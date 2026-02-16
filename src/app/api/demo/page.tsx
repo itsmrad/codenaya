@@ -1,9 +1,12 @@
 "use client";
 
+import * as Sentry from "@sentry/nextjs";
 import { Button } from "@/components/ui/button";
 import React, { useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 
 export default function Page() {
+	const { userId } = useAuth();
 	const [loading, setLoading] = useState(false);
 	const [backgroundLoading, setBackgroundLoading] = useState(false);
 	const [result, setResult] = useState<string>("");
@@ -52,6 +55,23 @@ export default function Page() {
 		}
 	};
 
+	const handleClientError = async () => {
+		Sentry.logger.info("User is attempting to click on the client function", {
+			userId: String(userId ?? "unknown"),
+		});
+		throw new Error("Client Error Something went wrong in the browser");
+	};
+
+	const handleApiError = async () => {
+		Sentry.logger.info("User is attempting to click on the api function", {
+			userId: String(userId ?? "unknown"),
+		});
+		await fetch("/api/demo/error", { method: "POST" });
+	};
+	const handleInngestError = async () => {
+		await fetch("/api/demo/inngest-error", { method: "POST" });
+	};
+
 	return (
 		<div className="flex flex-col gap-4 justify-center items-center w-full h-screen">
 			<div className="p-4 rounded-lg w-96 min-h-32">
@@ -68,6 +88,24 @@ export default function Page() {
 				onClick={handleBackground}
 				disabled={backgroundLoading}>
 				{backgroundLoading ? "Generating..." : "Background"}
+			</Button>
+
+			<Button
+				onClick={handleClientError}
+				variant={"destructive"}>
+				Client Error
+			</Button>
+
+			<Button
+				onClick={handleApiError}
+				variant={"destructive"}>
+				API Error
+			</Button>
+
+			<Button
+				onClick={handleInngestError}
+				variant={"destructive"}>
+				Inngest Error
 			</Button>
 		</div>
 	);

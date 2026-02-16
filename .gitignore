@@ -42,3 +42,5 @@ next-env.d.ts
 
 # Requestly
 CodeNaya_API/
+# Sentry Config File
+.env.sentry-build-plugin
