@@ -8,6 +8,11 @@ export async function POST() {
 			model: openai("gpt-3.5-turbo"),
 			prompt:
 				"Greet me say blocking and write a poem on pigeon love",
+			experimental_telemetry: {
+				isEnabled: true,
+				recordInputs: true,
+				recordOutputs: true,
+			},
 		});
 
 		console.log("AI Response:", response.text);
