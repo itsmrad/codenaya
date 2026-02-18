@@ -20,7 +20,10 @@
 		],
 		"paths": {
 			"@/*": ["./src/*"],
-      "convex/*": ["./convex/*"]
+      "@convex/*": ["./convex/*"],
+      "@features/*": ["./src/features/*"],
+      "@components/*": ["./src/components/*"],
+      "@lib/*": ["./src/lib/*"]
 		}
 	},
 	"include": [
