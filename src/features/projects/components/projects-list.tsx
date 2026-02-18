@@ -90,7 +90,7 @@ export const ProjectsList = ({ onViewAll }: projectListProps) => {
 
   const projects = useProjectsPartial(6)
 
-  if (projects == undefined) {
+  if (projects === undefined) {
     return <Spinner className="size-4 text-ring " />
   }
 
