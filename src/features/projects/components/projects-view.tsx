@@ -32,14 +32,14 @@ export const ProjectsView = () => {
       if (e.metaKey || e.ctrlKey) {
         if (e.key === "k"){
           e.preventDefault()
-          setCommandDialogOpen(!commandDialogOpen)
+          setCommandDialogOpen((prev) => !prev)
         }
       }
     }
 
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [commandDialogOpen])
+  }, [])
 
 	return (
     <>
