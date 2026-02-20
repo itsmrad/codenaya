@@ -36,7 +36,22 @@ export const demoGenerate = inngest.createFunction(
       return await generateText({
         model: anthropic('claude-3-haiku-20240307'),
         prompt: finalPrompt,
+        experimental_telemetry: {
+          isEnabled: true,
+          recordInputs: true,
+          recordOutputs: true,
+        },
       });
     })
   },
+);
+
+export const demoError = inngest.createFunction(
+  { id: "demo-error" },
+  { event: "demo/error" },
+  async ({ step }) => {
+    await step.run("fail", async () => {
+      throw new Error("Inngest error: Background job failed!");
+    });
+  }
 );
