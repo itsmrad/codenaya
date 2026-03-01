@@ -9,6 +9,7 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as files from "../files.js";
 import type * as projects from "../projects.js";
 
 import type {
@@ -19,6 +20,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  files: typeof files;
   projects: typeof projects;
 }>;
 
