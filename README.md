@@ -1,7 +1,5 @@
 # Codenaya - Build a Cursor AI Alternative
 
-> **Note:** This is **Part 1 of 2** of the project. The codebase is functional but incomplete - Part 2 will add the AI Agent, WebContainer preview, and GitHub integration.
-
 ## What We're Building
 
 Codenaya is a browser-based IDE inspired by Cursor AI, featuring:
@@ -244,6 +242,10 @@ A huge thank you to the sponsors who made this tutorial possible. Consider check
 ### Error Tracking
 
 **[Sentry](https://sentry.io)** - See what's broken and fix it fast.
+
+### Code Review
+
+**[CodeRabbit](https://coderabbit.ai)** - AI-powered code reviews that catch bugs before your users do.
 
 ## Acknowledgments
 
