@@ -163,6 +163,7 @@ export const InlineCitationCarouselIndex = ({
       return;
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCount(api.scrollSnapList().length);
     setCurrent(api.selectedScrollSnap() + 1);
 
