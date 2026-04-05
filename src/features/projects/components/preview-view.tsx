@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Allotment } from "allotment";
 import {
   Loader2Icon,
@@ -61,20 +61,20 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const activeInstance = activeEngine === "sandbox" ? sandbox : webcontainer;
   const { status, previewUrl, error, restart, terminalOutput } = activeInstance;
 
+  const switchEngine = useCallback((newEngine: PreviewEngine) => {
+    if (newEngine === engine) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("engine", newEngine);
+    window.location.href = `${pathname}?${params.toString()}`;
+  }, [engine, pathname, searchParams]);
+
   useEffect(() => {
     if (activeEngine === "sandbox" && sandbox.status === "error") {
       console.warn("Sandbox failed (possibly rate limit), automatically falling back to WebContainers.");
       // We push param so Next.js reloads with COOP/COEP headers
       switchEngine("webcontainer");
     }
-  }, [activeEngine, sandbox.status]);
-
-  const switchEngine = (newEngine: PreviewEngine) => {
-    if (newEngine === engine) return;
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("engine", newEngine);
-    window.location.href = `${pathname}?${params.toString()}`;
-  };
+  }, [activeEngine, sandbox.status, switchEngine]);
 
   const isLoading = status === "booting" || status === "installing";
 
@@ -155,7 +155,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
             variant="ghost"
             className="h-full rounded-none"
             title="Open in new tab"
-            onClick={() => window.open(previewUrl, "_blank")}
+            onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
           >
             <ExternalLinkIcon className="size-3" />
           </Button>

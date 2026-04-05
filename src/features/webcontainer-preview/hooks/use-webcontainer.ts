@@ -19,7 +19,7 @@ const getWebContainer = async (): Promise<WebContainer> => {
 
   if (!bootPromise) {
     const { WebContainer: WC } = await import("@webcontainer/api");
-    bootPromise = WC.boot({ coep: "credentialless" });
+    bootPromise = WC.boot({ coep: "require-corp" });
   }
 
   webcontainerInstance = await bootPromise;
