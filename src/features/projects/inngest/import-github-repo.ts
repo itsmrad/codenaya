@@ -19,6 +19,7 @@ interface ImportGithubRepoEvent {
 export const importGithubRepo = inngest.createFunction(
   {
     id: "import-github-repo",
+    triggers: [{ event: "github/import.repo" }],
     onFailure: async ({ event, step }) => {
       const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
       if (!internalKey) return;
@@ -34,7 +35,6 @@ export const importGithubRepo = inngest.createFunction(
       });
     },
   },
-  { event: "github/import.repo" },
   async ({ event, step }) => {
     const { owner, repo, projectId, githubToken } =
       event.data as ImportGithubRepoEvent;
