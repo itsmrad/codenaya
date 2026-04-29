@@ -1,4 +1,4 @@
-# Codenaya - Build a Cursor AI Alternative
+# Codenaya - Building a Cursor AI Alternative
 
 ## What We're Building
 

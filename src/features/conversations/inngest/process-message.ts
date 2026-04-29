@@ -1,4 +1,4 @@
-import { createAgent, anthropic, createNetwork } from '@inngest/agent-kit';
+import { createAgent, openai, createNetwork } from '@inngest/agent-kit';
 
 import { inngest } from "@/inngest/client";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -117,9 +117,9 @@ export const processMessage = inngest.createFunction(
        const titleAgent = createAgent({
         name: "title-generator",
         system: TITLE_GENERATOR_SYSTEM_PROMPT,
-        model: anthropic({
-          model: "claude-3-5-haiku-20241022",
-          defaultParameters: { temperature: 0, max_tokens: 50 },
+        model: openai({
+          model: "gpt-3.5-turbo",
+          defaultParameters: { temperature: 0 },
         }),
        });
 
@@ -155,9 +155,9 @@ export const processMessage = inngest.createFunction(
       name: "codenaya",
       description: "An expert AI coding assistant",
       system: systemPrompt,
-       model: anthropic({
-        model: "claude-opus-4-20250514",
-        defaultParameters: { temperature: 0.3, max_tokens: 16000 }
+       model: openai({
+        model: "gpt-5.4",
+        defaultParameters: { temperature: 0.3 }
        }),
        tools: [
         createListFilesTool({ internalKey, projectId }),
@@ -185,8 +185,7 @@ export const processMessage = inngest.createFunction(
           (m) => m.type === "tool_call"
         );
 
-        // Anthropic outputs text AND tool calls together
-        // Only stop if there's text WITHOUT tool calls (final response)
+        // Stop routing to this agent if there's a final text response without tool calls
         if (hasTextResponse && !hasToolCalls) {
           return undefined;
         }
