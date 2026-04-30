@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { WebContainer } from "@webcontainer/api";
+import type { WebContainer, WebContainerProcess } from "@webcontainer/api";
 
 import { 
   buildFileTree,
   getFilePath
-} from "@/features/preview/utils/file-tree";
-import { useFiles } from "@/features/projects/hooks/use-files";
+} from "@/features/webcontainer-preview/utils/file-tree";
 
-import { api } from "../../../../convex/_generated/api";
-import { Id } from "../../../../convex/_generated/dataModel";
+import { Id, Doc } from "../../../../convex/_generated/dataModel";
 
 // Singleton WebContainer instance
 let webcontainerInstance: WebContainer | null = null;
@@ -20,7 +18,8 @@ const getWebContainer = async (): Promise<WebContainer> => {
   }
 
   if (!bootPromise) {
-    bootPromise = WebContainer.boot({ coep: "credentialless" });
+    const { WebContainer: WC } = await import("@webcontainer/api");
+    bootPromise = WC.boot({ coep: "require-corp" });
   }
 
   webcontainerInstance = await bootPromise;
@@ -36,7 +35,7 @@ const teardownWebContainer = () => {
 };
 
 interface UseWebContainerProps {
-  projectId: Id<"projects">;
+  files?: Doc<"files">[];
   enabled: boolean;
   settings?: {
     installCommand?: string;
@@ -45,7 +44,7 @@ interface UseWebContainerProps {
 };
 
 export const useWebContainer = ({
-  projectId,
+  files,
   enabled,
   settings,
 }: UseWebContainerProps) => {
@@ -58,10 +57,9 @@ export const useWebContainer = ({
   const [terminalOutput, setTerminalOutput] = useState("");
 
   const containerRef = useRef<WebContainer | null>(null);
+  const installProcessRef = useRef<WebContainerProcess | null>(null);
+  const devProcessRef = useRef<WebContainerProcess | null>(null);
   const hasStartedRef = useRef(false);
-
-  // Fetch files from Convex (auto-updates on changes)
-  const files = useFiles(projectId);
 
   // Initial boot and mount
   useEffect(() => {
@@ -99,6 +97,7 @@ export const useWebContainer = ({
         const [installBin, ...installArgs] = installCmd.split(" ");
         appendOutput(`$ ${installCmd}\n`)
         const installProcess = await container.spawn(installBin, installArgs);
+        installProcessRef.current = installProcess;
         installProcess.output.pipeTo(
           new WritableStream({
             write(data) {
@@ -119,6 +118,7 @@ export const useWebContainer = ({
         const [devBin, ...devArgs] = devCmd.split(" ");
         appendOutput(`\n$ ${devCmd}\n`);
         const devProcess = await container.spawn(devBin, devArgs);
+        devProcessRef.current = devProcess;
         devProcess.output.pipeTo(
           new WritableStream({
             write(data) {
@@ -146,14 +146,18 @@ export const useWebContainer = ({
     const container = containerRef.current;
     if (!container || !files || status !== "running") return;
 
-    const filesMap = new Map(files.map((f) => [f._id, f]));
+    const timeoutId = setTimeout(() => {
+      const filesMap = new Map(files.map((f) => [f._id, f]));
 
-    for (const file of files) {
-      if (file.type !== "file" || file.storageId || !file.content) continue;
+      for (const file of files) {
+        if (file.type !== "file" || file.storageId || !file.content) continue;
 
-      const filePath = getFilePath(file, filesMap);
-      container.fs.writeFile(filePath, file.content);
-    }
+        const filePath = getFilePath(file, filesMap);
+        container.fs.writeFile(filePath, file.content).catch(() => {});
+      }
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
   }, [files, status]);
 
   // Reset when disabled
@@ -166,10 +170,13 @@ export const useWebContainer = ({
     }
   }, [enabled]);
 
-  // Restart the entire WebContainer process
+  // Restart the WebContainer processes
   const restart = useCallback(() => {
-    teardownWebContainer();
-    containerRef.current = null;
+    installProcessRef.current?.kill();
+    devProcessRef.current?.kill();
+    installProcessRef.current = null;
+    devProcessRef.current = null;
+
     hasStartedRef.current = false;
     setStatus("idle");
     setPreviewUrl(null);

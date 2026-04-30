@@ -2,21 +2,33 @@ import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Enable Next.js 16 Partial Prerendering and Cache Components
+  cacheComponents: true,
   async headers() {
     return [
       {
-        source: "/:path*",
+        // Apply only when explicitly requesting webcontainer via query param
+        source: "/projects/:path*",
+        has: [
+          {
+            type: "query",
+            key: "engine",
+            value: "webcontainer",
+          }
+        ],
         headers: [
-          { 
-            key: "Cross-Origin-Embedder-Policy", value: "credentialless"
+          {
+            key: "Cross-Origin-Embedder-Policy",
+            value: "require-corp",
           },
-          { 
-            key: "Cross-Origin-Opener-Policy", value: "same-origin"
+          {
+            key: "Cross-Origin-Opener-Policy",
+            value: "same-origin",
           },
         ],
-      }
+      },
     ];
-  }
+  },
 };
 
 export default withSentryConfig(nextConfig, {

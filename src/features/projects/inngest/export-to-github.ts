@@ -29,6 +29,7 @@ export const exportToGithub = inngest.createFunction(
         if: "event.data.projectId == async.data.projectId"
       },
     ],
+    triggers: [{ event: "github/export.repo" }],
     onFailure: async ({ event, step }) => {
       const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
       if (!internalKey) return;
@@ -43,9 +44,6 @@ export const exportToGithub = inngest.createFunction(
         });
       });
     }
-  },
-  {
-    event: "github/export.repo"
   },
   async ({ event, step }) => {
     const {
