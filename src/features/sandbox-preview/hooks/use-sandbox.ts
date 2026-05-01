@@ -32,6 +32,7 @@ export const useSandbox = ({
   const sandboxIdRef = useRef<string | null>(null);
   const hasStartedRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const syncPromiseRef = useRef<Promise<void>>(Promise.resolve());
 
   /**
    * Kill the current sandbox. Uses fetch with keepalive for reliability
@@ -164,7 +165,7 @@ export const useSandbox = ({
       const changedFiles: { path: string; content: string }[] = [];
   
       for (const file of files) {
-        if (file.type !== "file" || file.storageId || !file.content) continue;
+        if (file.type !== "file" || file.storageId || file.content == null) continue;
   
         const filePath = getFilePath(file, filesMap);
         changedFiles.push({ path: filePath, content: file.content });
@@ -172,14 +173,19 @@ export const useSandbox = ({
   
       if (changedFiles.length === 0) return;
   
-      // Fire-and-forget file sync
-      fetch(`/api/sandbox/${sandboxId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ files: changedFiles }),
-      }).catch(() => {
-        // Non-critical — file sync failure shouldn't crash the preview
-      });
+      // Serialize file syncs to prevent out-of-order writes
+      syncPromiseRef.current = syncPromiseRef.current
+        .then(() =>
+          fetch(`/api/sandbox/${sandboxId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ files: changedFiles }),
+          })
+        )
+        .catch(() => {
+          // Non-critical — file sync failure shouldn't crash the preview
+        })
+        .then(); // Return void promise
     }, 1000); // 1-second debounce window
 
     return () => clearTimeout(timeoutId);

@@ -46,11 +46,13 @@ export const PreviewSettingsPopover = ({
       onSubmit: formSchema,
     },
     onSubmit: async ({ value }) => {
+      const trimmedInstall = value.installCommand.trim();
+      const trimmedDev = value.devCommand.trim();
       await updateSettings({
         id: projectId,
         settings: {
-          installCommand: value.installCommand || undefined,
-          devCommand: value.devCommand || undefined,
+          installCommand: trimmedInstall === "" ? undefined : trimmedInstall,
+          devCommand: trimmedDev === "" ? undefined : trimmedDev,
         },
       });
       setOpen(false);

@@ -214,9 +214,14 @@ export async function POST(request: Request) {
         // Keep the NDJSON stream alive indefinitely until the client disconnects!
         // This ensures the E2B sandbox isn't prematurely garbage collected,
         // and allows us to stream continuous logs from the dev server to the UI.
-        await new Promise((resolve) => {
+        if (request.signal.aborted) {
+          // If already aborted, short-circuit and throw so finally kills the sandbox
+          throw new Error("Client aborted request");
+        }
+
+        await new Promise((resolve, reject) => {
           request.signal.addEventListener("abort", () => {
-            resolve(null);
+            reject(new Error("Client aborted request"));
           });
         });
 

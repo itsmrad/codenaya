@@ -22,6 +22,12 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
 
   try {
     const sandbox = await Sandbox.connect(sandboxId);
+    const sandboxInfo = await sandbox.getInfo();
+
+    if (sandboxInfo.metadata?.userId !== userId) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     await sandbox.kill();
 
     return Response.json({ success: true });
@@ -81,6 +87,11 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
   try {
     const sandbox = await Sandbox.connect(sandboxId);
+    const sandboxInfo = await sandbox.getInfo();
+
+    if (sandboxInfo.metadata?.userId !== userId) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     await Promise.all(
       files.map((file) =>
