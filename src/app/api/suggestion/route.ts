@@ -21,7 +21,7 @@ const suggestionRequestSchema = z.object({
   textBeforeCursor: z.string(),
   textAfterCursor: z.string(),
   nextLines: z.string().optional(),
-  lineNumber: z.number({ coerce: true }),
+  lineNumber: z.coerce.number(),
 });
 
 const SUGGESTION_PROMPT = `You are a code suggestion assistant.
