@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { generateText, Output } from "ai";
+import { generateObject } from "ai";
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 
 import { firecrawl } from "@/lib/firecrawl";
 
@@ -101,13 +101,14 @@ export async function POST(request: Request) {
       .replace("{instruction}", instruction)
       .replace("{documentation}", documentationContext);
 
-    const { output } = await generateText({
-      model: anthropic("claude-3-7-sonnet-20250219"),
-      output: Output.object({ schema: quickEditSchema }),
+    const { object } = await generateObject({
+      model: openai("gpt-4o"),
+      output: "object",
+      schema: quickEditSchema,
       prompt,
     });
 
-    return NextResponse.json({ editedCode: output.editedCode });
+    return NextResponse.json({ editedCode: object.editedCode });
   } catch (error) {
     console.error("Edit error:", error);
     return NextResponse.json(

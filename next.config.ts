@@ -4,6 +4,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Enable Next.js 16 Partial Prerendering and Cache Components
   cacheComponents: true,
+  allowedDevOrigins: ['10.5.0.2', '192.168.1.34'],
   async headers() {
     return [
       {

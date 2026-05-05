@@ -1,8 +1,8 @@
-import { generateText, Output } from "ai";
+import { generateObject } from "ai";
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 // import { google } from "@ai-sdk/google";
 
 const suggestionSchema = z.object({
@@ -82,13 +82,14 @@ export async function POST(request: Request) {
       .replace("{nextLines}", nextLines || "")
       .replace("{lineNumber}", lineNumber.toString());
 
-    const { output } = await generateText({
-      model: anthropic("claude-3-7-sonnet-20250219"),
-      output: Output.object({ schema: suggestionSchema }),
+    const { object } = await generateObject({
+      model: openai("gpt-4o-mini"),
+      output: "object",
+      schema: suggestionSchema,
       prompt,
     });
 
-    return NextResponse.json({ suggestion: output.suggestion })
+    return NextResponse.json({ suggestion: object.suggestion })
   } catch (error) {
     console.error("Suggestion error: ", error);
     return NextResponse.json(
