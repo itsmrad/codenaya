@@ -1,8 +1,8 @@
-import { generateText, Output } from "ai";
+import { generateObject } from "ai";
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 // import { google } from "@ai-sdk/google";
 
 const suggestionSchema = z.object({
@@ -11,6 +11,17 @@ const suggestionSchema = z.object({
     .describe(
       "The code to insert at cursor, or empty string if no completion needed"
     ),
+});
+
+const suggestionRequestSchema = z.object({
+  fileName: z.string(),
+  code: z.string().min(1, "code is required"),
+  currentLine: z.string(),
+  previousLines: z.string().optional(),
+  textBeforeCursor: z.string(),
+  textAfterCursor: z.string(),
+  nextLines: z.string().optional(),
+  lineNumber: z.coerce.number(),
 });
 
 const SUGGESTION_PROMPT = `You are a code suggestion assistant.
@@ -54,6 +65,16 @@ export async function POST(request: Request) {
       );
     }
 
+    const body = await request.json();
+    const parsed = suggestionRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request", details: parsed.error.flatten().fieldErrors },
+        { status: 400 }
+      );
+    }
+
     const {
       fileName,
       code,
@@ -63,32 +84,26 @@ export async function POST(request: Request) {
       textAfterCursor,
       nextLines,
       lineNumber,
-    } = await request.json();
-
-    if (!code) {
-      return NextResponse.json(
-        { error: "Code is required" },
-        { status: 400 }
-      );
-    }
+    } = parsed.data;
 
     const prompt = SUGGESTION_PROMPT
       .replace("{fileName}", fileName)
       .replace("{code}", code)
       .replace("{currentLine}", currentLine)
-      .replace("{previousLines}", previousLines || "")
+      .replace("{previousLines}", previousLines ?? "")
       .replace("{textBeforeCursor}", textBeforeCursor)
       .replace("{textAfterCursor}", textAfterCursor)
-      .replace("{nextLines}", nextLines || "")
+      .replace("{nextLines}", nextLines ?? "")
       .replace("{lineNumber}", lineNumber.toString());
 
-    const { output } = await generateText({
-      model: anthropic("claude-3-7-sonnet-20250219"),
-      output: Output.object({ schema: suggestionSchema }),
+    const { object } = await generateObject({
+      model: openai("gpt-4o-mini"),
+      output: "object",
+      schema: suggestionSchema,
       prompt,
     });
 
-    return NextResponse.json({ suggestion: output.suggestion })
+    return NextResponse.json({ suggestion: object.suggestion })
   } catch (error) {
     console.error("Suggestion error: ", error);
     return NextResponse.json(

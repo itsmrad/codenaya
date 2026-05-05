@@ -43,75 +43,74 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Islands UI (Derived from your VS Code Custom Theme) */
 :root {
-  --radius: 0.475rem;
-  --background: oklch(0.2925 0.0157 264.3);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.25 0.012 264.34);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.3404 0.0205 265.97);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --separator-border: oklch(1 0 0 / 10%);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.6562 0.1826 262.74);
+  --radius: 1.25rem; /* High radius mirroring --islands-panel-radius */
+  --background: #f4f4f7;
+  --foreground: #121216;
+  --card: #ffffff;
+  --card-foreground: #121216;
+  --popover: #ffffff;
+  --popover-foreground: #121216;
+  --primary: #121216;
+  --primary-foreground: #ffffff;
+  --secondary: #e9e9f0;
+  --secondary-foreground: #121216;
+  --muted: #e9e9f0;
+  --muted-foreground: #666870;
+  --accent: #e9e9f0;
+  --accent-foreground: #121216;
+  --destructive: #da3333;
+  --border: rgba(0, 0, 0, 0.08); 
+  --input: rgba(0, 0, 0, 0.1);
+  --ring: #121216;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #121216;
+  --sidebar-border: rgba(0, 0, 0, 0.08);
+  --sidebar-primary: #121216;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e9e9f0;
+  --sidebar-accent-foreground: #121216;
+  --sidebar-ring: #121216;
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.25 0.012 264.34);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
 }
 
 .dark {
-  --background: oklch(0.2925 0.0157 264.3);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.25 0.012 264.34);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.25 0.012 264.34);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.25 0.012 264.34);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.25 0.012 264.34);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.3404 0.0205 265.97);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --separator-border: oklch(1 0 0 / 10%);
-  --ring: oklch(0.6562 0.1826 262.74);
+  --background: #121216; /* --islands-bg-canvas */
+  --foreground: #e0e0e0;
+  --card: #181a1d; /* --islands-bg-surface */
+  --card-foreground: #e0e0e0;
+  --popover: #181a1d;
+  --popover-foreground: #e0e0e0;
+  --primary: #ffffff;
+  --primary-foreground: #121216;
+  --secondary: #25262a; /* Custom tab active/inactive background */
+  --secondary-foreground: #e0e0e0;
+  --muted: #202226; /* Slightly lighter than canvas for subtle depths */
+  --muted-foreground: #8b8e96;
+  --accent: #25262a;
+  --accent-foreground: #ffffff;
+  --destructive: #f05252;
+  --border: rgba(255, 255, 255, 0.06); /* Matches VS Code inset effect */
+  --input: rgba(255, 255, 255, 0.06);
+  --ring: rgba(255, 255, 255, 0.2);
+  --sidebar: #181a1d;
+  --sidebar-foreground: #e0e0e0;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #121216;
+  --sidebar-accent: #25262a;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-ring: rgba(255, 255, 255, 0.2);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.25 0.012 264.34);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
 }
 
 @layer base {

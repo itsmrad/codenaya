@@ -5,8 +5,11 @@ import {
   CopyIcon, 
   HistoryIcon, 
   LoaderIcon, 
-  PlusIcon
+  PlusIcon,
+  SquareIcon,
+  XIcon,
 } from "lucide-react";
+import { FileIcon } from "@react-symbols/icons/utils";
 
 import {
   Conversation,
@@ -41,6 +44,7 @@ import {
 import { Id } from "../../../../convex/_generated/dataModel";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { PastConversationsDialog } from "./past-conversations-dialog";
+import { useChatStore } from "../store/use-chat-store";
 
 interface ConversationSidebarProps {
   projectId: Id<"projects">;
@@ -49,7 +53,7 @@ interface ConversationSidebarProps {
 export const ConversationSidebar = ({
   projectId,
 }: ConversationSidebarProps) => {
-  const [input, setInput] = useState("");
+  const { input, setInput, contexts, removeContext, clearContexts } = useChatStore();
   const [
     selectedConversationId,
     setSelectedConversationId,
@@ -99,7 +103,7 @@ export const ConversationSidebar = ({
 
   const handleSubmit = async (message: PromptInputMessage) => {
     // If processing and no new message, this is just a stop function
-    if (isProcessing && !message.text) {
+    if (isProcessing && !message.text && contexts.length === 0) {
       await handleCancel()
       setInput("");
       return;
@@ -114,14 +118,24 @@ export const ConversationSidebar = ({
       }
     }
 
+    let finalMessage = message.text;
+    if (contexts.length > 0) {
+      const contextStrs = contexts.map(
+        (c) => `File: ${c.fileName} (Lines ${c.startLine}-${c.endLine})\n\`\`\`\n${c.content}\n\`\`\``
+      );
+      finalMessage = `${contextStrs.join("\n\n")}\n\n${finalMessage}`;
+    }
+
     // Trigger Inngest function via API
     try {
       await ky.post("/api/messages", {
         json: {
           conversationId,
-          message: message.text,
+          message: finalMessage,
         },
       });
+      // Only clear contexts after a successful send so they aren't lost on failure
+      clearContexts();
     } catch {
       toast.error("Message failed to send");
     }
@@ -206,6 +220,25 @@ export const ConversationSidebar = ({
             className="mt-2"
           >
             <PromptInputBody>
+              {contexts.length > 0 && (
+                <div className="flex w-full flex-wrap justify-start gap-2 p-2 pb-0">
+                  {contexts.map((ctx) => (
+                    <div key={ctx.id} className="group relative flex items-center gap-1.5 rounded-md border bg-muted/50 px-2 py-1 text-xs">
+                      <FileIcon fileName={ctx.fileName} autoAssign className="size-3.5" />
+                      <span className="font-medium text-muted-foreground">
+                        {ctx.fileName} <span className="text-muted-foreground/70 text-[10px]">#L{ctx.startLine}-{ctx.endLine}</span>
+                      </span>
+                      <button 
+                        type="button"
+                        onClick={() => removeContext(ctx.id)}
+                        className="ml-1 rounded-full p-0.5 hover:bg-muted-foreground/20 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <XIcon className="size-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <PromptInputTextarea
                 placeholder="Ask Codenaya anything..."
                 onChange={(e) => setInput(e.target.value)}
@@ -216,7 +249,7 @@ export const ConversationSidebar = ({
             <PromptInputFooter>
               <PromptInputTools />
               <PromptInputSubmit
-                disabled={isProcessing ? false : !input}
+                disabled={isProcessing ? false : (!input && contexts.length === 0)}
                 status={isProcessing ? "streaming" : undefined}
               />
             </PromptInputFooter>

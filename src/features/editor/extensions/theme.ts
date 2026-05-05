@@ -4,9 +4,15 @@ export const customTheme = EditorView.theme({
   "&": {
     outline: "none !important",
     height: "100%",
+    backgroundColor: "transparent !important",
+  },
+  ".cm-gutters": {
+    backgroundColor: "transparent !important",
+    backdropFilter: "blur(2px)",
+    borderRight: "none",
   },
   ".cm-content": {
-    fontFamily: "var(--font-plex-mono), monospace",
+    fontFamily: "var(--font-nerd-mono), monospace",
     fontSize: "14px",
   },
   ".cm-scroller": {

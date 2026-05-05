@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { generateText, Output } from "ai";
+import { generateObject } from "ai";
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 
 import { firecrawl } from "@/lib/firecrawl";
 
@@ -12,6 +12,12 @@ const quickEditSchema = z.object({
     .describe(
       "The edited version of the selected code based on the instruction"
     ),
+});
+
+const quickEditRequestSchema = z.object({
+  selectedCode: z.string().min(1, "selectedCode is required"),
+  fullCode: z.string().optional(),
+  instruction: z.string().min(1, "instruction is required"),
 });
 
 const URL_REGEX = /https?:\/\/[^\s)>\]]+/g;
@@ -43,28 +49,25 @@ If the instruction is unclear or cannot be applied, return the original code unc
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();
-    const { selectedCode, fullCode, instruction } = await request.json();
 
     if (!userId) {
       return NextResponse.json(
         { error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json();
+    const parsed = quickEditRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request", details: parsed.error.flatten().fieldErrors },
         { status: 400 }
       );
     }
 
-    if (!selectedCode) {
-      return NextResponse.json(
-        { error: "Selected code is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!instruction) {
-      return NextResponse.json(
-        { error: "Instruction is required" },
-        { status: 400 }
-      );
-    }
+    const { selectedCode, fullCode, instruction } = parsed.data;
 
     const urls: string[] = instruction.match(URL_REGEX) || [];
     let documentationContext = "";
@@ -101,13 +104,14 @@ export async function POST(request: Request) {
       .replace("{instruction}", instruction)
       .replace("{documentation}", documentationContext);
 
-    const { output } = await generateText({
-      model: anthropic("claude-3-7-sonnet-20250219"),
-      output: Output.object({ schema: quickEditSchema }),
+    const { object } = await generateObject({
+      model: openai("gpt-4o"),
+      output: "object",
+      schema: quickEditSchema,
       prompt,
     });
 
-    return NextResponse.json({ editedCode: output.editedCode });
+    return NextResponse.json({ editedCode: object.editedCode });
   } catch (error) {
     console.error("Edit error:", error);
     return NextResponse.json(
