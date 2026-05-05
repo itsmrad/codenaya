@@ -124,7 +124,6 @@ export const ConversationSidebar = ({
         (c) => `File: ${c.fileName} (Lines ${c.startLine}-${c.endLine})\n\`\`\`\n${c.content}\n\`\`\``
       );
       finalMessage = `${contextStrs.join("\n\n")}\n\n${finalMessage}`;
-      clearContexts();
     }
 
     // Trigger Inngest function via API
@@ -135,6 +134,8 @@ export const ConversationSidebar = ({
           message: finalMessage,
         },
       });
+      // Only clear contexts after a successful send so they aren't lost on failure
+      clearContexts();
     } catch {
       toast.error("Message failed to send");
     }

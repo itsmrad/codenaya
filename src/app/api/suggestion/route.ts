@@ -13,6 +13,17 @@ const suggestionSchema = z.object({
     ),
 });
 
+const suggestionRequestSchema = z.object({
+  fileName: z.string(),
+  code: z.string().min(1, "code is required"),
+  currentLine: z.string(),
+  previousLines: z.string().optional(),
+  textBeforeCursor: z.string(),
+  textAfterCursor: z.string(),
+  nextLines: z.string().optional(),
+  lineNumber: z.number({ coerce: true }),
+});
+
 const SUGGESTION_PROMPT = `You are a code suggestion assistant.
 
 <context>
@@ -54,6 +65,16 @@ export async function POST(request: Request) {
       );
     }
 
+    const body = await request.json();
+    const parsed = suggestionRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request", details: parsed.error.flatten().fieldErrors },
+        { status: 400 }
+      );
+    }
+
     const {
       fileName,
       code,
@@ -63,23 +84,16 @@ export async function POST(request: Request) {
       textAfterCursor,
       nextLines,
       lineNumber,
-    } = await request.json();
-
-    if (!code) {
-      return NextResponse.json(
-        { error: "Code is required" },
-        { status: 400 }
-      );
-    }
+    } = parsed.data;
 
     const prompt = SUGGESTION_PROMPT
       .replace("{fileName}", fileName)
       .replace("{code}", code)
       .replace("{currentLine}", currentLine)
-      .replace("{previousLines}", previousLines || "")
+      .replace("{previousLines}", previousLines ?? "")
       .replace("{textBeforeCursor}", textBeforeCursor)
       .replace("{textAfterCursor}", textAfterCursor)
-      .replace("{nextLines}", nextLines || "")
+      .replace("{nextLines}", nextLines ?? "")
       .replace("{lineNumber}", lineNumber.toString());
 
     const { object } = await generateObject({

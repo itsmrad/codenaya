@@ -14,6 +14,12 @@ const quickEditSchema = z.object({
     ),
 });
 
+const quickEditRequestSchema = z.object({
+  selectedCode: z.string().min(1, "selectedCode is required"),
+  fullCode: z.string().optional(),
+  instruction: z.string().min(1, "instruction is required"),
+});
+
 const URL_REGEX = /https?:\/\/[^\s)>\]]+/g;
 
 const QUICK_EDIT_PROMPT = `You are a code editing assistant. Edit the selected code based on the user's instruction.
@@ -43,28 +49,25 @@ If the instruction is unclear or cannot be applied, return the original code unc
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();
-    const { selectedCode, fullCode, instruction } = await request.json();
 
     if (!userId) {
       return NextResponse.json(
         { error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json();
+    const parsed = quickEditRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid request", details: parsed.error.flatten().fieldErrors },
         { status: 400 }
       );
     }
 
-    if (!selectedCode) {
-      return NextResponse.json(
-        { error: "Selected code is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!instruction) {
-      return NextResponse.json(
-        { error: "Instruction is required" },
-        { status: 400 }
-      );
-    }
+    const { selectedCode, fullCode, instruction } = parsed.data;
 
     const urls: string[] = instruction.match(URL_REGEX) || [];
     let documentationContext = "";
