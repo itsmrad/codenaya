@@ -9,7 +9,9 @@
 		"lint": "eslint"
 	},
 	"overrides": {
-		"postcss": "^8.5.10"
+		"postcss": "^8.5.10",
+		"axios": ">=1.15.2",
+		"ip-address": ">=10.2.0"
 	},
 	"dependencies": {
 		"@ai-sdk/anthropic": "^3.0.1",
@@ -27,7 +29,7 @@
 		"@hookform/resolvers": "^5.2.2",
 		"@inngest/agent-kit": "^0.13.2",
 		"@inngest/middleware-sentry": "^1.0.0",
-		"@mendable/firecrawl-js": "^4.10.0",
+		"@mendable/firecrawl-js": "^4.21.1",
 		"@radix-ui/react-accordion": "^1.2.12",
 		"@radix-ui/react-alert-dialog": "^1.1.15",
 		"@radix-ui/react-aspect-ratio": "^1.1.8",
