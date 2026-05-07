@@ -91,6 +91,7 @@ export const FileExplorer = ({
               variant="ghost"
               size="icon"
               className="size-7 hover:bg-muted"
+              aria-label="Create file"
             >
               <FilePlusCornerIcon className="size-3.5" />
             </Button>
@@ -104,6 +105,7 @@ export const FileExplorer = ({
               variant="ghost"
               size="icon"
               className="size-7 hover:bg-muted"
+              aria-label="Create folder"
             >
               <FolderPlusIcon className="size-3.5" />
             </Button>
@@ -116,6 +118,7 @@ export const FileExplorer = ({
               variant="ghost"
               size="icon"
               className="size-7 hover:bg-muted"
+              aria-label="Collapse all"
             >
               <CopyMinusIcon className="size-3.5" />
             </Button>

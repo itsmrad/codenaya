@@ -54,7 +54,7 @@ export const ProjectIdView = ({
   return (
     <div className="h-full flex flex-col gap-3">
       <nav className="flex items-center justify-between shrink-0">
-        <div className="flex items-center p-1 bg-muted/40 rounded-xl border border-border/50 shadow-sm backdrop-blur-md">
+        <div role="tablist" className="flex items-center p-1 bg-muted/40 rounded-xl border border-border/50 shadow-sm backdrop-blur-md">
           <Tab
             label="Code"
             isActive={activeView === "editor"}
