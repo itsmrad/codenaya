@@ -2,9 +2,9 @@ import Link from "next/link";
 import { FaGithub } from "react-icons/fa";
 import { formatDistanceToNow } from "date-fns";
 import { AlertCircleIcon, ArrowRightIcon, GlobeIcon, Loader2Icon, ClockIcon } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import { Kbd } from "@/components/ui/kbd";
+import { useIsMac } from "@/lib/hooks/use-is-mac";
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
 
@@ -110,11 +110,7 @@ export const ProjectsList = ({
   onViewAll
 }: ProjectsListProps) => {
   const projects = useProjectsPartial(6);
-  const [isMac, setIsMac] = useState(true);
-
-  useEffect(() => {
-    setIsMac(typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent));
-  }, []);
+  const isMac = useIsMac();
 
   if (projects === undefined) {
     return (

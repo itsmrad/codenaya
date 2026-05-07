@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { UserButton } from "@clerk/nextjs";
 
 import { cn } from "@/lib/utils";
+import { useIsMac } from "@/lib/hooks/use-is-mac";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 
@@ -24,7 +25,7 @@ export const ProjectsView = () => {
   const [commandDialogOpen, setCommandDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
-  const [isMac] = useState(() => typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent));
+  const isMac = useIsMac();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
