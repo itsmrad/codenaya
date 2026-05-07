@@ -11,11 +11,9 @@ import { XIcon } from "lucide-react";
 
 const Tab = ({
   fileId,
-  isFirst,
   projectId,
 }: {
   fileId: Id<"files">;
-  isFirst: boolean;
   projectId: Id<"projects">;
 }) => {
   const file = useFile(fileId);
@@ -33,13 +31,23 @@ const Tab = ({
 
   return (
     <div
+      role="tab"
+      tabIndex={0}
+      aria-selected={isActive}
       onClick={() => setActiveTab(fileId)}
       onDoubleClick={() => openFile(fileId, { pinned: true })}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setActiveTab(fileId);
+        }
+      }}
       className={cn(
-        "flex items-center gap-2 h-8.75 pl-2 pr-1.5 cursor-pointer text-muted-foreground group border-y border-x border-transparent hover:bg-accent/30",
-        isActive &&
-          "bg-background text-foreground border-x-border border-b-background -mb-px drop-shadow",
-        isFirst && "border-l-transparent!"
+        "flex items-center justify-center gap-2 h-8 px-3 cursor-pointer text-muted-foreground group transition-all duration-200 select-none shrink-0",
+        "rounded-md text-sm font-medium",
+        isActive
+          ? "bg-muted text-foreground shadow-sm ring-1 ring-border/50 border border-transparent"
+          : "hover:bg-muted/50 hover:text-foreground"
       )}
     >
       {file === undefined ? (
@@ -67,7 +75,7 @@ const Tab = ({
           }
         }}
         className={cn(
-          "p-0.5 rounded-sm hover:bg-white/10 opacity-0 group-hover:opacity-100",
+          "p-0.5 rounded-sm hover:bg-muted-foreground/20 opacity-0 group-hover:opacity-100 transition-opacity",
           isActive && "opacity-100"
         )}
       >
@@ -86,12 +94,11 @@ export const TopNavigation = ({
 
   return (
     <ScrollArea className="flex-1">
-      <nav className="bg-sidebar flex items-center h-8.75 border-b">
-        {openTabs.map((fileId, index) => (
+      <nav role="tablist" className="bg-background flex items-center h-12 px-2 gap-2 border-b border-border/40">
+        {openTabs.map((fileId) => (
           <Tab
             key={fileId}
             fileId={fileId}
-            isFirst={index === 0}
             projectId={projectId}
           />
         ))}

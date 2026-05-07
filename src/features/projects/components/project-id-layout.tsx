@@ -20,9 +20,11 @@ export const ProjectIdLayout = ({
   projectId: Id<"projects">;
 }) => {
   return (
-    <div className="w-full h-screen flex flex-col">
-      <Navbar projectId={projectId} />
-      <div className="flex-1 flex overflow-hidden">
+    <div className="w-full h-screen flex flex-col bg-muted/20">
+      <div className="shrink-0 bg-background border-b border-border/40 z-10">
+        <Navbar projectId={projectId} />
+      </div>
+      <div className="flex-1 p-3 min-h-0 flex overflow-hidden">
         <Allotment
           className="flex-1"
           defaultSizes={[
@@ -36,10 +38,16 @@ export const ProjectIdLayout = ({
             maxSize={MAX_SIDEBAR_WIDTH}
             preferredSize={DEFAULT_CONVERSATION_SIDEBAR_WIDTH}
           >
-            <ConversationSidebar projectId={projectId} />
+            <div className="h-full pr-1.5 box-border">
+              <div className="h-full rounded-2xl bg-background border border-border/50 shadow-sm flex flex-col overflow-hidden relative">
+                <ConversationSidebar projectId={projectId} />
+              </div>
+            </div>
           </Allotment.Pane>
           <Allotment.Pane>
-            {children}
+            <div className="h-full pl-1.5 box-border flex flex-col relative overflow-hidden">
+              {children}
+            </div>
           </Allotment.Pane>
         </Allotment>
       </div>

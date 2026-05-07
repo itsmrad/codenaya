@@ -55,23 +55,32 @@ export const FileExplorer = ({
   };
 
   return (
-    <div className="h-full bg-sidebar">
-      <ScrollArea>
+    <div className="h-full bg-background flex flex-col">
+      <div className="p-2 shrink-0 border-b border-border/40">
         <div
           role="button"
+          tabIndex={0}
           onClick={() => setIsOpen((value) => !value)}
-          className="group/project cursor-pointer w-full text-left flex items-center gap-0.5 h-5.5 bg-accent font-bold"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setIsOpen((value) => !value);
+            }
+          }}
+          className="group/project cursor-pointer w-full text-left flex items-center justify-between px-2 h-10 bg-muted/40 hover:bg-muted/60 transition-colors rounded-lg border border-border/50"
         >
-          <ChevronRightIcon
-            className={cn(
-              "size-4 shrink-0 text-muted-foreground",
-              isOpen && "rotate-90"
-            )}
-          />
-          <p className="text-xs uppercase line-clamp-1">
-            {project?.name ?? "Loading..."}
-          </p>
-          <div className="opacity-0 group-hover/project:opacity-100 transition-none duration-0 flex items-center gap-0.5 ml-auto">
+          <div className="flex items-center gap-1.5 overflow-hidden">
+            <ChevronRightIcon
+              className={cn(
+                "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
+                isOpen && "rotate-90"
+              )}
+            />
+            <p className="text-sm font-semibold uppercase tracking-wide truncate">
+              {project?.name ?? "Loading..."}
+            </p>
+          </div>
+          <div className="opacity-100 md:opacity-0 group-hover/project:opacity-100 group-focus-within/project:opacity-100 focus-within:opacity-100 transition-opacity duration-200 flex items-center gap-0.5 shrink-0">
             <Button
               onClick={(e) => {
                 e.stopPropagation();
@@ -79,8 +88,10 @@ export const FileExplorer = ({
                 setIsOpen(true);
                 setCreating("file");
               }}
-              variant="highlight"
-              size="icon-xs"
+              variant="ghost"
+              size="icon"
+              className="size-7 hover:bg-muted"
+              aria-label="Create file"
             >
               <FilePlusCornerIcon className="size-3.5" />
             </Button>
@@ -91,8 +102,10 @@ export const FileExplorer = ({
                 setIsOpen(true);
                 setCreating("folder");
               }}
-              variant="highlight"
-              size="icon-xs"
+              variant="ghost"
+              size="icon"
+              className="size-7 hover:bg-muted"
+              aria-label="Create folder"
             >
               <FolderPlusIcon className="size-3.5" />
             </Button>
@@ -102,15 +115,19 @@ export const FileExplorer = ({
                 e.preventDefault();
                 setCollapseKey((prev) => prev + 1);
               }}
-              variant="highlight"
-              size="icon-xs"
+              variant="ghost"
+              size="icon"
+              className="size-7 hover:bg-muted"
+              aria-label="Collapse all"
             >
               <CopyMinusIcon className="size-3.5" />
             </Button>
           </div>
         </div>
+      </div>
+      <ScrollArea className="flex-1 py-2">
         {isOpen && (
-          <>
+          <div className="px-1.5">
             {rootFiles === undefined && <LoadingRow level={0} />}
             {creating && (
               <CreateInput
@@ -128,7 +145,7 @@ export const FileExplorer = ({
                 projectId={projectId}
               />
             ))}
-          </>
+          </div>
         )}
       </ScrollArea>
     </div>

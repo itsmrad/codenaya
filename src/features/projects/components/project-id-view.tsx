@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Allotment } from "allotment";
-import { FaGithub } from "react-icons/fa";
 
 import { cn } from "@/lib/utils";
 import { EditorView } from "@/features/editor/components/editor-view";
@@ -27,15 +26,21 @@ const Tab = ({
   onClick: () => void;
 }) => {
   return (
-    <div
+    <button
+      type="button"
+      role="tab"
+      aria-selected={isActive}
       onClick={onClick}
       className={cn(
-        "flex items-center gap-2 h-full px-3 cursor-pointer text-muted-foreground border-r hover:bg-accent/30",
-        isActive && "bg-background text-foreground"
+        "flex items-center justify-center gap-2 px-4 py-1.5 cursor-pointer transition-all duration-200 select-none",
+        "rounded-lg text-sm font-medium",
+        isActive 
+          ? "bg-background text-foreground shadow-sm ring-1 ring-border/50" 
+          : "text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground"
       )}
     >
-      <span className="text-sm">{label}</span>
-    </div>
+      <span>{label}</span>
+    </button>
   );
 };
 
@@ -47,26 +52,30 @@ export const ProjectIdView = ({
   const [activeView, setActiveView] = useState<"editor" | "preview">("editor");
 
   return (
-    <div className="h-full flex flex-col">
-      <nav className="h-8.75 flex items-center bg-sidebar border-b">
-        <Tab
-          label="Code"
-          isActive={activeView === "editor"}
-          onClick={() => setActiveView("editor")}
-        />
-        <Tab
-          label="Preview"
-          isActive={activeView === "preview"}
-          onClick={() => setActiveView("preview")}
-        />
-        <div className="flex-1 flex justify-end h-full">
-          <ExportPopover projectId={projectId} />
+    <div className="h-full flex flex-col gap-3">
+      <nav className="flex items-center justify-between shrink-0">
+        <div role="tablist" className="flex items-center p-1 bg-muted/40 rounded-xl border border-border/50 shadow-sm backdrop-blur-md">
+          <Tab
+            label="Code"
+            isActive={activeView === "editor"}
+            onClick={() => setActiveView("editor")}
+          />
+          <Tab
+            label="Preview"
+            isActive={activeView === "preview"}
+            onClick={() => setActiveView("preview")}
+          />
+        </div>
+        <div className="flex items-center">
+          <div className="bg-muted/40 rounded-xl border border-border/50 shadow-sm p-1 flex items-center justify-center backdrop-blur-md">
+            <ExportPopover projectId={projectId} />
+          </div>
         </div>
       </nav>
       <div className="flex-1 relative">
         <div className={cn(
-          "absolute inset-0",
-          activeView === "editor" ? "visible" : "invisible"
+          "absolute inset-0 flex gap-3 transition-none",
+          activeView !== "editor" && "opacity-0 pointer-events-none"
         )}>
           <Allotment defaultSizes={[DEFAULT_SIDEBAR_WIDTH, DEFAULT_MAIN_SIZE]}>
             <Allotment.Pane
@@ -75,16 +84,24 @@ export const ProjectIdView = ({
               maxSize={MAX_SIDEBAR_WIDTH}
               preferredSize={DEFAULT_SIDEBAR_WIDTH}
             >
-              <FileExplorer projectId={projectId} />
+              <div className="h-full pr-1.5 box-border">
+                <div className="h-full rounded-2xl bg-background border border-border/50 shadow-sm overflow-hidden flex flex-col">
+                  <FileExplorer projectId={projectId} />
+                </div>
+              </div>
             </Allotment.Pane>
             <Allotment.Pane>
-              <EditorView projectId={projectId} />
+              <div className="h-full pl-1.5 box-border">
+                <div className="h-full rounded-2xl bg-background border border-border/50 shadow-sm overflow-hidden flex flex-col relative">
+                  <EditorView projectId={projectId} />
+                </div>
+              </div>
             </Allotment.Pane>
           </Allotment>
         </div>
         <div className={cn(
-          "absolute inset-0",
-          activeView === "preview" ? "visible" : "invisible"
+          "absolute inset-0 flex flex-col",
+          activeView !== "preview" && "opacity-0 pointer-events-none"
         )}>
           <PreviewView projectId={projectId} />
         </div>
