@@ -8,7 +8,6 @@ import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbPage,
-  BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";

@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { Id } from "../../../../convex/_generated/dataModel";
 
 type PreviewEngine = "sandbox" | "webcontainer";
+const TERMINAL_CLOSE_THRESHOLD = 110;
 
 export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const router = useRouter();
@@ -39,7 +40,6 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const files = useFiles(projectId);
   const [showTerminal, setShowTerminal] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
-  const TERMINAL_CLOSE_THRESHOLD = 110; // px — close terminal if dragged near the bottom
   
   // URL dictates isolation mode via next.config.ts conditional headers
   const engineParam = searchParams.get("engine") as PreviewEngine | null;
@@ -268,5 +268,4 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
     </div>
   );
 };
-
 

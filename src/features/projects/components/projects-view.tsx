@@ -24,11 +24,7 @@ export const ProjectsView = () => {
   const [commandDialogOpen, setCommandDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
-  const [isMac, setIsMac] = useState(true);
-
-  useEffect(() => {
-    setIsMac(typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent));
-  }, []);
+  const [isMac] = useState(() => typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent));
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -66,7 +62,7 @@ export const ProjectsView = () => {
         open={newProjectDialogOpen}
         onOpenChange={setNewProjectDialogOpen}
       />
-      <div className="min-h-screen bg-muted/20 flex flex-col items-center justify-center p-6 md:p-16 relative isolate">
+      <div className="min-h-screen bg-muted/20 flex flex-col items-center justify-center p-6 md:p-16 relative isolate overflow-hidden">
         {/* User account dropdown */}
         <div className="absolute top-6 right-6 z-50">
           <UserButton />
