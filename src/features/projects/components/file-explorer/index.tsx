@@ -59,7 +59,14 @@ export const FileExplorer = ({
       <div className="p-2 shrink-0 border-b border-border/40">
         <div
           role="button"
+          tabIndex={0}
           onClick={() => setIsOpen((value) => !value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setIsOpen((value) => !value);
+            }
+          }}
           className="group/project cursor-pointer w-full text-left flex items-center justify-between px-2 h-10 bg-muted/40 hover:bg-muted/60 transition-colors rounded-lg border border-border/50"
         >
           <div className="flex items-center gap-1.5 overflow-hidden">
@@ -73,7 +80,7 @@ export const FileExplorer = ({
               {project?.name ?? "Loading..."}
             </p>
           </div>
-          <div className="opacity-0 group-hover/project:opacity-100 transition-opacity duration-200 flex items-center gap-0.5 shrink-0">
+          <div className="opacity-100 md:opacity-0 group-hover/project:opacity-100 group-focus-within/project:opacity-100 focus-within:opacity-100 transition-opacity duration-200 flex items-center gap-0.5 shrink-0">
             <Button
               onClick={(e) => {
                 e.stopPropagation();

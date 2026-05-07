@@ -2,6 +2,7 @@ import Link from "next/link";
 import { FaGithub } from "react-icons/fa";
 import { formatDistanceToNow } from "date-fns";
 import { AlertCircleIcon, ArrowRightIcon, GlobeIcon, Loader2Icon, ClockIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
@@ -109,6 +110,11 @@ export const ProjectsList = ({
   onViewAll
 }: ProjectsListProps) => {
   const projects = useProjectsPartial(6);
+  const [isMac, setIsMac] = useState(true);
+
+  useEffect(() => {
+    setIsMac(typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent));
+  }, []);
 
   if (projects === undefined) {
     return (
@@ -136,7 +142,7 @@ export const ProjectsList = ({
             >
               <span>View all</span>
               <Kbd className="bg-muted/30 border-border/50 px-1.5 py-0.5 rounded group-hover/view-all:bg-background group-hover/view-all:shadow-sm transition-all">
-                ⌘K
+                {isMac ? "⌘K" : "Ctrl+K"}
               </Kbd>
             </button>
           </div>

@@ -51,9 +51,9 @@ export const FileBreadcrumbs = ({
                         {item.name}
                       </BreadcrumbPage>
                     ) : (
-                      <BreadcrumbLink href="#" className="px-2 py-0.5 hover:bg-muted/50 rounded-md transition-colors">
+                      <span className="px-2 py-0.5 hover:bg-muted/50 rounded-md transition-colors text-muted-foreground">
                         {item.name}
-                      </BreadcrumbLink>
+                      </span>
                     )}
                   </BreadcrumbItem>
                   {!isLast && <BreadcrumbSeparator className="opacity-50" />}

@@ -27,7 +27,10 @@ const Tab = ({
   onClick: () => void;
 }) => {
   return (
-    <div
+    <button
+      type="button"
+      role="tab"
+      aria-selected={isActive}
       onClick={onClick}
       className={cn(
         "flex items-center justify-center gap-2 px-4 py-1.5 cursor-pointer transition-all duration-200 select-none",
@@ -38,7 +41,7 @@ const Tab = ({
       )}
     >
       <span>{label}</span>
-    </div>
+    </button>
   );
 };
 

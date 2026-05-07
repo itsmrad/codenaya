@@ -78,6 +78,7 @@ export const PreviewSettingsPopover = ({
           variant="ghost"
           className="size-8 rounded-md hover:bg-muted"
           title="Preview settings"
+          aria-label="Preview settings"
         >
           <SettingsIcon className="size-4" />
         </Button>

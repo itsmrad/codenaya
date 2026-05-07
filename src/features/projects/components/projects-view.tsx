@@ -4,6 +4,7 @@ import { Poppins } from "next/font/google";
 import { SparkleIcon } from "lucide-react";
 import { FaGithub } from "react-icons/fa";
 import { useEffect, useState } from "react";
+import { UserButton } from "@clerk/nextjs";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,11 @@ export const ProjectsView = () => {
   const [commandDialogOpen, setCommandDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
+  const [isMac, setIsMac] = useState(true);
+
+  useEffect(() => {
+    setIsMac(typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent));
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -61,6 +67,11 @@ export const ProjectsView = () => {
         onOpenChange={setNewProjectDialogOpen}
       />
       <div className="min-h-screen bg-muted/20 flex flex-col items-center justify-center p-6 md:p-16 relative isolate">
+        {/* User account dropdown */}
+        <div className="absolute top-6 right-6 z-50">
+          <UserButton />
+        </div>
+
         {/* Subtle background glow effect for spatial depth */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] bg-primary/5 rounded-full blur-[120px] pointer-events-none -z-10" />
 
@@ -90,7 +101,7 @@ export const ProjectsView = () => {
                     <SparkleIcon className="size-4" />
                   </div>
                   <Kbd className="bg-background border-border/50 shadow-sm px-2 py-1 rounded-lg">
-                    ⌘J
+                    {isMac ? "⌘J" : "Ctrl+J"}
                   </Kbd>
                 </div>
                 <div>
@@ -110,7 +121,7 @@ export const ProjectsView = () => {
                     <FaGithub className="size-4" />
                   </div>
                   <Kbd className="bg-background border-border/50 shadow-sm px-2 py-1 rounded-lg">
-                    ⌘I
+                    {isMac ? "⌘I" : "Ctrl+I"}
                   </Kbd>
                 </div>
                 <div>

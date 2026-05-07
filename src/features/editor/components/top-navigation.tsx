@@ -30,7 +30,10 @@ const Tab = ({
   const fileName = file?.name ?? "Loading...";
 
   return (
-    <div
+    <button
+      type="button"
+      role="tab"
+      aria-selected={isActive}
       onClick={() => setActiveTab(fileId)}
       onDoubleClick={() => openFile(fileId, { pinned: true })}
       className={cn(
@@ -72,7 +75,7 @@ const Tab = ({
       >
         <XIcon className="size-3.5" />
       </button>
-    </div>
+    </button>
   );
 };
 

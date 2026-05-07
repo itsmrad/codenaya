@@ -104,6 +104,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
             disabled={isLoading}
             onClick={restart}
             title={`Restart ${activeEngine}`}
+            aria-label={`Restart ${activeEngine}`}
           >
             <RefreshCwIcon className="size-4" />
           </Button>
@@ -114,6 +115,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
             disabled={isLoading || !previewUrl}
             onClick={() => setRefreshKey(k => k + 1)}
             title="Refresh page"
+            aria-label="Refresh page"
           >
             <RotateCwIcon className="size-4" />
           </Button>
@@ -161,6 +163,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
               variant="ghost"
               className="size-8 rounded-md hover:bg-muted"
               title="Open in new tab"
+              aria-label="Open in new tab"
               onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
             >
               <ExternalLinkIcon className="size-4" />
@@ -171,6 +174,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
             variant="ghost"
             className="size-8 rounded-md hover:bg-muted"
             title="Toggle terminal"
+            aria-label="Toggle terminal"
             onClick={() => setShowTerminal((value) => !value)}
           >
             <TerminalSquareIcon className="size-4" />
