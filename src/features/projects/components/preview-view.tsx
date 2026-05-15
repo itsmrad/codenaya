@@ -194,46 +194,15 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
           >
             <Allotment.Pane minSize={100}>
               <div className="size-full pb-1.5">
-                <div className="size-full rounded-2xl overflow-hidden relative isolate">
-                  <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
-
-                  {error && (
-                    <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
-                      <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
-                        <AlertTriangleIcon className="size-6" />
-                        <p className="text-sm font-medium">{error}</p>
-                        <Button size="sm" variant="outline" onClick={restart}>
-                          <RefreshCwIcon className="size-4" />
-                          Restart
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {isLoading && !error && (
-                    <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
-                      <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
-                        <Loader2Icon className="size-6 animate-spin" />
-                        <p className="text-sm font-medium">
-                          {status === "booting"
-                            ? `Starting ${activeEngine}...`
-                            : "Installing dependencies..."}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {previewUrl && (
-                    <iframe
-                      key={refreshKey}
-                      src={previewUrl}
-                      className="size-full border-0"
-                      title="Preview"
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
-                      allow="cross-origin-isolated"
-                    />
-                  )}
-                </div>
+                <PreviewContent
+                  error={error}
+                  isLoading={isLoading}
+                  status={status}
+                  activeEngine={activeEngine}
+                  previewUrl={previewUrl}
+                  refreshKey={refreshKey}
+                  restart={restart}
+                />
               </div>
             </Allotment.Pane>
 
@@ -251,50 +220,78 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
           </Allotment>
         ) : (
           <div className="size-full">
-            <div className="size-full rounded-2xl overflow-hidden relative isolate">
-              <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
-
-              {error && (
-                <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
-                  <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
-                    <AlertTriangleIcon className="size-6" />
-                    <p className="text-sm font-medium">{error}</p>
-                    <Button size="sm" variant="outline" onClick={restart}>
-                      <RefreshCwIcon className="size-4" />
-                      Restart
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {isLoading && !error && (
-                <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
-                  <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
-                    <Loader2Icon className="size-6 animate-spin" />
-                    <p className="text-sm font-medium">
-                      {status === "booting"
-                        ? `Starting ${activeEngine}...`
-                        : "Installing dependencies..."}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {previewUrl && (
-                <iframe
-                  key={refreshKey}
-                  src={previewUrl}
-                  className="size-full border-0"
-                  title="Preview"
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
-                  allow="cross-origin-isolated"
-                />
-              )}
-            </div>
+            <PreviewContent
+              error={error}
+              isLoading={isLoading}
+              status={status}
+              activeEngine={activeEngine}
+              previewUrl={previewUrl}
+              refreshKey={refreshKey}
+              restart={restart}
+            />
           </div>
         )}
       </div>
     </div>
   );
 };
+
+const PreviewContent = ({
+  error,
+  isLoading,
+  status,
+  activeEngine,
+  previewUrl,
+  refreshKey,
+  restart,
+}: {
+  error: string | null | undefined;
+  isLoading: boolean;
+  status: string;
+  activeEngine: PreviewEngine;
+  previewUrl: string | null | undefined;
+  refreshKey: number;
+  restart: () => void;
+}) => (
+  <div className="size-full rounded-2xl overflow-hidden relative isolate">
+    <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
+
+    {error && (
+      <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
+        <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
+          <AlertTriangleIcon className="size-6" />
+          <p className="text-sm font-medium">{error}</p>
+          <Button size="sm" variant="outline" onClick={restart}>
+            <RefreshCwIcon className="size-4" />
+            Restart
+          </Button>
+        </div>
+      </div>
+    )}
+
+    {isLoading && !error && (
+      <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
+        <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
+          <Loader2Icon className="size-6 animate-spin" />
+          <p className="text-sm font-medium">
+            {status === "booting"
+              ? `Starting ${activeEngine}...`
+              : "Installing dependencies..."}
+          </p>
+        </div>
+      </div>
+    )}
+
+    {previewUrl && (
+      <iframe
+        key={refreshKey}
+        src={previewUrl}
+        className="size-full border-0"
+        title="Preview"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
+        allow="cross-origin-isolated"
+      />
+    )}
+  </div>
+);
 
