@@ -64,4 +64,54 @@ export default defineSchema({
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"]),
+
+  // ─── Showcase ───
+  showcaseProjects: defineTable({
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+    ownerName: v.string(),
+    ownerAvatarUrl: v.optional(v.string()),
+    title: v.string(),
+    description: v.string(),
+    previewImageId: v.optional(v.id("_storage")),
+    techStack: v.array(v.string()),
+    designStyle: v.array(v.string()),
+    category: v.string(),
+    upvotes: v.number(),
+    downvotes: v.number(),
+    viewCount: v.number(),
+    importCount: v.number(),
+    status: v.union(
+      v.literal("published"),
+      v.literal("removed"),
+    ),
+    publishedAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_status_and_publishedAt", ["status", "publishedAt"])
+    .index("by_status_and_upvotes", ["status", "upvotes"])
+    .index("by_owner", ["ownerId"])
+    .index("by_projectId", ["projectId"])
+    .index("by_status_and_category", ["status", "category"])
+    .searchIndex("search_title", {
+      searchField: "title",
+      filterFields: ["status", "category"],
+    }),
+
+  showcaseVotes: defineTable({
+    showcaseProjectId: v.id("showcaseProjects"),
+    userId: v.string(),
+    vote: v.union(v.literal("up"), v.literal("down")),
+    createdAt: v.number(),
+  })
+    .index("by_userId_and_showcaseProjectId", ["userId", "showcaseProjectId"])
+    .index("by_showcaseProjectId", ["showcaseProjectId"]),
+
+  showcaseViews: defineTable({
+    showcaseProjectId: v.id("showcaseProjects"),
+    userId: v.string(),
+    viewedAt: v.number(),
+  })
+    .index("by_userId_and_showcaseProjectId", ["userId", "showcaseProjectId"])
+    .index("by_showcaseProjectId", ["showcaseProjectId"]),
 });
