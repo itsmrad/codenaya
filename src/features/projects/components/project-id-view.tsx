@@ -182,7 +182,7 @@ export const ProjectIdView = ({
 
         {/* Right: Publish + Export + User */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {!isPublished && (
+          {isPublished === null && (
             <button
               onClick={() => setPublishDialogOpen(true)}
               className="flex items-center gap-1.5 h-8 px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"

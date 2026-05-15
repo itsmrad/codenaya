@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { UploadIcon, XIcon } from "lucide-react";
 
@@ -50,6 +50,13 @@ export const PublishDialog = ({
 
   const [title, setTitle] = useState(projectName);
   const [description, setDescription] = useState("");
+
+  // Keep title in sync when projectName loads or dialog opens
+  useEffect(() => {
+    if (open && projectName) {
+      setTitle(projectName);
+    }
+  }, [open, projectName]);
   const [category, setCategory] = useState("");
   const [techStack, setTechStack] = useState<string[]>([]);
   const [designStyle, setDesignStyle] = useState<string[]>([]);
@@ -109,8 +116,9 @@ export const PublishDialog = ({
       });
       toast.success("Published to showcase!");
       onOpenChange(false);
-    } catch (err: any) {
-      toast.error(err.message ?? "Failed to publish");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err) || "Failed to publish";
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }

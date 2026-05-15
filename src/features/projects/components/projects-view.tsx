@@ -253,16 +253,16 @@ export const ProjectsView = () => {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-44">
                     <DropdownMenuItem onClick={() => setProjectSort("updated-desc")}>
-                      Recently Updated ↓
+                      Updated — Newest First
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setProjectSort("updated-asc")}>
-                      Recently Updated ↑
+                      Updated — Oldest First
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setProjectSort("created-desc")}>
-                      Created At ↓
+                      Created — Newest First
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setProjectSort("created-asc")}>
-                      Created At ↑
+                      Created — Oldest First
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

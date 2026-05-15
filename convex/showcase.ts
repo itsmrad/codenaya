@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 
 import { mutation, query } from "./_generated/server";
+import { Id } from "./_generated/dataModel";
 import { verifyAuth } from "./auth";
 
 // ─── Queries ───
@@ -28,6 +29,14 @@ export const list = query({
       q = ctx.db
         .query("showcaseProjects")
         .withIndex("by_status_and_upvotes", (idx) =>
+          idx.eq("status", "published")
+        )
+        .order("desc");
+    } else if (sortBy === "imports") {
+      // No dedicated index for importCount, so fetch by publishedAt and sort client-side
+      q = ctx.db
+        .query("showcaseProjects")
+        .withIndex("by_status_and_publishedAt", (idx) =>
           idx.eq("status", "published")
         )
         .order("desc");
@@ -134,7 +143,7 @@ export const getMyPublished = query({
 export const isProjectPublished = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
-    const identity = await verifyAuth(ctx);
+    await verifyAuth(ctx);
 
     const existing = await ctx.db
       .query("showcaseProjects")
@@ -357,9 +366,15 @@ export const importToWorkspace = mutation({
     const sourceFiles = await ctx.db
       .query("files")
       .withIndex("by_project", (q) => q.eq("projectId", showcaseItem.projectId))
-      .take(5000);
+      .take(5001);
 
-    const idMap = new Map<string, string>();
+    if (sourceFiles.length > 5000) {
+      throw new Error(
+        `Project ${showcaseItem.projectId} has more than 5000 files and cannot be imported. Please contact the project owner.`
+      );
+    }
+
+    const idMap = new Map<string, Id<"files">>();
 
     for (const file of sourceFiles) {
       const newFileId = await ctx.db.insert("files", {
@@ -379,8 +394,8 @@ export const importToWorkspace = mutation({
         const newFileId = idMap.get(file._id);
         const newParentId = idMap.get(file.parentId);
         if (newFileId && newParentId) {
-          await ctx.db.patch(newFileId as any, {
-            parentId: newParentId as any,
+          await ctx.db.patch(newFileId, {
+            parentId: newParentId,
           });
         }
       }

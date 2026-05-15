@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -46,6 +46,7 @@ export const ShowcaseDetailDialog = ({
   const vote = useVote();
   const importToWorkspace = useImportToWorkspace();
   const incrementView = useIncrementView();
+  const [isImporting, setIsImporting] = useState(false);
 
   // Live query for realtime vote counts
   const liveProject = useShowcaseById(project?._id);
@@ -72,6 +73,8 @@ export const ShowcaseDetailDialog = ({
   };
 
   const handleImport = async () => {
+    if (isImporting) return;
+    setIsImporting(true);
     try {
       const newProjectId = await importToWorkspace({
         showcaseProjectId: displayProject._id,
@@ -79,8 +82,11 @@ export const ShowcaseDetailDialog = ({
       toast.success("Project imported to your workspace!");
       onOpenChange(false);
       router.push(`/projects/${newProjectId}`);
-    } catch (err: any) {
-      toast.error(err.message ?? "Failed to import");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err) || "Failed to import";
+      toast.error(message);
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -191,10 +197,11 @@ export const ShowcaseDetailDialog = ({
 
             <Button
               onClick={handleImport}
+              disabled={isImporting}
               className="ml-auto gap-2 bg-brand text-white hover:bg-brand/90"
             >
               <ImportIcon className="size-4" />
-              Import to Workspace
+              {isImporting ? "Importing..." : "Import to Workspace"}
             </Button>
           </div>
         </div>
