@@ -8,6 +8,7 @@ import {
   Search,
   PanelLeftClose,
   PanelLeftOpen,
+  ArrowUpDown,
 } from "lucide-react";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
@@ -16,15 +17,29 @@ import { AlertCircleIcon, GlobeIcon, Loader2Icon } from "lucide-react";
 
 import { useIsMac } from "@/lib/hooks/use-is-mac";
 import { Kbd } from "@/components/ui/kbd";
+import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { BackgroundRippleEffect } from "@/components/ui/background-ripple-effect";
+import { ShowcaseCard } from "@/features/showcase/components/showcase-card";
+import { ShowcaseDetailDialog } from "@/features/showcase/components/showcase-detail-dialog";
+import { useShowcaseTrending } from "@/features/showcase/hooks/use-showcase";
+import {
+  TECH_STACK_OPTIONS,
+  DESIGN_STYLE_OPTIONS,
+  CATEGORY_OPTIONS,
+} from "@/features/showcase/constants/tags";
 
 import { useProjects } from "../hooks/use-projects";
+import { Doc } from "../../../../convex/_generated/dataModel";
 import { ProjectsCommandDialog } from "./projects-command-dialog";
 import { ImportGithubDialog } from "./import-github-dialog";
 import { NewProjectDialog } from "./new-project-dialog";
-
-import { Doc } from "../../../../convex/_generated/dataModel";
 
 const formatTimestamp = (timestamp: number) => {
   return formatDistanceToNow(new Date(timestamp), { addSuffix: true });
@@ -49,6 +64,7 @@ export const ProjectsView = () => {
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [collapsed, setCollapsed] = useState(false);
+  const [projectSort, setProjectSort] = useState<"updated-desc" | "updated-asc" | "created-desc" | "created-asc">("updated-desc");
   const isMac = useIsMac();
 
   const allProjects = useProjects();
@@ -75,9 +91,17 @@ export const ProjectsView = () => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const filteredProjects = allProjects?.filter((p) =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredProjects = allProjects
+    ?.filter((p) => p.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      switch (projectSort) {
+        case "updated-desc": return b.updatedAt - a.updatedAt;
+        case "updated-asc": return a.updatedAt - b.updatedAt;
+        case "created-desc": return b._creationTime - a._creationTime;
+        case "created-asc": return a._creationTime - b._creationTime;
+        default: return 0;
+      }
+    });
 
   return (
     <>
@@ -217,9 +241,32 @@ export const ProjectsView = () => {
           {/* Projects List */}
           <div className="flex-1 overflow-y-auto px-3 pb-4">
             {!collapsed && (
-              <p className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2 px-1">
-                Projects
-              </p>
+              <div className="flex items-center justify-between mb-2 px-1">
+                <p className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+                  Projects
+                </p>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="size-5 flex items-center justify-center rounded text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/40 transition-colors">
+                      <ArrowUpDown className="size-3" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuItem onClick={() => setProjectSort("updated-desc")}>
+                      Updated — Newest First
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setProjectSort("updated-asc")}>
+                      Updated — Oldest First
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setProjectSort("created-desc")}>
+                      Created — Newest First
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setProjectSort("created-asc")}>
+                      Created — Oldest First
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             )}
 
             {filteredProjects === undefined ? (
@@ -292,56 +339,50 @@ export const ProjectsView = () => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.5, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
-          className="flex-1 flex flex-col items-start justify-start relative overflow-hidden"
+          className="flex-1 flex flex-col relative overflow-y-auto"
         >
-          {/* Background Ripple Effect */}
-          <BackgroundRippleEffect />
+          {/* Hero section with background — compact */}
+          <div className="relative flex flex-col items-center justify-center overflow-hidden shrink-0 py-14 md:py-20">
+            <BackgroundRippleEffect />
 
-          {/* Content */}
-          <div className="relative z-10 w-full max-w-4xl mx-auto px-8 mt-40 md:mt-52">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className="text-center"
-            >
-              <h2 className="text-2xl font-bold text-foreground md:text-4xl lg:text-7xl">
-                What will you build?
-              </h2>
-              <p className="mt-4 text-sm md:text-base text-muted-foreground max-w-xl mx-auto">
-                Start a new project or pick up where you left off. Your workspace is ready.
-              </p>
-            </motion.div>
-
-            {/* New Project prompt bar */}
-            <motion.div
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.5, ease: [0.22, 1, 0.36, 1] }}
-              className="mt-8 flex justify-center"
-            >
-              <button
-                onClick={() => setNewProjectDialogOpen(true)}
-                className="w-full max-w-md flex items-center gap-3 h-12 px-5 rounded-xl bg-card/80 backdrop-blur-sm border border-border/50 text-sm text-muted-foreground/60 hover:border-brand/30 hover:bg-card transition-all group cursor-text shadow-sm"
+            <div className="relative z-10 w-full max-w-4xl mx-auto px-8">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                className="text-center"
               >
-                <Search className="size-4 text-muted-foreground/40 group-hover:text-brand/60 transition-colors" />
-                <span>Describe what you want to build...</span>
-                <Kbd className="ml-auto text-[10px] text-muted-foreground/50 bg-muted/40 border-border/30 px-1.5 py-0.5 rounded">
-                  {isMac ? "⌘J" : "Ctrl+J"}
-                </Kbd>
-              </button>
-            </motion.div>
+                <h2 className="text-2xl font-bold text-foreground md:text-4xl lg:text-6xl">
+                  What will you build?
+                </h2>
+                <p className="mt-3 text-sm text-muted-foreground max-w-md mx-auto">
+                  Start a new project or pick up where you left off.
+                </p>
+              </motion.div>
 
-            {/* Showcase hint */}
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.5, delay: 0.7 }}
-              className="mt-6 text-center text-[11px] text-muted-foreground/40 tracking-wide"
-            >
-              Showcase coming soon
-            </motion.p>
+              {/* New Project prompt bar */}
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.5, ease: [0.22, 1, 0.36, 1] }}
+                className="mt-6 flex justify-center"
+              >
+                <button
+                  onClick={() => setNewProjectDialogOpen(true)}
+                  className="w-full max-w-md flex items-center gap-3 h-11 px-5 rounded-xl bg-card/80 backdrop-blur-sm border border-border/50 text-sm text-muted-foreground/60 hover:border-brand/30 hover:bg-card transition-all group cursor-text shadow-sm"
+                >
+                  <Search className="size-4 text-muted-foreground/40 group-hover:text-brand/60 transition-colors" />
+                  <span>Describe what you want to build...</span>
+                  <Kbd className="ml-auto text-[10px] text-muted-foreground/50 bg-muted/40 border-border/30 px-1.5 py-0.5 rounded">
+                    {isMac ? "⌘J" : "Ctrl+J"}
+                  </Kbd>
+                </button>
+              </motion.div>
+            </div>
           </div>
+
+          {/* Showcase Feed — starts immediately after hero */}
+          <ShowcaseFeed onNewProject={() => setNewProjectDialogOpen(true)} />
         </motion.main>
 
         {/* Mobile bottom actions */}
@@ -361,6 +402,194 @@ export const ProjectsView = () => {
             Import
           </button>
         </div>
+      </div>
+    </>
+  );
+};
+
+// ─── Showcase Feed (embedded in right panel) ───
+
+type ShowcaseProject = Doc<"showcaseProjects"> & { previewUrl: string | null };
+type SortBy = "newest" | "upvotes" | "imports";
+
+const ShowcaseFeed = ({ onNewProject }: { onNewProject: () => void }) => {
+  const [showcaseSearch, setShowcaseSearch] = useState("");
+  const [sortBy, setSortBy] = useState<SortBy>("newest");
+  const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
+  const [selectedTech, setSelectedTech] = useState<string[]>([]);
+  const [selectedDesign, setSelectedDesign] = useState<string[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const [selectedProject, setSelectedProject] = useState<ShowcaseProject | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  const trending = useShowcaseTrending(30);
+
+  const handleCardClick = (project: ShowcaseProject) => {
+    setSelectedProject(project);
+    setDetailOpen(true);
+  };
+
+  // Client-side filtering
+  const filteredProjects = (trending ?? []).filter((project) => {
+    if (showcaseSearch.length >= 2) {
+      const q = showcaseSearch.toLowerCase();
+      if (!project.title.toLowerCase().includes(q)) return false;
+    }
+    if (selectedCategory && project.category !== selectedCategory) return false;
+    if (selectedTech.length > 0) {
+      if (!selectedTech.some((t) => project.techStack.includes(t))) return false;
+    }
+    if (selectedDesign.length > 0) {
+      if (!selectedDesign.some((d) => project.designStyle.includes(d))) return false;
+    }
+    return true;
+  });
+
+  // Sort
+  const sortedProjects = [...filteredProjects].sort((a, b) => {
+    if (sortBy === "upvotes") return b.upvotes - a.upvotes;
+    if (sortBy === "imports") return b.importCount - a.importCount;
+    return b.publishedAt - a.publishedAt;
+  });
+
+  const hasActiveFilters = selectedCategory || selectedTech.length > 0 || selectedDesign.length > 0;
+
+  return (
+    <>
+      <ShowcaseDetailDialog
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        project={selectedProject}
+      />
+
+      <div className="px-6 md:px-10 pb-10">
+        {/* Header + Search + Sort */}
+        <div className="flex items-center gap-3 mb-4">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/50" />
+            <input
+              type="text"
+              placeholder="Search showcase..."
+              value={showcaseSearch}
+              onChange={(e) => setShowcaseSearch(e.target.value)}
+              className="w-full h-8 pl-8 pr-3 rounded-lg bg-muted/30 border border-border/40 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand/40 transition-all"
+            />
+          </div>
+
+          {/* Sort */}
+          <div className="flex items-center p-0.5 bg-muted/30 rounded-lg border border-border/40">
+            {(["newest", "upvotes", "imports"] as SortBy[]).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSortBy(s)}
+                className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors ${
+                  sortBy === s
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {s === "newest" ? "New" : s === "upvotes" ? "Top" : "Popular"}
+              </button>
+            ))}
+          </div>
+
+          {/* Filter toggle */}
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`h-8 px-2.5 rounded-lg border text-[11px] font-medium transition-colors ${
+              showFilters || hasActiveFilters
+                ? "border-brand/40 text-brand bg-brand/5"
+                : "border-border/40 text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Filters{hasActiveFilters ? " ●" : ""}
+          </button>
+        </div>
+
+        {/* Filter panel */}
+        {showFilters && (
+          <div className="mb-4 p-3 rounded-xl border border-border/40 bg-card/50 space-y-3">
+            {/* Category */}
+            <div className="space-y-1.5">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Category</p>
+              <div className="flex flex-wrap gap-1">
+                {CATEGORY_OPTIONS.map((cat) => (
+                  <Badge
+                    key={cat.value}
+                    variant={selectedCategory === cat.value ? "default" : "outline"}
+                    className="cursor-pointer text-[10px] px-2 py-0"
+                    onClick={() => setSelectedCategory(selectedCategory === cat.value ? undefined : cat.value)}
+                  >
+                    {cat.label}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+            {/* Tech */}
+            <div className="space-y-1.5">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tech Stack</p>
+              <div className="flex flex-wrap gap-1">
+                {TECH_STACK_OPTIONS.map((tag) => (
+                  <Badge
+                    key={tag}
+                    variant={selectedTech.includes(tag) ? "default" : "outline"}
+                    className="cursor-pointer text-[10px] px-2 py-0"
+                    onClick={() => setSelectedTech((prev) => prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag])}
+                  >
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+            {/* Design */}
+            <div className="space-y-1.5">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Design Style</p>
+              <div className="flex flex-wrap gap-1">
+                {DESIGN_STYLE_OPTIONS.map((tag) => (
+                  <Badge
+                    key={tag}
+                    variant={selectedDesign.includes(tag) ? "default" : "outline"}
+                    className="cursor-pointer text-[10px] px-2 py-0"
+                    onClick={() => setSelectedDesign((prev) => prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag])}
+                  >
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+            {hasActiveFilters && (
+              <button
+                onClick={() => { setSelectedCategory(undefined); setSelectedTech([]); setSelectedDesign([]); }}
+                className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Grid */}
+        {sortedProjects.length === 0 ? (
+          <div className="py-16 text-center">
+            <p className="text-sm text-muted-foreground/50">
+              {trending === undefined
+                ? "Loading..."
+                : trending.length === 0
+                  ? "No showcase projects yet. Be the first to publish!"
+                  : "No projects match your filters"}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {sortedProjects.map((project) => (
+              <ShowcaseCard
+                key={project._id}
+                project={project as ShowcaseProject}
+                onClick={() => handleCardClick(project as ShowcaseProject)}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </>
   );
