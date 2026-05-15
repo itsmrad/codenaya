@@ -22,17 +22,13 @@ import { Button } from "@/components/ui/button";
 
 import { useProject } from "../hooks/use-projects";
 import { useFiles } from "../hooks/use-files";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-
-import { cn } from "@/lib/utils";
+import { usePathname, useSearchParams } from "next/navigation";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 
 type PreviewEngine = "sandbox" | "webcontainer";
-const TERMINAL_CLOSE_THRESHOLD = 110;
 
 export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   
@@ -190,67 +186,26 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
       </div>
 
       <div className="flex-1 min-h-0 relative">
-        <Allotment
-          vertical
-          onChange={(sizes) => {
-            // Auto-close terminal when dragged close to the bottom
-            if (showTerminal && sizes[1] !== undefined && sizes[1] <= TERMINAL_CLOSE_THRESHOLD) {
-              setShowTerminal(false);
-            }
-          }}
-        >
-          <Allotment.Pane>
-            <div className={cn("size-full", showTerminal ? "pb-1.5" : "")}>
-              {/*
-                iframe corner bleed fix:
-                - The parent must be TRANSPARENT (no background) with overflow-hidden + border-radius to clip the iframe.
-                - Any anti-aliased edge pixels will then blend into the canvas bg instead of creating a visible dark/white halo.
-                - The ring overlay is painted on top via z-50 to draw the visible border.
-              */}
-              <div className="size-full rounded-2xl overflow-hidden relative isolate">
-                <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
-
-                {error && (
-                  <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
-                    <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
-                      <AlertTriangleIcon className="size-6" />
-                      <p className="text-sm font-medium">{error}</p>
-                      <Button size="sm" variant="outline" onClick={restart}>
-                        <RefreshCwIcon className="size-4" />
-                        Restart
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {isLoading && !error && (
-                  <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
-                    <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
-                      <Loader2Icon className="size-6 animate-spin" />
-                      <p className="text-sm font-medium">
-                        {status === "booting"
-                          ? `Starting ${activeEngine}...`
-                          : "Installing dependencies..."}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {previewUrl && (
-                  <iframe
-                    key={refreshKey}
-                    src={previewUrl}
-                    className="size-full border-0"
-                    title="Preview"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
-                    allow="cross-origin-isolated"
-                  />
-                )}
+        {showTerminal ? (
+          <Allotment
+            key="preview-with-terminal"
+            vertical
+            defaultSizes={[300, 150]}
+          >
+            <Allotment.Pane minSize={100}>
+              <div className="size-full pb-1.5">
+                <PreviewContent
+                  error={error}
+                  isLoading={isLoading}
+                  status={status}
+                  activeEngine={activeEngine}
+                  previewUrl={previewUrl}
+                  refreshKey={refreshKey}
+                  restart={restart}
+                />
               </div>
-            </div>
-          </Allotment.Pane>
+            </Allotment.Pane>
 
-          {showTerminal && (
             <Allotment.Pane minSize={100} maxSize={500} preferredSize={200}>
               <div className="size-full pt-1.5">
                 <div className="size-full rounded-2xl bg-background border border-border/50 shadow-sm overflow-hidden flex flex-col">
@@ -262,10 +217,81 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
                 </div>
               </div>
             </Allotment.Pane>
-          )}
-        </Allotment>
+          </Allotment>
+        ) : (
+          <div className="size-full">
+            <PreviewContent
+              error={error}
+              isLoading={isLoading}
+              status={status}
+              activeEngine={activeEngine}
+              previewUrl={previewUrl}
+              refreshKey={refreshKey}
+              restart={restart}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
 };
+
+const PreviewContent = ({
+  error,
+  isLoading,
+  status,
+  activeEngine,
+  previewUrl,
+  refreshKey,
+  restart,
+}: {
+  error: string | null | undefined;
+  isLoading: boolean;
+  status: string;
+  activeEngine: PreviewEngine;
+  previewUrl: string | null | undefined;
+  refreshKey: number;
+  restart: () => void;
+}) => (
+  <div className="size-full rounded-2xl overflow-hidden relative isolate">
+    <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
+
+    {error && (
+      <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
+        <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
+          <AlertTriangleIcon className="size-6" />
+          <p className="text-sm font-medium">{error}</p>
+          <Button size="sm" variant="outline" onClick={restart}>
+            <RefreshCwIcon className="size-4" />
+            Restart
+          </Button>
+        </div>
+      </div>
+    )}
+
+    {isLoading && !error && (
+      <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
+        <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
+          <Loader2Icon className="size-6 animate-spin" />
+          <p className="text-sm font-medium">
+            {status === "booting"
+              ? `Starting ${activeEngine}...`
+              : "Installing dependencies..."}
+          </p>
+        </div>
+      </div>
+    )}
+
+    {previewUrl && (
+      <iframe
+        key={refreshKey}
+        src={previewUrl}
+        className="size-full border-0"
+        title="Preview"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
+        allow="cross-origin-isolated"
+      />
+    )}
+  </div>
+);
 

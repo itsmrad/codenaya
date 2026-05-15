@@ -4,7 +4,6 @@ import { Allotment } from "allotment";
 
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
 
-import { Navbar } from "./navbar";
 import { Id } from "../../../../convex/_generated/dataModel";
 
 const MIN_SIDEBAR_WIDTH = 200;
@@ -20,16 +19,13 @@ export const ProjectIdLayout = ({
   projectId: Id<"projects">;
 }) => {
   return (
-    <div className="w-full h-screen flex flex-col bg-muted/20">
-      <div className="shrink-0 bg-background border-b border-border/40 z-10">
-        <Navbar projectId={projectId} />
-      </div>
-      <div className="flex-1 p-3 min-h-0 flex overflow-hidden">
+    <div className="w-full h-screen flex flex-col bg-background">
+      <div className="flex-1 p-2 min-h-0 flex overflow-hidden">
         <Allotment
           className="flex-1"
           defaultSizes={[
             DEFAULT_CONVERSATION_SIDEBAR_WIDTH,
-            DEFAULT_MAIN_SIZE
+            DEFAULT_MAIN_SIZE,
           ]}
         >
           <Allotment.Pane
@@ -38,14 +34,14 @@ export const ProjectIdLayout = ({
             maxSize={MAX_SIDEBAR_WIDTH}
             preferredSize={DEFAULT_CONVERSATION_SIDEBAR_WIDTH}
           >
-            <div className="h-full pr-1.5 box-border">
-              <div className="h-full rounded-2xl bg-background border border-border/50 shadow-sm flex flex-col overflow-hidden relative">
+            <div className="h-full pr-1 box-border">
+              <div className="h-full rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)] flex flex-col overflow-hidden relative">
                 <ConversationSidebar projectId={projectId} />
               </div>
             </div>
           </Allotment.Pane>
           <Allotment.Pane>
-            <div className="h-full pl-1.5 box-border flex flex-col relative overflow-hidden">
+            <div className="h-full pl-1 box-border flex flex-col relative overflow-hidden">
               {children}
             </div>
           </Allotment.Pane>

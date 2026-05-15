@@ -41,37 +41,48 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
 }
 
-/* Islands UI (Derived from your VS Code Custom Theme) */
+/* 
+ * Codenaya Design System
+ * Dark Mode First — Cinematic Noir with Warm Amber Accent
+ * Light Mode — Warm Ivory/Cream with Deep Contrast
+ * 
+ * Inspired by: Swiss/International, Japandi, Kinetic, Modernist
+ */
+
 :root {
-  --radius: 1.25rem; /* High radius mirroring --islands-panel-radius */
-  --background: #f4f4f7;
-  --foreground: #121216;
+  --radius: 0.75rem;
+  --background: #faf8f5;
+  --foreground: #1a1a1a;
   --card: #ffffff;
-  --card-foreground: #121216;
+  --card-foreground: #1a1a1a;
   --popover: #ffffff;
-  --popover-foreground: #121216;
-  --primary: #121216;
-  --primary-foreground: #ffffff;
-  --secondary: #e9e9f0;
-  --secondary-foreground: #121216;
-  --muted: #e9e9f0;
-  --muted-foreground: #666870;
-  --accent: #e9e9f0;
-  --accent-foreground: #121216;
-  --destructive: #da3333;
-  --border: rgba(0, 0, 0, 0.08); 
-  --input: rgba(0, 0, 0, 0.1);
-  --ring: #121216;
+  --popover-foreground: #1a1a1a;
+  --primary: #1a1a1a;
+  --primary-foreground: #faf8f5;
+  --secondary: #f0ece6;
+  --secondary-foreground: #1a1a1a;
+  --muted: #f0ece6;
+  --muted-foreground: #6b6560;
+  --accent: #f0ece6;
+  --accent-foreground: #1a1a1a;
+  --destructive: #dc2626;
+  --border: rgba(26, 26, 26, 0.08);
+  --input: rgba(26, 26, 26, 0.08);
+  --ring: #e8824f;
+  --brand: #e8824f;
+  --brand-foreground: #ffffff;
   --sidebar: #ffffff;
-  --sidebar-foreground: #121216;
-  --sidebar-border: rgba(0, 0, 0, 0.08);
-  --sidebar-primary: #121216;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #e9e9f0;
-  --sidebar-accent-foreground: #121216;
-  --sidebar-ring: #121216;
+  --sidebar-foreground: #1a1a1a;
+  --sidebar-border: rgba(26, 26, 26, 0.08);
+  --sidebar-primary: #1a1a1a;
+  --sidebar-primary-foreground: #faf8f5;
+  --sidebar-accent: #f0ece6;
+  --sidebar-accent-foreground: #1a1a1a;
+  --sidebar-ring: #e8824f;
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -80,32 +91,34 @@
 }
 
 .dark {
-  --background: #121216; /* --islands-bg-canvas */
-  --foreground: #e0e0e0;
-  --card: #181a1d; /* --islands-bg-surface */
-  --card-foreground: #e0e0e0;
-  --popover: #181a1d;
-  --popover-foreground: #e0e0e0;
-  --primary: #ffffff;
-  --primary-foreground: #121216;
-  --secondary: #25262a; /* Custom tab active/inactive background */
-  --secondary-foreground: #e0e0e0;
-  --muted: #202226; /* Slightly lighter than canvas for subtle depths */
-  --muted-foreground: #8b8e96;
-  --accent: #25262a;
-  --accent-foreground: #ffffff;
-  --destructive: #f05252;
-  --border: rgba(255, 255, 255, 0.06); /* Matches VS Code inset effect */
-  --input: rgba(255, 255, 255, 0.06);
-  --ring: rgba(255, 255, 255, 0.2);
-  --sidebar: #181a1d;
-  --sidebar-foreground: #e0e0e0;
-  --sidebar-border: rgba(255, 255, 255, 0.06);
-  --sidebar-primary: #ffffff;
-  --sidebar-primary-foreground: #121216;
-  --sidebar-accent: #25262a;
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-ring: rgba(255, 255, 255, 0.2);
+  --background: #09090b;
+  --foreground: #f0ece6;
+  --card: #131316;
+  --card-foreground: #f0ece6;
+  --popover: #131316;
+  --popover-foreground: #f0ece6;
+  --primary: #f0ece6;
+  --primary-foreground: #09090b;
+  --secondary: #1c1c20;
+  --secondary-foreground: #f0ece6;
+  --muted: #1c1c20;
+  --muted-foreground: #8a8580;
+  --accent: #252529;
+  --accent-foreground: #f0ece6;
+  --destructive: #ef4444;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: #e8824f;
+  --brand: #e8824f;
+  --brand-foreground: #09090b;
+  --sidebar: #131316;
+  --sidebar-foreground: #f0ece6;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-primary: #f0ece6;
+  --sidebar-primary-foreground: #09090b;
+  --sidebar-accent: #252529;
+  --sidebar-accent-foreground: #f0ece6;
+  --sidebar-ring: #e8824f;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -129,25 +142,26 @@
   }
 }
 
-@theme inline {
-  --animate-cell-ripple: cell-ripple var(--duration, 200ms) ease-out none 1
-    var(--delay, 0ms);
-
-  @keyframes cell-ripple {
-    0% {
-      opacity: 0.4;
-    }
-    50% {
-      opacity: 0.8;
-    }
-    100% {
-      opacity: 0.4;
-    }
-  }
+/* Smooth scrolling via Lenis - body gets this class */
+html.lenis, html.lenis body {
+  height: auto;
 }
 
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+/* Custom scrollbar */
 ::-webkit-scrollbar {
-  @apply w-2.5 h-2.5;
+  @apply w-2 h-2;
 }
 
 ::-webkit-scrollbar-track {
@@ -158,6 +172,7 @@
   @apply rounded-full bg-border border-[1px] border-transparent border-solid bg-clip-padding;
 }
 
+/* Allotment overrides for IDE */
 :root {
   --focus-border: transparent;
   --separator-border: transparent;
@@ -186,4 +201,21 @@
 .sash:hover::after,
 .sash.active::after {
   opacity: 0.45;
+}
+
+@theme inline {
+  --animate-cell-ripple: cell-ripple var(--duration, 200ms) ease-out none 1
+    var(--delay, 0ms);
+
+  @keyframes cell-ripple {
+    0% {
+      opacity: 0.4;
+    }
+    50% {
+      opacity: 0.8;
+    }
+    100% {
+      opacity: 0.4;
+    }
+  }
 }
