@@ -61,6 +61,8 @@ export default defineSchema({
         v.literal("cancelled")
       )
     ),
+    // Workflow run id (when processed via Vercel Workflow SDK)
+    workflowRunId: v.optional(v.string()),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"]),
