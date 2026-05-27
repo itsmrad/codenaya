@@ -2,8 +2,11 @@ import { z } from "zod";
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 
-import { inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
+import {
+  dispatchCancelMessage,
+  dispatchProcessMessage,
+} from "@/lib/message-processor";
 
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -60,12 +63,7 @@ export async function POST(request: Request) {
     // Cancel all processing messages
     await Promise.all(
       processingMessages.map(async (msg) => {
-        await inngest.send({
-          name: "message/cancel",
-          data: {
-            messageId: msg._id,
-          },
-        });
+        await dispatchCancelMessage({ internalKey, messageId: msg._id });
 
         await convex.mutation(api.system.updateMessageStatus, {
           internalKey,
@@ -98,20 +96,20 @@ export async function POST(request: Request) {
     }
   );
 
-  // Trigger Inngest to process the message
-  const event = await inngest.send({
-    name: "message/sent",
-    data: {
-      messageId: assistantMessageId,
-      conversationId,
-      projectId,
-      message,
-    },
+  // Trigger the configured message processor (Inngest or Vercel Workflow)
+  const dispatch = await dispatchProcessMessage({
+    internalKey,
+    messageId: assistantMessageId,
+    conversationId: conversationId as Id<"conversations">,
+    projectId,
+    message,
   });
 
   return NextResponse.json({
     success: true,
-    eventId: event.ids[0],
+    backend: dispatch.backend,
+    eventId: dispatch.eventId,
+    runId: dispatch.runId,
     messageId: assistantMessageId,
   });
 };

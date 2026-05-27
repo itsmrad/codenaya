@@ -10,8 +10,8 @@ import {
 
 import { DEFAULT_CONVERSATION_TITLE } from "@/features/conversations/constants";
 
-import { inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
+import { dispatchProcessMessage } from "@/lib/message-processor";
 
 import { api } from "../../../../../convex/_generated/api";
 
@@ -78,15 +78,13 @@ export async function POST(request: Request) {
     },
   );
 
-  // Trigger Inngest to process the message
-  await inngest.send({
-    name: "message/sent",
-    data: {
-      messageId: assistantMessageId,
-      conversationId,
-      projectId,
-      message: prompt,
-    },
+  // Trigger configured backend to process the message
+  await dispatchProcessMessage({
+    internalKey,
+    messageId: assistantMessageId,
+    conversationId,
+    projectId,
+    message: prompt,
   });
 
   return NextResponse.json({ projectId });

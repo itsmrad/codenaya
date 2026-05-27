@@ -2,8 +2,8 @@ import { z } from "zod";
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 
-import { inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
+import { dispatchCancelMessage } from "@/lib/message-processor";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
@@ -47,12 +47,7 @@ export async function POST(request: Request) {
   // Cancel all processing messages
   const cancelledIds = await Promise.all(
     processingMessages.map(async (msg) => {
-      await inngest.send({
-        name: "message/cancel",
-        data: {
-          messageId: msg._id,
-        },
-      });
+      await dispatchCancelMessage({ internalKey, messageId: msg._id });
 
       await convex.mutation(api.system.updateMessageStatus, {
         internalKey,
