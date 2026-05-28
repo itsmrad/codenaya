@@ -143,9 +143,18 @@ export async function processMessageWorkflow(input: ProcessMessageInput) {
     });
 
     return { success: true as const, messageId, conversationId };
-  } catch (err) {
+  } catch (originalErr) {
     // Best-effort failure write — mirrors the Inngest onFailure handler.
-    await markMessageFailed({ internalKey, messageId });
-    throw err;
+    // Wrapped in its own try/catch so a markMessageFailed throw cannot
+    // mask the real root cause we're rethrowing below.
+    try {
+      await markMessageFailed({ internalKey, messageId });
+    } catch (markErr) {
+      console.warn(
+        "[workflow] markMessageFailed threw while handling original error",
+        markErr
+      );
+    }
+    throw originalErr;
   }
 }

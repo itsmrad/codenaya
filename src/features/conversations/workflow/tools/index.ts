@@ -56,7 +56,9 @@ async function readFilesStep(opts: {
       fileId: fileId as Id<"files">,
     });
 
-    if (file && file.content) {
+    // Treat empty string as a valid (zero-byte) file. Only skip when the
+    // file row is missing or content is null/undefined.
+    if (file && file.content !== null && file.content !== undefined) {
       results.push({
         id: file._id,
         name: file.name,

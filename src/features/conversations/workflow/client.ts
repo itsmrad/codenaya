@@ -18,11 +18,32 @@ import {
 export async function startProcessMessageWorkflow(input: ProcessMessageInput) {
   const run = await start(processMessageWorkflow, [input]);
 
-  await convex.mutation(api.system.setMessageWorkflowRunId, {
-    internalKey: input.internalKey,
-    messageId: input.messageId,
-    workflowRunId: run.runId,
-  });
+  try {
+    await convex.mutation(api.system.setMessageWorkflowRunId, {
+      internalKey: input.internalKey,
+      messageId: input.messageId,
+      workflowRunId: run.runId,
+    });
+  } catch (persistErr) {
+    // We have a live workflow run with no way for the rest of the system to
+    // reach it (cancel, observe, etc.). Best-effort: tear it down so we don't
+    // leak compute, then surface the persistence failure to the caller.
+    try {
+      const startedRun = getRun(run.runId);
+      await startedRun.cancel();
+      console.warn(
+        "[workflow] cancelled orphan run after persistence failure",
+        run.runId
+      );
+    } catch (cancelErr) {
+      console.warn(
+        "[workflow] failed to cancel orphan run",
+        run.runId,
+        cancelErr
+      );
+    }
+    throw persistErr;
+  }
 
   return run.runId;
 }
