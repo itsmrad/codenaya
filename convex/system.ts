@@ -96,6 +96,33 @@ export const updateMessageStatus = mutation({
   },
 });
 
+export const setMessageWorkflowRunId = mutation({
+  args: {
+    internalKey: v.string(),
+    messageId: v.id("messages"),
+    workflowRunId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    await ctx.db.patch(args.messageId, {
+      workflowRunId: args.workflowRunId,
+    });
+  },
+});
+
+export const getMessageById = query({
+  args: {
+    internalKey: v.string(),
+    messageId: v.id("messages"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    return await ctx.db.get(args.messageId);
+  },
+});
+
 export const getProcessingMessages = query({
   args: {
     internalKey: v.string(),

@@ -11,11 +11,15 @@
 	"overrides": {
 		"postcss": "^8.5.10",
 		"axios": ">=1.15.2",
-		"ip-address": ">=10.2.0"
+		"ip-address": ">=10.2.0",
+		"devalue": "^5.8.1",
+		"undici": "^7.24.0",
+		"ws": "^8.20.1"
 	},
 	"dependencies": {
 		"@ai-sdk/anthropic": "^3.0.1",
 		"@ai-sdk/google": "^3.0.1",
+		"@ai-sdk/google-vertex": "^4.0.139",
 		"@ai-sdk/openai": "^3.0.60",
 		"@clerk/nextjs": "^7.2.7",
 		"@clerk/themes": "^2.4.46",
@@ -64,6 +68,8 @@
 		"@tanstack/react-form": "^1.27.7",
 		"@types/lodash": "^4.17.24",
 		"@webcontainer/api": "^1.6.1",
+		"@workflow/ai": "^4.1.2",
+		"@workflow/next": "^4.0.6",
 		"@xterm/addon-fit": "^0.11.0",
 		"@xterm/xterm": "^6.0.0",
 		"@xyflow/react": "^12.10.0",
@@ -77,6 +83,7 @@
 		"date-fns": "^4.1.0",
 		"e2b": "^2.19.2",
 		"embla-carousel-react": "^8.6.0",
+		"google-auth-library": "^10.6.2",
 		"inngest": "^4.2.4",
 		"input-otp": "^1.4.2",
 		"isbinaryfile": "^5.0.7",
@@ -104,6 +111,7 @@
 		"unique-names-generator": "^4.7.1",
 		"use-stick-to-bottom": "^1.1.1",
 		"vaul": "^1.1.2",
+		"workflow": "^4.2.5",
 		"zod": "^4.2.1",
 		"zustand": "^5.0.9"
 	},
