@@ -56,7 +56,7 @@ const ContinueCard = ({
       <Button
         variant="outline"
         asChild
-        className="h-auto items-start justify-start p-4 bg-muted/20 hover:bg-muted/50 border-border/50 rounded-2xl flex flex-col gap-3 transition-all group"
+        className="h-auto items-start justify-start p-4 bg-muted/20 hover:bg-muted/50 border-border/50 rounded-xl flex flex-col gap-3 transition-all group"
       >
         <Link href={`/projects/${data._id}`}>
           <div className="flex items-center justify-between w-full">

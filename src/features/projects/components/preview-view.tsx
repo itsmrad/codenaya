@@ -208,7 +208,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
 
             <Allotment.Pane minSize={100} maxSize={500} preferredSize={200}>
               <div className="size-full pt-1.5">
-                <div className="size-full rounded-2xl bg-background border border-border/50 shadow-sm overflow-hidden flex flex-col">
+                <div className="size-full rounded-xl bg-background border border-border/50 shadow-sm overflow-hidden flex flex-col">
                   <div className="h-9 flex items-center px-4 text-xs font-medium gap-1.5 text-muted-foreground border-b border-border/50 shrink-0 bg-muted/20">
                     <TerminalSquareIcon className="size-4" />
                     Terminal
@@ -253,8 +253,8 @@ const PreviewContent = ({
   refreshKey: number;
   restart: () => void;
 }) => (
-  <div className="size-full rounded-2xl overflow-hidden relative isolate">
-    <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
+  <div className="size-full rounded-xl overflow-hidden relative isolate">
+    <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
 
     {error && (
       <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
