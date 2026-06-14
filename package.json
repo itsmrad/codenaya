@@ -6,7 +6,9 @@
 		"dev": "next dev",
 		"build": "npx convex codegen && next build",
 		"start": "next start",
-		"lint": "eslint"
+		"lint": "eslint",
+		"test:visual": "playwright test",
+		"test:visual:update": "playwright test --update-snapshots"
 	},
 	"overrides": {
 		"postcss": "^8.5.10",
@@ -116,6 +118,7 @@
 		"zustand": "^5.0.9"
 	},
 	"devDependencies": {
+		"@playwright/test": "^1.60.0",
 		"@tailwindcss/postcss": "^4",
 		"@types/node": "^20",
 		"@types/react": "^19",
