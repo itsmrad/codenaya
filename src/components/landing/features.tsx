@@ -71,7 +71,7 @@ export const LandingFeatures = () => {
               }}
               className={`${feature.span} group relative`}
             >
-              <div className="relative h-full p-6 md:p-8 rounded-2xl border border-border/60 bg-card/50 backdrop-blur-sm overflow-hidden transition-all duration-500 hover:border-brand/30 hover:shadow-lg hover:shadow-brand/5">
+              <div className="relative h-full p-6 md:p-8 rounded-xl border border-border/60 bg-card/50 backdrop-blur-sm overflow-hidden transition-all duration-500 hover:border-brand/30 hover:shadow-lg hover:shadow-brand/5">
                 {/* Hover glow */}
                 <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-[radial-gradient(ellipse_at_top_left,rgba(232,130,79,0.05),transparent_60%)]" />
 
