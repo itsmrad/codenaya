@@ -179,6 +179,22 @@ export interface ProviderDefinition {
    */
   readonly destructiveTools: readonly string[];
   readonly apiKey?: ApiKeyPlacement;
+  /**
+   * Authorization server origins this provider is allowed to nominate during
+   * OAuth discovery.
+   *
+   * When present, the discovered authorization server origin must be one of
+   * these exactly. When absent, `validateAuthorizationServer` falls back to
+   * requiring the authorization server to be same-site with `mcpUrl`.
+   *
+   * Deliberately left unset for providers whose authorization server origin has
+   * not been verified against the live endpoint. The same-site fallback fails
+   * closed, and its error names the discovered origin so it can be added here
+   * as a small deliberate change.
+   */
+  readonly trustedAuthorizationServerOrigins?: readonly string[];
+  /** OAuth scopes to request. Omitted means "whatever the server defaults to". */
+  readonly oauthScopes?: readonly string[];
   /** Operator-facing caveats worth surfacing in the UI or in review. */
   readonly notes?: string;
 }
