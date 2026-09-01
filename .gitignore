@@ -44,7 +44,17 @@ next-env.d.ts
 .env.sentry-build-plugin
 
 # convex generated files
-convex/_generated/
+#
+# Deliberately NOT ignored. `npx convex deploy --cmd 'npm run build'` runs the
+# build command BEFORE it generates this directory, so `next build` cannot import
+# `convex/_generated/api` unless the files are already present. Generating them
+# inside the build script instead starts a second Convex push while `convex
+# deploy`'s own push is in flight, which fails with
+# `409 ExistingModuleHashConflict`.
+#
+# Committing them means the build needs no codegen and `convex deploy` is the only
+# thing that pushes. Regenerate with `npx convex codegen` (or let `npx convex dev`
+# do it) and commit the result whenever anything under `convex/` changes.
 
 #vscode
 .vscode

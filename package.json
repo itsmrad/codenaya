@@ -4,7 +4,8 @@
 	"private": true,
 	"scripts": {
 		"dev": "next dev",
-		"build": "npx convex codegen && next build",
+		"build": "next build",
+		"build:local": "npx convex codegen && next build",
 		"start": "next start",
 		"lint": "eslint",
 		"test": "vitest run",

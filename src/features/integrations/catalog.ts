@@ -216,7 +216,11 @@ const CATALOG = {
       valuePrefix: "Bearer ",
       hint: "Context7 API key",
     },
-    notes: "Documentation lookup only; there is nothing here to mutate.",
+    notes:
+      "Documentation lookup only; there is nothing here to mutate. Note that " +
+      "this server also answers unauthenticated requests (rate-limited), so a " +
+      "successful connection probe does not prove the API key is valid — it " +
+      "only proves the server is reachable. Verified against the live endpoint.",
   },
 
   prisma: {
