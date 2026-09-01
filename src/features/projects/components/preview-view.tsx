@@ -11,6 +11,7 @@ import {
   RotateCwIcon,
   ServerIcon,
   BoxIcon,
+  LockIcon,
 } from "lucide-react";
 
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
@@ -22,6 +23,10 @@ import { Button } from "@/components/ui/button";
 
 import { useProject } from "../hooks/use-projects";
 import { useFiles } from "../hooks/use-files";
+import {
+  usePublicEnvVars,
+  useWithheldSecretCount,
+} from "@/features/integrations/hooks/use-integrations";
 import { usePathname, useSearchParams } from "next/navigation";
 
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -48,12 +53,19 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const sandbox = useSandbox({
     files,
     enabled: activeEngine === "sandbox",
+    projectId,
     settings: project?.settings,
   });
+
+  // WebContainer runs in this page, so it receives only variables already destined
+  // for the client bundle. Secrets go to the E2B sandbox, which runs server-side.
+  const publicEnv = usePublicEnvVars(projectId);
+  const withheldSecretCount = useWithheldSecretCount(projectId);
 
   const webcontainer = useWebContainer({
     files,
     enabled: activeEngine === "webcontainer",
+    publicEnv,
     settings: project?.settings,
   });
 
@@ -91,6 +103,40 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
 
   return (
     <div className="h-full flex flex-col bg-transparent gap-3">
+      {/* Secrets are withheld from WebContainer because it boots in this page, so
+          anything mounted there is readable by the end user. Saying so explicitly
+          beats letting the generated app fail with a confusing runtime error the
+          user cannot trace back to a preview-engine choice. */}
+      {activeEngine === "webcontainer" && (withheldSecretCount ?? 0) > 0 && (
+        <div
+          role="status"
+          className="shrink-0 flex items-start gap-2.5 px-3 py-2.5 rounded-xl border border-amber-500/30 bg-amber-500/[0.07] text-xs"
+        >
+          <LockIcon
+            aria-hidden="true"
+            className="size-3.5 mt-0.5 shrink-0 text-amber-500"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-foreground">
+              {withheldSecretCount} secret{withheldSecretCount === 1 ? "" : "s"} not
+              available in this preview
+            </p>
+            <p className="text-muted-foreground mt-0.5 leading-relaxed">
+              This preview runs in your browser, so secret values are withheld —
+              anything sent here would be readable by anyone who opens the page.
+              Switch to Cloud Sandbox to run with full credentials.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 shrink-0 text-xs"
+            onClick={() => switchEngine("sandbox")}
+          >
+            Use Cloud Sandbox
+          </Button>
+        </div>
+      )}
       <div className="p-1.5 shrink-0 border border-border/50 rounded-xl bg-background shadow-sm flex items-center gap-2">
         <div className="flex items-center p-0.5 bg-muted/40 rounded-lg border border-border/50">
           <Button

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WebContainer, WebContainerProcess } from "@webcontainer/api";
 
-import { 
+import {
   buildFileTree,
   getFilePath
 } from "@/features/webcontainer-preview/utils/file-tree";
+import { serialiseDotenv } from "@/features/integrations/dotenv";
 
 import { Id, Doc } from "../../../../convex/_generated/dataModel";
 
@@ -37,6 +38,16 @@ const teardownWebContainer = () => {
 interface UseWebContainerProps {
   files?: Doc<"files">[];
   enabled: boolean;
+  /**
+   * Public environment variables only.
+   *
+   * WebContainer boots in this page, so anything mounted here is readable by the
+   * end user in devtools and by anyone they share a preview with. Secret values are
+   * deliberately not accepted — the type makes that a compile-time property rather
+   * than a convention someone has to remember. Secrets reach the E2B sandbox
+   * instead, which runs server-side.
+   */
+  publicEnv?: Array<{ key: string; value: string }>;
   settings?: {
     installCommand?: string;
     devCommand?: string;
@@ -46,6 +57,7 @@ interface UseWebContainerProps {
 export const useWebContainer = ({
   files,
   enabled,
+  publicEnv,
   settings,
 }: UseWebContainerProps) => {
   const [status, setStatus] = useState<
@@ -84,6 +96,20 @@ export const useWebContainer = ({
 
         const fileTree = buildFileTree(files);
         await container.mount(fileTree);
+
+        // Public environment variables only. This runs in the browser, so a secret
+        // written here would be readable by the end user and by anyone they share
+        // the preview with — that is why `publicEnv` is the only env input this
+        // hook accepts.
+        if (publicEnv && publicEnv.length > 0) {
+          const dotenv = serialiseDotenv(publicEnv);
+          await container.fs.writeFile(".env", dotenv);
+          await container.fs.writeFile(".env.local", dotenv);
+          appendOutput(
+            `Injected ${publicEnv.length} public environment variable(s): ` +
+              `${publicEnv.map((e) => e.key).join(", ")}\n`,
+          );
+        }
 
         container.on("server-ready", (_port, url) => {
           setPreviewUrl(url);

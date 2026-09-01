@@ -199,6 +199,13 @@ export function buildIntegrationsPromptSection(
         "process.env instead. Values shown as " +
         "[redacted-by-codenaya] were removed for safety — do not attempt to " +
         "reconstruct or guess them.",
+      "",
+      "After provisioning something, store its configuration with setEnvVar so the " +
+        "preview can connect. Use a NEXT_PUBLIC_ / VITE_ prefix only for values that " +
+        "are genuinely safe in a browser bundle (a project URL, an anon key); " +
+        "everything else — service-role keys, database URLs, secret API keys — must " +
+        "use an unprefixed name so it is encrypted and withheld from the in-browser " +
+        "preview.",
     );
   }
 
