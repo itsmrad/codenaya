@@ -11,12 +11,30 @@
 		"test:watch": "vitest"
 	},
 	"overrides": {
-		"postcss": "^8.5.10",
-		"axios": ">=1.15.2",
-		"ip-address": ">=10.2.0",
+		"postcss": ">=8.5.23 <9",
+		"axios": ">=1.18.0 <2",
+		"ip-address": ">=10.3.1 <11",
 		"devalue": "^5.8.1",
-		"undici": "^7.24.0",
-		"ws": "^8.20.1"
+		"undici": ">=7.29.0 <8",
+		"ws": "^8.20.1",
+		"tar": ">=7.5.22 <8",
+		"@xhmikosr/decompress": ">=11.1.4 <12",
+		"form-data": ">=4.0.6 <5",
+		"fast-uri": ">=3.1.6 <4",
+		"js-yaml": ">=4.3.2 <5",
+		"hono": ">=4.12.34 <5",
+		"piscina": ">=4.9.4 <5",
+		"sharp": ">=0.35.0 <0.36",
+		"express-rate-limit": ">=8.5.1 <9",
+		"@opentelemetry/propagator-jaeger": ">=2.9.0 <3",
+		"@opentelemetry/sdk-node": ">=0.220.0 <0.223.0",
+		"nanoid@3": ">=3.3.18 <4",
+		"@workflow/core": {
+			"nanoid": ">=5.1.16 <6"
+		},
+		"brace-expansion@1": ">=1.1.18 <2",
+		"brace-expansion@2": ">=2.1.4 <3",
+		"brace-expansion@5": ">=5.0.7 <6"
 	},
 	"dependencies": {
 		"@ai-sdk/anthropic": "^3.0.1",
@@ -95,8 +113,8 @@
 		"lodash": "^4.18.1",
 		"lucide-react": "^0.562.0",
 		"motion": "^12.38.0",
-		"nanoid": "^5.1.6",
-		"next": "^16.2.4",
+		"nanoid": "^5.1.16",
+		"next": "^16.3.4",
 		"next-themes": "^0.4.6",
 		"octokit": "^5.0.5",
 		"react": "19.2.3",
