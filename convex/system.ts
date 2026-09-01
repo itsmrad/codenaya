@@ -657,3 +657,495 @@ export const createProjectWithConversation = mutation({
     return { projectId, conversationId };
   },
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Integrations
+//
+// These are called from Next.js route handlers and Inngest steps, which hold the
+// KEK and can seal/unseal credentials. Convex only ever stores and returns the
+// sealed form.
+//
+// ## Why owner scoping still matters behind internalKey
+//
+// `internalKey` authenticates "this is our own server", not "this request is on
+// behalf of user X". Without an explicit owner check, a bug that passed the wrong
+// projectId would hand one tenant's credentials to another tenant's agent run.
+// `getProjectMcpConnections` therefore refuses any link whose credential owner
+// differs from the project owner, so internalKey is not a master key over every
+// user's tokens.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const sealedFields = {
+  kekProvider: v.string(),
+  kekKeyId: v.string(),
+  wrappedDek: v.string(),
+  ciphertext: v.string(),
+  iv: v.string(),
+  authTag: v.string(),
+} as const;
+
+export const createUserConnection = mutation({
+  args: {
+    internalKey: v.string(),
+    userId: v.string(),
+    providerId: v.string(),
+    label: v.string(),
+    authMode: v.union(v.literal("oauth"), v.literal("api_key")),
+    serverUrl: v.string(),
+    credentialRef: v.string(),
+    maskedPreview: v.string(),
+    scopes: v.array(v.string()),
+    tokenExpiresAt: v.optional(v.number()),
+    oauthClientId: v.optional(v.string()),
+    authServerUrl: v.optional(v.string()),
+    ...sealedFields,
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const now = Date.now();
+
+    return await ctx.db.insert("userConnections", {
+      userId: args.userId,
+      providerId: args.providerId,
+      label: args.label,
+      authMode: args.authMode,
+      serverUrl: args.serverUrl,
+      status: "active" as const,
+      credentialRef: args.credentialRef,
+      kekProvider: args.kekProvider,
+      kekKeyId: args.kekKeyId,
+      wrappedDek: args.wrappedDek,
+      ciphertext: args.ciphertext,
+      iv: args.iv,
+      authTag: args.authTag,
+      maskedPreview: args.maskedPreview,
+      scopes: args.scopes,
+      tokenExpiresAt: args.tokenExpiresAt,
+      oauthClientId: args.oauthClientId,
+      authServerUrl: args.authServerUrl,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+/**
+ * Replace a connection's sealed credential, used after an OAuth token refresh.
+ *
+ * `credentialRef` is intentionally *not* updatable: it anchors the AAD that binds
+ * the ciphertext to this row, so changing it would make every existing
+ * ciphertext undecryptable.
+ */
+export const updateUserConnectionCredential = mutation({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+    maskedPreview: v.string(),
+    scopes: v.optional(v.array(v.string())),
+    tokenExpiresAt: v.optional(v.number()),
+    ...sealedFields,
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const connection = await ctx.db.get("userConnections", args.connectionId);
+    if (!connection) {
+      throw new Error("Connection not found");
+    }
+
+    await ctx.db.patch("userConnections", args.connectionId, {
+      kekProvider: args.kekProvider,
+      kekKeyId: args.kekKeyId,
+      wrappedDek: args.wrappedDek,
+      ciphertext: args.ciphertext,
+      iv: args.iv,
+      authTag: args.authTag,
+      maskedPreview: args.maskedPreview,
+      ...(args.scopes !== undefined ? { scopes: args.scopes } : {}),
+      ...(args.tokenExpiresAt !== undefined
+        ? { tokenExpiresAt: args.tokenExpiresAt }
+        : {}),
+      status: "active" as const,
+      statusMessage: undefined,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const updateUserConnectionStatus = mutation({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+    status: v.union(
+      v.literal("active"),
+      v.literal("needs_reauth"),
+      v.literal("revoked"),
+      v.literal("error"),
+    ),
+    statusMessage: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    await ctx.db.patch("userConnections", args.connectionId, {
+      status: args.status,
+      statusMessage: args.statusMessage,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const markUserConnectionUsed = mutation({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    await ctx.db.patch("userConnections", args.connectionId, {
+      lastUsedAt: Date.now(),
+    });
+  },
+});
+
+export const getUserConnectionById = query({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    return await ctx.db.get("userConnections", args.connectionId);
+  },
+});
+
+/**
+ * Every enabled MCP connection for a project, with sealed credentials attached.
+ *
+ * This is the agent's entry point for resolving which MCP servers a run may talk
+ * to. Links whose credential belongs to someone other than the project owner are
+ * skipped rather than returned — see the owner-scoping note above.
+ */
+export const getProjectMcpConnections = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const project = await ctx.db.get("projects", args.projectId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+
+    const links = await ctx.db
+      .query("projectConnections")
+      .withIndex("by_project_and_enabled", (q) =>
+        q.eq("projectId", args.projectId).eq("enabled", true),
+      )
+      .collect();
+
+    const resolved = [];
+
+    for (const link of links) {
+      const connection = await ctx.db.get(
+        "userConnections",
+        link.userConnectionId,
+      );
+      if (!connection) continue;
+
+      // Cross-tenant guard. Reaching this branch means a bug elsewhere, so it is
+      // worth the log line: silently skipping would hide the defect.
+      if (connection.userId !== project.ownerId) {
+        console.warn(
+          `[system] skipping projectConnection ${link._id}: credential owner ` +
+            `does not match project owner`,
+        );
+        continue;
+      }
+
+      // A revoked or expired-auth credential cannot produce a working session.
+      // Skipping here means the agent simply lacks those tools, rather than
+      // failing the whole run on one bad connection.
+      if (connection.status !== "active") continue;
+
+      resolved.push({ link, connection });
+    }
+
+    return resolved;
+  },
+});
+
+/** Persist a discovered tool baseline for drift detection. */
+export const setProjectConnectionToolBaseline = mutation({
+  args: {
+    internalKey: v.string(),
+    projectConnectionId: v.id("projectConnections"),
+    toolBaseline: v.array(v.object({ name: v.string(), digest: v.string() })),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    await ctx.db.patch("projectConnections", args.projectConnectionId, {
+      toolBaseline: args.toolBaseline,
+      toolBaselineAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+// ─── Environment variables ───
+
+/**
+ * Every variable for a project, including sealed secret payloads.
+ *
+ * `internalKey` only. This is the counterpart to `envVars.listPublicEnvVars`:
+ * the client-callable query cannot return secrets, and this one is never reachable
+ * from a browser. Keeping them as separate functions is what makes the boundary
+ * structural rather than a matter of passing the right flag.
+ */
+export const getEnvVarsForSandbox = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    return await ctx.db
+      .query("projectEnvVars")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .collect();
+  },
+});
+
+/** Create or replace a sealed secret variable. */
+export const setSecretEnvVar = mutation({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+    key: v.string(),
+    secretRef: v.string(),
+    maskedPreview: v.string(),
+    source: v.union(v.literal("manual"), v.literal("integration")),
+    sourceConnectionId: v.optional(v.id("userConnections")),
+    ...sealedFields,
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const existing = await ctx.db
+      .query("projectEnvVars")
+      .withIndex("by_project_and_key", (q) =>
+        q.eq("projectId", args.projectId).eq("key", args.key),
+      )
+      .first();
+
+    const now = Date.now();
+
+    const sealed = {
+      visibility: "secret" as const,
+      secretRef: args.secretRef,
+      kekProvider: args.kekProvider,
+      kekKeyId: args.kekKeyId,
+      wrappedDek: args.wrappedDek,
+      ciphertext: args.ciphertext,
+      iv: args.iv,
+      authTag: args.authTag,
+      maskedPreview: args.maskedPreview,
+      source: args.source,
+      sourceConnectionId: args.sourceConnectionId,
+      updatedAt: now,
+    };
+
+    if (existing) {
+      await ctx.db.patch("projectEnvVars", existing._id, {
+        ...sealed,
+        // Drop any plaintext left from when this key was public, so the row does
+        // not carry two competing values.
+        plainValue: undefined,
+      });
+      return existing._id;
+    }
+
+    return await ctx.db.insert("projectEnvVars", {
+      projectId: args.projectId,
+      ownerId: args.ownerId,
+      key: args.key,
+      ...sealed,
+    });
+  },
+});
+
+// ─── OAuth flow state ───
+
+export const createOauthFlowState = mutation({
+  args: {
+    internalKey: v.string(),
+    state: v.string(),
+    userId: v.string(),
+    providerId: v.string(),
+    serverUrl: v.string(),
+    redirectUri: v.string(),
+    oauthClientId: v.optional(v.string()),
+    authServerUrl: v.string(),
+    issuer: v.optional(v.string()),
+    expiresAt: v.number(),
+    ...sealedFields,
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    return await ctx.db.insert("oauthFlowStates", {
+      state: args.state,
+      userId: args.userId,
+      providerId: args.providerId,
+      serverUrl: args.serverUrl,
+      redirectUri: args.redirectUri,
+      kekProvider: args.kekProvider,
+      kekKeyId: args.kekKeyId,
+      wrappedDek: args.wrappedDek,
+      ciphertext: args.ciphertext,
+      iv: args.iv,
+      authTag: args.authTag,
+      oauthClientId: args.oauthClientId,
+      authServerUrl: args.authServerUrl,
+      issuer: args.issuer,
+      createdAt: Date.now(),
+      expiresAt: args.expiresAt,
+    });
+  },
+});
+
+export const getOauthFlowState = query({
+  args: {
+    internalKey: v.string(),
+    state: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    return await ctx.db
+      .query("oauthFlowStates")
+      .withIndex("by_state", (q) => q.eq("state", args.state))
+      .first();
+  },
+});
+
+/**
+ * Delete a flow state, called immediately after a callback is consumed.
+ *
+ * Single-use is what prevents an intercepted authorization code from being
+ * replayed against the same PKCE verifier.
+ */
+export const deleteOauthFlowState = mutation({
+  args: {
+    internalKey: v.string(),
+    stateId: v.id("oauthFlowStates"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    await ctx.db.delete("oauthFlowStates", args.stateId);
+  },
+});
+
+// ─── Approvals & audit ───
+
+export const createMcpApproval = mutation({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+    messageId: v.optional(v.id("messages")),
+    projectConnectionId: v.id("projectConnections"),
+    providerId: v.string(),
+    toolName: v.string(),
+    argsPreview: v.string(),
+    expiresAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    return await ctx.db.insert("mcpApprovals", {
+      projectId: args.projectId,
+      ownerId: args.ownerId,
+      messageId: args.messageId,
+      projectConnectionId: args.projectConnectionId,
+      providerId: args.providerId,
+      toolName: args.toolName,
+      argsPreview: args.argsPreview,
+      status: "pending" as const,
+      createdAt: Date.now(),
+      expiresAt: args.expiresAt,
+    });
+  },
+});
+
+/** Read one approval. Polled by the agent from inside a durable step. */
+export const getMcpApproval = query({
+  args: {
+    internalKey: v.string(),
+    approvalId: v.id("mcpApprovals"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    return await ctx.db.get("mcpApprovals", args.approvalId);
+  },
+});
+
+export const expireMcpApproval = mutation({
+  args: {
+    internalKey: v.string(),
+    approvalId: v.id("mcpApprovals"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const approval = await ctx.db.get("mcpApprovals", args.approvalId);
+    if (!approval || approval.status !== "pending") return;
+
+    await ctx.db.patch("mcpApprovals", args.approvalId, {
+      status: "expired" as const,
+      resolvedAt: Date.now(),
+    });
+  },
+});
+
+export const recordMcpToolCall = mutation({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+    providerId: v.string(),
+    toolName: v.string(),
+    status: v.union(
+      v.literal("ok"),
+      v.literal("error"),
+      v.literal("denied"),
+      v.literal("blocked"),
+    ),
+    argsDigest: v.string(),
+    durationMs: v.number(),
+    errorMessage: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    await ctx.db.insert("mcpToolAuditLog", {
+      projectId: args.projectId,
+      ownerId: args.ownerId,
+      providerId: args.providerId,
+      toolName: args.toolName,
+      status: args.status,
+      argsDigest: args.argsDigest,
+      durationMs: args.durationMs,
+      errorMessage: args.errorMessage,
+      createdAt: Date.now(),
+    });
+  },
+});
