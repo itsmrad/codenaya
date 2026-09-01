@@ -1149,3 +1149,22 @@ export const recordMcpToolCall = mutation({
     });
   },
 });
+
+
+/**
+ * Read a project row.
+ *
+ * Used by the agent to resolve the project owner, which approval rows and audit
+ * entries are attributed to. Read from the project rather than passed in, so an
+ * approval prompt can only ever be shown to the person who owns the work.
+ */
+export const getProjectById = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    return await ctx.db.get("projects", args.projectId);
+  },
+});

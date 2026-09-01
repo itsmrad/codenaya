@@ -22,6 +22,10 @@ import {
   buildIntegrationsPromptSection,
   buildMcpAgentTools,
 } from '@/features/integrations/server/mcp/build-agent-tools';
+import {
+  createConvexApprovalGate,
+  createConvexAuditSink,
+} from '@/features/integrations/server/mcp/convex-approval';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -183,7 +187,33 @@ export const processMessage = inngest.createFunction(
       });
 
       if (entries.length > 0) {
-        const built = await buildMcpAgentTools({ entries });
+        // The project owner is needed for approval rows and audit entries. It is
+        // read from the project rather than trusted from anywhere else, so an
+        // approval prompt can only ever be shown to the person who owns the work.
+        const project = await convex.query(api.system.getProjectById, {
+          internalKey,
+          projectId,
+        });
+
+        const mcpContext = project
+          ? {
+              internalKey,
+              projectId,
+              ownerId: project.ownerId,
+              messageId,
+            }
+          : undefined;
+
+        const built = await buildMcpAgentTools({
+          entries,
+          // Without a resolvable owner there is nobody to ask, so no gate is
+          // passed and destructive tools refuse rather than run unreviewed.
+          approvalGate: mcpContext
+            ? createConvexApprovalGate(mcpContext)
+            : undefined,
+          audit: mcpContext ? createConvexAuditSink(mcpContext) : undefined,
+        });
+
         mcpTools = built.tools;
         mcpSummaries = built.connectedSummaries;
         mcpWarnings = built.warnings;

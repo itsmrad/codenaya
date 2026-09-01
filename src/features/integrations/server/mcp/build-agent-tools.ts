@@ -40,7 +40,6 @@ import {
   type ConnectionRecord,
   type ProjectLinkRecord,
 } from "./resolve-servers";
-
 export interface McpToolBuildResult {
   tools: Tool.Any[];
   /** One line per provider, for the system prompt. */

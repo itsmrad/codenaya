@@ -269,4 +269,51 @@ describe("redactJsonValue", () => {
       expect(redactJsonValue(value).value).toBe(value);
     }
   });
+
+  it("does not recurse forever on a circular structure", () => {
+    // This was a real bug: unguarded recursion threw
+    // "RangeError: Maximum call stack size exceeded", which would have crashed an
+    // agent run rather than degrading. Tool results are parsed JSON and cannot
+    // normally be circular, but this also runs over tool arguments from the model.
+    const node: Record<string, unknown> = { name: "root" };
+    node.self = node;
+
+    expect(() => redactJsonValue(node)).not.toThrow();
+
+    const result = redactJsonValue(node) as { value: Record<string, unknown> };
+    expect(result.value.name).toBe("root");
+    expect(result.value.self).toBe("[omitted: circular reference]");
+  });
+
+  it("handles a cycle through an array", () => {
+    const arr: unknown[] = [1, 2];
+    arr.push(arr);
+
+    expect(() => redactJsonValue(arr)).not.toThrow();
+  });
+
+  it("still redacts a value that legitimately appears twice", () => {
+    // A shared (non-circular) reference must not be mistaken for a cycle, or real
+    // data would be replaced with the circular placeholder.
+    const shared = { token: "AKIAIOSFODNN7EXAMPLE" };
+    const input = { a: shared, b: shared };
+
+    const result = redactJsonValue(input) as {
+      value: { a: { token: string }; b: { token: string } };
+      redactionCount: number;
+    };
+
+    expect(result.value.a.token).toBe(REDACTION_PLACEHOLDER);
+    expect(result.value.b.token).toBe(REDACTION_PLACEHOLDER);
+    expect(result.redactionCount).toBe(2);
+  });
+
+  it("bounds extremely deep nesting instead of overflowing", () => {
+    let node: Record<string, unknown> = { leaf: "AKIAIOSFODNN7EXAMPLE" };
+    for (let i = 0; i < 200; i++) {
+      node = { child: node };
+    }
+
+    expect(() => redactJsonValue(node)).not.toThrow();
+  });
 });
