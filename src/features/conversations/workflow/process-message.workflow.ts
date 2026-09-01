@@ -6,7 +6,7 @@ import { Id } from "../../../../convex/_generated/dataModel";
 
 import { CODING_AGENT_SYSTEM_PROMPT, WORKFLOW_MAX_STEPS } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
-import { vertex, VERTEX_MODELS } from "./lib/vertex-model";
+import { vertexModel, VERTEX_MODELS } from "./lib/vertex-model";
 import { createCodingTools } from "./tools";
 import {
   generateConversationTitle,
@@ -91,7 +91,7 @@ export async function processMessageWorkflow(input: ProcessMessageInput) {
     const agent = new DurableAgent({
       model: async () => {
         "use step";
-        return vertex(VERTEX_MODELS.coding);
+        return vertexModel(VERTEX_MODELS.coding);
       },
       instructions: systemPrompt,
       temperature: 0.3,
