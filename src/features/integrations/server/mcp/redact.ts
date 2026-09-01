@@ -79,6 +79,14 @@ const TOKEN_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
 const DSN_PASSWORD_PATTERN =
   /\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+):([^\s@/]+)@/gi;
 
+/**
+ * Nesting ceiling for `redactJsonValue`.
+ *
+ * Bounds work on a pathologically nested payload. Well beyond anything a real tool
+ * result reaches, so it never truncates legitimate data.
+ */
+const MAX_REDACTION_DEPTH = 32;
+
 export interface RedactionResult {
   text: string;
   /** How many spans were replaced. Zero means the payload was clean. */
@@ -165,6 +173,11 @@ export function redactSecrets(
  * Serialising, redacting and reparsing would corrupt the shape when a
  * placeholder lands inside a non-string field, so strings are rewritten in place
  * and other primitives are left alone.
+ *
+ * Cycle- and depth-guarded. Tool results arrive as parsed JSON and so cannot
+ * normally be circular, but a crash here would take down an agent run, and this
+ * function also runs over tool *arguments* that reach us from the model. Guarding
+ * is cheap; discovering the limit in production is not.
  */
 export function redactJsonValue(
   value: unknown,
@@ -173,7 +186,12 @@ export function redactJsonValue(
   let redactionCount = 0;
   const matchedRules = new Set<string>();
 
-  const walk = (input: unknown): unknown => {
+  // Tracks the ancestors of the node being visited. A WeakSet of the whole
+  // traversal would wrongly flag a value that legitimately appears twice in
+  // sibling positions, so entries are removed on the way back up.
+  const ancestors = new Set<object>();
+
+  const walk = (input: unknown, depth: number): unknown => {
     if (typeof input === "string") {
       const outcome = redactSecrets(input, knownSecrets);
       redactionCount += outcome.redactionCount;
@@ -181,22 +199,35 @@ export function redactJsonValue(
       return outcome.text;
     }
 
-    if (Array.isArray(input)) {
-      return input.map(walk);
+    if (input === null || typeof input !== "object") {
+      return input;
     }
 
-    if (input !== null && typeof input === "object") {
+    if (depth > MAX_REDACTION_DEPTH) {
+      return "[omitted: nesting too deep]";
+    }
+
+    if (ancestors.has(input)) {
+      return "[omitted: circular reference]";
+    }
+
+    ancestors.add(input);
+    try {
+      if (Array.isArray(input)) {
+        return input.map((entry) => walk(entry, depth + 1));
+      }
+
       const output: Record<string, unknown> = {};
       for (const [key, nested] of Object.entries(input)) {
-        output[key] = walk(nested);
+        output[key] = walk(nested, depth + 1);
       }
       return output;
+    } finally {
+      ancestors.delete(input);
     }
-
-    return input;
   };
 
-  const redacted = walk(value);
+  const redacted = walk(value, 0);
 
   return {
     value: redacted,

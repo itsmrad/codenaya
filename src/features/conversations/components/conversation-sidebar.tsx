@@ -33,6 +33,7 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
+import { ApprovalPrompt } from "@/features/integrations/components/approval-prompt";
 
 import {
   useConversation,
@@ -215,6 +216,11 @@ export const ConversationSidebar = ({
           <ConversationScrollButton />
         </Conversation>
         <div className="p-3">
+          {/* Sits directly above the composer rather than inside the
+              transcript: the agent is blocked waiting on this answer, and the
+              message list can be scrolled away from the bottom, which would
+              hide the prompt exactly when it matters. */}
+          <ApprovalPrompt projectId={projectId} />
           <PromptInput 
             onSubmit={handleSubmit}
             className="mt-2"
