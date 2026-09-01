@@ -12,34 +12,69 @@ import { createVertex } from "@ai-sdk/google-vertex";
  * Auth is handled by google-auth-library under the hood. Tokens are cached
  * and refreshed automatically, so this is safe to call repeatedly inside
  * step functions.
+ *
+ * ## Why configuration is resolved lazily
+ *
+ * This module previously validated env vars and built the provider at module
+ * evaluation time. That made merely *importing* it fatal when the Vertex
+ * credentials were absent, which broke `next build` during page-data collection
+ * for `/.well-known/workflow/v1/step` — a route that imports the workflow graph
+ * without ever intending to call Vertex.
+ *
+ * Vertex is only needed by the Vercel Workflow backend, which is the fallback
+ * for Inngest. A deployment running the Inngest path has no reason to hold
+ * Google credentials, so an absent credential must be a runtime error on the
+ * path that actually needs it, not a build-time error for everyone.
  */
-const project = process.env.GOOGLE_VERTEX_PROJECT;
-const location = process.env.GOOGLE_VERTEX_LOCATION ?? "us-central1";
-const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-const privateKeyRaw = process.env.GOOGLE_PRIVATE_KEY;
 
-if (!project) {
-  throw new Error("GOOGLE_VERTEX_PROJECT is not configured");
+interface VertexConfig {
+  project: string;
+  location: string;
+  clientEmail: string;
+  privateKey: string;
 }
 
-if (!clientEmail) {
-  throw new Error("GOOGLE_CLIENT_EMAIL is not configured");
+function readConfig(): VertexConfig {
+  const project = process.env.GOOGLE_VERTEX_PROJECT;
+  const location = process.env.GOOGLE_VERTEX_LOCATION ?? "us-central1";
+  const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
+  const privateKeyRaw = process.env.GOOGLE_PRIVATE_KEY;
+
+  if (!project) {
+    throw new Error("GOOGLE_VERTEX_PROJECT is not configured");
+  }
+
+  if (!clientEmail) {
+    throw new Error("GOOGLE_CLIENT_EMAIL is not configured");
+  }
+
+  if (!privateKeyRaw) {
+    throw new Error("GOOGLE_PRIVATE_KEY is not configured");
+  }
+
+  return {
+    project,
+    location,
+    clientEmail,
+    // Env-provided private keys often contain literal "\n" sequences instead of
+    // real newlines. The Google auth library requires real newlines.
+    privateKey: privateKeyRaw.replace(/\\n/g, "\n"),
+  };
 }
 
-if (!privateKeyRaw) {
-  throw new Error("GOOGLE_PRIVATE_KEY is not configured");
+/**
+ * True when every Vertex credential is present.
+ *
+ * Used by the message-processor to avoid routing work to the Workflow backend
+ * on a deployment that cannot actually reach Vertex.
+ */
+export function isVertexConfigured(): boolean {
+  return Boolean(
+    process.env.GOOGLE_VERTEX_PROJECT &&
+      process.env.GOOGLE_CLIENT_EMAIL &&
+      process.env.GOOGLE_PRIVATE_KEY,
+  );
 }
-
-// Env-provided private keys often contain literal "\n" sequences instead of
-// real newlines. The Google auth library requires real newlines.
-const privateKey = privateKeyRaw.replace(/\\n/g, "\n");
-
-const googleAuthOptions = {
-  credentials: {
-    client_email: clientEmail,
-    private_key: privateKey,
-  },
-};
 
 // Optional fetch interceptor that logs every Vertex API call to the dev
 // server console. Toggle on with `MESSAGE_PROCESSOR_LOG_VERTEX=1` in
@@ -49,8 +84,6 @@ const googleAuthOptions = {
 // "(Using gemini-X)" hallucinations issue) by reading the URL the AI SDK
 // constructs. Vertex puts the model ID in the URL path, so the log line
 // is ground truth.
-const logVertexCalls = process.env.MESSAGE_PROCESSOR_LOG_VERTEX === "1";
-
 const loggingFetch: typeof fetch = async (input, init) => {
   const url = typeof input === "string" ? input : (input as Request).url;
   const method = init?.method ?? "GET";
@@ -65,13 +98,44 @@ const loggingFetch: typeof fetch = async (input, init) => {
   return fetch(input as Parameters<typeof fetch>[0], init);
 };
 
-// Gemini (Google) provider on Vertex AI.
-export const vertex = createVertex({
-  project,
-  location,
-  googleAuthOptions,
-  ...(logVertexCalls ? { fetch: loggingFetch } : {}),
-});
+type VertexProvider = ReturnType<typeof createVertex>;
+
+let cachedProvider: VertexProvider | undefined;
+
+/**
+ * Gemini (Google) provider on Vertex AI, built on first use and memoised.
+ */
+function getVertexProvider(): VertexProvider {
+  if (!cachedProvider) {
+    const { project, location, clientEmail, privateKey } = readConfig();
+    const logVertexCalls = process.env.MESSAGE_PROCESSOR_LOG_VERTEX === "1";
+
+    cachedProvider = createVertex({
+      project,
+      location,
+      googleAuthOptions: {
+        credentials: {
+          client_email: clientEmail,
+          private_key: privateKey,
+        },
+      },
+      ...(logVertexCalls ? { fetch: loggingFetch } : {}),
+    });
+  }
+
+  return cachedProvider;
+}
+
+/**
+ * Resolve a Vertex language model by id.
+ *
+ * @throws when Vertex credentials are missing. Callers on the Workflow backend
+ * reach this only inside a durable step, so the failure is retryable and
+ * attributable rather than a process-wide crash.
+ */
+export function vertexModel(modelId: string) {
+  return getVertexProvider()(modelId);
+}
 
 export const VERTEX_MODELS = {
   // Coding agent: Gemini 3.1 Pro Preview — Google's strongest coding model

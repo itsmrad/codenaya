@@ -3,6 +3,7 @@ import {
   cancelProcessMessageWorkflowByMessageId,
   startProcessMessageWorkflow,
 } from "@/features/conversations/workflow/client";
+import { isVertexConfigured } from "@/features/conversations/workflow/lib/vertex-model";
 
 import type { Id } from "../../convex/_generated/dataModel";
 
@@ -13,10 +14,31 @@ export type MessageProcessorBackend = "inngest" | "workflow";
  * Defaults to `inngest` to keep existing behaviour unchanged. Set to
  * `workflow` to route message processing through the Vercel Workflow SDK
  * implementation.
+ *
+ * Inngest is the primary backend; Workflow is its fallback. Because the
+ * Workflow implementation runs its agent on Google Vertex, selecting it without
+ * Vertex credentials would fail on every message. Rather than accept that, an
+ * unusable `workflow` selection degrades to `inngest` and warns — a fallback
+ * that cannot run is worse than no fallback, because the failure surfaces only
+ * once the primary is already down.
  */
 export function getMessageProcessorBackend(): MessageProcessorBackend {
   const value = process.env.MESSAGE_PROCESSOR?.toLowerCase().trim();
-  return value === "workflow" ? "workflow" : "inngest";
+
+  if (value !== "workflow") {
+    return "inngest";
+  }
+
+  if (!isVertexConfigured()) {
+    console.warn(
+      "[message-processor] MESSAGE_PROCESSOR=workflow but Vertex credentials " +
+        "(GOOGLE_VERTEX_PROJECT / GOOGLE_CLIENT_EMAIL / GOOGLE_PRIVATE_KEY) are " +
+        "missing. Falling back to the Inngest backend.",
+    );
+    return "inngest";
+  }
+
+  return "workflow";
 }
 
 interface ProcessMessageDispatchInput {

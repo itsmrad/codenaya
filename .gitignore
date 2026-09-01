@@ -48,3 +48,7 @@ convex/_generated/
 
 #vscode
 .vscode
+
+# local implementation notes
+/steps
+/.swc

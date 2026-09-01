@@ -5,7 +5,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 
-import { vertex, VERTEX_MODELS } from "./lib/vertex-model";
+import { vertexModel, VERTEX_MODELS } from "./lib/vertex-model";
 import { TITLE_GENERATOR_SYSTEM_PROMPT } from "./constants";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,7 +74,7 @@ export async function generateConversationTitle(opts: {
 
   try {
     const { text } = await generateText({
-      model: vertex(VERTEX_MODELS.title),
+      model: vertexModel(VERTEX_MODELS.title),
       system: TITLE_GENERATOR_SYSTEM_PROMPT,
       prompt: opts.message,
       temperature: 0,
