@@ -105,6 +105,7 @@ export const ProjectIdView = ({
         projectName={project?.name ?? ""}
       />
       <IntegrationsDialog
+        projectId={projectId}
         open={integrationsDialogOpen}
         onOpenChange={setIntegrationsDialogOpen}
       />

@@ -1,4 +1,4 @@
-import { createAgent, openai, createNetwork } from '@inngest/agent-kit';
+import { createAgent, openai, createNetwork, type Tool } from '@inngest/agent-kit';
 
 import { inngest } from "@/inngest/client";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -18,6 +18,10 @@ import { createCreateFolderTool } from './tools/create-folder';
 import { createRenameFileTool } from './tools/rename-file';
 import { createDeleteFilesTool } from './tools/delete-files';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
+import {
+  buildIntegrationsPromptSection,
+  buildMcpAgentTools,
+} from '@/features/integrations/server/mcp/build-agent-tools';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -148,6 +152,65 @@ export const processMessage = inngest.createFunction(
       }
     }
 
+    // ─── MCP integrations ───
+    //
+    // Resolved before the agent is created so discovered tools can be handed to it
+    // and the connected services described in the system prompt.
+    //
+    // Deliberately *not* wrapped in a step. AgentKit tools are closures holding
+    // live credentials, so they cannot be serialised as a step result — they have
+    // to be built in the function body regardless. Wrapping only the discovery
+    // would mean doing every MCP handshake twice: once inside the step for the
+    // cached summary, once outside to rebuild the closures. Discovery is read-only
+    // and idempotent, so re-running it on a retry is harmless; the individual tool
+    // *calls* are what need step isolation, and the adapter wraps each of those.
+    //
+    // Non-fatal by design. A project with a broken integration still gets a working
+    // agent run with its file tools intact — the alternative is that one expired
+    // token makes the product unusable.
+    let mcpTools: Tool.Any[] = [];
+    let mcpSummaries: string[] = [];
+    let mcpWarnings: string[] = [];
+    let mcpBaselines: Array<{
+      projectConnectionId: string;
+      toolBaseline: Array<{ name: string; digest: string }>;
+    }> = [];
+
+    try {
+      const entries = await convex.query(api.system.getProjectMcpConnections, {
+        internalKey,
+        projectId,
+      });
+
+      if (entries.length > 0) {
+        const built = await buildMcpAgentTools({ entries });
+        mcpTools = built.tools;
+        mcpSummaries = built.connectedSummaries;
+        mcpWarnings = built.warnings;
+        mcpBaselines = built.baselinesToRecord;
+      }
+    } catch (error) {
+      console.error("[process-message] MCP resolution failed", error);
+      mcpWarnings = ["Integrations could not be loaded for this run."];
+    }
+
+    // Persist newly-trusted baselines so the next run can detect drift. In a step
+    // because it is a write with side effects, unlike discovery.
+    if (mcpBaselines.length > 0) {
+      await step.run("record-mcp-tool-baselines", async () => {
+        for (const baseline of mcpBaselines) {
+          await convex.mutation(api.system.setProjectConnectionToolBaseline, {
+            internalKey,
+            projectConnectionId:
+              baseline.projectConnectionId as Id<"projectConnections">,
+            toolBaseline: baseline.toolBaseline,
+          });
+        }
+      });
+    }
+
+    systemPrompt += buildIntegrationsPromptSection(mcpSummaries, mcpWarnings);
+
     // Create the coding agent with file tools
     const codingAgent = createAgent({
       name: "codenaya",
@@ -166,6 +229,7 @@ export const processMessage = inngest.createFunction(
         createRenameFileTool({ internalKey }),
         createDeleteFilesTool({ internalKey }),
         createScrapeUrlsTool(),
+        ...mcpTools,
       ],
     });
 
