@@ -10,6 +10,11 @@ import { Id, Doc } from "../../../../convex/_generated/dataModel";
 interface UseSandboxProps {
   files?: Doc<"files">[];
   enabled: boolean;
+  /**
+   * When set, the project's environment variables are injected into the sandbox.
+   * Optional so the hook still works for a preview with no project context.
+   */
+  projectId?: Id<"projects">;
   settings?: {
     installCommand?: string;
     devCommand?: string;
@@ -19,6 +24,7 @@ interface UseSandboxProps {
 export const useSandbox = ({
   files,
   enabled,
+  projectId,
   settings,
 }: UseSandboxProps) => {
   const [status, setStatus] = useState<
@@ -77,6 +83,7 @@ export const useSandbox = ({
           body: JSON.stringify({
             files: flatFiles,
             settings,
+            projectId,
           }),
           signal: abortController.signal,
         });

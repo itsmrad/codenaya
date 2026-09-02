@@ -1168,3 +1168,69 @@ export const getProjectById = query({
     return await ctx.db.get("projects", args.projectId);
   },
 });
+
+
+/**
+ * Create or replace a public environment variable from the server.
+ *
+ * The `envVars.setPublicEnvVar` counterpart is client-callable and authenticates
+ * the user; this one is `internalKey`-gated for the agent, which acts on the
+ * project owner's behalf and has no user session.
+ *
+ * Public values are stored in plaintext because they are public by definition — a
+ * `NEXT_PUBLIC_` variable is inlined into client JavaScript by the bundler whatever
+ * we do here, so encrypting it would add a decrypt step to every preview boot while
+ * protecting nothing.
+ */
+export const setPublicEnvVarInternal = mutation({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+    key: v.string(),
+    value: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const existing = await ctx.db
+      .query("projectEnvVars")
+      .withIndex("by_project_and_key", (q) =>
+        q.eq("projectId", args.projectId).eq("key", args.key)
+      )
+      .first();
+
+    const now = Date.now();
+
+    if (existing) {
+      await ctx.db.patch("projectEnvVars", existing._id, {
+        visibility: "public" as const,
+        plainValue: args.value,
+        maskedPreview: args.value,
+        // Clear any sealed payload from when this key was a secret, so the row does
+        // not carry two competing values.
+        secretRef: undefined,
+        kekProvider: undefined,
+        kekKeyId: undefined,
+        wrappedDek: undefined,
+        ciphertext: undefined,
+        iv: undefined,
+        authTag: undefined,
+        source: "integration" as const,
+        updatedAt: now,
+      });
+      return existing._id;
+    }
+
+    return await ctx.db.insert("projectEnvVars", {
+      projectId: args.projectId,
+      ownerId: args.ownerId,
+      key: args.key,
+      visibility: "public" as const,
+      plainValue: args.value,
+      maskedPreview: args.value,
+      source: "integration" as const,
+      updatedAt: now,
+    });
+  },
+});

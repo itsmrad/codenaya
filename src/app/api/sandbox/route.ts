@@ -1,6 +1,20 @@
 import { Sandbox } from "e2b";
 import { auth } from "@clerk/nextjs/server";
 
+import {
+  serialiseDotenv,
+  toProcessEnv,
+} from "@/features/integrations/dotenv";
+import {
+  resolveProjectEnv,
+  secretValuesFrom,
+} from "@/features/integrations/server/env/resolve-env";
+import { createStreamRedactor } from "@/features/integrations/server/env/stream-redactor";
+import { convex } from "@/lib/convex-client";
+
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
+
 /**
  * POST /api/sandbox
  *
@@ -55,9 +69,11 @@ export async function POST(request: Request) {
   const {
     files,
     settings,
+    projectId,
   } = body as {
     files: { path: string; content: string }[];
     settings?: { installCommand?: string; devCommand?: string };
+    projectId?: Id<"projects">;
   };
 
   if (!files || files.length === 0) {
@@ -67,11 +83,87 @@ export async function POST(request: Request) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
+      // ─── Environment variables ───
+      //
+      // Resolved before the redactor is created, because the redactor needs the
+      // secret values in order to strip them from the output stream.
+      //
+      // Non-fatal: a project whose integrations are broken should still get a
+      // preview, just without those variables. `envWarnings` tells the user which.
+      let envEntries: Array<{ key: string; value: string }> = [];
+      let secretValues: string[] = [];
+      const envWarnings: string[] = [];
+
+      if (projectId) {
+        try {
+          const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
+          if (!internalKey) {
+            throw new Error("CODENAYA_CONVEX_INTERNAL_KEY is not configured");
+          }
+
+          const records = await convex.query(api.system.getEnvVarsForSandbox, {
+            internalKey,
+            projectId,
+          });
+
+          const resolved = await resolveProjectEnv(records);
+
+          // E2B runs server-side, so both public and secret values are safe here.
+          // This is the difference from the WebContainer path, which gets public
+          // values only.
+          envEntries = [...resolved.publicEntries, ...resolved.secretEntries];
+          secretValues = secretValuesFrom(resolved);
+
+          if (resolved.failedKeys.length > 0) {
+            envWarnings.push(
+              `Could not decrypt ${resolved.failedKeys.length} variable(s): ` +
+                `${resolved.failedKeys.join(", ")}. They were not injected.`,
+            );
+          }
+        } catch (error) {
+          console.error("[sandbox] env resolution failed", error);
+          envWarnings.push(
+            "Environment variables could not be loaded for this preview.",
+          );
+        }
+      }
+
+      // Every byte written to the client passes through this. Install and dev
+      // output routinely echoes configuration, and a stack trace from a failed
+      // connection commonly embeds a full DSN — without redaction, injecting
+      // secrets into the sandbox would deliver them straight to the browser.
+      const redactor = createStreamRedactor(secretValues);
+
       const send = (data: Record<string, unknown>) => {
         try {
-          controller.enqueue(encoder.encode(JSON.stringify(data) + "\n"));
+          // Only the free-text `data` field can contain process output; status and
+          // url fields are ours. Redacting just that field keeps JSON structure
+          // intact, which redacting the serialised envelope would not.
+          const safe =
+            typeof data.data === "string"
+              ? { ...data, data: redactor.push(data.data) }
+              : data;
+
+          // A fully-redacted chunk can reduce to an empty string, which is not
+          // worth a frame.
+          if (typeof safe.data === "string" && safe.data === "") return;
+
+          controller.enqueue(encoder.encode(JSON.stringify(safe) + "\n"));
         } catch {
           // Controller may already be closed — ignore
+        }
+      };
+
+      /** Release anything the redactor is holding back. */
+      const flushRedactor = () => {
+        const tail = redactor.flush();
+        if (tail === "") return;
+        try {
+          controller.enqueue(
+            encoder.encode(JSON.stringify({ type: "output", data: tail }) + "\n"),
+          );
+        } catch {
+          // Stream already closed.
         }
       };
 
@@ -130,6 +222,31 @@ export async function POST(request: Request) {
           data: `Wrote ${files.length} file(s) to sandbox.\n\n`,
         });
 
+        // --- Write environment variables ---
+        //
+        // Before install, because a postinstall script or a build step may read
+        // them. Both filenames are written: frameworks disagree about which they
+        // load, and `.env.local` takes precedence in Next.js while Vite reads
+        // `.env`. Writing both means the app works whichever it expects.
+        if (envEntries.length > 0) {
+          const dotenv = serialiseDotenv(envEntries);
+          await sandbox.files.write(`${WORK_DIR}/.env`, dotenv);
+          await sandbox.files.write(`${WORK_DIR}/.env.local`, dotenv);
+
+          // Keys only. Naming the values here would print them to the terminal the
+          // user is watching, which is exactly what the redactor exists to prevent.
+          send({
+            type: "output",
+            data:
+              `Injected ${envEntries.length} environment variable(s): ` +
+              `${envEntries.map((e) => e.key).join(", ")}\n\n`,
+          });
+        }
+
+        for (const warning of envWarnings) {
+          send({ type: "output", data: `Warning: ${warning}\n` });
+        }
+
         // --- Install dependencies ---
         const installCmd = settings?.installCommand || "npm install";
         send({ type: "status", status: "installing" });
@@ -138,6 +255,8 @@ export async function POST(request: Request) {
         const installResult = await sandbox.commands.run(installCmd, {
           cwd: WORK_DIR,
           timeoutMs: 5 * 60 * 1000,
+          // Install may run postinstall scripts or a build that needs config.
+          envs: toProcessEnv(envEntries),
           onStdout: (data) => send({ type: "output", data }),
           onStderr: (data) => send({ type: "output", data }),
         });
@@ -164,7 +283,10 @@ export async function POST(request: Request) {
           cwd: WORK_DIR,
           background: true,
           timeoutMs: 0, // Prevent E2B from killing the dev server after the default 60s timeout
-          envs: DEV_SERVER_ENVS,
+          // Project variables first so DEV_SERVER_ENVS wins: HOST/HOSTNAME must
+          // stay 0.0.0.0 for E2B port forwarding, and a user variable overriding
+          // them would break the preview in a way that looks like a broken app.
+          envs: { ...toProcessEnv(envEntries), ...DEV_SERVER_ENVS },
           onStdout: (data) => {
             send({ type: "output", data });
             if (!detectedPort) {
@@ -241,6 +363,9 @@ export async function POST(request: Request) {
           }
         }
       } finally {
+        // Release any output the redactor is holding back, otherwise the last
+        // partial line would never reach the terminal.
+        flushRedactor();
         controller.close();
       }
     },

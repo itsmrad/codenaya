@@ -62,3 +62,50 @@ export const usePendingApprovals = (projectId: Id<"projects"> | undefined) => {
 export const useResolveApproval = () => {
   return useMutation(api.integrations.resolveApproval);
 };
+
+
+// ─── Environment variables ───
+
+/** Every variable for a project. Secret values are masked, never returned. */
+export const useEnvVars = (projectId: Id<"projects"> | undefined) => {
+  return useQuery(
+    api.envVars.listEnvVars,
+    projectId ? { projectId } : "skip",
+  );
+};
+
+/**
+ * Public variables as plain key/value pairs.
+ *
+ * This is what the WebContainer preview mounts. The underlying Convex query never
+ * reads the sealed fields, so it is structurally incapable of returning a secret.
+ */
+export const usePublicEnvVars = (projectId: Id<"projects"> | undefined) => {
+  return useQuery(
+    api.envVars.listPublicEnvVars,
+    projectId ? { projectId } : "skip",
+  );
+};
+
+/**
+ * How many secrets exist without exposing them.
+ *
+ * Lets the WebContainer preview explain that variables are missing, rather than the
+ * generated app failing with a confusing runtime error the user cannot trace.
+ */
+export const useWithheldSecretCount = (
+  projectId: Id<"projects"> | undefined,
+) => {
+  return useQuery(
+    api.envVars.countWithheldSecrets,
+    projectId ? { projectId } : "skip",
+  );
+};
+
+export const useSetPublicEnvVar = () => {
+  return useMutation(api.envVars.setPublicEnvVar);
+};
+
+export const useDeleteEnvVar = () => {
+  return useMutation(api.envVars.deleteEnvVar);
+};

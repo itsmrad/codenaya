@@ -18,6 +18,7 @@ import { createCreateFolderTool } from './tools/create-folder';
 import { createRenameFileTool } from './tools/rename-file';
 import { createDeleteFilesTool } from './tools/delete-files';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
+import { createSetEnvVarTool } from './tools/set-env-var';
 import {
   buildIntegrationsPromptSection,
   buildMcpAgentTools,
@@ -179,27 +180,30 @@ export const processMessage = inngest.createFunction(
       projectConnectionId: string;
       toolBaseline: Array<{ name: string; digest: string }>;
     }> = [];
+    // Project owner, needed by setEnvVar and the approval gate. Resolved from the
+    // project row so those act on behalf of whoever owns the work.
+    let mcpOwnerId: string | undefined;
 
     try {
+      // Fetched unconditionally: the owner is needed by setEnvVar, which is useful
+      // whether or not this project has any MCP connections.
+      const project = await convex.query(api.system.getProjectById, {
+        internalKey,
+        projectId,
+      });
+      mcpOwnerId = project?.ownerId;
+
       const entries = await convex.query(api.system.getProjectMcpConnections, {
         internalKey,
         projectId,
       });
 
       if (entries.length > 0) {
-        // The project owner is needed for approval rows and audit entries. It is
-        // read from the project rather than trusted from anywhere else, so an
-        // approval prompt can only ever be shown to the person who owns the work.
-        const project = await convex.query(api.system.getProjectById, {
-          internalKey,
-          projectId,
-        });
-
-        const mcpContext = project
+        const mcpContext = mcpOwnerId
           ? {
               internalKey,
               projectId,
-              ownerId: project.ownerId,
+              ownerId: mcpOwnerId,
               messageId,
             }
           : undefined;
@@ -259,6 +263,9 @@ export const processMessage = inngest.createFunction(
         createRenameFileTool({ internalKey }),
         createDeleteFilesTool({ internalKey }),
         createScrapeUrlsTool(),
+        ...(mcpOwnerId
+          ? [createSetEnvVarTool({ projectId, ownerId: mcpOwnerId, internalKey })]
+          : []),
         ...mcpTools,
       ],
     });
