@@ -63,6 +63,19 @@ export interface BuildMcpToolsOptions {
 }
 
 /**
+ * Ceiling on MCP tools across *all* of a project's connections.
+ *
+ * The per-connection cap in `discover-tools.ts` bounds one server; this bounds
+ * their sum. Without it, five connections each just under their own limit would
+ * together put ~200 tool schemas in front of the model on every request — which
+ * either fails outright or silently evicts the conversation from context.
+ *
+ * The agent's own file tools also live in that budget, so this leaves room for
+ * them and for the conversation history.
+ */
+export const MAX_TOOLS_PER_PROJECT = 80;
+
+/**
  * Build the tool set for a project's enabled connections.
  *
  * Never throws: a project with broken integrations still gets an agent run with
@@ -94,6 +107,7 @@ export async function buildMcpAgentTools(
   const knownSecrets = collectKnownSecrets(servers);
   const toolsByConnection = new Map<string, DiscoveredTool[]>();
   const usableServers: typeof servers = [];
+  let totalToolCount = 0;
 
   // Sequential rather than parallel: each discovery is a full MCP handshake, and
   // a user with several connections would otherwise open them all at once against
@@ -143,6 +157,32 @@ export async function buildMcpAgentTools(
     if (offered.length === 0) {
       continue;
     }
+
+    // Enforce the project-wide budget. Applied as connections are processed, so
+    // earlier ones keep their full allocation rather than every connection being
+    // thinned — a partially useful integration beats several crippled ones.
+    const remaining = MAX_TOOLS_PER_PROJECT - totalToolCount;
+
+    if (remaining <= 0) {
+      warnings.push(
+        `${server.displayName}: skipped — this project already exposes ` +
+          `${MAX_TOOLS_PER_PROJECT} integration tools, the maximum that fits the ` +
+          `model's context. Disable another connection or narrow its scope to make ` +
+          `room.`,
+      );
+      continue;
+    }
+
+    if (offered.length > remaining) {
+      warnings.push(
+        `${server.displayName}: only ${remaining} of ${offered.length} tools ` +
+          `included — the project-wide limit of ${MAX_TOOLS_PER_PROJECT} was ` +
+          `reached. Narrow this connection's scope to choose which tools matter.`,
+      );
+      offered = offered.slice(0, remaining);
+    }
+
+    totalToolCount += offered.length;
 
     toolsByConnection.set(server.projectConnectionId, offered);
     usableServers.push(server);

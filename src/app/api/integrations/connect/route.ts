@@ -9,6 +9,11 @@ import {
   secretContext,
 } from "@/features/integrations/server/crypto";
 import { probeMcpServer } from "@/features/integrations/server/mcp/probe";
+import {
+  CONNECT_RATE_LIMIT,
+  checkRateLimit,
+  rateLimitedResponse,
+} from "@/features/integrations/server/rate-limit";
 import { assertSafeMcpUrl } from "@/features/integrations/server/url-guard";
 import { convex } from "@/lib/convex-client";
 
@@ -62,6 +67,14 @@ export async function POST(request: Request) {
 
   if (!userId) {
     return jsonError("Unauthorized", 401);
+  }
+
+  // Checked before anything else. This route probes a remote MCP server, so an
+  // unthrottled loop would turn us into a request amplifier — the SSRF guard limits
+  // where it can reach, not how often.
+  const rateLimit = checkRateLimit(userId, CONNECT_RATE_LIMIT);
+  if (!rateLimit.allowed) {
+    return rateLimitedResponse(rateLimit);
   }
 
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;

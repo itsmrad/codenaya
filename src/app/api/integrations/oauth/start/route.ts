@@ -7,6 +7,11 @@ import {
   secretContext,
 } from "@/features/integrations/server/crypto";
 import { startOAuthFlow } from "@/features/integrations/server/oauth/flow";
+import {
+  OAUTH_START_RATE_LIMIT,
+  checkRateLimit,
+  rateLimitedResponse,
+} from "@/features/integrations/server/rate-limit";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../../convex/_generated/api";
@@ -56,6 +61,14 @@ export async function POST(request: Request) {
   const { userId } = await auth();
   if (!userId) {
     return jsonError("Unauthorized", 401);
+  }
+
+  // Each attempt performs OAuth discovery and registers a fresh client with the
+  // provider, which is slow and something they may throttle against our account
+  // rather than the user's.
+  const rateLimit = checkRateLimit(userId, OAUTH_START_RATE_LIMIT);
+  if (!rateLimit.allowed) {
+    return rateLimitedResponse(rateLimit);
   }
 
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
