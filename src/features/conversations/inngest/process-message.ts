@@ -1,4 +1,4 @@
-import { createAgent, openai, createNetwork, type Tool } from '@inngest/agent-kit';
+import { createAgent, createNetwork, type Tool } from '@inngest/agent-kit';
 
 import { inngest } from "@/inngest/client";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -19,6 +19,10 @@ import { createRenameFileTool } from './tools/rename-file';
 import { createDeleteFilesTool } from './tools/delete-files';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
 import { createSetEnvVarTool } from './tools/set-env-var';
+import {
+  OPENROUTER_MODELS,
+  openRouterModel,
+} from './lib/openrouter-model';
 import {
   buildIntegrationsPromptSection,
   buildMcpAgentTools,
@@ -124,10 +128,7 @@ export const processMessage = inngest.createFunction(
       const titleAgent = createAgent({
         name: "title-generator",
         system: TITLE_GENERATOR_SYSTEM_PROMPT,
-        model: openai({
-          model: "gpt-3.5-turbo",
-          defaultParameters: { temperature: 0 },
-        }),
+        model: openRouterModel(OPENROUTER_MODELS.title, 0),
       });
 
       const { output } = await titleAgent.run(message, { step });
@@ -250,10 +251,7 @@ export const processMessage = inngest.createFunction(
       name: "codenaya",
       description: "An expert AI coding assistant",
       system: systemPrompt,
-      model: openai({
-        model: "gpt-5.4",
-        defaultParameters: { temperature: 0.3 }
-      }),
+      model: openRouterModel(OPENROUTER_MODELS.coding, 0.3),
       tools: [
         createListFilesTool({ internalKey, projectId }),
         createReadFilesTool({ internalKey }),
