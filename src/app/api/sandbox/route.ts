@@ -65,6 +65,19 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const e2bApiKey = process.env.E2B_API_KEY?.trim();
+
+  if (!e2bApiKey) {
+    return Response.json(
+      {
+        error:
+          "E2B_API_KEY is not configured on the Codenaya server. Add it to the " +
+          "hosting environment and restart or redeploy the app.",
+      },
+      { status: 503 },
+    );
+  }
+
   const body = await request.json();
   const {
     files,
@@ -175,6 +188,7 @@ export async function POST(request: Request) {
         send({ type: "output", data: "Creating E2B sandbox...\n" });
 
         sandbox = await Sandbox.create({
+          apiKey: e2bApiKey,
           timeoutMs: SANDBOX_TIMEOUT_MS,
           metadata: { userId },
           network: {
@@ -583,4 +597,3 @@ async function isPortOpen(
     return false;
   }
 }
-

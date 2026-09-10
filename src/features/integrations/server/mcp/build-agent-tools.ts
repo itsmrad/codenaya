@@ -60,6 +60,8 @@ export interface BuildMcpToolsOptions {
   }>;
   approvalGate?: McpApprovalGate;
   audit?: McpAuditSink;
+  /** Workflow run id, used only to correlate log lines. */
+  runId?: string;
 }
 
 /**
@@ -84,7 +86,7 @@ export const MAX_TOOLS_PER_PROJECT = 80;
 export async function buildMcpAgentTools(
   options: BuildMcpToolsOptions,
 ): Promise<McpToolBuildResult> {
-  const { entries, approvalGate, audit } = options;
+  const { entries, approvalGate, audit, runId } = options;
 
   const warnings: string[] = [];
   const connectedSummaries: string[] = [];
@@ -201,6 +203,7 @@ export async function buildMcpAgentTools(
     knownSecrets,
     approvalGate,
     audit,
+    runId,
   });
 
   return { tools, connectedSummaries, warnings, baselinesToRecord };
@@ -219,11 +222,18 @@ export function buildIntegrationsPromptSection(
   connectedSummaries: readonly string[],
   warnings: readonly string[],
 ): string {
-  if (connectedSummaries.length === 0 && warnings.length === 0) {
-    return "";
-  }
-
   const lines: string[] = ["\n\n## Connected integrations"];
+
+  if (connectedSummaries.length === 0) {
+    lines.push(
+      "No usable project-scoped integrations were loaded for this run. This is " +
+        "the authoritative integration state. Do not infer integration access from " +
+        "the project's npm dependencies, source code, or environment variables. If " +
+        "asked whether a service is connected, say that no project-scoped MCP " +
+        "connection is available; do not claim that an SDK or env var is required.",
+    );
+    if (warnings.length === 0) return lines.join("\n");
+  }
 
   if (connectedSummaries.length > 0) {
     lines.push(
@@ -231,6 +241,13 @@ export function buildIntegrationsPromptSection(
         "file tools, their effects are outside this project and cannot be undone by " +
         "editing a file. Prefer reading before writing, and tell the user what you " +
         "are about to change.",
+      "A listed integration is authenticated and its tools were successfully " +
+        "discovered for this run. This access is independent of the project's " +
+        "npm dependencies, source files, and environment variables. When the user " +
+        "asks about a listed service, use its tools before answering. Never claim " +
+        "that access is unverified or missing merely because the workspace has no " +
+        "provider SDK or credentials; only report an access problem when a listed " +
+        "integration issue says so or an actual tool call fails.",
       "",
       ...connectedSummaries.map((summary) => `- ${summary}`),
       "",

@@ -215,6 +215,10 @@ export async function POST(request: Request) {
       JSON.stringify({
         codeVerifier: start.codeVerifier,
         clientInformation: start.clientInformation,
+        // The SDK uses this metadata to select the provider's advertised token
+        // endpoint. Without it, the callback falls back to `/token` on the
+        // authorization-server origin, which is wrong for many providers.
+        authorizationServerMetadata: start.authorizationServerMetadata,
       }),
       secretContext("oauthFlowStates", start.state, "pkce"),
     );

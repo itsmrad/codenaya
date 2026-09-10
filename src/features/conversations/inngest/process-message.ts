@@ -66,7 +66,7 @@ export const processMessage = inngest.createFunction(
       }
     }
   },
-  async ({ event, step }) => {
+  async ({ event, step, runId }) => {
     const {
       messageId,
       conversationId,
@@ -217,6 +217,8 @@ export const processMessage = inngest.createFunction(
             ? createConvexApprovalGate(mcpContext)
             : undefined,
           audit: mcpContext ? createConvexAuditSink(mcpContext) : undefined,
+          // Correlates the `[mcp]` log lines with this Inngest run.
+          runId,
         });
 
         mcpTools = built.tools;
@@ -321,4 +323,3 @@ export const processMessage = inngest.createFunction(
     return { success: true, messageId, conversationId };
   }
 );
-

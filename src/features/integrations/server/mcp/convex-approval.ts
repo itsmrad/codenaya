@@ -43,6 +43,7 @@ function createTransport(ctx: ConvexMcpContext): ApprovalTransport {
         toolName: request.toolName,
         argsPreview: request.argsPreview,
         expiresAt: request.expiresAt,
+        mcpInvocationId: request.invocationId,
       });
       return id;
     },
@@ -76,7 +77,7 @@ export function createConvexApprovalGate(
 ): McpApprovalGate {
   const transport = createTransport(ctx);
 
-  return async ({ server, toolName, args }) => {
+  return async ({ server, toolName, args, invocation, runner }) => {
     // A connection the user has explicitly marked write-approved still goes
     // through the gate for individual destructive calls. `writeApproved` grants
     // the *connection* permission to attempt writes; it is not blanket consent to
@@ -89,13 +90,51 @@ export function createConvexApprovalGate(
       toolName,
       args,
       knownSecrets: ctx.knownSecrets ?? [],
+      invocationId: invocation.invocationId,
+      runner,
     });
 
+    if (!decision.approved) {
+      return {
+        approved: false,
+        approvalId: decision.approvalId,
+        reason: refusalMessage(
+          server.displayName,
+          toolName,
+          decision.reason ?? "it was not approved",
+        ),
+      };
+    }
+
+    const approvalId = decision.approvalId;
+
     return {
-      approved: decision.approved,
-      reason: decision.approved
-        ? undefined
-        : refusalMessage(server.displayName, toolName, decision.reason ?? "it was not approved"),
+      approved: true,
+      approvalId,
+      /**
+       * Single-use claim on this approval.
+       *
+       * Deliberately *not* wrapped in a step by the caller: it has to be the
+       * uncached first act inside the call step, so that a step re-run after a
+       * lost checkpoint sees the claim already taken. A memoized claim would
+       * always report success and defeat the purpose.
+       */
+      claim: approvalId
+        ? async () => {
+            try {
+              return await convex.mutation(api.system.claimMcpApproval, {
+                internalKey: ctx.internalKey,
+                approvalId: approvalId as Id<"mcpApprovals">,
+              });
+            } catch (error) {
+              // Cannot establish whether this call already went out. Refusing is
+              // the safe direction for a mutating tool: a false "already applied"
+              // costs the user a retry, a false "go ahead" costs them their data.
+              console.error("[mcp/approval] claim failed", error);
+              return false;
+            }
+          }
+        : undefined,
     };
   };
 }
@@ -115,16 +154,18 @@ export function createConvexAuditSink(ctx: ConvexMcpContext): McpAuditSink {
       providerId: entry.providerId,
       toolName: entry.toolName,
       status: entry.status,
-      // The adapter does not see raw arguments by the time it audits, so the
-      // digest is computed from what it has. Recording the redaction summary
-      // alongside is what makes "did a secret pass through here" answerable.
-      argsDigest: digestArgs({
-        tool: entry.toolName,
+      // Digest of the actual arguments, supplied by the adapter, plus the
+      // redaction summary. Recording both is what makes "did a secret pass
+      // through here" answerable without storing the payload.
+      argsDigest: entry.argsDigest,
+      redactionSummary: digestArgs({
         redactions: entry.redactionCount,
         rules: entry.matchedRules,
       }),
       durationMs: entry.durationMs,
       errorMessage: entry.errorMessage,
+      // The join key back to the approval row, the step ids and the log lines.
+      mcpInvocationId: entry.invocationId,
     });
   };
 }

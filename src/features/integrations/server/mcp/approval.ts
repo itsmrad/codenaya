@@ -22,6 +22,20 @@
  * does not strand a run. On timeout the row is marked expired so the UI stops
  * offering a button that would no longer do anything.
  *
+ * ## Why the wait has to be durable
+ *
+ * The poll originally ran in the calling function's bare body with real timers.
+ * Two consequences, both bad. A fifteen-minute wait needed a fifteen-minute HTTP
+ * request, which no serverless platform allows — so the request died and the run
+ * was retried, losing any step result that had not yet been checkpointed. And
+ * because the Inngest function body re-executes from the top once per step, the
+ * gate re-ran on every replay: a single migration created four pending approval
+ * rows, three of them for an answer the user had already given.
+ *
+ * So when a `runner` is supplied, row creation is a memoized step and each poll
+ * interval is a durable sleep. The wait then costs no request time, and the row is
+ * created exactly once no matter how often the body replays.
+ *
  * ## Failure direction
  *
  * Every unexpected outcome denies the call. A gate that fails open would be worse
@@ -31,6 +45,7 @@
 
 import { createHash } from "node:crypto";
 
+import type { McpStepRunner } from "./invocation";
 import { redactJsonValue } from "./redact";
 
 /** How long a user has to answer before the request lapses. */
@@ -42,8 +57,16 @@ export const APPROVAL_TIMEOUT_MS = 15 * 60 * 1000;
  * Deliberately not aggressive: a human is reading a dialog, so sub-second latency
  * buys nothing and multiplies Convex function calls, which are metered on the free
  * plan.
+ *
+ * Backed off up to `MAX_POLL_INTERVAL_MS` when the wait is durable. Each interval
+ * is a real workflow sleep, and a flat two seconds over fifteen minutes would be
+ * ~450 steps for one approval.
  */
 const POLL_INTERVAL_MS = 2_000;
+
+const MAX_POLL_INTERVAL_MS = 30_000;
+
+const POLL_BACKOFF_FACTOR = 1.6;
 
 /**
  * Cap on the argument preview shown in the confirmation dialog.
@@ -65,13 +88,21 @@ export interface ApprovalRow {
  * Inngest imports and can be tested with fakes.
  */
 export interface ApprovalTransport {
-  /** Create a pending row and return its id. */
+  /**
+   * Create a pending row and return its id.
+   *
+   * `invocationId` identifies the logical tool call. Implementations should treat
+   * it as an idempotency key: step memoization already prevents a second call in
+   * the normal case, but a request killed between the insert and the checkpoint
+   * would otherwise leave a duplicate prompt behind.
+   */
   create(request: {
     providerId: string;
     projectConnectionId: string;
     toolName: string;
     argsPreview: string;
     expiresAt: number;
+    invocationId: string;
   }): Promise<string>;
   /** Read current state. `null` means the row is gone. */
   read(approvalId: string): Promise<ApprovalRow | null>;
@@ -149,6 +180,16 @@ export interface RequestApprovalOptions {
   displayName: string;
   knownSecrets?: readonly string[];
   timeoutMs?: number;
+  /** Identity of this logical call. Passed to the transport as an idempotency key. */
+  invocationId: string;
+  /**
+   * Durable executor, scoped to this invocation.
+   *
+   * When present, row creation becomes a memoized step and each poll interval a
+   * durable sleep. Without it the gate still works, but every replay of the
+   * calling function repeats the whole wait — see the module header.
+   */
+  runner?: McpStepRunner;
 }
 
 /**
@@ -168,20 +209,41 @@ export async function requestApproval(
     args,
     knownSecrets = [],
     timeoutMs = APPROVAL_TIMEOUT_MS,
+    invocationId,
+    runner,
   } = options;
 
   const now = transport.now ?? Date.now;
-  const deadline = now() + timeoutMs;
 
-  let approvalId: string;
-  try {
-    approvalId = await transport.create({
+  /**
+   * Create the row and fix the deadline together, in one memoized step.
+   *
+   * The deadline has to be memoized alongside the id. Computing it in the
+   * function body would recompute `now() + timeoutMs` on every replay, pushing
+   * the expiry further out each time — an unanswered prompt would then keep the
+   * run alive indefinitely instead of lapsing after fifteen minutes.
+   */
+  const create = async () => {
+    const deadline = now() + timeoutMs;
+    const approvalId = await transport.create({
       providerId,
       projectConnectionId,
       toolName,
       argsPreview: buildArgsPreview(args, knownSecrets),
       expiresAt: deadline,
+      invocationId,
     });
+    return { approvalId, deadline };
+  };
+
+  let approvalId: string;
+  let deadline: number;
+  try {
+    // Memoized when durable, so a replayed function body reuses the row it
+    // already created instead of opening a second prompt for the same action.
+    const created = runner ? await runner.run("approval:create", create) : await create();
+    approvalId = created.approvalId;
+    deadline = created.deadline;
   } catch (error) {
     // Cannot ask, so cannot proceed. Denying is the only safe direction.
     console.error("[mcp/approval] could not create approval request", error);
@@ -192,9 +254,11 @@ export async function requestApproval(
     };
   }
 
-  while (now() < deadline) {
-    await transport.sleep(POLL_INTERVAL_MS);
+  let interval = POLL_INTERVAL_MS;
 
+  // Read before sleeping. On a replay the answer is usually already recorded, and
+  // sleeping first would add an interval of latency to every replay for no reason.
+  for (let attempt = 0; ; attempt += 1) {
     let row: ApprovalRow | null;
     try {
       row = await transport.read(approvalId);
@@ -202,32 +266,46 @@ export async function requestApproval(
       // A transient read failure should not deny outright — the user may already
       // have approved. Keep polling until the deadline.
       console.warn("[mcp/approval] approval read failed, retrying", error);
-      continue;
+      row = undefined as unknown as ApprovalRow | null;
     }
 
-    if (!row) {
-      // Deleted mid-flight: treat as withdrawn rather than assuming consent.
-      return {
-        approved: false,
-        approvalId,
-        reason: "the approval request was withdrawn",
-      };
+    if (row !== undefined) {
+      if (!row) {
+        // Deleted mid-flight: treat as withdrawn rather than assuming consent.
+        return {
+          approved: false,
+          approvalId,
+          reason: "the approval request was withdrawn",
+        };
+      }
+
+      if (row.status === "approved") {
+        return { approved: true, approvalId };
+      }
+
+      if (row.status === "denied") {
+        return { approved: false, approvalId, reason: "the user declined" };
+      }
+
+      if (row.status === "expired") {
+        return {
+          approved: false,
+          approvalId,
+          reason: "the approval request expired",
+        };
+      }
     }
 
-    if (row.status === "approved") {
-      return { approved: true, approvalId };
-    }
+    if (now() >= deadline) break;
 
-    if (row.status === "denied") {
-      return { approved: false, approvalId, reason: "the user declined" };
-    }
-
-    if (row.status === "expired") {
-      return {
-        approved: false,
-        approvalId,
-        reason: "the approval request expired",
-      };
+    if (runner) {
+      await runner.sleep(`approval:wait:${attempt}`, interval);
+      interval = Math.min(
+        Math.round(interval * POLL_BACKOFF_FACTOR),
+        MAX_POLL_INTERVAL_MS,
+      );
+    } else {
+      await transport.sleep(interval);
     }
   }
 
