@@ -63,6 +63,27 @@ export default defineSchema({
     ),
     // Workflow run id (when processed via Vercel Workflow SDK)
     workflowRunId: v.optional(v.string()),
+    // Highest streamed chunk applied to `content`, so a replayed step cannot
+    // append the same delta twice. Absent on messages written in one shot.
+    streamSeq: v.optional(v.number()),
+    // Live tool activity for this turn, in the order the agent started each
+    // call. Keyed by the agent's own partId so repeated events for one call
+    // update in place instead of appending duplicates.
+    parts: v.optional(
+      v.array(
+        v.object({
+          partId: v.string(),
+          toolName: v.string(),
+          status: v.union(
+            v.literal("running"),
+            v.literal("done"),
+            v.literal("error"),
+          ),
+          // Short human-facing detail, e.g. the file being written.
+          label: v.optional(v.string()),
+        }),
+      ),
+    ),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"]),

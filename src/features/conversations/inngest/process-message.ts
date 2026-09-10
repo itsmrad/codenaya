@@ -124,8 +124,15 @@ export const processMessage = inngest.createFunction(
       const titleAgent = createAgent({
         name: "title-generator",
         system: TITLE_GENERATOR_SYSTEM_PROMPT,
+        // ─── OPENROUTER (local dev) — original below, restore to revert ───
+        // model: openai({
+        //   model: "gpt-3.5-turbo",
+        //   defaultParameters: { temperature: 0 },
+        // }),
         model: openai({
-          model: "gpt-3.5-turbo",
+          model: process.env.OPENROUTER_MODEL ?? "cohere/north-mini-code:free",
+          baseUrl: process.env.OPENROUTER_BASE_URL,
+          apiKey: process.env.OPENROUTER_API_KEY,
           defaultParameters: { temperature: 0 },
         }),
       });
@@ -250,9 +257,16 @@ export const processMessage = inngest.createFunction(
       name: "codenaya",
       description: "An expert AI coding assistant",
       system: systemPrompt,
+      // ─── OPENROUTER (local dev) — original below, restore to revert ───
+      // model: openai({
+      //   model: "gpt-5.4",
+      //   defaultParameters: { temperature: 0.3 }
+      // }),
       model: openai({
-        model: "gpt-5.4",
-        defaultParameters: { temperature: 0.3 }
+        model: process.env.OPENROUTER_MODEL ?? "cohere/north-mini-code:free",
+        baseUrl: process.env.OPENROUTER_BASE_URL,
+        apiKey: process.env.OPENROUTER_API_KEY,
+        defaultParameters: { temperature: 0.3 },
       }),
       tools: [
         createListFilesTool({ internalKey, projectId }),
@@ -292,8 +306,171 @@ export const processMessage = inngest.createFunction(
       }
     });
 
+    // ─── Streaming ───
+    //
+    // AgentKit emits typed chunks throughout the run; `publish` is ours to
+    // implement. Text deltas are accumulated and flushed on a timer rather than
+    // written per token, because every write is a Convex mutation and a
+    // token-rate write loop would be pathologically chatty for no visible gain.
+    //
+    // These writes are intentionally outside `step.run`. A durable step
+    // memoises its result and replays it wholesale, which would collapse the
+    // incremental writes that are the entire point here. `appendMessageChunk`
+    // carries its own sequence guard instead, so a retried run cannot
+    // double-append.
+    // Time alone is not enough to pace this. A fast model can emit its whole
+    // response inside one interval, which collapses the stream back into a
+    // single write; a size trigger keeps long answers visibly progressive.
+    const FLUSH_INTERVAL_MS = 100;
+    const FLUSH_CHARS = 60;
+
+    let pending = "";
+    let seq = 0;
+    let lastFlush = Date.now();
+
+    // partId -> tool name and the JSON arguments streamed so far.
+    const toolParts = new Map<string, { name: string; args: string }>();
+    // partIds already shown as running, so the timeline is written once per
+    // call rather than on every argument delta.
+    const announced = new Set<string>();
+
+    /**
+     * Best-effort human label from a tool's streamed arguments.
+     *
+     * The arguments arrive as a JSON string built up across many deltas, so it
+     * is usually truncated mid-token while the call is in flight and cannot be
+     * parsed. A regex for the fields that actually identify the work — a file
+     * name or path — degrades gracefully where JSON.parse would throw.
+     */
+    const labelFromArgs = (args: string): string | undefined => {
+      const match =
+        args.match(/"(?:name|path|fileName|filePath)"\s*:\s*"([^"]{1,120})"/) ??
+        args.match(/"url"\s*:\s*"([^"]{1,120})"/);
+
+      return match?.[1];
+    };
+
+    const publishPart = async (
+      partId: string,
+      toolName: string,
+      status: "running" | "done" | "error",
+      label?: string,
+    ) => {
+      try {
+        await convex.mutation(api.system.upsertMessagePart, {
+          internalKey,
+          messageId,
+          partId,
+          toolName,
+          status,
+          label,
+        });
+      } catch {
+        // Activity display is cosmetic; never fail the run over it.
+      }
+    };
+
+    const flush = async () => {
+      if (!pending) {
+        return;
+      }
+
+      const delta = pending;
+      pending = "";
+      lastFlush = Date.now();
+
+      try {
+        await convex.mutation(api.system.appendMessageChunk, {
+          internalKey,
+          messageId,
+          delta,
+          seq: seq++,
+        });
+      } catch {
+        // A dropped chunk must not abort the run: the authoritative full
+        // response is written once the agent finishes.
+      }
+    };
+
     // Run the agent
-    const result = await network.run(message);
+    const result = await network.run(message, {
+      streaming: {
+        simulateChunking: true,
+        publish: async (chunk) => {
+          // ─── Tool activity ───
+          //
+          //
+          // The tool's name arrives on the first `tool_call.arguments.delta`
+          // for a part, not on `part.created`, so names are remembered per
+          // partId and reused when the part later completes.
+          if (chunk.event === "tool_call.arguments.delta") {
+            const data = chunk.data as {
+              partId?: string;
+              delta?: string;
+              toolName?: string;
+            };
+
+            if (data.partId) {
+              const entry = toolParts.get(data.partId) ?? { name: "", args: "" };
+
+              if (data.toolName) {
+                entry.name = data.toolName;
+              }
+
+              entry.args += data.delta ?? "";
+              toolParts.set(data.partId, entry);
+
+              if (entry.name && !announced.has(data.partId)) {
+                announced.add(data.partId);
+                await publishPart(data.partId, entry.name, "running");
+              }
+            }
+
+            return;
+          }
+
+          if (chunk.event === "part.completed" || chunk.event === "part.failed") {
+            const data = chunk.data as { partId?: string; type?: string };
+
+            if (data.partId && data.type === "tool-call") {
+              const entry = toolParts.get(data.partId);
+
+              if (entry?.name) {
+                await publishPart(
+                  data.partId,
+                  entry.name,
+                  chunk.event === "part.failed" ? "error" : "done",
+                  labelFromArgs(entry.args),
+                );
+              }
+            }
+
+            return;
+          }
+
+          if (chunk.event !== "text.delta") {
+            return;
+          }
+
+          const delta = (chunk.data as { delta?: string } | undefined)?.delta;
+
+          if (!delta) {
+            return;
+          }
+
+          pending += delta;
+
+          if (
+            pending.length >= FLUSH_CHARS ||
+            Date.now() - lastFlush >= FLUSH_INTERVAL_MS
+          ) {
+            await flush();
+          }
+        },
+      },
+    });
+
+    await flush();
 
     // Extract the assistant's text response from the last agent result
     const lastResult = result.state.results.at(-1);

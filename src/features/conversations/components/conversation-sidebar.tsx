@@ -2,8 +2,9 @@ import ky from "ky";
 import { toast } from "sonner";
 import { useState } from "react";
 import { 
-  CopyIcon, 
-  HistoryIcon, 
+  CheckIcon,
+  CopyIcon,
+  HistoryIcon,
   LoaderIcon, 
   PlusIcon,
   SquareIcon,
@@ -46,6 +47,23 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { PastConversationsDialog } from "./past-conversations-dialog";
 import { useChatStore } from "../store/use-chat-store";
+
+/**
+ * Present-tense, human phrasing for the agent's tool names. Anything not listed
+ * falls back to the raw name, so a newly added tool degrades to something
+ * readable rather than disappearing from the timeline.
+ */
+const TOOL_LABELS: Record<string, string> = {
+  createFiles: "Creating files",
+  createFolder: "Creating folder",
+  deleteFiles: "Deleting files",
+  listFiles: "Listing files",
+  readFiles: "Reading files",
+  renameFile: "Renaming file",
+  scrapeUrls: "Scraping URLs",
+  setEnvVar: "Setting env var",
+  updateFile: "Editing file",
+};
 
 interface ConversationSidebarProps {
   projectId: Id<"projects">;
@@ -182,7 +200,38 @@ export const ConversationSidebar = ({
                 from={message.role}
               >
                 <MessageContent>
-                  {message.status === "processing" ? (
+                  {message.role === "assistant" &&
+                    !!message.parts?.length && (
+                      <div className="flex flex-col gap-1 rounded-md border border-border/60 bg-muted/30 p-2">
+                        {message.parts.map((part) => (
+                          <div
+                            key={part.partId}
+                            className="flex items-center gap-2 text-xs"
+                          >
+                            {part.status === "running" ? (
+                              <LoaderIcon className="size-3 shrink-0 animate-spin text-muted-foreground" />
+                            ) : part.status === "error" ? (
+                              <XIcon className="size-3 shrink-0 text-destructive" />
+                            ) : (
+                              <CheckIcon className="size-3 shrink-0 text-muted-foreground" />
+                            )}
+                            <span className="font-medium text-foreground/80">
+                              {TOOL_LABELS[part.toolName] ?? part.toolName}
+                            </span>
+                            {part.label && (
+                              <span className="truncate font-mono text-[10px] text-muted-foreground">
+                                {part.label}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  {message.status === "processing" && !message.content ? (
+                    // Nothing has streamed back yet. Once the first delta
+                    // lands the text itself is the progress indicator, so the
+                    // spinner is only for the genuinely empty window before
+                    // the model's first token.
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <LoaderIcon className="size-4 animate-spin" />
                       <span>Thinking...</span>
@@ -192,7 +241,15 @@ export const ConversationSidebar = ({
                       Request cancelled
                     </span>
                   ) : (
-                    <MessageResponse>{message.content}</MessageResponse>
+                    <>
+                      <MessageResponse>{message.content}</MessageResponse>
+                      {message.status === "processing" && (
+                        <span
+                          aria-hidden="true"
+                          className="inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-foreground/70"
+                        />
+                      )}
+                    </>
                   )}
                 </MessageContent>
                 {message.role === "assistant" &&
