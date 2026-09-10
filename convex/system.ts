@@ -77,6 +77,101 @@ export const updateMessageContent = mutation({
   },
 });
 
+/**
+ * Streams partial assistant output into a message that is still running.
+ *
+ * Deliberately a sibling of `updateMessageContent` rather than a flag on it:
+ * that mutation couples content to `status: "completed"` in one patch, so any
+ * partial write through it would end the turn on the first chunk. Here status
+ * is left untouched, so the message stays `processing` and the UI keeps
+ * rendering it as in-flight while text accumulates.
+ *
+ * `seq` makes the write idempotent under retries. Inngest steps can re-run, and
+ * a replayed chunk would otherwise be appended twice; a chunk whose sequence
+ * has already been applied is dropped instead.
+ */
+export const appendMessageChunk = mutation({
+  args: {
+    internalKey: v.string(),
+    messageId: v.id("messages"),
+    delta: v.string(),
+    seq: v.number(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const message = await ctx.db.get(args.messageId);
+
+    if (!message) {
+      return;
+    }
+
+    // A cancelled turn must not be resurrected by chunks already in flight.
+    if (message.status !== "processing") {
+      return;
+    }
+
+    if (args.seq <= (message.streamSeq ?? -1)) {
+      return;
+    }
+
+    await ctx.db.patch(args.messageId, {
+      content: message.content + args.delta,
+      streamSeq: args.seq,
+    });
+  },
+});
+
+/**
+ * Records or updates one tool call in a running message's activity list.
+ *
+ * Upsert rather than append: the agent emits several events per call
+ * (created, then completed), and each carries the same `partId`. Matching on
+ * that id keeps one row per call which transitions running -> done, instead of
+ * stacking duplicates in the timeline.
+ */
+export const upsertMessagePart = mutation({
+  args: {
+    internalKey: v.string(),
+    messageId: v.id("messages"),
+    partId: v.string(),
+    toolName: v.string(),
+    status: v.union(
+      v.literal("running"),
+      v.literal("done"),
+      v.literal("error"),
+    ),
+    label: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const message = await ctx.db.get(args.messageId);
+
+    if (!message) {
+      return;
+    }
+
+    const parts = message.parts ?? [];
+    const existing = parts.findIndex((part) => part.partId === args.partId);
+
+    const next = {
+      partId: args.partId,
+      toolName: args.toolName,
+      status: args.status,
+      // A later event without a label must not erase one already shown.
+      label: args.label ?? (existing >= 0 ? parts[existing].label : undefined),
+    };
+
+    const updated =
+      existing >= 0
+        ? parts.map((part, i) => (i === existing ? next : part))
+        : [...parts, next];
+
+    await ctx.db.patch(args.messageId, { parts: updated });
+  },
+});
+
 export const updateMessageStatus = mutation({
   args: {
     internalKey: v.string(),
