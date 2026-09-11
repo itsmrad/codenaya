@@ -8,6 +8,8 @@ import { UserButton } from "@clerk/nextjs";
 import { formatDistanceToNow } from "date-fns";
 
 import { cn } from "@/lib/utils";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { ErrorThrower } from "@/components/error-thrower";
 import { EditorView } from "@/features/editor/components/editor-view";
 import {
   Tooltip,
@@ -232,15 +234,21 @@ export const ProjectIdView = ({
               preferredSize={DEFAULT_SIDEBAR_WIDTH}
             >
               <div className="h-full pr-1 box-border">
-                <div className="h-full rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)] overflow-hidden flex flex-col">
-                  <FileExplorer projectId={projectId} />
+                <div className="h-full rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)] overflow-hidden flex flex-col relative">
+                  <ErrorBoundary section="File explorer">
+                    <ErrorThrower label="file explorer" />
+                    <FileExplorer projectId={projectId} />
+                  </ErrorBoundary>
                 </div>
               </div>
             </Allotment.Pane>
             <Allotment.Pane>
               <div className="h-full pl-1 box-border">
                 <div className="h-full rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)] overflow-hidden flex flex-col relative">
-                  <EditorView projectId={projectId} />
+                  <ErrorBoundary section="Editor">
+                    <ErrorThrower label="editor" />
+                    <EditorView projectId={projectId} />
+                  </ErrorBoundary>
                 </div>
               </div>
             </Allotment.Pane>
