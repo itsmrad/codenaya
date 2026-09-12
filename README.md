@@ -94,15 +94,21 @@ Codenaya is a browser-based IDE inspired by Cursor AI, featuring:
    # Clerk
    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
    CLERK_SECRET_KEY=
+   CLERK_JWT_ISSUER_DOMAIN=  # Also set this on the Convex deployment
 
    # Convex
    NEXT_PUBLIC_CONVEX_URL=
    CONVEX_DEPLOYMENT=
    CODENAYA_CONVEX_INTERNAL_KEY=  # Generate a random string
 
-   # AI Provider (choose one)
-   ANTHROPIC_API_KEY=        # Preferred - Claude Sonnet 4
-   GOOGLE_GENERATIVE_AI_API_KEY=  # Free alternative - Gemini 2.0 Flash
+   # Cloud sandbox previews
+   E2B_API_KEY=
+
+   # AI provider
+   OPENROUTER_API_KEY=
+
+   # Credential encryption
+   CODENAYA_LOCAL_KEK=  # Generate with: openssl rand -base64 32
 
    # Firecrawl (optional)
    FIRECRAWL_API_KEY=
@@ -262,7 +268,8 @@ and injected into the preview, so generated apps can be genuinely full-stack.
 CODENAYA_LOCAL_KEK=
 
 # Absolute OAuth callback URL. Required for OAuth connections.
-INTEGRATIONS_REDIRECT_URI=https://your-domain.com/api/integrations/oauth/callback
+INTEGRATIONS_REDIRECT_URI=http://localhost:3000/api/integrations/oauth/callback   # local
+# In production, swap the host for your real domain (https required off localhost).
 ```
 
 Use the **same `CODENAYA_LOCAL_KEK` in every environment**. A different value means

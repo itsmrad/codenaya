@@ -1,5 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
-import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
+import type {
+  AuthorizationServerMetadata,
+  OAuthClientInformationFull,
+} from "@modelcontextprotocol/sdk/shared/auth.js";
 import { nanoid } from "nanoid";
 
 import { getProvider } from "@/features/integrations/catalog";
@@ -163,6 +166,7 @@ export async function GET(request: Request) {
 
   let codeVerifier: string;
   let clientInformation: OAuthClientInformationFull;
+  let authorizationServerMetadata: AuthorizationServerMetadata | undefined;
   try {
     const opened = await getSecretSealer().open(
       {
@@ -178,9 +182,11 @@ export async function GET(request: Request) {
     const parsed = JSON.parse(opened) as {
       codeVerifier: string;
       clientInformation: OAuthClientInformationFull;
+      authorizationServerMetadata?: AuthorizationServerMetadata;
     };
     codeVerifier = parsed.codeVerifier;
     clientInformation = parsed.clientInformation;
+    authorizationServerMetadata = parsed.authorizationServerMetadata;
   } catch (error) {
     console.error("[oauth/callback] failed to open flow state", error);
     return fail("Could not verify the authorization request.");
@@ -189,6 +195,7 @@ export async function GET(request: Request) {
   const exchange = await completeOAuthFlow({
     provider,
     authorizationServerUrl: flow.authServerUrl,
+    authorizationServerMetadata,
     authorizationCode: code,
     codeVerifier,
     redirectUri: flow.redirectUri,
@@ -215,6 +222,9 @@ export async function GET(request: Request) {
         tokenType: tokens.token_type,
         // Kept so a refresh can re-present the same client identity.
         clientInformation,
+        // Refresh requests need the advertised token endpoint for the same
+        // reason as the initial exchange.
+        authorizationServerMetadata,
       }),
       secretContext("userConnections", credentialRef, "credential"),
     );
@@ -224,9 +234,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    await convex.mutation(api.system.createUserConnection, {
+    const created = await convex.mutation(api.system.createUserConnection, {
       internalKey,
       userId,
+      projectId: flow.projectId,
       providerId: provider.id,
       label: provider.displayName,
       authMode: "oauth",
@@ -239,14 +250,16 @@ export async function GET(request: Request) {
       authServerUrl: flow.authServerUrl,
       ...sealed,
     });
+
+    return resultPage(
+      "success",
+      created.projectConnectionId
+        ? `${provider.displayName} is connected to this project with read-only access. You can close this window.`
+        : `${provider.displayName} is connected. You can close this window.`,
+      origin,
+    );
   } catch (error) {
     console.error("[oauth/callback] failed to persist connection", error);
     return fail("Could not save the connection.");
   }
-
-  return resultPage(
-    "success",
-    `${provider.displayName} is connected. You can close this window.`,
-    origin,
-  );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import ky from "ky";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -24,6 +24,7 @@ import {
 } from "@/components/ai-elements/prompt-input";
 
 import { Id } from "../../../../convex/_generated/dataModel";
+import { detectCredential } from "@/features/integrations/credential-guard";
 
 interface NewProjectDialogProps {
   open: boolean;
@@ -40,6 +41,13 @@ export const NewProjectDialog = ({
 
   const handleSubmit = async (message: PromptInputMessage) => {
     if (!message.text) return;
+
+    if (detectCredential(message.text).detected) {
+      toast.error(
+        "Remove credentials from the prompt. Create the project first, then add the MCP connection through Integrations.",
+      );
+      return;
+    }
 
     setIsSubmitting(true);
 

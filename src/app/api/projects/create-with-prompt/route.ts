@@ -12,6 +12,7 @@ import { DEFAULT_CONVERSATION_TITLE } from "@/features/conversations/constants";
 
 import { convex } from "@/lib/convex-client";
 import { dispatchProcessMessage } from "@/lib/message-processor";
+import { detectCredential } from "@/features/integrations/credential-guard";
 
 import { api } from "../../../../../convex/_generated/api";
 
@@ -37,6 +38,17 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const { prompt } = requestSchema.parse(body);
+
+  if (detectCredential(prompt).detected) {
+    return NextResponse.json(
+      {
+        error:
+          "Credentials cannot be sent in a project prompt. Create the project first, then use Integrations.",
+        code: "credential_detected",
+      },
+      { status: 422 },
+    );
+  }
 
   // Generate a random project name
   const projectName = uniqueNamesGenerator({

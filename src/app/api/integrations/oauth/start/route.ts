@@ -15,6 +15,7 @@ import {
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../../convex/_generated/api";
+import { Id } from "../../../../../../convex/_generated/dataModel";
 
 /**
  * POST /api/integrations/oauth/start
@@ -30,31 +31,117 @@ import { api } from "../../../../../../convex/_generated/api";
 
 const requestSchema = z.object({
   providerId: z.string().min(1),
+  projectId: z.string().optional(),
 });
 
 function jsonError(error: string, status: number) {
   return Response.json({ ok: false, error }, { status });
 }
 
+/** Path the callback route is served at. Must match the file location. */
+const CALLBACK_PATH = "/api/integrations/oauth/callback";
+
+/**
+ * Placeholder hostnames that appear in this project's own documentation.
+ *
+ * Checked explicitly because pasting one verbatim is an easy mistake and its symptom
+ * is confusing: the OAuth flow *succeeds*, the provider redirects to a domain that
+ * does not exist, and the user sees a browser error with no connection to this
+ * configuration.
+ */
+const PLACEHOLDER_HOSTS = [
+  "your-domain.com",
+  "www.your-domain.com",
+  "example.com",
+  "your-app.vercel.app",
+];
+
 /**
  * Absolute callback URL.
  *
  * Must match exactly what was registered with the authorization server, so it is
  * read from configuration rather than derived from the request — a request-derived
- * value would vary across preview deployments and silently break the redirect_uri
- * match.
+ * value would vary across preview deployments and would also let a caller influence
+ * where an authorization code is sent.
+ *
+ * Returns a reason string on failure so the route can explain what to fix, rather
+ * than a bare undefined that becomes a generic error.
  */
-function resolveRedirectUri(): string | undefined {
+function resolveRedirectUri():
+  | { ok: true; redirectUri: string }
+  | { ok: false; reason: string } {
   const explicit = process.env.INTEGRATIONS_REDIRECT_URI;
-  if (explicit) return explicit;
 
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ??
-    (process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : undefined);
+  const candidate =
+    explicit ??
+    (() => {
+      const appUrl =
+        process.env.NEXT_PUBLIC_APP_URL ??
+        (process.env.VERCEL_PROJECT_PRODUCTION_URL
+          ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+          : undefined);
+      return appUrl ? `${appUrl}${CALLBACK_PATH}` : undefined;
+    })();
 
-  return appUrl ? `${appUrl}/api/integrations/oauth/callback` : undefined;
+  if (!candidate) {
+    return {
+      ok: false,
+      reason:
+        "OAuth is not configured. Set INTEGRATIONS_REDIRECT_URI to this deployment's " +
+        `absolute callback URL, e.g. http://localhost:3000${CALLBACK_PATH} for local ` +
+        "development.",
+    };
+  }
+
+  let url: URL;
+  try {
+    url = new URL(candidate.trim());
+  } catch {
+    return {
+      ok: false,
+      reason: `INTEGRATIONS_REDIRECT_URI is not a valid absolute URL: "${candidate}".`,
+    };
+  }
+
+  if (PLACEHOLDER_HOSTS.includes(url.hostname)) {
+    return {
+      ok: false,
+      reason:
+        `INTEGRATIONS_REDIRECT_URI still points at the documentation placeholder ` +
+        `"${url.hostname}". Replace it with this deployment's real host — ` +
+        `http://localhost:3000${CALLBACK_PATH} for local development — and restart ` +
+        `the dev server so the new value is picked up.`,
+    };
+  }
+
+  if (url.pathname !== CALLBACK_PATH) {
+    // A wrong path fails at the provider with an opaque redirect_uri_mismatch,
+    // which is far harder to diagnose than saying so here.
+    return {
+      ok: false,
+      reason:
+        `INTEGRATIONS_REDIRECT_URI must end with "${CALLBACK_PATH}", got ` +
+        `"${url.pathname}".`,
+    };
+  }
+
+  // Loopback HTTP is permitted by OAuth 2.1 and is how local development works.
+  // Anything else on plaintext would send an authorization code in the clear.
+  const isLoopback =
+    url.hostname === "localhost" ||
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "[::1]";
+
+  if (url.protocol !== "https:" && !isLoopback) {
+    return {
+      ok: false,
+      reason:
+        `INTEGRATIONS_REDIRECT_URI must use https except on localhost, got ` +
+        `"${url.protocol}//${url.hostname}".`,
+    };
+  }
+
+  return { ok: true, redirectUri: url.toString() };
 }
 
 export async function POST(request: Request) {
@@ -77,14 +164,11 @@ export async function POST(request: Request) {
     return jsonError("Server is not configured for integrations", 500);
   }
 
-  const redirectUri = resolveRedirectUri();
-  if (!redirectUri) {
-    return jsonError(
-      "OAuth is not configured. Set INTEGRATIONS_REDIRECT_URI to the absolute " +
-        "callback URL for this deployment.",
-      500,
-    );
+  const redirect = resolveRedirectUri();
+  if (!redirect.ok) {
+    return jsonError(redirect.reason, 500);
   }
+  const redirectUri = redirect.redirectUri;
 
   let body: unknown;
   try {
@@ -96,6 +180,19 @@ export async function POST(request: Request) {
   const parsed = requestSchema.safeParse(body);
   if (!parsed.success) {
     return jsonError(parsed.error.issues[0]?.message ?? "Invalid request", 400);
+  }
+
+  if (parsed.data.projectId) {
+    try {
+      const project = await convex.query(api.system.getProjectById, {
+        internalKey,
+        projectId: parsed.data.projectId as Id<"projects">,
+      });
+      if (!project) return jsonError("Project not found", 404);
+      if (project.ownerId !== userId) return jsonError("Forbidden", 403);
+    } catch {
+      return jsonError("Invalid project", 400);
+    }
   }
 
   const provider = getProvider(parsed.data.providerId);
@@ -133,6 +230,10 @@ export async function POST(request: Request) {
       JSON.stringify({
         codeVerifier: start.codeVerifier,
         clientInformation: start.clientInformation,
+        // The SDK uses this metadata to select the provider's advertised token
+        // endpoint. Without it, the callback falls back to `/token` on the
+        // authorization-server origin, which is wrong for many providers.
+        authorizationServerMetadata: start.authorizationServerMetadata,
       }),
       secretContext("oauthFlowStates", start.state, "pkce"),
     );
@@ -149,6 +250,7 @@ export async function POST(request: Request) {
       internalKey,
       state: start.state,
       userId,
+      projectId: parsed.data.projectId as Id<"projects"> | undefined,
       providerId: provider.id,
       serverUrl: provider.mcpUrl,
       redirectUri,

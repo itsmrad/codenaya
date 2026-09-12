@@ -168,7 +168,7 @@ export interface UseOAuthPopupResult {
   state: OAuthPopupState;
   /** Set only in the `error` state. */
   error: string | null;
-  start: (providerId: string) => Promise<void>;
+  start: (providerId: string, projectId?: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -230,7 +230,7 @@ export const useOAuthPopup = (): UseOAuthPopupResult => {
   }, [teardown]);
 
   const start = React.useCallback(
-    async (providerId: string) => {
+    async (providerId: string, projectId?: string) => {
       if (inFlightRef.current) return;
 
       inFlightRef.current = true;
@@ -263,7 +263,7 @@ export const useOAuthPopup = (): UseOAuthPopupResult => {
       try {
         const result = await ky
           .post("/api/integrations/oauth/start", {
-            json: { providerId },
+            json: { providerId, projectId },
             timeout: START_TIMEOUT_MS,
           })
           .json<OAuthStartResponse>();

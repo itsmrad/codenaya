@@ -74,6 +74,7 @@ const baseRequest = {
   displayName: "Supabase",
   toolName: "execute_sql",
   args: { query: "create table users (id serial)" },
+  invocationId: "supabase__execute_sql#0123456789abcdef#0",
 };
 
 describe("requestApproval", () => {
@@ -198,7 +199,40 @@ describe("requestApproval", () => {
 
     await requestApproval({ transport, ...baseRequest, timeoutMs: 60_000 });
 
-    expect(created[0].expiresAt).toBe(clock() - 2_000 + 60_000);
+    // No sleep precedes the first read any more: the row is created, then the
+    // status is checked immediately. So the deadline is the creation time plus
+    // the timeout, with the clock not yet advanced by a poll interval.
+    expect(created[0].expiresAt).toBe(clock() + 60_000);
+  });
+
+  it("fixes the deadline once, so replays cannot extend the wait", async () => {
+    // The deadline is computed inside the memoized creation step. Were it
+    // computed in the calling function's body instead, every replay would push
+    // the expiry further out and an unanswered prompt would keep the run alive
+    // indefinitely.
+    const { transport, created, expired } = makeTransport({
+      statuses: () => "pending",
+    });
+
+    const runner = {
+      run: async <T>(_id: string, fn: () => Promise<T>) => fn(),
+      // A durable sleep still advances wall-clock time, so delegate to the
+      // transport's clock-advancing sleep.
+      sleep: async (_id: string, ms: number) => {
+        await transport.sleep(ms);
+      },
+    };
+
+    await requestApproval({
+      transport,
+      ...baseRequest,
+      timeoutMs: 10_000,
+      runner,
+    });
+
+    // One row, one deadline — and the wait actually lapsed rather than running on.
+    expect(created).toHaveLength(1);
+    expect(expired).toEqual(["approval_1"]);
   });
 });
 

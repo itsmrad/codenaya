@@ -3,6 +3,7 @@
 import { Allotment } from "allotment";
 
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
+import { ProjectIntegrationsProvider } from "@/features/integrations/components/project-integrations-context";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 
@@ -19,8 +20,9 @@ export const ProjectIdLayout = ({
   projectId: Id<"projects">;
 }) => {
   return (
-    <div className="w-full h-screen flex flex-col bg-background">
-      <div className="flex-1 p-2 min-h-0 flex overflow-hidden">
+    <ProjectIntegrationsProvider projectId={projectId}>
+      <div className="w-full h-screen flex flex-col bg-background">
+        <div className="flex-1 p-2 min-h-0 flex overflow-hidden">
         <Allotment
           className="flex-1"
           defaultSizes={[
@@ -46,7 +48,8 @@ export const ProjectIdLayout = ({
             </div>
           </Allotment.Pane>
         </Allotment>
+        </div>
       </div>
-    </div>
+    </ProjectIntegrationsProvider>
   );
 };

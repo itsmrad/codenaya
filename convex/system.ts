@@ -689,6 +689,7 @@ export const createUserConnection = mutation({
   args: {
     internalKey: v.string(),
     userId: v.string(),
+    projectId: v.optional(v.id("projects")),
     providerId: v.string(),
     label: v.string(),
     authMode: v.union(v.literal("oauth"), v.literal("api_key")),
@@ -704,9 +705,16 @@ export const createUserConnection = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    if (args.projectId) {
+      const project = await ctx.db.get("projects", args.projectId);
+      if (!project || project.ownerId !== args.userId) {
+        throw new Error("Project not found or owned by another user");
+      }
+    }
+
     const now = Date.now();
 
-    return await ctx.db.insert("userConnections", {
+    const connectionId = await ctx.db.insert("userConnections", {
       userId: args.userId,
       providerId: args.providerId,
       label: args.label,
@@ -728,6 +736,22 @@ export const createUserConnection = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    if (!args.projectId) return { connectionId };
+
+    const projectConnectionId = await ctx.db.insert("projectConnections", {
+      projectId: args.projectId,
+      userConnectionId: connectionId,
+      ownerId: args.userId,
+      enabled: true,
+      readOnly: true,
+      providerScope: {},
+      writeApproved: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { connectionId, projectConnectionId };
   },
 });
 
@@ -794,6 +818,127 @@ export const updateUserConnectionStatus = mutation({
       statusMessage: args.statusMessage,
       updatedAt: Date.now(),
     });
+  },
+});
+
+/**
+ * Claim the right to refresh one OAuth credential.
+ *
+ * Refresh tokens may rotate. Without a database-backed lease, two agent runs
+ * can exchange the same token concurrently and the loser can invalidate an
+ * otherwise healthy connection. Convex serializes this mutation, so exactly one
+ * caller receives the lease.
+ */
+export const claimUserConnectionRefresh = mutation({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+    leaseId: v.string(),
+    refreshSkewMs: v.number(),
+    leaseDurationMs: v.number(),
+  },
+  returns: v.union(
+    v.literal("acquired"),
+    v.literal("busy"),
+    v.literal("not_needed"),
+    v.literal("missing"),
+  ),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const connection = await ctx.db.get("userConnections", args.connectionId);
+    if (!connection) return "missing" as const;
+
+    const now = Date.now();
+    const needsRefresh =
+      connection.authMode === "oauth" &&
+      typeof connection.tokenExpiresAt === "number" &&
+      connection.tokenExpiresAt - args.refreshSkewMs <= now;
+
+    if (!needsRefresh) return "not_needed" as const;
+
+    if (
+      connection.refreshLeaseId &&
+      connection.refreshLeaseExpiresAt &&
+      connection.refreshLeaseExpiresAt > now
+    ) {
+      return "busy" as const;
+    }
+
+    await ctx.db.patch("userConnections", args.connectionId, {
+      refreshLeaseId: args.leaseId,
+      refreshLeaseExpiresAt: now + args.leaseDurationMs,
+    });
+
+    return "acquired" as const;
+  },
+});
+
+/** Commit a refreshed sealed OAuth bundle only when the caller owns the lease. */
+export const completeUserConnectionRefresh = mutation({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+    leaseId: v.string(),
+    maskedPreview: v.string(),
+    scopes: v.array(v.string()),
+    tokenExpiresAt: v.union(v.number(), v.null()),
+    ...sealedFields,
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const connection = await ctx.db.get("userConnections", args.connectionId);
+    if (!connection || connection.refreshLeaseId !== args.leaseId) return false;
+
+    await ctx.db.patch("userConnections", args.connectionId, {
+      kekProvider: args.kekProvider,
+      kekKeyId: args.kekKeyId,
+      wrappedDek: args.wrappedDek,
+      ciphertext: args.ciphertext,
+      iv: args.iv,
+      authTag: args.authTag,
+      maskedPreview: args.maskedPreview,
+      scopes: args.scopes,
+      tokenExpiresAt: args.tokenExpiresAt ?? undefined,
+      status: "active" as const,
+      statusMessage: undefined,
+      refreshLeaseId: undefined,
+      refreshLeaseExpiresAt: undefined,
+      updatedAt: Date.now(),
+    });
+
+    return true;
+  },
+});
+
+/** Release a refresh lease and expose only a non-sensitive connection state. */
+export const failUserConnectionRefresh = mutation({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+    leaseId: v.string(),
+    reauthRequired: v.boolean(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const connection = await ctx.db.get("userConnections", args.connectionId);
+    if (!connection || connection.refreshLeaseId !== args.leaseId) return false;
+
+    await ctx.db.patch("userConnections", args.connectionId, {
+      status: args.reauthRequired ? "needs_reauth" : "active",
+      statusMessage: args.reauthRequired
+        ? "OAuth authorization expired. Reconnect this integration."
+        : "OAuth refresh temporarily failed. It will be retried automatically.",
+      refreshLeaseId: undefined,
+      refreshLeaseExpiresAt: undefined,
+      updatedAt: Date.now(),
+    });
+
+    return true;
   },
 });
 
@@ -989,6 +1134,7 @@ export const createOauthFlowState = mutation({
     internalKey: v.string(),
     state: v.string(),
     userId: v.string(),
+    projectId: v.optional(v.id("projects")),
     providerId: v.string(),
     serverUrl: v.string(),
     redirectUri: v.string(),
@@ -1001,9 +1147,17 @@ export const createOauthFlowState = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    if (args.projectId) {
+      const project = await ctx.db.get("projects", args.projectId);
+      if (!project || project.ownerId !== args.userId) {
+        throw new Error("Project not found or owned by another user");
+      }
+    }
+
     return await ctx.db.insert("oauthFlowStates", {
       state: args.state,
       userId: args.userId,
+      projectId: args.projectId,
       providerId: args.providerId,
       serverUrl: args.serverUrl,
       redirectUri: args.redirectUri,
@@ -1067,9 +1221,28 @@ export const createMcpApproval = mutation({
     toolName: v.string(),
     argsPreview: v.string(),
     expiresAt: v.number(),
+    mcpInvocationId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+
+    // Idempotent on the invocation id.
+    //
+    // The caller already creates this row inside a memoized workflow step, so a
+    // second insert normally cannot happen. This covers the case that memoization
+    // cannot: a request killed after the insert but before the step result was
+    // checkpointed, which on retry would otherwise leave the user with a second
+    // approval prompt for one action.
+    if (args.mcpInvocationId) {
+      const existing = await ctx.db
+        .query("mcpApprovals")
+        .withIndex("by_invocation", (q) =>
+          q.eq("mcpInvocationId", args.mcpInvocationId),
+        )
+        .first();
+
+      if (existing) return existing._id;
+    }
 
     return await ctx.db.insert("mcpApprovals", {
       projectId: args.projectId,
@@ -1082,7 +1255,41 @@ export const createMcpApproval = mutation({
       status: "pending" as const,
       createdAt: Date.now(),
       expiresAt: args.expiresAt,
+      mcpInvocationId: args.mcpInvocationId,
     });
+  },
+});
+
+/**
+ * Take the single-use claim on an approved action.
+ *
+ * Returns true to the first caller and false to every later one. Convex mutations
+ * are serializable transactions, so the read and the patch cannot interleave with
+ * a competing claim — which is what makes this a safe guard against a mutating MCP
+ * call being reissued when its workflow step is retried after losing its result.
+ *
+ * Failing closed is deliberate: a row that is missing, unapproved or already
+ * consumed all return false, because none of those states establish that it is
+ * safe to send a migration again.
+ */
+export const claimMcpApproval = mutation({
+  args: {
+    internalKey: v.string(),
+    approvalId: v.id("mcpApprovals"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const approval = await ctx.db.get("mcpApprovals", args.approvalId);
+    if (!approval) return false;
+    if (approval.status !== "approved") return false;
+    if (approval.consumedAt !== undefined) return false;
+
+    await ctx.db.patch("mcpApprovals", args.approvalId, {
+      consumedAt: Date.now(),
+    });
+
+    return true;
   },
 });
 
@@ -1130,11 +1337,30 @@ export const recordMcpToolCall = mutation({
       v.literal("blocked"),
     ),
     argsDigest: v.string(),
+    redactionSummary: v.optional(v.string()),
     durationMs: v.number(),
     errorMessage: v.optional(v.string()),
+    mcpInvocationId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+
+    // Idempotent per (invocation, status), for the same reason as the approval
+    // row: the audit write is already inside a memoized step, and this closes the
+    // window where a lost checkpoint would duplicate the row. Keyed on status as
+    // well as invocation because one invocation can legitimately record two
+    // outcomes — for example `denied` and then nothing, or `blocked` after a lost
+    // claim.
+    if (args.mcpInvocationId) {
+      const existing = await ctx.db
+        .query("mcpToolAuditLog")
+        .withIndex("by_invocation", (q) =>
+          q.eq("mcpInvocationId", args.mcpInvocationId),
+        )
+        .collect();
+
+      if (existing.some((row) => row.status === args.status)) return;
+    }
 
     await ctx.db.insert("mcpToolAuditLog", {
       projectId: args.projectId,
@@ -1143,9 +1369,11 @@ export const recordMcpToolCall = mutation({
       toolName: args.toolName,
       status: args.status,
       argsDigest: args.argsDigest,
+      redactionSummary: args.redactionSummary,
       durationMs: args.durationMs,
       errorMessage: args.errorMessage,
       createdAt: Date.now(),
+      mcpInvocationId: args.mcpInvocationId,
     });
   },
 });

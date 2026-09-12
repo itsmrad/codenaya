@@ -18,6 +18,7 @@ import { assertSafeMcpUrl } from "@/features/integrations/server/url-guard";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
+import { Id } from "../../../../../convex/_generated/dataModel";
 
 /**
  * POST /api/integrations/connect
@@ -42,6 +43,7 @@ const requestSchema = z.object({
   providerId: z.string().min(1),
   apiKey: z.string().min(1, "API key is required"),
   label: z.string().max(80).optional(),
+  projectId: z.string().optional(),
   /** Required when providerId is "custom". */
   serverUrl: z.string().url().optional(),
 });
@@ -95,7 +97,20 @@ export async function POST(request: Request) {
     return jsonError(parsed.error.issues[0]?.message ?? "Invalid request", 400);
   }
 
-  const { providerId, apiKey, label, serverUrl } = parsed.data;
+  const { providerId, apiKey, label, serverUrl, projectId } = parsed.data;
+
+  if (projectId) {
+    try {
+      const project = await convex.query(api.system.getProjectById, {
+        internalKey,
+        projectId: projectId as Id<"projects">,
+      });
+      if (!project) return jsonError("Project not found", 404);
+      if (project.ownerId !== userId) return jsonError("Forbidden", 403);
+    } catch {
+      return jsonError("Invalid project", 400);
+    }
+  }
 
   // ── Resolve the target endpoint and credential placement ──
 
@@ -189,9 +204,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const connectionId = await convex.mutation(api.system.createUserConnection, {
+    const created = await convex.mutation(api.system.createUserConnection, {
       internalKey,
       userId,
+      projectId: projectId as Id<"projects"> | undefined,
       providerId,
       label: label?.trim() || displayName,
       authMode: "api_key",
@@ -206,7 +222,9 @@ export async function POST(request: Request) {
 
     return Response.json({
       ok: true,
-      connectionId,
+      connectionId: created.connectionId,
+      linkedToProject: Boolean(created.projectConnectionId),
+      projectConnectionId: created.projectConnectionId,
       provider: { id: providerId, displayName },
       toolCount: probe.tools.length,
       truncated: probe.truncated,

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 
 import { convex } from "@/lib/convex-client";
+import { detectCredential } from "@/features/integrations/credential-guard";
 import {
   dispatchCancelMessage,
   dispatchProcessMessage,
@@ -34,6 +35,17 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const { conversationId, message } = requestSchema.parse(body);
+
+  if (detectCredential(message).detected) {
+    return NextResponse.json(
+      {
+        error:
+          "Credentials cannot be sent in chat. Use the secure Integrations flow.",
+        code: "credential_detected",
+      },
+      { status: 422 },
+    );
+  }
 
   // Call convex mutation, query
   const conversation = await convex.query(api.system.getConversationById, {

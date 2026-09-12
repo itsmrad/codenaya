@@ -1,4 +1,4 @@
-import ky from "ky";
+import ky, { HTTPError } from "ky";
 import { toast } from "sonner";
 import { useState } from "react";
 import { 
@@ -6,7 +6,6 @@ import {
   HistoryIcon, 
   LoaderIcon, 
   PlusIcon,
-  SquareIcon,
   XIcon,
 } from "lucide-react";
 import { FileIcon } from "@react-symbols/icons/utils";
@@ -34,6 +33,8 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
 import { ApprovalPrompt } from "@/features/integrations/components/approval-prompt";
+import { useProjectIntegrations } from "@/features/integrations/components/project-integrations-context";
+import { detectCredential } from "@/features/integrations/credential-guard";
 
 import {
   useConversation,
@@ -54,6 +55,7 @@ interface ConversationSidebarProps {
 export const ConversationSidebar = ({
   projectId,
 }: ConversationSidebarProps) => {
+  const { openIntegrations } = useProjectIntegrations();
   const { input, setInput, contexts, removeContext, clearContexts } = useChatStore();
   const [
     selectedConversationId,
@@ -110,6 +112,22 @@ export const ConversationSidebar = ({
       return;
     }
 
+    let finalMessage = message.text;
+    if (contexts.length > 0) {
+      const contextStrs = contexts.map(
+        (c) => `File: ${c.fileName} (Lines ${c.startLine}-${c.endLine})\n\`\`\`\n${c.content}\n\`\`\``
+      );
+      finalMessage = `${contextStrs.join("\n\n")}\n\n${finalMessage}`;
+    }
+
+    if (detectCredential(finalMessage).detected) {
+      toast.error(
+        "Credentials cannot be sent in chat. Add this MCP connection through Integrations instead.",
+      );
+      openIntegrations();
+      return;
+    }
+
     let conversationId = activeConversationId;
 
     if (!conversationId) {
@@ -117,14 +135,6 @@ export const ConversationSidebar = ({
       if (!conversationId) {
         return;
       }
-    }
-
-    let finalMessage = message.text;
-    if (contexts.length > 0) {
-      const contextStrs = contexts.map(
-        (c) => `File: ${c.fileName} (Lines ${c.startLine}-${c.endLine})\n\`\`\`\n${c.content}\n\`\`\``
-      );
-      finalMessage = `${contextStrs.join("\n\n")}\n\n${finalMessage}`;
     }
 
     // Trigger Inngest function via API
@@ -137,7 +147,19 @@ export const ConversationSidebar = ({
       });
       // Only clear contexts after a successful send so they aren't lost on failure
       clearContexts();
-    } catch {
+    } catch (error) {
+      if (error instanceof HTTPError && error.response.status === 422) {
+        const body = await error.response
+          .json<{ code?: string }>()
+          .catch(() => ({ code: undefined }));
+        if (body.code === "credential_detected") {
+          toast.error(
+            "Credentials cannot be sent in chat. Add this MCP connection through Integrations instead.",
+          );
+          openIntegrations();
+          return;
+        }
+      }
       toast.error("Message failed to send");
     }
 

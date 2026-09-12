@@ -170,6 +170,11 @@ export default defineSchema({
     oauthClientId: v.optional(v.string()),
     authServerUrl: v.optional(v.string()),
 
+    // Short lease used to serialize refresh-token rotation across concurrent
+    // agent runs. Both fields are optional so existing rows migrate safely.
+    refreshLeaseId: v.optional(v.string()),
+    refreshLeaseExpiresAt: v.optional(v.number()),
+
     lastUsedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -270,6 +275,9 @@ export default defineSchema({
   oauthFlowStates: defineTable({
     state: v.string(),
     userId: v.string(),
+    // When OAuth starts inside a project, the resulting connection is linked to
+    // that project in the same transaction that stores the sealed credential.
+    projectId: v.optional(v.id("projects")),
     providerId: v.string(),
     serverUrl: v.string(),
     redirectUri: v.string(),
@@ -319,10 +327,31 @@ export default defineSchema({
     createdAt: v.number(),
     expiresAt: v.number(),
     resolvedAt: v.optional(v.number()),
+    /**
+     * Identity of the logical MCP tool call this row belongs to.
+     *
+     * Two jobs. It is the idempotency key for creation, so a replayed agent turn
+     * reuses this prompt instead of opening another one for the same action. And
+     * it is the join key to the audit row, the workflow step ids and the `[mcp]`
+     * log lines, which is what makes one logical call traceable end to end.
+     *
+     * Optional because rows created before this field existed do not have one.
+     */
+    mcpInvocationId: v.optional(v.string()),
+    /**
+     * When the approved action was claimed by the executing step.
+     *
+     * Set exactly once, atomically. A destructive tool takes this claim as the
+     * first act inside its step, so a step that re-runs after its result was lost
+     * finds the claim already taken and refuses rather than reapplying the
+     * mutation. Absence on an approved row means the action has not been issued.
+     */
+    consumedAt: v.optional(v.number()),
   })
     .index("by_project_and_status", ["projectId", "status"])
     .index("by_message", ["messageId"])
-    .index("by_expiresAt", ["expiresAt"]),
+    .index("by_expiresAt", ["expiresAt"])
+    .index("by_invocation", ["mcpInvocationId"]),
 
   /**
    * Audit trail of MCP tool invocations.
@@ -343,10 +372,22 @@ export default defineSchema({
       v.literal("blocked"),
     ),
     argsDigest: v.string(),
+    /** Digest of the redaction outcome: how many spans were removed, and by which rules. */
+    redactionSummary: v.optional(v.string()),
     durationMs: v.number(),
     errorMessage: v.optional(v.string()),
     createdAt: v.number(),
+    /**
+     * The logical MCP tool call this row describes.
+     *
+     * One real request produces exactly one row with a given value here, so a
+     * repeated value means a genuinely repeated request rather than a replayed
+     * log write. That distinction was previously impossible to make from this
+     * table.
+     */
+    mcpInvocationId: v.optional(v.string()),
   })
     .index("by_project_and_createdAt", ["projectId", "createdAt"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .index("by_invocation", ["mcpInvocationId"]),
 });

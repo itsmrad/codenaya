@@ -28,6 +28,7 @@ import {
   supportsApiKey,
   supportsOAuth,
 } from "./provider-catalog";
+import { Id } from "../../../../convex/_generated/dataModel";
 
 /**
  * Failure `kind`s from `/api/integrations/connect`, translated into something a
@@ -50,6 +51,8 @@ const FALLBACK_MESSAGE = "Unable to connect. Please try again.";
 
 interface ConnectSuccess {
   connectionId: string;
+  linkedToProject: boolean;
+  projectConnectionId?: string;
   provider: { id: string; displayName: string };
   toolCount: number;
   truncated: boolean;
@@ -78,6 +81,7 @@ const buildSchema = (isCustom: boolean) =>
 
 interface OAuthConnectPanelProps {
   providerId: string;
+  projectId?: Id<"projects">;
   displayName: string;
   /**
    * True when the same provider also accepts an API key, so OAuth is one of two
@@ -96,6 +100,7 @@ interface OAuthConnectPanelProps {
  */
 const OAuthConnectPanel = ({
   providerId,
+  projectId,
   displayName,
   isRecommended,
   onConnected,
@@ -113,17 +118,21 @@ const OAuthConnectPanel = ({
 
     if (state === "success") {
       // The connections list is a live Convex query and updates on its own.
-      toast.success(`Connected ${displayName}`);
+      toast.success(
+        projectId
+          ? `Connected ${displayName} to this project with read-only access`
+          : `Connected ${displayName}`,
+      );
       onConnected?.();
       return;
     }
 
     toast.error(error ?? FALLBACK_MESSAGE);
-  }, [state, error, displayName, onConnected]);
+  }, [state, error, displayName, onConnected, projectId]);
 
   const handleStart = () => {
     notifiedRef.current = null;
-    void start(providerId);
+    void start(providerId, projectId);
   };
 
   const isPending = state === "pending";
@@ -156,7 +165,9 @@ const OAuthConnectPanel = ({
             aria-hidden="true"
             className="size-3 shrink-0 mt-0.5"
           />
-          Connected. {displayName} now appears under your connections above.
+          {projectId
+            ? `Connected to this project with read-only access. ${displayName} tools are available on the next agent request.`
+            : `Connected. ${displayName} now appears under your connections above.`}
         </p>
       );
     }
@@ -237,12 +248,14 @@ const OAuthConnectPanel = ({
 
 interface ConnectApiKeyFormProps {
   providerId: string;
+  projectId?: Id<"projects">;
   /** Called after a connection is created, so the parent can reset its flow. */
   onConnected?: () => void;
 }
 
 export const ConnectApiKeyForm = ({
   providerId,
+  projectId,
   onConnected,
 }: ConnectApiKeyFormProps) => {
   const isCustom = providerId === CUSTOM_PROVIDER_ID;
@@ -286,12 +299,20 @@ export const ConnectApiKeyForm = ({
               apiKey: value.apiKey,
               label: value.label.trim() || undefined,
               serverUrl: isCustom ? value.serverUrl.trim() : undefined,
+              projectId,
             },
           })
           .json<ConnectSuccess & { ok: true }>();
 
+        // Drop the plaintext from browser form state as soon as the server has
+        // confirmed that the encrypted connection was stored.
+        form.reset();
         setSuccess(result);
-        toast.success(`Connected ${result.provider.displayName}`);
+        toast.success(
+          result.linkedToProject
+            ? `Connected ${result.provider.displayName} to this project with read-only access`
+            : `Connected ${result.provider.displayName}`,
+        );
         onConnected?.();
       } catch (error) {
         if (error instanceof HTTPError) {
@@ -326,6 +347,12 @@ export const ConnectApiKeyForm = ({
               {success.toolCount} {success.toolCount === 1 ? "tool" : "tools"}{" "}
               available
             </p>
+            {success.linkedToProject && (
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                Linked to this project with read-only access. The agent can use
+                these tools on your next request.
+              </p>
+            )}
             {preview.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {preview.map((tool) => (
@@ -500,6 +527,7 @@ export const ConnectApiKeyForm = ({
       {oauthAvailable && (
         <OAuthConnectPanel
           providerId={providerId}
+          projectId={projectId}
           displayName={displayName}
           isRecommended={apiKeyAvailable}
           onConnected={onConnected}

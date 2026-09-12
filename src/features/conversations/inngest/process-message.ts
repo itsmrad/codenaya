@@ -1,4 +1,4 @@
-import { createAgent, openai, createNetwork, type Tool } from '@inngest/agent-kit';
+import { createAgent, createNetwork, type Tool } from '@inngest/agent-kit';
 
 import { inngest } from "@/inngest/client";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -20,6 +20,10 @@ import { createDeleteFilesTool } from './tools/delete-files';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
 import { createSetEnvVarTool } from './tools/set-env-var';
 import {
+  OPENROUTER_MODELS,
+  openRouterModel,
+} from './lib/openrouter-model';
+import {
   buildIntegrationsPromptSection,
   buildMcpAgentTools,
 } from '@/features/integrations/server/mcp/build-agent-tools';
@@ -27,6 +31,10 @@ import {
   createConvexApprovalGate,
   createConvexAuditSink,
 } from '@/features/integrations/server/mcp/convex-approval';
+import {
+  oauthConnectionNeedsRefresh,
+  refreshExpiredOAuthConnections,
+} from '@/features/integrations/server/oauth/refresh-connections';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -62,7 +70,7 @@ export const processMessage = inngest.createFunction(
       }
     }
   },
-  async ({ event, step }) => {
+  async ({ event, step, runId }) => {
     const {
       messageId,
       conversationId,
@@ -124,10 +132,7 @@ export const processMessage = inngest.createFunction(
       const titleAgent = createAgent({
         name: "title-generator",
         system: TITLE_GENERATOR_SYSTEM_PROMPT,
-        model: openai({
-          model: "gpt-3.5-turbo",
-          defaultParameters: { temperature: 0 },
-        }),
+        model: openRouterModel(OPENROUTER_MODELS.title, 0),
       });
 
       const { output } = await titleAgent.run(message, { step });
@@ -193,10 +198,84 @@ export const processMessage = inngest.createFunction(
       });
       mcpOwnerId = project?.ownerId;
 
-      const entries = await convex.query(api.system.getProjectMcpConnections, {
+      let entries = await convex.query(api.system.getProjectMcpConnections, {
         internalKey,
         projectId,
       });
+
+      const hasExpiringOAuthConnection = entries.some(
+        ({ connection }) => oauthConnectionNeedsRefresh(connection),
+      );
+
+      if (hasExpiringOAuthConnection) {
+        const refreshReport = await step.run(
+          "refresh-expired-oauth-connections",
+          async () => {
+            // Re-read inside the durable step. Another run may have refreshed the
+            // connection after the outer query, and the Convex lease below makes
+            // refresh-token rotation single-writer across workers.
+            const freshEntries = await convex.query(
+              api.system.getProjectMcpConnections,
+              { internalKey, projectId },
+            );
+
+            return await refreshExpiredOAuthConnections(
+              freshEntries.map(({ connection }) => connection),
+              {
+                claim: async (args) =>
+                  await convex.mutation(
+                    api.system.claimUserConnectionRefresh,
+                    {
+                      internalKey,
+                      connectionId: args.connectionId as Id<"userConnections">,
+                      leaseId: args.leaseId,
+                      refreshSkewMs: args.refreshSkewMs,
+                      leaseDurationMs: args.leaseDurationMs,
+                    },
+                  ),
+                complete: async (args) =>
+                  await convex.mutation(
+                    api.system.completeUserConnectionRefresh,
+                    {
+                      internalKey,
+                      connectionId: args.connectionId as Id<"userConnections">,
+                      leaseId: args.leaseId,
+                      maskedPreview: args.maskedPreview,
+                      scopes: args.scopes,
+                      tokenExpiresAt: args.tokenExpiresAt,
+                      ...args.sealed,
+                    },
+                  ),
+                fail: async (args) =>
+                  await convex.mutation(api.system.failUserConnectionRefresh, {
+                    internalKey,
+                    connectionId: args.connectionId as Id<"userConnections">,
+                    leaseId: args.leaseId,
+                    reauthRequired: args.reauthRequired,
+                  }),
+              },
+            );
+          },
+        );
+
+        mcpWarnings.push(...refreshReport.warnings);
+
+        // Never hand the stale access token from the first query to discovery.
+        // A failed terminal refresh is now needs_reauth and is excluded here.
+        entries = await convex.query(api.system.getProjectMcpConnections, {
+          internalKey,
+          projectId,
+        });
+
+        // A transient refresh failure deliberately keeps the connection active
+        // so a later run can retry. It must still be excluded from this run:
+        // handing discovery the known-expired token would only produce another
+        // Unauthorized request and could incorrectly turn a temporary outage
+        // into a permanent needs_reauth state.
+        entries = entries.filter(
+          ({ connection }) => !oauthConnectionNeedsRefresh(connection),
+        );
+      }
 
       if (entries.length > 0) {
         const mcpContext = mcpOwnerId
@@ -216,12 +295,28 @@ export const processMessage = inngest.createFunction(
             ? createConvexApprovalGate(mcpContext)
             : undefined,
           audit: mcpContext ? createConvexAuditSink(mcpContext) : undefined,
+          // Correlates the `[mcp]` log lines with this Inngest run.
+          runId,
         });
 
         mcpTools = built.tools;
         mcpSummaries = built.connectedSummaries;
-        mcpWarnings = built.warnings;
+        mcpWarnings.push(...built.warnings);
         mcpBaselines = built.baselinesToRecord;
+
+        if (built.reauthConnectionIds.length > 0) {
+          await step.run("mark-rejected-oauth-connections", async () => {
+            for (const connectionId of built.reauthConnectionIds) {
+              await convex.mutation(api.system.updateUserConnectionStatus, {
+                internalKey,
+                connectionId: connectionId as Id<"userConnections">,
+                status: "needs_reauth",
+                statusMessage:
+                  "The provider rejected this OAuth authorization. Reconnect the integration.",
+              });
+            }
+          });
+        }
       }
     } catch (error) {
       console.error("[process-message] MCP resolution failed", error);
@@ -250,10 +345,7 @@ export const processMessage = inngest.createFunction(
       name: "codenaya",
       description: "An expert AI coding assistant",
       system: systemPrompt,
-      model: openai({
-        model: "gpt-5.4",
-        defaultParameters: { temperature: 0.3 }
-      }),
+      model: openRouterModel(OPENROUTER_MODELS.coding, 0.3),
       tools: [
         createListFilesTool({ internalKey, projectId }),
         createReadFilesTool({ internalKey }),
@@ -323,4 +415,3 @@ export const processMessage = inngest.createFunction(
     return { success: true, messageId, conversationId };
   }
 );
-
