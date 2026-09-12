@@ -11,4 +11,28 @@ describe("coding agent integration instructions", () => {
       /do not inspect workspace files\s+to decide whether the integration exists/,
     );
   });
+
+  it("keeps MCP credentials outside model context and project files", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "NEVER ask the user to paste an MCP API key",
+    );
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "Integrations → Add a connection",
+    );
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "MCP authentication is injected into the server-side transport automatically",
+    );
+  });
+
+  it("requires remote provisioning to be applied and verified", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "Creating or editing a migration file does not change the remote database",
+    );
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "verify it with a read tool before claiming success",
+    );
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "never describe an unapplied migration as a completed fix",
+    );
+  });
 });

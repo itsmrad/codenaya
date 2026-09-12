@@ -23,6 +23,7 @@ vi.mock("./call-tool", () => ({
 import {
   buildIntegrationsPromptSection,
   buildMcpAgentTools,
+  isMcpAuthenticationFailure,
 } from "./build-agent-tools";
 
 const supabaseServer = {
@@ -112,6 +113,26 @@ describe("project-scoped MCP tool loading", () => {
     expect(built.tools).toEqual([]);
     expect(mocks.resolveMcpServers).not.toHaveBeenCalled();
   });
+
+  it("reports a rejected OAuth connection for reauthorization", async () => {
+    mocks.discoverTools.mockResolvedValue({
+      ok: false,
+      error: "HTTP 401 Unauthorized",
+    });
+
+    const built = await buildMcpAgentTools({ entries: [{} as never] });
+
+    expect(built.tools).toEqual([]);
+    expect(built.reauthConnectionIds).toEqual(["user-connection-1"]);
+  });
+});
+
+describe("MCP authentication failure detection", () => {
+  it("does not confuse transient transport errors with rejected credentials", () => {
+    expect(isMcpAuthenticationFailure("HTTP 401 Unauthorized")).toBe(true);
+    expect(isMcpAuthenticationFailure("invalid_token")).toBe(true);
+    expect(isMcpAuthenticationFailure("socket timed out")).toBe(false);
+  });
 });
 
 describe("buildIntegrationsPromptSection", () => {
@@ -126,6 +147,11 @@ describe("buildIntegrationsPromptSection", () => {
     expect(section).toContain("independent of the project's npm dependencies");
     expect(section).toContain("use its tools before answering");
     expect(section).toContain("Never claim that access is unverified");
+    expect(section).toContain(
+      "credential that authenticates this MCP connection is managed by the server",
+    );
+    expect(section).toContain("Never request it");
+    expect(section).toContain("pass it to setEnvVar");
   });
 });
 

@@ -22,7 +22,7 @@ import { ExportPopover } from "./export-popover";
 import { useProject, useRenameProject } from "../hooks/use-projects";
 import { PublishDialog } from "@/features/showcase/components/publish-dialog";
 import { useIsProjectPublished } from "@/features/showcase/hooks/use-showcase";
-import { IntegrationsDialog } from "@/features/integrations/components/integrations-dialog";
+import { useProjectIntegrations } from "@/features/integrations/components/project-integrations-context";
 
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 800;
@@ -64,7 +64,7 @@ export const ProjectIdView = ({
 }) => {
   const [activeView, setActiveView] = useState<"editor" | "preview">("editor");
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
-  const [integrationsDialogOpen, setIntegrationsDialogOpen] = useState(false);
+  const { openIntegrations } = useProjectIntegrations();
   const project = useProject(projectId);
   const renameProject = useRenameProject();
   const isPublished = useIsProjectPublished(projectId);
@@ -103,11 +103,6 @@ export const ProjectIdView = ({
         onOpenChange={setPublishDialogOpen}
         projectId={projectId}
         projectName={project?.name ?? ""}
-      />
-      <IntegrationsDialog
-        projectId={projectId}
-        open={integrationsDialogOpen}
-        onOpenChange={setIntegrationsDialogOpen}
       />
     <div className="h-full flex flex-col gap-2">
       {/* ─── Unified Navbar ─── */}
@@ -198,7 +193,7 @@ export const ProjectIdView = ({
             </button>
           )}
           <button
-            onClick={() => setIntegrationsDialogOpen(true)}
+            onClick={openIntegrations}
             className="flex items-center gap-1.5 h-8 px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
           >
             <PlugIcon aria-hidden="true" className="size-3.5" />

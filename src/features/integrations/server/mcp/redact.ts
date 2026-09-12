@@ -1,3 +1,8 @@
+import {
+  CREDENTIAL_TOKEN_PATTERNS,
+  DSN_PASSWORD_PATTERN,
+} from "../../credential-guard";
+
 /**
  * Redaction of MCP tool results before they reach the model.
  *
@@ -38,46 +43,6 @@ export const REDACTION_PLACEHOLDER = "[redacted-by-codenaya]";
  * unrelated text.
  */
 const MIN_EXACT_MATCH_LENGTH = 8;
-
-/**
- * Credential-shaped token patterns.
- *
- * Each is anchored on a provider prefix rather than raw entropy, because
- * entropy alone flags base64 payloads, hashes, UUIDs and minified code. Prefixed
- * matching has a far lower false-positive rate.
- */
-const TOKEN_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
-  // GitHub: ghp_, gho_, ghu_, ghs_, ghr_, github_pat_
-  { label: "github", pattern: /\bgh[pousr]_[A-Za-z0-9]{16,}\b/g },
-  { label: "github-pat", pattern: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g },
-  // Stripe live/test secret and restricted keys.
-  { label: "stripe", pattern: /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b/g },
-  // Supabase personal access tokens and service-role JWTs.
-  { label: "supabase-pat", pattern: /\bsbp_[A-Za-z0-9]{20,}\b/g },
-  // OpenAI-style.
-  { label: "openai", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
-  // Slack.
-  { label: "slack", pattern: /\bxox[abposr]-[A-Za-z0-9-]{10,}\b/g },
-  // Google API keys.
-  { label: "google", pattern: /\bAIza[A-Za-z0-9_-]{30,}\b/g },
-  // AWS access key ids.
-  { label: "aws", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g },
-  // JWTs — three base64url segments. Service-role keys are commonly JWTs.
-  {
-    label: "jwt",
-    pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-  },
-];
-
-/**
- * Passwords inside connection strings.
- *
- * The password is replaced while scheme, host, port and database name survive, so
- * the agent can still reason about the topology (and still knows a DSN was
- * returned) without the secret travelling into the transcript.
- */
-const DSN_PASSWORD_PATTERN =
-  /\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+):([^\s@/]+)@/gi;
 
 /**
  * Nesting ceiling for `redactJsonValue`.
@@ -140,7 +105,7 @@ export function redactSecrets(
     }
   }
 
-  for (const { label, pattern } of TOKEN_PATTERNS) {
+  for (const { label, pattern } of CREDENTIAL_TOKEN_PATTERNS) {
     // Fresh RegExp each call: the module-level literals carry /g state via
     // lastIndex, and reusing them across calls skips matches unpredictably.
     const scoped = new RegExp(pattern.source, pattern.flags);

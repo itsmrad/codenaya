@@ -15,6 +15,7 @@ import {
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../../convex/_generated/api";
+import { Id } from "../../../../../../convex/_generated/dataModel";
 
 /**
  * POST /api/integrations/oauth/start
@@ -30,6 +31,7 @@ import { api } from "../../../../../../convex/_generated/api";
 
 const requestSchema = z.object({
   providerId: z.string().min(1),
+  projectId: z.string().optional(),
 });
 
 function jsonError(error: string, status: number) {
@@ -180,6 +182,19 @@ export async function POST(request: Request) {
     return jsonError(parsed.error.issues[0]?.message ?? "Invalid request", 400);
   }
 
+  if (parsed.data.projectId) {
+    try {
+      const project = await convex.query(api.system.getProjectById, {
+        internalKey,
+        projectId: parsed.data.projectId as Id<"projects">,
+      });
+      if (!project) return jsonError("Project not found", 404);
+      if (project.ownerId !== userId) return jsonError("Forbidden", 403);
+    } catch {
+      return jsonError("Invalid project", 400);
+    }
+  }
+
   const provider = getProvider(parsed.data.providerId);
   if (!provider) {
     return jsonError(`Unknown provider "${parsed.data.providerId}"`, 400);
@@ -235,6 +250,7 @@ export async function POST(request: Request) {
       internalKey,
       state: start.state,
       userId,
+      projectId: parsed.data.projectId as Id<"projects"> | undefined,
       providerId: provider.id,
       serverUrl: provider.mcpUrl,
       redirectUri,

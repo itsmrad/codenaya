@@ -689,6 +689,7 @@ export const createUserConnection = mutation({
   args: {
     internalKey: v.string(),
     userId: v.string(),
+    projectId: v.optional(v.id("projects")),
     providerId: v.string(),
     label: v.string(),
     authMode: v.union(v.literal("oauth"), v.literal("api_key")),
@@ -704,9 +705,16 @@ export const createUserConnection = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    if (args.projectId) {
+      const project = await ctx.db.get("projects", args.projectId);
+      if (!project || project.ownerId !== args.userId) {
+        throw new Error("Project not found or owned by another user");
+      }
+    }
+
     const now = Date.now();
 
-    return await ctx.db.insert("userConnections", {
+    const connectionId = await ctx.db.insert("userConnections", {
       userId: args.userId,
       providerId: args.providerId,
       label: args.label,
@@ -728,6 +736,22 @@ export const createUserConnection = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    if (!args.projectId) return { connectionId };
+
+    const projectConnectionId = await ctx.db.insert("projectConnections", {
+      projectId: args.projectId,
+      userConnectionId: connectionId,
+      ownerId: args.userId,
+      enabled: true,
+      readOnly: true,
+      providerScope: {},
+      writeApproved: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { connectionId, projectConnectionId };
   },
 });
 
@@ -794,6 +818,127 @@ export const updateUserConnectionStatus = mutation({
       statusMessage: args.statusMessage,
       updatedAt: Date.now(),
     });
+  },
+});
+
+/**
+ * Claim the right to refresh one OAuth credential.
+ *
+ * Refresh tokens may rotate. Without a database-backed lease, two agent runs
+ * can exchange the same token concurrently and the loser can invalidate an
+ * otherwise healthy connection. Convex serializes this mutation, so exactly one
+ * caller receives the lease.
+ */
+export const claimUserConnectionRefresh = mutation({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+    leaseId: v.string(),
+    refreshSkewMs: v.number(),
+    leaseDurationMs: v.number(),
+  },
+  returns: v.union(
+    v.literal("acquired"),
+    v.literal("busy"),
+    v.literal("not_needed"),
+    v.literal("missing"),
+  ),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const connection = await ctx.db.get("userConnections", args.connectionId);
+    if (!connection) return "missing" as const;
+
+    const now = Date.now();
+    const needsRefresh =
+      connection.authMode === "oauth" &&
+      typeof connection.tokenExpiresAt === "number" &&
+      connection.tokenExpiresAt - args.refreshSkewMs <= now;
+
+    if (!needsRefresh) return "not_needed" as const;
+
+    if (
+      connection.refreshLeaseId &&
+      connection.refreshLeaseExpiresAt &&
+      connection.refreshLeaseExpiresAt > now
+    ) {
+      return "busy" as const;
+    }
+
+    await ctx.db.patch("userConnections", args.connectionId, {
+      refreshLeaseId: args.leaseId,
+      refreshLeaseExpiresAt: now + args.leaseDurationMs,
+    });
+
+    return "acquired" as const;
+  },
+});
+
+/** Commit a refreshed sealed OAuth bundle only when the caller owns the lease. */
+export const completeUserConnectionRefresh = mutation({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+    leaseId: v.string(),
+    maskedPreview: v.string(),
+    scopes: v.array(v.string()),
+    tokenExpiresAt: v.union(v.number(), v.null()),
+    ...sealedFields,
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const connection = await ctx.db.get("userConnections", args.connectionId);
+    if (!connection || connection.refreshLeaseId !== args.leaseId) return false;
+
+    await ctx.db.patch("userConnections", args.connectionId, {
+      kekProvider: args.kekProvider,
+      kekKeyId: args.kekKeyId,
+      wrappedDek: args.wrappedDek,
+      ciphertext: args.ciphertext,
+      iv: args.iv,
+      authTag: args.authTag,
+      maskedPreview: args.maskedPreview,
+      scopes: args.scopes,
+      tokenExpiresAt: args.tokenExpiresAt ?? undefined,
+      status: "active" as const,
+      statusMessage: undefined,
+      refreshLeaseId: undefined,
+      refreshLeaseExpiresAt: undefined,
+      updatedAt: Date.now(),
+    });
+
+    return true;
+  },
+});
+
+/** Release a refresh lease and expose only a non-sensitive connection state. */
+export const failUserConnectionRefresh = mutation({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+    leaseId: v.string(),
+    reauthRequired: v.boolean(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const connection = await ctx.db.get("userConnections", args.connectionId);
+    if (!connection || connection.refreshLeaseId !== args.leaseId) return false;
+
+    await ctx.db.patch("userConnections", args.connectionId, {
+      status: args.reauthRequired ? "needs_reauth" : "active",
+      statusMessage: args.reauthRequired
+        ? "OAuth authorization expired. Reconnect this integration."
+        : "OAuth refresh temporarily failed. It will be retried automatically.",
+      refreshLeaseId: undefined,
+      refreshLeaseExpiresAt: undefined,
+      updatedAt: Date.now(),
+    });
+
+    return true;
   },
 });
 
@@ -989,6 +1134,7 @@ export const createOauthFlowState = mutation({
     internalKey: v.string(),
     state: v.string(),
     userId: v.string(),
+    projectId: v.optional(v.id("projects")),
     providerId: v.string(),
     serverUrl: v.string(),
     redirectUri: v.string(),
@@ -1001,9 +1147,17 @@ export const createOauthFlowState = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    if (args.projectId) {
+      const project = await ctx.db.get("projects", args.projectId);
+      if (!project || project.ownerId !== args.userId) {
+        throw new Error("Project not found or owned by another user");
+      }
+    }
+
     return await ctx.db.insert("oauthFlowStates", {
       state: args.state,
       userId: args.userId,
+      projectId: args.projectId,
       providerId: args.providerId,
       serverUrl: args.serverUrl,
       redirectUri: args.redirectUri,

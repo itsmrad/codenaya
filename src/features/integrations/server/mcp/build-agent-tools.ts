@@ -34,6 +34,7 @@ import {
 } from "../../adapters/agentkit";
 import { describeDrift } from "./fingerprint";
 import { discoverTools, type DiscoveredTool } from "./discover-tools";
+import { redactSecrets } from "./redact";
 import {
   collectKnownSecrets,
   resolveMcpServers,
@@ -51,6 +52,8 @@ export interface McpToolBuildResult {
     projectConnectionId: string;
     toolBaseline: Array<{ name: string; digest: string }>;
   }>;
+  /** OAuth credentials rejected by the provider and requiring reconnection. */
+  reauthConnectionIds: string[];
 }
 
 export interface BuildMcpToolsOptions {
@@ -77,6 +80,12 @@ export interface BuildMcpToolsOptions {
  */
 export const MAX_TOOLS_PER_PROJECT = 80;
 
+export function isMcpAuthenticationFailure(error: string): boolean {
+  return /\b(?:unauthorized|invalid_token|invalid_client|invalid_grant|401)\b/i.test(
+    error,
+  );
+}
+
 /**
  * Build the tool set for a project's enabled connections.
  *
@@ -91,9 +100,16 @@ export async function buildMcpAgentTools(
   const warnings: string[] = [];
   const connectedSummaries: string[] = [];
   const baselinesToRecord: McpToolBuildResult["baselinesToRecord"] = [];
+  const reauthConnectionIds: string[] = [];
 
   if (entries.length === 0) {
-    return { tools: [], connectedSummaries, warnings, baselinesToRecord };
+    return {
+      tools: [],
+      connectedSummaries,
+      warnings,
+      baselinesToRecord,
+      reauthConnectionIds,
+    };
   }
 
   const { servers, problems } = await resolveMcpServers(entries);
@@ -103,7 +119,13 @@ export async function buildMcpAgentTools(
   }
 
   if (servers.length === 0) {
-    return { tools: [], connectedSummaries, warnings, baselinesToRecord };
+    return {
+      tools: [],
+      connectedSummaries,
+      warnings,
+      baselinesToRecord,
+      reauthConnectionIds,
+    };
   }
 
   const knownSecrets = collectKnownSecrets(servers);
@@ -118,8 +140,15 @@ export async function buildMcpAgentTools(
     const discovery = await discoverTools(server);
 
     if (!discovery.ok) {
+      const authenticationFailure = isMcpAuthenticationFailure(discovery.error);
+      if (authenticationFailure) {
+        reauthConnectionIds.push(server.userConnectionId);
+      }
+      const safeError = authenticationFailure
+        ? "authorization rejected; reconnect this integration"
+        : redactSecrets(discovery.error, knownSecrets).text;
       warnings.push(
-        `${server.displayName}: could not list tools (${discovery.error}).`,
+        `${server.displayName}: could not list tools (${safeError}).`,
       );
       continue;
     }
@@ -206,7 +235,13 @@ export async function buildMcpAgentTools(
     runId,
   });
 
-  return { tools, connectedSummaries, warnings, baselinesToRecord };
+  return {
+    tools,
+    connectedSummaries,
+    warnings,
+    baselinesToRecord,
+    reauthConnectionIds,
+  };
 }
 
 /**
@@ -256,6 +291,9 @@ export function buildIntegrationsPromptSection(
         "process.env instead. Values shown as " +
         "[redacted-by-codenaya] were removed for safety — do not attempt to " +
         "reconstruct or guess them.",
+      "The credential that authenticates this MCP connection is managed by the " +
+        "server. Never request it, place it in an MCP config file, or pass it to " +
+        "setEnvVar; invoke the connected tool directly.",
       "",
       "After provisioning something, store its configuration with setEnvVar so the " +
         "preview can connect. Use a NEXT_PUBLIC_ / VITE_ prefix only for values that " +

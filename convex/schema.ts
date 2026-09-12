@@ -170,6 +170,11 @@ export default defineSchema({
     oauthClientId: v.optional(v.string()),
     authServerUrl: v.optional(v.string()),
 
+    // Short lease used to serialize refresh-token rotation across concurrent
+    // agent runs. Both fields are optional so existing rows migrate safely.
+    refreshLeaseId: v.optional(v.string()),
+    refreshLeaseExpiresAt: v.optional(v.number()),
+
     lastUsedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -270,6 +275,9 @@ export default defineSchema({
   oauthFlowStates: defineTable({
     state: v.string(),
     userId: v.string(),
+    // When OAuth starts inside a project, the resulting connection is linked to
+    // that project in the same transaction that stores the sealed credential.
+    projectId: v.optional(v.id("projects")),
     providerId: v.string(),
     serverUrl: v.string(),
     redirectUri: v.string(),

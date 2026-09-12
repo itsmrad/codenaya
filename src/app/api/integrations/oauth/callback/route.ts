@@ -234,9 +234,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    await convex.mutation(api.system.createUserConnection, {
+    const created = await convex.mutation(api.system.createUserConnection, {
       internalKey,
       userId,
+      projectId: flow.projectId,
       providerId: provider.id,
       label: provider.displayName,
       authMode: "oauth",
@@ -249,14 +250,16 @@ export async function GET(request: Request) {
       authServerUrl: flow.authServerUrl,
       ...sealed,
     });
+
+    return resultPage(
+      "success",
+      created.projectConnectionId
+        ? `${provider.displayName} is connected to this project with read-only access. You can close this window.`
+        : `${provider.displayName} is connected. You can close this window.`,
+      origin,
+    );
   } catch (error) {
     console.error("[oauth/callback] failed to persist connection", error);
     return fail("Could not save the connection.");
   }
-
-  return resultPage(
-    "success",
-    `${provider.displayName} is connected. You can close this window.`,
-    origin,
-  );
 }
