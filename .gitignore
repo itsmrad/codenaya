@@ -62,3 +62,6 @@ next-env.d.ts
 # local implementation notes
 /steps
 /.swc
+
+# clerk configuration (can include secrets)
+/.clerk/
