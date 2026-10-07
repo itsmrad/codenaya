@@ -210,18 +210,41 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
         </div>
 
         <div className="flex items-center gap-1 p-0.5 bg-muted/40 rounded-lg border border-border/50">
-          {previewUrl && (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-8 rounded-md hover:bg-muted"
-              title="Open in new tab"
-              aria-label="Open in new tab"
-              onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
-            >
-              <ExternalLinkIcon className="size-4" />
-            </Button>
-          )}
+          {/* A real link rather than window.open, so the browser treats it as a
+              plain navigation (no popup heuristics; middle-click and copy-link
+              work). The span carries the tooltip: a disabled button gets no hover. */}
+          <span
+            className="flex"
+            title={previewUrl ? "Open in new tab" : "Available once the preview is running"}
+          >
+            {previewUrl ? (
+              <Button
+                asChild
+                size="icon"
+                variant="ghost"
+                className="size-8 rounded-md hover:bg-muted"
+              >
+                <a
+                  href={previewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Open in new tab"
+                >
+                  <ExternalLinkIcon className="size-4" />
+                </a>
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-8 rounded-md hover:bg-muted"
+                disabled
+                aria-label="Open in new tab"
+              >
+                <ExternalLinkIcon className="size-4" />
+              </Button>
+            )}
+          </span>
           <Button
             size="icon"
             variant="ghost"

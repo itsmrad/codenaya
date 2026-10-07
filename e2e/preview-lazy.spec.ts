@@ -1,42 +1,17 @@
-import { expect, test, type Page } from "@playwright/test";
-import { ConvexHttpClient } from "convex/browser";
+import { expect, test } from "@playwright/test";
 
-import { api } from "../convex/_generated/api";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
-import { userConvexClient } from "./convex-client";
+import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
 
 const PROJECT_NAME = "e2e-preview-boot";
-const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
-const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
-
-/** Reuses (or creates) the e2e user's fixture project; the preview needs a file to boot. */
-const seedProject = async (page: Page) => {
-  const user = await userConvexClient(page);
-  const existing = (await user.query(api.projects.get, {})).find(
-    (project) => project.name === PROJECT_NAME,
-  );
-  const projectId =
-    existing?._id ?? (await user.mutation(api.projects.create, { name: PROJECT_NAME }));
-
-  const system = new ConvexHttpClient(convexUrl!);
-  await system.mutation(api.system.cleanup, { internalKey: internalKey!, projectId });
-  await system.mutation(api.system.createFile, {
-    internalKey: internalKey!,
-    projectId,
-    name: "index.html",
-    content: "<h1>Hello</h1>\n",
-  });
-
-  return projectId;
-};
 
 /** The browser logs the stubbed 503 itself; that line is the scenario, not a bug. */
 const STUBBED_503 = /status of 503 .*\/api\/sandbox/;
 
 test.describe("preview boot", () => {
   test.skip(
-    !hasClerkCredentials() || !internalKey || !convexUrl,
+    !hasClerkCredentials() || !hasPreviewFixtureEnv(),
     "Needs CLERK_SECRET_KEY, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, NEXT_PUBLIC_CONVEX_URL and CODENAYA_CONVEX_INTERNAL_KEY",
   );
 
@@ -53,7 +28,7 @@ test.describe("preview boot", () => {
     });
 
     await signIn(page);
-    const projectId = await seedProject(page);
+    const projectId = await seedPreviewProject(page, PROJECT_NAME);
 
     await page.goto(`/projects/${projectId}`);
     // Once the file tree shows, the files have loaded; the old code booted the sandbox then.
