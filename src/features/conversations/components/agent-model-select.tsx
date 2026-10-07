@@ -49,7 +49,7 @@ export const AgentModelSelect = ({
       <PromptInputSelectTrigger
         size="sm"
         aria-label="Agent model"
-        className="h-7 max-w-44 gap-1 rounded-md px-2 text-xs dark:bg-transparent dark:hover:bg-accent"
+        className="h-7 min-w-0 max-w-44 gap-1 rounded-md px-2 text-xs dark:bg-transparent dark:hover:bg-accent"
       >
         <PromptInputSelectValue />
       </PromptInputSelectTrigger>

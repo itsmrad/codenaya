@@ -2,7 +2,7 @@
 
 import { Allotment } from "allotment";
 
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useIsCompact } from "@/hooks/use-mobile";
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
 import { ProjectIntegrationsProvider } from "@/features/integrations/components/project-integrations-context";
 
@@ -20,15 +20,15 @@ export const ProjectIdLayout = ({
   children: React.ReactNode;
   projectId: Id<"projects">;
 }) => {
-  // Phones get a tabbed layout instead: ProjectIdView renders the chat as one
-  // of its full-screen tabs, so the side-by-side panes are skipped.
-  const isMobile = useIsMobile();
+  // Phones and tablets get a tabbed layout instead: ProjectIdView renders the
+  // chat as one of its full-size tabs, so the side-by-side panes are skipped.
+  const isCompact = useIsCompact();
 
   return (
     <ProjectIntegrationsProvider projectId={projectId}>
       <div className="w-full h-dvh flex flex-col bg-background">
         <div className="flex-1 p-2 min-h-0 flex overflow-hidden">
-        {isMobile ? (
+        {isCompact ? (
           <div className="flex-1 min-w-0 flex flex-col relative">{children}</div>
         ) : (
         <Allotment

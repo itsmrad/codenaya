@@ -19,7 +19,7 @@ import { formatDistanceToNow } from "date-fns";
 
 import { cn } from "@/lib/utils";
 import { UserMenu } from "@/components/user-menu";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useIsCompact, useIsMobile } from "@/hooks/use-mobile";
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
 import { EditorView } from "@/features/editor/components/editor-view";
 import {
@@ -47,7 +47,7 @@ const DEFAULT_MAIN_SIZE = 1000;
 
 type IdeView = "chat" | "editor" | "preview";
 
-const MOBILE_TABS = [
+const VIEW_TABS = [
   { view: "chat", label: "Chat", icon: MessageSquareIcon },
   { view: "editor", label: "Code", icon: CodeIcon },
   { view: "preview", label: "Preview", icon: EyeIcon },
@@ -87,15 +87,17 @@ export const ProjectIdView = ({
   projectId: Id<"projects">;
 }) => {
   const isMobile = useIsMobile();
+  // Below desktop width the chat is a tab rather than a side panel.
+  const isCompact = useIsCompact();
   // Switching preview engines reloads the page with `?view=preview` so the user
   // lands back on the preview they were using.
   const openOnPreview = useSearchParams().get("view") === "preview";
-  // Otherwise phones open on the chat; wider screens show the chat as a side
-  // panel (see ProjectIdLayout), so there "chat" falls back to the editor.
+  // Otherwise phones and tablets open on the chat; desktops show the chat as a
+  // side panel (see ProjectIdLayout), so there "chat" falls back to the editor.
   const [selectedView, setSelectedView] = useState<IdeView>(
     openOnPreview ? "preview" : "chat",
   );
-  const activeView = !isMobile && selectedView === "chat" ? "editor" : selectedView;
+  const activeView = !isCompact && selectedView === "chat" ? "editor" : selectedView;
   // The preview boots a cloud sandbox or WebContainer as soon as it mounts, so
   // mount it on first open and keep it mounted so tab switches don't reboot it.
   const [previewOpened, setPreviewOpened] = useState(openOnPreview);
@@ -211,19 +213,20 @@ export const ProjectIdView = ({
           )}
         </div>
 
-        {/* Center: Code / Preview tabs (phones use the bottom tab bar) */}
+        {/* Center: view tabs (phones use the bottom tab bar; desktops keep
+            the chat beside them, so they only switch Code / Preview) */}
         {!isMobile && (
           <div className="flex items-center p-0.5 bg-muted/40 rounded-lg border border-border/40">
-            <Tab
-              label="Code"
-              isActive={activeView === "editor"}
-              onClick={() => selectView("editor")}
-            />
-            <Tab
-              label="Preview"
-              isActive={activeView === "preview"}
-              onClick={() => selectView("preview")}
-            />
+            {VIEW_TABS.filter(({ view }) => isCompact || view !== "chat").map(
+              ({ view, label }) => (
+                <Tab
+                  key={view}
+                  label={label}
+                  isActive={activeView === view}
+                  onClick={() => selectView(view)}
+                />
+              )
+            )}
           </div>
         )}
 
@@ -266,7 +269,7 @@ export const ProjectIdView = ({
 
       {/* ─── Content ─── */}
       <div className="flex-1 relative min-h-0">
-        {isMobile && (
+        {isCompact && (
           <div
             className={cn(
               "absolute inset-0 flex flex-col",
@@ -328,7 +331,7 @@ export const ProjectIdView = ({
           aria-label="Workspace views"
           className="shrink-0 grid grid-cols-3 gap-1 p-1 mb-[env(safe-area-inset-bottom)] rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]"
         >
-          {MOBILE_TABS.map(({ view, label, icon: Icon }) => (
+          {VIEW_TABS.map(({ view, label, icon: Icon }) => (
             <button
               key={view}
               type="button"

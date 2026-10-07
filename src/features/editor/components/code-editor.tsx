@@ -14,6 +14,9 @@ import { suggestion } from "../extensions/suggestion";
 import { quickEdit } from "../extensions/quick-edit";
 import { selectionTooltip } from "../extensions/selection-tooltip";
 
+// Below this width the minimap takes too much of the code area.
+const MINIMAP_MIN_EDITOR_WIDTH = 600;
+
 const editorTheme = (resolvedTheme?: string) =>
   resolvedTheme === "light" ? lightTheme : oneDark;
 
@@ -77,10 +80,29 @@ export const CodeEditor = ({
     });
   }, [resolvedTheme, themeCompartment]);
 
+  // Hide the minimap on narrow editors. A ResizeObserver rather than a CSS
+  // container query, because container queries would make this element the
+  // containing block for CodeMirror's fixed-position tooltips.
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      el.toggleAttribute(
+        "data-narrow",
+        entry.contentRect.width < MINIMAP_MIN_EDITOR_WIDTH,
+      );
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     // `isolate` keeps CodeMirror's z-index 500 tooltips (quick edit, selection
     // actions) inside the editor's stacking context, so dialogs and popovers
-    // stack above them.
-    <div ref={editorRef} className="isolate size-full pl-4 bg-background" />
+    // stack above them. `!` because CodeMirror's unlayered styles beat Tailwind's.
+    <div
+      ref={editorRef}
+      className="isolate size-full pl-4 bg-background data-narrow:[&_.cm-minimap-gutter]:hidden!"
+    />
   );
 };
