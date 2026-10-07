@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  BookOpenIcon,
   BrainIcon,
   CheckCircle2Icon,
   ChevronRightIcon,
@@ -52,6 +53,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   deleteFiles: { icon: FileX2Icon, running: "Deleting", done: "Deleted", writes: true },
   scrapeUrls: { icon: GlobeIcon, running: "Fetching", done: "Fetched" },
   setEnvVar: { icon: KeyRoundIcon, running: "Setting env", done: "Set env" },
+  loadSkill: { icon: BookOpenIcon, running: "Loading skill", done: "Used skill" },
 };
 
 const toolMeta = (tool = ""): ToolMeta => {
@@ -153,7 +155,8 @@ const Targets = ({
 }) => {
   const [expanded, setExpanded] = useState(false);
   const { tool } = row.step;
-  const opens = tool !== "scrapeUrls" && tool !== "setEnvVar" && !tool?.includes("__");
+  const opens =
+    tool !== "scrapeUrls" && tool !== "setEnvVar" && tool !== "loadSkill" && !tool?.includes("__");
   const open = opens && tool !== "deleteFiles" ? onOpenFile : undefined;
   if (tool === "renameFile" && row.targets.length === 2) {
     return (

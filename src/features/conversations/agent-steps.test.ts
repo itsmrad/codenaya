@@ -65,6 +65,13 @@ describe("describeToolCall", () => {
     ).toEqual(["API_URL"]);
   });
 
+  it("names the loaded skill", () => {
+    expect(
+      describeToolCall({ name: "loadSkill", input: { name: "seo-metadata" } }, pathOf),
+    ).toEqual(["seo-metadata"]);
+    expect(describeToolCall({ name: "loadSkill", input: {} }, pathOf)).toEqual([]);
+  });
+
   it("uses the tool part of namespaced MCP tools", () => {
     expect(
       describeToolCall({ name: "context7__search_docs", input: {} }, pathOf),

@@ -19,6 +19,7 @@ import { createRenameFileTool } from './tools/rename-file';
 import { createDeleteFilesTool } from './tools/delete-files';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
 import { createSetEnvVarTool } from './tools/set-env-var';
+import { createLoadSkillTool } from './tools/load-skill';
 import type { AgentModelChoice } from '../agent-models';
 import {
   type RunModel,
@@ -46,6 +47,8 @@ import {
   oauthConnectionNeedsRefresh,
   refreshExpiredOAuthConnections,
 } from '@/features/integrations/server/oauth/refresh-connections';
+import { resolveSkills } from '@/features/skills/server/resolve-skills';
+import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -436,6 +439,28 @@ export const processMessage = inngest.createFunction(
 
     systemPrompt += buildIntegrationsPromptSection(mcpSummaries, mcpWarnings);
 
+    // ─── Skills ───
+    //
+    // Only names and descriptions go in the prompt; loadSkill hands the agent a
+    // body from this step's result, with no further Convex call. Bodies are not
+    // secret, so persisting them is fine. Non-fatal, like MCP: a run without
+    // skills still works.
+    const skills = await step.run("resolve-skills", async () => {
+      try {
+        return resolveSkills(
+          await convex.query(api.system.getProjectSkills, {
+            internalKey,
+            projectId,
+          }),
+        );
+      } catch (error) {
+        console.error("[process-message] skills resolution failed", error);
+        return [];
+      }
+    });
+
+    systemPrompt += buildSkillsPromptSection(skills);
+
     // Display only: mirrors the agent's tool calls onto the assistant message
     // for the chat panel's activity block. Each write is its own step, so replays
     // reuse the recorded result instead of writing again, and it never throws:
@@ -485,6 +510,7 @@ export const processMessage = inngest.createFunction(
         ...(mcpOwnerId
           ? [createSetEnvVarTool({ projectId, ownerId: mcpOwnerId, internalKey })]
           : []),
+        ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
         ...mcpTools,
       ],
       lifecycle: {

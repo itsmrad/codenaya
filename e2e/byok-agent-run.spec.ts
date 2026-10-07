@@ -1,6 +1,3 @@
-import { createServer, type IncomingMessage } from "node:http";
-import type { AddressInfo } from "node:net";
-
 import { expect, test, type Page } from "@playwright/test";
 
 import { api } from "../convex/_generated/api";
@@ -8,99 +5,19 @@ import type { Id } from "../convex/_generated/dataModel";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
+import { STUB_MODEL, STUB_TITLE, startStubProvider } from "./stub-provider";
 
 /**
  * Agent runs on the user's own key (BYOK), end to end.
  *
- * A local OpenAI-compatible stub stands in for the provider, registered as a
- * custom key (`next dev` allows a localhost endpoint). Inference goes through
- * Inngest's `step.ai.infer`, so this needs the Inngest dev server serving this
- * app (`INNGEST_DEV` / `INNGEST_BASE_URL` pointing at it).
+ * A local OpenAI-compatible stub stands in for the provider (see
+ * `stub-provider.ts`). Inference goes through Inngest's `step.ai.infer`, so
+ * this needs the Inngest dev server serving this app (`INNGEST_DEV` /
+ * `INNGEST_BASE_URL` pointing at it).
  */
 
 const projectId = process.env.E2E_PROJECT_ID;
-const STUB_MODEL = "stub-model";
-const STUB_TITLE = "Stub chat title";
 const STUB_REPLY = "Hello from your own key";
-
-interface ChatRequest {
-  model: string;
-  tools?: unknown[];
-  messages: Array<{ role: string }>;
-}
-
-const readJson = async (request: IncomingMessage) => {
-  let body = "";
-  for await (const chunk of request) body += chunk;
-  return JSON.parse(body || "{}") as ChatRequest;
-};
-
-/**
- * Accepts one key until `reject()` is called. The coding agent first gets a
- * `listFiles` call (so the run block has a step to show), then a text reply;
- * the title agent (no tools) gets a fixed title.
- */
-const startStubProvider = async (apiKey: string) => {
-  let rejecting = false;
-  const models: string[] = [];
-
-  const server = createServer(async (request, response) => {
-    const send = (status: number, body: unknown) => {
-      response.writeHead(status, { "Content-Type": "application/json" });
-      response.end(JSON.stringify(body));
-    };
-
-    if (rejecting || request.headers.authorization !== `Bearer ${apiKey}`) {
-      return send(401, {
-        error: { message: "Incorrect API key provided", code: "invalid_api_key" },
-      });
-    }
-    if (request.method === "GET") {
-      return send(200, { data: [{ id: STUB_MODEL }] });
-    }
-
-    const body = await readJson(request);
-    models.push(body.model);
-    const message = !body.tools?.length
-      ? { role: "assistant", content: STUB_TITLE }
-      : body.messages.some((m) => m.role === "tool")
-        ? { role: "assistant", content: STUB_REPLY }
-        : {
-            role: "assistant",
-            content: null,
-            tool_calls: [
-              {
-                id: `call_${Date.now()}`,
-                type: "function",
-                function: { name: "listFiles", arguments: "{}" },
-              },
-            ],
-          };
-    send(200, {
-      id: "chatcmpl-stub",
-      object: "chat.completion",
-      model: body.model,
-      choices: [
-        {
-          index: 0,
-          message,
-          finish_reason: message.content ? "stop" : "tool_calls",
-        },
-      ],
-    });
-  });
-
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  return {
-    server,
-    baseUrl: `http://127.0.0.1:${port}/v1`,
-    models,
-    reject: () => {
-      rejecting = true;
-    },
-  };
-};
 
 test.describe.serial("agent runs on the user's own key", () => {
   test.skip(
@@ -135,7 +52,7 @@ test.describe.serial("agent runs on the user's own key", () => {
   };
 
   test.beforeAll(async ({ browser }) => {
-    stub = await startStubProvider(apiKey);
+    stub = await startStubProvider(apiKey, { reply: STUB_REPLY });
     page = await browser.newPage();
     await signIn(page);
 

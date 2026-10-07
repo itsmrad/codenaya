@@ -9,7 +9,6 @@
  */
 
 import { getFunctionName } from "convex/server";
-import { StepMode } from "inngest/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const SECRET = "sk-user-secret-key-1234";
@@ -31,10 +30,8 @@ vi.mock("@/features/ai-providers/server/test-connection", () => ({
   testConnection: mocks.testConnection,
 }));
 
-import { inngest } from "@/inngest/client";
-
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
-import { processMessage } from "./process-message";
+import { drive, text } from "./process-message.driver";
 
 const key = {
   _id: "key_1",
@@ -51,98 +48,12 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectById": () => ({ ownerId: "user_1" }),
   "system:getProjectMcpConnections": () => [],
   "system:getProjectFiles": () => [],
+  "system:getProjectSkills": () => [],
 };
 
 /** Convex mutations the run performed, as `[name, args]`. */
 const mutations = () =>
   mocks.mutation.mock.calls.map(([ref, args]) => [getFunctionName(ref), args] as const);
-
-const text = (content: string) => ({
-  choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }],
-});
-
-/** One inference result: memoized data, or a failed AI gateway step. */
-type Inference = { data: unknown } | { error: unknown };
-
-interface Outcome {
-  finalType: string;
-  /** Every persisted step result (what Inngest stores). */
-  stepState: Record<string, unknown>;
-  /** URLs the AI gateway was asked to call. */
-  inferenceUrls: string[];
-}
-
-async function drive(
-  model: Record<string, unknown>,
-  inferences: Inference[],
-): Promise<Outcome> {
-  const event = {
-    name: "message/sent",
-    data: {
-      messageId: "m1",
-      conversationId: "c1",
-      projectId: "p1",
-      message: "List my files",
-      model,
-    },
-  };
-  const stepState: Record<string, unknown> = {};
-  const order: string[] = [];
-  const inferenceUrls: string[] = [];
-  let next = 0;
-
-  for (let request = 0; request < 100; request += 1) {
-    const execution = (
-      processMessage as unknown as {
-        createExecution: (o: { partialOptions: Record<string, unknown> }) => {
-          start: () => Promise<Record<string, unknown>>;
-        };
-      }
-    ).createExecution({
-      partialOptions: {
-        client: inngest,
-        runId: "run-under-test",
-        stepMode: StepMode.Async,
-        data: { event, events: [event], runId: "run-under-test", attempt: 0 },
-        stepState: { ...stepState },
-        stepCompletionOrder: [...order],
-        reqArgs: [],
-        headers: {},
-      },
-    });
-
-    const result = (await execution.start()) as {
-      type: string;
-      step?: { id: string; data?: unknown; error?: unknown };
-      steps?: Array<{ id: string; op?: string; opts?: { url?: string } }>;
-    };
-
-    if (result.type === "step-ran" && result.step) {
-      const { id, data, error } = result.step;
-      stepState[id] = { id, ...(error ? { error } : { data }) };
-      order.push(id);
-      continue;
-    }
-
-    if (result.type === "steps-found" && result.steps) {
-      for (const found of result.steps) {
-        if (found.op === "AIGateway") {
-          inferenceUrls.push(found.opts?.url ?? "");
-          stepState[found.id] = { id: found.id, ...inferences[Math.min(next++, inferences.length - 1)] };
-        } else if (found.op === "Sleep") {
-          stepState[found.id] = { id: found.id, data: null };
-        } else {
-          throw new Error(`Unexpected op ${found.op}`);
-        }
-        order.push(found.id);
-      }
-      continue;
-    }
-
-    return { finalType: result.type, stepState, inferenceUrls };
-  }
-  throw new Error("Function did not settle");
-}
 
 beforeEach(() => {
   vi.resetAllMocks();

@@ -59,7 +59,8 @@ const urlLabel = (raw: string) => {
 };
 
 /**
- * Human-readable targets for a tool call: file paths, URLs or env keys.
+ * Human-readable targets for a tool call: file paths, URLs, env keys or
+ * skill names.
  *
  * File ids are resolved through `pathOf`; ids that don't resolve are dropped,
  * so a row never shows an internal id. Env var values are never read.
@@ -105,6 +106,9 @@ export const describeToolCall = (
       break;
     case "setEnvVar":
       targets = str(input.key) ? [str(input.key)] : [];
+      break;
+    case "loadSkill":
+      targets = str(input.name) ? [str(input.name)] : [];
       break;
     default:
       // MCP tools are namespaced `provider__tool`.
