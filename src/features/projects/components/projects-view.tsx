@@ -10,7 +10,6 @@ import {
   PanelLeftOpen,
   ArrowUpDown,
   FolderOpen,
-  Sparkles,
 } from "lucide-react";
 import Link from "next/link";
 import { differenceInMinutes, format, formatDistanceToNow } from "date-fns";
@@ -38,10 +37,13 @@ import {
 } from "@/features/showcase/constants/tags";
 
 import { useProjects } from "../hooks/use-projects";
+import { useCreateProjectFromPrompt } from "../hooks/use-create-project-from-prompt";
+import { takePendingPrompt } from "../utils/pending-prompt";
 import { Doc } from "../../../../convex/_generated/dataModel";
 import { ProjectsCommandDialog } from "./projects-command-dialog";
 import { ImportGithubDialog } from "./import-github-dialog";
 import { NewProjectDialog } from "./new-project-dialog";
+import { PromptComposer } from "./prompt-composer";
 
 const formatTimestamp = (timestamp: number) => {
   return formatDistanceToNow(new Date(timestamp), { addSuffix: true });
@@ -82,6 +84,15 @@ export const ProjectsView = () => {
   const isMac = useIsMac();
 
   const allProjects = useProjects();
+  const hasNoProjects = allProjects?.length === 0;
+  const { createProject, isSubmitting } = useCreateProjectFromPrompt();
+
+  // A prompt typed on the landing page before signing up: create its project
+  // now. Taking the prompt clears it, so this runs at most once.
+  useEffect(() => {
+    const pendingPrompt = takePendingPrompt();
+    if (pendingPrompt) void createProject(pendingPrompt);
+  }, [createProject]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -295,7 +306,7 @@ export const ProjectsView = () => {
             ) : filteredProjects.length === 0 ? (
               !collapsed && (
                 <p className="text-xs text-muted-foreground/50 px-1 py-4">
-                  {searchQuery ? "No results" : "No projects yet"}
+                  {searchQuery ? "No results" : "Your projects will appear here"}
                 </p>
               )
             ) : (
@@ -373,27 +384,35 @@ export const ProjectsView = () => {
                   What will you build?
                 </h2>
                 <p className="mt-3 text-sm text-muted-foreground max-w-md mx-auto">
-                  Start a new project or pick up where you left off.
+                  {hasNoProjects
+                    ? "Describe your first app, or start from one of these ideas."
+                    : "Start a new project or pick up where you left off."}
                 </p>
               </motion.div>
 
-              {/* New Project prompt bar */}
+              {/* New Project prompt composer */}
               <motion.div
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, delay: 0.5, ease: [0.22, 1, 0.36, 1] }}
-                className="mt-6 flex justify-center"
+                className="mt-6 mx-auto max-w-2xl"
               >
-                <button
-                  onClick={() => setNewProjectDialogOpen(true)}
-                  className="w-full max-w-md flex items-center gap-3 h-11 px-4 sm:px-5 rounded-xl bg-card/80 backdrop-blur-sm border border-border/50 text-sm text-muted-foreground/60 hover:border-brand/30 hover:bg-card transition-all group cursor-text shadow-sm"
-                >
-                  <Sparkles className="size-4 shrink-0 text-muted-foreground/60 group-hover:text-brand transition-colors" />
-                  <span className="truncate">Describe what you want to build...</span>
-                  <Kbd className="ml-auto hidden sm:inline-flex text-[10px] text-muted-foreground/50 bg-muted/40 border-border/30 px-1.5 py-0.5 rounded">
-                    {isMac ? "⌘J" : "Ctrl+J"}
-                  </Kbd>
-                </button>
+                <PromptComposer
+                  onSubmit={createProject}
+                  isSubmitting={isSubmitting}
+                  showStarters
+                />
+                {hasNoProjects && (
+                  <p className="mt-4 text-center text-xs text-muted-foreground">
+                    Already have code?{" "}
+                    <button
+                      onClick={() => setImportDialogOpen(true)}
+                      className="font-medium text-foreground underline-offset-4 hover:text-brand hover:underline"
+                    >
+                      Import from GitHub
+                    </button>
+                  </p>
+                )}
               </motion.div>
             </div>
           </div>

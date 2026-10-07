@@ -9,6 +9,7 @@ import {
 } from "unique-names-generator";
 
 import { DEFAULT_CONVERSATION_TITLE } from "@/features/conversations/constants";
+import { resolveAgentModelId } from "@/features/conversations/agent-models";
 
 import { convex } from "@/lib/convex-client";
 import {
@@ -21,6 +22,7 @@ import { api } from "../../../../../convex/_generated/api";
 
 const requestSchema = z.object({
   prompt: z.string().min(1),
+  model: z.string().optional(),
 });
 
 export async function POST(request: Request) {
@@ -40,7 +42,7 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { prompt } = requestSchema.parse(body);
+  const { prompt, model } = requestSchema.parse(body);
 
   if (detectCredential(prompt).detected) {
     return NextResponse.json(
@@ -100,6 +102,7 @@ export async function POST(request: Request) {
     conversationId,
     projectId,
     message: prompt,
+    model: resolveAgentModelId(model),
   });
 
   // The project exists either way: return its id so the client can open it

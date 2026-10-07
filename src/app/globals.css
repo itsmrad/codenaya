@@ -278,3 +278,54 @@ html.lenis, html.lenis body {
 .chat-composer [data-slot="input-group-control"] {
   @apply resize-none bg-transparent outline-none dark:bg-transparent;
 }
+
+/* Dashboard prompt composer: the chat composer's box, larger, with a slowly
+   rotating brand-colored border while focused. */
+@property --composer-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes composer-border-spin {
+  to {
+    --composer-angle: 360deg;
+  }
+}
+.prompt-composer {
+  position: relative;
+  border-radius: 1rem;
+}
+.prompt-composer [data-slot="input-group"] {
+  @apply rounded-2xl!;
+}
+.prompt-composer::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: 1;
+  padding: 1.5px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--composer-angle),
+    transparent 0%,
+    var(--brand) 18%,
+    color-mix(in oklab, var(--brand) 30%, #a78bfa) 32%,
+    transparent 50%,
+    transparent 100%
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+  animation: composer-border-spin 4s linear infinite;
+}
+.prompt-composer:focus-within::before {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .prompt-composer::before {
+    animation: none;
+  }
+}
