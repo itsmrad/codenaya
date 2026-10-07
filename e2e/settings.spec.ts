@@ -51,6 +51,10 @@ test.describe("settings", () => {
             content: page.getByRole("heading", { level: 1, name: "AI providers" }),
           },
           {
+            path: "/settings/skills",
+            content: page.getByRole("heading", { level: 1, name: "Skills" }),
+          },
+          {
             path: "/settings/integrations",
             content: page.getByRole("heading", { level: 1, name: "Integrations" }),
           },
