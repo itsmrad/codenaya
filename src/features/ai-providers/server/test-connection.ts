@@ -105,6 +105,98 @@ export async function testConnection(
 }
 
 /**
+ * Provider wording for an account that cannot pay for inference: OpenAI's
+ * `insufficient_quota`, Anthropic's low credit balance, OpenRouter's and
+ * DeepSeek's out-of-credit replies.
+ */
+export const OUT_OF_CREDIT_PATTERN =
+  /insufficient[_ ]quota|exceeded your current quota|insufficient (credits|balance)|credit balance is too low|requires more credits/i;
+
+/** Smallest completion request a provider accepts: one output token, no tools. */
+function probeRequest(
+  { provider, apiKey, model }: ProviderCredential & { model: string },
+  baseUrl: string,
+): { url: string; headers: Record<string, string>; body: unknown } {
+  const messages = [{ role: "user", content: "hi" }];
+  if (provider === "anthropic") {
+    return {
+      url: `${baseUrl}/messages`,
+      headers: { "x-api-key": apiKey, "anthropic-version": ANTHROPIC_VERSION },
+      body: { model, max_tokens: 1, messages },
+    };
+  }
+  return {
+    url: `${baseUrl}/chat/completions`,
+    headers: { Authorization: `Bearer ${apiKey}` },
+    // OpenAI's current models refuse `max_tokens`.
+    body:
+      provider === "openai"
+        ? { model, max_completion_tokens: 1, messages }
+        : { model, max_tokens: 1, messages },
+  };
+}
+
+/** OpenRouter's free `/key` endpoint answers for keys with a spending limit. */
+async function openRouterLimitSpent(
+  credential: ProviderCredential,
+  baseUrl: string,
+  doFetch: FetchLike,
+  timeoutMs: number,
+): Promise<boolean> {
+  const { url, headers } = testRequest(credential, baseUrl);
+  const response = await doFetch(url, {
+    method: "GET",
+    headers,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) return false;
+  const body = (await response.json()) as { data?: { limit_remaining?: number | null } };
+  const remaining = body.data?.limit_remaining;
+  return typeof remaining === "number" && remaining <= 0;
+}
+
+/**
+ * Whether the account behind a working key is out of credit or quota.
+ *
+ * Inngest retries a failed `step.ai.infer` with backoff on its own side, so a
+ * 402 from the real inference reaches the run only minutes later. This asks
+ * first, with a one-token completion (a fraction of a cent on the user's key);
+ * OpenRouter keys whose spending limit is used up are caught by the free
+ * `/key` call instead. Only a definite out-of-credit answer counts: rate
+ * limits, server errors and unreachable providers are left to the inference.
+ * The response body is matched, never returned or logged.
+ */
+export async function isOutOfCredit(
+  credential: ProviderCredential & { model: string },
+  { fetchFn, timeoutMs = TEST_TIMEOUT_MS }: TestConnectionOptions = {},
+): Promise<boolean> {
+  const baseUrl = baseUrlFor(credential);
+  const doFetch = fetchFn ?? providerFetch(baseUrl);
+  try {
+    if (
+      credential.provider === "openrouter" &&
+      (await openRouterLimitSpent(credential, baseUrl, doFetch, timeoutMs))
+    ) {
+      return true;
+    }
+    const { url, headers, body } = probeRequest(credential, baseUrl);
+    const response = await doFetch(url, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (response.ok) {
+      await response.body?.cancel().catch(() => {});
+      return false;
+    }
+    return response.status === 402 || OUT_OF_CREDIT_PATTERN.test(await response.text());
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Response for a failed test: a rejected key or blocked URL is the caller's
  * to fix (400); anything else is the provider's side (502).
  */
