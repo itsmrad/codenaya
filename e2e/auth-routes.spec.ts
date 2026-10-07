@@ -67,7 +67,7 @@ test.describe("auth routes", () => {
     await expect(page.locator(".cl-signIn-root")).toBeVisible();
 
     await page.goto("/");
-    await page.getByRole("link", { name: "Start Building" }).click();
+    await page.getByRole("link", { name: "Sign Up" }).click();
     await expect(page).toHaveURL(/\/sign-up$/);
     await expect(page.locator(".cl-signUp-root")).toBeVisible();
   });
