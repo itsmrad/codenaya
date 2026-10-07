@@ -44,3 +44,16 @@ export const buildFlatFileList = (
 
   return result;
 };
+
+/**
+ * Entries whose content differs from what the sandbox already has.
+ *
+ * Rewriting an unchanged file is not harmless: Vite restarts its dev server
+ * whenever its config or a `.env` file is written, which rotates the HMR token
+ * and leaves an already-open preview unable to reconnect (#146).
+ */
+export const getChangedFiles = (
+  files: { path: string; content: string }[],
+  synced: ReadonlyMap<string, string>
+): { path: string; content: string }[] =>
+  files.filter((file) => synced.get(file.path) !== file.content);
