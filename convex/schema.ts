@@ -86,6 +86,15 @@ export default defineSchema({
     deletingAt: v.optional(v.number()),
   }).index("by_owner", ["ownerId"]),
 
+  /**
+   * Denormalized running totals, one row per `name`, so public pages can show
+   * a number without scanning a table. See `convex/stats.ts`.
+   */
+  counters: defineTable({
+    name: v.string(),
+    value: v.number(),
+  }).index("by_name", ["name"]),
+
   files: defineTable({
     projectId: v.id("projects"),
     parentId: v.optional(v.id("files")),

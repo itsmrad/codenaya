@@ -55,7 +55,7 @@ test.describe("import a skill from GitHub", () => {
       await dialog.getByLabel("Skill URL").fill(SOURCE_URL);
       await dialog.getByRole("button", { name: "Preview" }).click();
 
-      await expect(dialog.getByText(SKILL_NAME)).toBeVisible();
+      await expect(dialog.getByRole("heading", { name: SKILL_NAME })).toBeVisible();
       await expect(dialog.getByText("Use when testing skill imports.")).toBeVisible();
       await expect(dialog.getByRole("link", { name: SOURCE_URL })).toBeVisible();
       await dialog.getByRole("button", { name: "Save to my library" }).click();

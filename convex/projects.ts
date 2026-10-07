@@ -18,6 +18,7 @@ import {
   copyProjectName,
   validateProjectName,
 } from "../src/features/projects/utils/project-name";
+import { countProjectBuilt } from "./stats";
 
 /** Env vars and skill settings copied per duplicate; far above real usage. */
 const MAX_COPIED_ROWS = 500;
@@ -91,6 +92,7 @@ export const create = mutation({
       ownerId: identity.subject,
       updatedAt: Date.now(),
     });
+    await countProjectBuilt(ctx);
 
     return projectId;
   },
@@ -175,6 +177,7 @@ export const duplicate = mutation({
       settings: source.settings,
       updatedAt: Date.now(),
     });
+    await countProjectBuilt(ctx);
 
     await copyProjectFiles(ctx, source._id, newProjectId);
 

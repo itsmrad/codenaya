@@ -7,6 +7,7 @@ import {
   runModelValidator,
 } from "./schema";
 import { resolveProjectSkills } from "./skills";
+import { countProjectBuilt } from "./stats";
 
 // Keeps the steps array (and the message document) bounded on long runs.
 const MAX_MESSAGE_STEPS = 100;
@@ -674,6 +675,7 @@ export const createProject = mutation({
       updatedAt: Date.now(),
       importStatus: "importing",
     });
+    await countProjectBuilt(ctx);
 
     return projectId;
   },
@@ -696,6 +698,7 @@ export const createProjectWithConversation = mutation({
       ownerId: args.ownerId,
       updatedAt: now,
     });
+    await countProjectBuilt(ctx);
 
     const conversationId = await ctx.db.insert("conversations", {
       projectId,
