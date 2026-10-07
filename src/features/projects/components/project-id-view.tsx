@@ -13,10 +13,10 @@ import {
   PlugIcon,
   RocketIcon,
 } from "lucide-react";
-import { UserButton } from "@clerk/nextjs";
 import { formatDistanceToNow } from "date-fns";
 
 import { cn } from "@/lib/utils";
+import { UserMenu } from "@/components/user-menu";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
 import { EditorView } from "@/features/editor/components/editor-view";
@@ -244,13 +244,7 @@ export const ProjectIdView = ({
           </button>
           <ExportPopover projectId={projectId} />
           <div className="w-px h-4 bg-border/40" />
-          <UserButton
-            appearance={{
-              elements: {
-                avatarBox: "size-6",
-              },
-            }}
-          />
+          <UserMenu avatarClassName="size-6" />
         </div>
       </nav>
 

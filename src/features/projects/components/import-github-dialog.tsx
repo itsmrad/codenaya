@@ -4,7 +4,6 @@ import { z } from "zod";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { useForm } from "@tanstack/react-form";
-import { useClerk } from "@clerk/nextjs";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -37,7 +36,6 @@ export const ImportGithubDialog = ({
   onOpenChange,
 }: ImportGithubDialogProps) => {
   const router = useRouter();
-  const { openUserProfile } = useClerk();
   const [githubNotLinked, setGithubNotLinked] = useState(false);
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -45,12 +43,6 @@ export const ImportGithubDialog = ({
       setGithubNotLinked(false);
     }
     onOpenChange(nextOpen);
-  };
-
-  const handleConnectGithub = () => {
-    // Close first: the dialog's focus trap would block Clerk's profile modal.
-    handleOpenChange(false);
-    openUserProfile();
   };
 
   const form = useForm({
@@ -133,7 +125,7 @@ export const ImportGithubDialog = ({
           </form.Field>
           {githubNotLinked && (
             <div className="mt-4">
-              <GithubNotLinkedAlert onConnect={handleConnectGithub} />
+              <GithubNotLinkedAlert />
             </div>
           )}
           <DialogFooter className="mt-4">

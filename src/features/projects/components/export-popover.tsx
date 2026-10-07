@@ -3,7 +3,6 @@ import ky, { HTTPError } from "ky";
 import { z } from "zod";
 import { toast } from "sonner";
 import { useForm } from "@tanstack/react-form";
-import { useClerk } from "@clerk/nextjs";
 import { FaGithub } from "react-icons/fa";
 import {
   CheckCheckIcon,
@@ -59,18 +58,12 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
   const project = useProject(projectId);
   const [open, setOpen] = React.useState(false);
   const [githubNotLinked, setGithubNotLinked] = React.useState(false);
-  const { openUserProfile } = useClerk();
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
       setGithubNotLinked(false);
     }
     setOpen(nextOpen);
-  };
-
-  const handleConnectGithub = () => {
-    handleOpenChange(false);
-    openUserProfile();
   };
 
   const exportStatus = project?.exportStatus;
@@ -286,7 +279,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
           </form.Field>
 
           {githubNotLinked && (
-            <GithubNotLinkedAlert onConnect={handleConnectGithub} />
+            <GithubNotLinkedAlert />
           )}
 
           <form.Subscribe

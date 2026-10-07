@@ -10,6 +10,7 @@ import {
   SIGN_IN_URL,
   SIGN_UP_URL,
 } from "@/features/auth/constants";
+import { useEnsureCurrentUser } from "@/features/auth/hooks/use-ensure-current-user";
 
 import { ThemeProvider } from "./theme-provider";
 
@@ -26,6 +27,11 @@ const clerkAppearance = {
   },
 };
 
+const EnsureCurrentUser = () => {
+  useEnsureCurrentUser();
+  return null;
+};
+
 export const Providers = ({ children }: { children: React.ReactNode }) => {
   return (
     <ClerkProvider
@@ -36,6 +42,7 @@ export const Providers = ({ children }: { children: React.ReactNode }) => {
       signUpFallbackRedirectUrl={AFTER_AUTH_URL}
     >
       <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
+        <EnsureCurrentUser />
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"

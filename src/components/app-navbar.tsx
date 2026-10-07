@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
+
+import { UserMenu } from "./user-menu";
 
 export const AppNavbar = () => {
   return (
@@ -19,13 +20,7 @@ export const AppNavbar = () => {
       </Link>
 
       {/* Right — User */}
-      <UserButton
-        appearance={{
-          elements: {
-            avatarBox: "size-7",
-          },
-        }}
-      />
+      <UserMenu avatarClassName="size-7" />
     </nav>
   );
 };
