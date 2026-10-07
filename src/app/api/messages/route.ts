@@ -6,8 +6,9 @@ import { convex } from "@/lib/convex-client";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { resolveAgentModelId } from "@/features/conversations/agent-models";
 import {
-  dispatchCancelMessage,
-  dispatchProcessMessage,
+  DISPATCH_FAILED_ERROR,
+  cancelProcessingMessage,
+  dispatchProcessMessageOrFail,
 } from "@/lib/message-processor";
 
 import { api } from "../../../../convex/_generated/api";
@@ -78,15 +79,9 @@ export async function POST(request: Request) {
   if (processingMessages.length > 0) {
     // Cancel all processing messages
     await Promise.all(
-      processingMessages.map(async (msg) => {
-        await dispatchCancelMessage({ internalKey, messageId: msg._id });
-
-        await convex.mutation(api.system.updateMessageStatus, {
-          internalKey,
-          messageId: msg._id,
-          status: "cancelled",
-        });
-      })
+      processingMessages.map((msg) =>
+        cancelProcessingMessage({ internalKey, messageId: msg._id })
+      )
     );
   }
 
@@ -113,7 +108,7 @@ export async function POST(request: Request) {
   );
 
   // Trigger the configured message processor (Inngest or Vercel Workflow)
-  const dispatch = await dispatchProcessMessage({
+  const dispatch = await dispatchProcessMessageOrFail({
     internalKey,
     messageId: assistantMessageId,
     conversationId: conversationId as Id<"conversations">,
@@ -121,6 +116,17 @@ export async function POST(request: Request) {
     message,
     model: resolveAgentModelId(model),
   });
+
+  if (!dispatch) {
+    return NextResponse.json(
+      {
+        error: DISPATCH_FAILED_ERROR,
+        code: "dispatch_failed",
+        messageId: assistantMessageId,
+      },
+      { status: 502 },
+    );
+  }
 
   return NextResponse.json({
     success: true,

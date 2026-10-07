@@ -8,11 +8,16 @@ import {
   MessageActions,
   MessageResponse,
 } from "@/components/ai-elements/message";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import type { Doc } from "../../../../convex/_generated/dataModel";
-import { sanitizeAgentText } from "../agent-steps";
-import { AgentRun } from "./agent-run";
+import {
+  STALLED_RUN_MS,
+  lastRunActivity,
+  sanitizeAgentText,
+} from "../agent-steps";
+import { AgentRun, useNow } from "./agent-run";
 
 export const UserMessage = ({ content }: { content: string }) => {
   const textRef = useRef<HTMLParagraphElement>(null);
@@ -68,6 +73,12 @@ export const AssistantMessage = ({
   const status = message.status ?? "completed";
   const steps = message.steps ?? [];
   const content = sanitizeAgentText(message.content, pathOf);
+  // Safety net for a run that died without reporting back (e.g. the worker
+  // crashed): after a long silence, offer a retry instead of a bare spinner.
+  const now = useNow(status === "processing");
+  const stalled =
+    status === "processing" &&
+    now - lastRunActivity(message._creationTime, steps) > STALLED_RUN_MS;
 
   const copy = () => {
     navigator.clipboard.writeText(content);
@@ -85,6 +96,15 @@ export const AssistantMessage = ({
           completedAt={message.completedAt}
           onOpenFile={onOpenFile}
         />
+      )}
+      {stalled && isLast && onRetry && (
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          <span>This is taking too long.</span>
+          <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+            <RotateCcwIcon className="size-3.5" />
+            Retry
+          </Button>
+        </div>
       )}
       {status === "cancelled" && steps.length === 0 && (
         <p className="text-sm text-muted-foreground">Request cancelled</p>

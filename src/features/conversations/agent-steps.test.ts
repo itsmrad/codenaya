@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPathIndex,
   describeToolCall,
+  lastRunActivity,
   sanitizeAgentText,
   toolResultError,
 } from "./agent-steps";
@@ -106,5 +107,20 @@ describe("sanitizeAgentText", () => {
     expect(sanitizeAgentText("internationalization")).toBe(
       "internationalization",
     );
+  });
+});
+
+describe("lastRunActivity", () => {
+  it("is the run start when nothing has been recorded", () => {
+    expect(lastRunActivity(1_000, [])).toBe(1_000);
+  });
+
+  it("is the latest step start or end", () => {
+    expect(
+      lastRunActivity(1_000, [
+        { id: "a", kind: "tool", status: "done", startedAt: 2_000, endedAt: 5_000 },
+        { id: "b", kind: "tool", status: "running", startedAt: 4_000 },
+      ]),
+    ).toBe(5_000);
   });
 });
