@@ -38,14 +38,17 @@ export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
       {activeTabId && <FileBreadcrumbs projectId={projectId} />}
       <div className="flex-1 min-h-0 bg-background">
         {!activeFile && (
-          <div className="size-full flex items-center justify-center">
+          <div className="size-full flex flex-col items-center justify-center gap-3">
             <Image
               src="/logo-alt.svg"
               alt="Codenaya"
-              width={50}
-              height={50}
-              className="opacity-25"
+              width={40}
+              height={40}
+              className="opacity-25 dark:invert-0 invert"
             />
+            <p className="text-xs text-muted-foreground">
+              Select a file from the explorer to start editing
+            </p>
           </div>
         )}
         {isActiveFileText && (

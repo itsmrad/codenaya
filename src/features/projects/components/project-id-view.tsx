@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Allotment } from "allotment";
 import Link from "next/link";
-import { CloudCheckIcon, LoaderIcon, PlugIcon } from "lucide-react";
+import { CloudCheckIcon, LoaderIcon, PlugIcon, RocketIcon } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { formatDistanceToNow } from "date-fns";
 
@@ -104,7 +104,7 @@ export const ProjectIdView = ({
         projectId={projectId}
         projectName={project?.name ?? ""}
       />
-    <div className="h-full flex flex-col gap-2">
+    <div className="@container h-full flex flex-col gap-2">
       {/* ─── Unified Navbar ─── */}
       <nav className="shrink-0 h-11 flex items-center gap-3 px-3 rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]">
         {/* Left: Brand + Project Name + Save */}
@@ -116,7 +116,7 @@ export const ProjectIdView = ({
               alt="Codenaya"
               className="size-4.5 dark:invert-0 invert transition-transform duration-200 group-hover:rotate-12"
             />
-            <span className="text-xs font-semibold tracking-tight text-foreground hidden sm:inline">
+            <span className="text-xs font-semibold tracking-tight text-foreground hidden @2xl:inline">
               codenaya
             </span>
           </Link>
@@ -134,12 +134,12 @@ export const ProjectIdView = ({
               onFocus={(e) => e.currentTarget.select()}
               onBlur={handleSubmit}
               onKeyDown={handleKeyDown}
-              className="text-xs bg-transparent text-foreground outline-none focus:ring-1 focus:ring-brand/40 focus:ring-inset rounded px-1 py-0.5 font-medium max-w-44 truncate"
+              className="min-w-0 text-xs bg-transparent text-foreground outline-none focus:ring-1 focus:ring-brand/40 focus:ring-inset rounded px-1 py-0.5 font-medium max-w-44 truncate"
             />
           ) : (
             <button
               onClick={handleStartRename}
-              className="text-xs font-medium text-foreground/80 hover:text-foreground truncate max-w-44 transition-colors"
+              className="min-w-0 text-xs font-medium text-foreground/80 hover:text-foreground truncate max-w-44 transition-colors"
             >
               {project?.name ?? "Loading..."}
             </button>
@@ -187,17 +187,22 @@ export const ProjectIdView = ({
           {isPublished === null && (
             <button
               onClick={() => setPublishDialogOpen(true)}
-              className="flex items-center gap-1.5 h-8 px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
+              aria-label="Publish"
+              title="Publish"
+              className="flex items-center gap-1.5 h-8 px-2 @3xl:px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
             >
-              Publish
+              <RocketIcon aria-hidden="true" className="size-3.5" />
+              <span className="hidden @3xl:inline">Publish</span>
             </button>
           )}
           <button
             onClick={openIntegrations}
-            className="flex items-center gap-1.5 h-8 px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
+            aria-label="Integrations"
+            title="Integrations"
+            className="flex items-center gap-1.5 h-8 px-2 @3xl:px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
           >
             <PlugIcon aria-hidden="true" className="size-3.5" />
-            Integrations
+            <span className="hidden @3xl:inline">Integrations</span>
           </button>
           <ExportPopover projectId={projectId} />
           <div className="w-px h-4 bg-border/40" />
