@@ -1,6 +1,10 @@
 import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
+import { messageStepValidator } from "./schema";
+
+// Keeps the steps array (and the message document) bounded on long runs.
+const MAX_MESSAGE_STEPS = 100;
 
 const validateInternalKey = (key: string) => {
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
@@ -73,6 +77,43 @@ export const updateMessageContent = mutation({
     await ctx.db.patch(args.messageId, {
       content: args.content,
       status: "completed" as const,
+      completedAt: Date.now(),
+    });
+  },
+});
+
+// Records agent activity for display. Upserts by step id so replays are no-ops.
+export const upsertMessageSteps = mutation({
+  args: {
+    internalKey: v.string(),
+    messageId: v.id("messages"),
+    steps: v.array(messageStepValidator),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const message = await ctx.db.get(args.messageId);
+    if (!message) {
+      return;
+    }
+
+    const steps = [...(message.steps ?? [])];
+    for (const incoming of args.steps) {
+      const index = steps.findIndex((step) => step.id === incoming.id);
+      if (index === -1) {
+        steps.push(incoming);
+      } else {
+        // Fields the update leaves out (e.g. targets) keep their recorded value.
+        steps[index] = {
+          ...steps[index],
+          ...incoming,
+          startedAt: steps[index].startedAt,
+        };
+      }
+    }
+
+    await ctx.db.patch(args.messageId, {
+      steps: steps.slice(-MAX_MESSAGE_STEPS),
     });
   },
 });
@@ -92,6 +133,7 @@ export const updateMessageStatus = mutation({
 
     await ctx.db.patch(args.messageId, {
       status: args.status,
+      completedAt: args.status === "processing" ? undefined : Date.now(),
     });
   },
 });

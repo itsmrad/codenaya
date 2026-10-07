@@ -1,10 +1,8 @@
 import ky, { HTTPError } from "ky";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { 
-  CopyIcon, 
   HistoryIcon, 
-  LoaderIcon, 
   PlusIcon,
   XIcon,
 } from "lucide-react";
@@ -15,13 +13,6 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
-import {
-  Message,
-  MessageContent,
-  MessageResponse,
-  MessageActions,
-  MessageAction,
-} from "@/components/ai-elements/message";
 import {
   PromptInput,
   PromptInputBody,
@@ -35,6 +26,8 @@ import { Button } from "@/components/ui/button";
 import { ApprovalPrompt } from "@/features/integrations/components/approval-prompt";
 import { useProjectIntegrations } from "@/features/integrations/components/project-integrations-context";
 import { detectCredential } from "@/features/integrations/credential-guard";
+import { useEditor } from "@/features/editor/hooks/use-editor";
+import { useFiles } from "@/features/projects/hooks/use-files";
 
 import {
   useConversation,
@@ -49,6 +42,8 @@ import { PastConversationsDialog } from "./past-conversations-dialog";
 import { useChatStore } from "../store/use-chat-store";
 import { useAgentModel } from "../hooks/use-agent-model";
 import { AgentModelSelect } from "./agent-model-select";
+import { buildPathIndex } from "../agent-steps";
+import { AssistantMessage, UserMessage } from "./chat-message";
 
 interface ConversationSidebarProps {
   projectId: Id<"projects">;
@@ -77,6 +72,23 @@ export const ConversationSidebar = ({
 
   const activeConversation = useConversation(activeConversationId);
   const conversationMessages = useMessages(activeConversationId);
+
+  // Resolves file ids in agent text to paths, and step chips back to files.
+  const files = useFiles(projectId);
+  const { openFile } = useEditor(projectId);
+  const { pathOf, idOfPath } = useMemo(() => {
+    const index = buildPathIndex(files ?? []);
+    const ids = new Map<string, Id<"files">>();
+    for (const file of files ?? []) {
+      if (file.type === "file") ids.set(index(file._id) ?? file.name, file._id);
+    }
+    return { pathOf: index, idOfPath: ids };
+  }, [files]);
+
+  const handleOpenFile = (path: string) => {
+    const fileId = idOfPath.get(path);
+    if (fileId) openFile(fileId, { pinned: true });
+  };
 
   // Check if any message is currently processing
   const isProcessing = conversationMessages?.some(
@@ -178,7 +190,7 @@ export const ConversationSidebar = ({
         onOpenChange={setPastConversationsOpen}
         onSelect={setSelectedConversationId}
       />
-      <div className="flex flex-col h-full bg-sidebar">
+      <div className="@container flex flex-col h-full bg-sidebar">
         <div className="h-8.75 flex items-center justify-between border-b">
           <div className="text-sm truncate pl-3">
             {activeConversation?.title ?? DEFAULT_CONVERSATION_TITLE}
@@ -201,43 +213,26 @@ export const ConversationSidebar = ({
           </div>
         </div>
         <Conversation className="flex-1">
-          <ConversationContent>
-            {conversationMessages?.map((message, messageIndex) => (
-              <Message
-                key={message._id}
-                from={message.role}
-              >
-                <MessageContent>
-                  {message.status === "processing" ? (
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <LoaderIcon className="size-4 animate-spin" />
-                      <span>Thinking...</span>
-                    </div>
-                  ) : message.status === "cancelled" ? (
-                    <span className="text-muted-foreground italic">
-                      Request cancelled
-                    </span>
-                  ) : (
-                    <MessageResponse>{message.content}</MessageResponse>
-                  )}
-                </MessageContent>
-                {message.role === "assistant" &&
-                  message.status === "completed" &&
-                  messageIndex === (conversationMessages?.length ?? 0) - 1 && (
-                    <MessageActions>
-                      <MessageAction
-                        onClick={() => {
-                          navigator.clipboard.writeText(message.content)
-                        }}
-                        label="Copy"
-                      >
-                        <CopyIcon className="size-3" />
-                      </MessageAction>
-                    </MessageActions>
-                  )
-                }
-              </Message>
-            ))}
+          <ConversationContent className="gap-6 px-4 py-4 pb-12">
+            {conversationMessages?.map((message, messageIndex) =>
+              message.role === "user" ? (
+                <UserMessage key={message._id} content={message.content} />
+              ) : (
+                <AssistantMessage
+                  key={message._id}
+                  message={message}
+                  isLast={messageIndex === conversationMessages.length - 1}
+                  pathOf={pathOf}
+                  onOpenFile={handleOpenFile}
+                  onRetry={() => {
+                    const prompt = conversationMessages
+                      .slice(0, messageIndex)
+                      .findLast((m) => m.role === "user");
+                    if (prompt) void handleSubmit({ text: prompt.content, files: [] });
+                  }}
+                />
+              ),
+            )}
           </ConversationContent>
           <ConversationScrollButton />
         </Conversation>

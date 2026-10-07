@@ -220,3 +220,49 @@ html.lenis, html.lenis body {
     }
   }
 }
+
+/* Assistant replies in the chat panel: compact prose sized for a side panel.
+   Unlayered so it overrides Streamdown's utility classes. */
+.chat-prose {
+  @apply text-sm leading-6 text-foreground;
+  overflow-wrap: anywhere;
+}
+.chat-prose :is([data-streamdown="heading-1"], [data-streamdown="heading-2"]) {
+  @apply mt-5 mb-2 text-[15px] leading-6 font-semibold;
+}
+.chat-prose :is([data-streamdown="heading-3"], [data-streamdown="heading-4"], [data-streamdown="heading-5"], [data-streamdown="heading-6"]) {
+  @apply mt-4 mb-1.5 text-sm font-semibold;
+}
+.chat-prose :is([data-streamdown="unordered-list"], [data-streamdown="ordered-list"]) {
+  @apply my-2 space-y-1 pl-5;
+}
+.chat-prose [data-streamdown="list-item"] {
+  @apply py-0;
+}
+.chat-prose [data-streamdown="inline-code"] {
+  @apply rounded bg-muted px-1 py-0.5 font-mono text-[12.5px];
+}
+.chat-prose [data-streamdown="code-block"] {
+  @apply my-3 gap-0 overflow-hidden rounded-lg border-border bg-muted/40 p-0;
+}
+.chat-prose [data-streamdown="code-block-header"] {
+  @apply h-8 border-b border-border px-3 font-mono text-[11px];
+}
+.chat-prose [data-streamdown="code-block-header"] > span {
+  @apply ml-0;
+}
+.chat-prose div:has(> [data-streamdown="code-block-actions"]) {
+  @apply top-0 -mt-8 pr-1;
+}
+.chat-prose [data-streamdown="code-block-actions"] {
+  @apply border-0 bg-transparent p-0;
+}
+.chat-prose [data-streamdown="code-block-actions"] button {
+  @apply grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground;
+}
+.chat-prose [data-streamdown="code-block-body"] {
+  @apply overflow-x-auto rounded-none border-0 bg-transparent p-3 font-mono text-[12.5px] leading-5;
+}
+.chat-prose [data-streamdown="code-block-body"] pre {
+  @apply bg-transparent;
+}
