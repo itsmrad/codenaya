@@ -153,6 +153,17 @@ Infisical only injects secrets into local processes. Convex functions run on Con
 npx convex env set NAME value
 ```
 
+### Running e2e tests
+
+End-to-end tests use [Playwright](https://playwright.dev) and live in `e2e/`.
+
+```bash
+npx playwright install chromium   # once; skipped if ~/.cache/ms-playwright already has it
+npm run test:e2e                  # starts `next dev` on port 3113 (or reuses a running one)
+```
+
+Set `E2E_PORT` to use another port. Failure screenshots and traces go to `test-results/`; open the HTML report with `npx playwright show-report`. Specs that need auth or secrets should call `test.skip(!process.env.SOME_VAR, "reason")` so they skip cleanly when the env var is absent.
+
 ## Project Structure
 
 ```
