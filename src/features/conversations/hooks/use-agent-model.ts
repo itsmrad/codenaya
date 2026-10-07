@@ -1,28 +1,55 @@
 import { useSyncExternalStore } from "react";
 
+import { modelIdsFor } from "@/features/ai-providers/registry";
 import {
-  type AgentModelId,
+  useAiPreferences,
+  useAiProviderKeys,
+} from "@/features/ai-providers/hooks/use-ai-providers";
+import type { AiProviderKeySummary } from "../../../../convex/aiProviders";
+
+import {
+  type AgentModelChoice,
   DEFAULT_AGENT_MODEL_ID,
-  resolveAgentModelId,
+  isAgentModelId,
 } from "../agent-models";
 
 const STORAGE_KEY = "codenaya:agent-model";
 
 // In-memory copy so the choice still sticks for the session when storage is
-// unavailable (private mode, blocked site data). `null` means "not read yet".
-let currentModel: AgentModelId | null = null;
+// unavailable (private mode, blocked site data). `undefined` means "not read
+// yet"; `null` means nothing was picked in this browser.
+let currentModel: AgentModelChoice | null | undefined;
 const listeners = new Set<() => void>();
 
 function notify() {
   listeners.forEach((listener) => listener());
 }
 
-function readModel(): AgentModelId {
-  if (currentModel === null) {
+/** Stored as JSON `{ keyId?, modelId }`; older builds stored a bare platform id. */
+function parseStored(raw: string | null): AgentModelChoice | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof (parsed as AgentModelChoice).modelId === "string"
+    ) {
+      const { keyId, modelId } = parsed as AgentModelChoice;
+      return typeof keyId === "string" ? { keyId, modelId } : { modelId };
+    }
+    return null;
+  } catch {
+    return { modelId: raw };
+  }
+}
+
+function readModel(): AgentModelChoice | null {
+  if (currentModel === undefined) {
     try {
-      currentModel = resolveAgentModelId(localStorage.getItem(STORAGE_KEY));
+      currentModel = parseStored(localStorage.getItem(STORAGE_KEY));
     } catch {
-      currentModel = DEFAULT_AGENT_MODEL_ID;
+      currentModel = null;
     }
   }
   return currentModel;
@@ -30,7 +57,7 @@ function readModel(): AgentModelId {
 
 function onStorage(event: StorageEvent) {
   if (event.key === STORAGE_KEY) {
-    currentModel = null;
+    currentModel = undefined;
     notify();
   }
 }
@@ -45,24 +72,58 @@ function subscribe(listener: () => void) {
   };
 }
 
-function setModel(model: AgentModelId) {
+function setModel(model: AgentModelChoice) {
   currentModel = model;
   try {
-    localStorage.setItem(STORAGE_KEY, model);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
   } catch {
     // Storage unavailable: the in-memory value still applies for this session.
   }
   notify();
 }
 
-/** The agent model chosen in this browser, persisted to localStorage. */
+/**
+ * Whether a choice can still be sent: a platform model on the allowlist, or a
+ * model of one of the user's keys. While keys are loading a BYOK choice is
+ * kept; the server validates it either way.
+ */
+function isAvailable(
+  choice: AgentModelChoice,
+  keys: AiProviderKeySummary[] | undefined,
+) {
+  if (!choice.keyId) return isAgentModelId(choice.modelId);
+  if (!keys) return true;
+  const key = keys.find((k) => k._id === choice.keyId);
+  return Boolean(key && modelIdsFor(key).includes(choice.modelId));
+}
+
+/**
+ * The agent model for the next run: the one picked in this browser (persisted
+ * to localStorage), else the user's default from Settings → AI providers, else
+ * the platform default. A pick whose key was deleted falls through.
+ */
 export function useAgentModel() {
-  const model = useSyncExternalStore(
+  const stored = useSyncExternalStore(
     subscribe,
     readModel,
     // Server render has no storage; the client re-renders with the saved value.
-    () => DEFAULT_AGENT_MODEL_ID,
+    () => null,
   );
+  const keys = useAiProviderKeys();
+  const preferences = useAiPreferences();
+
+  const preferred: AgentModelChoice | null = preferences
+    ? {
+        ...(preferences.defaultKeyId ? { keyId: preferences.defaultKeyId } : {}),
+        modelId: preferences.defaultModelId,
+      }
+    : null;
+
+  const model =
+    [stored, preferred].find(
+      (choice): choice is AgentModelChoice =>
+        choice !== null && isAvailable(choice, keys),
+    ) ?? { modelId: DEFAULT_AGENT_MODEL_ID };
 
   return [model, setModel] as const;
 }

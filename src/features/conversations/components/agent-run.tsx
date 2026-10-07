@@ -284,6 +284,8 @@ interface AgentRunProps {
   status: "processing" | "completed" | "cancelled";
   startedAt: number;
   completedAt?: number;
+  /** "Provider · model" the run used, when recorded. */
+  model?: string;
   onOpenFile?: (path: string) => void;
 }
 
@@ -296,6 +298,7 @@ export const AgentRun = ({
   status,
   startedAt,
   completedAt,
+  model,
   onOpenFile,
 }: AgentRunProps) => {
   const live = status === "processing";
@@ -331,6 +334,7 @@ export const AgentRun = ({
   const summary = [
     `${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`,
     changed > 0 && `${changed} ${changed === 1 ? "file" : "files"} changed`,
+    model,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -355,7 +359,12 @@ export const AgentRun = ({
             <Shimmer as="span" className="min-w-0 truncate">
               {liveLabel}
             </Shimmer>
-            <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+            <span className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
+              {model && (
+                <span className="hidden max-w-48 truncate @sm:inline" title={model}>
+                  {model} ·
+                </span>
+              )}
               {formatDuration(now - startedAt)}
             </span>
           </>

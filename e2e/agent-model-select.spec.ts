@@ -24,8 +24,10 @@ test.describe("chat agent model switcher", () => {
 
     const trigger = page.getByRole("combobox", { name: "Agent model" });
     await trigger.click();
-    await expect(page.getByRole("option")).toHaveCount(AGENT_MODELS.length);
-    await page.getByRole("option", { name: "Claude Sonnet 5.5" }).click();
+    // Scoped to the platform group: the user's own keys add groups of their own.
+    const platform = page.getByRole("group", { name: "Codenaya" });
+    await expect(platform.getByRole("option")).toHaveCount(AGENT_MODELS.length);
+    await platform.getByRole("option", { name: "Claude Sonnet 5.5" }).click();
     await expect(trigger).toHaveText("Claude Sonnet 5.5");
 
     await page.reload();

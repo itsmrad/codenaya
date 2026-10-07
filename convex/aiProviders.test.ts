@@ -203,4 +203,35 @@ describe("aiProviders", () => {
       { status: "invalid" },
     ]);
   });
+
+  test("agent runs record the model on the message and mark the key used", async () => {
+    const t = setup();
+    const keyId = await createKey(t, ALICE);
+    const { projectId, conversationId } = await t.mutation(
+      api.system.createProjectWithConversation,
+      { internalKey: INTERNAL_KEY, projectName: "p", conversationTitle: "New", ownerId: ALICE },
+    );
+
+    const runModel = { keyId, modelId: "gpt-5.6-luna", label: "OpenAI · GPT-5.6 Luna" };
+    const messageId = await t.mutation(api.system.createMessage, {
+      internalKey: INTERNAL_KEY,
+      conversationId,
+      projectId,
+      role: "assistant",
+      content: "",
+      status: "processing",
+      runModel,
+    });
+    expect((await t.run((ctx) => ctx.db.get(messageId)))?.runModel).toEqual(runModel);
+
+    const lastUsedAt = () =>
+      t.run(async (ctx) => (await ctx.db.get(keyId))?.lastUsedAt ?? null);
+    expect(await lastUsedAt()).toBeNull();
+    await t.mutation(api.system.markAiProviderKeyUsed, { internalKey: INTERNAL_KEY, keyId });
+    expect(await lastUsedAt()).toEqual(expect.any(Number));
+
+    await expect(
+      t.mutation(api.system.markAiProviderKeyUsed, { internalKey: "wrong", keyId }),
+    ).rejects.toThrow();
+  });
 });

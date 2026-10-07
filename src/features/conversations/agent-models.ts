@@ -41,3 +41,13 @@ export function isAgentModelId(value: unknown): value is AgentModelId {
 export function resolveAgentModelId(value: unknown): AgentModelId {
   return isAgentModelId(value) ? value : DEFAULT_AGENT_MODEL_ID;
 }
+
+/**
+ * What a run uses: a platform model (no `keyId`), or a model on one of the
+ * user's own provider keys (BYOK). Sent by the chat UI, validated by the API
+ * route and again by the agent run.
+ */
+export interface AgentModelChoice {
+  keyId?: string;
+  modelId: string;
+}

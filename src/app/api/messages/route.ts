@@ -4,7 +4,10 @@ import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import { convex } from "@/lib/convex-client";
 import { detectCredential } from "@/features/integrations/credential-guard";
-import { resolveAgentModelId } from "@/features/conversations/agent-models";
+import {
+  modelChoiceSchema,
+  requireModelChoice,
+} from "@/features/ai-providers/server/resolve-run-model";
 import {
   DISPATCH_FAILED_ERROR,
   cancelProcessingMessage,
@@ -17,13 +20,11 @@ import { Id } from "../../../../convex/_generated/dataModel";
 const requestSchema = z.object({
   conversationId: z.string(),
   message: z.string(),
-  // Validated against the allowlist below rather than here, so an unknown or
-  // retired id falls back to the default instead of failing the send.
-  model: z.string().optional(),
+  model: modelChoiceSchema,
 });
 
 export async function POST(request: Request) {
-  const { unauthorized } = await requireUserId();
+  const { userId, unauthorized } = await requireUserId();
 
   if (unauthorized) {
     return unauthorized;
@@ -50,6 +51,16 @@ export async function POST(request: Request) {
       },
       { status: 422 },
     );
+  }
+
+  const { runModel, rejected } = await requireModelChoice({
+    internalKey,
+    userId,
+    model,
+  });
+
+  if (rejected) {
+    return rejected;
   }
 
   // Call convex mutation, query
@@ -104,6 +115,7 @@ export async function POST(request: Request) {
       role: "assistant",
       content: "",
       status: "processing",
+      runModel,
     }
   );
 
@@ -114,7 +126,7 @@ export async function POST(request: Request) {
     conversationId: conversationId as Id<"conversations">,
     projectId,
     message,
-    model: resolveAgentModelId(model),
+    model: runModel,
   });
 
   if (!dispatch) {
