@@ -113,7 +113,7 @@ export const SkillSlashMenu = ({
     value={activeName}
     onValueChange={onActiveChange}
     shouldFilter={false}
-    className="absolute inset-x-3 bottom-full z-20 mb-1 h-auto rounded-lg border shadow-md"
+    className="absolute inset-x-3 bottom-full z-20 mb-1 h-auto w-auto rounded-lg border shadow-md"
   >
     <CommandList label="Skills">
       <CommandGroup heading="Skills">
