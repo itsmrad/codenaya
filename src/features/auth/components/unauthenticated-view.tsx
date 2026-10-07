@@ -1,4 +1,7 @@
+"use client";
+
 import { ShieldAlertIcon } from "lucide-react";
+import { usePathname } from "next/navigation";
 
 import {
   Item,
@@ -12,6 +15,9 @@ import { SignInButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 
 export const UnauthenticatedView = () => {
+  // Return the user to the page they tried to open once they sign in.
+  const pathname = usePathname();
+
   return (
     <div className="flex items-center justify-center h-screen bg-background">
       <div className="w-full max-w-lg bg-muted">
@@ -26,7 +32,11 @@ export const UnauthenticatedView = () => {
             </ItemDescription>
           </ItemContent>
           <ItemActions>
-            <SignInButton>
+            <SignInButton
+              mode="modal"
+              forceRedirectUrl={pathname}
+              signUpForceRedirectUrl={pathname}
+            >
               <Button variant="outline" size="sm">
                 Sign in
               </Button>
