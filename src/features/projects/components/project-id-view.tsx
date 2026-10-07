@@ -12,6 +12,7 @@ import {
   MessageSquareIcon,
   PlugIcon,
   RocketIcon,
+  SparklesIcon,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -34,6 +35,7 @@ import { useProject, useRenameProject } from "../hooks/use-projects";
 import { PublishDialog } from "@/features/showcase/components/publish-dialog";
 import { useIsProjectPublished } from "@/features/showcase/hooks/use-showcase";
 import { useProjectIntegrations } from "@/features/integrations/components/project-integrations-context";
+import { ProjectSkillsDialog } from "@/features/skills/components/project-skills-panel";
 
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 800;
@@ -100,6 +102,7 @@ export const ProjectIdView = ({
     if (view === "preview") setPreviewOpened(true);
   };
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
   const { openIntegrations } = useProjectIntegrations();
   const project = useProject(projectId);
   const renameProject = useRenameProject();
@@ -139,6 +142,11 @@ export const ProjectIdView = ({
         onOpenChange={setPublishDialogOpen}
         projectId={projectId}
         projectName={project?.name ?? ""}
+      />
+      <ProjectSkillsDialog
+        projectId={projectId}
+        open={skillsDialogOpen}
+        onOpenChange={setSkillsDialogOpen}
       />
     <div className="@container h-full flex flex-col gap-2">
       {/* ─── Unified Navbar ─── */}
@@ -241,6 +249,15 @@ export const ProjectIdView = ({
           >
             <PlugIcon aria-hidden="true" className="size-3.5" />
             <span className="hidden @3xl:inline">Integrations</span>
+          </button>
+          <button
+            onClick={() => setSkillsDialogOpen(true)}
+            aria-label="Skills"
+            title="Skills"
+            className="flex items-center gap-1.5 h-8 px-2 @3xl:px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
+          >
+            <SparklesIcon aria-hidden="true" className="size-3.5" />
+            <span className="hidden @3xl:inline">Skills</span>
           </button>
           <ExportPopover projectId={projectId} />
           <div className="w-px h-4 bg-border/40" />
