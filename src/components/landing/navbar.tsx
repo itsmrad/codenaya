@@ -65,6 +65,13 @@ export const LandingNavbar = () => {
               variant="ghost"
               className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
+              <Link href="/pricing">Pricing</Link>
+            </Button>
+            <Button
+              asChild
+              variant="ghost"
+              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
               <Link href={SIGN_IN_URL}>Log in</Link>
             </Button>
             <Button
@@ -104,6 +111,14 @@ export const LandingNavbar = () => {
                 onClick={() => setMobileOpen(false)}
               >
                 <Link href="/showcase">Showcase</Link>
+              </Button>
+              <Button
+                asChild
+                variant="ghost"
+                className="w-full h-12 text-base"
+                onClick={() => setMobileOpen(false)}
+              >
+                <Link href="/pricing">Pricing</Link>
               </Button>
               <Button
                 asChild
