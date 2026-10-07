@@ -14,13 +14,12 @@ import { STUB_MODEL, startStubProvider } from "./stub-provider";
  * `byok-agent-run.spec.ts`.
  */
 
-const projectId = process.env.E2E_PROJECT_ID as Id<"projects"> | undefined;
 const STUB_REPLY = "Added SEO metadata and a sitemap.";
 
 test.describe("agent skills", () => {
   test.skip(
-    !hasClerkCredentials() || !projectId,
-    "Needs CLERK_SECRET_KEY, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and E2E_PROJECT_ID (a project owned by the e2e user)",
+    !hasClerkCredentials(),
+    "Needs CLERK_SECRET_KEY and NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
   );
 
   const skillName = `e2e-seo-${Date.now()}`;
@@ -29,6 +28,9 @@ test.describe("agent skills", () => {
   let stub: Awaited<ReturnType<typeof startStubProvider>>;
   let page: Page;
   let keyId: Id<"aiProviderKeys"> | undefined;
+  // A project of its own: chat specs running alongside on the shared fixture
+  // project would otherwise switch conversations under this one.
+  let projectId: Id<"projects"> | undefined;
   let skillId: Id<"skills"> | undefined;
 
   test.beforeAll(async ({ browser }) => {
@@ -38,6 +40,9 @@ test.describe("agent skills", () => {
     });
     page = await browser.newPage();
     await signIn(page);
+    projectId = await (await userConvexClient(page)).mutation(api.projects.create, {
+      name: `e2e-skills-agent-${Date.now()}`,
+    });
 
     const response = await page.request.post("/api/ai-providers", {
       data: {
@@ -59,6 +64,9 @@ test.describe("agent skills", () => {
     }
     if (keyId) {
       await user.mutation(api.aiProviders.remove, { keyId }).catch(() => {});
+    }
+    if (projectId) {
+      await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});
     }
     await page?.close();
     stub?.server.close();

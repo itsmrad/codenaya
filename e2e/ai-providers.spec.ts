@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { expect, test, type Page } from "@playwright/test";
 
 import { api } from "../convex/_generated/api";
-import { hasClerkCredentials, signIn } from "./clerk-auth";
+import { hasClerkCredentials, signInAsSpecUser } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
 
@@ -42,6 +42,8 @@ test("POST /api/ai-providers signed out returns 401 JSON", async ({ request }) =
 /**
  * Serial because the 5/min limit is per user: every POST here counts toward
  * it, so the rate-limit test sends exactly as many as are left in the window.
+ * Signed in as a user of its own, so the BYOK specs adding keys on the pool
+ * user neither eat into that limit nor show up as keys here (and vice versa).
  */
 test.describe.serial("BYOK key storage (signed in)", () => {
   test.skip(
@@ -63,7 +65,7 @@ test.describe.serial("BYOK key storage (signed in)", () => {
 
   test.beforeAll(async ({ browser }) => {
     page = await browser.newPage();
-    await signIn(page);
+    await signInAsSpecUser(page, "ai-providers");
 
     // Start from no keys, as a new user would.
     const client = await userConvexClient(page);

@@ -47,9 +47,14 @@ test.describe("chat panel overflow", () => {
       await more.click();
       await expect(liveRun.getByRole("button", { name: "components.json" })).toBeVisible();
 
-      // Expanding a clamped message keeps it inside the panel too.
-      await page.getByRole("button", { name: "Show more" }).first().click({ force: true });
-      await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
+      // Expanding a clamped message keeps it inside the panel too. The live run
+      // re-renders the log, which can swallow a click, so retry it.
+      await expect(async () => {
+        await page.getByRole("button", { name: "Show more" }).first().click({ force: true });
+        await expect(page.getByRole("button", { name: "Show less" })).toBeVisible({
+          timeout: 2_000,
+        });
+      }).toPass();
       expect(await chatOverflow(page)).toEqual([]);
 
       // Phone layout: the chat is a full-width tab.

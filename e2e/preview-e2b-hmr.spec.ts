@@ -106,10 +106,11 @@ test.describe("E2B preview hot reload", () => {
       content: app("After edit"),
     });
 
-    // 1s sync debounce + the PATCH round trip to E2B (seconds under `next dev`)
-    // + Vite's hot update. Without the fix the edit never arrives at all.
+    // 1s sync debounce + the PATCH round trip to E2B (~9s under `next dev`, more
+    // on a loaded machine; see #179) + Vite's hot update. Without the fix the
+    // edit never arrives at all, so a generous wait still catches that.
     await expect(preview.getByRole("heading", { name: "After edit" })).toBeVisible({
-      timeout: 20_000,
+      timeout: 60_000,
     });
     expect(await frame.evaluate(() => (window as { hmrMarker?: boolean }).hmrMarker)).toBe(
       true,

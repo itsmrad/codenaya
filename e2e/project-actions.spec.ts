@@ -65,7 +65,8 @@ test.describe("project actions", () => {
         await page.getByRole("link", { name: new RegExp(copyName.replace(/[()]/g, "\\$&")) }).click();
         await page.waitForURL(/\/projects\//);
         const copyUrl = page.url();
-        if (width < 768) {
+        // Phones and tablets open on the chat, below desktop width.
+        if (width < 1024) {
           await page.getByRole("tab", { name: "Code" }).click();
         }
         await expect(page.getByRole("button", { name: "index.html", exact: true })).toBeVisible({

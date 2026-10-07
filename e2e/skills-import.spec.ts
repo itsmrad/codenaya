@@ -5,11 +5,12 @@ import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
 
-const SKILL_NAME = "e2e-imported-skill";
-const SOURCE_URL =
-  "https://github.com/vercel-labs/agent-skills/tree/main/skills/e2e-imported-skill";
+// Unique per run, so a skill another run (or a crashed one) left in the
+// library can't match the locators below.
+const SKILL_NAME = `e2e-imported-skill-${Date.now()}`;
+const SOURCE_URL = `https://github.com/vercel-labs/agent-skills/tree/main/skills/${SKILL_NAME}`;
 
-/** Deletes the imported skill left behind by an earlier run. */
+/** Deletes this run's imported skill. */
 const removeImported = async (page: Page) => {
   const user = await userConvexClient(page);
   for (const skill of await user.query(api.skills.listLibrary, {})) {
@@ -31,7 +32,6 @@ test.describe("import a skill from GitHub", () => {
     const errors = collectConsoleErrors(page);
 
     await signIn(page);
-    await removeImported(page);
 
     // No network in CI: the preview comes from a mocked import route.
     await page.route("**/api/skills/import", (route) =>
