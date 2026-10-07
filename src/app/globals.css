@@ -266,3 +266,15 @@ html.lenis, html.lenis body {
 .chat-prose [data-streamdown="code-block-body"] pre {
   @apply bg-transparent;
 }
+
+/* Chat composer: raised rounded box with a soft focus ring. Unlayered so it
+   overrides the shared InputGroup's utility classes. */
+.chat-composer [data-slot="input-group"] {
+  @apply rounded-xl! border-input bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04),0_4px_16px_-8px_rgb(0_0_0/0.08)] transition-[box-shadow,border-color] duration-150 dark:bg-card dark:shadow-none;
+}
+.chat-composer [data-slot="input-group"]:focus-within {
+  @apply border-ring/40 ring-2 ring-ring/15;
+}
+.chat-composer [data-slot="input-group-control"] {
+  @apply resize-none bg-transparent outline-none dark:bg-transparent;
+}
