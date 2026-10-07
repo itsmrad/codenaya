@@ -78,6 +78,9 @@ export const CodeEditor = ({
   }, [resolvedTheme, themeCompartment]);
 
   return (
-    <div ref={editorRef} className="size-full pl-4 bg-background" />
+    // `isolate` keeps CodeMirror's z-index 500 tooltips (quick edit, selection
+    // actions) inside the editor's stacking context, so dialogs and popovers
+    // stack above them.
+    <div ref={editorRef} className="isolate size-full pl-4 bg-background" />
   );
 };
