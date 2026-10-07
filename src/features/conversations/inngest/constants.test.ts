@@ -35,4 +35,12 @@ describe("coding agent integration instructions", () => {
       "never describe an unapplied migration as a completed fix",
     );
   });
+
+  it("pins Vite scaffolds to a major the preview sandbox's Node can run, with the @ alias", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain('"vite": "^6.0.0"');
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain('"@vitejs/plugin-react": "^4.0.0"');
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      'resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } }',
+    );
+  });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { testConnection, testFailureResponse } from "./test-connection";
+import { isOutOfCredit, testConnection, testFailureResponse } from "./test-connection";
 
 const respond = (status: number) => vi.fn().mockResolvedValue(new Response("{}", { status }));
 
@@ -79,6 +79,104 @@ describe("testConnection", () => {
       { fetchFn: vi.fn().mockRejectedValue(new TypeError("fetch failed")) },
     );
     expect(network).toEqual({ ok: false, kind: "network", error: "Could not reach OpenAI." });
+  });
+});
+
+describe("isOutOfCredit", () => {
+  const reply = (status: number, body: unknown = {}) =>
+    vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }));
+
+  it.each([
+    ["HTTP 402", reply(402, { error: { message: "Payment required" } })],
+    [
+      "OpenAI's insufficient_quota",
+      reply(429, {
+        error: {
+          message: "You exceeded your current quota, please check your plan and billing details.",
+          type: "insufficient_quota",
+          code: "insufficient_quota",
+        },
+      }),
+    ],
+    [
+      "Anthropic's low credit balance",
+      reply(400, {
+        type: "error",
+        error: {
+          type: "invalid_request_error",
+          message: "Your credit balance is too low to access the Anthropic API.",
+        },
+      }),
+    ],
+  ])("reports %s as out of credit", async (_, fetchFn) => {
+    expect(await isOutOfCredit({ provider: "openai", apiKey: "k", model: "gpt-x" }, { fetchFn })).toBe(true);
+  });
+
+  it.each([
+    ["a completion", reply(200, { choices: [] })],
+    ["a plain rate limit", reply(429, { error: { message: "Rate limit reached for requests" } })],
+    ["a server error", reply(500)],
+    ["an unreachable provider", vi.fn().mockRejectedValue(new TypeError("fetch failed"))],
+  ])("leaves %s to the inference", async (_, fetchFn) => {
+    expect(await isOutOfCredit({ provider: "openai", apiKey: "k", model: "gpt-x" }, { fetchFn })).toBe(false);
+  });
+
+  it.each([
+    [
+      "openai",
+      undefined,
+      "https://api.openai.com/v1/chat/completions",
+      { Authorization: "Bearer k-123" },
+      { max_completion_tokens: 1 },
+    ],
+    [
+      "anthropic",
+      undefined,
+      "https://api.anthropic.com/v1/messages",
+      { "x-api-key": "k-123", "anthropic-version": "2023-06-01" },
+      { max_tokens: 1 },
+    ],
+    [
+      "custom",
+      "https://llm.example.com/v1",
+      "https://llm.example.com/v1/chat/completions",
+      { Authorization: "Bearer k-123" },
+      { max_tokens: 1 },
+    ],
+  ] as const)("probes %s with a one-token completion and no tools", async (provider, baseUrl, url, headers, cap) => {
+    const fetchFn = reply(200);
+    await isOutOfCredit({ provider, apiKey: "k-123", baseUrl, model: "m" }, { fetchFn });
+
+    expect(fetchFn).toHaveBeenCalledOnce();
+    const [calledUrl, init] = fetchFn.mock.calls[0];
+    expect(calledUrl).toBe(url);
+    expect(init).toMatchObject({ method: "POST", headers });
+    expect(JSON.parse(init.body)).toEqual({
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+      ...cap,
+    });
+  });
+
+  it("answers from OpenRouter's /key when the spending limit is used up", async () => {
+    const fetchFn = reply(200, { data: { limit: 5, limit_remaining: 0 } });
+    expect(await isOutOfCredit({ provider: "openrouter", apiKey: "k", model: "m" }, { fetchFn })).toBe(true);
+    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(fetchFn).toHaveBeenCalledWith("https://openrouter.ai/api/v1/key", expect.anything());
+  });
+
+  it("probes an OpenRouter key without a spending limit", async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { limit: null, limit_remaining: null } })))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: "Insufficient credits", code: 402 } }), { status: 402 }),
+      );
+    expect(await isOutOfCredit({ provider: "openrouter", apiKey: "k", model: "m" }, { fetchFn })).toBe(true);
+    expect(fetchFn).toHaveBeenLastCalledWith(
+      "https://openrouter.ai/api/v1/chat/completions",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });
 

@@ -74,7 +74,7 @@ test.describe("chat when an agent run stops responding", () => {
       await expect(run).toBeVisible();
       await expect(run.getByText("Stopped responding")).toBeVisible();
       await expect(run.getByText("Thinking…")).toHaveCount(0);
-      await expect(page.getByText("This is taking too long.")).toBeVisible();
+      await expect(page.getByText("Taking too long")).toBeVisible();
       await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
 
       // Retry is the only action: the composer offers Send, not Stop.

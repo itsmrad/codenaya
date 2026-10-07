@@ -44,7 +44,7 @@ export const SettingsNav = () => {
         </ul>
       </nav>
 
-      <Tabs value={activeHref} className="lg:hidden">
+      <Tabs value={activeHref ?? ""} className="lg:hidden">
         <TabsList
           aria-label="Settings"
           className="w-full justify-start overflow-x-auto"

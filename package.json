@@ -11,7 +11,8 @@
 		"lint": "eslint",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"test:e2e": "playwright test"
+		"test:e2e": "playwright test",
+		"e2b:template": "node e2b/build-template.mts"
 	},
 	"overrides": {
 		"postcss": ">=8.5.23 <9",

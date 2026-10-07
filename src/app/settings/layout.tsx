@@ -6,6 +6,12 @@ import { AuthLoadingView } from "@/features/auth/components/auth-loading-view";
 import { ConvexAuthBoundary } from "@/features/auth/components/convex-auth-boundary";
 import { SettingsNav } from "@/features/settings/components/settings-nav";
 
+// Every settings page waits on the session (`auth.protect()` below), so
+// navigations into them block by design. Opting out here and on each page
+// keeps the dev-only instant-navigation validator from logging an error on
+// every visit (it validates each page segment separately).
+export const instant = false;
+
 const SettingsContent = async ({ children }: { children: React.ReactNode }) => {
   // Signed-out visitors are redirected to /sign-in and returned here after.
   await auth.protect();

@@ -27,7 +27,10 @@ test.describe("chat agent model switcher", () => {
     // Scoped to the platform group: the user's own keys add groups of their own.
     const platform = page.getByRole("group", { name: "Codenaya" });
     await expect(platform.getByRole("option")).toHaveCount(AGENT_MODELS.length);
-    await platform.getByRole("option", { name: "Claude Sonnet 5.5" }).click();
+    // The vendor is a muted tag beside the name, not part of the option text.
+    const sonnet = platform.getByRole("option", { name: "Claude Sonnet 5.5" });
+    await expect(sonnet).toHaveAttribute("data-tag", "Anthropic");
+    await sonnet.click();
     await expect(trigger).toHaveText("Claude Sonnet 5.5");
 
     await page.reload();

@@ -10,6 +10,7 @@ import {
   secretValuesFrom,
 } from "@/features/integrations/server/env/resolve-env";
 import { createStreamRedactor } from "@/features/integrations/server/env/stream-redactor";
+import { nodeIncompatibility } from "@/features/sandbox-preview/utils/node-compat";
 import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 import { convex } from "@/lib/convex-client";
 
@@ -32,6 +33,12 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 
 const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour (E2B free plan max)
 const WORK_DIR = "/home/user/app";
+
+/**
+ * The base image ships Node 20.9, too old for Vite 7 (#178). E2B_TEMPLATE
+ * points at the Node 22 template built by `npm run e2b:template`.
+ */
+const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || "base";
 
 /**
  * Environment variables that force dev servers to bind to 0.0.0.0
@@ -189,7 +196,7 @@ export async function POST(request: Request) {
         send({ type: "status", status: "booting" });
         send({ type: "output", data: "Creating E2B sandbox...\n" });
 
-        sandbox = await Sandbox.create({
+        sandbox = await Sandbox.create(SANDBOX_TEMPLATE, {
           apiKey: e2bApiKey,
           timeoutMs: SANDBOX_TIMEOUT_MS,
           metadata: { userId },
@@ -220,6 +227,15 @@ export async function POST(request: Request) {
           type: "output",
           data: `Node ${nodeCheck.stdout.trim()} available.\n\n`,
         });
+
+        // Fail with the reason now rather than with Vite's crash after a full install.
+        const incompatibility = nodeIncompatibility(
+          nodeCheck.stdout,
+          files.find((file) => file.path === "package.json")?.content,
+        );
+        if (incompatibility) {
+          throw new Error(incompatibility);
+        }
 
         // --- Write project files ---
         send({ type: "output", data: "Writing project files...\n" });

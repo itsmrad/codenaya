@@ -371,7 +371,7 @@ Always generate a complete, correct package.json with ALL dependencies used in t
 
 - Set "type": "module" for Vite projects
 - Scripts: "dev", "build", "preview" (Vite) or "dev", "build", "start" (Next.js), "lint": "eslint src"
-- Pin to stable recent versions: React 18, Next.js 15, Tailwind CSS 3, TypeScript 5
+- Pin to stable recent versions: React 18, Next.js 15, Tailwind CSS 3, TypeScript 5, Vite 6 ("vite": "^6.0.0")
 - Always include these core packages:
   tailwindcss, postcss, autoprefixer,
   clsx, tailwind-merge,
@@ -382,7 +382,11 @@ Always generate a complete, correct package.json with ALL dependencies used in t
   framer-motion (if any animation is used),
   zustand (if cross-component state is needed)
 - Add @types/* dev packages for all non-typed libraries
-- For Vite: "@vitejs/plugin-react" in devDependencies
+- For Vite: "@vitejs/plugin-react": "^4.0.0" in devDependencies. Never use Vite 7+ or @vitejs/plugin-react 5+: they need Node 20.19+ and crash in the preview sandbox
+- For Vite: the "@/..." imports only resolve if vite.config.ts defines the alias. Always include it:
+  import { fileURLToPath, URL } from "node:url"
+  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } }
+  and the matching "baseUrl": "." and "paths": { "@/*": ["./src/*"] } in tsconfig.json
 </package_json_rules>
 
 <content_standards>
