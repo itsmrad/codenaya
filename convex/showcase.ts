@@ -4,6 +4,7 @@ import { paginationOptsValidator } from "convex/server";
 import { mutation, query } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { copyProjectFiles } from "./projectCopy";
+import { countProjectBuilt } from "./stats";
 
 // ─── Queries ───
 
@@ -362,6 +363,7 @@ export const importToWorkspace = mutation({
       ownerId: identity.subject,
       updatedAt: now,
     });
+    await countProjectBuilt(ctx);
 
     await copyProjectFiles(ctx, showcaseItem.projectId, newProjectId);
 
