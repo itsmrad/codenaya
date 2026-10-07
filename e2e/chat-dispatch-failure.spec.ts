@@ -29,11 +29,12 @@ test.describe("chat when the agent cannot be dispatched", () => {
     expect(stop.ok()).toBe(true);
     await page.goto(`/projects/${projectId}?engine=webcontainer`);
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
+    // A conversation of its own, so other specs on this project can't interfere.
+    await page.getByRole("button", { name: "New conversation" }).click();
+    await expect(page.getByText("What do you want to build?")).toBeVisible();
 
-    const composer = page.getByPlaceholder("Ask Codenaya anything...");
+    const composer = page.getByPlaceholder("Describe a change or ask a question…");
     const failedReplies = page.getByText(/agent service is unreachable/);
-    await expect(composer).toBeEnabled({ timeout: 30_000 });
-    const before = await failedReplies.count();
 
     await composer.fill(`Dispatch failure check ${Date.now()}`);
     await composer.press("Enter");
@@ -42,17 +43,17 @@ test.describe("chat when the agent cannot be dispatched", () => {
     await expect(
       page.getByText("The agent service is unavailable. Please try again."),
     ).toBeVisible({ timeout: 30_000 });
-    await expect(failedReplies).toHaveCount(before + 1);
+    await expect(failedReplies).toHaveCount(1);
     await expect(composer).toBeEnabled();
 
     // The failure is stored, not just shown: a reload shows it instead of a spinner.
     await page.reload();
-    await expect(failedReplies).toHaveCount(before + 1);
+    await expect(failedReplies).toHaveCount(1);
     await expect(page.locator('[data-run-status="running"]')).toHaveCount(0);
     await expect(composer).toBeEnabled();
 
     await page.getByRole("button", { name: "Retry" }).last().click();
-    await expect(failedReplies).toHaveCount(before + 2, { timeout: 30_000 });
+    await expect(failedReplies).toHaveCount(2, { timeout: 30_000 });
 
     // The 502s from /api/messages are the failure under test; the WebContainer
     // preview iframe serves the generated app, not ours.
