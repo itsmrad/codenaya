@@ -317,9 +317,14 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
-        <button type="button" className="flex items-center justify-center gap-1.5 h-8 px-3 cursor-pointer text-muted-foreground transition-all duration-200 select-none rounded-lg text-sm font-medium hover:bg-muted/50 hover:text-foreground">
+        <button
+          type="button"
+          aria-label="Export"
+          title="Export"
+          className="flex items-center gap-1.5 h-8 px-2 @3xl:px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
+        >
           {getStatusIcon()}
-          <span>Export</span>
+          <span className="hidden @3xl:inline">Export</span>
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-80" align="start">

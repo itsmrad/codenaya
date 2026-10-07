@@ -59,7 +59,7 @@ export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
               src="/logo-alt.svg"
               alt="Codenaya"
               width={40}
-              height={40}
+              height={48}
               className="opacity-25 dark:invert-0 invert"
             />
             <p className="text-xs text-muted-foreground">
