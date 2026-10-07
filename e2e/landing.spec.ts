@@ -98,3 +98,34 @@ test.describe("landing layout", () => {
     expect(boxes.every((box) => box.lines === 1)).toBe(true);
   });
 });
+
+test.describe("landing social proof", () => {
+  test("shows real showcase projects and the live project count", async ({ page }) => {
+    await page.goto("/");
+
+    const community = page.getByRole("region", { name: "Built with Codenaya" });
+    await expect(community).toBeVisible({ timeout: 30_000 });
+    await expect(community.getByText(/\d[\d,]* projects built/)).toBeVisible();
+
+    const cards = community.locator('a[href^="/showcase/"]');
+    expect(await cards.count()).toBeLessThanOrEqual(6);
+  });
+
+  test("plays the muted demo with a poster", async ({ page }) => {
+    await page.goto("/");
+
+    const video = page.locator("video");
+    await expect(video).toHaveAttribute("poster", /\S/);
+    await expect(video).toHaveAttribute("autoplay", "");
+    expect(await video.evaluate((element: HTMLVideoElement) => element.muted)).toBe(true);
+  });
+
+  test("keeps the demo paused for reduced motion", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+
+    const video = page.locator("video");
+    await expect(video).toHaveAttribute("poster", /\S/);
+    expect(await video.evaluate((element: HTMLVideoElement) => element.paused)).toBe(true);
+  });
+});

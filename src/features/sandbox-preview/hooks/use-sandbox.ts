@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   buildFlatFileList,
-  getFilePath,
+  getChangedFiles,
 } from "@/features/sandbox-preview/utils/file-tree";
 import {
   classifySandboxError,
@@ -65,6 +65,8 @@ export const useSandbox = ({
   const hasStartedRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const syncPromiseRef = useRef<Promise<void>>(Promise.resolve());
+  /** Path → content the sandbox already has, so a sync only sends real edits. */
+  const syncedContentRef = useRef(new Map<string, string>());
 
   /**
    * Kill the current sandbox. Uses fetch with keepalive for reliability
@@ -102,6 +104,9 @@ export const useSandbox = ({
         setTerminalOutput("");
 
         const flatFiles = buildFlatFileList(files);
+        syncedContentRef.current = new Map(
+          flatFiles.map((file) => [file.path, file.content]),
+        );
 
         const response = await fetch("/api/sandbox", {
           method: "POST",
@@ -204,17 +209,18 @@ export const useSandbox = ({
 
     // Debounce the file sync to batch rapid AI file generations into a single update
     const timeoutId = setTimeout(() => {
-      const filesMap = new Map(files.map((f) => [f._id, f]));
-      const changedFiles: { path: string; content: string }[] = [];
-  
-      for (const file of files) {
-        if (file.type !== "file" || file.storageId || file.content == null) continue;
-  
-        const filePath = getFilePath(file, filesMap);
-        changedFiles.push({ path: filePath, content: file.content });
-      }
-  
+      // Only what changed: rewriting e.g. vite.config restarts the dev server
+      // and breaks the open preview's HMR connection (#146).
+      const changedFiles = getChangedFiles(
+        buildFlatFileList(files),
+        syncedContentRef.current,
+      );
+
       if (changedFiles.length === 0) return;
+
+      for (const file of changedFiles) {
+        syncedContentRef.current.set(file.path, file.content);
+      }
   
       // Serialize file syncs to prevent out-of-order writes
       syncPromiseRef.current = syncPromiseRef.current

@@ -1,4 +1,9 @@
 import { internalMutation } from "./_generated/server";
+import {
+  LOST_RUN_MESSAGE,
+  LOST_RUN_MS,
+  lastRunActivity,
+} from "../src/features/conversations/agent-steps";
 
 /**
  * Scheduled cleanup for integration tables.
@@ -170,5 +175,51 @@ export const pruneOrphanedProjectConnections = internalMutation({
     }
 
     return { scanned: links.length, deleted };
+  },
+});
+
+/**
+ * Fail agent runs that stopped reporting progress.
+ *
+ * A run whose worker died, or that the backend dropped (an Inngest dev server
+ * restart, a cancelled function), never writes its reply, so the message would
+ * stay `processing` forever: a live "Thinking…" timer on every reload. Once a
+ * run has gone `LOST_RUN_MS` without recording a step, it is resolved with
+ * `LOST_RUN_MESSAGE`, which re-enables the composer and offers Retry. Steps
+ * still marked running are closed as errors so the run block reads as failed.
+ *
+ * Processing rows are few, and the index orders them oldest first, so a single
+ * batch reaches the lost ones.
+ */
+export const failLostMessageRuns = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+
+    const processing = await ctx.db
+      .query("messages")
+      .withIndex("by_status", (q) => q.eq("status", "processing"))
+      .take(BATCH_SIZE);
+
+    let failed = 0;
+    for (const message of processing) {
+      const steps = message.steps ?? [];
+      const lastActivity = lastRunActivity(message._creationTime, steps);
+      if (now - lastActivity < LOST_RUN_MS) continue;
+
+      await ctx.db.patch("messages", message._id, {
+        content: LOST_RUN_MESSAGE,
+        status: "completed" as const,
+        completedAt: lastActivity,
+        steps: steps.map((step) =>
+          step.status === "running"
+            ? { ...step, status: "error" as const, error: "Interrupted", endedAt: lastActivity }
+            : step,
+        ),
+      });
+      failed += 1;
+    }
+
+    return { scanned: processing.length, failed };
   },
 });

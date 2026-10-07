@@ -22,6 +22,7 @@ import type * as projectCopy from "../projectCopy.js";
 import type * as projects from "../projects.js";
 import type * as showcase from "../showcase.js";
 import type * as skills from "../skills.js";
+import type * as stats from "../stats.js";
 import type * as system from "../system.js";
 import type * as users from "../users.js";
 
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   projects: typeof projects;
   showcase: typeof showcase;
   skills: typeof skills;
+  stats: typeof stats;
   system: typeof system;
   users: typeof users;
 }>;

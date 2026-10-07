@@ -184,6 +184,17 @@ export const sanitizeAgentText = (
 /** A run with no recorded progress for this long offers the user a retry. */
 export const STALLED_RUN_MS = 5 * 60_000;
 
+/**
+ * A run with no recorded progress for this long is presumed lost (its worker
+ * died or the backend dropped it) and is failed server-side, so a reload no
+ * longer shows it as running.
+ */
+export const LOST_RUN_MS = 10 * 60_000;
+
+/** Written in place of the reply when a lost run is failed. */
+export const LOST_RUN_MESSAGE =
+  "The agent stopped responding before it finished, so this run was ended. Please try again.";
+
 /** Latest sign of progress in a run: its start, or any step starting or ending. */
 export const lastRunActivity = (startedAt: number, steps: AgentStep[]) =>
   Math.max(startedAt, ...steps.map((step) => step.endedAt ?? step.startedAt));

@@ -1,6 +1,6 @@
 import { useRouter } from "next/navigation";
 import { FaGithub } from "react-icons/fa";
-import { AlertCircleIcon, GlobeIcon, Loader2Icon } from "lucide-react";
+import { AlertCircleIcon, GlobeIcon, KeyboardIcon, Loader2Icon } from "lucide-react";
 
 import {
   CommandDialog,
@@ -10,6 +10,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { useShortcutsDialog } from "@/components/shortcuts-dialog";
 
 import { useProjects } from "../hooks/use-projects";
 import { Doc } from "../../../../convex/_generated/dataModel";
@@ -43,10 +44,16 @@ export const ProjectsCommandDialog = ({
 }: ProjectsCommandDialogProps) => {
   const router = useRouter();
   const projects = useProjects();
+  const openShortcuts = useShortcutsDialog((state) => state.setOpen);
 
   const handleSelect = (projectId: string) => {
     router.push(`/projects/${projectId}`);
     onOpenChange(false);
+  };
+
+  const handleShowShortcuts = () => {
+    onOpenChange(false);
+    openShortcuts(true);
   };
 
   return (
@@ -70,6 +77,12 @@ export const ProjectsCommandDialog = ({
               <span>{project.name}</span>
             </CommandItem>
           ))}
+        </CommandGroup>
+        <CommandGroup heading="Help">
+          <CommandItem onSelect={handleShowShortcuts}>
+            <KeyboardIcon className="size-4 text-muted-foreground" />
+            <span>Keyboard shortcuts</span>
+          </CommandItem>
         </CommandGroup>
       </CommandList>
     </CommandDialog>
