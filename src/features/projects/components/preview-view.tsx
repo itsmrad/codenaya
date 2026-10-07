@@ -18,6 +18,12 @@ import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
+import {
+  PREVIEW_DEVICE_WIDTHS,
+  PreviewDeviceToggle,
+  usePreviewDevice,
+  type PreviewDevice,
+} from "@/features/sandbox-preview/components/preview-device-toggle";
 
 import { Button } from "@/components/ui/button";
 
@@ -42,6 +48,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const files = useFiles(projectId);
   const [showTerminal, setShowTerminal] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [device, setDevice] = usePreviewDevice();
   
   // URL dictates isolation mode via next.config.ts conditional headers
   const engineParam = searchParams.get("engine") as PreviewEngine | null;
@@ -188,6 +195,8 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
             </Button>
         </div>
 
+        <PreviewDeviceToggle device={device} onChange={setDevice} />
+
         <div className="flex-1 h-9 flex items-center px-3 bg-muted/30 rounded-lg border border-border/50 text-xs text-muted-foreground truncate font-mono">
           {isLoading && (
             <div className="flex items-center gap-1.5">
@@ -249,6 +258,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
                   activeEngine={activeEngine}
                   previewUrl={previewUrl}
                   refreshKey={refreshKey}
+                  device={device}
                   restart={restart}
                 />
               </div>
@@ -275,6 +285,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
               activeEngine={activeEngine}
               previewUrl={previewUrl}
               refreshKey={refreshKey}
+              device={device}
               restart={restart}
             />
           </div>
@@ -291,6 +302,7 @@ const PreviewContent = ({
   activeEngine,
   previewUrl,
   refreshKey,
+  device,
   restart,
 }: {
   error: string | null | undefined;
@@ -299,6 +311,7 @@ const PreviewContent = ({
   activeEngine: PreviewEngine;
   previewUrl: string | null | undefined;
   refreshKey: number;
+  device: PreviewDevice;
   restart: () => void;
 }) => (
   <div className="size-full rounded-xl overflow-hidden relative isolate">
@@ -331,14 +344,18 @@ const PreviewContent = ({
     )}
 
     {previewUrl && (
-      <iframe
-        key={refreshKey}
-        src={previewUrl}
-        className="size-full border-0"
-        title="Preview"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
-        allow="cross-origin-isolated"
-      />
+      <div className="size-full flex justify-center bg-muted/30">
+        <iframe
+          key={refreshKey}
+          src={previewUrl}
+          className="h-full w-full max-w-full border-0 bg-background data-[framed=true]:border-x data-[framed=true]:border-border/50"
+          style={{ width: PREVIEW_DEVICE_WIDTHS[device] ?? undefined }}
+          data-framed={device !== "desktop"}
+          title="Preview"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
+          allow="cross-origin-isolated"
+        />
+      </div>
     )}
   </div>
 );
