@@ -33,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useProject } from "../hooks/use-projects";
 import { GITHUB_NOT_LINKED } from "../constants";
 import { GithubNotLinkedAlert } from "./github-not-linked-alert";
+import { DownloadZipButton } from "./download-zip-button";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 import Link from "next/link";
@@ -330,6 +331,9 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
       </PopoverTrigger>
       <PopoverContent className="w-80" align="start">
         {renderContent()}
+        <div className="mt-4 border-t pt-4">
+          <DownloadZipButton projectId={projectId} />
+        </div>
       </PopoverContent>
     </Popover>
   );
