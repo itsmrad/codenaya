@@ -30,6 +30,7 @@ import {
   CATEGORY_OPTIONS,
 } from "../constants/tags";
 import { usePublish, useGenerateUploadUrl } from "../hooks/use-showcase";
+import { useFiles } from "@/features/projects/hooks/use-files";
 import { Id } from "../../../../convex/_generated/dataModel";
 
 interface PublishDialogProps {
@@ -47,6 +48,10 @@ export const PublishDialog = ({
 }: PublishDialogProps) => {
   const publish = usePublish();
   const generateUploadUrl = useGenerateUploadUrl();
+  const files = useFiles(open ? projectId : null);
+  // An empty project has nothing to show; wait for files to load before saying so.
+  const hasNoFiles =
+    files !== undefined && !files.some((file) => file.type === "file");
 
   const [title, setTitle] = useState(projectName);
   const [description, setDescription] = useState("");
@@ -129,7 +134,8 @@ export const PublishDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+      {/* Only the form scrolls, so Cancel and Publish stay in view. */}
+      <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>Publish to Showcase</DialogTitle>
           <DialogDescription>
@@ -137,7 +143,7 @@ export const PublishDialog = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5 py-2">
+        <div className="min-h-0 overflow-y-auto -mx-6 px-6 space-y-5 py-2">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Title</label>
             <Input
@@ -238,13 +244,19 @@ export const PublishDialog = ({
           </div>
         </div>
 
+        {hasNoFiles && (
+          <p className="text-xs text-muted-foreground">
+            Add some files to this project before publishing it.
+          </p>
+        )}
+
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={submitting || !title.trim() || !category}
+            disabled={submitting || hasNoFiles || !title.trim() || !category}
           >
             {submitting ? "Publishing..." : "Publish"}
           </Button>
