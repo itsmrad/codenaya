@@ -9,9 +9,11 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ArrowUpDown,
+  FolderOpen,
+  Sparkles,
 } from "lucide-react";
 import Link from "next/link";
-import { formatDistanceToNow } from "date-fns";
+import { differenceInMinutes, format, formatDistanceToNow } from "date-fns";
 import { FaGithub } from "react-icons/fa";
 import { AlertCircleIcon, GlobeIcon, Loader2Icon } from "lucide-react";
 
@@ -43,6 +45,18 @@ import { NewProjectDialog } from "./new-project-dialog";
 
 const formatTimestamp = (timestamp: number) => {
   return formatDistanceToNow(new Date(timestamp), { addSuffix: true });
+};
+
+/** Compact relative time for the narrow sidebar rows: "now", "16m", "3h", "2d", "Oct 3". */
+const formatShortTimestamp = (timestamp: number) => {
+  const minutes = differenceInMinutes(Date.now(), timestamp);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  return format(timestamp, "MMM d");
 };
 
 const getProjectIcon = (project: Doc<"projects">) => {
@@ -124,7 +138,7 @@ export const ProjectsView = () => {
           initial={false}
           animate={{ width: collapsed ? 56 : 300 }}
           transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-          className="h-full border-r border-border/40 flex flex-col shrink-0 overflow-hidden"
+          className="h-full border-r border-border/40 hidden md:flex flex-col shrink-0 overflow-hidden"
         >
           {/* Collapse toggle */}
           <div className={`flex items-center ${collapsed ? "justify-center" : "justify-end"} px-3 pt-3 pb-1`}>
@@ -322,8 +336,11 @@ export const ProjectsView = () => {
                         <span className="text-[13px] text-foreground/80 group-hover:text-foreground truncate flex-1 transition-colors">
                           {project.name}
                         </span>
-                        <span className="text-[10px] text-muted-foreground/50 shrink-0">
-                          {formatTimestamp(project.updatedAt)}
+                        <span
+                          title={`Updated ${formatTimestamp(project.updatedAt)}`}
+                          className="text-[11px] tabular-nums text-muted-foreground/60 shrink-0"
+                        >
+                          {formatShortTimestamp(project.updatedAt)}
                         </span>
                       </Link>
                     )}
@@ -342,17 +359,17 @@ export const ProjectsView = () => {
           className="flex-1 flex flex-col relative overflow-y-auto"
         >
           {/* Hero section with background — compact */}
-          <div className="relative flex flex-col items-center justify-center overflow-hidden shrink-0 py-14 md:py-20">
+          <div className="relative flex flex-col items-center justify-center overflow-hidden shrink-0 py-12 md:py-20">
             <BackgroundRippleEffect />
 
-            <div className="relative z-10 w-full max-w-4xl mx-auto px-8">
+            <div className="relative z-10 w-full max-w-4xl mx-auto px-4 md:px-8">
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
                 className="text-center"
               >
-                <h2 className="text-2xl font-bold text-foreground md:text-4xl lg:text-6xl">
+                <h2 className="text-3xl font-semibold tracking-tight text-foreground md:text-4xl lg:text-5xl">
                   What will you build?
                 </h2>
                 <p className="mt-3 text-sm text-muted-foreground max-w-md mx-auto">
@@ -369,11 +386,11 @@ export const ProjectsView = () => {
               >
                 <button
                   onClick={() => setNewProjectDialogOpen(true)}
-                  className="w-full max-w-md flex items-center gap-3 h-11 px-5 rounded-xl bg-card/80 backdrop-blur-sm border border-border/50 text-sm text-muted-foreground/60 hover:border-brand/30 hover:bg-card transition-all group cursor-text shadow-sm"
+                  className="w-full max-w-md flex items-center gap-3 h-11 px-4 sm:px-5 rounded-xl bg-card/80 backdrop-blur-sm border border-border/50 text-sm text-muted-foreground/60 hover:border-brand/30 hover:bg-card transition-all group cursor-text shadow-sm"
                 >
-                  <Search className="size-4 text-muted-foreground/40 group-hover:text-brand/60 transition-colors" />
-                  <span>Describe what you want to build...</span>
-                  <Kbd className="ml-auto text-[10px] text-muted-foreground/50 bg-muted/40 border-border/30 px-1.5 py-0.5 rounded">
+                  <Sparkles className="size-4 shrink-0 text-muted-foreground/60 group-hover:text-brand transition-colors" />
+                  <span className="truncate">Describe what you want to build...</span>
+                  <Kbd className="ml-auto hidden sm:inline-flex text-[10px] text-muted-foreground/50 bg-muted/40 border-border/30 px-1.5 py-0.5 rounded">
                     {isMac ? "⌘J" : "Ctrl+J"}
                   </Kbd>
                 </button>
@@ -386,7 +403,7 @@ export const ProjectsView = () => {
         </motion.main>
 
         {/* Mobile bottom actions */}
-        <div className="fixed bottom-0 left-0 right-0 md:hidden bg-background/90 backdrop-blur-xl border-t border-border/30 px-4 py-3 flex gap-2 z-40">
+        <div className="fixed bottom-0 left-0 right-0 md:hidden bg-background/90 backdrop-blur-xl border-t border-border/30 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] flex gap-2 z-40">
           <button
             onClick={() => setNewProjectDialogOpen(true)}
             className="flex-1 flex items-center justify-center gap-2 h-10 rounded-lg bg-brand text-white text-sm font-medium"
@@ -400,6 +417,13 @@ export const ProjectsView = () => {
           >
             <GitBranch className="size-4" />
             Import
+          </button>
+          <button
+            onClick={() => setCommandDialogOpen(true)}
+            className="flex-1 flex items-center justify-center gap-2 h-10 rounded-lg bg-muted border border-border/40 text-foreground text-sm font-medium"
+          >
+            <FolderOpen className="size-4" />
+            Projects
           </button>
         </div>
       </div>
@@ -462,10 +486,10 @@ const ShowcaseFeed = ({ onNewProject }: { onNewProject: () => void }) => {
         project={selectedProject}
       />
 
-      <div className="px-6 md:px-10 pb-10">
+      <div className="px-4 md:px-10 pb-24 md:pb-10">
         {/* Header + Search + Sort */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="relative flex-1 max-w-xs">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4">
+          <div className="relative w-full sm:w-auto sm:flex-1 sm:max-w-xs">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/50" />
             <input
               type="text"

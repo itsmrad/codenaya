@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpIcon, ArrowDownIcon, DownloadIcon, EyeIcon } from "lucide-react";
+import { ArrowUpIcon, ArrowDownIcon, DownloadIcon, EyeIcon, ImageIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Doc } from "../../../../convex/_generated/dataModel";
 
@@ -25,8 +25,9 @@ export const ShowcaseCard = ({ project, onClick }: ShowcaseCardProps) => {
             className="size-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
           />
         ) : (
-          <div className="size-full flex items-center justify-center text-muted-foreground/30">
-            <span className="text-xs font-mono">No preview</span>
+          <div className="size-full flex flex-col items-center justify-center gap-1.5 text-muted-foreground/60">
+            <ImageIcon className="size-5" />
+            <span className="text-xs">No preview</span>
           </div>
         )}
       </div>

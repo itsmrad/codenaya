@@ -75,26 +75,30 @@ export const NewProjectDialog = ({
         showCloseButton={false}
         className="sm:max-w-lg p-0"
       >
-        <DialogHeader className="hidden">
-          <DialogTitle>What do you want to build?</DialogTitle>
-          <DialogDescription>
+        <DialogHeader className="gap-1 px-4 pt-4 text-left">
+          <DialogTitle className="text-sm font-medium">
+            What do you want to build?
+          </DialogTitle>
+          <DialogDescription className="text-xs">
             Describe your project and AI will help you create it.
           </DialogDescription>
         </DialogHeader>
-        <PromptInput onSubmit={handleSubmit} className="border-none!">
-          <PromptInputBody>
-            <PromptInputTextarea
-              placeholder="Ask Codenaya to build..."
-              onChange={(e) => setInput(e.target.value)}
-              value={input}
-              disabled={isSubmitting}
-            />
-          </PromptInputBody>
-          <PromptInputFooter>
-             <PromptInputTools />
-             <PromptInputSubmit disabled={!input || isSubmitting} />
-          </PromptInputFooter>
-        </PromptInput>
+        <div className="px-3 pb-3 pt-1">
+          <PromptInput onSubmit={handleSubmit}>
+            <PromptInputBody>
+              <PromptInputTextarea
+                placeholder="Ask Codenaya to build..."
+                onChange={(e) => setInput(e.target.value)}
+                value={input}
+                disabled={isSubmitting}
+              />
+            </PromptInputBody>
+            <PromptInputFooter>
+               <PromptInputTools />
+               <PromptInputSubmit disabled={!input || isSubmitting} />
+            </PromptInputFooter>
+          </PromptInput>
+        </div>
       </DialogContent>
     </Dialog>
   );
