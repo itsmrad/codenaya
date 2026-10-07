@@ -61,6 +61,25 @@ describe("skills", () => {
     ).rejects.toThrow(/Skill name/);
   });
 
+  test("stores imported skills as GitHub skills with their source URL", async () => {
+    const { t, alice } = setup();
+    const sourceUrl = "https://github.com/o/r/tree/main/skills/imported";
+
+    const id = await alice.mutation(api.skills.create, {
+      ...skill("imported"),
+      sourceUrl,
+    });
+
+    const stored = await t.run((ctx) => ctx.db.get(id));
+    expect(stored).toMatchObject({ source: "github", sourceUrl });
+    await expect(
+      alice.mutation(api.skills.create, {
+        ...skill("elsewhere"),
+        sourceUrl: "https://example.com/SKILL.md",
+      }),
+    ).rejects.toThrow(/GitHub source/);
+  });
+
   test("requires sign-in", async () => {
     const { t } = setup();
 
