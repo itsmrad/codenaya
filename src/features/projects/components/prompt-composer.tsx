@@ -97,6 +97,18 @@ const useTypedPlaceholder = (enabled: boolean) => {
   return text;
 };
 
+/** The agent model chip; its own component so signed-out composers skip its queries. */
+const ComposerModelSelect = ({ disabled }: { disabled: boolean }) => {
+  const [agentModel, setAgentModel] = useAgentModel();
+  return (
+    <AgentModelSelect
+      value={agentModel}
+      onValueChange={setAgentModel}
+      disabled={disabled}
+    />
+  );
+};
+
 interface PromptComposerProps {
   /** Resolves to true when the prompt was accepted; the box is then cleared. */
   onSubmit: (prompt: string) => Promise<boolean>;
@@ -105,6 +117,8 @@ interface PromptComposerProps {
   showStarters?: boolean;
   /** Show the agent model chip (shares the chat's saved choice). */
   showModelSelect?: boolean;
+  /** Show the Enhance prompt button (needs a signed-in user). */
+  showEnhance?: boolean;
   autoFocus?: boolean;
   className?: string;
 }
@@ -112,19 +126,19 @@ interface PromptComposerProps {
 /**
  * The "describe what to build" box: a large prompt input with the chat
  * composer's look, an optional model chip and starter chips. Used by the
- * dashboard hero and the new-project dialog.
+ * dashboard hero, the new-project dialog and the landing page.
  */
 export const PromptComposer = ({
   onSubmit,
   isSubmitting = false,
   showStarters = false,
   showModelSelect = true,
+  showEnhance = true,
   autoFocus,
   className,
 }: PromptComposerProps) => {
   const [input, setInput] = useState("");
   const [isFocused, setIsFocused] = useState(false);
-  const [agentModel, setAgentModel] = useAgentModel();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const enhancer = useEnhancePrompt(input, setInput);
   const isBusy = isSubmitting || enhancer.isEnhancing;
@@ -161,18 +175,14 @@ export const PromptComposer = ({
           </PromptInputBody>
           <PromptInputFooter className="h-12 px-2.5 py-0">
             <PromptInputTools>
-              <EnhancePromptButton
-                enhancer={enhancer}
-                value={input}
-                disabled={isSubmitting}
-              />
-              {showModelSelect && (
-                <AgentModelSelect
-                  value={agentModel}
-                  onValueChange={setAgentModel}
+              {showEnhance && (
+                <EnhancePromptButton
+                  enhancer={enhancer}
+                  value={input}
                   disabled={isSubmitting}
                 />
               )}
+              {showModelSelect && <ComposerModelSelect disabled={isSubmitting} />}
             </PromptInputTools>
             <PromptInputSubmit
               disabled={!input.trim() || isBusy}

@@ -1,12 +1,10 @@
 "use client";
 
 import { useRef } from "react";
-import Link from "next/link";
 import { motion, useInView } from "motion/react";
 import { ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { SIGN_UP_URL } from "@/features/auth/constants";
 import { GridPattern } from "./grid-pattern";
+import { LandingPromptComposer } from "./landing-prompt-composer";
 import { Noise } from "./noise";
 
 export const LandingHero = () => {
@@ -106,31 +104,18 @@ export const LandingHero = () => {
             to run it, and GitHub export when it&apos;s done. On desktop or phone.
           </motion.p>
 
-          {/* CTA */}
-          <motion.div variants={fadeUp} className="mx-auto flex w-full max-w-xs flex-col items-stretch justify-center gap-3 pt-4 sm:max-w-none sm:flex-row sm:items-center">
-            <Button
-              asChild
-              size="lg"
-              className="w-full sm:w-auto h-12 px-8 text-base font-medium bg-brand text-brand-foreground hover:bg-brand/90 rounded-full gap-2 group"
-            >
-              <Link href={SIGN_UP_URL}>
-                Start Building
-                <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-              </Link>
-            </Button>
-            <motion.a
+          {/* Prompt: typing comes first, sign-up second */}
+          <motion.div variants={fadeUp} className="mx-auto max-w-2xl pt-4">
+            <LandingPromptComposer showStarters className="text-left" />
+            <a
               href="https://github.com/itsmrad/codenaya"
               target="_blank"
               rel="noopener noreferrer"
+              className="mt-5 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
             >
-              <Button
-                variant="outline"
-                size="lg"
-                className="w-full sm:w-auto h-12 px-8 text-base font-medium rounded-full border-border/60 hover:border-border"
-              >
-                View on GitHub
-              </Button>
-            </motion.a>
+              View on GitHub
+              <ArrowRight className="size-3.5" />
+            </a>
           </motion.div>
         </motion.div>
       </div>
