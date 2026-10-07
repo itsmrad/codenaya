@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Allotment } from "allotment";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { CloudCheckIcon, LoaderIcon, PlugIcon, RocketIcon } from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { formatDistanceToNow } from "date-fns";
@@ -62,7 +63,15 @@ export const ProjectIdView = ({
 }: {
   projectId: Id<"projects">;
 }) => {
-  const [activeView, setActiveView] = useState<"editor" | "preview">("editor");
+  // Switching preview engines reloads the page with `?view=preview` so the user
+  // lands back on the preview they were using.
+  const openOnPreview = useSearchParams().get("view") === "preview";
+  const [activeView, setActiveView] = useState<"editor" | "preview">(
+    openOnPreview ? "preview" : "editor",
+  );
+  // The preview boots a cloud sandbox or WebContainer as soon as it mounts, so
+  // mount it on first open and keep it mounted so tab switches don't reboot it.
+  const [previewOpened, setPreviewOpened] = useState(openOnPreview);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const { openIntegrations } = useProjectIntegrations();
   const project = useProject(projectId);
@@ -178,7 +187,10 @@ export const ProjectIdView = ({
           <Tab
             label="Preview"
             isActive={activeView === "preview"}
-            onClick={() => setActiveView("preview")}
+            onClick={() => {
+              setActiveView("preview");
+              setPreviewOpened(true);
+            }}
           />
         </div>
 
@@ -252,7 +264,7 @@ export const ProjectIdView = ({
             activeView !== "preview" && "opacity-0 pointer-events-none"
           )}
         >
-          <PreviewView projectId={projectId} />
+          {previewOpened && <PreviewView projectId={projectId} />}
         </div>
       </div>
     </div>

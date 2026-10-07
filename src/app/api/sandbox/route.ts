@@ -1,4 +1,4 @@
-import { Sandbox } from "e2b";
+import { AuthenticationError, RateLimitError, Sandbox } from "e2b";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import {
@@ -10,6 +10,7 @@ import {
   secretValuesFrom,
 } from "@/features/integrations/server/env/resolve-env";
 import { createStreamRedactor } from "@/features/integrations/server/env/stream-redactor";
+import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
@@ -26,7 +27,7 @@ import type { Id } from "../../../../convex/_generated/dataModel";
  *   { "type": "status", "status": "installing" | "running" }
  *   { "type": "output", "data": "..." }
  *   { "type": "ready",  "sandboxId": "...", "previewUrl": "..." }
- *   { "type": "error",  "message": "..." }
+ *   { "type": "error",  "message": "...", "code": SandboxErrorKind }
  */
 
 const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour (E2B free plan max)
@@ -73,6 +74,7 @@ export async function POST(request: Request) {
         error:
           "E2B_API_KEY is not configured on the Codenaya server. Add it to the " +
           "hosting environment and restart or redeploy the app.",
+        code: "config" satisfies SandboxErrorKind,
       },
       { status: 503 },
     );
@@ -365,8 +367,15 @@ export async function POST(request: Request) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
 
+        const code: SandboxErrorKind =
+          error instanceof AuthenticationError
+            ? "config"
+            : error instanceof RateLimitError
+              ? "rate_limit"
+              : "transient";
+
         send({ type: "output", data: `\nError: ${message}\n` });
-        send({ type: "error", message });
+        send({ type: "error", message, code });
 
         // Kill sandbox on error to free up the slot
         if (sandbox) {
