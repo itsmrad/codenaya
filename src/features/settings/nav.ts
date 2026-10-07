@@ -1,4 +1,5 @@
 import {
+  KeyRoundIcon,
   type LucideIcon,
   PaletteIcon,
   PlugIcon,
@@ -7,6 +8,7 @@ import {
 
 export const SETTINGS_URL = "/settings";
 export const ACCOUNT_SETTINGS_URL = "/settings/account";
+export const AI_PROVIDERS_SETTINGS_URL = "/settings/ai-providers";
 
 export interface SettingsNavItem {
   href: string;
@@ -21,6 +23,7 @@ export interface SettingsNavItem {
  */
 export const SETTINGS_NAV: SettingsNavItem[] = [
   { href: ACCOUNT_SETTINGS_URL, label: "Account", icon: UserIcon },
+  { href: AI_PROVIDERS_SETTINGS_URL, label: "AI providers", icon: KeyRoundIcon },
   { href: "/settings/integrations", label: "Integrations", icon: PlugIcon },
   { href: "/settings/appearance", label: "Appearance", icon: PaletteIcon },
 ];

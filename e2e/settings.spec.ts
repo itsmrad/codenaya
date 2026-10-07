@@ -47,6 +47,10 @@ test.describe("settings", () => {
         const tabs = [
           { path: "/settings/account", content: page.locator(".cl-userProfile-root") },
           {
+            path: "/settings/ai-providers",
+            content: page.getByRole("heading", { level: 1, name: "AI providers" }),
+          },
+          {
             path: "/settings/integrations",
             content: page.getByRole("heading", { level: 1, name: "Integrations" }),
           },
