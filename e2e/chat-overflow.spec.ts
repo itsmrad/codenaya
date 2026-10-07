@@ -8,15 +8,14 @@ import {
 } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
-
-const projectId = process.env.E2E_PROJECT_ID;
+import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
 
 // Regression for #132: a pasted log or a long unbroken token pushed the user
 // bubble past the panel's left edge, and file chips wrapped under the icons.
 test.describe("chat panel overflow", () => {
   test.skip(
-    !hasClerkCredentials() || !projectId || !hasInternalKey(),
-    "Needs CLERK_SECRET_KEY, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, E2E_PROJECT_ID and CODENAYA_CONVEX_INTERNAL_KEY",
+    !hasClerkCredentials() || !hasInternalKey() || !hasPreviewFixtureEnv(),
+    "Needs CLERK_SECRET_KEY, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, CODENAYA_CONVEX_INTERNAL_KEY and NEXT_PUBLIC_CONVEX_URL",
   );
 
   test("long messages and many file reads stay inside the panel", async ({ page }) => {
@@ -24,7 +23,10 @@ test.describe("chat panel overflow", () => {
     const errors = collectConsoleErrors(page);
 
     await signIn(page);
-    const stopRun = await seedOverflowConversation(page, projectId!);
+    // Its own project: in the shared E2E_PROJECT_ID, another spec's newer
+    // conversation can become the active one mid-test.
+    const projectId = await seedPreviewProject(page, "e2e chat overflow");
+    const stopRun = await seedOverflowConversation(page, projectId);
     try {
       await page.goto(`/projects/${projectId}?engine=webcontainer`);
       await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
