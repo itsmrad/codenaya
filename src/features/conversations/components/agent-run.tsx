@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
-import type { AgentStep } from "../agent-steps";
+import { type AgentStep, STALLED_RUN_MS, lastRunActivity } from "../agent-steps";
 
 interface ToolMeta {
   icon: LucideIcon;
@@ -288,6 +288,31 @@ export const useNow = (active: boolean) => {
   return now;
 };
 
+interface RunProgress {
+  status?: "processing" | "completed" | "cancelled";
+  _creationTime: number;
+  steps?: AgentStep[];
+}
+
+/**
+ * True once a processing run has gone `STALLED_RUN_MS` without progress: it
+ * most likely died without reporting back. Wakes once at the deadline rather
+ * than ticking, and resets when a new step arrives.
+ */
+export const useRunStalled = (run: RunProgress | undefined) => {
+  const deadline =
+    run?.status === "processing"
+      ? lastRunActivity(run._creationTime, run.steps ?? []) + STALLED_RUN_MS
+      : undefined;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (deadline === undefined) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, deadline - Date.now()));
+    return () => clearTimeout(timer);
+  }, [deadline]);
+  return deadline !== undefined && now >= deadline;
+};
+
 const LIVE_ROWS = 4;
 
 interface AgentRunProps {
@@ -297,6 +322,8 @@ interface AgentRunProps {
   completedAt?: number;
   /** "Provider · model" the run used, when recorded. */
   model?: string;
+  /** Processing, but silent for too long (see `useRunStalled`). */
+  stalled?: boolean;
   onOpenFile?: (path: string) => void;
 }
 
@@ -310,9 +337,10 @@ export const AgentRun = ({
   startedAt,
   completedAt,
   model,
+  stalled = false,
   onOpenFile,
 }: AgentRunProps) => {
-  const live = status === "processing";
+  const live = status === "processing" && !stalled;
   const [open, setOpen] = useState(live);
   const [showAll, setShowAll] = useState(false);
   const toggled = useRef(false);
@@ -354,7 +382,7 @@ export const AgentRun = ({
         toggled.current = true;
         setOpen(next);
       }}
-      data-run-status={live ? "running" : status}
+      data-run-status={live ? "running" : stalled ? "stalled" : status}
       className="@container w-full overflow-hidden rounded-xl border border-border bg-card/60"
     >
       <CollapsibleTrigger
@@ -378,18 +406,20 @@ export const AgentRun = ({
           </>
         ) : (
           <>
-            {errors > 0 || status === "cancelled" ? (
+            {errors > 0 || stalled || status === "cancelled" ? (
               <CircleAlertIcon
                 className={cn(
                   "size-3.5 shrink-0",
-                  errors > 0 ? "text-destructive" : "text-muted-foreground",
+                  errors > 0 || stalled ? "text-destructive" : "text-muted-foreground",
                 )}
               />
             ) : (
               <CheckCircle2Icon className="size-3.5 shrink-0 text-muted-foreground" />
             )}
             <span className="shrink-0 text-foreground/80">
-              {status === "cancelled"
+              {stalled
+                ? "Stopped responding"
+                : status === "cancelled"
                 ? `Stopped after ${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`
                 : endedAt
                   ? `Worked for ${formatDuration(endedAt - startedAt)}`
