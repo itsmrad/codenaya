@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
 import { AuthLoadingView } from "@/features/auth/components/auth-loading-view";
+import { AGENT_MODELS } from "@/features/conversations/agent-models";
 
 import "allotment/dist/style.css";
 import "./globals.css";
@@ -29,8 +30,7 @@ const nerdMono = IBM_Plex_Mono({
 });
 
 const title = "Codenaya — AI-Powered Browser IDE";
-const description =
-  "Build, edit, and deploy code from your browser with AI assistance. Real-time collaboration, GitHub integration, and instant preview.";
+const description = `Build apps from your browser with an AI agent. Choose from ${AGENT_MODELS.length} models, run a live preview, and export to GitHub or a ZIP.`;
 
 // Absolute base for Open Graph / Twitter image URLs.
 const appUrl =

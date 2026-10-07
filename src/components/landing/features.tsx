@@ -2,36 +2,57 @@
 
 import { useRef } from "react";
 import { motion, useInView } from "motion/react";
-import { Sparkles, GitBranch, Play, Users } from "lucide-react";
+import {
+  Bot,
+  Download,
+  FolderGit2,
+  KeyRound,
+  MonitorPlay,
+  Puzzle,
+} from "lucide-react";
+import { AGENT_MODELS } from "@/features/conversations/agent-models";
 
 const features = [
   {
-    icon: Sparkles,
-    title: "AI Code Generation",
-    description:
-      "Claude-powered suggestions, quick edits with Cmd+K, and a conversational AI assistant that understands your entire codebase.",
+    icon: Bot,
+    title: "AI agent with model choice",
+    description: `Describe what you want and the agent writes and edits files across your project. Switch between ${AGENT_MODELS.length} models, including Claude, GPT and Gemini, and use Cmd+K for quick edits in the editor.`,
     span: "lg:col-span-2",
   },
   {
-    icon: Play,
-    title: "In-Browser Execution",
+    icon: MonitorPlay,
+    title: "Live preview & terminal",
     description:
-      "Run your code instantly with WebContainer. No setup, no local environment — just write and see results.",
+      "Your app runs in a cloud sandbox with a live preview and a terminal. No local setup.",
     span: "lg:col-span-1",
   },
   {
-    icon: GitBranch,
-    title: "GitHub Integration",
+    icon: FolderGit2,
+    title: "GitHub import & export",
     description:
-      "Import repos, push changes, and manage branches directly from your browser. Your workflow, streamlined.",
+      "Start from any GitHub repository, then export your project to a new repo when it's ready.",
     span: "lg:col-span-1",
   },
   {
-    icon: Users,
-    title: "Real-time Collaboration",
+    icon: KeyRound,
+    title: "Bring your own key",
     description:
-      "Convex-powered real-time sync. Every keystroke, every file change — instantly reflected across all collaborators.",
+      "Run the agent on your own OpenRouter, OpenAI or Anthropic key, or any OpenAI-compatible endpoint.",
     span: "lg:col-span-2",
+  },
+  {
+    icon: Puzzle,
+    title: "Skills & integrations",
+    description:
+      "Teach the agent reusable skills, and connect integrations whose actions wait for your approval.",
+    span: "lg:col-span-2",
+  },
+  {
+    icon: Download,
+    title: "Download as ZIP",
+    description:
+      "Take the full source with you in one click, whenever you want.",
+    span: "lg:col-span-1",
   },
 ];
 

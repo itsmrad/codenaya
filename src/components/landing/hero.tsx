@@ -102,8 +102,8 @@ export const LandingHero = () => {
             variants={fadeUp}
             className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed font-light"
           >
-            A browser-based IDE with AI code generation, real-time collaboration,
-            and instant preview. Write, run, and deploy — all in one place.
+            A browser IDE with an AI agent that writes your code, a live preview
+            to run it, and GitHub export when it&apos;s done. On desktop or phone.
           </motion.p>
 
           {/* CTA */}

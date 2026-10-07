@@ -8,19 +8,19 @@ const steps = [
     number: "01",
     title: "Describe your project",
     description:
-      "Tell the AI what you want to build. A landing page, a full-stack app, or a quick prototype — just describe it.",
+      "Tell the agent what you want to build, or import a GitHub repo to start from. A landing page, a full-stack app, or a quick prototype.",
   },
   {
     number: "02",
-    title: "AI generates your code",
+    title: "The agent writes your code",
     description:
-      "Claude writes production-ready code across multiple files. Review, edit, and iterate in real-time with the AI assistant.",
+      "Pick a model and the agent writes code across multiple files. Review, edit, and keep iterating in the chat.",
   },
   {
     number: "03",
-    title: "Preview & deploy",
+    title: "Preview & export",
     description:
-      "See your app running instantly in the browser. Push to GitHub or deploy when you're ready — no terminal needed.",
+      "See your app running in a live preview. Export it to GitHub or download a ZIP when you're ready.",
   },
 ];
 
