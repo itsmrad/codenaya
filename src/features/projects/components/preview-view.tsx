@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { EnvVarsDialog } from "./env-vars-dialog";
 import { useProject } from "../hooks/use-projects";
 import { useFiles } from "../hooks/use-files";
+import { markPreviewOpened } from "../utils/first-run";
 import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
 import {
   usePublicEnvVars,
@@ -109,6 +110,11 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
     firstBuild && activeRun && files ? (
       <PreviewBuilding steps={activeRun.steps} files={files} />
     ) : null;
+
+  // Ticks the dashboard's "Open the preview" step.
+  useEffect(() => {
+    if (previewUrl) markPreviewOpened();
+  }, [previewUrl]);
 
   // Automatically refresh the iframe shortly after the dev server announces it's running.
   // The first request to Vite often serves the index.html and CSS instantly but hangs 
