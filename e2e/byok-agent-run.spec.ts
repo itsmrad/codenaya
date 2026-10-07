@@ -196,10 +196,13 @@ test.describe.serial("agent runs on the user's own key", () => {
 
     await sendPrompt(`byok e2e rejected ${Date.now()}`);
 
-    const link = page.getByRole("link", { name: "Settings → AI providers" }).last();
+    // Chat links render as buttons that confirm before opening (link safety).
+    const link = page.getByRole("button", { name: "Settings → AI providers" }).last();
     await expect(link).toBeVisible({ timeout: 60_000 });
-    await expect(link).toHaveAttribute("href", "/settings/ai-providers");
     await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
+    await link.click();
+    await expect(page.getByText(/\/settings\/ai-providers/)).toBeVisible();
+    await page.keyboard.press("Escape");
     // Marked invalid, and nothing fell back to the platform key.
     await expect.poll(keyStatus).toBe("invalid");
     expect(stub.models.length).toBe(calls);
@@ -210,7 +213,7 @@ test.describe.serial("agent runs on the user's own key", () => {
     await openNewChat();
     await sendPrompt(`byok e2e invalid ${Date.now()}`);
 
-    const link = page.getByRole("link", { name: "Settings → AI providers" }).last();
+    const link = page.getByRole("button", { name: "Settings → AI providers" }).last();
     await expect(link).toBeVisible({ timeout: 60_000 });
     await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
   });

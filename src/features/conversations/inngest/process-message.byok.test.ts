@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   mutation: vi.fn(),
   openProviderKey: vi.fn(),
+  testConnection: vi.fn(),
 }));
 
 vi.mock("@/lib/convex-client", () => ({
@@ -25,6 +26,9 @@ vi.mock("@/lib/convex-client", () => ({
 }));
 vi.mock("@/features/ai-providers/server/sealed-key", () => ({
   openProviderKey: mocks.openProviderKey,
+}));
+vi.mock("@/features/ai-providers/server/test-connection", () => ({
+  testConnection: mocks.testConnection,
 }));
 
 import { inngest } from "@/inngest/client";
@@ -151,6 +155,7 @@ beforeEach(() => {
   mocks.query.mockImplementation(async (ref) => QUERIES[getFunctionName(ref)]?.());
   mocks.mutation.mockResolvedValue(null);
   mocks.openProviderKey.mockResolvedValue(SECRET);
+  mocks.testConnection.mockResolvedValue({ ok: true });
 });
 
 describe("processMessage on the user's key", () => {
@@ -203,6 +208,50 @@ describe("processMessage on the user's key", () => {
       ]),
     );
     expect(JSON.stringify(outcome.stepState)).not.toContain(SECRET);
+  });
+
+  it("fails fast when the pre-flight check finds the key revoked", async () => {
+    mocks.testConnection.mockResolvedValue({
+      ok: false,
+      kind: "unauthorized",
+      error: "OpenAI rejected the API key.",
+    });
+
+    const outcome = await drive({ keyId: "key_1", modelId: "gpt-6.1-sol" }, []);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceUrls).toEqual([]);
+    expect(mocks.testConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "openai", apiKey: SECRET }),
+    );
+    expect(JSON.stringify(outcome.stepState)).not.toContain(SECRET);
+    expect(mutations()).toEqual(
+      expect.arrayContaining([
+        ["system:updateAiProviderKeyStatus", expect.objectContaining({ status: "invalid" })],
+        [
+          "system:updateMessageContent",
+          expect.objectContaining({ content: expect.stringContaining("/settings/ai-providers") }),
+        ],
+      ]),
+    );
+  });
+
+  it("goes on to the inference when the provider is merely unreachable", async () => {
+    mocks.testConnection.mockResolvedValue({
+      ok: false,
+      kind: "network",
+      error: "Could not reach OpenAI.",
+    });
+
+    const outcome = await drive({ keyId: "key_1", modelId: "gpt-6.1-sol" }, [
+      { data: text("Title") },
+      { data: text("Done.") },
+    ]);
+
+    expect(outcome.inferenceUrls.length).toBeGreaterThan(0);
+    expect(mutations().map(([name]) => name)).not.toContain(
+      "system:updateAiProviderKeyStatus",
+    );
   });
 
   it("fails an invalid key straight away, with no inference", async () => {
