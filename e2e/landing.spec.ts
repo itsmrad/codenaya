@@ -20,7 +20,7 @@ test.describe("landing page", () => {
         page.getByRole("heading", { level: 1, name: "Build with AI." }),
       ).toBeVisible();
       await expect(
-        page.getByRole("link", { name: "Start Building" }),
+        page.getByRole("textbox", { name: "Describe what you want to build" }).first(),
       ).toBeVisible();
 
       // The navbar collapses the sign-in CTA into a menu below the md breakpoint.
@@ -64,7 +64,7 @@ test.describe("landing copy", () => {
 });
 
 test.describe("landing layout", () => {
-  test("stacks equal-width hero CTAs below the header on mobile", async ({ page }) => {
+  test("fits the hero prompt box below the header on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/");
 
@@ -72,9 +72,12 @@ test.describe("landing layout", () => {
     const badge = await page.getByText("AI-Powered Browser IDE").boundingBox();
     expect(badge!.y - (header!.y + header!.height)).toBeGreaterThanOrEqual(24);
 
-    const start = await page.getByRole("link", { name: "Start Building" }).boundingBox();
-    const github = await page.getByRole("button", { name: "View on GitHub" }).boundingBox();
-    expect(Math.abs(start!.width - github!.width)).toBeLessThanOrEqual(1);
+    const composer = await page
+      .getByRole("textbox", { name: "Describe what you want to build" })
+      .first()
+      .boundingBox();
+    expect(composer!.x).toBeGreaterThanOrEqual(16);
+    expect(composer!.x + composer!.width).toBeLessThanOrEqual(375 - 16);
   });
 
   test("shows the features as two equal columns on tablet", async ({ page }) => {

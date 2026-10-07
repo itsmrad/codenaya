@@ -1,11 +1,8 @@
 "use client";
 
 import { useRef } from "react";
-import Link from "next/link";
 import { motion, useInView } from "motion/react";
-import { ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { SIGN_UP_URL } from "@/features/auth/constants";
+import { LandingPromptComposer } from "./landing-prompt-composer";
 
 export const LandingCTA = () => {
   const sectionRef = useRef<HTMLDivElement>(null);
@@ -27,18 +24,7 @@ export const LandingCTA = () => {
             Join developers who are shipping faster with AI-powered coding.
             No setup required — start building in seconds.
           </p>
-          <div className="pt-4">
-            <Button
-              asChild
-              size="lg"
-              className="h-12 px-8 text-base font-medium bg-brand text-brand-foreground hover:bg-brand/90 rounded-full gap-2 group"
-            >
-              <Link href={SIGN_UP_URL}>
-                Get Started Free
-                <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-              </Link>
-            </Button>
-          </div>
+          <LandingPromptComposer showStarters className="pt-4 text-left" />
         </motion.div>
       </div>
     </section>
