@@ -10,7 +10,8 @@
 		"start": "next start",
 		"lint": "eslint",
 		"test": "vitest run",
-		"test:watch": "vitest"
+		"test:watch": "vitest",
+		"test:e2e": "playwright test"
 	},
 	"overrides": {
 		"postcss": ">=8.5.23 <9",
@@ -140,6 +141,7 @@
 		"zustand": "^5.0.9"
 	},
 	"devDependencies": {
+		"@playwright/test": "1.63.0",
 		"@tailwindcss/postcss": "^4",
 		"@types/node": "^20",
 		"@types/react": "^19",
