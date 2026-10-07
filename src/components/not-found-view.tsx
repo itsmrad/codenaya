@@ -15,7 +15,6 @@ export const NotFoundView = ({ title, description }: NotFoundViewProps) => {
       <AppNavbar />
       <main className="relative flex-1 flex items-center justify-center overflow-hidden px-6 py-16">
         <GridPattern />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_40%,rgba(232,130,79,0.08),transparent_70%)] dark:bg-[radial-gradient(ellipse_60%_50%_at_50%_40%,rgba(232,130,79,0.12),transparent_70%)]" />
         <div className="relative z-10 max-w-md text-center flex flex-col items-center gap-5">
           <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/60 font-mono">
             Error 404
@@ -28,7 +27,7 @@ export const NotFoundView = ({ title, description }: NotFoundViewProps) => {
           </p>
           <Button
             asChild
-            className="mt-2 h-11 px-7 font-medium bg-brand text-white hover:bg-brand/90 rounded-full shadow-xl shadow-brand/25"
+            className="mt-2 h-11 px-7 font-medium bg-brand text-brand-foreground hover:bg-brand/90 rounded-full"
           >
             <Link href="/">Back to home</Link>
           </Button>

@@ -41,3 +41,38 @@ test.describe("landing page", () => {
     });
   }
 });
+
+test.describe("landing layout", () => {
+  test("stacks equal-width hero CTAs below the header on mobile", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto("/");
+
+    const header = await page.locator("header").boundingBox();
+    const badge = await page.getByText("AI-Powered Browser IDE").boundingBox();
+    expect(badge!.y - (header!.y + header!.height)).toBeGreaterThanOrEqual(24);
+
+    const start = await page.getByRole("link", { name: "Start Building" }).boundingBox();
+    const github = await page.getByRole("button", { name: "View on GitHub" }).boundingBox();
+    expect(Math.abs(start!.width - github!.width)).toBeLessThanOrEqual(1);
+  });
+
+  test("shows the features as two equal columns on tablet", async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.goto("/");
+
+    const titles = page.locator("section h3").filter({
+      hasText: /AI Code Generation|In-Browser Execution|GitHub Integration|Real-time Collaboration/,
+    });
+    await expect(titles).toHaveCount(4);
+
+    const boxes = await titles.evaluateAll((elements) =>
+      elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        const lineHeight = parseFloat(getComputedStyle(element).lineHeight);
+        return { left: Math.round(rect.left), lines: Math.round(rect.height / lineHeight) };
+      }),
+    );
+    expect(new Set(boxes.map((box) => box.left)).size).toBe(2);
+    expect(boxes.every((box) => box.lines === 1)).toBe(true);
+  });
+});

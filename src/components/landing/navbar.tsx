@@ -60,14 +60,12 @@ export const LandingNavbar = () => {
             >
               <Link href={SIGN_IN_URL}>Log in</Link>
             </Button>
-            <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-              <Button
-                asChild
-                className="text-sm font-medium bg-brand text-brand-foreground hover:bg-brand/90 rounded-full px-5 shadow-lg shadow-brand/20"
-              >
-                <Link href={SIGN_UP_URL}>Sign Up</Link>
-              </Button>
-            </motion.div>
+            <Button
+              asChild
+              className="text-sm font-medium bg-brand text-brand-foreground hover:bg-brand/90 rounded-full px-5"
+            >
+              <Link href={SIGN_UP_URL}>Sign Up</Link>
+            </Button>
           </div>
 
           {/* Mobile Menu Toggle */}
