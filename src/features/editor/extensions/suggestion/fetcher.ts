@@ -1,6 +1,5 @@
 import ky from "ky";
 import { z } from "zod";
-import { toast } from "sonner";
 
 const suggestionRequestSchema = z.object({
   fileName: z.string(),
@@ -43,7 +42,9 @@ export const fetcher = async (
     if (error instanceof Error && error.name === "AbortError") {
       return null;
     }
-    toast.error("Failed to fetch AI completion");
+    // Suggestions fire while typing, so a failure must not toast on every
+    // keystroke. The editor simply shows no ghost text.
+    console.debug("AI suggestion failed:", error);
     return null;
   }
 };
