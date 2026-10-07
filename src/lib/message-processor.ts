@@ -5,6 +5,8 @@ import {
 } from "@/features/conversations/workflow/client";
 import { isVertexConfigured } from "@/features/conversations/workflow/lib/vertex-model";
 
+import type { AgentModelId } from "@/features/conversations/agent-models";
+
 import type { Id } from "../../convex/_generated/dataModel";
 
 export type MessageProcessorBackend = "inngest" | "workflow";
@@ -47,6 +49,11 @@ interface ProcessMessageDispatchInput {
   conversationId: Id<"conversations">;
   projectId: Id<"projects">;
   message: string;
+  /**
+   * Allowlisted OpenRouter model id; omitted means the default. Inngest only:
+   * the Workflow backend runs on Vertex.
+   */
+  model?: AgentModelId;
 }
 
 interface DispatchResult {
@@ -78,6 +85,7 @@ export async function dispatchProcessMessage(
       conversationId: input.conversationId,
       projectId: input.projectId,
       message: input.message,
+      model: input.model,
     },
   });
 

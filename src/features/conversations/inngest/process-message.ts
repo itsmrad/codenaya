@@ -23,6 +23,7 @@ import {
   OPENROUTER_MODELS,
   openRouterModel,
 } from './lib/openrouter-model';
+import { resolveAgentModelId } from '../agent-models';
 import {
   buildIntegrationsPromptSection,
   buildMcpAgentTools,
@@ -41,6 +42,8 @@ interface MessageEvent {
   conversationId: Id<"conversations">;
   projectId: Id<"projects">;
   message: string;
+  /** Requested agent model. Optional: events sent before this field existed lack it. */
+  model?: string;
 };
 
 export const processMessage = inngest.createFunction(
@@ -75,7 +78,8 @@ export const processMessage = inngest.createFunction(
       messageId,
       conversationId,
       projectId,
-      message
+      message,
+      model,
     } = event.data as MessageEvent;
 
     const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
@@ -345,7 +349,9 @@ export const processMessage = inngest.createFunction(
       name: "codenaya",
       description: "An expert AI coding assistant",
       system: systemPrompt,
-      model: openRouterModel(OPENROUTER_MODELS.coding, 0.3),
+      // Re-validated here: the event is the boundary this function trusts, and
+      // anything holding the event key can send one.
+      model: openRouterModel(resolveAgentModelId(model), 0.3),
       tools: [
         createListFilesTool({ internalKey, projectId }),
         createReadFilesTool({ internalKey }),

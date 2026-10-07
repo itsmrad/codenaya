@@ -47,6 +47,8 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { PastConversationsDialog } from "./past-conversations-dialog";
 import { useChatStore } from "../store/use-chat-store";
+import { useAgentModel } from "../hooks/use-agent-model";
+import { AgentModelSelect } from "./agent-model-select";
 
 interface ConversationSidebarProps {
   projectId: Id<"projects">;
@@ -57,6 +59,7 @@ export const ConversationSidebar = ({
 }: ConversationSidebarProps) => {
   const { openIntegrations } = useProjectIntegrations();
   const { input, setInput, contexts, removeContext, clearContexts } = useChatStore();
+  const [agentModel, setAgentModel] = useAgentModel();
   const [
     selectedConversationId,
     setSelectedConversationId,
@@ -143,6 +146,7 @@ export const ConversationSidebar = ({
         json: {
           conversationId,
           message: finalMessage,
+          model: agentModel,
         },
       });
       // Only clear contexts after a successful send so they aren't lost on failure
@@ -275,7 +279,13 @@ export const ConversationSidebar = ({
               />
             </PromptInputBody>
             <PromptInputFooter>
-              <PromptInputTools />
+              <PromptInputTools>
+                <AgentModelSelect
+                  value={agentModel}
+                  onValueChange={setAgentModel}
+                  disabled={isProcessing}
+                />
+              </PromptInputTools>
               <PromptInputSubmit
                 disabled={isProcessing ? false : (!input && contexts.length === 0)}
                 status={isProcessing ? "streaming" : undefined}
