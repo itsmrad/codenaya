@@ -127,7 +127,9 @@ export default defineSchema({
     runModel: v.optional(runModelValidator),
   })
     .index("by_conversation", ["conversationId"])
-    .index("by_project_status", ["projectId", "status"]),
+    .index("by_project_status", ["projectId", "status"])
+    // For the lost-run sweep in maintenance.ts.
+    .index("by_status", ["status"]),
 
   // ─── Showcase ───
   showcaseProjects: defineTable({

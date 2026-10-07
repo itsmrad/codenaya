@@ -12,10 +12,12 @@ import { internal } from "./_generated/api";
  * everything every minute would burn roughly 130,000 calls a month on cleanup alone
  * — a meaningful slice of the budget for work that is not time-sensitive.
  *
- * The two that matter most for correctness run most often:
+ * The ones that matter most for correctness run most often:
  *
  * - **Approvals every 5 minutes.** A lapsed `pending` row has to reach a terminal
  *   status reasonably promptly, since an agent may be polling it.
+ * - **Lost agent runs every 5 minutes.** A run that stopped reporting progress
+ *   leaves its chat showing "Thinking…" until this marks it failed.
  * - **OAuth states every 15 minutes.** Their own TTL is 10 minutes, so this keeps
  *   the table near-empty without being urgent.
  *
@@ -33,6 +35,12 @@ crons.interval(
   "prune expired mcp approvals",
   { minutes: 5 },
   internal.maintenance.pruneMcpApprovals,
+);
+
+crons.interval(
+  "fail lost agent runs",
+  { minutes: 5 },
+  internal.maintenance.failLostMessageRuns,
 );
 
 crons.interval(
