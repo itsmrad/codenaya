@@ -132,3 +132,52 @@ export const chatOverflow = (page: Page) =>
     visit(scroller ?? log);
     return offenders;
   });
+
+/**
+ * Seeds a fresh conversation (it becomes the active one) with a finished run
+ * that thought for 4s, used a skill and edited `index.html` (the preview
+ * fixture's one file), followed by a live run. Returns a cleanup that stops
+ * the live run.
+ */
+export const seedRunConversation = async (page: Page, projectId: string) => {
+  const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY!;
+  const user = await userConvexClient(page);
+  const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+  const project = projectId as Id<"projects">;
+  const conversationId = await user.mutation(api.conversations.create, {
+    projectId: project,
+    title: `Run block ${Date.now()}`,
+  });
+  const create = (role: "user" | "assistant", content: string, status?: "processing" | "completed") =>
+    system.mutation(api.system.createMessage, { internalKey, conversationId, projectId: project, role, content, status });
+  const now = Date.now();
+  const tool = (id: string, name: string, targets: string[], status: "done" | "running" = "done") => ({
+    id, kind: "tool" as const, tool: name, targets, status, startedAt: now, endedAt: status === "done" ? now : undefined,
+  });
+
+  await create("user", "Add a pricing section to the home page");
+  const done = await create("assistant", "", "processing");
+  await system.mutation(api.system.upsertMessageSteps, {
+    internalKey,
+    messageId: done,
+    steps: [
+      { id: "think", kind: "thinking", text: "The page is a single index.html.", status: "done", startedAt: now - 4000, endedAt: now },
+      tool("skill", "loadSkill", ["frontend-design"]),
+      tool("read", "readFiles", ["index.html"]),
+      tool("create", "createFiles", ["src/pricing.css"]),
+      tool("edit", "updateFile", ["index.html"]),
+    ],
+  });
+  await system.mutation(api.system.updateMessageContent, { internalKey, messageId: done, content: "Added a pricing section." });
+
+  await create("user", "Now add a FAQ");
+  const live = await create("assistant", "", "processing");
+  await system.mutation(api.system.upsertMessageSteps, {
+    internalKey,
+    messageId: live,
+    steps: [tool("live-read", "readFiles", ["index.html"]), tool("live-edit", "updateFile", ["index.html"], "running")],
+  });
+
+  return () =>
+    system.mutation(api.system.updateMessageStatus, { internalKey, messageId: live, status: "cancelled" });
+};
