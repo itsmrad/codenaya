@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckIcon, CopyIcon, RotateCcwIcon } from "lucide-react";
 
 import {
@@ -17,12 +17,14 @@ import {
   lastRunActivity,
   sanitizeAgentText,
 } from "../agent-steps";
+import { userMessageBlocks } from "../user-message";
 import { AgentRun, useNow } from "./agent-run";
 
 export const UserMessage = ({ content }: { content: string }) => {
-  const textRef = useRef<HTMLParagraphElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [clamped, setClamped] = useState(false);
+  const blocks = useMemo(() => userMessageBlocks(content), [content]);
 
   useEffect(() => {
     const el = textRef.current;
@@ -30,23 +32,39 @@ export const UserMessage = ({ content }: { content: string }) => {
   }, [content]);
 
   return (
-    <div className="ml-auto flex max-w-[90%] flex-col items-end @sm:max-w-[85%]">
-      <p
+    // min-w-0 + overflow-wrap:anywhere: a long unbroken token (URL, path) must
+    // wrap instead of widening the bubble past the panel.
+    <div className="ml-auto flex min-w-0 max-w-[90%] flex-col items-end @sm:max-w-[85%]">
+      <div
         ref={textRef}
         className={cn(
-          "rounded-2xl rounded-br-md bg-muted px-3.5 py-2 text-sm/6 whitespace-pre-wrap break-words",
-          !expanded && "line-clamp-8",
+          "min-w-0 max-w-full space-y-2 overflow-hidden rounded-2xl rounded-br-md bg-muted px-3.5 py-2 text-sm/6 [overflow-wrap:anywhere]",
+          // 8 lines of text/6.
+          !expanded && "max-h-52",
         )}
       >
-        {content}
-      </p>
-      {clamped && !expanded && (
+        {blocks.map((block, index) =>
+          block.kind === "code" ? (
+            <pre
+              key={index}
+              className="-mx-1.5 overflow-x-auto rounded-md bg-background/60 px-2 py-1.5 font-mono text-xs/5 [overflow-wrap:normal]"
+            >
+              {block.text}
+            </pre>
+          ) : (
+            <p key={index} className="whitespace-pre-wrap">
+              {block.text}
+            </p>
+          ),
+        )}
+      </div>
+      {clamped && (
         <button
           type="button"
-          onClick={() => setExpanded(true)}
+          onClick={() => setExpanded((value) => !value)}
           className="mt-1 mr-1 text-xs text-muted-foreground hover:text-foreground"
         >
-          Show more
+          {expanded ? "Show less" : "Show more"}
         </button>
       )}
     </div>
