@@ -4,11 +4,21 @@ import { useState } from "react";
 import { Allotment } from "allotment";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { CloudCheckIcon, LoaderIcon, PlugIcon, RocketIcon } from "lucide-react";
+import {
+  CloudCheckIcon,
+  CodeIcon,
+  EyeIcon,
+  LoaderIcon,
+  MessageSquareIcon,
+  PlugIcon,
+  RocketIcon,
+} from "lucide-react";
 import { UserButton } from "@clerk/nextjs";
 import { formatDistanceToNow } from "date-fns";
 
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
 import { EditorView } from "@/features/editor/components/editor-view";
 import {
   Tooltip,
@@ -29,6 +39,14 @@ const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 800;
 const DEFAULT_SIDEBAR_WIDTH = 350;
 const DEFAULT_MAIN_SIZE = 1000;
+
+type IdeView = "chat" | "editor" | "preview";
+
+const MOBILE_TABS = [
+  { view: "chat", label: "Chat", icon: MessageSquareIcon },
+  { view: "editor", label: "Code", icon: CodeIcon },
+  { view: "preview", label: "Preview", icon: EyeIcon },
+] as const;
 
 const Tab = ({
   label,
@@ -63,15 +81,24 @@ export const ProjectIdView = ({
 }: {
   projectId: Id<"projects">;
 }) => {
+  const isMobile = useIsMobile();
   // Switching preview engines reloads the page with `?view=preview` so the user
   // lands back on the preview they were using.
   const openOnPreview = useSearchParams().get("view") === "preview";
-  const [activeView, setActiveView] = useState<"editor" | "preview">(
-    openOnPreview ? "preview" : "editor",
+  // Otherwise phones open on the chat; wider screens show the chat as a side
+  // panel (see ProjectIdLayout), so there "chat" falls back to the editor.
+  const [selectedView, setSelectedView] = useState<IdeView>(
+    openOnPreview ? "preview" : "chat",
   );
+  const activeView = !isMobile && selectedView === "chat" ? "editor" : selectedView;
   // The preview boots a cloud sandbox or WebContainer as soon as it mounts, so
   // mount it on first open and keep it mounted so tab switches don't reboot it.
   const [previewOpened, setPreviewOpened] = useState(openOnPreview);
+
+  const selectView = (view: IdeView) => {
+    setSelectedView(view);
+    if (view === "preview") setPreviewOpened(true);
+  };
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const { openIntegrations } = useProjectIntegrations();
   const project = useProject(projectId);
@@ -177,22 +204,21 @@ export const ProjectIdView = ({
           )}
         </div>
 
-        {/* Center: Code / Preview tabs */}
-        <div className="flex items-center p-0.5 bg-muted/40 rounded-lg border border-border/40">
-          <Tab
-            label="Code"
-            isActive={activeView === "editor"}
-            onClick={() => setActiveView("editor")}
-          />
-          <Tab
-            label="Preview"
-            isActive={activeView === "preview"}
-            onClick={() => {
-              setActiveView("preview");
-              setPreviewOpened(true);
-            }}
-          />
-        </div>
+        {/* Center: Code / Preview tabs (phones use the bottom tab bar) */}
+        {!isMobile && (
+          <div className="flex items-center p-0.5 bg-muted/40 rounded-lg border border-border/40">
+            <Tab
+              label="Code"
+              isActive={activeView === "editor"}
+              onClick={() => selectView("editor")}
+            />
+            <Tab
+              label="Preview"
+              isActive={activeView === "preview"}
+              onClick={() => selectView("preview")}
+            />
+          </div>
+        )}
 
         {/* Right: Publish + Export + User */}
         <div className="flex items-center gap-1.5 shrink-0">
@@ -230,27 +256,44 @@ export const ProjectIdView = ({
 
       {/* ─── Content ─── */}
       <div className="flex-1 relative min-h-0">
+        {isMobile && (
+          <div
+            className={cn(
+              "absolute inset-0 flex flex-col",
+              activeView !== "chat" && "invisible"
+            )}
+          >
+            <div className="h-full rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)] flex flex-col overflow-hidden relative">
+              <ConversationSidebar projectId={projectId} />
+            </div>
+          </div>
+        )}
         <div
           className={cn(
             "absolute inset-0 flex gap-2 transition-none",
-            activeView !== "editor" && "opacity-0 pointer-events-none"
+            activeView !== "editor" && "invisible"
           )}
         >
-          <Allotment defaultSizes={[DEFAULT_SIDEBAR_WIDTH, DEFAULT_MAIN_SIZE]}>
+          {/* Phones stack the explorer above the editor. */}
+          <Allotment
+            key={isMobile ? "stacked" : "side-by-side"}
+            vertical={isMobile}
+            defaultSizes={[DEFAULT_SIDEBAR_WIDTH, DEFAULT_MAIN_SIZE]}
+          >
             <Allotment.Pane
               snap
               minSize={MIN_SIDEBAR_WIDTH}
               maxSize={MAX_SIDEBAR_WIDTH}
               preferredSize={DEFAULT_SIDEBAR_WIDTH}
             >
-              <div className="h-full pr-1 box-border">
+              <div className={cn("h-full box-border", isMobile ? "pb-1" : "pr-1")}>
                 <div className="h-full rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)] overflow-hidden flex flex-col">
                   <FileExplorer projectId={projectId} />
                 </div>
               </div>
             </Allotment.Pane>
             <Allotment.Pane>
-              <div className="h-full pl-1 box-border">
+              <div className={cn("h-full box-border", isMobile ? "pt-1" : "pl-1")}>
                 <div className="h-full rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)] overflow-hidden flex flex-col relative">
                   <EditorView projectId={projectId} />
                 </div>
@@ -261,12 +304,40 @@ export const ProjectIdView = ({
         <div
           className={cn(
             "absolute inset-0 flex flex-col",
-            activeView !== "preview" && "opacity-0 pointer-events-none"
+            activeView !== "preview" && "invisible"
           )}
         >
           {previewOpened && <PreviewView projectId={projectId} />}
         </div>
       </div>
+
+      {/* ─── Phone tab bar ─── */}
+      {isMobile && (
+        <div
+          role="tablist"
+          aria-label="Workspace views"
+          className="shrink-0 grid grid-cols-3 gap-1 p-1 mb-[env(safe-area-inset-bottom)] rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]"
+        >
+          {MOBILE_TABS.map(({ view, label, icon: Icon }) => (
+            <button
+              key={view}
+              type="button"
+              role="tab"
+              aria-selected={activeView === view}
+              onClick={() => selectView(view)}
+              className={cn(
+                "flex h-11 flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors select-none",
+                activeView === view
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Icon aria-hidden="true" className="size-4" />
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
     </>
   );

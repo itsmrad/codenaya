@@ -150,6 +150,64 @@ export const ConversationSidebar = ({
     }
   };
 
+  /**
+   * Sends a message to the active conversation (creating one if needed).
+   * Resolves to "sent", "failed" (the request errored), or "blocked" (never
+   * sent: it contained a credential or no conversation could be created).
+   */
+  const sendMessage = async (
+    text: string,
+  ): Promise<"sent" | "failed" | "blocked"> => {
+    if (detectCredential(text).detected) {
+      toast.error(
+        "Credentials cannot be sent in chat. Add this MCP connection through Integrations instead.",
+      );
+      openIntegrations();
+      return "blocked";
+    }
+
+    let conversationId = activeConversationId;
+
+    if (!conversationId) {
+      conversationId = await handleCreateConversation();
+      if (!conversationId) {
+        return "blocked";
+      }
+    }
+
+    // Trigger Inngest function via API
+    try {
+      await ky.post("/api/messages", {
+        json: {
+          conversationId,
+          message: text,
+          model: agentModel,
+        },
+      });
+      return "sent";
+    } catch (error) {
+      if (error instanceof HTTPError) {
+        const body = await error.response
+          .json<{ code?: string; error?: string }>()
+          .catch(() => ({ code: undefined, error: undefined }));
+        if (body.code === "credential_detected") {
+          toast.error(
+            "Credentials cannot be sent in chat. Add this MCP connection through Integrations instead.",
+          );
+          openIntegrations();
+          return "blocked";
+        }
+        // The reply is already marked failed in the chat, with a retry action.
+        if (body.code === "dispatch_failed" && body.error) {
+          toast.error(body.error);
+          return "failed";
+        }
+      }
+      toast.error("Message failed to send");
+      return "failed";
+    }
+  };
+
   const handleSubmit = async (message: PromptInputMessage) => {
     // If processing and no new message, this is just a stop function
     if (isProcessing && !message.text && contexts.length === 0) {
@@ -166,55 +224,10 @@ export const ConversationSidebar = ({
       finalMessage = `${contextStrs.join("\n\n")}\n\n${finalMessage}`;
     }
 
-    if (detectCredential(finalMessage).detected) {
-      toast.error(
-        "Credentials cannot be sent in chat. Add this MCP connection through Integrations instead.",
-      );
-      openIntegrations();
-      return;
-    }
-
-    let conversationId = activeConversationId;
-
-    if (!conversationId) {
-      conversationId = await handleCreateConversation();
-      if (!conversationId) {
-        return;
-      }
-    }
-
-    // Trigger Inngest function via API
-    try {
-      await ky.post("/api/messages", {
-        json: {
-          conversationId,
-          message: finalMessage,
-          model: agentModel,
-        },
-      });
-      // Only clear contexts after a successful send so they aren't lost on failure
-      clearContexts();
-    } catch (error) {
-      if (error instanceof HTTPError) {
-        const body = await error.response
-          .json<{ code?: string; error?: string }>()
-          .catch(() => ({ code: undefined, error: undefined }));
-        if (body.code === "credential_detected") {
-          toast.error(
-            "Credentials cannot be sent in chat. Add this MCP connection through Integrations instead.",
-          );
-          openIntegrations();
-          return;
-        }
-        // The reply is already marked failed in the chat, with a retry action.
-        if (body.code === "dispatch_failed" && body.error) {
-          toast.error(body.error);
-          setInput("");
-          return;
-        }
-      }
-      toast.error("Message failed to send");
-    }
+    const result = await sendMessage(finalMessage);
+    if (result === "blocked") return;
+    // Only clear contexts after a successful send so they aren't lost on failure
+    if (result === "sent") clearContexts();
 
     setInput("");
   }
@@ -274,7 +287,9 @@ export const ConversationSidebar = ({
                     const prompt = conversationMessages
                       .slice(0, messageIndex)
                       .findLast((m) => m.role === "user");
-                    if (prompt) void handleSubmit({ text: prompt.content, files: [] });
+                    // Resend the prompt as-is, leaving the composer draft and
+                    // attached contexts alone.
+                    if (prompt) void sendMessage(prompt.content);
                   }}
                 />
               ),

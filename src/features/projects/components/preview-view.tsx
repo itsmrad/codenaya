@@ -140,7 +140,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
           </Button>
         </div>
       )}
-      <div className="p-1.5 shrink-0 border border-border/50 rounded-xl bg-background shadow-sm flex items-center gap-2">
+      <div className="p-1.5 shrink-0 border border-border/50 rounded-xl bg-background shadow-sm flex flex-wrap items-center gap-2">
         <div className="flex items-center p-0.5 bg-muted/40 rounded-lg border border-border/50">
           <Button
             size="icon"
@@ -192,9 +192,13 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
             </Button>
         </div>
 
-        <PreviewDeviceToggle device={device} onChange={setDevice} />
+        {/* A phone-width panel is already a phone-sized frame. */}
+        <div className="hidden @md:block">
+          <PreviewDeviceToggle device={device} onChange={setDevice} />
+        </div>
 
-        <div className="flex-1 min-w-0 h-9 flex items-center px-3 bg-muted/30 rounded-lg border border-border/50 text-xs text-muted-foreground truncate font-mono">
+        {/* Narrow panels give the URL its own row. */}
+        <div className="order-last basis-full @md:order-none @md:basis-auto flex-1 min-w-0 h-9 flex items-center px-3 bg-muted/30 rounded-lg border border-border/50 text-xs text-muted-foreground truncate font-mono">
           {isLoading && (
             <div className="flex items-center gap-1.5">
               <Loader2Icon className="size-3 animate-spin" />
