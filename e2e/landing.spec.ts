@@ -42,6 +42,27 @@ test.describe("landing page", () => {
   }
 });
 
+const FEATURE_TITLES =
+  /AI agent with model choice|Live preview & terminal|GitHub import & export|Bring your own key|Skills & integrations|Download as ZIP/;
+
+test.describe("landing copy", () => {
+  test("claims only features the product ships", async ({ page }) => {
+    await page.goto("/");
+
+    await expect(
+      page.getByText(/real-time collaboration|claude-powered|webcontainer|manage branches|deploy/i),
+    ).toHaveCount(0);
+    for (const title of [
+      "AI agent with model choice",
+      "Live preview & terminal",
+      "GitHub import & export",
+      "Download as ZIP",
+    ]) {
+      await expect(page.getByRole("heading", { level: 3, name: title })).toBeAttached();
+    }
+  });
+});
+
 test.describe("landing layout", () => {
   test("stacks equal-width hero CTAs below the header on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
@@ -60,10 +81,8 @@ test.describe("landing layout", () => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await page.goto("/");
 
-    const titles = page.locator("section h3").filter({
-      hasText: /AI Code Generation|In-Browser Execution|GitHub Integration|Real-time Collaboration/,
-    });
-    await expect(titles).toHaveCount(4);
+    const titles = page.locator("section h3").filter({ hasText: FEATURE_TITLES });
+    await expect(titles).toHaveCount(6);
 
     const boxes = await titles.evaluateAll((elements) =>
       elements.map((element) => {
