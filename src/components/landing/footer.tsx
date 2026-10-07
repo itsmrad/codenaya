@@ -9,11 +9,14 @@ import { GITHUB_REPO_URL } from "@/lib/site";
 type FooterLink = { label: string; href: string };
 
 // Only pages that exist are listed, so the footer never has dead links. Add
-// Pricing and Docs to Product when those pages land.
+// Docs to Product when that page lands.
 const FOOTER_COLUMNS: { title: string; links: FooterLink[] }[] = [
   {
     title: "Product",
-    links: [{ label: "Showcase", href: "/showcase" }],
+    links: [
+      { label: "Showcase", href: "/showcase" },
+      { label: "Pricing", href: "/pricing" },
+    ],
   },
   {
     title: "Resources",
