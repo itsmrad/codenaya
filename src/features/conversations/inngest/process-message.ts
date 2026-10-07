@@ -19,11 +19,14 @@ import { createRenameFileTool } from './tools/rename-file';
 import { createDeleteFilesTool } from './tools/delete-files';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
 import { createSetEnvVarTool } from './tools/set-env-var';
+import type { AgentModelChoice } from '../agent-models';
 import {
-  OPENROUTER_MODELS,
-  openRouterModel,
-} from './lib/openrouter-model';
-import { resolveAgentModelId } from '../agent-models';
+  type RunModel,
+  ProviderKeyError,
+  isProviderKeyRejection,
+  keyFailureMessage,
+  resolveRunModel,
+} from '@/features/ai-providers/server/resolve-run-model';
 import {
   type AgentStep,
   buildPathIndex,
@@ -49,8 +52,11 @@ interface MessageEvent {
   conversationId: Id<"conversations">;
   projectId: Id<"projects">;
   message: string;
-  /** Requested agent model. Optional: events sent before this field existed lack it. */
-  model?: string;
+  /**
+   * Requested model, on the platform or one of the user's keys. Optional, and a
+   * bare platform model id on events sent before BYOK.
+   */
+  model?: string | AgentModelChoice;
 };
 
 export const processMessage = inngest.createFunction(
@@ -110,6 +116,68 @@ export const processMessage = inngest.createFunction(
       throw new NonRetriableError("Conversation not found");
     }
 
+    // ─── Model and key ───
+    //
+    // Resolved in the function body, never in a step: a BYOK model closes over
+    // the decrypted key, and Inngest persists step results. A key that cannot be
+    // used ends the run with a pointer to settings; there is no fallback to the
+    // platform key.
+    let runModel: RunModel;
+    try {
+      runModel = await resolveRunModel({
+        internalKey,
+        projectId,
+        choice: typeof model === "object" ? model : { modelId: model ?? "" },
+      });
+    } catch (error) {
+      if (!(error instanceof ProviderKeyError)) {
+        throw error;
+      }
+      await step.run("ai-provider-key-unavailable", async () => {
+        await convex.mutation(api.system.updateMessageContent, {
+          internalKey,
+          messageId,
+          content: error.message,
+        });
+      });
+      return { success: false, messageId, conversationId };
+    }
+
+    const runKey = runModel.key;
+    if (runKey) {
+      await step.run("mark-ai-provider-key-used", async () => {
+        await convex.mutation(api.system.markAiProviderKeyUsed, {
+          internalKey,
+          keyId: runKey._id,
+        });
+      });
+    }
+
+    // The provider refusing the user's key (401/402/quota) marks it invalid and
+    // ends the run with a clear reply. Anything else fails the run as before.
+    const endRunOnKeyRejection = async (error: unknown) => {
+      if (!runKey || !isProviderKeyRejection(error)) {
+        throw error;
+      }
+      await step.run("ai-provider-key-rejected", async () => {
+        await convex.mutation(api.system.updateAiProviderKeyStatus, {
+          internalKey,
+          keyId: runKey._id,
+          userId: runKey.userId,
+          status: "invalid",
+          statusMessage: "The provider rejected this key during an agent run.",
+        });
+        await convex.mutation(api.system.updateMessageContent, {
+          internalKey,
+          messageId,
+          content: keyFailureMessage(
+            `Your ${runKey.label} key was rejected by the provider.`,
+          ),
+        });
+      });
+      return { success: false, messageId, conversationId };
+    };
+
     // Fetch recent messages for conversation context
     const recentMessages = await step.run("get-recent-messages", async () => {
       return await convex.query(api.system.getRecentMessages, {
@@ -143,10 +211,15 @@ export const processMessage = inngest.createFunction(
       const titleAgent = createAgent({
         name: "title-generator",
         system: TITLE_GENERATOR_SYSTEM_PROMPT,
-        model: openRouterModel(OPENROUTER_MODELS.title, 0),
+        model: runModel.title(0),
       });
 
-      const { output } = await titleAgent.run(message, { step });
+      let output;
+      try {
+        ({ output } = await titleAgent.run(message, { step }));
+      } catch (error) {
+        return await endRunOnKeyRejection(error);
+      }
 
       const textMessage = output.find(
         (m) => m.type === "text" && m.role === "assistant"
@@ -385,9 +458,9 @@ export const processMessage = inngest.createFunction(
       name: "codenaya",
       description: "An expert AI coding assistant",
       system: systemPrompt,
-      // Re-validated here: the event is the boundary this function trusts, and
-      // anything holding the event key can send one.
-      model: openRouterModel(resolveAgentModelId(model), 0.3),
+      // Re-validated by resolveRunModel: the event is the boundary this function
+      // trusts, and anything holding the event key can send one.
+      model: runModel.coding(0.3),
       tools: [
         createListFilesTool({ internalKey, projectId }),
         createReadFilesTool({ internalKey }),
@@ -494,7 +567,12 @@ export const processMessage = inngest.createFunction(
     });
 
     // Run the agent
-    const result = await network.run(message);
+    let result;
+    try {
+      result = await network.run(message);
+    } catch (error) {
+      return await endRunOnKeyRejection(error);
+    }
 
     // Extract the assistant's text response from the last agent result
     const lastResult = result.state.results.at(-1);

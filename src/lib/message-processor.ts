@@ -6,7 +6,7 @@ import {
 } from "@/features/conversations/workflow/client";
 import { isVertexConfigured } from "@/features/conversations/workflow/lib/vertex-model";
 
-import type { AgentModelId } from "@/features/conversations/agent-models";
+import type { AgentModelChoice } from "@/features/conversations/agent-models";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -52,10 +52,10 @@ interface ProcessMessageDispatchInput {
   projectId: Id<"projects">;
   message: string;
   /**
-   * Allowlisted OpenRouter model id; omitted means the default. Inngest only:
-   * the Workflow backend runs on Vertex.
+   * Validated model choice; omitted means the platform default. Inngest only:
+   * the Workflow backend always runs on Vertex with the platform key.
    */
-  model?: AgentModelId;
+  model?: AgentModelChoice;
 }
 
 interface DispatchResult {
@@ -76,6 +76,12 @@ export async function dispatchProcessMessage(
   const backend = getMessageProcessorBackend();
 
   if (backend === "workflow") {
+    if (input.model?.keyId) {
+      console.warn(
+        "[message-processor] BYOK model requested on the Workflow backend; " +
+          "running on the platform Vertex model instead.",
+      );
+    }
     const runId = await startProcessMessageWorkflow(input);
     return { backend, runId };
   }
@@ -87,7 +93,9 @@ export async function dispatchProcessMessage(
       conversationId: input.conversationId,
       projectId: input.projectId,
       message: input.message,
-      model: input.model,
+      model: input.model
+        ? { keyId: input.model.keyId, modelId: input.model.modelId }
+        : undefined,
     },
   });
 

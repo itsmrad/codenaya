@@ -6,57 +6,82 @@ import {
   PromptInputSelectValue,
 } from "@/components/ai-elements/prompt-input";
 import { SelectGroup, SelectLabel } from "@/components/ui/select";
-
 import {
-  AGENT_MODELS,
-  type AgentModelId,
-  isAgentModelId,
-} from "../agent-models";
+  AI_PROVIDERS,
+  PLATFORM_PROVIDER,
+  keyModels,
+} from "@/features/ai-providers/registry";
+import {
+  fromChoiceValue,
+  toChoiceValue,
+} from "@/features/ai-providers/model-choice";
+import { useAiProviderKeys } from "@/features/ai-providers/hooks/use-ai-providers";
 
-// Grouped by provider, in allowlist order.
-const MODEL_GROUPS = [...new Set(AGENT_MODELS.map((m) => m.provider))].map(
-  (provider) => ({
-    provider,
-    models: AGENT_MODELS.filter((m) => m.provider === provider),
-  }),
-);
+import type { AgentModelChoice } from "../agent-models";
 
 interface AgentModelSelectProps {
-  value: AgentModelId;
-  onValueChange: (model: AgentModelId) => void;
+  value: AgentModelChoice;
+  onValueChange: (model: AgentModelChoice) => void;
   disabled?: boolean;
 }
 
+/**
+ * Codenaya's models plus one group per active key the user brought. A key
+ * that has since been marked invalid stays listed while it is selected, so the
+ * current choice still shows (and the run explains what is wrong).
+ */
 export const AgentModelSelect = ({
   value,
   onValueChange,
   disabled,
-}: AgentModelSelectProps) => (
-  <PromptInputSelect
-    value={value}
-    onValueChange={(next) => {
-      if (isAgentModelId(next)) onValueChange(next);
-    }}
-    disabled={disabled}
-  >
-    <PromptInputSelectTrigger
-      size="sm"
-      aria-label="Agent model"
-      className="h-7 max-w-44 gap-1 rounded-md px-2 text-xs dark:bg-transparent dark:hover:bg-accent"
+}: AgentModelSelectProps) => {
+  const keys = useAiProviderKeys() ?? [];
+  const keyGroups = keys.filter(
+    (key) => key.status === "active" || key._id === value.keyId,
+  );
+
+  return (
+    <PromptInputSelect
+      value={toChoiceValue(value)}
+      onValueChange={(next) => onValueChange(fromChoiceValue(next))}
+      disabled={disabled}
     >
-      <PromptInputSelectValue />
-    </PromptInputSelectTrigger>
-    <PromptInputSelectContent position="popper" align="start">
-      {MODEL_GROUPS.map(({ provider, models }) => (
-        <SelectGroup key={provider}>
-          <SelectLabel>{provider}</SelectLabel>
-          {models.map((model) => (
-            <PromptInputSelectItem key={model.id} value={model.id}>
+      <PromptInputSelectTrigger
+        size="sm"
+        aria-label="Agent model"
+        className="h-7 max-w-44 gap-1 rounded-md px-2 text-xs dark:bg-transparent dark:hover:bg-accent"
+      >
+        <PromptInputSelectValue />
+      </PromptInputSelectTrigger>
+      <PromptInputSelectContent position="popper" align="start" className="max-h-80">
+        <SelectGroup>
+          <SelectLabel>{PLATFORM_PROVIDER.label}</SelectLabel>
+          {PLATFORM_PROVIDER.models.map((model) => (
+            <PromptInputSelectItem
+              key={model.id}
+              value={toChoiceValue({ modelId: model.id })}
+            >
               {model.label}
             </PromptInputSelectItem>
           ))}
         </SelectGroup>
-      ))}
-    </PromptInputSelectContent>
-  </PromptInputSelect>
-);
+        {keyGroups.map((key) => (
+          <SelectGroup key={key._id}>
+            <SelectLabel>
+              {AI_PROVIDERS[key.provider].label} · {key.label}
+              {key.status === "invalid" && " (invalid)"}
+            </SelectLabel>
+            {keyModels(key).map((model) => (
+              <PromptInputSelectItem
+                key={model.id}
+                value={toChoiceValue({ keyId: key._id, modelId: model.id })}
+              >
+                {model.label}
+              </PromptInputSelectItem>
+            ))}
+          </SelectGroup>
+        ))}
+      </PromptInputSelectContent>
+    </PromptInputSelect>
+  );
+};

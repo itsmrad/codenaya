@@ -26,6 +26,17 @@ export const aiProviderValidator = v.union(
   v.literal("custom"),
 );
 
+/**
+ * The model an assistant message was produced with. `keyId` is set when the
+ * run used the user's own key (BYOK), which is what billing reads to charge no
+ * credits. `label` is the "provider · model" shown on the run block.
+ */
+export const runModelValidator = v.object({
+  keyId: v.optional(v.id("aiProviderKeys")),
+  modelId: v.string(),
+  label: v.string(),
+});
+
 export default defineSchema({
   /**
    * Profile mirror of a Clerk user, kept in sync by the Clerk webhook
@@ -109,6 +120,8 @@ export default defineSchema({
     steps: v.optional(v.array(messageStepValidator)),
     // When the run stopped (completed or cancelled), for "Worked for Xs".
     completedAt: v.optional(v.number()),
+    // Assistant messages only: the model the run used.
+    runModel: v.optional(runModelValidator),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"]),

@@ -1,7 +1,11 @@
 import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
-import { aiProviderValidator, messageStepValidator } from "./schema";
+import {
+  aiProviderValidator,
+  messageStepValidator,
+  runModelValidator,
+} from "./schema";
 import { resolveProjectSkills } from "./skills";
 
 // Keeps the steps array (and the message document) bounded on long runs.
@@ -45,6 +49,7 @@ export const createMessage = mutation({
         v.literal("cancelled")
       )
     ),
+    runModel: v.optional(runModelValidator),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -55,6 +60,7 @@ export const createMessage = mutation({
       role: args.role,
       content: args.content,
       status: args.status,
+      runModel: args.runModel,
     });
 
     // Update conversation's updatedAt
@@ -1598,6 +1604,22 @@ export const getAiProviderKeyForRun = query({
     const project = await ctx.db.get("projects", args.projectId);
     const key = await ctx.db.get("aiProviderKeys", args.keyId);
     return project && key && key.userId === project.ownerId ? key : null;
+  },
+});
+
+/** Records that an agent run used the key, for the settings page. */
+export const markAiProviderKeyUsed = mutation({
+  args: {
+    internalKey: v.string(),
+    keyId: v.id("aiProviderKeys"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const key = await ctx.db.get("aiProviderKeys", args.keyId);
+    if (key) {
+      await ctx.db.patch("aiProviderKeys", args.keyId, { lastUsedAt: Date.now() });
+    }
   },
 });
 

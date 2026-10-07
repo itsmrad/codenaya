@@ -112,6 +112,7 @@ export const AssistantMessage = ({
           status={status}
           startedAt={message._creationTime}
           completedAt={message.completedAt}
+          model={message.runModel?.label}
           onOpenFile={onOpenFile}
         />
       )}

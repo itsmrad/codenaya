@@ -9,7 +9,10 @@ import {
 } from "unique-names-generator";
 
 import { DEFAULT_CONVERSATION_TITLE } from "@/features/conversations/constants";
-import { resolveAgentModelId } from "@/features/conversations/agent-models";
+import {
+  modelChoiceSchema,
+  requireModelChoice,
+} from "@/features/ai-providers/server/resolve-run-model";
 
 import { convex } from "@/lib/convex-client";
 import {
@@ -22,7 +25,7 @@ import { api } from "../../../../../convex/_generated/api";
 
 const requestSchema = z.object({
   prompt: z.string().min(1),
-  model: z.string().optional(),
+  model: modelChoiceSchema,
 });
 
 export async function POST(request: Request) {
@@ -53,6 +56,16 @@ export async function POST(request: Request) {
       },
       { status: 422 },
     );
+  }
+
+  const { runModel, rejected } = await requireModelChoice({
+    internalKey,
+    userId,
+    model,
+  });
+
+  if (rejected) {
+    return rejected;
   }
 
   // Generate a random project name
@@ -92,6 +105,7 @@ export async function POST(request: Request) {
       role: "assistant",
       content: "",
       status: "processing",
+      runModel,
     },
   );
 
@@ -102,7 +116,7 @@ export async function POST(request: Request) {
     conversationId,
     projectId,
     message: prompt,
-    model: resolveAgentModelId(model),
+    model: runModel,
   });
 
   // The project exists either way: return its id so the client can open it

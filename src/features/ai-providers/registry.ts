@@ -132,3 +132,31 @@ export function baseUrlFor(key: {
   }
   return baseUrl;
 }
+
+/** A key's models, labelled from the registry; custom ids label themselves. */
+export function keyModels(key: {
+  provider: AiProviderId;
+  modelIds?: readonly string[];
+}): readonly ProviderModel[] {
+  return key.provider === "custom"
+    ? (key.modelIds ?? []).map((id) => ({ id, label: id }))
+    : AI_PROVIDERS[key.provider].models;
+}
+
+/**
+ * Short "provider · model" label for a run, shown on the chat's run block.
+ * Without a key it names the platform; a custom endpoint is named by its label.
+ */
+export function runModelLabel(
+  modelId: string,
+  key?: { provider: AiProviderId; label: string; modelIds?: readonly string[] },
+): string {
+  const models = key ? keyModels(key) : PLATFORM_PROVIDER.models;
+  const model = models.find((m) => m.id === modelId)?.label ?? modelId;
+  const provider = !key
+    ? PLATFORM_PROVIDER.label
+    : key.provider === "custom"
+      ? key.label
+      : AI_PROVIDERS[key.provider].label;
+  return `${provider} · ${model}`;
+}
