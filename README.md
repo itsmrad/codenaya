@@ -103,6 +103,7 @@ Codenaya is a browser-based IDE inspired by Cursor AI, featuring:
 
    # Cloud sandbox previews
    E2B_API_KEY=
+   E2B_TEMPLATE=  # Optional: Node 22 template from `npm run e2b:template`
 
    # AI provider
    OPENROUTER_API_KEY=
