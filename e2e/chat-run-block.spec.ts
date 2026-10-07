@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { hasInternalKey, seedRunConversation } from "./chat-fixtures";
+import { chatEntryAnimations, hasInternalKey, seedRunConversation } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
@@ -28,6 +28,8 @@ test.describe("chat run block", () => {
       const liveRun = page.locator('[data-run-status="running"]');
       const loaderCell = liveRun.locator('[data-slot="run-loader"] > span').first();
       await expect(loaderCell).toBeVisible({ timeout: 60_000 });
+      // Loaded history (bubbles, reply, rows) doesn't replay entry animations.
+      expect(await chatEntryAnimations(page)).toBe(0);
       const animationName = () => loaderCell.evaluate((cell) => getComputedStyle(cell).animationName);
       expect(await animationName()).toBe("pixel-on");
       await page.emulateMedia({ reducedMotion: "reduce" });

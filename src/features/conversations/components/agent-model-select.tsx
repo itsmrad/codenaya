@@ -17,7 +17,15 @@ import {
 } from "@/features/ai-providers/model-choice";
 import { useAiProviderKeys } from "@/features/ai-providers/hooks/use-ai-providers";
 
-import type { AgentModelChoice } from "../agent-models";
+import { AGENT_MODELS, type AgentModelChoice } from "../agent-models";
+
+/** Item with a muted tag on the right (the model's vendor or key). Drawn as
+ *  `::after` so the trigger, which mirrors the item text, shows the name only. */
+const TAGGED_ITEM =
+  "after:ml-auto after:shrink-0 after:pl-4 after:text-[11px] after:text-muted-foreground after:content-[attr(data-tag)]";
+
+const vendorOf = (modelId: string) =>
+  AGENT_MODELS.find((model) => model.id === modelId)?.provider;
 
 interface AgentModelSelectProps {
   value: AgentModelChoice;
@@ -60,6 +68,8 @@ export const AgentModelSelect = ({
             <PromptInputSelectItem
               key={model.id}
               value={toChoiceValue({ modelId: model.id })}
+              data-tag={vendorOf(model.id)}
+              className={TAGGED_ITEM}
             >
               {model.label}
             </PromptInputSelectItem>
@@ -75,6 +85,8 @@ export const AgentModelSelect = ({
               <PromptInputSelectItem
                 key={model.id}
                 value={toChoiceValue({ keyId: key._id, modelId: model.id })}
+                data-tag={key.label}
+                className={TAGGED_ITEM}
               >
                 {model.label}
               </PromptInputSelectItem>
