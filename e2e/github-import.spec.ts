@@ -23,7 +23,8 @@ test.describe("GitHub import", () => {
     await dialog.getByRole("button", { name: "Import" }).click();
 
     await expect(dialog.getByText("GitHub account not connected")).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+    await dialog.getByRole("link", { name: "Connect GitHub" }).click();
+    await expect(page).toHaveURL(/\/settings\/account$/);
 
     // The route answers 400 GITHUB_NOT_LINKED, which the browser logs as a failed load.
     expect(errors.filter((error) => !error.includes("status of 400"))).toEqual([]);
