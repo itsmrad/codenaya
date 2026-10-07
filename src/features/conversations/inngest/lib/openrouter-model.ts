@@ -1,5 +1,7 @@
 import { openai } from "@inngest/agent-kit";
 
+import { DEFAULT_AGENT_MODEL_ID } from "../../agent-models";
+
 /**
  * OpenRouter models for the Inngest agent.
  *
@@ -28,9 +30,10 @@ import { openai } from "@inngest/agent-kit";
 export const OPENROUTER_MODELS = {
   /**
    * Coding agent. Handles the file tools and any connected MCP tools, so it needs
-   * reliable multi-step tool calling.
+   * reliable multi-step tool calling. This is the default; the user can pick
+   * another from the shared allowlist in `agent-models.ts` per message.
    */
-  coding: "openai/gpt-5.6-luna" as const,
+  coding: DEFAULT_AGENT_MODEL_ID,
 
   /**
    * Conversation title generator. A short deterministic generation — a small, cheap

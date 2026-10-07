@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 
 import { convex } from "@/lib/convex-client";
 import { detectCredential } from "@/features/integrations/credential-guard";
+import { resolveAgentModelId } from "@/features/conversations/agent-models";
 import {
   dispatchCancelMessage,
   dispatchProcessMessage,
@@ -15,6 +16,9 @@ import { Id } from "../../../../convex/_generated/dataModel";
 const requestSchema = z.object({
   conversationId: z.string(),
   message: z.string(),
+  // Validated against the allowlist below rather than here, so an unknown or
+  // retired id falls back to the default instead of failing the send.
+  model: z.string().optional(),
 });
 
 export async function POST(request: Request) {
@@ -34,7 +38,7 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { conversationId, message } = requestSchema.parse(body);
+  const { conversationId, message, model } = requestSchema.parse(body);
 
   if (detectCredential(message).detected) {
     return NextResponse.json(
@@ -115,6 +119,7 @@ export async function POST(request: Request) {
     conversationId: conversationId as Id<"conversations">,
     projectId,
     message,
+    model: resolveAgentModelId(model),
   });
 
   return NextResponse.json({
