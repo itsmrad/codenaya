@@ -1,4 +1,5 @@
 import { inngest } from "@/inngest/client";
+import { convex } from "@/lib/convex-client";
 import {
   cancelProcessMessageWorkflowByMessageId,
   startProcessMessageWorkflow,
@@ -7,6 +8,7 @@ import { isVertexConfigured } from "@/features/conversations/workflow/lib/vertex
 
 import type { AgentModelId } from "@/features/conversations/agent-models";
 
+import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 
 export type MessageProcessorBackend = "inngest" | "workflow";
@@ -92,6 +94,45 @@ export async function dispatchProcessMessage(
   return { backend, eventId: event.ids[0] };
 }
 
+/** Written in place of the reply when the agent could not be started. */
+export const DISPATCH_FAILED_MESSAGE =
+  "I couldn't start working on this because the agent service is unreachable. Please try again in a moment.";
+
+/** API error for a request whose agent run could not be started. */
+export const DISPATCH_FAILED_ERROR =
+  "The agent service is unavailable. Please try again.";
+
+/**
+ * Dispatches like `dispatchProcessMessage`, but if the backend cannot be
+ * reached it resolves the assistant placeholder with `DISPATCH_FAILED_MESSAGE`
+ * and returns null. Otherwise the placeholder would stay "processing" forever:
+ * a spinner across reloads and a composer that only Stop can unlock.
+ */
+export async function dispatchProcessMessageOrFail(
+  input: ProcessMessageDispatchInput,
+): Promise<DispatchResult | null> {
+  try {
+    return await dispatchProcessMessage(input);
+  } catch (error) {
+    console.error("[message-processor] Failed to dispatch message", error);
+
+    await convex
+      .mutation(api.system.updateMessageContent, {
+        internalKey: input.internalKey,
+        messageId: input.messageId,
+        content: DISPATCH_FAILED_MESSAGE,
+      })
+      .catch((updateError) => {
+        console.error(
+          "[message-processor] Failed to mark undispatched message failed",
+          updateError,
+        );
+      });
+
+    return null;
+  }
+}
+
 /**
  * Cancels in-flight processing for a single assistant message. Routes to the
  * configured backend.
@@ -111,4 +152,26 @@ export async function dispatchCancelMessage(opts: {
     data: { messageId: opts.messageId },
   });
   return true;
+}
+
+/**
+ * Stops a processing message: asks the backend to cancel its run, then marks
+ * the message cancelled. The status is written even when the backend is
+ * unreachable, so an orphaned "processing" message can always be cleared.
+ */
+export async function cancelProcessingMessage(opts: {
+  internalKey: string;
+  messageId: Id<"messages">;
+}) {
+  try {
+    await dispatchCancelMessage(opts);
+  } catch (error) {
+    console.error("[message-processor] Failed to dispatch cancel", error);
+  }
+
+  await convex.mutation(api.system.updateMessageStatus, {
+    internalKey: opts.internalKey,
+    messageId: opts.messageId,
+    status: "cancelled",
+  });
 }

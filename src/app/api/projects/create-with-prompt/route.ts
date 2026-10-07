@@ -11,7 +11,10 @@ import {
 import { DEFAULT_CONVERSATION_TITLE } from "@/features/conversations/constants";
 
 import { convex } from "@/lib/convex-client";
-import { dispatchProcessMessage } from "@/lib/message-processor";
+import {
+  DISPATCH_FAILED_ERROR,
+  dispatchProcessMessageOrFail,
+} from "@/lib/message-processor";
 import { detectCredential } from "@/features/integrations/credential-guard";
 
 import { api } from "../../../../../convex/_generated/api";
@@ -91,13 +94,22 @@ export async function POST(request: Request) {
   );
 
   // Trigger configured backend to process the message
-  await dispatchProcessMessage({
+  const dispatch = await dispatchProcessMessageOrFail({
     internalKey,
     messageId: assistantMessageId,
     conversationId,
     projectId,
     message: prompt,
   });
+
+  // The project exists either way: return its id so the client can open it
+  // and the user can retry from the chat.
+  if (!dispatch) {
+    return NextResponse.json(
+      { error: DISPATCH_FAILED_ERROR, code: "dispatch_failed", projectId },
+      { status: 502 },
+    );
+  }
 
   return NextResponse.json({ projectId });
 };

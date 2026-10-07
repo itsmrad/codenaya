@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import ky from "ky";
+import ky, { HTTPError } from "ky";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
@@ -62,7 +62,21 @@ export const NewProjectDialog = ({
       onOpenChange(false);
       setInput("");
       router.push(`/projects/${projectId}`);
-    } catch {
+    } catch (error) {
+      // The project was created but its agent run could not start: open it
+      // anyway, where the failed reply offers a retry.
+      if (error instanceof HTTPError) {
+        const body = await error.response
+          .json<{ code?: string; projectId?: Id<"projects"> }>()
+          .catch(() => ({ code: undefined, projectId: undefined }));
+        if (body.code === "dispatch_failed" && body.projectId) {
+          toast.error("Project created, but the agent couldn't start. Retry from the chat.");
+          onOpenChange(false);
+          setInput("");
+          router.push(`/projects/${body.projectId}`);
+          return;
+        }
+      }
       toast.error("Unable to create project");
     } finally {
       setIsSubmitting(false);

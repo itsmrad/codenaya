@@ -244,7 +244,7 @@ const StepRow = ({
   );
 };
 
-const useNow = (active: boolean) => {
+export const useNow = (active: boolean) => {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active) return;

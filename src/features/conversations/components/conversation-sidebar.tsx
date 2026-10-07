@@ -195,15 +195,21 @@ export const ConversationSidebar = ({
       // Only clear contexts after a successful send so they aren't lost on failure
       clearContexts();
     } catch (error) {
-      if (error instanceof HTTPError && error.response.status === 422) {
+      if (error instanceof HTTPError) {
         const body = await error.response
-          .json<{ code?: string }>()
-          .catch(() => ({ code: undefined }));
+          .json<{ code?: string; error?: string }>()
+          .catch(() => ({ code: undefined, error: undefined }));
         if (body.code === "credential_detected") {
           toast.error(
             "Credentials cannot be sent in chat. Add this MCP connection through Integrations instead.",
           );
           openIntegrations();
+          return;
+        }
+        // The reply is already marked failed in the chat, with a retry action.
+        if (body.code === "dispatch_failed" && body.error) {
+          toast.error(body.error);
+          setInput("");
           return;
         }
       }
