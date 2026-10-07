@@ -47,8 +47,12 @@ import {
   oauthConnectionNeedsRefresh,
   refreshExpiredOAuthConnections,
 } from '@/features/integrations/server/oauth/refresh-connections';
-import { resolveSkills } from '@/features/skills/server/resolve-skills';
+import {
+  resolveForcedSkills,
+  resolveSkills,
+} from '@/features/skills/server/resolve-skills';
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
+import { parseSlashSkills } from '@/features/skills/parse-slash';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -444,22 +448,25 @@ export const processMessage = inngest.createFunction(
     // Only names and descriptions go in the prompt; loadSkill hands the agent a
     // body from this step's result, with no further Convex call. Bodies are not
     // secret, so persisting them is fine. Non-fatal, like MCP: a run without
-    // skills still works.
-    const skills = await step.run("resolve-skills", async () => {
+    // skills still works. Skills the message forces with leading `/name`
+    // tokens go in up-front with their bodies; the message is left as sent.
+    const { skills, forced, unavailable } = await step.run("resolve-skills", async () => {
       try {
-        return resolveSkills(
-          await convex.query(api.system.getProjectSkills, {
-            internalKey,
-            projectId,
-          }),
-        );
+        const projectSkills = await convex.query(api.system.getProjectSkills, {
+          internalKey,
+          projectId,
+        });
+        return {
+          skills: resolveSkills(projectSkills),
+          ...resolveForcedSkills(projectSkills, parseSlashSkills(message)),
+        };
       } catch (error) {
         console.error("[process-message] skills resolution failed", error);
-        return [];
+        return { skills: [], forced: [], unavailable: [] };
       }
     });
 
-    systemPrompt += buildSkillsPromptSection(skills);
+    systemPrompt += buildSkillsPromptSection(skills, forced, unavailable);
 
     // Display only: mirrors the agent's tool calls onto the assistant message
     // for the chat panel's activity block. Each write is its own step, so replays
@@ -489,6 +496,24 @@ export const processMessage = inngest.createFunction(
           console.error("[agent-steps] failed to record steps", error);
         }
       });
+
+    // Forced skills show in the run block as used, like a loadSkill call.
+    if (forced.length > 0) {
+      await recordSteps(
+        "record-forced-skills",
+        () =>
+          forced.map(({ name }) => ({
+            id: `forced-skill:${name}`,
+            kind: "tool",
+            tool: "loadSkill",
+            targets: [name],
+            status: "done",
+            startedAt: Date.now(),
+            endedAt: Date.now(),
+          })),
+        false,
+      );
+    }
 
     // Create the coding agent with file tools
     const codingAgent = createAgent({

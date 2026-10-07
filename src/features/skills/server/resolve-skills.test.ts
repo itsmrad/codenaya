@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { MAX_INDEXED_SKILLS } from "../limits";
 import type { SkillScope } from "../types";
-import { type ProjectSkill, resolveSkills } from "./resolve-skills";
+import {
+  type ProjectSkill,
+  resolveForcedSkills,
+  resolveSkills,
+} from "./resolve-skills";
 
 const skill = (
   name: string,
@@ -56,6 +60,30 @@ describe("resolveSkills", () => {
   it("keeps only what the agent needs", () => {
     expect(resolveSkills([skill("alpha", "library", 1)])).toEqual([
       { name: "alpha", description: "Use for alpha", body: "# alpha", source: "user" },
+    ]);
+  });
+});
+
+describe("resolveForcedSkills", () => {
+  it("returns enabled skills with bodies and reports the rest", () => {
+    const { forced, unavailable } = resolveForcedSkills(
+      [skill("alpha", "library", 1), skill("beta", "library", 2, false)],
+      ["alpha", "beta", "gamma"],
+    );
+
+    expect(forced).toEqual([
+      { name: "alpha", description: "Use for alpha", body: "# alpha", source: "user" },
+    ]);
+    expect(unavailable).toEqual(["beta", "gamma"]);
+  });
+
+  it("can force an enabled skill left out of the capped index", () => {
+    const library = Array.from({ length: 50 }, (_, i) =>
+      skill(`lib-${i}`, "library", i),
+    );
+
+    expect(resolveForcedSkills(library, ["lib-0"]).forced.map((s) => s.name)).toEqual([
+      "lib-0",
     ]);
   });
 });

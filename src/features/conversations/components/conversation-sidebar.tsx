@@ -38,6 +38,11 @@ import { useProjectIntegrations } from "@/features/integrations/components/proje
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 import { useFiles } from "@/features/projects/hooks/use-files";
+import {
+  SkillSlashMenu,
+  useSkillSlashMenu,
+} from "@/features/skills/components/skill-slash-menu";
+import { splitSlashSkills } from "@/features/skills/parse-slash";
 
 import {
   useConversation,
@@ -56,6 +61,7 @@ import { useEnhancePrompt } from "../hooks/use-enhance-prompt";
 import { EnhancePromptButton } from "./enhance-prompt-button";
 import { buildPathIndex } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
+import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
 
 interface ConversationSidebarProps {
@@ -69,6 +75,7 @@ export const ConversationSidebar = ({
   const { input, setInput, contexts, removeContext, clearContexts } = useChatStore();
   const [agentModel, setAgentModel] = useAgentModel();
   const enhancer = useEnhancePrompt(input, setInput);
+  const slashMenu = useSkillSlashMenu(projectId, input, setInput);
   const [
     selectedConversationId,
     setSelectedConversationId,
@@ -104,10 +111,13 @@ export const ConversationSidebar = ({
     if (fileId) openFile(fileId, { pinned: true });
   };
 
-  // Check if any message is currently processing
-  const isProcessing = conversationMessages?.some(
+  // Check if any message is currently processing. A stalled run doesn't
+  // count: the composer offers Send (which clears it) rather than Stop.
+  const processingMessage = conversationMessages?.findLast(
     (msg) => msg.status === "processing"
   );
+  const stalled = useRunStalled(processingMessage);
+  const isProcessing = Boolean(processingMessage) && !stalled;
 
   const handleCancel = async () => {
     try {
@@ -224,7 +234,10 @@ export const ConversationSidebar = ({
       const contextStrs = contexts.map(
         (c) => `File: ${c.fileName} (Lines ${c.startLine}-${c.endLine})\n\`\`\`\n${c.content}\n\`\`\``
       );
-      finalMessage = `${contextStrs.join("\n\n")}\n\n${finalMessage}`;
+      // Leading /skill tokens stay first so the server still reads them.
+      const { names, rest } = splitSlashSkills(finalMessage);
+      const skills = names.map((name) => `/${name} `).join("");
+      finalMessage = `${skills}${contextStrs.join("\n\n")}\n\n${rest}`;
     }
 
     const result = await sendMessage(finalMessage);
@@ -278,7 +291,11 @@ export const ConversationSidebar = ({
           <ConversationContent className="gap-6 px-4 py-4 pb-12">
             {conversationMessages?.map((message, messageIndex) =>
               message.role === "user" ? (
-                <UserMessage key={message._id} content={message.content} />
+                <UserMessage
+                  key={message._id}
+                  content={message.content}
+                  skillNames={slashMenu.skillNames}
+                />
               ) : (
                 <AssistantMessage
                   key={message._id}
@@ -304,12 +321,20 @@ export const ConversationSidebar = ({
           />
         </Conversation>
         )}
-        <div className="chat-composer px-3 pb-[max(12px,env(safe-area-inset-bottom))]">
+        <div className="chat-composer relative px-3 pb-[max(12px,env(safe-area-inset-bottom))]">
           {/* Sits directly above the composer rather than inside the
               transcript: the agent is blocked waiting on this answer, and the
               message list can be scrolled away from the bottom, which would
               hide the prompt exactly when it matters. */}
           <ApprovalPrompt projectId={projectId} />
+          {slashMenu.open && (
+            <SkillSlashMenu
+              items={slashMenu.items}
+              activeName={slashMenu.activeName}
+              onActiveChange={slashMenu.setActive}
+              onSelect={slashMenu.select}
+            />
+          )}
           <PromptInput 
             onSubmit={handleSubmit}
             className="mt-2"
@@ -338,6 +363,7 @@ export const ConversationSidebar = ({
                 placeholder="Describe a change or ask a question…"
                 className="min-h-11 px-3 pt-3 pb-1 text-sm/6 placeholder:text-muted-foreground/70"
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={slashMenu.onKeyDown}
                 value={input}
                 disabled={isProcessing || enhancer.isEnhancing}
               />

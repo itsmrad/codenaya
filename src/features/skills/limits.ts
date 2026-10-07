@@ -17,7 +17,7 @@ export const MAX_PROJECT_SKILLS = 20;
 export const MAX_INDEXED_SKILLS = 40;
 
 // Lowercase letters, digits and single hyphens between them.
-const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export interface SkillFields {
   name: string;
