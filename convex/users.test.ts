@@ -204,6 +204,21 @@ async function seedOwnedData(t: TestConvex, ownerId: string, files = 1) {
       defaultModelId: "gpt-5.6-luna",
       updatedAt: now,
     });
+    const skillId = await ctx.db.insert("skills", {
+      ownerId,
+      name: "my-skill",
+      description: "Does things",
+      body: "Steps",
+      source: "user",
+      updatedAt: now,
+    });
+    await ctx.db.insert("projectSkillSettings", {
+      projectId,
+      ownerId,
+      skillKey: `user:${skillId}`,
+      enabled: true,
+      updatedAt: now,
+    });
     return { projectId, showcaseId, storageId };
   });
 }
@@ -222,6 +237,8 @@ const OWNED_TABLES = [
   "showcaseViews",
   "aiProviderKeys",
   "userAiPreferences",
+  "skills",
+  "projectSkillSettings",
 ] as const;
 
 const countRows = (t: TestConvex) =>

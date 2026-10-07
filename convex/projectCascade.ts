@@ -126,6 +126,18 @@ export async function deleteProjectBatch(
     .take(CASCADE_BATCH_SIZE);
   if (await deleteRows(ctx, "mcpToolAuditLog", auditEntries)) return false;
 
+  const skillSettings = await ctx.db
+    .query("projectSkillSettings")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "projectSkillSettings", skillSettings)) return false;
+
+  const projectSkills = await ctx.db
+    .query("skills")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "skills", projectSkills)) return false;
+
   const showcase = await ctx.db
     .query("showcaseProjects")
     .withIndex("by_projectId", (q) => q.eq("projectId", projectId))

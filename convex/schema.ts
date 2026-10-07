@@ -163,6 +163,43 @@ export default defineSchema({
     .index("by_userId_and_showcaseProjectId", ["userId", "showcaseProjectId"])
     .index("by_showcaseProjectId", ["showcaseProjectId"]),
 
+  // ─── Skills ───
+
+  /**
+   * A user's Agent Skill (`SKILL.md` shape). Without `projectId` it is a
+   * library skill the owner can enable per project; with it, the skill exists
+   * only in that project. Built-in skills live in code, not here.
+   */
+  skills: defineTable({
+    ownerId: v.string(),
+    projectId: v.optional(v.id("projects")),
+    name: v.string(),
+    description: v.string(),
+    body: v.string(),
+    source: v.union(v.literal("user"), v.literal("github")),
+    sourceUrl: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_and_projectId", ["ownerId", "projectId"])
+    .index("by_owner_and_name", ["ownerId", "name"])
+    .index("by_project", ["projectId"]),
+
+  /**
+   * Whether a skill is enabled in a project. An absent row means disabled;
+   * project skills get an enabled row when they are created.
+   */
+  projectSkillSettings: defineTable({
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+    // "builtin:<name>" | "user:<skills _id>"
+    skillKey: v.string(),
+    enabled: v.boolean(),
+    updatedAt: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_project_and_skillKey", ["projectId", "skillKey"])
+    .index("by_owner_and_skillKey", ["ownerId", "skillKey"]),
+
   // ─── Integrations (MCP servers + runtime env vars) ───
   //
   // Credential storage uses envelope encryption (see
