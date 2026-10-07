@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { UploadIcon, XIcon } from "lucide-react";
 
@@ -51,12 +51,15 @@ export const PublishDialog = ({
   const [title, setTitle] = useState(projectName);
   const [description, setDescription] = useState("");
 
+  const [prevSync, setPrevSync] = useState({ open, projectName });
+
   // Keep title in sync when projectName loads or dialog opens
-  useEffect(() => {
+  if (prevSync.open !== open || prevSync.projectName !== projectName) {
+    setPrevSync({ open, projectName });
     if (open && projectName) {
       setTitle(projectName);
     }
-  }, [open, projectName]);
+  }
   const [category, setCategory] = useState("");
   const [techStack, setTechStack] = useState<string[]>([]);
   const [designStyle, setDesignStyle] = useState<string[]>([]);

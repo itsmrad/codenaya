@@ -34,6 +34,17 @@ export const useSandbox = ({
   const [error, setError] = useState<string | null>(null);
   const [restartKey, setRestartKey] = useState(0);
   const [terminalOutput, setTerminalOutput] = useState("");
+  const [prevEnabled, setPrevEnabled] = useState(enabled);
+
+  // Reset preview state as soon as the preview is disabled
+  if (enabled !== prevEnabled) {
+    setPrevEnabled(enabled);
+    if (!enabled) {
+      setStatus("idle");
+      setPreviewUrl(null);
+      setError(null);
+    }
+  }
 
   const sandboxIdRef = useRef<string | null>(null);
   const hasStartedRef = useRef(false);
@@ -202,9 +213,6 @@ export const useSandbox = ({
   useEffect(() => {
     if (!enabled) {
       hasStartedRef.current = false;
-      setStatus("idle");
-      setPreviewUrl(null);
-      setError(null);
 
       // Kill sandbox if one exists
       const sandboxId = sandboxIdRef.current;
