@@ -5,8 +5,8 @@ import { createOpenAI } from "@ai-sdk/openai";
  *
  * The Inngest agent builds AgentKit models from these values
  * (`features/conversations/inngest/lib/openrouter-model.ts`); the editor AI
- * routes (`/api/suggestion`, `/api/quick-edit`) build AI SDK models through
- * `editorModel()` below.
+ * routes (`/api/suggestion`, `/api/quick-edit`, `/api/enhance-prompt`) build
+ * AI SDK models through `editorModel()` below.
  *
  * Configuration is read at call time, not module load, so importing this file
  * never fails when the key is absent (that would break `next build`).
@@ -34,7 +34,7 @@ export function isOpenRouterConfigured(): boolean {
 }
 
 /**
- * Editor AI tasks. Both are short, latency-sensitive generations, so a small,
+ * Editor AI tasks. All are short, latency-sensitive generations, so a small,
  * cheap model is the default. Each can be overridden with an OpenRouter model id
  * in the named env var.
  */
@@ -45,6 +45,10 @@ export const EDITOR_AI_MODELS = {
   },
   quickEdit: {
     env: "OPENROUTER_QUICK_EDIT_MODEL",
+    fallback: "openai/gpt-5.4-mini",
+  },
+  enhancePrompt: {
+    env: "OPENROUTER_ENHANCE_PROMPT_MODEL",
     fallback: "openai/gpt-5.4-mini",
   },
 } as const;

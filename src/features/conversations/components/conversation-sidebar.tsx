@@ -52,6 +52,8 @@ import { PastConversationsDialog } from "./past-conversations-dialog";
 import { useChatStore } from "../store/use-chat-store";
 import { useAgentModel } from "../hooks/use-agent-model";
 import { AgentModelSelect } from "./agent-model-select";
+import { useEnhancePrompt } from "../hooks/use-enhance-prompt";
+import { EnhancePromptButton } from "./enhance-prompt-button";
 import { buildPathIndex } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
 import { ChatEmptyState } from "./chat-empty-state";
@@ -66,6 +68,7 @@ export const ConversationSidebar = ({
   const { openIntegrations } = useProjectIntegrations();
   const { input, setInput, contexts, removeContext, clearContexts } = useChatStore();
   const [agentModel, setAgentModel] = useAgentModel();
+  const enhancer = useEnhancePrompt(input, setInput);
   const [
     selectedConversationId,
     setSelectedConversationId,
@@ -336,7 +339,7 @@ export const ConversationSidebar = ({
                 className="min-h-11 px-3 pt-3 pb-1 text-sm/6 placeholder:text-muted-foreground/70"
                 onChange={(e) => setInput(e.target.value)}
                 value={input}
-                disabled={isProcessing}
+                disabled={isProcessing || enhancer.isEnhancing}
               />
             </PromptInputBody>
             <PromptInputFooter className="h-10 px-2 py-0">
@@ -358,6 +361,11 @@ export const ConversationSidebar = ({
                   </TooltipTrigger>
                   <TooltipContent>Attachments coming soon</TooltipContent>
                 </Tooltip>
+                <EnhancePromptButton
+                  enhancer={enhancer}
+                  value={input}
+                  disabled={isProcessing}
+                />
                 <AgentModelSelect
                   value={agentModel}
                   onValueChange={setAgentModel}
@@ -381,7 +389,11 @@ export const ConversationSidebar = ({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <PromptInputSubmit
-                      disabled={isProcessing ? false : (!input && contexts.length === 0)}
+                      disabled={
+                        isProcessing
+                          ? false
+                          : enhancer.isEnhancing || (!input && contexts.length === 0)
+                      }
                       aria-label={isProcessing ? "Stop" : "Send"}
                       className="size-8 rounded-lg disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
                     >

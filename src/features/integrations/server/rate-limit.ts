@@ -189,6 +189,16 @@ export const AI_PROVIDER_TEST_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
+/**
+ * Enhancing a prompt is one short LLM call billed to us. Ten a minute is far
+ * above someone refining an idea by hand while stopping a scripted loop.
+ */
+export const ENHANCE_PROMPT_RATE_LIMIT: RateLimitConfig = {
+  scope: "enhance-prompt",
+  limit: 10,
+  windowMs: 60_000,
+};
+
 /** Standard 429 response with a `Retry-After` header. */
 export function rateLimitedResponse(result: RateLimitResult): Response {
   return Response.json(

@@ -23,7 +23,9 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { Suggestion } from "@/components/ai-elements/suggestion";
 import { AgentModelSelect } from "@/features/conversations/components/agent-model-select";
+import { EnhancePromptButton } from "@/features/conversations/components/enhance-prompt-button";
 import { useAgentModel } from "@/features/conversations/hooks/use-agent-model";
+import { useEnhancePrompt } from "@/features/conversations/hooks/use-enhance-prompt";
 import { cn } from "@/lib/utils";
 
 /** Starter ideas: a chip fills the composer with the prompt, it never sends. */
@@ -124,11 +126,13 @@ export const PromptComposer = ({
   const [isFocused, setIsFocused] = useState(false);
   const [agentModel, setAgentModel] = useAgentModel();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const enhancer = useEnhancePrompt(input, setInput);
+  const isBusy = isSubmitting || enhancer.isEnhancing;
   const reduceMotion = useReducedMotion();
   const placeholder = useTypedPlaceholder(!reduceMotion && !input && !isFocused);
 
   const handleSubmit = async (message: PromptInputMessage) => {
-    if (!message.text.trim() || isSubmitting) return;
+    if (!message.text.trim() || isBusy) return;
     if (await onSubmit(message.text)) setInput("");
   };
 
@@ -151,12 +155,17 @@ export const PromptComposer = ({
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               value={input}
-              disabled={isSubmitting}
+              disabled={isBusy}
               autoFocus={autoFocus}
             />
           </PromptInputBody>
           <PromptInputFooter className="h-12 px-2.5 py-0">
             <PromptInputTools>
+              <EnhancePromptButton
+                enhancer={enhancer}
+                value={input}
+                disabled={isSubmitting}
+              />
               {showModelSelect && (
                 <AgentModelSelect
                   value={agentModel}
@@ -166,7 +175,7 @@ export const PromptComposer = ({
               )}
             </PromptInputTools>
             <PromptInputSubmit
-              disabled={!input.trim() || isSubmitting}
+              disabled={!input.trim() || isBusy}
               aria-label="Create project"
               className="size-8 rounded-lg disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
             >
