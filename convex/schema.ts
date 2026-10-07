@@ -19,6 +19,13 @@ export const messageStepValidator = v.object({
   endedAt: v.optional(v.number()),
 });
 
+export const aiProviderValidator = v.union(
+  v.literal("openrouter"),
+  v.literal("openai"),
+  v.literal("anthropic"),
+  v.literal("custom"),
+);
+
 export default defineSchema({
   /**
    * Profile mirror of a Clerk user, kept in sync by the Clerk webhook
@@ -267,6 +274,48 @@ export default defineSchema({
     .index("by_project", ["projectId"])
     .index("by_project_and_enabled", ["projectId", "enabled"])
     .index("by_userConnection", ["userConnectionId"]),
+
+  /**
+   * A model provider API key the user brought (BYOK). Sealed exactly like
+   * `userConnections`: the AAD is anchored on `secretRef`, and the client only
+   * ever sees `maskedPreview` through the allowlist in `aiProviders.list`.
+   */
+  aiProviderKeys: defineTable({
+    userId: v.string(),
+    provider: aiProviderValidator,
+    label: v.string(),
+    // Custom (OpenAI-compatible) endpoints only. Validated https + public IP.
+    baseUrl: v.optional(v.string()),
+    // Custom only: user-entered model ids, at most MAX_CUSTOM_MODEL_IDS.
+    modelIds: v.optional(v.array(v.string())),
+
+    secretRef: v.string(),
+    kekProvider: v.string(),
+    kekKeyId: v.string(),
+    wrappedDek: v.string(),
+    ciphertext: v.string(),
+    iv: v.string(),
+    authTag: v.string(),
+
+    // Last four characters only, e.g. "••••3f2a".
+    maskedPreview: v.string(),
+    status: v.union(v.literal("active"), v.literal("invalid")),
+    statusMessage: v.optional(v.string()),
+    lastTestedAt: v.optional(v.number()),
+    lastUsedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_and_provider", ["userId", "provider"]),
+
+  /** The user's default model. No `defaultKeyId` means the Codenaya platform key. */
+  userAiPreferences: defineTable({
+    userId: v.string(),
+    defaultKeyId: v.optional(v.id("aiProviderKeys")),
+    defaultModelId: v.string(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"]),
 
   /**
    * Environment variables injected into a project's preview at runtime.

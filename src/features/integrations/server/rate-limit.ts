@@ -172,6 +172,23 @@ export const ENV_VAR_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
+/**
+ * Adding a BYOK provider key calls the provider to test it, then seals and
+ * stores it. Five a minute is plenty for someone pasting their keys.
+ */
+export const AI_PROVIDER_CREATE_RATE_LIMIT: RateLimitConfig = {
+  scope: "ai-providers-create",
+  limit: 5,
+  windowMs: 60_000,
+};
+
+/** Re-testing a stored key is one outbound request and no write of key material. */
+export const AI_PROVIDER_TEST_RATE_LIMIT: RateLimitConfig = {
+  scope: "ai-providers-test",
+  limit: 10,
+  windowMs: 60_000,
+};
+
 /** Standard 429 response with a `Retry-After` header. */
 export function rateLimitedResponse(result: RateLimitResult): Response {
   return Response.json(

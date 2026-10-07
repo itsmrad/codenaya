@@ -1,6 +1,6 @@
-import { openai } from "@inngest/agent-kit";
-
-import { OPENROUTER_BASE_URL, readOpenRouterApiKey } from "@/lib/openrouter";
+import { buildAgentKitModel } from "@/features/ai-providers/server/agentkit-model";
+import { PLATFORM_PROVIDER } from "@/features/ai-providers/registry";
+import { readOpenRouterApiKey } from "@/lib/openrouter";
 
 import { DEFAULT_AGENT_MODEL_ID } from "../../agent-models";
 
@@ -41,7 +41,7 @@ export const OPENROUTER_MODELS = {
    * Conversation title generator. A short deterministic generation — a small, cheap
    * model is the right fit and a frontier model would be waste.
    */
-  title: "openai/gpt-5.4-mini" as const,
+  title: PLATFORM_PROVIDER.titleModel,
 } as const;
 
 /**
@@ -52,12 +52,10 @@ export const OPENROUTER_MODELS = {
  * error on a non-default temperature rather than ignoring it.
  */
 export function openRouterModel(model: string, temperature?: number) {
-  return openai({
-    model,
+  return buildAgentKitModel({
+    provider: "openrouter",
     apiKey: readOpenRouterApiKey(),
-    baseUrl: OPENROUTER_BASE_URL,
-    ...(temperature !== undefined
-      ? { defaultParameters: { temperature } }
-      : {}),
+    model,
+    temperature,
   });
 }

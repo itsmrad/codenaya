@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
-import { messageStepValidator } from "./schema";
+import { aiProviderValidator, messageStepValidator } from "./schema";
 
 // Keeps the steps array (and the message document) bounded on long runs.
 const MAX_MESSAGE_STEPS = 100;
@@ -1502,5 +1502,100 @@ export const setPublicEnvVarInternal = mutation({
       source: "integration" as const,
       updatedAt: now,
     });
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI provider keys (BYOK)
+//
+// Same contract as the integrations above: the Next.js routes test and seal a
+// key, Convex stores only ciphertext, and every read is owner-scoped so
+// internalKey is not a master key over every user's keys.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const createAiProviderKey = mutation({
+  args: {
+    internalKey: v.string(),
+    userId: v.string(),
+    provider: aiProviderValidator,
+    label: v.string(),
+    baseUrl: v.optional(v.string()),
+    modelIds: v.optional(v.array(v.string())),
+    secretRef: v.string(),
+    maskedPreview: v.string(),
+    ...sealedFields,
+  },
+  handler: async (ctx, { internalKey, ...args }) => {
+    validateInternalKey(internalKey);
+
+    const now = Date.now();
+    // Only stored after a successful connection test.
+    return await ctx.db.insert("aiProviderKeys", {
+      ...args,
+      status: "active",
+      lastTestedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+export const updateAiProviderKeyStatus = mutation({
+  args: {
+    internalKey: v.string(),
+    keyId: v.id("aiProviderKeys"),
+    userId: v.string(),
+    status: v.union(v.literal("active"), v.literal("invalid")),
+    statusMessage: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const key = await ctx.db.get("aiProviderKeys", args.keyId);
+    if (!key || key.userId !== args.userId) {
+      throw new Error("AI provider key not found");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch("aiProviderKeys", args.keyId, {
+      status: args.status,
+      statusMessage: args.statusMessage,
+      lastTestedAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+/** The sealed key, only when `userId` owns it. For the test-connection route. */
+export const getAiProviderKeyForUser = query({
+  args: {
+    internalKey: v.string(),
+    keyId: v.id("aiProviderKeys"),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const key = await ctx.db.get("aiProviderKeys", args.keyId);
+    return key && key.userId === args.userId ? key : null;
+  },
+});
+
+/**
+ * The sealed key for an agent run, only when the key's owner is the project's
+ * owner, so a wrong or crafted keyId cannot spend another user's key.
+ */
+export const getAiProviderKeyForRun = query({
+  args: {
+    internalKey: v.string(),
+    keyId: v.id("aiProviderKeys"),
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const project = await ctx.db.get("projects", args.projectId);
+    const key = await ctx.db.get("aiProviderKeys", args.keyId);
+    return project && key && key.userId === project.ownerId ? key : null;
   },
 });
