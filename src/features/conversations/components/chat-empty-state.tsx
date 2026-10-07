@@ -31,17 +31,18 @@ export const ChatEmptyState = ({ onSelect }: ChatEmptyStateProps) => (
       Codenaya edits your project files directly.
     </p>
     <div className="mt-5 grid gap-2">
-      {SUGGESTIONS.map(({ icon: Icon, prompt }) => (
+      {SUGGESTIONS.map(({ icon: Icon, prompt }, index) => (
         <Suggestion
           key={prompt}
           suggestion={prompt}
           onClick={onSelect}
           variant="ghost"
-          className="group h-auto justify-start gap-2.5 whitespace-normal rounded-lg border border-border px-3 py-2.5 text-left text-[13px] font-normal text-foreground/80 transition-colors duration-100 hover:bg-accent/60 hover:text-foreground"
+          style={{ animationDelay: `${index * 90}ms` }}
+          className="group h-auto animate-fade-up justify-start gap-2.5 whitespace-normal rounded-lg border border-border px-3 py-2.5 text-left text-[13px] font-normal text-foreground/80 transition-colors duration-150 hover:bg-accent/40 hover:text-foreground motion-reduce:animate-none"
         >
           <Icon className="size-4 shrink-0 text-muted-foreground" />
           <span className="flex-1">{prompt}</span>
-          <ArrowUpRightIcon className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100" />
+          <ArrowUpRightIcon className="size-3.5 shrink-0 -translate-x-0.5 text-muted-foreground opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-x-0 group-hover:opacity-100 motion-reduce:transition-none [@media(hover:none)]:translate-x-0 [@media(hover:none)]:opacity-100" />
         </Suggestion>
       ))}
     </div>

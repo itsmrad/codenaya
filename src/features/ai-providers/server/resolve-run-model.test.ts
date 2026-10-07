@@ -192,6 +192,8 @@ describe("isProviderKeyRejection", () => {
     new Error("No auth credentials found"),
     new Error("Insufficient credits. Add more using https://openrouter.ai/credits"),
     new Error("You exceeded your current quota, please check your plan"),
+    new Error("Your credit balance is too low to access the Anthropic API."),
+    new Error("This request requires more credits, or fewer max_tokens."),
     { message: "step failed", cause: { status: 401 } },
     { error: { message: "Request failed with status 402" } },
   ])("treats %o as the key's fault", (error) => {

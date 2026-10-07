@@ -94,6 +94,19 @@ export const ConversationSidebar = ({
   const activeConversation = useConversation(activeConversationId);
   const conversationMessages = useMessages(activeConversationId);
 
+  // Messages already there when a conversation opens are history; only those
+  // that arrive while it is open animate in.
+  const [history, setHistory] = useState<{
+    conversationId: Id<"conversations"> | null;
+    messageIds: ReadonlySet<string>;
+  } | null>(null);
+  if (conversationMessages && history?.conversationId !== activeConversationId) {
+    setHistory({
+      conversationId: activeConversationId,
+      messageIds: new Set(conversationMessages.map((message) => message._id)),
+    });
+  }
+
   // Resolves file ids in agent text to paths, and step chips back to files.
   const files = useFiles(projectId);
   const { openFile } = useEditor(projectId);
@@ -295,6 +308,7 @@ export const ConversationSidebar = ({
                   key={message._id}
                   content={message.content}
                   skillNames={slashMenu.skillNames}
+                  animate={Boolean(history && !history.messageIds.has(message._id))}
                 />
               ) : (
                 <AssistantMessage
@@ -423,10 +437,17 @@ export const ConversationSidebar = ({
                       aria-label={isProcessing ? "Stop" : "Send"}
                       className="size-8 rounded-lg disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
                     >
+                      {/* Keyed so each swap pops the new icon in. */}
                       {isProcessing ? (
-                        <SquareIcon className="size-3 fill-current" />
+                        <SquareIcon
+                          key="stop"
+                          className="size-3 animate-in fill-current fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none"
+                        />
                       ) : (
-                        <ArrowUpIcon className="size-4" />
+                        <ArrowUpIcon
+                          key="send"
+                          className="size-4 animate-in fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none"
+                        />
                       )}
                     </PromptInputSubmit>
                   </TooltipTrigger>
