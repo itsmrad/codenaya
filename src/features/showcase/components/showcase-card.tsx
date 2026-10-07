@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowUpIcon, ArrowDownIcon, DownloadIcon, EyeIcon, ImageIcon } from "lucide-react";
+import { ArrowUpIcon, ArrowDownIcon, DownloadIcon, EyeIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { ProjectCover } from "@/components/project-cover";
 import { Doc } from "../../../../convex/_generated/dataModel";
 
 type ShowcaseProject = Doc<"showcaseProjects"> & { previewUrl: string | null };
@@ -25,10 +26,7 @@ export const ShowcaseCard = ({ project, onClick }: ShowcaseCardProps) => {
             className="size-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
           />
         ) : (
-          <div className="size-full flex flex-col items-center justify-center gap-1.5 text-muted-foreground/60">
-            <ImageIcon className="size-5" />
-            <span className="text-xs">No preview</span>
-          </div>
+          <ProjectCover seed={project._id} className="size-full" />
         )}
       </div>
 

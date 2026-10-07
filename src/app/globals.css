@@ -204,23 +204,6 @@ html.lenis, html.lenis body {
   opacity: 0.45;
 }
 
-@theme inline {
-  --animate-cell-ripple: cell-ripple var(--duration, 200ms) ease-out none 1
-    var(--delay, 0ms);
-
-  @keyframes cell-ripple {
-    0% {
-      opacity: 0.4;
-    }
-    50% {
-      opacity: 0.8;
-    }
-    100% {
-      opacity: 0.4;
-    }
-  }
-}
-
 /* Assistant replies in the chat panel: compact prose sized for a side panel.
    Unlayered so it overrides Streamdown's utility classes. */
 .chat-prose {
@@ -328,4 +311,21 @@ html.lenis, html.lenis body {
   .prompt-composer::before {
     animation: none;
   }
+}
+
+/* Generated project covers (ProjectCover): a two-hue gradient picked from the
+   project id, light or deep to match the theme. */
+.project-cover {
+  --cover-accent: oklch(0.62 0.17 var(--cover-h));
+  background:
+    radial-gradient(at 15% 10%, oklch(0.86 0.09 var(--cover-h)) 0, transparent 60%),
+    radial-gradient(at 90% 95%, oklch(0.84 0.1 var(--cover-h2)) 0, transparent 55%),
+    oklch(0.95 0.025 var(--cover-h));
+}
+.dark .project-cover {
+  --cover-accent: oklch(0.7 0.15 var(--cover-h));
+  background:
+    radial-gradient(at 15% 10%, oklch(0.42 0.12 var(--cover-h)) 0, transparent 60%),
+    radial-gradient(at 90% 95%, oklch(0.38 0.12 var(--cover-h2)) 0, transparent 55%),
+    oklch(0.2 0.03 var(--cover-h));
 }
