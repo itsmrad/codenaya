@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Inter } from "next/font/google";
+import { Suspense } from "react";
 
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
+import { AuthLoadingView } from "@/features/auth/components/auth-loading-view";
 
 import "allotment/dist/style.css";
 import "./globals.css";
@@ -42,10 +44,14 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${plexMono.variable} ${nerdMono.variable} antialiased`}
       >
-        <Providers>
-          {children}
-          <Toaster />
-        </Providers>
+        {/* Clerk's keyless mode (no publishable key) reads route segments in
+            ClerkProvider, which Cache Components requires under <Suspense>. */}
+        <Suspense fallback={<AuthLoadingView />}>
+          <Providers>
+            {children}
+            <Toaster />
+          </Providers>
+        </Suspense>
       </body>
     </html>
   );
