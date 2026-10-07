@@ -164,6 +164,8 @@ npm run test:e2e                  # starts `next dev` on port 3113 (or reuses a 
 
 Set `E2E_PORT` to use another port. Failure screenshots and traces go to `test-results/`; open the HTML report with `npx playwright show-report`. Specs that need auth or secrets should call `test.skip(!process.env.SOME_VAR, "reason")` so they skip cleanly when the env var is absent.
 
+Signed-in specs use `e2e/clerk-auth.ts`, which needs `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (run under `infisical run`). `e2e/env-vars.spec.ts` also needs `E2E_PROJECT_ID`, a project owned by the e2e user (`codenaya+clerk_test@example.com`, or `E2E_EMAIL`).
+
 ## Project Structure
 
 ```
