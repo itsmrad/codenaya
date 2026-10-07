@@ -20,6 +20,8 @@ test.describe("preview device toggle", () => {
     const errors = collectConsoleErrors(page);
 
     await page.goto(previewPath!);
+    // The preview only boots once its tab is opened.
+    await page.getByRole("tab", { name: "Preview" }).click();
     const frame = page.getByTitle("Preview");
     await expect(frame).toBeVisible({ timeout: 180_000 });
     const panel = await frame.locator("..").boundingBox();

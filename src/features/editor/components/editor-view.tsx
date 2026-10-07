@@ -17,6 +17,7 @@ export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const activeFile = useFile(activeTabId);
   const updateFile = useUpdateFile();
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingSaveRef = useRef<(() => void) | null>(null);
 
   const isActiveFileBinary = activeFile && activeFile.storageId;
   const isActiveFileText = activeFile && !activeFile.storageId;
@@ -27,8 +28,23 @@ export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
+      pendingSaveRef.current = null;
     };
   }, [activeTabId]);
+
+  // Switching preview engines reloads the page. Don't let that drop an edit that
+  // is still waiting out the debounce: save it now and have the browser confirm.
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      const save = pendingSaveRef.current;
+      if (!save) return;
+      save();
+      event.preventDefault();
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   return (
     <div className="h-full flex flex-col">
@@ -61,9 +77,16 @@ export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
                 clearTimeout(timeoutRef.current);
               }
 
-              timeoutRef.current = setTimeout(() => {
+              const save = () => {
+                if (timeoutRef.current) {
+                  clearTimeout(timeoutRef.current);
+                  timeoutRef.current = null;
+                }
+                pendingSaveRef.current = null;
                 updateFile({ id: activeFile._id, content });
-              }, DEBOUNCE_MS);
+              };
+              pendingSaveRef.current = save;
+              timeoutRef.current = setTimeout(save, DEBOUNCE_MS);
             }}
           />
         )}

@@ -24,6 +24,7 @@ import {
   usePreviewDevice,
   type PreviewDevice,
 } from "@/features/sandbox-preview/components/preview-device-toggle";
+import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 
 import { Button } from "@/components/ui/button";
 
@@ -52,11 +53,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
   
   // URL dictates isolation mode via next.config.ts conditional headers
   const engineParam = searchParams.get("engine") as PreviewEngine | null;
-  const engine = engineParam === "webcontainer" ? "webcontainer" : "sandbox";
-
-  // For auto-fallback handling without hard page reloading loops
-  const [fallbackEngine, setFallbackEngine] = useState<PreviewEngine | null>(null);
-  const activeEngine = fallbackEngine || engine;
+  const activeEngine = engineParam === "webcontainer" ? "webcontainer" : "sandbox";
 
   const sandbox = useSandbox({
     files,
@@ -79,21 +76,19 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
 
   const activeInstance = activeEngine === "sandbox" ? sandbox : webcontainer;
   const { status, previewUrl, error, restart, terminalOutput } = activeInstance;
+  const errorKind = activeEngine === "sandbox" ? sandbox.errorKind : null;
 
+  // Only ever called from a user action. WebContainer needs the COOP/COEP headers
+  // next.config.ts sets for `?engine=webcontainer`, so switching is a full page
+  // load; doing it automatically on a sandbox error turned config errors into a
+  // silent reload with no explanation.
   const switchEngine = useCallback((newEngine: PreviewEngine) => {
-    if (newEngine === engine) return;
+    if (newEngine === activeEngine) return;
     const params = new URLSearchParams(searchParams.toString());
     params.set("engine", newEngine);
+    params.set("view", "preview");
     window.location.href = `${pathname}?${params.toString()}`;
-  }, [engine, pathname, searchParams]);
-
-  useEffect(() => {
-    if (activeEngine === "sandbox" && sandbox.status === "error") {
-      console.warn("Sandbox failed (possibly rate limit), automatically falling back to WebContainers.");
-      // We push param so Next.js reloads with COOP/COEP headers
-      switchEngine("webcontainer");
-    }
-  }, [activeEngine, sandbox.status, switchEngine]);
+  }, [activeEngine, pathname, searchParams]);
 
   const isLoading = status === "booting" || status === "installing";
 
@@ -262,6 +257,8 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
                   refreshKey={refreshKey}
                   device={device}
                   restart={restart}
+                  errorKind={errorKind}
+                  onUseWebContainer={() => switchEngine("webcontainer")}
                 />
               </div>
             </Allotment.Pane>
@@ -289,12 +286,20 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
               refreshKey={refreshKey}
               device={device}
               restart={restart}
+              errorKind={errorKind}
+              onUseWebContainer={() => switchEngine("webcontainer")}
             />
           </div>
         )}
       </div>
     </div>
   );
+};
+
+const ERROR_TITLES: Record<SandboxErrorKind, string> = {
+  config: "Cloud sandbox isn't available",
+  rate_limit: "Cloud sandbox limit reached",
+  transient: "Preview failed to start",
 };
 
 const PreviewContent = ({
@@ -306,6 +311,8 @@ const PreviewContent = ({
   refreshKey,
   device,
   restart,
+  errorKind,
+  onUseWebContainer,
 }: {
   error: string | null | undefined;
   isLoading: boolean;
@@ -315,19 +322,35 @@ const PreviewContent = ({
   refreshKey: number;
   device: PreviewDevice;
   restart: () => void;
+  errorKind: SandboxErrorKind | null;
+  onUseWebContainer: () => void;
 }) => (
   <div className="size-full rounded-xl overflow-hidden relative isolate">
     <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
 
     {error && (
-      <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
-        <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
+      <div className="size-full flex items-center justify-center text-muted-foreground bg-background p-4">
+        <div
+          role="alert"
+          className="flex flex-col items-center gap-2 max-w-md mx-auto text-center"
+        >
           <AlertTriangleIcon className="size-6" />
-          <p className="text-sm font-medium">{error}</p>
-          <Button size="sm" variant="outline" onClick={restart}>
-            <RefreshCwIcon className="size-4" />
-            Restart
-          </Button>
+          <p className="text-sm font-medium text-foreground">
+            {ERROR_TITLES[errorKind ?? "transient"]}
+          </p>
+          <p className="text-xs leading-relaxed">{error}</p>
+          <div className="flex flex-wrap justify-center gap-2 mt-1">
+            <Button size="sm" variant="outline" onClick={restart}>
+              <RefreshCwIcon className="size-4" />
+              Retry
+            </Button>
+            {activeEngine === "sandbox" && (
+              <Button size="sm" onClick={onUseWebContainer}>
+                <BoxIcon className="size-4" />
+                Use in-browser preview
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     )}

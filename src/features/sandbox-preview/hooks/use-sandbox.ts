@@ -4,8 +4,21 @@ import {
   buildFlatFileList,
   getFilePath,
 } from "@/features/sandbox-preview/utils/file-tree";
+import {
+  classifySandboxError,
+  type SandboxErrorKind,
+} from "@/features/sandbox-preview/utils/sandbox-error";
 
 import { Id, Doc } from "../../../../convex/_generated/dataModel";
+
+class SandboxStartError extends Error {
+  constructor(
+    message: string,
+    readonly kind: SandboxErrorKind,
+  ) {
+    super(message);
+  }
+}
 
 interface UseSandboxProps {
   files?: Doc<"files">[];
@@ -32,6 +45,7 @@ export const useSandbox = ({
   >("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<SandboxErrorKind | null>(null);
   const [restartKey, setRestartKey] = useState(0);
   const [terminalOutput, setTerminalOutput] = useState("");
   const [prevEnabled, setPrevEnabled] = useState(enabled);
@@ -43,6 +57,7 @@ export const useSandbox = ({
       setStatus("idle");
       setPreviewUrl(null);
       setError(null);
+      setErrorKind(null);
     }
   }
 
@@ -101,8 +116,12 @@ export const useSandbox = ({
 
         if (!response.ok) {
           const errorBody = await response.json().catch(() => null);
-          throw new Error(
-            errorBody?.error || `Failed to create sandbox (${response.status})`
+          throw new SandboxStartError(
+            errorBody?.error || `Failed to create sandbox (${response.status})`,
+            classifySandboxError({
+              code: errorBody?.code,
+              status: response.status,
+            }),
           );
         }
 
@@ -142,7 +161,10 @@ export const useSandbox = ({
                   setStatus("running");
                   break;
                 case "error":
-                  throw new Error(event.message);
+                  throw new SandboxStartError(
+                    event.message,
+                    classifySandboxError({ code: event.code }),
+                  );
               }
             } catch (parseError) {
               // If it's a re-thrown error from "error" event, propagate it
@@ -157,6 +179,9 @@ export const useSandbox = ({
         if ((error as Error).name === "AbortError") return;
 
         setError(error instanceof Error ? error.message : "Unknown error");
+        setErrorKind(
+          error instanceof SandboxStartError ? error.kind : "transient",
+        );
         setStatus("error");
       }
     };
@@ -250,6 +275,9 @@ export const useSandbox = ({
       }
 
       abortControllerRef.current?.abort();
+      // Let a remount (React Strict Mode in dev) boot again instead of waiting
+      // forever on the stream this cleanup just aborted.
+      hasStartedRef.current = false;
     };
   }, [killSandbox]);
 
@@ -268,6 +296,7 @@ export const useSandbox = ({
     setStatus("idle");
     setPreviewUrl(null);
     setError(null);
+    setErrorKind(null);
     setTerminalOutput("");
     setRestartKey((k) => k + 1);
   }, [killSandbox]);
@@ -276,6 +305,7 @@ export const useSandbox = ({
     status,
     previewUrl,
     error,
+    errorKind,
     restart,
     terminalOutput,
   };
