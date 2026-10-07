@@ -302,15 +302,16 @@ export const SkillsGallery = () => {
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="max-sm:has-data-[slot=card-action]:grid-cols-1">
           <CardTitle>
             <h2>My library</h2>
           </CardTitle>
           <CardDescription>
             Skills you can enable in any of your projects.
           </CardDescription>
+          {/* Below the description on phones so it keeps its width. */}
           {library && library.length > 0 && (
-            <CardAction className="flex gap-2">
+            <CardAction className="flex gap-2 max-sm:col-start-1 max-sm:row-span-1 max-sm:row-start-3 max-sm:justify-self-start">
               {/* Placeholder for importing from GitHub / skills.sh (#104). */}
               <Button
                 size="sm"
