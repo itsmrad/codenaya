@@ -141,6 +141,9 @@ const FileChip = ({ path, onOpen }: FileChipProps) => {
   );
 };
 
+/** Chips shown before a long list collapses into "+N more". */
+const CHIP_LIMIT = 6;
+
 const Targets = ({
   row,
   onOpenFile,
@@ -148,6 +151,7 @@ const Targets = ({
   row: Row;
   onOpenFile?: (path: string) => void;
 }) => {
+  const [expanded, setExpanded] = useState(false);
   const { tool } = row.step;
   const opens = tool !== "scrapeUrls" && tool !== "setEnvVar" && !tool?.includes("__");
   const open = opens && tool !== "deleteFiles" ? onOpenFile : undefined;
@@ -160,9 +164,24 @@ const Targets = ({
       </>
     );
   }
-  return row.targets.map((target, index) => (
-    <FileChip key={`${target}-${index}`} path={target} onOpen={open} />
-  ));
+  const visible = expanded ? row.targets : row.targets.slice(0, CHIP_LIMIT);
+  const more = row.targets.length - visible.length;
+  return (
+    <>
+      {visible.map((target, index) => (
+        <FileChip key={`${target}-${index}`} path={target} onOpen={open} />
+      ))}
+      {more > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="h-5 rounded-[6px] px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
+          +{more} more
+        </button>
+      )}
+    </>
+  );
 };
 
 const ThinkingRow = ({ text }: { text: string }) => {
@@ -216,24 +235,28 @@ const StepRow = ({
   const failed = row.step.status === "error";
   return (
     <div className="animate-in fade-in-0 duration-150 motion-reduce:animate-none">
+      {/* Icon column + label column: chips wrap under the label, clear of
+          the icon column and the timeline rule drawn through it. */}
       <div
         className={cn(
-          "flex min-h-7 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-0.5 text-[13px] text-foreground/80",
+          "flex min-w-0 items-start gap-2 py-1 text-[13px] text-foreground/80",
           failed && "text-destructive",
         )}
       >
         <Icon
           className={cn(
-            "relative z-10 size-3.5 shrink-0 bg-card text-muted-foreground",
+            "relative z-10 mt-[3px] size-3.5 shrink-0 bg-card text-muted-foreground",
             failed && "text-destructive",
           )}
         />
-        <span className="shrink-0">{rowLabel(row, running)}</span>
-        <Targets row={row} onOpenFile={onOpenFile} />
+        <div className="flex min-h-5 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="shrink-0">{rowLabel(row, running)}</span>
+          <Targets row={row} onOpenFile={onOpenFile} />
+        </div>
         {running && (
-          <Loader2Icon className="ml-auto size-3.5 shrink-0 animate-spin text-muted-foreground" />
+          <Loader2Icon className="mt-[3px] size-3.5 shrink-0 animate-spin text-muted-foreground" />
         )}
-        {failed && <CircleXIcon className="ml-auto size-3.5 shrink-0 text-destructive" />}
+        {failed && <CircleXIcon className="mt-[3px] size-3.5 shrink-0 text-destructive" />}
       </div>
       {failed && row.step.error && (
         <p className="truncate pb-1 pl-6 text-xs text-muted-foreground" title={row.step.error}>
