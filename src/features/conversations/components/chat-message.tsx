@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckIcon, CopyIcon, RotateCcwIcon } from "lucide-react";
+import { BookOpenIcon, CheckIcon, CopyIcon, RotateCcwIcon } from "lucide-react";
 
 import {
   MessageAction,
   MessageActions,
   MessageResponse,
 } from "@/components/ai-elements/message";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { splitSlashSkills } from "@/features/skills/parse-slash";
 import { cn } from "@/lib/utils";
 
 import type { Doc } from "../../../../convex/_generated/dataModel";
@@ -20,11 +22,25 @@ import {
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useNow } from "./agent-run";
 
-export const UserMessage = ({ content }: { content: string }) => {
+interface UserMessageProps {
+  content: string;
+  /** Enabled skills: leading `/name` tokens naming one show as a chip. */
+  skillNames?: ReadonlySet<string>;
+}
+
+export const UserMessage = ({ content, skillNames }: UserMessageProps) => {
   const textRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [clamped, setClamped] = useState(false);
-  const blocks = useMemo(() => userMessageBlocks(content), [content]);
+  const { skills, text } = useMemo(() => {
+    const { names, rest } = splitSlashSkills(content);
+    const skills = names.filter((name) => skillNames?.has(name));
+    if (skills.length === 0) return { skills, text: content };
+    // Tokens that name no enabled skill stay in the text as typed.
+    const others = names.filter((name) => !skillNames?.has(name));
+    return { skills, text: others.map((name) => `/${name} `).join("") + rest };
+  }, [content, skillNames]);
+  const blocks = useMemo(() => userMessageBlocks(text), [text]);
 
   useEffect(() => {
     const el = textRef.current;
@@ -43,6 +59,20 @@ export const UserMessage = ({ content }: { content: string }) => {
           !expanded && "max-h-52",
         )}
       >
+        {skills.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {skills.map((name) => (
+              <Badge
+                key={name}
+                variant="outline"
+                title={`Skill: ${name}`}
+                className="bg-background/60 font-medium"
+              >
+                <BookOpenIcon />/{name}
+              </Badge>
+            ))}
+          </div>
+        )}
         {blocks.map((block, index) =>
           block.kind === "code" ? (
             <pre

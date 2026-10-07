@@ -30,6 +30,7 @@ export interface Outcome {
 export async function drive(
   model: Record<string, unknown>,
   inferences: Inference[],
+  message = "List my files",
 ): Promise<Outcome> {
   const event = {
     name: "message/sent",
@@ -37,7 +38,7 @@ export async function drive(
       messageId: "m1",
       conversationId: "c1",
       projectId: "p1",
-      message: "List my files",
+      message,
       model,
     },
   };
