@@ -253,7 +253,16 @@ async function scrapeUrlsStep(opts: { urls: string[] }) {
   "use step";
 
   // Lazy import: firecrawl is a Node.js client and only runs in step context.
-  const { firecrawl } = await import("@/lib/firecrawl");
+  const { getFirecrawl, FIRECRAWL_NOT_CONFIGURED_MESSAGE } = await import(
+    "@/lib/firecrawl"
+  );
+  const firecrawl = getFirecrawl();
+  if (!firecrawl) {
+    return opts.urls.map((url) => ({
+      url,
+      content: FIRECRAWL_NOT_CONFIGURED_MESSAGE,
+    }));
+  }
 
   const results: { url: string; content: string }[] = [];
 

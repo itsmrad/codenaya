@@ -1,7 +1,7 @@
 import { generateText } from "ai";
 import { inngest } from "./client";
 import { anthropic } from "@ai-sdk/anthropic";
-import { firecrawl } from "@/lib/firecrawl";
+import { getFirecrawl } from "@/lib/firecrawl";
 
 const URL_REGEX = /https?:\/\/[^\s]+/g;
 
@@ -18,6 +18,9 @@ export const demoGenerate = inngest.createFunction(
     }) as string[];
 
     const scrapedContent = await step.run("scrape-urls", async () => {
+      const firecrawl = getFirecrawl();
+      if (!firecrawl) return "";
+
       const results = await Promise.all(
         urls.map(async (url) => {
           const result = await firecrawl.scrape(

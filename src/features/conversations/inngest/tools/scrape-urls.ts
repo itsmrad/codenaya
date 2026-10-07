@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { createTool } from "@inngest/agent-kit";
-import { firecrawl } from "@/lib/firecrawl";
+import {
+  FIRECRAWL_NOT_CONFIGURED_MESSAGE,
+  getFirecrawl,
+} from "@/lib/firecrawl";
 
 const paramsSchema = z.object({
   urls: z
@@ -23,6 +26,11 @@ export const createScrapeUrlsTool = () => {
       }
 
       const { urls } = parsed.data;
+
+      const firecrawl = getFirecrawl();
+      if (!firecrawl) {
+        return `Error: ${FIRECRAWL_NOT_CONFIGURED_MESSAGE}`;
+      }
 
       try {
         return await toolStep?.run("scrape-urls", async () => {

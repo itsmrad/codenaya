@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { openai } from "@ai-sdk/openai";
 
-import { firecrawl } from "@/lib/firecrawl";
+import { getFirecrawl } from "@/lib/firecrawl";
 
 const quickEditSchema = z.object({
   editedCode: z
@@ -71,8 +71,10 @@ export async function POST(request: Request) {
 
     const urls: string[] = instruction.match(URL_REGEX) || [];
     let documentationContext = "";
+    // Firecrawl is optional: without a key, edit without documentation context.
+    const firecrawl = getFirecrawl();
 
-    if (urls.length > 0) {
+    if (firecrawl && urls.length > 0) {
       const scrapedResults = await Promise.all(
         urls.map(async (url) => {
           try {
