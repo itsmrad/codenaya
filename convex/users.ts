@@ -235,5 +235,17 @@ async function purgeUserDataBatch(
     .take(CASCADE_BATCH_SIZE);
   if (await deleteRows(ctx, "oauthFlowStates", flowStates)) return false;
 
+  const aiPreferences = await ctx.db
+    .query("userAiPreferences")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "userAiPreferences", aiPreferences)) return false;
+
+  const aiProviderKeys = await ctx.db
+    .query("aiProviderKeys")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "aiProviderKeys", aiProviderKeys)) return false;
+
   return true;
 }

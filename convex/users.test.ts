@@ -187,6 +187,23 @@ async function seedOwnedData(t: TestConvex, ownerId: string, files = 1) {
       userId: ownerId,
       viewedAt: now,
     });
+    const aiProviderKeyId = await ctx.db.insert("aiProviderKeys", {
+      userId: ownerId,
+      provider: "openai",
+      label: "OpenAI",
+      secretRef: `secret-${ownerId}`,
+      maskedPreview: "••••1234",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+      ...sealed,
+    });
+    await ctx.db.insert("userAiPreferences", {
+      userId: ownerId,
+      defaultKeyId: aiProviderKeyId,
+      defaultModelId: "gpt-5.6-luna",
+      updatedAt: now,
+    });
     return { projectId, showcaseId, storageId };
   });
 }
@@ -203,6 +220,8 @@ const OWNED_TABLES = [
   "showcaseProjects",
   "showcaseVotes",
   "showcaseViews",
+  "aiProviderKeys",
+  "userAiPreferences",
 ] as const;
 
 const countRows = (t: TestConvex) =>
