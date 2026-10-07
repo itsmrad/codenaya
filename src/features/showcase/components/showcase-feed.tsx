@@ -7,13 +7,13 @@ import { Badge } from "@/components/ui/badge";
 
 import { Doc } from "../../../../convex/_generated/dataModel";
 import { useShowcaseTrending } from "../hooks/use-showcase";
+import { showcasePath } from "../hooks/use-remix";
 import {
   TECH_STACK_OPTIONS,
   DESIGN_STYLE_OPTIONS,
   CATEGORY_OPTIONS,
 } from "../constants/tags";
 import { ShowcaseCard } from "./showcase-card";
-import { ShowcaseDetailDialog } from "./showcase-detail-dialog";
 
 type ShowcaseProject = Doc<"showcaseProjects"> & { previewUrl: string | null };
 type SortBy = "newest" | "upvotes" | "imports";
@@ -26,15 +26,8 @@ export const ShowcaseFeed = () => {
   const [selectedTech, setSelectedTech] = useState<string[]>([]);
   const [selectedDesign, setSelectedDesign] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
-  const [selectedProject, setSelectedProject] = useState<ShowcaseProject | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
 
   const trending = useShowcaseTrending(30);
-
-  const handleCardClick = (project: ShowcaseProject) => {
-    setSelectedProject(project);
-    setDetailOpen(true);
-  };
 
   // Client-side filtering
   const filteredProjects = (trending ?? []).filter((project) => {
@@ -63,12 +56,6 @@ export const ShowcaseFeed = () => {
 
   return (
     <>
-      <ShowcaseDetailDialog
-        open={detailOpen}
-        onOpenChange={setDetailOpen}
-        project={selectedProject}
-      />
-
       <div>
         {/* Header + Search + Sort */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4">
@@ -192,7 +179,7 @@ export const ShowcaseFeed = () => {
               <ShowcaseCard
                 key={project._id}
                 project={project as ShowcaseProject}
-                onClick={() => handleCardClick(project as ShowcaseProject)}
+                href={showcasePath(project._id)}
               />
             ))}
           </div>
