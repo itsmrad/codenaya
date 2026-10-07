@@ -2,8 +2,8 @@ import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 
 import { mutation, query } from "./_generated/server";
-import { Id } from "./_generated/dataModel";
 import { verifyAuth } from "./auth";
+import { copyProjectFiles } from "./projectCopy";
 
 // ─── Queries ───
 
@@ -363,43 +363,7 @@ export const importToWorkspace = mutation({
       updatedAt: now,
     });
 
-    const sourceFiles = await ctx.db
-      .query("files")
-      .withIndex("by_project", (q) => q.eq("projectId", showcaseItem.projectId))
-      .take(5001);
-
-    if (sourceFiles.length > 5000) {
-      throw new Error(
-        `Project ${showcaseItem.projectId} has more than 5000 files and cannot be imported. Please contact the project owner.`
-      );
-    }
-
-    const idMap = new Map<string, Id<"files">>();
-
-    for (const file of sourceFiles) {
-      const newFileId = await ctx.db.insert("files", {
-        projectId: newProjectId,
-        parentId: undefined,
-        name: file.name,
-        type: file.type,
-        content: file.content,
-        storageId: file.storageId,
-        updatedAt: now,
-      });
-      idMap.set(file._id, newFileId);
-    }
-
-    for (const file of sourceFiles) {
-      if (file.parentId) {
-        const newFileId = idMap.get(file._id);
-        const newParentId = idMap.get(file.parentId);
-        if (newFileId && newParentId) {
-          await ctx.db.patch(newFileId, {
-            parentId: newParentId,
-          });
-        }
-      }
-    }
+    await copyProjectFiles(ctx, showcaseItem.projectId, newProjectId);
 
     await ctx.db.patch(args.showcaseProjectId, {
       importCount: showcaseItem.importCount + 1,

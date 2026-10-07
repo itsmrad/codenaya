@@ -81,6 +81,9 @@ export default defineSchema({
         devCommand: v.optional(v.string()),
       })
     ),
+    // Set when the owner deletes the project. The project is hidden at once
+    // while `projects.deleteBatch` removes its data in the background.
+    deletingAt: v.optional(v.number()),
   }).index("by_owner", ["ownerId"]),
 
   files: defineTable({

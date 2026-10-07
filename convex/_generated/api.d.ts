@@ -18,6 +18,7 @@ import type * as http from "../http.js";
 import type * as integrations from "../integrations.js";
 import type * as maintenance from "../maintenance.js";
 import type * as projectCascade from "../projectCascade.js";
+import type * as projectCopy from "../projectCopy.js";
 import type * as projects from "../projects.js";
 import type * as showcase from "../showcase.js";
 import type * as skills from "../skills.js";
@@ -41,6 +42,7 @@ declare const fullApi: ApiFromModules<{
   integrations: typeof integrations;
   maintenance: typeof maintenance;
   projectCascade: typeof projectCascade;
+  projectCopy: typeof projectCopy;
   projects: typeof projects;
   showcase: typeof showcase;
   skills: typeof skills;

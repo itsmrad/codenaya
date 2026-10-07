@@ -83,3 +83,36 @@ export const useRenameProject = () => {
 export const useUpdateProjectSettings = () => {
   return useMutation(api.projects.updateSettings);
 };
+
+export const useDuplicateProject = () => {
+  return useMutation(api.projects.duplicate);
+};
+
+/** Removes the project from the lists right away; the server hides it too. */
+export const useRemoveProject = () => {
+  return useMutation(api.projects.remove).withOptimisticUpdate(
+    (localStore, args) => {
+      const existingProjects = localStore.getQuery(api.projects.get);
+
+      if (existingProjects !== undefined) {
+        localStore.setQuery(
+          api.projects.get,
+          {},
+          existingProjects.filter((project) => project._id !== args.id)
+        );
+      }
+
+      for (const { args: queryArgs, value } of localStore.getAllQueries(
+        api.projects.getPartial
+      )) {
+        if (value !== undefined) {
+          localStore.setQuery(
+            api.projects.getPartial,
+            queryArgs,
+            value.filter((project) => project._id !== args.id)
+          );
+        }
+      }
+    }
+  );
+};
