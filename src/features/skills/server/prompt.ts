@@ -14,12 +14,14 @@ const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 /**
  * The system prompt's skills sections: `## Available skills` lists names and
  * descriptions only (bodies come from `loadSkill`), and `## Active skills`
- * carries the bodies of skills the user forced for this request. Empty when
- * there are neither.
+ * carries the bodies of skills the user forced for this request. Names the
+ * user asked for that are not enabled are listed so the agent can say so.
+ * Empty when there are none of these.
  */
 export function buildSkillsPromptSection(
   skills: readonly AgentSkill[],
   forcedSkills: readonly AgentSkill[] = [],
+  unavailableSkills: readonly string[] = [],
 ): string {
   let section = "";
 
@@ -36,6 +38,14 @@ export function buildSkillsPromptSection(
       "\n\n## Active skills",
       `The user asked for these skills on this request; follow them without calling loadSkill. ${SKILL_RULE}`,
       ...forcedSkills.map(formatSkill),
+    ].join("\n");
+  }
+
+  if (unavailableSkills.length > 0) {
+    section += [
+      "\n\n## Unavailable skills",
+      "The user asked for these skills, but they are not enabled; tell the user and continue without them.",
+      ...unavailableSkills.map((name) => `- Skill /${name} is not enabled in this project`),
     ].join("\n");
   }
 
