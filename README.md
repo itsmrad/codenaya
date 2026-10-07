@@ -137,6 +137,22 @@ Codenaya is a browser-based IDE inspired by Cursor AI, featuring:
 
 8. Open [http://localhost:3000](http://localhost:3000)
 
+### Secrets (Infisical)
+
+Secrets are managed in the Infisical project `codenaya` (environments: `dev`, `staging`, `prod`). The project is linked via `.infisical.json`, which holds no secret values.
+
+```bash
+infisical login                    # once per machine
+npm run dev:infisical              # next dev with dev secrets injected
+infisical run --env dev -- <cmd>   # inject secrets into any other command
+```
+
+Infisical only injects secrets into local processes. Convex functions run on Convex servers, so secrets they read (e.g. `CLERK_JWT_ISSUER_DOMAIN`, `CODENAYA_CONVEX_INTERNAL_KEY`) must also be set on the deployment:
+
+```bash
+npx convex env set NAME value
+```
+
 ## Project Structure
 
 ```
@@ -214,6 +230,7 @@ These features are planned for Part 2:
 
 ```bash
 npm run dev       # Start development server
+npm run dev:infisical  # Start dev server with Infisical secrets
 npm run build     # Build for production
 npm run start     # Start production server
 npm run lint      # Run ESLint
