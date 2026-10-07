@@ -57,11 +57,12 @@ const frontendApiHost = () => {
   return Buffer.from(encoded, "base64").toString().replace(/\$$/, "");
 };
 
-export const signIn = async (page: Page) => {
+/** Finds the shared e2e test user, creating it on first use. */
+export const ensureTestUser = async () => {
   const existing = await clerkApi<Array<{ id: string }>>(
     `/users?email_address=${encodeURIComponent(E2E_EMAIL)}`,
   );
-  const user =
+  return (
     existing[0] ??
     (await clerkApi<{ id: string }>("/users", {
       method: "POST",
@@ -69,8 +70,12 @@ export const signIn = async (page: Page) => {
         email_address: [E2E_EMAIL],
         skip_password_requirement: true,
       }),
-    }));
+    }))
+  );
+};
 
+/** Adds a testing token to Frontend API calls to get past bot protection. */
+export const addTestingToken = async (page: Page) => {
   const { token: testingToken } = await clerkApi<{ token: string }>(
     "/testing_tokens",
     { method: "POST" },
@@ -80,6 +85,11 @@ export const signIn = async (page: Page) => {
     url.searchParams.set("__clerk_testing_token", testingToken);
     route.continue({ url: url.toString() });
   });
+};
+
+export const signIn = async (page: Page) => {
+  const user = await ensureTestUser();
+  await addTestingToken(page);
 
   const { token: ticket } = await clerkApi<{ token: string }>(
     "/sign_in_tokens",

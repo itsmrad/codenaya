@@ -1,5 +1,5 @@
 import { Sandbox } from "e2b";
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import {
   serialiseDotenv,
@@ -59,10 +59,10 @@ const PORT_PATTERNS = [
 ];
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (unauthorized) {
+    return unauthorized;
   }
 
   const e2bApiKey = process.env.E2B_API_KEY?.trim();

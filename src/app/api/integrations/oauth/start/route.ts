@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 import { z } from "zod";
 
 import { getProvider } from "@/features/integrations/catalog";
@@ -145,9 +145,9 @@ function resolveRedirectUri():
 }
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
-  if (!userId) {
-    return jsonError("Unauthorized", 401);
+  const { userId, unauthorized } = await requireUserId();
+  if (unauthorized) {
+    return unauthorized;
   }
 
   // Each attempt performs OAuth discovery and registers a fresh client with the

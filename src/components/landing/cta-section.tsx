@@ -1,10 +1,11 @@
 "use client";
 
 import { useRef } from "react";
+import Link from "next/link";
 import { motion, useInView } from "motion/react";
 import { ArrowRight } from "lucide-react";
-import { SignUpButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
+import { SIGN_UP_URL } from "@/features/auth/constants";
 
 export const LandingCTA = () => {
   const sectionRef = useRef<HTMLDivElement>(null);
@@ -30,21 +31,22 @@ export const LandingCTA = () => {
             No setup required — start building in seconds.
           </p>
           <div className="pt-4">
-            <SignUpButton mode="modal">
-              <motion.div
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.96 }}
-                className="inline-block"
+            <motion.div
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+              className="inline-block"
+            >
+              <Button
+                asChild
+                size="lg"
+                className="h-14 px-10 text-base font-medium bg-brand text-white hover:bg-brand/90 rounded-full shadow-2xl shadow-brand/30 gap-2 group"
               >
-                <Button
-                  size="lg"
-                  className="h-14 px-10 text-base font-medium bg-brand text-white hover:bg-brand/90 rounded-full shadow-2xl shadow-brand/30 gap-2 group"
-                >
+                <Link href={SIGN_UP_URL}>
                   Get Started Free
                   <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-                </Button>
-              </motion.div>
-            </SignUpButton>
+                </Link>
+              </Button>
+            </motion.div>
           </div>
         </motion.div>
       </div>

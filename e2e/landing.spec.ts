@@ -20,7 +20,7 @@ test.describe("landing page", () => {
         page.getByRole("heading", { level: 1, name: "Build with AI." }),
       ).toBeVisible();
       await expect(
-        page.getByRole("button", { name: "Start Building" }),
+        page.getByRole("link", { name: "Start Building" }),
       ).toBeVisible();
 
       // The navbar collapses the sign-in CTA into a menu below the md breakpoint.
@@ -28,7 +28,7 @@ test.describe("landing page", () => {
         await page.getByRole("button", { name: "Toggle menu" }).click();
       }
       await expect(
-        page.getByRole("button", { name: "Log in" }).first(),
+        page.getByRole("link", { name: "Log in" }).first(),
       ).toBeVisible();
 
       const overflow = await page.evaluate(

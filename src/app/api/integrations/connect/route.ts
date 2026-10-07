@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
@@ -65,10 +65,10 @@ function jsonError(
 }
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return jsonError("Unauthorized", 401);
+  if (unauthorized) {
+    return unauthorized;
   }
 
   // Checked before anything else. This route probes a remote MCP server, so an

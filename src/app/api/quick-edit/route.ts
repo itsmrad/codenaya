@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { generateObject } from "ai";
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 import { openai } from "@ai-sdk/openai";
 
 import { getFirecrawl } from "@/lib/firecrawl";
@@ -48,13 +48,10 @@ If the instruction is unclear or cannot be applied, return the original code unc
 
 export async function POST(request: Request) {
   try {
-    const { userId } = await auth();
+    const { unauthorized } = await requireUserId();
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+    if (unauthorized) {
+      return unauthorized;
     }
 
     const body = await request.json();

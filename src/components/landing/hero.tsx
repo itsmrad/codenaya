@@ -1,10 +1,11 @@
 "use client";
 
 import { useRef } from "react";
+import Link from "next/link";
 import { motion, useInView } from "motion/react";
 import { ArrowRight } from "lucide-react";
-import { SignUpButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
+import { SIGN_UP_URL } from "@/features/auth/constants";
 import { GridPattern } from "./grid-pattern";
 import { Noise } from "./noise";
 
@@ -116,17 +117,18 @@ export const LandingHero = () => {
 
           {/* CTA */}
           <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-            <SignUpButton mode="modal">
-              <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
-                <Button
-                  size="lg"
-                  className="h-12 px-8 text-base font-medium bg-brand text-white hover:bg-brand/90 rounded-full shadow-xl shadow-brand/25 gap-2 group"
-                >
+            <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
+              <Button
+                asChild
+                size="lg"
+                className="h-12 px-8 text-base font-medium bg-brand text-white hover:bg-brand/90 rounded-full shadow-xl shadow-brand/25 gap-2 group"
+              >
+                <Link href={SIGN_UP_URL}>
                   Start Building
                   <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-                </Button>
-              </motion.div>
-            </SignUpButton>
+                </Link>
+              </Button>
+            </motion.div>
             <motion.a
               href="https://github.com/itsmrad/codenaya"
               target="_blank"

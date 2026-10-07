@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import { inngest } from "@/inngest/client";
 import {
@@ -18,10 +18,10 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (unauthorized) {
+    return unauthorized;
   }
 
   const body = await request.json();
