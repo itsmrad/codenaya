@@ -4,6 +4,7 @@
 	"private": true,
 	"scripts": {
 		"dev": "next dev",
+		"dev:infisical": "infisical run --env dev -- next dev",
 		"build": "next build",
 		"build:local": "npx convex codegen && next build",
 		"start": "next start",
