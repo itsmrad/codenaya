@@ -1,4 +1,4 @@
-import ky from "ky";
+import ky, { HTTPError } from "ky";
 import { z } from "zod";
 import { toast } from "sonner";
 
@@ -38,7 +38,17 @@ export const fetcher = async (
     if (error instanceof Error && error.name === "AbortError") {
       return null;
     }
-    toast.error("Failed to fetch AI quick edit");
+    // Surface the route's JSON error (e.g. "AI is not configured") when present.
+    const reason =
+      error instanceof HTTPError
+        ? await error.response
+            .json<{ error?: string }>()
+            .then((body) => body.error)
+            .catch(() => undefined)
+        : undefined;
+    toast.error(
+      reason ? `AI quick edit failed: ${reason}` : "AI quick edit failed. Please try again.",
+    );
     return null;
   }
 };

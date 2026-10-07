@@ -2,9 +2,9 @@ import { z } from "zod";
 import { generateObject } from "ai";
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/features/auth/server/require-user-id";
-import { openai } from "@ai-sdk/openai";
 
 import { getFirecrawl } from "@/lib/firecrawl";
+import { editorModel, isOpenRouterConfigured } from "@/lib/openrouter";
 
 const quickEditSchema = z.object({
   editedCode: z
@@ -52,6 +52,13 @@ export async function POST(request: Request) {
 
     if (unauthorized) {
       return unauthorized;
+    }
+
+    if (!isOpenRouterConfigured()) {
+      return NextResponse.json(
+        { error: "AI is not configured" },
+        { status: 503 }
+      );
     }
 
     const body = await request.json();
@@ -104,7 +111,7 @@ export async function POST(request: Request) {
       .replace("{documentation}", documentationContext);
 
     const { object } = await generateObject({
-      model: openai("gpt-4o"),
+      model: editorModel("quickEdit"),
       output: "object",
       schema: quickEditSchema,
       prompt,

@@ -17,8 +17,6 @@ Base services for every flow: Clerk (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`,
   tool and `src/inngest/functions.ts`.
 - `/projects/[projectId]` raises "useSelectedLayoutSegments() in Client Component outside
   `<Suspense>`" (Next 16 cache components).
-- Editor AI routes (`/api/suggestion`, `/api/quick-edit`) call `@ai-sdk/openai` directly, so
-  they need `OPENAI_API_KEY`, which is not listed in `.env.example` (the agent uses OpenRouter).
 
 ## 1. Core user flows
 
@@ -66,13 +64,15 @@ Base services for every flow: Clerk (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`,
 - Code: `features/projects/components/file-explorer/*`, `features/editor/*`; `convex/files.ts`
   (`getFolderContents`, `createFile`, `createFolder`, `renameFile`, `deleteFile`, `updateFile`).
 
-**F7. AI inline suggestions and Cmd+K quick edit**: Partially works
+**F7. AI inline suggestions and Cmd+K quick edit**: Works
 - Steps: type → a ghost-text suggestion appears → Tab accepts it. Select code → Cmd+K →
   instruction → the selection is replaced.
-- Code: `editor/extensions/suggestion/*` → `POST /api/suggestion` (gpt-4o-mini);
-  `editor/extensions/quick-edit/*`, `selection-tooltip.ts` → `POST /api/quick-edit` (gpt-4o,
-  scrapes URLs in the instruction through Firecrawl).
-- Gap: needs the undocumented `OPENAI_API_KEY` and does not go through OpenRouter.
+- Code: `editor/extensions/suggestion/*` → `POST /api/suggestion`;
+  `editor/extensions/quick-edit/*`, `selection-tooltip.ts` → `POST /api/quick-edit` (scrapes
+  URLs in the instruction through Firecrawl). Both use OpenRouter via `editorModel()` in
+  `src/lib/openrouter.ts` (default `openai/gpt-5.4-mini`, overridable with
+  `OPENROUTER_SUGGESTION_MODEL` / `OPENROUTER_QUICK_EDIT_MODEL`).
+- Env: `OPENROUTER_API_KEY` (503 JSON error without it).
 
 **F8. Live preview with terminal**: Works (E2B) / Unverified (WebContainer)
 - Steps: Preview tab → sandbox boots, writes files, installs, starts the dev server → iframe plus
