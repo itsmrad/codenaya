@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { chatEntryAnimations } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 
@@ -36,6 +37,8 @@ test.describe("chat panel", () => {
     // The user bubble lands and the composer clears.
     await expect(page.getByText(prompt)).toBeVisible();
     await expect(input).toHaveValue("");
+    // A message sent while the conversation is open fades up.
+    expect(await chatEntryAnimations(page)).toBeGreaterThan(0);
 
     // While the agent runs, the send button turns into Stop. Stopping is
     // best-effort cleanup: cancelling needs the Inngest server, which a local

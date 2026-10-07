@@ -89,6 +89,15 @@ export const seedOverflowConversation = async (page: Page, projectId: string) =>
     system.mutation(api.system.updateMessageStatus, { internalKey, messageId: live, status: "cancelled" });
 };
 
+/** Entry animations ("fade-up") running or held in the chat transcript. */
+export const chatEntryAnimations = (page: Page) =>
+  page.locator('[role="log"]').evaluate(
+    (log) =>
+      log
+        .getAnimations({ subtree: true })
+        .filter((animation) => (animation as CSSAnimation).animationName === "fade-up").length,
+  );
+
 /** Drags the chat/editor sash so the chat panel is `width` px wide (desktop layout). */
 export const setChatPanelWidth = async (page: Page, width: number) => {
   const panel = page.locator('[role="log"]');

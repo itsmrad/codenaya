@@ -113,10 +113,10 @@ export const SkillSlashMenu = ({
     value={activeName}
     onValueChange={onActiveChange}
     shouldFilter={false}
-    className="absolute inset-x-3 bottom-full z-20 mb-1 h-auto w-auto rounded-lg border shadow-md"
+    className="absolute inset-x-3 bottom-full z-20 mb-2 h-auto w-auto origin-bottom animate-in rounded-lg bg-popover p-1 shadow-md ring-1 ring-border fade-in-0 zoom-in-95 duration-150 motion-reduce:animate-none dark:shadow-none"
   >
     <CommandList label="Skills">
-      <CommandGroup heading="Skills">
+      <CommandGroup heading="Skills" className="p-0">
         {items.map((skill) => (
           <CommandItem
             key={skill.key}
@@ -124,9 +124,10 @@ export const SkillSlashMenu = ({
             onSelect={onSelect}
             // Keep focus in the textarea.
             onMouseDown={(event) => event.preventDefault()}
+            className="h-9 rounded-[6px] px-2"
           >
             <BookOpenIcon />
-            <span className="shrink-0 font-medium">/{skill.name}</span>
+            <span className="shrink-0 text-[12.5px] font-medium">/{skill.name}</span>
             <span className="truncate text-xs text-muted-foreground">
               {skill.description}
             </span>
@@ -134,5 +135,8 @@ export const SkillSlashMenu = ({
         ))}
       </CommandGroup>
     </CommandList>
+    <p className="border-t border-border px-2 pt-1.5 pb-1 text-[11px] text-muted-foreground">
+      Type to search skills
+    </p>
   </Command>
 );
