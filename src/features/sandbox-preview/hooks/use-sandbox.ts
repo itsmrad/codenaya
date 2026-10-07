@@ -11,6 +11,9 @@ import {
 
 import { Id, Doc } from "../../../../convex/_generated/dataModel";
 
+const NETWORK_ERROR_MESSAGE =
+  "Couldn't reach the preview sandbox. Check your connection and retry.";
+
 class SandboxStartError extends Error {
   constructor(
     message: string,
@@ -183,7 +186,15 @@ export const useSandbox = ({
       } catch (error) {
         if ((error as Error).name === "AbortError") return;
 
-        setError(error instanceof Error ? error.message : "Unknown error");
+        setError(
+          // fetch and stream reads reject with a bare TypeError ("Failed to
+          // fetch", "network error") when the connection drops.
+          error instanceof TypeError
+            ? NETWORK_ERROR_MESSAGE
+            : error instanceof Error
+              ? error.message
+              : "Unknown error",
+        );
         setErrorKind(
           error instanceof SandboxStartError ? error.kind : "transient",
         );
