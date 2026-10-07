@@ -179,9 +179,10 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
               className="h-8 rounded-md px-2 space-x-1 shadow-none"
               onClick={() => switchEngine("sandbox")}
               title="Use high-fidelity E2B Sandbox"
+              aria-label="Sandbox"
             >
               <ServerIcon className="size-3.5" />
-              <span className="text-xs">Sandbox</span>
+              <span className="text-xs hidden @3xl:inline">Sandbox</span>
             </Button>
             <Button
               size="sm"
@@ -189,15 +190,16 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
               className="h-8 rounded-md px-2 space-x-1 shadow-none"
               onClick={() => switchEngine("webcontainer")}
               title="Use in-browser WebContainers"
+              aria-label="WebContainer"
             >
               <BoxIcon className="size-3.5" />
-              <span className="text-xs">WebContainer</span>
+              <span className="text-xs hidden @3xl:inline">WebContainer</span>
             </Button>
         </div>
 
         <PreviewDeviceToggle device={device} onChange={setDevice} />
 
-        <div className="flex-1 h-9 flex items-center px-3 bg-muted/30 rounded-lg border border-border/50 text-xs text-muted-foreground truncate font-mono">
+        <div className="flex-1 min-w-0 h-9 flex items-center px-3 bg-muted/30 rounded-lg border border-border/50 text-xs text-muted-foreground truncate font-mono">
           {isLoading && (
             <div className="flex items-center gap-1.5">
               <Loader2Icon className="size-3 animate-spin" />
