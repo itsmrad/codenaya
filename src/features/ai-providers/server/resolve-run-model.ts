@@ -225,18 +225,24 @@ export async function resolveRunModel({
 }
 
 /**
- * Whether a failed inference means the provider refused the key itself:
- * unauthorized, forbidden, payment required, or out of quota. Plain rate
- * limits and server errors are not the key's fault.
+ * Provider wording for a refused key: unauthorized, forbidden, payment
+ * required or out of quota. AgentKit rethrows only the error body's message,
+ * so the status code is often gone by the time the run sees the error.
+ */
+const KEY_REJECTION_PATTERNS = [
+  /\b(401|402|403)\b/,
+  /unauthori[sz]ed|forbidden|payment required/i,
+  /invalid[ _-]?(x-)?api[ _-]?key|incorrect api key|no auth credentials/i,
+  /authentication[_ ]?error|insufficient[_ ]quota|exceeded your current quota|insufficient credits/i,
+];
+
+/**
+ * Whether a failed inference means the provider refused the key itself.
+ * Plain rate limits and server errors are not the key's fault.
  */
 export function isProviderKeyRejection(error: unknown): boolean {
   const text = errorText(error);
-  return (
-    /\b(401|402|403)\b/.test(text) ||
-    /unauthori[sz]ed|invalid[ _-]?api[ _-]?key|incorrect api key|authentication|insufficient[_ ]quota|exceeded your current quota|insufficient credits|payment required/i.test(
-      text,
-    )
-  );
+  return KEY_REJECTION_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 /** Message, status and cause chain of an error, flattened for matching. */
