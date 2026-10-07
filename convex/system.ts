@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { aiProviderValidator, messageStepValidator } from "./schema";
+import { resolveProjectSkills } from "./skills";
 
 // Keeps the steps array (and the message document) bounded on long runs.
 const MAX_MESSAGE_STEPS = 100;
@@ -1597,5 +1598,29 @@ export const getAiProviderKeyForRun = query({
     const project = await ctx.db.get("projects", args.projectId);
     const key = await ctx.db.get("aiProviderKeys", args.keyId);
     return project && key && key.userId === project.ownerId ? key : null;
+  },
+});
+
+// ─── Skills ───
+
+/**
+ * The project's enabled skills, with bodies, for the agent's skill index.
+ * Only the project owner's skills are read, as in `getProjectMcpConnections`.
+ */
+export const getProjectSkills = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const project = await ctx.db.get("projects", args.projectId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+
+    const skills = await resolveProjectSkills(ctx, project);
+    return skills.filter((skill) => skill.enabled);
   },
 });

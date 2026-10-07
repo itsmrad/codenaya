@@ -20,6 +20,7 @@ import type * as maintenance from "../maintenance.js";
 import type * as projectCascade from "../projectCascade.js";
 import type * as projects from "../projects.js";
 import type * as showcase from "../showcase.js";
+import type * as skills from "../skills.js";
 import type * as system from "../system.js";
 import type * as users from "../users.js";
 
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   projectCascade: typeof projectCascade;
   projects: typeof projects;
   showcase: typeof showcase;
+  skills: typeof skills;
   system: typeof system;
   users: typeof users;
 }>;

@@ -229,6 +229,13 @@ async function purgeUserDataBatch(
     return false;
   }
 
+  // Library skills; project skills and their settings went with the projects.
+  const skills = await ctx.db
+    .query("skills")
+    .withIndex("by_owner_and_projectId", (q) => q.eq("ownerId", userId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "skills", skills)) return false;
+
   const flowStates = await ctx.db
     .query("oauthFlowStates")
     .withIndex("by_user", (q) => q.eq("userId", userId))
