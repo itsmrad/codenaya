@@ -266,11 +266,20 @@ export const create = mutation({
     description: v.string(),
     body: v.string(),
     projectId: v.optional(v.id("projects")),
+    /** Set when the skill was imported from GitHub or skills.sh. */
+    sourceUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
     const ownerId = identity.subject;
     assertValid(args);
+    if (
+      args.sourceUrl !== undefined &&
+      (!args.sourceUrl.startsWith("https://github.com/") ||
+        args.sourceUrl.length > 2048)
+    ) {
+      throw new Error("Imported skills must link to their GitHub source");
+    }
 
     const project = args.projectId
       ? await getOwnedProject(ctx, args.projectId, ownerId)
@@ -296,7 +305,8 @@ export const create = mutation({
       name: args.name,
       description: args.description,
       body: args.body,
-      source: "user",
+      source: args.sourceUrl ? "github" : "user",
+      sourceUrl: args.sourceUrl,
       updatedAt: Date.now(),
     });
 

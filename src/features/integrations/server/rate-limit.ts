@@ -199,6 +199,16 @@ export const ENHANCE_PROMPT_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
+/**
+ * Previewing a skill import fetches up to three files from GitHub. Ten a
+ * minute covers someone trying a few URLs while stopping a scripted loop.
+ */
+export const SKILL_IMPORT_RATE_LIMIT: RateLimitConfig = {
+  scope: "skills-import",
+  limit: 10,
+  windowMs: 60_000,
+};
+
 /** Standard 429 response with a `Retry-After` header. */
 export function rateLimitedResponse(result: RateLimitResult): Response {
   return Response.json(

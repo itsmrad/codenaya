@@ -58,6 +58,7 @@ import {
 } from "../hooks/use-skills";
 import { SkillCard } from "./skill-card";
 import { SkillEditorDialog, type SkillEditorTarget } from "./skill-editor-dialog";
+import { ImportSkillDialog } from "./import-skill-dialog";
 
 import { Doc } from "../../../../convex/_generated/dataModel";
 
@@ -94,6 +95,7 @@ export const SkillsGallery = () => {
     null,
   );
   const [deleting, setDeleting] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const openCreate = () => setEditorTarget({ kind: "create", scope: "library" });
 
@@ -138,7 +140,11 @@ export const SkillsGallery = () => {
               recipes or checklists the agent should follow.
             </EmptyDescription>
           </EmptyHeader>
-          <EmptyContent>
+          <EmptyContent className="flex-row flex-wrap justify-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
+              <DownloadIcon aria-hidden="true" />
+              Import
+            </Button>
             <Button size="sm" onClick={openCreate}>
               <PlusIcon aria-hidden="true" />
               New skill
@@ -312,12 +318,11 @@ export const SkillsGallery = () => {
           {/* Below the description on phones so it keeps its width. */}
           {library && library.length > 0 && (
             <CardAction className="flex gap-2 max-sm:col-start-1 max-sm:row-span-1 max-sm:row-start-3 max-sm:justify-self-start">
-              {/* Placeholder for importing from GitHub / skills.sh (#104). */}
               <Button
                 size="sm"
                 variant="outline"
-                disabled
-                title="Import from GitHub is coming soon"
+                title="Import from GitHub or skills.sh"
+                onClick={() => setImportOpen(true)}
               >
                 <DownloadIcon aria-hidden="true" />
                 Import
@@ -333,6 +338,7 @@ export const SkillsGallery = () => {
       </Card>
 
       <SkillEditorDialog target={editorTarget} onTargetChange={setEditorTarget} />
+      <ImportSkillDialog open={importOpen} onOpenChange={setImportOpen} />
 
       <AlertDialog
         open={pendingDelete !== null}
