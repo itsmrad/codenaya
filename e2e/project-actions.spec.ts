@@ -29,6 +29,12 @@ test.describe("project actions", () => {
   for (const width of [375, 768, 1440]) {
     test(`duplicate, rename and delete at ${width}px`, async ({ page }) => {
       test.setTimeout(180_000);
+      // The dev-tools badge covers the bottom-left tab on phones (see ide-shell.spec.ts).
+      await page.addInitScript(() => {
+        const style = document.createElement("style");
+        style.textContent = "nextjs-portal { display: none !important; }";
+        document.addEventListener("DOMContentLoaded", () => document.body.append(style));
+      });
       await page.setViewportSize({ width, height: 900 });
       const errors = collectConsoleErrors(page);
       await signIn(page);
@@ -97,7 +103,9 @@ test.describe("project actions", () => {
 
         // Its URL shows the not-found view.
         await page.goto(copyUrl);
-        await expect(page.getByText("Project not found")).toBeVisible({ timeout: 30_000 });
+        await expect(page.getByRole("heading", { name: "Project not found" })).toBeVisible({
+          timeout: 30_000,
+        });
       } finally {
         await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});
       }
