@@ -95,7 +95,12 @@ test.describe("agent skills", () => {
     await input.press("Enter");
     await expect(page.getByText(STUB_REPLY)).toBeVisible({ timeout: 120_000 });
 
-    await page.getByRole("button", { name: /Worked/ }).last().click();
+    // A finished run block collapses itself shortly after the run ends; a
+    // click before that would close it instead of opening it.
+    const runBlock = page.getByRole("button", { name: /Worked/ }).last();
+    await expect(runBlock).toHaveAttribute("aria-expanded", "false");
+    await runBlock.click();
+    await expect(runBlock).toHaveAttribute("aria-expanded", "true");
     await test.info().attach("run-block", {
       body: await page.screenshot(),
       contentType: "image/png",
