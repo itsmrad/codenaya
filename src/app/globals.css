@@ -46,6 +46,34 @@
   --color-brand-foreground: var(--brand-foreground);
 }
 
+/* Chat motion: the live-run pixel loader and the entry of newly arrived rows.
+   Adapted from Beautiful UI (beautifului.dev), MIT © 2026 Shane Levine — see
+   THIRD_PARTY_NOTICES.md. */
+@theme {
+  --animate-pixel-on: pixel-on 650ms ease-in-out infinite;
+  --animate-fade-up: fade-up 300ms cubic-bezier(0.23, 1, 0.32, 1) both;
+
+  @keyframes pixel-on {
+    0%,
+    100% {
+      opacity: 0.15;
+    }
+    18%,
+    42% {
+      opacity: 1;
+    }
+    62% {
+      opacity: 0.15;
+    }
+  }
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+}
+
 /* 
  * Codenaya Design System
  * Dark Mode First — Cinematic Noir with Warm Amber Accent
