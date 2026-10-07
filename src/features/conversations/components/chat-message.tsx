@@ -14,13 +14,9 @@ import { splitSlashSkills } from "@/features/skills/parse-slash";
 import { cn } from "@/lib/utils";
 
 import type { Doc } from "../../../../convex/_generated/dataModel";
-import {
-  STALLED_RUN_MS,
-  lastRunActivity,
-  sanitizeAgentText,
-} from "../agent-steps";
+import { sanitizeAgentText } from "../agent-steps";
 import { userMessageBlocks } from "../user-message";
-import { AgentRun, useNow } from "./agent-run";
+import { AgentRun, useRunStalled } from "./agent-run";
 
 interface UserMessageProps {
   content: string;
@@ -123,10 +119,8 @@ export const AssistantMessage = ({
   const content = sanitizeAgentText(message.content, pathOf);
   // Safety net for a run that died without reporting back (e.g. the worker
   // crashed): after a long silence, offer a retry instead of a bare spinner.
-  const now = useNow(status === "processing");
-  const stalled =
-    status === "processing" &&
-    now - lastRunActivity(message._creationTime, steps) > STALLED_RUN_MS;
+  // The server fails such a run for good after LOST_RUN_MS.
+  const stalled = useRunStalled(message);
 
   const copy = () => {
     navigator.clipboard.writeText(content);
@@ -143,6 +137,7 @@ export const AssistantMessage = ({
           startedAt={message._creationTime}
           completedAt={message.completedAt}
           model={message.runModel?.label}
+          stalled={stalled}
           onOpenFile={onOpenFile}
         />
       )}

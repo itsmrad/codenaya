@@ -61,6 +61,7 @@ import { useEnhancePrompt } from "../hooks/use-enhance-prompt";
 import { EnhancePromptButton } from "./enhance-prompt-button";
 import { buildPathIndex } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
+import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
 
 interface ConversationSidebarProps {
@@ -110,10 +111,13 @@ export const ConversationSidebar = ({
     if (fileId) openFile(fileId, { pinned: true });
   };
 
-  // Check if any message is currently processing
-  const isProcessing = conversationMessages?.some(
+  // Check if any message is currently processing. A stalled run doesn't
+  // count: the composer offers Send (which clears it) rather than Stop.
+  const processingMessage = conversationMessages?.findLast(
     (msg) => msg.status === "processing"
   );
+  const stalled = useRunStalled(processingMessage);
+  const isProcessing = Boolean(processingMessage) && !stalled;
 
   const handleCancel = async () => {
     try {

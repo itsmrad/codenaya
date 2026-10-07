@@ -86,6 +86,15 @@ export default defineSchema({
     deletingAt: v.optional(v.number()),
   }).index("by_owner", ["ownerId"]),
 
+  /**
+   * Denormalized running totals, one row per `name`, so public pages can show
+   * a number without scanning a table. See `convex/stats.ts`.
+   */
+  counters: defineTable({
+    name: v.string(),
+    value: v.number(),
+  }).index("by_name", ["name"]),
+
   files: defineTable({
     projectId: v.id("projects"),
     parentId: v.optional(v.id("files")),
@@ -127,7 +136,9 @@ export default defineSchema({
     runModel: v.optional(runModelValidator),
   })
     .index("by_conversation", ["conversationId"])
-    .index("by_project_status", ["projectId", "status"]),
+    .index("by_project_status", ["projectId", "status"])
+    // For the lost-run sweep in maintenance.ts.
+    .index("by_status", ["status"]),
 
   // ─── Showcase ───
   showcaseProjects: defineTable({
