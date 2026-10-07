@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { Allotment } from "allotment";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ChevronDownIcon,
   CloudCheckIcon,
   CodeIcon,
   EyeIcon,
@@ -31,7 +32,9 @@ import { FileExplorer } from "./file-explorer";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { PreviewView } from "./preview-view";
 import { ExportPopover } from "./export-popover";
-import { useProject, useRenameProject } from "../hooks/use-projects";
+import { useProject } from "../hooks/use-projects";
+import { useProjectRename } from "../hooks/use-project-rename";
+import { DeleteProjectDialog, ProjectActionsMenu } from "./project-actions";
 import { PublishDialog } from "@/features/showcase/components/publish-dialog";
 import { useIsProjectPublished } from "@/features/showcase/hooks/use-showcase";
 import { useProjectIntegrations } from "@/features/integrations/components/project-integrations-context";
@@ -105,35 +108,10 @@ export const ProjectIdView = ({
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
   const { openIntegrations } = useProjectIntegrations();
   const project = useProject(projectId);
-  const renameProject = useRenameProject();
   const isPublished = useIsProjectPublished(projectId);
-
-  const [isRenaming, setIsRenaming] = useState(false);
-  const [name, setName] = useState("");
-
-  const handleStartRename = () => {
-    if (!project) return;
-    setName(project.name);
-    setIsRenaming(true);
-  };
-
-  const handleSubmit = () => {
-    if (!project) return;
-    setIsRenaming(false);
-
-    const trimmedName = name.trim();
-    if (!trimmedName || trimmedName === project.name) return;
-
-    renameProject({ id: projectId, name: trimmedName });
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      handleSubmit();
-    } else if (e.key === "Escape") {
-      setIsRenaming(false);
-    }
-  };
+  const rename = useProjectRename(project);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const router = useRouter();
 
   return (
     <>
@@ -148,6 +126,14 @@ export const ProjectIdView = ({
         open={skillsDialogOpen}
         onOpenChange={setSkillsDialogOpen}
       />
+      {project && (
+        <DeleteProjectDialog
+          project={project}
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          onDeleting={() => router.replace("/")}
+        />
+      )}
     <div className="@container h-full flex flex-col gap-2">
       {/* ─── Unified Navbar ─── */}
       <nav className="shrink-0 h-11 flex items-center gap-3 px-3 rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]">
@@ -169,24 +155,36 @@ export const ProjectIdView = ({
           <div className="w-px h-4 bg-border/50 shrink-0" />
 
           {/* Project Name */}
-          {isRenaming ? (
+          {rename.isRenaming ? (
             <input
-              autoFocus
+              {...rename.inputProps}
               type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onFocus={(e) => e.currentTarget.select()}
-              onBlur={handleSubmit}
-              onKeyDown={handleKeyDown}
-              className="min-w-0 text-xs bg-transparent text-foreground outline-none focus:ring-1 focus:ring-brand/40 focus:ring-inset rounded px-1 py-0.5 font-medium max-w-44 truncate"
+              className="min-w-0 text-xs bg-transparent text-foreground outline-none focus:ring-1 focus:ring-brand/40 aria-invalid:ring-destructive focus:ring-inset rounded px-1 py-0.5 font-medium max-w-44 truncate"
             />
           ) : (
             <button
-              onClick={handleStartRename}
+              onClick={rename.start}
               className="min-w-0 text-xs font-medium text-foreground/80 hover:text-foreground truncate max-w-44 transition-colors"
             >
               {project?.name ?? "Loading..."}
             </button>
+          )}
+          {project && (
+            <ProjectActionsMenu
+              project={project}
+              align="start"
+              onRename={rename.start}
+              onDelete={() => setDeleteOpen(true)}
+              trigger={
+                <button
+                  aria-label="Project actions"
+                  title="Project actions"
+                  className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                >
+                  <ChevronDownIcon className="size-3.5" />
+                </button>
+              }
+            />
           )}
 
           {/* Save status */}
