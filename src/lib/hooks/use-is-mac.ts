@@ -5,8 +5,13 @@ function subscribe() {
   return () => {};
 }
 
-function getSnapshot(): boolean {
+/** Client-only check for macOS/iOS, for code outside React (e.g. CodeMirror DOM). */
+export function isMacPlatform(): boolean {
   return /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
+}
+
+function getSnapshot(): boolean {
+  return isMacPlatform();
 }
 
 function getServerSnapshot(): boolean {
