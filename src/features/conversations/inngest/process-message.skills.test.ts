@@ -123,6 +123,33 @@ describe("processMessage with skills", () => {
     ).toHaveLength(1);
   });
 
+  it("preloads skills forced with /name and records them as used", async () => {
+    const outcome = await drive(
+      PLATFORM_MODEL,
+      [{ data: text("SEO") }, { data: text("Added SEO metadata.") }],
+      "/seo-metadata /stripe /nope add a sitemap",
+    );
+
+    expect(outcome.finalType).toBe("function-resolved");
+    const prompt = systemPrompt(codingRequests(outcome.inferenceBodies)[0]);
+    expect(prompt).toContain("## Active skills");
+    expect(prompt).toContain(SEO_BODY);
+    expect(prompt).toContain("Skill /stripe is not enabled in this project");
+    expect(prompt).toContain("Skill /nope is not enabled in this project");
+    expect(prompt).not.toContain("# stripe");
+
+    const steps = mocks.mutation.mock.calls
+      .filter(([ref]) => getFunctionName(ref) === "system:upsertMessageSteps")
+      .flatMap(([, args]) => args.steps);
+    expect(steps).toContainEqual(
+      expect.objectContaining({
+        tool: "loadSkill",
+        targets: ["seo-metadata"],
+        status: "done",
+      }),
+    );
+  });
+
   it("leaves the prompt and tools alone when no skill is enabled", async () => {
     projectSkills = () => [skill("stripe", false)];
 
