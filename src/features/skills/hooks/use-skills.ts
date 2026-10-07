@@ -11,6 +11,9 @@ export const useProjectSkills = (projectId: Id<"projects"> | undefined) => {
   );
 };
 
+/** The signed-in user's library skills, each with its enabled-project count. */
+export const useLibrarySkills = () => useQuery(api.skills.listLibrary);
+
 /** One stored skill with its body, or skipped while `skillId` is unset. */
 export const useSkill = (skillId: Id<"skills"> | undefined) => {
   return useQuery(api.skills.get, skillId ? { skillId } : "skip");

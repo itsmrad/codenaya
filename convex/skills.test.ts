@@ -267,6 +267,29 @@ describe("skills", () => {
     expect(await alice.query(api.skills.listLibrary, {})).toEqual([]);
   });
 
+  test("listLibrary counts the projects each skill is enabled in", async () => {
+    const { t, alice } = setup();
+    const p1 = await createProject(t, ALICE);
+    const p2 = await createProject(t, ALICE);
+    const id = await alice.mutation(api.skills.create, skill("alpha"));
+    for (const projectId of [p1, p2]) {
+      await alice.mutation(api.skills.setProjectSkillEnabled, {
+        projectId,
+        skillKey: `user:${id}`,
+        enabled: true,
+      });
+    }
+    await alice.mutation(api.skills.setProjectSkillEnabled, {
+      projectId: p2,
+      skillKey: `user:${id}`,
+      enabled: false,
+    });
+
+    expect(await alice.query(api.skills.listLibrary, {})).toEqual([
+      expect.objectContaining({ name: "alpha", projectCount: 1 }),
+    ]);
+  });
+
   test("system.getProjectSkills returns only enabled skills, with bodies", async () => {
     const { t, alice } = setup();
     const projectId = await createProject(t, ALICE);
