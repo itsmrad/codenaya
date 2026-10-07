@@ -6,6 +6,7 @@ import { ArrowLeftIcon } from "lucide-react";
 import { fetchQuery } from "convex/nextjs";
 
 import { AppNavbar } from "@/components/app-navbar";
+import { LandingFooter } from "@/components/landing/footer";
 import { Spinner } from "@/components/ui/spinner";
 import { ShowcaseDetail } from "@/features/showcase/components/showcase-detail";
 
@@ -68,7 +69,7 @@ const ShowcaseIdPage = (props: ShowcaseIdPageProps) => {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <AppNavbar />
-      <main className="mx-auto w-full max-w-3xl px-4 py-8 md:px-8 md:py-12">
+      <main className="flex-1 mx-auto w-full max-w-3xl px-4 py-8 md:px-8 md:py-12">
         <Link
           href="/showcase"
           className="mb-4 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -86,6 +87,7 @@ const ShowcaseIdPage = (props: ShowcaseIdPageProps) => {
           <ShowcaseIdContent {...props} />
         </Suspense>
       </main>
+      <LandingFooter />
     </div>
   );
 };
