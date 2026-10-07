@@ -6,6 +6,7 @@
  * Proves that the decrypted key never lands in a persisted step result, that
  * inference goes to the user's provider, and that a rejected or invalid key
  * ends the run with a settings link instead of falling back to the platform.
+ * The out-of-credit probe runs for real against a stubbed provider.
  */
 
 import { getFunctionName } from "convex/server";
@@ -26,7 +27,8 @@ vi.mock("@/lib/convex-client", () => ({
 vi.mock("@/features/ai-providers/server/sealed-key", () => ({
   openProviderKey: mocks.openProviderKey,
 }));
-vi.mock("@/features/ai-providers/server/test-connection", () => ({
+vi.mock("@/features/ai-providers/server/test-connection", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   testConnection: mocks.testConnection,
 }));
 
@@ -142,6 +144,44 @@ describe("processMessage on the user's key", () => {
         [
           "system:updateMessageContent",
           expect.objectContaining({ content: expect.stringContaining("/settings/ai-providers") }),
+        ],
+      ]),
+    );
+  });
+
+  it.each([
+    ["HTTP 402", 402, { error: { message: "Payment required" } }],
+    [
+      "insufficient_quota",
+      429,
+      { error: { message: "You exceeded your current quota.", code: "insufficient_quota" } },
+    ],
+  ])("fails fast when the provider reports the key out of credit (%s)", async (_, status, body) => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) =>
+      String(input) === "https://api.openai.com/v1/chat/completions"
+        ? new Response(JSON.stringify(body), { status })
+        : new Response("{}", { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const startedAt = Date.now();
+    const outcome = await drive({ keyId: "key_1", modelId: "gpt-6.1-sol" }, []);
+
+    expect(Date.now() - startedAt).toBeLessThan(20_000);
+    expect(outcome.finalType).toBe("function-resolved");
+    // The probe is the only provider call: no inference was scheduled.
+    expect(outcome.inferenceUrls).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.openai.com/v1/chat/completions",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(JSON.stringify(outcome.stepState)).not.toContain(SECRET);
+    expect(mutations()).toEqual(
+      expect.arrayContaining([
+        ["system:updateAiProviderKeyStatus", expect.objectContaining({ status: "invalid" })],
+        [
+          "system:updateMessageContent",
+          expect.objectContaining({ content: expect.stringContaining("(/settings/ai-providers)") }),
         ],
       ]),
     );
