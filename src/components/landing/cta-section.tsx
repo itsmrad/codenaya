@@ -12,10 +12,7 @@ export const LandingCTA = () => {
   const isInView = useInView(sectionRef, { once: true, amount: 0.4 });
 
   return (
-    <section ref={sectionRef} className="relative py-32 md:py-40 overflow-hidden">
-      {/* Background glow */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_50%,rgba(232,130,79,0.06),transparent_60%)] dark:bg-[radial-gradient(ellipse_80%_60%_at_50%_50%,rgba(232,130,79,0.1),transparent_60%)]" />
-
+    <section ref={sectionRef} className="relative py-14 md:py-20 overflow-hidden">
       <div className="relative z-10 max-w-3xl mx-auto px-6 md:px-8 text-center">
         <motion.div
           initial={{ opacity: 0, y: 40 }}
@@ -31,22 +28,16 @@ export const LandingCTA = () => {
             No setup required — start building in seconds.
           </p>
           <div className="pt-4">
-            <motion.div
-              whileHover={{ scale: 1.04 }}
-              whileTap={{ scale: 0.96 }}
-              className="inline-block"
+            <Button
+              asChild
+              size="lg"
+              className="h-12 px-8 text-base font-medium bg-brand text-brand-foreground hover:bg-brand/90 rounded-full gap-2 group"
             >
-              <Button
-                asChild
-                size="lg"
-                className="h-14 px-10 text-base font-medium bg-brand text-white hover:bg-brand/90 rounded-full shadow-2xl shadow-brand/30 gap-2 group"
-              >
-                <Link href={SIGN_UP_URL}>
-                  Get Started Free
-                  <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-                </Link>
-              </Button>
-            </motion.div>
+              <Link href={SIGN_UP_URL}>
+                Get Started Free
+                <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            </Button>
           </div>
         </motion.div>
       </div>

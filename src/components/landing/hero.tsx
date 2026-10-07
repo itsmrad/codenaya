@@ -54,7 +54,7 @@ export const LandingHero = () => {
   return (
     <section
       ref={heroRef}
-      className="relative min-h-screen w-full overflow-hidden flex items-center justify-center pt-16"
+      className="relative w-full overflow-hidden pt-28 pb-16 md:pt-40 md:pb-20"
     >
       {/* Background layers */}
       <div className="absolute inset-0 bg-background" />
@@ -64,9 +64,6 @@ export const LandingHero = () => {
 
       {/* Noise texture */}
       <Noise />
-
-      {/* Radial gradient spotlight — warm amber glow */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_40%,rgba(232,130,79,0.08),transparent_70%)] dark:bg-[radial-gradient(ellipse_60%_50%_at_50%_40%,rgba(232,130,79,0.12),transparent_70%)]" />
 
       {/* Vignette */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,var(--background)_80%)] opacity-60" />
@@ -93,15 +90,9 @@ export const LandingHero = () => {
               <motion.h1
                 key={i}
                 variants={lineVariants}
-                className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-bold tracking-tighter leading-[1.05]"
+                className="text-[2.5rem] sm:text-6xl lg:text-7xl font-bold tracking-tighter leading-[1.05] text-foreground"
               >
-                <span className={
-                  i === 0
-                    ? "bg-gradient-to-r from-foreground via-foreground to-brand bg-clip-text text-transparent"
-                    : "text-foreground"
-                }>
-                  {line}
-                </span>
+                {line}
               </motion.h1>
             ))}
           </div>
@@ -116,48 +107,30 @@ export const LandingHero = () => {
           </motion.p>
 
           {/* CTA */}
-          <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-            <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
-              <Button
-                asChild
-                size="lg"
-                className="h-12 px-8 text-base font-medium bg-brand text-white hover:bg-brand/90 rounded-full shadow-xl shadow-brand/25 gap-2 group"
-              >
-                <Link href={SIGN_UP_URL}>
-                  Start Building
-                  <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-                </Link>
-              </Button>
-            </motion.div>
+          <motion.div variants={fadeUp} className="mx-auto flex w-full max-w-xs flex-col items-stretch justify-center gap-3 pt-4 sm:max-w-none sm:flex-row sm:items-center">
+            <Button
+              asChild
+              size="lg"
+              className="w-full sm:w-auto h-12 px-8 text-base font-medium bg-brand text-brand-foreground hover:bg-brand/90 rounded-full gap-2 group"
+            >
+              <Link href={SIGN_UP_URL}>
+                Start Building
+                <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            </Button>
             <motion.a
               href="https://github.com/itsmrad/codenaya"
               target="_blank"
               rel="noopener noreferrer"
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
             >
               <Button
                 variant="outline"
                 size="lg"
-                className="h-12 px-8 text-base font-medium rounded-full border-border/60 hover:border-border"
+                className="w-full sm:w-auto h-12 px-8 text-base font-medium rounded-full border-border/60 hover:border-border"
               >
                 View on GitHub
               </Button>
             </motion.a>
-          </motion.div>
-
-          {/* Scroll indicator */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 2.2, duration: 0.8 }}
-            className="flex items-center justify-center gap-4 pt-16"
-          >
-            <div className="h-px w-12 bg-gradient-to-r from-transparent to-border" />
-            <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/60 font-mono">
-              Scroll
-            </span>
-            <div className="h-px w-12 bg-gradient-to-l from-transparent to-border" />
           </motion.div>
         </motion.div>
       </div>

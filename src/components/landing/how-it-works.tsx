@@ -29,17 +29,14 @@ export const LandingHowItWorks = () => {
   const isInView = useInView(sectionRef, { once: true, amount: 0.2 });
 
   return (
-    <section ref={sectionRef} className="relative py-32 md:py-40">
-      {/* Subtle divider */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-24 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
-
-      <div className="max-w-5xl mx-auto px-6 md:px-8">
+    <section ref={sectionRef} className="relative py-14 md:py-20">
+      <div className="max-w-3xl mx-auto px-6 md:px-8">
         {/* Section header */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-          className="text-center mb-20"
+          className="text-center mb-8 md:mb-10"
         >
           <p className="text-xs uppercase tracking-[0.25em] text-brand font-mono mb-4">
             How it works
@@ -61,19 +58,19 @@ export const LandingHowItWorks = () => {
                 delay: i * 0.15 + 0.3,
                 ease: [0.22, 1, 0.36, 1],
               }}
-              className="group relative flex items-start gap-6 md:gap-10 py-10 border-b border-border/40 last:border-b-0"
+              className="relative flex items-start gap-6 md:gap-10 py-8 md:py-10 border-b border-border/40 last:border-b-0 last:pb-0"
             >
               {/* Number */}
-              <span className="text-4xl md:text-5xl font-bold text-brand/20 group-hover:text-brand/40 transition-colors duration-500 font-mono shrink-0">
+              <span className="text-4xl md:text-5xl font-bold text-brand/40 font-mono shrink-0">
                 {step.number}
               </span>
 
               {/* Content */}
               <div className="space-y-2 pt-2">
-                <h3 className="text-xl md:text-2xl font-semibold text-foreground tracking-tight group-hover:text-brand transition-colors duration-300">
+                <h3 className="text-xl md:text-2xl font-semibold text-foreground tracking-tight">
                   {step.title}
                 </h3>
-                <p className="text-muted-foreground leading-relaxed max-w-lg">
+                <p className="text-muted-foreground leading-relaxed">
                   {step.description}
                 </p>
               </div>
