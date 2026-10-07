@@ -159,7 +159,7 @@ export const ProjectIdView = ({
             <input
               {...rename.inputProps}
               type="text"
-              className="min-w-0 text-xs bg-transparent text-foreground outline-none focus:ring-1 focus:ring-brand/40 aria-invalid:ring-destructive focus:ring-inset rounded px-1 py-0.5 font-medium max-w-44 truncate"
+              className="min-w-32 flex-1 @xl:flex-none text-xs bg-transparent text-foreground outline-none focus:ring-1 focus:ring-brand/40 aria-invalid:ring-destructive focus:ring-inset rounded px-1 py-0.5 font-medium max-w-44 truncate"
             />
           ) : (
             <button
@@ -179,7 +179,7 @@ export const ProjectIdView = ({
                 <button
                   aria-label="Project actions"
                   title="Project actions"
-                  className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                  className="-ml-1.5 grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
                 >
                   <ChevronDownIcon className="size-3.5" />
                 </button>
@@ -196,9 +196,10 @@ export const ProjectIdView = ({
               <TooltipContent>Importing...</TooltipContent>
             </Tooltip>
           ) : (
+            // Hidden on phones so the project name keeps its room.
             <Tooltip>
               <TooltipTrigger asChild>
-                <CloudCheckIcon className="size-3 text-muted-foreground/60 shrink-0" />
+                <CloudCheckIcon className="hidden @md:block size-3 text-muted-foreground/60 shrink-0" />
               </TooltipTrigger>
               <TooltipContent>
                 Saved{" "}
@@ -226,8 +227,8 @@ export const ProjectIdView = ({
           </div>
         )}
 
-        {/* Right: Publish + Export + User */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        {/* Right: Publish + Export + User (phones hide it while renaming to make room) */}
+        <div className={cn("flex items-center gap-1.5 shrink-0", rename.isRenaming && "hidden @xl:flex")}>
           {isPublished === null && (
             <button
               onClick={() => setPublishDialogOpen(true)}
