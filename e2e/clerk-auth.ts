@@ -79,17 +79,17 @@ const frontendApiHost = () => {
   return Buffer.from(encoded, "base64").toString().replace(/\$$/, "");
 };
 
-/** Finds this run's e2e test user, creating it on first use. */
-export const ensureTestUser = async () => {
+/** Finds this run's e2e test user (or `email`), creating it on first use. */
+export const ensureTestUser = async (email = E2E_EMAIL) => {
   const existing = await clerkApi<Array<{ id: string }>>(
-    `/users?email_address=${encodeURIComponent(E2E_EMAIL)}`,
+    `/users?email_address=${encodeURIComponent(email)}`,
   );
   return (
     existing[0] ??
     (await clerkApi<{ id: string }>("/users", {
       method: "POST",
       body: JSON.stringify({
-        email_address: [E2E_EMAIL],
+        email_address: [email],
         skip_password_requirement: true,
       }),
     }))
@@ -166,5 +166,20 @@ export const signIn = async (page: Page) => {
   }
 
   const user = await ensureTestUser();
+  await signInWithTicket(page, user.id);
+};
+
+/**
+ * Signs the page in as a user of the spec's own, next to this run's pool user,
+ * for specs whose per-user state other specs would disturb: the 5/min BYOK key
+ * limit, or "no keys yet" while another spec adds one. Starts a new session,
+ * so call it once per spec (e.g. in `beforeAll`).
+ */
+export const signInAsSpecUser = async (page: Page, spec: string) => {
+  await addTestingToken(page);
+  const user = await ensureTestUser(
+    `codenaya-e2e-${e2eUserIndex()}-${spec}+clerk_test@example.com`,
+  );
+  await revokeStaleSessions(user.id);
   await signInWithTicket(page, user.id);
 };

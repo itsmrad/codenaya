@@ -15,13 +15,12 @@ import { STUB_MODEL, startStubProvider } from "./stub-provider";
  * `skills-agent.spec.ts`.
  */
 
-const projectId = process.env.E2E_PROJECT_ID as Id<"projects"> | undefined;
 const STUB_REPLY = "Added the sitemap with the forced skill.";
 
 test.describe("skill slash command", () => {
   test.skip(
-    !hasClerkCredentials() || !projectId,
-    "Needs CLERK_SECRET_KEY, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and E2E_PROJECT_ID (a project owned by the e2e user)",
+    !hasClerkCredentials(),
+    "Needs CLERK_SECRET_KEY and NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
   );
 
   const stamp = Date.now();
@@ -32,12 +31,18 @@ test.describe("skill slash command", () => {
   let stub: Awaited<ReturnType<typeof startStubProvider>>;
   let page: Page;
   let keyId: Id<"aiProviderKeys"> | undefined;
+  // A project of its own: chat specs running alongside on the shared fixture
+  // project would otherwise switch conversations under this one.
+  let projectId: Id<"projects"> | undefined;
   const skillIds: Id<"skills">[] = [];
 
   test.beforeAll(async ({ browser }) => {
     stub = await startStubProvider(apiKey, { reply: STUB_REPLY });
     page = await browser.newPage();
     await signIn(page);
+    projectId = await (await userConvexClient(page)).mutation(api.projects.create, {
+      name: `e2e-skills-slash-${Date.now()}`,
+    });
 
     const response = await page.request.post("/api/ai-providers", {
       data: {
@@ -59,6 +64,9 @@ test.describe("skill slash command", () => {
     }
     if (keyId) {
       await user.mutation(api.aiProviders.remove, { keyId }).catch(() => {});
+    }
+    if (projectId) {
+      await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});
     }
     await page?.close();
     stub?.server.close();

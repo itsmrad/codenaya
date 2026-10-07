@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const VIEWPORTS = [
   { name: "mobile", width: 375, height: 812 },
@@ -7,10 +7,18 @@ const VIEWPORTS = [
 ] as const;
 
 const PAGES = [
-  { name: "landing", path: "/" },
-  { name: "404", path: "/this-page-does-not-exist" },
-  { name: "project", path: "/projects/k57abc123def456ghi789jkl0mn1pqr2" },
+  { name: "landing", path: "/", url: /\/$/ },
+  { name: "404", path: "/this-page-does-not-exist", url: /\/this-page-does-not-exist$/ },
+  // Signed out, this redirects to sign-in after the page loads.
+  { name: "project", path: "/projects/k57abc123def456ghi789jkl0mn1pqr2", url: /\/sign-in\?/ },
 ] as const;
+
+/** Computed font of the first `selector` match, once web fonts have loaded. */
+const fontOf = (page: Page, selector: string) =>
+  page.locator(selector).first().evaluate(async (element) => {
+    await document.fonts.ready;
+    return getComputedStyle(element).fontFamily;
+  });
 
 test.describe("typography", () => {
   for (const viewport of VIEWPORTS) {
@@ -19,21 +27,18 @@ test.describe("typography", () => {
       test.setTimeout(90_000);
       await page.setViewportSize(viewport);
 
-      for (const { name, path } of PAGES) {
+      for (const { name, path, url } of PAGES) {
         await page.goto(path);
+        // Let redirects finish, or they abort the next navigation.
+        await expect(page).toHaveURL(url);
 
-        const bodyFont = await page.evaluate(
-          () => getComputedStyle(document.body).fontFamily,
-        );
-        expect(bodyFont, `body font on ${name}`).toMatch(/^"?Inter/);
+        await expect
+          .poll(() => fontOf(page, "body"), { message: `body font on ${name}` })
+          .toMatch(/^"?Inter/);
       }
 
       await page.goto("/");
-      const monoFont = await page
-        .locator(".font-mono")
-        .first()
-        .evaluate((element) => getComputedStyle(element).fontFamily);
-      expect(monoFont).toMatch(/^"?IBM Plex Mono/);
+      await expect.poll(() => fontOf(page, ".font-mono")).toMatch(/^"?IBM Plex Mono/);
     });
   }
 });

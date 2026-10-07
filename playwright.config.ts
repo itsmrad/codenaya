@@ -16,8 +16,15 @@ export default defineConfig({
   testDir: "./e2e",
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: true,
+  // Each worker drives a browser against one shared `next dev`; more than two
+  // starve the dev server and tests flake on slow compiles.
+  workers: 2,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
+  // `next dev` compiles each route on its first visit, which takes well over
+  // Playwright's 5s/30s defaults on a loaded machine.
+  timeout: 60_000,
+  expect: { timeout: 15_000 },
   reporter: process.env.CI
     ? "github"
     : [["list"], ["html", { open: "never" }]],
