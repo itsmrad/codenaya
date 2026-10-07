@@ -16,7 +16,7 @@ test.describe("GitHub import", () => {
     // The e2e user is created with an email only, so no GitHub account is linked.
     await signIn(page);
     await page.goto("/");
-    await page.getByRole("button", { name: /Import GitHub/ }).first().click();
+    await page.getByRole("button", { name: /Import from GitHub/ }).first().click();
 
     const dialog = page.getByRole("dialog", { name: "Import from GitHub" });
     await dialog.getByLabel("Repository URL").fill("https://github.com/vercel/next.js");

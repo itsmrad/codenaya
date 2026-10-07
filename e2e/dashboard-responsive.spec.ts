@@ -27,13 +27,37 @@ test.describe("signed-in dashboard layout", () => {
     });
   }
 
-  test("mobile bottom bar opens the projects palette", async ({ page }) => {
+  test("phones reach the projects palette from the hero", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await signIn(page);
     await page.goto("/");
 
-    await expect(page.getByLabel("Collapse sidebar")).toBeHidden();
-    await page.getByRole("button", { name: "Projects", exact: true }).click();
+    await page.getByRole("button", { name: "Find a project" }).click();
     await expect(page.getByPlaceholder("Search projects...")).toBeVisible();
+  });
+
+  test("project search filters the grid", async ({ page }) => {
+    await signIn(page);
+    await page.goto("/");
+
+    const grid = page.getByRole("region", { name: "Your projects" });
+    const cards = grid.getByRole("link");
+    await expect(cards.first()).toBeVisible();
+    const name = (await cards.first().getByRole("paragraph").first().textContent())!;
+
+    await grid.getByRole("searchbox", { name: "Search projects" }).fill(name);
+    await expect(cards.first()).toContainText(name);
+    await grid.getByRole("searchbox", { name: "Search projects" }).fill("zz-no-such-project-zz");
+    await expect(grid.getByText(/No projects match/)).toBeVisible();
+  });
+
+  test("the community showcase has its own page", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await signIn(page);
+    await page.goto("/showcase");
+
+    await expect(page.getByRole("heading", { name: "Community showcase" })).toBeVisible();
+    await expect(page.getByPlaceholder("Search showcase...")).toBeVisible();
+    expect(errors).toEqual([]);
   });
 });
