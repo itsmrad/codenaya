@@ -32,7 +32,11 @@ import {
 
 type Ctx = QueryCtx | MutationCtx;
 
-export type ResolvedProjectSkill = ProjectSkillSummary & { body: string };
+export type ResolvedProjectSkill = ProjectSkillSummary & {
+  body: string;
+  /** Stored skills only; the agent indexes recently updated ones first. */
+  updatedAt?: number;
+};
 
 // One setting per skill a project can see, so this never truncates.
 const MAX_PROJECT_SETTINGS =
@@ -175,6 +179,7 @@ export async function resolveProjectSkills(
       source: skill.source,
       scope,
       enabled: enabledByKey.get(key) ?? false,
+      updatedAt: skill.updatedAt,
     };
   };
 

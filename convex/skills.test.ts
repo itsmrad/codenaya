@@ -308,7 +308,12 @@ describe("skills", () => {
     });
 
     expect(skills).toEqual([
-      expect.objectContaining({ name: "beta", body: "# beta", enabled: true }),
+      expect.objectContaining({
+        name: "beta",
+        body: "# beta",
+        enabled: true,
+        updatedAt: expect.any(Number),
+      }),
     ]);
     await expect(
       t.query(api.system.getProjectSkills, { internalKey: "wrong", projectId }),
