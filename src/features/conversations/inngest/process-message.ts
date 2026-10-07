@@ -25,6 +25,13 @@ import {
 } from './lib/openrouter-model';
 import { resolveAgentModelId } from '../agent-models';
 import {
+  type AgentStep,
+  buildPathIndex,
+  clampStepText,
+  describeToolCall,
+  toolResultError,
+} from '../agent-steps';
+import {
   buildIntegrationsPromptSection,
   buildMcpAgentTools,
 } from '@/features/integrations/server/mcp/build-agent-tools';
@@ -344,6 +351,35 @@ export const processMessage = inngest.createFunction(
 
     systemPrompt += buildIntegrationsPromptSection(mcpSummaries, mcpWarnings);
 
+    // Display only: mirrors the agent's tool calls onto the assistant message
+    // for the chat panel's activity block. Each write is its own step, so replays
+    // reuse the recorded result instead of writing again, and it never throws:
+    // a failed write must not fail the agent run.
+    const recordSteps = (
+      id: string,
+      build: (pathOf: (fileId: string) => string | undefined) => AgentStep[],
+      withPaths: boolean,
+    ) =>
+      step.run(id, async () => {
+        try {
+          const pathOf = withPaths
+            ? buildPathIndex(
+                await convex.query(api.system.getProjectFiles, {
+                  internalKey,
+                  projectId,
+                }),
+              )
+            : () => undefined;
+          await convex.mutation(api.system.upsertMessageSteps, {
+            internalKey,
+            messageId,
+            steps: build(pathOf),
+          });
+        } catch (error) {
+          console.error("[agent-steps] failed to record steps", error);
+        }
+      });
+
     // Create the coding agent with file tools
     const codingAgent = createAgent({
       name: "codenaya",
@@ -366,6 +402,73 @@ export const processMessage = inngest.createFunction(
           : []),
         ...mcpTools,
       ],
+      lifecycle: {
+        onResponse: async ({ result }) => {
+          const calls = result.output.flatMap((m) =>
+            m.type === "tool_call" ? m.tools : [],
+          );
+          if (calls.length === 0) {
+            return result;
+          }
+          const thought = clampStepText(
+            result.output
+              .map((m) =>
+                m.type === "text" && m.role === "assistant"
+                  ? typeof m.content === "string"
+                    ? m.content
+                    : m.content.map((c) => c.text).join("")
+                  : "",
+              )
+              .join("\n"),
+          );
+          await recordSteps("record-agent-steps", (pathOf) => {
+            const startedAt = Date.now();
+            return [
+              ...(thought
+                ? [{
+                    id: `thinking-${calls[0].id}`,
+                    kind: "thinking" as const,
+                    text: thought,
+                    status: "done" as const,
+                    startedAt,
+                  }]
+                : []),
+              ...calls.map((call) => ({
+                id: call.id,
+                kind: "tool" as const,
+                tool: call.name,
+                targets: describeToolCall(call, pathOf),
+                status: "running" as const,
+                startedAt,
+              })),
+            ];
+          }, true);
+          return result;
+        },
+        onFinish: async ({ result }) => {
+          if (result.toolCalls.length === 0) {
+            return result;
+          }
+          // Targets are left out so the merge keeps the ones recorded before
+          // the call ran (a renamed or deleted file no longer resolves).
+          await recordSteps("finish-agent-steps", () => {
+            const endedAt = Date.now();
+            return result.toolCalls.map(({ tool, content }) => {
+              const error = toolResultError(content);
+              return {
+                id: tool.id,
+                kind: "tool" as const,
+                tool: tool.name,
+                status: error ? ("error" as const) : ("done" as const),
+                ...(error ? { error } : {}),
+                startedAt: endedAt,
+                endedAt,
+              };
+            });
+          }, false);
+          return result;
+        },
+      },
     });
 
     // Create network with single agent

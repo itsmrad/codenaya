@@ -1,6 +1,24 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+/**
+ * One row of an agent run, recorded for display only (the chat panel's
+ * "Worked for Xs" block). `targets` are human-readable paths, URLs or env keys,
+ * never document ids or values. Upserted by `id` (the tool call id), so a
+ * replayed agent turn rewrites the same rows instead of adding new ones.
+ */
+export const messageStepValidator = v.object({
+  id: v.string(),
+  kind: v.union(v.literal("tool"), v.literal("thinking")),
+  tool: v.optional(v.string()),
+  targets: v.optional(v.array(v.string())),
+  text: v.optional(v.string()),
+  status: v.union(v.literal("running"), v.literal("done"), v.literal("error")),
+  error: v.optional(v.string()),
+  startedAt: v.number(),
+  endedAt: v.optional(v.number()),
+});
+
 export default defineSchema({
   projects: defineTable({
     name: v.string(),
@@ -63,6 +81,10 @@ export default defineSchema({
     ),
     // Workflow run id (when processed via Vercel Workflow SDK)
     workflowRunId: v.optional(v.string()),
+    // Agent activity for the chat panel. Bounded: see MAX_MESSAGE_STEPS.
+    steps: v.optional(v.array(messageStepValidator)),
+    // When the run stopped (completed or cancelled), for "Worked for Xs".
+    completedAt: v.optional(v.number()),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"]),
