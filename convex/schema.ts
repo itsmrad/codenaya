@@ -20,6 +20,23 @@ export const messageStepValidator = v.object({
 });
 
 export default defineSchema({
+  /**
+   * Profile mirror of a Clerk user, kept in sync by the Clerk webhook
+   * (`convex/http.ts`). Ownership everywhere else stays keyed on
+   * `identity.subject`, which is this row's `clerkUserId`.
+   *
+   * A deleted user keeps a tombstone (`deletedAt`) so a late or replayed
+   * `user.updated` event cannot recreate the row after its data was purged.
+   */
+  users: defineTable({
+    clerkUserId: v.string(),
+    email: v.optional(v.string()),
+    name: v.optional(v.string()),
+    imageUrl: v.optional(v.string()),
+    deletedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  }).index("by_clerkUserId", ["clerkUserId"]),
+
   projects: defineTable({
     name: v.string(),
     ownerId: v.string(),
@@ -322,7 +339,8 @@ export default defineSchema({
     expiresAt: v.number(),
   })
     .index("by_state", ["state"])
-    .index("by_expiresAt", ["expiresAt"]),
+    .index("by_expiresAt", ["expiresAt"])
+    .index("by_user", ["userId"]),
 
   /**
    * Human-in-the-loop gate for destructive MCP tool calls.
