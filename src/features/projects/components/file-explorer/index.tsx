@@ -67,7 +67,7 @@ export const FileExplorer = ({
               setIsOpen((value) => !value);
             }
           }}
-          className="group/project cursor-pointer w-full text-left flex items-center justify-between px-2 h-10 bg-muted/40 hover:bg-muted/60 transition-colors rounded-lg border border-border/50"
+          className="group/project relative cursor-pointer w-full text-left flex items-center justify-between px-2 h-10 bg-muted/40 hover:bg-muted/60 transition-colors rounded-lg border border-border/50"
         >
           <div className="flex items-center gap-1.5 overflow-hidden">
             <ChevronRightIcon
@@ -76,11 +76,15 @@ export const FileExplorer = ({
                 isOpen && "rotate-90"
               )}
             />
-            <p className="text-sm font-semibold uppercase tracking-wide truncate">
+            <p
+              className="text-sm font-semibold uppercase tracking-wide truncate"
+              title={project?.name}
+            >
               {project?.name ?? "Loading..."}
             </p>
           </div>
-          <div className="opacity-100 md:opacity-0 group-hover/project:opacity-100 group-focus-within/project:opacity-100 focus-within:opacity-100 transition-opacity duration-200 flex items-center gap-0.5 shrink-0">
+          {/* From md up the actions overlay the name until hover/focus, so they take no width. */}
+          <div className="opacity-100 md:opacity-0 group-hover/project:opacity-100 group-focus-within/project:opacity-100 focus-within:opacity-100 transition-opacity duration-200 flex items-center gap-0.5 shrink-0 md:absolute md:right-1.5 md:top-1/2 md:-translate-y-1/2 md:rounded-md md:bg-[color-mix(in_oklab,var(--muted)_60%,var(--background))]">
             <Button
               onClick={(e) => {
                 e.stopPropagation();

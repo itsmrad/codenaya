@@ -88,6 +88,33 @@ test.describe("IDE polish", () => {
     expect(errors).toEqual([]);
   });
 
+  test("the explorer header gives the project name the full width until hovered", async ({ page }) => {
+    test.setTimeout(120_000);
+    const errors = collectConsoleErrors(page);
+    await signIn(page);
+    const projectId = await seedPreviewProject(page, PROJECT_NAME);
+
+    for (const width of [768, 1024, 1440]) {
+      await openProject(page, projectId, width);
+      await page.getByRole("tab", { name: "Code" }).click();
+      const header = page
+        .getByRole("button", { name: PROJECT_NAME })
+        .filter({ has: page.getByRole("button", { name: "Create file" }) });
+      const name = header.getByText(PROJECT_NAME, { exact: true });
+      await expect(name).toHaveAttribute("title", PROJECT_NAME);
+      // Hidden actions take no width, so a short name is not cut off.
+      expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+      const chevron = header.locator("svg").first();
+      const before = (await chevron.boundingBox())!;
+      await header.hover();
+      await expect(header.getByRole("button", { name: "Create file" })).toHaveCSS("opacity", "1");
+      expect((await chevron.boundingBox())!.x).toBe(before.x);
+    }
+
+    expect(errors).toEqual([]);
+  });
+
   test("a dropped sandbox connection reads as a sentence", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await page.route("**/api/sandbox", (route) => route.abort("failed"));
