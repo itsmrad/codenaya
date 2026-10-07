@@ -164,7 +164,11 @@ npm run test:e2e                  # starts `next dev` on port 3113 (or reuses a 
 
 Set `E2E_PORT` to use another port. Failure screenshots and traces go to `test-results/`; open the HTML report with `npx playwright show-report`. Specs that need auth or secrets should call `test.skip(!process.env.SOME_VAR, "reason")` so they skip cleanly when the env var is absent.
 
-Signed-in specs use `e2e/clerk-auth.ts`, which needs `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (run under `infisical run`). `e2e/env-vars.spec.ts` also needs `E2E_PROJECT_ID`, a project owned by the e2e user (`codenaya+clerk_test@example.com`, or `E2E_EMAIL`).
+Signed-in specs use `e2e/clerk-auth.ts`, which needs `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (run under `infisical run`). Each run signs in as one user from a pool of Clerk DEV test users, `codenaya-e2e-<n>+clerk_test@example.com`, so parallel runs from different worktrees never share a session:
+
+- `n` is `E2E_USER_INDEX` if set, else `E2E_PORT % 6 + 1`; give runs whose ports collide distinct `E2E_USER_INDEX` values. `E2E_EMAIL` pins one specific user instead.
+- `e2e/global-setup.ts` creates the user if needed, revokes its sessions idle for over an hour, signs in once and saves the session to `playwright/.auth/` (gitignored); `signIn(page)` reuses it.
+- It also sets `E2E_PROJECT_ID` to the user's `e2e fixture` project, creating it on first use. With `E2E_EMAIL` set, `E2E_PROJECT_ID` must name a project that user owns.
 
 ## Project Structure
 
