@@ -62,6 +62,22 @@ test.describe("IDE responsive layout", () => {
     expect(overflow).toBeLessThanOrEqual(0);
   };
 
+  /** The composer's send button must not be cut off by the chat panel. */
+  const expectSendButtonUnclipped = async (page: Page) => {
+    const send = page.getByRole("button", { name: "Send" });
+    await expect(send).toBeVisible();
+    const clipped = await send.evaluate((button) => {
+      const right = button.getBoundingClientRect().right;
+      for (let el = button.parentElement; el; el = el.parentElement) {
+        if (getComputedStyle(el).overflowX !== "visible") {
+          return right - el.getBoundingClientRect().right;
+        }
+      }
+      return 0;
+    });
+    expect(clipped).toBeLessThanOrEqual(0);
+  };
+
   test("phones switch Chat / Code / Preview with a bottom tab bar", async ({ page }) => {
     test.setTimeout(180_000);
     const errors = collectConsoleErrors(page);
@@ -77,6 +93,7 @@ test.describe("IDE responsive layout", () => {
     await expect(composer).toBeVisible();
     await composer.fill("draft survives tab switches");
     expect((await composer.boundingBox())!.width).toBeGreaterThan(300);
+    await expectSendButtonUnclipped(page);
 
     await tab("Code").click();
     await expect(tab("Code")).toHaveAttribute("aria-selected", "true");
@@ -96,14 +113,50 @@ test.describe("IDE responsive layout", () => {
     expect(errors.filter((error) => !error.includes("webcontainer-api.io"))).toEqual([]);
   });
 
-  for (const width of [768, 1440]) {
-    test(`wider screens keep chat beside the editor at ${width}px`, async ({ page }) => {
+  for (const width of [768, 900, 1023]) {
+    test(`tablets switch Chat / Code / Preview from the top bar at ${width}px`, async ({ page }) => {
+      test.setTimeout(180_000);
+      const errors = collectConsoleErrors(page);
+      await openProject(page, width);
+
+      const nav = page.locator("nav");
+      const tab = (name: string) => nav.getByRole("tab", { name });
+      const composer = page.getByPlaceholder("Describe a change or ask a question…");
+
+      // No phone tab bar; the chat opens as its own full-width view.
+      await expect(page.getByRole("tablist", { name: "Workspace views" })).toHaveCount(0);
+      await expect(tab("Chat")).toHaveAttribute("aria-selected", "true");
+      await expect(composer).toBeVisible();
+      await composer.fill("draft survives tab switches");
+      expect((await composer.boundingBox())!.width).toBeGreaterThan(width - 100);
+      await expectSendButtonUnclipped(page);
+
+      // The code view gets the whole width, explorer beside the editor.
+      await tab("Code").click();
+      await expect(composer).toBeHidden();
+      await expect(page.getByRole("button", { name: "Create file", exact: true })).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+
+      await tab("Chat").click();
+      await expect(composer).toHaveValue("draft survives tab switches");
+      await expectNoHorizontalOverflow(page);
+
+      expect(errors.filter((error) => !error.includes("webcontainer-api.io"))).toEqual([]);
+    });
+  }
+
+  for (const width of [1024, 1440]) {
+    test(`desktops keep chat beside the editor at ${width}px`, async ({ page }) => {
       test.setTimeout(180_000);
       const errors = collectConsoleErrors(page);
       await openProject(page, width);
 
       await expect(page.getByRole("tablist", { name: "Workspace views" })).toHaveCount(0);
-      await expect(page.getByPlaceholder("Describe a change or ask a question…")).toBeVisible();
+      await expect(page.getByRole("tab", { name: "Chat" })).toHaveCount(0);
+      const composer = page.getByPlaceholder("Describe a change or ask a question…");
+      await expect(composer).toBeVisible();
+      await composer.fill("hello");
+      await expectSendButtonUnclipped(page);
       await expectNoHorizontalOverflow(page);
 
       expect(errors.filter((error) => !error.includes("webcontainer-api.io"))).toEqual([]);

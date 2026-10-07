@@ -340,7 +340,9 @@ export const ConversationSidebar = ({
               />
             </PromptInputBody>
             <PromptInputFooter className="h-10 px-2 py-0">
-              <PromptInputTools>
+              {/* The tools shrink (the model name truncates) so a narrow
+                  panel never pushes the send button out of view. */}
+              <PromptInputTools className="min-w-0">
                 {/* Attachment slot: shown disabled until uploads ship. */}
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -362,7 +364,7 @@ export const ConversationSidebar = ({
                   disabled={isProcessing}
                 />
               </PromptInputTools>
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-2">
                 <span className="hidden items-center gap-1 text-[11px] text-muted-foreground/70 @[400px]:inline-flex">
                   <kbd className="inline-flex h-4 items-center rounded border px-1 font-sans">
                     <CornerDownLeftIcon className="size-2.5" />
