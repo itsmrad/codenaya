@@ -132,6 +132,7 @@
 		"shiki": "^3.20.0",
 		"sonner": "^2.0.7",
 		"streamdown": "2.4.0",
+		"svix": "^2.7.0",
 		"tailwind-merge": "^3.4.0",
 		"tokenlens": "^1.3.1",
 		"unique-names-generator": "^4.7.1",
@@ -142,11 +143,13 @@
 		"zustand": "^5.0.9"
 	},
 	"devDependencies": {
+		"@edge-runtime/vm": "^5.0.0",
 		"@playwright/test": "1.63.0",
 		"@tailwindcss/postcss": "^4",
 		"@types/node": "^20",
 		"@types/react": "^19",
 		"@types/react-dom": "^19",
+		"convex-test": "^0.0.54",
 		"eslint": "^9",
 		"eslint-config-next": "16.2.2",
 		"tailwindcss": "^4",
