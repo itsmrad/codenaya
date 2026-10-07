@@ -31,6 +31,8 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 
 import { useProject } from "../hooks/use-projects";
+import { GITHUB_NOT_LINKED } from "../constants";
+import { GithubNotLinkedAlert } from "./github-not-linked-alert";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 import Link from "next/link";
@@ -55,7 +57,20 @@ interface ExportPopoverProps {
 export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
   const project = useProject(projectId);
   const [open, setOpen] = React.useState(false);
+  const [githubNotLinked, setGithubNotLinked] = React.useState(false);
   const { openUserProfile } = useClerk();
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setGithubNotLinked(false);
+    }
+    setOpen(nextOpen);
+  };
+
+  const handleConnectGithub = () => {
+    handleOpenChange(false);
+    openUserProfile();
+  };
 
   const exportStatus = project?.exportStatus;
   const exportRepoUrl = project?.exportRepoUrl;
@@ -70,6 +85,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
       onSubmit: formSchema,
     },
     onSubmit: async ({ value }) => {
+      setGithubNotLinked(false);
       try {
         await ky
           .post("/api/github/export", {
@@ -84,26 +100,9 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
         toast.success("Export started...");
       } catch (error) {
         if (error instanceof HTTPError) {
-          const body = await error.response.json<{ error: string }>();
-          if (body.error?.includes("Pro plan required")) {
-            toast.error("Upgrade to import repositories", {
-              action: {
-                label: "Upgrade",
-                onClick: () => openUserProfile(),
-              },
-            });
-            setOpen(false);
-            return;
-          }
-
-          if (body.error?.includes("GitHub not connected")) {
-            toast.error("GitHub account not connected", {
-              action: {
-                label: "Connect",
-                onClick: () => openUserProfile(),
-              },
-            });
-            setOpen(false);
+          const body = await error.response.json<{ error: string; code?: string }>();
+          if (body.code === GITHUB_NOT_LINKED) {
+            setGithubNotLinked(true);
             return;
           }
         }
@@ -285,6 +284,10 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
             }}
           </form.Field>
 
+          {githubNotLinked && (
+            <GithubNotLinkedAlert onConnect={handleConnectGithub} />
+          )}
+
           <form.Subscribe
             selector={(state) => [state.canSubmit, state.isSubmitting]}
           >
@@ -318,7 +321,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <button type="button" className="flex items-center justify-center gap-1.5 h-8 px-3 cursor-pointer text-muted-foreground transition-all duration-200 select-none rounded-lg text-sm font-medium hover:bg-muted/50 hover:text-foreground">
           {getStatusIcon()}
