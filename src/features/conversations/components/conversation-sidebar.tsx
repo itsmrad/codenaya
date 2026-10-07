@@ -1,9 +1,13 @@
 import ky, { HTTPError } from "ky";
 import { toast } from "sonner";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { 
+  ArrowBigUpIcon,
+  ArrowUpIcon,
+  CornerDownLeftIcon,
   HistoryIcon, 
   PlusIcon,
+  SquareIcon,
   XIcon,
 } from "lucide-react";
 import { FileIcon } from "@react-symbols/icons/utils";
@@ -16,6 +20,7 @@ import {
 import {
   PromptInput,
   PromptInputBody,
+  PromptInputButton,
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
@@ -23,6 +28,11 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ApprovalPrompt } from "@/features/integrations/components/approval-prompt";
 import { useProjectIntegrations } from "@/features/integrations/components/project-integrations-context";
 import { detectCredential } from "@/features/integrations/credential-guard";
@@ -44,6 +54,7 @@ import { useAgentModel } from "../hooks/use-agent-model";
 import { AgentModelSelect } from "./agent-model-select";
 import { buildPathIndex } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
+import { ChatEmptyState } from "./chat-empty-state";
 
 interface ConversationSidebarProps {
   projectId: Id<"projects">;
@@ -104,6 +115,26 @@ export const ConversationSidebar = ({
       toast.error("Unable to cancel request");
     }
   };
+
+  // Esc stops a running agent. The textarea is disabled while running, so
+  // listen on the document, but only when focus isn't elsewhere (a dialog or
+  // the editor), where Esc means something else.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isProcessing) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const active = document.activeElement;
+      const inPanel =
+        !active || active === document.body || panelRef.current?.contains(active);
+      if (event.key === "Escape" && !event.defaultPrevented && inPanel) {
+        void handleCancel();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+    // handleCancel only depends on projectId.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isProcessing, projectId]);
 
   const handleCreateConversation = async () => {
     try {
@@ -190,15 +221,17 @@ export const ConversationSidebar = ({
         onOpenChange={setPastConversationsOpen}
         onSelect={setSelectedConversationId}
       />
-      <div className="@container flex flex-col h-full bg-sidebar">
+      <div ref={panelRef} className="@container flex flex-col h-full bg-sidebar">
         <div className="h-8.75 flex items-center justify-between border-b">
-          <div className="text-sm truncate pl-3">
+          <div className="text-sm font-medium truncate pl-3">
             {activeConversation?.title ?? DEFAULT_CONVERSATION_TITLE}
           </div>
           <div className="flex items-center px-1 gap-1">
             <Button
               size="icon-xs"
               variant="highlight"
+              aria-label="Past conversations"
+              title="Past conversations"
               onClick={() => setPastConversationsOpen(true)}
             >
               <HistoryIcon className="size-3.5" />
@@ -206,12 +239,19 @@ export const ConversationSidebar = ({
             <Button
               size="icon-xs"
               variant="highlight"
+              aria-label="New conversation"
+              title="New conversation"
               onClick={handleCreateConversation}
             >
               <PlusIcon className="size-3.5" />
             </Button>
           </div>
         </div>
+        {conversationMessages?.length === 0 ? (
+          <ChatEmptyState
+            onSelect={(prompt) => void handleSubmit({ text: prompt, files: [] })}
+          />
+        ) : (
         <Conversation className="flex-1">
           <ConversationContent className="gap-6 px-4 py-4 pb-12">
             {conversationMessages?.map((message, messageIndex) =>
@@ -234,9 +274,13 @@ export const ConversationSidebar = ({
               ),
             )}
           </ConversationContent>
-          <ConversationScrollButton />
+          <ConversationScrollButton
+            aria-label="Scroll to bottom"
+            className="bottom-3 size-8 border-border bg-background/90 shadow-sm backdrop-blur transition-opacity duration-150 dark:bg-background/90"
+          />
         </Conversation>
-        <div className="p-3">
+        )}
+        <div className="chat-composer px-3 pb-[max(12px,env(safe-area-inset-bottom))]">
           {/* Sits directly above the composer rather than inside the
               transcript: the agent is blocked waiting on this answer, and the
               message list can be scrolled away from the bottom, which would
@@ -267,24 +311,67 @@ export const ConversationSidebar = ({
                 </div>
               )}
               <PromptInputTextarea
-                placeholder="Ask Codenaya anything..."
+                placeholder="Describe a change or ask a question…"
+                className="min-h-11 px-3 pt-3 pb-1 text-sm/6 placeholder:text-muted-foreground/70"
                 onChange={(e) => setInput(e.target.value)}
                 value={input}
                 disabled={isProcessing}
               />
             </PromptInputBody>
-            <PromptInputFooter>
+            <PromptInputFooter className="h-10 px-2 py-0">
               <PromptInputTools>
+                {/* Attachment slot: shown disabled until uploads ship. */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0} className="rounded-lg">
+                      <PromptInputButton
+                        disabled
+                        aria-label="Attach files"
+                        className="size-8 rounded-lg"
+                      >
+                        <PlusIcon className="size-4" />
+                      </PromptInputButton>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Attachments coming soon</TooltipContent>
+                </Tooltip>
                 <AgentModelSelect
                   value={agentModel}
                   onValueChange={setAgentModel}
                   disabled={isProcessing}
                 />
               </PromptInputTools>
-              <PromptInputSubmit
-                disabled={isProcessing ? false : (!input && contexts.length === 0)}
-                status={isProcessing ? "streaming" : undefined}
-              />
+              <div className="flex items-center gap-2">
+                <span className="hidden items-center gap-1 text-[11px] text-muted-foreground/70 @[400px]:inline-flex">
+                  <kbd className="inline-flex h-4 items-center rounded border px-1 font-sans">
+                    <CornerDownLeftIcon className="size-2.5" />
+                    <span className="sr-only">Enter</span>
+                  </kbd>
+                  send ·
+                  <kbd className="inline-flex h-4 items-center gap-0.5 rounded border px-1 font-sans">
+                    <ArrowBigUpIcon className="size-2.5" />
+                    <CornerDownLeftIcon className="size-2.5" />
+                    <span className="sr-only">Shift+Enter</span>
+                  </kbd>
+                  newline
+                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <PromptInputSubmit
+                      disabled={isProcessing ? false : (!input && contexts.length === 0)}
+                      aria-label={isProcessing ? "Stop" : "Send"}
+                      className="size-8 rounded-lg disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
+                    >
+                      {isProcessing ? (
+                        <SquareIcon className="size-3 fill-current" />
+                      ) : (
+                        <ArrowUpIcon className="size-4" />
+                      )}
+                    </PromptInputSubmit>
+                  </TooltipTrigger>
+                  <TooltipContent>{isProcessing ? "Stop (Esc)" : "Send (Enter)"}</TooltipContent>
+                </Tooltip>
+              </div>
             </PromptInputFooter>
           </PromptInput>
         </div>
