@@ -38,6 +38,11 @@ import { useProjectIntegrations } from "@/features/integrations/components/proje
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 import { useFiles } from "@/features/projects/hooks/use-files";
+import {
+  SkillSlashMenu,
+  useSkillSlashMenu,
+} from "@/features/skills/components/skill-slash-menu";
+import { splitSlashSkills } from "@/features/skills/parse-slash";
 
 import {
   useConversation,
@@ -70,6 +75,7 @@ export const ConversationSidebar = ({
   const { input, setInput, contexts, removeContext, clearContexts } = useChatStore();
   const [agentModel, setAgentModel] = useAgentModel();
   const enhancer = useEnhancePrompt(input, setInput);
+  const slashMenu = useSkillSlashMenu(projectId, input, setInput);
   const [
     selectedConversationId,
     setSelectedConversationId,
@@ -87,6 +93,19 @@ export const ConversationSidebar = ({
 
   const activeConversation = useConversation(activeConversationId);
   const conversationMessages = useMessages(activeConversationId);
+
+  // Messages already there when a conversation opens are history; only those
+  // that arrive while it is open animate in.
+  const [history, setHistory] = useState<{
+    conversationId: Id<"conversations"> | null;
+    messageIds: ReadonlySet<string>;
+  } | null>(null);
+  if (conversationMessages && history?.conversationId !== activeConversationId) {
+    setHistory({
+      conversationId: activeConversationId,
+      messageIds: new Set(conversationMessages.map((message) => message._id)),
+    });
+  }
 
   // Resolves file ids in agent text to paths, and step chips back to files.
   const files = useFiles(projectId);
@@ -228,7 +247,10 @@ export const ConversationSidebar = ({
       const contextStrs = contexts.map(
         (c) => `File: ${c.fileName} (Lines ${c.startLine}-${c.endLine})\n\`\`\`\n${c.content}\n\`\`\``
       );
-      finalMessage = `${contextStrs.join("\n\n")}\n\n${finalMessage}`;
+      // Leading /skill tokens stay first so the server still reads them.
+      const { names, rest } = splitSlashSkills(finalMessage);
+      const skills = names.map((name) => `/${name} `).join("");
+      finalMessage = `${skills}${contextStrs.join("\n\n")}\n\n${rest}`;
     }
 
     const result = await sendMessage(finalMessage);
@@ -282,7 +304,12 @@ export const ConversationSidebar = ({
           <ConversationContent className="gap-6 px-4 py-4 pb-12">
             {conversationMessages?.map((message, messageIndex) =>
               message.role === "user" ? (
-                <UserMessage key={message._id} content={message.content} />
+                <UserMessage
+                  key={message._id}
+                  content={message.content}
+                  skillNames={slashMenu.skillNames}
+                  animate={Boolean(history && !history.messageIds.has(message._id))}
+                />
               ) : (
                 <AssistantMessage
                   key={message._id}
@@ -308,12 +335,20 @@ export const ConversationSidebar = ({
           />
         </Conversation>
         )}
-        <div className="chat-composer px-3 pb-[max(12px,env(safe-area-inset-bottom))]">
+        <div className="chat-composer relative px-3 pb-[max(12px,env(safe-area-inset-bottom))]">
           {/* Sits directly above the composer rather than inside the
               transcript: the agent is blocked waiting on this answer, and the
               message list can be scrolled away from the bottom, which would
               hide the prompt exactly when it matters. */}
           <ApprovalPrompt projectId={projectId} />
+          {slashMenu.open && (
+            <SkillSlashMenu
+              items={slashMenu.items}
+              activeName={slashMenu.activeName}
+              onActiveChange={slashMenu.setActive}
+              onSelect={slashMenu.select}
+            />
+          )}
           <PromptInput 
             onSubmit={handleSubmit}
             className="mt-2"
@@ -342,6 +377,7 @@ export const ConversationSidebar = ({
                 placeholder="Describe a change or ask a question…"
                 className="min-h-11 px-3 pt-3 pb-1 text-sm/6 placeholder:text-muted-foreground/70"
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={slashMenu.onKeyDown}
                 value={input}
                 disabled={isProcessing || enhancer.isEnhancing}
               />
@@ -401,10 +437,17 @@ export const ConversationSidebar = ({
                       aria-label={isProcessing ? "Stop" : "Send"}
                       className="size-8 rounded-lg disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
                     >
+                      {/* Keyed so each swap pops the new icon in. */}
                       {isProcessing ? (
-                        <SquareIcon className="size-3 fill-current" />
+                        <SquareIcon
+                          key="stop"
+                          className="size-3 animate-in fill-current fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none"
+                        />
                       ) : (
-                        <ArrowUpIcon className="size-4" />
+                        <ArrowUpIcon
+                          key="send"
+                          className="size-4 animate-in fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none"
+                        />
                       )}
                     </PromptInputSubmit>
                   </TooltipTrigger>

@@ -13,6 +13,7 @@ import { useProjects } from "../hooks/use-projects";
 import { useCreateProjectFromPrompt } from "../hooks/use-create-project-from-prompt";
 import { takePendingPrompt } from "../utils/pending-prompt";
 import { ProjectsCommandDialog } from "./projects-command-dialog";
+import { FirstRunChecklist } from "./first-run-checklist";
 import { ImportGithubDialog } from "./import-github-dialog";
 import { NewProjectDialog } from "./new-project-dialog";
 import { PromptComposer } from "./prompt-composer";
@@ -146,6 +147,10 @@ export const ProjectsView = () => {
           transition={{ duration: 0.5, delay: 0.2, ease: EASE }}
           className="mx-auto max-w-6xl space-y-14 px-4 pb-16 md:px-8"
         >
+          <FirstRunChecklist
+            projects={allProjects}
+            onNewProject={() => setNewProjectDialogOpen(true)}
+          />
           <ProjectsGrid
             projects={allProjects}
             onNewProject={() => setNewProjectDialogOpen(true)}

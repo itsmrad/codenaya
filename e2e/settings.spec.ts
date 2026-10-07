@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { hasClerkCredentials, signIn } from "./clerk-auth";
+import { SETTINGS_NAV } from "../src/features/settings/nav";
 import { collectConsoleErrors } from "./console-errors";
 
 const horizontalOverflow = () =>
@@ -8,9 +9,13 @@ const horizontalOverflow = () =>
 
 test.describe("settings", () => {
   test("redirects a signed-out visit to the sign-in page", async ({ page }) => {
-    await page.goto("/settings");
+    const errors = collectConsoleErrors(page);
+    for (const path of ["/settings", ...SETTINGS_NAV.map(({ href }) => href)]) {
+      await page.goto(path);
 
-    await expect(page).toHaveURL(/\/sign-in\?redirect_url=/);
+      await expect(page).toHaveURL(/\/sign-in\?redirect_url=/);
+    }
+    expect(errors).toEqual([]);
   });
 
   test.describe("signed in", () => {
@@ -25,6 +30,9 @@ test.describe("settings", () => {
       await signIn(page);
 
       await page.locator(".cl-userButtonTrigger").click();
+      // Settings is the only account entry; Clerk's modal duplicate is hidden.
+      await expect(page.getByRole("button", { name: "Settings" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Manage account" })).toBeHidden();
       await page.getByRole("button", { name: "Settings" }).click();
 
       await expect(page).toHaveURL(/\/settings\/account$/);

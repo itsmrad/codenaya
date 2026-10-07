@@ -42,6 +42,14 @@ describe("buildSkillsPromptSection", () => {
       section.indexOf("## Active skills"),
     );
   });
+
+  it("tells the agent which requested skills are not enabled", () => {
+    const section = buildSkillsPromptSection([], [], ["stripe"]);
+
+    expect(section).toContain("## Unavailable skills");
+    expect(section).toContain("Skill /stripe is not enabled in this project");
+    expect(section).not.toContain("## Available skills");
+  });
 });
 
 describe("formatSkill", () => {

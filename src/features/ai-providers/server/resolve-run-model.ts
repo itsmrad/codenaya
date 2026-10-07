@@ -14,7 +14,7 @@ import {
 import { modelIdsFor, runModelLabel, titleModelFor } from "../registry";
 import { buildAgentKitModel } from "./agentkit-model";
 import { openProviderKey } from "./sealed-key";
-import { testConnection } from "./test-connection";
+import { OUT_OF_CREDIT_PATTERN, isOutOfCredit, testConnection } from "./test-connection";
 import { api } from "../../../../convex/_generated/api";
 import type { Doc, Id } from "../../../../convex/_generated/dataModel";
 
@@ -162,10 +162,12 @@ export interface RunModel {
   /** The conversation title model, on the same provider. */
   title: (temperature?: number) => AgentKitModel;
   /**
-   * BYOK only: whether the provider still accepts the key, via the free
-   * test-connection call. Inngest retries a failed inference with backoff
-   * before the run sees the error, so checking first is what lets a revoked
-   * key fail in seconds. Returns no key material, so it is safe as a step.
+   * BYOK only: whether the provider still accepts the key (the free
+   * test-connection call) and the account can still pay for inference
+   * (`isOutOfCredit`). Inngest retries a failed inference with backoff before
+   * the run sees the error, so checking first is what lets a revoked or
+   * out-of-credit key fail in seconds. Returns no key material, so it is safe
+   * as a step.
    */
   checkKey?: () => Promise<{ rejected: boolean }>;
 }
@@ -232,12 +234,12 @@ export async function resolveRunModel({
     // Only a definite refusal counts: an unreachable provider is left for the
     // inference itself to retry.
     checkKey: async () => {
-      const result = await testConnection({
-        provider: key.provider,
-        apiKey,
-        baseUrl: key.baseUrl,
-      });
-      return { rejected: !result.ok && result.kind === "unauthorized" };
+      const credential = { provider: key.provider, apiKey, baseUrl: key.baseUrl };
+      const result = await testConnection(credential);
+      if (!result.ok) {
+        return { rejected: result.kind === "unauthorized" };
+      }
+      return { rejected: await isOutOfCredit({ ...credential, model: choice.modelId }) };
     },
   };
 }
@@ -251,7 +253,8 @@ const KEY_REJECTION_PATTERNS = [
   /\b(401|402|403)\b/,
   /unauthori[sz]ed|forbidden|payment required/i,
   /invalid[ _-]?(x-)?api[ _-]?key|incorrect api key|no auth credentials/i,
-  /authentication[_ ]?error|insufficient[_ ]quota|exceeded your current quota|insufficient credits/i,
+  /authentication[_ ]?error/i,
+  OUT_OF_CREDIT_PATTERN,
 ];
 
 /**

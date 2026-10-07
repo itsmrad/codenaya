@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { useReducedMotion } from "motion/react";
 import {
   BookOpenIcon,
   BrainIcon,
@@ -17,7 +18,6 @@ import {
   FolderTreeIcon,
   GlobeIcon,
   KeyRoundIcon,
-  Loader2Icon,
   PlugIcon,
   WrenchIcon,
   type LucideIcon,
@@ -32,6 +32,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { type AgentStep, STALLED_RUN_MS, lastRunActivity } from "../agent-steps";
+import { LoaderGrid } from "./run-loader";
 
 interface ToolMeta {
   icon: LucideIcon;
@@ -99,6 +100,7 @@ const toRows = (steps: AgentStep[]): Row[] => {
         previous.step = {
           ...previous.step,
           text: [previous.step.text, step.text].filter(Boolean).join("\n\n"),
+          endedAt: step.endedAt ?? previous.step.endedAt,
         };
       }
       continue;
@@ -121,18 +123,22 @@ const rowLabel = (row: Row, live: boolean) => {
 interface FileChipProps {
   path: string;
   onOpen?: (path: string) => void;
+  /** A skill, URL or env var name rather than a project file. */
+  label?: boolean;
 }
 
-const FileChip = ({ path, onOpen }: FileChipProps) => {
-  const className =
-    "inline-flex h-5 min-w-0 max-w-[55%] @sm:max-w-[60%] items-center rounded-[6px] border border-border bg-muted/60 px-1.5 font-mono text-[11px] text-foreground/90";
-  const name = <span className="truncate">{basename(path)}</span>;
+const FileChip = ({ path, onOpen, label = false }: FileChipProps) => {
+  const className = cn(
+    "inline-flex h-5.5 min-w-0 max-w-[55%] @sm:max-w-[60%] items-center rounded-[6px] bg-muted/60 px-1.5 text-[11.5px] text-foreground/90 shadow-[inset_0_0_0_1px_var(--border)]",
+    label ? "font-sans" : "font-mono",
+  );
+  const name = <span className="truncate">{label ? path : basename(path)}</span>;
   return onOpen ? (
     <button
       type="button"
       title={path}
       onClick={() => onOpen(path)}
-      className={cn(className, "transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40")}
+      className={cn(className, "transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 motion-reduce:transition-none")}
     >
       {name}
     </button>
@@ -146,6 +152,11 @@ const FileChip = ({ path, onOpen }: FileChipProps) => {
 /** Chips shown before a long list collapses into "+N more". */
 const CHIP_LIMIT = 6;
 
+/** Tools whose targets are not project files: their chips never open. */
+const NON_FILE_TOOLS = new Set(["scrapeUrls", "setEnvVar", "loadSkill"]);
+
+const isFileTool = (tool = "") => !NON_FILE_TOOLS.has(tool) && !tool.includes("__");
+
 const Targets = ({
   row,
   onOpenFile,
@@ -155,9 +166,8 @@ const Targets = ({
 }) => {
   const [expanded, setExpanded] = useState(false);
   const { tool } = row.step;
-  const opens =
-    tool !== "scrapeUrls" && tool !== "setEnvVar" && tool !== "loadSkill" && !tool?.includes("__");
-  const open = opens && tool !== "deleteFiles" ? onOpenFile : undefined;
+  const files = isFileTool(tool);
+  const open = files && tool !== "deleteFiles" ? onOpenFile : undefined;
   if (tool === "renameFile" && row.targets.length === 2) {
     return (
       <>
@@ -172,13 +182,13 @@ const Targets = ({
   return (
     <>
       {visible.map((target, index) => (
-        <FileChip key={`${target}-${index}`} path={target} onOpen={open} />
+        <FileChip key={`${target}-${index}`} path={target} onOpen={open} label={!files} />
       ))}
       {more > 0 && (
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="h-5 rounded-[6px] px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+          className="h-5.5 rounded-[6px] px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
         >
           +{more} more
         </button>
@@ -187,20 +197,27 @@ const Targets = ({
   );
 };
 
-const ThinkingRow = ({ text }: { text: string }) => {
+/** Icon on the timeline rule: opaque so the rule stops at it, hover included. */
+const RULE_ICON =
+  "relative z-10 size-3.5 shrink-0 bg-card text-muted-foreground transition-colors duration-150 group-hover/step:bg-[color-mix(in_srgb,var(--accent)_40%,var(--card))] motion-reduce:transition-none";
+
+const ThinkingRow = ({ step }: { step: AgentStep }) => {
   const [expanded, setExpanded] = useState(false);
+  const text = step.text ?? "";
   return (
     <Collapsible>
-      <CollapsibleTrigger className="group/think flex min-h-7 w-full items-center gap-2 rounded-md text-left text-[13px] text-foreground/80 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40">
-        <BrainIcon className="relative z-10 size-3.5 shrink-0 bg-card text-muted-foreground" />
-        <span>Thought</span>
-        <ChevronRightIcon className="size-3.5 text-muted-foreground transition-transform duration-150 group-data-[state=open]/think:rotate-90 motion-reduce:transition-none" />
+      <CollapsibleTrigger className="group/step flex min-h-7 w-full items-center gap-2 rounded-md px-1.5 text-left text-[13px] text-foreground/80 outline-none transition-colors duration-150 hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 motion-reduce:transition-none">
+        <BrainIcon className={RULE_ICON} />
+        <span>
+          {step.endedAt ? `Thought for ${formatDuration(step.endedAt - step.startedAt)}` : "Thought"}
+        </span>
+        <ChevronRightIcon className="size-3.5 text-muted-foreground transition-transform duration-200 group-data-[state=open]/step:rotate-90 motion-reduce:transition-none" />
       </CollapsibleTrigger>
       <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
-        <div className="mb-1 ml-6 border-l border-border pl-3">
+        <div className="mb-1 ml-7 border-l border-border pl-3">
           <p
             className={cn(
-              "whitespace-pre-wrap break-words text-xs/5 text-muted-foreground",
+              "whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-muted-foreground",
               !expanded && "line-clamp-10",
             )}
           >
@@ -221,48 +238,64 @@ const ThinkingRow = ({ text }: { text: string }) => {
   );
 };
 
+/** Stagger between rows arriving in the same update, capped so a burst of
+ *  steps doesn't trail in behind the run. */
+const staggerDelay = (index: number, step: number) => `${Math.min(index, 5) * step}ms`;
+
 const StepRow = ({
   row,
   live,
+  entryIndex,
   onOpenFile,
 }: {
   row: Row;
   live: boolean;
+  /** Position within the batch of rows that just arrived; unset for rows
+   *  already there when the run mounted (history never re-animates). */
+  entryIndex?: number;
   onOpenFile?: (path: string) => void;
 }) => {
+  // Decided once, on mount: later batches must not restart this row's entry.
+  const [entry] = useState<CSSProperties | undefined>(() =>
+    entryIndex === undefined ? undefined : { animationDelay: staggerDelay(entryIndex, 60) },
+  );
+  const entryClass = entry && "animate-fade-up motion-reduce:animate-none";
+
   if (row.step.kind === "thinking") {
-    return row.step.text ? <ThinkingRow text={row.step.text} /> : null;
+    return row.step.text ? (
+      <div className={cn(entryClass)} style={entry}>
+        <ThinkingRow step={row.step} />
+      </div>
+    ) : null;
   }
   const { icon: Icon } = toolMeta(row.step.tool);
   const running = live && row.step.status === "running";
   const failed = row.step.status === "error";
   return (
-    <div className="animate-in fade-in-0 duration-150 motion-reduce:animate-none">
+    <div className={cn(entryClass)} style={entry}>
       {/* Icon column + label column: chips wrap under the label, clear of
           the icon column and the timeline rule drawn through it. */}
       <div
         className={cn(
-          "flex min-w-0 items-start gap-2 py-1 text-[13px] text-foreground/80",
+          "group/step flex min-h-7 min-w-0 items-start gap-2 rounded-md px-1.5 py-1 text-[13px] text-foreground/80 transition-colors duration-150 hover:bg-accent/40 motion-reduce:transition-none",
           failed && "text-destructive",
         )}
       >
-        <Icon
-          className={cn(
-            "relative z-10 mt-[3px] size-3.5 shrink-0 bg-card text-muted-foreground",
-            failed && "text-destructive",
-          )}
-        />
+        <Icon className={cn(RULE_ICON, "mt-[3px]", failed && "text-destructive")} />
         <div className="flex min-h-5 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="shrink-0">{rowLabel(row, running)}</span>
           <Targets row={row} onOpenFile={onOpenFile} />
         </div>
         {running && (
-          <Loader2Icon className="mt-[3px] size-3.5 shrink-0 animate-spin text-muted-foreground" />
+          <span
+            aria-hidden
+            className="mt-1 size-3 shrink-0 animate-spin rounded-full border-[1.5px] border-border border-t-foreground/70 motion-reduce:animate-none"
+          />
         )}
         {failed && <CircleXIcon className="mt-[3px] size-3.5 shrink-0 text-destructive" />}
       </div>
       {failed && row.step.error && (
-        <p className="truncate pb-1 pl-6 text-xs text-muted-foreground" title={row.step.error}>
+        <p className="truncate pb-1 pl-7 text-xs text-muted-foreground" title={row.step.error}>
           {row.step.error}
         </p>
       )}
@@ -315,6 +348,75 @@ export const useRunStalled = (run: RunProgress | undefined) => {
 
 const LIVE_ROWS = 4;
 
+/** Changed-file chips shown before the rest collapse into "+N more". */
+const CHANGED_LIMIT = 4;
+
+/** Files a run created, edited or renamed into, in the order first written. */
+const changedFiles = (toolSteps: AgentStep[]) => [
+  ...new Set(
+    toolSteps
+      .filter((step) => step.status === "done" && toolMeta(step.tool).writes)
+      .flatMap((step) =>
+        step.tool === "deleteFiles"
+          ? []
+          : step.tool === "renameFile"
+            ? (step.targets ?? []).slice(1)
+            : (step.targets ?? []),
+      ),
+  ),
+];
+
+/**
+ * What a finished run wrote, one chip per file. `animate` pops the chips in
+ * when the run settles in front of the user, not when history loads.
+ */
+const ChangedFiles = ({
+  paths,
+  animate,
+  onOpenFile,
+}: {
+  paths: string[];
+  animate: boolean;
+  onOpenFile?: (path: string) => void;
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? paths : paths.slice(0, CHANGED_LIMIT);
+  const more = paths.length - visible.length;
+  return (
+    <div
+      data-slot="changed-files"
+      className="flex flex-wrap gap-1.5 border-t border-border px-3 py-2"
+    >
+      {visible.map((path, index) => (
+        <button
+          key={path}
+          type="button"
+          title={path}
+          disabled={!onOpenFile}
+          onClick={() => onOpenFile?.(path)}
+          className={cn(
+            "inline-flex h-7 min-w-0 max-w-full items-center rounded-md bg-muted/60 px-2 font-mono text-[11.5px] text-foreground/90 shadow-[inset_0_0_0_1px_var(--border)] transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:hover:bg-muted/60 motion-reduce:transition-none",
+            animate &&
+              "animate-in fade-in-0 zoom-in-95 fill-mode-both duration-250 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:animate-none",
+          )}
+          style={animate ? { animationDelay: staggerDelay(index, 80) } : undefined}
+        >
+          <span className="truncate">{basename(path)}</span>
+        </button>
+      ))}
+      {more > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="h-7 rounded-md px-1.5 font-mono text-[11.5px] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
+          +{more} more
+        </button>
+      )}
+    </div>
+  );
+};
+
 interface AgentRunProps {
   steps: AgentStep[];
   status: "processing" | "completed" | "cancelled";
@@ -345,6 +447,10 @@ export const AgentRun = ({
   const [showAll, setShowAll] = useState(false);
   const toggled = useRef(false);
   const now = useNow(live);
+  const reduceMotion = useReducedMotion();
+  // Mounted mid-run: it settles in front of the user, so the summary and
+  // changed files animate in. A finished run loaded from history doesn't.
+  const [startedLive] = useState(live);
 
   // Collapse shortly after the run ends, unless the user took control.
   useEffect(() => {
@@ -354,6 +460,12 @@ export const AgentRun = ({
   }, [live]);
 
   const rows = toRows(steps);
+  // Rows that arrived since the last update form a batch that fades up with a
+  // stagger. Rows already there on mount (history) are never animated.
+  const [batch, setBatch] = useState({ count: rows.length, start: rows.length });
+  if (rows.length !== batch.count) {
+    setBatch({ count: rows.length, start: Math.min(batch.count, rows.length) });
+  }
   const toolSteps = steps.filter((step) => step.kind === "tool");
   const errors = toolSteps.filter((step) => step.status === "error").length;
   const changed = new Set(
@@ -364,6 +476,9 @@ export const AgentRun = ({
   ).size;
   const endedAt = completedAt ?? toolSteps.at(-1)?.endedAt;
   const hidden = live && !showAll ? Math.max(0, rows.length - LIVE_ROWS) : 0;
+  const written = status === "completed" ? changedFiles(toolSteps) : [];
+  const settle =
+    startedLive && "animate-in fade-in-0 duration-300 motion-reduce:animate-none";
 
   const liveLabel = liveStepLabel(steps);
 
@@ -391,17 +506,21 @@ export const AgentRun = ({
       >
         {live ? (
           <>
-            <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-brand motion-reduce:animate-none" />
-            <Shimmer as="span" className="min-w-0 truncate">
-              {liveLabel}
-            </Shimmer>
-            <span className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
+            <LoaderGrid />
+            {reduceMotion ? (
+              <span className="min-w-0 truncate text-muted-foreground">{liveLabel}</span>
+            ) : (
+              <Shimmer as="span" duration={1.4} className="min-w-0 truncate">
+                {liveLabel}
+              </Shimmer>
+            )}
+            <span className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
               {model && (
                 <span className="hidden max-w-48 truncate @sm:inline" title={model}>
                   {model} ·
                 </span>
               )}
-              {formatDuration(now - startedAt)}
+              <span className="font-mono tabular-nums">{formatDuration(now - startedAt)}</span>
             </span>
           </>
         ) : (
@@ -411,12 +530,13 @@ export const AgentRun = ({
                 className={cn(
                   "size-3.5 shrink-0",
                   errors > 0 || stalled ? "text-destructive" : "text-muted-foreground",
+                  settle,
                 )}
               />
             ) : (
-              <CheckCircle2Icon className="size-3.5 shrink-0 text-muted-foreground" />
+              <CheckCircle2Icon className={cn("size-3.5 shrink-0 text-muted-foreground", settle)} />
             )}
-            <span className="shrink-0 text-foreground/80">
+            <span className={cn("shrink-0 text-foreground/80", settle)}>
               {stalled
                 ? "Stopped responding"
                 : status === "cancelled"
@@ -425,7 +545,7 @@ export const AgentRun = ({
                   ? `Worked for ${formatDuration(endedAt - startedAt)}`
                   : "Worked"}
             </span>
-            <span className="min-w-0 truncate text-muted-foreground">
+            <span className={cn("min-w-0 truncate text-muted-foreground", settle)}>
               {status !== "cancelled" && `· ${summary}`}
               {errors > 0 && (
                 <span className="text-destructive">
@@ -433,29 +553,41 @@ export const AgentRun = ({
                 </span>
               )}
             </span>
-            <ChevronRightIcon className="ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[state=open]/run:rotate-90 motion-reduce:transition-none" />
+            <ChevronRightIcon className="ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]/run:rotate-90 motion-reduce:transition-none" />
           </>
         )}
       </CollapsibleTrigger>
       {rows.length > 0 && (
         <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
-          <div className="border-t border-border px-3 py-2">
+          <div className="border-t border-border px-1.5 py-1.5">
             {hidden > 0 && (
               <button
                 type="button"
                 onClick={() => setShowAll(true)}
-                className="mb-1 pl-6 text-xs text-muted-foreground hover:text-foreground"
+                className="mb-1 pl-7 text-xs text-muted-foreground hover:text-foreground"
               >
                 +{hidden} earlier {hidden === 1 ? "step" : "steps"}
               </button>
             )}
-            <div className="relative before:absolute before:inset-y-1 before:left-[6.5px] before:w-px before:bg-border">
-              {rows.slice(hidden).map((row) => (
-                <StepRow key={row.key} row={row} live={live} onOpenFile={onOpenFile} />
-              ))}
+            <div className="relative before:absolute before:inset-y-1 before:left-[12.5px] before:w-px before:bg-border">
+              {rows.slice(hidden).map((row, offset) => {
+                const index = hidden + offset;
+                return (
+                  <StepRow
+                    key={row.key}
+                    row={row}
+                    live={live}
+                    entryIndex={index >= batch.start ? index - batch.start : undefined}
+                    onOpenFile={onOpenFile}
+                  />
+                );
+              })}
             </div>
           </div>
         </CollapsibleContent>
+      )}
+      {written.length > 0 && (
+        <ChangedFiles paths={written} animate={startedLive} onOpenFile={onOpenFile} />
       )}
     </Collapsible>
   );

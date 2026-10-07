@@ -23,6 +23,13 @@ const SCOPE_ORDER: Record<SkillScope, number> = {
   library: 2,
 };
 
+const toAgentSkill = ({ name, description, body, source }: AgentSkill): AgentSkill => ({
+  name,
+  description,
+  body,
+  source,
+});
+
 /**
  * The skills for one agent run: enabled only, built-ins first, then project
  * skills, then library skills, most recently updated first within each, capped
@@ -37,10 +44,24 @@ export function resolveSkills(skills: readonly ProjectSkill[]): AgentSkill[] {
         (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
     )
     .slice(0, MAX_INDEXED_SKILLS)
-    .map(({ name, description, body, source }) => ({
-      name,
-      description,
-      body,
-      source,
-    }));
+    .map(toAgentSkill);
+}
+
+/**
+ * The skills a message forced by name (see `parseSlashSkills`): enabled ones
+ * are returned with their bodies, any other name is reported as unavailable.
+ * Not capped by the index, so an enabled skill can always be forced.
+ */
+export function resolveForcedSkills(
+  skills: readonly ProjectSkill[],
+  names: readonly string[],
+): { forced: AgentSkill[]; unavailable: string[] } {
+  const forced: AgentSkill[] = [];
+  const unavailable: string[] = [];
+  for (const name of names) {
+    const skill = skills.find((s) => s.enabled && s.name === name);
+    if (skill) forced.push(toAgentSkill(skill));
+    else unavailable.push(name);
+  }
+  return { forced, unavailable };
 }
