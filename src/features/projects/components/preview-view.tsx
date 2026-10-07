@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { Allotment } from "allotment";
 import {
   Loader2Icon,
@@ -18,6 +18,7 @@ import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
+import { PreviewBuilding } from "@/features/sandbox-preview/components/preview-building";
 import {
   PREVIEW_DEVICE_WIDTHS,
   PreviewDeviceToggle,
@@ -31,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { EnvVarsDialog } from "./env-vars-dialog";
 import { useProject } from "../hooks/use-projects";
 import { useFiles } from "../hooks/use-files";
+import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
 import {
   usePublicEnvVars,
   useWithheldSecretCount,
@@ -55,9 +57,21 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const engineParam = searchParams.get("engine") as PreviewEngine | null;
   const activeEngine = engineParam === "webcontainer" ? "webcontainer" : "sandbox";
 
+  // A run that starts before package.json exists is writing the first build.
+  // Booting against it would install a half-written project, so hold the boot
+  // until that run ends; the engine's own gate then starts it.
+  const activeRun = useActiveRun(projectId);
+  const hasPackageJson = files?.some(
+    (file) => file.type === "file" && !file.parentId && file.name === "package.json",
+  );
+  const [firstBuild, setFirstBuild] = useState(false);
+  if (!firstBuild && activeRun && files && !hasPackageJson) setFirstBuild(true);
+  if (firstBuild && activeRun === null) setFirstBuild(false);
+  const holdBoot = activeRun === undefined || firstBuild;
+
   const sandbox = useSandbox({
     files,
-    enabled: activeEngine === "sandbox",
+    enabled: activeEngine === "sandbox" && !holdBoot,
     projectId,
     settings: project?.settings,
   });
@@ -69,7 +83,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
 
   const webcontainer = useWebContainer({
     files,
-    enabled: activeEngine === "webcontainer",
+    enabled: activeEngine === "webcontainer" && !holdBoot,
     publicEnv,
     settings: project?.settings,
   });
@@ -91,6 +105,10 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
   }, [activeEngine, pathname, searchParams]);
 
   const isLoading = status === "booting" || status === "installing";
+  const building =
+    firstBuild && activeRun && files ? (
+      <PreviewBuilding steps={activeRun.steps} files={files} />
+    ) : null;
 
   // Automatically refresh the iframe shortly after the dev server announces it's running.
   // The first request to Vite often serves the index.html and CSS instantly but hangs 
@@ -206,7 +224,9 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
             </div>
           )}
           {previewUrl && <span className="truncate">{previewUrl}</span>}
-          {!isLoading && !previewUrl && !error && <span>Ready to preview</span>}
+          {!isLoading && !previewUrl && !error && (
+            <span>{building ? "Waiting for the first build..." : "Ready to preview"}</span>
+          )}
         </div>
 
         <div className="flex items-center gap-1 p-0.5 bg-muted/40 rounded-lg border border-border/50">
@@ -286,6 +306,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
                   restart={restart}
                   errorKind={errorKind}
                   onUseWebContainer={() => switchEngine("webcontainer")}
+                  building={building}
                 />
               </div>
             </Allotment.Pane>
@@ -315,6 +336,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
               restart={restart}
               errorKind={errorKind}
               onUseWebContainer={() => switchEngine("webcontainer")}
+              building={building}
             />
           </div>
         )}
@@ -340,6 +362,7 @@ const PreviewContent = ({
   restart,
   errorKind,
   onUseWebContainer,
+  building,
 }: {
   error: string | null | undefined;
   isLoading: boolean;
@@ -351,9 +374,13 @@ const PreviewContent = ({
   restart: () => void;
   errorKind: SandboxErrorKind | null;
   onUseWebContainer: () => void;
+  /** The first-build placeholder; the engine stays idle while it's shown. */
+  building: ReactNode;
 }) => (
   <div className="size-full rounded-xl overflow-hidden relative isolate">
     <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
+
+    {building}
 
     {error && (
       <div className="size-full flex items-center justify-center text-muted-foreground bg-background p-4">

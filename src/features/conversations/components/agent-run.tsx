@@ -270,6 +270,14 @@ const StepRow = ({
   );
 };
 
+/** What a live run is doing right now, e.g. "Creating page.tsx…". */
+export const liveStepLabel = (steps: AgentStep[]) => {
+  const current = [...toRows(steps)].reverse().find((row) => row.step.status === "running");
+  return current
+    ? `${rowLabel(current, true)}${current.targets[0] ? ` ${basename(current.targets[0])}` : ""}…`
+    : "Thinking…";
+};
+
 export const useNow = (active: boolean) => {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -329,10 +337,7 @@ export const AgentRun = ({
   const endedAt = completedAt ?? toolSteps.at(-1)?.endedAt;
   const hidden = live && !showAll ? Math.max(0, rows.length - LIVE_ROWS) : 0;
 
-  const current = [...rows].reverse().find((row) => row.step.status === "running");
-  const liveLabel = current
-    ? `${rowLabel(current, true)}${current.targets[0] ? ` ${basename(current.targets[0])}` : ""}…`
-    : "Thinking…";
+  const liveLabel = liveStepLabel(steps);
 
   const summary = [
     `${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`,

@@ -21,3 +21,7 @@ export const useConversations = (projectId: Id<"projects">) => {
 export const useCreateConversation = () => {
   return useMutation(api.conversations.create);
 };
+
+export const useActiveRun = (projectId: Id<"projects">) => {
+  return useQuery(api.conversations.getActiveRun, { projectId });
+};
