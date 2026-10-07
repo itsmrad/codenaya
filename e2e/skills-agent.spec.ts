@@ -50,14 +50,6 @@ test.describe("agent skills", () => {
     });
     expect(response.status()).toBe(200);
     keyId = (await response.json()).keyId;
-
-    const user = await userConvexClient(page);
-    skillId = await user.mutation(api.skills.create, {
-      name: skillName,
-      description: "Use when adding SEO metadata or a sitemap",
-      body: "# SEO\nExport `metadata` from the root layout and add app/sitemap.ts.",
-      projectId,
-    });
   });
 
   test.afterAll(async () => {
@@ -81,6 +73,14 @@ test.describe("agent skills", () => {
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     await page.getByRole("button", { name: "New conversation" }).click();
     await expect(page.getByText("What do you want to build?")).toBeVisible();
+
+    // A project skill starts enabled in its project.
+    skillId = await (await userConvexClient(page)).mutation(api.skills.create, {
+      name: skillName,
+      description: "Use when adding SEO metadata or a sitemap",
+      body: "# SEO\nExport `metadata` from the root layout and add app/sitemap.ts.",
+      projectId: projectId!,
+    });
 
     const trigger = page.getByRole("combobox", { name: "Agent model" });
     await trigger.click();
