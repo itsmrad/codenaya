@@ -194,13 +194,32 @@ export async function resolveProjectSkills(
   ];
 }
 
-/** The signed-in user's library skills (not project-only ones). */
+/**
+ * The signed-in user's library skills (not project-only ones), each with the
+ * number of projects it is enabled in.
+ */
 export const listLibrary = query({
   args: {},
   handler: async (ctx) => {
     const identity = await verifyAuth(ctx);
+    const skills = await libraryQuery(ctx, identity.subject).take(
+      MAX_LIBRARY_SKILLS,
+    );
 
-    return await libraryQuery(ctx, identity.subject).take(MAX_LIBRARY_SKILLS);
+    return await Promise.all(
+      skills.map(async (skill) => {
+        const settings = ctx.db
+          .query("projectSkillSettings")
+          .withIndex("by_owner_and_skillKey", (q) =>
+            q.eq("ownerId", skill.ownerId).eq("skillKey", userSkillKey(skill._id)),
+          );
+        let projectCount = 0;
+        for await (const setting of settings) {
+          if (setting.enabled) projectCount++;
+        }
+        return { ...skill, projectCount };
+      }),
+    );
   },
 });
 

@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { SKILLS_SETTINGS_URL } from "@/features/settings/nav";
 
 import type { ProjectSkillSummary } from "../types";
 import {
@@ -50,8 +51,6 @@ import {
 import { SkillEditorDialog, type SkillEditorTarget } from "./skill-editor-dialog";
 
 import { Id } from "../../../../convex/_generated/dataModel";
-
-export const SKILLS_SETTINGS_URL = "/settings/skills";
 
 const iconButtonClassName =
   "size-7 text-muted-foreground hover:text-foreground";

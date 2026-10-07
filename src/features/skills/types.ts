@@ -17,6 +17,13 @@ export const userSkillKey = (skillId: string): SkillKey => `user:${skillId}`;
 
 export type BuiltinSkill = SkillFields;
 
+/** Where a built-in skill was adapted from, shown in Settings → Skills. */
+export interface BuiltinSkillAttribution {
+  label: string;
+  url: string;
+  license: string;
+}
+
 /** A skill as listed for one project, without its body. */
 export interface ProjectSkillSummary {
   key: SkillKey;
