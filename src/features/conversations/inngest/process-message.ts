@@ -127,7 +127,7 @@ export const processMessage = inngest.createFunction(
       runModel = await resolveRunModel({
         internalKey,
         projectId,
-        choice: typeof model === "object" ? model : { modelId: model ?? "" },
+        choice: model && typeof model === "object" ? model : { modelId: model ?? "" },
       });
     } catch (error) {
       if (!(error instanceof ProviderKeyError)) {
