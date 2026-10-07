@@ -21,6 +21,7 @@ import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-t
 
 import { Button } from "@/components/ui/button";
 
+import { EnvVarsDialog } from "./env-vars-dialog";
 import { useProject } from "../hooks/use-projects";
 import { useFiles } from "../hooks/use-files";
 import {
@@ -221,6 +222,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
           >
             <TerminalSquareIcon className="size-4" />
           </Button>
+          <EnvVarsDialog projectId={projectId} />
           <div className="px-1 flex items-center">
             <PreviewSettingsPopover
               projectId={projectId}

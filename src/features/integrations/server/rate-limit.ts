@@ -162,6 +162,16 @@ export const OAUTH_START_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
+/**
+ * Storing a secret env var seals it with the KEK and writes a row. Thirty per
+ * minute covers someone pasting a whole .env by hand while stopping a loop.
+ */
+export const ENV_VAR_RATE_LIMIT: RateLimitConfig = {
+  scope: "env-vars-secret",
+  limit: 30,
+  windowMs: 60_000,
+};
+
 /** Standard 429 response with a `Retry-After` header. */
 export function rateLimitedResponse(result: RateLimitResult): Response {
   return Response.json(
