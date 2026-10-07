@@ -2,8 +2,8 @@ import { generateObject } from "ai";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { openai } from "@ai-sdk/openai";
-// import { google } from "@ai-sdk/google";
+
+import { editorModel, isOpenRouterConfigured } from "@/lib/openrouter";
 
 const suggestionSchema = z.object({
   suggestion: z
@@ -62,6 +62,13 @@ export async function POST(request: Request) {
       return unauthorized;
     }
 
+    if (!isOpenRouterConfigured()) {
+      return NextResponse.json(
+        { error: "AI is not configured" },
+        { status: 503 },
+      );
+    }
+
     const body = await request.json();
     const parsed = suggestionRequestSchema.safeParse(body);
 
@@ -94,7 +101,7 @@ export async function POST(request: Request) {
       .replace("{lineNumber}", lineNumber.toString());
 
     const { object } = await generateObject({
-      model: openai("gpt-4o-mini"),
+      model: editorModel("suggestion"),
       output: "object",
       schema: suggestionSchema,
       prompt,

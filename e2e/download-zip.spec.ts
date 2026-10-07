@@ -7,26 +7,13 @@ import JSZip from "jszip";
 import { api } from "../convex/_generated/api";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
+import { userConvexClient } from "./convex-client";
 
 const PROJECT_NAME = "e2e-download-zip";
 const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff]);
-
-type ClerkSessionWindow = Window & {
-  Clerk?: { session?: { getToken(options: { template: string }): Promise<string | null> } };
-};
-
-/** Convex client authenticated as the signed-in e2e user. */
-const userConvexClient = async (page: Page) => {
-  const token = await page.evaluate(() =>
-    (window as ClerkSessionWindow).Clerk!.session!.getToken({ template: "convex" }),
-  );
-  const client = new ConvexHttpClient(convexUrl!);
-  client.setAuth(token!);
-  return client;
-};
 
 /**
  * Reuses (or creates) the e2e user's fixture project and replaces its files
