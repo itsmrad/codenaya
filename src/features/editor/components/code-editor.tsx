@@ -1,16 +1,21 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { EditorView, keymap } from "@codemirror/view";
+import { Compartment } from "@codemirror/state";
+import { useTheme } from "next-themes";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { indentWithTab } from "@codemirror/commands";
 import { indentationMarkers } from "@replit/codemirror-indentation-markers";
 
 import { minimap } from "../extensions/minimap";
-import { customTheme } from "../extensions/theme";
+import { customTheme, lightTheme } from "../extensions/theme";
 import { getLanguageExtension } from "../extensions/language-extension";
 import { customSetup } from "../extensions/custom-setup";
 import { suggestion } from "../extensions/suggestion";
 import { quickEdit } from "../extensions/quick-edit";
 import { selectionTooltip } from "../extensions/selection-tooltip";
+
+const editorTheme = (resolvedTheme?: string) =>
+  resolvedTheme === "light" ? lightTheme : oneDark;
 
 interface Props {
   fileName: string;
@@ -25,6 +30,8 @@ export const CodeEditor = ({
 }: Props) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const [themeCompartment] = useState(() => new Compartment());
+  const { resolvedTheme } = useTheme();
 
   const languageExtension = useMemo(() => {
     return getLanguageExtension(fileName)
@@ -37,7 +44,7 @@ export const CodeEditor = ({
       doc: initialValue,
       parent: editorRef.current,
       extensions: [
-        oneDark,
+        themeCompartment.of(editorTheme(resolvedTheme)),
         customTheme,
         customSetup,
         languageExtension,
@@ -60,8 +67,15 @@ export const CodeEditor = ({
     return () => {
       view.destroy();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialValue is only used for initial document
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialValue and resolvedTheme only seed the new view
   }, [languageExtension]);
+
+  // Re-theme the open editor when the app theme changes, without recreating it.
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: themeCompartment.reconfigure(editorTheme(resolvedTheme)),
+    });
+  }, [resolvedTheme, themeCompartment]);
 
   return (
     <div ref={editorRef} className="size-full pl-4 bg-background" />
