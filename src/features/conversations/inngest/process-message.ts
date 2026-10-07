@@ -155,15 +155,12 @@ export const processMessage = inngest.createFunction(
 
     // The provider refusing the user's key (401/402/quota) marks it invalid and
     // ends the run with a clear reply. Anything else fails the run as before.
-    const endRunOnKeyRejection = async (error: unknown) => {
-      if (!runKey || !isProviderKeyRejection(error)) {
-        throw error;
-      }
+    const rejectKey = async (key: NonNullable<RunModel["key"]>) => {
       await step.run("ai-provider-key-rejected", async () => {
         await convex.mutation(api.system.updateAiProviderKeyStatus, {
           internalKey,
-          keyId: runKey._id,
-          userId: runKey.userId,
+          keyId: key._id,
+          userId: key.userId,
           status: "invalid",
           statusMessage: "The provider rejected this key during an agent run.",
         });
@@ -171,12 +168,27 @@ export const processMessage = inngest.createFunction(
           internalKey,
           messageId,
           content: keyFailureMessage(
-            `Your ${runKey.label} key was rejected by the provider.`,
+            `Your ${key.label} key was rejected by the provider.`,
           ),
         });
       });
       return { success: false, messageId, conversationId };
     };
+
+    const endRunOnKeyRejection = async (error: unknown) => {
+      if (!runKey || !isProviderKeyRejection(error)) {
+        throw error;
+      }
+      return await rejectKey(runKey);
+    };
+
+    const { checkKey } = runModel;
+    if (runKey && checkKey) {
+      const { rejected } = await step.run("check-ai-provider-key", checkKey);
+      if (rejected) {
+        return await rejectKey(runKey);
+      }
+    }
 
     // Fetch recent messages for conversation context
     const recentMessages = await step.run("get-recent-messages", async () => {
