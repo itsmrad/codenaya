@@ -1,5 +1,5 @@
 import { generateObject } from "ai";
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
@@ -56,13 +56,10 @@ Your suggestion is inserted immediately after the cursor, so never suggest code 
 
 export async function POST(request: Request) {
   try {
-    const { userId } = await auth();
+    const { unauthorized } = await requireUserId();
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 403 },
-      );
+    if (unauthorized) {
+      return unauthorized;
     }
 
     const body = await request.json();

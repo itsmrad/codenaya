@@ -1,5 +1,5 @@
 import { Sandbox } from "e2b";
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 
 interface RouteParams {
   params: Promise<{ sandboxId: string }>;
@@ -12,10 +12,10 @@ interface RouteParams {
  * Called on unmount, navigation away, or manual restart.
  */
 export async function DELETE(_request: Request, { params }: RouteParams) {
-  const { userId } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (unauthorized) {
+    return unauthorized;
   }
 
   const { sandboxId } = await params;
@@ -66,10 +66,10 @@ export async function POST(request: Request, { params }: RouteParams) {
  * Accepts an array of { path, content } objects.
  */
 export async function PATCH(request: Request, { params }: RouteParams) {
-  const { userId } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (unauthorized) {
+    return unauthorized;
   }
 
   const { sandboxId } = await params;

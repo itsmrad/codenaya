@@ -3,7 +3,6 @@ import { Suspense } from "react";
 
 import { AuthLoadingView } from "@/features/auth/components/auth-loading-view";
 import { ConvexAuthBoundary } from "@/features/auth/components/convex-auth-boundary";
-import { UnauthenticatedView } from "@/features/auth/components/unauthenticated-view";
 import { ProjectIdLayout } from "@/features/projects/components/project-id-layout";
 import { ProjectIdView } from "@/features/projects/components/project-id-view";
 
@@ -16,11 +15,8 @@ type ProjectIdPageProps = {
 const ProjectContent = async ({
   params,
 }: ProjectIdPageProps) => {
-  const [{ projectId }, { userId }] = await Promise.all([params, auth()]);
-
-  if (!userId) {
-    return <UnauthenticatedView />;
-  }
+  // Signed-out visitors are redirected to /sign-in and returned here after.
+  const [{ projectId }] = await Promise.all([params, auth.protect()]);
 
   const typedProjectId = projectId as Id<"projects">;
 
