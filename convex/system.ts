@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import {
   aiProviderValidator,
   messageStepValidator,
@@ -1488,6 +1489,18 @@ export const getProjectById = query({
   },
 });
 
+/** The project when `userId` owns it and it is not being deleted, else `null`. */
+const ownedProjectOrNull = async (
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  userId: string,
+) => {
+  const project = await ctx.db.get("projects", projectId);
+  return project?.ownerId === userId && project.deletingAt === undefined
+    ? project
+    : null;
+};
+
 /**
  * The project when `userId` owns it, else `null`: missing, someone else's and
  * malformed ids all look the same, so API routes can answer 404 to all three
@@ -1502,9 +1515,7 @@ export const getOwnedProject = query({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     const projectId = ctx.db.normalizeId("projects", args.projectId);
-    if (!projectId) return null;
-    const project = await ctx.db.get("projects", projectId);
-    return project?.ownerId === args.userId ? project : null;
+    return projectId ? await ownedProjectOrNull(ctx, projectId, args.userId) : null;
   },
 });
 
@@ -1518,11 +1529,12 @@ export const getOwnedConversation = query({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     const conversationId = ctx.db.normalizeId("conversations", args.conversationId);
-    if (!conversationId) return null;
-    const conversation = await ctx.db.get("conversations", conversationId);
+    const conversation = conversationId
+      ? await ctx.db.get("conversations", conversationId)
+      : null;
     if (!conversation) return null;
-    const project = await ctx.db.get("projects", conversation.projectId);
-    return project?.ownerId === args.userId ? conversation : null;
+    const project = await ownedProjectOrNull(ctx, conversation.projectId, args.userId);
+    return project ? conversation : null;
   },
 });
 

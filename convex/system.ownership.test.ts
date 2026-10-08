@@ -75,6 +75,19 @@ describe("system.getOwnedProject", () => {
     }
   });
 
+  test("returns null for a project that is being deleted", async () => {
+    const { t, projectId } = await setup();
+    await t.run((ctx) => ctx.db.patch(projectId, { deletingAt: 1 }));
+
+    const project = await t.query(api.system.getOwnedProject, {
+      internalKey: INTERNAL_KEY,
+      projectId,
+      userId: ALICE,
+    });
+
+    expect(project).toBeNull();
+  });
+
   test("rejects a wrong internal key", async () => {
     const { t, projectId } = await setup();
 
