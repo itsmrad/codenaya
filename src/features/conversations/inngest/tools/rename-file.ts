@@ -5,6 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { getFileByAgentId } from "./get-file";
 
 interface RenameFileToolOptions {
   internalKey: string;
@@ -34,10 +35,7 @@ export const createRenameFileTool = ({
       const { fileId, newName } = parsed.data;
 
       // Validate file exists before running the step
-      const file = await convex.query(api.system.getFileById, {
-        internalKey,
-        fileId: fileId as Id<"files">,
-      });
+      const file = await getFileByAgentId(internalKey, fileId);
 
       if (!file) {
         return `Error: File with ID "${fileId}" not found. Use listFiles to get valid file IDs.`;
