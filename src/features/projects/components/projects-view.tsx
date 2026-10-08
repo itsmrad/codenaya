@@ -8,6 +8,8 @@ import { GitBranch, Search } from "lucide-react";
 import { useIsMac } from "@/lib/hooks/use-is-mac";
 import { Kbd } from "@/components/ui/kbd";
 import { CommunityRail } from "@/features/showcase/components/community-rail";
+import { StarterTemplates } from "@/features/templates/components/starter-templates";
+import { takePendingTemplate } from "@/features/templates/utils/pending-template";
 
 import { useProjects } from "../hooks/use-projects";
 import { useCreateProjectFromPrompt } from "../hooks/use-create-project-from-prompt";
@@ -32,11 +34,14 @@ export const ProjectsView = () => {
   const hasNoProjects = allProjects?.length === 0;
   const { createProject, isSubmitting } = useCreateProjectFromPrompt();
 
-  // A prompt typed on the landing page before signing up: create its project
-  // now. Taking the prompt clears it, so this runs at most once.
+  // A template picked on /showcase or a prompt typed on the landing page
+  // before signing up: create its project now. Taking them clears them, so
+  // this runs at most once.
   useEffect(() => {
+    const pendingTemplate = takePendingTemplate();
     const pendingPrompt = takePendingPrompt();
-    if (pendingPrompt) void createProject(pendingPrompt);
+    if (pendingTemplate) void createProject(pendingTemplate.prompt, pendingTemplate.id);
+    else if (pendingPrompt) void createProject(pendingPrompt);
   }, [createProject]);
 
   useEffect(() => {
@@ -155,6 +160,10 @@ export const ProjectsView = () => {
             projects={allProjects}
             onNewProject={() => setNewProjectDialogOpen(true)}
             onImport={() => setImportDialogOpen(true)}
+          />
+          <StarterTemplates
+            title="Start from a template"
+            description="Official starters that boot in the preview, then the agent builds them out"
           />
           <CommunityRail />
         </motion.div>

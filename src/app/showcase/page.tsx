@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { AppNavbar } from "@/components/app-navbar";
 import { LandingFooter } from "@/components/landing/footer";
 import { ShowcaseFeed } from "@/features/showcase/components/showcase-feed";
+import { StarterTemplates } from "@/features/templates/components/starter-templates";
 
 export const metadata: Metadata = {
   title: "Community showcase — Codenaya",
@@ -19,6 +20,12 @@ const ShowcasePage = () => {
         <p className="mt-1 mb-6 text-sm text-muted-foreground">
           Apps people built with Codenaya. Open one to preview it or remix a copy into your workspace.
         </p>
+        <div className="mb-12">
+          <StarterTemplates
+            title="Templates"
+            description="Official starters: pick one to create a project the agent builds out"
+          />
+        </div>
         <ShowcaseFeed />
       </main>
       <LandingFooter />
