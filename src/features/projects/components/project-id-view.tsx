@@ -18,6 +18,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 
 import { cn } from "@/lib/utils";
+import { HelpMenu } from "@/components/help-menu";
 import { UserMenu } from "@/components/user-menu";
 import { useIsCompact, useIsMobile } from "@/hooks/use-mobile";
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
@@ -230,7 +231,7 @@ export const ProjectIdView = ({
           </div>
         )}
 
-        {/* Right: Publish + Export + User (phones hide it while renaming to make room) */}
+        {/* Right: Publish + Export + Help + User (phones hide it while renaming to make room) */}
         <div className={cn("flex items-center gap-1.5 shrink-0", rename.isRenaming && "hidden @xl:flex")}>
           {isPublished === null && (
             <button
@@ -262,6 +263,7 @@ export const ProjectIdView = ({
             <span className="hidden @3xl:inline">Skills</span>
           </button>
           <ExportPopover projectId={projectId} />
+          <HelpMenu className="size-8" />
           <div className="w-px h-4 bg-border/40" />
           <UserMenu avatarClassName="size-6" />
         </div>

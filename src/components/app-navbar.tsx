@@ -6,6 +6,7 @@ import { useAuth } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import { SIGN_IN_URL, SIGN_UP_URL } from "@/features/auth/constants";
 
+import { HelpMenu } from "./help-menu";
 import { UserMenu } from "./user-menu";
 
 export const AppNavbar = () => {
@@ -27,7 +28,7 @@ export const AppNavbar = () => {
         </span>
       </Link>
 
-      {/* Right — User */}
+      {/* Right — Help + User */}
       {isSignedIn === false ? (
         <div className="flex items-center gap-2">
           <Button asChild size="sm" variant="ghost">
@@ -38,7 +39,10 @@ export const AppNavbar = () => {
           </Button>
         </div>
       ) : (
-        <UserMenu avatarClassName="size-7" />
+        <div className="flex items-center gap-2">
+          <HelpMenu className="size-8" />
+          <UserMenu avatarClassName="size-7" />
+        </div>
       )}
     </nav>
   );

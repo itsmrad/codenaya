@@ -4,18 +4,18 @@ import Link from "next/link";
 import { motion } from "motion/react";
 import { FaGithub } from "react-icons/fa";
 
-import { GITHUB_REPO_URL } from "@/lib/site";
+import { GITHUB_REPO_URL, REPORT_ISSUE_URL } from "@/lib/site";
 
 type FooterLink = { label: string; href: string };
 
-// Only pages that exist are listed, so the footer never has dead links. Add
-// Docs to Product when that page lands.
+// Only pages that exist are listed, so the footer never has dead links.
 const FOOTER_COLUMNS: { title: string; links: FooterLink[] }[] = [
   {
     title: "Product",
     links: [
       { label: "Showcase", href: "/showcase" },
       { label: "Pricing", href: "/pricing" },
+      { label: "Docs", href: "/docs" },
     ],
   },
   {
@@ -23,7 +23,7 @@ const FOOTER_COLUMNS: { title: string; links: FooterLink[] }[] = [
     links: [
       { label: "GitHub", href: GITHUB_REPO_URL },
       { label: "Changelog", href: `${GITHUB_REPO_URL}/releases` },
-      { label: "Report an issue", href: `${GITHUB_REPO_URL}/issues/new` },
+      { label: "Report an issue", href: REPORT_ISSUE_URL },
     ],
   },
   {
