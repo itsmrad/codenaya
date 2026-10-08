@@ -114,6 +114,37 @@ describe("validateModelChoice (API route)", () => {
     });
   });
 
+  it("with images, refuses a model that can't read them", async () => {
+    const withImages = (model: Parameters<typeof validate>[0]) =>
+      validateModelChoice({ internalKey: "ik", userId: "user_1", model, withImages: true });
+
+    expect(await withImages("anthropic/claude-opus-5.5")).toMatchObject({
+      modelId: "anthropic/claude-opus-5.5",
+    });
+    await expect(withImages("z-ai/glm-5.3")).rejects.toMatchObject({
+      status: 400,
+      message: "Codenaya · GLM 5.3 can't read images. Pick a vision model to send them.",
+    });
+    // Text-only messages may still use it.
+    expect(await validate("z-ai/glm-5.3")).toMatchObject({ modelId: "z-ai/glm-5.3" });
+
+    mocks.query.mockResolvedValue(openAiKey);
+    expect(await withImages({ keyId: "key_1", modelId: "gpt-5.6-luna" })).toMatchObject({
+      keyId: "key_1",
+    });
+
+    // Custom endpoints can't be checked, so they are trusted.
+    mocks.query.mockResolvedValue(customKey);
+    expect(await withImages({ keyId: "key_2", modelId: "llama-4-scout" })).toMatchObject({
+      keyId: "key_2",
+    });
+
+    mocks.query.mockResolvedValue({ ...openAiKey, provider: "anthropic" as const });
+    await expect(
+      withImages({ keyId: "key_1", modelId: "claude-opus-5-5" }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it("maps refusals to JSON responses for routes", async () => {
     mocks.query.mockResolvedValue(null);
     const { rejected } = await requireModelChoice({

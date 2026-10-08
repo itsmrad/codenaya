@@ -54,6 +54,7 @@ import {
 } from '@/features/skills/server/resolve-skills';
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
+import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -207,6 +208,15 @@ export const processMessage = inngest.createFunction(
       });
     });
 
+    // Images on the user message this run answers: the last one before it.
+    const imageUrls =
+      recentMessages
+        .slice(0, recentMessages.findIndex((msg) => msg._id === messageId))
+        .findLast((msg) => msg.role === "user")?.imageUrls ?? [];
+    // A message can be images alone; the agents still need a request to answer.
+    const request =
+      imageUrls.length > 0 && !message.trim() ? IMAGE_ONLY_PROMPT : message;
+
     // Build system prompt with conversation history (exclude the current processing message)
     let systemPrompt = CODING_AGENT_SYSTEM_PROMPT;
 
@@ -236,7 +246,7 @@ export const processMessage = inngest.createFunction(
 
       let output;
       try {
-        ({ output } = await titleAgent.run(message, { step }));
+        ({ output } = await titleAgent.run(request, { step }));
       } catch (error) {
         return await endRunOnKeyRejection(error);
       }
@@ -516,6 +526,22 @@ export const processMessage = inngest.createFunction(
       );
     }
 
+    // Checkpoint (#43): the files as they are before the agent touches them,
+    // so the run can be restored from the chat. Best effort: a failed snapshot
+    // must not fail the run.
+    await step.run("create-checkpoint", async () => {
+      try {
+        await convex.mutation(api.system.createProjectCheckpoint, {
+          internalKey,
+          projectId,
+          messageId,
+          label: message,
+        });
+      } catch (error) {
+        console.error("[checkpoints] failed to snapshot project", error);
+      }
+    });
+
     // Create the coding agent with file tools
     const codingAgent = createAgent({
       name: "codenaya",
@@ -541,6 +567,11 @@ export const processMessage = inngest.createFunction(
         ...mcpTools,
       ],
       lifecycle: {
+        onStart: ({ prompt, history }) => ({
+          prompt: withImageParts(prompt, imageUrls),
+          history: history ?? [],
+          stop: false,
+        }),
         onResponse: async ({ result }) => {
           const calls = result.output.flatMap((m) =>
             m.type === "tool_call" ? m.tools : [],
@@ -634,7 +665,7 @@ export const processMessage = inngest.createFunction(
     // Run the agent
     let result;
     try {
-      result = await network.run(message);
+      result = await network.run(request);
     } catch (error) {
       return await endRunOnKeyRejection(error);
     }

@@ -108,6 +108,34 @@ export default defineSchema({
     .index("by_parent", ["parentId"])
     .index("by_project_parent", ["projectId", "parentId"]),
 
+  /**
+   * The project's files just before an agent run (#43), restorable from the
+   * chat. One row per run, keyed by its assistant message; see
+   * `convex/checkpoints.ts`.
+   */
+  checkpoints: defineTable({
+    projectId: v.id("projects"),
+    messageId: v.id("messages"),
+    // The prompt that started the run, for the history list.
+    label: v.string(),
+    fileCount: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_message", ["messageId"]),
+
+  /** One file or folder of a checkpoint. Binary files keep their blob. */
+  checkpointFiles: defineTable({
+    checkpointId: v.id("checkpoints"),
+    projectId: v.id("projects"),
+    path: v.string(),
+    type: v.union(v.literal("file"), v.literal("folder")),
+    content: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
+  })
+    .index("by_checkpoint", ["checkpointId"])
+    .index("by_project", ["projectId"])
+    .index("by_storageId", ["storageId"]),
+
   conversations: defineTable({
     projectId: v.id("projects"),
     title: v.string(),
@@ -134,11 +162,23 @@ export default defineSchema({
     completedAt: v.optional(v.number()),
     // Assistant messages only: the model the run used.
     runModel: v.optional(runModelValidator),
+    // User messages only: attached images. Bounded: see MAX_CHAT_IMAGES.
+    images: v.optional(v.array(v.id("_storage"))),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"])
     // For the lost-run sweep in maintenance.ts.
     .index("by_status", ["status"]),
+
+  // Images uploaded from the chat composer: who uploaded each blob, so a
+  // message can only attach its sender's own images. Deleted with the project.
+  chatImages: defineTable({
+    storageId: v.id("_storage"),
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+  })
+    .index("by_storageId", ["storageId"])
+    .index("by_projectId", ["projectId"]),
 
   // ─── Showcase ───
   showcaseProjects: defineTable({

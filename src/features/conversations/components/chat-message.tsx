@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpenIcon, CheckIcon, CopyIcon, RotateCcwIcon } from "lucide-react";
+import { BookOpenIcon, CheckIcon, CopyIcon, RotateCcwIcon, Undo2Icon } from "lucide-react";
 
 import {
   MessageAction,
@@ -20,13 +20,20 @@ import { AgentRun, useRunStalled } from "./agent-run";
 
 interface UserMessageProps {
   content: string;
+  /** Attached images, shown as thumbnails above the text. */
+  imageUrls?: string[];
   /** Enabled skills: leading `/name` tokens naming one show as a chip. */
   skillNames?: ReadonlySet<string>;
   /** Sent while the conversation was open (not history): fades up on mount. */
   animate?: boolean;
 }
 
-export const UserMessage = ({ content, skillNames, animate = false }: UserMessageProps) => {
+export const UserMessage = ({
+  content,
+  imageUrls = [],
+  skillNames,
+  animate = false,
+}: UserMessageProps) => {
   const textRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [clamped, setClamped] = useState(false);
@@ -54,43 +61,62 @@ export const UserMessage = ({ content, skillNames, animate = false }: UserMessag
         animate && "animate-fade-up motion-reduce:animate-none",
       )}
     >
-      <div
-        ref={textRef}
-        className={cn(
-          "min-w-0 max-w-full space-y-2 overflow-hidden rounded-2xl rounded-br-md bg-muted px-3.5 py-2 text-sm/6 [overflow-wrap:anywhere]",
-          // 8 lines of text/6.
-          !expanded && "max-h-52",
-        )}
-      >
-        {skills.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {skills.map((name) => (
-              <Badge
-                key={name}
-                variant="outline"
-                title={`Skill: ${name}`}
-                className="bg-background/60 font-medium"
+      {imageUrls.length > 0 && (
+        <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
+          {imageUrls.map((url, index) => (
+            <a key={url} href={url} target="_blank" rel="noreferrer">
+              {/* eslint-disable-next-line @next/next/no-img-element -- Convex storage URL */}
+              <img
+                src={url}
+                // A CORS request: the WebContainer engine's COEP (require-corp)
+                // blocks plain cross-origin images, and Convex storage sends CORS.
+                crossOrigin="anonymous"
+                alt={`Attached image ${index + 1}`}
+                className="size-20 rounded-lg border object-cover"
+              />
+            </a>
+          ))}
+        </div>
+      )}
+      {(content.trim() || skills.length > 0) && (
+        <div
+          ref={textRef}
+          className={cn(
+            "min-w-0 max-w-full space-y-2 overflow-hidden rounded-2xl rounded-br-md bg-muted px-3.5 py-2 text-sm/6 [overflow-wrap:anywhere]",
+            // 8 lines of text/6.
+            !expanded && "max-h-52",
+          )}
+        >
+          {skills.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {skills.map((name) => (
+                <Badge
+                  key={name}
+                  variant="outline"
+                  title={`Skill: ${name}`}
+                  className="bg-background/60 font-medium"
+                >
+                  <BookOpenIcon />/{name}
+                </Badge>
+              ))}
+            </div>
+          )}
+          {blocks.map((block, index) =>
+            block.kind === "code" ? (
+              <pre
+                key={index}
+                className="-mx-1.5 overflow-x-auto rounded-md bg-background/60 px-2 py-1.5 font-mono text-xs/5 [overflow-wrap:normal]"
               >
-                <BookOpenIcon />/{name}
-              </Badge>
-            ))}
-          </div>
-        )}
-        {blocks.map((block, index) =>
-          block.kind === "code" ? (
-            <pre
-              key={index}
-              className="-mx-1.5 overflow-x-auto rounded-md bg-background/60 px-2 py-1.5 font-mono text-xs/5 [overflow-wrap:normal]"
-            >
-              {block.text}
-            </pre>
-          ) : (
-            <p key={index} className="whitespace-pre-wrap">
-              {block.text}
-            </p>
-          ),
-        )}
-      </div>
+                {block.text}
+              </pre>
+            ) : (
+              <p key={index} className="whitespace-pre-wrap">
+                {block.text}
+              </p>
+            ),
+          )}
+        </div>
+      )}
       {clamped && (
         <button
           type="button"
@@ -111,6 +137,8 @@ interface AssistantMessageProps {
   pathOf?: (fileId: string) => string | undefined;
   onOpenFile?: (path: string) => void;
   onRetry?: () => void;
+  /** Set when a checkpoint was taken before this run (#43). */
+  onRestore?: () => void;
 }
 
 export const AssistantMessage = ({
@@ -119,6 +147,7 @@ export const AssistantMessage = ({
   pathOf,
   onOpenFile,
   onRetry,
+  onRestore,
 }: AssistantMessageProps) => {
   const [copied, setCopied] = useState(false);
   const status = message.status ?? "completed";
@@ -132,6 +161,18 @@ export const AssistantMessage = ({
   // already completed (history) stays still.
   const [startedProcessing] = useState(status === "processing");
   const settle = startedProcessing && "animate-fade-up motion-reduce:animate-none";
+
+  const restoreAction = onRestore && status !== "processing" && (
+    <MessageAction
+      size="icon-sm"
+      label="Restore to before this run"
+      tooltip="Restore to before this run"
+      onClick={onRestore}
+      className="size-7 text-muted-foreground hover:text-foreground"
+    >
+      <Undo2Icon className="size-3.5" />
+    </MessageAction>
+  );
 
   const copy = () => {
     navigator.clipboard.writeText(content);
@@ -165,6 +206,10 @@ export const AssistantMessage = ({
       )}
       {status === "cancelled" && steps.length === 0 && (
         <p className="text-sm text-muted-foreground">Request cancelled</p>
+      )}
+      {/* A stopped run may still have changed files. */}
+      {status === "cancelled" && restoreAction && (
+        <MessageActions className="-ml-1.5 -mt-1">{restoreAction}</MessageActions>
       )}
       {status === "completed" && content && (
         <>
@@ -200,6 +245,7 @@ export const AssistantMessage = ({
                 <RotateCcwIcon className="size-3.5" />
               </MessageAction>
             )}
+            {restoreAction}
           </MessageActions>
         </>
       )}

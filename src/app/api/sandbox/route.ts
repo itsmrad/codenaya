@@ -11,6 +11,10 @@ import {
 } from "@/features/integrations/server/env/resolve-env";
 import { createStreamRedactor } from "@/features/integrations/server/env/stream-redactor";
 import {
+  forgetSandbox,
+  rememberSandbox,
+} from "@/features/sandbox-preview/server/sandbox-registry";
+import {
   missingReferencedFiles,
   undeclaredPackages,
 } from "@/features/sandbox-preview/utils/missing-references";
@@ -225,6 +229,9 @@ export async function POST(request: Request) {
           },
         });
 
+        // File syncs reuse this handle instead of reconnecting (#179).
+        rememberSandbox(sandbox, userId);
+
         send({
           type: "output",
           data: `Sandbox ${sandbox.sandboxId} created.\n`,
@@ -422,6 +429,10 @@ export async function POST(request: Request) {
           }
         }
       } finally {
+        if (sandbox) {
+          forgetSandbox(sandbox.sandboxId);
+        }
+
         // Release any output the redactor is holding back, otherwise the last
         // partial line would never reach the terminal.
         flushRedactor();

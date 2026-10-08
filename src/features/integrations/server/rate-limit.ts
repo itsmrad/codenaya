@@ -200,6 +200,24 @@ export const ENHANCE_PROMPT_RATE_LIMIT: RateLimitConfig = {
 };
 
 /**
+ * Inline suggestions fire 300ms after typing pauses, so steady typing makes a
+ * request every second or so. Two a second sustained is above any human typist
+ * while stopping a scripted loop on our (or the user's) key.
+ */
+export const SUGGESTION_RATE_LIMIT: RateLimitConfig = {
+  scope: "editor-suggestion",
+  limit: 120,
+  windowMs: 60_000,
+};
+
+/** A Cmd+K quick edit is one deliberate request; twenty a minute is plenty. */
+export const QUICK_EDIT_RATE_LIMIT: RateLimitConfig = {
+  scope: "editor-quick-edit",
+  limit: 20,
+  windowMs: 60_000,
+};
+
+/**
  * Previewing a skill import fetches up to three files from GitHub. Ten a
  * minute covers someone trying a few URLs while stopping a scripted loop.
  */

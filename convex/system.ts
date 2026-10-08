@@ -6,6 +6,8 @@ import {
   messageStepValidator,
   runModelValidator,
 } from "./schema";
+import { createCheckpoint, releaseFileStorage } from "./checkpoints";
+import { assertOwnedImages, withImageUrls } from "./chatImages";
 import { resolveProjectSkills } from "./skills";
 import { countProjectBuilt } from "./stats";
 
@@ -51,9 +53,19 @@ export const createMessage = mutation({
       )
     ),
     runModel: v.optional(runModelValidator),
+    images: v.optional(v.array(v.id("_storage"))),
+    // The sender, required with images: only their own uploads can be attached.
+    ownerId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+
+    if (args.images?.length) {
+      await assertOwnedImages(ctx, args.images, {
+        projectId: args.projectId,
+        ownerId: args.ownerId,
+      });
+    }
 
     const messageId = await ctx.db.insert("messages", {
       conversationId: args.conversationId,
@@ -62,6 +74,7 @@ export const createMessage = mutation({
       content: args.content,
       status: args.status,
       runModel: args.runModel,
+      ...(args.images?.length ? { images: args.images } : {}),
     });
 
     // Update conversation's updatedAt
@@ -211,7 +224,7 @@ export const getRecentMessages = query({
       .collect();
 
     const limit = args.limit ?? 10;
-    return messages.slice(-limit);
+    return await withImageUrls(ctx, messages.slice(-limit));
   },
 });
 
@@ -245,6 +258,30 @@ export const getProjectFiles = query({
       .query("files")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .collect();
+  },
+});
+
+// Snapshot of the project's files taken before an agent run (#43).
+export const createProjectCheckpoint = mutation({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    messageId: v.id("messages"),
+    label: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const message = await ctx.db.get(args.messageId);
+    if (!message || message.projectId !== args.projectId) {
+      throw new Error("Message not found");
+    }
+
+    return await createCheckpoint(ctx, {
+      projectId: args.projectId,
+      messageId: args.messageId,
+      label: args.label,
+    });
   },
 });
 
@@ -500,7 +537,7 @@ export const deleteFile = mutation({
 
       // Delete storage file if it exists
       if (item.storageId) {
-        await ctx.storage.delete(item.storageId);
+        await releaseFileStorage(ctx, item.storageId);
       }
 
       // Delete the file/folder itself
@@ -529,7 +566,7 @@ export const cleanup = mutation({
     for (const file of files) {
       // Delete storage file if it exists
       if (file.storageId) {
-        await ctx.storage.delete(file.storageId);
+        await releaseFileStorage(ctx, file.storageId);
       }
 
       await ctx.db.delete(file._id);
@@ -1588,6 +1625,35 @@ export const getAiProviderKeyForUser = query({
 
     const key = await ctx.db.get("aiProviderKeys", args.keyId);
     return key && key.userId === args.userId ? key : null;
+  },
+});
+
+/**
+ * The user's default key (sealed) and model, for the editor AI routes. Null when
+ * the default is the platform, so the caller uses Codenaya's model. A default
+ * whose key no longer exists comes back as `key: null`.
+ */
+export const getDefaultAiProviderKey = query({
+  args: {
+    internalKey: v.string(),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const preferences = await ctx.db
+      .query("userAiPreferences")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .unique();
+    if (!preferences?.defaultKeyId) {
+      return null;
+    }
+
+    const key = await ctx.db.get("aiProviderKeys", preferences.defaultKeyId);
+    return {
+      key: key && key.userId === args.userId ? key : null,
+      modelId: preferences.defaultModelId,
+    };
   },
 });
 
