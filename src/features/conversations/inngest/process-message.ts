@@ -560,13 +560,13 @@ export const processMessage = inngest.createFunction(
 
     const tools: Tool.Any[] = [
       createListFilesTool({ internalKey, projectId }),
-      createReadFilesTool({ internalKey }),
-      createUpdateFileTool({ internalKey }),
+      createReadFilesTool({ projectId, internalKey }),
+      createUpdateFileTool({ projectId, internalKey }),
       createCreateFilesTool({ projectId, internalKey }),
       createCreateFolderTool({ projectId, internalKey }),
       createScaffoldViteAppTool({ projectId, internalKey }),
-      createRenameFileTool({ internalKey }),
-      createDeleteFilesTool({ internalKey }),
+      createRenameFileTool({ projectId, internalKey }),
+      createDeleteFilesTool({ projectId, internalKey }),
       createScrapeUrlsTool(),
       ...(mcpOwnerId
         ? [createSetEnvVarTool({ projectId, ownerId: mcpOwnerId, internalKey })]

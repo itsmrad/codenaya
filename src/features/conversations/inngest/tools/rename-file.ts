@@ -8,6 +8,7 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
 
 interface RenameFileToolOptions {
+  projectId: Id<"projects">;
   internalKey: string;
 }
 
@@ -17,6 +18,7 @@ const paramsSchema = z.object({
 });
 
 export const createRenameFileTool = ({
+  projectId,
   internalKey,
 }: RenameFileToolOptions) => {
   return createTool({
@@ -35,7 +37,7 @@ export const createRenameFileTool = ({
       const { fileId, newName } = parsed.data;
 
       // Validate file exists before running the step
-      const file = await getFileByAgentId(internalKey, fileId);
+      const file = await getFileByAgentId(internalKey, projectId, fileId);
 
       if (!file) {
         return `Error: File with ID "${fileId}" not found. Use listFiles to get valid file IDs.`;
@@ -45,6 +47,7 @@ export const createRenameFileTool = ({
         return await toolStep?.run("rename-file", async () => {
           await convex.mutation(api.system.renameFile, {
             internalKey,
+            projectId,
             fileId: fileId as Id<"files">,
             newName,
           });

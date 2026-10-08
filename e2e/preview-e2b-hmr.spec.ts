@@ -52,6 +52,7 @@ test.describe("E2B preview hot reload", () => {
       const startedAt = Date.now();
       await system.mutation(api.system.updateFile, {
         internalKey,
+        projectId,
         fileId: appId,
         content: app(text),
       });
