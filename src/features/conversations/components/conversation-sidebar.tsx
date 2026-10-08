@@ -8,6 +8,7 @@ import {
   CornerDownLeftIcon,
   HistoryIcon, 
   PlusIcon,
+  SquareIcon,
   XIcon,
 } from "lucide-react";
 import { FileIcon } from "@react-symbols/icons/utils";

@@ -3,18 +3,11 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import { inngest } from "@/inngest/client";
-<<<<<<< HEAD
-import { convex } from "@/lib/convex-client";
-
-import { api } from "../../../../../convex/_generated/api";
-import { Id } from "../../../../../convex/_generated/dataModel";
-=======
 import {
   getGithubToken,
   githubNotLinkedResponse,
 } from "@/features/projects/server/github-token";
 import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
->>>>>>> upstream/main
 
 const requestSchema = z.object({
   projectId: z.string(),
