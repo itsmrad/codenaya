@@ -10,6 +10,10 @@ import {
   secretValuesFrom,
 } from "@/features/integrations/server/env/resolve-env";
 import { createStreamRedactor } from "@/features/integrations/server/env/stream-redactor";
+import {
+  forgetSandbox,
+  rememberSandbox,
+} from "@/features/sandbox-preview/server/sandbox-registry";
 import { nodeIncompatibility } from "@/features/sandbox-preview/utils/node-compat";
 import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 import { convex } from "@/lib/convex-client";
@@ -204,6 +208,9 @@ export async function POST(request: Request) {
             maskRequestHost: "localhost:${PORT}",
           },
         });
+
+        // File syncs reuse this handle instead of reconnecting (#179).
+        rememberSandbox(sandbox, userId);
 
         send({
           type: "output",
@@ -402,6 +409,10 @@ export async function POST(request: Request) {
           }
         }
       } finally {
+        if (sandbox) {
+          forgetSandbox(sandbox.sandboxId);
+        }
+
         // Release any output the redactor is holding back, otherwise the last
         // partial line would never reach the terminal.
         flushRedactor();
