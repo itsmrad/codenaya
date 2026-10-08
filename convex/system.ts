@@ -56,6 +56,7 @@ export const createMessage = mutation({
     images: v.optional(v.array(v.id("_storage"))),
     // The sender, required with images: only their own uploads can be attached.
     ownerId: v.optional(v.string()),
+    mode: v.optional(v.literal("plan")),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -75,6 +76,7 @@ export const createMessage = mutation({
       status: args.status,
       runModel: args.runModel,
       ...(args.images?.length ? { images: args.images } : {}),
+      ...(args.mode ? { mode: args.mode } : {}),
     });
 
     // Update conversation's updatedAt

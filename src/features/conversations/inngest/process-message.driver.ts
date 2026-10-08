@@ -31,6 +31,8 @@ export async function drive(
   model: Record<string, unknown>,
   inferences: Inference[],
   message = "List my files",
+  /** More event fields, such as `mode`. */
+  extra: Record<string, unknown> = {},
 ): Promise<Outcome> {
   const event = {
     name: "message/sent",
@@ -40,6 +42,7 @@ export async function drive(
       projectId: "p1",
       message,
       model,
+      ...extra,
     },
   };
   const stepState: Record<string, unknown> = {};

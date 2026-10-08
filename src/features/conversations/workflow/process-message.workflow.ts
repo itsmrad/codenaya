@@ -6,6 +6,12 @@ import { Id } from "../../../../convex/_generated/dataModel";
 
 import { CODING_AGENT_SYSTEM_PROMPT, WORKFLOW_MAX_STEPS } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
+import {
+  type MessageMode,
+  PLAN_MODE,
+  PLAN_MODE_PROMPT,
+  PLAN_MODE_TOOLS,
+} from "../plan-mode";
 import { vertexModel, VERTEX_MODELS } from "./lib/vertex-model";
 import { createCodingTools } from "./tools";
 import {
@@ -23,6 +29,8 @@ export interface ProcessMessageInput {
   conversationId: Id<"conversations">;
   projectId: Id<"projects">;
   message: string;
+  /** Plan mode (#120): read-only tools, and the reply is a plan. */
+  mode?: MessageMode;
 }
 
 /**
@@ -44,7 +52,9 @@ export async function processMessageWorkflow(input: ProcessMessageInput) {
     conversationId,
     projectId,
     message,
+    mode,
   } = input;
+  const planMode = mode === PLAN_MODE;
 
   try {
     // 1. Load conversation context (history + conversation row)
@@ -88,12 +98,18 @@ export async function processMessageWorkflow(input: ProcessMessageInput) {
     systemPrompt +=
       `\n\n## Tool error handling:\nIf a tool returns a string starting with "Error: <toolName> failed transiently", treat it as a temporary infrastructure hiccup. You may retry the same tool call on your next turn. Do NOT tell the user that file system tools are unavailable.`;
 
-    await createProjectCheckpoint({
-      internalKey,
-      projectId,
-      messageId,
-      label: message,
-    });
+    if (planMode) {
+      systemPrompt += PLAN_MODE_PROMPT;
+    } else {
+      await createProjectCheckpoint({
+        internalKey,
+        projectId,
+        messageId,
+        label: message,
+      });
+    }
+
+    const tools = createCodingTools({ internalKey, projectId });
 
     // 4. Run the durable agent against Gemini 3.1 Pro Preview on Vertex AI.
     const agent = new DurableAgent({
@@ -103,7 +119,11 @@ export async function processMessageWorkflow(input: ProcessMessageInput) {
       },
       instructions: systemPrompt,
       temperature: 0.3,
-      tools: createCodingTools({ internalKey, projectId }),
+      tools: planMode
+        ? Object.fromEntries(
+            Object.entries(tools).filter(([name]) => PLAN_MODE_TOOLS.has(name)),
+          )
+        : tools,
     });
 
     const messages: ModelMessage[] = [{ role: "user", content: message }];

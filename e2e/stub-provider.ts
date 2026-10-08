@@ -17,11 +17,20 @@ export interface StubChatRequest {
   messages: Array<{ role: string; content?: unknown }>;
 }
 
+/** A fixed value, or one picked per request (e.g. by the tools it offers). */
+type PerRequest<T> = T | ((request: StubChatRequest) => T);
+type StubToolCall = { name: string; arguments: Record<string, unknown> };
+
+const resolve = <T,>(value: PerRequest<T>, request: StubChatRequest) =>
+  typeof value === "function"
+    ? (value as (request: StubChatRequest) => T)(request)
+    : value;
+
 interface StubOptions {
   /** The coding agent's final text reply. */
-  reply?: string;
+  reply?: PerRequest<string>;
   /** The one tool call the coding agent makes before replying. */
-  toolCall?: { name: string; arguments: Record<string, unknown> };
+  toolCall?: PerRequest<StubToolCall>;
   /** The JSON object returned to a structured-output request. */
   object?: (request: StubChatRequest) => unknown;
 }
@@ -68,7 +77,7 @@ export const startStubProvider = async (
         : !body.tools?.length
           ? { role: "assistant", content: STUB_TITLE }
           : body.messages.some((m) => m.role === "tool")
-            ? { role: "assistant", content: reply }
+            ? { role: "assistant", content: resolve(reply, body) }
             : {
                 role: "assistant",
                 content: null,
@@ -77,8 +86,8 @@ export const startStubProvider = async (
                     id: `call_${Date.now()}`,
                     type: "function",
                     function: {
-                      name: toolCall.name,
-                      arguments: JSON.stringify(toolCall.arguments),
+                      name: resolve(toolCall, body).name,
+                      arguments: JSON.stringify(resolve(toolCall, body).arguments),
                     },
                   },
                 ],
