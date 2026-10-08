@@ -11,6 +11,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { FileIcon } from "@react-symbols/icons/utils";
+import type { FileUIPart } from "ai";
 
 import {
   Conversation,
@@ -20,7 +21,6 @@ import {
 import {
   PromptInput,
   PromptInputBody,
-  PromptInputButton,
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
@@ -35,6 +35,8 @@ import {
 } from "@/components/ui/tooltip";
 import { ApprovalPrompt } from "@/features/integrations/components/approval-prompt";
 import { useProjectIntegrations } from "@/features/integrations/components/project-integrations-context";
+import { useAiProviderKeys } from "@/features/ai-providers/hooks/use-ai-providers";
+import { modelAcceptsImages } from "@/features/ai-providers/registry";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 import { useFiles } from "@/features/projects/hooks/use-files";
@@ -63,6 +65,17 @@ import { buildPathIndex } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
 import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
+import {
+  ComposerAttachButton,
+  ComposerImages,
+  WithAttachmentCount,
+} from "./composer-attachments";
+import { useUploadChatImages } from "../hooks/use-chat-images";
+import {
+  CHAT_IMAGE_TYPES,
+  MAX_CHAT_IMAGES,
+  MAX_CHAT_IMAGE_BYTES,
+} from "../chat-images";
 
 interface ConversationSidebarProps {
   projectId: Id<"projects">;
@@ -76,6 +89,14 @@ export const ConversationSidebar = ({
   const [agentModel, setAgentModel] = useAgentModel();
   const enhancer = useEnhancePrompt(input, setInput);
   const slashMenu = useSkillSlashMenu(projectId, input, setInput);
+  const uploadImages = useUploadChatImages(projectId);
+  // A key still loading (or gone) is left to the server to check.
+  const modelKeys = useAiProviderKeys();
+  const modelKey = modelKeys?.find((key) => key._id === agentModel.keyId);
+  const acceptsImages =
+    agentModel.keyId && !modelKey
+      ? true
+      : modelAcceptsImages(agentModel.modelId, modelKey);
   const [
     selectedConversationId,
     setSelectedConversationId,
@@ -183,6 +204,7 @@ export const ConversationSidebar = ({
    */
   const sendMessage = async (
     text: string,
+    images?: Id<"_storage">[],
   ): Promise<"sent" | "failed" | "blocked"> => {
     if (detectCredential(text).detected) {
       toast.error(
@@ -208,6 +230,7 @@ export const ConversationSidebar = ({
           conversationId,
           message: text,
           model: agentModel,
+          images,
         },
       });
       return "sent";
@@ -236,7 +259,12 @@ export const ConversationSidebar = ({
 
   const handleSubmit = async (message: PromptInputMessage) => {
     // If processing and no new message, this is just a stop function
-    if (isProcessing && !message.text && contexts.length === 0) {
+    if (
+      isProcessing &&
+      !message.text &&
+      contexts.length === 0 &&
+      message.files.length === 0
+    ) {
       await handleCancel()
       setInput("");
       return;
@@ -253,13 +281,34 @@ export const ConversationSidebar = ({
       finalMessage = `${skills}${contextStrs.join("\n\n")}\n\n${rest}`;
     }
 
-    const result = await sendMessage(finalMessage);
-    if (result === "blocked") return;
-    // Only clear contexts after a successful send so they aren't lost on failure
-    if (result === "sent") clearContexts();
+    let images: Id<"_storage">[] | undefined;
+    if (message.files.length > 0) {
+      images = await uploadMessageImages(message.files);
+    }
 
-    setInput("");
+    const result = await sendMessage(finalMessage, images);
+    if (result !== "blocked") {
+      // Only clear contexts after a successful send so they aren't lost on failure
+      if (result === "sent") clearContexts();
+      setInput("");
+    }
+    // PromptInput keeps its attachments when submit throws, to send again.
+    if (result !== "sent" && images) throw new Error("Message not sent");
   }
+
+  /** Throws (keeping the attachments) when the images can't be sent. */
+  const uploadMessageImages = async (files: FileUIPart[]) => {
+    if (!acceptsImages) {
+      toast.error("This model can't read images. Pick a vision model to send them.");
+      throw new Error("Model lacks vision");
+    }
+    try {
+      return await uploadImages(files);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Image upload failed");
+      throw error;
+    }
+  };
 
   return (
     <>
@@ -307,6 +356,7 @@ export const ConversationSidebar = ({
                 <UserMessage
                   key={message._id}
                   content={message.content}
+                  imageUrls={message.imageUrls}
                   skillNames={slashMenu.skillNames}
                   animate={Boolean(history && !history.messageIds.has(message._id))}
                 />
@@ -323,7 +373,7 @@ export const ConversationSidebar = ({
                       .findLast((m) => m.role === "user");
                     // Resend the prompt as-is, leaving the composer draft and
                     // attached contexts alone.
-                    if (prompt) void sendMessage(prompt.content);
+                    if (prompt) void sendMessage(prompt.content, prompt.images);
                   }}
                 />
               ),
@@ -352,8 +402,20 @@ export const ConversationSidebar = ({
           <PromptInput 
             onSubmit={handleSubmit}
             className="mt-2"
+            accept={CHAT_IMAGE_TYPES.join(",")}
+            multiple
+            maxFiles={MAX_CHAT_IMAGES}
+            maxFileSize={MAX_CHAT_IMAGE_BYTES}
+            onError={({ code }) =>
+              toast.error(
+                code === "max_files"
+                  ? `Attach up to ${MAX_CHAT_IMAGES} images per message.`
+                  : `Images must be PNG, JPEG, WebP or GIF, up to ${MAX_CHAT_IMAGE_BYTES / 1024 / 1024} MB.`,
+              )
+            }
           >
             <PromptInputBody>
+              <ComposerImages acceptsImages={acceptsImages} />
               {contexts.length > 0 && (
                 <div className="flex w-full flex-wrap justify-start gap-2 p-2 pb-0">
                   {contexts.map((ctx) => (
@@ -386,21 +448,7 @@ export const ConversationSidebar = ({
               {/* The tools shrink (the model name truncates) so a narrow
                   panel never pushes the send button out of view. */}
               <PromptInputTools className="min-w-0">
-                {/* Attachment slot: shown disabled until uploads ship. */}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span tabIndex={0} className="rounded-lg">
-                      <PromptInputButton
-                        disabled
-                        aria-label="Attach files"
-                        className="size-8 rounded-lg"
-                      >
-                        <PlusIcon className="size-4" />
-                      </PromptInputButton>
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>Attachments coming soon</TooltipContent>
-                </Tooltip>
+                <ComposerAttachButton disabled={isProcessing} />
                 <EnhancePromptButton
                   enhancer={enhancer}
                   value={input}
@@ -426,33 +474,39 @@ export const ConversationSidebar = ({
                   </kbd>
                   newline
                 </span>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <PromptInputSubmit
-                      disabled={
-                        isProcessing
-                          ? false
-                          : enhancer.isEnhancing || (!input && contexts.length === 0)
-                      }
-                      aria-label={isProcessing ? "Stop" : "Send"}
-                      className="size-8 rounded-lg disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
-                    >
-                      {/* Keyed so each swap pops the new icon in. */}
-                      {isProcessing ? (
-                        <SquareIcon
-                          key="stop"
-                          className="size-3 animate-in fill-current fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none"
-                        />
-                      ) : (
-                        <ArrowUpIcon
-                          key="send"
-                          className="size-4 animate-in fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none"
-                        />
-                      )}
-                    </PromptInputSubmit>
-                  </TooltipTrigger>
-                  <TooltipContent>{isProcessing ? "Stop (Esc)" : "Send (Enter)"}</TooltipContent>
-                </Tooltip>
+                <WithAttachmentCount>
+                  {(images) => (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <PromptInputSubmit
+                        disabled={
+                          isProcessing
+                            ? false
+                            : enhancer.isEnhancing ||
+                              (!input && contexts.length === 0 && images === 0) ||
+                              (images > 0 && !acceptsImages)
+                        }
+                        aria-label={isProcessing ? "Stop" : "Send"}
+                        className="size-8 rounded-lg disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
+                      >
+                        {/* Keyed so each swap pops the new icon in. */}
+                        {isProcessing ? (
+                          <SquareIcon
+                            key="stop"
+                            className="size-3 animate-in fill-current fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none"
+                          />
+                        ) : (
+                          <ArrowUpIcon
+                            key="send"
+                            className="size-4 animate-in fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none"
+                          />
+                        )}
+                      </PromptInputSubmit>
+                    </TooltipTrigger>
+                    <TooltipContent>{isProcessing ? "Stop (Esc)" : "Send (Enter)"}</TooltipContent>
+                  </Tooltip>
+                  )}
+                </WithAttachmentCount>
               </div>
             </PromptInputFooter>
           </PromptInput>

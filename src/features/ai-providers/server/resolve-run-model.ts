@@ -11,7 +11,12 @@ import {
   openRouterModel,
 } from "@/features/conversations/inngest/lib/openrouter-model";
 
-import { modelIdsFor, runModelLabel, titleModelFor } from "../registry";
+import {
+  modelAcceptsImages,
+  modelIdsFor,
+  runModelLabel,
+  titleModelFor,
+} from "../registry";
 import { buildAgentKitModel } from "./agentkit-model";
 import { openProviderKey } from "./sealed-key";
 import { OUT_OF_CREDIT_PATTERN, isOutOfCredit, testConnection } from "./test-connection";
@@ -82,23 +87,36 @@ const platformChoice = (modelId: string): RunModelChoice => {
   return { modelId: id, label: runModelLabel(id) };
 };
 
+/** The message has images and the model cannot read them. */
+const visionRequired = (label: string) =>
+  new ModelChoiceError(
+    `${label} can't read images. Pick a vision model to send them.`,
+    400,
+  );
+
 /**
  * Route-side check. Platform ids outside the allowlist fall back to the
  * default, as before; a BYOK choice must name a key the caller owns and a model
- * that key's provider offers.
+ * that key's provider offers. With `withImages`, the model must accept images.
  */
 export async function validateModelChoice({
   internalKey,
   userId,
   model,
+  withImages = false,
 }: {
   internalKey: string;
   userId: string;
   model: ModelChoiceInput;
+  withImages?: boolean;
 }): Promise<RunModelChoice> {
   const { keyId, modelId } = toChoice(model);
   if (!keyId) {
-    return platformChoice(modelId);
+    const choice = platformChoice(modelId);
+    if (withImages && !modelAcceptsImages(choice.modelId)) {
+      throw visionRequired(choice.label);
+    }
+    return choice;
   }
 
   // A malformed id fails Convex argument validation: same answer as a foreign one.
@@ -117,7 +135,12 @@ export async function validateModelChoice({
     throw new ModelChoiceError("Model is not available for this key", 400);
   }
 
-  return { keyId: key._id, modelId, label: runModelLabel(modelId, key) };
+  const label = runModelLabel(modelId, key);
+  if (withImages && !modelAcceptsImages(modelId, key)) {
+    throw visionRequired(label);
+  }
+
+  return { keyId: key._id, modelId, label };
 }
 
 /**
