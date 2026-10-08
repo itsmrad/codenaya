@@ -23,6 +23,7 @@ export const PlanModeToggle = ({
   <Tooltip>
     <TooltipTrigger asChild>
       <PromptInputButton
+        aria-label="Plan"
         aria-pressed={pressed}
         variant={pressed ? "secondary" : "ghost"}
         onClick={() => onPressedChange(!pressed)}
@@ -30,7 +31,8 @@ export const PlanModeToggle = ({
         className={cn("h-8 shrink-0 rounded-lg px-2", pressed && "text-foreground")}
       >
         <ListChecksIcon className="size-4" />
-        Plan
+        {/* Icon only in a narrow panel, so the model name keeps its room. */}
+        <span className="hidden @[480px]:inline">Plan</span>
       </PromptInputButton>
     </TooltipTrigger>
     <TooltipContent>
