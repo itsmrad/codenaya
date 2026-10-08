@@ -106,10 +106,10 @@ describe("checkpoints", () => {
     await snapshot(t, projectId, messageId);
 
     // What an agent run might do: edit, create (in a new folder), delete.
-    await t.mutation(api.system.updateFile, { internalKey: INTERNAL_KEY, fileId: index, content: "<h1>v2</h1>" });
+    await t.mutation(api.system.updateFile, { internalKey: INTERNAL_KEY, projectId, fileId: index, content: "<h1>v2</h1>" });
     const lib = await t.mutation(api.system.createFolder, { internalKey: INTERNAL_KEY, projectId, name: "lib" });
     await t.mutation(api.system.createFile, { internalKey: INTERNAL_KEY, projectId, parentId: lib, name: "util.ts", content: "x" });
-    await t.mutation(api.system.deleteFile, { internalKey: INTERNAL_KEY, fileId: src });
+    await t.mutation(api.system.deleteFile, { internalKey: INTERNAL_KEY, projectId, fileId: src });
     expect(await tree(t, projectId)).not.toEqual(before);
 
     const [checkpoint] = await alice.query(api.checkpoints.list, { projectId });
@@ -127,7 +127,7 @@ describe("checkpoints", () => {
     const { projectId, conversationId, index } = await seedProject(t);
     const messageId = await addRun(t, projectId, conversationId);
     const first = await snapshot(t, projectId, messageId);
-    await t.mutation(api.system.updateFile, { internalKey: INTERNAL_KEY, fileId: index, content: "<h1>v2</h1>" });
+    await t.mutation(api.system.updateFile, { internalKey: INTERNAL_KEY, projectId, fileId: index, content: "<h1>v2</h1>" });
     expect(await snapshot(t, projectId, messageId)).toBe(first);
 
     await alice.mutation(api.checkpoints.restore, { checkpointId: first });

@@ -71,6 +71,7 @@ export const seedViteApp = async (
   for (const root of roots.filter((file) => file.error)) {
     await system.mutation(api.system.updateFile, {
       internalKey,
+      projectId,
       fileId: root.fileId as Id<"files">,
       content: rootFiles.find((file) => file.name === root.name)!.content,
     });
