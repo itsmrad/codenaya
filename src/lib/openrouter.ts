@@ -61,8 +61,8 @@ export function editorModelId(task: EditorAiTask): string {
 }
 
 /**
- * The AI SDK model for an editor AI task. Kept as the one place a model is
- * constructed so a per-user provider (BYOK) can replace it later.
+ * The platform AI SDK model for an editor AI task. Users with a default BYOK
+ * key get their own provider instead (`features/ai-providers/server/editor-model.ts`).
  *
  * Uses Chat Completions (`.chat`), the OpenAI-compatible API OpenRouter serves.
  */
