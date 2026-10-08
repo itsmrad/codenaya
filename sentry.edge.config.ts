@@ -6,6 +6,10 @@
 import * as Sentry from "@sentry/nextjs";
 
 Sentry.init({
+  // Report from production builds only, like the client config: events from
+  // `next dev` are noise.
+  enabled: process.env.NODE_ENV === "production",
+
   dsn: "https://5a5ad5d9846faece0a4727540f810281@o4510149980258304.ingest.de.sentry.io/4510621155983440",
 
   // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
