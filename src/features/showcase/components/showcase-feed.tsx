@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
-import { Doc } from "../../../../convex/_generated/dataModel";
-import { useShowcaseTrending } from "../hooks/use-showcase";
+import { useShowcaseFeed, type ShowcaseSort } from "../hooks/use-showcase";
 import { showcasePath } from "../hooks/use-remix";
 import {
   TECH_STACK_OPTIONS,
@@ -15,41 +15,29 @@ import {
 } from "../constants/tags";
 import { ShowcaseCard } from "./showcase-card";
 
-type ShowcaseProject = Doc<"showcaseProjects"> & { previewUrl: string | null };
-type SortBy = "newest" | "upvotes" | "imports";
+const SEARCH_DEBOUNCE_MS = 250;
 
-/** The full community showcase: search, sort, tag filters and a card grid. */
+/** The full community showcase: search, sort, tag filters and a paginated card grid. */
 export const ShowcaseFeed = () => {
   const [showcaseSearch, setShowcaseSearch] = useState("");
-  const [sortBy, setSortBy] = useState<SortBy>("newest");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sortBy, setSortBy] = useState<ShowcaseSort>("newest");
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
   const [selectedTech, setSelectedTech] = useState<string[]>([]);
   const [selectedDesign, setSelectedDesign] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
 
-  const trending = useShowcaseTrending(30);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(showcaseSearch), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [showcaseSearch]);
 
-  // Client-side filtering
-  const filteredProjects = (trending ?? []).filter((project) => {
-    if (showcaseSearch.length >= 2) {
-      const q = showcaseSearch.toLowerCase();
-      if (!project.title.toLowerCase().includes(q)) return false;
-    }
-    if (selectedCategory && project.category !== selectedCategory) return false;
-    if (selectedTech.length > 0) {
-      if (!selectedTech.some((t) => project.techStack.includes(t))) return false;
-    }
-    if (selectedDesign.length > 0) {
-      if (!selectedDesign.some((d) => project.designStyle.includes(d))) return false;
-    }
-    return true;
-  });
-
-  // Sort
-  const sortedProjects = [...filteredProjects].sort((a, b) => {
-    if (sortBy === "upvotes") return b.upvotes - a.upvotes;
-    if (sortBy === "imports") return b.importCount - a.importCount;
-    return b.publishedAt - a.publishedAt;
+  const { results, status, loadMore, searching } = useShowcaseFeed({
+    search: debouncedSearch,
+    sortBy,
+    category: selectedCategory,
+    techStack: selectedTech,
+    designStyle: selectedDesign,
   });
 
   const hasActiveFilters = selectedCategory || selectedTech.length > 0 || selectedDesign.length > 0;
@@ -72,12 +60,15 @@ export const ShowcaseFeed = () => {
 
           {/* Sort */}
           <div className="flex items-center p-0.5 bg-muted/30 rounded-lg border border-border/40">
-            {(["newest", "upvotes", "imports"] as SortBy[]).map((s) => (
+            {(["newest", "upvotes", "imports"] as ShowcaseSort[]).map((s) => (
               <button
                 key={s}
                 onClick={() => setSortBy(s)}
-                className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors ${
-                  sortBy === s
+                disabled={searching}
+                title={searching ? "Search results are ordered by best match" : undefined}
+                aria-pressed={!searching && sortBy === s}
+                className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors disabled:opacity-50 disabled:pointer-events-none ${
+                  !searching && sortBy === s
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -163,25 +154,38 @@ export const ShowcaseFeed = () => {
         )}
 
         {/* Grid */}
-        {sortedProjects.length === 0 ? (
+        {results.length === 0 && status !== "CanLoadMore" ? (
           <div className="py-16 text-center">
             <p className="text-sm text-muted-foreground/50">
-              {trending === undefined
+              {status === "LoadingFirstPage" || status === "LoadingMore"
                 ? "Loading..."
-                : trending.length === 0
-                  ? "No showcase projects yet. Be the first to publish!"
-                  : "No projects match your filters"}
+                : searching || hasActiveFilters
+                  ? "No projects match your filters"
+                  : "No showcase projects yet. Be the first to publish!"}
             </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {sortedProjects.map((project) => (
+            {results.map((project) => (
               <ShowcaseCard
                 key={project._id}
-                project={project as ShowcaseProject}
+                project={project}
                 href={showcasePath(project._id)}
               />
             ))}
+          </div>
+        )}
+
+        {(status === "CanLoadMore" || status === "LoadingMore") && (
+          <div className="mt-6 flex justify-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadMore}
+              disabled={status === "LoadingMore"}
+            >
+              {status === "LoadingMore" ? "Loading..." : "Load more"}
+            </Button>
           </div>
         )}
       </div>
