@@ -157,6 +157,36 @@ describe("aiProviders", () => {
     expect(await as(t, BOB).query(api.aiProviders.list, {})).toHaveLength(1);
   });
 
+  test("the default key read follows the user's preferences", async () => {
+    const t = setup();
+    const aliceKey = await createKey(t, ALICE);
+    const defaultFor = (userId: string, internalKey = INTERNAL_KEY) =>
+      t.query(api.system.getDefaultAiProviderKey, { internalKey, userId });
+
+    // No preferences, or a platform default: no key.
+    expect(await defaultFor(ALICE)).toBeNull();
+    await as(t, ALICE).mutation(api.aiProviders.setPreferences, {
+      defaultModelId: "openai/gpt-5.6-luna",
+    });
+    expect(await defaultFor(ALICE)).toBeNull();
+
+    await as(t, ALICE).mutation(api.aiProviders.setPreferences, {
+      defaultKeyId: aliceKey,
+      defaultModelId: "gpt-5.6-luna",
+    });
+    const result = await defaultFor(ALICE);
+    expect(result?.modelId).toBe("gpt-5.6-luna");
+    expect(result?.key?._id).toBe(aliceKey);
+    expect(result?.key?.ciphertext).toBe("ct");
+
+    expect(await defaultFor(BOB)).toBeNull();
+    await expect(defaultFor(ALICE, "wrong")).rejects.toThrow();
+
+    // Deleting the key resets the default to the platform.
+    await as(t, ALICE).mutation(api.aiProviders.remove, { keyId: aliceKey });
+    expect(await defaultFor(ALICE)).toBeNull();
+  });
+
   test("sealed reads are scoped to the key owner", async () => {
     const t = setup();
     const aliceKey = await createKey(t, ALICE);

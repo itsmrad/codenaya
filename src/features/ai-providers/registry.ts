@@ -93,6 +93,12 @@ export const PLATFORM_PROVIDER = {
   titleModel: AI_PROVIDERS.openrouter.titleModel!,
 } as const;
 
+/**
+ * `code` on an editor AI route error caused by the user's own key, so the
+ * editor can point to the settings page.
+ */
+export const PROVIDER_KEY_ERROR_CODE = "provider_key";
+
 export function isAiProviderId(value: unknown): value is AiProviderId {
   return AI_PROVIDER_IDS.includes(value as AiProviderId);
 }

@@ -1592,6 +1592,35 @@ export const getAiProviderKeyForUser = query({
 });
 
 /**
+ * The user's default key (sealed) and model, for the editor AI routes. Null when
+ * the default is the platform, so the caller uses Codenaya's model. A default
+ * whose key no longer exists comes back as `key: null`.
+ */
+export const getDefaultAiProviderKey = query({
+  args: {
+    internalKey: v.string(),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const preferences = await ctx.db
+      .query("userAiPreferences")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .unique();
+    if (!preferences?.defaultKeyId) {
+      return null;
+    }
+
+    const key = await ctx.db.get("aiProviderKeys", preferences.defaultKeyId);
+    return {
+      key: key && key.userId === args.userId ? key : null,
+      modelId: preferences.defaultModelId,
+    };
+  },
+});
+
+/**
  * The sealed key for an agent run, only when the key's owner is the project's
  * owner, so a wrong or crafted keyId cannot spend another user's key.
  */

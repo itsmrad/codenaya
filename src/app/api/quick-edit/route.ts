@@ -4,7 +4,12 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import { getFirecrawl } from "@/lib/firecrawl";
-import { editorModel, isOpenRouterConfigured } from "@/lib/openrouter";
+import { withEditorModel } from "@/features/ai-providers/server/editor-model";
+import {
+  QUICK_EDIT_RATE_LIMIT,
+  checkRateLimit,
+  rateLimitedResponse,
+} from "@/features/integrations/server/rate-limit";
 
 const quickEditSchema = z.object({
   editedCode: z
@@ -48,17 +53,15 @@ If the instruction is unclear or cannot be applied, return the original code unc
 
 export async function POST(request: Request) {
   try {
-    const { unauthorized } = await requireUserId();
+    const { userId, unauthorized } = await requireUserId();
 
     if (unauthorized) {
       return unauthorized;
     }
 
-    if (!isOpenRouterConfigured()) {
-      return NextResponse.json(
-        { error: "AI is not configured" },
-        { status: 503 }
-      );
+    const rateLimit = checkRateLimit(userId, QUICK_EDIT_RATE_LIMIT);
+    if (!rateLimit.allowed) {
+      return rateLimitedResponse(rateLimit);
     }
 
     const body = await request.json();
@@ -110,14 +113,16 @@ export async function POST(request: Request) {
       .replace("{instruction}", instruction)
       .replace("{documentation}", documentationContext);
 
-    const { object } = await generateObject({
-      model: editorModel("quickEdit"),
-      output: "object",
-      schema: quickEditSchema,
-      prompt,
-    });
+    return await withEditorModel({ userId, task: "quickEdit" }, async (model) => {
+      const { object } = await generateObject({
+        model,
+        output: "object",
+        schema: quickEditSchema,
+        prompt,
+      });
 
-    return NextResponse.json({ editedCode: object.editedCode });
+      return NextResponse.json({ editedCode: object.editedCode });
+    });
   } catch (error) {
     console.error("Edit error:", error);
     return NextResponse.json(
