@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { 
   ArrowBigUpIcon,
   ArrowUpIcon,
+  ClockArrowUpIcon,
   CornerDownLeftIcon,
   HistoryIcon, 
   PlusIcon,
@@ -65,6 +66,11 @@ import { buildPathIndex } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
 import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
+import { type Checkpoint, useCheckpoints } from "../hooks/use-checkpoints";
+import {
+  CheckpointHistoryDialog,
+  RestoreCheckpointDialog,
+} from "./checkpoint-dialogs";
 import {
   ComposerAttachButton,
   ComposerImages,
@@ -105,6 +111,14 @@ export const ConversationSidebar = ({
     pastConversationsOpen,
     setPastConversationsOpen
   ] = useState(false);
+
+  const [checkpointHistoryOpen, setCheckpointHistoryOpen] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState<Checkpoint | null>(null);
+  const checkpoints = useCheckpoints(projectId);
+  const checkpointByMessage = useMemo(
+    () => new Map(checkpoints?.map((checkpoint) => [checkpoint.messageId, checkpoint])),
+    [checkpoints],
+  );
 
   const createConversation = useCreateConversation();
   const conversations = useConversations(projectId);
@@ -318,12 +332,35 @@ export const ConversationSidebar = ({
         onOpenChange={setPastConversationsOpen}
         onSelect={setSelectedConversationId}
       />
+      <CheckpointHistoryDialog
+        checkpoints={checkpoints}
+        open={checkpointHistoryOpen}
+        onOpenChange={setCheckpointHistoryOpen}
+        onRestore={(checkpoint) => {
+          setCheckpointHistoryOpen(false);
+          setRestoreTarget(checkpoint);
+        }}
+        disabled={isProcessing}
+      />
+      <RestoreCheckpointDialog
+        checkpoint={restoreTarget}
+        onOpenChange={(open) => !open && setRestoreTarget(null)}
+      />
       <div ref={panelRef} className="@container flex flex-col h-full bg-sidebar">
         <div className="h-8.75 flex items-center justify-between border-b">
           <div className="text-sm font-medium truncate pl-3">
             {activeConversation?.title ?? DEFAULT_CONVERSATION_TITLE}
           </div>
           <div className="flex items-center px-1 gap-1">
+            <Button
+              size="icon-xs"
+              variant="highlight"
+              aria-label="Version history"
+              title="Version history"
+              onClick={() => setCheckpointHistoryOpen(true)}
+            >
+              <ClockArrowUpIcon className="size-3.5" />
+            </Button>
             <Button
               size="icon-xs"
               variant="highlight"
@@ -375,6 +412,11 @@ export const ConversationSidebar = ({
                     // attached contexts alone.
                     if (prompt) void sendMessage(prompt.content, prompt.images);
                   }}
+                  onRestore={
+                    checkpointByMessage.has(message._id) && !isProcessing
+                      ? () => setRestoreTarget(checkpointByMessage.get(message._id)!)
+                      : undefined
+                  }
                 />
               ),
             )}

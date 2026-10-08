@@ -27,7 +27,7 @@ const MAX_COPIED_ROWS = 500;
  * The caller's project. Projects being deleted count as gone, so they can't
  * be opened, renamed or copied while their data is removed.
  */
-async function getOwnedProject(
+export async function getOwnedProject(
   ctx: QueryCtx | MutationCtx,
   id: Id<"projects">,
   ownerId: string,
