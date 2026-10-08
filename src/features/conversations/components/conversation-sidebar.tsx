@@ -305,7 +305,7 @@ export const ConversationSidebar = ({
     try {
       return await uploadImages(files);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Image upload failed");
+      toast.error("Image upload failed");
       throw error;
     }
   };
