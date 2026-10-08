@@ -107,8 +107,10 @@ export async function POST(request: Request) {
     projectId,
     role: "user",
     content: message,
-    images: images as Id<"_storage">[] | undefined,
-    ownerId: userId,
+    // Only sent with images: only the sender's own uploads can be attached.
+    ...(images?.length
+      ? { images: images as Id<"_storage">[], ownerId: userId }
+      : {}),
   });
 
   // Create assistant message placeholder with processing status
