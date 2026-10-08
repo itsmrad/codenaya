@@ -27,6 +27,29 @@ const validateInternalKey = (key: string) => {
   }
 };
 
+// Agent tools pass file ids straight from model output, so every file and
+// parent folder they touch must belong to the run's own project (#209).
+const getProjectFile = async (
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  fileId: Id<"files">
+) => {
+  const file = await ctx.db.get("files", fileId);
+  return file && file.projectId === projectId ? file : null;
+};
+
+const assertProjectFolder = async (
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  parentId: Id<"files"> | undefined
+) => {
+  if (!parentId) return;
+  const parent = await getProjectFile(ctx, projectId, parentId);
+  if (!parent || parent.type !== "folder") {
+    throw new Error("Parent folder not found");
+  }
+};
+
 export const getConversationById = query({
   args: {
     conversationId: v.id("conversations"),
@@ -292,12 +315,13 @@ export const createProjectCheckpoint = mutation({
 export const getFileById = query({
   args: {
     internalKey: v.string(),
+    projectId: v.id("projects"),
     fileId: v.id("files"),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
-    return await ctx.db.get(args.fileId);
+    return await getProjectFile(ctx, args.projectId, args.fileId);
   },
 });
 
@@ -305,13 +329,14 @@ export const getFileById = query({
 export const updateFile = mutation({
   args: {
     internalKey: v.string(),
+    projectId: v.id("projects"),
     fileId: v.id("files"),
     content: v.string(),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
-    const file = await ctx.db.get(args.fileId);
+    const file = await getProjectFile(ctx, args.projectId, args.fileId);
 
     if (!file) {
       throw new Error("File not found");
@@ -337,6 +362,7 @@ export const createFile = mutation({
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertProjectFolder(ctx, args.projectId, args.parentId);
 
     const files = await ctx.db
       .query("files")
@@ -381,6 +407,7 @@ export const createFiles = mutation({
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertProjectFolder(ctx, args.projectId, args.parentId);
 
     const existingFiles = await ctx.db
       .query("files")
@@ -431,6 +458,7 @@ export const createFolder = mutation({
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertProjectFolder(ctx, args.projectId, args.parentId);
 
     const files = await ctx.db
       .query("files")
@@ -463,13 +491,14 @@ export const createFolder = mutation({
 export const renameFile = mutation({
   args: {
     internalKey: v.string(),
+    projectId: v.id("projects"),
     fileId: v.id("files"),
     newName: v.string(),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
-    const file = await ctx.db.get(args.fileId);
+    const file = await getProjectFile(ctx, args.projectId, args.fileId);
     if (!file) {
       throw new Error("File not found");
     }
@@ -506,12 +535,13 @@ export const renameFile = mutation({
 export const deleteFile = mutation({
   args: {
     internalKey: v.string(),
+    projectId: v.id("projects"),
     fileId: v.id("files"),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
-     const file = await ctx.db.get(args.fileId);
+    const file = await getProjectFile(ctx, args.projectId, args.fileId);
     if (!file) {
       throw new Error("File not found");
     }
@@ -599,6 +629,7 @@ export const createBinaryFile = mutation({
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertProjectFolder(ctx, args.projectId, args.parentId);
 
     const files = await ctx.db
       .query("files")

@@ -44,6 +44,7 @@ async function listFilesStep(opts: {
 
 async function readFilesStep(opts: {
   internalKey: string;
+  projectId: Id<"projects">;
   fileIds: string[];
 }) {
   "use step";
@@ -53,6 +54,7 @@ async function readFilesStep(opts: {
   for (const fileId of opts.fileIds) {
     const file = await convex.query(api.system.getFileById, {
       internalKey: opts.internalKey,
+      projectId: opts.projectId,
       fileId: fileId as Id<"files">,
     });
 
@@ -72,6 +74,7 @@ async function readFilesStep(opts: {
 
 async function updateFileStep(opts: {
   internalKey: string;
+  projectId: Id<"projects">;
   fileId: string;
   content: string;
 }) {
@@ -79,6 +82,7 @@ async function updateFileStep(opts: {
 
   const file = await convex.query(api.system.getFileById, {
     internalKey: opts.internalKey,
+    projectId: opts.projectId,
     fileId: opts.fileId as Id<"files">,
   });
 
@@ -98,6 +102,7 @@ async function updateFileStep(opts: {
 
   await convex.mutation(api.system.updateFile, {
     internalKey: opts.internalKey,
+    projectId: opts.projectId,
     fileId: opts.fileId as Id<"files">,
     content: opts.content,
   });
@@ -122,6 +127,7 @@ async function createFilesStep(opts: {
     resolvedParentId = opts.parentId as Id<"files">;
     const parentFolder = await convex.query(api.system.getFileById, {
       internalKey: opts.internalKey,
+      projectId: opts.projectId,
       fileId: resolvedParentId,
     });
     if (!parentFolder) {
@@ -159,6 +165,7 @@ async function createFolderStep(opts: {
   if (opts.parentId) {
     const parentFolder = await convex.query(api.system.getFileById, {
       internalKey: opts.internalKey,
+      projectId: opts.projectId,
       fileId: opts.parentId as Id<"files">,
     });
     if (!parentFolder) {
@@ -187,6 +194,7 @@ async function createFolderStep(opts: {
 
 async function renameFileStep(opts: {
   internalKey: string;
+  projectId: Id<"projects">;
   fileId: string;
   newName: string;
 }) {
@@ -194,6 +202,7 @@ async function renameFileStep(opts: {
 
   const file = await convex.query(api.system.getFileById, {
     internalKey: opts.internalKey,
+    projectId: opts.projectId,
     fileId: opts.fileId as Id<"files">,
   });
 
@@ -206,6 +215,7 @@ async function renameFileStep(opts: {
 
   await convex.mutation(api.system.renameFile, {
     internalKey: opts.internalKey,
+    projectId: opts.projectId,
     fileId: opts.fileId as Id<"files">,
     newName: opts.newName,
   });
@@ -218,6 +228,7 @@ async function renameFileStep(opts: {
 
 async function deleteFilesStep(opts: {
   internalKey: string;
+  projectId: Id<"projects">;
   fileIds: string[];
 }) {
   "use step";
@@ -226,6 +237,7 @@ async function deleteFilesStep(opts: {
   for (const fileId of opts.fileIds) {
     const file = await convex.query(api.system.getFileById, {
       internalKey: opts.internalKey,
+      projectId: opts.projectId,
       fileId: fileId as Id<"files">,
     });
     if (!file) {
@@ -241,6 +253,7 @@ async function deleteFilesStep(opts: {
   for (const file of targets) {
     await convex.mutation(api.system.deleteFile, {
       internalKey: opts.internalKey,
+      projectId: opts.projectId,
       fileId: file.id as Id<"files">,
     });
     messages.push(`Deleted ${file.type} "${file.name}" successfully`);
@@ -342,7 +355,7 @@ export function createCodingTools({ internalKey, projectId }: ToolFactoryOptions
       }),
       execute: async ({ fileIds }) =>
         safeExecute("readFiles", async () => {
-          const files = await readFilesStep({ internalKey, fileIds });
+          const files = await readFilesStep({ internalKey, projectId, fileIds });
           if (files.length === 0) {
             return "Error: No files found with provided IDs. Use listFiles to get valid fileIDs.";
           }
@@ -358,7 +371,7 @@ export function createCodingTools({ internalKey, projectId }: ToolFactoryOptions
       }),
       execute: async ({ fileId, content }) =>
         safeExecute("updateFile", async () => {
-          const result = await updateFileStep({ internalKey, fileId, content });
+          const result = await updateFileStep({ internalKey, projectId, fileId, content });
           return result.ok ? result.message : `Error: ${result.error}`;
         }),
     }),
@@ -425,7 +438,7 @@ export function createCodingTools({ internalKey, projectId }: ToolFactoryOptions
       }),
       execute: async ({ fileId, newName }) =>
         safeExecute("renameFile", async () => {
-          const result = await renameFileStep({ internalKey, fileId, newName });
+          const result = await renameFileStep({ internalKey, projectId, fileId, newName });
           return result.ok ? result.message : `Error: ${result.error}`;
         }),
     }),
@@ -441,7 +454,7 @@ export function createCodingTools({ internalKey, projectId }: ToolFactoryOptions
       }),
       execute: async ({ fileIds }) =>
         safeExecute("deleteFiles", async () => {
-          const result = await deleteFilesStep({ internalKey, fileIds });
+          const result = await deleteFilesStep({ internalKey, projectId, fileIds });
           return result.ok ? result.messages.join("\n") : `Error: ${result.error}`;
         }),
     }),

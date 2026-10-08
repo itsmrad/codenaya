@@ -8,6 +8,7 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
 
 interface DeleteFilesToolOptions {
+  projectId: Id<"projects">;
   internalKey: string;
 }
 
@@ -18,6 +19,7 @@ const paramsSchema = z.object({
 });
 
 export const createDeleteFilesTool = ({
+  projectId,
   internalKey,
 }: DeleteFilesToolOptions) => {
   return createTool({
@@ -45,7 +47,7 @@ export const createDeleteFilesTool = ({
       }[] = [];
 
       for (const fileId of fileIds) {
-        const file = await getFileByAgentId(internalKey, fileId);
+        const file = await getFileByAgentId(internalKey, projectId, fileId);
 
         if (!file) {
           return `Error: File with ID "${fileId}" not found. Use listFiles to get valid file IDs.`;
@@ -65,6 +67,7 @@ export const createDeleteFilesTool = ({
           for (const file of filesToDelete) {
             await convex.mutation(api.system.deleteFile, {
               internalKey,
+              projectId,
               fileId: file.id as Id<"files">,
             });
 
