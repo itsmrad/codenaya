@@ -20,12 +20,19 @@ import {
   dispatchProcessMessageOrFail,
 } from "@/lib/message-processor";
 import { detectCredential } from "@/features/integrations/credential-guard";
+import { seedTemplateFiles } from "@/features/templates/server/seed-template";
+import {
+  STARTER_TEMPLATE_IDS,
+  getStarterTemplate,
+} from "@/features/templates/templates";
 
 import { api } from "../../../../../convex/_generated/api";
 
 const requestSchema = z.object({
   prompt: z.string().min(1),
   model: modelChoiceSchema,
+  /** Seeds the project with a starter template's files first (#119). */
+  templateId: z.enum(STARTER_TEMPLATE_IDS).optional(),
 });
 
 export async function POST(request: Request) {
@@ -45,7 +52,8 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { prompt, model } = requestSchema.parse(body);
+  const { prompt, model, templateId } = requestSchema.parse(body);
+  const template = templateId ? getStarterTemplate(templateId) : undefined;
 
   if (detectCredential(prompt).detected) {
     return NextResponse.json(
@@ -68,12 +76,14 @@ export async function POST(request: Request) {
     return rejected;
   }
 
-  // Generate a random project name
-  const projectName = uniqueNamesGenerator({
-    dictionaries: [adjectives, animals, colors],
-    separator: "-",
-    length: 3,
-  });
+  // Name it after its template, or generate a random name
+  const projectName =
+    template?.id ??
+    uniqueNamesGenerator({
+      dictionaries: [adjectives, animals, colors],
+      separator: "-",
+      length: 3,
+    });
 
   // Create project and conversation together
   const { projectId, conversationId } = await convex.mutation(
@@ -85,6 +95,10 @@ export async function POST(request: Request) {
       ownerId: userId,
     },
   );
+
+  if (template) {
+    await seedTemplateFiles({ internalKey, projectId, template });
+  }
 
   // Create user message
   await convex.mutation(api.system.createMessage, {

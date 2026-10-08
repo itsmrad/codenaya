@@ -12,7 +12,7 @@ type ShowcaseCardProps = {
   project: ShowcaseProject;
 } & ({ href: string; onClick?: never } | { onClick: () => void; href?: never });
 
-const CARD_CLASS =
+export const CARD_CLASS =
   "group block text-left w-full rounded-xl border border-border/50 bg-card overflow-hidden hover:border-border/80 hover:shadow-md transition-all duration-200";
 
 /** A showcase project card: a link to its page, or a button (e.g. to open a dialog). */

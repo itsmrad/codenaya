@@ -43,4 +43,12 @@ describe("coding agent integration instructions", () => {
       'resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } }',
     );
   });
+
+  it("starts new Vite apps from the scaffold and checks config references", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("For a NEW Vite + React app, call scaffoldViteApp FIRST");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      'each tsconfig "references" and "extends" path, and the index.html entry script',
+    );
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("keep every package it already lists");
+  });
 });
