@@ -56,7 +56,7 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody }) =>
     vi.stubEnv("MESSAGE_PROCESSOR", "inngest");
     vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.auth.mockResolvedValue({ userId: "user_1" });
-    // getConversationById, then getProcessingMessages (messages route only).
+    // getOwnedConversation, then getProcessingMessages (messages route only).
     mocks.query
       .mockResolvedValueOnce({ _id: "c1", projectId: "p1" })
       .mockResolvedValueOnce([]);
@@ -145,7 +145,10 @@ describe("cancelling processing messages while the backend is down", () => {
     });
 
   it("Stop still marks the stuck message cancelled", async () => {
-    mocks.query.mockResolvedValueOnce([{ _id: "m_stuck" }]);
+    // getOwnedProject, then getProcessingMessages.
+    mocks.query
+      .mockResolvedValueOnce({ _id: "p1", ownerId: "user_1" })
+      .mockResolvedValueOnce([{ _id: "m_stuck" }]);
 
     const res = await cancelPOST(post({ projectId: "p1" }));
 

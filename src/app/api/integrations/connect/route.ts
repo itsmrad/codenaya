@@ -15,6 +15,7 @@ import {
   rateLimitedResponse,
 } from "@/features/integrations/server/rate-limit";
 import { assertSafeMcpUrl } from "@/features/integrations/server/url-guard";
+import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
@@ -100,16 +101,8 @@ export async function POST(request: Request) {
   const { providerId, apiKey, label, serverUrl, projectId } = parsed.data;
 
   if (projectId) {
-    try {
-      const project = await convex.query(api.system.getProjectById, {
-        internalKey,
-        projectId: projectId as Id<"projects">,
-      });
-      if (!project) return jsonError("Project not found", 404);
-      if (project.ownerId !== userId) return jsonError("Forbidden", 403);
-    } catch {
-      return jsonError("Invalid project", 400);
-    }
+    const { notFound } = await requireOwnedProject({ internalKey, userId, projectId });
+    if (notFound) return notFound;
   }
 
   // ── Resolve the target endpoint and credential placement ──

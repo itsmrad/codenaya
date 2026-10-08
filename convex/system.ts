@@ -1488,6 +1488,44 @@ export const getProjectById = query({
   },
 });
 
+/**
+ * The project when `userId` owns it, else `null`: missing, someone else's and
+ * malformed ids all look the same, so API routes can answer 404 to all three
+ * without revealing which projects exist (#208).
+ */
+export const getOwnedProject = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.string(),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const projectId = ctx.db.normalizeId("projects", args.projectId);
+    if (!projectId) return null;
+    const project = await ctx.db.get("projects", projectId);
+    return project?.ownerId === args.userId ? project : null;
+  },
+});
+
+/** `getOwnedProject` for a conversation: `null` unless `userId` owns its project. */
+export const getOwnedConversation = query({
+  args: {
+    internalKey: v.string(),
+    conversationId: v.string(),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const conversationId = ctx.db.normalizeId("conversations", args.conversationId);
+    if (!conversationId) return null;
+    const conversation = await ctx.db.get("conversations", conversationId);
+    if (!conversation) return null;
+    const project = await ctx.db.get("projects", conversation.projectId);
+    return project?.ownerId === args.userId ? conversation : null;
+  },
+});
+
 
 /**
  * Create or replace a public environment variable from the server.

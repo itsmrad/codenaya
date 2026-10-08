@@ -7,8 +7,7 @@ import {
   getGithubToken,
   githubNotLinkedResponse,
 } from "@/features/projects/server/github-token";
-
-import { Id } from "../../../../../convex/_generated/dataModel";
+import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
 
 const requestSchema = z.object({
   projectId: z.string(),
@@ -27,12 +26,6 @@ export async function POST(request: Request) {
   const body = await request.json();
   const { projectId, repoName, visibility, description } = requestSchema.parse(body);
 
-  const githubToken = await getGithubToken(userId);
-
-  if (!githubToken) {
-    return githubNotLinkedResponse();
-  }
-
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
 
   if (!internalKey) {
@@ -42,10 +35,26 @@ export async function POST(request: Request) {
     );
   }
 
+  const { found: project, notFound } = await requireOwnedProject({
+    internalKey,
+    userId,
+    projectId,
+  });
+
+  if (notFound) {
+    return notFound;
+  }
+
+  const githubToken = await getGithubToken(userId);
+
+  if (!githubToken) {
+    return githubNotLinkedResponse();
+  }
+
   const event = await inngest.send({
     name: "github/export.repo",
     data: {
-      projectId,
+      projectId: project._id,
       repoName,
       visibility,
       description,
