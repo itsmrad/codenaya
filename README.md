@@ -63,7 +63,8 @@ Codenaya is a browser-based IDE inspired by Cursor AI, featuring:
   - [Clerk](https://clerk.com) - Authentication
   - [Convex](https://convex.dev) - Database
   - [Inngest](https://inngest.com) - Background jobs
-  - [Anthropic](https://anthropic.com) or [Google AI Studio](https://aistudio.google.com) - AI API (one required)
+  - [OpenRouter](https://openrouter.ai) - LLM API
+  - [E2B](https://e2b.dev) - Cloud sandbox previews
   - [Firecrawl](https://firecrawl.dev) - Web scraping (optional)
   - [Sentry](https://sentry.io) - Error tracking (optional)
 
@@ -88,35 +89,7 @@ Codenaya is a browser-based IDE inspired by Cursor AI, featuring:
    cp .env.example .env.local
    ```
 
-4. Configure your `.env.local` with the required keys:
-
-   ```env
-   # Clerk
-   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
-   CLERK_SECRET_KEY=
-   CLERK_JWT_ISSUER_DOMAIN=  # Also set this on the Convex deployment
-
-   # Convex
-   NEXT_PUBLIC_CONVEX_URL=
-   CONVEX_DEPLOYMENT=
-   CODENAYA_CONVEX_INTERNAL_KEY=  # Generate a random string
-
-   # Cloud sandbox previews
-   E2B_API_KEY=
-   E2B_TEMPLATE=  # Optional: Node 22 template from `npm run e2b:template`
-
-   # AI provider
-   OPENROUTER_API_KEY=
-
-   # Credential encryption
-   CODENAYA_LOCAL_KEK=  # Generate with: openssl rand -base64 32
-
-   # Firecrawl (optional)
-   FIRECRAWL_API_KEY=
-
-   # Sentry (optional)
-   SENTRY_DSN=
-   ```
+4. Fill in `.env.local`. `.env.example` lists every variable the app reads, split into **Required** and **Optional**, and tags each with where it goes: the Next.js host, the Convex deployment, or both. See [Environment & secrets](#environment--secrets).
 
 5. Start the Convex development server:
 
@@ -138,9 +111,17 @@ Codenaya is a browser-based IDE inspired by Cursor AI, featuring:
 
 8. Open [http://localhost:3000](http://localhost:3000)
 
-### Secrets (Infisical)
+### Environment & secrets
 
-Secrets are managed in the Infisical project `codenaya` (environments: `dev`, `staging`, `prod`). The project is linked via `.infisical.json`, which holds no secret values.
+`.env.example` is the reference for every variable: required vs optional, a one-line description, and a tag for where it is read:
+
+- **[Next]** by the Next.js server (and Inngest functions, which run inside it).
+- **[Convex]** by Convex functions, which run on Convex's servers and see only the deployment's own env: `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`.
+- **[Both]** in both places, with the same value: `CODENAYA_CONVEX_INTERNAL_KEY`.
+
+#### Infisical
+
+Secrets live in the Infisical project `codenaya` (environments: `dev`, `staging`, `prod`). The project is linked via `.infisical.json`, which holds no secret values. Never commit `.env*` files or paste secret values into issues or PRs.
 
 ```bash
 infisical login                    # once per machine
@@ -148,11 +129,23 @@ npm run dev:infisical              # next dev with dev secrets injected
 infisical run --env dev -- <cmd>   # inject secrets into any other command
 ```
 
-Infisical only injects secrets into local processes. Convex functions run on Convex servers, so secrets they read (e.g. `CLERK_JWT_ISSUER_DOMAIN`, `CODENAYA_CONVEX_INTERNAL_KEY`) must also be set on the deployment:
+Outside the repo root (or in a worktree without `.infisical.json`), pass the project explicitly: `infisical run --env dev --projectId 2aecb08a-77b7-45fb-b366-57a36ffab934 -- <cmd>`. `NEXT_PUBLIC_CONVEX_URL` and `CONVEX_DEPLOYMENT` are written to `.env.local` by `npx convex dev`.
+
+Infisical only injects secrets into local processes. Convex variables must also be set on the deployment:
 
 ```bash
-npx convex env set NAME value
+npx convex env set NAME value          # dev deployment
+npx convex env set --prod NAME value   # production deployment
 ```
+
+#### Production checklist
+
+1. **Next.js host env.** Set every Required `[Next]` variable from the Infisical `prod` environment, plus `NEXT_PUBLIC_APP_URL` (or `INTEGRATIONS_REDIRECT_URI`) for the real domain. Use the same `CODENAYA_LOCAL_KEK` as every other environment, or stored credentials cannot be decrypted.
+2. **Convex env.** On the production deployment, set `CLERK_JWT_ISSUER_DOMAIN` (the production Clerk instance), `CLERK_WEBHOOK_SECRET` (step 4) and `CODENAYA_CONVEX_INTERNAL_KEY` (same value as the host).
+3. **Convex deploy + backfill.** Deploy functions and schema with `npx convex deploy --cmd 'npm run build'` (needs `CONVEX_DEPLOY_KEY`; keep `npm run build` as plain `next build`). After the first deploy, backfill the landing-page project counter once: `npx convex run --prod stats:backfillProjectsBuilt '{}'`.
+4. **Clerk webhook.** In the production Clerk instance, add a webhook to `https://<prod-deployment>.convex.site/clerk-users-webhook` with events `user.created`, `user.updated`, `user.deleted`; put its signing secret in Convex as `CLERK_WEBHOOK_SECRET`. Enable "Delete account" under User & authentication > Account settings.
+5. **E2B template.** Run `npm run e2b:template` with the production `E2B_API_KEY`, then set `E2B_TEMPLATE=codenaya-node22` on the host. Without it previews use the `base` image, whose Node is too old for Vite 7.
+6. **Inngest Cloud.** Set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` on the host, leave `INNGEST_DEV` unset, and sync the app at `https://<your-domain>/api/inngest` (the Inngest Vercel integration does both automatically).
 
 ### Running e2e tests
 
