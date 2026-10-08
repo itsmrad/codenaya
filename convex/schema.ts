@@ -205,9 +205,12 @@ export default defineSchema({
   })
     .index("by_status_and_publishedAt", ["status", "publishedAt"])
     .index("by_status_and_upvotes", ["status", "upvotes"])
+    .index("by_status_and_importCount", ["status", "importCount"])
     .index("by_owner", ["ownerId"])
     .index("by_projectId", ["projectId"])
-    .index("by_status_and_category", ["status", "category"])
+    .index("by_status_and_category_and_publishedAt", ["status", "category", "publishedAt"])
+    .index("by_status_and_category_and_upvotes", ["status", "category", "upvotes"])
+    .index("by_status_and_category_and_importCount", ["status", "category", "importCount"])
     .searchIndex("search_title", {
       searchField: "title",
       filterFields: ["status", "category"],
