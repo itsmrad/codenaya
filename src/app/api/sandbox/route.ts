@@ -14,6 +14,10 @@ import {
   forgetSandbox,
   rememberSandbox,
 } from "@/features/sandbox-preview/server/sandbox-registry";
+import {
+  missingReferencedFiles,
+  undeclaredPackages,
+} from "@/features/sandbox-preview/utils/missing-references";
 import { nodeIncompatibility } from "@/features/sandbox-preview/utils/node-compat";
 import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 import { convex } from "@/lib/convex-client";
@@ -196,6 +200,22 @@ export async function POST(request: Request) {
       let sandbox: Sandbox | null = null;
 
       try {
+        // Name the missing file now rather than leave Vite's overlay to (#190).
+        const missing = missingReferencedFiles(files);
+        if (missing.length > 0) {
+          throw new Error(
+            `The project's config points at files that don't exist: ${missing.join(", ")}. ` +
+              "Ask the agent to create them, or remove the references.",
+          );
+        }
+        const undeclared = undeclaredPackages(files);
+        if (undeclared.length > 0) {
+          throw new Error(
+            `The project imports packages missing from package.json: ${undeclared.join(", ")}. ` +
+              "Ask the agent to add them to package.json.",
+          );
+        }
+
         // --- Boot sandbox ---
         send({ type: "status", status: "booting" });
         send({ type: "output", data: "Creating E2B sandbox...\n" });

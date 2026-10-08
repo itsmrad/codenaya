@@ -5,6 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { syntaxErrorNote } from "./syntax-error";
 
 interface CreateFilesToolOptions {
   projectId: Id<"projects">;
@@ -94,7 +95,10 @@ export const createCreateFilesTool = ({
             response += `. Failed: ${failed.map((r) => `${r.name} (${r.error})`).join(", ")}`;
           }
 
-          return response;
+          return (
+            response +
+            syntaxErrorNote(files.filter((file) => created.some((r) => r.name === file.name)))
+          );
         });
       } catch (error) {
         return `Error creating files: ${error instanceof Error ? error.message : "Unknown error"}`;
