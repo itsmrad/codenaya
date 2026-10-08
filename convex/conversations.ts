@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
 import { verifyAuth } from "./auth";
+import { withImageUrls } from "./chatImages";
 
 export const create = mutation({
   args: {
@@ -106,13 +107,15 @@ export const getMessages = query({
       throw new Error("Unauthorized to access this project");
     }
 
-    return await ctx.db
+    const messages = await ctx.db
       .query("messages")
       .withIndex("by_conversation", (q) =>
         q.eq("conversationId", args.conversationId)
       )
       .order("asc")
       .collect();
+
+    return await withImageUrls(ctx, messages);
   },
 });
 

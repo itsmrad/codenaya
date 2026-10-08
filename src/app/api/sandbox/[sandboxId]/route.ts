@@ -1,5 +1,8 @@
-import { Sandbox } from "e2b";
 import { requireUserId } from "@/features/auth/server/require-user-id";
+import {
+  forgetSandbox,
+  getOwnedSandbox,
+} from "@/features/sandbox-preview/server/sandbox-registry";
 
 interface RouteParams {
   params: Promise<{ sandboxId: string }>;
@@ -21,13 +24,13 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
   const { sandboxId } = await params;
 
   try {
-    const sandbox = await Sandbox.connect(sandboxId);
-    const sandboxInfo = await sandbox.getInfo();
+    const sandbox = await getOwnedSandbox(sandboxId, userId);
 
-    if (sandboxInfo.metadata?.userId !== userId) {
+    if (!sandbox) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    forgetSandbox(sandboxId);
     await sandbox.kill();
 
     return Response.json({ success: true });
@@ -86,21 +89,25 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   const WORK_DIR = "/home/user/app";
 
   try {
-    const sandbox = await Sandbox.connect(sandboxId);
-    const sandboxInfo = await sandbox.getInfo();
+    const sandbox = await getOwnedSandbox(sandboxId, userId);
 
-    if (sandboxInfo.metadata?.userId !== userId) {
+    if (!sandbox) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    await Promise.all(
-      files.map((file) =>
-        sandbox.files.write(`${WORK_DIR}/${file.path}`, file.content)
-      )
+    // One request for the whole batch instead of one per file.
+    await sandbox.files.write(
+      files.map((file) => ({
+        path: `${WORK_DIR}/${file.path}`,
+        data: file.content,
+      }))
     );
 
     return Response.json({ success: true, synced: files.length });
   } catch (error) {
+    // The cached handle may belong to a sandbox that has since died.
+    forgetSandbox(sandboxId);
+
     const message = error instanceof Error ? error.message : "Unknown error";
 
     return Response.json({ success: false, error: message }, { status: 500 });

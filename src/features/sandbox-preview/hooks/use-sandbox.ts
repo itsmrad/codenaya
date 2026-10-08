@@ -246,7 +246,7 @@ export const useSandbox = ({
           // Non-critical — file sync failure shouldn't crash the preview
         })
         .then(); // Return void promise
-    }, 1000); // 1-second debounce window
+    }, 300); // Short enough to feel instant, long enough to batch a burst of writes
 
     return () => clearTimeout(timeoutId);
   }, [files, status]);
