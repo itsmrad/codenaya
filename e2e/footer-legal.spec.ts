@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { collectConsoleErrors } from "./console-errors";
 
 test.describe("footer and legal pages (signed out)", () => {
-  for (const name of ["Pricing", "Terms", "Privacy"]) {
+  for (const name of ["Pricing", "Docs", "Terms", "Privacy"]) {
     test(`footer "${name}" link opens a page with a heading`, async ({ page }) => {
       const errors = collectConsoleErrors(page);
       await page.goto("/");

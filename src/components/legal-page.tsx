@@ -3,6 +3,11 @@ import type { ReactNode } from "react";
 import { AppNavbar } from "@/components/app-navbar";
 import { LandingFooter } from "@/components/landing/footer";
 import { CONTACT_EMAIL } from "@/lib/site";
+import { cn } from "@/lib/utils";
+
+/** Body text styles shared by the public text pages (legal, docs). */
+export const PROSE_CLASS_NAME =
+  "flex flex-col gap-8 text-sm md:text-base leading-relaxed text-muted-foreground [&_h2]:mb-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1 [&_a]:text-foreground [&_a]:underline [&_a]:underline-offset-4";
 
 type LegalPageProps = {
   title: string;
@@ -27,7 +32,7 @@ export const LegalPage = ({ title, lastUpdated, children }: LegalPageProps) => {
           <strong>Template.</strong> This page is placeholder text pending legal review and is
           not yet a binding agreement.
         </p>
-        <div className="mt-10 flex flex-col gap-8 text-sm md:text-base leading-relaxed text-muted-foreground [&_h2]:mb-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1 [&_a]:text-foreground [&_a]:underline [&_a]:underline-offset-4">
+        <div className={cn("mt-10", PROSE_CLASS_NAME)}>
           {children}
         </div>
       </main>
