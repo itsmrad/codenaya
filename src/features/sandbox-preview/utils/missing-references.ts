@@ -1,22 +1,27 @@
+import { builtinModules } from "node:module";
 import { posix } from "node:path";
 
 /**
- * A tsconfig.json that references a tsconfig.app.json nobody wrote, or an
- * index.html whose entry script doesn't exist, boots into a Vite error overlay
- * (#190). The sandbox checks for them before booting so the user gets the
- * missing file's name instead.
+ * A tsconfig.json that references a tsconfig.app.json nobody wrote, an
+ * index.html whose entry script doesn't exist, or a tailwind.config.ts that
+ * imports a package missing from package.json, boots into a Vite error
+ * overlay (#190). The sandbox checks for them before booting so the user gets
+ * the missing file's or package's name instead.
  */
 
 type ProjectFile = { path: string; content: string };
 
-/** tsconfig files are JSONC: drop comments and trailing commas, keep strings intact. */
-const parseJsonc = (text: string): unknown => {
-  const withoutComments = text.replace(
-    /("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
+/** Drops line and block comments, leaving string literals (which may contain them) intact. */
+const stripComments = (text: string) =>
+  text.replace(
+    /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
     (match, string: string | undefined) => string ?? "",
   );
+
+/** tsconfig files are JSONC: drop comments and trailing commas. */
+const parseJsonc = (text: string): unknown => {
   try {
-    return JSON.parse(withoutComments.replace(/,(\s*[}\]])/g, "$1"));
+    return JSON.parse(stripComments(text).replace(/,(\s*[}\]])/g, "$1"));
   } catch {
     return null;
   }
@@ -84,4 +89,52 @@ export const missingReferencedFiles = (files: ProjectFile[]): string[] => {
   }
 
   return missing;
+};
+
+const SOURCE_FILE = /\.(?:[cm]?[jt]sx?)$/;
+const IMPORT_SPECIFIER =
+  /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'`]([^"'`\n]+)["'`]/g;
+const BUILTINS = new Set(builtinModules);
+
+/** `react-dom/client` → `react-dom`, `@radix-ui/react-slot/x` → `@radix-ui/react-slot`. */
+const packageName = (specifier: string): string | null => {
+  // Relative and absolute paths, the "@/" and "~/" aliases, URLs and virtual modules.
+  if (/^(?:\.|\/|@\/|~|#|[a-z]+:)/i.test(specifier)) return null;
+  const parts = specifier.split("?")[0].split("/");
+  const name = specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+  return BUILTINS.has(name) ? null : name;
+};
+
+/**
+ * Describes each package the project's code imports but its package.json
+ * doesn't declare, e.g. `tailwindcss-animate (imported by tailwind.config.ts)`.
+ */
+export const undeclaredPackages = (files: ProjectFile[]): string[] => {
+  const manifest = files.find((file) => file.path === "package.json");
+  const pkg = manifest ? (parseJsonc(manifest.content) as Record<string, unknown> | null) : null;
+  if (!pkg || typeof pkg !== "object") return [];
+
+  const declared = new Set(
+    ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"].flatMap(
+      (field) => Object.keys((pkg[field] as Record<string, string> | undefined) ?? {}),
+    ),
+  );
+  // Workspace packages declare their own dependencies.
+  const nestedPackages = files
+    .filter((file) => file.path.endsWith("/package.json"))
+    .map((file) => file.path.slice(0, -"package.json".length));
+  const undeclared = new Map<string, string>();
+
+  for (const file of files) {
+    if (!SOURCE_FILE.test(file.path) || file.path.endsWith(".d.ts")) continue;
+    if (nestedPackages.some((dir) => file.path.startsWith(dir))) continue;
+    for (const [, specifier] of stripComments(file.content).matchAll(IMPORT_SPECIFIER)) {
+      const name = packageName(specifier);
+      if (name && !declared.has(name) && !undeclared.has(name)) {
+        undeclared.set(name, file.path);
+      }
+    }
+  }
+
+  return [...undeclared].map(([name, path]) => `${name} (imported by ${path})`);
 };

@@ -389,7 +389,7 @@ Always generate a complete, correct package.json with ALL dependencies used in t
   import { fileURLToPath, URL } from "node:url"
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } }
   and the matching "baseUrl": "." and "paths": { "@/*": ["./src/*"] } in tsconfig.json
-- For a new Vite + React app, scaffoldViteApp writes all of this correctly. Add dependencies to its package.json with updateFile; never replace the versions above
+- For a new Vite + React app, scaffoldViteApp writes all of this correctly. When you update its package.json, keep every package it already lists (tailwind.config.ts imports tailwindcss-animate, src/main.tsx imports @fontsource/inter) and only add new ones; never replace the versions above
 </package_json_rules>
 
 <content_standards>
@@ -444,6 +444,7 @@ VERIFICATION:
 11. Re-read critical files (App.tsx, main entry, package.json) to confirm no missing imports or broken references
 12. Verify every shadcn component imported in page files has its corresponding source file in src/components/ui/
 13. Verify every file a config points at exists: each tsconfig "references" and "extends" path, and the index.html entry script. The preview refuses to start otherwise
+14. Verify every package imported anywhere, config files included, is listed in package.json. The preview refuses to start otherwise
 </workflow>
 
 <response_format>

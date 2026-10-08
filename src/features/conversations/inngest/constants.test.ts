@@ -49,5 +49,6 @@ describe("coding agent integration instructions", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       'each tsconfig "references" and "extends" path, and the index.html entry script',
     );
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("keep every package it already lists");
   });
 });
