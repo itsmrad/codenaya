@@ -101,6 +101,22 @@ export async function persistConversationTitle(opts: {
   });
 }
 
+/** Checkpoint before the agent runs (#43). Best effort, like the Inngest step. */
+export async function createProjectCheckpoint(opts: {
+  internalKey: string;
+  projectId: Id<"projects">;
+  messageId: Id<"messages">;
+  label: string;
+}) {
+  "use step";
+
+  try {
+    await convex.mutation(api.system.createProjectCheckpoint, opts);
+  } catch (error) {
+    console.error("[checkpoints] failed to snapshot project", error);
+  }
+}
+
 export async function persistAssistantMessage(opts: {
   internalKey: string;
   messageId: Id<"messages">;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpenIcon, CheckIcon, CopyIcon, RotateCcwIcon } from "lucide-react";
+import { BookOpenIcon, CheckIcon, CopyIcon, RotateCcwIcon, Undo2Icon } from "lucide-react";
 
 import {
   MessageAction,
@@ -137,6 +137,8 @@ interface AssistantMessageProps {
   pathOf?: (fileId: string) => string | undefined;
   onOpenFile?: (path: string) => void;
   onRetry?: () => void;
+  /** Set when a checkpoint was taken before this run (#43). */
+  onRestore?: () => void;
 }
 
 export const AssistantMessage = ({
@@ -145,6 +147,7 @@ export const AssistantMessage = ({
   pathOf,
   onOpenFile,
   onRetry,
+  onRestore,
 }: AssistantMessageProps) => {
   const [copied, setCopied] = useState(false);
   const status = message.status ?? "completed";
@@ -158,6 +161,18 @@ export const AssistantMessage = ({
   // already completed (history) stays still.
   const [startedProcessing] = useState(status === "processing");
   const settle = startedProcessing && "animate-fade-up motion-reduce:animate-none";
+
+  const restoreAction = onRestore && status !== "processing" && (
+    <MessageAction
+      size="icon-sm"
+      label="Restore to before this run"
+      tooltip="Restore to before this run"
+      onClick={onRestore}
+      className="size-7 text-muted-foreground hover:text-foreground"
+    >
+      <Undo2Icon className="size-3.5" />
+    </MessageAction>
+  );
 
   const copy = () => {
     navigator.clipboard.writeText(content);
@@ -191,6 +206,10 @@ export const AssistantMessage = ({
       )}
       {status === "cancelled" && steps.length === 0 && (
         <p className="text-sm text-muted-foreground">Request cancelled</p>
+      )}
+      {/* A stopped run may still have changed files. */}
+      {status === "cancelled" && restoreAction && (
+        <MessageActions className="-ml-1.5 -mt-1">{restoreAction}</MessageActions>
       )}
       {status === "completed" && content && (
         <>
@@ -226,6 +245,7 @@ export const AssistantMessage = ({
                 <RotateCcwIcon className="size-3.5" />
               </MessageAction>
             )}
+            {restoreAction}
           </MessageActions>
         </>
       )}

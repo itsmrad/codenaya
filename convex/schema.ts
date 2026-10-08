@@ -108,6 +108,34 @@ export default defineSchema({
     .index("by_parent", ["parentId"])
     .index("by_project_parent", ["projectId", "parentId"]),
 
+  /**
+   * The project's files just before an agent run (#43), restorable from the
+   * chat. One row per run, keyed by its assistant message; see
+   * `convex/checkpoints.ts`.
+   */
+  checkpoints: defineTable({
+    projectId: v.id("projects"),
+    messageId: v.id("messages"),
+    // The prompt that started the run, for the history list.
+    label: v.string(),
+    fileCount: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_message", ["messageId"]),
+
+  /** One file or folder of a checkpoint. Binary files keep their blob. */
+  checkpointFiles: defineTable({
+    checkpointId: v.id("checkpoints"),
+    projectId: v.id("projects"),
+    path: v.string(),
+    type: v.union(v.literal("file"), v.literal("folder")),
+    content: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
+  })
+    .index("by_checkpoint", ["checkpointId"])
+    .index("by_project", ["projectId"])
+    .index("by_storageId", ["storageId"]),
+
   conversations: defineTable({
     projectId: v.id("projects"),
     title: v.string(),

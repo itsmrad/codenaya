@@ -90,6 +90,23 @@ export async function deleteProjectBatch(
   }
   if (await deleteRows(ctx, "files", files)) return false;
 
+  const checkpointFiles = await ctx.db
+    .query("checkpointFiles")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .take(CASCADE_BATCH_SIZE);
+  for (const row of checkpointFiles) {
+    if (row.storageId) {
+      await deleteStorageIfPresent(ctx, row.storageId);
+    }
+  }
+  if (await deleteRows(ctx, "checkpointFiles", checkpointFiles)) return false;
+
+  const checkpoints = await ctx.db
+    .query("checkpoints")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "checkpoints", checkpoints)) return false;
+
   const messages = await ctx.db
     .query("messages")
     .withIndex("by_project_status", (q) => q.eq("projectId", projectId))
