@@ -7,6 +7,7 @@ import {
 import { isVertexConfigured } from "@/features/conversations/workflow/lib/vertex-model";
 
 import type { AgentModelChoice } from "@/features/conversations/agent-models";
+import type { MessageMode } from "@/features/conversations/plan-mode";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -56,6 +57,8 @@ interface ProcessMessageDispatchInput {
    * the Workflow backend always runs on Vertex with the platform key.
    */
   model?: AgentModelChoice;
+  /** Plan mode (#120): no write tools; omitted means build. */
+  mode?: MessageMode;
 }
 
 interface DispatchResult {
@@ -96,6 +99,7 @@ export async function dispatchProcessMessage(
       model: input.model
         ? { keyId: input.model.keyId, modelId: input.model.modelId }
         : undefined,
+      mode: input.mode,
     },
   });
 

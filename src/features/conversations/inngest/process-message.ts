@@ -54,6 +54,12 @@ import {
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
+import {
+  type MessageMode,
+  PLAN_MODE,
+  PLAN_MODE_PROMPT,
+  PLAN_MODE_TOOLS,
+} from '../plan-mode';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -65,6 +71,8 @@ interface MessageEvent {
    * bare platform model id on events sent before BYOK.
    */
   model?: string | AgentModelChoice;
+  /** Plan mode (#120): read-only tools, and the reply is a plan. */
+  mode?: MessageMode;
 };
 
 export const processMessage = inngest.createFunction(
@@ -101,7 +109,9 @@ export const processMessage = inngest.createFunction(
       projectId,
       message,
       model,
+      mode,
     } = event.data as MessageEvent;
+    const planMode = mode === PLAN_MODE;
 
     const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
 
@@ -478,6 +488,10 @@ export const processMessage = inngest.createFunction(
 
     systemPrompt += buildSkillsPromptSection(skills, forced, unavailable);
 
+    if (planMode) {
+      systemPrompt += PLAN_MODE_PROMPT;
+    }
+
     // Display only: mirrors the agent's tool calls onto the assistant message
     // for the chat panel's activity block. Each write is its own step, so replays
     // reuse the recorded result instead of writing again, and it never throws:
@@ -527,19 +541,37 @@ export const processMessage = inngest.createFunction(
 
     // Checkpoint (#43): the files as they are before the agent touches them,
     // so the run can be restored from the chat. Best effort: a failed snapshot
-    // must not fail the run.
-    await step.run("create-checkpoint", async () => {
-      try {
-        await convex.mutation(api.system.createProjectCheckpoint, {
-          internalKey,
-          projectId,
-          messageId,
-          label: message,
-        });
-      } catch (error) {
-        console.error("[checkpoints] failed to snapshot project", error);
-      }
-    });
+    // must not fail the run. A plan-mode run changes nothing to restore.
+    if (!planMode) {
+      await step.run("create-checkpoint", async () => {
+        try {
+          await convex.mutation(api.system.createProjectCheckpoint, {
+            internalKey,
+            projectId,
+            messageId,
+            label: message,
+          });
+        } catch (error) {
+          console.error("[checkpoints] failed to snapshot project", error);
+        }
+      });
+    }
+
+    const tools: Tool.Any[] = [
+      createListFilesTool({ internalKey, projectId }),
+      createReadFilesTool({ internalKey }),
+      createUpdateFileTool({ internalKey }),
+      createCreateFilesTool({ projectId, internalKey }),
+      createCreateFolderTool({ projectId, internalKey }),
+      createRenameFileTool({ internalKey }),
+      createDeleteFilesTool({ internalKey }),
+      createScrapeUrlsTool(),
+      ...(mcpOwnerId
+        ? [createSetEnvVarTool({ projectId, ownerId: mcpOwnerId, internalKey })]
+        : []),
+      ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
+      ...mcpTools,
+    ];
 
     // Create the coding agent with file tools
     const codingAgent = createAgent({
@@ -549,21 +581,10 @@ export const processMessage = inngest.createFunction(
       // Re-validated by resolveRunModel: the event is the boundary this function
       // trusts, and anything holding the event key can send one.
       model: runModel.coding(0.3),
-      tools: [
-        createListFilesTool({ internalKey, projectId }),
-        createReadFilesTool({ internalKey }),
-        createUpdateFileTool({ internalKey }),
-        createCreateFilesTool({ projectId, internalKey }),
-        createCreateFolderTool({ projectId, internalKey }),
-        createRenameFileTool({ internalKey }),
-        createDeleteFilesTool({ internalKey }),
-        createScrapeUrlsTool(),
-        ...(mcpOwnerId
-          ? [createSetEnvVarTool({ projectId, ownerId: mcpOwnerId, internalKey })]
-          : []),
-        ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
-        ...mcpTools,
-      ],
+      // Plan mode is enforced here, not just asked for in the prompt.
+      tools: planMode
+        ? tools.filter((tool) => PLAN_MODE_TOOLS.has(tool.name))
+        : tools,
       lifecycle: {
         onStart: ({ prompt, history }) => ({
           prompt: withImageParts(prompt, imageUrls),
