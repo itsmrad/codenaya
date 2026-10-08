@@ -33,6 +33,8 @@ test.describe("public showcase (signed out)", () => {
       await page.goto("/showcase");
 
       await expect(page.getByRole("heading", { name: "Community showcase" })).toBeVisible();
+      // The feed pages newest first; "Top" lists the trending project first.
+      await page.getByRole("button", { name: "Top", exact: true }).click();
       const card = page.locator(`a[href="/showcase/${project!._id}"]`);
       await card.click();
 
