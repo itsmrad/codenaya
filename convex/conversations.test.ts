@@ -1,7 +1,7 @@
 // @vitest-environment edge-runtime
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { api } from "./_generated/api";
 import schema from "./schema";
@@ -90,5 +90,30 @@ describe("conversations.getActiveRun", () => {
     await expect(
       bob.query(api.conversations.getActiveRun, { projectId }),
     ).rejects.toThrow("Unauthorized");
+  });
+});
+
+describe("plan-mode messages (#120)", () => {
+  test("a plan reply keeps its mode for the chat", async () => {
+    const { t, alice } = setup();
+    const { projectId, conversationId } = await seedProject(t);
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "ik");
+    const create = (mode?: "plan") =>
+      t.mutation(api.system.createMessage, {
+        internalKey: "ik",
+        conversationId,
+        projectId,
+        role: "assistant",
+        content: "",
+        status: "processing",
+        ...(mode ? { mode } : {}),
+      });
+
+    const plan = await create("plan");
+    const build = await create();
+
+    const messages = await alice.query(api.conversations.getMessages, { conversationId });
+    expect(messages.find((m) => m._id === plan)?.mode).toBe("plan");
+    expect(messages.find((m) => m._id === build)).not.toHaveProperty("mode");
   });
 });

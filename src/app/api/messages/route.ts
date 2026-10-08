@@ -14,6 +14,7 @@ import {
   dispatchProcessMessageOrFail,
 } from "@/lib/message-processor";
 import { MAX_CHAT_IMAGES } from "@/features/conversations/chat-images";
+import { PLAN_MODE } from "@/features/conversations/plan-mode";
 
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -24,6 +25,8 @@ const requestSchema = z.object({
   model: modelChoiceSchema,
   // Storage ids of images registered through api.chatImages.register.
   images: z.array(z.string()).max(MAX_CHAT_IMAGES).optional(),
+  // Plan mode (#120): the agent replies with a plan and writes nothing.
+  mode: z.literal(PLAN_MODE).optional(),
 });
 
 export async function POST(request: Request) {
@@ -43,7 +46,7 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { conversationId, message, model, images } = requestSchema.parse(body);
+  const { conversationId, message, model, images, mode } = requestSchema.parse(body);
 
   if (detectCredential(message).detected) {
     return NextResponse.json(
@@ -124,6 +127,7 @@ export async function POST(request: Request) {
       content: "",
       status: "processing",
       runModel,
+      mode,
     }
   );
 
@@ -135,6 +139,7 @@ export async function POST(request: Request) {
     projectId,
     message,
     model: runModel,
+    mode,
   });
 
   if (!dispatch) {

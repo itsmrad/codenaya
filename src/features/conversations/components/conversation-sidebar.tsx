@@ -62,6 +62,8 @@ import { useAgentModel } from "../hooks/use-agent-model";
 import { AgentModelSelect } from "./agent-model-select";
 import { useEnhancePrompt } from "../hooks/use-enhance-prompt";
 import { EnhancePromptButton } from "./enhance-prompt-button";
+import { PlanModeToggle } from "./plan-mode-toggle";
+import { type MessageMode, PLAN_MODE, buildPlanMessage } from "../plan-mode";
 import { buildPathIndex } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
 import { useRunStalled } from "./agent-run";
@@ -96,6 +98,7 @@ export const ConversationSidebar = ({
   const enhancer = useEnhancePrompt(input, setInput);
   const slashMenu = useSkillSlashMenu(projectId, input, setInput);
   const uploadImages = useUploadChatImages(projectId);
+  const [planMode, setPlanMode] = useState(false);
   // A key still loading (or gone) is left to the server to check.
   const modelKeys = useAiProviderKeys();
   const modelKey = modelKeys?.find((key) => key._id === agentModel.keyId);
@@ -219,6 +222,7 @@ export const ConversationSidebar = ({
   const sendMessage = async (
     text: string,
     images?: Id<"_storage">[],
+    mode?: MessageMode,
   ): Promise<"sent" | "failed" | "blocked"> => {
     if (detectCredential(text).detected) {
       toast.error(
@@ -245,6 +249,7 @@ export const ConversationSidebar = ({
           message: text,
           model: agentModel,
           images,
+          mode,
         },
       });
       return "sent";
@@ -300,7 +305,11 @@ export const ConversationSidebar = ({
       images = await uploadMessageImages(message.files);
     }
 
-    const result = await sendMessage(finalMessage, images);
+    const result = await sendMessage(
+      finalMessage,
+      images,
+      planMode ? PLAN_MODE : undefined,
+    );
     if (result !== "blocked") {
       // Only clear contexts after a successful send so they aren't lost on failure
       if (result === "sent") clearContexts();
@@ -408,9 +417,13 @@ export const ConversationSidebar = ({
                     const prompt = conversationMessages
                       .slice(0, messageIndex)
                       .findLast((m) => m.role === "user");
-                    // Resend the prompt as-is, leaving the composer draft and
-                    // attached contexts alone.
-                    if (prompt) void sendMessage(prompt.content, prompt.images);
+                    // Resend the prompt as-is, in the reply's mode, leaving the
+                    // composer draft and attached contexts alone.
+                    if (prompt) void sendMessage(prompt.content, prompt.images, message.mode);
+                  }}
+                  onBuildPlan={() => {
+                    setPlanMode(false);
+                    void sendMessage(buildPlanMessage(message.content));
                   }}
                   onRestore={
                     checkpointByMessage.has(message._id) && !isProcessing
@@ -494,6 +507,11 @@ export const ConversationSidebar = ({
                 <EnhancePromptButton
                   enhancer={enhancer}
                   value={input}
+                  disabled={isProcessing}
+                />
+                <PlanModeToggle
+                  pressed={planMode}
+                  onPressedChange={setPlanMode}
                   disabled={isProcessing}
                 />
                 <AgentModelSelect

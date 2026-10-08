@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpenIcon, CheckIcon, CopyIcon, RotateCcwIcon, Undo2Icon } from "lucide-react";
+import {
+  BookOpenIcon,
+  CheckIcon,
+  CopyIcon,
+  HammerIcon,
+  ListChecksIcon,
+  RotateCcwIcon,
+  Undo2Icon,
+} from "lucide-react";
 
 import {
   MessageAction,
@@ -139,6 +147,8 @@ interface AssistantMessageProps {
   onRetry?: () => void;
   /** Set when a checkpoint was taken before this run (#43). */
   onRestore?: () => void;
+  /** A plan-mode reply (#120): sends the plan as the next build message. */
+  onBuildPlan?: () => void;
 }
 
 export const AssistantMessage = ({
@@ -148,6 +158,7 @@ export const AssistantMessage = ({
   onOpenFile,
   onRetry,
   onRestore,
+  onBuildPlan,
 }: AssistantMessageProps) => {
   const [copied, setCopied] = useState(false);
   const status = message.status ?? "completed";
@@ -161,6 +172,7 @@ export const AssistantMessage = ({
   // already completed (history) stays still.
   const [startedProcessing] = useState(status === "processing");
   const settle = startedProcessing && "animate-fade-up motion-reduce:animate-none";
+  const isPlan = message.mode === "plan";
 
   const restoreAction = onRestore && status !== "processing" && (
     <MessageAction
@@ -213,12 +225,29 @@ export const AssistantMessage = ({
       )}
       {status === "completed" && content && (
         <>
+          {isPlan && (
+            <Badge variant="outline" className={cn("-mb-1 text-muted-foreground", settle)}>
+              <ListChecksIcon />
+              Plan
+            </Badge>
+          )}
           <MessageResponse
             className={cn("chat-prose", settle)}
             controls={{ code: { copy: true, download: false } }}
           >
             {content}
           </MessageResponse>
+          {isPlan && isLast && onBuildPlan && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={onBuildPlan}
+              className={cn("self-start", settle)}
+            >
+              <HammerIcon className="size-3.5" />
+              Build this plan
+            </Button>
+          )}
           <MessageActions
             className={cn(
               "-ml-1.5 -mt-1 opacity-0 transition-opacity duration-100 group-hover/msg:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",

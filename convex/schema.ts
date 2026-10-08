@@ -164,6 +164,8 @@ export default defineSchema({
     runModel: v.optional(runModelValidator),
     // User messages only: attached images. Bounded: see MAX_CHAT_IMAGES.
     images: v.optional(v.array(v.id("_storage"))),
+    // Assistant messages only: a plan-mode reply, which wrote no files (#120).
+    mode: v.optional(v.literal("plan")),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"])
