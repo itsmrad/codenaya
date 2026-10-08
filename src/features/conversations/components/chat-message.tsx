@@ -68,6 +68,9 @@ export const UserMessage = ({
               {/* eslint-disable-next-line @next/next/no-img-element -- Convex storage URL */}
               <img
                 src={url}
+                // A CORS request: the WebContainer engine's COEP (require-corp)
+                // blocks plain cross-origin images, and Convex storage sends CORS.
+                crossOrigin="anonymous"
                 alt={`Attached image ${index + 1}`}
                 className="size-20 rounded-lg border object-cover"
               />

@@ -151,7 +151,7 @@ test.describe("editor AI on the user's own key", () => {
       // The provider now refuses the key.
       stub.reject();
       const calls = stub.requests.length;
-      await seedProject(page);
+      // The stub's edit kept `return a + b;`, so the file opens as before.
       const editor = await openFile(page, projectId);
 
       // A refused suggestion stays silent.
@@ -164,15 +164,16 @@ test.describe("editor AI on the user's own key", () => {
 
       // A refused quick edit explains why and links to settings, with no
       // fallback to the platform key.
+      const before = await editor.textContent();
       await page.keyboard.press("ControlOrMeta+a");
       await page.keyboard.press("ControlOrMeta+k");
       const instruction = page.getByPlaceholder("Edit selected code");
-      await instruction.fill("Rename the function add to sum");
+      await instruction.fill("Rename the function sum to total");
       await instruction.press("Enter");
       await expect(
         page.getByText(new RegExp(`AI quick edit failed: Your ${label} key`)),
       ).toBeVisible({ timeout: 30_000 });
-      await expect(editor).not.toContainText("function sum(");
+      expect(await editor.textContent()).toBe(before);
       expect(stub.requests.length).toBe(calls);
       const keyStatus = async () =>
         (await user.query(api.aiProviders.list, {})).find((key) => key._id === keyId)?.status;
