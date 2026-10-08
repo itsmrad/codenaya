@@ -27,6 +27,8 @@ export type AiProviderId = (typeof AI_PROVIDER_IDS)[number];
 export interface ProviderModel {
   id: string;
   label: string;
+  /** Accepts image input, so attached images can be sent to it. */
+  vision?: boolean;
 }
 
 export interface AiProviderMeta {
@@ -49,7 +51,7 @@ export const AI_PROVIDERS: Record<AiProviderId, AiProviderMeta> = {
     id: "openrouter",
     label: "OpenRouter",
     baseUrl: "https://openrouter.ai/api/v1",
-    models: AGENT_MODELS.map(({ id, label }) => ({ id, label })),
+    models: AGENT_MODELS.map(({ id, label, vision }) => ({ id, label, vision })),
     titleModel: "openai/gpt-5.4-mini",
   },
   openai: {
@@ -57,11 +59,11 @@ export const AI_PROVIDERS: Record<AiProviderId, AiProviderMeta> = {
     label: "OpenAI",
     baseUrl: "https://api.openai.com/v1",
     models: [
-      { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
-      { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
-      { id: "gpt-6.1-sol", label: "GPT-6.1 Sol" },
-      { id: "gpt-6-luna", label: "GPT-6 Luna" },
-      { id: "gpt-5.4-mini", label: "GPT-5.4 mini" },
+      { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", vision: true },
+      { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", vision: true },
+      { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", vision: true },
+      { id: "gpt-6-luna", label: "GPT-6 Luna", vision: true },
+      { id: "gpt-5.4-mini", label: "GPT-5.4 mini", vision: true },
     ],
     titleModel: "gpt-5.4-mini",
   },
@@ -69,6 +71,8 @@ export const AI_PROVIDERS: Record<AiProviderId, AiProviderMeta> = {
     id: "anthropic",
     label: "Anthropic",
     baseUrl: "https://api.anthropic.com/v1",
+    // No `vision`: Claude reads images, but AgentKit's Anthropic adapter only
+    // forwards text content, so attached images could not reach it.
     models: [
       { id: "claude-opus-5-5", label: "Claude Opus 5.5" },
       { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
@@ -141,6 +145,20 @@ export function keyModels(key: {
   return key.provider === "custom"
     ? (key.modelIds ?? []).map((id) => ({ id, label: id }))
     : AI_PROVIDERS[key.provider].models;
+}
+
+/**
+ * Whether a model can be sent attached images: the platform's models without
+ * a key, the key's curated list with one. A custom endpoint's models cannot be
+ * looked up, so they are trusted; the endpoint reports it if it can't.
+ */
+export function modelAcceptsImages(
+  modelId: string,
+  key?: { provider: AiProviderId },
+): boolean {
+  if (key?.provider === "custom") return true;
+  const models = key ? AI_PROVIDERS[key.provider].models : PLATFORM_PROVIDER.models;
+  return models.find((model) => model.id === modelId)?.vision === true;
 }
 
 /**

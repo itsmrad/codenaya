@@ -113,6 +113,15 @@ export async function deleteProjectBatch(
     .take(CASCADE_BATCH_SIZE);
   if (await deleteRows(ctx, "messages", messages)) return false;
 
+  const chatImages = await ctx.db
+    .query("chatImages")
+    .withIndex("by_projectId", (q) => q.eq("projectId", projectId))
+    .take(CASCADE_BATCH_SIZE);
+  for (const image of chatImages) {
+    await deleteStorageIfPresent(ctx, image.storageId);
+  }
+  if (await deleteRows(ctx, "chatImages", chatImages)) return false;
+
   const conversations = await ctx.db
     .query("conversations")
     .withIndex("by_project", (q) => q.eq("projectId", projectId))

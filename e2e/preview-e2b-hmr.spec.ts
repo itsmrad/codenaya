@@ -17,9 +17,9 @@ test.describe("E2B preview hot reload", () => {
     "Needs Clerk and Convex fixture env plus E2B_API_KEY (boots a real sandbox)",
   );
 
-  test("an edit hot-updates the preview without a reload or websocket errors", async ({
+  test("an edit hot-updates the preview within 3s, without a reload or websocket errors", async ({
     page,
-  }) => {
+  }, testInfo) => {
     test.setTimeout(300_000);
     await page.setViewportSize({ width: 1440, height: 900 });
     const errors = collectConsoleErrors(page);
@@ -46,22 +46,38 @@ test.describe("E2B preview hot reload", () => {
     const frame = page.frame({ url: /e2b\.app/ })!;
     await frame.evaluate(() => ((window as { hmrMarker?: boolean }).hmrMarker = true));
 
-    // The agent writes files through this same mutation.
-    await system.mutation(api.system.updateFile, {
-      internalKey,
-      fileId: appId,
-      content: app("After edit"),
-    });
+    // The agent writes files through this same mutation. Returns how long the
+    // edit took to show up in the preview.
+    const editAndWait = async (text: string) => {
+      const startedAt = Date.now();
+      await system.mutation(api.system.updateFile, {
+        internalKey,
+        fileId: appId,
+        content: app(text),
+      });
+      // Without #146 the edit never arrives at all, so a generous wait still
+      // catches that; the latency budget is asserted separately below.
+      await expect(preview.getByRole("heading", { name: text })).toBeVisible({
+        timeout: 60_000,
+      });
+      return Date.now() - startedAt;
+    };
 
-    // 1s sync debounce + the PATCH round trip to E2B (~9s under `next dev`, more
-    // on a loaded machine; see #179) + Vite's hot update. Without the fix the
-    // edit never arrives at all, so a generous wait still catches that.
-    await expect(preview.getByRole("heading", { name: "After edit" })).toBeVisible({
-      timeout: 60_000,
+    // The first edit also pays for `next dev` compiling the PATCH route.
+    const firstEditMs = await editAndWait("After edit");
+    const editMs = await editAndWait("Second edit");
+    await page.screenshot({ path: testInfo.outputPath("after-edit.png") });
+    testInfo.annotations.push({
+      type: "edit-to-preview",
+      description: `first ${firstEditMs}ms, warm ${editMs}ms`,
     });
+    console.log(`[#179] edit→preview: first ${firstEditMs}ms, warm ${editMs}ms`);
+
     expect(await frame.evaluate(() => (window as { hmrMarker?: boolean }).hmrMarker)).toBe(
       true,
     );
+    // Debounce + PATCH round trip to E2B + Vite's hot update (#179).
+    expect(editMs).toBeLessThan(3_000);
     expect(errors).toEqual([]);
   });
 });

@@ -162,11 +162,23 @@ export default defineSchema({
     completedAt: v.optional(v.number()),
     // Assistant messages only: the model the run used.
     runModel: v.optional(runModelValidator),
+    // User messages only: attached images. Bounded: see MAX_CHAT_IMAGES.
+    images: v.optional(v.array(v.id("_storage"))),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"])
     // For the lost-run sweep in maintenance.ts.
     .index("by_status", ["status"]),
+
+  // Images uploaded from the chat composer: who uploaded each blob, so a
+  // message can only attach its sender's own images. Deleted with the project.
+  chatImages: defineTable({
+    storageId: v.id("_storage"),
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+  })
+    .index("by_storageId", ["storageId"])
+    .index("by_projectId", ["projectId"]),
 
   // ─── Showcase ───
   showcaseProjects: defineTable({

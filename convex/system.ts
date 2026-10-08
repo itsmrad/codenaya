@@ -7,6 +7,7 @@ import {
   runModelValidator,
 } from "./schema";
 import { createCheckpoint, releaseFileStorage } from "./checkpoints";
+import { assertOwnedImages, withImageUrls } from "./chatImages";
 import { resolveProjectSkills } from "./skills";
 import { countProjectBuilt } from "./stats";
 
@@ -52,9 +53,19 @@ export const createMessage = mutation({
       )
     ),
     runModel: v.optional(runModelValidator),
+    images: v.optional(v.array(v.id("_storage"))),
+    // The sender, required with images: only their own uploads can be attached.
+    ownerId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+
+    if (args.images?.length) {
+      await assertOwnedImages(ctx, args.images, {
+        projectId: args.projectId,
+        ownerId: args.ownerId,
+      });
+    }
 
     const messageId = await ctx.db.insert("messages", {
       conversationId: args.conversationId,
@@ -63,6 +74,7 @@ export const createMessage = mutation({
       content: args.content,
       status: args.status,
       runModel: args.runModel,
+      ...(args.images?.length ? { images: args.images } : {}),
     });
 
     // Update conversation's updatedAt
@@ -212,7 +224,7 @@ export const getRecentMessages = query({
       .collect();
 
     const limit = args.limit ?? 10;
-    return messages.slice(-limit);
+    return await withImageUrls(ctx, messages.slice(-limit));
   },
 });
 
