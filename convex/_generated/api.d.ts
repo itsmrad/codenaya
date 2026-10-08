@@ -10,6 +10,7 @@
 
 import type * as aiProviders from "../aiProviders.js";
 import type * as auth from "../auth.js";
+import type * as checkpoints from "../checkpoints.js";
 import type * as conversations from "../conversations.js";
 import type * as crons from "../crons.js";
 import type * as envVars from "../envVars.js";
@@ -35,6 +36,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   aiProviders: typeof aiProviders;
   auth: typeof auth;
+  checkpoints: typeof checkpoints;
   conversations: typeof conversations;
   crons: typeof crons;
   envVars: typeof envVars;

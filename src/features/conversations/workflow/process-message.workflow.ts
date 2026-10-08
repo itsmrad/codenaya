@@ -9,6 +9,7 @@ import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { vertexModel, VERTEX_MODELS } from "./lib/vertex-model";
 import { createCodingTools } from "./tools";
 import {
+  createProjectCheckpoint,
   generateConversationTitle,
   loadConversationContext,
   markMessageFailed,
@@ -86,6 +87,13 @@ export async function processMessageWorkflow(input: ProcessMessageInput) {
     // broken.
     systemPrompt +=
       `\n\n## Tool error handling:\nIf a tool returns a string starting with "Error: <toolName> failed transiently", treat it as a temporary infrastructure hiccup. You may retry the same tool call on your next turn. Do NOT tell the user that file system tools are unavailable.`;
+
+    await createProjectCheckpoint({
+      internalKey,
+      projectId,
+      messageId,
+      label: message,
+    });
 
     // 4. Run the durable agent against Gemini 3.1 Pro Preview on Vertex AI.
     const agent = new DurableAgent({

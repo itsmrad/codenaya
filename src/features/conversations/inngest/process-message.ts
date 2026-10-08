@@ -515,6 +515,22 @@ export const processMessage = inngest.createFunction(
       );
     }
 
+    // Checkpoint (#43): the files as they are before the agent touches them,
+    // so the run can be restored from the chat. Best effort: a failed snapshot
+    // must not fail the run.
+    await step.run("create-checkpoint", async () => {
+      try {
+        await convex.mutation(api.system.createProjectCheckpoint, {
+          internalKey,
+          projectId,
+          messageId,
+          label: message,
+        });
+      } catch (error) {
+        console.error("[checkpoints] failed to snapshot project", error);
+      }
+    });
+
     // Create the coding agent with file tools
     const codingAgent = createAgent({
       name: "codenaya",
