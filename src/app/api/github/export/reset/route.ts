@@ -30,6 +30,18 @@ export async function POST(request: Request) {
     );
   }
 
+  const project = await convex.query(api.system.getProjectById, {
+    internalKey,
+    projectId: projectId as Id<"projects">,
+  });
+
+  if (!project || project.ownerId !== userId) {
+    return NextResponse.json(
+      { error: "Unauthorized access to project" },
+      { status: 403 }
+    );
+  }
+
   // Clear export status
   await convex.mutation(api.system.updateExportStatus, {
     internalKey,

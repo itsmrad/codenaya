@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import {
   Plus,
   GitBranch,
@@ -413,6 +413,7 @@ type ShowcaseProject = Doc<"showcaseProjects"> & { previewUrl: string | null };
 type SortBy = "newest" | "upvotes" | "imports";
 
 const ShowcaseFeed = ({ onNewProject }: { onNewProject: () => void }) => {
+  void onNewProject;
   const [showcaseSearch, setShowcaseSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortBy>("newest");
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);

@@ -54,6 +54,7 @@ export const PublishDialog = ({
   // Keep title in sync when projectName loads or dialog opens
   useEffect(() => {
     if (open && projectName) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTitle(projectName);
     }
   }, [open, projectName]);

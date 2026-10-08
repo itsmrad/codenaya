@@ -636,6 +636,7 @@ export const createProjectWithConversation = mutation({
     projectName: v.string(),
     conversationTitle: v.string(),
     ownerId: v.string(),
+    initialPrompt: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -645,6 +646,7 @@ export const createProjectWithConversation = mutation({
     const projectId = await ctx.db.insert("projects", {
       name: args.projectName,
       ownerId: args.ownerId,
+      initialPrompt: args.initialPrompt,
       updatedAt: now,
     });
 

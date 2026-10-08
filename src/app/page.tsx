@@ -1,7 +1,18 @@
+import { currentUser } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
 import { AppNavbar } from "@/components/app-navbar";
 import { ProjectsView } from "@/features/projects/components/projects-view";
 
-const Home = () => {
+export const instant = false;
+
+const Home = async () => {
+  const user = await currentUser();
+
+  // If user is authenticated but hasn't completed onboarding -> redirect to /onboarding
+  if (user && !user.publicMetadata?.hasCompletedOnboarding) {
+    redirect("/onboarding");
+  }
+
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <AppNavbar />
@@ -13,3 +24,4 @@ const Home = () => {
 };
 
 export default Home;
+

@@ -34,15 +34,33 @@ export const updateSettings = mutation({
 export const create = mutation({
   args: {
     name: v.string(),
+    initialPrompt: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
 
+    const now = Date.now();
     const projectId = await ctx.db.insert("projects", {
       name: args.name,
       ownerId: identity.subject,
-      updatedAt: Date.now(),
+      initialPrompt: args.initialPrompt,
+      updatedAt: now,
     });
+
+    const conversationId = await ctx.db.insert("conversations", {
+      projectId,
+      title: "Initial Chat",
+      updatedAt: now,
+    });
+
+    if (args.initialPrompt) {
+      await ctx.db.insert("messages", {
+        conversationId,
+        projectId,
+        role: "user",
+        content: args.initialPrompt,
+      });
+    }
 
     return projectId;
   },

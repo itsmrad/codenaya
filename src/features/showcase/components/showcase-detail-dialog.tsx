@@ -20,7 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import { Id, Doc } from "../../../../convex/_generated/dataModel";
+import { Doc } from "../../../../convex/_generated/dataModel";
 import {
   useShowcaseById,
   useUserVote,

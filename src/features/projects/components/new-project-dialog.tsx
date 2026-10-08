@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import ky from "ky";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";

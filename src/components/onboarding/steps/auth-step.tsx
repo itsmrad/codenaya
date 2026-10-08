@@ -1,21 +1,13 @@
 "use client";
 
 /**
- * Combined "log in or sign up" step, built on Clerk's headless hooks
- * (useSignIn / useSignUp) rather than Clerk's prebuilt <SignIn>/<SignUp>
- * components, since this needs to match the custom terminal design exactly.
- *
- * IMPORTANT: verify this against Clerk's current docs for your installed
- * @clerk/nextjs version (you're on ^7.2.7). Clerk's exact method names and
- * error-code strings for "user not found" have shifted across major
- * versions before, and this file is the one most likely to need a small
- * adjustment. The pattern itself (try sign-in, fall back to sign-up on a
- * missing account, verify with an emailed code) is Clerk's documented
- * approach for a combined login/signup field.
+ * Combined "log in or sign up" step, built on Clerk's headless client
+ * rather than Clerk's prebuilt <SignIn>/<SignUp> components, since
+ * this needs to match the custom terminal design exactly.
  */
 
 import { useState } from "react";
-import { useSignIn, useSignUp } from "@clerk/nextjs";
+import { useClerk } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { NavRow } from "../nav-row";
@@ -30,8 +22,9 @@ export function AuthStep({
   onAuthed: (method: AuthMethod) => void;
   onBack: () => void;
 }) {
-  const { signIn, setActive: setActiveSignIn, isLoaded: signInLoaded } = useSignIn();
-  const { signUp, setActive: setActiveSignUp, isLoaded: signUpLoaded } = useSignUp();
+  const clerk = useClerk();
+  const signIn = clerk.client?.signIn;
+  const signUp = clerk.client?.signUp;
 
   const [stage, setStage] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
@@ -65,7 +58,7 @@ export function AuthStep({
       if (emailFactor && "emailAddressId" in emailFactor) {
         await signIn.prepareFirstFactor({
           strategy: "email_code",
-          emailAddressId: emailFactor.emailAddressId,
+          emailAddressId: emailFactor.emailAddressId as string,
         });
         setPendingFlow("sign-in");
         setStage("code");
@@ -98,23 +91,23 @@ export function AuthStep({
   }
 
   async function handleCodeSubmit() {
-    if (!code || !pendingFlow) return;
+    if (!code || !pendingFlow || !signIn || !signUp) return;
     setSubmitting(true);
     setError(null);
     try {
       if (pendingFlow === "sign-in") {
-        const result = await signIn!.attemptFirstFactor({
+        const result = await signIn.attemptFirstFactor({
           strategy: "email_code",
           code,
         });
         if (result.status === "complete") {
-          await setActiveSignIn!({ session: result.createdSessionId });
+          await clerk.setActive({ session: result.createdSessionId });
           onAuthed("email");
         }
       } else {
-        const result = await signUp!.attemptEmailAddressVerification({ code });
+        const result = await signUp.attemptEmailAddressVerification({ code });
         if (result.status === "complete") {
-          await setActiveSignUp!({ session: result.createdSessionId });
+          await clerk.setActive({ session: result.createdSessionId });
           onAuthed("email");
         }
       }
@@ -125,7 +118,7 @@ export function AuthStep({
     }
   }
 
-  const authReady = signInLoaded && signUpLoaded;
+  const authReady = clerk.loaded && !!signIn && !!signUp;
 
   return (
     <div className="flex h-full flex-col">
@@ -218,3 +211,4 @@ export function AuthStep({
     </div>
   );
 }
+

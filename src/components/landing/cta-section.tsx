@@ -3,12 +3,17 @@
 import { useRef } from "react";
 import { motion, useInView } from "motion/react";
 import { ArrowRight } from "lucide-react";
-import { SignUpButton } from "@clerk/nextjs";
+import { useUser } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 
 export const LandingCTA = () => {
   const sectionRef = useRef<HTMLDivElement>(null);
   const isInView = useInView(sectionRef, { once: true, amount: 0.4 });
+  const { user } = useUser();
+  const router = useRouter();
+
+  const targetUrl = user?.publicMetadata?.hasCompletedOnboarding ? "/" : "/onboarding";
 
   return (
     <section ref={sectionRef} className="relative py-32 md:py-40 overflow-hidden">
@@ -30,24 +35,24 @@ export const LandingCTA = () => {
             No setup required — start building in seconds.
           </p>
           <div className="pt-4">
-            <SignUpButton mode="modal">
-              <motion.div
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.96 }}
-                className="inline-block"
+            <motion.div
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+              className="inline-block"
+            >
+              <Button
+                size="lg"
+                className="h-14 px-10 text-base font-medium bg-brand text-white hover:bg-brand/90 rounded-full shadow-2xl shadow-brand/30 gap-2 group"
+                onClick={() => router.push(targetUrl)}
               >
-                <Button
-                  size="lg"
-                  className="h-14 px-10 text-base font-medium bg-brand text-white hover:bg-brand/90 rounded-full shadow-2xl shadow-brand/30 gap-2 group"
-                >
-                  Get Started Free
-                  <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-                </Button>
-              </motion.div>
-            </SignUpButton>
+                Get Started Free
+                <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+              </Button>
+            </motion.div>
           </div>
         </motion.div>
       </div>
     </section>
   );
 };
+

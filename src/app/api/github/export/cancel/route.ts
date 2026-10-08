@@ -31,6 +31,18 @@ export async function POST(request: Request) {
     );
   }
 
+  const project = await convex.query(api.system.getProjectById, {
+    internalKey,
+    projectId: projectId as Id<"projects">,
+  });
+
+  if (!project || project.ownerId !== userId) {
+    return NextResponse.json(
+      { error: "Unauthorized access to project" },
+      { status: 403 }
+    );
+  }
+
   const event = await inngest.send({
     name: "github/export.cancel",
     data: {

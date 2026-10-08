@@ -251,7 +251,7 @@ export const processMessage = inngest.createFunction(
       description: "An expert AI coding assistant",
       system: systemPrompt,
       model: openai({
-        model: "gpt-5.4",
+        model: "gpt-4o",
         defaultParameters: { temperature: 0.3 }
       }),
       tools: [

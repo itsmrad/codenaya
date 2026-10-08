@@ -35,18 +35,33 @@ import { api } from "../../../../../../convex/_generated/api";
  * The `postMessage` target origin is this deployment's own origin, never `*`, so
  * the result cannot be read by another window.
  */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function resultPage(
   status: "success" | "error",
   message: string,
   origin: string,
 ): Response {
-  // Values are JSON-encoded before interpolation so a provider-supplied error
-  // string cannot break out of the script context.
+  // Values are JSON-encoded and Unicode-escaped so user/provider input cannot
+  // break out of the script tag (e.g. via </script> sequences).
   const payload = JSON.stringify({
     source: "codenaya-oauth",
     status,
     message,
-  });
+  })
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e");
+
+  const safeOrigin = JSON.stringify(origin)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e");
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -64,12 +79,12 @@ function resultPage(
 <body>
 <main>
   <h1>${status === "success" ? "Connected" : "Connection failed"}</h1>
-  <p>${message.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c] as string)}</p>
+  <p>${escapeHtml(message)}</p>
 </main>
 <script>
   try {
     if (window.opener) {
-      window.opener.postMessage(${payload}, ${JSON.stringify(origin)});
+      window.opener.postMessage(${payload}, ${safeOrigin});
     }
   } catch (e) {}
   setTimeout(function () { window.close(); }, ${status === "success" ? 600 : 4000});

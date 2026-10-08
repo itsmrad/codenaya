@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpIcon, ArrowDownIcon, DownloadIcon, EyeIcon } from "lucide-react";
+import { ArrowUpIcon, DownloadIcon, EyeIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Doc } from "../../../../convex/_generated/dataModel";
 

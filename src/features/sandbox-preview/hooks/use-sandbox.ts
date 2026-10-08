@@ -202,6 +202,7 @@ export const useSandbox = ({
   useEffect(() => {
     if (!enabled) {
       hasStartedRef.current = false;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatus("idle");
       setPreviewUrl(null);
       setError(null);

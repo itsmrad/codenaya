@@ -7,7 +7,7 @@ import {
 } from "@/features/webcontainer-preview/utils/file-tree";
 import { serialiseDotenv } from "@/features/integrations/dotenv";
 
-import { Id, Doc } from "../../../../convex/_generated/dataModel";
+import { Doc } from "../../../../convex/_generated/dataModel";
 
 // Singleton WebContainer instance
 let webcontainerInstance: WebContainer | null = null;
@@ -27,7 +27,7 @@ const getWebContainer = async (): Promise<WebContainer> => {
   return webcontainerInstance;
 };
 
-const teardownWebContainer = () => {
+export const teardownWebContainer = () => {
   if (webcontainerInstance) {
     webcontainerInstance.teardown();
     webcontainerInstance = null;
@@ -190,6 +190,7 @@ export const useWebContainer = ({
   useEffect(() => {
     if (!enabled) {
       hasStartedRef.current = false;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatus("idle");
       setPreviewUrl(null);
       setError(null);

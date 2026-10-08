@@ -12,6 +12,8 @@ interface TerminalPanelProps {
   model: ModelId;
   projectName: string;
   created: boolean;
+  userIdentifier?: string;
+  prompt?: string;
 }
 
 function LogLine({ text, state }: { text: string; state: LineState }) {
@@ -47,15 +49,25 @@ export function TerminalPanel({
   model,
   projectName,
   created,
+  userIdentifier,
+  prompt,
 }: TerminalPanelProps) {
-  const authDone = stepKey !== "auth" && authMethod !== null;
+  const authDone = (stepKey !== "auth" && authMethod !== null) || !!userIdentifier;
   const modelDone = stepKey !== "model" && ALL_STEPS_AFTER("model", stepKey);
   const projectDone = created;
 
   const lines: { text: string; state: LineState }[] = [
     { text: "workspace ready", state: "done" },
     {
-      text: authMethod ? "auth: takeshi" : "auth: —",
+      text: prompt ? "prompt: captured" : "prompt: —",
+      state: prompt ? "done" : "pending",
+    },
+    {
+      text: userIdentifier
+        ? `auth: ${userIdentifier}`
+        : authMethod
+        ? "auth: connected"
+        : "auth: —",
       state: stepKey === "auth" ? "current" : authDone ? "done" : "pending",
     },
     { text: "convex: connected", state: "done" },
@@ -82,6 +94,20 @@ export function TerminalPanel({
       {lines.map((line) => (
         <LogLine key={line.text.split(":")[0]} text={line.text} state={line.state} />
       ))}
+
+      {prompt && (
+        <div className="mt-2 rounded-xl bg-card/70 border border-border/80 p-3.5 text-xs font-mono backdrop-blur-sm">
+          <div className="flex items-center justify-between text-muted-foreground mb-1.5">
+            <span className="text-[10px] uppercase tracking-wider text-brand font-semibold">
+              $ initial_prompt
+            </span>
+            <span className="text-[10px] text-emerald-400">persisted</span>
+          </div>
+          <p className="line-clamp-4 font-sans text-xs text-foreground/90 italic leading-relaxed">
+            &ldquo;{prompt}&rdquo;
+          </p>
+        </div>
+      )}
 
       {!created && (
         <div className="flex items-center gap-3" aria-hidden>

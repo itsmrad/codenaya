@@ -101,6 +101,15 @@ export async function POST(request: Request) {
             throw new Error("CODENAYA_CONVEX_INTERNAL_KEY is not configured");
           }
 
+          const project = await convex.query(api.system.getProjectById, {
+            internalKey,
+            projectId,
+          });
+
+          if (!project || project.ownerId !== userId) {
+            throw new Error("Unauthorized access to project");
+          }
+
           const records = await convex.query(api.system.getEnvVarsForSandbox, {
             internalKey,
             projectId,
