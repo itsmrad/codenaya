@@ -5,6 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { getFileByAgentId } from "./get-file";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface UpdateFileToolOptions {
@@ -37,11 +38,7 @@ export const createUpdateFileTool = ({
       const { fileId, content } = parsed.data;
 
       // Validate file exists before running the step
-      const file = await convex.query(api.system.getFileById, {
-        internalKey,
-        projectId,
-        fileId: fileId as Id<"files">,
-      });
+      const file = await getFileByAgentId(internalKey, projectId, fileId);
 
       if (!file) {
         return `Error: File with ID "${fileId}" not found. Use listFiles to get valid file IDs.`;

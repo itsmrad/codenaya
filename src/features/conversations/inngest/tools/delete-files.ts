@@ -5,6 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { getFileByAgentId } from "./get-file";
 
 interface DeleteFilesToolOptions {
   projectId: Id<"projects">;
@@ -46,11 +47,7 @@ export const createDeleteFilesTool = ({
       }[] = [];
 
       for (const fileId of fileIds) {
-        const file = await convex.query(api.system.getFileById, {
-          internalKey,
-          projectId,
-          fileId: fileId as Id<"files">,
-        });
+        const file = await getFileByAgentId(internalKey, projectId, fileId);
 
         if (!file) {
           return `Error: File with ID "${fileId}" not found. Use listFiles to get valid file IDs.`;
