@@ -15,6 +15,7 @@ import {
 } from "@/lib/message-processor";
 import { MAX_CHAT_IMAGES } from "@/features/conversations/chat-images";
 import { PLAN_MODE } from "@/features/conversations/plan-mode";
+import { requireOwnedConversation } from "@/features/projects/server/require-owned-project";
 
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -70,17 +71,14 @@ export async function POST(request: Request) {
     return rejected;
   }
 
-  // Call convex mutation, query
-  const conversation = await convex.query(api.system.getConversationById, {
+  const { found: conversation, notFound } = await requireOwnedConversation({
     internalKey,
-    conversationId: conversationId as Id<"conversations">,
+    userId,
+    conversationId,
   });
 
-  if (!conversation) {
-    return NextResponse.json(
-      { error: "Conversation not found" },
-      { status: 404 }
-    );
+  if (notFound) {
+    return notFound;
   }
 
   const projectId = conversation.projectId;
@@ -106,7 +104,7 @@ export async function POST(request: Request) {
   // Create user message
   await convex.mutation(api.system.createMessage, {
     internalKey,
-    conversationId: conversationId as Id<"conversations">,
+    conversationId: conversation._id,
     projectId,
     role: "user",
     content: message,
@@ -121,7 +119,7 @@ export async function POST(request: Request) {
     api.system.createMessage,
     {
       internalKey,
-      conversationId: conversationId as Id<"conversations">,
+      conversationId: conversation._id,
       projectId,
       role: "assistant",
       content: "",
@@ -135,7 +133,7 @@ export async function POST(request: Request) {
   const dispatch = await dispatchProcessMessageOrFail({
     internalKey,
     messageId: assistantMessageId,
-    conversationId: conversationId as Id<"conversations">,
+    conversationId: conversation._id,
     projectId,
     message,
     model: runModel,

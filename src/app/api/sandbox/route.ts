@@ -10,6 +10,7 @@ import {
   secretValuesFrom,
 } from "@/features/integrations/server/env/resolve-env";
 import { createStreamRedactor } from "@/features/integrations/server/env/stream-redactor";
+import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
 import {
   forgetSandbox,
   rememberSandbox,
@@ -110,6 +111,29 @@ export async function POST(request: Request) {
     return Response.json({ error: "No files provided" }, { status: 400 });
   }
 
+  const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
+
+  // The project's decrypted secrets go into this sandbox, which runs the
+  // caller's files and commands, so only its owner may name it (#208).
+  if (projectId) {
+    if (!internalKey) {
+      return Response.json(
+        { error: "Server configuration error", code: "config" satisfies SandboxErrorKind },
+        { status: 500 },
+      );
+    }
+
+    const { notFound } = await requireOwnedProject({
+      internalKey,
+      userId,
+      projectId,
+    });
+
+    if (notFound) {
+      return notFound;
+    }
+  }
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -124,13 +148,8 @@ export async function POST(request: Request) {
       let secretValues: string[] = [];
       const envWarnings: string[] = [];
 
-      if (projectId) {
+      if (projectId && internalKey) {
         try {
-          const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
-          if (!internalKey) {
-            throw new Error("CODENAYA_CONVEX_INTERNAL_KEY is not configured");
-          }
-
           const records = await convex.query(api.system.getEnvVarsForSandbox, {
             internalKey,
             projectId,

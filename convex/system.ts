@@ -1520,6 +1520,55 @@ export const getProjectById = query({
   },
 });
 
+/** The project when `userId` owns it and it is not being deleted, else `null`. */
+const ownedProjectOrNull = async (
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  userId: string,
+) => {
+  const project = await ctx.db.get("projects", projectId);
+  return project?.ownerId === userId && project.deletingAt === undefined
+    ? project
+    : null;
+};
+
+/**
+ * The project when `userId` owns it, else `null`: missing, someone else's and
+ * malformed ids all look the same, so API routes can answer 404 to all three
+ * without revealing which projects exist (#208).
+ */
+export const getOwnedProject = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.string(),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const projectId = ctx.db.normalizeId("projects", args.projectId);
+    return projectId ? await ownedProjectOrNull(ctx, projectId, args.userId) : null;
+  },
+});
+
+/** `getOwnedProject` for a conversation: `null` unless `userId` owns its project. */
+export const getOwnedConversation = query({
+  args: {
+    internalKey: v.string(),
+    conversationId: v.string(),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const conversationId = ctx.db.normalizeId("conversations", args.conversationId);
+    const conversation = conversationId
+      ? await ctx.db.get("conversations", conversationId)
+      : null;
+    if (!conversation) return null;
+    const project = await ownedProjectOrNull(ctx, conversation.projectId, args.userId);
+    return project ? conversation : null;
+  },
+});
+
 
 /**
  * Create or replace a public environment variable from the server.

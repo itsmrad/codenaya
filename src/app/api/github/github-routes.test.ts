@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   getUserOauthAccessToken: vi.fn(),
   createProject: vi.fn(),
+  query: vi.fn(),
   inngestSend: vi.fn(),
 }));
 
@@ -14,7 +15,7 @@ vi.mock("@clerk/nextjs/server", () => ({
   }),
 }));
 vi.mock("@/lib/convex-client", () => ({
-  convex: { mutation: mocks.createProject },
+  convex: { mutation: mocks.createProject, query: mocks.query },
 }));
 vi.mock("@/inngest/client", () => ({
   inngest: { send: mocks.inngestSend },
@@ -48,6 +49,8 @@ describe.each(routes)("POST /api/github/$name", ({ call }) => {
     // `has` reports no plans: users without a "pro" plan must still be allowed.
     mocks.auth.mockResolvedValue({ userId: "user_1", has: () => false });
     mocks.createProject.mockResolvedValue("p1");
+    // Export checks the caller owns the project (#208).
+    mocks.query.mockResolvedValue({ _id: "p1", ownerId: "user_1" });
     mocks.inngestSend.mockResolvedValue({ ids: ["evt_1"] });
   });
 

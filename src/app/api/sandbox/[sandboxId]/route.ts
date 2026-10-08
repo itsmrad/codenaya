@@ -27,7 +27,7 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
     const sandbox = await getOwnedSandbox(sandboxId, userId);
 
     if (!sandbox) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
+      return Response.json({ error: "Sandbox not found" }, { status: 404 });
     }
 
     forgetSandbox(sandboxId);
@@ -92,7 +92,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const sandbox = await getOwnedSandbox(sandboxId, userId);
 
     if (!sandbox) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
+      return Response.json({ error: "Sandbox not found" }, { status: 404 });
     }
 
     // One request for the whole batch instead of one per file.

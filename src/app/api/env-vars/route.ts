@@ -16,6 +16,7 @@ import {
   checkRateLimit,
   rateLimitedResponse,
 } from "@/features/integrations/server/rate-limit";
+import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
@@ -90,16 +91,8 @@ export async function POST(request: Request) {
     return jsonError(`"${key}" is a public variable and cannot be stored as a secret`, 400);
   }
 
-  try {
-    const project = await convex.query(api.system.getProjectById, {
-      internalKey,
-      projectId,
-    });
-    if (!project) return jsonError("Project not found", 404);
-    if (project.ownerId !== userId) return jsonError("Forbidden", 403);
-  } catch {
-    return jsonError("Invalid project", 400);
-  }
+  const { notFound } = await requireOwnedProject({ internalKey, userId, projectId });
+  if (notFound) return notFound;
 
   // Generated before the insert so it can anchor the AAD in a single write.
   const secretRef = nanoid();

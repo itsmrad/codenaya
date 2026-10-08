@@ -4,16 +4,16 @@ import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import { convex } from "@/lib/convex-client";
 import { cancelProcessingMessage } from "@/lib/message-processor";
+import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
 
 import { api } from "../../../../../convex/_generated/api";
-import { Id } from "../../../../../convex/_generated/dataModel";
 
 const requestSchema = z.object({
   projectId: z.string(),
 });
 
 export async function POST(request: Request) {
-  const { unauthorized } = await requireUserId();
+  const { userId, unauthorized } = await requireUserId();
 
   if (unauthorized) {
     return unauthorized;
@@ -31,12 +31,22 @@ export async function POST(request: Request) {
     );
   }
 
+  const { found: project, notFound } = await requireOwnedProject({
+    internalKey,
+    userId,
+    projectId,
+  });
+
+  if (notFound) {
+    return notFound;
+  }
+
   // Find all processing messages in this project
   const processingMessages = await convex.query(
     api.system.getProcessingMessages,
     {
       internalKey,
-      projectId: projectId as Id<"projects">,
+      projectId: project._id,
     }
   );
 
