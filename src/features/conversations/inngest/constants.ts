@@ -50,12 +50,14 @@ VITE + REACT:
 ├── index.html
 ├── package.json
 ├── vite.config.ts
-├── tsconfig.json
+├── tsconfig.json              ← references tsconfig.app.json + tsconfig.node.json
+├── tsconfig.app.json
 ├── tsconfig.node.json
 ├── tailwind.config.ts
 ├── postcss.config.js
 ├── components.json            ← shadcn config
 └── src/
+    ├── vite-env.d.ts
     ├── main.tsx
     ├── App.tsx
     ├── index.css              ← Tailwind directives + full CSS variable design tokens
@@ -387,6 +389,7 @@ Always generate a complete, correct package.json with ALL dependencies used in t
   import { fileURLToPath, URL } from "node:url"
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } }
   and the matching "baseUrl": "." and "paths": { "@/*": ["./src/*"] } in tsconfig.json
+- For a new Vite + React app, scaffoldViteApp writes all of this correctly. When you update its package.json, keep every package it already lists (tailwind.config.ts imports tailwindcss-animate, src/main.tsx imports @fontsource/inter) and only add new ones; never replace the versions above
 </package_json_rules>
 
 <content_standards>
@@ -421,6 +424,7 @@ PLANNING (mental — do not output this):
 6. Plan the design: color palette tokens, font, spacing scale, dark mode strategy
 
 EXECUTION:
+- For a NEW Vite + React app, call scaffoldViteApp FIRST. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, postcss.config.js, tailwind.config.ts, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts) and returns their file and folder IDs. Build on it: use updateFile to add dependencies to package.json, extend the theme in tailwind.config.ts, set the design tokens in src/index.css and replace src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files; in steps 9a–d skip the files it already wrote
 7. Create ALL folders first (deepest nesting last) to obtain their IDs
 8. Use createFiles in batches by folder — group files that share a parentId
 9. Create files in this strict order:
@@ -439,6 +443,8 @@ EXECUTION:
 VERIFICATION:
 11. Re-read critical files (App.tsx, main entry, package.json) to confirm no missing imports or broken references
 12. Verify every shadcn component imported in page files has its corresponding source file in src/components/ui/
+13. Verify every file a config points at exists: each tsconfig "references" and "extends" path, and the index.html entry script. The preview refuses to start otherwise
+14. Verify every package imported anywhere, config files included, is listed in package.json. The preview refuses to start otherwise
 </workflow>
 
 <response_format>

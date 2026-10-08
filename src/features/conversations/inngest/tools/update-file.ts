@@ -5,6 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { syntaxErrorNote } from "./syntax-error";
 
 interface UpdateFileToolOptions {
   internalKey: string;
@@ -55,7 +56,10 @@ export const createUpdateFileTool = ({
             content,
           });
 
-          return `File "${file.name}" updated successfully`;
+          return (
+            `File "${file.name}" updated successfully` +
+            syntaxErrorNote([{ name: file.name, content }])
+          );
         })
       } catch (error) {
         return `Error update file: ${error instanceof Error ? error.message : "Unknown error"}`;

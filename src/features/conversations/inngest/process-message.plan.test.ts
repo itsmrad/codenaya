@@ -42,6 +42,7 @@ const WRITE_TOOLS = [
   "updateFile",
   "createFiles",
   "createFolder",
+  "scaffoldViteApp",
   "renameFile",
   "deleteFiles",
   "setEnvVar",
