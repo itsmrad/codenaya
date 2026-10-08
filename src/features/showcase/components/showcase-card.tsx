@@ -4,9 +4,7 @@ import Link from "next/link";
 import { ArrowUpIcon, ArrowDownIcon, DownloadIcon, EyeIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ProjectCover } from "@/components/project-cover";
-import { Doc } from "../../../../convex/_generated/dataModel";
-
-type ShowcaseProject = Doc<"showcaseProjects"> & { previewUrl: string | null };
+import type { ShowcaseProject } from "../types";
 
 type ShowcaseCardProps = {
   project: ShowcaseProject;

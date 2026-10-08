@@ -4,12 +4,10 @@ import { useState } from "react";
 import Link from "next/link";
 import { ArrowRightIcon } from "lucide-react";
 
-import { Doc } from "../../../../convex/_generated/dataModel";
+import type { ShowcaseProject } from "../types";
 import { useShowcaseTrending } from "../hooks/use-showcase";
 import { ShowcaseCard } from "./showcase-card";
 import { ShowcaseDetailDialog } from "./showcase-detail-dialog";
-
-type ShowcaseProject = Doc<"showcaseProjects"> & { previewUrl: string | null };
 
 const RAIL_SIZE = 4;
 

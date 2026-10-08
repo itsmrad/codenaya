@@ -46,7 +46,23 @@ const matchesTags = (item: Doc<"showcaseProjects">, tags: ShowcaseTags) =>
   (!tags.techStack?.length || tags.techStack.some((t) => item.techStack.includes(t))) &&
   (!tags.designStyle?.length || tags.designStyle.some((d) => item.designStyle.includes(d)));
 
-/** A page of showcase projects, tag-filtered, each with its preview image URL. */
+/**
+ * A published entry as anyone may see it, with its preview image URL. The
+ * project and owner ids stay private: API routes act on a project id, so a
+ * public one would hand every visitor a target (#208).
+ */
+const toPublicEntry = async (
+  ctx: QueryCtx,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- left out on purpose
+  { projectId, ownerId, ...entry }: Doc<"showcaseProjects">
+) => {
+  const previewUrl = entry.previewImageId
+    ? await ctx.storage.getUrl(entry.previewImageId)
+    : null;
+  return { ...entry, previewUrl };
+};
+
+/** A page of public showcase entries, tag-filtered. */
 const toFeedPage = async (
   ctx: QueryCtx,
   results: PaginationResult<Doc<"showcaseProjects">>,
@@ -55,12 +71,7 @@ const toFeedPage = async (
   const page = await Promise.all(
     results.page
       .filter((item) => matchesTags(item, tags))
-      .map(async (item) => {
-        const previewUrl = item.previewImageId
-          ? await ctx.storage.getUrl(item.previewImageId)
-          : null;
-        return { ...item, previewUrl };
-      })
+      .map((item) => toPublicEntry(ctx, item))
   );
   return { ...results, page };
 };
@@ -116,11 +127,7 @@ export const getById = query({
       return null;
     }
 
-    const previewUrl = item.previewImageId
-      ? await ctx.storage.getUrl(item.previewImageId)
-      : null;
-
-    return { ...item, previewUrl };
+    return await toPublicEntry(ctx, item);
   },
 });
 
@@ -182,16 +189,7 @@ export const getTrending = query({
       .order("desc")
       .take(limit);
 
-    const withUrls = await Promise.all(
-      results.map(async (item) => {
-        const previewUrl = item.previewImageId
-          ? await ctx.storage.getUrl(item.previewImageId)
-          : null;
-        return { ...item, previewUrl };
-      })
-    );
-
-    return withUrls;
+    return await Promise.all(results.map((item) => toPublicEntry(ctx, item)));
   },
 });
 

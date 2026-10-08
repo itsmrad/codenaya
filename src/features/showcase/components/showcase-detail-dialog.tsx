@@ -6,10 +6,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import { Doc } from "../../../../convex/_generated/dataModel";
+import type { ShowcaseProject } from "../types";
 import { ShowcaseDetail } from "./showcase-detail";
-
-type ShowcaseProject = Doc<"showcaseProjects"> & { previewUrl: string | null };
 
 interface ShowcaseDetailDialogProps {
   open: boolean;

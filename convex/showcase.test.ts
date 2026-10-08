@@ -129,3 +129,24 @@ describe("showcase.search", () => {
     expect(titles(games.page)).toEqual(["Weather game"]);
   });
 });
+
+describe("public showcase queries", () => {
+  test("never return the project or owner id (#208)", async () => {
+    const t = convexTest(schema, modules);
+    await seed(t, [{ title: "Weather widget", publishedAt: 1 }]);
+
+    const listed = await t.query(api.showcase.list, { paginationOpts: page(10) });
+    const searched = await t.query(api.showcase.search, {
+      query: "weather",
+      paginationOpts: page(10),
+    });
+    const trending = await t.query(api.showcase.getTrending, {});
+    const byId = await t.query(api.showcase.getById, { id: listed.page[0]._id });
+
+    for (const entry of [...listed.page, ...searched.page, ...trending, byId]) {
+      expect(entry).toMatchObject({ title: "Weather widget", ownerName: "Alice" });
+      expect(entry).not.toHaveProperty("projectId");
+      expect(entry).not.toHaveProperty("ownerId");
+    }
+  });
+});

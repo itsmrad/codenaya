@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SIGN_IN_URL } from "@/features/auth/constants";
 
-import { Doc } from "../../../../convex/_generated/dataModel";
+import type { ShowcaseProject } from "../types";
 import {
   useShowcaseById,
   useUserVote,
@@ -25,8 +25,6 @@ import {
   useIncrementView,
 } from "../hooks/use-showcase";
 import { authRedirectUrl, showcasePath, useRemix } from "../hooks/use-remix";
-
-type ShowcaseProject = Doc<"showcaseProjects"> & { previewUrl: string | null };
 
 interface ShowcaseDetailProps {
   project: ShowcaseProject;
