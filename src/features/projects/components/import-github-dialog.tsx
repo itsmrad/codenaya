@@ -1,9 +1,9 @@
+import { useState } from "react";
 import ky, { HTTPError } from "ky";
 import { z } from "zod";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { useForm } from "@tanstack/react-form";
-import { useClerk } from "@clerk/nextjs";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +16,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+
+import { GITHUB_NOT_LINKED } from "../constants";
+import { GithubNotLinkedAlert } from "./github-not-linked-alert";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 
@@ -33,7 +36,14 @@ export const ImportGithubDialog = ({
   onOpenChange,
 }: ImportGithubDialogProps) => {
   const router = useRouter();
-  const { openUserProfile } = useClerk();
+  const [githubNotLinked, setGithubNotLinked] = useState(false);
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setGithubNotLinked(false);
+    }
+    onOpenChange(nextOpen);
+  };
 
   const form = useForm({
     defaultValues: {
@@ -43,6 +53,7 @@ export const ImportGithubDialog = ({
       onSubmit: formSchema,
     },
     onSubmit: async ({ value }) => {
+      setGithubNotLinked(false);
       try {
         const { projectId } = await ky
           .post("/api/github/import", {
@@ -61,26 +72,9 @@ export const ImportGithubDialog = ({
         router.push(`/projects/${projectId}`);
       } catch (error) {
         if (error instanceof HTTPError) {
-          const body = await error.response.json<{ error: string }>();
-          if (body.error?.includes("Pro plan required")) {
-            toast.error("Upgrade to import repositories", {
-              action: {
-                label: "Upgrade",
-                onClick: () => openUserProfile(),
-              },
-            });
-            onOpenChange(false);
-            return;
-          }
-
-          if (body.error?.includes("GitHub not connected")) {
-            toast.error("GitHub account not connected", {
-              action: {
-                label: "Connect",
-                onClick: () => openUserProfile(),
-              },
-            });
-            onOpenChange(false);
+          const body = await error.response.json<{ error: string; code?: string }>();
+          if (body.code === GITHUB_NOT_LINKED) {
+            setGithubNotLinked(true);
             return;
           }
         }
@@ -90,7 +84,7 @@ export const ImportGithubDialog = ({
   });
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Import from GitHub</DialogTitle>
@@ -129,11 +123,16 @@ export const ImportGithubDialog = ({
               );
             }}
           </form.Field>
+          {githubNotLinked && (
+            <div className="mt-4">
+              <GithubNotLinkedAlert />
+            </div>
+          )}
           <DialogFooter className="mt-4">
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={() => handleOpenChange(false)}
             >
               Cancel
             </Button>

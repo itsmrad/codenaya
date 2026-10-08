@@ -1,7 +1,60 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+/**
+ * One row of an agent run, recorded for display only (the chat panel's
+ * "Worked for Xs" block). `targets` are human-readable paths, URLs or env keys,
+ * never document ids or values. Upserted by `id` (the tool call id), so a
+ * replayed agent turn rewrites the same rows instead of adding new ones.
+ */
+export const messageStepValidator = v.object({
+  id: v.string(),
+  kind: v.union(v.literal("tool"), v.literal("thinking")),
+  tool: v.optional(v.string()),
+  targets: v.optional(v.array(v.string())),
+  text: v.optional(v.string()),
+  status: v.union(v.literal("running"), v.literal("done"), v.literal("error")),
+  error: v.optional(v.string()),
+  startedAt: v.number(),
+  endedAt: v.optional(v.number()),
+});
+
+export const aiProviderValidator = v.union(
+  v.literal("openrouter"),
+  v.literal("openai"),
+  v.literal("anthropic"),
+  v.literal("custom"),
+);
+
+/**
+ * The model an assistant message was produced with. `keyId` is set when the
+ * run used the user's own key (BYOK), which is what billing reads to charge no
+ * credits. `label` is the "provider · model" shown on the run block.
+ */
+export const runModelValidator = v.object({
+  keyId: v.optional(v.id("aiProviderKeys")),
+  modelId: v.string(),
+  label: v.string(),
+});
+
 export default defineSchema({
+  /**
+   * Profile mirror of a Clerk user, kept in sync by the Clerk webhook
+   * (`convex/http.ts`). Ownership everywhere else stays keyed on
+   * `identity.subject`, which is this row's `clerkUserId`.
+   *
+   * A deleted user keeps a tombstone (`deletedAt`) so a late or replayed
+   * `user.updated` event cannot recreate the row after its data was purged.
+   */
+  users: defineTable({
+    clerkUserId: v.string(),
+    email: v.optional(v.string()),
+    name: v.optional(v.string()),
+    imageUrl: v.optional(v.string()),
+    deletedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  }).index("by_clerkUserId", ["clerkUserId"]),
+
   projects: defineTable({
     name: v.string(),
     ownerId: v.string(),
@@ -29,7 +82,19 @@ export default defineSchema({
         devCommand: v.optional(v.string()),
       })
     ),
+    // Set when the owner deletes the project. The project is hidden at once
+    // while `projects.deleteBatch` removes its data in the background.
+    deletingAt: v.optional(v.number()),
   }).index("by_owner", ["ownerId"]),
+
+  /**
+   * Denormalized running totals, one row per `name`, so public pages can show
+   * a number without scanning a table. See `convex/stats.ts`.
+   */
+  counters: defineTable({
+    name: v.string(),
+    value: v.number(),
+  }).index("by_name", ["name"]),
 
   files: defineTable({
     projectId: v.id("projects"),
@@ -43,6 +108,34 @@ export default defineSchema({
     .index("by_project", ["projectId"])
     .index("by_parent", ["parentId"])
     .index("by_project_parent", ["projectId", "parentId"]),
+
+  /**
+   * The project's files just before an agent run (#43), restorable from the
+   * chat. One row per run, keyed by its assistant message; see
+   * `convex/checkpoints.ts`.
+   */
+  checkpoints: defineTable({
+    projectId: v.id("projects"),
+    messageId: v.id("messages"),
+    // The prompt that started the run, for the history list.
+    label: v.string(),
+    fileCount: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_message", ["messageId"]),
+
+  /** One file or folder of a checkpoint. Binary files keep their blob. */
+  checkpointFiles: defineTable({
+    checkpointId: v.id("checkpoints"),
+    projectId: v.id("projects"),
+    path: v.string(),
+    type: v.union(v.literal("file"), v.literal("folder")),
+    content: v.optional(v.string()),
+    storageId: v.optional(v.id("_storage")),
+  })
+    .index("by_checkpoint", ["checkpointId"])
+    .index("by_project", ["projectId"])
+    .index("by_storageId", ["storageId"]),
 
   conversations: defineTable({
     projectId: v.id("projects"),
@@ -64,9 +157,31 @@ export default defineSchema({
     ),
     // Workflow run id (when processed via Vercel Workflow SDK)
     workflowRunId: v.optional(v.string()),
+    // Agent activity for the chat panel. Bounded: see MAX_MESSAGE_STEPS.
+    steps: v.optional(v.array(messageStepValidator)),
+    // When the run stopped (completed or cancelled), for "Worked for Xs".
+    completedAt: v.optional(v.number()),
+    // Assistant messages only: the model the run used.
+    runModel: v.optional(runModelValidator),
+    // User messages only: attached images. Bounded: see MAX_CHAT_IMAGES.
+    images: v.optional(v.array(v.id("_storage"))),
+    // Assistant messages only: a plan-mode reply, which wrote no files (#120).
+    mode: v.optional(v.literal("plan")),
   })
     .index("by_conversation", ["conversationId"])
-    .index("by_project_status", ["projectId", "status"]),
+    .index("by_project_status", ["projectId", "status"])
+    // For the lost-run sweep in maintenance.ts.
+    .index("by_status", ["status"]),
+
+  // Images uploaded from the chat composer: who uploaded each blob, so a
+  // message can only attach its sender's own images. Deleted with the project.
+  chatImages: defineTable({
+    storageId: v.id("_storage"),
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+  })
+    .index("by_storageId", ["storageId"])
+    .index("by_projectId", ["projectId"]),
 
   // ─── Showcase ───
   showcaseProjects: defineTable({
@@ -93,9 +208,12 @@ export default defineSchema({
   })
     .index("by_status_and_publishedAt", ["status", "publishedAt"])
     .index("by_status_and_upvotes", ["status", "upvotes"])
+    .index("by_status_and_importCount", ["status", "importCount"])
     .index("by_owner", ["ownerId"])
     .index("by_projectId", ["projectId"])
-    .index("by_status_and_category", ["status", "category"])
+    .index("by_status_and_category_and_publishedAt", ["status", "category", "publishedAt"])
+    .index("by_status_and_category_and_upvotes", ["status", "category", "upvotes"])
+    .index("by_status_and_category_and_importCount", ["status", "category", "importCount"])
     .searchIndex("search_title", {
       searchField: "title",
       filterFields: ["status", "category"],
@@ -117,6 +235,43 @@ export default defineSchema({
   })
     .index("by_userId_and_showcaseProjectId", ["userId", "showcaseProjectId"])
     .index("by_showcaseProjectId", ["showcaseProjectId"]),
+
+  // ─── Skills ───
+
+  /**
+   * A user's Agent Skill (`SKILL.md` shape). Without `projectId` it is a
+   * library skill the owner can enable per project; with it, the skill exists
+   * only in that project. Built-in skills live in code, not here.
+   */
+  skills: defineTable({
+    ownerId: v.string(),
+    projectId: v.optional(v.id("projects")),
+    name: v.string(),
+    description: v.string(),
+    body: v.string(),
+    source: v.union(v.literal("user"), v.literal("github")),
+    sourceUrl: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_and_projectId", ["ownerId", "projectId"])
+    .index("by_owner_and_name", ["ownerId", "name"])
+    .index("by_project", ["projectId"]),
+
+  /**
+   * Whether a skill is enabled in a project. An absent row means disabled;
+   * project skills get an enabled row when they are created.
+   */
+  projectSkillSettings: defineTable({
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+    // "builtin:<name>" | "user:<skills _id>"
+    skillKey: v.string(),
+    enabled: v.boolean(),
+    updatedAt: v.number(),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_project_and_skillKey", ["projectId", "skillKey"])
+    .index("by_owner_and_skillKey", ["ownerId", "skillKey"]),
 
   // ─── Integrations (MCP servers + runtime env vars) ───
   //
@@ -170,6 +325,11 @@ export default defineSchema({
     tokenExpiresAt: v.optional(v.number()),
     oauthClientId: v.optional(v.string()),
     authServerUrl: v.optional(v.string()),
+
+    // Short lease used to serialize refresh-token rotation across concurrent
+    // agent runs. Both fields are optional so existing rows migrate safely.
+    refreshLeaseId: v.optional(v.string()),
+    refreshLeaseExpiresAt: v.optional(v.number()),
 
     lastUsedAt: v.optional(v.number()),
     createdAt: v.number(),
@@ -226,6 +386,48 @@ export default defineSchema({
     .index("by_userConnection", ["userConnectionId"]),
 
   /**
+   * A model provider API key the user brought (BYOK). Sealed exactly like
+   * `userConnections`: the AAD is anchored on `secretRef`, and the client only
+   * ever sees `maskedPreview` through the allowlist in `aiProviders.list`.
+   */
+  aiProviderKeys: defineTable({
+    userId: v.string(),
+    provider: aiProviderValidator,
+    label: v.string(),
+    // Custom (OpenAI-compatible) endpoints only. Validated https + public IP.
+    baseUrl: v.optional(v.string()),
+    // Custom only: user-entered model ids, at most MAX_CUSTOM_MODEL_IDS.
+    modelIds: v.optional(v.array(v.string())),
+
+    secretRef: v.string(),
+    kekProvider: v.string(),
+    kekKeyId: v.string(),
+    wrappedDek: v.string(),
+    ciphertext: v.string(),
+    iv: v.string(),
+    authTag: v.string(),
+
+    // Last four characters only, e.g. "••••3f2a".
+    maskedPreview: v.string(),
+    status: v.union(v.literal("active"), v.literal("invalid")),
+    statusMessage: v.optional(v.string()),
+    lastTestedAt: v.optional(v.number()),
+    lastUsedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_user_and_provider", ["userId", "provider"]),
+
+  /** The user's default model. No `defaultKeyId` means the Codenaya platform key. */
+  userAiPreferences: defineTable({
+    userId: v.string(),
+    defaultKeyId: v.optional(v.id("aiProviderKeys")),
+    defaultModelId: v.string(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"]),
+
+  /**
    * Environment variables injected into a project's preview at runtime.
    *
    * `visibility` is the security boundary between the two preview backends.
@@ -271,6 +473,9 @@ export default defineSchema({
   oauthFlowStates: defineTable({
     state: v.string(),
     userId: v.string(),
+    // When OAuth starts inside a project, the resulting connection is linked to
+    // that project in the same transaction that stores the sealed credential.
+    projectId: v.optional(v.id("projects")),
     providerId: v.string(),
     serverUrl: v.string(),
     redirectUri: v.string(),
@@ -293,7 +498,8 @@ export default defineSchema({
     expiresAt: v.number(),
   })
     .index("by_state", ["state"])
-    .index("by_expiresAt", ["expiresAt"]),
+    .index("by_expiresAt", ["expiresAt"])
+    .index("by_user", ["userId"]),
 
   /**
    * Human-in-the-loop gate for destructive MCP tool calls.
@@ -320,10 +526,31 @@ export default defineSchema({
     createdAt: v.number(),
     expiresAt: v.number(),
     resolvedAt: v.optional(v.number()),
+    /**
+     * Identity of the logical MCP tool call this row belongs to.
+     *
+     * Two jobs. It is the idempotency key for creation, so a replayed agent turn
+     * reuses this prompt instead of opening another one for the same action. And
+     * it is the join key to the audit row, the workflow step ids and the `[mcp]`
+     * log lines, which is what makes one logical call traceable end to end.
+     *
+     * Optional because rows created before this field existed do not have one.
+     */
+    mcpInvocationId: v.optional(v.string()),
+    /**
+     * When the approved action was claimed by the executing step.
+     *
+     * Set exactly once, atomically. A destructive tool takes this claim as the
+     * first act inside its step, so a step that re-runs after its result was lost
+     * finds the claim already taken and refuses rather than reapplying the
+     * mutation. Absence on an approved row means the action has not been issued.
+     */
+    consumedAt: v.optional(v.number()),
   })
     .index("by_project_and_status", ["projectId", "status"])
     .index("by_message", ["messageId"])
-    .index("by_expiresAt", ["expiresAt"]),
+    .index("by_expiresAt", ["expiresAt"])
+    .index("by_invocation", ["mcpInvocationId"]),
 
   /**
    * Audit trail of MCP tool invocations.
@@ -344,10 +571,22 @@ export default defineSchema({
       v.literal("blocked"),
     ),
     argsDigest: v.string(),
+    /** Digest of the redaction outcome: how many spans were removed, and by which rules. */
+    redactionSummary: v.optional(v.string()),
     durationMs: v.number(),
     errorMessage: v.optional(v.string()),
     createdAt: v.number(),
+    /**
+     * The logical MCP tool call this row describes.
+     *
+     * One real request produces exactly one row with a given value here, so a
+     * repeated value means a genuinely repeated request rather than a replayed
+     * log write. That distinction was previously impossible to make from this
+     * table.
+     */
+    mcpInvocationId: v.optional(v.string()),
   })
     .index("by_project_and_createdAt", ["projectId", "createdAt"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .index("by_invocation", ["mcpInvocationId"]),
 });

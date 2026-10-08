@@ -4,14 +4,25 @@
 
 import * as Sentry from "@sentry/nextjs";
 
+import { parseTracesSampleRate } from "@/lib/sentry";
+
+// Inlined at build time. Sentry stays off when it is unset.
+const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+
 Sentry.init({
-  dsn: "https://5a5ad5d9846faece0a4727540f810281@o4510149980258304.ingest.de.sentry.io/4510621155983440",
+  // Off in `next dev`: the `/monitoring` tunnel rejects localhost events with a
+  // 403, which logs console errors on every page.
+  enabled: process.env.NODE_ENV === "production" && !!dsn,
+
+  dsn,
 
   // Add optional integrations for additional features
   integrations: [Sentry.replayIntegration()],
 
-  // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
-  tracesSampleRate: 1,
+  // Share of traces sent, from NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE (0-1, default 0.1).
+  tracesSampleRate: parseTracesSampleRate(
+    process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE,
+  ),
   // Enable logs to be sent to Sentry
   enableLogs: true,
 
@@ -23,9 +34,10 @@ Sentry.init({
   // Define how likely Replay events are sampled when an error occurs.
   replaysOnErrorSampleRate: 1.0,
 
-  // Enable sending user PII (Personally Identifiable Information)
+  // No user PII (IP addresses, cookies) by default; Replay masks all text and
+  // media on its own defaults. Opt in per field rather than flipping this on.
   // https://docs.sentry.io/platforms/javascript/guides/nextjs/configuration/options/#sendDefaultPii
-  sendDefaultPii: true,
+  sendDefaultPii: false,
 });
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

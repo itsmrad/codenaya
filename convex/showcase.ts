@@ -1,94 +1,121 @@
 import { v } from "convex/values";
-import { paginationOptsValidator } from "convex/server";
+import { paginationOptsValidator, type PaginationResult } from "convex/server";
 
-import { mutation, query } from "./_generated/server";
-import { Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
+import { copyProjectFiles } from "./projectCopy";
+import { countProjectBuilt } from "./stats";
 
 // ─── Queries ───
+
+type ShowcaseSort = "newest" | "upvotes" | "imports";
+type ShowcaseTags = { techStack?: string[]; designStyle?: string[] };
+
+/** Published projects, highest `sortBy` value first, optionally in one category. */
+const publishedInOrder = (ctx: QueryCtx, sortBy: ShowcaseSort, category?: string) => {
+  const table = ctx.db.query("showcaseProjects");
+  if (category) {
+    const index = {
+      newest: "by_status_and_category_and_publishedAt",
+      upvotes: "by_status_and_category_and_upvotes",
+      imports: "by_status_and_category_and_importCount",
+    } as const;
+    return table
+      .withIndex(index[sortBy], (q) =>
+        q.eq("status", "published").eq("category", category)
+      )
+      .order("desc");
+  }
+  const index = {
+    newest: "by_status_and_publishedAt",
+    upvotes: "by_status_and_upvotes",
+    imports: "by_status_and_importCount",
+  } as const;
+  return table
+    .withIndex(index[sortBy], (q) => q.eq("status", "published"))
+    .order("desc");
+};
+
+/**
+ * Tag filters have no index (they are arrays), so they apply to each fetched
+ * page: a project matches when it has any selected tag of each group. Pages
+ * can come back short, and the client loads more to fill in.
+ */
+const matchesTags = (item: Doc<"showcaseProjects">, tags: ShowcaseTags) =>
+  (!tags.techStack?.length || tags.techStack.some((t) => item.techStack.includes(t))) &&
+  (!tags.designStyle?.length || tags.designStyle.some((d) => item.designStyle.includes(d)));
+
+/**
+ * A published entry as anyone may see it, with its preview image URL. The
+ * project and owner ids stay private: API routes act on a project id, so a
+ * public one would hand every visitor a target (#208).
+ */
+const toPublicEntry = async (
+  ctx: QueryCtx,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- left out on purpose
+  { projectId, ownerId, ...entry }: Doc<"showcaseProjects">
+) => {
+  const previewUrl = entry.previewImageId
+    ? await ctx.storage.getUrl(entry.previewImageId)
+    : null;
+  return { ...entry, previewUrl };
+};
+
+/** A page of public showcase entries, tag-filtered. */
+const toFeedPage = async (
+  ctx: QueryCtx,
+  results: PaginationResult<Doc<"showcaseProjects">>,
+  tags: ShowcaseTags
+) => {
+  const page = await Promise.all(
+    results.page
+      .filter((item) => matchesTags(item, tags))
+      .map((item) => toPublicEntry(ctx, item))
+  );
+  return { ...results, page };
+};
+
+const feedFilterArgs = {
+  category: v.optional(v.string()),
+  techStack: v.optional(v.array(v.string())),
+  designStyle: v.optional(v.array(v.string())),
+};
 
 export const list = query({
   args: {
     paginationOpts: paginationOptsValidator,
-    category: v.optional(v.string()),
+    ...feedFilterArgs,
     sortBy: v.optional(
       v.union(v.literal("newest"), v.literal("upvotes"), v.literal("imports"))
     ),
   },
   handler: async (ctx, args) => {
-    const sortBy = args.sortBy ?? "newest";
-
-    let q;
-    if (args.category) {
-      q = ctx.db
-        .query("showcaseProjects")
-        .withIndex("by_status_and_category", (idx) =>
-          idx.eq("status", "published").eq("category", args.category!)
-        );
-    } else if (sortBy === "upvotes") {
-      q = ctx.db
-        .query("showcaseProjects")
-        .withIndex("by_status_and_upvotes", (idx) =>
-          idx.eq("status", "published")
-        )
-        .order("desc");
-    } else if (sortBy === "imports") {
-      // No dedicated index for importCount, so fetch by publishedAt and sort client-side
-      q = ctx.db
-        .query("showcaseProjects")
-        .withIndex("by_status_and_publishedAt", (idx) =>
-          idx.eq("status", "published")
-        )
-        .order("desc");
-    } else {
-      q = ctx.db
-        .query("showcaseProjects")
-        .withIndex("by_status_and_publishedAt", (idx) =>
-          idx.eq("status", "published")
-        )
-        .order("desc");
-    }
-
-    const results = await q.paginate(args.paginationOpts);
-
-    const pageWithUrls = await Promise.all(
-      results.page.map(async (item) => {
-        const previewUrl = item.previewImageId
-          ? await ctx.storage.getUrl(item.previewImageId)
-          : null;
-        return { ...item, previewUrl };
-      })
-    );
-
-    return { ...results, page: pageWithUrls };
+    const results = await publishedInOrder(
+      ctx,
+      args.sortBy ?? "newest",
+      args.category
+    ).paginate(args.paginationOpts);
+    return await toFeedPage(ctx, results, args);
   },
 });
 
+/** Title search, best match first. */
 export const search = query({
   args: {
+    paginationOpts: paginationOptsValidator,
     query: v.string(),
-    limit: v.optional(v.number()),
+    ...feedFilterArgs,
   },
   handler: async (ctx, args) => {
-    const limit = args.limit ?? 20;
-
     const results = await ctx.db
       .query("showcaseProjects")
-      .withSearchIndex("search_title", (q) =>
-        q.search("title", args.query).eq("status", "published")
-      )
-      .take(limit);
-
-    const withUrls = await Promise.all(
-      results.map(async (item) => {
-        const previewUrl = item.previewImageId
-          ? await ctx.storage.getUrl(item.previewImageId)
-          : null;
-        return { ...item, previewUrl };
+      .withSearchIndex("search_title", (q) => {
+        const published = q.search("title", args.query).eq("status", "published");
+        return args.category ? published.eq("category", args.category) : published;
       })
-    );
-
-    return withUrls;
+      .paginate(args.paginationOpts);
+    return await toFeedPage(ctx, results, args);
   },
 });
 
@@ -100,11 +127,7 @@ export const getById = query({
       return null;
     }
 
-    const previewUrl = item.previewImageId
-      ? await ctx.storage.getUrl(item.previewImageId)
-      : null;
-
-    return { ...item, previewUrl };
+    return await toPublicEntry(ctx, item);
   },
 });
 
@@ -166,16 +189,7 @@ export const getTrending = query({
       .order("desc")
       .take(limit);
 
-    const withUrls = await Promise.all(
-      results.map(async (item) => {
-        const previewUrl = item.previewImageId
-          ? await ctx.storage.getUrl(item.previewImageId)
-          : null;
-        return { ...item, previewUrl };
-      })
-    );
-
-    return withUrls;
+    return await Promise.all(results.map((item) => toPublicEntry(ctx, item)));
   },
 });
 
@@ -362,44 +376,9 @@ export const importToWorkspace = mutation({
       ownerId: identity.subject,
       updatedAt: now,
     });
+    await countProjectBuilt(ctx);
 
-    const sourceFiles = await ctx.db
-      .query("files")
-      .withIndex("by_project", (q) => q.eq("projectId", showcaseItem.projectId))
-      .take(5001);
-
-    if (sourceFiles.length > 5000) {
-      throw new Error(
-        `Project ${showcaseItem.projectId} has more than 5000 files and cannot be imported. Please contact the project owner.`
-      );
-    }
-
-    const idMap = new Map<string, Id<"files">>();
-
-    for (const file of sourceFiles) {
-      const newFileId = await ctx.db.insert("files", {
-        projectId: newProjectId,
-        parentId: undefined,
-        name: file.name,
-        type: file.type,
-        content: file.content,
-        storageId: file.storageId,
-        updatedAt: now,
-      });
-      idMap.set(file._id, newFileId);
-    }
-
-    for (const file of sourceFiles) {
-      if (file.parentId) {
-        const newFileId = idMap.get(file._id);
-        const newParentId = idMap.get(file.parentId);
-        if (newFileId && newParentId) {
-          await ctx.db.patch(newFileId, {
-            parentId: newParentId,
-          });
-        }
-      }
-    }
+    await copyProjectFiles(ctx, showcaseItem.projectId, newProjectId);
 
     await ctx.db.patch(args.showcaseProjectId, {
       importCount: showcaseItem.importCount + 1,

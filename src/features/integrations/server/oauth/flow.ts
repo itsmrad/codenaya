@@ -85,6 +85,12 @@ export interface OAuthFlowStart {
   state: string;
   codeVerifier: string;
   authorizationServerUrl: string;
+  /**
+   * Discovery metadata used to build both the authorization and token requests.
+   * The OAuth callback runs in a separate request, so it must travel with the
+   * sealed flow state rather than being left only in this process's memory.
+   */
+  authorizationServerMetadata?: AuthorizationServerMetadata;
   /** Recorded so the callback can reject an `iss` mismatch. */
   issuer?: string;
   clientInformation: OAuthClientInformationFull;
@@ -204,6 +210,7 @@ export async function startOAuthFlow(
       state,
       codeVerifier: authorization.codeVerifier,
       authorizationServerUrl: serverInfo.authorizationServerUrl,
+      authorizationServerMetadata: metadata,
       issuer: metadata?.issuer,
       clientInformation,
       expiresAt: Date.now() + OAUTH_STATE_TTL_MS,
@@ -214,6 +221,7 @@ export async function startOAuthFlow(
 export interface CompleteOAuthOptions {
   provider: ProviderDefinition;
   authorizationServerUrl: string;
+  authorizationServerMetadata?: AuthorizationServerMetadata;
   authorizationCode: string;
   codeVerifier: string;
   redirectUri: string;
@@ -241,6 +249,7 @@ export async function completeOAuthFlow(
   const {
     provider,
     authorizationServerUrl,
+    authorizationServerMetadata,
     authorizationCode,
     codeVerifier,
     redirectUri,
@@ -278,6 +287,7 @@ export async function completeOAuthFlow(
 
   try {
     const tokens = await exchangeAuthorization(authorizationServerUrl, {
+      metadata: authorizationServerMetadata,
       clientInformation,
       authorizationCode,
       codeVerifier,
@@ -300,6 +310,7 @@ export async function completeOAuthFlow(
 export interface RefreshOAuthOptions {
   provider: ProviderDefinition;
   authorizationServerUrl: string;
+  authorizationServerMetadata?: AuthorizationServerMetadata;
   refreshToken: string;
   clientInformation: OAuthClientInformationFull;
 }
@@ -316,6 +327,7 @@ export async function refreshOAuthTokens(
   const {
     provider,
     authorizationServerUrl,
+    authorizationServerMetadata,
     refreshToken,
     clientInformation,
   } = options;
@@ -333,6 +345,7 @@ export async function refreshOAuthTokens(
 
   try {
     const tokens = await refreshAuthorization(authorizationServerUrl, {
+      metadata: authorizationServerMetadata,
       clientInformation,
       refreshToken,
       resource: new URL(provider.mcpUrl),

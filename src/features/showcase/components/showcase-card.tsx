@@ -1,22 +1,22 @@
 "use client";
 
-import { ArrowUpIcon, DownloadIcon, EyeIcon } from "lucide-react";
+import Link from "next/link";
+import { ArrowUpIcon, ArrowDownIcon, DownloadIcon, EyeIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Doc } from "../../../../convex/_generated/dataModel";
+import { ProjectCover } from "@/components/project-cover";
+import type { ShowcaseProject } from "../types";
 
-type ShowcaseProject = Doc<"showcaseProjects"> & { previewUrl: string | null };
-
-interface ShowcaseCardProps {
+type ShowcaseCardProps = {
   project: ShowcaseProject;
-  onClick: () => void;
-}
+} & ({ href: string; onClick?: never } | { onClick: () => void; href?: never });
 
-export const ShowcaseCard = ({ project, onClick }: ShowcaseCardProps) => {
-  return (
-    <button
-      onClick={onClick}
-      className="group text-left w-full rounded-xl border border-border/50 bg-card overflow-hidden hover:border-border/80 hover:shadow-md transition-all duration-200"
-    >
+export const CARD_CLASS =
+  "group block text-left w-full rounded-xl border border-border/50 bg-card overflow-hidden hover:border-border/80 hover:shadow-md transition-all duration-200";
+
+/** A showcase project card: a link to its page, or a button (e.g. to open a dialog). */
+export const ShowcaseCard = ({ project, href, onClick }: ShowcaseCardProps) => {
+  const body = (
+    <>
       <div className="aspect-video w-full bg-muted/30 overflow-hidden relative">
         {project.previewUrl ? (
           <img
@@ -25,9 +25,7 @@ export const ShowcaseCard = ({ project, onClick }: ShowcaseCardProps) => {
             className="size-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
           />
         ) : (
-          <div className="size-full flex items-center justify-center text-muted-foreground/30">
-            <span className="text-xs font-mono">No preview</span>
-          </div>
+          <ProjectCover seed={project._id} className="size-full" />
         )}
       </div>
 
@@ -69,6 +67,16 @@ export const ShowcaseCard = ({ project, onClick }: ShowcaseCardProps) => {
           </span>
         </div>
       </div>
+    </>
+  );
+
+  return href ? (
+    <Link href={href} className={CARD_CLASS}>
+      {body}
+    </Link>
+  ) : (
+    <button onClick={onClick} className={CARD_CLASS}>
+      {body}
     </button>
   );
 };

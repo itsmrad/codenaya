@@ -162,6 +162,71 @@ export const OAUTH_START_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
+/**
+ * Storing a secret env var seals it with the KEK and writes a row. Thirty per
+ * minute covers someone pasting a whole .env by hand while stopping a loop.
+ */
+export const ENV_VAR_RATE_LIMIT: RateLimitConfig = {
+  scope: "env-vars-secret",
+  limit: 30,
+  windowMs: 60_000,
+};
+
+/**
+ * Adding a BYOK provider key calls the provider to test it, then seals and
+ * stores it. Five a minute is plenty for someone pasting their keys.
+ */
+export const AI_PROVIDER_CREATE_RATE_LIMIT: RateLimitConfig = {
+  scope: "ai-providers-create",
+  limit: 5,
+  windowMs: 60_000,
+};
+
+/** Re-testing a stored key is one outbound request and no write of key material. */
+export const AI_PROVIDER_TEST_RATE_LIMIT: RateLimitConfig = {
+  scope: "ai-providers-test",
+  limit: 10,
+  windowMs: 60_000,
+};
+
+/**
+ * Enhancing a prompt is one short LLM call billed to us. Ten a minute is far
+ * above someone refining an idea by hand while stopping a scripted loop.
+ */
+export const ENHANCE_PROMPT_RATE_LIMIT: RateLimitConfig = {
+  scope: "enhance-prompt",
+  limit: 10,
+  windowMs: 60_000,
+};
+
+/**
+ * Inline suggestions fire 300ms after typing pauses, so steady typing makes a
+ * request every second or so. Two a second sustained is above any human typist
+ * while stopping a scripted loop on our (or the user's) key.
+ */
+export const SUGGESTION_RATE_LIMIT: RateLimitConfig = {
+  scope: "editor-suggestion",
+  limit: 120,
+  windowMs: 60_000,
+};
+
+/** A Cmd+K quick edit is one deliberate request; twenty a minute is plenty. */
+export const QUICK_EDIT_RATE_LIMIT: RateLimitConfig = {
+  scope: "editor-quick-edit",
+  limit: 20,
+  windowMs: 60_000,
+};
+
+/**
+ * Previewing a skill import fetches up to three files from GitHub. Ten a
+ * minute covers someone trying a few URLs while stopping a scripted loop.
+ */
+export const SKILL_IMPORT_RATE_LIMIT: RateLimitConfig = {
+  scope: "skills-import",
+  limit: 10,
+  windowMs: 60_000,
+};
+
 /** Standard 429 response with a `Retry-After` header. */
 export function rateLimitedResponse(result: RateLimitResult): Response {
   return Response.json(

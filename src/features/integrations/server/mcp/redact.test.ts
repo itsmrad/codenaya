@@ -111,6 +111,11 @@ describe("token-shape redaction", () => {
       fake("sbp", "_", "0123456789abcdefghijklmnopqrstuvwxyz"),
       "supabase-pat",
     ],
+    [
+      "supabase secret key",
+      fake("sb", "_secret_", "0123456789abcdefghijklmnopqrstuvwxyz"),
+      "supabase-secret",
+    ],
     ["openai", fake("sk", "-proj-", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123"), "openai"],
     ["slack", fake("xoxb", "-", "123456789012", "-", "abcdefghijklmnop"), "slack"],
     [

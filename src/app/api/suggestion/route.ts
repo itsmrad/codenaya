@@ -1,9 +1,14 @@
 import { generateObject } from "ai";
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { openai } from "@ai-sdk/openai";
-// import { google } from "@ai-sdk/google";
+
+import { withEditorModel } from "@/features/ai-providers/server/editor-model";
+import {
+  SUGGESTION_RATE_LIMIT,
+  checkRateLimit,
+  rateLimitedResponse,
+} from "@/features/integrations/server/rate-limit";
 
 const suggestionSchema = z.object({
   suggestion: z
@@ -56,13 +61,15 @@ Your suggestion is inserted immediately after the cursor, so never suggest code 
 
 export async function POST(request: Request) {
   try {
-    const { userId } = await auth();
+    const { userId, unauthorized } = await requireUserId();
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
+    if (unauthorized) {
+      return unauthorized;
+    }
+
+    const rateLimit = checkRateLimit(userId, SUGGESTION_RATE_LIMIT);
+    if (!rateLimit.allowed) {
+      return rateLimitedResponse(rateLimit);
     }
 
     const body = await request.json();
@@ -96,14 +103,16 @@ export async function POST(request: Request) {
       .replace("{nextLines}", nextLines ?? "")
       .replace("{lineNumber}", lineNumber.toString());
 
-    const { object } = await generateObject({
-      model: openai("gpt-4o-mini"),
-      output: "object",
-      schema: suggestionSchema,
-      prompt,
-    });
+    return await withEditorModel({ userId, task: "suggestion" }, async (model) => {
+      const { object } = await generateObject({
+        model,
+        output: "object",
+        schema: suggestionSchema,
+        prompt,
+      });
 
-    return NextResponse.json({ suggestion: object.suggestion })
+      return NextResponse.json({ suggestion: object.suggestion });
+    });
   } catch (error) {
     console.error("Suggestion error: ", error);
     return NextResponse.json(

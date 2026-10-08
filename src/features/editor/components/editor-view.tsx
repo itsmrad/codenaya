@@ -17,6 +17,7 @@ export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const activeFile = useFile(activeTabId);
   const updateFile = useUpdateFile();
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingSaveRef = useRef<(() => void) | null>(null);
 
   const isActiveFileBinary = activeFile && activeFile.storageId;
   const isActiveFileText = activeFile && !activeFile.storageId;
@@ -27,8 +28,23 @@ export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
+      pendingSaveRef.current = null;
     };
   }, [activeTabId]);
+
+  // Switching preview engines reloads the page. Don't let that drop an edit that
+  // is still waiting out the debounce: save it now and have the browser confirm.
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      const save = pendingSaveRef.current;
+      if (!save) return;
+      save();
+      event.preventDefault();
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   return (
     <div className="h-full flex flex-col">
@@ -38,14 +54,17 @@ export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
       {activeTabId && <FileBreadcrumbs projectId={projectId} />}
       <div className="flex-1 min-h-0 bg-background">
         {!activeFile && (
-          <div className="size-full flex items-center justify-center">
+          <div className="size-full flex flex-col items-center justify-center gap-3">
             <Image
               src="/logo-alt.svg"
               alt="Codenaya"
-              width={50}
-              height={50}
-              className="opacity-25"
+              width={40}
+              height={48}
+              className="opacity-25 dark:invert-0 invert"
             />
+            <p className="text-xs text-muted-foreground">
+              Select a file from the explorer to start editing
+            </p>
           </div>
         )}
         {isActiveFileText && (
@@ -58,9 +77,16 @@ export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
                 clearTimeout(timeoutRef.current);
               }
 
-              timeoutRef.current = setTimeout(() => {
+              const save = () => {
+                if (timeoutRef.current) {
+                  clearTimeout(timeoutRef.current);
+                  timeoutRef.current = null;
+                }
+                pendingSaveRef.current = null;
                 updateFile({ id: activeFile._id, content });
-              }, DEBOUNCE_MS);
+              };
+              pendingSaveRef.current = save;
+              timeoutRef.current = setTimeout(save, DEBOUNCE_MS);
             }}
           />
         )}

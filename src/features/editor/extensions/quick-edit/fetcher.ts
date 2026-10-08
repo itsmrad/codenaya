@@ -1,6 +1,9 @@
-import ky from "ky";
+import ky, { HTTPError } from "ky";
 import { z } from "zod";
 import { toast } from "sonner";
+
+import { PROVIDER_KEY_ERROR_CODE } from "@/features/ai-providers/registry";
+import { AI_PROVIDERS_SETTINGS_URL } from "@/features/settings/nav";
 
 const editRequestSchema = z.object({
   selectedCode: z.string(),
@@ -38,7 +41,27 @@ export const fetcher = async (
     if (error instanceof Error && error.name === "AbortError") {
       return null;
     }
-    toast.error("Failed to fetch AI quick edit");
+    // Surface the route's JSON error (e.g. "AI is not configured") when present.
+    const body =
+      error instanceof HTTPError
+        ? await error.response
+            .json<{ error?: string; code?: string }>()
+            .catch(() => undefined)
+        : undefined;
+    // A problem with the user's own key links to where they can fix it.
+    const settingsAction =
+      body?.code === PROVIDER_KEY_ERROR_CODE
+        ? {
+            label: "Settings",
+            onClick: () => window.location.assign(AI_PROVIDERS_SETTINGS_URL),
+          }
+        : undefined;
+    toast.error(
+      body?.error
+        ? `AI quick edit failed: ${body.error}`
+        : "AI quick edit failed. Please try again.",
+      { action: settingsAction },
+    );
     return null;
   }
 };

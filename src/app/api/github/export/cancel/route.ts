@@ -1,22 +1,22 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import { convex } from "@/lib/convex-client";
+import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
 import { inngest } from "@/inngest/client";
 
 import { api } from "../../../../../../convex/_generated/api";
-import { Id } from "../../../../../../convex/_generated/dataModel";
 
 const requestSchema = z.object({
   projectId: z.string(),
 });
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (unauthorized) {
+    return unauthorized;
   }
 
   const body = await request.json();
@@ -31,29 +31,27 @@ export async function POST(request: Request) {
     );
   }
 
-  const project = await convex.query(api.system.getProjectById, {
+  const { found: project, notFound } = await requireOwnedProject({
     internalKey,
-    projectId: projectId as Id<"projects">,
+    userId,
+    projectId,
   });
 
-  if (!project || project.ownerId !== userId) {
-    return NextResponse.json(
-      { error: "Unauthorized access to project" },
-      { status: 403 }
-    );
+  if (notFound) {
+    return notFound;
   }
 
   const event = await inngest.send({
     name: "github/export.cancel",
     data: {
-      projectId,
+      projectId: project._id,
     },
   });
 
   // Update status to cancelled
   await convex.mutation(api.system.updateExportStatus, {
     internalKey,
-    projectId: projectId as Id<"projects">,
+    projectId: project._id,
     status: "cancelled",
   });
 

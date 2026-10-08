@@ -7,7 +7,7 @@ import {
 } from "@/features/webcontainer-preview/utils/file-tree";
 import { serialiseDotenv } from "@/features/integrations/dotenv";
 
-import { Doc } from "../../../../convex/_generated/dataModel";
+import { Id, Doc } from "../../../../convex/_generated/dataModel";
 
 // Singleton WebContainer instance
 let webcontainerInstance: WebContainer | null = null;
@@ -27,7 +27,7 @@ const getWebContainer = async (): Promise<WebContainer> => {
   return webcontainerInstance;
 };
 
-export const teardownWebContainer = () => {
+const teardownWebContainer = () => {
   if (webcontainerInstance) {
     webcontainerInstance.teardown();
     webcontainerInstance = null;
@@ -67,6 +67,17 @@ export const useWebContainer = ({
   const [error, setError] = useState<string | null>(null);
   const [restartKey, setRestartKey] = useState(0);
   const [terminalOutput, setTerminalOutput] = useState("");
+  const [prevEnabled, setPrevEnabled] = useState(enabled);
+
+  // Reset preview state as soon as the preview is disabled
+  if (enabled !== prevEnabled) {
+    setPrevEnabled(enabled);
+    if (!enabled) {
+      setStatus("idle");
+      setPreviewUrl(null);
+      setError(null);
+    }
+  }
 
   const containerRef = useRef<WebContainer | null>(null);
   const installProcessRef = useRef<WebContainerProcess | null>(null);
@@ -190,10 +201,6 @@ export const useWebContainer = ({
   useEffect(() => {
     if (!enabled) {
       hasStartedRef.current = false;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setStatus("idle");
-      setPreviewUrl(null);
-      setError(null);
     }
   }, [enabled]);
 

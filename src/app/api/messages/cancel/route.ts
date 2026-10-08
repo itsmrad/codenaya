@@ -1,22 +1,22 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import { convex } from "@/lib/convex-client";
-import { dispatchCancelMessage } from "@/lib/message-processor";
+import { cancelProcessingMessage } from "@/lib/message-processor";
+import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
 
 import { api } from "../../../../../convex/_generated/api";
-import { Id } from "../../../../../convex/_generated/dataModel";
 
 const requestSchema = z.object({
   projectId: z.string(),
 });
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (unauthorized) {
+    return unauthorized;
   }
   
   const body = await request.json();
@@ -31,12 +31,22 @@ export async function POST(request: Request) {
     );
   }
 
+  const { found: project, notFound } = await requireOwnedProject({
+    internalKey,
+    userId,
+    projectId,
+  });
+
+  if (notFound) {
+    return notFound;
+  }
+
   // Find all processing messages in this project
   const processingMessages = await convex.query(
     api.system.getProcessingMessages,
     {
       internalKey,
-      projectId: projectId as Id<"projects">,
+      projectId: project._id,
     }
   );
 
@@ -47,13 +57,7 @@ export async function POST(request: Request) {
   // Cancel all processing messages
   const cancelledIds = await Promise.all(
     processingMessages.map(async (msg) => {
-      await dispatchCancelMessage({ internalKey, messageId: msg._id });
-
-      await convex.mutation(api.system.updateMessageStatus, {
-        internalKey,
-        messageId: msg._id,
-        status: "cancelled",
-      });
+      await cancelProcessingMessage({ internalKey, messageId: msg._id });
 
       return msg._id;
     })

@@ -1,12 +1,20 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
-import { auth, clerkClient } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import { inngest } from "@/inngest/client";
+<<<<<<< HEAD
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+=======
+import {
+  getGithubToken,
+  githubNotLinkedResponse,
+} from "@/features/projects/server/github-token";
+import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
+>>>>>>> upstream/main
 
 const requestSchema = z.object({
   projectId: z.string(),
@@ -16,16 +24,10 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const { userId, has } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const hasPro = has({ plan: "pro" });
-
-  if (!hasPro) {
-    return NextResponse.json({ error: "Pro plan required" }, { status: 403 });
+  if (unauthorized) {
+    return unauthorized;
   }
 
   const body = await request.json();
@@ -40,33 +42,26 @@ export async function POST(request: Request) {
     );
   }
 
-  const project = await convex.query(api.system.getProjectById, {
+  const { found: project, notFound } = await requireOwnedProject({
     internalKey,
-    projectId: projectId as Id<"projects">,
+    userId,
+    projectId,
   });
 
-  if (!project || project.ownerId !== userId) {
-    return NextResponse.json(
-      { error: "Unauthorized access to project" },
-      { status: 403 }
-    );
+  if (notFound) {
+    return notFound;
   }
 
-  const client = await clerkClient();
-  const tokens = await client.users.getUserOauthAccessToken(userId, "github");
-  const githubToken = tokens.data[0]?.token;
+  const githubToken = await getGithubToken(userId);
 
   if (!githubToken) {
-    return NextResponse.json(
-      { error: "GitHub not connected. Please reconnect your GitHub account." },
-      { status: 400 }
-    );
+    return githubNotLinkedResponse();
   }
 
   const event = await inngest.send({
     name: "github/export.repo",
     data: {
-      projectId,
+      projectId: project._id,
       repoName,
       visibility,
       description,

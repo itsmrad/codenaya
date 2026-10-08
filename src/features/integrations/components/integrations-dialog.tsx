@@ -148,7 +148,10 @@ export const IntegrationsDialog = ({
       </div>
 
       {selectedProviderId ? (
-        <ConnectApiKeyForm providerId={selectedProviderId} />
+        <ConnectApiKeyForm
+          providerId={selectedProviderId}
+          projectId={projectId}
+        />
       ) : (
         <ProviderCatalog onSelect={setSelectedProviderId} />
       )}

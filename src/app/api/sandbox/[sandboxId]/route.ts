@@ -1,5 +1,8 @@
-import { Sandbox } from "e2b";
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
+import {
+  forgetSandbox,
+  getOwnedSandbox,
+} from "@/features/sandbox-preview/server/sandbox-registry";
 
 interface RouteParams {
   params: Promise<{ sandboxId: string }>;
@@ -12,22 +15,22 @@ interface RouteParams {
  * Called on unmount, navigation away, or manual restart.
  */
 export async function DELETE(_request: Request, { params }: RouteParams) {
-  const { userId } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (unauthorized) {
+    return unauthorized;
   }
 
   const { sandboxId } = await params;
 
   try {
-    const sandbox = await Sandbox.connect(sandboxId);
-    const sandboxInfo = await sandbox.getInfo();
+    const sandbox = await getOwnedSandbox(sandboxId, userId);
 
-    if (sandboxInfo.metadata?.userId !== userId) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
+    if (!sandbox) {
+      return Response.json({ error: "Sandbox not found" }, { status: 404 });
     }
 
+    forgetSandbox(sandboxId);
     await sandbox.kill();
 
     return Response.json({ success: true });
@@ -66,10 +69,10 @@ export async function POST(request: Request, { params }: RouteParams) {
  * Accepts an array of { path, content } objects.
  */
 export async function PATCH(request: Request, { params }: RouteParams) {
-  const { userId } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (unauthorized) {
+    return unauthorized;
   }
 
   const { sandboxId } = await params;
@@ -86,21 +89,25 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   const WORK_DIR = "/home/user/app";
 
   try {
-    const sandbox = await Sandbox.connect(sandboxId);
-    const sandboxInfo = await sandbox.getInfo();
+    const sandbox = await getOwnedSandbox(sandboxId, userId);
 
-    if (sandboxInfo.metadata?.userId !== userId) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
+    if (!sandbox) {
+      return Response.json({ error: "Sandbox not found" }, { status: 404 });
     }
 
-    await Promise.all(
-      files.map((file) =>
-        sandbox.files.write(`${WORK_DIR}/${file.path}`, file.content)
-      )
+    // One request for the whole batch instead of one per file.
+    await sandbox.files.write(
+      files.map((file) => ({
+        path: `${WORK_DIR}/${file.path}`,
+        data: file.content,
+      }))
     );
 
     return Response.json({ success: true, synced: files.length });
   } catch (error) {
+    // The cached handle may belong to a sandbox that has since died.
+    forgetSandbox(sandboxId);
+
     const message = error instanceof Error ? error.message : "Unknown error";
 
     return Response.json({ success: false, error: message }, { status: 500 });

@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@clerk/ui/themes/shadcn.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -45,6 +46,34 @@
   --color-brand-foreground: var(--brand-foreground);
 }
 
+/* Chat motion: the live-run pixel loader and the entry of newly arrived rows.
+   Adapted from Beautiful UI (beautifului.dev), MIT © 2026 Shane Levine — see
+   THIRD_PARTY_NOTICES.md. */
+@theme {
+  --animate-pixel-on: pixel-on 650ms ease-in-out infinite;
+  --animate-fade-up: fade-up 300ms cubic-bezier(0.23, 1, 0.32, 1) both;
+
+  @keyframes pixel-on {
+    0%,
+    100% {
+      opacity: 0.15;
+    }
+    18%,
+    42% {
+      opacity: 1;
+    }
+    62% {
+      opacity: 0.15;
+    }
+  }
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+}
+
 /* 
  * Codenaya Design System
  * Dark Mode First — Cinematic Noir with Warm Amber Accent
@@ -74,7 +103,7 @@
   --input: rgba(26, 26, 26, 0.08);
   --ring: #e8824f;
   --brand: #e8824f;
-  --brand-foreground: #ffffff;
+  --brand-foreground: #1a1a1a;
   --sidebar: #ffffff;
   --sidebar-foreground: #1a1a1a;
   --sidebar-border: rgba(26, 26, 26, 0.08);
@@ -203,19 +232,128 @@ html.lenis, html.lenis body {
   opacity: 0.45;
 }
 
-@theme inline {
-  --animate-cell-ripple: cell-ripple var(--duration, 200ms) ease-out none 1
-    var(--delay, 0ms);
+/* Assistant replies in the chat panel: compact prose sized for a side panel.
+   Unlayered so it overrides Streamdown's utility classes. */
+.chat-prose {
+  @apply text-sm leading-6 text-foreground;
+  overflow-wrap: anywhere;
+}
+.chat-prose :is([data-streamdown="heading-1"], [data-streamdown="heading-2"]) {
+  @apply mt-5 mb-2 text-[15px] leading-6 font-semibold;
+}
+.chat-prose :is([data-streamdown="heading-3"], [data-streamdown="heading-4"], [data-streamdown="heading-5"], [data-streamdown="heading-6"]) {
+  @apply mt-4 mb-1.5 text-sm font-semibold;
+}
+.chat-prose :is([data-streamdown="unordered-list"], [data-streamdown="ordered-list"]) {
+  @apply my-2 space-y-1 pl-5;
+}
+.chat-prose [data-streamdown="list-item"] {
+  @apply py-0;
+}
+.chat-prose [data-streamdown="inline-code"] {
+  @apply rounded bg-muted px-1 py-0.5 font-mono text-[12.5px];
+}
+.chat-prose [data-streamdown="code-block"] {
+  @apply my-3 gap-0 overflow-hidden rounded-lg border-border bg-muted/40 p-0;
+}
+.chat-prose [data-streamdown="code-block-header"] {
+  @apply h-8 border-b border-border px-3 font-mono text-[11px];
+}
+.chat-prose [data-streamdown="code-block-header"] > span {
+  @apply ml-0;
+}
+.chat-prose div:has(> [data-streamdown="code-block-actions"]) {
+  @apply top-0 -mt-8 pr-1;
+}
+.chat-prose [data-streamdown="code-block-actions"] {
+  @apply border-0 bg-transparent p-0;
+}
+.chat-prose [data-streamdown="code-block-actions"] button {
+  @apply grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground;
+}
+.chat-prose [data-streamdown="code-block-body"] {
+  @apply overflow-x-auto rounded-none border-0 bg-transparent p-3 font-mono text-[12.5px] leading-5;
+}
+.chat-prose [data-streamdown="code-block-body"] pre {
+  @apply bg-transparent;
+}
 
-  @keyframes cell-ripple {
-    0% {
-      opacity: 0.4;
-    }
-    50% {
-      opacity: 0.8;
-    }
-    100% {
-      opacity: 0.4;
-    }
+/* Chat composer: raised rounded box with a soft focus ring. Unlayered so it
+   overrides the shared InputGroup's utility classes. */
+.chat-composer [data-slot="input-group"] {
+  @apply rounded-xl! border-input bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04),0_4px_16px_-8px_rgb(0_0_0/0.08)] transition-[box-shadow,border-color] duration-150 dark:bg-card dark:shadow-none;
+}
+.chat-composer [data-slot="input-group"]:focus-within {
+  @apply border-ring/40 ring-2 ring-ring/15;
+}
+.chat-composer [data-slot="input-group-control"] {
+  @apply resize-none bg-transparent outline-none dark:bg-transparent;
+}
+
+/* Dashboard prompt composer: the chat composer's box, larger, with a slowly
+   rotating brand-colored border while focused. */
+@property --composer-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes composer-border-spin {
+  to {
+    --composer-angle: 360deg;
   }
+}
+.prompt-composer {
+  position: relative;
+  border-radius: 1rem;
+}
+.prompt-composer [data-slot="input-group"] {
+  @apply rounded-2xl!;
+}
+.prompt-composer::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: 1;
+  padding: 1.5px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--composer-angle),
+    transparent 0%,
+    var(--brand) 18%,
+    color-mix(in oklab, var(--brand) 30%, #a78bfa) 32%,
+    transparent 50%,
+    transparent 100%
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+  animation: composer-border-spin 4s linear infinite;
+}
+.prompt-composer:focus-within::before {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .prompt-composer::before {
+    animation: none;
+  }
+}
+
+/* Generated project covers (ProjectCover): a two-hue gradient picked from the
+   project id, light or deep to match the theme. */
+.project-cover {
+  --cover-accent: oklch(0.62 0.17 var(--cover-h));
+  background:
+    radial-gradient(at 15% 10%, oklch(0.86 0.09 var(--cover-h)) 0, transparent 60%),
+    radial-gradient(at 90% 95%, oklch(0.84 0.1 var(--cover-h2)) 0, transparent 55%),
+    oklch(0.95 0.025 var(--cover-h));
+}
+.dark .project-cover {
+  --cover-accent: oklch(0.7 0.15 var(--cover-h));
+  background:
+    radial-gradient(at 15% 10%, oklch(0.42 0.12 var(--cover-h)) 0, transparent 60%),
+    radial-gradient(at 90% 95%, oklch(0.38 0.12 var(--cover-h2)) 0, transparent 55%),
+    oklch(0.2 0.03 var(--cover-h));
 }

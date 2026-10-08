@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
@@ -15,9 +15,11 @@ import {
   rateLimitedResponse,
 } from "@/features/integrations/server/rate-limit";
 import { assertSafeMcpUrl } from "@/features/integrations/server/url-guard";
+import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
+import { Id } from "../../../../../convex/_generated/dataModel";
 
 /**
  * POST /api/integrations/connect
@@ -42,6 +44,7 @@ const requestSchema = z.object({
   providerId: z.string().min(1),
   apiKey: z.string().min(1, "API key is required"),
   label: z.string().max(80).optional(),
+  projectId: z.string().optional(),
   /** Required when providerId is "custom". */
   serverUrl: z.string().url().optional(),
 });
@@ -63,10 +66,10 @@ function jsonError(
 }
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return jsonError("Unauthorized", 401);
+  if (unauthorized) {
+    return unauthorized;
   }
 
   // Checked before anything else. This route probes a remote MCP server, so an
@@ -95,7 +98,12 @@ export async function POST(request: Request) {
     return jsonError(parsed.error.issues[0]?.message ?? "Invalid request", 400);
   }
 
-  const { providerId, apiKey, label, serverUrl } = parsed.data;
+  const { providerId, apiKey, label, serverUrl, projectId } = parsed.data;
+
+  if (projectId) {
+    const { notFound } = await requireOwnedProject({ internalKey, userId, projectId });
+    if (notFound) return notFound;
+  }
 
   // ── Resolve the target endpoint and credential placement ──
 
@@ -189,9 +197,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const connectionId = await convex.mutation(api.system.createUserConnection, {
+    const created = await convex.mutation(api.system.createUserConnection, {
       internalKey,
       userId,
+      projectId: projectId as Id<"projects"> | undefined,
       providerId,
       label: label?.trim() || displayName,
       authMode: "api_key",
@@ -206,7 +215,9 @@ export async function POST(request: Request) {
 
     return Response.json({
       ok: true,
-      connectionId,
+      connectionId: created.connectionId,
+      linkedToProject: Boolean(created.projectConnectionId),
+      projectConnectionId: created.projectConnectionId,
       provider: { id: providerId, displayName },
       toolCount: probe.tools.length,
       truncated: probe.truncated,

@@ -2,10 +2,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   buildFlatFileList,
-  getFilePath,
+  getChangedFiles,
 } from "@/features/sandbox-preview/utils/file-tree";
+import {
+  classifySandboxError,
+  type SandboxErrorKind,
+} from "@/features/sandbox-preview/utils/sandbox-error";
 
 import { Id, Doc } from "../../../../convex/_generated/dataModel";
+
+const NETWORK_ERROR_MESSAGE =
+  "Couldn't reach the preview sandbox. Check your connection and retry.";
+
+class SandboxStartError extends Error {
+  constructor(
+    message: string,
+    readonly kind: SandboxErrorKind,
+  ) {
+    super(message);
+  }
+}
 
 interface UseSandboxProps {
   files?: Doc<"files">[];
@@ -32,13 +48,28 @@ export const useSandbox = ({
   >("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<SandboxErrorKind | null>(null);
   const [restartKey, setRestartKey] = useState(0);
   const [terminalOutput, setTerminalOutput] = useState("");
+  const [prevEnabled, setPrevEnabled] = useState(enabled);
+
+  // Reset preview state as soon as the preview is disabled
+  if (enabled !== prevEnabled) {
+    setPrevEnabled(enabled);
+    if (!enabled) {
+      setStatus("idle");
+      setPreviewUrl(null);
+      setError(null);
+      setErrorKind(null);
+    }
+  }
 
   const sandboxIdRef = useRef<string | null>(null);
   const hasStartedRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const syncPromiseRef = useRef<Promise<void>>(Promise.resolve());
+  /** Path → content the sandbox already has, so a sync only sends real edits. */
+  const syncedContentRef = useRef(new Map<string, string>());
 
   /**
    * Kill the current sandbox. Uses fetch with keepalive for reliability
@@ -76,6 +107,9 @@ export const useSandbox = ({
         setTerminalOutput("");
 
         const flatFiles = buildFlatFileList(files);
+        syncedContentRef.current = new Map(
+          flatFiles.map((file) => [file.path, file.content]),
+        );
 
         const response = await fetch("/api/sandbox", {
           method: "POST",
@@ -90,8 +124,12 @@ export const useSandbox = ({
 
         if (!response.ok) {
           const errorBody = await response.json().catch(() => null);
-          throw new Error(
-            errorBody?.error || `Failed to create sandbox (${response.status})`
+          throw new SandboxStartError(
+            errorBody?.error || `Failed to create sandbox (${response.status})`,
+            classifySandboxError({
+              code: errorBody?.code,
+              status: response.status,
+            }),
           );
         }
 
@@ -131,7 +169,10 @@ export const useSandbox = ({
                   setStatus("running");
                   break;
                 case "error":
-                  throw new Error(event.message);
+                  throw new SandboxStartError(
+                    event.message,
+                    classifySandboxError({ code: event.code }),
+                  );
               }
             } catch (parseError) {
               // If it's a re-thrown error from "error" event, propagate it
@@ -145,7 +186,18 @@ export const useSandbox = ({
       } catch (error) {
         if ((error as Error).name === "AbortError") return;
 
-        setError(error instanceof Error ? error.message : "Unknown error");
+        setError(
+          // fetch and stream reads reject with a bare TypeError ("Failed to
+          // fetch", "network error") when the connection drops.
+          error instanceof TypeError
+            ? NETWORK_ERROR_MESSAGE
+            : error instanceof Error
+              ? error.message
+              : "Unknown error",
+        );
+        setErrorKind(
+          error instanceof SandboxStartError ? error.kind : "transient",
+        );
         setStatus("error");
       }
     };
@@ -168,17 +220,18 @@ export const useSandbox = ({
 
     // Debounce the file sync to batch rapid AI file generations into a single update
     const timeoutId = setTimeout(() => {
-      const filesMap = new Map(files.map((f) => [f._id, f]));
-      const changedFiles: { path: string; content: string }[] = [];
-  
-      for (const file of files) {
-        if (file.type !== "file" || file.storageId || file.content == null) continue;
-  
-        const filePath = getFilePath(file, filesMap);
-        changedFiles.push({ path: filePath, content: file.content });
-      }
-  
+      // Only what changed: rewriting e.g. vite.config restarts the dev server
+      // and breaks the open preview's HMR connection (#146).
+      const changedFiles = getChangedFiles(
+        buildFlatFileList(files),
+        syncedContentRef.current,
+      );
+
       if (changedFiles.length === 0) return;
+
+      for (const file of changedFiles) {
+        syncedContentRef.current.set(file.path, file.content);
+      }
   
       // Serialize file syncs to prevent out-of-order writes
       syncPromiseRef.current = syncPromiseRef.current
@@ -193,7 +246,7 @@ export const useSandbox = ({
           // Non-critical — file sync failure shouldn't crash the preview
         })
         .then(); // Return void promise
-    }, 1000); // 1-second debounce window
+    }, 300); // Short enough to feel instant, long enough to batch a burst of writes
 
     return () => clearTimeout(timeoutId);
   }, [files, status]);
@@ -202,10 +255,6 @@ export const useSandbox = ({
   useEffect(() => {
     if (!enabled) {
       hasStartedRef.current = false;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setStatus("idle");
-      setPreviewUrl(null);
-      setError(null);
 
       // Kill sandbox if one exists
       const sandboxId = sandboxIdRef.current;
@@ -243,6 +292,9 @@ export const useSandbox = ({
       }
 
       abortControllerRef.current?.abort();
+      // Let a remount (React Strict Mode in dev) boot again instead of waiting
+      // forever on the stream this cleanup just aborted.
+      hasStartedRef.current = false;
     };
   }, [killSandbox]);
 
@@ -261,6 +313,7 @@ export const useSandbox = ({
     setStatus("idle");
     setPreviewUrl(null);
     setError(null);
+    setErrorKind(null);
     setTerminalOutput("");
     setRestartKey((k) => k + 1);
   }, [killSandbox]);
@@ -269,6 +322,7 @@ export const useSandbox = ({
     status,
     previewUrl,
     error,
+    errorKind,
     restart,
     terminalOutput,
   };

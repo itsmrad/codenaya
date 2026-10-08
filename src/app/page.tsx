@@ -1,27 +1,37 @@
-import { currentUser } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
+import { auth } from "@clerk/nextjs/server";
+import { Suspense } from "react";
+
 import { AppNavbar } from "@/components/app-navbar";
+import { LandingPage } from "@/components/landing/landing-page";
+import { AuthLoadingView } from "@/features/auth/components/auth-loading-view";
+import { ConvexAuthBoundary } from "@/features/auth/components/convex-auth-boundary";
 import { ProjectsView } from "@/features/projects/components/projects-view";
 
-export const instant = false;
+const HomeContent = async () => {
+  const { userId } = await auth();
 
-const Home = async () => {
-  const user = await currentUser();
-
-  // If user is authenticated but hasn't completed onboarding -> redirect to /onboarding
-  if (user && !user.publicMetadata?.hasCompletedOnboarding) {
-    redirect("/onboarding");
+  if (!userId) {
+    return <LandingPage />;
   }
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
-      <AppNavbar />
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <ProjectsView />
+    <ConvexAuthBoundary>
+      <div className="h-screen flex flex-col overflow-hidden">
+        <AppNavbar />
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ProjectsView />
+        </div>
       </div>
-    </div>
+    </ConvexAuthBoundary>
+  );
+};
+
+const Home = () => {
+  return (
+    <Suspense fallback={<AuthLoadingView />}>
+      <HomeContent />
+    </Suspense>
   );
 };
 
 export default Home;
-

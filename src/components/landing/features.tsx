@@ -2,36 +2,57 @@
 
 import { useRef } from "react";
 import { motion, useInView } from "motion/react";
-import { Sparkles, GitBranch, Play, Users } from "lucide-react";
+import {
+  Bot,
+  Download,
+  FolderGit2,
+  KeyRound,
+  MonitorPlay,
+  Puzzle,
+} from "lucide-react";
+import { AGENT_MODELS } from "@/features/conversations/agent-models";
 
 const features = [
   {
-    icon: Sparkles,
-    title: "AI Code Generation",
-    description:
-      "Claude-powered suggestions, quick edits with Cmd+K, and a conversational AI assistant that understands your entire codebase.",
-    span: "md:col-span-2",
+    icon: Bot,
+    title: "AI agent with model choice",
+    description: `Describe what you want and the agent writes and edits files across your project. Switch between ${AGENT_MODELS.length} models, including Claude, GPT and Gemini, and use Cmd+K for quick edits in the editor.`,
+    span: "lg:col-span-2",
   },
   {
-    icon: Play,
-    title: "In-Browser Execution",
+    icon: MonitorPlay,
+    title: "Live preview & terminal",
     description:
-      "Run your code instantly with WebContainer. No setup, no local environment — just write and see results.",
-    span: "md:col-span-1",
+      "Your app runs in a cloud sandbox with a live preview and a terminal. No local setup.",
+    span: "lg:col-span-1",
   },
   {
-    icon: GitBranch,
-    title: "GitHub Integration",
+    icon: FolderGit2,
+    title: "GitHub import & export",
     description:
-      "Import repos, push changes, and manage branches directly from your browser. Your workflow, streamlined.",
-    span: "md:col-span-1",
+      "Start from any GitHub repository, then export your project to a new repo when it's ready.",
+    span: "lg:col-span-1",
   },
   {
-    icon: Users,
-    title: "Real-time Collaboration",
+    icon: KeyRound,
+    title: "Bring your own key",
     description:
-      "Convex-powered real-time sync. Every keystroke, every file change — instantly reflected across all collaborators.",
-    span: "md:col-span-2",
+      "Run the agent on your own OpenRouter, OpenAI or Anthropic key, or any OpenAI-compatible endpoint.",
+    span: "lg:col-span-2",
+  },
+  {
+    icon: Puzzle,
+    title: "Skills & integrations",
+    description:
+      "Teach the agent reusable skills, and connect integrations whose actions wait for your approval.",
+    span: "lg:col-span-2",
+  },
+  {
+    icon: Download,
+    title: "Download as ZIP",
+    description:
+      "Take the full source with you in one click, whenever you want.",
+    span: "lg:col-span-1",
   },
 ];
 
@@ -40,14 +61,14 @@ export const LandingFeatures = () => {
   const isInView = useInView(sectionRef, { once: true, amount: 0.2 });
 
   return (
-    <section ref={sectionRef} className="relative py-32 md:py-40">
+    <section ref={sectionRef} className="relative py-14 md:py-20">
       <div className="max-w-6xl mx-auto px-6 md:px-8">
         {/* Section header */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-          className="text-center mb-16 md:mb-20"
+          className="text-center mb-12 md:mb-16"
         >
           <p className="text-xs uppercase tracking-[0.25em] text-brand font-mono mb-4">
             Features
@@ -58,7 +79,7 @@ export const LandingFeatures = () => {
         </motion.div>
 
         {/* Bento Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
           {features.map((feature, i) => (
             <motion.div
               key={feature.title}
@@ -71,11 +92,8 @@ export const LandingFeatures = () => {
               }}
               className={`${feature.span} group relative`}
             >
-              <div className="relative h-full p-6 md:p-8 rounded-xl border border-border/60 bg-card/50 backdrop-blur-sm overflow-hidden transition-all duration-500 hover:border-brand/30 hover:shadow-lg hover:shadow-brand/5">
-                {/* Hover glow */}
-                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-[radial-gradient(ellipse_at_top_left,rgba(232,130,79,0.05),transparent_60%)]" />
-
-                <div className="relative z-10 space-y-4">
+              <div className="relative h-full p-6 md:p-8 rounded-xl border border-border/60 bg-card/50 transition-colors duration-200 hover:border-border">
+                <div className="space-y-4">
                   <div className="inline-flex items-center justify-center size-10 rounded-xl bg-brand/10 text-brand">
                     <feature.icon className="size-5" />
                   </div>

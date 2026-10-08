@@ -2,7 +2,9 @@
 
 import { Allotment } from "allotment";
 
+import { useIsCompact } from "@/hooks/use-mobile";
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
+import { ProjectIntegrationsProvider } from "@/features/integrations/components/project-integrations-context";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 
@@ -18,9 +20,17 @@ export const ProjectIdLayout = ({
   children: React.ReactNode;
   projectId: Id<"projects">;
 }) => {
+  // Phones and tablets get a tabbed layout instead: ProjectIdView renders the
+  // chat as one of its full-size tabs, so the side-by-side panes are skipped.
+  const isCompact = useIsCompact();
+
   return (
-    <div className="w-full h-screen flex flex-col bg-background">
-      <div className="flex-1 p-2 min-h-0 flex overflow-hidden">
+    <ProjectIntegrationsProvider projectId={projectId}>
+      <div className="w-full h-dvh flex flex-col bg-background">
+        <div className="flex-1 p-2 min-h-0 flex overflow-hidden">
+        {isCompact ? (
+          <div className="flex-1 min-w-0 flex flex-col relative">{children}</div>
+        ) : (
         <Allotment
           className="flex-1"
           defaultSizes={[
@@ -46,7 +56,9 @@ export const ProjectIdLayout = ({
             </div>
           </Allotment.Pane>
         </Allotment>
+        )}
+        </div>
       </div>
-    </div>
+    </ProjectIntegrationsProvider>
   );
 };

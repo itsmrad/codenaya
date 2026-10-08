@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { verifyAuth } from "./auth";
+import { releaseFileStorage } from "./checkpoints";
 import { Doc, Id } from "./_generated/dataModel";
 
 export const getFiles = query({
@@ -23,6 +24,41 @@ export const getFiles = query({
       .query("files")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .collect();
+  },
+});
+
+/**
+ * All files of a project, with a download URL for binary (storage) files.
+ * Used for: Download ZIP
+ */
+export const getFilesWithUrls = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+
+    const project = await ctx.db.get("projects", args.projectId);
+
+    if (!project) {
+      throw new Error("Project not found");
+    }
+
+    if (project.ownerId !== identity.subject) {
+      throw new Error("Unauthorized to access this project");
+    }
+
+    const files = await ctx.db
+      .query("files")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .collect();
+
+    return await Promise.all(
+      files.map(async (file) => ({
+        ...file,
+        storageUrl: file.storageId
+          ? await ctx.storage.getUrl(file.storageId)
+          : null,
+      }))
+    );
   },
 });
 
@@ -349,7 +385,7 @@ export const deleteFile = mutation({
 
        // Delete storage file if it exists
        if (item.storageId) {
-        await ctx.storage.delete(item.storageId);
+        await releaseFileStorage(ctx, item.storageId);
       }
 
       // Delete the file/folder itself

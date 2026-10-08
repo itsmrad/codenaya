@@ -1,12 +1,11 @@
 import { z } from "zod";
 import { createTool } from "@inngest/agent-kit";
 
-import { convex } from "@/lib/convex-client";
-
-import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { getFileByAgentId } from "./get-file";
 
 interface ReadFilesToolOptions {
+  projectId: Id<"projects">;
   internalKey: string;
 }
 
@@ -16,7 +15,10 @@ const paramsSchema = z.object({
     .min(1, "Provide at least one file ID"),
 });
 
-export const createReadFilesTool = ({ internalKey }: ReadFilesToolOptions) => {
+export const createReadFilesTool = ({
+  projectId,
+  internalKey,
+}: ReadFilesToolOptions) => {
   return createTool({
     name: "readFiles",
     description: "Read the content of files from the project. Returns file contents.",
@@ -36,10 +38,7 @@ export const createReadFilesTool = ({ internalKey }: ReadFilesToolOptions) => {
           const results: { id: string; name: string; content: string }[] = [];
 
           for (const fileId of fileIds) {
-            const file = await convex.query(api.system.getFileById, {
-              internalKey,
-              fileId: fileId as Id<"files">,
-            });
+            const file = await getFileByAgentId(internalKey, projectId, fileId);
 
             if (file && file.content) {
               results.push({

@@ -8,16 +8,25 @@
  * @module
  */
 
+import type * as aiProviders from "../aiProviders.js";
 import type * as auth from "../auth.js";
+import type * as chatImages from "../chatImages.js";
+import type * as checkpoints from "../checkpoints.js";
 import type * as conversations from "../conversations.js";
 import type * as crons from "../crons.js";
 import type * as envVars from "../envVars.js";
 import type * as files from "../files.js";
+import type * as http from "../http.js";
 import type * as integrations from "../integrations.js";
 import type * as maintenance from "../maintenance.js";
+import type * as projectCascade from "../projectCascade.js";
+import type * as projectCopy from "../projectCopy.js";
 import type * as projects from "../projects.js";
 import type * as showcase from "../showcase.js";
+import type * as skills from "../skills.js";
+import type * as stats from "../stats.js";
 import type * as system from "../system.js";
+import type * as users from "../users.js";
 
 import type {
   ApiFromModules,
@@ -26,16 +35,25 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  aiProviders: typeof aiProviders;
   auth: typeof auth;
+  chatImages: typeof chatImages;
+  checkpoints: typeof checkpoints;
   conversations: typeof conversations;
   crons: typeof crons;
   envVars: typeof envVars;
   files: typeof files;
+  http: typeof http;
   integrations: typeof integrations;
   maintenance: typeof maintenance;
+  projectCascade: typeof projectCascade;
+  projectCopy: typeof projectCopy;
   projects: typeof projects;
   showcase: typeof showcase;
+  skills: typeof skills;
+  stats: typeof stats;
   system: typeof system;
+  users: typeof users;
 }>;
 
 /**

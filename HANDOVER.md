@@ -23,7 +23,8 @@ Nothing works without this. Add to `.env.local` **and** to Vercel:
 CODENAYA_LOCAL_KEK=          # openssl rand -base64 32
 
 # Absolute OAuth callback URL. Only needed for OAuth providers.
-INTEGRATIONS_REDIRECT_URI=https://your-domain.com/api/integrations/oauth/callback
+INTEGRATIONS_REDIRECT_URI=http://localhost:3000/api/integrations/oauth/callback   # local
+# In production, swap the host for your real domain (https required off localhost).
 ```
 
 ⚠️ **Use the identical `CODENAYA_LOCAL_KEK` in every environment.** Different values

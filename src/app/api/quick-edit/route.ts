@@ -1,10 +1,15 @@
 import { z } from "zod";
 import { generateObject } from "ai";
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
-import { openai } from "@ai-sdk/openai";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 
-import { firecrawl } from "@/lib/firecrawl";
+import { getFirecrawl } from "@/lib/firecrawl";
+import { withEditorModel } from "@/features/ai-providers/server/editor-model";
+import {
+  QUICK_EDIT_RATE_LIMIT,
+  checkRateLimit,
+  rateLimitedResponse,
+} from "@/features/integrations/server/rate-limit";
 
 const quickEditSchema = z.object({
   editedCode: z
@@ -48,13 +53,15 @@ If the instruction is unclear or cannot be applied, return the original code unc
 
 export async function POST(request: Request) {
   try {
-    const { userId } = await auth();
+    const { userId, unauthorized } = await requireUserId();
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+    if (unauthorized) {
+      return unauthorized;
+    }
+
+    const rateLimit = checkRateLimit(userId, QUICK_EDIT_RATE_LIMIT);
+    if (!rateLimit.allowed) {
+      return rateLimitedResponse(rateLimit);
     }
 
     const body = await request.json();
@@ -71,8 +78,10 @@ export async function POST(request: Request) {
 
     const urls: string[] = instruction.match(URL_REGEX) || [];
     let documentationContext = "";
+    // Firecrawl is optional: without a key, edit without documentation context.
+    const firecrawl = getFirecrawl();
 
-    if (urls.length > 0) {
+    if (firecrawl && urls.length > 0) {
       const scrapedResults = await Promise.all(
         urls.map(async (url) => {
           try {
@@ -104,14 +113,16 @@ export async function POST(request: Request) {
       .replace("{instruction}", instruction)
       .replace("{documentation}", documentationContext);
 
-    const { object } = await generateObject({
-      model: openai("gpt-4o"),
-      output: "object",
-      schema: quickEditSchema,
-      prompt,
-    });
+    return await withEditorModel({ userId, task: "quickEdit" }, async (model) => {
+      const { object } = await generateObject({
+        model,
+        output: "object",
+        schema: quickEditSchema,
+        prompt,
+      });
 
-    return NextResponse.json({ editedCode: object.editedCode });
+      return NextResponse.json({ editedCode: object.editedCode });
+    });
   } catch (error) {
     console.error("Edit error:", error);
     return NextResponse.json(

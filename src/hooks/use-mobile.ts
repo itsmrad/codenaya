@@ -1,20 +1,31 @@
 import * as React from "react"
 
 const MOBILE_BREAKPOINT = 768
+// Below this the project IDE shows one pane at a time (Chat / Code / Preview)
+// instead of the chat panel beside the editor.
+const COMPACT_BREAKPOINT = 1024
+
+function useIsBelow(breakpoint: number) {
+  const subscribe = React.useCallback(
+    (onChange: () => void) => {
+      const mql = window.matchMedia(`(max-width: ${breakpoint - 1}px)`)
+      mql.addEventListener("change", onChange)
+      return () => mql.removeEventListener("change", onChange)
+    },
+    [breakpoint]
+  )
+
+  return React.useSyncExternalStore(
+    subscribe,
+    () => window.innerWidth < breakpoint,
+    () => false
+  )
+}
 
 export function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)
+  return useIsBelow(MOBILE_BREAKPOINT)
+}
 
-  React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
-    const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    }
-    mql.addEventListener("change", onChange)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    return () => mql.removeEventListener("change", onChange)
-  }, [])
-
-  return !!isMobile
+export function useIsCompact() {
+  return useIsBelow(COMPACT_BREAKPOINT)
 }

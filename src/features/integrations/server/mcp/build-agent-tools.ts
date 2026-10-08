@@ -34,6 +34,7 @@ import {
 } from "../../adapters/agentkit";
 import { describeDrift } from "./fingerprint";
 import { discoverTools, type DiscoveredTool } from "./discover-tools";
+import { redactSecrets } from "./redact";
 import {
   collectKnownSecrets,
   resolveMcpServers,
@@ -51,6 +52,8 @@ export interface McpToolBuildResult {
     projectConnectionId: string;
     toolBaseline: Array<{ name: string; digest: string }>;
   }>;
+  /** OAuth credentials rejected by the provider and requiring reconnection. */
+  reauthConnectionIds: string[];
 }
 
 export interface BuildMcpToolsOptions {
@@ -60,6 +63,8 @@ export interface BuildMcpToolsOptions {
   }>;
   approvalGate?: McpApprovalGate;
   audit?: McpAuditSink;
+  /** Workflow run id, used only to correlate log lines. */
+  runId?: string;
 }
 
 /**
@@ -75,6 +80,12 @@ export interface BuildMcpToolsOptions {
  */
 export const MAX_TOOLS_PER_PROJECT = 80;
 
+export function isMcpAuthenticationFailure(error: string): boolean {
+  return /\b(?:unauthorized|invalid_token|invalid_client|invalid_grant|401)\b/i.test(
+    error,
+  );
+}
+
 /**
  * Build the tool set for a project's enabled connections.
  *
@@ -84,14 +95,21 @@ export const MAX_TOOLS_PER_PROJECT = 80;
 export async function buildMcpAgentTools(
   options: BuildMcpToolsOptions,
 ): Promise<McpToolBuildResult> {
-  const { entries, approvalGate, audit } = options;
+  const { entries, approvalGate, audit, runId } = options;
 
   const warnings: string[] = [];
   const connectedSummaries: string[] = [];
   const baselinesToRecord: McpToolBuildResult["baselinesToRecord"] = [];
+  const reauthConnectionIds: string[] = [];
 
   if (entries.length === 0) {
-    return { tools: [], connectedSummaries, warnings, baselinesToRecord };
+    return {
+      tools: [],
+      connectedSummaries,
+      warnings,
+      baselinesToRecord,
+      reauthConnectionIds,
+    };
   }
 
   const { servers, problems } = await resolveMcpServers(entries);
@@ -101,7 +119,13 @@ export async function buildMcpAgentTools(
   }
 
   if (servers.length === 0) {
-    return { tools: [], connectedSummaries, warnings, baselinesToRecord };
+    return {
+      tools: [],
+      connectedSummaries,
+      warnings,
+      baselinesToRecord,
+      reauthConnectionIds,
+    };
   }
 
   const knownSecrets = collectKnownSecrets(servers);
@@ -116,8 +140,15 @@ export async function buildMcpAgentTools(
     const discovery = await discoverTools(server);
 
     if (!discovery.ok) {
+      const authenticationFailure = isMcpAuthenticationFailure(discovery.error);
+      if (authenticationFailure) {
+        reauthConnectionIds.push(server.userConnectionId);
+      }
+      const safeError = authenticationFailure
+        ? "authorization rejected; reconnect this integration"
+        : redactSecrets(discovery.error, knownSecrets).text;
       warnings.push(
-        `${server.displayName}: could not list tools (${discovery.error}).`,
+        `${server.displayName}: could not list tools (${safeError}).`,
       );
       continue;
     }
@@ -201,9 +232,16 @@ export async function buildMcpAgentTools(
     knownSecrets,
     approvalGate,
     audit,
+    runId,
   });
 
-  return { tools, connectedSummaries, warnings, baselinesToRecord };
+  return {
+    tools,
+    connectedSummaries,
+    warnings,
+    baselinesToRecord,
+    reauthConnectionIds,
+  };
 }
 
 /**
@@ -219,11 +257,18 @@ export function buildIntegrationsPromptSection(
   connectedSummaries: readonly string[],
   warnings: readonly string[],
 ): string {
-  if (connectedSummaries.length === 0 && warnings.length === 0) {
-    return "";
-  }
-
   const lines: string[] = ["\n\n## Connected integrations"];
+
+  if (connectedSummaries.length === 0) {
+    lines.push(
+      "No usable project-scoped integrations were loaded for this run. This is " +
+        "the authoritative integration state. Do not infer integration access from " +
+        "the project's npm dependencies, source code, or environment variables. If " +
+        "asked whether a service is connected, say that no project-scoped MCP " +
+        "connection is available; do not claim that an SDK or env var is required.",
+    );
+    if (warnings.length === 0) return lines.join("\n");
+  }
 
   if (connectedSummaries.length > 0) {
     lines.push(
@@ -231,6 +276,13 @@ export function buildIntegrationsPromptSection(
         "file tools, their effects are outside this project and cannot be undone by " +
         "editing a file. Prefer reading before writing, and tell the user what you " +
         "are about to change.",
+      "A listed integration is authenticated and its tools were successfully " +
+        "discovered for this run. This access is independent of the project's " +
+        "npm dependencies, source files, and environment variables. When the user " +
+        "asks about a listed service, use its tools before answering. Never claim " +
+        "that access is unverified or missing merely because the workspace has no " +
+        "provider SDK or credentials; only report an access problem when a listed " +
+        "integration issue says so or an actual tool call fails.",
       "",
       ...connectedSummaries.map((summary) => `- ${summary}`),
       "",
@@ -239,6 +291,9 @@ export function buildIntegrationsPromptSection(
         "process.env instead. Values shown as " +
         "[redacted-by-codenaya] were removed for safety — do not attempt to " +
         "reconstruct or guess them.",
+      "The credential that authenticates this MCP connection is managed by the " +
+        "server. Never request it, place it in an MCP config file, or pass it to " +
+        "setEnvVar; invoke the connected tool directly.",
       "",
       "After provisioning something, store its configuration with setEnvVar so the " +
         "preview can connect. Use a NEXT_PUBLIC_ / VITE_ prefix only for values that " +

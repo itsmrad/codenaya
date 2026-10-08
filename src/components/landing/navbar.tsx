@@ -1,20 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { motion, AnimatePresence } from "motion/react";
 import { Menu, X } from "lucide-react";
-import { SignInButton, SignUpButton, useAuth, useUser } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { SIGN_IN_URL, SIGN_UP_URL } from "@/features/auth/constants";
 
 export const LandingNavbar = () => {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { isSignedIn } = useAuth();
-  const { user } = useUser();
-  const router = useRouter();
-
-  const targetUrl = user?.publicMetadata?.hasCompletedOnboarding ? "/" : "/onboarding";
 
   useEffect(() => {
     const handleScroll = () => {
@@ -58,34 +53,33 @@ export const LandingNavbar = () => {
 
           {/* Desktop Auth Buttons */}
           <div className="hidden md:flex items-center gap-3">
-            {isSignedIn ? (
-              <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-                <Button
-                  className="text-sm font-medium bg-brand text-brand-foreground hover:bg-brand/90 rounded-full px-5 shadow-lg shadow-brand/20"
-                  onClick={() => router.push(targetUrl)}
-                >
-                  Go to App
-                </Button>
-              </motion.div>
-            ) : (
-              <>
-                <SignInButton mode="modal" fallbackRedirectUrl="/">
-                  <Button
-                    variant="ghost"
-                    className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    Log in
-                  </Button>
-                </SignInButton>
-                <SignUpButton mode="modal" fallbackRedirectUrl="/onboarding">
-                  <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-                    <Button className="text-sm font-medium bg-brand text-brand-foreground hover:bg-brand/90 rounded-full px-5 shadow-lg shadow-brand/20">
-                      Sign Up
-                    </Button>
-                  </motion.div>
-                </SignUpButton>
-              </>
-            )}
+            <Button
+              asChild
+              variant="ghost"
+              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Link href="/showcase">Showcase</Link>
+            </Button>
+            <Button
+              asChild
+              variant="ghost"
+              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Link href="/pricing">Pricing</Link>
+            </Button>
+            <Button
+              asChild
+              variant="ghost"
+              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Link href={SIGN_IN_URL}>Log in</Link>
+            </Button>
+            <Button
+              asChild
+              className="text-sm font-medium bg-brand text-brand-foreground hover:bg-brand/90 rounded-full px-5"
+            >
+              <Link href={SIGN_UP_URL}>Sign Up</Link>
+            </Button>
           </div>
 
           {/* Mobile Menu Toggle */}
@@ -110,37 +104,37 @@ export const LandingNavbar = () => {
             className="fixed inset-0 z-40 bg-background/98 backdrop-blur-xl pt-20 px-6 md:hidden"
           >
             <div className="flex flex-col gap-4 pt-8">
-              {isSignedIn ? (
-                <Button
-                  className="w-full h-12 text-base bg-brand text-brand-foreground hover:bg-brand/90"
-                  onClick={() => {
-                    setMobileOpen(false);
-                    router.push(targetUrl);
-                  }}
-                >
-                  Go to App
-                </Button>
-              ) : (
-                <>
-                  <SignInButton mode="modal" fallbackRedirectUrl="/">
-                    <Button
-                      variant="outline"
-                      className="w-full h-12 text-base"
-                      onClick={() => setMobileOpen(false)}
-                    >
-                      Log in
-                    </Button>
-                  </SignInButton>
-                  <SignUpButton mode="modal" fallbackRedirectUrl="/onboarding">
-                    <Button
-                      className="w-full h-12 text-base bg-brand text-brand-foreground hover:bg-brand/90"
-                      onClick={() => setMobileOpen(false)}
-                    >
-                      Sign Up
-                    </Button>
-                  </SignUpButton>
-                </>
-              )}
+              <Button
+                asChild
+                variant="ghost"
+                className="w-full h-12 text-base"
+                onClick={() => setMobileOpen(false)}
+              >
+                <Link href="/showcase">Showcase</Link>
+              </Button>
+              <Button
+                asChild
+                variant="ghost"
+                className="w-full h-12 text-base"
+                onClick={() => setMobileOpen(false)}
+              >
+                <Link href="/pricing">Pricing</Link>
+              </Button>
+              <Button
+                asChild
+                variant="outline"
+                className="w-full h-12 text-base"
+                onClick={() => setMobileOpen(false)}
+              >
+                <Link href={SIGN_IN_URL}>Log in</Link>
+              </Button>
+              <Button
+                asChild
+                className="w-full h-12 text-base bg-brand text-brand-foreground hover:bg-brand/90"
+                onClick={() => setMobileOpen(false)}
+              >
+                <Link href={SIGN_UP_URL}>Sign Up</Link>
+              </Button>
             </div>
           </motion.div>
         )}
@@ -148,4 +142,3 @@ export const LandingNavbar = () => {
     </>
   );
 };
-

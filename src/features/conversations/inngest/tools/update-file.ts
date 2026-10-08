@@ -5,8 +5,11 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { getFileByAgentId } from "./get-file";
+import { syntaxErrorNote } from "./syntax-error";
 
 interface UpdateFileToolOptions {
+  projectId: Id<"projects">;
   internalKey: string;
 }
 
@@ -16,6 +19,7 @@ const paramsSchema = z.object({
 });
 
 export const createUpdateFileTool = ({
+  projectId,
   internalKey,
 }: UpdateFileToolOptions) => {
   return createTool({
@@ -34,10 +38,7 @@ export const createUpdateFileTool = ({
       const { fileId, content } = parsed.data;
 
       // Validate file exists before running the step
-      const file = await convex.query(api.system.getFileById, {
-        internalKey,
-        fileId: fileId as Id<"files">,
-      });
+      const file = await getFileByAgentId(internalKey, projectId, fileId);
 
       if (!file) {
         return `Error: File with ID "${fileId}" not found. Use listFiles to get valid file IDs.`;
@@ -51,11 +52,15 @@ export const createUpdateFileTool = ({
         return await toolStep?.run("update-file", async () => {
           await convex.mutation(api.system.updateFile, {
             internalKey,
+            projectId,
             fileId: fileId as Id<"files">,
             content,
           });
 
-          return `File "${file.name}" updated successfully`;
+          return (
+            `File "${file.name}" updated successfully` +
+            syntaxErrorNote([{ name: file.name, content }])
+          );
         })
       } catch (error) {
         return `Error update file: ${error instanceof Error ? error.message : "Unknown error"}`;

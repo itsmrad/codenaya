@@ -1,12 +1,21 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import { convex } from "@/lib/convex-client";
+import { detectCredential } from "@/features/integrations/credential-guard";
 import {
-  dispatchCancelMessage,
-  dispatchProcessMessage,
+  modelChoiceSchema,
+  requireModelChoice,
+} from "@/features/ai-providers/server/resolve-run-model";
+import {
+  DISPATCH_FAILED_ERROR,
+  cancelProcessingMessage,
+  dispatchProcessMessageOrFail,
 } from "@/lib/message-processor";
+import { MAX_CHAT_IMAGES } from "@/features/conversations/chat-images";
+import { PLAN_MODE } from "@/features/conversations/plan-mode";
+import { requireOwnedConversation } from "@/features/projects/server/require-owned-project";
 
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -14,13 +23,18 @@ import { Id } from "../../../../convex/_generated/dataModel";
 const requestSchema = z.object({
   conversationId: z.string(),
   message: z.string(),
+  model: modelChoiceSchema,
+  // Storage ids of images registered through api.chatImages.register.
+  images: z.array(z.string()).max(MAX_CHAT_IMAGES).optional(),
+  // Plan mode (#120): the agent replies with a plan and writes nothing.
+  mode: z.literal(PLAN_MODE).optional(),
 });
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (unauthorized) {
+    return unauthorized;
   }
 
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
@@ -33,19 +47,38 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { conversationId, message } = requestSchema.parse(body);
+  const { conversationId, message, model, images, mode } = requestSchema.parse(body);
 
-  // Call convex mutation, query
-  const conversation = await convex.query(api.system.getConversationById, {
+  if (detectCredential(message).detected) {
+    return NextResponse.json(
+      {
+        error:
+          "Credentials cannot be sent in chat. Use the secure Integrations flow.",
+        code: "credential_detected",
+      },
+      { status: 422 },
+    );
+  }
+
+  const { runModel, rejected } = await requireModelChoice({
     internalKey,
-    conversationId: conversationId as Id<"conversations">,
+    userId,
+    model,
+    withImages: Boolean(images?.length),
   });
 
-  if (!conversation) {
-    return NextResponse.json(
-      { error: "Conversation not found" },
-      { status: 404 }
-    );
+  if (rejected) {
+    return rejected;
+  }
+
+  const { found: conversation, notFound } = await requireOwnedConversation({
+    internalKey,
+    userId,
+    conversationId,
+  });
+
+  if (notFound) {
+    return notFound;
   }
 
   const projectId = conversation.projectId;
@@ -62,25 +95,23 @@ export async function POST(request: Request) {
   if (processingMessages.length > 0) {
     // Cancel all processing messages
     await Promise.all(
-      processingMessages.map(async (msg) => {
-        await dispatchCancelMessage({ internalKey, messageId: msg._id });
-
-        await convex.mutation(api.system.updateMessageStatus, {
-          internalKey,
-          messageId: msg._id,
-          status: "cancelled",
-        });
-      })
+      processingMessages.map((msg) =>
+        cancelProcessingMessage({ internalKey, messageId: msg._id })
+      )
     );
   }
 
   // Create user message
   await convex.mutation(api.system.createMessage, {
     internalKey,
-    conversationId: conversationId as Id<"conversations">,
+    conversationId: conversation._id,
     projectId,
     role: "user",
     content: message,
+    // Only sent with images: only the sender's own uploads can be attached.
+    ...(images?.length
+      ? { images: images as Id<"_storage">[], ownerId: userId }
+      : {}),
   });
 
   // Create assistant message placeholder with processing status
@@ -88,22 +119,37 @@ export async function POST(request: Request) {
     api.system.createMessage,
     {
       internalKey,
-      conversationId: conversationId as Id<"conversations">,
+      conversationId: conversation._id,
       projectId,
       role: "assistant",
       content: "",
       status: "processing",
+      runModel,
+      mode,
     }
   );
 
   // Trigger the configured message processor (Inngest or Vercel Workflow)
-  const dispatch = await dispatchProcessMessage({
+  const dispatch = await dispatchProcessMessageOrFail({
     internalKey,
     messageId: assistantMessageId,
-    conversationId: conversationId as Id<"conversations">,
+    conversationId: conversation._id,
     projectId,
     message,
+    model: runModel,
+    mode,
   });
+
+  if (!dispatch) {
+    return NextResponse.json(
+      {
+        error: DISPATCH_FAILED_ERROR,
+        code: "dispatch_failed",
+        messageId: assistantMessageId,
+      },
+      { status: 502 },
+    );
+  }
 
   return NextResponse.json({
     success: true,

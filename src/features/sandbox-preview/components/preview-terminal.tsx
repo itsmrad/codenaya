@@ -3,6 +3,9 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { useTheme } from "next-themes";
+
+import { getTerminalTheme } from "@/lib/terminal-theme";
 
 import "@xterm/xterm/css/xterm.css";
 
@@ -15,6 +18,7 @@ export const PreviewTerminal = ({ output }: PreviewTerminalProps) => {
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const lastLengthRef = useRef(0);
+  const { resolvedTheme } = useTheme();
 
   // Initialize terminal
   useEffect(() => {
@@ -26,7 +30,7 @@ export const PreviewTerminal = ({ output }: PreviewTerminalProps) => {
       fontSize: 12,
       fontFamily: "monospace",
       allowTransparency: true,
-      theme: { background: "#00000000" },
+      theme: getTerminalTheme(resolvedTheme),
     });
 
     const fitAddon = new FitAddon();
@@ -53,9 +57,15 @@ export const PreviewTerminal = ({ output }: PreviewTerminalProps) => {
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-    // "output" does not need to be a dependency since it is not intended
-    // to update anything, just used on mount
+    // "output" and "resolvedTheme" do not need to be dependencies since they
+    // are only used on mount
   }, []);
+
+  // Follow theme changes on the open terminal
+  useEffect(() => {
+    if (!terminalRef.current) return;
+    terminalRef.current.options.theme = getTerminalTheme(resolvedTheme);
+  }, [resolvedTheme]);
 
   // Write output
   useEffect(() => {

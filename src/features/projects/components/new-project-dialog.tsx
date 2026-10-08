@@ -1,10 +1,5 @@
 "use client";
 
-import { useState } from "react";
-import ky from "ky";
-import { toast } from "sonner";
-import { useRouter } from "next/navigation";
-
 import {
   Dialog,
   DialogContent,
@@ -13,17 +8,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import {
-  PromptInput,
-  PromptInputBody,
-  PromptInputFooter,
-  PromptInputSubmit,
-  PromptInputTextarea,
-  PromptInputTools,
-  type PromptInputMessage,
-} from "@/components/ai-elements/prompt-input";
-
-import { Id } from "../../../../convex/_generated/dataModel";
+import { useCreateProjectFromPrompt } from "../hooks/use-create-project-from-prompt";
+import { PromptComposer } from "./prompt-composer";
 
 interface NewProjectDialogProps {
   open: boolean;
@@ -34,31 +20,12 @@ export const NewProjectDialog = ({
   open,
   onOpenChange,
 }: NewProjectDialogProps) => {
-  const router = useRouter();
-  const [input, setInput] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { createProject, isSubmitting } = useCreateProjectFromPrompt();
 
-  const handleSubmit = async (message: PromptInputMessage) => {
-    if (!message.text) return;
-
-    setIsSubmitting(true);
-
-    try {
-      const { projectId } = await ky
-        .post("/api/projects/create-with-prompt", {
-          json: { prompt: message.text.trim() },
-        })
-        .json<{ projectId: Id<"projects"> }>();
-
-      toast.success("Project created");
-      onOpenChange(false);
-      setInput("");
-      router.push(`/projects/${projectId}`);
-    } catch {
-      toast.error("Unable to create project");
-    } finally {
-      setIsSubmitting(false);
-    }
+  const handleSubmit = async (prompt: string) => {
+    const created = await createProject(prompt);
+    if (created) onOpenChange(false);
+    return created;
   };
 
   return (
@@ -67,26 +34,21 @@ export const NewProjectDialog = ({
         showCloseButton={false}
         className="sm:max-w-lg p-0"
       >
-        <DialogHeader className="hidden">
-          <DialogTitle>What do you want to build?</DialogTitle>
-          <DialogDescription>
+        <DialogHeader className="gap-1 px-4 pt-4 text-left">
+          <DialogTitle className="text-sm font-medium">
+            What do you want to build?
+          </DialogTitle>
+          <DialogDescription className="text-xs">
             Describe your project and AI will help you create it.
           </DialogDescription>
         </DialogHeader>
-        <PromptInput onSubmit={handleSubmit} className="border-none!">
-          <PromptInputBody>
-            <PromptInputTextarea
-              placeholder="Ask Codenaya to build..."
-              onChange={(e) => setInput(e.target.value)}
-              value={input}
-              disabled={isSubmitting}
-            />
-          </PromptInputBody>
-          <PromptInputFooter>
-             <PromptInputTools />
-             <PromptInputSubmit disabled={!input || isSubmitting} />
-          </PromptInputFooter>
-        </PromptInput>
+        <div className="px-3 pb-3 pt-1">
+          <PromptComposer
+            onSubmit={handleSubmit}
+            isSubmitting={isSubmitting}
+            autoFocus
+          />
+        </div>
       </DialogContent>
     </Dialog>
   );

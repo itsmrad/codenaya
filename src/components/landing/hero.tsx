@@ -2,19 +2,14 @@
 
 import { useRef } from "react";
 import { motion, useInView } from "motion/react";
-import { useUser } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
+import { ArrowRight } from "lucide-react";
 import { GridPattern } from "./grid-pattern";
+import { LandingPromptComposer } from "./landing-prompt-composer";
 import { Noise } from "./noise";
-import { PromptInputHero } from "./prompt-input-hero";
 
 export const LandingHero = () => {
   const heroRef = useRef<HTMLDivElement>(null);
   const isInView = useInView(heroRef, { once: true, amount: 0.3 });
-  const { user } = useUser();
-  const router = useRouter();
-
-  const targetUrl = user?.publicMetadata?.hasCompletedOnboarding ? "/" : "/onboarding";
 
   const headline = ["Build with AI.", "Ship from your browser."];
 
@@ -57,7 +52,7 @@ export const LandingHero = () => {
   return (
     <section
       ref={heroRef}
-      className="relative min-h-[100dvh] lg:h-[100dvh] lg:max-h-[100dvh] w-full overflow-hidden flex flex-col justify-center items-center pt-16 pb-8"
+      className="relative w-full overflow-hidden pt-28 pb-16 md:pt-40 md:pb-20"
     >
       {/* Background layers */}
       <div className="absolute inset-0 bg-background" />
@@ -68,43 +63,34 @@ export const LandingHero = () => {
       {/* Noise texture */}
       <Noise />
 
-      {/* Radial gradient spotlight — warm amber glow */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_40%,rgba(232,130,79,0.08),transparent_70%)] dark:bg-[radial-gradient(ellipse_60%_50%_at_50%_40%,rgba(232,130,79,0.12),transparent_70%)]" />
-
       {/* Vignette */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,var(--background)_80%)] opacity-60" />
 
       {/* Content */}
-      <div className="relative z-10 w-full max-w-4xl mx-auto px-4 sm:px-6 md:px-8 text-center my-auto flex flex-col items-center">
+      <div className="relative z-10 max-w-5xl mx-auto px-6 md:px-8 text-center">
         <motion.div
           variants={containerVariants}
           initial="hidden"
           animate={isInView ? "visible" : "hidden"}
-          className="w-full flex flex-col items-center space-y-3 sm:space-y-4 md:space-y-5"
+          className="space-y-8"
         >
           {/* Badge */}
           <motion.div variants={fadeUp} className="flex justify-center">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-border/60 bg-card/50 backdrop-blur-sm text-[11px] sm:text-xs font-medium text-muted-foreground">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-border/60 bg-card/50 backdrop-blur-sm text-xs font-medium text-muted-foreground">
               <span className="size-1.5 rounded-full bg-brand animate-pulse" />
               AI-Powered Browser IDE
             </div>
           </motion.div>
 
           {/* Headline */}
-          <div className="space-y-0.5 sm:space-y-1">
+          <div className="space-y-2">
             {headline.map((line, i) => (
               <motion.h1
                 key={i}
                 variants={lineVariants}
-                className="text-3xl sm:text-5xl md:text-6xl lg:text-[62px] font-bold tracking-tight leading-[1.08]"
+                className="text-[2.5rem] sm:text-6xl lg:text-7xl font-bold tracking-tighter leading-[1.05] text-foreground"
               >
-                <span className={
-                  i === 0
-                    ? "bg-gradient-to-r from-foreground via-foreground to-brand bg-clip-text text-transparent"
-                    : "text-foreground"
-                }>
-                  {line}
-                </span>
+                {line}
               </motion.h1>
             ))}
           </div>
@@ -112,54 +98,30 @@ export const LandingHero = () => {
           {/* Subtitle */}
           <motion.p
             variants={fadeUp}
-            className="text-xs sm:text-sm md:text-base text-muted-foreground max-w-xl mx-auto leading-relaxed font-light"
+            className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed font-light"
           >
-            A browser-based IDE with AI code generation, real-time collaboration,
-            and instant preview. Write, run, and deploy — all in one place.
+            A browser IDE with an AI agent that writes your code, a live preview
+            to run it, and GitHub export when it&apos;s done. On desktop or phone.
           </motion.p>
 
-          {/* Prompt Input Box (Lovable inspired flow) */}
-          <motion.div variants={fadeUp} className="w-full pt-1">
-            <PromptInputHero />
-          </motion.div>
-
-          {/* Secondary Actions */}
-          <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 pt-1">
-            <button
-              onClick={() => router.push(targetUrl)}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline-offset-4 hover:underline cursor-pointer"
-            >
-              Or start with a blank workspace →
-            </button>
-            <span className="hidden sm:inline text-muted-foreground/30">•</span>
+          {/* Prompt: typing comes first, sign-up second */}
+          <motion.div variants={fadeUp} className="mx-auto max-w-2xl pt-4">
+            <LandingPromptComposer showStarters className="text-left" />
             <a
               href="https://github.com/itsmrad/codenaya"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline-offset-4 hover:underline"
+              className="mt-5 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
             >
-              View source on GitHub
+              View on GitHub
+              <ArrowRight className="size-3.5" />
             </a>
           </motion.div>
         </motion.div>
       </div>
 
-      {/* Scroll indicator - anchored to bottom */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 2.0, duration: 0.8 }}
-        className="absolute bottom-2 sm:bottom-3 left-1/2 -translate-x-1/2 flex items-center justify-center gap-3 z-20 pointer-events-none"
-      >
-        <div className="h-px w-8 sm:w-12 bg-gradient-to-r from-transparent to-border" />
-        <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground/60 font-mono">
-          Scroll
-        </span>
-        <div className="h-px w-8 sm:w-12 bg-gradient-to-l from-transparent to-border" />
-      </motion.div>
-
       {/* Bottom fade */}
-      <div className="absolute bottom-0 left-0 right-0 h-16 sm:h-20 bg-gradient-to-t from-background to-transparent pointer-events-none" />
+      <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
     </section>
   );
 };

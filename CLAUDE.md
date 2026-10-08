@@ -17,6 +17,7 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
 
 Before implementing:
+
 - State your assumptions explicitly. If uncertain, ask.
 - If multiple interpretations exist, present them - don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.
@@ -39,12 +40,14 @@ Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, sim
 **Touch only what you must. Clean up only your own mess.**
 
 When editing existing code:
+
 - Don't "improve" adjacent code, comments, or formatting.
 - Don't refactor things that aren't broken.
 - Match existing style, even if you'd do it differently.
 - If you notice unrelated dead code, mention it - don't delete it.
 
 When your changes create orphans:
+
 - Remove imports/variables/functions that YOUR changes made unused.
 - Don't remove pre-existing dead code unless asked.
 
@@ -55,11 +58,13 @@ The test: Every changed line should trace directly to the user's request.
 **Define success criteria. Loop until verified.**
 
 Transform tasks into verifiable goals:
+
 - "Add validation" → "Write tests for invalid inputs, then make them pass"
 - "Fix the bug" → "Write a test that reproduces it, then make it pass"
 - "Refactor X" → "Ensure tests pass before and after"
 
 For multi-step tasks, state a brief plan:
+
 ```text
 1. [Step] → verify: [check]
 2. [Step] → verify: [check]
@@ -67,6 +72,14 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+5. Some more points :
+
+- every new feature is linked to a branch like a new xyz branch which should definitely be branched off from main unless specified, you will make changes in the new branch and commit on that branch, there can be multiple commits on one branch, and after completion push it to github then i will manually merge it
+- make sure to reuse code as much as possible 
+- make sure to follow professional developer standerds and make sure to include best developer practices
+- the prompt given below is for only instruction, if you believe there is a better way to handle this specific problem ask me and then go forward, make sure to think what must be optimal before execution
+- do not get involved in making it too optimal that you forget to execute it and keep thinking, i need a mid ok ok optimal level that works not something state of the art. value execution before too much optimization
 
 ---
 

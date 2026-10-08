@@ -1,5 +1,7 @@
 import { Tooltip, showTooltip, keymap, EditorView } from "@codemirror/view";
-import { StateField, EditorState, StateEffect } from "@codemirror/state";
+import { StateField, EditorState, StateEffect, Prec } from "@codemirror/state";
+
+import { buttonVariants } from "@/components/ui/button";
 
 import { fetcher } from "./fetcher";
 
@@ -7,6 +9,18 @@ export const showQuickEditEffect = StateEffect.define<boolean>();
 
 let editorView: EditorView | null = null;
 let currentAbortController: AbortController | null = null;
+
+/** Closes the quick-edit widget and aborts any in-flight edit request. */
+const closeQuickEdit = (view: EditorView) => {
+  if (currentAbortController) {
+    currentAbortController.abort();
+    currentAbortController = null;
+  }
+  view.dispatch({
+    effects: showQuickEditEffect.of(false),
+  });
+  view.focus();
+};
 
 export const quickEditState = StateField.define<boolean>({
   create() {
@@ -58,8 +72,14 @@ const createQuickEditTooltip = (state: EditorState): readonly Tooltip[] => {
         input.type = "text";
         input.placeholder = "Edit selected code";
         input.className =
-          "bg-transparent border-none outline-none px-2 py-1 font-sans w-100";
+          "h-8 w-100 rounded-md border border-input bg-transparent px-2 py-1 font-sans outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] dark:bg-input/30";
         input.autofocus = true;
+        input.onkeydown = (e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            if (editorView) closeQuickEdit(editorView);
+          }
+        };
 
         const buttonContainer = document.createElement("div");
         buttonContainer.className = "flex items-center justify-between gap-2";
@@ -67,25 +87,21 @@ const createQuickEditTooltip = (state: EditorState): readonly Tooltip[] => {
         const cancelButton = document.createElement("button");
         cancelButton.type = "button";
         cancelButton.textContent = "Cancel";
-        cancelButton.className =
-          "font-sans p-1 px-2 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-sm";
+        cancelButton.className = `font-sans ${buttonVariants({ variant: "ghost", size: "sm" })}`;
         cancelButton.onclick = () => {
-          if (currentAbortController) {
-            currentAbortController.abort();
-            currentAbortController = null;
-          }
-          if (editorView) {
-            editorView.dispatch({
-              effects: showQuickEditEffect.of(false),
-            });
-          }
+          if (editorView) closeQuickEdit(editorView);
         }
 
         const submitButton = document.createElement("button");
         submitButton.type = "submit";
         submitButton.textContent = "Submit";
-        submitButton.className =
-          "font-sans p-1 px-2 text-muted-foreground hover:text-foreground hover:bg-foreground/10 rounded-sm";
+        submitButton.className = `font-sans ${buttonVariants({ size: "sm" })}`;
+        submitButton.disabled = true;
+        input.oninput = () => {
+          if (!currentAbortController) {
+            submitButton.disabled = !input.value.trim();
+          }
+        };
 
         form.onsubmit = async (e) => {
           e.preventDefault();
@@ -126,7 +142,7 @@ const createQuickEditTooltip = (state: EditorState): readonly Tooltip[] => {
               effects: showQuickEditEffect.of(false),
             });
           } else {
-            submitButton.disabled = false;
+            submitButton.disabled = !input.value.trim();
             submitButton.textContent = "Submit";
           }
 
@@ -173,7 +189,17 @@ const quickEditTooltipField = StateField.define<readonly Tooltip[]>({
   ),
 });
 
-const quickEditKeymap = keymap.of([
+const quickEditKeymap = Prec.high(keymap.of([
+  {
+    key: "Escape",
+    run: (view) => {
+      if (!view.state.field(quickEditState)) {
+        return false;
+      }
+      closeQuickEdit(view);
+      return true;
+    },
+  },
   {
     key: "Mod-k",
     run: (view) => {
@@ -188,7 +214,7 @@ const quickEditKeymap = keymap.of([
       return true;
     },
   },
-]);
+]));
 
 const captureViewExtension = EditorView.updateListener.of((update) => {
   editorView = update.view;

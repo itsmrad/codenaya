@@ -2,6 +2,7 @@ import { Tooltip, showTooltip, EditorView } from "@codemirror/view";
 import { StateField, EditorState } from "@codemirror/state";
 import { showQuickEditEffect, quickEditState } from "./quick-edit";
 import { useChatStore } from "../../conversations/store/use-chat-store";
+import { isMacPlatform } from "@/lib/hooks/use-is-mac";
 
 let editorView: EditorView | null = null;
 
@@ -59,7 +60,7 @@ const createTooltipForSelection = (
         quickEditButtonText.textContent = "Quick Edit";
 
         const quickEditButtonShortcut = document.createElement("span");
-        quickEditButtonShortcut.textContent = "⌘K";
+        quickEditButtonShortcut.textContent = isMacPlatform() ? "⌘K" : "Ctrl+K";
         quickEditButtonShortcut.className = "text-sm opacity-60";
 
         quickEditButton.appendChild(quickEditButtonText);

@@ -1,5 +1,5 @@
-import { Sandbox } from "e2b";
-import { auth } from "@clerk/nextjs/server";
+import { AuthenticationError, RateLimitError, Sandbox } from "e2b";
+import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import {
   serialiseDotenv,
@@ -10,6 +10,17 @@ import {
   secretValuesFrom,
 } from "@/features/integrations/server/env/resolve-env";
 import { createStreamRedactor } from "@/features/integrations/server/env/stream-redactor";
+import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
+import {
+  forgetSandbox,
+  rememberSandbox,
+} from "@/features/sandbox-preview/server/sandbox-registry";
+import {
+  missingReferencedFiles,
+  undeclaredPackages,
+} from "@/features/sandbox-preview/utils/missing-references";
+import { nodeIncompatibility } from "@/features/sandbox-preview/utils/node-compat";
+import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
@@ -26,11 +37,17 @@ import type { Id } from "../../../../convex/_generated/dataModel";
  *   { "type": "status", "status": "installing" | "running" }
  *   { "type": "output", "data": "..." }
  *   { "type": "ready",  "sandboxId": "...", "previewUrl": "..." }
- *   { "type": "error",  "message": "..." }
+ *   { "type": "error",  "message": "...", "code": SandboxErrorKind }
  */
 
 const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour (E2B free plan max)
 const WORK_DIR = "/home/user/app";
+
+/**
+ * The base image ships Node 20.9, too old for Vite 7 (#178). E2B_TEMPLATE
+ * points at the Node 22 template built by `npm run e2b:template`.
+ */
+const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || "base";
 
 /**
  * Environment variables that force dev servers to bind to 0.0.0.0
@@ -59,10 +76,24 @@ const PORT_PATTERNS = [
 ];
 
 export async function POST(request: Request) {
-  const { userId } = await auth();
+  const { userId, unauthorized } = await requireUserId();
 
-  if (!userId) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (unauthorized) {
+    return unauthorized;
+  }
+
+  const e2bApiKey = process.env.E2B_API_KEY?.trim();
+
+  if (!e2bApiKey) {
+    return Response.json(
+      {
+        error:
+          "E2B_API_KEY is not configured on the Codenaya server. Add it to the " +
+          "hosting environment and restart or redeploy the app.",
+        code: "config" satisfies SandboxErrorKind,
+      },
+      { status: 503 },
+    );
   }
 
   const body = await request.json();
@@ -80,6 +111,29 @@ export async function POST(request: Request) {
     return Response.json({ error: "No files provided" }, { status: 400 });
   }
 
+  const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
+
+  // The project's decrypted secrets go into this sandbox, which runs the
+  // caller's files and commands, so only its owner may name it (#208).
+  if (projectId) {
+    if (!internalKey) {
+      return Response.json(
+        { error: "Server configuration error", code: "config" satisfies SandboxErrorKind },
+        { status: 500 },
+      );
+    }
+
+    const { notFound } = await requireOwnedProject({
+      internalKey,
+      userId,
+      projectId,
+    });
+
+    if (notFound) {
+      return notFound;
+    }
+  }
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -94,22 +148,8 @@ export async function POST(request: Request) {
       let secretValues: string[] = [];
       const envWarnings: string[] = [];
 
-      if (projectId) {
+      if (projectId && internalKey) {
         try {
-          const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
-          if (!internalKey) {
-            throw new Error("CODENAYA_CONVEX_INTERNAL_KEY is not configured");
-          }
-
-          const project = await convex.query(api.system.getProjectById, {
-            internalKey,
-            projectId,
-          });
-
-          if (!project || project.ownerId !== userId) {
-            throw new Error("Unauthorized access to project");
-          }
-
           const records = await convex.query(api.system.getEnvVarsForSandbox, {
             internalKey,
             projectId,
@@ -179,17 +219,37 @@ export async function POST(request: Request) {
       let sandbox: Sandbox | null = null;
 
       try {
+        // Name the missing file now rather than leave Vite's overlay to (#190).
+        const missing = missingReferencedFiles(files);
+        if (missing.length > 0) {
+          throw new Error(
+            `The project's config points at files that don't exist: ${missing.join(", ")}. ` +
+              "Ask the agent to create them, or remove the references.",
+          );
+        }
+        const undeclared = undeclaredPackages(files);
+        if (undeclared.length > 0) {
+          throw new Error(
+            `The project imports packages missing from package.json: ${undeclared.join(", ")}. ` +
+              "Ask the agent to add them to package.json.",
+          );
+        }
+
         // --- Boot sandbox ---
         send({ type: "status", status: "booting" });
         send({ type: "output", data: "Creating E2B sandbox...\n" });
 
-        sandbox = await Sandbox.create({
+        sandbox = await Sandbox.create(SANDBOX_TEMPLATE, {
+          apiKey: e2bApiKey,
           timeoutMs: SANDBOX_TIMEOUT_MS,
           metadata: { userId },
           network: {
             maskRequestHost: "localhost:${PORT}",
           },
         });
+
+        // File syncs reuse this handle instead of reconnecting (#179).
+        rememberSandbox(sandbox, userId);
 
         send({
           type: "output",
@@ -213,6 +273,15 @@ export async function POST(request: Request) {
           type: "output",
           data: `Node ${nodeCheck.stdout.trim()} available.\n\n`,
         });
+
+        // Fail with the reason now rather than with Vite's crash after a full install.
+        const incompatibility = nodeIncompatibility(
+          nodeCheck.stdout,
+          files.find((file) => file.path === "package.json")?.content,
+        );
+        if (incompatibility) {
+          throw new Error(incompatibility);
+        }
 
         // --- Write project files ---
         send({ type: "output", data: "Writing project files...\n" });
@@ -360,8 +429,15 @@ export async function POST(request: Request) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
 
+        const code: SandboxErrorKind =
+          error instanceof AuthenticationError
+            ? "config"
+            : error instanceof RateLimitError
+              ? "rate_limit"
+              : "transient";
+
         send({ type: "output", data: `\nError: ${message}\n` });
-        send({ type: "error", message });
+        send({ type: "error", message, code });
 
         // Kill sandbox on error to free up the slot
         if (sandbox) {
@@ -372,6 +448,10 @@ export async function POST(request: Request) {
           }
         }
       } finally {
+        if (sandbox) {
+          forgetSandbox(sandbox.sandboxId);
+        }
+
         // Release any output the redactor is holding back, otherwise the last
         // partial line would never reach the terminal.
         flushRedactor();
@@ -592,4 +672,3 @@ async function isPortOpen(
     return false;
   }
 }
-

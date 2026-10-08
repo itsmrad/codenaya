@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { Allotment } from "allotment";
 import {
   Loader2Icon,
@@ -18,11 +18,22 @@ import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
+import { PreviewBuilding } from "@/features/sandbox-preview/components/preview-building";
+import {
+  PREVIEW_DEVICE_WIDTHS,
+  PreviewDeviceToggle,
+  usePreviewDevice,
+  type PreviewDevice,
+} from "@/features/sandbox-preview/components/preview-device-toggle";
+import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 
 import { Button } from "@/components/ui/button";
 
+import { EnvVarsDialog } from "./env-vars-dialog";
 import { useProject } from "../hooks/use-projects";
 import { useFiles } from "../hooks/use-files";
+import { markPreviewOpened } from "../utils/first-run";
+import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
 import {
   usePublicEnvVars,
   useWithheldSecretCount,
@@ -41,18 +52,27 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const files = useFiles(projectId);
   const [showTerminal, setShowTerminal] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [device, setDevice] = usePreviewDevice();
   
   // URL dictates isolation mode via next.config.ts conditional headers
   const engineParam = searchParams.get("engine") as PreviewEngine | null;
-  const engine = engineParam === "webcontainer" ? "webcontainer" : "sandbox";
+  const activeEngine = engineParam === "webcontainer" ? "webcontainer" : "sandbox";
 
-  // For auto-fallback handling without hard page reloading loops
-  const [fallbackEngine, setFallbackEngine] = useState<PreviewEngine | null>(null);
-  const activeEngine = fallbackEngine || engine;
+  // A run that starts before package.json exists is writing the first build.
+  // Booting against it would install a half-written project, so hold the boot
+  // until that run ends; the engine's own gate then starts it.
+  const activeRun = useActiveRun(projectId);
+  const hasPackageJson = files?.some(
+    (file) => file.type === "file" && !file.parentId && file.name === "package.json",
+  );
+  const [firstBuild, setFirstBuild] = useState(false);
+  if (!firstBuild && activeRun && files && !hasPackageJson) setFirstBuild(true);
+  if (firstBuild && activeRun === null) setFirstBuild(false);
+  const holdBoot = activeRun === undefined || firstBuild;
 
   const sandbox = useSandbox({
     files,
-    enabled: activeEngine === "sandbox",
+    enabled: activeEngine === "sandbox" && !holdBoot,
     projectId,
     settings: project?.settings,
   });
@@ -64,30 +84,37 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
 
   const webcontainer = useWebContainer({
     files,
-    enabled: activeEngine === "webcontainer",
+    enabled: activeEngine === "webcontainer" && !holdBoot,
     publicEnv,
     settings: project?.settings,
   });
 
   const activeInstance = activeEngine === "sandbox" ? sandbox : webcontainer;
   const { status, previewUrl, error, restart, terminalOutput } = activeInstance;
+  const errorKind = activeEngine === "sandbox" ? sandbox.errorKind : null;
 
+  // Only ever called from a user action. WebContainer needs the COOP/COEP headers
+  // next.config.ts sets for `?engine=webcontainer`, so switching is a full page
+  // load; doing it automatically on a sandbox error turned config errors into a
+  // silent reload with no explanation.
   const switchEngine = useCallback((newEngine: PreviewEngine) => {
-    if (newEngine === engine) return;
+    if (newEngine === activeEngine) return;
     const params = new URLSearchParams(searchParams.toString());
     params.set("engine", newEngine);
+    params.set("view", "preview");
     window.location.href = `${pathname}?${params.toString()}`;
-  }, [engine, pathname, searchParams]);
-
-  useEffect(() => {
-    if (activeEngine === "sandbox" && sandbox.status === "error") {
-      console.warn("Sandbox failed (possibly rate limit), automatically falling back to WebContainers.");
-      // We push param so Next.js reloads with COOP/COEP headers
-      switchEngine("webcontainer");
-    }
-  }, [activeEngine, sandbox.status, switchEngine]);
+  }, [activeEngine, pathname, searchParams]);
 
   const isLoading = status === "booting" || status === "installing";
+  const building =
+    firstBuild && activeRun && files ? (
+      <PreviewBuilding steps={activeRun.steps} files={files} />
+    ) : null;
+
+  // Ticks the dashboard's "Open the preview" step.
+  useEffect(() => {
+    if (previewUrl) markPreviewOpened();
+  }, [previewUrl]);
 
   // Automatically refresh the iframe shortly after the dev server announces it's running.
   // The first request to Vite often serves the index.html and CSS instantly but hangs 
@@ -137,7 +164,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
           </Button>
         </div>
       )}
-      <div className="p-1.5 shrink-0 border border-border/50 rounded-xl bg-background shadow-sm flex items-center gap-2">
+      <div className="p-1.5 shrink-0 border border-border/50 rounded-xl bg-background shadow-sm flex flex-wrap items-center gap-2">
         <div className="flex items-center p-0.5 bg-muted/40 rounded-lg border border-border/50">
           <Button
             size="icon"
@@ -171,9 +198,10 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
               className="h-8 rounded-md px-2 space-x-1 shadow-none"
               onClick={() => switchEngine("sandbox")}
               title="Use high-fidelity E2B Sandbox"
+              aria-label="Sandbox"
             >
               <ServerIcon className="size-3.5" />
-              <span className="text-xs">Sandbox</span>
+              <span className="text-xs hidden @3xl:inline">Sandbox</span>
             </Button>
             <Button
               size="sm"
@@ -181,13 +209,20 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
               className="h-8 rounded-md px-2 space-x-1 shadow-none"
               onClick={() => switchEngine("webcontainer")}
               title="Use in-browser WebContainers"
+              aria-label="WebContainer"
             >
               <BoxIcon className="size-3.5" />
-              <span className="text-xs">WebContainer</span>
+              <span className="text-xs hidden @3xl:inline">WebContainer</span>
             </Button>
         </div>
 
-        <div className="flex-1 h-9 flex items-center px-3 bg-muted/30 rounded-lg border border-border/50 text-xs text-muted-foreground truncate font-mono">
+        {/* A phone-width panel is already a phone-sized frame. */}
+        <div className="hidden @md:block">
+          <PreviewDeviceToggle device={device} onChange={setDevice} />
+        </div>
+
+        {/* Narrow panels give the URL its own row. */}
+        <div className="order-last basis-full @md:order-none @md:basis-auto flex-1 min-w-0 h-9 flex items-center px-3 bg-muted/30 rounded-lg border border-border/50 text-xs text-muted-foreground truncate font-mono">
           {isLoading && (
             <div className="flex items-center gap-1.5">
               <Loader2Icon className="size-3 animate-spin" />
@@ -195,22 +230,47 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
             </div>
           )}
           {previewUrl && <span className="truncate">{previewUrl}</span>}
-          {!isLoading && !previewUrl && !error && <span>Ready to preview</span>}
+          {!isLoading && !previewUrl && !error && (
+            <span>{building ? "Waiting for the first build..." : "Ready to preview"}</span>
+          )}
         </div>
 
         <div className="flex items-center gap-1 p-0.5 bg-muted/40 rounded-lg border border-border/50">
-          {previewUrl && (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-8 rounded-md hover:bg-muted"
-              title="Open in new tab"
-              aria-label="Open in new tab"
-              onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
-            >
-              <ExternalLinkIcon className="size-4" />
-            </Button>
-          )}
+          {/* A real link rather than window.open, so the browser treats it as a
+              plain navigation (no popup heuristics; middle-click and copy-link
+              work). The span carries the tooltip: a disabled button gets no hover. */}
+          <span
+            className="flex"
+            title={previewUrl ? "Open in new tab" : "Available once the preview is running"}
+          >
+            {previewUrl ? (
+              <Button
+                asChild
+                size="icon"
+                variant="ghost"
+                className="size-8 rounded-md hover:bg-muted"
+              >
+                <a
+                  href={previewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Open in new tab"
+                >
+                  <ExternalLinkIcon className="size-4" />
+                </a>
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-8 rounded-md hover:bg-muted"
+                disabled
+                aria-label="Open in new tab"
+              >
+                <ExternalLinkIcon className="size-4" />
+              </Button>
+            )}
+          </span>
           <Button
             size="icon"
             variant="ghost"
@@ -221,6 +281,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
           >
             <TerminalSquareIcon className="size-4" />
           </Button>
+          <EnvVarsDialog projectId={projectId} />
           <div className="px-1 flex items-center">
             <PreviewSettingsPopover
               projectId={projectId}
@@ -247,7 +308,11 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
                   activeEngine={activeEngine}
                   previewUrl={previewUrl}
                   refreshKey={refreshKey}
+                  device={device}
                   restart={restart}
+                  errorKind={errorKind}
+                  onUseWebContainer={() => switchEngine("webcontainer")}
+                  building={building}
                 />
               </div>
             </Allotment.Pane>
@@ -273,13 +338,23 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
               activeEngine={activeEngine}
               previewUrl={previewUrl}
               refreshKey={refreshKey}
+              device={device}
               restart={restart}
+              errorKind={errorKind}
+              onUseWebContainer={() => switchEngine("webcontainer")}
+              building={building}
             />
           </div>
         )}
       </div>
     </div>
   );
+};
+
+const ERROR_TITLES: Record<SandboxErrorKind, string> = {
+  config: "Cloud sandbox isn't available",
+  rate_limit: "Cloud sandbox limit reached",
+  transient: "Preview failed to start",
 };
 
 const PreviewContent = ({
@@ -289,7 +364,11 @@ const PreviewContent = ({
   activeEngine,
   previewUrl,
   refreshKey,
+  device,
   restart,
+  errorKind,
+  onUseWebContainer,
+  building,
 }: {
   error: string | null | undefined;
   isLoading: boolean;
@@ -297,20 +376,41 @@ const PreviewContent = ({
   activeEngine: PreviewEngine;
   previewUrl: string | null | undefined;
   refreshKey: number;
+  device: PreviewDevice;
   restart: () => void;
+  errorKind: SandboxErrorKind | null;
+  onUseWebContainer: () => void;
+  /** The first-build placeholder; the engine stays idle while it's shown. */
+  building: ReactNode;
 }) => (
   <div className="size-full rounded-xl overflow-hidden relative isolate">
     <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
 
+    {building}
+
     {error && (
-      <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
-        <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
+      <div className="size-full flex items-center justify-center text-muted-foreground bg-background p-4">
+        <div
+          role="alert"
+          className="flex flex-col items-center gap-2 max-w-md mx-auto text-center"
+        >
           <AlertTriangleIcon className="size-6" />
-          <p className="text-sm font-medium">{error}</p>
-          <Button size="sm" variant="outline" onClick={restart}>
-            <RefreshCwIcon className="size-4" />
-            Restart
-          </Button>
+          <p className="text-sm font-medium text-foreground">
+            {ERROR_TITLES[errorKind ?? "transient"]}
+          </p>
+          <p className="text-xs leading-relaxed">{error}</p>
+          <div className="flex flex-wrap justify-center gap-2 mt-1">
+            <Button size="sm" variant="outline" onClick={restart}>
+              <RefreshCwIcon className="size-4" />
+              Retry
+            </Button>
+            {activeEngine === "sandbox" && (
+              <Button size="sm" onClick={onUseWebContainer}>
+                <BoxIcon className="size-4" />
+                Use in-browser preview
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     )}
@@ -329,14 +429,18 @@ const PreviewContent = ({
     )}
 
     {previewUrl && (
-      <iframe
-        key={refreshKey}
-        src={previewUrl}
-        className="size-full border-0"
-        title="Preview"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
-        allow="cross-origin-isolated"
-      />
+      <div className="size-full flex justify-center bg-muted/30">
+        <iframe
+          key={refreshKey}
+          src={previewUrl}
+          className="h-full w-full max-w-full border-0 bg-background data-[framed=true]:border-x data-[framed=true]:border-border/50"
+          style={{ width: PREVIEW_DEVICE_WIDTHS[device] ?? undefined }}
+          data-framed={device !== "desktop"}
+          title="Preview"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
+          allow="cross-origin-isolated"
+        />
+      </div>
     )}
   </div>
 );

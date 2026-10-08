@@ -1,6 +1,19 @@
 import { v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { mutation, query, type QueryCtx } from "./_generated/server";
+import {
+  aiProviderValidator,
+  messageStepValidator,
+  runModelValidator,
+} from "./schema";
+import { createCheckpoint, releaseFileStorage } from "./checkpoints";
+import { assertOwnedImages, withImageUrls } from "./chatImages";
+import { resolveProjectSkills } from "./skills";
+import { countProjectBuilt } from "./stats";
+
+// Keeps the steps array (and the message document) bounded on long runs.
+const MAX_MESSAGE_STEPS = 100;
 
 const validateInternalKey = (key: string) => {
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
@@ -11,6 +24,29 @@ const validateInternalKey = (key: string) => {
 
   if (key !== internalKey) {
     throw new Error("Invalid internal key");
+  }
+};
+
+// Agent tools pass file ids straight from model output, so every file and
+// parent folder they touch must belong to the run's own project (#209).
+const getProjectFile = async (
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  fileId: Id<"files">
+) => {
+  const file = await ctx.db.get("files", fileId);
+  return file && file.projectId === projectId ? file : null;
+};
+
+const assertProjectFolder = async (
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  parentId: Id<"files"> | undefined
+) => {
+  if (!parentId) return;
+  const parent = await getProjectFile(ctx, projectId, parentId);
+  if (!parent || parent.type !== "folder") {
+    throw new Error("Parent folder not found");
   }
 };
 
@@ -40,9 +76,21 @@ export const createMessage = mutation({
         v.literal("cancelled")
       )
     ),
+    runModel: v.optional(runModelValidator),
+    images: v.optional(v.array(v.id("_storage"))),
+    // The sender, required with images: only their own uploads can be attached.
+    ownerId: v.optional(v.string()),
+    mode: v.optional(v.literal("plan")),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+
+    if (args.images?.length) {
+      await assertOwnedImages(ctx, args.images, {
+        projectId: args.projectId,
+        ownerId: args.ownerId,
+      });
+    }
 
     const messageId = await ctx.db.insert("messages", {
       conversationId: args.conversationId,
@@ -50,6 +98,9 @@ export const createMessage = mutation({
       role: args.role,
       content: args.content,
       status: args.status,
+      runModel: args.runModel,
+      ...(args.images?.length ? { images: args.images } : {}),
+      ...(args.mode ? { mode: args.mode } : {}),
     });
 
     // Update conversation's updatedAt
@@ -73,6 +124,43 @@ export const updateMessageContent = mutation({
     await ctx.db.patch(args.messageId, {
       content: args.content,
       status: "completed" as const,
+      completedAt: Date.now(),
+    });
+  },
+});
+
+// Records agent activity for display. Upserts by step id so replays are no-ops.
+export const upsertMessageSteps = mutation({
+  args: {
+    internalKey: v.string(),
+    messageId: v.id("messages"),
+    steps: v.array(messageStepValidator),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const message = await ctx.db.get(args.messageId);
+    if (!message) {
+      return;
+    }
+
+    const steps = [...(message.steps ?? [])];
+    for (const incoming of args.steps) {
+      const index = steps.findIndex((step) => step.id === incoming.id);
+      if (index === -1) {
+        steps.push(incoming);
+      } else {
+        // Fields the update leaves out (e.g. targets) keep their recorded value.
+        steps[index] = {
+          ...steps[index],
+          ...incoming,
+          startedAt: steps[index].startedAt,
+        };
+      }
+    }
+
+    await ctx.db.patch(args.messageId, {
+      steps: steps.slice(-MAX_MESSAGE_STEPS),
     });
   },
 });
@@ -92,6 +180,7 @@ export const updateMessageStatus = mutation({
 
     await ctx.db.patch(args.messageId, {
       status: args.status,
+      completedAt: args.status === "processing" ? undefined : Date.now(),
     });
   },
 });
@@ -161,7 +250,7 @@ export const getRecentMessages = query({
       .collect();
 
     const limit = args.limit ?? 10;
-    return messages.slice(-limit);
+    return await withImageUrls(ctx, messages.slice(-limit));
   },
 });
 
@@ -198,16 +287,41 @@ export const getProjectFiles = query({
   },
 });
 
+// Snapshot of the project's files taken before an agent run (#43).
+export const createProjectCheckpoint = mutation({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    messageId: v.id("messages"),
+    label: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const message = await ctx.db.get(args.messageId);
+    if (!message || message.projectId !== args.projectId) {
+      throw new Error("Message not found");
+    }
+
+    return await createCheckpoint(ctx, {
+      projectId: args.projectId,
+      messageId: args.messageId,
+      label: args.label,
+    });
+  },
+});
+
 // Used for Agent "ReadFiles" tool
 export const getFileById = query({
   args: {
     internalKey: v.string(),
+    projectId: v.id("projects"),
     fileId: v.id("files"),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
-    return await ctx.db.get(args.fileId);
+    return await getProjectFile(ctx, args.projectId, args.fileId);
   },
 });
 
@@ -215,13 +329,14 @@ export const getFileById = query({
 export const updateFile = mutation({
   args: {
     internalKey: v.string(),
+    projectId: v.id("projects"),
     fileId: v.id("files"),
     content: v.string(),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
-    const file = await ctx.db.get(args.fileId);
+    const file = await getProjectFile(ctx, args.projectId, args.fileId);
 
     if (!file) {
       throw new Error("File not found");
@@ -247,6 +362,7 @@ export const createFile = mutation({
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertProjectFolder(ctx, args.projectId, args.parentId);
 
     const files = await ctx.db
       .query("files")
@@ -291,6 +407,7 @@ export const createFiles = mutation({
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertProjectFolder(ctx, args.projectId, args.parentId);
 
     const existingFiles = await ctx.db
       .query("files")
@@ -341,6 +458,7 @@ export const createFolder = mutation({
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertProjectFolder(ctx, args.projectId, args.parentId);
 
     const files = await ctx.db
       .query("files")
@@ -373,13 +491,14 @@ export const createFolder = mutation({
 export const renameFile = mutation({
   args: {
     internalKey: v.string(),
+    projectId: v.id("projects"),
     fileId: v.id("files"),
     newName: v.string(),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
-    const file = await ctx.db.get(args.fileId);
+    const file = await getProjectFile(ctx, args.projectId, args.fileId);
     if (!file) {
       throw new Error("File not found");
     }
@@ -416,12 +535,13 @@ export const renameFile = mutation({
 export const deleteFile = mutation({
   args: {
     internalKey: v.string(),
+    projectId: v.id("projects"),
     fileId: v.id("files"),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
-     const file = await ctx.db.get(args.fileId);
+    const file = await getProjectFile(ctx, args.projectId, args.fileId);
     if (!file) {
       throw new Error("File not found");
     }
@@ -450,7 +570,7 @@ export const deleteFile = mutation({
 
       // Delete storage file if it exists
       if (item.storageId) {
-        await ctx.storage.delete(item.storageId);
+        await releaseFileStorage(ctx, item.storageId);
       }
 
       // Delete the file/folder itself
@@ -479,7 +599,7 @@ export const cleanup = mutation({
     for (const file of files) {
       // Delete storage file if it exists
       if (file.storageId) {
-        await ctx.storage.delete(file.storageId);
+        await releaseFileStorage(ctx, file.storageId);
       }
 
       await ctx.db.delete(file._id);
@@ -509,6 +629,7 @@ export const createBinaryFile = mutation({
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertProjectFolder(ctx, args.projectId, args.parentId);
 
     const files = await ctx.db
       .query("files")
@@ -625,6 +746,7 @@ export const createProject = mutation({
       updatedAt: Date.now(),
       importStatus: "importing",
     });
+    await countProjectBuilt(ctx);
 
     return projectId;
   },
@@ -649,6 +771,7 @@ export const createProjectWithConversation = mutation({
       initialPrompt: args.initialPrompt,
       updatedAt: now,
     });
+    await countProjectBuilt(ctx);
 
     const conversationId = await ctx.db.insert("conversations", {
       projectId,
@@ -691,6 +814,7 @@ export const createUserConnection = mutation({
   args: {
     internalKey: v.string(),
     userId: v.string(),
+    projectId: v.optional(v.id("projects")),
     providerId: v.string(),
     label: v.string(),
     authMode: v.union(v.literal("oauth"), v.literal("api_key")),
@@ -706,9 +830,16 @@ export const createUserConnection = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    if (args.projectId) {
+      const project = await ctx.db.get("projects", args.projectId);
+      if (!project || project.ownerId !== args.userId) {
+        throw new Error("Project not found or owned by another user");
+      }
+    }
+
     const now = Date.now();
 
-    return await ctx.db.insert("userConnections", {
+    const connectionId = await ctx.db.insert("userConnections", {
       userId: args.userId,
       providerId: args.providerId,
       label: args.label,
@@ -730,6 +861,22 @@ export const createUserConnection = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    if (!args.projectId) return { connectionId };
+
+    const projectConnectionId = await ctx.db.insert("projectConnections", {
+      projectId: args.projectId,
+      userConnectionId: connectionId,
+      ownerId: args.userId,
+      enabled: true,
+      readOnly: true,
+      providerScope: {},
+      writeApproved: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return { connectionId, projectConnectionId };
   },
 });
 
@@ -796,6 +943,127 @@ export const updateUserConnectionStatus = mutation({
       statusMessage: args.statusMessage,
       updatedAt: Date.now(),
     });
+  },
+});
+
+/**
+ * Claim the right to refresh one OAuth credential.
+ *
+ * Refresh tokens may rotate. Without a database-backed lease, two agent runs
+ * can exchange the same token concurrently and the loser can invalidate an
+ * otherwise healthy connection. Convex serializes this mutation, so exactly one
+ * caller receives the lease.
+ */
+export const claimUserConnectionRefresh = mutation({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+    leaseId: v.string(),
+    refreshSkewMs: v.number(),
+    leaseDurationMs: v.number(),
+  },
+  returns: v.union(
+    v.literal("acquired"),
+    v.literal("busy"),
+    v.literal("not_needed"),
+    v.literal("missing"),
+  ),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const connection = await ctx.db.get("userConnections", args.connectionId);
+    if (!connection) return "missing" as const;
+
+    const now = Date.now();
+    const needsRefresh =
+      connection.authMode === "oauth" &&
+      typeof connection.tokenExpiresAt === "number" &&
+      connection.tokenExpiresAt - args.refreshSkewMs <= now;
+
+    if (!needsRefresh) return "not_needed" as const;
+
+    if (
+      connection.refreshLeaseId &&
+      connection.refreshLeaseExpiresAt &&
+      connection.refreshLeaseExpiresAt > now
+    ) {
+      return "busy" as const;
+    }
+
+    await ctx.db.patch("userConnections", args.connectionId, {
+      refreshLeaseId: args.leaseId,
+      refreshLeaseExpiresAt: now + args.leaseDurationMs,
+    });
+
+    return "acquired" as const;
+  },
+});
+
+/** Commit a refreshed sealed OAuth bundle only when the caller owns the lease. */
+export const completeUserConnectionRefresh = mutation({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+    leaseId: v.string(),
+    maskedPreview: v.string(),
+    scopes: v.array(v.string()),
+    tokenExpiresAt: v.union(v.number(), v.null()),
+    ...sealedFields,
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const connection = await ctx.db.get("userConnections", args.connectionId);
+    if (!connection || connection.refreshLeaseId !== args.leaseId) return false;
+
+    await ctx.db.patch("userConnections", args.connectionId, {
+      kekProvider: args.kekProvider,
+      kekKeyId: args.kekKeyId,
+      wrappedDek: args.wrappedDek,
+      ciphertext: args.ciphertext,
+      iv: args.iv,
+      authTag: args.authTag,
+      maskedPreview: args.maskedPreview,
+      scopes: args.scopes,
+      tokenExpiresAt: args.tokenExpiresAt ?? undefined,
+      status: "active" as const,
+      statusMessage: undefined,
+      refreshLeaseId: undefined,
+      refreshLeaseExpiresAt: undefined,
+      updatedAt: Date.now(),
+    });
+
+    return true;
+  },
+});
+
+/** Release a refresh lease and expose only a non-sensitive connection state. */
+export const failUserConnectionRefresh = mutation({
+  args: {
+    internalKey: v.string(),
+    connectionId: v.id("userConnections"),
+    leaseId: v.string(),
+    reauthRequired: v.boolean(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const connection = await ctx.db.get("userConnections", args.connectionId);
+    if (!connection || connection.refreshLeaseId !== args.leaseId) return false;
+
+    await ctx.db.patch("userConnections", args.connectionId, {
+      status: args.reauthRequired ? "needs_reauth" : "active",
+      statusMessage: args.reauthRequired
+        ? "OAuth authorization expired. Reconnect this integration."
+        : "OAuth refresh temporarily failed. It will be retried automatically.",
+      refreshLeaseId: undefined,
+      refreshLeaseExpiresAt: undefined,
+      updatedAt: Date.now(),
+    });
+
+    return true;
   },
 });
 
@@ -991,6 +1259,7 @@ export const createOauthFlowState = mutation({
     internalKey: v.string(),
     state: v.string(),
     userId: v.string(),
+    projectId: v.optional(v.id("projects")),
     providerId: v.string(),
     serverUrl: v.string(),
     redirectUri: v.string(),
@@ -1003,9 +1272,17 @@ export const createOauthFlowState = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    if (args.projectId) {
+      const project = await ctx.db.get("projects", args.projectId);
+      if (!project || project.ownerId !== args.userId) {
+        throw new Error("Project not found or owned by another user");
+      }
+    }
+
     return await ctx.db.insert("oauthFlowStates", {
       state: args.state,
       userId: args.userId,
+      projectId: args.projectId,
       providerId: args.providerId,
       serverUrl: args.serverUrl,
       redirectUri: args.redirectUri,
@@ -1069,9 +1346,28 @@ export const createMcpApproval = mutation({
     toolName: v.string(),
     argsPreview: v.string(),
     expiresAt: v.number(),
+    mcpInvocationId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+
+    // Idempotent on the invocation id.
+    //
+    // The caller already creates this row inside a memoized workflow step, so a
+    // second insert normally cannot happen. This covers the case that memoization
+    // cannot: a request killed after the insert but before the step result was
+    // checkpointed, which on retry would otherwise leave the user with a second
+    // approval prompt for one action.
+    if (args.mcpInvocationId) {
+      const existing = await ctx.db
+        .query("mcpApprovals")
+        .withIndex("by_invocation", (q) =>
+          q.eq("mcpInvocationId", args.mcpInvocationId),
+        )
+        .first();
+
+      if (existing) return existing._id;
+    }
 
     return await ctx.db.insert("mcpApprovals", {
       projectId: args.projectId,
@@ -1084,7 +1380,41 @@ export const createMcpApproval = mutation({
       status: "pending" as const,
       createdAt: Date.now(),
       expiresAt: args.expiresAt,
+      mcpInvocationId: args.mcpInvocationId,
     });
+  },
+});
+
+/**
+ * Take the single-use claim on an approved action.
+ *
+ * Returns true to the first caller and false to every later one. Convex mutations
+ * are serializable transactions, so the read and the patch cannot interleave with
+ * a competing claim — which is what makes this a safe guard against a mutating MCP
+ * call being reissued when its workflow step is retried after losing its result.
+ *
+ * Failing closed is deliberate: a row that is missing, unapproved or already
+ * consumed all return false, because none of those states establish that it is
+ * safe to send a migration again.
+ */
+export const claimMcpApproval = mutation({
+  args: {
+    internalKey: v.string(),
+    approvalId: v.id("mcpApprovals"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const approval = await ctx.db.get("mcpApprovals", args.approvalId);
+    if (!approval) return false;
+    if (approval.status !== "approved") return false;
+    if (approval.consumedAt !== undefined) return false;
+
+    await ctx.db.patch("mcpApprovals", args.approvalId, {
+      consumedAt: Date.now(),
+    });
+
+    return true;
   },
 });
 
@@ -1132,11 +1462,30 @@ export const recordMcpToolCall = mutation({
       v.literal("blocked"),
     ),
     argsDigest: v.string(),
+    redactionSummary: v.optional(v.string()),
     durationMs: v.number(),
     errorMessage: v.optional(v.string()),
+    mcpInvocationId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+
+    // Idempotent per (invocation, status), for the same reason as the approval
+    // row: the audit write is already inside a memoized step, and this closes the
+    // window where a lost checkpoint would duplicate the row. Keyed on status as
+    // well as invocation because one invocation can legitimately record two
+    // outcomes — for example `denied` and then nothing, or `blocked` after a lost
+    // claim.
+    if (args.mcpInvocationId) {
+      const existing = await ctx.db
+        .query("mcpToolAuditLog")
+        .withIndex("by_invocation", (q) =>
+          q.eq("mcpInvocationId", args.mcpInvocationId),
+        )
+        .collect();
+
+      if (existing.some((row) => row.status === args.status)) return;
+    }
 
     await ctx.db.insert("mcpToolAuditLog", {
       projectId: args.projectId,
@@ -1145,9 +1494,11 @@ export const recordMcpToolCall = mutation({
       toolName: args.toolName,
       status: args.status,
       argsDigest: args.argsDigest,
+      redactionSummary: args.redactionSummary,
       durationMs: args.durationMs,
       errorMessage: args.errorMessage,
       createdAt: Date.now(),
+      mcpInvocationId: args.mcpInvocationId,
     });
   },
 });
@@ -1168,6 +1519,55 @@ export const getProjectById = query({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     return await ctx.db.get("projects", args.projectId);
+  },
+});
+
+/** The project when `userId` owns it and it is not being deleted, else `null`. */
+const ownedProjectOrNull = async (
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  userId: string,
+) => {
+  const project = await ctx.db.get("projects", projectId);
+  return project?.ownerId === userId && project.deletingAt === undefined
+    ? project
+    : null;
+};
+
+/**
+ * The project when `userId` owns it, else `null`: missing, someone else's and
+ * malformed ids all look the same, so API routes can answer 404 to all three
+ * without revealing which projects exist (#208).
+ */
+export const getOwnedProject = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.string(),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const projectId = ctx.db.normalizeId("projects", args.projectId);
+    return projectId ? await ownedProjectOrNull(ctx, projectId, args.userId) : null;
+  },
+});
+
+/** `getOwnedProject` for a conversation: `null` unless `userId` owns its project. */
+export const getOwnedConversation = query({
+  args: {
+    internalKey: v.string(),
+    conversationId: v.string(),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const conversationId = ctx.db.normalizeId("conversations", args.conversationId);
+    const conversation = conversationId
+      ? await ctx.db.get("conversations", conversationId)
+      : null;
+    if (!conversation) return null;
+    const project = await ownedProjectOrNull(ctx, conversation.projectId, args.userId);
+    return project ? conversation : null;
   },
 });
 
@@ -1234,5 +1634,169 @@ export const setPublicEnvVarInternal = mutation({
       source: "integration" as const,
       updatedAt: now,
     });
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI provider keys (BYOK)
+//
+// Same contract as the integrations above: the Next.js routes test and seal a
+// key, Convex stores only ciphertext, and every read is owner-scoped so
+// internalKey is not a master key over every user's keys.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const createAiProviderKey = mutation({
+  args: {
+    internalKey: v.string(),
+    userId: v.string(),
+    provider: aiProviderValidator,
+    label: v.string(),
+    baseUrl: v.optional(v.string()),
+    modelIds: v.optional(v.array(v.string())),
+    secretRef: v.string(),
+    maskedPreview: v.string(),
+    ...sealedFields,
+  },
+  handler: async (ctx, { internalKey, ...args }) => {
+    validateInternalKey(internalKey);
+
+    const now = Date.now();
+    // Only stored after a successful connection test.
+    return await ctx.db.insert("aiProviderKeys", {
+      ...args,
+      status: "active",
+      lastTestedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+export const updateAiProviderKeyStatus = mutation({
+  args: {
+    internalKey: v.string(),
+    keyId: v.id("aiProviderKeys"),
+    userId: v.string(),
+    status: v.union(v.literal("active"), v.literal("invalid")),
+    statusMessage: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const key = await ctx.db.get("aiProviderKeys", args.keyId);
+    if (!key || key.userId !== args.userId) {
+      throw new Error("AI provider key not found");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch("aiProviderKeys", args.keyId, {
+      status: args.status,
+      statusMessage: args.statusMessage,
+      lastTestedAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+/** The sealed key, only when `userId` owns it. For the test-connection route. */
+export const getAiProviderKeyForUser = query({
+  args: {
+    internalKey: v.string(),
+    keyId: v.id("aiProviderKeys"),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const key = await ctx.db.get("aiProviderKeys", args.keyId);
+    return key && key.userId === args.userId ? key : null;
+  },
+});
+
+/**
+ * The user's default key (sealed) and model, for the editor AI routes. Null when
+ * the default is the platform, so the caller uses Codenaya's model. A default
+ * whose key no longer exists comes back as `key: null`.
+ */
+export const getDefaultAiProviderKey = query({
+  args: {
+    internalKey: v.string(),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const preferences = await ctx.db
+      .query("userAiPreferences")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .unique();
+    if (!preferences?.defaultKeyId) {
+      return null;
+    }
+
+    const key = await ctx.db.get("aiProviderKeys", preferences.defaultKeyId);
+    return {
+      key: key && key.userId === args.userId ? key : null,
+      modelId: preferences.defaultModelId,
+    };
+  },
+});
+
+/**
+ * The sealed key for an agent run, only when the key's owner is the project's
+ * owner, so a wrong or crafted keyId cannot spend another user's key.
+ */
+export const getAiProviderKeyForRun = query({
+  args: {
+    internalKey: v.string(),
+    keyId: v.id("aiProviderKeys"),
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const project = await ctx.db.get("projects", args.projectId);
+    const key = await ctx.db.get("aiProviderKeys", args.keyId);
+    return project && key && key.userId === project.ownerId ? key : null;
+  },
+});
+
+/** Records that an agent run used the key, for the settings page. */
+export const markAiProviderKeyUsed = mutation({
+  args: {
+    internalKey: v.string(),
+    keyId: v.id("aiProviderKeys"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const key = await ctx.db.get("aiProviderKeys", args.keyId);
+    if (key) {
+      await ctx.db.patch("aiProviderKeys", args.keyId, { lastUsedAt: Date.now() });
+    }
+  },
+});
+
+// ─── Skills ───
+
+/**
+ * The project's enabled skills, with bodies, for the agent's skill index.
+ * Only the project owner's skills are read, as in `getProjectMcpConnections`.
+ */
+export const getProjectSkills = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const project = await ctx.db.get("projects", args.projectId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
+
+    const skills = await resolveProjectSkills(ctx, project);
+    return skills.filter((skill) => skill.enabled);
   },
 });

@@ -1,8 +1,12 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Inter } from "next/font/google";
+import { Suspense } from "react";
 
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
+import { ShortcutsDialog } from "@/components/shortcuts-dialog";
+import { AuthLoadingView } from "@/features/auth/components/auth-loading-view";
+import { AGENT_MODELS } from "@/features/conversations/agent-models";
 
 import "allotment/dist/style.css";
 import "./globals.css";
@@ -26,10 +30,48 @@ const nerdMono = IBM_Plex_Mono({
   weight: ["400", "500", "600", "700"],
 });
 
+const title = "Codenaya — AI-Powered Browser IDE";
+const description = `Build apps from your browser with an AI agent. Choose from ${AGENT_MODELS.length} models, run a live preview, and export to GitHub or a ZIP.`;
+
+// Absolute base for Open Graph / Twitter image URLs.
+const appUrl =
+  process.env.NEXT_PUBLIC_APP_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : "http://localhost:3000");
+
+const ogImage = {
+  url: "/og.png",
+  width: 1200,
+  height: 630,
+  alt: "Codenaya — Build with AI. Ship from your browser.",
+};
+
 export const metadata: Metadata = {
-  title: "Codenaya — AI-Powered Browser IDE",
-  description:
-    "Build, edit, and deploy code from your browser with AI assistance. Real-time collaboration, GitHub integration, and instant preview.",
+  metadataBase: new URL(appUrl),
+  title,
+  description,
+  applicationName: "Codenaya",
+  openGraph: {
+    type: "website",
+    siteName: "Codenaya",
+    title,
+    description,
+    images: [ogImage],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+    images: [ogImage],
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#faf8f5" },
+    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+  ],
 };
 
 export default function RootLayout({
@@ -40,12 +82,17 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${inter.variable} ${plexMono.variable} ${nerdMono.variable} antialiased`}
+        className={`${inter.variable} ${plexMono.variable} ${nerdMono.variable} font-sans antialiased`}
       >
-        <Providers>
-          {children}
-          <Toaster />
-        </Providers>
+        {/* Clerk's keyless mode (no publishable key) reads route segments in
+            ClerkProvider, which Cache Components requires under <Suspense>. */}
+        <Suspense fallback={<AuthLoadingView />}>
+          <Providers>
+            {children}
+            <Toaster />
+            <ShortcutsDialog />
+          </Providers>
+        </Suspense>
       </body>
     </html>
   );
