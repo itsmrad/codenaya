@@ -5,6 +5,10 @@
 import * as Sentry from "@sentry/nextjs";
 
 Sentry.init({
+  // Off in `next dev`: the `/monitoring` tunnel rejects localhost events with a
+  // 403, which logs console errors on every page.
+  enabled: process.env.NODE_ENV === "production",
+
   dsn: "https://5a5ad5d9846faece0a4727540f810281@o4510149980258304.ingest.de.sentry.io/4510621155983440",
 
   // Add optional integrations for additional features
