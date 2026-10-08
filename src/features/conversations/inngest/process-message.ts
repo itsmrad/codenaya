@@ -20,6 +20,7 @@ import { createDeleteFilesTool } from './tools/delete-files';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
 import { createSetEnvVarTool } from './tools/set-env-var';
 import { createLoadSkillTool } from './tools/load-skill';
+import { createScaffoldViteAppTool } from './tools/scaffold-vite-app';
 import type { AgentModelChoice } from '../agent-models';
 import {
   type RunModel,
@@ -529,6 +530,7 @@ export const processMessage = inngest.createFunction(
         createUpdateFileTool({ internalKey }),
         createCreateFilesTool({ projectId, internalKey }),
         createCreateFolderTool({ projectId, internalKey }),
+        createScaffoldViteAppTool({ projectId, internalKey }),
         createRenameFileTool({ internalKey }),
         createDeleteFilesTool({ internalKey }),
         createScrapeUrlsTool(),
