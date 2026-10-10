@@ -2,7 +2,7 @@ import { generateObject } from "ai";
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { openai } from "@ai-sdk/openai";
+import { openrouter } from "@/lib/openrouter";
 // import { google } from "@ai-sdk/google";
 
 const suggestionSchema = z.object({
@@ -97,7 +97,7 @@ export async function POST(request: Request) {
       .replace("{lineNumber}", lineNumber.toString());
 
     const { object } = await generateObject({
-      model: openai("gpt-4o-mini"),
+      model: openrouter(),
       output: "object",
       schema: suggestionSchema,
       prompt,

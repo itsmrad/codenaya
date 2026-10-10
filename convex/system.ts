@@ -142,6 +142,7 @@ export const upsertMessagePart = mutation({
       v.literal("error"),
     ),
     label: v.optional(v.string()),
+    text: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -161,6 +162,7 @@ export const upsertMessagePart = mutation({
       status: args.status,
       // A later event without a label must not erase one already shown.
       label: args.label ?? (existing >= 0 ? parts[existing].label : undefined),
+      text: args.text ?? (existing >= 0 ? parts[existing].text : undefined),
     };
 
     const updated =

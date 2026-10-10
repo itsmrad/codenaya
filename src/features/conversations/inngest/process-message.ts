@@ -252,6 +252,9 @@ export const processMessage = inngest.createFunction(
 
     systemPrompt += buildIntegrationsPromptSection(mcpSummaries, mcpWarnings);
 
+    let reasoningCount = 0;
+    let suppressText = false;
+
     // Create the coding agent with file tools
     const codingAgent = createAgent({
       name: "codenaya",
@@ -282,6 +285,46 @@ export const processMessage = inngest.createFunction(
           : []),
         ...mcpTools,
       ],
+      lifecycle: {
+        // AgentKit drops OpenRouter's `reasoning` field when parsing, so it
+        // is read from the raw response and shown as a "thinking" part ahead
+        // of this inference's tool calls. The counter is deterministic across
+        // Inngest replays, so a replayed step upserts the same part.
+        onResponse: async ({ result }) => {
+          const index = reasoningCount++;
+
+          // Text sent alongside tool calls is narration ("Listing files to
+          // see the structure…"), not the answer: show it in the timeline and
+          // keep it out of the streamed reply. Streaming for this inference
+          // happens after onResponse, so the flag applies to its deltas.
+          const hasToolCalls = result.output.some((m) => m.type === "tool_call");
+          suppressText = hasToolCalls;
+
+          try {
+            const reasoning: unknown = JSON.parse(result.raw ?? "{}")
+              ?.choices?.[0]?.message?.reasoning;
+
+            if (typeof reasoning === "string" && reasoning.trim()) {
+              await publishPart(`reasoning-${index}`, "thinking", "done", undefined, reasoning.trim());
+            }
+
+            const narration = result.output
+              .map((m) => (m.type === "text" && m.role === "assistant"
+                ? typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("")
+                : ""))
+              .join("")
+              .trim();
+
+            if (hasToolCalls && narration) {
+              await publishPart(`narration-${index}`, "narration", "done", undefined, narration);
+            }
+          } catch {
+            // Activity display is cosmetic; never fail the run over it.
+          }
+
+          return result;
+        },
+      },
     });
 
     // Create network with single agent
@@ -355,6 +398,7 @@ export const processMessage = inngest.createFunction(
       toolName: string,
       status: "running" | "done" | "error",
       label?: string,
+      text?: string,
     ) => {
       try {
         await convex.mutation(api.system.upsertMessagePart, {
@@ -364,6 +408,7 @@ export const processMessage = inngest.createFunction(
           toolName,
           status,
           label,
+          text,
         });
       } catch {
         // Activity display is cosmetic; never fail the run over it.
@@ -448,7 +493,7 @@ export const processMessage = inngest.createFunction(
             return;
           }
 
-          if (chunk.event !== "text.delta") {
+          if (chunk.event !== "text.delta" || suppressText) {
             return;
           }
 

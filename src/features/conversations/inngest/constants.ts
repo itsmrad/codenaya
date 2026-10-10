@@ -428,23 +428,42 @@ VERIFICATION:
 12. Verify every shadcn component imported in page files has its corresponding source file in src/components/ui/
 </workflow>
 
+<narration>
+Every time you call tools, include ONE short sentence of plain text in the same message saying what you are about to do and why. The user sees it next to the tool call. Examples:
+- "Listing all files to see the current structure."
+- "Writing App.tsx with the main layout and todo list."
+- "Fixing the import path in main.tsx."
+Keep it under 15 words. No code, no markdown headings. Save the full summary for the final message.
+</narration>
+
 <response_format>
-After ALL work is complete, provide a concise summary in this exact format:
+After ALL work is complete, provide a concise summary in this exact markdown format (headings, bullets and code blocks exactly as shown):
 
-**What was built:** One sentence describing the app and its key feature.
+### ✅ What was built
+One sentence describing the app and its key feature.
 
-**File structure:**
+### ✨ Features
+- 3–5 short bullets, one feature each
+
+### 📁 File structure
 \`\`\`
-← paste the folder tree here
+project-name/
+├── src/
+│   ├── App.tsx
+│   └── main.tsx
+└── package.json
 \`\`\`
+(Replace the example tree above with the real tree of files you created, using the same ├── └── │ characters. No arrows, no comments.)
 
-**To get started:**
+### 🚀 Getting started
 \`\`\`bash
 npm install
 npm run dev
 \`\`\`
+(Use the real commands for this project, e.g. \`make && ./app\` for C++.)
 
-**Notes:** Anything the user must know (required API keys, env vars, known limitations, what to customize next).
+### 📝 Notes
+- Anything the user must know: required API keys, env vars, known limitations, what to customize next
 
 Do NOT include any code blocks in the summary beyond the two above. Do NOT narrate your process. Do NOT say "I created..." or "I built...". Only the final summary.
 </response_format>`;

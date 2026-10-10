@@ -81,6 +81,8 @@ export default defineSchema({
           ),
           // Short human-facing detail, e.g. the file being written.
           label: v.optional(v.string()),
+          // Model reasoning for a "thinking" part; absent on tool parts.
+          text: v.optional(v.string()),
         }),
       ),
     ),

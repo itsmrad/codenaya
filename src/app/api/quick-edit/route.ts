@@ -2,7 +2,7 @@ import { z } from "zod";
 import { generateObject } from "ai";
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { openai } from "@ai-sdk/openai";
+import { openrouter } from "@/lib/openrouter";
 
 import { firecrawl } from "@/lib/firecrawl";
 
@@ -105,7 +105,7 @@ export async function POST(request: Request) {
       .replace("{documentation}", documentationContext);
 
     const { object } = await generateObject({
-      model: openai("gpt-4o"),
+      model: openrouter(),
       output: "object",
       schema: quickEditSchema,
       prompt,
