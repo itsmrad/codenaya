@@ -623,6 +623,13 @@ export const processMessage = inngest.createFunction(
         // A dropped chunk must not abort the run: the full reply is written
         // once the agent finishes.
         console.error("[process-message] failed to stream reply chunk", error);
+        // Put the chunk back so the next flush resends it from the same offset
+        // (the mutation skips any part that did land); otherwise every later
+        // chunk would start past the end of the content and be skipped.
+        if (streamed === offset + delta.length) {
+          pending = delta + pending;
+          streamed = offset;
+        }
       }
     };
 
