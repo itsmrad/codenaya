@@ -546,14 +546,19 @@ export const AgentRun = ({
                   ? `Worked for ${formatDuration(endedAt - startedAt)}`
                   : "Worked"}
             </span>
-            <span className={cn("min-w-0 truncate text-muted-foreground", settle)}>
+            <span
+              className={cn("min-w-0 truncate text-muted-foreground", settle)}
+              title={status !== "cancelled" ? summary : undefined}
+            >
               {status !== "cancelled" && `· ${summary}`}
-              {errors > 0 && (
-                <span className="text-destructive">
-                  {" "}· {errors} {errors === 1 ? "error" : "errors"}
-                </span>
-              )}
             </span>
+            {/* Outside the truncating summary, so the summary is cut first and
+                the only text signal that a step failed stays visible (#264). */}
+            {errors > 0 && (
+              <span className={cn("shrink-0 text-destructive", settle)}>
+                · {errors} {errors === 1 ? "error" : "errors"}
+              </span>
+            )}
             <ChevronRightIcon className="ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]/run:rotate-90 motion-reduce:transition-none" />
           </>
         )}
