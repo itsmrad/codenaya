@@ -166,14 +166,15 @@ export const upsertMessageSteps = mutation({
 });
 
 // Streams the final reply into `content` while the run is still processing.
-// `seq` makes replayed chunks no-ops; `updateMessageContent` writes the
-// authoritative full reply when the run finishes.
+// `offset` is where `delta` starts in the reply, so a replayed chunk, even one
+// split at different boundaries, only appends text that isn't there yet.
+// `updateMessageContent` writes the authoritative full reply when the run ends.
 export const appendMessageChunk = mutation({
   args: {
     internalKey: v.string(),
     messageId: v.id("messages"),
     delta: v.string(),
-    seq: v.number(),
+    offset: v.number(),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -185,13 +186,14 @@ export const appendMessageChunk = mutation({
       return;
     }
 
-    if (args.seq <= (message.streamSeq ?? -1)) {
+    const length = message.content.length;
+    // Already applied (a replay), or a gap left by a dropped chunk.
+    if (args.offset + args.delta.length <= length || args.offset > length) {
       return;
     }
 
     await ctx.db.patch(args.messageId, {
-      content: message.content + args.delta,
-      streamSeq: args.seq,
+      content: message.content + args.delta.slice(length - args.offset),
     });
   },
 });

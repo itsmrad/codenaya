@@ -595,11 +595,12 @@ export const processMessage = inngest.createFunction(
     ];
 
     // Reply streaming: text deltas are buffered and appended to the message so
-    // the chat shows the answer as it arrives. `seq` restarts on every Inngest
-    // replay, so replayed chunks carry already-applied numbers and are ignored.
+    // the chat shows the answer as it arrives. Each chunk carries its offset in
+    // the reply; a replay resends the same text from offset 0, so chunks already
+    // applied are ignored however the timed flushes split them this time.
     let suppressText = false;
     let pending = "";
-    let seq = 0;
+    let streamed = 0;
     let lastFlush = Date.now();
 
     const flush = async () => {
@@ -607,18 +608,21 @@ export const processMessage = inngest.createFunction(
         return;
       }
       const delta = pending;
+      const offset = streamed;
       pending = "";
+      streamed += delta.length;
       lastFlush = Date.now();
       try {
         await convex.mutation(api.system.appendMessageChunk, {
           internalKey,
           messageId,
           delta,
-          seq: seq++,
+          offset,
         });
-      } catch {
+      } catch (error) {
         // A dropped chunk must not abort the run: the full reply is written
         // once the agent finishes.
+        console.error("[process-message] failed to stream reply chunk", error);
       }
     };
 
@@ -662,9 +666,10 @@ export const processMessage = inngest.createFunction(
             }
             return result;
           }
+          // Narration first: it is one line, and must survive the clamp when
+          // the reasoning is long.
           const thought = clampStepText(
             [
-              reasoning,
               ...result.output.map((m) =>
                 m.type === "text" && m.role === "assistant"
                   ? typeof m.content === "string"
@@ -672,6 +677,7 @@ export const processMessage = inngest.createFunction(
                     : m.content.map((c) => c.text).join("")
                   : "",
               ),
+              reasoning,
             ]
               .filter(Boolean)
               .join("\n\n"),

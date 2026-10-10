@@ -39,8 +39,8 @@ async function setup() {
       status: "processing",
     });
   });
-  const append = (delta: string, seq: number, internalKey = INTERNAL_KEY) =>
-    t.mutation(api.system.appendMessageChunk, { internalKey, messageId, delta, seq });
+  const append = (delta: string, offset: number, internalKey = INTERNAL_KEY) =>
+    t.mutation(api.system.appendMessageChunk, { internalKey, messageId, delta, offset });
   const content = () => t.run(async (ctx) => (await ctx.db.get(messageId))?.content);
   return { t, messageId, append, content };
 }
@@ -49,18 +49,34 @@ describe("appendMessageChunk", () => {
   test("appends streamed chunks in order", async () => {
     const { append, content } = await setup();
     await append("Hel", 0);
-    await append("lo", 1);
+    await append("lo", 3);
     expect(await content()).toBe("Hello");
   });
 
   test("ignores chunks replayed by an Inngest retry", async () => {
     const { append, content } = await setup();
     await append("Hel", 0);
-    await append("lo", 1);
-    // A replay restarts `seq` and re-sends the same deltas.
+    await append("lo", 3);
+    // A replay resends the same text from offset 0.
     await append("Hel", 0);
-    await append("lo", 1);
+    await append("lo", 3);
     expect(await content()).toBe("Hello");
+  });
+
+  test("appends only new text when a replay splits chunks differently", async () => {
+    const { append, content } = await setup();
+    await append("Hel", 0);
+    // Timed flushes split the replay as "He" + "llo world".
+    await append("He", 0);
+    await append("llo world", 2);
+    expect(await content()).toBe("Hello world");
+  });
+
+  test("skips a chunk that would leave a gap after a dropped one", async () => {
+    const { append, content } = await setup();
+    await append("Hel", 0);
+    await append("world", 6);
+    expect(await content()).toBe("Hel");
   });
 
   test("ignores chunks once the run is no longer processing", async () => {

@@ -158,7 +158,8 @@ const useTypewriter = (text: string, animate: boolean) => {
     );
     return () => cancelAnimationFrame(frame);
   }, [shown, text.length]);
-  return text.slice(0, shown);
+  // Animation turned off mid-reply (e.g. reduced motion): show it all.
+  return animate ? text.slice(0, shown) : text;
 };
 
 interface AssistantMessageProps {
