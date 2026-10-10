@@ -120,9 +120,12 @@ export const describeToolCall = (
 /**
  * The error message of an AgentKit tool result, or undefined on success.
  * Tools here report failures by returning an "Error..." string; AgentKit wraps
- * thrown errors as `{ error }`.
+ * thrown errors as `{ error }`. Ids in the message resolve to paths via `pathOf`.
  */
-export const toolResultError = (content: unknown): string | undefined => {
+export const toolResultError = (
+  content: unknown,
+  pathOf?: (id: string) => string | undefined,
+): string | undefined => {
   if (!content || typeof content !== "object") return undefined;
   const { data, error } = content as { data?: unknown; error?: unknown };
   let message: string | undefined;
@@ -134,7 +137,7 @@ export const toolResultError = (content: unknown): string | undefined => {
   } else if (typeof data === "string" && /^error\b/i.test(data.trim())) {
     message = data.trim();
   }
-  return message ? sanitizeAgentText(message).slice(0, MAX_ERROR) : undefined;
+  return message ? sanitizeAgentText(message, pathOf).slice(0, MAX_ERROR) : undefined;
 };
 
 /** Cap for interim "thinking" text recorded alongside tool calls. */
@@ -151,6 +154,8 @@ const LABELLED_ID = new RegExp(
   String.raw`\s*\(?\bid:\s*["'\x60]?(${ID_BODY})\b["'\x60]?\)?`,
   "gi",
 );
+// Tool errors: 'File with ID "abc…" not found.'
+const WITH_ID = new RegExp(String.raw`\s+with ID ["'\x60](${ID_BODY})["'\x60]`, "gi");
 
 const sanitizeProse = (
   text: string,
@@ -163,6 +168,11 @@ const sanitizeProse = (
     .replace(LABELLED_ID, (match, id: string) => {
       const path = pathOf?.(id);
       return path ? ` (${path})` : "";
+    })
+    // An unresolved id would read 'File with ID "a file" not found': drop it.
+    .replace(WITH_ID, (match, id: string) => {
+      const path = pathOf?.(id);
+      return path ? ` "${path}"` : "";
     })
     .replace(DOC_ID, (id) => pathOf?.(id) ?? "a file");
 

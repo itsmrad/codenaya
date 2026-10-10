@@ -53,7 +53,7 @@ export const createCreateFolderTool = ({
                 return `Error: Parent folder with ID "${parentId}" not found. Use listFiles to get valid folder IDs.`;
               }
               if (parentFolder.type !== "folder") {
-                return `Error: The ID "${parentId}" is a file, not a folder. Use a folder ID as parentId.`;
+                return `Error: "${parentFolder.name}" is a file, not a folder. Use a folder ID as parentId.`;
               }
             } catch {
               return `Error: Invalid parentId "${parentId}". Use listFiles to get valid folder IDs, or use empty string for root level.`;
