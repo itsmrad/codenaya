@@ -82,10 +82,19 @@ describe("describeToolCall", () => {
 describe("toolResultError", () => {
   it("detects error strings and thrown errors", () => {
     expect(toolResultError({ data: "File updated" })).toBeUndefined();
-    expect(
-      toolResultError({ data: `Error: File with ID "${ID_A}" not found.` }),
-    ).toBe('Error: File with ID "a file" not found.');
     expect(toolResultError({ error: { message: "boom" } })).toBe("boom");
+  });
+
+  // #219: an unresolved id used to read 'File with ID "a file" not found.'
+  it("resolves ids in errors to paths, and drops ids it cannot resolve", () => {
+    const missing = { data: `Error: File with ID "${ID_A}" not found. Use listFiles.` };
+    expect(toolResultError(missing)).toBe("Error: File not found. Use listFiles.");
+    expect(toolResultError(missing, pathOf)).toBe(
+      'Error: File "src/App.jsx" not found. Use listFiles.',
+    );
+    expect(
+      toolResultError({ data: `Error: Parent folder with ID "${ID_A}" not found.` }),
+    ).toBe("Error: Parent folder not found.");
   });
 });
 

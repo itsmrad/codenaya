@@ -106,6 +106,15 @@ describe("project scope", () => {
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
 
+  // #219: the id would be shown to the user as "a file".
+  it("names the folder, not its id, when asked to update a folder", async () => {
+    mocks.query.mockResolvedValue({ _id: "d1", name: "ui", type: "folder" });
+    expect(
+      await createUpdateFileTool({ projectId, internalKey }).handler({ fileId: "d1", content: "x" }, ctx),
+    ).toBe('Error: "ui" is a folder, not a file. You can only update file contents.');
+    expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
   it("passes the run's projectId to the write", async () => {
     mocks.query.mockResolvedValue({ _id: "f1", name: "App.tsx", type: "file" });
     await createUpdateFileTool({ projectId, internalKey }).handler({ fileId: "f1", content: "x" }, ctx);

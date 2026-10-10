@@ -640,11 +640,12 @@ export const processMessage = inngest.createFunction(
             return result;
           }
           // Targets are left out so the merge keeps the ones recorded before
-          // the call ran (a renamed or deleted file no longer resolves).
-          await recordSteps("finish-agent-steps", () => {
+          // the call ran (a renamed or deleted file no longer resolves). Ids in
+          // error messages resolve to paths where the file still exists (#219).
+          await recordSteps("finish-agent-steps", (pathOf) => {
             const endedAt = Date.now();
             return result.toolCalls.map(({ tool, content }) => {
-              const error = toolResultError(content);
+              const error = toolResultError(content, pathOf);
               return {
                 id: tool.id,
                 kind: "tool" as const,
@@ -655,7 +656,7 @@ export const processMessage = inngest.createFunction(
                 endedAt,
               };
             });
-          }, false);
+          }, true);
           return result;
         },
       },

@@ -45,7 +45,7 @@ export const createUpdateFileTool = ({
       }
 
       if (file.type === "folder") {
-        return `Error: "${fileId}" is a folder, not a file. You can only update file contents.`;
+        return `Error: "${file.name}" is a folder, not a file. You can only update file contents.`;
       }
 
       try {
