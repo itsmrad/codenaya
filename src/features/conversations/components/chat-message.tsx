@@ -148,10 +148,13 @@ const useTypewriter = (text: string, animate: boolean) => {
   const [shown, setShown] = useState(animate ? 0 : text.length);
   useEffect(() => {
     if (shown >= text.length) return;
-    // ponytail: 1 char/frame when close, up to 8 when far behind so long
-    // replies don't take minutes; tune the divisor/cap if it feels off.
+    // One character per frame when close, up to 8 when far behind, so a long
+    // reply catches up in seconds rather than minutes.
     const frame = requestAnimationFrame(() =>
-      setShown((s) => Math.min(text.length, s + Math.min(8, Math.max(1, Math.ceil((text.length - s) / 40))))),
+      setShown((s) => {
+        const step = Math.min(8, Math.max(1, Math.ceil((text.length - s) / 40)));
+        return Math.min(text.length, s + step);
+      }),
     );
     return () => cancelAnimationFrame(frame);
   }, [shown, text.length]);
@@ -272,34 +275,36 @@ export const AssistantMessage = ({
               Build this plan
             </Button>
           )}
-          {status === "completed" && <MessageActions
-            className={cn(
-              "-ml-1.5 -mt-1 opacity-0 transition-opacity duration-100 group-hover/msg:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",
-              startedProcessing && "animate-in fade-in-0 duration-300 motion-reduce:animate-none",
-            )}
-          >
-            <MessageAction
-              size="icon-sm"
-              label={copied ? "Copied" : "Copy"}
-              tooltip={copied ? "Copied" : "Copy"}
-              onClick={copy}
-              className="size-7 text-muted-foreground hover:text-foreground"
+          {status === "completed" && (
+            <MessageActions
+              className={cn(
+                "-ml-1.5 -mt-1 opacity-0 transition-opacity duration-100 group-hover/msg:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",
+                startedProcessing && "animate-in fade-in-0 duration-300 motion-reduce:animate-none",
+              )}
             >
-              {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
-            </MessageAction>
-            {isLast && onRetry && (
               <MessageAction
                 size="icon-sm"
-                label="Retry"
-                tooltip="Retry"
-                onClick={onRetry}
+                label={copied ? "Copied" : "Copy"}
+                tooltip={copied ? "Copied" : "Copy"}
+                onClick={copy}
                 className="size-7 text-muted-foreground hover:text-foreground"
               >
-                <RotateCcwIcon className="size-3.5" />
+                {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
               </MessageAction>
-            )}
-            {restoreAction}
-          </MessageActions>}
+              {isLast && onRetry && (
+                <MessageAction
+                  size="icon-sm"
+                  label="Retry"
+                  tooltip="Retry"
+                  onClick={onRetry}
+                  className="size-7 text-muted-foreground hover:text-foreground"
+                >
+                  <RotateCcwIcon className="size-3.5" />
+                </MessageAction>
+              )}
+              {restoreAction}
+            </MessageActions>
+          )}
         </>
       )}
     </div>

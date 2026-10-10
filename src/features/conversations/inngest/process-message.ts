@@ -34,6 +34,7 @@ import {
   buildPathIndex,
   clampStepText,
   describeToolCall,
+  sanitizeAgentText,
   toolResultError,
 } from '../agent-steps';
 import {
@@ -647,7 +648,8 @@ export const processMessage = inngest.createFunction(
           // in the thinking step, not the streamed reply. Streaming for this
           // inference runs after onResponse, so the flag covers its deltas.
           suppressText = calls.length > 0;
-          const reasoning = modelReasoning(result.raw);
+          // Raw reasoning can echo tool markup, model tokens and document ids.
+          const reasoning = sanitizeAgentText(modelReasoning(result.raw));
           if (calls.length === 0) {
             if (reasoning) {
               await recordSteps("record-final-thinking", () => [{
