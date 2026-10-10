@@ -76,6 +76,24 @@ interface MessageEvent {
   mode?: MessageMode;
 };
 
+/**
+ * The model's reasoning, which AgentKit drops when it parses the response.
+ * OpenRouter (and OpenAI-compatible endpoints) return it as `message.reasoning`;
+ * other providers leave it out, so this is empty for them.
+ */
+const modelReasoning = (raw?: string): string => {
+  try {
+    const reasoning: unknown = JSON.parse(raw ?? "{}")?.choices?.[0]?.message?.reasoning;
+    return typeof reasoning === "string" ? reasoning.trim() : "";
+  } catch {
+    return "";
+  }
+};
+
+/** Streamed reply text is buffered and written at most this often / this large. */
+const FLUSH_INTERVAL_MS = 100;
+const FLUSH_CHARS = 60;
+
 export const processMessage = inngest.createFunction(
   {
     id: "process-message",
@@ -575,6 +593,34 @@ export const processMessage = inngest.createFunction(
       ...mcpTools,
     ];
 
+    // Reply streaming: text deltas are buffered and appended to the message so
+    // the chat shows the answer as it arrives. `seq` restarts on every Inngest
+    // replay, so replayed chunks carry already-applied numbers and are ignored.
+    let suppressText = false;
+    let pending = "";
+    let seq = 0;
+    let lastFlush = Date.now();
+
+    const flush = async () => {
+      if (!pending) {
+        return;
+      }
+      const delta = pending;
+      pending = "";
+      lastFlush = Date.now();
+      try {
+        await convex.mutation(api.system.appendMessageChunk, {
+          internalKey,
+          messageId,
+          delta,
+          seq: seq++,
+        });
+      } catch {
+        // A dropped chunk must not abort the run: the full reply is written
+        // once the agent finishes.
+      }
+    };
+
     // Create the coding agent with file tools
     const codingAgent = createAgent({
       name: "codenaya",
@@ -597,19 +643,36 @@ export const processMessage = inngest.createFunction(
           const calls = result.output.flatMap((m) =>
             m.type === "tool_call" ? m.tools : [],
           );
+          // Text sent with tool calls is narration, not the answer: it goes
+          // in the thinking step, not the streamed reply. Streaming for this
+          // inference runs after onResponse, so the flag covers its deltas.
+          suppressText = calls.length > 0;
+          const reasoning = modelReasoning(result.raw);
           if (calls.length === 0) {
+            if (reasoning) {
+              await recordSteps("record-final-thinking", () => [{
+                id: "thinking-final",
+                kind: "thinking" as const,
+                text: clampStepText(reasoning),
+                status: "done" as const,
+                startedAt: Date.now(),
+              }], false);
+            }
             return result;
           }
           const thought = clampStepText(
-            result.output
-              .map((m) =>
+            [
+              reasoning,
+              ...result.output.map((m) =>
                 m.type === "text" && m.role === "assistant"
                   ? typeof m.content === "string"
                     ? m.content
                     : m.content.map((c) => c.text).join("")
                   : "",
-              )
-              .join("\n"),
+              ),
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
           );
           await recordSteps("record-agent-steps", (pathOf) => {
             const startedAt = Date.now();
@@ -686,7 +749,21 @@ export const processMessage = inngest.createFunction(
     // Run the agent
     let result;
     try {
-      result = await network.run(request);
+      result = await network.run(request, {
+        streaming: {
+          simulateChunking: true,
+          publish: async (chunk) => {
+            if (chunk.event !== "text.delta" || suppressText) {
+              return;
+            }
+            pending += (chunk.data as { delta?: string } | undefined)?.delta ?? "";
+            if (pending.length >= FLUSH_CHARS || Date.now() - lastFlush >= FLUSH_INTERVAL_MS) {
+              await flush();
+            }
+          },
+        },
+      });
+      await flush();
     } catch (error) {
       return await endRunOnKeyRejection(error);
     }

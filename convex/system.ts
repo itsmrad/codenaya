@@ -165,6 +165,37 @@ export const upsertMessageSteps = mutation({
   },
 });
 
+// Streams the final reply into `content` while the run is still processing.
+// `seq` makes replayed chunks no-ops; `updateMessageContent` writes the
+// authoritative full reply when the run finishes.
+export const appendMessageChunk = mutation({
+  args: {
+    internalKey: v.string(),
+    messageId: v.id("messages"),
+    delta: v.string(),
+    seq: v.number(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const message = await ctx.db.get(args.messageId);
+
+    // A cancelled turn must not be resurrected by chunks already in flight.
+    if (!message || message.status !== "processing") {
+      return;
+    }
+
+    if (args.seq <= (message.streamSeq ?? -1)) {
+      return;
+    }
+
+    await ctx.db.patch(args.messageId, {
+      content: message.content + args.delta,
+      streamSeq: args.seq,
+    });
+  },
+});
+
 export const updateMessageStatus = mutation({
   args: {
     internalKey: v.string(),

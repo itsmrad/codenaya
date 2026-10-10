@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useReducedMotion } from "motion/react";
 import {
   BookOpenIcon,
   CheckIcon,
@@ -138,6 +139,25 @@ export const UserMessage = ({
   );
 };
 
+/**
+ * Reveals text a few characters per frame, so a streamed reply types out
+ * instead of jumping in by whole chunks. Text already complete on mount
+ * (history) shows in full.
+ */
+const useTypewriter = (text: string, animate: boolean) => {
+  const [shown, setShown] = useState(animate ? 0 : text.length);
+  useEffect(() => {
+    if (shown >= text.length) return;
+    // ponytail: 1 char/frame when close, up to 8 when far behind so long
+    // replies don't take minutes; tune the divisor/cap if it feels off.
+    const frame = requestAnimationFrame(() =>
+      setShown((s) => Math.min(text.length, s + Math.min(8, Math.max(1, Math.ceil((text.length - s) / 40))))),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [shown, text.length]);
+  return text.slice(0, shown);
+};
+
 interface AssistantMessageProps {
   message: Doc<"messages">;
   /** Last message in the conversation: gets the retry action. */
@@ -173,6 +193,10 @@ export const AssistantMessage = ({
   const [startedProcessing] = useState(status === "processing");
   const settle = startedProcessing && "animate-fade-up motion-reduce:animate-none";
   const isPlan = message.mode === "plan";
+  // The reply streams in while the run is processing; the same element stays
+  // mounted when it completes, so the text never re-animates.
+  const reduceMotion = useReducedMotion();
+  const shown = useTypewriter(content, startedProcessing && !reduceMotion);
 
   const restoreAction = onRestore && status !== "processing" && (
     <MessageAction
@@ -223,9 +247,9 @@ export const AssistantMessage = ({
       {status === "cancelled" && restoreAction && (
         <MessageActions className="-ml-1.5 -mt-1">{restoreAction}</MessageActions>
       )}
-      {status === "completed" && content && (
+      {(status === "completed" || status === "processing") && content && (
         <>
-          {isPlan && (
+          {status === "completed" && isPlan && (
             <Badge variant="outline" className={cn("-mb-1 text-muted-foreground", settle)}>
               <ListChecksIcon />
               Plan
@@ -235,9 +259,9 @@ export const AssistantMessage = ({
             className={cn("chat-prose", settle)}
             controls={{ code: { copy: true, download: false } }}
           >
-            {content}
+            {shown}
           </MessageResponse>
-          {isPlan && isLast && onBuildPlan && (
+          {status === "completed" && isPlan && isLast && onBuildPlan && (
             <Button
               type="button"
               size="sm"
@@ -248,7 +272,7 @@ export const AssistantMessage = ({
               Build this plan
             </Button>
           )}
-          <MessageActions
+          {status === "completed" && <MessageActions
             className={cn(
               "-ml-1.5 -mt-1 opacity-0 transition-opacity duration-100 group-hover/msg:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",
               startedProcessing && "animate-in fade-in-0 duration-300 motion-reduce:animate-none",
@@ -275,7 +299,7 @@ export const AssistantMessage = ({
               </MessageAction>
             )}
             {restoreAction}
-          </MessageActions>
+          </MessageActions>}
         </>
       )}
     </div>

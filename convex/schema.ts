@@ -158,6 +158,9 @@ export default defineSchema({
     workflowRunId: v.optional(v.string()),
     // Agent activity for the chat panel. Bounded: see MAX_MESSAGE_STEPS.
     steps: v.optional(v.array(messageStepValidator)),
+    // Highest streamed chunk applied to `content`, so a replayed step cannot
+    // append the same delta twice. Absent on messages written in one shot.
+    streamSeq: v.optional(v.number()),
     // When the run stopped (completed or cancelled), for "Worked for Xs".
     completedAt: v.optional(v.number()),
     // Assistant messages only: the model the run used.
