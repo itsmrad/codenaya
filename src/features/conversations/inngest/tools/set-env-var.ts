@@ -123,6 +123,13 @@ export const createSetEnvVarTool = ({
       };
 
       try {
+        // Resolved before the step (#79): a missing or invalid KEK is a config
+        // error no retry can fix, and thrown inside step.run Inngest retries it
+        // for minutes while the chat shows nothing. Network failures while
+        // sealing or saving still happen inside the step, so they still retry.
+        if (visibility === "secret") {
+          getSecretSealer();
+        }
         return step
           ? await step.run(`set-env-var-${trimmedKey}`, run)
           : await run();
