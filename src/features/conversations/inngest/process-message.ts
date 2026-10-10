@@ -34,6 +34,7 @@ import {
   buildPathIndex,
   clampStepText,
   describeToolCall,
+  sanitizeAgentText,
   toolResultError,
 } from '../agent-steps';
 import {
@@ -74,6 +75,20 @@ interface MessageEvent {
   model?: string | AgentModelChoice;
   /** Plan mode (#120): read-only tools, and the reply is a plan. */
   mode?: MessageMode;
+};
+
+/**
+ * The model's reasoning, which AgentKit drops when it parses the response.
+ * OpenRouter (and OpenAI-compatible endpoints) return it as `message.reasoning`;
+ * other providers leave it out, so this is empty for them.
+ */
+const modelReasoning = (raw?: string): string => {
+  try {
+    const reasoning: unknown = JSON.parse(raw ?? "{}")?.choices?.[0]?.message?.reasoning;
+    return typeof reasoning === "string" ? reasoning.trim() : "";
+  } catch {
+    return "";
+  }
 };
 
 export const processMessage = inngest.createFunction(
@@ -597,19 +612,35 @@ export const processMessage = inngest.createFunction(
           const calls = result.output.flatMap((m) =>
             m.type === "tool_call" ? m.tools : [],
           );
+          // Raw reasoning can echo tool markup, model tokens and document ids.
+          const reasoning = sanitizeAgentText(modelReasoning(result.raw));
           if (calls.length === 0) {
+            if (reasoning) {
+              await recordSteps("record-final-thinking", () => [{
+                id: "thinking-final",
+                kind: "thinking" as const,
+                text: clampStepText(reasoning),
+                status: "done" as const,
+                startedAt: Date.now(),
+              }], false);
+            }
             return result;
           }
+          // Narration first: it is one line, and must survive the clamp when
+          // the reasoning is long.
           const thought = clampStepText(
-            result.output
-              .map((m) =>
+            [
+              ...result.output.map((m) =>
                 m.type === "text" && m.role === "assistant"
                   ? typeof m.content === "string"
                     ? m.content
                     : m.content.map((c) => c.text).join("")
                   : "",
-              )
-              .join("\n"),
+              ),
+              reasoning,
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
           );
           await recordSteps("record-agent-steps", (pathOf) => {
             const startedAt = Date.now();
