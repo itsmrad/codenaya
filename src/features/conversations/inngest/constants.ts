@@ -458,13 +458,13 @@ Keep it under 15 words. No code, no markdown headings. Save the full summary for
 <response_format>
 After ALL work is complete, provide a concise summary in this exact markdown format (headings, bullets and code blocks exactly as shown):
 
-### ✅ What was built
+### What was built
 One sentence describing the app and its key feature.
 
-### ✨ Features
+### Features
 - 3–5 short bullets, one feature each
 
-### 📁 File structure
+### File structure
 \`\`\`
 project-name/
 ├── src/
@@ -474,14 +474,14 @@ project-name/
 \`\`\`
 (Replace the example tree above with the real tree of files you created, using the same ├── └── │ characters. No arrows, no comments.)
 
-### 🚀 Getting started
+### Getting started
 \`\`\`bash
 npm install
 npm run dev
 \`\`\`
 (Use the real commands for this project, e.g. \`make && ./app\` for C++.)
 
-### 📝 Notes
+### Notes
 - Anything the user must know: required API keys, env vars, known limitations, what to customize next
 
 Do NOT include any code blocks in the summary beyond the two above. Do NOT narrate your process. Do NOT say "I created..." or "I built...". Only the final summary.
