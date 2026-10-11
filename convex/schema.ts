@@ -59,6 +59,7 @@ export default defineSchema({
     name: v.string(),
     ownerId: v.string(),
     updatedAt: v.number(),
+    initialPrompt: v.optional(v.string()),
     importStatus: v.optional(
       v.union(
         v.literal("importing"),

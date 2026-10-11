@@ -220,9 +220,12 @@ const captureViewExtension = EditorView.updateListener.of((update) => {
   editorView = update.view;
 });
 
-export const quickEdit = (fileName: string) => [
-  quickEditState,
-  quickEditTooltipField,
-  quickEditKeymap,
-  captureViewExtension,
-];
+export const quickEdit = (fileName?: string) => {
+  void fileName;
+  return [
+    quickEditState,
+    quickEditTooltipField,
+    quickEditKeymap,
+    captureViewExtension,
+  ];
+};

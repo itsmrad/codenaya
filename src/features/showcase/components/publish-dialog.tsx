@@ -62,6 +62,7 @@ export const PublishDialog = ({
   if (prevSync.open !== open || prevSync.projectName !== projectName) {
     setPrevSync({ open, projectName });
     if (open && projectName) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTitle(projectName);
     }
   }

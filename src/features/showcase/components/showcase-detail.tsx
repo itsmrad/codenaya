@@ -50,11 +50,29 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
   // Use live data when available, fall back to prop
   const displayProject = liveProject ?? project;
 
-  // Views are counted per signed-in user, so wait until Convex has the token.
+  // Count views once per user or anonymous browser
   useEffect(() => {
-    if (isAuthenticated) incrementView({ id: project._id });
+    if (isAuthLoading) return;
+
+    let anonymousId: string | undefined;
+    if (!isAuthenticated) {
+      try {
+        const key = "codenaya_anonymous_id";
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          anonymousId = stored;
+        } else {
+          anonymousId = `anon_${crypto.randomUUID()}`;
+          localStorage.setItem(key, anonymousId);
+        }
+      } catch {
+        // localStorage unavailable
+      }
+    }
+
+    incrementView({ id: project._id, anonymousId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project._id, isAuthenticated]);
+  }, [project._id, isAuthenticated, isAuthLoading]);
 
   const handleVote = async (direction: "up" | "down") => {
     if (isAuthLoading) return;
@@ -151,11 +169,11 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
         <div className="flex items-center gap-4 text-xs text-muted-foreground py-2 border-t border-border/40">
           <span className="flex items-center gap-1">
             <EyeIcon className="size-3.5" />
-            {displayProject.viewCount} views
+            {displayProject.viewCount} {displayProject.viewCount === 1 ? "view" : "views"}
           </span>
           <span className="flex items-center gap-1">
             <DownloadIcon className="size-3.5" />
-            {displayProject.importCount} imports
+            {displayProject.importCount} {displayProject.importCount === 1 ? "import" : "imports"}
           </span>
         </div>
 
