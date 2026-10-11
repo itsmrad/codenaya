@@ -12,6 +12,7 @@ import {
   useCreateFolder,
   useFolderContents
 } from "../../hooks/use-files"
+import { useEditor } from "@/features/editor/hooks/use-editor";
 import { CreateInput } from "./create-input"
 import { LoadingRow } from "./loading-row"
 import { Tree } from "./tree"
@@ -27,6 +28,7 @@ export const FileExplorer = ({
     null
   );
 
+  const { openFile } = useEditor();
   const project = useProject(projectId);
   const rootFiles = useFolderContents({
     projectId,
@@ -35,18 +37,22 @@ export const FileExplorer = ({
 
   const createFile = useCreateFile();
   const createFolder = useCreateFolder();
-  const handleCreate = (name: string) => {
+  const handleCreate = async (name: string) => {
+    const createType = creating;
     setCreating(null);
 
-    if (creating === "file") {
-      createFile({
+    if (createType === "file") {
+      const fileId = await createFile({
         projectId,
         name,
         content: "",
         parentId: undefined,
       });
-    } else {
-      createFolder({
+      if (fileId) {
+        openFile(fileId, { pinned: false });
+      }
+    } else if (createType === "folder") {
+      await createFolder({
         projectId,
         name,
         parentId: undefined,

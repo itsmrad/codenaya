@@ -11,6 +11,7 @@ import {
   useFolderContents,
   useRenameFile,
   useDeleteFile,
+  isOptimisticFileId,
 } from "@/features/projects/hooks/use-files";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 
@@ -63,18 +64,22 @@ export const Tree = ({
     renameFile({ id: item._id, newName });
   };
 
-  const handleCreate = (name: string) => {
+  const handleCreate = async (name: string) => {
+    const createType = creating;
     setCreating(null);
 
-    if (creating === "file") {
-      createFile({
+    if (createType === "file") {
+      const fileId = await createFile({
         projectId,
         name,
         content: "",
         parentId: item._id,
       });
-    } else {
-      createFolder({
+      if (fileId) {
+        openFile(fileId, { pinned: false });
+      }
+    } else if (createType === "folder") {
+      await createFolder({
         projectId,
         name,
         parentId: item._id,
@@ -108,8 +113,16 @@ export const Tree = ({
         item={item}
         level={level}
         isActive={isActive}
-        onClick={() => openFile(item._id, { pinned: false })}
-        onDoubleClick={() => openFile(item._id, { pinned: true })}
+        onClick={() => {
+          if (!isOptimisticFileId(item._id)) {
+            openFile(item._id, { pinned: false });
+          }
+        }}
+        onDoubleClick={() => {
+          if (!isOptimisticFileId(item._id)) {
+            openFile(item._id, { pinned: true });
+          }
+        }}
         onRename={() => setIsRenaming(true)}
         onDelete={() => {
           closeTab(item._id);
