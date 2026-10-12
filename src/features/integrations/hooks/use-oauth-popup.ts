@@ -214,6 +214,13 @@ export const useOAuthPopup = (): UseOAuthPopupResult => {
     (next: SettledState, message: string | null) => {
       if (settledRef.current) return;
       settledRef.current = true;
+      if (next === "error" || next === "cancelled") {
+        try {
+          if (popupRef.current && !popupRef.current.closed) {
+            popupRef.current.close();
+          }
+        } catch {}
+      }
       teardown();
       if (!mountedRef.current) return;
       setState(next);

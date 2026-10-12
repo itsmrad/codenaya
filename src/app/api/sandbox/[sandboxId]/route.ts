@@ -1,4 +1,6 @@
+import { z } from "zod";
 import { requireUserId } from "@/features/auth/server/require-user-id";
+import { parseJsonBody } from "@/lib/parse-json-body";
 import {
   forgetSandbox,
   getOwnedSandbox,
@@ -7,6 +9,17 @@ import {
 interface RouteParams {
   params: Promise<{ sandboxId: string }>;
 }
+
+const sandboxPatchSchema = z.object({
+  files: z
+    .array(
+      z.object({
+        path: z.string().min(1),
+        content: z.string(),
+      }),
+    )
+    .min(1, "No files provided"),
+});
 
 /**
  * DELETE /api/sandbox/[sandboxId]
@@ -77,14 +90,12 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
   const { sandboxId } = await params;
 
-  const body = await request.json();
-  const { files } = body as {
-    files: { path: string; content: string }[];
-  };
-
-  if (!files || files.length === 0) {
-    return Response.json({ error: "No files provided" }, { status: 400 });
+  const parsed = await parseJsonBody(request, sandboxPatchSchema);
+  if (!parsed.ok) {
+    return parsed.response;
   }
+
+  const { files } = parsed.data;
 
   const WORK_DIR = "/home/user/app";
 

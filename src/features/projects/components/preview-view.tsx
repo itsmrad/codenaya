@@ -58,15 +58,22 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const engineParam = searchParams.get("engine") as PreviewEngine | null;
   const activeEngine = engineParam === "webcontainer" ? "webcontainer" : "sandbox";
 
-  // A run that starts before package.json exists is writing the first build.
+  // A run that starts before package.json (or index.html) exists is writing the first build.
   // Booting against it would install a half-written project, so hold the boot
   // until that run ends; the engine's own gate then starts it.
   const activeRun = useActiveRun(projectId);
   const hasPackageJson = files?.some(
     (file) => file.type === "file" && !file.parentId && file.name === "package.json",
   );
+  const hasIndexHtml = files?.some(
+    (file) =>
+      file.type === "file" &&
+      !file.parentId &&
+      (file.name === "index.html" || file.name === "index.htm"),
+  );
+  const hasEntrypoint = hasPackageJson || hasIndexHtml;
   const [firstBuild, setFirstBuild] = useState(false);
-  if (!firstBuild && activeRun && files && !hasPackageJson) setFirstBuild(true);
+  if (!firstBuild && activeRun && files && !hasEntrypoint) setFirstBuild(true);
   if (firstBuild && activeRun === null) setFirstBuild(false);
   const holdBoot = activeRun === undefined || firstBuild;
 

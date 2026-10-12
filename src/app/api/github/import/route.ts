@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/features/auth/server/require-user-id";
+import { parseJsonBody } from "@/lib/parse-json-body";
 
 import { convex } from "@/lib/convex-client";
 import { inngest } from "@/inngest/client";
@@ -12,13 +13,13 @@ import {
 import { api } from "../../../../../convex/_generated/api";
 
 const requestSchema = z.object({
-  url: z.url(),
+  url: z.string().url(),
 });
 
-function parseGitHubUrl(url: string) {
+function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
   const match = url.match(/github\.com\/([^/]+)\/([^/]+)/);
   if (!match) {
-    throw new Error("Invalid GitHub URL");
+    return null;
   }
 
   return { owner: match[1], repo: match[2].replace(/\.git$/, "") };
@@ -31,10 +32,20 @@ export async function POST(request: Request) {
     return unauthorized;
   }
 
-  const body = await request.json();
-  const { url } = requestSchema.parse(body);
+  const { success, data, errorResponse } = await parseJsonBody(request, requestSchema);
+  if (!success) {
+    return errorResponse;
+  }
 
-  const { owner, repo } = parseGitHubUrl(url);
+  const parsedGitHub = parseGitHubUrl(data.url);
+  if (!parsedGitHub) {
+    return NextResponse.json(
+      { error: "Invalid GitHub repository URL" },
+      { status: 400 }
+    );
+  }
+
+  const { owner, repo } = parsedGitHub;
   // https://github.com/itsmrad/codenaya
   // { owner: "itsmrad", repo: "codenaya" }
 

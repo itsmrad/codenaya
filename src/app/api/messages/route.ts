@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/features/auth/server/require-user-id";
+import { parseJsonBody } from "@/lib/parse-json-body";
 
 import { convex } from "@/lib/convex-client";
 import { detectCredential } from "@/features/integrations/credential-guard";
@@ -46,8 +47,12 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = await request.json();
-  const { conversationId, message, model, images, mode } = requestSchema.parse(body);
+  const { success, data, errorResponse } = await parseJsonBody(request, requestSchema);
+  if (!success) {
+    return errorResponse;
+  }
+
+  const { conversationId, message, model, images, mode } = data;
 
   if (detectCredential(message).detected) {
     return NextResponse.json(

@@ -6,8 +6,13 @@ import {
   getFilePath
 } from "@/features/webcontainer-preview/utils/file-tree";
 import { serialiseDotenv } from "@/features/integrations/dotenv";
+import {
+  hasIndexHtml,
+  hasPackageJson,
+  STATIC_SERVER_SCRIPT,
+} from "@/features/sandbox-preview/utils/static-server";
 
-import { Id, Doc } from "../../../../convex/_generated/dataModel";
+import { Doc } from "../../../../convex/_generated/dataModel";
 
 // Singleton WebContainer instance
 let webcontainerInstance: WebContainer | null = null;
@@ -127,42 +132,72 @@ export const useWebContainer = ({
           setStatus("running");
         });
 
-        setStatus("installing");
+        const filesMap = new Map(files.map((f) => [f._id, f]));
+        const filePaths = files.map((f) => getFilePath(f, filesMap));
+        const hasPkg = hasPackageJson(filePaths);
+        const hasHtml = hasIndexHtml(filePaths);
 
-        // Parse install command (default: npm install)
-        const installCmd = settings?.installCommand || "npm install";
-        const [installBin, ...installArgs] = installCmd.split(" ");
-        appendOutput(`$ ${installCmd}\n`)
-        const installProcess = await container.spawn(installBin, installArgs);
-        installProcessRef.current = installProcess;
-        installProcess.output.pipeTo(
-          new WritableStream({
-            write(data) {
-              appendOutput(data);
-            },
-          })
-        );
-        const installExitCode = await installProcess.exit;
-
-        if (installExitCode !== 0) {
+        if (!hasPkg && !hasHtml) {
           throw new Error(
-            `${installCmd} failed with code ${installExitCode}`
+            "Add a package.json with a dev script, or an index.html, to preview this project",
           );
         }
 
-        // Parse dev command (default: npm run dev)
-        const devCmd = settings?.devCommand || "npm run dev";
-        const [devBin, ...devArgs] = devCmd.split(" ");
-        appendOutput(`\n$ ${devCmd}\n`);
-        const devProcess = await container.spawn(devBin, devArgs);
-        devProcessRef.current = devProcess;
-        devProcess.output.pipeTo(
-          new WritableStream({
-            write(data) {
-              appendOutput(data);
-            },
-          })
-        );
+        const isStaticSite = !hasPkg && hasHtml;
+
+        if (!isStaticSite) {
+          setStatus("installing");
+
+          // Parse install command (default: npm install)
+          const installCmd = settings?.installCommand || "npm install";
+          const [installBin, ...installArgs] = installCmd.split(" ");
+          appendOutput(`$ ${installCmd}\n`);
+          const installProcess = await container.spawn(installBin, installArgs);
+          installProcessRef.current = installProcess;
+          installProcess.output.pipeTo(
+            new WritableStream({
+              write(data) {
+                appendOutput(data);
+              },
+            })
+          );
+          const installExitCode = await installProcess.exit;
+
+          if (installExitCode !== 0) {
+            const exitCode = (installExitCode | 0);
+            throw new Error(
+              `${installCmd} failed with code ${exitCode}`
+            );
+          }
+
+          // Parse dev command (default: npm run dev)
+          const devCmd = settings?.devCommand || "npm run dev";
+          const [devBin, ...devArgs] = devCmd.split(" ");
+          appendOutput(`\n$ ${devCmd}\n`);
+          const devProcess = await container.spawn(devBin, devArgs);
+          devProcessRef.current = devProcess;
+          devProcess.output.pipeTo(
+            new WritableStream({
+              write(data) {
+                appendOutput(data);
+              },
+            })
+          );
+        } else {
+          appendOutput(
+            "No package.json detected. Serving index.html as a static site...\n\n$ node _serve_static.cjs\n",
+          );
+          await container.fs.writeFile("_serve_static.cjs", STATIC_SERVER_SCRIPT);
+          const devProcess = await container.spawn("node", ["_serve_static.cjs"]);
+          devProcessRef.current = devProcess;
+          devProcess.output.pipeTo(
+            new WritableStream({
+              write(data) {
+                appendOutput(data);
+              },
+            })
+          );
+        }
       } catch (error) {
         setError(error instanceof Error ? error.message : "Unknown error");
         setStatus("error");

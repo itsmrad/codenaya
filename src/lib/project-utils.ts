@@ -1,8 +1,4 @@
-import {
-  adjectives,
-  animals,
-  uniqueNamesGenerator,
-} from "unique-names-generator";
+import { generateProjectName } from "./project-names";
 
 /**
  * Derives a human-friendly project title from a user's initial prompt.
@@ -15,11 +11,7 @@ import {
 export function generateProjectNameFromPrompt(prompt: string): string {
   const trimmed = prompt.trim();
   if (!trimmed) {
-    return uniqueNamesGenerator({
-      dictionaries: [adjectives, animals],
-      separator: "-",
-      length: 2,
-    });
+    return generateProjectName();
   }
 
   // Remove common prompt prefixes
@@ -48,11 +40,7 @@ export function generateProjectNameFromPrompt(prompt: string): string {
 
   const words = cleaned.split(" ").filter(Boolean);
   if (words.length === 0) {
-    return uniqueNamesGenerator({
-      dictionaries: [adjectives, animals],
-      separator: "-",
-      length: 2,
-    });
+    return generateProjectName();
   }
 
   // Take between 1 and 4 words

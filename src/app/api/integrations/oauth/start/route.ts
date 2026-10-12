@@ -167,7 +167,8 @@ export async function POST(request: Request) {
 
   const redirect = resolveRedirectUri();
   if (!redirect.ok) {
-    return jsonError(redirect.reason, 500);
+    console.error("[oauth/start] Redirect URI configuration error:", redirect.reason);
+    return jsonError("OAuth isn't set up for this server yet", 500);
   }
   const redirectUri = redirect.redirectUri;
 

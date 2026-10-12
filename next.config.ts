@@ -5,9 +5,37 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Enable Next.js 16 Partial Prerendering and Cache Components
   cacheComponents: true,
-  allowedDevOrigins: ['10.5.0.2', '192.168.1.34'],
+  poweredByHeader: false,
+  ...(process.env.ALLOWED_DEV_ORIGINS && {
+    allowedDevOrigins: process.env.ALLOWED_DEV_ORIGINS.split(",").map((s) => s.trim()),
+  }),
   async headers() {
     return [
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "X-Frame-Options",
+            value: "DENY",
+          },
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors 'none'",
+          },
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
+          },
+          {
+            key: "Referrer-Policy",
+            value: "strict-origin-when-cross-origin",
+          },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=()",
+          },
+        ],
+      },
       {
         // Apply only when explicitly requesting webcontainer via query param
         source: "/projects/:path*",
@@ -33,13 +61,15 @@ const nextConfig: NextConfig = {
   },
 };
 
+export { nextConfig };
+
 export default withSentryConfig(withWorkflow(nextConfig), {
   // For all available options, see:
   // https://www.npmjs.com/package/@sentry/webpack-plugin#options
 
-  org: "john-doe-fb",
+  org: process.env.SENTRY_ORG || undefined,
 
-  project: "codenaya",
+  project: process.env.SENTRY_PROJECT || "codenaya",
 
   // Only print logs for uploading source maps in CI
   silent: !process.env.CI,

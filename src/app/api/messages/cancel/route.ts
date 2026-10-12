@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/features/auth/server/require-user-id";
+import { parseJsonBody } from "@/lib/parse-json-body";
 
 import { convex } from "@/lib/convex-client";
 import { cancelProcessingMessage } from "@/lib/message-processor";
@@ -19,8 +20,12 @@ export async function POST(request: Request) {
     return unauthorized;
   }
   
-  const body = await request.json();
-  const { projectId } = requestSchema.parse(body);
+  const { success, data, errorResponse } = await parseJsonBody(request, requestSchema);
+  if (!success) {
+    return errorResponse;
+  }
+
+  const { projectId } = data;
 
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
 

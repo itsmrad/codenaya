@@ -1,5 +1,7 @@
 import { AuthenticationError, RateLimitError, Sandbox } from "e2b";
+import { z } from "zod";
 import { requireUserId } from "@/features/auth/server/require-user-id";
+import { parseJsonBody } from "@/lib/parse-json-body";
 
 import {
   serialiseDotenv,
@@ -20,6 +22,11 @@ import {
   undeclaredPackages,
 } from "@/features/sandbox-preview/utils/missing-references";
 import { nodeIncompatibility } from "@/features/sandbox-preview/utils/node-compat";
+import {
+  hasIndexHtml,
+  hasPackageJson,
+  STATIC_SERVER_SCRIPT,
+} from "@/features/sandbox-preview/utils/static-server";
 import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 import { convex } from "@/lib/convex-client";
 
@@ -96,20 +103,31 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = await request.json();
-  const {
-    files,
-    settings,
-    projectId,
-  } = body as {
-    files: { path: string; content: string }[];
-    settings?: { installCommand?: string; devCommand?: string };
-    projectId?: Id<"projects">;
-  };
+  const sandboxCreateSchema = z.object({
+    files: z
+      .array(
+        z.object({
+          path: z.string().min(1),
+          content: z.string(),
+        }),
+      )
+      .min(1, "No files provided"),
+    settings: z
+      .object({
+        installCommand: z.string().optional(),
+        devCommand: z.string().optional(),
+      })
+      .optional(),
+    projectId: z.string().optional(),
+  });
 
-  if (!files || files.length === 0) {
-    return Response.json({ error: "No files provided" }, { status: 400 });
+  const parsed = await parseJsonBody(request, sandboxCreateSchema);
+  if (!parsed.ok) {
+    return parsed.response;
   }
+
+  const { files, settings } = parsed.data;
+  const projectId = parsed.data.projectId as Id<"projects"> | undefined;
 
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
 
@@ -219,6 +237,16 @@ export async function POST(request: Request) {
       let sandbox: Sandbox | null = null;
 
       try {
+        const filePaths = files.map((f) => f.path);
+        const hasPkg = hasPackageJson(filePaths);
+        const hasHtml = hasIndexHtml(filePaths);
+
+        if (!hasPkg && !hasHtml) {
+          throw new Error(
+            "Add a package.json with a dev script, or an index.html, to preview this project",
+          );
+        }
+
         // Name the missing file now rather than leave Vite's overlay to (#190).
         const missing = missingReferencedFiles(files);
         if (missing.length > 0) {
@@ -325,32 +353,47 @@ export async function POST(request: Request) {
           send({ type: "output", data: `Warning: ${warning}\n` });
         }
 
-        // --- Install dependencies ---
-        const installCmd = settings?.installCommand || "npm install";
-        send({ type: "status", status: "installing" });
-        send({ type: "output", data: `$ ${installCmd}\n` });
+        const isStaticSite = !hasPkg && hasHtml;
 
-        const installResult = await sandbox.commands.run(installCmd, {
-          cwd: WORK_DIR,
-          timeoutMs: 5 * 60 * 1000,
-          // Install may run postinstall scripts or a build that needs config.
-          envs: toProcessEnv(envEntries),
-          onStdout: (data) => send({ type: "output", data }),
-          onStderr: (data) => send({ type: "output", data }),
-        });
+        if (!isStaticSite) {
+          // --- Install dependencies ---
+          const installCmd = settings?.installCommand || "npm install";
+          send({ type: "status", status: "installing" });
+          send({ type: "output", data: `$ ${installCmd}\n` });
 
-        if (installResult.exitCode !== 0) {
-          throw new Error(
-            `${installCmd} failed with exit code ${installResult.exitCode}\n` +
-              installResult.stderr
+          const installResult = await sandbox.commands.run(installCmd, {
+            cwd: WORK_DIR,
+            timeoutMs: 5 * 60 * 1000,
+            // Install may run postinstall scripts or a build that needs config.
+            envs: toProcessEnv(envEntries),
+            onStdout: (data) => send({ type: "output", data }),
+            onStderr: (data) => send({ type: "output", data }),
+          });
+
+          if (installResult.exitCode !== 0) {
+            throw new Error(
+              `${installCmd} failed with exit code ${installResult.exitCode}\n` +
+                installResult.stderr
+            );
+          }
+
+          send({ type: "output", data: "\nDependencies installed.\n\n" });
+        } else {
+          send({
+            type: "output",
+            data: "No package.json detected. Serving index.html as a static site...\n\n",
+          });
+          await sandbox.files.write(
+            `${WORK_DIR}/_serve_static.js`,
+            STATIC_SERVER_SCRIPT,
           );
         }
 
-        send({ type: "output", data: "\nDependencies installed.\n\n" });
-
-        // --- Start dev server directly without hacking configs ---
-        const devCmd = settings?.devCommand || "npm run dev";
-        const devCmdWithHost = appendHostFlag(devCmd);
+        // --- Start dev server ---
+        const devCmd = isStaticSite
+          ? "node _serve_static.js"
+          : settings?.devCommand || "npm run dev";
+        const devCmdWithHost = isStaticSite ? devCmd : appendHostFlag(devCmd);
         
         send({ type: "output", data: `$ ${devCmdWithHost}\n` });
 
