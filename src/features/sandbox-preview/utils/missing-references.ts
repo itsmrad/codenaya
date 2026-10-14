@@ -138,3 +138,52 @@ export const undeclaredPackages = (files: ProjectFile[]): string[] => {
 
   return [...undeclared].map(([name, path]) => `${name} (imported by ${path})`);
 };
+
+const RESOLVE_SUFFIXES = [
+  "",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".json",
+  "/index.ts",
+  "/index.tsx",
+  "/index.js",
+  "/index.jsx",
+];
+
+/** Project paths a local specifier may name: relative, or `@/` for `src/` (or the root). */
+const localCandidates = (from: string, specifier: string): string[] | null => {
+  const bare = specifier.split(/[?#]/)[0];
+  if (isLocal(bare)) return [posix.normalize(posix.join(posix.dirname(from), bare))];
+  if (bare.startsWith("@/")) return [`src/${bare.slice(2)}`, bare.slice(2)];
+  return null;
+};
+
+/**
+ * Describes each relative or `@/` import that resolves to no project file,
+ * e.g. `./components/Header (imported by src/App.tsx)`. `paths` may include
+ * files whose content isn't in `files`, such as uploaded images.
+ */
+export const unresolvedImports = (
+  files: ProjectFile[],
+  paths: Set<string> = new Set(files.map((file) => file.path)),
+): string[] => {
+  const unresolved: string[] = [];
+
+  for (const file of files) {
+    if (!SOURCE_FILE.test(file.path) || file.path.endsWith(".d.ts")) continue;
+    for (const [, specifier] of stripComments(file.content).matchAll(IMPORT_SPECIFIER)) {
+      const candidates = localCandidates(file.path, specifier);
+      if (!candidates) continue;
+      const found = candidates.some((candidate) =>
+        RESOLVE_SUFFIXES.some((suffix) => paths.has(candidate + suffix)),
+      );
+      if (!found) unresolved.push(`${specifier} (imported by ${file.path})`);
+    }
+  }
+
+  return [...new Set(unresolved)];
+};

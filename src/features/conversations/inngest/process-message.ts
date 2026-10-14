@@ -21,6 +21,8 @@ import { createScrapeUrlsTool } from './tools/scrape-urls';
 import { createSetEnvVarTool } from './tools/set-env-var';
 import { createLoadSkillTool } from './tools/load-skill';
 import { createScaffoldViteAppTool } from './tools/scaffold-vite-app';
+import { createCheckBuildTool } from './tools/check-build';
+import { createBuildCheckGate } from './build-check-gate';
 import type { AgentModelChoice } from '../agent-models';
 import {
   type RunModel,
@@ -31,6 +33,7 @@ import {
 } from '@/features/ai-providers/server/resolve-run-model';
 import {
   type AgentStep,
+  buildCheckLabel,
   buildPathIndex,
   clampStepText,
   describeToolCall,
@@ -582,6 +585,7 @@ export const processMessage = inngest.createFunction(
       createScaffoldViteAppTool({ projectId, internalKey }),
       createRenameFileTool({ projectId, internalKey }),
       createDeleteFilesTool({ projectId, internalKey }),
+      createCheckBuildTool({ projectId, internalKey }),
       createScrapeUrlsTool(),
       ...(mcpOwnerId
         ? [createSetEnvVarTool({ projectId, ownerId: mcpOwnerId, internalKey })]
@@ -589,6 +593,9 @@ export const processMessage = inngest.createFunction(
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
     ];
+
+    // Plan-mode runs write nothing, so the gate never fires for them.
+    const buildCheckGate = createBuildCheckGate();
 
     // Create the coding agent with file tools
     const codingAgent = createAgent({
@@ -603,11 +610,17 @@ export const processMessage = inngest.createFunction(
         ? tools.filter((tool) => PLAN_MODE_TOOLS.has(tool.name))
         : tools,
       lifecycle: {
-        onStart: ({ prompt, history }) => ({
-          prompt: withImageParts(prompt, imageUrls),
-          history: history ?? [],
-          stop: false,
-        }),
+        onStart: ({ prompt, history }) => {
+          const nudge = buildCheckGate.takeNudge();
+          return {
+            prompt: withImageParts(prompt, imageUrls),
+            history: [
+              ...(history ?? []),
+              ...(nudge ? [{ type: "text" as const, role: "user" as const, content: nudge }] : []),
+            ],
+            stop: false,
+          };
+        },
         onResponse: async ({ result }) => {
           const calls = result.output.flatMap((m) =>
             m.type === "tool_call" ? m.tools : [],
@@ -678,12 +691,14 @@ export const processMessage = inngest.createFunction(
             const endedAt = Date.now();
             return result.toolCalls.map(({ tool, content }) => {
               const error = toolResultError(content, pathOf);
+              const label = !error && tool.name === "checkBuild" ? buildCheckLabel(content) : undefined;
               return {
                 id: tool.id,
                 kind: "tool" as const,
                 tool: tool.name,
                 status: error ? ("error" as const) : ("done" as const),
                 ...(error ? { error } : {}),
+                ...(label ? { text: label } : {}),
                 startedAt: endedAt,
                 endedAt,
               };
@@ -708,9 +723,12 @@ export const processMessage = inngest.createFunction(
           (m) => m.type === "tool_call"
         );
 
-        // Stop routing to this agent if there's a final text response without tool calls
+        // Stop routing to this agent if there's a final text response without
+        // tool calls, unless files changed since the last passing build check.
         if (hasTextResponse && !hasToolCalls) {
-          return undefined;
+          return buildCheckGate.shouldContinue(network.state.results)
+            ? codingAgent
+            : undefined;
         }
         return codingAgent;
       }

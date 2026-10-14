@@ -17,6 +17,7 @@ import {
   FolderPlusIcon,
   FolderTreeIcon,
   GlobeIcon,
+  HammerIcon,
   KeyRoundIcon,
   PlugIcon,
   WrenchIcon,
@@ -56,6 +57,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   scrapeUrls: { icon: GlobeIcon, running: "Fetching", done: "Fetched" },
   setEnvVar: { icon: KeyRoundIcon, running: "Setting env", done: "Set env" },
   loadSkill: { icon: BookOpenIcon, running: "Loading skill", done: "Used skill" },
+  checkBuild: { icon: HammerIcon, running: "Checking build", done: "Build verified" },
 };
 
 const toolMeta = (tool = ""): ToolMeta => {
@@ -113,7 +115,8 @@ const toRows = (steps: AgentStep[]): Row[] => {
 
 const rowLabel = (row: Row, live: boolean) => {
   const meta = toolMeta(row.step.tool);
-  const verb = live ? meta.running : meta.done;
+  // A passing check records what it verified ("Static checks passed").
+  const verb = live ? meta.running : (row.step.tool === "checkBuild" && row.step.text) || meta.done;
   // "Read 4 files" reads better than four chips with no count.
   if (row.step.tool === "readFiles" && row.targets.length > 1) {
     return `${verb} ${row.targets.length} files`;
@@ -154,7 +157,7 @@ const FileChip = ({ path, onOpen, label = false }: FileChipProps) => {
 const CHIP_LIMIT = 6;
 
 /** Tools whose targets are not project files: their chips never open. */
-const NON_FILE_TOOLS = new Set(["scrapeUrls", "setEnvVar", "loadSkill"]);
+const NON_FILE_TOOLS = new Set(["scrapeUrls", "setEnvVar", "loadSkill", "checkBuild"]);
 
 const isFileTool = (tool = "") => !NON_FILE_TOOLS.has(tool) && !tool.includes("__");
 

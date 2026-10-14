@@ -140,6 +140,15 @@ export const toolResultError = (
   return message ? sanitizeAgentText(message, pathOf).slice(0, MAX_ERROR) : undefined;
 };
 
+/**
+ * The first line of a passing checkBuild result ("Build verified", "Static
+ * checks passed"), which the run block shows as the row's label.
+ */
+export const buildCheckLabel = (content: unknown): string | undefined => {
+  const data = (content as { data?: unknown } | null)?.data;
+  return typeof data === "string" ? data.trim().split("\n")[0].slice(0, MAX_ERROR) || undefined : undefined;
+};
+
 /** Cap for interim "thinking" text recorded alongside tool calls. */
 export const clampStepText = (text: string) => text.trim().slice(0, MAX_TEXT);
 
