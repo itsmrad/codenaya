@@ -70,7 +70,16 @@ export const seedOverflowConversation = async (page: Page, projectId: string) =>
   const now = Date.now();
 
   await create("user", LONG_SINGLE_LINE_MESSAGE);
-  const done = await create("assistant", "", "processing");
+  // A model label makes the finished run's header long enough to truncate (#264).
+  const done = await system.mutation(api.system.createMessage, {
+    internalKey,
+    conversationId,
+    projectId: project,
+    role: "assistant",
+    content: "",
+    status: "processing",
+    runModel: { modelId: "gemini-2.5-pro", label: "Google · Gemini 2.5 Pro" },
+  });
   await system.mutation(api.system.upsertMessageSteps, {
     internalKey,
     messageId: done,
