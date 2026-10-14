@@ -21,6 +21,7 @@ import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webco
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
 import { PreviewBuilding } from "@/features/sandbox-preview/components/preview-building";
+import { PreviewBootSteps } from "@/features/sandbox-preview/components/preview-boot-steps";
 import {
   PreviewStatusBadge,
   PreviewTerminalStrip,
@@ -34,6 +35,7 @@ import {
 } from "@/features/sandbox-preview/components/preview-device-toggle";
 import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 import { hasRootPackageJson } from "@/features/sandbox-preview/utils/file-tree";
+import type { BootHistory, BootPhase } from "@/features/sandbox-preview/utils/boot-phase";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -114,6 +116,14 @@ export const PreviewView = ({
   const activeInstance = activeEngine === "sandbox" ? sandbox : webcontainer;
   const { status, previewUrl, error, restart, terminalOutput } = activeInstance;
   const errorKind = activeEngine === "sandbox" ? sandbox.errorKind : null;
+  // WebContainer has no phase events: booting covers creating it and writing
+  // the files, installing covers the install and starting the dev server.
+  const bootPhase: BootPhase | null =
+    activeEngine === "sandbox"
+      ? sandbox.phase
+      : webcontainer.status === "installing"
+        ? "install"
+        : "create";
   const reduceMotion = useReducedMotion();
 
   // A failed start opens the terminal even when the user keeps it closed, but
@@ -157,7 +167,10 @@ export const PreviewView = ({
     <PreviewContent
       error={error}
       isLoading={isLoading}
-      status={status}
+      bootPhase={bootPhase}
+      bootHistory={sandbox.bootHistory}
+      terminalOutput={terminalOutput}
+      onShowLogs={showTerminal ? undefined : toggleTerminal}
       activeEngine={activeEngine}
       previewUrl={previewUrl}
       refreshKey={refreshKey}
@@ -420,7 +433,9 @@ const ERROR_TITLES: Record<SandboxErrorKind, string> = {
 const PreviewContent = ({
   error,
   isLoading,
-  status,
+  bootPhase,
+  bootHistory,
+  terminalOutput,
   activeEngine,
   previewUrl,
   refreshKey,
@@ -429,10 +444,13 @@ const PreviewContent = ({
   errorKind,
   onUseWebContainer,
   building,
+  onShowLogs,
 }: {
   error: string | null | undefined;
   isLoading: boolean;
-  status: string;
+  bootPhase: BootPhase | null;
+  bootHistory: BootHistory;
+  terminalOutput: string;
   activeEngine: PreviewEngine;
   previewUrl: string | null | undefined;
   refreshKey: number;
@@ -442,6 +460,8 @@ const PreviewContent = ({
   onUseWebContainer: () => void;
   /** The first-build placeholder, shown over the engine until the run ends. */
   building: ReactNode;
+  /** Reveals the terminal; omitted while it is already showing. */
+  onShowLogs?: () => void;
 }) => (
   <div className="size-full rounded-xl overflow-hidden relative isolate">
     <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
@@ -477,16 +497,14 @@ const PreviewContent = ({
     )}
 
     {isLoading && !error && (
-      <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
-        <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
-          <Loader2Icon className="size-6 animate-spin" />
-          <p className="text-sm font-medium">
-            {status === "booting"
-              ? `Starting ${activeEngine}...`
-              : "Installing dependencies..."}
-          </p>
-        </div>
-      </div>
+      <PreviewBootSteps
+        key={activeEngine}
+        phase={bootPhase}
+        history={activeEngine === "sandbox" ? bootHistory : undefined}
+        log={terminalOutput}
+        firstStepLabel={activeEngine === "webcontainer" ? "Start WebContainer" : undefined}
+        onShowLogs={onShowLogs}
+      />
     )}
 
     {previewUrl && (

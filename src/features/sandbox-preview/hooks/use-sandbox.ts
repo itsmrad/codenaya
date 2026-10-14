@@ -5,6 +5,12 @@ import {
   getChangedFiles,
 } from "@/features/sandbox-preview/utils/file-tree";
 import {
+  isBootPhase,
+  recordBootPhase,
+  type BootHistory,
+  type BootPhase,
+} from "@/features/sandbox-preview/utils/boot-phase";
+import {
   classifySandboxError,
   type SandboxErrorKind,
 } from "@/features/sandbox-preview/utils/sandbox-error";
@@ -51,6 +57,8 @@ export const useSandbox = ({
   const [errorKind, setErrorKind] = useState<SandboxErrorKind | null>(null);
   const [restartKey, setRestartKey] = useState(0);
   const [terminalOutput, setTerminalOutput] = useState("");
+  const [bootHistory, setBootHistory] = useState<BootHistory>({});
+  const [phase, setPhase] = useState<BootPhase | null>(null);
   const [prevEnabled, setPrevEnabled] = useState(enabled);
 
   // Reset preview state as soon as the preview is disabled
@@ -61,6 +69,8 @@ export const useSandbox = ({
       setPreviewUrl(null);
       setError(null);
       setErrorKind(null);
+      setPhase(null);
+      setBootHistory({});
     }
   }
 
@@ -105,6 +115,8 @@ export const useSandbox = ({
         setStatus("booting");
         setError(null);
         setTerminalOutput("");
+        setPhase(null);
+      setBootHistory({});
 
         const flatFiles = buildFlatFileList(files);
         syncedContentRef.current = new Map(
@@ -139,6 +151,7 @@ export const useSandbox = ({
 
         const decoder = new TextDecoder();
         let buffer = "";
+        let logLength = 0;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -161,7 +174,15 @@ export const useSandbox = ({
                   setStatus(event.status);
                   break;
                 case "output":
+                  logLength += event.data.length;
                   setTerminalOutput((prev) => prev + event.data);
+                  break;
+                case "phase":
+                  if (isBootPhase(event.phase)) {
+                    setPhase(event.phase);
+                    const logAt = logLength;
+                    setBootHistory((history) => recordBootPhase(history, event.phase, event.at, logAt));
+                  }
                   break;
                 case "ready":
                   sandboxIdRef.current = event.sandboxId;
@@ -318,6 +339,8 @@ export const useSandbox = ({
     setError(null);
     setErrorKind(null);
     setTerminalOutput("");
+    setPhase(null);
+      setBootHistory({});
     setRestartKey((k) => k + 1);
   }, [killSandbox]);
 
@@ -328,5 +351,7 @@ export const useSandbox = ({
     errorKind,
     restart,
     terminalOutput,
+    phase,
+    bootHistory,
   };
 };

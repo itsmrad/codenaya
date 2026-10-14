@@ -1,5 +1,8 @@
 "use client";
 
+import { formatDuration } from "@/lib/format-duration";
+import { useNow } from "@/hooks/use-now";
+
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import {
@@ -68,13 +71,6 @@ const toolMeta = (tool = ""): ToolMeta => {
 };
 
 const basename = (path: string) => path.split("/").pop() || path;
-
-const formatDuration = (ms: number) => {
-  const seconds = Math.max(1, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${seconds % 60}s`;
-};
 
 /** A row as rendered: one step, or several merged finished reads/lists. */
 interface Row {
@@ -310,16 +306,6 @@ export const liveStepLabel = (steps: AgentStep[]) => {
   return current
     ? `${rowLabel(current, true)}${current.targets[0] ? ` ${basename(current.targets[0])}` : ""}…`
     : "Thinking…";
-};
-
-export const useNow = (active: boolean) => {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [active]);
-  return now;
 };
 
 interface RunProgress {
