@@ -24,6 +24,14 @@ describe("hasUncheckedWrites", () => {
     expect(hasUncheckedWrites([turn(call("scaffoldViteApp")), turn(failedCheck())])).toBe(true);
   });
 
+  it("is false after a check that could not run, which the agent reports instead", () => {
+    const unfinished = call(
+      "checkBuild",
+      "Error: The build check could not finish (Command timed out). This is not an error in the project's code.",
+    );
+    expect(hasUncheckedWrites([turn(call("updateFile")), turn(unfinished)])).toBe(false);
+  });
+
   it("is false once the check and both fix attempts are spent", () => {
     expect(
       hasUncheckedWrites([

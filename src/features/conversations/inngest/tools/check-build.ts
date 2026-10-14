@@ -3,6 +3,7 @@ import { createTool } from "@inngest/agent-kit";
 import { CommandExitError, type CommandResult, type Sandbox } from "e2b";
 
 import {
+  BUILD_CHECK_UNFINISHED,
   BUILD_NOT_CHECKED,
   BUILD_VERIFIED,
   STATIC_CHECKS_PASSED,
@@ -72,6 +73,11 @@ const run = async (sandbox: Sandbox, command: string, timeoutMs: number): Promis
 /** Errors first: Vite writes progress to stdout and the failure to stderr. */
 const failureOutput = (result: CommandResult) =>
   trimBuildOutput(`${result.stderr}\n${result.stdout}`);
+
+/** A timeout or a sandbox failure, not a problem in the project's code. */
+const unfinished = (error: unknown) =>
+  `${BUILD_CHECK_UNFINISHED} (${error instanceof Error ? error.message : "Unknown error"}). ` +
+  "This is not an error in the project's code. Say in Notes that the build was not verified.";
 
 const notBuilt = (reason: string) =>
   `${STATIC_CHECKS_PASSED}\n${reason}, so the type check and build did not run. ` +
@@ -147,12 +153,7 @@ export const checkProjectBuild = async ({
 
     return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.`;
   } catch (error) {
-    // A timeout or a sandbox failure, not a problem in the project's code.
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return (
-      `Error: The build check could not finish (${message}). ` +
-      "This is not an error in the project's code. Say in Notes that the build was not verified."
-    );
+    return unfinished(error);
   } finally {
     await sandbox.kill().catch(() => {});
   }
@@ -193,7 +194,7 @@ export const createCheckBuildTool = ({
           });
         });
       } catch (error) {
-        return `Error checking build: ${error instanceof Error ? error.message : "Unknown error"}`;
+        return unfinished(error);
       }
     },
   });

@@ -621,7 +621,7 @@ export const processMessage = inngest.createFunction(
             stop: false,
           };
         },
-        onResponse: async ({ result }) => {
+        onResponse: async ({ result, network }) => {
           const calls = result.output.flatMap((m) =>
             m.type === "tool_call" ? m.tools : [],
           );
@@ -629,8 +629,10 @@ export const processMessage = inngest.createFunction(
           const reasoning = sanitizeAgentText(modelReasoning(result.raw));
           if (calls.length === 0) {
             if (reasoning) {
+              // A run routed back by the build-check gate has two final turns.
+              const turn = network?.state.results.length ?? 0;
               await recordSteps("record-final-thinking", () => [{
-                id: "thinking-final",
+                id: `thinking-final-${turn}`,
                 kind: "thinking" as const,
                 text: clampStepText(reasoning),
                 status: "done" as const,

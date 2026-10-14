@@ -154,12 +154,24 @@ const RESOLVE_SUFFIXES = [
   "/index.jsx",
 ];
 
-/** Project paths a local specifier may name: relative, or `@/` for `src/` (or the root). */
+/**
+ * Project paths a local specifier may name: relative, or `@/` for `src/` (or
+ * the root). A `.js` specifier may name its TypeScript source, as in Vite and
+ * TypeScript's bundler resolution. Null for anything else, including
+ * template-literal and glob imports, which name no single file.
+ */
 const localCandidates = (from: string, specifier: string): string[] | null => {
   const bare = specifier.split(/[?#]/)[0];
-  if (isLocal(bare)) return [posix.normalize(posix.join(posix.dirname(from), bare))];
-  if (bare.startsWith("@/")) return [`src/${bare.slice(2)}`, bare.slice(2)];
-  return null;
+  if (/\$\{|\*/.test(bare)) return null;
+  const targets = isLocal(bare)
+    ? [posix.normalize(posix.join(posix.dirname(from), bare))]
+    : bare.startsWith("@/")
+      ? [`src/${bare.slice(2)}`, bare.slice(2)]
+      : null;
+  return targets?.flatMap((target) => {
+    const ts = target.replace(/\.([cm]?)js(x?)$/, ".$1ts$2");
+    return ts === target ? [target] : [target, ts];
+  }) ?? null;
 };
 
 /**

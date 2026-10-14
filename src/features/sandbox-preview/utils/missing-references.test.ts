@@ -160,11 +160,14 @@ describe("unresolvedImports", () => {
           'import logo from "./logo.svg?url";',
           'const Page = lazy(() => import("./pages/Page"));',
           '// import { Gone } from "./gone";',
+          'import { helper } from "./lib/helper.js";',
+          "const messages = import(`./locales/${lang}.json`);",
         ].join("\n"),
       },
       { path: "src/index.css", content: "" },
       { path: "src/components/ui/index.ts", content: "" },
       { path: "src/pages/Page.tsx", content: "" },
+      { path: "src/lib/helper.ts", content: "" },
     ];
     // The logo is an uploaded image: a known path without text content.
     const paths = new Set([...files.map((file) => file.path), "src/logo.svg"]);

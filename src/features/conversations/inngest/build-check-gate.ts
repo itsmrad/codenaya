@@ -1,4 +1,4 @@
-import { toolResultError } from "../agent-steps";
+import { BUILD_CHECK_UNFINISHED, toolResultError } from "../agent-steps";
 
 /**
  * Keeps a run from ending with files changed since its last passing
@@ -17,12 +17,16 @@ const WRITE_TOOLS = new Set([
 /** One check plus the two fix attempts the prompt allows. */
 export const MAX_BUILD_CHECKS = 3;
 
+// The reply after this turn replaces the summary, so it asks for it again.
 export const BUILD_CHECK_NUDGE =
-  "Files changed since the last build check. Run checkBuild before finishing.";
+  "Files changed since the last build check. Run checkBuild, then give the complete final summary again.";
 
 type ToolCalls = { toolCalls: Array<{ tool: { name: string }; content: unknown }> };
 
-/** Whether files changed after the last passing checkBuild, with a check left to spend. */
+/**
+ * Whether files changed after the last checkBuild that passed or could not
+ * run, with a check left to spend.
+ */
 export const hasUncheckedWrites = (results: ToolCalls[]) => {
   let unchecked = false;
   let checks = 0;
@@ -31,7 +35,9 @@ export const hasUncheckedWrites = (results: ToolCalls[]) => {
       unchecked = true;
     } else if (tool.name === "checkBuild") {
       checks += 1;
-      if (toolResultError(content) === undefined) unchecked = false;
+      // A check that could not run is not retried: the agent reports it instead.
+      const error = toolResultError(content);
+      if (error === undefined || error.startsWith(BUILD_CHECK_UNFINISHED)) unchecked = false;
     }
   }
   return unchecked && checks < MAX_BUILD_CHECKS;

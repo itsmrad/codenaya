@@ -144,6 +144,8 @@ export const toolResultError = (
 export const BUILD_VERIFIED = "Build verified";
 export const STATIC_CHECKS_PASSED = "Static checks passed";
 export const BUILD_NOT_CHECKED = "Build not checked";
+/** Starts a checkBuild result that failed for reasons outside the project's code. */
+export const BUILD_CHECK_UNFINISHED = "Error: The build check could not finish";
 
 /**
  * The first line of a passing checkBuild result ("Build verified", "Static

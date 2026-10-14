@@ -107,7 +107,9 @@ describe("checkProjectBuild", () => {
     const sandbox = fakeSandbox({ exitCode: 0 }, { exitCode: 0 });
     const result = await check();
     expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
-    expect(sandbox.files.write).toHaveBeenCalledWith("/home/user/app/src/App.tsx", expect.any(String));
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      expect.arrayContaining([{ path: "/home/user/app/src/App.tsx", data: expect.any(String) }]),
+    );
     const commands = sandbox.commands.run.mock.calls.map((call) => (call as unknown[])[0]);
     expect(commands).toEqual([
       "npm install --no-audit --no-fund --loglevel=error",

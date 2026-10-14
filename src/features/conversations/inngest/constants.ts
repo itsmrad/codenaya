@@ -445,7 +445,7 @@ VERIFICATION:
 12. Verify every shadcn component imported in page files has its corresponding source file in src/components/ui/
 13. Verify every file a config points at exists: each tsconfig "references" and "extends" path, and the index.html entry script. The preview refuses to start otherwise
 14. Verify every package imported anywhere, config files included, is listed in package.json. The preview refuses to start otherwise
-15. If this run changed any files, call checkBuild once before the final summary. On errors, fix them and call it again, at most 2 more times. If it still fails, list the remaining errors under Notes instead of claiming the app works. If it reports that the build was not verified, say so under Notes
+15. If the checkBuild tool is available and this run changed any files, call checkBuild once before the final summary. On errors, fix them and call it again, at most 2 more times. If it still fails, list the remaining errors under Notes instead of claiming the app works. If it reports that the build was not verified, say so under Notes
 </workflow>
 
 <narration>
