@@ -23,6 +23,7 @@ import {
 } from "@/features/sandbox-preview/utils/missing-references";
 import { nodeIncompatibility } from "@/features/sandbox-preview/utils/node-compat";
 import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
+import type { BootPhase } from "@/features/sandbox-preview/utils/boot-phase";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
@@ -37,6 +38,7 @@ import type { Id } from "../../../../convex/_generated/dataModel";
  *
  * Response format (NDJSON – one JSON object per line):
  *   { "type": "status", "status": "installing" | "running" }
+ *   { "type": "phase",  "phase": BootPhase, "at": <epoch ms> }
  *   { "type": "output", "data": "..." }
  *   { "type": "ready",  "sandboxId": "...", "previewUrl": "..." }
  *   { "type": "error",  "message": "...", "code": SandboxErrorKind }
@@ -207,6 +209,10 @@ export async function POST(request: Request) {
         }
       };
 
+      /** Drives the preview's boot checklist (#254). */
+      const sendPhase = (phase: BootPhase) =>
+        send({ type: "phase", phase, at: Date.now() });
+
       /** Release anything the redactor is holding back. */
       const flushRedactor = () => {
         const tail = redactor.flush();
@@ -271,6 +277,7 @@ export async function POST(request: Request) {
 
         // --- Boot sandbox ---
         send({ type: "status", status: "booting" });
+        sendPhase("create");
         send({ type: "output", data: "Creating E2B sandbox...\n" });
 
         sandbox = await Sandbox.create(SANDBOX_TEMPLATE, {
@@ -318,6 +325,7 @@ export async function POST(request: Request) {
         }
 
         // --- Write project files ---
+        sendPhase("files");
         send({ type: "output", data: "Writing project files...\n" });
 
         await sandbox.files.makeDir(WORK_DIR);
@@ -361,6 +369,7 @@ export async function POST(request: Request) {
 
         // --- Install dependencies ---
         send({ type: "status", status: "installing" });
+        sendPhase("install");
         send({ type: "output", data: `$ ${installCmd}\n` });
 
         const installResult = await runInstall(sandbox);
@@ -377,6 +386,7 @@ export async function POST(request: Request) {
         // --- Start dev server directly without hacking configs ---
         const devCmd = settings?.devCommand || "npm run dev";
         const devCmdWithHost = appendHostFlag(devCmd);
+        sendPhase("start");
         
         send({ type: "output", data: `$ ${devCmdWithHost}\n` });
 
@@ -424,13 +434,14 @@ export async function POST(request: Request) {
         const host = sandbox.getHost(proxyPort);
         const previewUrl = `https://${host}`;
 
-        // Give E2B's external networking edge enough time to correctly map
-        // the newly opened 4000 port to the public domain before mounting iframe
+        // E2B's edge needs a moment to route the newly opened port 4000 to the
+        // public domain before the iframe can load it.
         send({ type: "output", data: "\nConfiguring external network routing...\n" });
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await waitForPublicUrl(previewUrl);
 
         send({ type: "output", data: `\nServer ready at ${previewUrl}\n` });
         send({ type: "status", status: "running" });
+        sendPhase("ready");
         send({
           type: "ready",
           sandboxId: sandbox.sandboxId,
@@ -553,6 +564,27 @@ async function waitForServerPort(
   // Last resort: return the detected port even if we couldn't verify
   // (the server might be slow to respond to curl but is actually running)
   return getDetectedPort();
+}
+
+/**
+ * Poll the public preview URL until E2B routes it (it answers 5xx before
+ * that), up to `maxWaitMs`. Replaces a fixed 3s wait.
+ */
+async function waitForPublicUrl(url: string, maxWaitMs = 3000): Promise<void> {
+  const deadline = Date.now() + maxWaitMs;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+      });
+      await response.body?.cancel();
+      if (response.status < 500) return;
+    } catch {
+      // Not reachable yet, or the attempt ran out of time.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
 }
 
 /**

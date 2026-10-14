@@ -5,6 +5,10 @@ import {
   getChangedFiles,
 } from "@/features/sandbox-preview/utils/file-tree";
 import {
+  isBootPhase,
+  type BootPhase,
+} from "@/features/sandbox-preview/utils/boot-phase";
+import {
   classifySandboxError,
   type SandboxErrorKind,
 } from "@/features/sandbox-preview/utils/sandbox-error";
@@ -51,6 +55,7 @@ export const useSandbox = ({
   const [errorKind, setErrorKind] = useState<SandboxErrorKind | null>(null);
   const [restartKey, setRestartKey] = useState(0);
   const [terminalOutput, setTerminalOutput] = useState("");
+  const [phase, setPhase] = useState<BootPhase | null>(null);
   const [prevEnabled, setPrevEnabled] = useState(enabled);
 
   // Reset preview state as soon as the preview is disabled
@@ -61,6 +66,7 @@ export const useSandbox = ({
       setPreviewUrl(null);
       setError(null);
       setErrorKind(null);
+      setPhase(null);
     }
   }
 
@@ -105,6 +111,7 @@ export const useSandbox = ({
         setStatus("booting");
         setError(null);
         setTerminalOutput("");
+        setPhase(null);
 
         const flatFiles = buildFlatFileList(files);
         syncedContentRef.current = new Map(
@@ -162,6 +169,9 @@ export const useSandbox = ({
                   break;
                 case "output":
                   setTerminalOutput((prev) => prev + event.data);
+                  break;
+                case "phase":
+                  if (isBootPhase(event.phase)) setPhase(event.phase);
                   break;
                 case "ready":
                   sandboxIdRef.current = event.sandboxId;
@@ -318,6 +328,7 @@ export const useSandbox = ({
     setError(null);
     setErrorKind(null);
     setTerminalOutput("");
+    setPhase(null);
     setRestartKey((k) => k + 1);
   }, [killSandbox]);
 
@@ -328,5 +339,6 @@ export const useSandbox = ({
     errorKind,
     restart,
     terminalOutput,
+    phase,
   };
 };
