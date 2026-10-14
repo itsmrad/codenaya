@@ -57,7 +57,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   scrapeUrls: { icon: GlobeIcon, running: "Fetching", done: "Fetched" },
   setEnvVar: { icon: KeyRoundIcon, running: "Setting env", done: "Set env" },
   loadSkill: { icon: BookOpenIcon, running: "Loading skill", done: "Used skill" },
-  checkBuild: { icon: HammerIcon, running: "Checking build", done: "Build verified" },
+  checkBuild: { icon: HammerIcon, running: "Checking build", done: "Checked build" },
 };
 
 const toolMeta = (tool = ""): ToolMeta => {
