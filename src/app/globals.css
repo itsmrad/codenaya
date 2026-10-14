@@ -357,3 +357,143 @@ html.lenis, html.lenis body {
     radial-gradient(at 90% 95%, oklch(0.38 0.12 var(--cover-h2)) 0, transparent 55%),
     oklch(0.2 0.03 var(--cover-h));
 }
+
+/* Preview boot stage (PreviewBootSteps): drifting aurora, a perspective grid
+   flowing toward the viewer and rising sparks behind the progress core. */
+.preview-boot {
+  --boot-violet: color-mix(in oklab, var(--brand) 30%, #a78bfa);
+  /* The sparks rise the stage's full height. */
+  container-type: size;
+}
+.preview-boot-aurora > span {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(64px);
+  opacity: 0.32;
+  animation: boot-drift 14s ease-in-out infinite alternate;
+}
+.dark .preview-boot-aurora > span {
+  opacity: 0.22;
+}
+.preview-boot-aurora > span:nth-child(1) {
+  width: 55%;
+  aspect-ratio: 1;
+  left: 8%;
+  top: 4%;
+  background: var(--brand);
+}
+.preview-boot-aurora > span:nth-child(2) {
+  width: 50%;
+  aspect-ratio: 1;
+  right: 4%;
+  top: 22%;
+  background: var(--boot-violet);
+  animation-duration: 18s;
+  animation-direction: alternate-reverse;
+}
+.preview-boot-aurora > span:nth-child(3) {
+  width: 38%;
+  aspect-ratio: 1;
+  left: 30%;
+  bottom: -6%;
+  background: color-mix(in oklab, var(--brand) 55%, #f472b6);
+  animation-duration: 22s;
+}
+@keyframes boot-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(12%, -8%, 0) scale(1.15);
+  }
+  100% {
+    transform: translate3d(-10%, 10%, 0) scale(0.92);
+  }
+}
+.preview-boot-grid {
+  position: absolute;
+  left: -50%;
+  right: -50%;
+  bottom: 0;
+  height: 60%;
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--foreground) 9%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--foreground) 9%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+  transform: perspective(420px) rotateX(62deg);
+  transform-origin: bottom;
+  mask-image: linear-gradient(to top, #000 10%, transparent 85%);
+  animation: boot-grid-flow 2.4s linear infinite;
+}
+@keyframes boot-grid-flow {
+  to {
+    background-position: 0 48px;
+  }
+}
+.preview-boot-sparks > span {
+  position: absolute;
+  bottom: -8px;
+  width: 3px;
+  height: 3px;
+  border-radius: 9999px;
+  background: var(--brand);
+  box-shadow: 0 0 8px 2px color-mix(in oklab, var(--brand) 60%, transparent);
+  opacity: 0;
+  animation: boot-rise 7s linear infinite;
+}
+.preview-boot-sparks > span:nth-child(even) {
+  background: var(--boot-violet);
+  box-shadow: 0 0 8px 2px color-mix(in oklab, var(--boot-violet) 60%, transparent);
+}
+@keyframes boot-rise {
+  10% {
+    opacity: 0.9;
+  }
+  80% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--spark-sway, 12px), -110cqh, 0);
+  }
+}
+@property --boot-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes boot-spin {
+  to {
+    --boot-angle: 360deg;
+  }
+}
+.preview-boot-halo {
+  background: conic-gradient(
+    from var(--boot-angle),
+    transparent 0%,
+    var(--brand) 20%,
+    var(--boot-violet) 40%,
+    transparent 60%,
+    transparent 100%
+  );
+  filter: blur(18px);
+  opacity: 0.55;
+  animation: boot-spin 3.5s linear infinite;
+}
+.preview-boot-orbit {
+  animation: boot-orbit 3s linear infinite;
+}
+@keyframes boot-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .preview-boot-aurora > span,
+  .preview-boot-grid,
+  .preview-boot-sparks > span,
+  .preview-boot-halo,
+  .preview-boot-orbit {
+    animation: none;
+  }
+}
