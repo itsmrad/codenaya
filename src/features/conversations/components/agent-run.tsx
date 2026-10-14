@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
-import { type AgentStep, STALLED_RUN_MS, lastRunActivity } from "../agent-steps";
+import { type AgentStep, BUILD_VERIFIED, STALLED_RUN_MS, lastRunActivity } from "../agent-steps";
 import { LoaderGrid } from "./run-loader";
 
 interface ToolMeta {
@@ -275,6 +275,7 @@ const StepRow = ({
   const { icon: Icon } = toolMeta(row.step.tool);
   const running = live && row.step.status === "running";
   const failed = row.step.status === "error";
+  const verified = row.step.tool === "checkBuild" && row.step.text === BUILD_VERIFIED;
   return (
     <div className={cn(entryClass)} style={entry}>
       {/* Icon column + label column: chips wrap under the label, clear of
@@ -297,6 +298,7 @@ const StepRow = ({
           />
         )}
         {failed && <CircleXIcon className="mt-[3px] size-3.5 shrink-0 text-destructive" />}
+        {verified && <CheckCircle2Icon className="mt-[3px] size-3.5 shrink-0 text-muted-foreground" />}
       </div>
       {failed && row.step.error && (
         <p className="truncate pb-1 pl-7 text-xs text-muted-foreground" title={row.step.error}>

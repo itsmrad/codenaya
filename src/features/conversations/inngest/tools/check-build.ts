@@ -2,7 +2,12 @@ import { z } from "zod";
 import { createTool } from "@inngest/agent-kit";
 import { CommandExitError, type CommandResult, type Sandbox } from "e2b";
 
-import { buildPathIndex } from "@/features/conversations/agent-steps";
+import {
+  BUILD_NOT_CHECKED,
+  BUILD_VERIFIED,
+  STATIC_CHECKS_PASSED,
+  buildPathIndex,
+} from "@/features/conversations/agent-steps";
 import {
   type ProjectFile,
   WORK_DIR,
@@ -29,11 +34,6 @@ const CHECK_TIMEOUT_MS = 120_000;
 /** E2B reaps the sandbox after this even if the kill below is lost. */
 const SANDBOX_TIMEOUT_MS = 5 * 60_000;
 const MAX_ERROR_LINES = 40;
-
-// First line of each passing result; the run block shows it as the row label.
-export const BUILD_VERIFIED = "Build verified";
-export const STATIC_CHECKS_PASSED = "Static checks passed";
-export const BUILD_NOT_CHECKED = "Build not checked";
 
 const ANSI_ESCAPE = /\u001b\[[\d;]*[A-Za-z]/g;
 

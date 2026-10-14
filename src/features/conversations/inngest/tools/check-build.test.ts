@@ -14,9 +14,8 @@ import {
   BUILD_NOT_CHECKED,
   BUILD_VERIFIED,
   STATIC_CHECKS_PASSED,
-  checkProjectBuild,
-  trimBuildOutput,
-} from "./check-build";
+} from "../../agent-steps";
+import { checkProjectBuild, trimBuildOutput } from "./check-build";
 
 const starter = () => VITE_REACT_STARTER.map((file) => ({ ...file }));
 const check = (files = starter(), apiKey: string | null = "e2b_key") =>

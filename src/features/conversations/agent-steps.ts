@@ -140,6 +140,11 @@ export const toolResultError = (
   return message ? sanitizeAgentText(message, pathOf).slice(0, MAX_ERROR) : undefined;
 };
 
+// First line of each passing checkBuild result; the run block shows it as the row label.
+export const BUILD_VERIFIED = "Build verified";
+export const STATIC_CHECKS_PASSED = "Static checks passed";
+export const BUILD_NOT_CHECKED = "Build not checked";
+
 /**
  * The first line of a passing checkBuild result ("Build verified", "Static
  * checks passed"), which the run block shows as the row's label.
