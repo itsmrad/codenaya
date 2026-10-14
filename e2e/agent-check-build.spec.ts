@@ -14,7 +14,7 @@ import { STUB_MODEL, type StubChatRequest, startStubProvider } from "./stub-prov
  * in `byok-agent-run.spec.ts`.
  */
 
-const STUB_REPLY = "**What was built:** a page.";
+const STUB_REPLY = "Built the page.";
 
 const calledCheckBuild = (request: StubChatRequest) =>
   JSON.stringify(request.messages).includes('"name":"checkBuild"');
