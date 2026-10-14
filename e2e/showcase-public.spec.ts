@@ -72,6 +72,34 @@ test.describe("public showcase (signed out)", () => {
 test.describe("showcase Remix (signed in)", () => {
   test.skip(!hasClerkCredentials(), "needs CLERK_SECRET_KEY and NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
 
+  test("an entry without a screenshot shows its cover art, with Remix in view", async ({ page }) => {
+    await signIn(page);
+    const user = await userConvexClient(page);
+    const projectId = await user.mutation(api.projects.create, { name: "e2e cover fallback" });
+    try {
+      const showcaseId = await user.mutation(api.showcase.publish, {
+        projectId,
+        title: "e2e cover fallback",
+        description: "e2e showcase detail without a screenshot",
+        techStack: [],
+        designStyle: [],
+        category: "tool",
+      });
+
+      await page.setViewportSize({ width: 375, height: 812 });
+      const errors = collectConsoleErrors(page);
+      await page.goto(`/showcase/${showcaseId}`);
+
+      await expect(page.getByRole("heading", { name: "e2e cover fallback" })).toBeVisible();
+      await expect(page.locator("article .project-cover")).toBeVisible();
+      await expect(page.getByText("No preview available")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Remix" })).toBeInViewport();
+      expect(errors).toEqual([]);
+    } finally {
+      await user.mutation(api.projects.remove, { id: projectId });
+    }
+  });
+
   test("a Remix started signed out finishes after sign-in", async ({ page }) => {
     const project = await findPublishedProject();
     test.skip(!project, "no published showcase projects to show");

@@ -24,7 +24,7 @@ test.describe("dashboard prompt composer", () => {
     });
     await expect(composer).toBeVisible();
 
-    await page.getByRole("button", { name: "Portfolio" }).click();
+    await page.getByRole("button", { name: "Portfolio", exact: true }).click();
 
     await expect(composer).toHaveValue(/Portfolio/);
     await expect(composer).toBeFocused();
@@ -71,7 +71,7 @@ test.describe("dashboard prompt composer", () => {
     test.skip(projects.length > 0, "the e2e user already has projects");
 
     await expect(page.getByRole("button", { name: "Import from GitHub" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Portfolio" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Portfolio", exact: true })).toBeVisible();
     await expect(page.getByText("No projects yet")).toHaveCount(0);
   });
 });

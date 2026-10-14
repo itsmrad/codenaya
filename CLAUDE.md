@@ -6,6 +6,8 @@ When working on Convex code, **always read `convex/_generated/ai/guidelines.md` 
 Convex agent skills for common tasks can be installed by running `npx convex ai-files install`.
 <!-- convex-ai-end -->
 
+Engineering standards and ADRs: follow [docs/ENGINEERING.md](docs/ENGINEERING.md) and [docs/adr/](docs/adr/).
+
 # CLAUDE.md
 
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.

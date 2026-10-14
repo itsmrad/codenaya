@@ -38,7 +38,7 @@ test.describe("landing hero prompt", () => {
   test("a starter chip fills the hero prompt without leaving the page", async ({ page }) => {
     await page.goto("/");
 
-    await page.getByRole("button", { name: "Portfolio" }).first().click();
+    await page.getByRole("button", { name: "Portfolio", exact: true }).first().click();
 
     await expect(
       page.getByRole("textbox", { name: "Describe what you want to build" }).first(),

@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { Allotment } from "allotment";
+import { motion, useReducedMotion } from "motion/react";
 import {
+  ChevronDownIcon,
   Loader2Icon,
   TerminalSquareIcon,
   AlertTriangleIcon,
@@ -20,6 +22,11 @@ import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/pr
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
 import { PreviewBuilding } from "@/features/sandbox-preview/components/preview-building";
 import {
+  PreviewStatusBadge,
+  PreviewTerminalStrip,
+  usePreviewTerminal,
+} from "@/features/sandbox-preview/components/preview-terminal-strip";
+import {
   PREVIEW_DEVICE_WIDTHS,
   PreviewDeviceToggle,
   usePreviewDevice,
@@ -29,6 +36,7 @@ import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-
 import { hasRootPackageJson } from "@/features/sandbox-preview/utils/file-tree";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 import { EnvVarsDialog } from "./env-vars-dialog";
 import { useProject } from "../hooks/use-projects";
@@ -45,6 +53,15 @@ import { Id } from "../../../../convex/_generated/dataModel";
 
 type PreviewEngine = "sandbox" | "webcontainer";
 
+const WAITING_FOR_BUILD = "Waiting for the first build...";
+
+/** What the collapsed terminal shows until the engine writes its first line. */
+const stripPlaceholder = (building: boolean, isLoading: boolean) => {
+  if (building) return WAITING_FOR_BUILD;
+  if (isLoading) return "Starting...";
+  return "No output yet";
+};
+
 export const PreviewView = ({
   projectId,
   firstBuild,
@@ -58,7 +75,7 @@ export const PreviewView = ({
   
   const project = useProject(projectId);
   const files = useFiles(projectId);
-  const [showTerminal, setShowTerminal] = useState(true);
+  const [terminalChoice, setTerminalChoice] = usePreviewTerminal();
   const [refreshKey, setRefreshKey] = useState(0);
   const [device, setDevice] = usePreviewDevice();
   
@@ -97,6 +114,19 @@ export const PreviewView = ({
   const activeInstance = activeEngine === "sandbox" ? sandbox : webcontainer;
   const { status, previewUrl, error, restart, terminalOutput } = activeInstance;
   const errorKind = activeEngine === "sandbox" ? sandbox.errorKind : null;
+  const reduceMotion = useReducedMotion();
+
+  // A failed start opens the terminal even when the user keeps it closed, but
+  // that isn't saved as their choice: closing it again only lasts for this error.
+  const [errorDismissed, setErrorDismissed] = useState(false);
+  if (errorDismissed && status !== "error") setErrorDismissed(false);
+  const showTerminal =
+    terminalChoice === "open" || (status === "error" && !errorDismissed);
+  const toggleTerminal = () => {
+    if (!showTerminal) return setTerminalChoice("open");
+    setTerminalChoice("closed");
+    if (status === "error") setErrorDismissed(true);
+  };
 
   // A boot that started mid-build can fail on files the agent hadn't written
   // yet; boot once more against the finished build.
@@ -123,6 +153,21 @@ export const PreviewView = ({
     firstBuild && activeRun && files ? (
       <PreviewBuilding steps={activeRun.steps} files={files} />
     ) : null;
+  const content = (
+    <PreviewContent
+      error={error}
+      isLoading={isLoading}
+      status={status}
+      activeEngine={activeEngine}
+      previewUrl={previewUrl}
+      refreshKey={refreshKey}
+      device={device}
+      restart={restart}
+      errorKind={errorKind}
+      onUseWebContainer={() => switchEngine("webcontainer")}
+      building={building}
+    />
+  );
 
   // Ticks the dashboard's "Open the preview" step.
   useEffect(() => {
@@ -244,7 +289,7 @@ export const PreviewView = ({
           )}
           {previewUrl && <span className="truncate">{previewUrl}</span>}
           {!isLoading && !previewUrl && !error && (
-            <span>{building ? "Waiting for the first build..." : "Ready to preview"}</span>
+            <span>{building ? WAITING_FOR_BUILD : "Ready to preview"}</span>
           )}
         </div>
 
@@ -288,9 +333,10 @@ export const PreviewView = ({
             size="icon"
             variant="ghost"
             className="size-8 rounded-md hover:bg-muted"
-            title="Toggle terminal"
+            title={showTerminal ? "Hide logs" : "Show logs"}
             aria-label="Toggle terminal"
-            onClick={() => setShowTerminal((value) => !value)}
+            aria-pressed={showTerminal}
+            onClick={toggleTerminal}
           >
             <TerminalSquareIcon className="size-4" />
           </Button>
@@ -314,48 +360,49 @@ export const PreviewView = ({
           >
             <Allotment.Pane minSize={100}>
               <div className="size-full pb-1.5">
-                <PreviewContent
-                  error={error}
-                  isLoading={isLoading}
-                  status={status}
-                  activeEngine={activeEngine}
-                  previewUrl={previewUrl}
-                  refreshKey={refreshKey}
-                  device={device}
-                  restart={restart}
-                  errorKind={errorKind}
-                  onUseWebContainer={() => switchEngine("webcontainer")}
-                  building={building}
-                />
+                {content}
               </div>
             </Allotment.Pane>
 
             <Allotment.Pane minSize={100} maxSize={500} preferredSize={200}>
               <div className="size-full pt-1.5">
-                <div className="size-full rounded-xl bg-background border border-border/50 shadow-sm overflow-hidden flex flex-col">
-                  <div className="h-9 flex items-center px-4 text-xs font-medium gap-1.5 text-muted-foreground border-b border-border/50 shrink-0 bg-muted/20">
+                <motion.div
+                  initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.15, ease: "easeOut" }}
+                  className={cn(
+                    "size-full rounded-xl bg-background border border-border/50 shadow-sm overflow-hidden flex flex-col",
+                    status === "error" && "ring-1 ring-destructive/40",
+                  )}
+                >
+                  <div className="h-9 flex items-center pl-4 pr-1.5 text-xs font-medium gap-2 text-muted-foreground border-b border-border/50 shrink-0 bg-muted/20">
                     <TerminalSquareIcon className="size-4" />
                     Terminal
+                    <PreviewStatusBadge status={status} />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="ml-auto h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+                      aria-expanded={true}
+                      onClick={toggleTerminal}
+                    >
+                      Hide logs
+                      <ChevronDownIcon className="size-3.5" />
+                    </Button>
                   </div>
                   <PreviewTerminal output={terminalOutput} />
-                </div>
+                </motion.div>
               </div>
             </Allotment.Pane>
           </Allotment>
         ) : (
-          <div className="size-full">
-            <PreviewContent
-              error={error}
-              isLoading={isLoading}
+          <div className="size-full flex flex-col gap-1.5">
+            <div className="flex-1 min-h-0">{content}</div>
+            <PreviewTerminalStrip
               status={status}
-              activeEngine={activeEngine}
-              previewUrl={previewUrl}
-              refreshKey={refreshKey}
-              device={device}
-              restart={restart}
-              errorKind={errorKind}
-              onUseWebContainer={() => switchEngine("webcontainer")}
-              building={building}
+              output={terminalOutput}
+              placeholder={stripPlaceholder(Boolean(building), isLoading)}
+              onExpand={toggleTerminal}
             />
           </div>
         )}

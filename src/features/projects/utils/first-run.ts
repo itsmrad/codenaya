@@ -46,7 +46,7 @@ export const getFirstRunProgress = (data: FirstRunData) => ({
   connectGithub: data.githubConnected,
   addKeyOrSkill: data.aiKeyCount + data.skillCount > 0,
   ship:
-    data.published.some((entry) => entry.status === "published") ||
+    data.published.some((entry) => entry.status !== "removed") ||
     data.projects.some((project) => project.exportStatus === "completed"),
 });
 

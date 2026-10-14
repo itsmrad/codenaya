@@ -1,8 +1,9 @@
 import { v } from "convex/values";
 import { paginationOptsValidator, type PaginationResult } from "convex/server";
 
+import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { mutation, query, type QueryCtx } from "./_generated/server";
+import { internalMutation, mutation, query, type QueryCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { copyProjectFiles } from "./projectCopy";
 import { countProjectBuilt } from "./stats";
@@ -173,7 +174,8 @@ export const isProjectPublished = query({
       .withIndex("by_projectId", (q) => q.eq("projectId", args.projectId))
       .take(1);
 
-    const published = existing.find((e) => e.status === "published");
+    // An unlisted entry is still published as far as its owner is concerned.
+    const published = existing.find((e) => e.status !== "removed");
     return published ?? null;
   },
 });
@@ -193,7 +195,56 @@ export const getTrending = query({
   },
 });
 
+/** Most entries `getFeatured` returns. */
+const FEATURED_MAX = 24;
+/** How many top-voted entries the fallback looks through for covers (>= FEATURED_MAX). */
+const FALLBACK_WINDOW = 50;
+
+/**
+ * Entries for the landing page strip: the hand-picked ones, most recently
+ * published first. Until something is featured, the most upvoted entries
+ * with a screenshot stand in, so the strip never shows placeholder art.
+ */
+export const getFeatured = query({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const limit = Math.min(Math.max(Math.floor(args.limit ?? 6), 1), FEATURED_MAX);
+
+    let results = await ctx.db
+      .query("showcaseProjects")
+      .withIndex("by_status_and_featured_and_publishedAt", (q) =>
+        q.eq("status", "published").eq("featured", true)
+      )
+      .order("desc")
+      .take(limit);
+
+    if (results.length === 0) {
+      const topVoted = await ctx.db
+        .query("showcaseProjects")
+        .withIndex("by_status_and_upvotes", (q) => q.eq("status", "published"))
+        .order("desc")
+        .take(FALLBACK_WINDOW);
+      results = topVoted.filter((item) => item.previewImageId).slice(0, limit);
+    }
+
+    return await Promise.all(results.map((item) => toPublicEntry(ctx, item)));
+  },
+});
+
 // ─── Mutations ───
+
+/**
+ * Clerk user ids whose entries stay off the public pages: the e2e user pool
+ * and other test accounts, as a comma-separated list in the deployment's
+ * SHOWCASE_UNLISTED_OWNER_IDS. Exact ids, never email patterns, so a real
+ * user can't be caught by accident. Dev leaves it unset: the feed specs need
+ * their seeds listed.
+ */
+const unlistedOwnerIds = () =>
+  (process.env.SHOWCASE_UNLISTED_OWNER_IDS ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
 
 export const publish = mutation({
   args: {
@@ -219,7 +270,7 @@ export const publish = mutation({
       .withIndex("by_projectId", (q) => q.eq("projectId", args.projectId))
       .take(1);
 
-    const alreadyPublished = existing.find((e) => e.status === "published");
+    const alreadyPublished = existing.find((e) => e.status !== "removed");
     if (alreadyPublished) {
       throw new Error("Project is already published to showcase");
     }
@@ -241,7 +292,7 @@ export const publish = mutation({
       downvotes: 0,
       viewCount: 0,
       importCount: 0,
-      status: "published",
+      status: unlistedOwnerIds().includes(identity.subject) ? "unlisted" : "published",
       publishedAt: now,
       updatedAt: now,
     });
@@ -394,5 +445,96 @@ export const generateUploadUrl = mutation({
   handler: async (ctx) => {
     await verifyAuth(ctx);
     return await ctx.storage.generateUploadUrl();
+  },
+});
+
+// ─── Curation (internal: run from the Convex dashboard or `npx convex run`) ───
+
+/**
+ * Features an entry (see `getFeatured`), or unfeatures it. Only published
+ * entries with a screenshot qualify: featured entries are meant for the
+ * landing page, so they show real work, not placeholder art.
+ */
+export const setFeatured = internalMutation({
+  args: { id: v.id("showcaseProjects"), featured: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const item = await ctx.db.get(args.id);
+    if (!item) throw new Error("Not found");
+    if (args.featured) {
+      if (item.status !== "published") throw new Error("Only published entries can be featured");
+      if (!item.previewImageId) throw new Error("Add a screenshot before featuring this entry");
+    }
+    await ctx.db.patch(args.id, { featured: args.featured, updatedAt: Date.now() });
+    return null;
+  },
+});
+
+const UNLIST_BATCH = 200;
+
+/**
+ * One-off cleanup: unlists the published entries of `ownerIds` (default:
+ * SHOWCASE_UNLISTED_OWNER_IDS). A dry run unless `apply` is true: it logs
+ * each entry it would unlist either way, so the ids are on record for
+ * `relistEntries`. Walks the published entries in batches, scheduling itself
+ * until done.
+ */
+export const unlistTestEntries = internalMutation({
+  args: {
+    ownerIds: v.optional(v.array(v.string())),
+    apply: v.optional(v.boolean()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    matched: v.optional(v.number()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const ownerIds = args.ownerIds ?? unlistedOwnerIds();
+    if (ownerIds.length === 0) {
+      throw new Error("Pass ownerIds or set SHOWCASE_UNLISTED_OWNER_IDS");
+    }
+    const apply = args.apply ?? false;
+    const verb = apply ? "Unlisted" : "Would unlist";
+
+    const page = await ctx.db
+      .query("showcaseProjects")
+      .withIndex("by_status_and_publishedAt", (q) => q.eq("status", "published"))
+      .paginate({ cursor: args.cursor ?? null, numItems: UNLIST_BATCH });
+
+    const matches = page.page.filter((item) => ownerIds.includes(item.ownerId));
+    const now = Date.now();
+    for (const item of matches) {
+      console.log(`${verb} ${item._id} "${item.title}" (owner ${item.ownerId})`);
+      if (apply) {
+        await ctx.db.patch(item._id, { status: "unlisted", featured: false, updatedAt: now });
+      }
+    }
+    const matched = (args.matched ?? 0) + matches.length;
+
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.showcase.unlistTestEntries, {
+        ownerIds,
+        apply,
+        cursor: page.continueCursor,
+        matched,
+      });
+      return null;
+    }
+    console.log(`${verb} ${matched} showcase entries`);
+    return null;
+  },
+});
+
+/** Undoes `unlistTestEntries` for the given entries: unlisted ones go back to published. */
+export const relistEntries = internalMutation({
+  args: { ids: v.array(v.id("showcaseProjects")) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    for (const id of args.ids) {
+      const item = await ctx.db.get(id);
+      if (item?.status === "unlisted") {
+        await ctx.db.patch(id, { status: "published", updatedAt: Date.now() });
+      }
+    }
+    return null;
   },
 });

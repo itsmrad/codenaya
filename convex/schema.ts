@@ -199,14 +199,22 @@ export default defineSchema({
     downvotes: v.number(),
     viewCount: v.number(),
     importCount: v.number(),
+    /**
+     * "unlisted" entries exist for their owner but stay off every public
+     * list and page, e.g. ones published by test accounts.
+     */
     status: v.union(
       v.literal("published"),
+      v.literal("unlisted"),
       v.literal("removed"),
     ),
+    /** Picked for the landing page strip; set with `showcase.setFeatured`. */
+    featured: v.optional(v.boolean()),
     publishedAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_status_and_publishedAt", ["status", "publishedAt"])
+    .index("by_status_and_featured_and_publishedAt", ["status", "featured", "publishedAt"])
     .index("by_status_and_upvotes", ["status", "upvotes"])
     .index("by_status_and_importCount", ["status", "importCount"])
     .index("by_owner", ["ownerId"])

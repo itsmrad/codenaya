@@ -1,5 +1,7 @@
 # Codenaya - Building a Cursor AI Alternative
 
+Contributing? Read the [engineering standards](docs/ENGINEERING.md) and [architecture decision records](docs/adr/) first.
+
 ## What We're Building
 
 Codenaya is a browser-based IDE inspired by Cursor AI, featuring:

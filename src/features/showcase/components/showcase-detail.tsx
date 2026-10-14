@@ -15,6 +15,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ProjectCover } from "@/components/project-cover";
 import { SIGN_IN_URL } from "@/features/auth/constants";
 
 import type { ShowcaseProject } from "../types";
@@ -90,9 +91,7 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
             className="size-full object-cover"
           />
         ) : (
-          <div className="size-full flex items-center justify-center text-muted-foreground/30">
-            <span className="text-sm font-mono">No preview available</span>
-          </div>
+          <ProjectCover seed={displayProject._id} className="size-full" />
         )}
       </div>
 
@@ -108,6 +107,47 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
               />
             )}
             <span>by {displayProject.ownerName}</span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1 border border-border/50 rounded-lg p-0.5">
+            <Button
+              size="sm"
+              variant={userVote === "up" ? "default" : "ghost"}
+              className="h-8 px-3 gap-1.5"
+              aria-label={`Upvote (${displayProject.upvotes})`}
+              onClick={() => handleVote("up")}
+            >
+              <ArrowUpIcon className="size-3.5" />
+              {displayProject.upvotes}
+            </Button>
+            <div className="w-px h-5 bg-border/40" />
+            <Button
+              size="sm"
+              variant={userVote === "down" ? "default" : "ghost"}
+              className="h-8 px-3 gap-1.5"
+              aria-label={`Downvote (${displayProject.downvotes})`}
+              onClick={() => handleVote("down")}
+            >
+              <ArrowDownIcon className="size-3.5" />
+              {displayProject.downvotes}
+            </Button>
+          </div>
+
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="outline" onClick={copyLink} className="gap-2">
+              <LinkIcon className="size-4" />
+              Copy link
+            </Button>
+            <Button
+              onClick={remix}
+              disabled={isRemixing || isAuthLoading}
+              className="gap-2 bg-brand text-white hover:bg-brand/90"
+            >
+              <GitForkIcon className="size-4" />
+              {isRemixing ? "Remixing..." : "Remix"}
+            </Button>
           </div>
         </div>
 
@@ -157,47 +197,6 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
             <DownloadIcon className="size-3.5" />
             {displayProject.importCount} imports
           </span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 pt-2">
-          <div className="flex items-center gap-1 border border-border/50 rounded-lg p-0.5">
-            <Button
-              size="sm"
-              variant={userVote === "up" ? "default" : "ghost"}
-              className="h-8 px-3 gap-1.5"
-              aria-label={`Upvote (${displayProject.upvotes})`}
-              onClick={() => handleVote("up")}
-            >
-              <ArrowUpIcon className="size-3.5" />
-              {displayProject.upvotes}
-            </Button>
-            <div className="w-px h-5 bg-border/40" />
-            <Button
-              size="sm"
-              variant={userVote === "down" ? "default" : "ghost"}
-              className="h-8 px-3 gap-1.5"
-              aria-label={`Downvote (${displayProject.downvotes})`}
-              onClick={() => handleVote("down")}
-            >
-              <ArrowDownIcon className="size-3.5" />
-              {displayProject.downvotes}
-            </Button>
-          </div>
-
-          <div className="ml-auto flex items-center gap-2">
-            <Button variant="outline" onClick={copyLink} className="gap-2">
-              <LinkIcon className="size-4" />
-              Copy link
-            </Button>
-            <Button
-              onClick={remix}
-              disabled={isRemixing || isAuthLoading}
-              className="gap-2 bg-brand text-white hover:bg-brand/90"
-            >
-              <GitForkIcon className="size-4" />
-              {isRemixing ? "Remixing..." : "Remix"}
-            </Button>
-          </div>
         </div>
       </div>
     </>
