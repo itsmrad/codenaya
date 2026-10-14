@@ -17,6 +17,7 @@ import {
   FolderPlusIcon,
   FolderTreeIcon,
   GlobeIcon,
+  HammerIcon,
   KeyRoundIcon,
   PlugIcon,
   WrenchIcon,
@@ -31,7 +32,7 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
-import { type AgentStep, STALLED_RUN_MS, lastRunActivity } from "../agent-steps";
+import { type AgentStep, BUILD_VERIFIED, STALLED_RUN_MS, lastRunActivity } from "../agent-steps";
 import { LoaderGrid } from "./run-loader";
 
 interface ToolMeta {
@@ -56,6 +57,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   scrapeUrls: { icon: GlobeIcon, running: "Fetching", done: "Fetched" },
   setEnvVar: { icon: KeyRoundIcon, running: "Setting env", done: "Set env" },
   loadSkill: { icon: BookOpenIcon, running: "Loading skill", done: "Used skill" },
+  checkBuild: { icon: HammerIcon, running: "Checking build", done: "Checked build" },
 };
 
 const toolMeta = (tool = ""): ToolMeta => {
@@ -113,7 +115,8 @@ const toRows = (steps: AgentStep[]): Row[] => {
 
 const rowLabel = (row: Row, live: boolean) => {
   const meta = toolMeta(row.step.tool);
-  const verb = live ? meta.running : meta.done;
+  // A passing check records what it verified ("Static checks passed").
+  const verb = live ? meta.running : (row.step.tool === "checkBuild" && row.step.text) || meta.done;
   // "Read 4 files" reads better than four chips with no count.
   if (row.step.tool === "readFiles" && row.targets.length > 1) {
     return `${verb} ${row.targets.length} files`;
@@ -154,7 +157,7 @@ const FileChip = ({ path, onOpen, label = false }: FileChipProps) => {
 const CHIP_LIMIT = 6;
 
 /** Tools whose targets are not project files: their chips never open. */
-const NON_FILE_TOOLS = new Set(["scrapeUrls", "setEnvVar", "loadSkill"]);
+const NON_FILE_TOOLS = new Set(["scrapeUrls", "setEnvVar", "loadSkill", "checkBuild"]);
 
 const isFileTool = (tool = "") => !NON_FILE_TOOLS.has(tool) && !tool.includes("__");
 
@@ -272,6 +275,7 @@ const StepRow = ({
   const { icon: Icon } = toolMeta(row.step.tool);
   const running = live && row.step.status === "running";
   const failed = row.step.status === "error";
+  const verified = row.step.tool === "checkBuild" && row.step.text === BUILD_VERIFIED;
   return (
     <div className={cn(entryClass)} style={entry}>
       {/* Icon column + label column: chips wrap under the label, clear of
@@ -294,6 +298,7 @@ const StepRow = ({
           />
         )}
         {failed && <CircleXIcon className="mt-[3px] size-3.5 shrink-0 text-destructive" />}
+        {verified && <CheckCircle2Icon className="mt-[3px] size-3.5 shrink-0 text-muted-foreground" />}
       </div>
       {failed && row.step.error && (
         <p className="truncate pb-1 pl-7 text-xs text-muted-foreground" title={row.step.error}>

@@ -1,4 +1,4 @@
-import { AuthenticationError, RateLimitError, Sandbox } from "e2b";
+import { AuthenticationError, RateLimitError, type Sandbox } from "e2b";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 
 import {
@@ -11,6 +11,11 @@ import {
 } from "@/features/integrations/server/env/resolve-env";
 import { createStreamRedactor } from "@/features/integrations/server/env/stream-redactor";
 import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
+import {
+  WORK_DIR,
+  createProjectSandbox,
+  writeProjectFiles,
+} from "@/features/sandbox-preview/server/project-sandbox";
 import {
   forgetSandbox,
   rememberSandbox,
@@ -43,15 +48,8 @@ import type { Id } from "../../../../convex/_generated/dataModel";
  */
 
 const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour (E2B free plan max)
-const WORK_DIR = "/home/user/app";
 /** A package.json sync waits this long for more edits before re-installing. */
 const REINSTALL_DEBOUNCE_MS = 2000;
-
-/**
- * The base image ships Node 20.9, too old for Vite 7 (#178). E2B_TEMPLATE
- * points at the Node 22 template built by `npm run e2b:template`.
- */
-const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || "base";
 
 /**
  * Environment variables that force dev servers to bind to 0.0.0.0
@@ -273,7 +271,7 @@ export async function POST(request: Request) {
         send({ type: "status", status: "booting" });
         send({ type: "output", data: "Creating E2B sandbox...\n" });
 
-        sandbox = await Sandbox.create(SANDBOX_TEMPLATE, {
+        sandbox = await createProjectSandbox({
           apiKey: e2bApiKey,
           timeoutMs: SANDBOX_TIMEOUT_MS,
           metadata: { userId },
@@ -320,14 +318,7 @@ export async function POST(request: Request) {
         // --- Write project files ---
         send({ type: "output", data: "Writing project files...\n" });
 
-        await sandbox.files.makeDir(WORK_DIR);
-
-        for (const file of files) {
-          await sandbox.files.write(
-            `${WORK_DIR}/${file.path}`,
-            file.content
-          );
-        }
+        await writeProjectFiles(sandbox, files);
 
         send({
           type: "output",

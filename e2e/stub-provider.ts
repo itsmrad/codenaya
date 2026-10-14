@@ -31,6 +31,8 @@ interface StubOptions {
   reply?: PerRequest<string>;
   /** The one tool call the coding agent makes before replying. */
   toolCall?: PerRequest<StubToolCall>;
+  /** A later tool call, picked per request once tools have run; replies when undefined. */
+  followUp?: (request: StubChatRequest) => StubToolCall | undefined;
   /** The JSON object returned to a structured-output request. */
   object?: (request: StubChatRequest) => unknown;
 }
@@ -49,7 +51,7 @@ const readJson = async (request: IncomingMessage) => {
  */
 export const startStubProvider = async (
   apiKey: string,
-  { reply = "", toolCall = { name: "listFiles", arguments: {} }, object }: StubOptions,
+  { reply = "", toolCall = { name: "listFiles", arguments: {} }, followUp, object }: StubOptions,
 ) => {
   let rejecting = false;
   const requests: StubChatRequest[] = [];
@@ -71,27 +73,28 @@ export const startStubProvider = async (
 
     const body = await readJson(request);
     requests.push(body);
+    const call = (tool: StubToolCall) => ({
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: `call_${Date.now()}`,
+          type: "function",
+          function: { name: tool.name, arguments: JSON.stringify(tool.arguments) },
+        },
+      ],
+    });
+    const next = followUp?.(body);
     const message =
       body.response_format && object
         ? { role: "assistant", content: JSON.stringify(object(body)) }
         : !body.tools?.length
           ? { role: "assistant", content: STUB_TITLE }
           : body.messages.some((m) => m.role === "tool")
-            ? { role: "assistant", content: resolve(reply, body) }
-            : {
-                role: "assistant",
-                content: null,
-                tool_calls: [
-                  {
-                    id: `call_${Date.now()}`,
-                    type: "function",
-                    function: {
-                      name: resolve(toolCall, body).name,
-                      arguments: JSON.stringify(resolve(toolCall, body).arguments),
-                    },
-                  },
-                ],
-              };
+            ? next
+              ? call(next)
+              : { role: "assistant", content: resolve(reply, body) }
+            : call(resolve(toolCall, body));
     send(200, {
       id: "chatcmpl-stub",
       object: "chat.completion",

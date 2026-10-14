@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starter";
 
-import { missingReferencedFiles, undeclaredPackages } from "./missing-references";
+import {
+  missingReferencedFiles,
+  undeclaredPackages,
+  unresolvedImports,
+} from "./missing-references";
 
 const starter = () => VITE_REACT_STARTER.map((file) => ({ ...file }));
 const without = (path: string) => starter().filter((file) => file.path !== path);
@@ -128,5 +132,50 @@ describe("undeclaredPackages", () => {
     const files = [{ path: "src/main.tsx", content: 'import "react";' }];
     expect(undeclaredPackages(files)).toEqual([]);
     expect(undeclaredPackages([{ path: "package.json", content: "{ nope" }, ...files])).toEqual([]);
+  });
+});
+
+describe("unresolvedImports", () => {
+  it("passes the agent's Vite + React starter", () => {
+    expect(unresolvedImports(starter())).toEqual([]);
+  });
+
+  it("names a relative import with no file behind it", () => {
+    const files = [
+      ...starter(),
+      { path: "src/pages/Home.tsx", content: 'import { Header } from "../components/Header";\n' },
+    ];
+    expect(unresolvedImports(files)).toEqual([
+      "../components/Header (imported by src/pages/Home.tsx)",
+    ]);
+  });
+
+  it("resolves extensions, index files, the @/ alias and query suffixes", () => {
+    const files = [
+      {
+        path: "src/App.tsx",
+        content: [
+          'import "./index.css";',
+          'import { Button } from "@/components/ui";',
+          'import logo from "./logo.svg?url";',
+          'const Page = lazy(() => import("./pages/Page"));',
+          '// import { Gone } from "./gone";',
+          'import { helper } from "./lib/helper.js";',
+          "const messages = import(`./locales/${lang}.json`);",
+        ].join("\n"),
+      },
+      { path: "src/index.css", content: "" },
+      { path: "src/components/ui/index.ts", content: "" },
+      { path: "src/pages/Page.tsx", content: "" },
+      { path: "src/lib/helper.ts", content: "" },
+    ];
+    // The logo is an uploaded image: a known path without text content.
+    const paths = new Set([...files.map((file) => file.path), "src/logo.svg"]);
+    expect(unresolvedImports(files, paths)).toEqual([]);
+  });
+
+  it("names a missing @/ import", () => {
+    const files = [{ path: "src/App.tsx", content: 'import { cn } from "@/lib/utils";\n' }];
+    expect(unresolvedImports(files)).toEqual(["@/lib/utils (imported by src/App.tsx)"]);
   });
 });
