@@ -114,7 +114,11 @@ test.describe.serial("plan mode", () => {
 
     // The plan renders as a checklist, and nothing was written.
     await expect(page.getByText(PLAN_ITEM)).toBeVisible({ timeout: 120_000 });
-    await expect(page.getByRole("checkbox").first()).toBeVisible();
+    // One checkbox per step, no bullet (#263). The boxes are aria-hidden, so
+    // they are found by selector rather than by role.
+    const step = page.locator(".task-list-item", { hasText: PLAN_ITEM });
+    await expect(step.locator('input[type="checkbox"]')).toBeVisible();
+    await expect(step.locator("xpath=..")).toHaveCSS("list-style-type", "none");
     const build = page.getByRole("button", { name: "Build this plan" });
     await expect(build).toBeVisible();
     await test.info().attach("plan-reply", {

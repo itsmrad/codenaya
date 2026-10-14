@@ -250,6 +250,17 @@ html.lenis, html.lenis body {
 .chat-prose [data-streamdown="list-item"] {
   @apply py-0;
 }
+/* Plan checklists (#263): the checkbox is the only marker, and wrapped lines
+   line up with the step text instead of starting under the box. */
+.chat-prose .contains-task-list {
+  @apply list-none pl-0;
+}
+.chat-prose .task-list-item {
+  @apply relative pl-6;
+}
+.chat-prose :is(.task-list-item > input, .task-list-item > p:first-child > input) {
+  @apply absolute top-[0.3em] left-0 m-0;
+}
 .chat-prose [data-streamdown="inline-code"] {
   @apply rounded bg-muted px-1 py-0.5 font-mono text-[12.5px];
 }

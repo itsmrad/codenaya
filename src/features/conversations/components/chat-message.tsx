@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentProps, useEffect, useMemo, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import {
   BookOpenIcon,
@@ -162,6 +162,17 @@ const useTypewriter = (text: string, animate: boolean) => {
   return animate ? text.slice(0, shown) : text;
 };
 
+/**
+ * Plan replies are checklists (#263). Their checkboxes are display-only, so
+ * screen readers skip them and read the step text instead.
+ */
+const replyComponents = {
+  input: ({ node, ...props }: ComponentProps<"input"> & { node?: unknown }) => {
+    void node;
+    return <input {...props} aria-hidden="true" tabIndex={-1} />;
+  },
+};
+
 interface AssistantMessageProps {
   message: Doc<"messages">;
   /** Last message in the conversation: gets the retry action. */
@@ -260,6 +271,7 @@ export const AssistantMessage = ({
           <MessageResponse
             className={cn("chat-prose", settle)}
             controls={{ code: { copy: true, download: false } }}
+            components={replyComponents}
           >
             {shown}
           </MessageResponse>
