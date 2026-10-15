@@ -40,6 +40,13 @@ test.describe("public showcase (signed out)", () => {
 
       await expect(page).toHaveURL(new RegExp(`/showcase/${project!._id}$`));
       await expect(page.getByRole("heading", { name: project!.title })).toBeVisible();
+      const header = page.locator("header").first();
+      if (width < 768) await header.getByRole("button", { name: "Toggle menu" }).click();
+      const navigation = width < 768 ? page.getByRole("dialog") : header;
+      await expect(navigation.getByRole("link", { name: "Showcase", exact: true })).toHaveAttribute(
+        "aria-current", "page",
+      );
+      if (width < 768) await page.keyboard.press("Escape");
       await expect(page.getByRole("button", { name: /^Upvote \(\d+\)$/ })).toBeVisible();
       await expect(page.locator('meta[property="og:image"]')).toHaveAttribute("content", /.+/);
 

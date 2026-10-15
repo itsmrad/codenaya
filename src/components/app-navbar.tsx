@@ -10,8 +10,8 @@ import { HelpMenu } from "./help-menu";
 import { UserMenu } from "./user-menu";
 
 export const AppNavbar = () => {
-  // Public pages (the showcase) also use this bar, so signed-out visitors get
-  // auth links instead of the user menu.
+  // Public pages use MarketingNavbar, but in-app pages such as "Project not
+  // found" can be reached signed out, so those visitors get auth links.
   const { isSignedIn } = useAuth();
 
   return (

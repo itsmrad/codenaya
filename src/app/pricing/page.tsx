@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Check, Minus } from "lucide-react";
 
-import { AppNavbar } from "@/components/app-navbar";
+import { MarketingNavbar } from "@/components/marketing-navbar";
 import { LandingFooter } from "@/components/landing/footer";
 import {
   Accordion,
@@ -132,7 +132,7 @@ const ComparisonValue = ({ value }: { value: string | boolean }) => {
 const PricingPage = () => {
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <AppNavbar />
+      <MarketingNavbar />
       <main className="flex-1 mx-auto w-full max-w-5xl px-4 py-10 md:px-8 md:py-16">
         <div className="text-center">
           <p className="text-xs uppercase tracking-[0.25em] text-brand font-mono mb-4">

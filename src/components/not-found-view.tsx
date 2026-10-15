@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 
 import { AppNavbar } from "@/components/app-navbar";
@@ -7,12 +8,18 @@ import { Button } from "@/components/ui/button";
 type NotFoundViewProps = {
   title: string;
   description: string;
+  /** The page header. Defaults to the app bar, as the in-app "Project not found" needs. */
+  header?: ReactNode;
 };
 
-export const NotFoundView = ({ title, description }: NotFoundViewProps) => {
+export const NotFoundView = ({
+  title,
+  description,
+  header = <AppNavbar />,
+}: NotFoundViewProps) => {
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <AppNavbar />
+      {header}
       <main className="relative flex-1 flex items-center justify-center overflow-hidden px-6 py-16">
         <GridPattern />
         <div className="relative z-10 max-w-md text-center flex flex-col items-center gap-5">

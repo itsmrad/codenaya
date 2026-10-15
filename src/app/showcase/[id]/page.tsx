@@ -5,7 +5,7 @@ import { cache, Suspense } from "react";
 import { ArrowLeftIcon } from "lucide-react";
 import { fetchQuery } from "convex/nextjs";
 
-import { AppNavbar } from "@/components/app-navbar";
+import { MarketingNavbar } from "@/components/marketing-navbar";
 import { LandingFooter } from "@/components/landing/footer";
 import { Spinner } from "@/components/ui/spinner";
 import { ShowcaseDetail } from "@/features/showcase/components/showcase-detail";
@@ -68,7 +68,7 @@ const ShowcaseIdContent = async ({ params }: ShowcaseIdPageProps) => {
 const ShowcaseIdPage = (props: ShowcaseIdPageProps) => {
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <AppNavbar />
+      <MarketingNavbar />
       <main className="flex-1 mx-auto w-full max-w-3xl px-4 py-8 md:px-8 md:py-12">
         <Link
           href="/showcase"

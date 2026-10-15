@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { AppNavbar } from "@/components/app-navbar";
+import { MarketingNavbar } from "@/components/marketing-navbar";
 import { LandingFooter } from "@/components/landing/footer";
 import { CONTACT_EMAIL } from "@/lib/site";
 import { cn } from "@/lib/utils";
@@ -19,7 +19,7 @@ type LegalPageProps = {
 export const LegalPage = ({ title, lastUpdated, children }: LegalPageProps) => {
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <AppNavbar />
+      <MarketingNavbar />
       <main className="flex-1 mx-auto w-full max-w-3xl px-4 py-10 md:px-8 md:py-16">
         <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-foreground">
           {title}

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { AppNavbar } from "@/components/app-navbar";
+import { MarketingNavbar } from "@/components/marketing-navbar";
 import { LandingFooter } from "@/components/landing/footer";
 import { PROSE_CLASS_NAME } from "@/components/legal-page";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
 const { free, pro } = PLANS;
 
 const Section = ({ id, title, children }: { id: string; title: string; children: ReactNode }) => (
-  <section id={id} aria-labelledby={`${id}-heading`} className="scroll-mt-6 flex flex-col gap-3">
+  <section id={id} aria-labelledby={`${id}-heading`} className="scroll-mt-24 flex flex-col gap-3">
     <h2 id={`${id}-heading`}>{title}</h2>
     {children}
   </section>
@@ -270,7 +270,7 @@ const SECTIONS: { id: string; title: string; content: ReactNode }[] = [
 const DocsPage = () => {
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <AppNavbar />
+      <MarketingNavbar />
       <main className="flex-1 mx-auto w-full max-w-5xl px-4 py-10 md:px-8 md:py-16">
         <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-foreground">Docs</h1>
         <p className="mt-2 text-sm md:text-base text-muted-foreground">
@@ -278,7 +278,7 @@ const DocsPage = () => {
         </p>
 
         <div className="mt-10 grid gap-10 md:grid-cols-[11rem_1fr]">
-          <nav aria-label="On this page" className="md:sticky md:top-6 md:self-start">
+          <nav aria-label="On this page" className="md:sticky md:top-24 md:self-start">
             <h2 className="mb-3 text-xs font-medium uppercase tracking-[0.15em] text-foreground">
               On this page
             </h2>

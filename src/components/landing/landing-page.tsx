@@ -1,7 +1,7 @@
 "use client";
 
 import { SmoothScrollProvider } from "@/components/smooth-scroll-provider";
-import { LandingNavbar } from "./navbar";
+import { MarketingNavbar } from "@/components/marketing-navbar";
 import { LandingHero } from "./hero";
 import { LandingDemo } from "./demo-video";
 import { LandingCommunityStrip } from "./community-strip";
@@ -14,7 +14,7 @@ export const LandingPage = () => {
   return (
     <SmoothScrollProvider>
       <div className="relative min-h-screen bg-background overflow-x-hidden">
-        <LandingNavbar />
+        <MarketingNavbar overlay />
         <main>
           <LandingHero />
           <LandingDemo />
