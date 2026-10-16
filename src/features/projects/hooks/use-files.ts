@@ -17,12 +17,20 @@ export const useFiles = (projectId: Id<"projects"> | null) => {
   return useQuery(api.files.getFiles, projectId ? { projectId } : "skip");
 };
 
+export const isOptimisticFileId = (fileId: string | null | undefined): boolean => {
+  if (!fileId) return false;
+  // Convex IDs never contain hyphens; client-generated optimistic IDs are UUIDs
+  return fileId.includes("-");
+};
+
 export const useFile = (fileId: Id<"files"> | null) => {
-  return useQuery(api.files.getFile, fileId ? { id: fileId } : "skip");
+  const shouldSkip = !fileId || isOptimisticFileId(fileId);
+  return useQuery(api.files.getFile, shouldSkip ? "skip" : { id: fileId });
 };
 
 export const useFilePath = (fileId: Id<"files"> | null) => {
-  return useQuery(api.files.getFilePath, fileId ? { id: fileId } : "skip");
+  const shouldSkip = !fileId || isOptimisticFileId(fileId);
+  return useQuery(api.files.getFilePath, shouldSkip ? "skip" : { id: fileId });
 };
 
 export const useUpdateFile = () => {

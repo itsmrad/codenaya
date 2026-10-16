@@ -118,8 +118,11 @@ export const getFilePath = query({
 
     const path: { _id: string; name: string }[] = [];
     let currentId: Id<"files"> | undefined = args.id;
+    const visited = new Set<string>();
+    const MAX_DEPTH = 50;
 
-    while (currentId) {
+    while (currentId && !visited.has(currentId) && visited.size < MAX_DEPTH) {
+      visited.add(currentId);
       const file = (await ctx.db.get("files", currentId)) as 
         | Doc<"files">
         | undefined;
