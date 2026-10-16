@@ -4,6 +4,7 @@ import { ChevronRightIcon, CopyMinusIcon, FilePlusCornerIcon, FolderPlusIcon } f
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { toast } from "sonner"
 
 import { useProject } from "../../hooks/use-projects"
 import { Id } from "../../../../../convex/_generated/dataModel"
@@ -35,22 +36,39 @@ export const FileExplorer = ({
 
   const createFile = useCreateFile();
   const createFolder = useCreateFolder();
-  const handleCreate = (name: string) => {
+  const handleCreate = async (name: string) => {
+    const createType = creating;
     setCreating(null);
 
-    if (creating === "file") {
-      createFile({
-        projectId,
-        name,
-        content: "",
-        parentId: undefined,
-      });
-    } else {
-      createFolder({
-        projectId,
-        name,
-        parentId: undefined,
-      });
+    // Validate against siblings in rootFiles
+    if (rootFiles) {
+      const exists = rootFiles.some(
+        (f) => f.name.toLowerCase() === name.toLowerCase() && f.type === createType
+      );
+      if (exists) {
+        toast.error(createType === "file" ? "File already exists" : "Folder already exists");
+        return;
+      }
+    }
+
+    try {
+      if (createType === "file") {
+        await createFile({
+          projectId,
+          name,
+          content: "",
+          parentId: undefined,
+        });
+      } else if (createType === "folder") {
+        await createFolder({
+          projectId,
+          name,
+          parentId: undefined,
+        });
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err) || "Failed to create";
+      toast.error(message);
     }
   };
 
