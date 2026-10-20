@@ -11,7 +11,9 @@ export type AppErrorCode =
   | "UNAUTHENTICATED"
   | "INVALID_ARGUMENT"
   | "CONFLICT"
-  | "LIMIT_EXCEEDED";
+  | "LIMIT_EXCEEDED"
+  /** A platform run was refused because the account cannot pay for it (#105). */
+  | "INSUFFICIENT_CREDITS";
 
 export type AppErrorData = {
   code: AppErrorCode;

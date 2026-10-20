@@ -2,6 +2,8 @@ import { v } from "convex/values";
 
 import type { Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
+import { validateInternalKey } from "./internalKey";
+import { assertCanRunForUser, chargeRunForUser, readAccountView } from "./credits";
 import {
   aiProviderValidator,
   messageStepValidator,
@@ -36,33 +38,6 @@ const MAX_RECENT_MESSAGES = 50;
 
 /** A project runs one agent at a time; lost runs are failed by a cron. */
 const MAX_PROCESSING_MESSAGES = 20;
-
-const validateInternalKey = (key: string) => {
-  const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
-
-  if (!internalKey) {
-    throw new Error("CODENAYA_CONVEX_INTERNAL_KEY is not configured");
-  }
-
-  if (!keysMatch(key, internalKey)) {
-    throw appError("UNAUTHENTICATED", "Invalid internal key");
-  }
-};
-
-/**
- * Constant-time string compare, so response timing doesn't reveal how much of
- * a guessed key was right (#211). The Convex runtime has no
- * `crypto.timingSafeEqual`. Only the secret's length can leak.
- */
-const keysMatch = (given: string, secret: string) => {
-  const a = new TextEncoder().encode(given);
-  const b = new TextEncoder().encode(secret);
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < b.length; i++) {
-    diff |= (a[i] ?? 0) ^ b[i];
-  }
-  return diff === 0;
-};
 
 export const getConversationById = query({
   args: {
@@ -1738,5 +1713,54 @@ export const getProjectSkills = query({
 
     const skills = await resolveProjectSkills(ctx, project);
     return skills.filter((skill) => skill.enabled);
+  },
+});
+
+/**
+ * Credits (#105). The domain logic lives in `convex/credits.ts`; these are the
+ * internal-key wrappers the Next.js route and the Inngest run call.
+ */
+
+/** Pre-run gate: throws `INSUFFICIENT_CREDITS` when the account cannot pay. */
+export const assertCanRun = mutation({
+  args: {
+    internalKey: v.string(),
+    userId: v.string(),
+    byok: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    return await assertCanRunForUser(ctx, args);
+  },
+});
+
+/** Post-run charge, idempotent on the assistant message id. */
+export const chargeRun = mutation({
+  args: {
+    internalKey: v.string(),
+    userId: v.string(),
+    messageId: v.id("messages"),
+    byok: v.boolean(),
+    model: v.optional(v.string()),
+    costUsd: v.number(),
+    promptTokens: v.optional(v.number()),
+    completionTokens: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const { internalKey: _internalKey, ...charge } = args;
+    return await chargeRunForUser(ctx, charge);
+  },
+});
+
+/** The account, for the billing routes (e.g. top-ups are Pro-only). */
+export const getCreditAccount = query({
+  args: {
+    internalKey: v.string(),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    return await readAccountView(ctx, args.userId);
   },
 });
