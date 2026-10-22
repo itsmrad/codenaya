@@ -38,6 +38,21 @@ export const runModelValidator = v.object({
   label: v.string(),
 });
 
+/** Paid plan a credit account is on (#105). */
+export const creditPlanValidator = v.union(v.literal("free"), v.literal("pro"));
+
+/**
+ * Why a credit ledger row exists. `usage` is a charge, `grant` a monthly plan
+ * grant, `topup` a purchased pack, `refund` and `adjust` are manual.
+ */
+export const creditLedgerKindValidator = v.union(
+  v.literal("grant"),
+  v.literal("topup"),
+  v.literal("usage"),
+  v.literal("refund"),
+  v.literal("adjust"),
+);
+
 export default defineSchema({
   /**
    * Profile mirror of a Clerk user, kept in sync by the Clerk webhook
@@ -607,4 +622,52 @@ export default defineSchema({
     .index("by_project_and_createdAt", ["projectId", "createdAt"])
     .index("by_createdAt", ["createdAt"])
     .index("by_invocation", ["mcpInvocationId"]),
+
+  /**
+   * A user's credit balance (#105). One row per user, created lazily by
+   * `credits.getOrInitAccount` on the first run or visit; there is no cron.
+   *
+   * `balance` is the monthly grant still unspent and `topupBalance` the
+   * purchased packs, which are spent only after the grant. `dailyUsed` resets
+   * at `dailyResetAt`; `periodEndsAt` is when the monthly grant rolls over.
+   */
+  creditAccounts: defineTable({
+    userId: v.string(),
+    plan: creditPlanValidator,
+    balance: v.number(),
+    dailyUsed: v.number(),
+    dailyResetAt: v.number(),
+    periodGrant: v.number(),
+    periodEndsAt: v.number(),
+    topupBalance: v.number(),
+    /** Set by `subscription.canceled`: downgrade when the period ends. */
+    cancelAtPeriodEnd: v.optional(v.boolean()),
+    billingCustomerId: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_userId", ["userId"]),
+
+  /**
+   * Every credit movement, for the billing page and support (#105). A run
+   * writes one `usage` row keyed by its assistant message, which is also the
+   * idempotency key for `chargeRun`; a webhook row is keyed by `externalId`
+   * (invoice, order or subscription period id).
+   */
+  creditLedger: defineTable({
+    userId: v.string(),
+    /** Credits added (positive) or spent (negative). */
+    delta: v.number(),
+    kind: creditLedgerKindValidator,
+    messageId: v.optional(v.id("messages")),
+    model: v.optional(v.string()),
+    costUsd: v.optional(v.number()),
+    promptTokens: v.optional(v.number()),
+    completionTokens: v.optional(v.number()),
+    /** True for a BYOK run: recorded for analytics, charges nothing. */
+    byok: v.boolean(),
+    externalId: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_externalId", ["externalId"])
+    .index("by_messageId", ["messageId"]),
 });

@@ -46,3 +46,16 @@ export const TOP_UP = {
 
 /** Formats a credit count for display, e.g. 2000 -> "2,000". */
 export const formatCredits = (credits: number) => credits.toLocaleString("en-US");
+
+/**
+ * Credits a run costs: 1 credit is $0.01 of billed value, marked up 1.5x and
+ * rounded up so a tiny run never bills zero (#105).
+ */
+export const creditsForUsageUsd = (costUsd: number) =>
+  Number.isFinite(costUsd) && costUsd > 0 ? Math.ceil(costUsd * 1.5 * 100) : 0;
+
+/** How long a monthly grant lasts before it rolls over (30 days). */
+export const CREDIT_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** How long a day's allowance lasts before `dailyUsed` resets. */
+export const DAILY_PERIOD_MS = 24 * 60 * 60 * 1000;
