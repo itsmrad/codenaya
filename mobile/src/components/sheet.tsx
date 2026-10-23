@@ -1,8 +1,11 @@
 import type { ReactNode } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import Animated, { Easing, SlideInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { font, radius, useColors } from "@/lib/theme";
+
+const SHEET_EASE = Easing.bezier(0.32, 0.72, 0, 1);
 
 /** A bottom sheet for pickers and lists (models, conversations, versions). */
 export function Sheet({
@@ -21,9 +24,12 @@ export function Sheet({
   const c = useColors();
   const insets = useSafeAreaInsets();
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View
+    // The backdrop fades while the sheet slides up; "slide" would move the
+    // dimmed backdrop up with it.
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
+      <Animated.View
+        entering={SlideInDown.duration(280).easing(SHEET_EASE)}
         style={[
           styles.sheet,
           { backgroundColor: c.card, borderColor: c.border, paddingBottom: insets.bottom + 12 },
@@ -33,7 +39,7 @@ export function Sheet({
         <Text style={[styles.title, { color: c.foreground }]}>{title}</Text>
         {description && <Text style={[styles.description, { color: c.mutedForeground }]}>{description}</Text>}
         <ScrollView style={styles.body}>{children}</ScrollView>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

@@ -10,16 +10,17 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useHeaderHeight } from "expo-router/react-navigation";
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { ChatComposer } from "@/components/chat-composer";
+import { ChatEmptyState } from "@/components/chat-empty-state";
 import { AssistantMessage, UserMessage, useRunStalled } from "@/components/chat-message";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { useAgentModel } from "@/lib/agent-model";
@@ -44,6 +45,7 @@ type MessageMode = typeof PLAN_MODE | undefined;
 export default function ProjectChat() {
   const c = useColors();
   const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const router = useRouter();
   const { getToken } = useAuth();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -55,6 +57,12 @@ export default function ProjectChat() {
   const conversationId = selectedId ?? conversations?.[0]?._id;
   const conversation = conversations?.find((item) => item._id === conversationId);
   const messages = useQuery(api.conversations.getMessages, conversationId ? { conversationId } : "skip");
+  // The messages a conversation opened with: they are history and never
+  // animate; anything that arrives later fades up (as on the web).
+  const [history, setHistory] = useState<{ conversationId?: string; ids: Set<string> }>();
+  if (messages && history?.conversationId !== conversationId) {
+    setHistory({ conversationId, ids: new Set(messages.map((message) => message._id)) });
+  }
   const files = useQuery(api.files.getFiles, { projectId });
   const checkpoints = useQuery(api.checkpoints.list, { projectId });
   const projectSkills = useQuery(api.skills.listProjectSkills, { projectId });
@@ -163,8 +171,10 @@ export default function ProjectChat() {
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 44 : 0}
+      // Android draws edge to edge, so the window no longer resizes for the
+      // keyboard: pad on both platforms, below the header.
+      behavior="padding"
+      keyboardVerticalOffset={headerHeight}
     >
       <Stack.Screen
         options={{
@@ -192,11 +202,7 @@ export default function ProjectChat() {
       {messages === undefined && conversationId ? (
         <ActivityIndicator style={styles.flex} />
       ) : !messages?.length && !pending ? (
-        <View style={styles.empty}>
-          <Text style={[styles.emptyText, { color: c.mutedForeground }]}>
-            Ask Codenaya to build or change something in {project.name}.
-          </Text>
-        </View>
+        <ChatEmptyState onSelect={(prompt) => send(prompt, []).then(report)} />
       ) : (
         <FlatList
           // Inverted: the newest message sits at the bottom and new steps keep
@@ -210,13 +216,20 @@ export default function ProjectChat() {
           ListHeaderComponent={
             pending && (
               <View style={styles.pending}>
-                <UserMessage content={pending.text} imageUrls={pending.imageUrls} skillNames={skillNames} />
+                <UserMessage content={pending.text} imageUrls={pending.imageUrls} skillNames={skillNames} animate />
               </View>
             )
           }
           renderItem={({ item, index }) => {
             if (item.role === "user") {
-              return <UserMessage content={item.content} imageUrls={item.imageUrls} skillNames={skillNames} />;
+              return (
+                <UserMessage
+                  content={item.content}
+                  imageUrls={item.imageUrls}
+                  skillNames={skillNames}
+                  animate={Boolean(history && !history.ids.has(item._id)) && !pending}
+                />
+              );
             }
             const checkpoint = checkpointByMessage.get(item._id);
             return (
@@ -336,9 +349,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   list: { padding: 16, gap: 18 },
-  empty: { flex: 1, justifyContent: "center", padding: 24 },
   pending: { opacity: 0.6, marginTop: 18 },
-  emptyText: { textAlign: "center", fontSize: 14, fontFamily: font.regular },
   sheetEmpty: { textAlign: "center", paddingVertical: 24, fontSize: 14, fontFamily: font.regular },
   restore: { fontSize: 13, fontFamily: font.medium },
 });

@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import Animated from "react-native-reanimated";
 
 import { errorMessage } from "@/lib/format";
+import { zoomIn } from "@/lib/motion";
 import { font, radius, useColors } from "@/lib/theme";
 
 // Alert.prompt is iOS-only, so naming (rename, new file or folder) gets a
@@ -42,8 +44,9 @@ export function NameDialog({
         setName(initialName);
         setError(undefined);
       }}>
-      <View style={styles.backdrop}>
-        <View style={[styles.dialog, { backgroundColor: c.card, borderColor: c.border }]}>
+      {/* Lifts the dialog above the keyboard its input opens. */}
+      <KeyboardAvoidingView behavior="padding" style={styles.backdrop}>
+        <Animated.View entering={zoomIn} style={[styles.dialog, { backgroundColor: c.card, borderColor: c.border }]}>
           <Text style={[styles.title, { color: c.foreground }]}>{title}</Text>
           <TextInput
             style={[styles.input, { color: c.foreground, borderColor: c.border }]}
@@ -70,8 +73,8 @@ export function NameDialog({
               <Text style={[styles.buttonText, { color: c.primaryForeground }]}>{confirmLabel}</Text>
             </Pressable>
           </View>
-        </View>
-      </View>
+        </Animated.View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

@@ -13,10 +13,12 @@ import { type ErrorBoundaryProps, Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
+import { ConnectionBanner } from "@/components/connection-banner";
 import { Logo } from "@/components/logo";
+import { CONVEX_URL } from "@/lib/env";
 import { font, useColors, useNavigationTheme } from "@/lib/theme";
 
-const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, {
+const convex = new ConvexReactClient(CONVEX_URL, {
   unsavedChangesWarning: false,
 });
 
@@ -72,22 +74,25 @@ function Screens() {
   }
 
   return (
-    <Stack
-      screenOptions={{
-        headerShadowVisible: false,
-        headerTitleStyle: { fontFamily: font.semibold },
-        headerBackButtonDisplayMode: "minimal",
-      }}
-    >
-      <Stack.Protected guard={isAuthenticated}>
-        <Stack.Screen name="index" options={{ title: "Codenaya", headerTitle: () => <Logo size={18} /> }} />
-        <Stack.Screen name="projects/[id]/index" options={{ title: "" }} />
-        <Stack.Screen name="projects/[id]/files" options={{ title: "Files" }} />
-        <Stack.Screen name="projects/[id]/file" options={{ title: "" }} />
-      </Stack.Protected>
-      <Stack.Protected guard={!isAuthenticated}>
-        <Stack.Screen name="sign-in" options={{ headerShown: false }} />
-      </Stack.Protected>
-    </Stack>
+    <>
+      <Stack
+        screenOptions={{
+          headerShadowVisible: false,
+          headerTitleStyle: { fontFamily: font.semibold },
+          headerBackButtonDisplayMode: "minimal",
+        }}
+      >
+        <Stack.Protected guard={isAuthenticated}>
+          <Stack.Screen name="index" options={{ title: "Codenaya", headerTitle: () => <Logo size={18} /> }} />
+          <Stack.Screen name="projects/[id]/index" options={{ title: "" }} />
+          <Stack.Screen name="projects/[id]/files" options={{ title: "Files" }} />
+          <Stack.Screen name="projects/[id]/file" options={{ title: "" }} />
+        </Stack.Protected>
+        <Stack.Protected guard={!isAuthenticated}>
+          <Stack.Screen name="sign-in" options={{ headerShown: false }} />
+        </Stack.Protected>
+      </Stack>
+      <ConnectionBanner />
+    </>
   );
 }

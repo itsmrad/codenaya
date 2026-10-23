@@ -4,10 +4,11 @@ import { BookOpen, Check, Copy, Hammer, ListChecks, RotateCcw, Undo2 } from "luc
 import { type ReactNode, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useMarkdown } from "react-native-marked";
-import { useReducedMotion } from "react-native-reanimated";
+import Animated, { useReducedMotion } from "react-native-reanimated";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { AgentRun } from "@/components/agent-run";
+import { fadeUp } from "@/lib/motion";
 import { STALLED_RUN_MS, lastRunActivity, sanitizeAgentText, splitSlashSkills } from "@/lib/shared";
 import { type Colors, font, radius, useColors } from "@/lib/theme";
 
@@ -19,10 +20,13 @@ export function UserMessage({
   content,
   imageUrls = [],
   skillNames,
+  animate = false,
 }: {
   content: string;
   imageUrls?: string[];
   skillNames?: ReadonlySet<string>;
+  /** Fades up on mount: a message that arrived while the chat was open. */
+  animate?: boolean;
 }) {
   const c = useColors();
   const { names, rest } = splitSlashSkills(content);
@@ -33,7 +37,7 @@ export function UserMessage({
     : content;
 
   return (
-    <View style={styles.user}>
+    <Animated.View entering={animate ? fadeUp() : undefined} style={styles.user}>
       {imageUrls.length > 0 && (
         <View style={styles.images}>
           {imageUrls.map((url) => (
@@ -56,7 +60,7 @@ export function UserMessage({
           {text.trim() ? <Text style={[styles.userText, { color: c.foreground }]}>{text}</Text> : null}
         </View>
       )}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -97,7 +101,12 @@ function Reply({ content }: { content: string }) {
 
 function IconAction({ label, onPress, children }: { label: string; onPress: () => void; children: ReactNode }) {
   return (
-    <Pressable onPress={onPress} hitSlop={8} accessibilityLabel={label} style={styles.action}>
+    <Pressable
+      onPress={onPress}
+      hitSlop={8}
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+    >
       {children}
     </Pressable>
   );
@@ -178,7 +187,8 @@ export function AssistantMessage({
   );
 
   return (
-    <View style={styles.assistant}>
+    // Seen running: it settles in. A reply loaded from history stays still.
+    <Animated.View entering={startedProcessing ? fadeUp() : undefined} style={styles.assistant}>
       {(status === "processing" || steps.length > 0) && (
         <AgentRun
           steps={steps}
@@ -230,7 +240,7 @@ export function AssistantMessage({
           </View>
         </>
       ) : null}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -263,6 +273,7 @@ const styles = StyleSheet.create({
   muted: { fontSize: 14, fontFamily: font.regular },
   actions: { flexDirection: "row", gap: 14, marginTop: -4 },
   action: { padding: 2 },
+  pressed: { opacity: 0.5 },
   stalled: { flexDirection: "row", alignItems: "center", gap: 8 },
   stalledBadge: {
     fontSize: 11.5,

@@ -6,7 +6,6 @@ import { useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,6 +16,7 @@ import {
 
 import { GoogleIcon } from "@/components/google-icon";
 import { Logo } from "@/components/logo";
+import { webUrl } from "@/lib/http";
 import { font, radius, useColors } from "@/lib/theme";
 
 // Closes Google's browser tab when it redirects back to the app.
@@ -79,7 +79,7 @@ export default function SignIn() {
   return (
     <KeyboardAvoidingView
       style={[styles.flex, { backgroundColor: c.background }]}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior="padding"
     >
       <ScrollView contentContainerStyle={styles.screen} keyboardShouldPersistTaps="handled">
         <View style={styles.logo}>
@@ -183,7 +183,7 @@ export default function SignIn() {
               Don’t have an account?{" "}
               <Text
                 style={{ color: c.foreground, fontFamily: font.medium }}
-                onPress={() => WebBrowser.openBrowserAsync(`${process.env.EXPO_PUBLIC_API_URL}/sign-up`)}
+                onPress={() => WebBrowser.openBrowserAsync(webUrl("/sign-up"))}
               >
                 Sign up
               </Text>

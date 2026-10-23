@@ -15,6 +15,7 @@ import {
 } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import Animated from "react-native-reanimated";
 
 import { Sheet, SheetRow, SheetSection } from "@/components/sheet";
 import type { useAgentModel } from "@/lib/agent-model";
@@ -33,9 +34,12 @@ function ToolButton({
   onPress,
   c,
   accessibilityLabel,
+  shrink,
 }: {
   icon: ReactNode;
   label?: string;
+  /** Gives up width first, truncating its label (the model name). */
+  shrink?: boolean;
   active?: boolean;
   disabled?: boolean;
   onPress: () => void;
@@ -49,11 +53,14 @@ function ToolButton({
       hitSlop={4}
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ selected: active, disabled }}
-      style={[styles.tool, active && { backgroundColor: c.muted }, disabled && styles.disabled]}
+      style={[styles.tool, shrink && styles.shrink, active && { backgroundColor: c.muted }, disabled && styles.disabled]}
     >
       {icon}
       {label && (
-        <Text style={[styles.toolText, { color: active ? c.foreground : c.mutedForeground }]} numberOfLines={1}>
+        <Text
+          style={[styles.toolText, shrink && styles.shrink, { color: active ? c.foreground : c.mutedForeground }]}
+          numberOfLines={1}
+        >
           {label}
         </Text>
       )}
@@ -93,6 +100,7 @@ export function ChatComposer({
   const [error, setError] = useState<string>();
   const [sheet, setSheet] = useState<"model" | "skills">();
   const [enhancing, setEnhancing] = useState(false);
+  const [focused, setFocused] = useState(false);
   // Undo stays available until the enhanced text is edited, as on the web.
   const [enhanced, setEnhanced] = useState<{ original: string; enhanced: string }>();
   const canUndo = enhanced?.enhanced === text;
@@ -163,7 +171,14 @@ export function ChatComposer({
   return (
     <View style={[styles.wrap, { backgroundColor: c.background }]}>
       {error && <Text style={[styles.error, { color: c.destructive }]}>{error}</Text>}
-      <View style={[styles.box, { backgroundColor: c.card, borderColor: c.border }]}>
+      {/* The web's focus ring: the border brightens while typing. */}
+      <Animated.View
+        style={[
+          styles.box,
+          { backgroundColor: c.card, borderColor: focused ? c.mutedForeground : c.border },
+          { transitionProperty: "borderColor", transitionDuration: 150 },
+        ]}
+      >
         {images.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbs}>
             {images.map((image) => (
@@ -185,6 +200,8 @@ export function ChatComposer({
           style={[styles.input, { color: c.foreground }]}
           value={text}
           onChangeText={setText}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           placeholder={
             running ? "Codenaya is working…" : planMode ? "Describe what to plan…" : "Ask Codenaya to change something…"
           }
@@ -192,7 +209,8 @@ export function ChatComposer({
           multiline
         />
         <View style={styles.toolbar}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.flex} contentContainerStyle={styles.tools}>
+          {/* One row, no scrolling: the model name truncates so every tool fits. */}
+          <View style={styles.tools}>
             <ToolButton
               c={c}
               accessibilityLabel="Attach images"
@@ -205,6 +223,7 @@ export function ChatComposer({
               accessibilityLabel="Agent model"
               icon={<ChevronDown size={14} color={c.mutedForeground} />}
               label={modelName}
+              shrink
               onPress={() => setSheet("model")}
               disabled={running}
             />
@@ -252,7 +271,7 @@ export function ChatComposer({
                 disabled={running || enhancing || !text.trim()}
               />
             )}
-          </ScrollView>
+          </View>
           <Pressable
             onPress={press}
             disabled={!enabled}
@@ -268,7 +287,7 @@ export function ChatComposer({
             )}
           </Pressable>
         </View>
-      </View>
+      </Animated.View>
 
       <Sheet visible={sheet === "model"} title="Agent model" onClose={() => setSheet(undefined)}>
         {agent.groups.map((group) => (
@@ -319,9 +338,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: font.regular,
   },
-  flex: { flex: 1 },
   toolbar: { flexDirection: "row", alignItems: "center", gap: 6 },
-  tools: { alignItems: "center", gap: 2 },
+  tools: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 2 },
+  shrink: { flexShrink: 1, minWidth: 0 },
   tool: {
     flexDirection: "row",
     alignItems: "center",
@@ -329,7 +348,6 @@ const styles = StyleSheet.create({
     height: 30,
     paddingHorizontal: 8,
     borderRadius: radius.sm,
-    maxWidth: 170,
   },
   toolText: { fontSize: 12.5, fontFamily: font.medium },
   disabled: { opacity: 0.4 },

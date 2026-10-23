@@ -5,11 +5,13 @@ import * as WebBrowser from "expo-web-browser";
 import { CircleAlert, Copy, Download, ExternalLink, GitBranch, Link, MoreHorizontal, Pencil, Trash2 } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import Animated from "react-native-reanimated";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { api } from "@/lib/api";
 import { errorMessage, timeAgo } from "@/lib/format";
 import { webUrl } from "@/lib/http";
+import { PULSE } from "@/lib/motion";
 import { getCoverHue, getInitials } from "@/lib/project-cover";
 import { shareProjectZip } from "@/lib/project-zip";
 import { type Colors, font, radius, useColors } from "@/lib/theme";
@@ -22,7 +24,7 @@ function StatusBadge({ project, c }: { project: Doc<"projects">; c: Colors }) {
   if (project.importStatus === "importing") {
     content = (
       <>
-        <View style={[styles.dot, { backgroundColor: c.brand }]} />
+        <Animated.View style={[styles.dot, { backgroundColor: c.brand }, PULSE]} />
         <Text style={[styles.badgeText, { color: c.foreground }]}>Importing…</Text>
       </>
     );
@@ -83,7 +85,11 @@ export function ProjectCard({ project }: { project: Doc<"projects"> }) {
     <Pressable
       onPress={() => router.push(`/projects/${project._id}`)}
       onLongPress={() => setMenuOpen(true)}
-      style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}
+      style={({ pressed }) => [
+        styles.card,
+        { backgroundColor: c.card, borderColor: c.border },
+        pressed && styles.pressed,
+      ]}
     >
       <View style={[styles.cover, { backgroundColor: `hsla(${hue}, 70%, 60%, 0.14)` }]}>
         <View style={[styles.bar, styles.barTitle, { backgroundColor: `hsla(${hue}, 60%, 50%, 0.35)` }]} />
@@ -155,6 +161,7 @@ export function ProjectCard({ project }: { project: Doc<"projects"> }) {
 
 const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: radius.xl, overflow: "hidden" },
+  pressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
   cover: { aspectRatio: 16 / 10, alignItems: "center", paddingTop: "8%", gap: 8 },
   bar: { height: 6, width: "40%", borderRadius: 3 },
   barTitle: { height: 10, width: "60%", borderRadius: 5 },

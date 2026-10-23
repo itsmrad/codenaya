@@ -1,3 +1,5 @@
+import { API_URL } from "./env";
+
 /**
  * Calls a Next.js API route as the signed-in user. Native apps have no
  * cookies, so the Clerk session token goes in the Authorization header, which
@@ -8,7 +10,7 @@ export const postApi = async <T>(
   body: unknown,
   getToken: () => Promise<string | null>,
 ): Promise<{ ok: boolean; status: number; data: T & { error?: string; code?: string } }> => {
-  const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}${path}`, {
+  const response = await fetch(`${API_URL}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -21,4 +23,4 @@ export const postApi = async <T>(
 };
 
 /** A page on the Codenaya website, e.g. a project's IDE for "Open on the website". */
-export const webUrl = (path: string) => `${process.env.EXPO_PUBLIC_API_URL}${path}`;
+export const webUrl = (path: string) => `${API_URL}${path}`;

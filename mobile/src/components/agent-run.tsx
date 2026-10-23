@@ -19,9 +19,11 @@ import {
   Plug,
   Wrench,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import Animated, { FadeIn, FadeOut, LinearTransition, useReducedMotion } from "react-native-reanimated";
 
+import { fadeUp, staggerDelay } from "@/lib/motion";
 import { type AgentStep, BUILD_VERIFIED, formatDuration } from "@/lib/shared";
 import { type Colors, font, radius, useColors } from "@/lib/theme";
 
@@ -128,6 +130,88 @@ const useNow = (active: boolean) => {
   return now;
 };
 
+/**
+ * Per-cell delays (ms) of the web's pixel loader (run-loader.tsx): a 3×3 grid
+ * with a chevron wavefront driving right.
+ */
+const CHEVRON = Array.from({ length: 9 }, (_, index) => {
+  const row = Math.floor(index / 3);
+  const column = index % 3;
+  return (column + Math.abs(row - 1)) * 90;
+});
+
+// The web's pixel-on keyframes (globals.css).
+const PIXEL_ON = {
+  "0%, 100%": { opacity: 0.15 },
+  "18%, 42%": { opacity: 1 },
+  "62%": { opacity: 0.15 },
+};
+
+/** The web's live-run loader. Reduced motion freezes it with the centre lit. */
+function LoaderGrid({ c }: { c: Colors }) {
+  const reduceMotion = useReducedMotion();
+  return (
+    <View style={styles.grid}>
+      {CHEVRON.map((delay, index) => (
+        <Animated.View
+          key={index}
+          style={[
+            styles.pixel,
+            { backgroundColor: c.brand, opacity: reduceMotion && index === 4 ? 1 : 0.15 },
+            !reduceMotion && {
+              animationName: PIXEL_ON,
+              animationDuration: "650ms",
+              animationDelay: `${delay}ms`,
+              animationIterationCount: "infinite",
+              animationTimingFunction: "ease-in-out",
+            },
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
+
+/**
+ * The live step label. The web sweeps a shimmer across it; without a gradient
+ * text library a soft pulse at the same pace stands in.
+ */
+function LiveLabel({ text, c }: { text: string; c: Colors }) {
+  const reduceMotion = useReducedMotion();
+  return (
+    <Animated.Text
+      numberOfLines={1}
+      style={[
+        styles.headerText,
+        styles.flex,
+        { color: reduceMotion ? c.mutedForeground : c.foreground },
+        !reduceMotion && {
+          animationName: { "0%": { opacity: 1 }, "50%": { opacity: 0.45 }, "100%": { opacity: 1 } },
+          animationDuration: "1.4s",
+          animationIterationCount: "infinite",
+          animationTimingFunction: "linear",
+        },
+      ]}
+    >
+      {text}
+    </Animated.Text>
+  );
+}
+
+/** A chevron that turns to point down when open, like the web's collapsible. */
+function Chevron({ open, c, style }: { open: boolean; c: Colors; style?: object }) {
+  return (
+    <Animated.View
+      style={[
+        style,
+        { transform: [{ rotate: open ? "90deg" : "0deg" }], transitionProperty: "transform", transitionDuration: 150 },
+      ]}
+    >
+      <ChevronRight size={14} color={c.mutedForeground} />
+    </Animated.View>
+  );
+}
+
 /** Tools whose targets are not project files: their chips never open. */
 const NON_FILE_TOOLS = new Set(["scrapeUrls", "setEnvVar", "loadSkill", "checkBuild", "deleteFiles"]);
 
@@ -154,16 +238,12 @@ function ThinkingRow({ step, c }: { step: AgentStep; c: Colors }) {
         <Text style={[styles.rowText, { color: c.foreground }]}>
           {step.endedAt ? `Thought for ${formatDuration(step.endedAt - step.startedAt)}` : "Thought"}
         </Text>
-        <ChevronRight
-          size={14}
-          color={c.mutedForeground}
-          style={{ transform: [{ rotate: open ? "90deg" : "0deg" }] }}
-        />
+        <Chevron open={open} c={c} />
       </Pressable>
       {open && (
-        <View style={[styles.thought, { borderColor: c.border }]}>
+        <Animated.View entering={FadeIn.duration(200)} style={[styles.thought, { borderColor: c.border }]}>
           <Text style={[styles.thoughtText, { color: c.mutedForeground }]}>{step.text}</Text>
-        </View>
+        </Animated.View>
       )}
     </View>
   );
@@ -172,16 +252,27 @@ function ThinkingRow({ step, c }: { step: AgentStep; c: Colors }) {
 function StepRow({
   row,
   live,
+  entryIndex,
   c,
   onOpenFile,
 }: {
   row: Row;
   live: boolean;
+  /** Position within the batch of rows that just arrived; unset for rows
+   *  already there when the run mounted (history never animates). */
+  entryIndex?: number;
   c: Colors;
   onOpenFile?: (path: string) => void;
 }) {
   const [errorOpen, setErrorOpen] = useState(false);
-  if (row.step.kind === "thinking") return row.step.text ? <ThinkingRow step={row.step} c={c} /> : null;
+  const entering = entryIndex === undefined ? undefined : fadeUp({ delay: staggerDelay(entryIndex, 60) });
+  if (row.step.kind === "thinking") {
+    return row.step.text ? (
+      <Animated.View entering={entering}>
+        <ThinkingRow step={row.step} c={c} />
+      </Animated.View>
+    ) : null;
+  }
 
   const { icon: Icon } = toolMeta(row.step.tool);
   const running = live && row.step.status === "running";
@@ -193,7 +284,7 @@ function StepRow({
   const open = NON_FILE_TOOLS.has(tool) || tool.includes("__") ? undefined : onOpenFile;
 
   return (
-    <View>
+    <Animated.View entering={entering}>
       <View style={styles.row}>
         <Icon size={14} color={tint} />
         <View style={styles.rowBody}>
@@ -228,7 +319,7 @@ function StepRow({
           </Text>
         </Pressable>
       )}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -260,14 +351,25 @@ export function AgentRun({
   const c = useColors();
   const live = status === "processing" && !stalled;
   const [open, setOpen] = useState(live);
+  const toggled = useRef(false);
   const now = useNow(live);
+  // Mounted mid-run: the summary settles in when it ends. History stays still.
+  const [startedLive] = useState(live);
 
-  // Collapse once the run ends.
+  // Collapse shortly after the run ends, unless the user took control.
   useEffect(() => {
-    if (!live) setOpen(false);
+    if (live || toggled.current) return;
+    const timer = setTimeout(() => setOpen(false), 600);
+    return () => clearTimeout(timer);
   }, [live]);
 
   const rows = toRows(steps);
+  // Rows that arrived since the last update form a batch that fades up with a
+  // stagger. Rows already there on mount (history) never animate.
+  const [batch, setBatch] = useState({ count: rows.length, start: rows.length });
+  if (rows.length !== batch.count) {
+    setBatch({ count: rows.length, start: Math.min(batch.count, rows.length) });
+  }
   const toolSteps = steps.filter((step) => step.kind === "tool");
   const errors = toolSteps.filter((step) => step.status === "error").length;
   const changed = new Set(
@@ -277,8 +379,7 @@ export function AgentRun({
       .filter(Boolean),
   ).size;
   const endedAt = completedAt ?? toolSteps.at(-1)?.endedAt;
-  const visible = live ? rows.slice(-LIVE_ROWS) : rows;
-  const hidden = rows.length - visible.length;
+  const hidden = live ? Math.max(0, rows.length - LIVE_ROWS) : 0;
 
   const summary = [
     `${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`,
@@ -289,18 +390,26 @@ export function AgentRun({
     .join(" · ");
 
   return (
-    <View style={[styles.run, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Pressable style={styles.header} onPress={() => setOpen((value) => !value)} disabled={rows.length === 0}>
+    <Animated.View
+      layout={LinearTransition.duration(200)}
+      style={[styles.run, { backgroundColor: c.card, borderColor: c.border }]}
+    >
+      <Pressable
+        style={({ pressed }) => [styles.header, pressed && { backgroundColor: c.muted }]}
+        onPress={() => {
+          toggled.current = true;
+          setOpen((value) => !value);
+        }}
+        disabled={rows.length === 0}
+      >
         {live ? (
           <>
-            <ActivityIndicator size="small" color={c.brand} />
-            <Text style={[styles.headerText, styles.flex, { color: c.foreground }]} numberOfLines={1}>
-              {liveStepLabel(rows)}
-            </Text>
+            <LoaderGrid c={c} />
+            <LiveLabel text={liveStepLabel(rows)} c={c} />
             <Text style={[styles.timer, { color: c.mutedForeground }]}>{formatDuration(now - startedAt)}</Text>
           </>
         ) : (
-          <>
+          <Animated.View entering={startedLive ? FadeIn.duration(300) : undefined} style={styles.summary}>
             {errors > 0 || stalled || status === "cancelled" ? (
               <CircleAlert size={14} color={errors > 0 || stalled ? c.destructive : c.mutedForeground} />
             ) : (
@@ -325,27 +434,37 @@ export function AgentRun({
                 · {errors} {errors === 1 ? "error" : "errors"}
               </Text>
             )}
-            <ChevronRight
-              size={14}
-              color={c.mutedForeground}
-              style={[styles.chevron, { transform: [{ rotate: open ? "90deg" : "0deg" }] }]}
-            />
-          </>
+            <Chevron open={open} c={c} style={styles.chevron} />
+          </Animated.View>
         )}
       </Pressable>
       {open && rows.length > 0 && (
-        <View style={[styles.body, { borderColor: c.border }]}>
+        <Animated.View
+          entering={FadeIn.duration(200)}
+          exiting={FadeOut.duration(150)}
+          style={[styles.body, { borderColor: c.border }]}
+        >
           {hidden > 0 && (
             <Text style={[styles.more, styles.earlier, { color: c.mutedForeground }]}>
               +{hidden} earlier {hidden === 1 ? "step" : "steps"}
             </Text>
           )}
-          {visible.map((row) => (
-            <StepRow key={row.key} row={row} live={live} c={c} onOpenFile={onOpenFile} />
-          ))}
-        </View>
+          {rows.slice(hidden).map((row, index) => {
+            const position = hidden + index;
+            return (
+              <StepRow
+                key={row.key}
+                row={row}
+                live={live}
+                entryIndex={position >= batch.start ? position - batch.start : undefined}
+                c={c}
+                onOpenFile={onOpenFile}
+              />
+            );
+          })}
+        </Animated.View>
       )}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -353,6 +472,9 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   run: { borderWidth: 1, borderRadius: radius.lg, overflow: "hidden" },
   header: { minHeight: 38, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12 },
+  summary: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
+  grid: { width: 15, flexDirection: "row", flexWrap: "wrap", gap: 1.5 },
+  pixel: { width: 4, height: 4, borderRadius: 1 },
   headerText: { fontSize: 13, fontFamily: font.regular },
   timer: { fontSize: 12, fontFamily: font.regular, fontVariant: ["tabular-nums"] },
   chevron: { marginLeft: "auto" },

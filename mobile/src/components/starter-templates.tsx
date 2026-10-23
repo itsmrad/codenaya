@@ -38,7 +38,10 @@ export function StarterTemplates() {
             onPress={() => use(template)}
             disabled={creating !== undefined}
             accessibilityLabel={`Use the ${template.title} template`}
-            style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}
+            style={({ pressed }) => [
+              styles.card,
+              { backgroundColor: pressed ? c.muted : c.card, borderColor: c.border },
+            ]}
           >
             <View style={styles.header}>
               <Text style={[styles.name, { color: c.foreground }]} numberOfLines={1}>

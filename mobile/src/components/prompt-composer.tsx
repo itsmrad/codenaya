@@ -1,6 +1,7 @@
 import { ArrowUp, ChartColumn, ListTodo, Rocket, SquareKanban, UserRound } from "lucide-react-native";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import Animated, { useReducedMotion } from "react-native-reanimated";
 
 import { useCreateProject } from "@/lib/create-project";
 import { font, radius, useColors } from "@/lib/theme";
@@ -34,6 +35,45 @@ const STARTER_PROMPTS = [
   },
 ];
 
+// The web's typed placeholder ideas (prompt-composer.tsx).
+const PLACEHOLDER_PREFIX = "Ask Codenaya to build ";
+const PLACEHOLDER_IDEAS = [
+  "a SaaS landing page…",
+  "a habit tracker with streaks…",
+  "a recipe finder…",
+  "a portfolio for a photographer…",
+  "an invoice generator…",
+];
+
+/**
+ * Types each idea into the placeholder, pauses, then moves to the next, like
+ * the web. Only while the box is empty and unfocused.
+ */
+const useTypedPlaceholder = (enabled: boolean) => {
+  const [text, setText] = useState(PLACEHOLDER_PREFIX + PLACEHOLDER_IDEAS[0]);
+  useEffect(() => {
+    if (!enabled) return;
+    let idea = 0;
+    let length = 0;
+    let pause = 0;
+    const id = setInterval(() => {
+      const target = PLACEHOLDER_IDEAS[idea];
+      if (length < target.length) {
+        length += 1;
+      } else if (pause < 25) {
+        pause += 1;
+      } else {
+        idea = (idea + 1) % PLACEHOLDER_IDEAS.length;
+        length = 0;
+        pause = 0;
+      }
+      setText(PLACEHOLDER_PREFIX + PLACEHOLDER_IDEAS[idea].slice(0, length));
+    }, 60);
+    return () => clearInterval(id);
+  }, [enabled]);
+  return text;
+};
+
 /**
  * The dashboard's "What will you build?" box: creates a project from the
  * prompt through the web's route, then opens it while the agent starts.
@@ -44,6 +84,9 @@ export function PromptComposer() {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [focused, setFocused] = useState(false);
+  const reduceMotion = useReducedMotion();
+  const placeholder = useTypedPlaceholder(!reduceMotion && !prompt && !focused);
 
   const create = async () => {
     setBusy(true);
@@ -58,12 +101,22 @@ export function PromptComposer() {
 
   return (
     <View>
-      <View style={[styles.box, { backgroundColor: c.card, borderColor: c.border }]}>
+      {/* The web spins a brand-colored border around the focused box; RN has
+          no conic gradient, so the border fades to the brand color instead. */}
+      <Animated.View
+        style={[
+          styles.box,
+          { backgroundColor: c.card, borderColor: focused ? c.brand : c.border },
+          { transitionProperty: "borderColor", transitionDuration: 200 },
+        ]}
+      >
         <TextInput
           style={[styles.input, { color: c.foreground }]}
           value={prompt}
           onChangeText={setPrompt}
-          placeholder="Ask Codenaya to build a SaaS landing page…"
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder={placeholder}
           placeholderTextColor={c.mutedForeground}
           multiline
           editable={!busy}
@@ -82,7 +135,7 @@ export function PromptComposer() {
             )}
           </Pressable>
         </View>
-      </View>
+      </Animated.View>
       {error && <Text style={[styles.error, { color: c.destructive }]}>{error}</Text>}
       {/* One left-aligned row that scrolls sideways, rather than wrapped and centred. */}
       <ScrollView
@@ -95,7 +148,10 @@ export function PromptComposer() {
           <Pressable
             key={label}
             onPress={() => setPrompt(starter)}
-            style={[styles.chip, { borderColor: c.border, backgroundColor: c.card }]}
+            style={({ pressed }) => [
+              styles.chip,
+              { borderColor: c.border, backgroundColor: pressed ? c.muted : c.card },
+            ]}
           >
             <Icon size={14} color={c.mutedForeground} />
             <Text style={[styles.chipText, { color: c.mutedForeground }]}>{label}</Text>

@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useHeaderHeight } from "expo-router/react-navigation";
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { api } from "@/lib/api";
@@ -31,6 +32,7 @@ type SaveState = "saved" | "unsaved" | "saving" | "error";
 export default function FileView() {
   const c = useColors();
   const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const params = useLocalSearchParams<{ fileId: string; edit?: string }>();
   const fileId = params.fileId as Id<"files">;
   const file = useQuery(api.files.getFile, { id: fileId });
@@ -97,8 +99,10 @@ export default function FileView() {
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 44 : 0}
+      // Android draws edge to edge, so the window no longer resizes for the
+      // keyboard: pad on both platforms, below the header.
+      behavior="padding"
+      keyboardVerticalOffset={headerHeight}
     >
       <Stack.Screen
         options={{
