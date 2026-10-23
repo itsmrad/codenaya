@@ -93,8 +93,12 @@ function Screens() {
         }}
       >
         <Stack.Protected guard={isAuthenticated}>
-          <Stack.Screen name="index" options={{ title: "Codenaya", headerTitle: () => <Logo size={18} /> }} />
-          <Stack.Screen name="projects/[id]/index" options={{ title: "" }} />
+          <Stack.Screen
+            name="index"
+            options={{ title: "Codenaya", headerTitle: "", headerLeft: () => <Logo size={22} /> }}
+          />
+          <Stack.Screen name="projects/index" options={{ title: "All projects" }} />
+        <Stack.Screen name="projects/[id]/index" options={{ title: "" }} />
           <Stack.Screen name="projects/[id]/files" options={{ title: "Files" }} />
           <Stack.Screen name="projects/[id]/file" options={{ title: "" }} />
         <Stack.Screen name="projects/[id]/integrations" options={{ title: "Integrations & env" }} />

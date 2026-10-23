@@ -1,26 +1,36 @@
-import { StyleSheet, Text, View } from "react-native";
-import Svg, { Path } from "react-native-svg";
+import { StyleSheet, Text, View, useColorScheme } from "react-native";
+import Svg, { Path, Rect } from "react-native-svg";
 
 import { font, useColors } from "@/lib/theme";
 
-/** The website's mark (public/logo-alt.svg) and lowercase wordmark. */
-export function Logo({ size = 20 }: { size?: number }) {
+// The "Cursor C" monogram (assets/brand/cursor-c-*.svg): a ring with a block
+// cursor in its mouth. The light version uses a deeper orange for contrast.
+const MARK = {
+  dark: { ring: "#FAFAF9", cursor: "#EC6A47" },
+  light: { ring: "#09090B", cursor: "#D45431" },
+};
+const RING = "M26.79 -20.93A34 34 0 1 0 26.79 20.93L14.97 11.70A19 19 0 1 1 14.97 -11.70Z";
+
+/** The Cursor C mark, optionally with the lowercase wordmark. */
+export function Logo({ size = 20, wordmark = true }: { size?: number; wordmark?: boolean }) {
   const c = useColors();
+  const colors = MARK[useColorScheme() === "light" ? "light" : "dark"];
   return (
-    <View style={styles.row}>
-      <Svg width={size} height={size * 1.2} viewBox="0 0 40 48" fill="none">
-        <Path
-          d="M20 4V16.3604C20 19.087 16.6569 20.3998 14.8016 18.4017L7 10M40 24H27.6396C24.913 24 23.6002 20.6569 25.5983 18.8016L34 11M20 44V31.6396C20 28.913 23.3431 27.6002 25.1984 29.5983L33 38M0 24L12.3604 24C15.087 24 16.3998 27.3431 14.4017 29.1984L6 37"
-          stroke={c.foreground}
-          strokeWidth={4}
-        />
+    <View style={[styles.row, { gap: size * 0.45 }]}>
+      <Svg width={size} height={size} viewBox="-34.5 -34 68 68">
+        <Path d={RING} fill={colors.ring} />
+        <Rect x={24} y={-9.5} width={9} height={19} fill={colors.cursor} />
       </Svg>
-      <Text style={[styles.word, { color: c.foreground, fontSize: size * 0.8 }]}>codenaya</Text>
+      {wordmark && (
+        // Sized like the brand board (the wordmark about as tall as the C), with
+        // a line box that hugs the glyphs so the row centres the C on the text.
+        <Text style={[styles.word, { color: c.foreground, fontSize: size, lineHeight: size * 1.15 }]}>codenaya</Text>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: 10 },
-  word: { fontFamily: font.semibold, letterSpacing: -0.3 },
+  row: { flexDirection: "row", alignItems: "center" },
+  word: { fontFamily: font.semibold, letterSpacing: -0.5, includeFontPadding: false, textAlignVertical: "center" },
 });

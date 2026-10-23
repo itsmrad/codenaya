@@ -46,11 +46,11 @@ function StatusBadge({ project, c }: { project: Doc<"projects">; c: Colors }) {
 }
 
 /**
- * A compact project row: the name in a rounded card, with the web card's
- * status pill. The menu holds the web card's link actions plus duplicate,
- * download, rename and delete.
+ * A compact project row: the name in a rounded card (or, `plain`, a bare row
+ * for the dashboard's recent list), with the web card's status pill. The menu
+ * holds the web card's link actions plus duplicate, download, rename and delete.
  */
-export function ProjectCard({ project }: { project: Doc<"projects"> }) {
+export function ProjectCard({ project, plain = false }: { project: Doc<"projects">; plain?: boolean }) {
   const c = useColors();
   const router = useRouter();
   const convex = useConvex();
@@ -82,12 +82,11 @@ export function ProjectCard({ project }: { project: Doc<"projects"> }) {
       onPress={() => router.push(`/projects/${project._id}`)}
       onLongPress={() => setMenuOpen(true)}
       style={({ pressed }) => [
-        styles.card,
-        { backgroundColor: c.card, borderColor: c.border },
-        pressed && styles.pressed,
+        plain ? styles.plain : [styles.card, { backgroundColor: c.card, borderColor: c.border }],
+        pressed && (plain ? { backgroundColor: c.muted } : styles.pressed),
       ]}
     >
-      <View style={styles.row}>
+      <View style={[styles.row, plain && styles.plainRow]}>
         <Text style={[styles.name, { color: c.foreground }]} numberOfLines={1}>
           {project.name}
         </Text>
@@ -147,6 +146,8 @@ export function ProjectCard({ project }: { project: Doc<"projects"> }) {
 const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: radius.xl, overflow: "hidden" },
   pressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
+  plain: { borderRadius: radius.md },
+  plainRow: { paddingHorizontal: 6, paddingVertical: 13 },
   badge: {
     flexDirection: "row",
     alignItems: "center",

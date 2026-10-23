@@ -8,7 +8,10 @@
     "scheme": "codenaya",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
+      "icon": {
+        "light": "./assets/images/icon-light.png",
+        "dark": "./assets/images/icon-dark.png"
+      },
       "bundleIdentifier": "com.codenaya.app"
     },
     "android": {
@@ -30,9 +33,13 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#09090b",
+          "backgroundColor": "#ffffff",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 76,
+          "dark": {
+            "backgroundColor": "#09090b",
+            "image": "./assets/images/splash-icon-dark.png"
+          }
         }
       ],
       "@clerk/expo",
