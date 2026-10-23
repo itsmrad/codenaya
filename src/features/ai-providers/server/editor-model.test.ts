@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
+  platform: vi.fn(),
   mutation: vi.fn(),
   openProviderKey: vi.fn(),
   buildAiSdkModel: vi.fn(),
@@ -9,13 +10,21 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/convex-client", async () => {
   const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
+  return { convex: { query: withEnvPlatform(mocks.query, mocks.platform), mutation: mocks.mutation } };
 });
 vi.mock("./sealed-key", () => ({ openProviderKey: mocks.openProviderKey }));
+// Outside a request, run `after` callbacks at once.
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  after: (task: () => unknown) => task(),
+}));
 vi.mock("./ai-sdk-model", () => ({ buildAiSdkModel: mocks.buildAiSdkModel }));
 
+import type { LanguageModelV3 } from "@ai-sdk/provider";
+import { MockLanguageModelV3 } from "ai/test";
+
 import { PROVIDER_KEY_ERROR_CODE } from "../registry";
-import { resolveEditorModel, withEditorModel } from "./editor-model";
+import { UsageLimitError, resolveEditorModel, withEditorModel } from "./editor-model";
 import { ProviderKeyError } from "./resolve-run-model";
 
 const SECRET = "sk-user-secret-key-1234";
@@ -36,6 +45,16 @@ const customKey = {
   baseUrl: "https://api.groq.test/openai/v1",
   modelIds: ["llama-4-scout", "llama-4-maverick"],
   status: "active" as const,
+};
+
+/** Free plan, $3.00 of $3.00 used. */
+const OVER_CAP = {
+  planId: "free",
+  costMicroUsd: 3_000_000,
+  tokens: 1_000,
+  costLimitMicroUsd: 3_000_000,
+  exceeded: true,
+  exceededBy: "usd",
 };
 
 const resolve = () =>
@@ -61,10 +80,63 @@ describe("resolveEditorModel", () => {
       userId: "user_1",
     });
     expect(resolved?.key).toBeUndefined();
-    expect(resolved?.model).toEqual({
-      byok: { provider: "openrouter", apiKey: "sk-or-platform", model: "openai/gpt-5.4-mini" },
+    expect(mocks.buildAiSdkModel).toHaveBeenCalledWith({
+      provider: "openrouter",
+      apiKey: "sk-or-platform",
+      model: "openai/gpt-5.4-mini",
     });
     expect(mocks.openProviderKey).not.toHaveBeenCalled();
+  });
+
+  it("refuses platform AI over the monthly cap, naming the cap", async () => {
+    mocks.query.mockResolvedValue(null);
+    mocks.platform.mockReturnValue({ provider: "openrouter", config: null, usage: OVER_CAP });
+
+    const error = await resolve().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(UsageLimitError);
+    expect((error as Error).message).toMatch(/Free plan's \$3\.00 of Codenaya AI/);
+    expect(mocks.buildAiSdkModel).not.toHaveBeenCalled();
+  });
+
+  it("lets a default key through when platform usage is over the cap", async () => {
+    mocks.query.mockResolvedValue({ key: anthropicKey, modelId: "claude-opus-5-5" });
+    mocks.platform.mockReturnValue({ provider: "openrouter", config: null, usage: OVER_CAP });
+
+    expect((await resolve())?.key?._id).toBe("key_1");
+  });
+
+  it("meters each platform call once, to the user, as editor usage", async () => {
+    mocks.query.mockResolvedValue(null);
+    mocks.buildAiSdkModel.mockReturnValue(
+      new MockLanguageModelV3({
+        doGenerate: {
+          content: [{ type: "text", text: "ok" }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: {
+            inputTokens: { total: 120, noCache: 120, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 30, text: 30, reasoning: 0 },
+          },
+          warnings: [],
+        },
+      }),
+    );
+
+    mocks.mutation.mockResolvedValue({});
+    const model = (await resolve())!.model as LanguageModelV3;
+    await model.doGenerate({ prompt: [] });
+
+    expect(mocks.mutation).toHaveBeenCalledOnce();
+    expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), {
+      internalKey: "ik",
+      key: expect.stringMatching(/^editor:/),
+      userId: "user_1",
+      source: "editor",
+      provider: "openrouter",
+      modelId: "openai/gpt-5.4-mini",
+      inputTokens: 120,
+      outputTokens: 30,
+    });
   });
 
   it("returns null without a default key when the platform is not configured", async () => {
@@ -141,6 +213,18 @@ describe("withEditorModel", () => {
     expect(generate).toHaveBeenCalledWith({
       byok: expect.objectContaining({ provider: "anthropic", model: "claude-haiku-4-5" }),
     });
+  });
+
+  it("answers a typed 402 over the monthly cap, without calling the provider", async () => {
+    mocks.query.mockResolvedValue(null);
+    mocks.platform.mockReturnValue({ provider: "openrouter", config: null, usage: OVER_CAP });
+    const generate = vi.fn();
+
+    const response = await run(generate);
+
+    expect(response.status).toBe(402);
+    expect(await response.json()).toMatchObject({ code: "usage_limit" });
+    expect(generate).not.toHaveBeenCalled();
   });
 
   it("answers 503 when AI is not configured", async () => {

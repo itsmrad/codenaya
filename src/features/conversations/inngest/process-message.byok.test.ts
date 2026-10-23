@@ -22,8 +22,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/convex-client", async () => {
-  const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
+  const { withEnvPlatform, withUsageRecorded } = await import(
+    "@/features/ai-providers/server/active-platform.mock"
+  );
+  return { convex: { query: withEnvPlatform(mocks.query), mutation: withUsageRecorded(mocks.mutation) } };
 });
 vi.mock("@/features/ai-providers/server/sealed-key", () => ({
   openProviderKey: mocks.openProviderKey,

@@ -10,7 +10,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
-vi.mock("ai", () => ({ generateObject: mocks.generateObject }));
+vi.mock("ai", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("ai")>()),
+  generateObject: mocks.generateObject,
+}));
 vi.mock("@/lib/convex-client", async () => {
   const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
   return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };

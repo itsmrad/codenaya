@@ -229,6 +229,43 @@ describe("validateModelChoice (API route)", () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
+  it("refuses a platform send over the monthly cap with 402, from the same read", async () => {
+    mocks.platform.mockReturnValue({
+      provider: "openrouter",
+      config: null,
+      usage: {
+        planId: "free",
+        costMicroUsd: 1_000,
+        tokens: 2_000,
+        tokenLimit: 2_000,
+        exceeded: true,
+        exceededBy: "tokens",
+      },
+    });
+
+    const { rejected } = await requireModelChoice({ internalKey: "ik", userId: "user_1", model: undefined });
+
+    expect(rejected?.status).toBe(402);
+    expect(await rejected?.json()).toEqual({
+      code: "usage_limit",
+      error: expect.stringMatching(/Free plan's 2,000 tokens of Codenaya AI .* Settings → AI providers/),
+    });
+    expect(mocks.platform).toHaveBeenCalledOnce();
+    expect(mocks.platform).toHaveBeenCalledWith(
+      expect.objectContaining({ usageOf: { userId: "user_1", month: expect.stringMatching(/^\d{4}-\d{2}$/) } }),
+    );
+  });
+
+  it("lets a BYOK choice through over the cap, without reading platform usage", async () => {
+    mocks.platform.mockReturnValue({ provider: "openrouter", config: null, usage: { exceeded: true } });
+    mocks.query.mockResolvedValue(openAiKey);
+
+    expect(
+      await validateModelChoice({ internalKey: "ik", userId: "user_1", model: { keyId: "key_1", modelId: "gpt-5.6-luna" } }),
+    ).toMatchObject({ keyId: "key_1" });
+    expect(mocks.platform).not.toHaveBeenCalled();
+  });
+
   it("maps refusals to JSON responses for routes", async () => {
     mocks.query.mockResolvedValue(null);
     const { rejected } = await requireModelChoice({

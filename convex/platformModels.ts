@@ -11,10 +11,11 @@ import { MAX_MODEL_ID_LENGTH } from "../src/features/ai-providers/registry";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import { requireAdmin, writeAudit } from "./admin";
+import { usageStatusFor } from "./aiUsage";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
-import { platformModelValidator, platformProviderValidator } from "./schema";
+import { platformModelValidator, platformProviderValidator, usageStatusValidator } from "./schema";
 
 /**
  * The admin's selection of platform models per provider (/admin). Users see
@@ -159,18 +160,29 @@ export const getForAdmin = query({
 
 /**
  * The active provider and its full saved selection, for the routes and the
- * agent run: one round trip on the send path.
+ * agent run: one round trip on the send path. With `usageOf`, also that
+ * user's monthly usage against their plan caps, so the limit check costs no
+ * extra round trip.
  */
 export const getActiveForServer = query({
-  args: { internalKey: v.string(), fallbackProvider: platformProviderValidator },
+  args: {
+    internalKey: v.string(),
+    fallbackProvider: platformProviderValidator,
+    usageOf: v.optional(v.object({ userId: v.string(), month: v.string() })),
+  },
   returns: v.object({
     provider: platformProviderValidator,
     config: v.union(configValidator, v.null()),
+    usage: v.optional(usageStatusValidator),
   }),
-  handler: async (ctx, { internalKey, fallbackProvider }) => {
+  handler: async (ctx, { internalKey, fallbackProvider, usageOf }) => {
     validateInternalKey(internalKey);
     const provider = await activeProvider(ctx, fallbackProvider);
-    return { provider, config: toConfig(await getConfig(ctx, provider)) };
+    const [config, usage] = await Promise.all([
+      getConfig(ctx, provider),
+      usageOf && usageStatusFor(ctx, usageOf.userId, usageOf.month),
+    ]);
+    return { provider, config: toConfig(config), ...(usage ? { usage } : {}) };
   },
 });
 

@@ -1,3 +1,7 @@
+import { wrapLanguageModel } from "ai";
+import { after } from "next/server";
+
+import { type UsageStatus, monthKey } from "@/features/ai-usage/limits";
 import { convex } from "@/lib/convex-client";
 
 import { AI_PROVIDERS } from "../registry";
@@ -40,14 +44,19 @@ export const platformKeyOrNull = (provider: PlatformProviderId) =>
 
 /**
  * The provider and model selection platform requests run on: the admin's in
- * /admin, else the env provider and its catalog. One Convex read.
+ * /admin, else the env provider and its catalog. One Convex read, which with
+ * `usageOf` also carries that user's usage this month against their caps.
  */
-export async function activePlatform(internalKey: string): Promise<ActivePlatform> {
-  const { provider, config } = await convex.query(api.platformModels.getActiveForServer, {
+export async function activePlatform(
+  internalKey: string,
+  usageOf?: { userId: string },
+): Promise<ActivePlatform & { usage?: UsageStatus }> {
+  const { provider, config, usage } = await convex.query(api.platformModels.getActiveForServer, {
     internalKey,
     fallbackProvider: platformProviderId(),
+    ...(usageOf ? { usageOf: { userId: usageOf.userId, month: monthKey() } } : {}),
   });
-  return { provider, config: platformConfigFrom(config) };
+  return { provider, config: platformConfigFrom(config), ...(usage ? { usage } : {}) };
 }
 
 /** True when the provider has a key. Lets callers refuse cleanly rather than throw. */
@@ -96,12 +105,35 @@ export const platformTitleModel = (provider: PlatformProviderId) =>
 
 /**
  * AI SDK model for the editor AI routes. Editor tasks are short and
- * latency-sensitive, so they run on the provider's small model.
+ * latency-sensitive, so they run on the provider's small model. Each call is
+ * metered to `userId` after the response is sent (`after`), so the answer
+ * doesn't wait on the write; a failed record is logged, not thrown.
  */
-export function platformEditorModel(provider: PlatformProviderId) {
-  return buildAiSdkModel({
-    provider,
-    apiKey: readPlatformApiKey(provider),
-    model: platformTitleModel(provider),
+export function platformEditorModel(
+  provider: PlatformProviderId,
+  { internalKey, userId }: { internalKey: string; userId: string },
+) {
+  const modelId = platformTitleModel(provider);
+  return wrapLanguageModel({
+    model: buildAiSdkModel({ provider, apiKey: readPlatformApiKey(provider), model: modelId }),
+    middleware: {
+      specificationVersion: "v3",
+      wrapGenerate: async ({ doGenerate }) => {
+        const result = await doGenerate();
+        after(() =>
+          convex.mutation(api.aiUsage.record, {
+            internalKey,
+            key: `editor:${crypto.randomUUID()}`,
+            userId,
+            source: "editor",
+            provider,
+            modelId,
+            inputTokens: result.usage.inputTokens.total ?? 0,
+            outputTokens: result.usage.outputTokens.total ?? 0,
+          }).catch((error) => console.error("[ai-usage] failed to record editor usage", error)),
+        );
+        return result;
+      },
+    },
   });
 }

@@ -346,3 +346,4 @@ if (notFound) return notFound;
 | [0004](adr/0004-e2e-clerk-user-pool.md) | e2e tests sign in from a pool of Clerk test users |
 | [0005](adr/0005-platform-ai-provider-by-env.md) | Platform AI provider chosen by env; Workflow backend retired |
 | [0006](adr/0006-platform-provider-and-models-in-admin.md) | Platform provider and models set at runtime in /admin; env is the fallback |
+| [0007](adr/0007-platform-ai-usage-ledger-and-plan-caps.md) | Platform AI usage metered per user per month; per-plan USD/token caps enforced server-side |

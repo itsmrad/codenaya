@@ -1,6 +1,7 @@
 import type { LanguageModel } from "ai";
 import { NextResponse } from "next/server";
 
+import { USAGE_LIMIT_CODE, monthKey, usageLimitMessage } from "@/features/ai-usage/limits";
 import { convex } from "@/lib/convex-client";
 import { AI_PROVIDERS, PROVIDER_KEY_ERROR_CODE, modelIdsFor } from "../registry";
 import { buildAiSdkModel } from "./ai-sdk-model";
@@ -41,9 +42,13 @@ export interface EditorModel {
 const editorModelIdFor = (provider: Doc<"aiProviderKeys">["provider"], defaultModelId: string) =>
   AI_PROVIDERS[provider].titleModel ?? defaultModelId;
 
+/** Platform editor AI refused: the user is over their monthly cap. */
+export class UsageLimitError extends Error {}
+
 /**
  * Returns null when the user has no default key and the platform is not
- * configured. Throws `ProviderKeyError` when the default key is gone, marked
+ * configured. Throws `UsageLimitError` when platform AI is over the user's
+ * monthly cap, and `ProviderKeyError` when the default key is gone, marked
  * invalid, or no longer offers the model.
  */
 export async function resolveEditorModel({
@@ -53,16 +58,19 @@ export async function resolveEditorModel({
   internalKey: string;
   userId: string;
 }): Promise<EditorModel | null> {
-  // In parallel, so a platform request pays no extra round trip.
+  // In parallel, so a platform request pays no extra round trip; the usage
+  // check rides on the platform read.
   const [byok, platform] = await Promise.all([
     convex.query(api.system.getDefaultAiProviderKey, { internalKey, userId }),
-    activePlatform(internalKey),
+    activePlatform(internalKey, { userId }),
   ]);
 
   if (!byok) {
-    return isPlatformConfigured(platform.provider)
-      ? { model: platformEditorModel(platform.provider) }
-      : null;
+    if (!isPlatformConfigured(platform.provider)) return null;
+    if (platform.usage?.exceeded) {
+      throw new UsageLimitError(usageLimitMessage(platform.usage, monthKey()));
+    }
+    return { model: platformEditorModel(platform.provider, { internalKey, userId }) };
   }
 
   const { key, modelId } = byok;
@@ -95,7 +103,8 @@ const keyErrorResponse = (message: string) =>
   NextResponse.json({ error: message, code: PROVIDER_KEY_ERROR_CODE }, { status: 422 });
 
 /**
- * Runs an editor AI request on the resolved model. Key problems come back as a
+ * Runs an editor AI request on the resolved model. Over the monthly cap is a
+ * 402 with `code: "usage_limit"`. Key problems come back as a
  * 422 with `code: PROVIDER_KEY_ERROR_CODE`; a provider refusing the key also
  * marks it invalid, as an agent run does. Other errors propagate.
  */
@@ -114,6 +123,9 @@ export async function withEditorModel(
   } catch (error) {
     if (error instanceof ProviderKeyError) {
       return keyErrorResponse(error.message);
+    }
+    if (error instanceof UsageLimitError) {
+      return NextResponse.json({ error: error.message, code: USAGE_LIMIT_CODE }, { status: 402 });
     }
     throw error;
   }

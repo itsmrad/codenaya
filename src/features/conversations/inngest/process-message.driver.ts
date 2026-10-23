@@ -40,6 +40,7 @@ export async function drive(
       messageId: "m1",
       conversationId: "c1",
       projectId: "p1",
+      ownerId: "user_1",
       message,
       model,
       ...extra,

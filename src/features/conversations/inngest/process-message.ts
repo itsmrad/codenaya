@@ -59,6 +59,11 @@ import {
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
+import type { UsageStatus } from '@/features/ai-usage/limits';
+import {
+  createRunUsageMeter,
+  stoppedByLimitNote,
+} from '@/features/ai-usage/server/run-usage-meter';
 import {
   type MessageMode,
   PLAN_MODE,
@@ -131,6 +136,7 @@ export const processMessage = inngest.createFunction(
       messageId,
       conversationId,
       projectId,
+      ownerId,
       message,
       model,
       mode,
@@ -182,6 +188,20 @@ export const processMessage = inngest.createFunction(
           content: error.message,
         });
       });
+      return { success: false, messageId, conversationId };
+    }
+
+    // Platform runs are metered to the owner and stop at their monthly cap;
+    // runs on the user's own key are neither.
+    const { platform } = runModel;
+    if (platform && !ownerId) {
+      throw new NonRetriableError("A platform run needs the project owner to meter usage");
+    }
+    const meter =
+      platform && ownerId
+        ? createRunUsageMeter({ step, internalKey, runId, messageId, userId: ownerId, platform })
+        : undefined;
+    if (meter && (await meter.blockedAtStart())) {
       return { success: false, messageId, conversationId };
     }
 
@@ -277,12 +297,13 @@ export const processMessage = inngest.createFunction(
         model: runModel.title(0),
       });
 
-      let output;
+      let output, raw;
       try {
-        ({ output } = await titleAgent.run(request, { step }));
+        ({ output, raw } = await titleAgent.run(request, { step }));
       } catch (error) {
         return await endRunOnKeyRejection(error);
       }
+      await meter?.record("title", "title", raw);
 
       const textMessage = output.find(
         (m) => m.type === "text" && m.role === "assistant"
@@ -630,6 +651,8 @@ export const processMessage = inngest.createFunction(
           };
         },
         onResponse: async ({ result, network }) => {
+          // One inference per agent turn in a network, so the turn names the call.
+          await meter?.record(`t${network?.state.results.length ?? 0}`, "agent", result.raw);
           const calls = result.output.flatMap((m) =>
             m.type === "tool_call" ? m.tools : [],
           );
@@ -719,6 +742,15 @@ export const processMessage = inngest.createFunction(
       },
     });
 
+    // A cap reached mid-run ends the run before its next platform inference,
+    // so the overrun is at most the inference in flight.
+    let stoppedByLimit: UsageStatus | undefined;
+    const unlessOverLimit = (agent: typeof codingAgent) => {
+      if (!meter?.exceeded) return agent;
+      stoppedByLimit = meter.exceeded;
+      return undefined;
+    };
+
     // Create network with single agent
     const network = createNetwork({
       name: "codenaya-network",
@@ -737,10 +769,10 @@ export const processMessage = inngest.createFunction(
         // tool calls, unless files changed since the last passing build check.
         if (hasTextResponse && !hasToolCalls) {
           return buildCheckGate.shouldContinue(network.state.results)
-            ? codingAgent
+            ? unlessOverLimit(codingAgent)
             : undefined;
         }
-        return codingAgent;
+        return unlessOverLimit(codingAgent);
       }
     });
 
@@ -766,6 +798,10 @@ export const processMessage = inngest.createFunction(
         typeof textMessage.content === "string"
           ? textMessage.content
           : textMessage.content.map((c) => c.text).join("");
+    }
+
+    if (stoppedByLimit) {
+      assistantResponse += `\n\n${stoppedByLimitNote(stoppedByLimit)}`;
     }
 
     // Update the assistant message with the response (this also sets status to completed)

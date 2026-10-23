@@ -324,9 +324,16 @@ Open bugs only. Gaps found in code without an issue are listed on the flow itsel
 - Code: `first-run-checklist.tsx`, `utils/first-run.ts`.
 - E2E: `first-run-checklist.spec.ts`.
 
-**F28. Credits and billing**: Missing (#105)
-- `/pricing` shows Free and Pro plans, but Pro checkout is disabled ("Coming soon") and no
-  credits are tracked or enforced. Everyone is on Free.
+**F28. Credits and billing**: Partial (#105)
+- `/pricing` shows Free and Pro plans, but Pro checkout is disabled ("Coming soon").
+  Everyone is on Free.
+- Codenaya AI (the platform key; never BYOK) is metered per user per UTC month in tokens
+  and micro-USD at the admin's saved prices (a high fallback rate when none are saved). Each plan has a monthly USD and/or token cap,
+  set in /admin → Usage & limits (default: the plan's credits, Free $3 / Pro $20). Reaching
+  either cap blocks sends (402 `usage_limit`), editor AI and the next agent turn until the
+  month rolls over. Users see "usage this month" on Settings → AI providers (ADR 0007).
+- Code: `convex/aiUsage.ts`, `convex/planLimits.ts`, `features/ai-usage/*`,
+  `features/admin/components/usage-tab.tsx`.
 - E2E: none (`pricing.spec.ts` covers the page only).
 
 ## 2. Platform safeguards

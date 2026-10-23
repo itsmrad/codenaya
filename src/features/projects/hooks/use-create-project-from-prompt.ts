@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
 import { Id } from "../../../../convex/_generated/dataModel";
+import { USAGE_LIMIT_CODE } from "@/features/ai-usage/limits";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { useAgentModel } from "@/features/conversations/hooks/use-agent-model";
 import type { StarterTemplateId } from "@/features/templates/templates";
@@ -63,8 +64,9 @@ export const useCreateProjectFromPrompt = () => {
             toast.error(body.error ?? CREDENTIAL_ERROR);
             return false;
           }
-          // Platform AI has no key; nothing was created.
-          if (body.code === "ai_not_configured" && body.error) {
+          // Platform AI has no key, or the user is over their monthly cap;
+          // nothing was created.
+          if ((body.code === "ai_not_configured" || body.code === USAGE_LIMIT_CODE) && body.error) {
             toast.error(body.error);
             return false;
           }

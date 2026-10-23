@@ -63,6 +63,27 @@ export const runModelValidator = v.object({
   label: v.string(),
 });
 
+/** Plans whose usage caps the admin sets (the `PLANS` keys). */
+export const planIdValidator = v.union(v.literal("free"), v.literal("pro"));
+
+/** Where a metered platform model call came from. */
+export const aiUsageSourceValidator = v.union(
+  v.literal("agent"),
+  v.literal("title"),
+  v.literal("editor"),
+);
+
+/** A user's platform AI usage this month against their plan's caps (`usageStatus`). */
+export const usageStatusValidator = v.object({
+  planId: planIdValidator,
+  costMicroUsd: v.number(),
+  tokens: v.number(),
+  costLimitMicroUsd: v.optional(v.number()),
+  tokenLimit: v.optional(v.number()),
+  exceeded: v.boolean(),
+  exceededBy: v.optional(v.union(v.literal("usd"), v.literal("tokens"))),
+});
+
 export default defineSchema({
   /**
    * Profile mirror of a Clerk user, kept in sync by the Clerk webhook
@@ -503,6 +524,53 @@ export default defineSchema({
     summary: v.string(),
     at: v.number(),
   }).index("by_at", ["at"]),
+
+  /**
+   * A plan's monthly caps on platform AI, set in /admin. No row means the
+   * `PLANS` default (its monthly credits in USD, no token cap); a row with
+   * neither cap is unlimited. Money is integer micro-USD.
+   */
+  planLimits: defineTable({
+    planId: planIdValidator,
+    costLimitMicroUsd: v.optional(v.number()),
+    tokenLimit: v.optional(v.number()),
+    updatedAt: v.number(),
+    updatedBy: v.string(),
+  }).index("by_planId", ["planId"]),
+
+  /**
+   * One row per metered platform model call: the dedupe point and the audit
+   * trail. `key` is deterministic per call (`<inngestRunId>:t<turn>`), so an
+   * Inngest retry or replay never counts twice. Read only by `by_key`.
+   * ponytail: grows one row per call; add a batched retention cron (13
+   * months) around 1M rows.
+   */
+  aiUsageEvents: defineTable({
+    key: v.string(),
+    userId: v.string(),
+    month: v.string(),
+    source: aiUsageSourceValidator,
+    provider: platformProviderValidator,
+    modelId: v.string(),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    costMicroUsd: v.number(),
+    // False when the provider had no saved prices: charged at UNPRICED_FALLBACK_PRICE.
+    priced: v.boolean(),
+    at: v.number(),
+  }).index("by_key", ["key"]),
+
+  /** A user's platform AI usage for one UTC month ("YYYY-MM"): what the caps check. */
+  aiUsageMonthly: defineTable({
+    userId: v.string(),
+    month: v.string(),
+    costMicroUsd: v.number(),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_userId_and_month", ["userId", "month"])
+    .index("by_month_and_costMicroUsd", ["month", "costMicroUsd"]),
 
   /**
    * Environment variables injected into a project's preview at runtime.

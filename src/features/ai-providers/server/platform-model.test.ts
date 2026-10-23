@@ -8,6 +8,8 @@ import {
   platformEditorModel,
 } from "./platform-model";
 
+const METER = { internalKey: "ik", userId: "user_1" };
+
 /** AgentKit models keep their endpoint, key and model id on the instance. */
 const target = (model: unknown) => {
   const { url, authKey, options } = model as {
@@ -43,7 +45,7 @@ describe("platform models", () => {
     expect(agent).toMatchObject({ id: "some-model", authKey: `key-${provider}` });
     expect(agent.url).toContain(url);
 
-    const editor = platformEditorModel(provider);
+    const editor = platformEditorModel(provider, METER);
     expect(editor.provider).toBe(editorApi);
   });
 
@@ -59,6 +61,6 @@ describe("platform models", () => {
     expect(isPlatformConfigured("groq")).toBe(false);
     expect(error.mock.calls[0][0]).toMatch(/GROQ_API_KEY is not set/);
     expect(() => platformAgentModel("groq", "openai/gpt-oss-120b")).toThrow(/GROQ_API_KEY/);
-    expect(() => platformEditorModel("groq")).toThrow(/GROQ_API_KEY/);
+    expect(() => platformEditorModel("groq", METER)).toThrow(/GROQ_API_KEY/);
   });
 });

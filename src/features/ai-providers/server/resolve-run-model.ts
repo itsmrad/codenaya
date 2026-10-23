@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { USAGE_LIMIT_CODE, monthKey, usageLimitMessage } from "@/features/ai-usage/limits";
 import { convex } from "@/lib/convex-client";
 import type { AgentModelChoice } from "@/features/conversations/agent-models";
 
-import { resolvePlatformModel } from "../platform";
+import { type PlatformProviderId, resolvePlatformModel } from "../platform";
 import {
   modelAcceptsImages,
   modelIdsFor,
@@ -73,12 +74,13 @@ export interface RunModelChoice {
 
 /**
  * A choice the route refuses: someone else's key (403), a model it lacks
- * (400), or platform AI without a key (503, `code: "ai_not_configured"`).
+ * (400), platform AI without a key (503, `code: "ai_not_configured"`) or over
+ * the user's monthly cap (402, `code: "usage_limit"`).
  */
 export class ModelChoiceError extends Error {
   constructor(
     message: string,
-    readonly status: 400 | 403 | 503,
+    readonly status: 400 | 402 | 403 | 503,
     readonly code?: string,
   ) {
     super(message);
@@ -98,7 +100,7 @@ const visionRequired = (label: string) =>
 /**
  * Route-side check. Platform ids outside the active provider's selection
  * (/admin, else its catalog) fall back to its default, and a platform without
- * a key is refused; a BYOK choice must name a key the caller owns and a model
+ * a key, or a user over their monthly cap, is refused; a BYOK choice must name a key the caller owns and a model
  * that key's provider offers. With `withImages`, the model must accept images.
  */
 export async function validateModelChoice({
@@ -114,9 +116,13 @@ export async function validateModelChoice({
 }): Promise<RunModelChoice> {
   const { keyId, modelId } = toChoice(model);
   if (!keyId) {
-    const { provider, config } = await activePlatform(internalKey);
+    // The usage check rides on the same read: no extra round trip on the send path.
+    const { provider, config, usage } = await activePlatform(internalKey, { userId });
     if (!isPlatformConfigured(provider)) {
       throw new ModelChoiceError(AI_NOT_CONFIGURED_MESSAGE, 503, "ai_not_configured");
+    }
+    if (usage?.exceeded) {
+      throw new ModelChoiceError(usageLimitMessage(usage, monthKey()), 402, USAGE_LIMIT_CODE);
     }
     const model = resolvePlatformModel(provider, config, modelId);
     const label = runModelLabel(model);
@@ -190,6 +196,8 @@ type AgentKitModel = ReturnType<typeof buildAgentKitModel>;
 export interface RunModel {
   /** Set for runs on the user's own key. Holds no key material. */
   key?: Pick<Doc<"aiProviderKeys">, "_id" | "userId" | "label">;
+  /** Set for runs on the platform key: what to meter usage against. */
+  platform?: { provider: PlatformProviderId; codingModelId: string; titleModelId: string };
   /** The coding agent's model. */
   coding: (temperature?: number) => AgentKitModel;
   /** The conversation title model, on the same provider. */
@@ -230,9 +238,11 @@ export async function resolveRunModel({
       throw new ProviderKeyError(AI_NOT_CONFIGURED_MESSAGE);
     }
     const modelId = resolvePlatformModel(provider, config, choice.modelId).id;
+    const titleModelId = platformTitleModel(provider);
     return {
+      platform: { provider, codingModelId: modelId, titleModelId },
       coding: (temperature) => platformAgentModel(provider, modelId, temperature),
-      title: (temperature) => platformAgentModel(provider, platformTitleModel(provider), temperature),
+      title: (temperature) => platformAgentModel(provider, titleModelId, temperature),
     };
   }
 

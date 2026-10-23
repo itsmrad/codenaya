@@ -10,6 +10,7 @@
 
 import type * as admin from "../admin.js";
 import type * as aiProviders from "../aiProviders.js";
+import type * as aiUsage from "../aiUsage.js";
 import type * as auth from "../auth.js";
 import type * as chatImages from "../chatImages.js";
 import type * as checkpoints from "../checkpoints.js";
@@ -22,6 +23,7 @@ import type * as http from "../http.js";
 import type * as integrations from "../integrations.js";
 import type * as internalKey from "../internalKey.js";
 import type * as maintenance from "../maintenance.js";
+import type * as planLimits from "../planLimits.js";
 import type * as platformModels from "../platformModels.js";
 import type * as projectCascade from "../projectCascade.js";
 import type * as projectCopy from "../projectCopy.js";
@@ -41,6 +43,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   aiProviders: typeof aiProviders;
+  aiUsage: typeof aiUsage;
   auth: typeof auth;
   chatImages: typeof chatImages;
   checkpoints: typeof checkpoints;
@@ -53,6 +56,7 @@ declare const fullApi: ApiFromModules<{
   integrations: typeof integrations;
   internalKey: typeof internalKey;
   maintenance: typeof maintenance;
+  planLimits: typeof planLimits;
   platformModels: typeof platformModels;
   projectCascade: typeof projectCascade;
   projectCopy: typeof projectCopy;

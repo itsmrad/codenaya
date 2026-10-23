@@ -13,8 +13,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/convex-client", async () => {
-  const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
+  const { withEnvPlatform, withUsageRecorded } = await import(
+    "@/features/ai-providers/server/active-platform.mock"
+  );
+  return { convex: { query: withEnvPlatform(mocks.query), mutation: withUsageRecorded(mocks.mutation) } };
 });
 
 import { BUILD_CHECK_NUDGE } from "./build-check-gate";

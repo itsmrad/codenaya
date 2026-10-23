@@ -42,6 +42,7 @@ import {
 } from "@/features/ai-providers/hooks/use-ai-providers";
 import { modelAcceptsImages } from "@/features/ai-providers/registry";
 import { resolvePlatformModel } from "@/features/ai-providers/platform";
+import { USAGE_LIMIT_CODE } from "@/features/ai-usage/limits";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 import { useFiles } from "@/features/projects/hooks/use-files";
@@ -280,8 +281,9 @@ export const ConversationSidebar = ({
           openIntegrations();
           return "blocked";
         }
-        // Platform AI has no key: nothing was saved, so keep the draft.
-        if (body.code === "ai_not_configured" && body.error) {
+        // Platform AI has no key, or the user is over their monthly cap:
+        // nothing was saved, so keep the draft.
+        if ((body.code === "ai_not_configured" || body.code === USAGE_LIMIT_CODE) && body.error) {
           toast.error(body.error);
           return "blocked";
         }

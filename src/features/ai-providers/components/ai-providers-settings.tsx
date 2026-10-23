@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
 import { Spinner } from "@/components/ui/spinner";
+import { UsageThisMonth } from "@/features/ai-usage/components/usage-this-month";
 
 import { useAiPreferences, useAiProviderKeys } from "../hooks/use-ai-providers";
 import { AddProviderKeyDialog } from "./add-provider-key-dialog";
@@ -80,6 +81,8 @@ export const AiProvidersSettings = () => {
 
   return (
     <>
+      <UsageThisMonth />
+
       <Alert>
         <WalletIcon aria-hidden="true" />
         <AlertTitle className="line-clamp-none">
