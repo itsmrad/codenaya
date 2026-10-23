@@ -2,7 +2,7 @@ import { useAuth } from "@clerk/expo";
 import { useRouter } from "expo-router";
 import { ArrowUp, ChartColumn, ListTodo, Rocket, SquareKanban, UserRound } from "lucide-react-native";
 import { useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { postApi } from "@/lib/http";
 import { font, radius, useColors } from "@/lib/theme";
@@ -101,7 +101,13 @@ export function PromptComposer() {
         </View>
       </View>
       {error && <Text style={[styles.error, { color: c.destructive }]}>{error}</Text>}
-      <View style={styles.chips}>
+      {/* One left-aligned row that scrolls sideways, rather than wrapped and centred. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.chipRow}
+        contentContainerStyle={styles.chips}
+      >
         {STARTER_PROMPTS.map(({ label, icon: Icon, prompt: starter }) => (
           <Pressable
             key={label}
@@ -112,7 +118,7 @@ export function PromptComposer() {
             <Text style={[styles.chipText, { color: c.mutedForeground }]}>{label}</Text>
           </Pressable>
         ))}
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -132,7 +138,9 @@ const styles = StyleSheet.create({
   footer: { height: 48, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", justifyContent: "flex-end" },
   send: { width: 32, height: 32, borderRadius: radius.sm, alignItems: "center", justifyContent: "center" },
   error: { marginTop: 8, fontSize: 13, fontFamily: font.regular },
-  chips: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8, marginTop: 16 },
+  // Bleeds to the screen edges (the list has 16px padding) so chips scroll off-screen cleanly.
+  chipRow: { marginTop: 16, marginHorizontal: -16 },
+  chips: { gap: 8, paddingHorizontal: 16 },
   chip: {
     flexDirection: "row",
     alignItems: "center",

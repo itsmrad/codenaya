@@ -11,9 +11,10 @@ import { ConvexReactClient, useConvexAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { ActivityIndicator, View } from "react-native";
 
 import { Logo } from "@/components/logo";
-import { font, useNavigationTheme } from "@/lib/theme";
+import { font, useColors, useNavigationTheme } from "@/lib/theme";
 
 const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, {
   unsavedChangesWarning: false,
@@ -40,9 +41,16 @@ export default function RootLayout() {
 }
 
 function Screens() {
+  const c = useColors();
   // Convex auth, not just Clerk: queries need the Convex token in place.
   const { isLoading, isAuthenticated } = useConvexAuth();
-  if (isLoading) return null;
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", backgroundColor: c.background }}>
+        <ActivityIndicator color={c.mutedForeground} />
+      </View>
+    );
+  }
 
   return (
     <Stack
@@ -54,7 +62,9 @@ function Screens() {
     >
       <Stack.Protected guard={isAuthenticated}>
         <Stack.Screen name="index" options={{ title: "Codenaya", headerTitle: () => <Logo size={18} /> }} />
-        <Stack.Screen name="projects/[id]" options={{ title: "" }} />
+        <Stack.Screen name="projects/[id]/index" options={{ title: "" }} />
+        <Stack.Screen name="projects/[id]/files" options={{ title: "Files" }} />
+        <Stack.Screen name="projects/[id]/file" options={{ title: "" }} />
       </Stack.Protected>
       <Stack.Protected guard={!isAuthenticated}>
         <Stack.Screen name="sign-in" options={{ headerShown: false }} />
