@@ -12,9 +12,11 @@ import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { type ErrorBoundaryProps, Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, Platform, Pressable, Text, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { ConnectionBanner } from "@/components/connection-banner";
 import { Logo } from "@/components/logo";
+import { SheetHost } from "@/components/sheet-host";
 import { applySavedTheme } from "@/lib/appearance";
 import { CONVEX_URL } from "@/lib/env";
 import { font, useColors, useNavigationTheme } from "@/lib/theme";
@@ -50,17 +52,20 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <ClerkProvider
-      publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
-      tokenCache={tokenCache}
-    >
-      <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
-        <ThemeProvider value={navigationTheme}>
-          <StatusBar style="auto" />
-          <Screens />
-        </ThemeProvider>
-      </ConvexProviderWithClerk>
-    </ClerkProvider>
+    // Gestures (dragging sheets closed) need a root view above everything.
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ClerkProvider
+        publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
+        tokenCache={tokenCache}
+      >
+        <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
+          <ThemeProvider value={navigationTheme}>
+            <StatusBar style="auto" />
+            <Screens />
+          </ThemeProvider>
+        </ConvexProviderWithClerk>
+      </ClerkProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -77,7 +82,7 @@ function Screens() {
   }
 
   return (
-    <>
+    <SheetHost>
       <Stack
         screenOptions={{
           headerShadowVisible: false,
@@ -115,6 +120,6 @@ function Screens() {
         </Stack.Protected>
       </Stack>
       <ConnectionBanner />
-    </>
+    </SheetHost>
   );
 }
