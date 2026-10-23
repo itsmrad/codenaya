@@ -11,7 +11,7 @@ import { ConvexReactClient, useConvexAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { type ErrorBoundaryProps, Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, Text, View } from "react-native";
 
 import { ConnectionBanner } from "@/components/connection-banner";
 import { Logo } from "@/components/logo";
@@ -83,6 +83,13 @@ function Screens() {
           headerShadowVisible: false,
           headerTitleStyle: { fontFamily: font.semibold },
           headerBackButtonDisplayMode: "minimal",
+          // iOS keeps its native push; Android gets the same slide-over (its
+          // default fades and jumps), played in reverse on back.
+          animation: Platform.OS === "android" ? "ios_from_right" : "default",
+          // Swipe back from anywhere on the screen, not only the left edge.
+          fullScreenGestureEnabled: true,
+          // A solid page under every screen, so nothing flashes mid-slide.
+          contentStyle: { backgroundColor: c.background },
         }}
       >
         <Stack.Protected guard={isAuthenticated}>

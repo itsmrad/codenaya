@@ -154,7 +154,7 @@ export default function Dashboard() {
           projects === undefined ? (
             // The web grid's pulsing placeholders while projects load.
             <View style={styles.skeletons}>
-              {[0, 1].map((index) => (
+              {[0, 1, 2].map((index) => (
                 <Animated.View key={index} style={[styles.skeleton, { backgroundColor: c.muted }, PULSE]} />
               ))}
             </View>
@@ -218,6 +218,6 @@ const styles = StyleSheet.create({
   sortText: { fontSize: 12, fontFamily: font.regular },
   empty: { marginTop: 32 },
   skeletons: { gap: 14 },
-  skeleton: { aspectRatio: 16 / 12.5, borderRadius: radius.xl },
+  skeleton: { height: 52, borderRadius: radius.xl },
   emptyText: { textAlign: "center", fontSize: 14, fontFamily: font.regular },
 });
