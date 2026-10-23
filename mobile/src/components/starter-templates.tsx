@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
+import { confirm, toast } from "@/components/dialogs";
 import { ProjectCover } from "@/components/project-cover";
 import { useCreateProject } from "@/lib/create-project";
 import { STARTER_TEMPLATES } from "@/lib/shared";
@@ -16,19 +17,18 @@ export function StarterTemplates() {
   const createProject = useCreateProject();
   const [creating, setCreating] = useState<string>();
 
-  const use = (template: (typeof STARTER_TEMPLATES)[number]) =>
-    Alert.alert(`Start a ${template.title.toLowerCase()}?`, template.description, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Create",
-        onPress: async () => {
-          setCreating(template.id);
-          const failed = await createProject(template.prompt, template.id);
-          setCreating(undefined);
-          if (failed) Alert.alert(failed);
-        },
-      },
-    ]);
+  const use = async (template: (typeof STARTER_TEMPLATES)[number]) => {
+    const confirmed = await confirm({
+      title: `Start a ${template.title.toLowerCase()}?`,
+      message: template.description,
+      confirmLabel: "Create",
+    });
+    if (!confirmed) return;
+    setCreating(template.id);
+    const failed = await createProject(template.prompt, template.id);
+    setCreating(undefined);
+    if (failed) toast.error(failed);
+  };
 
   return (
     <View style={styles.wrap}>

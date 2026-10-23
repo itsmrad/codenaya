@@ -7,7 +7,6 @@ import { Eye, EyeOff, Link2, Plus, Trash2, Unlink } from "lucide-react-native";
 import { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
@@ -19,6 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
+import { confirm, toast } from "@/components/dialogs";
 import { AddConnectionSheet } from "@/components/add-connection-sheet";
 import { ConnectionCard } from "@/components/connection-card";
 import { Button, Field } from "@/components/form";
@@ -79,13 +79,13 @@ export default function ProjectIntegrations() {
 
   const linkedIds = new Set(links?.map((item) => item.userConnectionId));
   const unlinked = connections?.filter((connection) => !linkedIds.has(connection._id)) ?? [];
-  const fail = (fallback: string) => (error: unknown) => Alert.alert(errorMessage(error, fallback));
+  const fail = (fallback: string) => (error: unknown) => toast.error(errorMessage(error, fallback));
 
   const linkConnection = (userConnectionId: Id<"userConnections">, label: string) => {
     setSheet(undefined);
     // No readOnly argument: a new link is read-only with writes unapproved, as on the web.
     link({ projectId, userConnectionId }).then(
-      () => Alert.alert(`Linked ${label}`, "Read-only until you allow writes."),
+      () => toast.success(`Linked ${label}`, "Read-only until you allow writes."),
       fail("Unable to link this connection"),
     );
   };
@@ -141,7 +141,7 @@ export default function ProjectIntegrations() {
             </Pressable>
           </View>
           {links === undefined ? (
-            <ActivityIndicator style={styles.loading} />
+            <ActivityIndicator style={styles.loading} color={c.mutedForeground} />
           ) : links.length === 0 ? (
             <Text style={[styles.empty, { color: c.mutedForeground }]}>No connections linked to this project.</Text>
           ) : (
@@ -199,7 +199,7 @@ export default function ProjectIntegrations() {
             never shown again.
           </Text>
           {envVars === undefined ? (
-            <ActivityIndicator style={styles.loading} />
+            <ActivityIndicator style={styles.loading} color={c.mutedForeground} />
           ) : envVars.length === 0 ? (
             <Text style={[styles.empty, { color: c.mutedForeground }]}>No variables yet.</Text>
           ) : (
@@ -231,9 +231,15 @@ export default function ProjectIntegrations() {
                     </Pressable>
                   )}
                   <Pressable
-                    onPress={() =>
-                      deleteEnvVar({ id: envVar._id }).catch(() => Alert.alert(`Unable to delete ${envVar.key}`))
-                    }
+                    onPress={async () => {
+                      const confirmed = await confirm({
+                        title: `Delete ${envVar.key}?`,
+                        message: "The agent and the preview lose this variable.",
+                        confirmLabel: "Delete",
+                        destructive: true,
+                      });
+                      if (confirmed) deleteEnvVar({ id: envVar._id }).catch(() => toast.error(`Unable to delete ${envVar.key}`));
+                    }}
                     hitSlop={8}
                     accessibilityLabel={`Delete ${envVar.key}`}
                   >

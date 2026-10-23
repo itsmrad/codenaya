@@ -4,7 +4,7 @@ import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { CircleAlert, Copy, Download, ExternalLink, GitBranch, Link, MoreHorizontal, Pencil, Trash2 } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
@@ -14,6 +14,7 @@ import { webUrl } from "@/lib/http";
 import { PULSE } from "@/lib/motion";
 import { shareProjectZip } from "@/lib/project-zip";
 import { type Colors, font, radius, useColors } from "@/lib/theme";
+import { confirm, toast } from "./dialogs";
 import { NameDialog } from "./name-dialog";
 import { Sheet, SheetRow } from "./sheet";
 
@@ -61,21 +62,25 @@ export function ProjectCard({ project, plain = false }: { project: Doc<"projects
   const [renaming, setRenaming] = useState(false);
   const link = webUrl(`/projects/${project._id}`);
 
-  // Each action closes the menu first, so alerts and dialogs aren't hidden behind it.
+  // Each action closes the menu first, so the rename dialog isn't hidden behind it.
   const act = (action: () => void) => () => {
     setMenuOpen(false);
     action();
   };
 
-  const confirmDelete = () =>
-    Alert.alert(`Delete ${project.name}?`, "This deletes the project and all its files.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => remove({ id: project._id }).catch(() => Alert.alert("Couldn't delete the project")),
-      },
-    ]);
+  const confirmDelete = async () => {
+    const confirmed = await confirm({
+      title: `Delete “${project.name}”?`,
+      message: "This deletes the project and all its files. This can't be undone.",
+      confirmLabel: "Delete project",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    remove({ id: project._id }).then(
+      () => toast.success(`Deleted “${project.name}”`),
+      () => toast.error("Couldn't delete the project"),
+    );
+  };
 
   return (
     <Pressable
@@ -107,7 +112,7 @@ export function ProjectCard({ project, plain = false }: { project: Doc<"projects
           trailing={<Link size={16} color={c.mutedForeground} />}
           onPress={act(async () => {
             await Clipboard.setStringAsync(link);
-            Alert.alert("Link copied");
+            toast.success("Link copied");
           })}
         />
         <SheetRow
@@ -115,14 +120,17 @@ export function ProjectCard({ project, plain = false }: { project: Doc<"projects
           detail="Files, settings and project skills; not chats or secrets"
           trailing={<Copy size={16} color={c.mutedForeground} />}
           onPress={act(() =>
-            duplicate({ id: project._id }).catch((error) => Alert.alert(errorMessage(error, "Couldn't duplicate the project"))),
+            duplicate({ id: project._id }).then(
+              () => toast.success("Project duplicated"),
+              (error) => toast.error(errorMessage(error, "Couldn't duplicate the project")),
+            ),
           )}
         />
         <SheetRow
           label="Download ZIP"
           trailing={<Download size={16} color={c.mutedForeground} />}
           onPress={act(() =>
-            shareProjectZip(convex, project._id, project.name).catch(() => Alert.alert("Couldn't create the ZIP")),
+            shareProjectZip(convex, project._id, project.name).catch(() => toast.error("Couldn't create the ZIP")),
           )}
         />
         <SheetRow
@@ -130,7 +138,7 @@ export function ProjectCard({ project, plain = false }: { project: Doc<"projects
           trailing={<Pencil size={16} color={c.mutedForeground} />}
           onPress={act(() => setRenaming(true))}
         />
-        <SheetRow label="Delete" trailing={<Trash2 size={16} color={c.destructive} />} onPress={act(confirmDelete)} />
+        <SheetRow label="Delete" destructive trailing={<Trash2 size={16} color={c.destructive} />} onPress={act(confirmDelete)} />
       </Sheet>
       <NameDialog
         visible={renaming}

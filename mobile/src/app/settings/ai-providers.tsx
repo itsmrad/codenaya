@@ -3,8 +3,9 @@ import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { Check, ChevronDown, KeyRound, Plus, Trash2, Wallet } from "lucide-react-native";
 import { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { confirm, toast } from "@/components/dialogs";
 import { AddProviderKeySheet } from "@/components/add-provider-key-sheet";
 import { Button } from "@/components/form";
 import { Sheet, SheetRow, SheetSection } from "@/components/sheet";
@@ -34,30 +35,25 @@ function KeyCard({ providerKey, c }: { providerKey: ProviderKey; c: Colors }) {
     try {
       // The new status and test time arrive through the live list query.
       const { ok, data } = await postApi(`/api/ai-providers/${providerKey._id}/test`, {}, getToken);
-      Alert.alert(ok ? `${label} is working` : (data.error ?? "Something went wrong. Please try again."));
+      if (ok) toast.success(`${label} is working`);
+      else toast.error(data.error ?? "Something went wrong. Please try again.");
     } catch {
-      Alert.alert("Couldn't reach Codenaya. Is the server running?");
+      toast.error("Couldn't reach Codenaya. Is the server running?");
     } finally {
       setTesting(false);
     }
   };
 
-  const confirmDelete = () =>
-    Alert.alert(
-      `Delete ${label}?`,
-      "The stored key is deleted and cannot be recovered. If it is your default, new runs go back to Codenaya's models.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () =>
-            removeKey({ keyId: providerKey._id }).catch((error) =>
-              Alert.alert(errorMessage(error, "Unable to remove this key")),
-            ),
-        },
-      ],
-    );
+  const confirmDelete = async () => {
+    const confirmed = await confirm({
+      title: `Delete ${label}?`,
+      message: "The stored key is deleted and cannot be recovered. If it is your default, new runs go back to Codenaya's models.",
+      confirmLabel: "Delete key",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    removeKey({ keyId: providerKey._id }).catch((error) => toast.error(errorMessage(error, "Unable to remove this key")));
+  };
 
   return (
     <View style={[styles.key, { borderColor: c.border }]}>
@@ -113,7 +109,7 @@ export default function AiProvidersSettings() {
   const pick = (keyId: ProviderKey["_id"] | undefined, modelId: string) => {
     setPicking(false);
     setPreferences({ defaultKeyId: keyId, defaultModelId: modelId }).catch(() =>
-      Alert.alert("Could not update the default model"),
+      toast.error("Could not update the default model"),
     );
   };
 
@@ -145,7 +141,7 @@ export default function AiProvidersSettings() {
           )}
         </View>
         {keys === undefined ? (
-          <ActivityIndicator style={styles.loading} />
+          <ActivityIndicator style={styles.loading} color={c.mutedForeground} />
         ) : keys.length === 0 ? (
           <View style={[styles.empty, { borderColor: c.border }]}>
             <KeyRound size={20} color={c.mutedForeground} />

@@ -7,7 +7,6 @@ import { ClockArrowUp, Download, ExternalLink, FolderTree, GitBranch, History, M
 import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Pressable,
@@ -20,6 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "expo-router/react-navigation";
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
+import { confirm, toast } from "@/components/dialogs";
 import { ChatComposer } from "@/components/chat-composer";
 import { ChatEmptyState } from "@/components/chat-empty-state";
 import { AssistantMessage, UserMessage, useRunStalled } from "@/components/chat-message";
@@ -138,8 +138,8 @@ export default function ProjectChat() {
     }
   };
 
-  const report = (error: string | undefined) => error && Alert.alert(error);
-  const unreachable = () => Alert.alert("Couldn't reach Codenaya. Is the server running?");
+  const report = (error: string | undefined) => error && toast.error(error);
+  const unreachable = () => toast.error("Couldn't reach Codenaya. Is the server running?");
 
   const stop = async () => {
     await postApi("/api/messages/cancel", { projectId }, getToken).catch(() => undefined);
@@ -150,31 +150,26 @@ export default function ProjectChat() {
     try {
       setSelectedId(await createConversation({ projectId, title: NEW_CONVERSATION_TITLE }));
     } catch {
-      Alert.alert("Unable to create new conversation");
+      toast.error("Unable to create new conversation");
     }
   };
 
-  const confirmRestore = (checkpoint: { _id: Id<"checkpoints">; _creationTime: number }) => {
+  const confirmRestore = async (checkpoint: { _id: Id<"checkpoints">; _creationTime: number }) => {
     setSheet(undefined);
-    Alert.alert(
-      "Restore to before this run?",
-      `The project's files go back to how they were ${timeAgo(checkpoint._creationTime)}, before the agent ran. Changes made since then are replaced.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Restore",
-          onPress: () =>
-            restoreCheckpoint({ checkpointId: checkpoint._id }).then(
-              () => Alert.alert("Files restored"),
-              () => Alert.alert("Couldn't restore the files"),
-            ),
-        },
-      ],
+    const confirmed = await confirm({
+      title: "Restore to before this run?",
+      message: `The project's files go back to how they were ${timeAgo(checkpoint._creationTime)}, before the agent ran. Changes made since then are replaced.`,
+      confirmLabel: "Restore",
+    });
+    if (!confirmed) return;
+    restoreCheckpoint({ checkpointId: checkpoint._id }).then(
+      () => toast.success("Files restored"),
+      () => toast.error("Couldn't restore the files"),
     );
   };
 
   if (project === undefined || conversations === undefined) {
-    return <ActivityIndicator style={styles.flex} />;
+    return <ActivityIndicator style={styles.flex} color={c.mutedForeground} />;
   }
 
   const ordered = [...(messages ?? [])].reverse();
@@ -212,7 +207,7 @@ export default function ProjectChat() {
       </Text>
 
       {messages === undefined && conversationId ? (
-        <ActivityIndicator style={styles.flex} />
+        <ActivityIndicator style={styles.flex} color={c.mutedForeground} />
       ) : !messages?.length && !pending ? (
         <ChatEmptyState onSelect={(prompt) => send(prompt, []).then(report)} />
       ) : (
@@ -315,7 +310,7 @@ export default function ProjectChat() {
           trailing={<Download size={16} color={c.mutedForeground} />}
           onPress={() => {
             setSheet(undefined);
-            shareProjectZip(convex, projectId, project.name).catch(() => Alert.alert("Couldn't create the ZIP"));
+            shareProjectZip(convex, projectId, project.name).catch(() => toast.error("Couldn't create the ZIP"));
           }}
         />
         <SheetRow
@@ -348,7 +343,7 @@ export default function ProjectChat() {
                 value={skill.enabled}
                 onValueChange={(enabled) => {
                   setSkillEnabled({ projectId, skillKey: skill.key, enabled }).catch(() =>
-                    Alert.alert(`Couldn't update ${skill.name}`),
+                    toast.error(`Couldn't update ${skill.name}`),
                   );
                 }}
                 trackColor={{ true: c.brand }}

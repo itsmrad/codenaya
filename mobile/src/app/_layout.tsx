@@ -15,6 +15,7 @@ import { ActivityIndicator, Platform, Pressable, Text, View } from "react-native
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { ConnectionBanner } from "@/components/connection-banner";
+import { DialogHost } from "@/components/dialogs";
 import { Logo } from "@/components/logo";
 import { SheetHost } from "@/components/sheet-host";
 import { applySavedTheme } from "@/lib/appearance";
@@ -82,6 +83,7 @@ function Screens() {
   }
 
   return (
+    <>
     <SheetHost>
       <Stack
         screenOptions={{
@@ -121,5 +123,8 @@ function Screens() {
       </Stack>
       <ConnectionBanner />
     </SheetHost>
+    {/* After the sheets, so confirms and toasts show above an open sheet. */}
+    <DialogHost />
+    </>
   );
 }

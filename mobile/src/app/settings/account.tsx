@@ -26,7 +26,7 @@ export default function AccountSettings() {
   const { signOut } = useAuth();
   const { user } = useUser();
   const [renaming, setRenaming] = useState(false);
-  if (!user) return <ActivityIndicator style={styles.flex} />;
+  if (!user) return <ActivityIndicator style={styles.flex} color={c.mutedForeground} />;
 
   const name = user.fullName || user.username || "Your account";
   const connected = (provider: string) => user.externalAccounts.find((account) => account.provider === provider);

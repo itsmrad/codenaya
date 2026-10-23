@@ -2,9 +2,10 @@ import { useMutation, useQuery } from "convex/react";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { ChevronRight, File, FilePlus2, Folder, FolderPlus, Pencil, Plus, Trash2 } from "lucide-react-native";
 import { useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { Doc, Id } from "../../../../../convex/_generated/dataModel";
+import { confirm, toast } from "@/components/dialogs";
 import { NameDialog } from "@/components/name-dialog";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { api } from "@/lib/api";
@@ -33,7 +34,7 @@ export default function Files() {
   const [sheet, setSheet] = useState<"new" | { file: Doc<"files"> }>();
   const [dialog, setDialog] = useState<Dialog>();
 
-  if (files === undefined) return <ActivityIndicator style={styles.flex} />;
+  if (files === undefined) return <ActivityIndicator style={styles.flex} color={c.mutedForeground} />;
 
   const current = parentId ? files.find((file) => file._id === parentId) : undefined;
   const entries = files
@@ -47,20 +48,16 @@ export default function Files() {
         : { pathname: "/projects/[id]/file", params: { id, fileId: file._id, ...(edit ? { edit: "1" } : {}) } },
     );
 
-  const confirmDelete = (file: Doc<"files">) => {
+  const confirmDelete = async (file: Doc<"files">) => {
     setSheet(undefined);
-    Alert.alert(
-      `Delete ${file.name}?`,
-      file.type === "folder" ? "This deletes the folder and everything in it." : "This deletes the file.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => deleteFile({ id: file._id }).catch((error) => Alert.alert(errorMessage(error, "Couldn't delete it."))),
-        },
-      ],
-    );
+    const confirmed = await confirm({
+      title: `Delete ${file.name}?`,
+      message: file.type === "folder" ? "This deletes the folder and everything in it." : "This deletes the file.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    deleteFile({ id: file._id }).catch((error) => toast.error(errorMessage(error, "Couldn't delete it.")));
   };
 
   const saveName = async (name: string) => {
@@ -162,6 +159,7 @@ export default function Files() {
             />
             <SheetRow
               label="Delete"
+              destructive
               trailing={<Trash2 size={16} color={c.destructive} />}
               onPress={() => confirmDelete(sheet.file)}
             />

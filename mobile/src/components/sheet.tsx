@@ -158,7 +158,7 @@ export function Sheet(props: SheetProps) {
   return null;
 }
 
-/** One tappable row in a sheet or list: an optional icon, a label, a muted detail, and a trailing slot. */
+/** One tappable row in a sheet or list: an optional icon, a label (red when `destructive`), a muted detail, and a trailing slot. */
 export function SheetRow({
   icon,
   label,
@@ -167,6 +167,7 @@ export function SheetRow({
   trailing,
   onPress,
   disabled,
+  destructive,
 }: {
   icon?: ReactNode;
   label: string;
@@ -175,6 +176,8 @@ export function SheetRow({
   trailing?: ReactNode;
   onPress?: () => void;
   disabled?: boolean;
+  /** Red label, for deletes. */
+  destructive?: boolean;
 }) {
   const c = useColors();
   return (
@@ -189,7 +192,7 @@ export function SheetRow({
     >
       {icon}
       <View style={styles.rowText}>
-        <Text style={[styles.label, { color: c.foreground }]} numberOfLines={1}>
+        <Text style={[styles.label, { color: destructive ? c.destructive : c.foreground }]} numberOfLines={1}>
           {label}
         </Text>
         {detail && (

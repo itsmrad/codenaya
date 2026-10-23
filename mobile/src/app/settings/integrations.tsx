@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from "convex/react";
 import { Plug, Plus, Trash2 } from "lucide-react-native";
 import { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AddConnectionSheet } from "@/components/add-connection-sheet";
 import { type Connection, ConnectionCard } from "@/components/connection-card";
+import { confirm, toast } from "@/components/dialogs";
 import { Button } from "@/components/form";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/format";
@@ -17,27 +18,26 @@ export default function IntegrationsSettings() {
   const deleteConnection = useMutation(api.integrations.deleteUserConnection);
   const [adding, setAdding] = useState(false);
 
-  const confirmDelete = (connection: Connection) =>
-    Alert.alert(`Remove ${connection.label}?`, "It is unlinked from every project that uses it.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            const { unlinkedProjects } = await deleteConnection({ id: connection._id });
-            if (unlinkedProjects > 0) {
-              Alert.alert(
-                `Removed ${connection.label}`,
-                `Unlinked from ${unlinkedProjects} ${unlinkedProjects === 1 ? "project" : "projects"}.`,
-              );
-            }
-          } catch (error) {
-            Alert.alert(errorMessage(error, "Unable to remove this connection"));
-          }
-        },
-      },
-    ]);
+  const confirmDelete = async (connection: Connection) => {
+    const confirmed = await confirm({
+      title: `Remove ${connection.label}?`,
+      message: "It is unlinked from every project that uses it.",
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    try {
+      const { unlinkedProjects } = await deleteConnection({ id: connection._id });
+      toast.success(
+        `Removed ${connection.label}`,
+        unlinkedProjects > 0
+          ? `Unlinked from ${unlinkedProjects} ${unlinkedProjects === 1 ? "project" : "projects"}.`
+          : undefined,
+      );
+    } catch (error) {
+      toast.error(errorMessage(error, "Unable to remove this connection"));
+    }
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.page}>
@@ -54,7 +54,7 @@ export default function IntegrationsSettings() {
           </Pressable>
         </View>
         {connections === undefined ? (
-          <ActivityIndicator style={styles.loading} />
+          <ActivityIndicator style={styles.loading} color={c.mutedForeground} />
         ) : connections.length === 0 ? (
           <View style={[styles.empty, { borderColor: c.border }]}>
             <Plug size={20} color={c.mutedForeground} />

@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { KeyboardAvoidingView, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Modal, StyleSheet, Text, TextInput, View } from "react-native";
 import Animated from "react-native-reanimated";
 
+import { Button } from "@/components/form";
 import { errorMessage } from "@/lib/format";
 import { zoomIn } from "@/lib/motion";
 import { font, radius, useColors } from "@/lib/theme";
@@ -40,7 +41,8 @@ export function NameDialog({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onShow={() => {
+    // Translucent bars, so the backdrop covers the whole screen like the confirm dialog's.
+    <Modal visible={visible} transparent statusBarTranslucent navigationBarTranslucent animationType="fade" onRequestClose={onClose} onShow={() => {
         setName(initialName);
         setError(undefined);
       }}>
@@ -62,16 +64,12 @@ export function NameDialog({
           />
           {error && <Text style={{ color: c.destructive, fontFamily: font.regular }}>{error}</Text>}
           <View style={styles.actions}>
-            <Pressable onPress={onClose} style={[styles.button, { backgroundColor: c.muted }]}>
-              <Text style={[styles.buttonText, { color: c.foreground }]}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              onPress={save}
-              disabled={!trimmed || trimmed === initialName}
-              style={[styles.button, { backgroundColor: c.primary }, (!trimmed || trimmed === initialName) && styles.disabled]}
-            >
-              <Text style={[styles.buttonText, { color: c.primaryForeground }]}>{confirmLabel}</Text>
-            </Pressable>
+            <View style={styles.action}>
+              <Button label="Cancel" variant="outline" onPress={onClose} />
+            </View>
+            <View style={styles.action}>
+              <Button label={confirmLabel} onPress={save} disabled={!trimmed || trimmed === initialName} />
+            </View>
           </View>
         </Animated.View>
       </KeyboardAvoidingView>
@@ -80,12 +78,10 @@ export function NameDialog({
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: 24 },
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 24 },
   dialog: { borderWidth: 1, borderRadius: radius.xl, padding: 20, gap: 14 },
   title: { fontSize: 17, fontFamily: font.semibold },
   input: { borderWidth: 1, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, fontFamily: font.regular },
-  actions: { flexDirection: "row", justifyContent: "flex-end", gap: 8 },
-  button: { borderRadius: radius.md, paddingHorizontal: 16, paddingVertical: 10 },
-  buttonText: { fontSize: 14, fontFamily: font.medium },
-  disabled: { opacity: 0.5 },
+  actions: { flexDirection: "row", gap: 8, marginTop: 4 },
+  action: { flex: 1 },
 });

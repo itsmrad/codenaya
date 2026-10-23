@@ -69,7 +69,7 @@ export default function FileView() {
     [fileId, updateFile],
   );
 
-  if (file === undefined) return <ActivityIndicator style={styles.flex} />;
+  if (file === undefined) return <ActivityIndicator style={styles.flex} color={c.mutedForeground} />;
 
   const binary = Boolean(file.storageId);
   // While editing, the local draft wins over agent updates (as on the web).

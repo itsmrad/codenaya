@@ -20,11 +20,12 @@ const EMPTY = { name: "", description: "", body: "" };
  * duplicates a built-in, and no param starts a new skill.
  */
 export default function SkillEditor() {
+  const c = useColors();
   const { skillId, builtin, from } = useLocalSearchParams<{ skillId?: string; builtin?: string; from?: string }>();
   const skill = useQuery(api.skills.get, skillId ? { skillId: skillId as Id<"skills"> } : "skip");
   const builtinSkill = BUILTIN_SKILLS.find((item) => item.name === (builtin ?? from));
 
-  if (skillId && skill === undefined) return <ActivityIndicator style={styles.flex} />;
+  if (skillId && skill === undefined) return <ActivityIndicator style={styles.flex} color={c.mutedForeground} />;
   const initial = skill ?? (from && builtinSkill ? { ...builtinSkill, name: `${builtinSkill.name}-copy` } : undefined);
   return (
     <SkillForm

@@ -4,9 +4,10 @@ import { Stack, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { Copy, Download, Eye, Info, Pencil, Plus, Search, Sparkles, Trash2 } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import type { Id } from "../../../../convex/_generated/dataModel";
+import { confirm, toast } from "@/components/dialogs";
 import { Button, Field } from "@/components/form";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { api } from "@/lib/api";
@@ -167,18 +168,16 @@ export default function SkillsSettings() {
   const [importOpen, setImportOpen] = useState(false);
 
   const openEditor = (params: Record<string, string> = {}) => router.push({ pathname: "/settings/skill", params });
-  const confirmDelete = (skill: { _id: Id<"skills">; name: string }) =>
-    Alert.alert(`Delete ${skill.name}?`, "It is removed from your library and every project that uses it.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () =>
-          removeSkill({ skillId: skill._id }).catch((error) =>
-            Alert.alert(errorMessage(error, `Unable to delete ${skill.name}`)),
-          ),
-      },
-    ]);
+  const confirmDelete = async (skill: { _id: Id<"skills">; name: string }) => {
+    const confirmed = await confirm({
+      title: `Delete ${skill.name}?`,
+      message: "It is removed from your library and every project that uses it.",
+      confirmLabel: "Delete skill",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    removeSkill({ skillId: skill._id }).catch((error) => toast.error(errorMessage(error, `Unable to delete ${skill.name}`)));
+  };
 
   const builtins = BUILTIN_SKILLS.filter((skill) => matches(skill, search));
   const shown = library?.filter((skill) => matches(skill, search));
@@ -251,7 +250,7 @@ export default function SkillsSettings() {
       <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
         <Text style={[styles.title, { color: c.foreground }]}>Your library</Text>
         {shown === undefined ? (
-          <ActivityIndicator style={styles.loading} />
+          <ActivityIndicator style={styles.loading} color={c.mutedForeground} />
         ) : library?.length === 0 ? (
           <View style={[styles.emptyBox, { borderColor: c.border }]}>
             <Sparkles size={20} color={c.mutedForeground} />
