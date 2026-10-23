@@ -3,7 +3,7 @@ import { useConvex, useMutation, useQuery } from "convex/react";
 import type { ImagePickerAsset } from "expo-image-picker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { ClockArrowUp, Download, ExternalLink, FolderTree, History, MoreHorizontal, Plus } from "lucide-react-native";
+import { ClockArrowUp, Download, ExternalLink, FolderTree, GitBranch, History, MoreHorizontal, Plug, Plus, Sparkles } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from "react-native";
@@ -22,6 +23,7 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import { ChatComposer } from "@/components/chat-composer";
 import { ChatEmptyState } from "@/components/chat-empty-state";
 import { AssistantMessage, UserMessage, useRunStalled } from "@/components/chat-message";
+import { GithubExportSheet } from "@/components/github-export-sheet";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { useAgentModel } from "@/lib/agent-model";
 import { api } from "@/lib/api";
@@ -36,6 +38,15 @@ import { font, useColors } from "@/lib/theme";
 const NEW_CONVERSATION_TITLE = "New conversation";
 
 type MessageMode = typeof PLAN_MODE | undefined;
+
+/** The export job's state, under "Export to GitHub" in the menu. */
+const EXPORT_STATUS = {
+  idle: undefined,
+  exporting: "Exporting…",
+  completed: "Exported",
+  failed: "Export failed",
+  cancelled: undefined,
+};
 
 /**
  * A project's chat, like the web's conversation panel: conversations (new,
@@ -68,12 +79,13 @@ export default function ProjectChat() {
   const projectSkills = useQuery(api.skills.listProjectSkills, { projectId });
   const createConversation = useMutation(api.conversations.create);
   const restoreCheckpoint = useMutation(api.checkpoints.restore);
+  const setSkillEnabled = useMutation(api.skills.setProjectSkillEnabled);
   const uploadImages = useUploadChatImages(projectId);
   const agent = useAgentModel();
   const convex = useConvex();
 
   const [planMode, setPlanMode] = useState(false);
-  const [sheet, setSheet] = useState<"menu" | "conversations" | "versions">();
+  const [sheet, setSheet] = useState<"menu" | "conversations" | "versions" | "export" | "skills">();
   // Shown at once, until the request saves the real message (as on the web).
   const [pending, setPending] = useState<{ text: string; imageUrls: string[] }>();
 
@@ -278,6 +290,27 @@ export default function ProjectChat() {
           onPress={() => setSheet("versions")}
         />
         <SheetRow
+          label="Skills"
+          detail={`${enabledSkills.length} enabled`}
+          trailing={<Sparkles size={16} color={c.mutedForeground} />}
+          onPress={() => setSheet("skills")}
+        />
+        <SheetRow
+          label="Integrations & env"
+          detail="Connections and environment variables"
+          trailing={<Plug size={16} color={c.mutedForeground} />}
+          onPress={() => {
+            setSheet(undefined);
+            router.push({ pathname: "/projects/[id]/integrations", params: { id } });
+          }}
+        />
+        <SheetRow
+          label="Export to GitHub"
+          detail={EXPORT_STATUS[project.exportStatus ?? "idle"]}
+          trailing={<GitBranch size={16} color={c.mutedForeground} />}
+          onPress={() => setSheet("export")}
+        />
+        <SheetRow
           label="Download ZIP"
           trailing={<Download size={16} color={c.mutedForeground} />}
           onPress={() => {
@@ -287,7 +320,7 @@ export default function ProjectChat() {
         />
         <SheetRow
           label="Open on the website"
-          detail="Preview, GitHub export and settings"
+          detail="Live preview"
           trailing={<ExternalLink size={16} color={c.mutedForeground} />}
           onPress={() => {
             setSheet(undefined);
@@ -295,6 +328,37 @@ export default function ProjectChat() {
           }}
         />
       </Sheet>
+
+      <Sheet
+        visible={sheet === "skills"}
+        title="Skills"
+        description="The agent sees enabled skills and loads one when a task matches. Manage your library in Settings."
+        onClose={() => setSheet(undefined)}
+      >
+        {projectSkills?.length === 0 && (
+          <Text style={[styles.sheetEmpty, { color: c.mutedForeground }]}>No skills yet.</Text>
+        )}
+        {projectSkills?.map((skill) => (
+          <SheetRow
+            key={skill.key}
+            label={skill.name}
+            detail={skill.description}
+            trailing={
+              <Switch
+                value={skill.enabled}
+                onValueChange={(enabled) => {
+                  setSkillEnabled({ projectId, skillKey: skill.key, enabled }).catch(() =>
+                    Alert.alert(`Couldn't update ${skill.name}`),
+                  );
+                }}
+                trackColor={{ true: c.brand }}
+              />
+            }
+          />
+        ))}
+      </Sheet>
+
+      <GithubExportSheet project={project} visible={sheet === "export"} onClose={() => setSheet(undefined)} />
 
       <Sheet visible={sheet === "conversations"} title="Past conversations" onClose={() => setSheet(undefined)}>
         {conversations.length === 0 && (

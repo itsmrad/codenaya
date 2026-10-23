@@ -15,8 +15,11 @@ import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
 import { ConnectionBanner } from "@/components/connection-banner";
 import { Logo } from "@/components/logo";
+import { applySavedTheme } from "@/lib/appearance";
 import { CONVEX_URL } from "@/lib/env";
 import { font, useColors, useNavigationTheme } from "@/lib/theme";
+
+applySavedTheme();
 
 const convex = new ConvexReactClient(CONVEX_URL, {
   unsavedChangesWarning: false,
@@ -87,6 +90,14 @@ function Screens() {
           <Stack.Screen name="projects/[id]/index" options={{ title: "" }} />
           <Stack.Screen name="projects/[id]/files" options={{ title: "Files" }} />
           <Stack.Screen name="projects/[id]/file" options={{ title: "" }} />
+        <Stack.Screen name="projects/[id]/integrations" options={{ title: "Integrations & env" }} />
+        <Stack.Screen name="settings/index" options={{ title: "Settings" }} />
+        <Stack.Screen name="settings/account" options={{ title: "Account" }} />
+        <Stack.Screen name="settings/appearance" options={{ title: "Appearance" }} />
+        <Stack.Screen name="settings/ai-providers" options={{ title: "AI providers" }} />
+        <Stack.Screen name="settings/skills" options={{ title: "Skills" }} />
+        <Stack.Screen name="settings/skill" options={{ title: "" }} />
+        <Stack.Screen name="settings/integrations" options={{ title: "Integrations" }} />
         </Stack.Protected>
         <Stack.Protected guard={!isAuthenticated}>
           <Stack.Screen name="sign-in" options={{ headerShown: false }} />

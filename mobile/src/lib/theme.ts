@@ -31,8 +31,7 @@ const dark: typeof light = {
   brandForeground: "#09090b",
   brandText: "#e8824f",
 };
-// Dark is the default, as on the website (defaultTheme="dark"); app.json sets
-// userInterfaceStyle to "dark", so the light tokens are kept for later.
+// Which one shows is the Appearance setting (lib/appearance.ts); dark by default.
 
 export type Colors = typeof light;
 

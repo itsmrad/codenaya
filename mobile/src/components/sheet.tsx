@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated, { Easing, SlideInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -27,25 +27,31 @@ export function Sheet({
     // The backdrop fades while the sheet slides up; "slide" would move the
     // dimmed backdrop up with it.
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
-      <Animated.View
-        entering={SlideInDown.duration(280).easing(SHEET_EASE)}
-        style={[
-          styles.sheet,
-          { backgroundColor: c.card, borderColor: c.border, paddingBottom: insets.bottom + 12 },
-        ]}
-      >
-        <View style={[styles.handle, { backgroundColor: c.border }]} />
-        <Text style={[styles.title, { color: c.foreground }]}>{title}</Text>
-        {description && <Text style={[styles.description, { color: c.mutedForeground }]}>{description}</Text>}
-        <ScrollView style={styles.body}>{children}</ScrollView>
-      </Animated.View>
+      {/* Sheets with fields rise above the keyboard. */}
+      <KeyboardAvoidingView behavior="padding" style={styles.flex}>
+        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
+        <Animated.View
+          entering={SlideInDown.duration(280).easing(SHEET_EASE)}
+          style={[
+            styles.sheet,
+            { backgroundColor: c.card, borderColor: c.border, paddingBottom: insets.bottom + 12 },
+          ]}
+        >
+          <View style={[styles.handle, { backgroundColor: c.border }]} />
+          <Text style={[styles.title, { color: c.foreground }]}>{title}</Text>
+          {description && <Text style={[styles.description, { color: c.mutedForeground }]}>{description}</Text>}
+          <ScrollView style={styles.body} keyboardShouldPersistTaps="handled">
+            {children}
+          </ScrollView>
+        </Animated.View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
-/** One tappable row in a sheet: a label, an optional muted detail, and a trailing slot. */
+/** One tappable row in a sheet or list: an optional icon, a label, a muted detail, and a trailing slot. */
 export function SheetRow({
+  icon,
   label,
   detail,
   selected,
@@ -53,6 +59,7 @@ export function SheetRow({
   onPress,
   disabled,
 }: {
+  icon?: ReactNode;
   label: string;
   detail?: string;
   selected?: boolean;
@@ -71,6 +78,7 @@ export function SheetRow({
         disabled && styles.disabled,
       ]}
     >
+      {icon}
       <View style={styles.rowText}>
         <Text style={[styles.label, { color: c.foreground }]} numberOfLines={1}>
           {label}
@@ -92,6 +100,7 @@ export function SheetSection({ title }: { title: string }) {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },
   sheet: {
     maxHeight: "75%",

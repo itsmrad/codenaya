@@ -2,7 +2,7 @@ import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
 import { BookOpen, Check, Copy, Hammer, ListChecks, RotateCcw, Undo2 } from "lucide-react-native";
 import { type ReactNode, useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
 import { useMarkdown } from "react-native-marked";
 import Animated, { useReducedMotion } from "react-native-reanimated";
 
@@ -82,8 +82,9 @@ const useTypewriter = (text: string, animate: boolean) => {
 
 function Reply({ content }: { content: string }) {
   const c = useColors();
+  const scheme = useColorScheme();
   const elements = useMarkdown(content, {
-    colorScheme: "dark",
+    colorScheme: scheme === "light" ? "light" : "dark",
     theme: { colors: { text: c.foreground, link: c.brandText, code: c.muted, border: c.border } },
     styles: {
       text: { fontFamily: font.regular, fontSize: 15, lineHeight: 24, color: c.foreground },

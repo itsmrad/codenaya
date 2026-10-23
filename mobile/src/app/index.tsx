@@ -1,8 +1,8 @@
 import { useAuth } from "@clerk/expo";
 import { useMutation, useQuery } from "convex/react";
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
-import { ArrowUpDown, LogOut, Search } from "lucide-react-native";
+import { ArrowUpDown, GitBranch, Search, Settings } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   FlatList,
@@ -20,10 +20,14 @@ import type { Doc } from "../../../convex/_generated/dataModel";
 
 import { ProjectCard } from "@/components/project-card";
 import { FirstRunChecklist } from "@/components/first-run-checklist";
+import { NameDialog } from "@/components/name-dialog";
 import { PromptComposer } from "@/components/prompt-composer";
 import { StarterTemplates } from "@/components/starter-templates";
 import { api } from "@/lib/api";
+import { GITHUB_NOT_LINKED, alertGithubNotLinked } from "@/lib/github";
+import { postApi } from "@/lib/http";
 import { PULSE, fadeUp } from "@/lib/motion";
+import { parseGithubRepo } from "@/lib/shared";
 import { font, radius, useColors } from "@/lib/theme";
 
 // The web grid's sorts (projects-grid.tsx).
@@ -37,16 +41,36 @@ const SORT_ORDER = Object.keys(SORTS) as SortKey[];
 
 export default function Dashboard() {
   const c = useColors();
-  const { signOut } = useAuth();
+  const { getToken } = useAuth();
+  const router = useRouter();
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const projects = useQuery(api.projects.get);
   const ensureCurrent = useMutation(api.users.ensureCurrent);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("updated");
+  const [importOpen, setImportOpen] = useState(false);
   const visible = (projects ?? [])
     .filter((project) => project.name.toLowerCase().includes(query.trim().toLowerCase()))
     .sort(SORTS[sort].compare);
+
+  /** Like the web's ImportGithubDialog: a new project, filled by the import job. */
+  const importRepo = async (input: string) => {
+    const slug = parseGithubRepo(input);
+    if (!slug) throw new Error("Enter a GitHub repository URL like https://github.com/owner/repo");
+    const { ok, data } = await postApi<{ projectId: string }>(
+      "/api/github/import",
+      { url: `https://github.com/${slug}` },
+      getToken,
+    );
+    if (data.code === GITHUB_NOT_LINKED) {
+      return alertGithubNotLinked(
+        "This repository is private or doesn't exist. Public repositories import without GitHub; connect GitHub to import private ones.",
+      );
+    }
+    if (!ok) throw new Error(data.error ?? "Unable to import repository. Please check the URL and try again");
+    router.push(`/projects/${data.projectId}`);
+  };
 
   // Same as the web's useEnsureCurrentUser: creates the user row if Clerk's
   // webhook has not arrived yet. Idempotent on the server.
@@ -59,8 +83,8 @@ export default function Dashboard() {
       <Stack.Screen
         options={{
           headerRight: () => (
-            <Pressable onPress={() => signOut()} hitSlop={10} accessibilityLabel="Sign out">
-              <LogOut size={18} color={c.mutedForeground} />
+            <Pressable onPress={() => router.push("/settings")} hitSlop={10} accessibilityLabel="Settings">
+              <Settings size={19} color={c.mutedForeground} />
             </Pressable>
           ),
         }}
@@ -89,6 +113,14 @@ export default function Dashboard() {
               <View style={styles.sectionRow}>
                 <Text style={[styles.section, { color: c.foreground }]}>Your projects</Text>
                 {projects && <Text style={[styles.count, { color: c.mutedForeground }]}>{projects.length}</Text>}
+                <Pressable
+                  onPress={() => setImportOpen(true)}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.import, pressed && { opacity: 0.6 }]}
+                >
+                  <GitBranch size={14} color={c.mutedForeground} />
+                  <Text style={[styles.sortText, { color: c.mutedForeground }]}>Import from GitHub</Text>
+                </Pressable>
               </View>
               {projects && projects.length > 0 && (
                 <View style={styles.tools}>
@@ -139,6 +171,14 @@ export default function Dashboard() {
           </Animated.View>
         )}
       />
+      <NameDialog
+        visible={importOpen}
+        title="Import from GitHub"
+        placeholder="https://github.com/owner/repo"
+        confirmLabel="Import"
+        onClose={() => setImportOpen(false)}
+        onSave={importRepo}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -150,9 +190,10 @@ const styles = StyleSheet.create({
   group: { gap: 10 },
   title: { fontSize: 30, letterSpacing: -0.6, fontFamily: font.semibold, textAlign: "center" },
   subtitle: { fontSize: 14, fontFamily: font.regular, textAlign: "center", marginBottom: 14 },
-  sectionRow: { flexDirection: "row", alignItems: "baseline", gap: 8, marginTop: 22 },
+  sectionRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 22 },
   section: { fontSize: 15, fontFamily: font.semibold },
   count: { fontSize: 12, fontFamily: font.regular },
+  import: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 6 },
   tools: { flexDirection: "row", gap: 8 },
   search: {
     flex: 1,
