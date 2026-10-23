@@ -5,6 +5,7 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "motion/react";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CodenayaLogo } from "@/components/codenaya-logo";
 import { SIGN_IN_URL, SIGN_UP_URL } from "@/features/auth/constants";
 
 export const LandingNavbar = () => {
@@ -40,10 +41,9 @@ export const LandingNavbar = () => {
             whileTap={{ scale: 0.98 }}
           >
             <div className="relative">
-              <img
-                src="/logo-alt.svg"
-                alt="Codenaya"
-                className="size-7 dark:invert-0 invert transition-transform duration-300 group-hover:rotate-12"
+              <CodenayaLogo
+                size={28}
+                className="transition-transform duration-300 group-hover:rotate-12"
               />
             </div>
             <span className="text-lg font-semibold tracking-tight text-foreground">

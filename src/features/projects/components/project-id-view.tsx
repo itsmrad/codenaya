@@ -18,6 +18,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 
 import { cn } from "@/lib/utils";
+import { CodenayaLogo } from "@/components/codenaya-logo";
 import { HelpMenu } from "@/components/help-menu";
 import { UserMenu } from "@/components/user-menu";
 import { useIsCompact, useIsMobile } from "@/hooks/use-mobile";
@@ -144,10 +145,9 @@ export const ProjectIdView = ({
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
           {/* Brand */}
           <Link href="/" className="flex items-center gap-2 shrink-0 group">
-            <img
-              src="/logo-alt.svg"
-              alt="Codenaya"
-              className="size-4.5 dark:invert-0 invert transition-transform duration-200 group-hover:rotate-12"
+            <CodenayaLogo
+              size={18}
+              className="transition-transform duration-200 group-hover:rotate-12"
             />
             <span className="text-xs font-semibold tracking-tight text-foreground hidden @2xl:inline">
               codenaya

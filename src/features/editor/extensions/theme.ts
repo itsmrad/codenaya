@@ -16,6 +16,11 @@ export const customTheme = EditorView.theme({
   ".cm-content": {
     fontFamily: "var(--font-nerd-mono), monospace",
     fontSize: "14px",
+    caretColor: "var(--brand, #e8824f) !important",
+  },
+  ".cm-cursor, .cm-dropCursor": {
+    borderLeftColor: "var(--brand, #e8824f) !important",
+    borderLeftWidth: "2px",
   },
   ".cm-scroller": {
     scrollbarWidth: "thin",
@@ -41,14 +46,14 @@ const ink = "#383a42",
   sage = "#2f6f1c",
   violet = "#a0229e",
   invalid = "#c4001a",
-  cursor = "#2563eb",
+  cursor = "#e8824f",
   selection = "#dce5f5",
   highlight = "#efebe5";
 
 const lightEditorTheme = EditorView.theme({
   "&": { color: ink },
   ".cm-content": { caretColor: cursor },
-  ".cm-cursor, .cm-dropCursor": { borderLeftColor: cursor },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: cursor, borderLeftWidth: "2px" },
   "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
     backgroundColor: selection,
   },

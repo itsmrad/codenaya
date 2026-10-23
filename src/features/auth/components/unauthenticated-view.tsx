@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/empty";
 import { SignInButton, SignOutButton, useAuth } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
+import { CodenayaLogo } from "@/components/codenaya-logo";
 
 export const UnauthenticatedView = () => {
   // Return the user to the page they tried to open once they sign in.
@@ -25,11 +26,7 @@ export const UnauthenticatedView = () => {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-8 bg-background px-4 py-16">
       <Link href="/" className="flex items-center gap-2.5">
-        <img
-          src="/logo-alt.svg"
-          alt="Codenaya"
-          className="size-6 dark:invert-0 invert"
-        />
+        <CodenayaLogo size={24} />
         <span className="text-base font-semibold tracking-tight text-foreground">
           codenaya
         </span>

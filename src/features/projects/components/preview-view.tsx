@@ -19,6 +19,7 @@ import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webco
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
 import { PreviewBuilding } from "@/features/sandbox-preview/components/preview-building";
+import { CodenayaLogo } from "@/components/codenaya-logo";
 import {
   PREVIEW_DEVICE_WIDTHS,
   PreviewDeviceToggle,
@@ -349,6 +350,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
               restart={restart}
               errorKind={errorKind}
               onUseWebContainer={() => switchEngine("webcontainer")}
+              isExecuting={Boolean(activeRun)}
               building={building}
             />
           </div>
@@ -375,6 +377,7 @@ const PreviewContent = ({
   restart,
   errorKind,
   onUseWebContainer,
+  isExecuting,
   building,
 }: {
   error: string | null | undefined;
@@ -387,6 +390,7 @@ const PreviewContent = ({
   restart: () => void;
   errorKind: SandboxErrorKind | null;
   onUseWebContainer: () => void;
+  isExecuting?: boolean;
   /** The first-build placeholder; the engine stays idle while it's shown. */
   building: ReactNode;
 }) => (
@@ -394,6 +398,17 @@ const PreviewContent = ({
     <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
 
     {building}
+
+    {isExecuting && (
+      <div className="absolute top-3 right-3 z-40 flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-card/95 backdrop-blur-md border border-brand/30 shadow-lg text-xs font-medium text-foreground animate-in fade-in-0 duration-200">
+        <span className="relative flex size-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand opacity-75" />
+          <span className="relative inline-flex rounded-full size-2 bg-brand" />
+        </span>
+        <CodenayaLogo size={16} blinking={true} />
+        <span className="text-[11px] text-muted-foreground font-mono">Executing code</span>
+      </div>
+    )}
 
     {error && (
       <div className="size-full flex items-center justify-center text-muted-foreground bg-background p-4">
@@ -424,13 +439,21 @@ const PreviewContent = ({
 
     {isLoading && !error && (
       <div className="size-full flex items-center justify-center text-muted-foreground bg-background">
-        <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
-          <Loader2Icon className="size-6 animate-spin" />
-          <p className="text-sm font-medium">
-            {status === "booting"
-              ? `Starting ${activeEngine}...`
-              : "Installing dependencies..."}
-          </p>
+        <div className="flex flex-col items-center gap-3 max-w-md mx-auto text-center">
+          <div className="relative grid size-16 place-items-center rounded-2xl border border-border/70 bg-card shadow-xl shadow-brand/5">
+            <span className="absolute inset-0 animate-ping rounded-2xl bg-brand/20 motion-reduce:animate-none opacity-60" />
+            <CodenayaLogo size={36} blinking={true} />
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <p className="text-sm font-medium text-foreground">
+              {status === "booting"
+                ? `Starting ${activeEngine}...`
+                : "Installing dependencies..."}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Preparing live execution environment
+            </p>
+          </div>
         </div>
       </div>
     )}

@@ -5,6 +5,7 @@ import { motion } from "motion/react";
 import { FaGithub } from "react-icons/fa";
 
 import { GITHUB_REPO_URL, REPORT_ISSUE_URL } from "@/lib/site";
+import { CodenayaLogo } from "@/components/codenaya-logo";
 
 type FooterLink = { label: string; href: string };
 
@@ -61,11 +62,7 @@ export const LandingFooter = () => {
             className="flex flex-col gap-3 max-w-xs"
           >
             <Link href="/" className="flex items-center gap-3">
-              <img
-                src="/logo-alt.svg"
-                alt="Codenaya"
-                className="size-5 dark:invert-0 invert"
-              />
+              <CodenayaLogo size={20} />
               <span className="text-sm font-medium text-foreground">codenaya</span>
             </Link>
             <p className="text-sm text-muted-foreground">

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 
 import { Button } from "@/components/ui/button";
+import { CodenayaLogo } from "@/components/codenaya-logo";
 import { SIGN_IN_URL, SIGN_UP_URL } from "@/features/auth/constants";
 
 import { HelpMenu } from "./help-menu";
@@ -18,10 +19,9 @@ export const AppNavbar = () => {
     <nav className="h-12 shrink-0 flex items-center justify-between px-4 border-b border-border/40 bg-background">
       {/* Left — Brand */}
       <Link href="/" className="flex items-center gap-2.5 group">
-        <img
-          src="/logo-alt.svg"
-          alt="Codenaya"
-          className="size-5 dark:invert-0 invert transition-transform duration-200 group-hover:rotate-12"
+        <CodenayaLogo
+          size={20}
+          className="transition-transform duration-200 group-hover:rotate-12"
         />
         <span className="text-sm font-semibold tracking-tight text-foreground">
           codenaya

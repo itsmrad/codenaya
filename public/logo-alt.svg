@@ -1,3 +1,12 @@
-<svg width="40" height="48" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg">
- <path d="M20 4V16.3604C20 19.087 16.6569 20.3998 14.8016 18.4017L7 10M40 24H27.6396C24.913 24 23.6002 20.6569 25.5983 18.8016L34 11M20 44V31.6396C20 28.913 23.3431 27.6002 25.1984 29.5983L33 38M0 24L12.3604 24C15.087 24 16.3998 27.3431 14.4017 29.1984L6 37" stroke="white" stroke-width="4"/>
- </svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <style>
+    .ring { fill: #09090B; }
+    .cursor { fill: #E5481F; }
+    @media (prefers-color-scheme: dark) {
+      .ring { fill: #FAFAF9; }
+      .cursor { fill: #FF5F3A; }
+    }
+  </style>
+  <path class="ring" d="M99.4 29.2A50 50 0 1 0 99.4 90.8L82.1 77.2A28 28 0 1 1 82.1 42.8Z"/>
+  <rect class="cursor" x="94" y="46" width="14" height="28" rx="2"/>
+</svg>
