@@ -1,0 +1,108 @@
+import type { ReactNode } from "react";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { font, radius, useColors } from "@/lib/theme";
+
+/** A bottom sheet for pickers and lists (models, conversations, versions). */
+export function Sheet({
+  visible,
+  title,
+  description,
+  onClose,
+  children,
+}: {
+  visible: boolean;
+  title: string;
+  description?: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} />
+      <View
+        style={[
+          styles.sheet,
+          { backgroundColor: c.card, borderColor: c.border, paddingBottom: insets.bottom + 12 },
+        ]}
+      >
+        <View style={[styles.handle, { backgroundColor: c.border }]} />
+        <Text style={[styles.title, { color: c.foreground }]}>{title}</Text>
+        {description && <Text style={[styles.description, { color: c.mutedForeground }]}>{description}</Text>}
+        <ScrollView style={styles.body}>{children}</ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+/** One tappable row in a sheet: a label, an optional muted detail, and a trailing slot. */
+export function SheetRow({
+  label,
+  detail,
+  selected,
+  trailing,
+  onPress,
+  disabled,
+}: {
+  label: string;
+  detail?: string;
+  selected?: boolean;
+  trailing?: ReactNode;
+  onPress?: () => void;
+  disabled?: boolean;
+}) {
+  const c = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled || !onPress}
+      style={({ pressed }) => [
+        styles.row,
+        (pressed || selected) && { backgroundColor: c.muted },
+        disabled && styles.disabled,
+      ]}
+    >
+      <View style={styles.rowText}>
+        <Text style={[styles.label, { color: c.foreground }]} numberOfLines={1}>
+          {label}
+        </Text>
+        {detail && (
+          <Text style={[styles.detail, { color: c.mutedForeground }]} numberOfLines={1}>
+            {detail}
+          </Text>
+        )}
+      </View>
+      {trailing}
+    </Pressable>
+  );
+}
+
+export function SheetSection({ title }: { title: string }) {
+  const c = useColors();
+  return <Text style={[styles.section, { color: c.mutedForeground }]}>{title}</Text>;
+}
+
+const styles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" },
+  sheet: {
+    maxHeight: "75%",
+    borderTopLeftRadius: radius.xl + 4,
+    borderTopRightRadius: radius.xl + 4,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    paddingTop: 8,
+  },
+  handle: { alignSelf: "center", width: 36, height: 4, borderRadius: 2, marginBottom: 12 },
+  title: { fontSize: 16, fontFamily: font.semibold, paddingHorizontal: 20 },
+  description: { fontSize: 13, fontFamily: font.regular, paddingHorizontal: 20, marginTop: 4 },
+  body: { marginTop: 10, paddingHorizontal: 8 },
+  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 11, borderRadius: radius.md },
+  rowText: { flex: 1, minWidth: 0 },
+  label: { fontSize: 15, fontFamily: font.regular },
+  detail: { fontSize: 12, fontFamily: font.regular, marginTop: 2 },
+  section: { fontSize: 12, fontFamily: font.medium, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 4 },
+  disabled: { opacity: 0.5 },
+});

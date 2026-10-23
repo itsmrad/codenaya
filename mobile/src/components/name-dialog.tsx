@@ -1,17 +1,25 @@
 import { useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
+import { errorMessage } from "@/lib/format";
 import { font, radius, useColors } from "@/lib/theme";
 
-// Alert.prompt is iOS-only, so renaming gets a small modal on both platforms.
-export function RenameDialog({
+// Alert.prompt is iOS-only, so naming (rename, new file or folder) gets a
+// small modal on both platforms.
+export function NameDialog({
   visible,
-  initialName,
+  title,
+  initialName = "",
+  confirmLabel = "Save",
+  placeholder,
   onClose,
   onSave,
 }: {
   visible: boolean;
-  initialName: string;
+  title: string;
+  initialName?: string;
+  confirmLabel?: string;
+  placeholder?: string;
   onClose: () => void;
   onSave: (name: string) => Promise<unknown>;
 }) {
@@ -24,21 +32,28 @@ export function RenameDialog({
     try {
       await onSave(trimmed);
       onClose();
-    } catch {
-      setError("Couldn't rename the project.");
+    } catch (error) {
+      setError(errorMessage(error));
     }
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onShow={() => setName(initialName)}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onShow={() => {
+        setName(initialName);
+        setError(undefined);
+      }}>
       <View style={styles.backdrop}>
         <View style={[styles.dialog, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[styles.title, { color: c.foreground }]}>Rename project</Text>
+          <Text style={[styles.title, { color: c.foreground }]}>{title}</Text>
           <TextInput
             style={[styles.input, { color: c.foreground, borderColor: c.border }]}
             value={name}
             onChangeText={setName}
             onSubmitEditing={save}
+            placeholder={placeholder}
+            placeholderTextColor={c.mutedForeground}
+            autoCapitalize="none"
+            autoCorrect={false}
             autoFocus
             selectTextOnFocus
           />
@@ -52,7 +67,7 @@ export function RenameDialog({
               disabled={!trimmed || trimmed === initialName}
               style={[styles.button, { backgroundColor: c.primary }, (!trimmed || trimmed === initialName) && styles.disabled]}
             >
-              <Text style={[styles.buttonText, { color: c.primaryForeground }]}>Save</Text>
+              <Text style={[styles.buttonText, { color: c.primaryForeground }]}>{confirmLabel}</Text>
             </Pressable>
           </View>
         </View>

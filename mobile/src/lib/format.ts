@@ -1,3 +1,5 @@
+import { ConvexError } from "convex/values";
+
 /** "5 minutes ago", like the web's formatDistanceToNow, without date-fns. */
 export const timeAgo = (time: number) => {
   const minutes = Math.round((Date.now() - time) / 60_000);
@@ -12,3 +14,7 @@ export const timeAgo = (time: number) => {
           : [Math.round(minutes / (60 * 24 * 30)), "month"];
   return `${value} ${unit}${value === 1 ? "" : "s"} ago`;
 };
+
+/** A Convex `appError`'s message (e.g. "File already exists"), else a fallback. */
+export const errorMessage = (error: unknown, fallback = "Something went wrong.") =>
+  error instanceof ConvexError && typeof error.data?.message === "string" ? error.data.message : fallback;

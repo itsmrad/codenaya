@@ -9,9 +9,9 @@ import {
 } from "@expo-google-fonts/inter";
 import { ConvexReactClient, useConvexAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
-import { Stack, ThemeProvider } from "expo-router";
+import { type ErrorBoundaryProps, Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
 import { Logo } from "@/components/logo";
 import { font, useColors, useNavigationTheme } from "@/lib/theme";
@@ -19,6 +19,25 @@ import { font, useColors, useNavigationTheme } from "@/lib/theme";
 const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, {
   unsavedChangesWarning: false,
 });
+
+/**
+ * Shown instead of a crash when a screen throws (e.g. a query for a project
+ * deleted elsewhere). Retry re-renders the screen.
+ */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  const c = useColors();
+  return (
+    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", gap: 12, padding: 24, backgroundColor: c.background }}>
+      <Text style={{ color: c.foreground, fontSize: 17, fontFamily: font.semibold }}>Something went wrong</Text>
+      <Text style={{ color: c.mutedForeground, fontSize: 13, fontFamily: font.regular, textAlign: "center" }}>
+        {error.message}
+      </Text>
+      <Pressable onPress={retry} style={{ backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 }}>
+        <Text style={{ color: c.primaryForeground, fontFamily: font.medium }}>Try again</Text>
+      </Pressable>
+    </View>
+  );
+}
 
 export default function RootLayout() {
   const navigationTheme = useNavigationTheme();

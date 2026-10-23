@@ -19,3 +19,6 @@ export const postApi = async <T>(
   const data = await response.json().catch(() => ({}));
   return { ok: response.ok, status: response.status, data };
 };
+
+/** A page on the Codenaya website, e.g. a project's IDE for "Open on the website". */
+export const webUrl = (path: string) => `${process.env.EXPO_PUBLIC_API_URL}${path}`;

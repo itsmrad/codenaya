@@ -245,6 +245,7 @@ export function AgentRun({
   startedAt,
   completedAt,
   model,
+  stalled = false,
   onOpenFile,
 }: {
   steps: AgentStep[];
@@ -252,10 +253,12 @@ export function AgentRun({
   startedAt: number;
   completedAt?: number;
   model?: string;
+  /** Processing, but silent for too long (see useRunStalled). */
+  stalled?: boolean;
   onOpenFile?: (path: string) => void;
 }) {
   const c = useColors();
-  const live = status === "processing";
+  const live = status === "processing" && !stalled;
   const [open, setOpen] = useState(live);
   const now = useNow(live);
 
@@ -298,13 +301,15 @@ export function AgentRun({
           </>
         ) : (
           <>
-            {errors > 0 || status === "cancelled" ? (
-              <CircleAlert size={14} color={errors > 0 ? c.destructive : c.mutedForeground} />
+            {errors > 0 || stalled || status === "cancelled" ? (
+              <CircleAlert size={14} color={errors > 0 || stalled ? c.destructive : c.mutedForeground} />
             ) : (
               <CheckCircle2 size={14} color={c.mutedForeground} />
             )}
             <Text style={[styles.headerText, { color: c.foreground }]}>
-              {status === "cancelled"
+              {stalled
+                ? "Stopped responding"
+                : status === "cancelled"
                 ? `Stopped after ${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`
                 : endedAt
                   ? `Worked for ${formatDuration(endedAt - startedAt)}`

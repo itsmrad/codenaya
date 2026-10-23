@@ -1,10 +1,8 @@
-import { useAuth } from "@clerk/expo";
-import { useRouter } from "expo-router";
 import { ArrowUp, ChartColumn, ListTodo, Rocket, SquareKanban, UserRound } from "lucide-react-native";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { postApi } from "@/lib/http";
+import { useCreateProject } from "@/lib/create-project";
 import { font, radius, useColors } from "@/lib/theme";
 
 // The web's STARTER_PROMPTS (prompt-composer.tsx): a chip fills the box, it never sends.
@@ -42,8 +40,7 @@ const STARTER_PROMPTS = [
  */
 export function PromptComposer() {
   const c = useColors();
-  const router = useRouter();
-  const { getToken } = useAuth();
+  const createProject = useCreateProject();
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -51,24 +48,10 @@ export function PromptComposer() {
   const create = async () => {
     setBusy(true);
     setError(undefined);
-    try {
-      const { ok, data } = await postApi<{ projectId?: string }>(
-        "/api/projects/create-with-prompt",
-        { prompt: prompt.trim() },
-        getToken,
-      );
-      // A failed dispatch (502) still created the project: open it anyway.
-      if (data.projectId) {
-        setPrompt("");
-        router.push(`/projects/${data.projectId}`);
-      } else {
-        setError(ok ? "Something went wrong." : (data.error ?? "Couldn't create the project."));
-      }
-    } catch {
-      setError("Couldn't reach Codenaya. Is the server running?");
-    } finally {
-      setBusy(false);
-    }
+    const failed = await createProject(prompt.trim());
+    if (failed) setError(failed);
+    else setPrompt("");
+    setBusy(false);
   };
 
   const canSend = prompt.trim().length > 0 && !busy;
