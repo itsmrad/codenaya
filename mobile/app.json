@@ -2,7 +2,7 @@
   "expo": {
     "name": "Codenaya",
     "slug": "codenaya",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "codenaya",
@@ -16,13 +16,14 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#09090b",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
+        "backgroundColor": "#ffffff",
+        "foregroundImage": "./assets/images/android-icon-foreground-light.png",
+        "backgroundImage": "./assets/images/android-icon-background-light.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.codenaya.app"
+      "package": "com.codenaya.app",
+      "versionCode": 2
     },
     "web": {
       "output": "server",
@@ -50,7 +51,14 @@
           "photosPermission": "Codenaya uses your photos to attach images to chat messages."
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "./plugins/with-night-launcher-icon",
+        {
+          "foregroundImage": "./assets/images/android-icon-foreground.png",
+          "backgroundImage": "./assets/images/android-icon-background.png"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
