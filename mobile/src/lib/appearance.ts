@@ -6,7 +6,9 @@ export type ThemeChoice = "system" | "light" | "dark";
 
 const KEY = "codenaya.theme";
 
-const apply = (choice: ThemeChoice) => Appearance.setColorScheme(choice === "system" ? "unspecified" : choice);
+// Missing on web, including the server render a release export runs.
+const apply = (choice: ThemeChoice) =>
+  Appearance.setColorScheme?.(choice === "system" ? "unspecified" : choice);
 
 const stored = (): ThemeChoice => {
   try {

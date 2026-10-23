@@ -27,3 +27,21 @@ sign-in), `preview` (a standalone APK to share) and `production`. Run
 `.env.local` is not uploaded, so set the three `EXPO_PUBLIC_*` values for the build with
 `npx eas-cli env:create`. A build used away from your Wi-Fi needs public URLs (a deployed
 Convex and Next.js), not LAN IPs.
+
+## Local APK (no Expo account)
+
+Needs JDK 17 and the Android SDK, e.g. `brew install openjdk@17 && brew install --cask android-commandlinetools`,
+then `sdkmanager --licenses` and `sdkmanager platform-tools`.
+
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+npx expo prebuild -p android --no-install   # android/ is git-ignored
+cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+# → android/app/build/outputs/apk/release/app-release.apk
+```
+
+The `EXPO_PUBLIC_*` values from `.env.local` are baked in at build time, so rebuild when the
+Mac's IP changes. While they are `http://` URLs, `app.config.js` allows cleartext traffic,
+which Android release builds otherwise block. The release is signed with the debug key: fine
+for testing, not for the Play Store.
