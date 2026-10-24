@@ -20,6 +20,7 @@ import { SIGN_IN_URL, SIGN_UP_URL } from "@/features/auth/constants";
 import { cn } from "@/lib/utils";
 
 import { UserMenu } from "./user-menu";
+import { ThemeToggle } from "./theme-toggle";
 
 const NAV_LINKS = [
   { href: "/showcase", label: "Showcase" },
@@ -107,7 +108,8 @@ export const MarketingNavbar = ({ overlay = false }: MarketingNavbarProps) => {
           </ul>
         </div>
 
-        <div className="hidden md:flex items-center gap-1.5">
+        <div className="hidden md:flex items-center gap-2">
+          <ThemeToggle />
           {isSignedIn === true && (
             <>
               <Button asChild variant="ghost" className={pillButton}>
@@ -132,7 +134,8 @@ export const MarketingNavbar = ({ overlay = false }: MarketingNavbarProps) => {
           )}
         </div>
 
-        <div className="flex items-center gap-1 md:hidden">
+        <div className="flex items-center gap-1.5 md:hidden">
+          <ThemeToggle />
           {isSignedIn === true && <UserMenu avatarClassName="size-7" />}
           <Sheet>
             <SheetTrigger asChild>
@@ -180,7 +183,13 @@ export const MarketingNavbar = ({ overlay = false }: MarketingNavbarProps) => {
                 })}
               </ul>
 
-              <div className="mt-auto flex flex-col gap-2 p-5">
+              <div className="mt-auto flex flex-col gap-3 p-5">
+                <div className="flex items-center justify-between py-2 border-b border-border/60">
+                  <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                    Theme
+                  </span>
+                  <ThemeToggle />
+                </div>
                 {isSignedIn === true && (
                   <SheetClose asChild>
                     <Button asChild className={cn("h-11 w-full rounded-full text-base", solidButton)}>
