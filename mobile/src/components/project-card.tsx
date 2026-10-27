@@ -2,12 +2,12 @@ import * as Clipboard from "expo-clipboard";
 import { useConvex, useMutation } from "convex/react";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { CircleAlert, Copy, Download, ExternalLink, GitBranch, Link, MoreHorizontal, Pencil, Trash2 } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
+import { CircleAlert, Copy, Download, ExternalLink, GitBranch, Link, MoreHorizontal, Pencil, Trash2 } from "@/components/icons";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/format";
 import { webUrl } from "@/lib/http";

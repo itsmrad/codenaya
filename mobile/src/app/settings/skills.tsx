@@ -2,13 +2,13 @@ import { useAuth } from "@clerk/expo";
 import { useMutation, useQuery } from "convex/react";
 import { Stack, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { Copy, Download, Eye, Info, Pencil, Plus, Search, Sparkles, Trash2 } from "lucide-react-native";
 import { type ReactNode, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { confirm, toast } from "@/components/dialogs";
 import { Button, Field } from "@/components/form";
+import { Copy, Download, Eye, Info, Pencil, Plus, Search, Sparkles, Trash2 } from "@/components/icons";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/format";

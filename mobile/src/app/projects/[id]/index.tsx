@@ -3,7 +3,6 @@ import { useConvex, useMutation, useQuery } from "convex/react";
 import type { ImagePickerAsset } from "expo-image-picker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { ClockArrowUp, Download, ExternalLink, FolderTree, GitBranch, History, MoreHorizontal, Plug, Plus, Sparkles } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -24,6 +23,7 @@ import { ChatComposer } from "@/components/chat-composer";
 import { ChatEmptyState } from "@/components/chat-empty-state";
 import { AssistantMessage, UserMessage, useRunStalled } from "@/components/chat-message";
 import { GithubExportSheet } from "@/components/github-export-sheet";
+import { ClockArrowUp, Download, ExternalLink, FolderTree, GitBranch, History, MoreHorizontal, Plug, Plus, Sparkles } from "@/components/icons";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { useAgentModel } from "@/lib/agent-model";
 import { api } from "@/lib/api";

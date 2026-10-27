@@ -1,12 +1,12 @@
 import { useAuth, useUser } from "@clerk/expo";
 import { Image } from "expo-image";
 import * as WebBrowser from "expo-web-browser";
-import { CheckCircle2, ExternalLink, GitBranch, LogOut, Pencil } from "lucide-react-native";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Button } from "@/components/form";
 import { GoogleIcon } from "@/components/google-icon";
+import { CheckCircle2, ExternalLink, GitBranch, LogOut, Pencil } from "@/components/icons";
 import { NameDialog } from "@/components/name-dialog";
 import { SheetRow } from "@/components/sheet";
 import { webUrl } from "@/lib/http";

@@ -1,6 +1,10 @@
 import { useAuth } from "@clerk/expo";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import { type ReactNode, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import Animated from "react-native-reanimated";
+
 import {
   ArrowUp,
   Check,
@@ -12,11 +16,7 @@ import {
   Undo2,
   WandSparkles,
   X,
-} from "lucide-react-native";
-import { type ReactNode, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import Animated from "react-native-reanimated";
-
+} from "@/components/icons";
 import { Sheet, SheetRow, SheetSection } from "@/components/sheet";
 import type { useAgentModel } from "@/lib/agent-model";
 import { postApi } from "@/lib/http";

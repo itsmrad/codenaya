@@ -1,11 +1,11 @@
 import { useMutation, useQuery } from "convex/react";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { ChevronRight, File, FilePlus2, Folder, FolderPlus, Pencil, Plus, Trash2 } from "lucide-react-native";
 import { useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { Doc, Id } from "../../../../../convex/_generated/dataModel";
 import { confirm, toast } from "@/components/dialogs";
+import { ChevronRight, File, FilePlus2, Folder, FolderPlus, Pencil, Plus, Trash2 } from "@/components/icons";
 import { NameDialog } from "@/components/name-dialog";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { api } from "@/lib/api";

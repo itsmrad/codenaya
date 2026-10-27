@@ -1,5 +1,4 @@
 import { useMutation, useQuery } from "convex/react";
-import { Plug, Plus, Trash2 } from "lucide-react-native";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -7,6 +6,7 @@ import { AddConnectionSheet } from "@/components/add-connection-sheet";
 import { type Connection, ConnectionCard } from "@/components/connection-card";
 import { confirm, toast } from "@/components/dialogs";
 import { Button } from "@/components/form";
+import { Plug, Plus, Trash2 } from "@/components/icons";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/format";
 import { font, radius, useColors } from "@/lib/theme";

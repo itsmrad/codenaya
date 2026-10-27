@@ -1,7 +1,6 @@
 import { useSignIn } from "@clerk/expo";
 import { useSSO } from "@clerk/expo/experimental";
 import * as WebBrowser from "expo-web-browser";
-import { Play } from "lucide-react-native";
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -15,6 +14,7 @@ import {
 } from "react-native";
 
 import { GoogleIcon } from "@/components/google-icon";
+import { Play } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { webUrl } from "@/lib/http";
 import { font, radius, useColors } from "@/lib/theme";

@@ -1,13 +1,13 @@
 import { useAuth } from "@clerk/expo";
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
-import { Check, ChevronDown, KeyRound, Plus, Trash2, Wallet } from "lucide-react-native";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { confirm, toast } from "@/components/dialogs";
 import { AddProviderKeySheet } from "@/components/add-provider-key-sheet";
 import { Button } from "@/components/form";
+import { Check, ChevronDown, KeyRound, Plus, Trash2, Wallet } from "@/components/icons";
 import { Sheet, SheetRow, SheetSection } from "@/components/sheet";
 import { useAgentModel } from "@/lib/agent-model";
 import { api } from "@/lib/api";

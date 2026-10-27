@@ -1,7 +1,7 @@
-import { Monitor, Moon, Sun } from "lucide-react-native";
 import { StyleSheet, Text, View } from "react-native";
 
 import { Segmented } from "@/components/form";
+import { Monitor, Moon, Sun } from "@/components/icons";
 import { useThemeChoice } from "@/lib/appearance";
 import { font, radius, useColors } from "@/lib/theme";
 

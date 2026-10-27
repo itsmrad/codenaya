@@ -1,6 +1,5 @@
 import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
-import { BookOpen, Check, Copy, Hammer, ListChecks, RotateCcw, Undo2 } from "lucide-react-native";
 import { type ReactNode, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
 import { useMarkdown } from "react-native-marked";
@@ -8,6 +7,7 @@ import Animated, { useReducedMotion } from "react-native-reanimated";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { AgentRun } from "@/components/agent-run";
+import { BookOpen, Check, Copy, Hammer, ListChecks, RotateCcw, Undo2 } from "@/components/icons";
 import { fadeUp } from "@/lib/motion";
 import { STALLED_RUN_MS, lastRunActivity, sanitizeAgentText, splitSlashSkills } from "@/lib/shared";
 import { type Colors, font, radius, useColors } from "@/lib/theme";

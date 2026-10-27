@@ -1,10 +1,10 @@
 import { useAuth } from "@clerk/expo";
 import * as WebBrowser from "expo-web-browser";
-import { ChevronRight, ExternalLink, Server } from "lucide-react-native";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import { Button, Field } from "@/components/form";
+import { ChevronRight, ExternalLink, Server } from "@/components/icons";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { postApi } from "@/lib/http";
 import { getProvider, listProviders } from "@/lib/shared";

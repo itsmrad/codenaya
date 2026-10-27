@@ -1,7 +1,7 @@
 import { type Href, useRouter } from "expo-router";
-import { ChevronRight, KeyRound, type LucideIcon, Palette, Plug, Sparkles, User } from "lucide-react-native";
 import { ScrollView, StyleSheet } from "react-native";
 
+import { ChevronRight, KeyRound, type LucideIcon, Palette, Plug, Sparkles, User } from "@/components/icons";
 import { SheetRow } from "@/components/sheet";
 import { useColors } from "@/lib/theme";
 

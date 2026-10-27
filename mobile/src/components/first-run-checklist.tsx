@@ -2,11 +2,11 @@ import { useUser } from "@clerk/expo";
 import { useQuery } from "convex/react";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
-import { CheckCircle2, ChevronRight, Circle, X } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
+import { CheckCircle2, ChevronRight, Circle, X } from "@/components/icons";
 import { api } from "@/lib/api";
 import { webUrl } from "@/lib/http";
 import { getFirstRunProgress } from "@/lib/shared";

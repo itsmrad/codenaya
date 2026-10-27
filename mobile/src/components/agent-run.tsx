@@ -1,3 +1,7 @@
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import Animated, { FadeIn, FadeOut, LinearTransition, useReducedMotion } from "react-native-reanimated";
+
 import {
   BookOpen,
   Brain,
@@ -18,11 +22,7 @@ import {
   type LucideIcon,
   Plug,
   Wrench,
-} from "lucide-react-native";
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
-import Animated, { FadeIn, FadeOut, LinearTransition, useReducedMotion } from "react-native-reanimated";
-
+} from "@/components/icons";
 import { fadeUp, staggerDelay } from "@/lib/motion";
 import { type AgentStep, BUILD_VERIFIED, formatDuration } from "@/lib/shared";
 import { type Colors, font, radius, useColors } from "@/lib/theme";

@@ -2,13 +2,13 @@ import { useAuth } from "@clerk/expo";
 import { useQuery } from "convex/react";
 import { Stack, useRouter } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
-import { ArrowUpDown, GitBranch, Search } from "lucide-react-native";
 import { useState } from "react";
 import { FlatList, KeyboardAvoidingView, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { Doc } from "../../../../convex/_generated/dataModel";
+import { ArrowUpDown, GitBranch, Search } from "@/components/icons";
 import { NameDialog } from "@/components/name-dialog";
 import { ProjectCard } from "@/components/project-card";
 import { api } from "@/lib/api";

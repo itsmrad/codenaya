@@ -1,13 +1,13 @@
 import { useMutation, useQuery } from "convex/react";
 import { Stack, useRouter } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
-import { ChevronRight, Settings } from "lucide-react-native";
 import { Fragment, useEffect } from "react";
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { FirstRunChecklist } from "@/components/first-run-checklist";
+import { ChevronRight, Settings } from "@/components/icons";
 import { ProjectCard } from "@/components/project-card";
 import { PromptComposer } from "@/components/prompt-composer";
 import { StarterTemplates } from "@/components/starter-templates";

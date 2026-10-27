@@ -1,8 +1,8 @@
-import { ArrowUp, ChartColumn, ListTodo, Rocket, SquareKanban, UserRound } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import Animated, { useReducedMotion } from "react-native-reanimated";
 
+import { ArrowUp, ChartColumn, ListTodo, Rocket, SquareKanban, UserRound } from "@/components/icons";
 import { useCreateProject } from "@/lib/create-project";
 import { font, radius, useColors } from "@/lib/theme";
 

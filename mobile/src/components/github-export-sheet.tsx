@@ -1,11 +1,11 @@
 import { useAuth } from "@clerk/expo";
 import * as WebBrowser from "expo-web-browser";
-import { CheckCircle2, ExternalLink, Lock, Globe, XCircle } from "lucide-react-native";
 import { useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { Button, Field, Segmented } from "@/components/form";
+import { CheckCircle2, ExternalLink, Lock, Globe, XCircle } from "@/components/icons";
 import { Sheet } from "@/components/sheet";
 import { GITHUB_NOT_LINKED, alertGithubNotLinked } from "@/lib/github";
 import { postApi } from "@/lib/http";

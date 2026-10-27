@@ -1,10 +1,10 @@
-import { CircleCheck, OctagonX } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import { BackHandler, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/form";
+import { CircleCheck, OctagonX } from "@/components/icons";
 import { fadeUp, zoomIn } from "@/lib/motion";
 import { font, radius, useColors } from "@/lib/theme";
 

@@ -3,7 +3,6 @@ import { useMutation, useQuery } from "convex/react";
 import { useLocalSearchParams } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import * as WebBrowser from "expo-web-browser";
-import { Eye, EyeOff, Link2, Plus, Trash2, Unlink } from "lucide-react-native";
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -22,6 +21,7 @@ import { confirm, toast } from "@/components/dialogs";
 import { AddConnectionSheet } from "@/components/add-connection-sheet";
 import { ConnectionCard } from "@/components/connection-card";
 import { Button, Field } from "@/components/form";
+import { Eye, EyeOff, Link2, Plus, Trash2, Unlink } from "@/components/icons";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/format";

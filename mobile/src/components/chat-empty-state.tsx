@@ -1,7 +1,7 @@
-import { ArrowUpRight, Bug, Database, LayoutTemplate, Palette, Sparkles } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 
+import { ArrowUpRight, Bug, Database, LayoutTemplate, Palette, Sparkles } from "@/components/icons";
 import { fadeUp } from "@/lib/motion";
 import { font, radius, useColors } from "@/lib/theme";
 
