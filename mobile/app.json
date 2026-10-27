@@ -52,6 +52,7 @@
         }
       ],
       "expo-sharing",
+      ["expo-build-properties", { "android": { "enableMinifyInReleaseBuilds": true, "enableShrinkResourcesInReleaseBuilds": true } }],
       [
         "./plugins/with-night-launcher-icon",
         {
