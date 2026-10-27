@@ -1,7 +1,6 @@
 import type { ConvexReactClient } from "convex/react";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
-import JSZip from "jszip";
 
 import type { Id } from "../../../convex/_generated/dataModel";
 import { api } from "@/lib/api";
@@ -23,6 +22,8 @@ export const shareProjectZip = async (
 ) => {
   const files = await convex.query(api.files.getFilesWithUrls, { projectId });
   const pathOf = buildPathIndex(files);
+  // Loaded on first use; most sessions never download a ZIP.
+  const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
 
   await Promise.all(

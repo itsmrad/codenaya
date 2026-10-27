@@ -1,14 +1,13 @@
 import { ClerkProvider, useAuth } from "@clerk/expo";
 import { tokenCache } from "@clerk/expo/token-cache";
-import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-  useFonts,
-} from "@expo-google-fonts/inter";
+// Each weight by path: the package index bundles all 18 Inter files.
+import { Inter_400Regular } from "@expo-google-fonts/inter/400Regular";
+import { Inter_500Medium } from "@expo-google-fonts/inter/500Medium";
+import { Inter_600SemiBold } from "@expo-google-fonts/inter/600SemiBold";
+import { Inter_700Bold } from "@expo-google-fonts/inter/700Bold";
 import { ConvexReactClient, useConvexAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
+import { useFonts } from "expo-font";
 import { type ErrorBoundaryProps, Stack, ThemeProvider } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, Platform, Pressable, Text, View } from "react-native";
