@@ -8,6 +8,7 @@ import { SIGN_IN_URL, SIGN_UP_URL } from "@/features/auth/constants";
 
 import { HelpMenu } from "./help-menu";
 import { UserMenu } from "./user-menu";
+import { ThemeToggle } from "./theme-toggle";
 
 export const AppNavbar = () => {
   // Public pages use MarketingNavbar, but in-app pages such as "Project not
@@ -28,9 +29,10 @@ export const AppNavbar = () => {
         </span>
       </Link>
 
-      {/* Right — Help + User */}
+      {/* Right — Theme + Help + User */}
       {isSignedIn === false ? (
         <div className="flex items-center gap-2">
+          <ThemeToggle />
           <Button asChild size="sm" variant="ghost">
             <Link href={SIGN_IN_URL}>Log in</Link>
           </Button>
@@ -40,6 +42,7 @@ export const AppNavbar = () => {
         </div>
       ) : (
         <div className="flex items-center gap-2">
+          <ThemeToggle />
           <HelpMenu className="size-8" />
           <UserMenu avatarClassName="size-7" />
         </div>
