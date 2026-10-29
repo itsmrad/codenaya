@@ -89,7 +89,7 @@ function assertValidCatalog({ models, defaultModelId, utilityModelId }: Catalog)
       (caps.every((cap) => cap === undefined) ||
         !caps.every((cap) => cap === undefined || (Number.isFinite(cap) && cap > 0 && cap <= MAX_SPEND_LIMIT_USD)))
     ) {
-      throw invalid(`Spend limits for ${model.id} must be between $0 and $${MAX_SPEND_LIMIT_USD}`);
+      throw invalid(`Set at least one spend cap for ${model.id}, above $0 and at most $${MAX_SPEND_LIMIT_USD}`);
     }
   }
   // Every user's runs may land on these, so they must be open to everyone. The

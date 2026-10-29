@@ -220,20 +220,23 @@ export const toSaveBody = (draft: Draft, confirmRiskyPrices: boolean): CatalogSa
   defaultModelId: draft.defaultModelId,
   utilityModelId: draft.utilityModelId,
   confirmRiskyPrices,
-  models: draft.models.map((model) => ({
-    id: model.id,
-    name: model.name,
-    vendor: model.vendor,
-    provider: model.provider,
-    providerModelId: model.providerModelId,
-    ...(model.contextLength === undefined ? {} : { contextLength: model.contextLength }),
-    vision: model.vision,
-    tools: model.tools ?? "confirmed",
-    pricing: toPricing(model)!,
-    access: model.access,
-    hidden: model.hidden,
-    ...(toSpendLimit(model) ? { spendLimit: toSpendLimit(model)! } : {}),
-  })),
+  models: draft.models.map((model) => {
+    const spendLimit = toSpendLimit(model);
+    return {
+      id: model.id,
+      name: model.name,
+      vendor: model.vendor,
+      provider: model.provider,
+      providerModelId: model.providerModelId,
+      ...(model.contextLength === undefined ? {} : { contextLength: model.contextLength }),
+      vision: model.vision,
+      tools: model.tools ?? "confirmed",
+      pricing: toPricing(model)!,
+      access: model.access,
+      hidden: model.hidden,
+      ...(spendLimit ? { spendLimit } : {}),
+    };
+  }),
 });
 
 /**

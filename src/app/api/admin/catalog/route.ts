@@ -10,9 +10,9 @@ import {
 } from "@/features/admin/platform-models";
 import { ADMIN_CATALOG_SAVE_RATE_LIMIT, requireAdminWrite } from "@/features/admin/server/admin-request";
 import { PLATFORM_PROVIDER_IDS } from "@/features/ai-providers/platform";
-import { MAX_SPEND_LIMIT_USD, SPEND_RESETS } from "@/features/billing/model-spend";
 import { AI_PROVIDERS, MAX_MODEL_ID_LENGTH } from "@/features/ai-providers/registry";
 import { PLATFORM_KEY_ENV, platformKeyOrNull } from "@/features/ai-providers/server/platform-model";
+import { MAX_SPEND_LIMIT_USD, SPEND_RESETS } from "@/features/billing/model-spend";
 import { getAppError } from "@/lib/convex-error";
 import { parseJsonBody } from "@/lib/parse-json-body";
 

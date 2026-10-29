@@ -29,8 +29,8 @@ import {
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import type { ModelAccess } from "@/features/ai-providers/catalog";
-import { useNow } from "@/hooks/use-now";
 import { SPEND_RESETS, type SpendReset, spendPeriodStart, spentInPeriod } from "@/features/billing/model-spend";
+import { useNow } from "@/hooks/use-now";
 
 import { api } from "../../../../convex/_generated/api";
 import { type DraftModel, parseLimit, parsePrice, togglePriceMode } from "../catalog-draft";
@@ -165,7 +165,8 @@ const SpendLimitFields = ({ model, draft }: { model: DraftModel; draft: CatalogD
           </SelectContent>
         </Select>
         <FieldDescription>
-          {total ? `All users spent $${spent.toFixed(2)} this period.` : "Spend is counted from when a limit is saved."}
+          {total ? `All users spent $${spent.toFixed(2)} this period. ` : "Spend is counted from when a limit is saved. "}
+          Changing the period starts the count again.
         </FieldDescription>
       </Field>
     </FieldSet>
