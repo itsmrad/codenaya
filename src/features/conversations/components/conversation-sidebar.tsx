@@ -44,6 +44,7 @@ import { modelAcceptsImages } from "@/features/ai-providers/registry";
 import { resolveCatalogModel } from "@/features/ai-providers/platform";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { INSUFFICIENT_CREDITS_CODE } from "@/features/billing/credits";
+import { MODEL_LIMIT_CODE } from "@/features/billing/model-spend";
 import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 import { useFiles } from "@/features/projects/hooks/use-files";
@@ -283,11 +284,12 @@ export const ConversationSidebar = ({
           return "blocked";
         }
         // Platform AI has no key, a promo model can't run (ADR 0009), or the
-        // user is out of credits (ADR 0011):
+        // user is out of credits (ADR 0011) or the model hit its limit (ADR 0012):
         // nothing was saved, so keep the draft.
         const refused =
           body.code === "ai_not_configured" ||
           body.code === INSUFFICIENT_CREDITS_CODE ||
+          body.code === MODEL_LIMIT_CODE ||
           isPromoRefusalCode(body.code);
         if (refused && body.error) {
           toast.error(body.error);

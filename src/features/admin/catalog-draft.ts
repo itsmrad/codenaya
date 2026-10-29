@@ -4,6 +4,7 @@ import {
   blendPrices,
   blendedUsdPerMTok,
 } from "../ai-providers/catalog";
+import { MAX_SPEND_LIMIT_USD, type SpendLimit, type SpendReset } from "../billing/model-spend";
 import {
   type FetchedModel,
   MAX_USD_PER_MTOK,
@@ -32,7 +33,7 @@ export interface SavedCatalog {
   utilityModelId: string;
 }
 
-export interface DraftModel extends Omit<CatalogModel, "tools" | "pricing"> {
+export interface DraftModel extends Omit<CatalogModel, "tools" | "pricing" | "spendLimit"> {
   tools: CatalogModel["tools"] | null;
   priceMode: ModelPricing["mode"];
   /** Blended USD/1M, as typed. */
@@ -42,6 +43,10 @@ export interface DraftModel extends Omit<CatalogModel, "tools" | "pricing"> {
   output: string;
   /** The price is OpenRouter's reference, not one the admin set. */
   isReferencePrice?: boolean;
+  /** Spend caps in USD, as typed; empty is no cap (ADR 0012). */
+  perUserLimit: string;
+  totalLimit: string;
+  limitResets: SpendReset;
 }
 
 export interface Draft {
@@ -63,6 +68,26 @@ export function parsePrice(text: string): number | null {
   if (!text.trim()) return null;
   const value = Number(text);
   return Number.isFinite(value) && value >= 0 && value <= MAX_USD_PER_MTOK ? value : null;
+}
+
+/** A spend cap from an input: undefined when empty, null when invalid. */
+export function parseLimit(text: string): number | undefined | null {
+  if (!text.trim()) return undefined;
+  const value = Number(text);
+  return Number.isFinite(value) && value > 0 && value <= MAX_SPEND_LIMIT_USD ? value : null;
+}
+
+/** The draft's spend limit: undefined with no cap set, null while a cap is invalid. */
+export function toSpendLimit(model: DraftModel): SpendLimit | undefined | null {
+  const perUserUsd = parseLimit(model.perUserLimit);
+  const totalUsd = parseLimit(model.totalLimit);
+  if (perUserUsd === null || totalUsd === null) return null;
+  if (perUserUsd === undefined && totalUsd === undefined) return undefined;
+  return {
+    ...(perUserUsd === undefined ? {} : { perUserUsd }),
+    ...(totalUsd === undefined ? {} : { totalUsd }),
+    resets: model.limitResets,
+  };
 }
 
 /** The draft's price, or null while any part of it is missing or invalid. */
@@ -94,12 +119,14 @@ export function draftProblems(draft: Draft): string[] {
   if (draft.models.length === 0) return ["Add at least one model"];
   const unpriced = draft.models.filter((m) => !toPricing(m)).length;
   const unconfirmed = draft.models.filter((m) => m.tools === null).length;
+  const badLimits = draft.models.filter((m) => toSpendLimit(m) === null).length;
   const byId = new Map(draft.models.map((m) => [m.id, m]));
   const defaultModel = byId.get(draft.defaultModelId);
   const utilityModel = byId.get(draft.utilityModelId);
   return [
     unpriced && `Set valid prices ($0–$${MAX_USD_PER_MTOK}) for ${plural(unpriced, "model")}`,
     unconfirmed && `Confirm tool calling for ${plural(unconfirmed, "model")}`,
+    badLimits && `Set valid spend limits ($0–$${MAX_SPEND_LIMIT_USD}) for ${plural(badLimits, "model")}`,
     (!defaultModel || defaultModel.hidden || defaultModel.access !== "everyone") &&
       "Pick a default model that everyone can use and isn't hidden",
     (!utilityModel || utilityModel.access !== "everyone") && "Pick a utility model that everyone can use",
@@ -107,8 +134,11 @@ export function draftProblems(draft: Draft): string[] {
 }
 
 export const toDraft = (saved: SavedCatalog | null): Draft => ({
-  models: (saved?.models ?? []).map(({ pricing, ...model }) => ({
+  models: (saved?.models ?? []).map(({ pricing, spendLimit, ...model }) => ({
     ...model,
+    perUserLimit: spendLimit?.perUserUsd === undefined ? "" : String(spendLimit.perUserUsd),
+    totalLimit: spendLimit?.totalUsd === undefined ? "" : String(spendLimit.totalUsd),
+    limitResets: spendLimit?.resets ?? "monthly",
     priceMode: pricing.mode,
     price: pricing.mode === "blended" ? String(pricing.usdPerMTok) : "",
     input: pricing.mode === "split" ? String(pricing.inputUsdPerMTok) : "",
@@ -148,6 +178,9 @@ export const fromListed = (listed: ListedModel, provider: PlatformProviderId): D
   vendor: listed.vendor,
   access: "everyone",
   hidden: false,
+  perUserLimit: "",
+  totalLimit: "",
+  limitResets: "monthly",
   ...routeFields(listed, provider),
 });
 
@@ -199,6 +232,7 @@ export const toSaveBody = (draft: Draft, confirmRiskyPrices: boolean): CatalogSa
     pricing: toPricing(model)!,
     access: model.access,
     hidden: model.hidden,
+    ...(toSpendLimit(model) ? { spendLimit: toSpendLimit(model)! } : {}),
   })),
 });
 

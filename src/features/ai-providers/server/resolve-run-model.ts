@@ -8,6 +8,7 @@ import {
   type RunSource,
   creditRefusal,
 } from "@/features/billing/credits";
+import { MODEL_LIMIT_CODE, spendRefusal, spendRefusalMessage } from "@/features/billing/model-spend";
 import { PLANS } from "@/features/billing/plans";
 import type { AgentModelChoice } from "@/features/conversations/agent-models";
 
@@ -106,6 +107,25 @@ export class ModelChoiceError extends Error {
   }
 }
 
+/** Refuses `model` once its per-user or site-wide spend limit is reached (ADR 0012). */
+async function refuseOverSpendLimit({
+  internalKey,
+  userId,
+  model,
+}: {
+  internalKey: string;
+  userId: string;
+  model: RoutedModel;
+}) {
+  const limit = model.spendLimit;
+  if (!limit) return;
+  const spent = await convex.query(api.modelSpend.getForServer, { internalKey, userId, modelId: model.id });
+  const refusal = spendRefusal(limit, spent, Date.now());
+  if (refusal) {
+    throw new ModelChoiceError(spendRefusalMessage(refusal, model.name, limit.resets), 402, MODEL_LIMIT_CODE);
+  }
+}
+
 const toChoice = (input: ModelChoiceInput): AgentModelChoice =>
   typeof input === "object" ? input : { modelId: input ?? "" };
 
@@ -130,6 +150,7 @@ const platformRunLabel = (model: RoutedModel) => runModelLabel({ id: model.id, l
  * changes nothing; `promoKind` tells `takePromoRun` which run to take once the
  * send is known to go. Any other platform model needs credits left (ADR 0011);
  * a run that starts with some may end past zero, and the next send is refused.
+ * A model with a spend limit (ADR 0012), promo or not, needs room under it.
  */
 export async function validateModelChoice({
   internalKey,
@@ -163,6 +184,9 @@ export async function validateModelChoice({
       if (refusal) {
         throw promoRefused(refusal);
       }
+    }
+    await refuseOverSpendLimit({ internalKey, userId, model });
+    if (promoKind) {
       return { ...choice, promoKind };
     }
     // Usage is always recorded; the cap only applies once billing is live (#105).
