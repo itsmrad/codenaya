@@ -12,6 +12,7 @@ import { ADMIN_CATALOG_SAVE_RATE_LIMIT, requireAdminWrite } from "@/features/adm
 import { PLATFORM_PROVIDER_IDS } from "@/features/ai-providers/platform";
 import { AI_PROVIDERS, MAX_MODEL_ID_LENGTH } from "@/features/ai-providers/registry";
 import { PLATFORM_KEY_ENV, platformKeyOrNull } from "@/features/ai-providers/server/platform-model";
+import { MAX_SPEND_LIMIT_USD, SPEND_RESETS } from "@/features/billing/model-spend";
 import { getAppError } from "@/lib/convex-error";
 import { parseJsonBody } from "@/lib/parse-json-body";
 
@@ -19,6 +20,7 @@ import { api } from "../../../../../convex/_generated/api";
 
 const modelId = z.string().trim().min(1).max(MAX_MODEL_ID_LENGTH);
 const price = z.number().finite().min(0).max(MAX_USD_PER_MTOK);
+const cap = z.number().finite().positive().max(MAX_SPEND_LIMIT_USD).optional();
 
 // Mirrors `catalogModelValidator` (convex/schema.ts); Convex checks again.
 const modelSchema = z.object({
@@ -36,6 +38,10 @@ const modelSchema = z.object({
   ]),
   access: z.enum(["everyone", "promo_counted", "promo_unlimited"]),
   hidden: z.boolean(),
+  spendLimit: z
+    .object({ perUserUsd: cap, totalUsd: cap, resets: z.enum(SPEND_RESETS) })
+    .refine((limit) => limit.perUserUsd !== undefined || limit.totalUsd !== undefined, "Set a cap")
+    .optional(),
 });
 
 const requestSchema = z

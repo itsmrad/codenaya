@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "convex/react";
 import { RouteIcon, Trash2Icon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -28,8 +29,11 @@ import {
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import type { ModelAccess } from "@/features/ai-providers/catalog";
+import { SPEND_RESETS, type SpendReset, spendPeriodStart, spentInPeriod } from "@/features/billing/model-spend";
+import { useNow } from "@/hooks/use-now";
 
-import { type DraftModel, parsePrice, togglePriceMode } from "../catalog-draft";
+import { api } from "../../../../convex/_generated/api";
+import { type DraftModel, parseLimit, parsePrice, togglePriceMode } from "../catalog-draft";
 import type { CatalogDraft } from "../hooks/use-catalog-draft";
 
 export const ACCESS_LABELS: Record<ModelAccess, string> = {
@@ -92,6 +96,78 @@ const PriceFields = ({ model, draft }: { model: DraftModel; draft: CatalogDraft 
           Price input and output apart
         </FieldLabel>
         <Switch id="model-price-split" checked={split} onCheckedChange={() => draft.update(model.id, togglePriceMode(model))} />
+      </Field>
+    </FieldSet>
+  );
+};
+
+const RESET_LABELS: Record<SpendReset, string> = {
+  daily: "Daily",
+  weekly: "Weekly (Monday)",
+  monthly: "Monthly",
+  never: "Never",
+};
+
+const LimitInput = ({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) => (
+  <InputGroup>
+    <InputGroupAddon>
+      <InputGroupText>$</InputGroupText>
+    </InputGroupAddon>
+    <InputGroupInput
+      id={id}
+      type="number"
+      inputMode="decimal"
+      min={0}
+      step="any"
+      placeholder="No limit"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      aria-invalid={parseLimit(value) === null}
+    />
+  </InputGroup>
+);
+
+/** Spend caps in USD at the model's price (ADR 0012), and what the site spent this period. */
+const SpendLimitFields = ({ model, draft }: { model: DraftModel; draft: CatalogDraft }) => {
+  const totals = useQuery(api.modelSpend.listTotalsForAdmin);
+  const total = totals?.find((row) => row.modelId === model.id) ?? null;
+  const now = useNow(false);
+  const spent = spentInPeriod(total, spendPeriodStart(model.limitResets, now));
+  return (
+    <FieldSet>
+      <FieldLegend variant="label">Spend limit</FieldLegend>
+      <FieldDescription>
+        What runs on this model may cost us, in USD at its price. Promo runs count; users&apos; own keys
+        don&apos;t. Sends past a limit are refused until it resets.
+      </FieldDescription>
+      <div className="grid grid-cols-2 gap-3">
+        <Field>
+          <FieldLabel htmlFor="model-limit-user">Per user</FieldLabel>
+          <LimitInput id="model-limit-user" value={model.perUserLimit} onChange={(perUserLimit) => draft.update(model.id, { perUserLimit })} />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="model-limit-total">All users</FieldLabel>
+          <LimitInput id="model-limit-total" value={model.totalLimit} onChange={(totalLimit) => draft.update(model.id, { totalLimit })} />
+        </Field>
+      </div>
+      <Field>
+        <FieldLabel htmlFor="model-limit-resets">Resets</FieldLabel>
+        <Select value={model.limitResets} onValueChange={(limitResets) => draft.update(model.id, { limitResets: limitResets as SpendReset })}>
+          <SelectTrigger id="model-limit-resets" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SPEND_RESETS.map((value) => (
+              <SelectItem key={value} value={value}>
+                {RESET_LABELS[value]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <FieldDescription>
+          {total ? `All users spent $${spent.toFixed(2)} this period. ` : "Spend is counted from when a limit is saved. "}
+          Changing the period starts the count again.
+        </FieldDescription>
       </Field>
     </FieldSet>
   );
@@ -190,6 +266,8 @@ const ModelFields = ({
 
       <FieldSeparator />
       <PriceFields model={model} draft={draft} />
+      <FieldSeparator />
+      <SpendLimitFields model={model} draft={draft} />
       <FieldSeparator />
 
       <FieldSet>

@@ -349,3 +349,4 @@ if (notFound) return notFound;
 | [0008](adr/0008-file-contents-table.md) | A text file's content lives in `fileContents`, not on the `files` doc |
 | [0009](adr/0009-github-promotion-claims.md) | GitHub promotion: verified claims and a per-claim Opus run count |
 | [0011](adr/0011-credit-metering.md) | Credits metered per run at catalog prices; usage-based accounts with lazy monthly and daily resets |
+| [0012](adr/0012-model-spend-limits.md) | Per-model USD spend caps, per user and site-wide, with a daily, weekly, monthly or no reset |

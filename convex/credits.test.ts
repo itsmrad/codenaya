@@ -148,3 +148,66 @@ describe("credits.getMine", () => {
     await expect(t.query(api.credits.getMine, {})).rejects.toThrow();
   });
 });
+
+describe("model spend limits (ADR 0012)", () => {
+  const LIMITED = "gpt-5.6-luna"; // the seeded messages' runModel
+  const catalogModel = (id: string, spendLimit?: { perUserUsd?: number; totalUsd?: number; resets: "monthly" }) => ({
+    id,
+    name: id,
+    vendor: "x",
+    provider: "openrouter" as const,
+    providerModelId: id,
+    vision: false,
+    tools: "reported" as const,
+    pricing: { mode: "blended" as const, usdPerMTok: 1 },
+    access: "everyone" as const,
+    hidden: false,
+    ...(spendLimit ? { spendLimit } : {}),
+  });
+  const seedCatalog = (t: TestConvex, limited = true) =>
+    t.run((ctx) =>
+      ctx.db.insert("platformCatalog", {
+        models: [catalogModel(LIMITED, limited ? { perUserUsd: 1, resets: "monthly" } : undefined)],
+        defaultModelId: LIMITED,
+        utilityModelId: LIMITED,
+        updatedAt: 1,
+        updatedBy: "admin",
+      }),
+    );
+  const spend = (t: TestConvex, userId = ALICE) =>
+    t.query(api.modelSpend.getForServer, { internalKey: INTERNAL_KEY, userId, modelId: LIMITED });
+
+  test("adds each run's growth to the user's and the site's spend, promo included", async () => {
+    const t = setup();
+    await seedCatalog(t);
+    const first = await seedMessage(t, ALICE);
+    await record(t, first, { inputTokens: 1, outputTokens: 1, costUsd: 0.1 });
+    await record(t, first, { inputTokens: 2, outputTokens: 2, costUsd: 0.3 });
+    await record(t, first, { inputTokens: 2, outputTokens: 2, costUsd: 0.3 }); // replayed: nothing new
+    await record(t, await seedMessage(t, BOB), { inputTokens: 1, outputTokens: 1, costUsd: 0.2 }, "promo");
+    await record(t, await seedMessage(t, BOB), { inputTokens: 1, outputTokens: 1, costUsd: 5 }, "byok");
+
+    const month = Date.UTC(2026, 9, 1);
+    expect(await spend(t, ALICE)).toEqual({
+      user: { periodStartsAt: month, spentUsd: 0.3 },
+      total: { periodStartsAt: month, spentUsd: expect.closeTo(0.5, 10) },
+    });
+    expect((await spend(t, BOB)).user).toEqual({ periodStartsAt: month, spentUsd: 0.2 });
+  });
+
+  test("starts a new period from zero", async () => {
+    const t = setup();
+    await seedCatalog(t);
+    await record(t, await seedMessage(t), { inputTokens: 1, outputTokens: 1, costUsd: 0.9 });
+    vi.setSystemTime(Date.UTC(2026, 10, 2));
+    await record(t, await seedMessage(t), { inputTokens: 1, outputTokens: 1, costUsd: 0.1 });
+    expect((await spend(t)).user).toEqual({ periodStartsAt: Date.UTC(2026, 10, 1), spentUsd: 0.1 });
+  });
+
+  test("counts nothing for a model without a limit", async () => {
+    const t = setup();
+    await seedCatalog(t, false);
+    await record(t, await seedMessage(t), { inputTokens: 1, outputTokens: 1, costUsd: 0.5 });
+    expect(await spend(t)).toEqual({ user: null, total: null });
+  });
+});
