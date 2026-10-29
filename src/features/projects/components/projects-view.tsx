@@ -8,6 +8,7 @@ import { GitBranch, Search } from "lucide-react";
 import { useIsMac } from "@/lib/hooks/use-is-mac";
 import { Kbd } from "@/components/ui/kbd";
 import { CommunityRail } from "@/features/showcase/components/community-rail";
+import { AnimatedDotGrid } from "@/components/landing/animated-dot-grid";
 import { StarterTemplates } from "@/features/templates/components/starter-templates";
 import { takePendingTemplate } from "@/features/templates/utils/pending-template";
 import { PromoBanner } from "@/features/promotions/components/promo-banner";
@@ -114,7 +115,8 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
         <section className="relative isolate overflow-hidden px-4 pt-14 pb-12 md:px-8 md:pt-20 md:pb-16">
           {/* Static backdrop: a soft brand glow over a dot grid that fades out. */}
           <div aria-hidden className="absolute inset-0 -z-10">
-            <div className="absolute inset-0 bg-[radial-gradient(color-mix(in_oklab,var(--foreground)_10%,transparent)_1px,transparent_1px)] bg-size-[22px_22px] mask-[radial-gradient(ellipse_70%_60%_at_50%_0%,black,transparent)]" />
+            <div className="absolute inset-0 dark:hidden bg-[radial-gradient(color-mix(in_oklab,var(--foreground)_10%,transparent)_1px,transparent_1px)] bg-size-[22px_22px] mask-[radial-gradient(ellipse_70%_60%_at_50%_0%,black,transparent)]" />
+            <AnimatedDotGrid className="mask-[radial-gradient(ellipse_70%_60%_at_50%_0%,black,transparent)]" />
             <div className="absolute left-1/2 top-[-12rem] h-[26rem] w-[44rem] max-w-[140vw] -translate-x-1/2 rounded-full bg-brand/20 blur-[100px] dark:bg-brand/15" />
             <div className="absolute left-[60%] top-[-6rem] h-64 w-96 max-w-[90vw] rounded-full bg-violet-500/10 blur-[90px]" />
           </div>

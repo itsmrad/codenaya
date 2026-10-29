@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { motion, useInView } from "motion/react";
 import { ArrowRight } from "lucide-react";
 import { GridPattern } from "./grid-pattern";
+import { AnimatedDotGrid } from "./animated-dot-grid";
 import { LandingPromptComposer } from "./landing-prompt-composer";
 import { Noise } from "./noise";
 
@@ -59,6 +60,7 @@ export const LandingHero = () => {
 
       {/* Subtle grid */}
       <GridPattern />
+      <AnimatedDotGrid />
 
       {/* Noise texture */}
       <Noise />
