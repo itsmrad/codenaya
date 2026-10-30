@@ -16,10 +16,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "expo-router/react-navigation";
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
+import { monoLabel } from "@/components/grid";
+import { highlight } from "@/components/highlight";
+import { Check, Pencil } from "@/components/icons";
 import { api } from "@/lib/api";
 import { font, useColors } from "@/lib/theme";
 
-const MONO = "monospace";
+/** IBM Plex Mono's advance at the code's 12.5px, to size the gutter by digits. */
+const CHAR_WIDTH = 7.5;
 /** Same autosave delay as the web editor (editor-view.tsx). */
 const DEBOUNCE_MS = 1500;
 
@@ -36,6 +40,7 @@ export default function FileView() {
   const params = useLocalSearchParams<{ fileId: string; edit?: string }>();
   const fileId = params.fileId as Id<"files">;
   const file = useQuery(api.files.getFile, { id: fileId });
+  const path = useQuery(api.files.getFilePath, { id: fileId });
   const updateFile = useMutation(api.files.updateFile);
 
   const [editing, setEditing] = useState(params.edit === "1");
@@ -95,6 +100,11 @@ export default function FileView() {
   };
 
   const status = { saved: "Saved", unsaved: "Unsaved", saving: "Saving…", error: "Save failed, retrying on next edit" }[saveState];
+  const statusColor = { saved: c.success, unsaved: c.mutedForeground, saving: c.mutedForeground, error: c.destructive }[
+    saveState
+  ];
+  const gutter = String(lines.length).length * CHAR_WIDTH + 24;
+  const ext = file.name.includes(".") ? file.name.split(".").pop()! : "";
 
   return (
     <KeyboardAvoidingView
@@ -110,26 +120,45 @@ export default function FileView() {
           headerRight: binary
             ? undefined
             : () => (
-                <Pressable onPress={toggle} hitSlop={10} accessibilityLabel={editing ? "Done editing" : "Edit file"}>
-                  <Text style={[styles.headerButton, { color: c.brandText }]}>{editing ? "Done" : "Edit"}</Text>
+                <Pressable
+                  onPress={toggle}
+                  accessibilityLabel={editing ? "Done editing" : "Edit file"}
+                  style={({ pressed }) => [styles.headerButton, pressed && { backgroundColor: c.muted }]}
+                >
+                  {editing ? <Check size={16} color={c.foreground} /> : <Pencil size={16} color={c.foreground} />}
+                  <Text style={[monoLabel, styles.headerLabel, { color: c.foreground }]}>{editing ? "Done" : "Edit"}</Text>
                 </Pressable>
               ),
         }}
       />
+      {/* The path, last segment strongest, and the save state. */}
+      <View style={[styles.strip, styles.crumb, { backgroundColor: c.card, borderColor: c.border }]}>
+        <Text style={[styles.path, { color: c.mutedForeground }]} numberOfLines={1}>
+          {(path ?? []).map((segment, index, all) =>
+            index < all.length - 1 ? (
+              `${segment.name} / `
+            ) : (
+              <Text key={segment._id} style={{ color: c.foreground }}>
+                {segment.name}
+              </Text>
+            ),
+          )}
+        </Text>
+        {!binary && (
+          <>
+            <View style={[styles.dot, { backgroundColor: statusColor }]} />
+            <Text style={[monoLabel, { color: statusColor }]}>{status}</Text>
+          </>
+        )}
+      </View>
       {binary ? (
         <Text style={[styles.note, { color: c.mutedForeground }]}>
           This is a binary file (an image or similar). Open the project on the website to see it.
         </Text>
       ) : editing ? (
         <>
-          <View style={[styles.statusBar, { borderColor: c.border }]}>
-            <Text style={[styles.status, { color: saveState === "error" ? c.destructive : c.mutedForeground }]}>
-              {status}
-            </Text>
-            <Text style={[styles.status, { color: c.mutedForeground }]}>{lines.length} lines</Text>
-          </View>
           <TextInput
-            style={[styles.editor, styles.text, { color: c.foreground }]}
+            style={[styles.editor, styles.text, { color: c.foreground, backgroundColor: c.card }]}
             value={text}
             onChangeText={onChange}
             multiline
@@ -144,18 +173,32 @@ export default function FileView() {
           />
         </>
       ) : (
-        <ScrollView style={styles.flex}>
-          <ScrollView horizontal contentContainerStyle={styles.code}>
-            <View style={[styles.gutter, { borderColor: c.border }]}>
-              <Text style={[styles.text, styles.numbers, { color: c.mutedForeground }]}>
+        <>
+          <View style={[styles.flex, { backgroundColor: c.card }]}>
+            {/* The gutter's band runs the full height, past the last line. */}
+            <View style={[styles.band, { width: gutter, backgroundColor: c.background, borderColor: c.border }]} />
+            <ScrollView style={styles.flex} contentContainerStyle={styles.code}>
+              {/* Line numbers stay put while the code scrolls sideways. */}
+              <Text style={[styles.text, styles.numbers, { width: gutter, color: c.mutedForeground }]}>
                 {lines.map((_, index) => index + 1).join("\n")}
               </Text>
-            </View>
-            <Text style={[styles.text, { color: c.foreground }]} selectable>
-              {text}
+              <ScrollView horizontal contentContainerStyle={styles.lines}>
+                <Text style={[styles.text, { color: c.foreground }]} selectable>
+                  {highlight(text, file.name, c)}
+                </Text>
+              </ScrollView>
+            </ScrollView>
+          </View>
+          <View style={[styles.strip, { borderColor: c.border, paddingBottom: insets.bottom }]}>
+            <Text style={[monoLabel, styles.cell, { color: c.mutedForeground, borderColor: c.border }]}>
+              {ext || "Text"}
             </Text>
-          </ScrollView>
-        </ScrollView>
+            <Text style={[monoLabel, styles.cell, { color: c.mutedForeground, borderColor: c.border }]}>
+              {lines.length} lines
+            </Text>
+            <Text style={[monoLabel, styles.hint, { color: c.mutedForeground }]}>Read-only · tap Edit</Text>
+          </View>
+        </>
       )}
     </KeyboardAvoidingView>
   );
@@ -163,19 +206,19 @@ export default function FileView() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  headerButton: { fontSize: 15, fontFamily: font.medium },
-  code: { paddingVertical: 12, paddingRight: 24 },
-  gutter: { borderRightWidth: StyleSheet.hairlineWidth, paddingHorizontal: 10, marginRight: 12 },
-  text: { fontFamily: MONO, fontSize: 12.5, lineHeight: 19 },
-  numbers: { textAlign: "right" },
-  statusBar: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  status: { fontSize: 12, fontFamily: font.regular },
+  headerButton: { height: 48, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16 },
+  headerLabel: { fontSize: 11 },
+  strip: { flexDirection: "row", alignItems: "center", borderTopWidth: 1 },
+  crumb: { height: 36, gap: 8, paddingHorizontal: 16, borderTopWidth: 0, borderBottomWidth: 1 },
+  path: { flex: 1, fontSize: 12, fontFamily: font.mono },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  band: { position: "absolute", top: 0, bottom: 0, left: 0, borderRightWidth: 1 },
+  code: { flexDirection: "row", paddingVertical: 12 },
+  lines: { paddingLeft: 12, paddingRight: 24 },
+  text: { fontFamily: font.mono, fontSize: 12.5, lineHeight: 19 },
+  numbers: { textAlign: "right", paddingRight: 12 },
+  cell: { paddingHorizontal: 16, paddingVertical: 12, borderRightWidth: 1 },
+  hint: { flex: 1, textAlign: "right", paddingHorizontal: 16 },
   editor: { flex: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 },
   note: { padding: 24, textAlign: "center", fontSize: 14, fontFamily: font.regular },
 });
