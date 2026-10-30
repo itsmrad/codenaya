@@ -15,13 +15,9 @@ export {
 } from "../../../src/features/conversations/chat-images";
 export { PLAN_MODE, buildPlanMessage } from "../../../src/features/conversations/plan-mode";
 export type { AgentModelChoice } from "../../../src/features/conversations/agent-models";
-export {
-  type ActivePlatform,
-  platformConfigFrom,
-  platformModels,
-  platformProviderId,
-  resolvePlatformModel,
-} from "../../../src/features/ai-providers/platform";
+export { envCatalog, platformProviderId, resolveCatalogModel } from "../../../src/features/ai-providers/platform";
+export { type CatalogModel, pickableModels } from "../../../src/features/ai-providers/catalog";
+export { isPromoActive, opusRunsLeft } from "../../../src/features/promotions/github-promo";
 export {
   AI_PROVIDER_IDS,
   AI_PROVIDERS,

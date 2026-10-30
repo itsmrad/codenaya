@@ -5,18 +5,26 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import {
   AI_PROVIDERS,
-  type ActivePlatform,
   type AgentModelChoice,
+  type CatalogModel,
   PLATFORM_PROVIDER,
+  type ProviderModel,
+  envCatalog,
+  isPromoActive,
   keyModels,
   modelAcceptsImages,
   modelIdsFor,
-  platformConfigFrom,
-  platformModels,
+  opusRunsLeft,
+  pickableModels,
   platformProviderId,
-  resolvePlatformModel,
+  resolveCatalogModel,
   runModelLabel,
 } from "@/lib/shared";
+
+type PickerCatalog = {
+  models: readonly (Pick<CatalogModel, "id" | "name" | "vendor" | "vision" | "access"> & { hidden?: boolean })[];
+  defaultModelId: string;
+};
 
 const STORAGE_KEY = "codenaya.agent-model";
 
@@ -57,15 +65,23 @@ export const useAgentModel = () => {
 
   const keys = useQuery(api.aiProviders.list);
   const preferences = useQuery(api.aiProviders.getPreferences);
-  const active = useQuery(api.platformModels.getActive, { fallbackProvider: platformProviderId() });
-  const platform: ActivePlatform = active
-    ? { provider: active.provider, config: platformConfigFrom(active.config) }
-    : { provider: platformProviderId(), config: null };
+  // The models the user may pick (ADR 0010), as the web's usePlatformModels:
+  // the admin's catalog else the env provider's, promo models only with a claim.
+  const saved = useQuery(api.platformCatalog.getForUsers);
+  const claim = useQuery(api.promoClaims.getMine);
+  const catalog: PickerCatalog = saved ?? envCatalog(platformProviderId());
+  const promo = { claimed: Boolean(claim), active: isPromoActive(Date.now()), countedRunsLeft: claim ? opusRunsLeft(claim) : 0 };
+  const platformModels: ProviderModel[] = pickableModels(catalog.models, promo).map((m) => ({
+    id: m.id,
+    label: m.name,
+    vendor: m.vendor,
+    vision: m.vision,
+  }));
+  const platformLoaded = saved !== undefined && claim !== undefined;
+  const platformCatalog = { models: platformModels, defaultModelId: catalog.defaultModelId };
 
   const isAvailable = (choice: AgentModelChoice) => {
-    if (!choice.keyId) {
-      return !active || platformModels(platform.provider, platform.config).some((m) => m.id === choice.modelId);
-    }
+    if (!choice.keyId) return !platformLoaded || platformModels.some((m) => m.id === choice.modelId);
     if (!keys) return true;
     const key = keys.find((k) => k._id === choice.keyId);
     return Boolean(key && modelIdsFor(key).includes(choice.modelId));
@@ -77,16 +93,16 @@ export const useAgentModel = () => {
   const model =
     [stored ?? null, preferred].find(
       (choice): choice is AgentModelChoice => choice !== null && isAvailable(choice),
-    ) ?? { modelId: resolvePlatformModel(platform.provider, platform.config, undefined).id };
+    ) ?? { modelId: resolveCatalogModel(platformCatalog, undefined).id };
 
   const key = model.keyId ? keys?.find((k) => k._id === model.keyId) : undefined;
-  const platformModel = resolvePlatformModel(platform.provider, platform.config, model.modelId);
+  const platformModel = resolveCatalogModel(platformCatalog, model.modelId);
   const label = key ? runModelLabel(model.modelId, key) : runModelLabel(platformModel);
   // Sending images to a model without vision is refused, as on the web.
   const acceptsImages = key ? modelAcceptsImages(model.modelId, key) : platformModel.vision === true;
   // Models the picker offers: the platform's, then one group per usable key.
   const groups = [
-    { title: PLATFORM_PROVIDER.label, keyId: undefined, models: platformModels(platform.provider, platform.config) },
+    { title: PLATFORM_PROVIDER.label, keyId: undefined, models: platformModels },
     ...(keys ?? [])
       .filter((k) => k.status === "active" || k._id === model.keyId)
       .map((k) => ({ title: `${AI_PROVIDERS[k.provider].label} · ${k.label}${k.status === "invalid" ? " (invalid)" : ""}`, keyId: k._id, models: keyModels(k) })),
