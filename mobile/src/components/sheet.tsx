@@ -94,7 +94,7 @@ function SheetLayer({
           styles.sheet,
           // Runs to the bottom edge, behind the navigation bar; only the
           // content keeps clear of it.
-          { backgroundColor: c.card, borderColor: c.border, paddingBottom: insets.bottom + 12 },
+          { backgroundColor: c.card, borderColor: c.border, paddingBottom: insets.bottom },
           sheetStyle,
         ]}
       >
@@ -230,8 +230,9 @@ const styles = StyleSheet.create({
   grab: { paddingTop: 4, paddingBottom: 2 },
   handle: { alignSelf: "center", width: 40, height: 5, borderRadius: 3, marginBottom: 12 },
   title: { borderTopWidth: 1 },
-  description: { fontSize: 14, lineHeight: 20, fontFamily: font.regular, paddingHorizontal: 16, marginTop: 14 },
-  body: { marginTop: 10, paddingHorizontal: 8 },
+  description: { fontSize: 14, lineHeight: 20, fontFamily: font.regular, paddingHorizontal: 16, marginVertical: 14 },
+  // Rows start right under the title strip and end at the last one.
+  body: { paddingHorizontal: 8 },
   // Full-bleed grid rows across the body's padding, split by rules.
   row: {
     flexDirection: "row",
