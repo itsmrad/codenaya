@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { BackHandler, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/form";
+import { LabelStrip } from "@/components/grid";
 import { CircleCheck, OctagonX } from "@/components/icons";
 import { fadeUp, zoomIn } from "@/lib/motion";
-import { font, radius, useColors } from "@/lib/theme";
+import { font, useColors } from "@/lib/theme";
 
 // The web's AlertDialog and sonner toasts, in place of the system Alert:
 // themed, edge to edge, and drawn above sheets. Callable from anywhere, like
@@ -80,6 +81,7 @@ export function DialogHost() {
   }, [pending]);
 
   const Icon = current?.tone === "error" ? OctagonX : CircleCheck;
+  const toneColor = current?.tone === "error" ? c.destructive : c.success;
 
   return (
     <>
@@ -90,34 +92,27 @@ export function DialogHost() {
           style={[StyleSheet.absoluteFill, styles.backdrop]}
         >
           <Pressable style={StyleSheet.absoluteFill} onPress={() => answer(false)} accessibilityLabel="Cancel" />
-          <Animated.View
-            entering={zoomIn}
-            accessibilityRole="alert"
-            style={[styles.dialog, { backgroundColor: c.card, borderColor: c.border }]}
-          >
-            <Text style={[styles.title, { color: c.foreground }]}>{pending.title}</Text>
-            {pending.message && <Text style={[styles.message, { color: c.mutedForeground }]}>{pending.message}</Text>}
-            <View style={styles.actions}>
-              <View style={styles.action}>
-                <Button label="Cancel" variant="outline" onPress={() => answer(false)} />
-              </View>
-              <View style={styles.action}>
-                {pending.destructive ? (
-                  // The web's filled destructive button; the app's Button draws it outlined.
-                  <Pressable
+          <DialogCard
+            label="Confirm"
+            destructive={pending.destructive}
+            title={pending.title}
+            actions={
+              <>
+                <View style={styles.action}>
+                  <Button label="Cancel" variant="outline" onPress={() => answer(false)} />
+                </View>
+                <View style={styles.action}>
+                  <Button
+                    label={pending.confirmLabel ?? (pending.destructive ? "Delete" : "Continue")}
+                    variant={pending.destructive ? "destructive" : "brand"}
                     onPress={() => answer(true)}
-                    style={({ pressed }) => [styles.danger, { backgroundColor: c.destructive }, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.dangerText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                      {pending.confirmLabel ?? "Delete"}
-                    </Text>
-                  </Pressable>
-                ) : (
-                  <Button label={pending.confirmLabel ?? "Continue"} onPress={() => answer(true)} />
-                )}
-              </View>
-            </View>
-          </Animated.View>
+                  />
+                </View>
+              </>
+            }
+          >
+            {pending.message && <Text style={[styles.message, { color: c.mutedForeground }]}>{pending.message}</Text>}
+          </DialogCard>
         </Animated.View>
       )}
       {current && (
@@ -133,7 +128,9 @@ export function DialogHost() {
             accessibilityRole="alert"
             style={[styles.toast, { backgroundColor: c.card, borderColor: c.border }]}
           >
-            <Icon size={16} color={current.tone === "error" ? c.destructive : c.foreground} />
+            {/* The strip's bar, in the toast's tone. */}
+            <View style={[styles.toastBar, { backgroundColor: toneColor }]} />
+            <Icon size={16} color={toneColor} />
             <View style={styles.toastText}>
               <Text style={[styles.toastTitle, { color: c.foreground }]}>{current.title}</Text>
               {current.description && (
@@ -147,33 +144,80 @@ export function DialogHost() {
   );
 }
 
+/**
+ * A dialog window like the web's rename and delete dialogs: a `[ LABEL ]`
+ * strip (red bar for deletes), a large title, the body, and a tinted footer
+ * holding the actions.
+ */
+export function DialogCard({
+  label,
+  destructive,
+  title,
+  children,
+  actions,
+}: {
+  label: string;
+  destructive?: boolean;
+  title: string;
+  children?: ReactNode;
+  actions: ReactNode;
+}) {
+  const c = useColors();
+  return (
+    <Animated.View
+      entering={zoomIn}
+      accessibilityRole="alert"
+      style={[styles.dialog, { backgroundColor: c.card, borderColor: c.border }]}
+    >
+      <View style={{ backgroundColor: c.background }}>
+        <LabelStrip label={label} barColor={destructive ? c.destructive : undefined} />
+      </View>
+      <View style={styles.body}>
+        <Text style={[styles.title, { color: c.foreground }]}>{title}</Text>
+        {children}
+      </View>
+      <View style={[styles.actions, { backgroundColor: c.background, borderColor: c.border }]}>{actions}</View>
+    </Animated.View>
+  );
+}
+
 const styles = StyleSheet.create({
   backdrop: { backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 20 },
-  dialog: { borderWidth: 1, borderRadius: radius.xl, padding: 20, gap: 8 },
-  title: { fontSize: 17, fontFamily: font.semibold },
-  message: { fontSize: 14, lineHeight: 20, fontFamily: font.regular },
-  actions: { flexDirection: "row", gap: 8, marginTop: 12 },
+  dialog: {
+    borderWidth: 1,
+    borderRadius: 6,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 8,
+  },
+  body: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 22, gap: 10 },
+  title: { fontSize: 20, lineHeight: 26, fontFamily: font.semibold, letterSpacing: -0.4 },
+  message: { fontSize: 14.5, lineHeight: 21, fontFamily: font.regular },
+  actions: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1 },
   action: { flex: 1 },
-  danger: { alignItems: "center", justifyContent: "center", borderRadius: radius.md, paddingHorizontal: 10, paddingVertical: 11 },
-  dangerText: { color: "#fff", fontSize: 14, fontFamily: font.medium },
-  pressed: { opacity: 0.8 },
   toastWrap: { position: "absolute", left: 16, right: 16, alignItems: "center" },
   toast: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
     borderWidth: 1,
-    borderRadius: radius.lg,
-    paddingHorizontal: 14,
+    borderRadius: 6,
+    paddingLeft: 16,
+    paddingRight: 14,
     paddingVertical: 12,
     maxWidth: 420,
     width: "100%",
+    overflow: "hidden",
     shadowColor: "#000",
     shadowOpacity: 0.15,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
+  toastBar: { position: "absolute", left: 0, top: 0, bottom: 0, width: 2 },
   toastText: { flex: 1, minWidth: 0, gap: 2 },
   toastTitle: { fontSize: 14, fontFamily: font.medium },
   toastDescription: { fontSize: 13, fontFamily: font.regular },

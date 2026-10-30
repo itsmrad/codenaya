@@ -1,14 +1,13 @@
 import { useState } from "react";
 import { KeyboardAvoidingView, Modal, StyleSheet, Text, TextInput, View } from "react-native";
-import Animated from "react-native-reanimated";
 
+import { DialogCard } from "@/components/dialogs";
 import { Button } from "@/components/form";
 import { errorMessage } from "@/lib/format";
-import { zoomIn } from "@/lib/motion";
-import { font, radius, useColors } from "@/lib/theme";
+import { font, useColors } from "@/lib/theme";
 
 // Alert.prompt is iOS-only, so naming (rename, new file or folder) gets a
-// small modal on both platforms.
+// small modal on both platforms, in the confirm dialog's window.
 export function NameDialog({
   visible,
   title,
@@ -29,6 +28,7 @@ export function NameDialog({
   const c = useColors();
   const [name, setName] = useState(initialName);
   const [error, setError] = useState<string>();
+  const [focused, setFocused] = useState(false);
   const trimmed = name.trim();
 
   const save = async () => {
@@ -48,13 +48,27 @@ export function NameDialog({
       }}>
       {/* Lifts the dialog above the keyboard its input opens. */}
       <KeyboardAvoidingView behavior="padding" style={styles.backdrop}>
-        <Animated.View entering={zoomIn} style={[styles.dialog, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[styles.title, { color: c.foreground }]}>{title}</Text>
+        <DialogCard
+          label="Name"
+          title={title}
+          actions={
+            <>
+              <View style={styles.action}>
+                <Button label="Cancel" variant="outline" onPress={onClose} />
+              </View>
+              <View style={styles.action}>
+                <Button label={confirmLabel} variant="brand" onPress={save} disabled={!trimmed || trimmed === initialName} />
+              </View>
+            </>
+          }
+        >
           <TextInput
-            style={[styles.input, { color: c.foreground, borderColor: c.border }]}
+            style={[styles.input, { color: c.foreground, borderColor: focused ? c.brand : c.border, backgroundColor: c.background }]}
             value={name}
             onChangeText={setName}
             onSubmitEditing={save}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             placeholder={placeholder}
             placeholderTextColor={c.mutedForeground}
             autoCapitalize="none"
@@ -62,16 +76,8 @@ export function NameDialog({
             autoFocus
             selectTextOnFocus
           />
-          {error && <Text style={{ color: c.destructive, fontFamily: font.regular }}>{error}</Text>}
-          <View style={styles.actions}>
-            <View style={styles.action}>
-              <Button label="Cancel" variant="outline" onPress={onClose} />
-            </View>
-            <View style={styles.action}>
-              <Button label={confirmLabel} onPress={save} disabled={!trimmed || trimmed === initialName} />
-            </View>
-          </View>
-        </Animated.View>
+          {error && <Text style={[styles.error, { color: c.destructive }]}>{error}</Text>}
+        </DialogCard>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -79,9 +85,7 @@ export function NameDialog({
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 24 },
-  dialog: { borderWidth: 1, borderRadius: radius.xl, padding: 20, gap: 14 },
-  title: { fontSize: 17, fontFamily: font.semibold },
-  input: { borderWidth: 1, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, fontFamily: font.regular },
-  actions: { flexDirection: "row", gap: 8, marginTop: 4 },
+  input: { height: 44, marginTop: 6, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, fontSize: 15, fontFamily: font.regular },
+  error: { fontSize: 13, fontFamily: font.regular },
   action: { flex: 1 },
 });

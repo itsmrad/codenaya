@@ -74,7 +74,7 @@ export function Segmented<T extends string>({
   );
 }
 
-/** Primary, brand (the orange call to action), outline or destructive button; shows a spinner while `busy`. */
+/** Primary, brand (the orange call to action), outline or destructive (filled red) button; shows a spinner while `busy`. */
 export function Button({
   label,
   onPress,
@@ -91,10 +91,10 @@ export function Button({
   icon?: ReactNode;
 }) {
   const c = useColors();
-  const tint = { primary: c.primaryForeground, brand: c.brandForeground, outline: c.foreground, destructive: c.destructive }[
+  const tint = { primary: c.primaryForeground, brand: c.brandForeground, outline: c.foreground, destructive: "#ffffff" }[
     variant
   ];
-  const fill = { primary: c.primary, brand: c.brand }[variant as "primary" | "brand"];
+  const fill = { primary: c.primary, brand: c.brand, destructive: c.destructive }[variant as "primary" | "brand" | "destructive"];
   return (
     <Pressable
       onPress={onPress}

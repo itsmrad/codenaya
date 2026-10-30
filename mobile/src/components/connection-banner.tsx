@@ -4,13 +4,14 @@ import { ActivityIndicator, StyleSheet, Text } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { font, useColors } from "@/lib/theme";
+import { monoLabel } from "@/components/grid";
+import { useColors } from "@/lib/theme";
 
 /** A short blip (the app resuming, a network switch) isn't worth a banner. */
 const GRACE_MS = 3000;
 
 /**
- * A pill at the top while Convex is unreachable, so a dropped connection
+ * A grid tag at the top while Convex is unreachable, so a dropped connection
  * reads as "reconnecting" instead of a screen that silently stops updating.
  */
 export function ConnectionBanner() {
@@ -34,7 +35,7 @@ export function ConnectionBanner() {
       style={[styles.banner, { top: insets.top + 6, backgroundColor: c.card, borderColor: c.border }]}
     >
       <ActivityIndicator size="small" color={c.mutedForeground} />
-      <Text style={[styles.text, { color: c.foreground }]}>Can't reach Codenaya. Reconnecting…</Text>
+      <Text style={[monoLabel, { color: c.foreground }]}>Can't reach Codenaya · Reconnecting</Text>
     </Animated.View>
   );
 }
@@ -47,9 +48,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 14,
+    borderRadius: 6,
+    paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  text: { fontSize: 13, fontFamily: font.medium },
 });

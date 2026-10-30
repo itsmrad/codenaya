@@ -56,11 +56,22 @@ export function Corners() {
  * The `▍[ LABEL ]` strip across the top of a window or section; `right` sits
  * at its end, `cell` in a full-height cell split off by a rule.
  */
-export function LabelStrip({ label, right, cell }: { label: string; right?: ReactNode; cell?: ReactNode }) {
+export function LabelStrip({
+  label,
+  right,
+  cell,
+  barColor,
+}: {
+  label: string;
+  right?: ReactNode;
+  cell?: ReactNode;
+  /** The bar's colour; brand orange unless set (red for deletes). */
+  barColor?: string;
+}) {
   const c = useColors();
   return (
     <View style={[styles.strip, { borderColor: c.border }]}>
-      <View style={[styles.bar, { backgroundColor: c.brand }]} />
+      <View style={[styles.bar, { backgroundColor: barColor ?? c.brand }]} />
       <Text style={[monoLabel, { color: c.mutedForeground }]}>[ {label} ]</Text>
       {right != null && <View style={styles.right}>{right}</View>}
       {cell != null && <View style={[styles.cell, { borderColor: c.border }]}>{cell}</View>}
