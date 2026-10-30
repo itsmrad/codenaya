@@ -13,7 +13,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Defs, LinearGradient, Path, Pattern, RadialGradient, Rect, Stop } from "react-native-svg";
 
-import { ChevronLeft } from "@/components/icons";
+import { ChevronLeft, type LucideIcon } from "@/components/icons";
 
 import { font, useColors } from "@/lib/theme";
 
@@ -52,15 +52,68 @@ export function Corners() {
   );
 }
 
-/** The `▍[ LABEL ]` strip across the top of a window or section. */
-export function LabelStrip({ label, right }: { label: string; right?: ReactNode }) {
+/**
+ * The `▍[ LABEL ]` strip across the top of a window or section; `right` sits
+ * at its end, `cell` in a full-height cell split off by a rule.
+ */
+export function LabelStrip({ label, right, cell }: { label: string; right?: ReactNode; cell?: ReactNode }) {
   const c = useColors();
   return (
     <View style={[styles.strip, { borderColor: c.border }]}>
       <View style={[styles.bar, { backgroundColor: c.brand }]} />
       <Text style={[monoLabel, { color: c.mutedForeground }]}>[ {label} ]</Text>
       {right != null && <View style={styles.right}>{right}</View>}
+      {cell != null && <View style={[styles.cell, { borderColor: c.border }]}>{cell}</View>}
     </View>
+  );
+}
+
+/**
+ * A full-width row under a LabelStrip: an icon in a bordered tile, a label
+ * (red when `destructive`), an optional detail and a trailing slot.
+ */
+export function TileRow({
+  icon: Icon,
+  label,
+  detail,
+  trailing,
+  onPress,
+  destructive,
+}: {
+  icon: LucideIcon;
+  label: string;
+  detail?: string;
+  trailing?: ReactNode;
+  onPress: () => void;
+  destructive?: boolean;
+}) {
+  const c = useColors();
+  const tint = destructive ? c.destructive : c.foreground;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.tileRow, { borderColor: c.border }, pressed && { backgroundColor: c.muted }]}
+    >
+      <View
+        style={[
+          styles.tile,
+          destructive
+            ? { borderColor: `${c.destructive}40`, backgroundColor: `${c.destructive}0d` }
+            : { borderColor: c.border, backgroundColor: c.background },
+        ]}
+      >
+        <Icon size={18} color={tint} />
+      </View>
+      <View style={styles.tileText}>
+        <Text style={[styles.tileLabel, { color: tint }]}>{label}</Text>
+        {detail && (
+          <Text style={[styles.tileDetail, { color: c.mutedForeground }]} numberOfLines={1}>
+            {detail}
+          </Text>
+        )}
+      </View>
+      {trailing}
+    </Pressable>
   );
 }
 
@@ -242,5 +295,22 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   bar: { width: 2, height: 12 },
+  tileRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  tile: { width: 36, height: 36, borderRadius: 6, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  tileText: { flex: 1 },
+  tileLabel: { fontSize: 15, fontFamily: font.medium },
+  tileDetail: { fontSize: 13, fontFamily: font.regular, marginTop: 2 },
   right: { marginLeft: "auto", flexDirection: "row", alignItems: "center" },
+  // Out to the strip's right edge, over its padding.
+  cell: {
+    alignSelf: "stretch",
+    marginLeft: "auto",
+    marginRight: -14,
+    minWidth: 40,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    borderLeftWidth: 1,
+  },
 });

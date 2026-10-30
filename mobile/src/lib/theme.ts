@@ -2,7 +2,7 @@ import { DarkTheme, DefaultTheme, type Theme } from "expo-router";
 import { useColorScheme } from "react-native";
 
 // The web app's design tokens (src/app/globals.css, :root and .dark).
-const light = {
+export const light = {
   background: "#faf8f5",
   foreground: "#1a1a1a",
   card: "#ffffff",
@@ -18,7 +18,7 @@ const light = {
   success: "#15803d",
 };
 
-const dark: typeof light = {
+export const dark: typeof light = {
   background: "#09090b",
   foreground: "#f0ece6",
   card: "#131316",
