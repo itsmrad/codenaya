@@ -2,19 +2,19 @@ import { useAuth } from "@clerk/expo";
 import { useMutation, useQuery } from "convex/react";
 import { Stack, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import type { Id } from "../../../../convex/_generated/dataModel";
-import { confirm, toast } from "@/components/dialogs";
 import { Button, Field } from "@/components/form";
-import { Copy, Download, Eye, Info, Pencil, Plus, Search, Sparkles, Trash2 } from "@/components/icons";
+import { LabelStrip, monoLabel } from "@/components/grid";
+import { ChevronRight, Copy, Download, Eye, Pencil, Plus, Search, Sparkles } from "@/components/icons";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/format";
 import { postApi } from "@/lib/http";
 import { BUILTIN_SKILL_ATTRIBUTIONS, BUILTIN_SKILLS } from "@/lib/shared";
-import { type Colors, font, radius, useColors } from "@/lib/theme";
+import { font, useColors } from "@/lib/theme";
 
 const matches = (skill: { name: string; description: string }, search: string) => {
   const needle = search.trim().toLowerCase();
@@ -22,45 +22,7 @@ const matches = (skill: { name: string; description: string }, search: string) =
 };
 
 const projectCountLabel = (count: number) =>
-  count === 0 ? "Not enabled in any project" : `Used in ${count} ${count === 1 ? "project" : "projects"}`;
-
-/** Like the web's SkillCard: name, description, a meta line and actions. */
-function SkillCard({
-  name,
-  description,
-  meta,
-  actions,
-  c,
-}: {
-  name: string;
-  description: string;
-  meta?: ReactNode;
-  actions: ReactNode;
-  c: Colors;
-}) {
-  return (
-    <View style={[styles.skill, { borderColor: c.border }]}>
-      <Text style={[styles.name, { color: c.foreground }]}>{name}</Text>
-      <Text style={[styles.muted, { color: c.mutedForeground }]} numberOfLines={3}>
-        {description}
-      </Text>
-      {meta && <Text style={[styles.meta, { color: c.mutedForeground }]}>{meta}</Text>}
-      <View style={styles.actions}>{actions}</View>
-    </View>
-  );
-}
-
-function Action({ label, icon, onPress, c }: { label: string; icon: ReactNode; onPress: () => void; c: Colors }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.action, { borderColor: c.border }, pressed && { backgroundColor: c.muted }]}
-    >
-      {icon}
-      <Text style={[styles.actionText, { color: c.foreground }]}>{label}</Text>
-    </Pressable>
-  );
-}
+  count === 0 ? "Not enabled in any project" : `${count} ${count === 1 ? "project" : "projects"}`;
 
 type ImportedSkill = { name: string; description: string; body: string; sourceUrl: string };
 
@@ -124,7 +86,7 @@ function ImportSkillSheet({ visible, onClose }: { visible: boolean; onClose: () 
             <Text style={[styles.name, { color: c.foreground }]}>{preview.name}</Text>
             <Text style={[styles.muted, { color: c.mutedForeground }]}>{preview.description}</Text>
             <Pressable onPress={() => WebBrowser.openBrowserAsync(preview.sourceUrl)}>
-              <Text style={[styles.meta, { color: c.brandText }]} numberOfLines={1}>
+              <Text style={[styles.link, { color: c.brandText }]} numberOfLines={1}>
                 {preview.sourceUrl}
               </Text>
             </Pressable>
@@ -155,35 +117,27 @@ function ImportSkillSheet({ visible, onClose }: { visible: boolean; onClose: () 
 
 /**
  * The web's Settings > Skills: the built-in skills (view, duplicate) and the
- * user's library (new, import, edit, delete). Library skills are enabled per
- * project from the project's Skills panel.
+ * user's library (new, import, edit, delete), as grid sections. Library skills
+ * are enabled per project from the project's Skills panel.
  */
 export default function SkillsSettings() {
   const c = useColors();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const library = useQuery(api.skills.listLibrary);
-  const removeSkill = useMutation(api.skills.remove);
   const [search, setSearch] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  // The built-in skill whose View / Duplicate sheet is open.
+  const [builtinName, setBuiltinName] = useState<string>();
 
   const openEditor = (params: Record<string, string> = {}) => router.push({ pathname: "/settings/skill", params });
-  const confirmDelete = async (skill: { _id: Id<"skills">; name: string }) => {
-    const confirmed = await confirm({
-      title: `Delete ${skill.name}?`,
-      message: "It is removed from your library and every project that uses it.",
-      confirmLabel: "Delete skill",
-      destructive: true,
-    });
-    if (!confirmed) return;
-    removeSkill({ skillId: skill._id }).catch((error) => toast.error(errorMessage(error, `Unable to delete ${skill.name}`)));
-  };
-
   const builtins = BUILTIN_SKILLS.filter((skill) => matches(skill, search));
   const shown = library?.filter((skill) => matches(skill, search));
+  const attribution = builtinName ? BUILTIN_SKILL_ATTRIBUTIONS[builtinName] : undefined;
 
   return (
-    <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }} keyboardShouldPersistTaps="handled">
       <Stack.Screen
         options={{
           headerRight: () => (
@@ -193,20 +147,8 @@ export default function SkillsSettings() {
           ),
         }}
       />
-      <View style={[styles.card, styles.notice, { backgroundColor: c.card, borderColor: c.border }]}>
-        <Info size={16} color={c.foreground} />
-        <View style={styles.flex}>
-          <Text style={[styles.title, { color: c.foreground }]}>
-            Library skills are off in every project until you enable them
-          </Text>
-          <Text style={[styles.muted, { color: c.mutedForeground }]}>
-            Open a project's Skills to turn skills on for that project.
-          </Text>
-        </View>
-      </View>
-
       <View style={[styles.search, { backgroundColor: c.card, borderColor: c.border }]}>
-        <Search size={14} color={c.mutedForeground} />
+        <Search size={17} color={c.mutedForeground} />
         <TextInput
           style={[styles.searchInput, { color: c.foreground }]}
           value={search}
@@ -218,92 +160,125 @@ export default function SkillsSettings() {
         />
       </View>
 
-      <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
-        <Text style={[styles.title, { color: c.foreground }]}>Built-in</Text>
-        <Text style={[styles.muted, { color: c.mutedForeground }]}>
-          Read-only skills that ship with Codenaya. Duplicate one to change it.
-        </Text>
+      <View style={[styles.section, styles.first, { backgroundColor: c.card, borderColor: c.border }]}>
+        <LabelStrip label="Built-in" />
         {builtins.length === 0 ? (
-          <Text style={[styles.empty, { color: c.mutedForeground }]}>No built-in skills match "{search.trim()}".</Text>
+          <Text style={[styles.empty, { color: c.mutedForeground, borderColor: c.border }]}>
+            No built-in skills match "{search.trim()}".
+          </Text>
         ) : (
-          builtins.map((skill) => {
-            const attribution = BUILTIN_SKILL_ATTRIBUTIONS[skill.name];
-            return (
-              <SkillCard
-                key={skill.name}
-                name={skill.name}
-                description={skill.description}
-                meta={attribution && `Adapted from ${attribution.label} · ${attribution.license} license`}
-                c={c}
-                actions={
-                  <>
-                    <Action label="View" icon={<Eye size={14} color={c.foreground} />} onPress={() => openEditor({ builtin: skill.name })} c={c} />
-                    <Action label="Duplicate" icon={<Copy size={14} color={c.foreground} />} onPress={() => openEditor({ from: skill.name })} c={c} />
-                  </>
-                }
-              />
-            );
-          })
-        )}
-      </View>
-
-      <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
-        <Text style={[styles.title, { color: c.foreground }]}>Your library</Text>
-        {shown === undefined ? (
-          <ActivityIndicator style={styles.loading} color={c.mutedForeground} />
-        ) : library?.length === 0 ? (
-          <View style={[styles.emptyBox, { borderColor: c.border }]}>
-            <Sparkles size={20} color={c.mutedForeground} />
-            <Text style={[styles.title, { color: c.foreground }]}>No skills in your library yet</Text>
-            <Text style={[styles.muted, styles.center, { color: c.mutedForeground }]}>
-              Write a skill once and enable it in any project: conventions, recipes or checklists the agent should
-              follow.
-            </Text>
-            <View style={styles.actions}>
-              <Button label="Import" variant="outline" icon={<Download size={15} color={c.foreground} />} onPress={() => setImportOpen(true)} />
-              <Button label="New skill" icon={<Plus size={15} color={c.primaryForeground} />} onPress={() => openEditor()} />
-            </View>
-          </View>
-        ) : shown.length === 0 ? (
-          <Text style={[styles.empty, { color: c.mutedForeground }]}>No skills match "{search.trim()}".</Text>
-        ) : (
-          shown.map((skill) => (
-            <SkillCard
-              key={skill._id}
-              name={skill.name}
-              description={skill.description}
-              meta={projectCountLabel(skill.projectCount)}
-              c={c}
-              actions={
-                <>
-                  <Action label="Edit" icon={<Pencil size={14} color={c.foreground} />} onPress={() => openEditor({ skillId: skill._id })} c={c} />
-                  <Pressable onPress={() => confirmDelete(skill)} hitSlop={10} accessibilityLabel={`Delete ${skill.name}`} style={styles.delete}>
-                    <Trash2 size={16} color={c.mutedForeground} />
-                  </Pressable>
-                </>
-              }
-            />
+          builtins.map((skill) => (
+            <Pressable
+              key={skill.name}
+              onPress={() => setBuiltinName(skill.name)}
+              accessibilityLabel={`${skill.name} options`}
+              style={({ pressed }) => [styles.row, { borderColor: c.border }, pressed && { backgroundColor: c.muted }]}
+            >
+              <View style={[styles.tile, { borderColor: c.border, backgroundColor: c.background }]}>
+                <Sparkles size={18} color={c.brandText} />
+              </View>
+              <View style={styles.flex}>
+                <Text style={[styles.name, { color: c.foreground }]} numberOfLines={1}>
+                  {skill.name}
+                </Text>
+                <Text style={[styles.description, { color: c.mutedForeground }]} numberOfLines={1}>
+                  {skill.description}
+                </Text>
+              </View>
+              <Text style={[monoLabel, styles.tag, { color: c.mutedForeground, borderColor: c.border }]}>Built-in</Text>
+            </Pressable>
           ))
         )}
       </View>
 
+      <View style={[styles.section, { backgroundColor: c.card, borderColor: c.border }]}>
+        <LabelStrip
+          label="Your library"
+          cell={<Text style={[monoLabel, { color: c.mutedForeground }]}>{library?.length ?? 0}</Text>}
+        />
+        {shown === undefined ? (
+          <ActivityIndicator style={styles.loading} color={c.mutedForeground} />
+        ) : library?.length === 0 ? (
+          <Text style={[styles.empty, { color: c.mutedForeground, borderColor: c.border }]}>
+            No skills in your library yet. Write a skill once and enable it in any project: conventions, recipes or
+            checklists the agent should follow.
+          </Text>
+        ) : shown.length === 0 ? (
+          <Text style={[styles.empty, { color: c.mutedForeground, borderColor: c.border }]}>
+            No skills match "{search.trim()}".
+          </Text>
+        ) : (
+          shown.map((skill) => (
+            <Pressable
+              key={skill._id}
+              onPress={() => openEditor({ skillId: skill._id })}
+              accessibilityLabel={`Edit ${skill.name}`}
+              style={({ pressed }) => [styles.row, { borderColor: c.border }, pressed && { backgroundColor: c.muted }]}
+            >
+              <View style={styles.flex}>
+                <Text style={[styles.name, { color: c.foreground }]} numberOfLines={1}>
+                  {skill.name}
+                </Text>
+                <Text style={[styles.description, { color: c.mutedForeground }]} numberOfLines={2}>
+                  {skill.description}
+                </Text>
+                <Text style={[monoLabel, styles.meta, { color: c.mutedForeground }]}>
+                  {projectCountLabel(skill.projectCount)}
+                </Text>
+              </View>
+              <ChevronRight size={16} color={c.mutedForeground} />
+            </Pressable>
+          ))
+        )}
+      </View>
+      <Text style={[styles.note, { color: c.mutedForeground }]}>
+        Library skills are off in every project until you enable them in that project's Skills.
+      </Text>
+
       <Sheet visible={menuOpen} title="Add a skill" onClose={() => setMenuOpen(false)}>
         <SheetRow
+          icon={<Download size={18} color={c.foreground} />}
+          label="Import"
+          detail="From GitHub or skills.sh"
+          onPress={() => {
+            setMenuOpen(false);
+            setImportOpen(true);
+          }}
+        />
+        <SheetRow
+          icon={<Pencil size={18} color={c.foreground} />}
           label="New skill"
           detail="Write the instructions yourself"
-          trailing={<Plus size={16} color={c.mutedForeground} />}
           onPress={() => {
             setMenuOpen(false);
             openEditor();
           }}
         />
+      </Sheet>
+      <Sheet
+        visible={builtinName !== undefined}
+        title={builtinName ?? ""}
+        description={
+          attribution
+            ? `Read-only, ships with Codenaya. Adapted from ${attribution.label} · ${attribution.license} license.`
+            : "Read-only, ships with Codenaya. Duplicate it to change it."
+        }
+        onClose={() => setBuiltinName(undefined)}
+      >
         <SheetRow
-          label="Import"
-          detail="From GitHub or skills.sh"
-          trailing={<Download size={16} color={c.mutedForeground} />}
+          icon={<Eye size={18} color={c.foreground} />}
+          label="View"
           onPress={() => {
-            setMenuOpen(false);
-            setImportOpen(true);
+            setBuiltinName(undefined);
+            if (builtinName) openEditor({ builtin: builtinName });
+          }}
+        />
+        <SheetRow
+          icon={<Copy size={18} color={c.foreground} />}
+          label="Duplicate to your library"
+          onPress={() => {
+            setBuiltinName(undefined);
+            if (builtinName) openEditor({ from: builtinName });
           }}
         />
       </Sheet>
@@ -314,41 +289,22 @@ export default function SkillsSettings() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  page: { padding: 16, gap: 14, paddingBottom: 48 },
-  card: { borderWidth: 1, borderRadius: radius.xl, padding: 14, gap: 10 },
-  notice: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
-  title: { fontSize: 15, fontFamily: font.semibold },
   muted: { fontSize: 13, lineHeight: 18, fontFamily: font.regular },
-  meta: { fontSize: 12, fontFamily: font.regular },
-  center: { textAlign: "center" },
-  empty: { textAlign: "center", paddingVertical: 12, fontSize: 13, fontFamily: font.regular },
-  emptyBox: { alignItems: "center", gap: 8, borderWidth: 1, borderStyle: "dashed", borderRadius: radius.lg, padding: 18 },
+  meta: { fontSize: 9, marginTop: 6 },
+  link: { fontSize: 12, fontFamily: font.regular },
   loading: { paddingVertical: 16 },
-  search: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    height: 40,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-  },
-  searchInput: { flex: 1, fontSize: 14, fontFamily: font.regular, paddingVertical: 0 },
-  skill: { borderWidth: 1, borderRadius: radius.lg, padding: 12, gap: 4 },
-  name: { fontSize: 14, fontFamily: "monospace" },
-  actions: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
-  action: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderRadius: radius.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  actionText: { fontSize: 13, fontFamily: font.medium },
-  delete: { marginLeft: "auto" },
+  empty: { padding: 16, borderBottomWidth: 1, fontSize: 13, lineHeight: 19, fontFamily: font.regular },
+  search: { flexDirection: "row", alignItems: "center", gap: 12, height: 48, paddingHorizontal: 16, borderBottomWidth: 1 },
+  searchInput: { flex: 1, fontSize: 15, fontFamily: font.regular, paddingVertical: 0 },
+  section: { marginTop: 20, borderTopWidth: 1 },
+  first: { marginTop: 0, borderTopWidth: 0 },
+  row: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  tile: { width: 36, height: 36, borderRadius: 6, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  name: { fontSize: 14, fontFamily: font.monoMedium },
+  description: { fontSize: 13, lineHeight: 18, fontFamily: font.regular, marginTop: 2 },
+  tag: { fontSize: 9, borderWidth: 1, borderRadius: 2, paddingHorizontal: 6, paddingVertical: 2 },
+  note: { padding: 16, fontSize: 12.5, lineHeight: 18, fontFamily: font.regular },
   form: { gap: 12, padding: 12 },
-  preview: { maxHeight: 220, borderWidth: 1, borderRadius: radius.md, padding: 10 },
-  code: { fontFamily: "monospace", fontSize: 12, lineHeight: 18 },
+  preview: { maxHeight: 220, borderWidth: 1, borderRadius: 6, padding: 10 },
+  code: { fontFamily: font.mono, fontSize: 12, lineHeight: 18 },
 });

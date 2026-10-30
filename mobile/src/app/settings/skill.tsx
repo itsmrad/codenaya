@@ -2,11 +2,14 @@ import { useMutation, useQuery } from "convex/react";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, ScrollView, StyleSheet, Text } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { Id } from "../../../../convex/_generated/dataModel";
+import { confirm, toast } from "@/components/dialogs";
 import { Button, Field } from "@/components/form";
+import { LabelStrip, monoLabel } from "@/components/grid";
+import { Check, Trash2 } from "@/components/icons";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/format";
 import { BUILTIN_SKILLS, SKILL_BODY_MAX_LENGTH, validateSkill } from "@/lib/shared";
@@ -53,6 +56,7 @@ function SkillForm({
   const insets = useSafeAreaInsets();
   const create = useMutation(api.skills.create);
   const update = useMutation(api.skills.update);
+  const remove = useMutation(api.skills.remove);
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description);
   const [body, setBody] = useState(initial.body);
@@ -75,19 +79,54 @@ function SkillForm({
     }
   };
 
+  const confirmDelete = async () => {
+    if (!skillId) return;
+    const confirmed = await confirm({
+      title: `Delete ${initial.name}?`,
+      message: "It is removed from your library and every project that uses it.",
+      confirmLabel: "Delete skill",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    remove({ skillId }).then(
+      () => router.back(),
+      (error) => toast.error(errorMessage(error, `Unable to delete ${initial.name}`)),
+    );
+  };
+
   const title = readOnly ? "Built-in skill" : skillId ? "Edit skill" : "New skill";
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior="padding" keyboardVerticalOffset={headerHeight}>
-      <Stack.Screen options={{ title }} />
-      <ScrollView
-        contentContainerStyle={[styles.page, { paddingBottom: insets.bottom + 24 }]}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={[styles.muted, { color: c.mutedForeground }]}>
-          {readOnly
-            ? "Built-in skills are read-only. Duplicate one to your library to change it."
-            : "The agent sees every enabled skill's name and description, and reads the instructions when a task matches."}
-        </Text>
+    <KeyboardAvoidingView
+      style={[styles.flex, { backgroundColor: c.card }]}
+      behavior="padding"
+      keyboardVerticalOffset={headerHeight}
+    >
+      <Stack.Screen
+        options={{
+          title,
+          headerRight: skillId
+            ? () => (
+                <Pressable onPress={confirmDelete} hitSlop={10} accessibilityLabel={`Delete ${initial.name}`}>
+                  <Trash2 size={18} color={c.destructive} />
+                </Pressable>
+              )
+            : undefined,
+        }}
+      />
+      <LabelStrip
+        label="Skill"
+        cell={
+          <Text style={[monoLabel, { color: c.mutedForeground }]}>
+            {readOnly ? "Read-only" : skillId ? "Editing" : "Draft"}
+          </Text>
+        }
+      />
+      <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
+        {readOnly && (
+          <Text style={[styles.muted, { color: c.mutedForeground }]}>
+            Built-in skills are read-only. Duplicate one to your library to change it.
+          </Text>
+        )}
         <Field
           label="Name"
           value={name}
@@ -117,17 +156,35 @@ function SkillForm({
           style={[styles.mono, styles.body]}
           hint={readOnly ? undefined : `${body.length.toLocaleString("en-US")} / ${SKILL_BODY_MAX_LENGTH.toLocaleString("en-US")} characters`}
         />
+        {!readOnly && (
+          <Text style={[styles.muted, { color: c.mutedForeground }]}>
+            The agent sees every enabled skill's name and description, and reads the instructions when a task matches.
+          </Text>
+        )}
         {error && <Text style={[styles.muted, { color: c.destructive }]}>{error}</Text>}
-        {!readOnly && <Button label={busy ? "Saving..." : skillId ? "Save" : "Create skill"} busy={busy} onPress={save} />}
       </ScrollView>
+      {!readOnly && (
+        <View
+          style={[styles.footer, { paddingBottom: insets.bottom + 12, backgroundColor: c.background, borderColor: c.border }]}
+        >
+          <Button
+            label={busy ? "Saving..." : skillId ? "Save skill" : "Create skill"}
+            variant="brand"
+            busy={busy}
+            icon={<Check size={15} color={c.brandForeground} />}
+            onPress={save}
+          />
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  page: { padding: 16, gap: 14 },
-  muted: { fontSize: 13, lineHeight: 18, fontFamily: font.regular },
-  mono: { fontFamily: "monospace", fontSize: 13 },
-  body: { minHeight: 240 },
+  page: { padding: 16, gap: 18 },
+  muted: { fontSize: 13.5, lineHeight: 20, fontFamily: font.regular },
+  mono: { fontFamily: font.mono, fontSize: 13 },
+  body: { minHeight: 200, lineHeight: 22 },
+  footer: { paddingHorizontal: 16, paddingTop: 12, borderTopWidth: 1 },
 });
