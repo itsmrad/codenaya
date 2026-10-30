@@ -7,39 +7,52 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
-import { CircleAlert, Copy, Download, ExternalLink, GitBranch, Link, MoreHorizontal, Pencil, Trash2 } from "@/components/icons";
+import {
+  CircleAlert,
+  Copy,
+  Download,
+  EllipsisVertical,
+  ExternalLink,
+  Link,
+  Pencil,
+  Trash2,
+} from "@/components/icons";
 import { api } from "@/lib/api";
-import { errorMessage } from "@/lib/format";
+import { errorMessage, timeAgo } from "@/lib/format";
 import { webUrl } from "@/lib/http";
 import { PULSE } from "@/lib/motion";
 import { shareProjectZip } from "@/lib/project-zip";
-import { type Colors, font, radius, useColors } from "@/lib/theme";
+import { type Colors, font, useColors } from "@/lib/theme";
 import { confirm, toast } from "./dialogs";
+import { GitHubIcon } from "./github-icon";
+import { monoLabel } from "./grid";
 import { NameDialog } from "./name-dialog";
+import { ProjectCover } from "./project-cover";
 import { Sheet, SheetRow } from "./sheet";
 
 /** The web card's status pill: importing, import failed, or linked to GitHub. */
 function StatusBadge({ project, c }: { project: Doc<"projects">; c: Colors }) {
   let content: ReactNode = null;
   if (project.importStatus === "importing") {
-    content = (
-      <>
+    // Unboxed, in the brand colour, so it reads as live rather than a tag.
+    return (
+      <View style={styles.importing}>
         <Animated.View style={[styles.dot, { backgroundColor: c.brand }, PULSE]} />
-        <Text style={[styles.badgeText, { color: c.foreground }]}>Importing…</Text>
-      </>
+        <Text style={[monoLabel, styles.badgeText, { color: c.brandText }]}>Importing…</Text>
+      </View>
     );
   } else if (project.importStatus === "failed") {
     content = (
       <>
         <CircleAlert size={11} color={c.destructive} />
-        <Text style={[styles.badgeText, { color: c.destructive }]}>Import failed</Text>
+        <Text style={[monoLabel, styles.badgeText, { color: c.destructive }]}>Import failed</Text>
       </>
     );
   } else if (project.importStatus === "completed" || project.exportStatus === "completed") {
     content = (
       <>
-        <GitBranch size={11} color={c.mutedForeground} />
-        <Text style={[styles.badgeText, { color: c.mutedForeground }]}>GitHub</Text>
+        <GitHubIcon size={11} color={c.mutedForeground} />
+        <Text style={[monoLabel, styles.badgeText, { color: c.mutedForeground }]}>GitHub</Text>
       </>
     );
   }
@@ -47,11 +60,10 @@ function StatusBadge({ project, c }: { project: Doc<"projects">; c: Colors }) {
 }
 
 /**
- * A compact project row: the name in a rounded card (or, `plain`, a bare row
- * for the dashboard's recent list), with the web card's status pill. The menu
- * holds the web card's link actions plus duplicate, download, rename and delete.
+ * A project row: its cover, name, last edit and the web card's status pill. The
+ * menu holds the web card's link actions plus duplicate, download, rename and delete.
  */
-export function ProjectCard({ project, plain = false }: { project: Doc<"projects">; plain?: boolean }) {
+export function ProjectCard({ project }: { project: Doc<"projects"> }) {
   const c = useColors();
   const router = useRouter();
   const convex = useConvex();
@@ -86,18 +98,23 @@ export function ProjectCard({ project, plain = false }: { project: Doc<"projects
     <Pressable
       onPress={() => router.push(`/projects/${project._id}`)}
       onLongPress={() => setMenuOpen(true)}
-      style={({ pressed }) => [
-        plain ? styles.plain : [styles.card, { backgroundColor: c.card, borderColor: c.border }],
-        pressed && (plain ? { backgroundColor: c.muted } : styles.pressed),
-      ]}
+      style={({ pressed }) => pressed && { backgroundColor: c.muted }}
     >
-      <View style={[styles.row, plain && styles.plainRow]}>
-        <Text style={[styles.name, { color: c.foreground }]} numberOfLines={1}>
-          {project.name}
-        </Text>
-        <StatusBadge project={project} c={c} />
+      <View style={styles.row}>
+        <View style={[styles.thumb, { borderColor: c.border }]}>
+          <ProjectCover seed={project._id} style={StyleSheet.absoluteFill} />
+        </View>
+        <View style={styles.text}>
+          <Text style={[styles.name, { color: c.foreground }]} numberOfLines={1}>
+            {project.name}
+          </Text>
+          <View style={styles.metaRow}>
+            <Text style={[monoLabel, styles.meta, { color: c.mutedForeground }]}>Edited {timeAgo(project.updatedAt)}</Text>
+            <StatusBadge project={project} c={c} />
+          </View>
+        </View>
         <Pressable onPress={() => setMenuOpen(true)} hitSlop={10} accessibilityLabel="Project actions">
-          <MoreHorizontal size={18} color={c.mutedForeground} />
+          <EllipsisVertical size={16} color={c.mutedForeground} />
         </Pressable>
       </View>
 
@@ -152,21 +169,22 @@ export function ProjectCard({ project, plain = false }: { project: Doc<"projects
 }
 
 const styles = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: radius.xl, overflow: "hidden" },
-  pressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
-  plain: { borderRadius: radius.md },
-  plainRow: { paddingHorizontal: 6, paddingVertical: 13 },
+  thumb: { width: 44, height: 44, borderRadius: 4, borderWidth: 1, overflow: "hidden" },
+  text: { flex: 1, minWidth: 0, gap: 4 },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  meta: { fontSize: 9.5 },
   badge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
     borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 8,
+    borderRadius: 3,
+    paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  badgeText: { fontSize: 11, fontFamily: font.medium },
+  badgeText: { fontSize: 9 },
+  importing: { flexDirection: "row", alignItems: "center", gap: 6 },
   dot: { width: 6, height: 6, borderRadius: 3 },
-  row: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingVertical: 15 },
-  name: { flex: 1, minWidth: 0, fontSize: 15, fontFamily: font.medium },
+  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  name: { fontSize: 15, fontFamily: font.medium },
 });

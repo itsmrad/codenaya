@@ -6,11 +6,12 @@ import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
-import { CheckCircle2, ChevronRight, Circle, X } from "@/components/icons";
+import { LabelStrip, monoLabel } from "@/components/grid";
+import { Check, ChevronRight, X } from "@/components/icons";
 import { api } from "@/lib/api";
 import { webUrl } from "@/lib/http";
 import { getFirstRunProgress } from "@/lib/shared";
-import { font, radius, useColors } from "@/lib/theme";
+import { font, useColors } from "@/lib/theme";
 
 // Per user, like the web's localStorage flags (first-run.ts), kept on the device.
 const dismissedKey = (userId: string) => `codenaya.first-run-dismissed.${userId}`;
@@ -75,17 +76,24 @@ export function FirstRunChecklist({ projects }: { projects: Doc<"projects">[] })
 
   return (
     <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <View style={styles.header}>
-        <View style={styles.flex}>
-          <Text style={[styles.title, { color: c.foreground }]}>Getting started</Text>
-          <Text style={[styles.count, { color: c.mutedForeground }]}>
-            {doneCount} of {steps.length} done
-          </Text>
-        </View>
-        <Pressable onPress={dismiss} hitSlop={10} accessibilityLabel="Dismiss getting started checklist">
-          <X size={16} color={c.mutedForeground} />
-        </Pressable>
-      </View>
+      <LabelStrip
+        label="Getting started"
+        right={
+          <>
+            <Text style={[monoLabel, { color: c.mutedForeground }]}>
+              {doneCount} / {steps.length}
+            </Text>
+            <Pressable
+              onPress={dismiss}
+              hitSlop={10}
+              accessibilityLabel="Dismiss getting started checklist"
+              style={[styles.dismiss, { borderColor: c.border }]}
+            >
+              <X size={14} color={c.mutedForeground} />
+            </Pressable>
+          </>
+        }
+      />
       <View style={[styles.track, { backgroundColor: c.muted }]}>
         <View style={[styles.fill, { backgroundColor: c.brand, width: `${(doneCount / steps.length) * 100}%` }]} />
       </View>
@@ -93,8 +101,15 @@ export function FirstRunChecklist({ projects }: { projects: Doc<"projects">[] })
         const done = progress[step.id];
         const actionable = !done && Boolean(step.path);
         return (
-          <Pressable key={step.id} onPress={() => open(step)} disabled={!actionable} style={styles.step}>
-            {done ? <CheckCircle2 size={16} color={c.brand} /> : <Circle size={16} color={c.mutedForeground} />}
+          <Pressable
+            key={step.id}
+            onPress={() => open(step)}
+            disabled={!actionable}
+            style={({ pressed }) => [styles.step, { borderColor: c.border }, pressed && { backgroundColor: c.muted }]}
+          >
+            <View style={[styles.mark, done ? { backgroundColor: c.brand } : { borderWidth: 1, borderColor: c.mutedForeground }]}>
+              {done && <Check size={11} strokeWidth={3} color={c.brandForeground} />}
+            </View>
             <Text
               style={[
                 styles.label,
@@ -113,14 +128,13 @@ export function FirstRunChecklist({ projects }: { projects: Doc<"projects">[] })
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  card: { borderWidth: 1, borderRadius: radius.xl, padding: 14, gap: 8, marginTop: 22 },
-  header: { flexDirection: "row", alignItems: "flex-start" },
-  title: { fontSize: 15, fontFamily: font.semibold },
-  count: { fontSize: 12, fontFamily: font.regular, marginTop: 2 },
-  track: { height: 4, borderRadius: 2, overflow: "hidden", marginBottom: 4 },
-  fill: { height: 4, borderRadius: 2 },
-  step: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 },
+  // A full-bleed bordered section, like the web dashboard's cells.
+  card: { borderTopWidth: 1, borderBottomWidth: 1, marginHorizontal: -16, marginTop: 28 },
+  dismiss: { marginLeft: 12, paddingLeft: 12, borderLeftWidth: 1, height: 36, justifyContent: "center" },
+  track: { height: 2 },
+  fill: { height: 2 },
+  step: { flexDirection: "row", alignItems: "center", gap: 12, height: 46, paddingHorizontal: 16, borderTopWidth: 1 },
+  mark: { width: 18, height: 18, borderRadius: 9, alignItems: "center", justifyContent: "center" },
   label: { flex: 1, fontSize: 14, fontFamily: font.regular },
   done: { textDecorationLine: "line-through" },
 });

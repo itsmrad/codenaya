@@ -8,15 +8,19 @@ import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { Doc } from "../../../../convex/_generated/dataModel";
-import { ArrowUpDown, GitBranch, Search } from "@/components/icons";
-import { NameDialog } from "@/components/name-dialog";
+import { Button, Field } from "@/components/form";
+import { monoLabel } from "@/components/grid";
+import { GitHubIcon } from "@/components/github-icon";
+import { ArrowUpDown, Download, Search } from "@/components/icons";
 import { ProjectCard } from "@/components/project-card";
+import { Sheet } from "@/components/sheet";
 import { api } from "@/lib/api";
+import { errorMessage } from "@/lib/format";
 import { GITHUB_NOT_LINKED, alertGithubNotLinked } from "@/lib/github";
 import { postApi } from "@/lib/http";
 import { PULSE, fadeUp } from "@/lib/motion";
 import { parseGithubRepo } from "@/lib/shared";
-import { font, radius, useColors } from "@/lib/theme";
+import { font, useColors } from "@/lib/theme";
 
 // The web grid's sorts (projects-grid.tsx).
 const SORTS = {
@@ -38,6 +42,9 @@ export default function AllProjects() {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("updated");
   const [importOpen, setImportOpen] = useState(false);
+  const [repo, setRepo] = useState("");
+  const [importError, setImportError] = useState<string>();
+  const [importing, setImporting] = useState(false);
   const visible = (projects ?? [])
     .filter((project) => project.name.toLowerCase().includes(query.trim().toLowerCase()))
     .sort(SORTS[sort].compare);
@@ -60,14 +67,34 @@ export default function AllProjects() {
     router.push(`/projects/${data.projectId}`);
   };
 
+  const submitImport = async () => {
+    setImporting(true);
+    setImportError(undefined);
+    try {
+      await importRepo(repo);
+      setImportOpen(false);
+      setRepo("");
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : errorMessage(error));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <KeyboardAvoidingView style={styles.flex} behavior="padding" keyboardVerticalOffset={headerHeight}>
       <Stack.Screen
         options={{
-          title: projects ? `All projects (${projects.length})` : "All projects",
+          title: "All projects",
           headerRight: () => (
-            <Pressable onPress={() => setImportOpen(true)} hitSlop={10} accessibilityLabel="Import from GitHub">
-              <GitBranch size={19} color={c.mutedForeground} />
+            <Pressable
+              onPress={() => setImportOpen(true)}
+              hitSlop={10}
+              accessibilityLabel="Import from GitHub"
+              style={styles.import}
+            >
+              <GitHubIcon size={15} color={c.foreground} />
+              <Text style={[monoLabel, { color: c.foreground }]}>Import</Text>
             </Pressable>
           ),
         }}
@@ -75,38 +102,51 @@ export default function AllProjects() {
       <FlatList
         data={visible}
         keyExtractor={(project) => project._id}
-        contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 32 }]}
+        style={{ backgroundColor: c.card }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
-          <View style={styles.tools}>
-            <View style={[styles.search, { backgroundColor: c.card, borderColor: c.border }]}>
-              <Search size={14} color={c.mutedForeground} />
-              <TextInput
-                style={[styles.searchInput, { color: c.foreground }]}
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Search projects"
-                placeholderTextColor={c.mutedForeground}
-                autoCorrect={false}
-                clearButtonMode="while-editing"
-              />
+          <>
+            <View style={[styles.tools, { borderColor: c.border }]}>
+              <View style={styles.search}>
+                <Search size={16} color={c.mutedForeground} />
+                <TextInput
+                  style={[styles.searchInput, { color: c.foreground }]}
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Search projects"
+                  placeholderTextColor={c.mutedForeground}
+                  autoCorrect={false}
+                  clearButtonMode="while-editing"
+                />
+              </View>
+              <Pressable
+                // Cycles Last edited → Newest → Name, like picking from the web's menu.
+                onPress={() => setSort(SORT_ORDER[(SORT_ORDER.indexOf(sort) + 1) % SORT_ORDER.length])}
+                accessibilityLabel={`Sort: ${SORTS[sort].label}`}
+                style={({ pressed }) => [styles.sort, { borderColor: c.border }, pressed && { backgroundColor: c.muted }]}
+              >
+                <ArrowUpDown size={14} color={c.mutedForeground} />
+                <Text style={[monoLabel, { color: c.mutedForeground }]}>{SORTS[sort].label}</Text>
+              </Pressable>
             </View>
-            <Pressable
-              // Cycles Last edited → Newest → Name, like picking from the web's menu.
-              onPress={() => setSort(SORT_ORDER[(SORT_ORDER.indexOf(sort) + 1) % SORT_ORDER.length])}
-              accessibilityLabel={`Sort: ${SORTS[sort].label}`}
-              style={[styles.sort, { backgroundColor: c.card, borderColor: c.border }]}
-            >
-              <ArrowUpDown size={14} color={c.mutedForeground} />
-              <Text style={[styles.sortText, { color: c.mutedForeground }]}>{SORTS[sort].label}</Text>
-            </Pressable>
-          </View>
+            {projects !== undefined && (
+              <View style={[styles.count, { borderColor: c.border, backgroundColor: c.background }]}>
+                <Text style={[monoLabel, { color: c.mutedForeground }]}>
+                  {visible.length} {visible.length === 1 ? "project" : "projects"}
+                </Text>
+                <Text style={[monoLabel, { color: c.mutedForeground }]}>Sorted · {SORTS[sort].label}</Text>
+              </View>
+            )}
+          </>
         }
         ListEmptyComponent={
           projects === undefined ? (
-            <View style={styles.skeletons}>
+            <View>
               {[0, 1, 2].map((index) => (
-                <Animated.View key={index} style={[styles.skeleton, { backgroundColor: c.muted }, PULSE]} />
+                <View key={index} style={[styles.skeletonRow, { borderColor: c.border }]}>
+                  <Animated.View style={[styles.skeleton, { backgroundColor: c.muted }, PULSE]} />
+                </View>
               ))}
             </View>
           ) : (
@@ -117,49 +157,66 @@ export default function AllProjects() {
         }
         // Cards rise in one after another, like the web grid.
         renderItem={({ item, index }) => (
-          <Animated.View entering={fadeUp({ rise: 8, duration: 250, delay: Math.min(index * 40, 300) })}>
+          <Animated.View
+            entering={fadeUp({ rise: 8, duration: 250, delay: Math.min(index * 40, 300) })}
+            style={[styles.item, { borderColor: c.border }]}
+          >
             <ProjectCard project={item} />
           </Animated.View>
         )}
       />
-      <NameDialog
+      <Sheet
         visible={importOpen}
         title="Import from GitHub"
-        placeholder="https://github.com/owner/repo"
-        confirmLabel="Import"
+        description="Enter a GitHub repository URL like https://github.com/owner/repo"
         onClose={() => setImportOpen(false)}
-        onSave={importRepo}
-      />
+      >
+        <View style={styles.form}>
+          <Field
+            label="Repository"
+            value={repo}
+            onChangeText={setRepo}
+            onSubmitEditing={submitImport}
+            placeholder="https://github.com/owner/repo"
+            keyboardType="url"
+            autoFocus
+            hint="Public repositories import without GitHub; connect GitHub to import private ones."
+          />
+          {importError && <Text style={[styles.error, { color: c.destructive }]}>{importError}</Text>}
+          <Button
+            label="Import"
+            variant="brand"
+            icon={<Download size={14} color={c.brandForeground} />}
+            busy={importing}
+            disabled={!repo.trim()}
+            onPress={submitImport}
+          />
+        </View>
+      </Sheet>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  list: { padding: 16, gap: 12 },
-  tools: { flexDirection: "row", gap: 8, marginBottom: 2 },
-  search: {
-    flex: 1,
+  import: { flexDirection: "row", alignItems: "center", gap: 8, height: 48, paddingHorizontal: 16 },
+  // Full-bleed cells on the grid: search, then the sort, split by a rule.
+  tools: { flexDirection: "row", height: 48, borderBottomWidth: 1 },
+  search: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16 },
+  searchInput: { flex: 1, fontSize: 15, fontFamily: font.regular, paddingVertical: 0 },
+  sort: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, borderLeftWidth: 1 },
+  count: {
+    height: 32,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    height: 38,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    paddingHorizontal: 10,
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
   },
-  searchInput: { flex: 1, fontSize: 14, fontFamily: font.regular, paddingVertical: 0 },
-  sort: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    height: 38,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    paddingHorizontal: 10,
-  },
-  sortText: { fontSize: 12, fontFamily: font.regular },
-  skeletons: { gap: 12 },
-  skeleton: { height: 52, borderRadius: radius.xl },
+  item: { borderBottomWidth: 1 },
+  skeletonRow: { padding: 12, paddingHorizontal: 16, borderBottomWidth: 1 },
+  skeleton: { height: 44, borderRadius: 4 },
   empty: { marginTop: 32, textAlign: "center", fontSize: 14, fontFamily: font.regular },
+  form: { gap: 14, paddingHorizontal: 8, paddingTop: 4 },
+  error: { fontSize: 13, fontFamily: font.regular },
 });

@@ -14,7 +14,8 @@ import {
 } from "react-native";
 
 import { GoogleIcon } from "@/components/google-icon";
-import { Play } from "@/components/icons";
+import { Corners, DotGrid, LabelStrip, monoLabel } from "@/components/grid";
+import { ArrowRight } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { webUrl } from "@/lib/http";
 import { font, radius, useColors } from "@/lib/theme";
@@ -35,6 +36,7 @@ export default function SignIn() {
   const [codeSent, setCodeSent] = useState(false);
   const [error, setError] = useState<string>();
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [focused, setFocused] = useState(false);
   const busy = fetchStatus === "fetching" || googleBusy;
 
   const signInWithGoogle = async () => {
@@ -74,122 +76,141 @@ export default function SignIn() {
   };
 
   const canContinue = !busy && (codeSent ? code.trim() : email.trim()).length > 0;
-  const inputStyle = [styles.input, { color: c.foreground, borderColor: c.border, backgroundColor: c.muted }];
+  const inputStyle = [
+    styles.input,
+    { color: c.foreground, borderColor: focused ? c.brand : c.border, backgroundColor: c.card },
+  ];
+  const focusProps = { onFocus: () => setFocused(true), onBlur: () => setFocused(false) };
 
   return (
     <KeyboardAvoidingView
       style={[styles.flex, { backgroundColor: c.background }]}
       behavior="padding"
     >
+      <DotGrid />
       <ScrollView contentContainerStyle={styles.screen} keyboardShouldPersistTaps="handled">
         <View style={styles.logo}>
           <Logo size={22} />
         </View>
 
-        <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
+        {/* The web's window: `+` corners outside the card, a `[ SIGN IN ]` strip on top. */}
+        <View style={styles.window}>
+          <Corners />
+          <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
+            <LabelStrip
+            label={codeSent ? "Verify" : "Sign in"}
+            right={<Text style={[monoLabel, { color: c.mutedForeground }]}>{codeSent ? "02 / 02" : "01 / 02"}</Text>}
+          />
           <View style={styles.cardBody}>
-            <Text style={[styles.title, { color: c.foreground }]}>
-              {codeSent ? "Check your email" : "Sign in to codenaya"}
-            </Text>
-            <Text style={[styles.subtitle, { color: c.mutedForeground }]}>
-              {codeSent
-                ? `Enter the verification code sent to ${email.trim()}`
-                : "Welcome back! Please sign in to continue"}
-            </Text>
+              <Text style={[styles.title, { color: c.foreground }]}>
+                {codeSent ? "Check your email" : "Sign in to codenaya"}
+              </Text>
+              <Text style={[styles.subtitle, { color: c.mutedForeground }]}>
+                {codeSent
+                  ? `Enter the verification code sent to ${email.trim()}`
+                  : "Welcome back! Please sign in to continue"}
+              </Text>
 
-            {!codeSent && (
-              <>
-                <Pressable
-                  style={[styles.google, { borderColor: c.border }, busy && styles.disabled]}
-                  onPress={signInWithGoogle}
-                  disabled={busy}
-                >
-                  {googleBusy ? (
-                    <ActivityIndicator color={c.foreground} />
-                  ) : (
-                    <>
-                      <GoogleIcon size={18} />
-                      <Text style={[styles.googleText, { color: c.foreground }]}>Continue with Google</Text>
-                    </>
-                  )}
-                </Pressable>
-                <View style={styles.divider}>
-                  <View style={[styles.rule, { backgroundColor: c.border }]} />
-                  <Text style={[styles.or, { color: c.mutedForeground }]}>or</Text>
-                  <View style={[styles.rule, { backgroundColor: c.border }]} />
-                </View>
-              </>
-            )}
-
-            <Text style={[styles.label, { color: c.foreground }]}>
-              {codeSent ? "Verification code" : "Email address"}
-            </Text>
-            {codeSent ? (
-              <TextInput
-                key="code"
-                style={inputStyle}
-                value={code}
-                onChangeText={setCode}
-                placeholder="Enter the 6-digit code"
-                placeholderTextColor={c.mutedForeground}
-                keyboardType="number-pad"
-                autoComplete="one-time-code"
-                textContentType="oneTimeCode"
-                onSubmitEditing={verifyCode}
-                autoFocus
-              />
-            ) : (
-              <TextInput
-                key="email"
-                style={inputStyle}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="Enter your email address"
-                placeholderTextColor={c.mutedForeground}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoComplete="email"
-                textContentType="emailAddress"
-                onSubmitEditing={sendCode}
-              />
-            )}
-
-            {error && <Text style={[styles.error, { color: c.destructive }]}>{error}</Text>}
-
-            <Pressable
-              style={[styles.continue, { backgroundColor: c.brand }, !canContinue && styles.disabled]}
-              onPress={codeSent ? verifyCode : sendCode}
-              disabled={!canContinue}
-            >
-              {fetchStatus === "fetching" ? (
-                <ActivityIndicator color={c.brandForeground} />
-              ) : (
+              {!codeSent && (
                 <>
-                  <Text style={[styles.continueText, { color: c.brandForeground }]}>Continue</Text>
-                  <Play size={9} color={c.brandForeground} fill={c.brandForeground} />
+                  <Pressable
+                    style={[styles.google, { borderColor: c.border }, busy && styles.disabled]}
+                    onPress={signInWithGoogle}
+                    disabled={busy}
+                  >
+                    {googleBusy ? (
+                      <ActivityIndicator color={c.foreground} />
+                    ) : (
+                      <>
+                        <GoogleIcon size={18} />
+                        <Text style={[styles.googleText, { color: c.foreground }]}>Continue with Google</Text>
+                      </>
+                    )}
+                  </Pressable>
+                  <View style={styles.divider}>
+                    <View style={[styles.rule, { backgroundColor: c.border }]} />
+                    <Text style={[monoLabel, { color: c.mutedForeground }]}>or</Text>
+                    <View style={[styles.rule, { backgroundColor: c.border }]} />
+                  </View>
                 </>
               )}
-            </Pressable>
 
-            {codeSent && (
-              <Pressable onPress={startOver} disabled={busy}>
-                <Text style={[styles.link, { color: c.brandText }]}>Use a different email</Text>
-              </Pressable>
-            )}
-          </View>
-
-          <View style={[styles.cardFooter, { borderColor: c.border, backgroundColor: c.muted }]}>
-            <Text style={[styles.footerText, { color: c.mutedForeground }]}>
-              Don’t have an account?{" "}
-              <Text
-                style={{ color: c.foreground, fontFamily: font.medium }}
-                onPress={() => WebBrowser.openBrowserAsync(webUrl("/sign-up"))}
-              >
-                Sign up
+              <Text style={[monoLabel, styles.label, { color: c.mutedForeground }]}>
+                {codeSent ? "Verification code" : "Email address"}
               </Text>
-            </Text>
+              {codeSent ? (
+                <TextInput
+                  key="code"
+                  style={inputStyle}
+                  value={code}
+                  onChangeText={setCode}
+                  placeholder="Enter the 6-digit code"
+                  placeholderTextColor={c.mutedForeground}
+                  keyboardType="number-pad"
+                  autoComplete="one-time-code"
+                  textContentType="oneTimeCode"
+                  onSubmitEditing={verifyCode}
+                  autoFocus
+                  {...focusProps}
+                />
+              ) : (
+                <TextInput
+                  key="email"
+                  style={inputStyle}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="Enter your email address"
+                  placeholderTextColor={c.mutedForeground}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoComplete="email"
+                  textContentType="emailAddress"
+                  onSubmitEditing={sendCode}
+                  {...focusProps}
+                />
+              )}
+
+              {error && <Text style={[styles.error, { color: c.destructive }]}>{error}</Text>}
+
+              <Pressable
+                style={[styles.continue, { backgroundColor: c.brand }, !canContinue && styles.disabled]}
+                onPress={codeSent ? verifyCode : sendCode}
+                disabled={!canContinue}
+              >
+                {fetchStatus === "fetching" ? (
+                  <ActivityIndicator color={c.brandForeground} />
+                ) : (
+                  <>
+                    <Text style={[monoLabel, styles.continueText, { color: c.brandForeground }]}>Continue</Text>
+                    <ArrowRight size={14} color={c.brandForeground} />
+                  </>
+                )}
+              </Pressable>
+
+              {codeSent && (
+                <Pressable onPress={startOver} disabled={busy}>
+                  <Text style={[styles.link, { color: c.mutedForeground }]}>Use a different email</Text>
+                </Pressable>
+              )}
+            </View>
+
+            <View style={[styles.cardFooter, { borderColor: c.border, backgroundColor: c.muted }]}>
+              <Text style={[styles.footerText, { color: c.mutedForeground }]}>
+                Don’t have an account?{" "}
+                <Text
+                  style={{ color: c.foreground, fontFamily: font.medium }}
+                  onPress={() => WebBrowser.openBrowserAsync(webUrl("/sign-up"))}
+                >
+                  Sign up
+                </Text>
+              </Text>
+            </View>
           </View>
         </View>
+
+        <Text style={[monoLabel, styles.hint, { color: c.mutedForeground }]}>
+          {codeSent ? "No code? Check your spam folder" : "A 6-digit code is sent to your email"}
+        </Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -197,47 +218,64 @@ export default function SignIn() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  screen: { flexGrow: 1, justifyContent: "center", padding: 20, gap: 28 },
+  screen: { flexGrow: 1, justifyContent: "center", padding: 20, gap: 24 },
   logo: { alignItems: "center" },
-  card: { borderWidth: 1, borderRadius: radius.xl, overflow: "hidden" },
-  cardBody: { padding: 28, gap: 12 },
-  title: { fontSize: 18, fontFamily: font.semibold, textAlign: "center" },
-  subtitle: { fontSize: 14, fontFamily: font.regular, textAlign: "center", marginBottom: 16 },
+  window: { position: "relative" },
+  card: {
+    borderWidth: 1,
+    borderRadius: 6,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 2,
+  },
+  cardBody: { padding: 22, gap: 12 },
+  title: { fontSize: 24, fontFamily: font.semibold, letterSpacing: -0.4 },
+  subtitle: { fontSize: 14, fontFamily: font.regular, marginBottom: 14 },
   google: {
     borderWidth: 1,
-    borderRadius: radius.sm,
-    height: 44,
+    borderRadius: 6,
+    height: 46,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
   },
   googleText: { fontSize: 14, fontFamily: font.medium },
-  divider: { flexDirection: "row", alignItems: "center", gap: 16, marginVertical: 8 },
+  divider: { flexDirection: "row", alignItems: "center", gap: 12, marginVertical: 6 },
   rule: { flex: 1, height: 1 },
-  or: { fontSize: 13, fontFamily: font.regular },
-  label: { fontSize: 13, fontFamily: font.medium, marginTop: 4 },
+  label: { marginTop: 4 },
   input: {
     borderWidth: 1,
-    borderRadius: radius.sm,
-    height: 44,
-    paddingHorizontal: 12,
-    fontSize: 14,
+    borderRadius: 6,
+    height: 46,
+    paddingHorizontal: 14,
+    fontSize: 15,
     fontFamily: font.regular,
   },
   error: { fontSize: 13, fontFamily: font.regular },
   continue: {
-    marginTop: 12,
-    height: 44,
-    borderRadius: radius.sm,
+    marginTop: 8,
+    height: 46,
+    borderRadius: 6,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
   },
-  continueText: { fontSize: 14, fontFamily: font.medium },
+  continueText: { fontSize: 11, fontFamily: font.monoMedium },
   disabled: { opacity: 0.6 },
-  link: { textAlign: "center", paddingVertical: 6, fontSize: 13, fontFamily: font.medium },
-  cardFooter: { borderTopWidth: 1, paddingVertical: 18, alignItems: "center" },
+  link: {
+    textAlign: "center",
+    paddingVertical: 6,
+    fontSize: 13,
+    fontFamily: font.regular,
+    textDecorationLine: "underline",
+    textDecorationStyle: "dotted",
+  },
+  cardFooter: { borderTopWidth: 1, paddingVertical: 16, alignItems: "center" },
   footerText: { fontSize: 13, fontFamily: font.regular },
+  hint: { textAlign: "center" },
 });

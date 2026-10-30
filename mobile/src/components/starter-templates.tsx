@@ -2,10 +2,11 @@ import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { confirm, toast } from "@/components/dialogs";
+import { LabelStrip, monoLabel } from "@/components/grid";
 import { ProjectCover } from "@/components/project-cover";
 import { useCreateProject } from "@/lib/create-project";
 import { STARTER_TEMPLATES } from "@/lib/shared";
-import { font, radius, useColors } from "@/lib/theme";
+import { font, useColors } from "@/lib/theme";
 
 /**
  * The web's starter templates (STARTER_TEMPLATES) as full-width cards with the
@@ -31,8 +32,11 @@ export function StarterTemplates() {
   };
 
   return (
-    <View style={styles.wrap}>
-      <Text style={[styles.title, { color: c.foreground }]}>Start from a template</Text>
+    <View style={[styles.wrap, { borderColor: c.border }]}>
+      <LabelStrip
+        label="Start from a template"
+        right={<Text style={[monoLabel, { color: c.mutedForeground }]}>{STARTER_TEMPLATES.length}</Text>}
+      />
       <View style={styles.grid}>
         {STARTER_TEMPLATES.map((template) => (
           <Pressable
@@ -61,7 +65,7 @@ export function StarterTemplates() {
               </Text>
               <View style={styles.tags}>
                 {template.techStack.map((tag) => (
-                  <Text key={tag} style={[styles.tag, { color: c.mutedForeground, backgroundColor: c.muted }]}>
+                  <Text key={tag} style={[monoLabel, styles.tag, { color: c.mutedForeground, borderColor: c.border }]}>
                     {tag}
                   </Text>
                 ))}
@@ -75,16 +79,16 @@ export function StarterTemplates() {
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 10, marginTop: 28 },
-  title: { fontSize: 15, fontFamily: font.semibold },
-  grid: { gap: 14 },
-  card: { borderWidth: 1, borderRadius: radius.xl, overflow: "hidden" },
+  // A full-bleed section strip over the cards, like the web dashboard.
+  wrap: { marginHorizontal: -16, marginTop: 28, borderTopWidth: 1 },
+  grid: { gap: 14, padding: 16 },
+  card: { borderWidth: 1, borderRadius: 6, overflow: "hidden" },
   preview: { aspectRatio: 16 / 9, borderBottomWidth: 1 },
   creating: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   creatingText: { fontSize: 12, fontFamily: font.medium },
   body: { padding: 14, gap: 6 },
   name: { fontSize: 15, fontFamily: font.semibold },
   description: { fontSize: 13, lineHeight: 18, fontFamily: font.regular },
-  tags: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 2 },
-  tag: { fontSize: 10.5, fontFamily: font.medium, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, overflow: "hidden" },
+  tags: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 4 },
+  tag: { fontSize: 9, borderWidth: 1, borderRadius: 3, paddingHorizontal: 6, paddingVertical: 2 },
 });
