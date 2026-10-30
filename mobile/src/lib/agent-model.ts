@@ -1,6 +1,6 @@
 import { useQuery } from "convex/react";
 import * as SecureStore from "expo-secure-store";
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 
 import { api } from "@/lib/api";
 import {
@@ -32,9 +32,17 @@ const STORAGE_KEY = "codenaya.agent-model";
 let stored: AgentModelChoice | null | undefined;
 const listeners = new Set<() => void>();
 
+const notify = () => listeners.forEach((listener) => listener());
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+
 const setStored = (choice: AgentModelChoice) => {
   stored = choice;
-  listeners.forEach((listener) => listener());
+  notify();
   SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(choice)).catch(() => undefined);
 };
 
@@ -44,23 +52,20 @@ const setStored = (choice: AgentModelChoice) => {
  * platform default. A pick whose key or model is gone falls through.
  */
 export const useAgentModel = () => {
-  const [, rerender] = useState(0);
+  // Read as an external store, so a pick re-renders every screen using it.
+  // (A module variable read in render is invisible to the React Compiler's
+  // memoization: the chat kept showing the default model after a pick.)
+  const picked = useSyncExternalStore(subscribe, () => stored);
   useEffect(() => {
-    const listener = () => rerender((n) => n + 1);
-    listeners.add(listener);
-    if (stored === undefined) {
-      SecureStore.getItemAsync(STORAGE_KEY)
-        .then((raw) => {
-          stored = raw ? (JSON.parse(raw) as AgentModelChoice) : null;
-        })
-        .catch(() => {
-          stored = null;
-        })
-        .finally(listener);
-    }
-    return () => {
-      listeners.delete(listener);
-    };
+    if (stored !== undefined) return;
+    SecureStore.getItemAsync(STORAGE_KEY)
+      .then((raw) => {
+        stored = raw ? (JSON.parse(raw) as AgentModelChoice) : null;
+      })
+      .catch(() => {
+        stored = null;
+      })
+      .finally(notify);
   }, []);
 
   const keys = useQuery(api.aiProviders.list);
@@ -91,7 +96,7 @@ export const useAgentModel = () => {
     ? { ...(preferences.defaultKeyId ? { keyId: preferences.defaultKeyId } : {}), modelId: preferences.defaultModelId }
     : null;
   const model =
-    [stored ?? null, preferred].find(
+    [picked ?? null, preferred].find(
       (choice): choice is AgentModelChoice => choice !== null && isAvailable(choice),
     ) ?? { modelId: resolveCatalogModel(platformCatalog, undefined).id };
 
