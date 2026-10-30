@@ -1,17 +1,17 @@
 import { useAuth, useUser } from "@clerk/expo";
-import { Image } from "expo-image";
 import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Button } from "@/components/form";
+import { GitHubIcon } from "@/components/github-icon";
 import { GoogleIcon } from "@/components/google-icon";
-import { CheckCircle2, ExternalLink, GitBranch, LogOut, Pencil } from "@/components/icons";
+import { LabelStrip, TileRow, monoLabel } from "@/components/grid";
+import { ArrowUpRight, ExternalLink, LogOut, Pencil } from "@/components/icons";
 import { NameDialog } from "@/components/name-dialog";
-import { SheetRow } from "@/components/sheet";
+import { UserAvatar, useDisplayName } from "@/components/user-avatar";
 import { webUrl } from "@/lib/http";
-import { getInitials } from "@/lib/project-cover";
-import { font, radius, useColors } from "@/lib/theme";
+import { font, useColors } from "@/lib/theme";
 
 const MANAGE_URL = webUrl("/settings/account");
 
@@ -23,17 +23,19 @@ const MANAGE_URL = webUrl("/settings/account");
  */
 export default function AccountSettings() {
   const c = useColors();
+  const insets = useSafeAreaInsets();
   const { signOut } = useAuth();
   const { user } = useUser();
+  const name = useDisplayName();
   const [renaming, setRenaming] = useState(false);
   if (!user) return <ActivityIndicator style={styles.flex} color={c.mutedForeground} />;
 
-  const name = user.fullName || user.username || "Your account";
   const connected = (provider: string) => user.externalAccounts.find((account) => account.provider === provider);
   const providers = [
+    { id: "github", label: "GitHub", icon: <GitHubIcon size={20} color={c.foreground} /> },
     { id: "google", label: "Google", icon: <GoogleIcon size={18} /> },
-    { id: "github", label: "GitHub", icon: <GitBranch size={18} color={c.foreground} /> },
   ];
+  const openWebsite = () => WebBrowser.openBrowserAsync(MANAGE_URL);
 
   const rename = async (fullName: string) => {
     const [firstName, ...rest] = fullName.split(/\s+/);
@@ -41,67 +43,64 @@ export default function AccountSettings() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.page}>
-      <View style={[styles.card, styles.profile, { backgroundColor: c.card, borderColor: c.border }]}>
-        {user.hasImage ? (
-          <Image source={user.imageUrl} style={styles.avatar} />
-        ) : (
-          <View style={[styles.avatar, { backgroundColor: c.muted }]}>
-            <Text style={[styles.initials, { color: c.foreground }]}>{getInitials(name)}</Text>
-          </View>
-        )}
-        <View style={styles.flex}>
+    <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+      <View style={[styles.profile, { backgroundColor: c.card, borderColor: c.border }]}>
+        <UserAvatar size={72} />
+        <Pressable
+          onPress={() => setRenaming(true)}
+          hitSlop={8}
+          accessibilityLabel="Edit name"
+          style={({ pressed }) => [styles.nameRow, pressed && styles.dim]}
+        >
           <Text style={[styles.name, { color: c.foreground }]} numberOfLines={1}>
             {name}
           </Text>
-          <Text style={[styles.muted, { color: c.mutedForeground }]} numberOfLines={1}>
-            {user.primaryEmailAddress?.emailAddress}
-          </Text>
-        </View>
-        <Pressable onPress={() => setRenaming(true)} hitSlop={10} accessibilityLabel="Edit name">
-          <Pencil size={16} color={c.mutedForeground} />
+          <Pencil size={15} color={c.mutedForeground} />
         </Pressable>
+        <Text style={[styles.email, { color: c.mutedForeground }]} numberOfLines={1}>
+          {user.primaryEmailAddress?.emailAddress}
+        </Text>
       </View>
 
-      <Text style={[styles.section, { color: c.mutedForeground }]}>Connected accounts</Text>
-      <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
+      <View style={[styles.section, { backgroundColor: c.card, borderColor: c.border }]}>
+        <LabelStrip label="Connected accounts" />
         {providers.map(({ id, label, icon }) => {
           const account = connected(id);
           return (
-            <SheetRow
-              key={id}
-              icon={icon}
-              label={label}
-              detail={account ? account.emailAddress || account.username || "Connected" : "Not connected"}
-              trailing={
-                account ? (
-                  <CheckCircle2 size={16} color={c.mutedForeground} />
-                ) : (
-                  <Text style={[styles.link, { color: c.brandText }]}>Connect</Text>
-                )
-              }
-              onPress={account ? undefined : () => WebBrowser.openBrowserAsync(MANAGE_URL)}
-            />
+            <View key={id} style={[styles.account, { borderColor: c.border }]}>
+              <View style={styles.mark}>{icon}</View>
+              <View style={styles.flex}>
+                <Text style={[styles.label, { color: c.foreground }]}>{label}</Text>
+                {account && (account.emailAddress || account.username) && (
+                  <Text style={[styles.detail, { color: c.mutedForeground }]} numberOfLines={1}>
+                    {account.emailAddress || account.username}
+                  </Text>
+                )}
+              </View>
+              {account ? (
+                <Text style={[monoLabel, styles.tag, { color: c.success, borderColor: `${c.success}55` }]}>Connected</Text>
+              ) : (
+                <Pressable
+                  onPress={openWebsite}
+                  accessibilityLabel={`Connect ${label} on the website`}
+                  style={({ pressed }) => [styles.connect, { borderColor: c.border }, pressed && { backgroundColor: c.muted }]}
+                >
+                  <Text style={[monoLabel, { color: c.foreground }]}>Connect</Text>
+                </Pressable>
+              )}
+            </View>
           );
         })}
       </View>
-      <Text style={[styles.hint, { color: c.mutedForeground }]}>
-        GitHub lets Codenaya import private repositories and export projects.
-      </Text>
 
-      <View style={styles.actions}>
-        <Button
+      <View style={[styles.section, { backgroundColor: c.card, borderColor: c.border }]}>
+        <TileRow
+          icon={ExternalLink}
           label="Manage account on the website"
-          variant="outline"
-          icon={<ExternalLink size={15} color={c.foreground} />}
-          onPress={() => WebBrowser.openBrowserAsync(MANAGE_URL)}
+          trailing={<ArrowUpRight size={16} color={c.mutedForeground} />}
+          onPress={openWebsite}
         />
-        <Button
-          label="Sign out"
-          variant="destructive"
-          icon={<LogOut size={15} color={c.destructive} />}
-          onPress={() => signOut()}
-        />
+        <TileRow icon={LogOut} label="Sign out" destructive onPress={() => signOut()} />
       </View>
 
       <NameDialog
@@ -118,15 +117,16 @@ export default function AccountSettings() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  page: { padding: 16, gap: 8 },
-  card: { borderWidth: 1, borderRadius: radius.xl, padding: 4 },
-  profile: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
-  avatar: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" },
-  initials: { fontSize: 16, fontFamily: font.semibold },
-  name: { fontSize: 16, fontFamily: font.semibold },
-  muted: { fontSize: 13, fontFamily: font.regular, marginTop: 2 },
-  section: { fontSize: 12, fontFamily: font.medium, marginTop: 16, marginLeft: 4 },
-  link: { fontSize: 13, fontFamily: font.medium },
-  hint: { fontSize: 12, fontFamily: font.regular, marginLeft: 4 },
-  actions: { gap: 10, marginTop: 20 },
+  dim: { opacity: 0.6 },
+  profile: { alignItems: "center", paddingTop: 28, paddingBottom: 26, paddingHorizontal: 16, borderBottomWidth: 1 },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 16, maxWidth: "100%" },
+  name: { flexShrink: 1, fontSize: 20, fontFamily: font.semibold, letterSpacing: -0.3 },
+  email: { marginTop: 4, fontSize: 14, fontFamily: font.regular },
+  section: { marginTop: 20, borderTopWidth: 1 },
+  account: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1 },
+  mark: { width: 22, alignItems: "center" },
+  label: { fontSize: 15, fontFamily: font.medium },
+  detail: { fontSize: 13, fontFamily: font.regular, marginTop: 2 },
+  tag: { fontSize: 9, borderWidth: 1, borderRadius: 2, paddingHorizontal: 6, paddingVertical: 2 },
+  connect: { height: 30, justifyContent: "center", paddingHorizontal: 12, borderWidth: 1, borderRadius: 6 },
 });
