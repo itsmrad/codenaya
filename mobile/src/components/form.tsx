@@ -1,23 +1,33 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, type TextInputProps, View } from "react-native";
 
 import { font, radius, useColors } from "@/lib/theme";
+import { monoLabel } from "./grid";
 
-/** A labelled text input, like the web's Field + Input. */
+/** A labelled text input, like the web's Field + Input; the border turns brand while focused. */
 export function Field({ label, hint, ...input }: TextInputProps & { label: string; hint?: string }) {
   const c = useColors();
+  const [focused, setFocused] = useState(false);
   return (
     <View style={styles.field}>
-      <Text style={[styles.label, { color: c.foreground }]}>{label}</Text>
+      <Text style={[monoLabel, { color: c.mutedForeground }]}>{label}</Text>
       <TextInput
         placeholderTextColor={c.mutedForeground}
         autoCapitalize="none"
         autoCorrect={false}
         {...input}
+        onFocus={(event) => {
+          setFocused(true);
+          input.onFocus?.(event);
+        }}
+        onBlur={(event) => {
+          setFocused(false);
+          input.onBlur?.(event);
+        }}
         style={[
           styles.input,
           input.multiline && styles.multiline,
-          { color: c.foreground, borderColor: c.border, backgroundColor: c.background },
+          { color: c.foreground, borderColor: focused ? c.brand : c.border, backgroundColor: c.background },
           input.style,
         ]}
       />
@@ -64,7 +74,7 @@ export function Segmented<T extends string>({
   );
 }
 
-/** Primary, outline or destructive button; shows a spinner while `busy`. */
+/** Primary, brand (the orange call to action), outline or destructive button; shows a spinner while `busy`. */
 export function Button({
   label,
   onPress,
@@ -75,26 +85,29 @@ export function Button({
 }: {
   label: string;
   onPress: () => void;
-  variant?: "primary" | "outline" | "destructive";
+  variant?: "primary" | "brand" | "outline" | "destructive";
   busy?: boolean;
   disabled?: boolean;
   icon?: ReactNode;
 }) {
   const c = useColors();
-  const tint = { primary: c.primaryForeground, outline: c.foreground, destructive: c.destructive }[variant];
+  const tint = { primary: c.primaryForeground, brand: c.brandForeground, outline: c.foreground, destructive: c.destructive }[
+    variant
+  ];
+  const fill = { primary: c.primary, brand: c.brand }[variant as "primary" | "brand"];
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled || busy}
       style={({ pressed }) => [
         styles.button,
-        variant === "primary" ? { backgroundColor: c.primary } : { borderWidth: 1, borderColor: c.border },
+        fill ? { backgroundColor: fill } : { borderWidth: 1, borderColor: c.border },
         (disabled || busy) && styles.disabled,
         pressed && styles.pressed,
       ]}
     >
       {busy ? <ActivityIndicator size="small" color={tint} /> : icon}
-      <Text style={[styles.buttonText, { color: tint }]}>{label}</Text>
+      <Text style={[monoLabel, styles.buttonText, { color: tint }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -104,7 +117,7 @@ const styles = StyleSheet.create({
   label: { fontSize: 13, fontFamily: font.medium },
   input: {
     borderWidth: 1,
-    borderRadius: radius.md,
+    borderRadius: 6,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
@@ -128,11 +141,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    borderRadius: radius.md,
+    borderRadius: 6,
     paddingHorizontal: 16,
-    paddingVertical: 11,
+    height: 44,
   },
-  buttonText: { fontSize: 14, fontFamily: font.medium },
+  buttonText: { fontSize: 11, fontFamily: font.monoMedium },
   disabled: { opacity: 0.5 },
   pressed: { opacity: 0.8 },
 });

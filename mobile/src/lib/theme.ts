@@ -15,6 +15,7 @@ const light = {
   brand: "#e8824f",
   brandForeground: "#1a1a1a",
   brandText: "#a24415",
+  success: "#15803d",
 };
 
 const dark: typeof light = {
@@ -30,6 +31,7 @@ const dark: typeof light = {
   brand: "#e8824f",
   brandForeground: "#09090b",
   brandText: "#e8824f",
+  success: "#4ade80",
 };
 // Which one shows is the Appearance setting (lib/appearance.ts); dark by default.
 
@@ -40,12 +42,14 @@ export const useColors = (): Colors => (useColorScheme() === "dark" ? dark : lig
 /** `--radius` is 0.75rem; sm/md/lg/xl as in globals.css. */
 export const radius = { sm: 8, md: 10, lg: 12, xl: 16 };
 
-/** Inter, as on the web. React Native picks a font file per weight. */
+/** Inter and IBM Plex Mono, as on the web. React Native picks a font file per weight. */
 export const font = {
   regular: "Inter_400Regular",
   medium: "Inter_500Medium",
   semibold: "Inter_600SemiBold",
   bold: "Inter_700Bold",
+  mono: "IBMPlexMono_400Regular",
+  monoMedium: "IBMPlexMono_500Medium",
 };
 
 /** Headers and screen backgrounds in the same tokens. */

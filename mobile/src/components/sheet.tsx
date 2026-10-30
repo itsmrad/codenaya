@@ -20,6 +20,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 
+import { LabelStrip, monoLabel } from "@/components/grid";
 import { useSheetPortal } from "@/components/sheet-host";
 import { font, radius, useColors } from "@/lib/theme";
 
@@ -100,7 +101,9 @@ function SheetLayer({
         <GestureDetector gesture={pan}>
           <View style={styles.grab} accessibilityHint="Drag down to close">
             <View style={[styles.handle, { backgroundColor: c.border }]} />
-            <Text style={[styles.title, { color: c.foreground }]}>{title}</Text>
+            <View style={[styles.title, { borderColor: c.border, backgroundColor: c.background }]}>
+              <LabelStrip label={title} />
+            </View>
             {description && <Text style={[styles.description, { color: c.mutedForeground }]}>{description}</Text>}
           </View>
         </GestureDetector>
@@ -186,6 +189,7 @@ export function SheetRow({
       disabled={disabled || !onPress}
       style={({ pressed }) => [
         styles.row,
+        { borderColor: c.border },
         (pressed || selected) && { backgroundColor: c.muted },
         disabled && styles.disabled,
       ]}
@@ -208,7 +212,7 @@ export function SheetRow({
 
 export function SheetSection({ title }: { title: string }) {
   const c = useColors();
-  return <Text style={[styles.section, { color: c.mutedForeground }]}>{title}</Text>;
+  return <Text style={[monoLabel, styles.section, { color: c.mutedForeground }]}>{title}</Text>;
 }
 
 const styles = StyleSheet.create({
@@ -225,13 +229,22 @@ const styles = StyleSheet.create({
   // The draggable top: tall enough to grab easily with a thumb.
   grab: { paddingTop: 4, paddingBottom: 2 },
   handle: { alignSelf: "center", width: 40, height: 5, borderRadius: 3, marginBottom: 12 },
-  title: { fontSize: 16, fontFamily: font.semibold, paddingHorizontal: 20 },
-  description: { fontSize: 13, fontFamily: font.regular, paddingHorizontal: 20, marginTop: 4 },
+  title: { borderTopWidth: 1 },
+  description: { fontSize: 14, lineHeight: 20, fontFamily: font.regular, paddingHorizontal: 16, marginTop: 14 },
   body: { marginTop: 10, paddingHorizontal: 8 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 11, borderRadius: radius.md },
+  // Full-bleed grid rows across the body's padding, split by rules.
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    marginHorizontal: -8,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
   rowText: { flex: 1, minWidth: 0 },
   label: { fontSize: 15, fontFamily: font.regular },
   detail: { fontSize: 12, fontFamily: font.regular, marginTop: 2 },
-  section: { fontSize: 12, fontFamily: font.medium, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 4 },
+  section: { paddingHorizontal: 8, paddingTop: 16, paddingBottom: 8 },
   disabled: { opacity: 0.5 },
 });
