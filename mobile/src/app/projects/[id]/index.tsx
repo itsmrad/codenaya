@@ -414,20 +414,55 @@ export default function ProjectChat() {
         {checkpoints?.length === 0 && (
           <Text style={[styles.sheetEmpty, { color: c.mutedForeground }]}>No checkpoints yet.</Text>
         )}
-        {checkpoints?.map((checkpoint) => (
-          <SheetRow
-            key={checkpoint._id}
-            label={checkpoint.label || "Agent run"}
-            detail={`${timeAgo(checkpoint._creationTime)} · ${checkpoint.fileCount} ${checkpoint.fileCount === 1 ? "file" : "files"}`}
-            disabled={running}
-            trailing={
-              <View style={[styles.restore, { borderColor: c.border }]}>
-                <Text style={[monoLabel, { color: c.foreground }]}>Restore</Text>
+        {/* A timeline, newest first: the latest checkpoint gets the orange dot. */}
+        {checkpoints?.map((checkpoint, index) => {
+          const latest = index === 0;
+          const last = index === checkpoints.length - 1;
+          return (
+            <Pressable
+              key={checkpoint._id}
+              disabled={running}
+              onPress={() => confirmRestore(checkpoint)}
+              accessibilityLabel={`Restore to before ${checkpoint.label || "this agent run"}`}
+              style={({ pressed }) => [
+                styles.version,
+                { borderColor: c.border },
+                pressed && { backgroundColor: c.muted },
+                running && styles.dim,
+              ]}
+            >
+              <View style={styles.rail}>
+                <View
+                  style={[styles.railLine, { backgroundColor: c.border, top: latest ? "50%" : 0, bottom: last ? "50%" : 0 }]}
+                />
+                <View
+                  style={[
+                    styles.railDot,
+                    latest
+                      ? { backgroundColor: c.brand, borderColor: c.brand }
+                      : { backgroundColor: c.card, borderColor: c.mutedForeground },
+                  ]}
+                />
               </View>
-            }
-            onPress={() => confirmRestore(checkpoint)}
-          />
-        ))}
+              <View style={styles.flex}>
+                <Text style={[styles.versionLabel, { color: c.foreground }]} numberOfLines={1}>
+                  {checkpoint.label || "Agent run"}
+                </Text>
+                <Text style={[monoLabel, styles.versionMeta, { color: c.mutedForeground }]} numberOfLines={1}>
+                  Before run · {timeAgo(checkpoint._creationTime)} · {checkpoint.fileCount}{" "}
+                  {checkpoint.fileCount === 1 ? "file" : "files"}
+                </Text>
+              </View>
+              {latest ? (
+                <Text style={[monoLabel, styles.latest, { color: c.brandText, borderColor: `${c.brand}88` }]}>Latest</Text>
+              ) : (
+                <View style={[styles.restore, { borderColor: c.border }]}>
+                  <Text style={[monoLabel, { color: c.foreground }]}>Restore</Text>
+                </View>
+              )}
+            </Pressable>
+          );
+        })}
       </Sheet>
     </View>
   );
@@ -443,4 +478,13 @@ const styles = StyleSheet.create({
   pending: { opacity: 0.6, marginTop: 18 },
   sheetEmpty: { textAlign: "center", paddingVertical: 24, fontSize: 14, fontFamily: font.regular },
   restore: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
+  dim: { opacity: 0.5 },
+  // Full-bleed across the sheet body's padding, like SheetRow.
+  version: { flexDirection: "row", alignItems: "center", gap: 14, marginHorizontal: -8, paddingRight: 16, borderBottomWidth: 1 },
+  rail: { width: 40, alignSelf: "stretch", alignItems: "center", justifyContent: "center" },
+  railLine: { position: "absolute", width: 1, left: 19.5 },
+  railDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1.5 },
+  versionLabel: { fontSize: 15, fontFamily: font.regular, marginTop: 14 },
+  versionMeta: { marginTop: 4, marginBottom: 14 },
+  latest: { fontSize: 9, borderWidth: 1, borderRadius: 2, paddingHorizontal: 6, paddingVertical: 2 },
 });

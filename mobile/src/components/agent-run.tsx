@@ -4,23 +4,23 @@ import Animated, { FadeIn, FadeOut, LinearTransition, useReducedMotion } from "r
 
 import {
   BookOpen,
-  Brain,
   CheckCircle2,
   ChevronRight,
   CircleAlert,
   CircleX,
   FilePen,
   FilePlus2,
+  FileSearch,
   FileSymlink,
-  FileText,
   FileX2,
+  FolderOpen,
   FolderPlus,
-  FolderTree,
   Globe,
-  Hammer,
   KeyRound,
+  Lightbulb,
   type LucideIcon,
   Plug,
+  Terminal,
   Wrench,
 } from "@/components/icons";
 import { monoLabel } from "@/components/grid";
@@ -43,8 +43,8 @@ interface ToolMeta {
 }
 
 const TOOL_META: Record<string, ToolMeta> = {
-  readFiles: { icon: FileText, running: "Reading", done: "Read", mergeable: true },
-  listFiles: { icon: FolderTree, running: "Listing files", done: "Listed files", mergeable: true },
+  readFiles: { icon: FileSearch, running: "Reading", done: "Read", mergeable: true },
+  listFiles: { icon: FolderOpen, running: "Listing files", done: "Listed files", mergeable: true },
   createFiles: { icon: FilePlus2, running: "Creating", done: "Created", writes: true },
   createFolder: { icon: FolderPlus, running: "Creating folder", done: "Created folder" },
   scaffoldViteApp: { icon: FolderPlus, running: "Scaffolding Vite app", done: "Scaffolded Vite app" },
@@ -54,7 +54,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   scrapeUrls: { icon: Globe, running: "Fetching", done: "Fetched" },
   setEnvVar: { icon: KeyRound, running: "Setting env", done: "Set env" },
   loadSkill: { icon: BookOpen, running: "Loading skill", done: "Used skill" },
-  checkBuild: { icon: Hammer, running: "Checking build", done: "Checked build" },
+  checkBuild: { icon: Terminal, running: "Checking build", done: "Checked build" },
 };
 
 const toolMeta = (tool = ""): ToolMeta => {
@@ -131,44 +131,24 @@ const useNow = (active: boolean) => {
   return now;
 };
 
-/**
- * Per-cell delays (ms) of the web's pixel loader (run-loader.tsx): a 3×3 grid
- * with a chevron wavefront driving right.
- */
-const CHEVRON = Array.from({ length: 9 }, (_, index) => {
-  const row = Math.floor(index / 3);
-  const column = index % 3;
-  return (column + Math.abs(row - 1)) * 90;
-});
-
-// The web's pixel-on keyframes (globals.css).
-const PIXEL_ON = {
-  "0%, 100%": { opacity: 0.15 },
-  "18%, 42%": { opacity: 1 },
-  "62%": { opacity: 0.15 },
-};
-
-/** The web's live-run loader. Reduced motion freezes it with the centre lit. */
-function LoaderGrid({ c }: { c: Colors }) {
+/** A live run's orange dot, pulsing in a soft halo. Reduced motion holds it still. */
+function LiveDot({ c }: { c: Colors }) {
   const reduceMotion = useReducedMotion();
   return (
-    <View style={styles.grid}>
-      {CHEVRON.map((delay, index) => (
-        <Animated.View
-          key={index}
-          style={[
-            styles.pixel,
-            { backgroundColor: c.brand, opacity: reduceMotion && index === 4 ? 1 : 0.15 },
-            !reduceMotion && {
-              animationName: PIXEL_ON,
-              animationDuration: "650ms",
-              animationDelay: `${delay}ms`,
-              animationIterationCount: "infinite",
-              animationTimingFunction: "ease-in-out",
-            },
-          ]}
-        />
-      ))}
+    <View style={styles.dotWrap}>
+      <Animated.View
+        style={[
+          styles.halo,
+          { backgroundColor: c.brand },
+          !reduceMotion && {
+            animationName: { "0%": { opacity: 0.35, transform: [{ scale: 0.6 }] }, "100%": { opacity: 0, transform: [{ scale: 1.6 }] } },
+            animationDuration: "1.4s",
+            animationIterationCount: "infinite",
+            animationTimingFunction: "ease-out",
+          },
+        ]}
+      />
+      <View style={[styles.dot, { backgroundColor: c.brand }]} />
     </View>
   );
 }
@@ -213,29 +193,33 @@ function Chevron({ open, c, style }: { open: boolean; c: Colors; style?: object 
   );
 }
 
-/** Tools whose targets are not project files: their chips never open. */
-const NON_FILE_TOOLS = new Set(["scrapeUrls", "setEnvVar", "loadSkill", "checkBuild", "deleteFiles"]);
+/** Tools whose targets are project files: the row shows the path. */
+const FILE_TOOLS = new Set(["readFiles", "createFiles", "updateFile", "renameFile", "deleteFiles"]);
 
-function Chip({ label, c, onPress }: { label: string; c: Colors; onPress?: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={!onPress}
-      style={styles.chip}
-    >
-      <Text style={[styles.chipText, { color: c.foreground }]} numberOfLines={1}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
+// Tailwind's purple, blue, amber, sky, yellow, teal and indigo 500s: they
+// read on both themes, beside the theme's own green, orange and red.
+const THOUGHT_TINT = "#8b5cf6";
+const TINTS: Record<string, string> = {
+  readFiles: "#3b82f6",
+  listFiles: "#f59e0b",
+  scrapeUrls: "#0ea5e9",
+  setEnvVar: "#eab308",
+  loadSkill: "#14b8a6",
+};
+
+/** The icon's tint by what the step did: added green, edited orange, removed red, the rest their own colour. */
+const toolTint = (tool = "", c: Colors) =>
+  ["createFiles", "createFolder", "scaffoldViteApp"].includes(tool) ? c.success
+  : tool === "updateFile" || tool === "renameFile" ? c.brandText
+  : tool === "deleteFiles" ? c.destructive
+  : (TINTS[tool] ?? (tool.includes("__") ? "#6366f1" : c.mutedForeground));
 
 function ThinkingRow({ step, c }: { step: AgentStep; c: Colors }) {
   const [open, setOpen] = useState(false);
   return (
     <View>
       <Pressable style={styles.row} onPress={() => setOpen((value) => !value)}>
-        <Brain size={14} color={c.mutedForeground} />
+        <Lightbulb size={15} color={THOUGHT_TINT} />
         <Text style={[styles.rowText, { color: c.foreground }]}>
           {step.endedAt ? `Thought for ${formatDuration(step.endedAt - step.startedAt)}` : "Thought"}
         </Text>
@@ -275,41 +259,49 @@ function StepRow({
     ) : null;
   }
 
-  const { icon: Icon } = toolMeta(row.step.tool);
+  const meta = toolMeta(row.step.tool);
+  const Icon = meta.icon;
+  const tool = row.step.tool ?? "";
   const running = live && row.step.status === "running";
   const failed = row.step.status === "error";
-  const tint = failed ? c.destructive : c.mutedForeground;
-  const chips = row.step.tool === "renameFile" ? row.targets.slice(-1) : row.targets.slice(0, 4);
-  const more = row.targets.length - chips.length;
-  const tool = row.step.tool ?? "";
-  const open = NON_FILE_TOOLS.has(tool) || tool.includes("__") ? undefined : onOpenFile;
+  const verified = tool === "checkBuild" && row.step.text === BUILD_VERIFIED;
+  const tint = failed ? c.destructive : verified ? c.success : toolTint(tool, c);
+  // A file step reads as its path (the renamed-to one for a rename); others as their label.
+  const path = FILE_TOOLS.has(tool) ? (tool === "renameFile" ? row.targets.at(-1) : row.targets[0]) : undefined;
+  const more = path && tool !== "renameFile" ? row.targets.length - 1 : 0;
+  const open = path && tool !== "deleteFiles" && onOpenFile ? () => onOpenFile(path) : undefined;
+  const result =
+    tool === "checkBuild" ? (failed ? "failed" : verified ? "passed" : row.step.text || "checked")
+    : path ? (running ? meta.running : meta.done).toLowerCase()
+    : undefined;
 
   return (
     <Animated.View entering={entering} style={[styles.step, { borderColor: c.border }]}>
-      <View style={styles.row}>
-        <Icon size={14} color={tint} />
-        <View style={styles.rowBody}>
-          <Text style={[styles.rowText, { color: failed ? c.destructive : c.foreground }]}>
-            {rowLabel(row, running)}
+      <Pressable onPress={open} disabled={!open} style={({ pressed }) => [styles.row, pressed && { backgroundColor: c.muted }]}>
+        <Icon size={15} color={tint} />
+        {path ? (
+          <Text style={[styles.path, { color: failed ? c.destructive : c.foreground }]} numberOfLines={1} ellipsizeMode="head">
+            {path}
+            {more > 0 && <Text style={{ color: c.mutedForeground }}>{`  +${more}`}</Text>}
           </Text>
-          {chips.map((target, index) => (
-            <Chip
-              key={`${target}-${index}`}
-              label={basename(target)}
-              c={c}
-              onPress={open && (() => open(target))}
-            />
-          ))}
-          {more > 0 && row.step.tool !== "renameFile" && (
-            <Text style={[styles.more, { color: c.mutedForeground }]}>+{more} more</Text>
-          )}
-        </View>
-        {running && <ActivityIndicator size="small" color={c.mutedForeground} />}
-        {failed && <CircleX size={14} color={c.destructive} />}
-        {row.step.tool === "checkBuild" && row.step.text === BUILD_VERIFIED && (
-          <CheckCircle2 size={14} color={c.mutedForeground} />
+        ) : (
+          <Text style={[styles.rowText, { color: failed ? c.destructive : c.foreground }]} numberOfLines={1}>
+            {rowLabel(row, running)}
+            {row.targets[0] && <Text style={styles.target}>{` ${basename(row.targets[0])}`}</Text>}
+          </Text>
         )}
-      </View>
+        {running ? (
+          <ActivityIndicator size="small" color={c.mutedForeground} />
+        ) : failed ? (
+          <CircleX size={14} color={c.destructive} />
+        ) : (
+          result && (
+            <Text style={[styles.result, { color: verified ? c.success : c.mutedForeground }]} numberOfLines={1}>
+              {result}
+            </Text>
+          )
+        )}
+      </Pressable>
       {failed && row.step.error && (
         <Pressable onPress={() => setErrorOpen((value) => !value)}>
           <Text
@@ -401,7 +393,7 @@ export function AgentRun({
       >
         {live ? (
           <>
-            <LoaderGrid c={c} />
+            <LiveDot c={c} />
             <LiveLabel text={liveStepLabel(rows)} c={c} />
             <Text style={[monoLabel, styles.timer, { color: c.mutedForeground }]}>{formatDuration(now - startedAt)}</Text>
           </>
@@ -473,15 +465,16 @@ const styles = StyleSheet.create({
   header: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14 },
   summary: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
   bar: { width: 2, height: 12, marginRight: 2 },
-  grid: { width: 15, flexDirection: "row", flexWrap: "wrap", gap: 1.5 },
-  pixel: { width: 4, height: 4, borderRadius: 1 },
+  dotWrap: { width: 16, height: 16, alignItems: "center", justifyContent: "center" },
+  halo: { position: "absolute", width: 16, height: 16, borderRadius: 8 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
   timer: { fontVariant: ["tabular-nums"] },
   step: { borderTopWidth: 1 },
-  row: { flexDirection: "row", alignItems: "flex-start", gap: 10, paddingHorizontal: 14, paddingVertical: 11 },
-  rowBody: { flex: 1, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
-  rowText: { fontSize: 13, fontFamily: font.regular },
-  chip: { maxWidth: "70%" },
-  chipText: { fontSize: 12.5, fontFamily: font.mono },
+  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 11 },
+  rowText: { flex: 1, fontSize: 13, fontFamily: font.regular },
+  target: { fontFamily: font.mono, fontSize: 12.5 },
+  path: { flex: 1, fontSize: 13, fontFamily: font.mono },
+  result: { fontSize: 12, fontFamily: font.mono, maxWidth: "40%" },
   more: { fontSize: 12, fontFamily: font.regular },
   earlier: { borderTopWidth: 1, paddingLeft: 38, paddingVertical: 9 },
   thought: { marginLeft: 38, borderLeftWidth: 1, paddingLeft: 12, marginBottom: 10 },
