@@ -22,15 +22,18 @@ export function AddConnectionSheet({
   visible,
   onClose,
   projectId,
+  initialProviderId,
 }: {
   visible: boolean;
   onClose: () => void;
   /** Links the new connection to this project too. */
   projectId?: string;
+  /** Opens straight on this provider's form; remount (`key`) to change it. */
+  initialProviderId?: string;
 }) {
   const c = useColors();
   const { getToken } = useAuth();
-  const [providerId, setProviderId] = useState<string>();
+  const [providerId, setProviderId] = useState(initialProviderId);
   const [apiKey, setApiKey] = useState("");
   const [label, setLabel] = useState("");
   const [serverUrl, setServerUrl] = useState("");

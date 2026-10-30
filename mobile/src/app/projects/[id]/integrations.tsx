@@ -12,6 +12,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,39 +20,20 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { confirm, toast } from "@/components/dialogs";
 import { AddConnectionSheet } from "@/components/add-connection-sheet";
-import { ConnectionCard } from "@/components/connection-card";
-import { Button, Field } from "@/components/form";
-import { Eye, EyeOff, Link2, Plus, Trash2, Unlink } from "@/components/icons";
+import { ProviderTile, STATUS } from "@/components/connection-card";
+import { LabelStrip, monoLabel } from "@/components/grid";
+import { ChevronRight, ExternalLink, Eye, EyeOff, Link2, Plus, Trash2, Unlink } from "@/components/icons";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/format";
 import { postApi, webUrl } from "@/lib/http";
 import { classifyEnvKey, getProvider, isValidEnvKey } from "@/lib/shared";
-import { type Colors, font, radius, useColors } from "@/lib/theme";
-
-function SwitchRow({
-  label,
-  value,
-  onChange,
-  c,
-}: {
-  label: string;
-  value: boolean;
-  onChange: (value: boolean) => void;
-  c: Colors;
-}) {
-  return (
-    <View style={styles.switchRow}>
-      <Text style={[styles.switchLabel, { color: c.foreground }]}>{label}</Text>
-      <Switch value={value} onValueChange={onChange} trackColor={{ true: c.brand }} />
-    </View>
-  );
-}
+import { font, useColors } from "@/lib/theme";
 
 /**
  * A project's integrations and environment variables, like the web's project
- * connections panel and env vars dialog. Scopes, tool filters and write
- * approval stay on the website.
+ * connections panel and env vars dialog, as grid sections. Scopes, tool
+ * filters and write approval stay on the website.
  */
 export default function ProjectIntegrations() {
   const c = useColors();
@@ -71,6 +53,8 @@ export default function ProjectIntegrations() {
   const deleteEnvVar = useMutation(api.envVars.deleteEnvVar);
 
   const [sheet, setSheet] = useState<"link" | "add">();
+  // The linked connection whose settings sheet is open.
+  const [managingId, setManagingId] = useState<string>();
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -79,7 +63,9 @@ export default function ProjectIntegrations() {
 
   const linkedIds = new Set(links?.map((item) => item.userConnectionId));
   const unlinked = connections?.filter((connection) => !linkedIds.has(connection._id)) ?? [];
+  const managing = links?.find((item) => item._id === managingId);
   const fail = (fallback: string) => (error: unknown) => toast.error(errorMessage(error, fallback));
+  const openWebsite = () => WebBrowser.openBrowserAsync(webUrl(`/projects/${projectId}`));
 
   const linkConnection = (userConnectionId: Id<"userConnections">, label: string) => {
     setSheet(undefined);
@@ -122,86 +108,113 @@ export default function ProjectIntegrations() {
     });
 
   const typed = key.trim();
+  const isPublicKey = classifyEnvKey(typed) === "public";
+  const envNote = envError ?? (typed ? `Saved as ${isPublicKey ? "public" : "an encrypted secret"}` : undefined);
   return (
     <KeyboardAvoidingView style={styles.flex} behavior="padding" keyboardVerticalOffset={headerHeight}>
-      <ScrollView
-        contentContainerStyle={[styles.page, { paddingBottom: insets.bottom + 32 }]}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <View style={styles.header}>
-            <View style={styles.flex}>
-              <Text style={[styles.title, { color: c.foreground }]}>Connections</Text>
-              <Text style={[styles.muted, { color: c.mutedForeground }]}>
-                Tools your agent can use in this project. New links are read-only.
-              </Text>
-            </View>
-            <Pressable onPress={() => setSheet("link")} hitSlop={10} accessibilityLabel="Link a connection">
-              <Plus size={20} color={c.foreground} />
-            </Pressable>
-          </View>
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 32 }} keyboardShouldPersistTaps="handled">
+        <View style={{ backgroundColor: c.card }}>
+          <LabelStrip
+            label="Connections"
+            cell={
+              <Pressable
+                onPress={() => setSheet("link")}
+                hitSlop={12}
+                accessibilityLabel="Link a connection"
+                style={({ pressed }) => [styles.cellButton, pressed && styles.dim]}
+              >
+                <Link2 size={15} color={c.foreground} />
+                <Text style={[monoLabel, { color: c.foreground }]}>Link</Text>
+              </Pressable>
+            }
+          />
+        </View>
+        <View style={styles.cards}>
           {links === undefined ? (
             <ActivityIndicator style={styles.loading} color={c.mutedForeground} />
           ) : links.length === 0 ? (
-            <Text style={[styles.empty, { color: c.mutedForeground }]}>No connections linked to this project.</Text>
+            <Text style={[styles.empty, { color: c.mutedForeground }]}>
+              No connections linked to this project. New links are read-only.
+            </Text>
           ) : (
             links.map((item) => {
-              const supportsReadOnly = getProvider(item.connection.providerId)?.supportsReadOnly ?? false;
+              const status = STATUS[item.connection.status];
+              const detail = [item.connection.label, item.connection.status !== "active" && status.label];
               return (
-                <ConnectionCard key={item._id} connection={item.connection}>
-                  <Text style={[styles.muted, { color: c.mutedForeground }]}>
-                    {item.readOnly ? "Read-only" : item.writeApproved ? "Read and write" : "Writes need approval"}
-                    {item.toolCount !== undefined && ` · ${item.toolCount} tools`}
-                  </Text>
-                  <SwitchRow
-                    label="Enabled"
-                    value={item.enabled}
-                    onChange={(enabled) => {
-                      updateLink({ id: item._id, enabled }).catch(fail("Unable to update this connection"));
-                    }}
-                    c={c}
-                  />
-                  {supportsReadOnly && (
-                    <SwitchRow
-                      label="Read-only"
-                      value={item.readOnly}
-                      onChange={(readOnly) => {
-                        updateLink({ id: item._id, readOnly }).catch(fail("Unable to update this connection"));
+                <View key={item._id} style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
+                  <View style={styles.cardTop}>
+                    <ProviderTile providerId={item.connection.providerId} />
+                    <View style={styles.flex}>
+                      <Text style={[styles.name, { color: c.foreground }]} numberOfLines={1}>
+                        {getProvider(item.connection.providerId)?.displayName ?? item.connection.providerId}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.detail,
+                          { color: item.connection.status === "active" ? c.mutedForeground : (status.tint ?? c.destructive) },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {detail.filter(Boolean).join(" · ")}
+                      </Text>
+                    </View>
+                    <Switch
+                      value={item.enabled}
+                      onValueChange={(enabled) => {
+                        updateLink({ id: item._id, enabled }).catch(fail("Unable to update this connection"));
                       }}
-                      c={c}
+                      trackColor={{ true: c.brand }}
+                      accessibilityLabel={`${item.connection.label} enabled`}
                     />
-                  )}
-                  <View style={styles.linkActions}>
-                    <Pressable
-                      onPress={() => WebBrowser.openBrowserAsync(webUrl(`/projects/${projectId}`))}
-                      hitSlop={6}
-                    >
-                      <Text style={[styles.link, { color: c.brandText }]}>Scope and tools on the website</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => unlink({ id: item._id }).catch(fail("Unable to unlink this connection"))}
-                      hitSlop={10}
-                      accessibilityLabel={`Unlink ${item.connection.label}`}
-                    >
-                      <Unlink size={16} color={c.mutedForeground} />
-                    </Pressable>
                   </View>
-                </ConnectionCard>
+                  <Pressable
+                    onPress={() => setManagingId(item._id)}
+                    accessibilityLabel={`${item.connection.label} settings`}
+                    style={({ pressed }) => [styles.cardBottom, { borderColor: c.border }, pressed && { backgroundColor: c.muted }]}
+                  >
+                    <Text
+                      style={[
+                        monoLabel,
+                        styles.tag,
+                        item.readOnly
+                          ? { color: c.mutedForeground, borderColor: c.border }
+                          : { color: c.brandText, borderColor: c.brand },
+                      ]}
+                    >
+                      {item.readOnly ? "Read-only" : "Read and write"}
+                    </Text>
+                    <Text style={[styles.note, { color: c.mutedForeground }]} numberOfLines={1}>
+                      {!item.readOnly && !item.writeApproved
+                        ? "Writes need approval"
+                        : item.toolCount !== undefined
+                          ? `${item.toolCount} tools`
+                          : ""}
+                    </Text>
+                    <ChevronRight size={16} color={c.mutedForeground} />
+                  </Pressable>
+                </View>
               );
             })
           )}
+          {links && links.length > 0 && (
+            <Pressable onPress={openWebsite} hitSlop={6} style={({ pressed }) => [styles.website, pressed && styles.dim]}>
+              <Text style={[styles.note, { color: c.mutedForeground }]}>Scope and tools on the website</Text>
+              <ExternalLink size={14} color={c.mutedForeground} />
+            </Pressable>
+          )}
         </View>
 
-        <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
-          <Text style={[styles.title, { color: c.foreground }]}>Environment variables</Text>
-          <Text style={[styles.muted, { color: c.mutedForeground }]}>
-            Keys starting with NEXT_PUBLIC_, VITE_ or PUBLIC_ are public. Anything else is an encrypted secret that is
-            never shown again.
-          </Text>
+        <View style={[styles.section, { backgroundColor: c.card, borderColor: c.border }]}>
+          <LabelStrip
+            label="Environment variables"
+            cell={<Text style={[monoLabel, { color: c.mutedForeground }]}>{envVars?.length ?? 0}</Text>}
+          />
           {envVars === undefined ? (
             <ActivityIndicator style={styles.loading} color={c.mutedForeground} />
           ) : envVars.length === 0 ? (
-            <Text style={[styles.empty, { color: c.mutedForeground }]}>No variables yet.</Text>
+            <Text style={[styles.empty, styles.rule, { color: c.mutedForeground, borderColor: c.border }]}>
+              No variables yet.
+            </Text>
           ) : (
             envVars.map((envVar) => {
               const isPublic = envVar.visibility === "public";
@@ -209,12 +222,18 @@ export default function ProjectIntegrations() {
               return (
                 <View key={envVar._id} style={[styles.envRow, { borderColor: c.border }]}>
                   <View style={styles.flex}>
-                    <Text style={[styles.envKey, { color: c.foreground }]} numberOfLines={1}>
-                      {envVar.key}
-                    </Text>
+                    <View style={styles.envTitle}>
+                      <Text style={[styles.envKey, { color: c.foreground }]} numberOfLines={1}>
+                        {envVar.key}
+                      </Text>
+                      {envVar.source === "integration" && (
+                        <Text style={[monoLabel, styles.tag, { color: c.mutedForeground, borderColor: c.border }]}>
+                          Integration
+                        </Text>
+                      )}
+                    </View>
                     <Text style={[styles.envValue, { color: c.mutedForeground }]} numberOfLines={1}>
-                      {shown} · {isPublic ? "public" : "secret"}
-                      {envVar.source === "integration" && " · from an integration"}
+                      {shown}
                     </Text>
                   </View>
                   {isPublic && (
@@ -224,9 +243,9 @@ export default function ProjectIntegrations() {
                       accessibilityLabel={`${revealed.has(envVar.key) ? "Hide" : "Reveal"} ${envVar.key}`}
                     >
                       {revealed.has(envVar.key) ? (
-                        <EyeOff size={16} color={c.mutedForeground} />
+                        <EyeOff size={17} color={c.mutedForeground} />
                       ) : (
-                        <Eye size={16} color={c.mutedForeground} />
+                        <Eye size={17} color={c.mutedForeground} />
                       )}
                     </Pressable>
                   )}
@@ -243,24 +262,51 @@ export default function ProjectIntegrations() {
                     hitSlop={8}
                     accessibilityLabel={`Delete ${envVar.key}`}
                   >
-                    <Trash2 size={16} color={c.mutedForeground} />
+                    <Trash2 size={17} color={c.mutedForeground} />
                   </Pressable>
                 </View>
               );
             })
           )}
-          <Field
-            label="Key"
-            value={key}
-            onChangeText={setKey}
-            placeholder="NEXT_PUBLIC_API_URL"
-            autoCapitalize="characters"
-            style={styles.mono}
-            hint={typed ? `Saved as ${classifyEnvKey(typed) === "public" ? "public" : "an encrypted secret"}` : undefined}
-          />
-          <Field label="Value" value={value} onChangeText={setValue} placeholder="Value" secureTextEntry={classifyEnvKey(typed) !== "public"} />
-          {envError && <Text style={[styles.muted, { color: c.destructive }]}>{envError}</Text>}
-          <Button label="Save variable" busy={saving} disabled={!typed || !value} onPress={saveEnvVar} />
+          <View style={styles.addRow}>
+            <TextInput
+              value={key}
+              onChangeText={setKey}
+              placeholder="NEXT_PUBLIC_API_URL"
+              placeholderTextColor={c.mutedForeground}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              accessibilityLabel="Key"
+              style={[styles.input, styles.keyInput, { color: c.foreground, borderColor: c.border, backgroundColor: c.background }]}
+            />
+            <TextInput
+              value={value}
+              onChangeText={setValue}
+              placeholder="Value"
+              placeholderTextColor={c.mutedForeground}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry={!isPublicKey}
+              accessibilityLabel="Value"
+              style={[styles.input, styles.flex, { color: c.foreground, borderColor: c.border, backgroundColor: c.background }]}
+            />
+            <Pressable
+              onPress={saveEnvVar}
+              disabled={!typed || !value || saving}
+              accessibilityLabel="Save variable"
+              style={({ pressed }) => [
+                styles.addButton,
+                { backgroundColor: c.brand },
+                (!typed || !value) && styles.disabled,
+                pressed && styles.dim,
+              ]}
+            >
+              {saving ? <ActivityIndicator size="small" color={c.brandForeground} /> : <Plus size={18} color={c.brandForeground} />}
+            </Pressable>
+          </View>
+          {envNote && (
+            <Text style={[styles.envNote, { color: envError ? c.destructive : c.mutedForeground }]}>{envNote}</Text>
+          )}
         </View>
       </ScrollView>
 
@@ -273,6 +319,7 @@ export default function ProjectIntegrations() {
         {unlinked.map((connection) => (
           <SheetRow
             key={connection._id}
+            icon={<ProviderTile providerId={connection.providerId} />}
             label={connection.label}
             detail={getProvider(connection.providerId)?.displayName ?? connection.providerId}
             trailing={<Link2 size={16} color={c.mutedForeground} />}
@@ -286,33 +333,73 @@ export default function ProjectIntegrations() {
         />
       </Sheet>
       <AddConnectionSheet visible={sheet === "add"} projectId={projectId} onClose={() => setSheet(undefined)} />
+
+      <Sheet
+        visible={managing !== undefined}
+        title={managing?.connection.label ?? ""}
+        onClose={() => setManagingId(undefined)}
+      >
+        {managing && (getProvider(managing.connection.providerId)?.supportsReadOnly ?? false) && (
+          <SheetRow
+            label="Read-only"
+            detail="The agent can read but not change anything"
+            trailing={
+              <Switch
+                value={managing.readOnly}
+                onValueChange={(readOnly) => {
+                  updateLink({ id: managing._id, readOnly }).catch(fail("Unable to update this connection"));
+                }}
+                trackColor={{ true: c.brand }}
+              />
+            }
+          />
+        )}
+        <SheetRow
+          label="Scope and tools on the website"
+          trailing={<ExternalLink size={16} color={c.mutedForeground} />}
+          onPress={openWebsite}
+        />
+        {managing && (
+          <SheetRow
+            label="Unlink"
+            destructive
+            trailing={<Unlink size={16} color={c.destructive} />}
+            onPress={() => {
+              setManagingId(undefined);
+              unlink({ id: managing._id }).catch(fail("Unable to unlink this connection"));
+            }}
+          />
+        )}
+      </Sheet>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  page: { padding: 16, gap: 14 },
-  card: { borderWidth: 1, borderRadius: radius.xl, padding: 14, gap: 10 },
-  header: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
-  title: { fontSize: 15, fontFamily: font.semibold },
-  muted: { fontSize: 13, lineHeight: 18, fontFamily: font.regular },
-  empty: { textAlign: "center", paddingVertical: 12, fontSize: 13, fontFamily: font.regular },
+  dim: { opacity: 0.6 },
+  disabled: { opacity: 0.5 },
   loading: { paddingVertical: 16 },
-  switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  switchLabel: { fontSize: 13, fontFamily: font.regular },
-  linkActions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4 },
-  link: { fontSize: 12.5, fontFamily: font.medium },
-  envRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderWidth: 1,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  envKey: { fontSize: 13, fontFamily: "monospace" },
-  envValue: { fontSize: 12, fontFamily: font.regular, marginTop: 2 },
-  mono: { fontFamily: "monospace" },
+  empty: { textAlign: "center", paddingVertical: 16, fontSize: 13, fontFamily: font.regular },
+  rule: { borderBottomWidth: 1 },
+  cellButton: { flexDirection: "row", alignItems: "center", gap: 8 },
+  cards: { padding: 16, gap: 12 },
+  card: { borderWidth: 1, borderRadius: 6, overflow: "hidden" },
+  cardTop: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
+  name: { fontSize: 15, fontFamily: font.medium },
+  detail: { fontSize: 13, fontFamily: font.regular, marginTop: 2 },
+  cardBottom: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1 },
+  tag: { fontSize: 9, borderWidth: 1, borderRadius: 2, paddingHorizontal: 6, paddingVertical: 2 },
+  note: { flex: 1, fontSize: 13, fontFamily: font.regular },
+  website: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" },
+  section: { borderTopWidth: 1, borderBottomWidth: 1 },
+  envRow: { flexDirection: "row", alignItems: "center", gap: 16, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  envTitle: { flexDirection: "row", alignItems: "center", gap: 8 },
+  envKey: { flexShrink: 1, fontSize: 13, fontFamily: font.monoMedium },
+  envValue: { fontSize: 12, fontFamily: font.mono, marginTop: 3 },
+  addRow: { flexDirection: "row", gap: 8, padding: 16 },
+  input: { height: 44, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, fontSize: 12, fontFamily: font.mono },
+  keyInput: { flex: 1.15 },
+  addButton: { width: 44, height: 44, borderRadius: 6, alignItems: "center", justifyContent: "center" },
+  envNote: { marginTop: -8, paddingHorizontal: 16, paddingBottom: 14, fontSize: 12, fontFamily: font.regular },
 });
