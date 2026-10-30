@@ -23,9 +23,10 @@ import {
   Plug,
   Wrench,
 } from "@/components/icons";
+import { monoLabel } from "@/components/grid";
 import { fadeUp, staggerDelay } from "@/lib/motion";
 import { type AgentStep, BUILD_VERIFIED, formatDuration } from "@/lib/shared";
-import { type Colors, font, radius, useColors } from "@/lib/theme";
+import { type Colors, font, useColors } from "@/lib/theme";
 
 // ponytail: labels and row merging are ported from the web's agent-run.tsx
 // (a web component, so it can't be imported). Move them into agent-steps.ts
@@ -182,7 +183,7 @@ function LiveLabel({ text, c }: { text: string; c: Colors }) {
     <Animated.Text
       numberOfLines={1}
       style={[
-        styles.headerText,
+        monoLabel,
         styles.flex,
         { color: reduceMotion ? c.mutedForeground : c.foreground },
         !reduceMotion && {
@@ -220,7 +221,7 @@ function Chip({ label, c, onPress }: { label: string; c: Colors; onPress?: () =>
     <Pressable
       onPress={onPress}
       disabled={!onPress}
-      style={[styles.chip, { backgroundColor: c.muted, borderColor: c.border }]}
+      style={styles.chip}
     >
       <Text style={[styles.chipText, { color: c.foreground }]} numberOfLines={1}>
         {label}
@@ -268,7 +269,7 @@ function StepRow({
   const entering = entryIndex === undefined ? undefined : fadeUp({ delay: staggerDelay(entryIndex, 60) });
   if (row.step.kind === "thinking") {
     return row.step.text ? (
-      <Animated.View entering={entering}>
+      <Animated.View entering={entering} style={[styles.step, { borderColor: c.border }]}>
         <ThinkingRow step={row.step} c={c} />
       </Animated.View>
     ) : null;
@@ -284,7 +285,7 @@ function StepRow({
   const open = NON_FILE_TOOLS.has(tool) || tool.includes("__") ? undefined : onOpenFile;
 
   return (
-    <Animated.View entering={entering}>
+    <Animated.View entering={entering} style={[styles.step, { borderColor: c.border }]}>
       <View style={styles.row}>
         <Icon size={14} color={tint} />
         <View style={styles.rowBody}>
@@ -334,16 +335,12 @@ export function AgentRun({
   steps,
   status,
   startedAt,
-  completedAt,
-  model,
   stalled = false,
   onOpenFile,
 }: {
   steps: AgentStep[];
   status: "processing" | "completed" | "cancelled";
   startedAt: number;
-  completedAt?: number;
-  model?: string;
   /** Processing, but silent for too long (see useRunStalled). */
   stalled?: boolean;
   onOpenFile?: (path: string) => void;
@@ -378,13 +375,12 @@ export function AgentRun({
       .map((step) => step.targets?.[0])
       .filter(Boolean),
   ).size;
-  const endedAt = completedAt ?? toolSteps.at(-1)?.endedAt;
+  const verified = toolSteps.some((step) => step.tool === "checkBuild" && step.text === BUILD_VERIFIED);
   const hidden = live ? Math.max(0, rows.length - LIVE_ROWS) : 0;
 
   const summary = [
     `${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`,
     changed > 0 && `${changed} ${changed === 1 ? "file" : "files"} changed`,
-    model,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -394,8 +390,9 @@ export function AgentRun({
       layout={LinearTransition.duration(200)}
       style={[styles.run, { backgroundColor: c.card, borderColor: c.border }]}
     >
+      {/* A `[ AGENT RUN ]` strip, as on the web's windows; live, the current step. */}
       <Pressable
-        style={({ pressed }) => [styles.header, pressed && { backgroundColor: c.muted }]}
+        style={({ pressed }) => [styles.header, { backgroundColor: pressed ? c.muted : c.background }]}
         onPress={() => {
           toggled.current = true;
           setOpen((value) => !value);
@@ -406,35 +403,37 @@ export function AgentRun({
           <>
             <LoaderGrid c={c} />
             <LiveLabel text={liveStepLabel(rows)} c={c} />
-            <Text style={[styles.timer, { color: c.mutedForeground }]}>{formatDuration(now - startedAt)}</Text>
+            <Text style={[monoLabel, styles.timer, { color: c.mutedForeground }]}>{formatDuration(now - startedAt)}</Text>
           </>
         ) : (
           <Animated.View entering={startedLive ? FadeIn.duration(300) : undefined} style={styles.summary}>
-            {errors > 0 || stalled || status === "cancelled" ? (
-              <CircleAlert size={14} color={errors > 0 || stalled ? c.destructive : c.mutedForeground} />
+            <View style={[styles.bar, { backgroundColor: c.brand }]} />
+            <Text style={[monoLabel, styles.flex, { color: c.mutedForeground }]}>[ Agent run ]</Text>
+            {stalled || errors > 0 || status === "cancelled" ? (
+              <>
+                <CircleAlert size={13} color={status === "cancelled" && !stalled ? c.mutedForeground : c.destructive} />
+                <Text
+                  style={[monoLabel, { color: status === "cancelled" && !stalled ? c.mutedForeground : c.destructive }]}
+                  numberOfLines={1}
+                >
+                  {stalled
+                    ? "Stopped responding"
+                    : status === "cancelled"
+                      ? `Stopped · ${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`
+                      : `${errors} ${errors === 1 ? "error" : "errors"}`}
+                </Text>
+              </>
+            ) : verified ? (
+              <>
+                <CheckCircle2 size={13} color={c.success} />
+                <Text style={[monoLabel, { color: c.success }]}>Build verified</Text>
+              </>
             ) : (
-              <CheckCircle2 size={14} color={c.mutedForeground} />
-            )}
-            <Text style={[styles.headerText, { color: c.foreground }]}>
-              {stalled
-                ? "Stopped responding"
-                : status === "cancelled"
-                ? `Stopped after ${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`
-                : endedAt
-                  ? `Worked for ${formatDuration(endedAt - startedAt)}`
-                  : "Worked"}
-            </Text>
-            {status !== "cancelled" && (
-              <Text style={[styles.headerText, styles.flex, { color: c.mutedForeground }]} numberOfLines={1}>
-                · {summary}
+              <Text style={[monoLabel, { color: c.mutedForeground }]} numberOfLines={1}>
+                {summary}
               </Text>
             )}
-            {errors > 0 && (
-              <Text style={[styles.headerText, { color: c.destructive }]}>
-                · {errors} {errors === 1 ? "error" : "errors"}
-              </Text>
-            )}
-            <Chevron open={open} c={c} style={styles.chevron} />
+            <Chevron open={open} c={c} />
           </Animated.View>
         )}
       </Pressable>
@@ -442,10 +441,10 @@ export function AgentRun({
         <Animated.View
           entering={FadeIn.duration(200)}
           exiting={FadeOut.duration(150)}
-          style={[styles.body, { borderColor: c.border }]}
+          style={{ backgroundColor: c.card }}
         >
           {hidden > 0 && (
-            <Text style={[styles.more, styles.earlier, { color: c.mutedForeground }]}>
+            <Text style={[styles.more, styles.earlier, { color: c.mutedForeground, borderColor: c.border }]}>
               +{hidden} earlier {hidden === 1 ? "step" : "steps"}
             </Text>
           )}
@@ -470,23 +469,22 @@ export function AgentRun({
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  run: { borderWidth: 1, borderRadius: radius.lg, overflow: "hidden" },
-  header: { minHeight: 38, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12 },
+  run: { borderWidth: 1, borderRadius: 6, overflow: "hidden" },
+  header: { minHeight: 40, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14 },
   summary: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
+  bar: { width: 2, height: 12, marginRight: 2 },
   grid: { width: 15, flexDirection: "row", flexWrap: "wrap", gap: 1.5 },
   pixel: { width: 4, height: 4, borderRadius: 1 },
-  headerText: { fontSize: 13, fontFamily: font.regular },
-  timer: { fontSize: 12, fontFamily: font.regular, fontVariant: ["tabular-nums"] },
-  chevron: { marginLeft: "auto" },
-  body: { borderTopWidth: 1, paddingHorizontal: 8, paddingVertical: 6, gap: 2 },
-  row: { flexDirection: "row", alignItems: "flex-start", gap: 8, paddingHorizontal: 4, paddingVertical: 5 },
-  rowBody: { flex: 1, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 },
+  timer: { fontVariant: ["tabular-nums"] },
+  step: { borderTopWidth: 1 },
+  row: { flexDirection: "row", alignItems: "flex-start", gap: 10, paddingHorizontal: 14, paddingVertical: 11 },
+  rowBody: { flex: 1, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
   rowText: { fontSize: 13, fontFamily: font.regular },
-  chip: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 1, maxWidth: "70%" },
-  chipText: { fontSize: 11.5, fontFamily: "monospace" },
+  chip: { maxWidth: "70%" },
+  chipText: { fontSize: 12.5, fontFamily: font.mono },
   more: { fontSize: 12, fontFamily: font.regular },
-  earlier: { paddingLeft: 26, paddingVertical: 4 },
-  thought: { marginLeft: 26, borderLeftWidth: 1, paddingLeft: 12, marginBottom: 4 },
+  earlier: { borderTopWidth: 1, paddingLeft: 38, paddingVertical: 9 },
+  thought: { marginLeft: 38, borderLeftWidth: 1, paddingLeft: 12, marginBottom: 10 },
   thoughtText: { fontSize: 12.5, lineHeight: 19, fontFamily: font.regular },
-  error: { fontSize: 12, paddingLeft: 26, paddingBottom: 4, fontFamily: font.regular },
+  error: { fontSize: 12, paddingLeft: 38, paddingRight: 14, paddingBottom: 10, fontFamily: font.regular },
 });

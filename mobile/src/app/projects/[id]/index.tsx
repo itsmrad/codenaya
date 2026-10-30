@@ -3,11 +3,10 @@ import { useConvex, useMutation, useQuery } from "convex/react";
 import type { ImagePickerAsset } from "expo-image-picker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  KeyboardAvoidingView,
   Pressable,
   StyleSheet,
   Switch,
@@ -15,7 +14,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useHeaderHeight } from "expo-router/react-navigation";
+import Animated, { useAnimatedKeyboard, useAnimatedStyle } from "react-native-reanimated";
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { confirm, toast } from "@/components/dialogs";
@@ -23,11 +22,14 @@ import { ChatComposer } from "@/components/chat-composer";
 import { ChatEmptyState } from "@/components/chat-empty-state";
 import { AssistantMessage, UserMessage, useRunStalled } from "@/components/chat-message";
 import { GithubExportSheet } from "@/components/github-export-sheet";
-import { ClockArrowUp, Download, ExternalLink, FolderTree, GitBranch, History, MoreHorizontal, Plug, Plus, Sparkles } from "@/components/icons";
+import { GitHubIcon } from "@/components/github-icon";
+import { DotGrid, monoLabel } from "@/components/grid";
+import { ClockArrowUp, Download, ExternalLink, FolderTree, History, MoreHorizontal, Plug, Plus, Sparkles } from "@/components/icons";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { useAgentModel } from "@/lib/agent-model";
 import { api } from "@/lib/api";
 import { useUploadChatImages } from "@/lib/chat-images";
+import { takeFirstMessage } from "@/lib/create-project";
 import { timeAgo } from "@/lib/format";
 import { postApi, webUrl } from "@/lib/http";
 import { shareProjectZip } from "@/lib/project-zip";
@@ -56,7 +58,13 @@ const EXPORT_STATUS = {
 export default function ProjectChat() {
   const c = useColors();
   const insets = useSafeAreaInsets();
-  const headerHeight = useHeaderHeight();
+  // ponytail: Reanimated's keyboard hook is deprecated; move to
+  // react-native-keyboard-controller if it stops working.
+  // Translucent bars: the app draws edge to edge, so the hook must not inset
+  // the root view under the status bar (or turn edge to edge off on unmount).
+  const keyboard = useAnimatedKeyboard({ isStatusBarTranslucentAndroid: true, isNavigationBarTranslucentAndroid: true });
+  // The composer sits on the keyboard when it is up, else above the gesture bar.
+  const bottom = useAnimatedStyle(() => ({ paddingBottom: Math.max(keyboard.height.value, insets.bottom) }));
   const router = useRouter();
   const { getToken } = useAuth();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -85,6 +93,7 @@ export default function ProjectChat() {
   const convex = useConvex();
 
   const [planMode, setPlanMode] = useState(false);
+  const [typing, setTyping] = useState(false);
   const [sheet, setSheet] = useState<"menu" | "conversations" | "versions" | "export" | "skills">();
   // Shown at once, until the request saves the real message (as on the web).
   const [pending, setPending] = useState<{ text: string; imageUrls: string[] }>();
@@ -141,6 +150,13 @@ export default function ProjectChat() {
   const report = (error: string | undefined) => error && toast.error(error);
   const unreachable = () => toast.error("Couldn't reach Codenaya. Is the server running?");
 
+  // A dashboard prompt with images: sent here, where images upload to the project.
+  useEffect(() => {
+    const first = takeFirstMessage(projectId);
+    if (first) send(first.text, first.images).then(report, unreachable);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the project opens
+  }, [projectId]);
+
   const stop = async () => {
     await postApi("/api/messages/cancel", { projectId }, getToken).catch(() => undefined);
   };
@@ -176,91 +192,106 @@ export default function ProjectChat() {
   const lastId = messages?.at(-1)?._id;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      // Android draws edge to edge, so the window no longer resizes for the
-      // keyboard: pad on both platforms, below the header.
-      behavior="padding"
-      keyboardVerticalOffset={headerHeight}
-    >
+    <View style={styles.flex}>
       <Stack.Screen
         options={{
           title: project.name,
+          // Two header cells: files, then the menu.
           headerRight: () => (
-            <View style={styles.headerActions}>
+            <>
               <Pressable
                 onPress={() => router.push({ pathname: "/projects/[id]/files", params: { id } })}
-                hitSlop={10}
                 accessibilityLabel="Files"
+                style={({ pressed }) => [styles.headerButton, pressed && { backgroundColor: c.muted }]}
               >
-                <FolderTree size={18} color={c.mutedForeground} />
+                <FolderTree size={18} color={c.foreground} />
               </Pressable>
-              <Pressable onPress={() => setSheet("menu")} hitSlop={10} accessibilityLabel="Conversation menu">
-                <MoreHorizontal size={20} color={c.mutedForeground} />
+              <Pressable
+                onPress={() => setSheet("menu")}
+                accessibilityLabel="Conversation menu"
+                style={({ pressed }) => [
+                  styles.headerButton,
+                  { borderLeftWidth: 1, borderColor: c.border },
+                  pressed && { backgroundColor: c.muted },
+                ]}
+              >
+                <MoreHorizontal size={20} color={c.foreground} />
               </Pressable>
-            </View>
+            </>
           ),
         }}
       />
-      <Text style={[styles.conversationTitle, { color: c.mutedForeground, borderColor: c.border }]} numberOfLines={1}>
-        {conversation?.title ?? NEW_CONVERSATION_TITLE}
-      </Text>
+      <View style={[styles.conversation, { backgroundColor: c.card, borderColor: c.border }]}>
+        <View style={[styles.bar, { backgroundColor: c.brand }]} />
+        <Text style={[styles.conversationTitle, { color: c.foreground }]} numberOfLines={1}>
+          {conversation?.title ?? NEW_CONVERSATION_TITLE}
+        </Text>
+        {messages && messages.length > 0 && (
+          <Text style={[monoLabel, { color: c.mutedForeground }]}>
+            {messages.length} {messages.length === 1 ? "message" : "messages"}
+          </Text>
+        )}
+      </View>
 
-      {messages === undefined && conversationId ? (
-        <ActivityIndicator style={styles.flex} color={c.mutedForeground} />
-      ) : !messages?.length && !pending ? (
-        <ChatEmptyState onSelect={(prompt) => send(prompt, []).then(report)} />
-      ) : (
-        <FlatList
-          // Inverted: the newest message sits at the bottom and new steps keep
-          // it in view without manual scrolling.
-          inverted
-          data={ordered}
-          keyExtractor={(message) => message._id}
-          contentContainerStyle={styles.list}
-          keyboardShouldPersistTaps="handled"
-          // The list is inverted, so its header sits below the newest message.
-          ListHeaderComponent={
-            pending && (
-              <View style={styles.pending}>
-                <UserMessage content={pending.text} imageUrls={pending.imageUrls} skillNames={skillNames} animate />
-              </View>
-            )
-          }
-          renderItem={({ item, index }) => {
-            if (item.role === "user") {
+      <View style={styles.flex}>
+        <DotGrid />
+        {messages === undefined && conversationId ? (
+          <ActivityIndicator style={styles.flex} color={c.mutedForeground} />
+        ) : !messages?.length && !pending ? (
+          <ChatEmptyState typing={typing} onSelect={(prompt) => send(prompt, []).then(report)} />
+        ) : (
+          <FlatList
+            // Inverted: the newest message sits at the bottom and new steps keep
+            // it in view without manual scrolling.
+            inverted
+            data={ordered}
+            keyExtractor={(message) => message._id}
+            contentContainerStyle={styles.list}
+            keyboardShouldPersistTaps="handled"
+            // The list is inverted, so its header sits below the newest message.
+            ListHeaderComponent={
+              pending && (
+                <View style={styles.pending}>
+                  <UserMessage content={pending.text} imageUrls={pending.imageUrls} skillNames={skillNames} animate />
+                </View>
+              )
+            }
+            renderItem={({ item, index }) => {
+              if (item.role === "user") {
+                return (
+                  <UserMessage
+                    content={item.content}
+                    time={item._creationTime}
+                    imageUrls={item.imageUrls}
+                    skillNames={skillNames}
+                    animate={Boolean(history && !history.ids.has(item._id)) && !pending}
+                  />
+                );
+              }
+              const checkpoint = checkpointByMessage.get(item._id);
               return (
-                <UserMessage
-                  content={item.content}
-                  imageUrls={item.imageUrls}
-                  skillNames={skillNames}
-                  animate={Boolean(history && !history.ids.has(item._id)) && !pending}
+                <AssistantMessage
+                  message={item}
+                  isLast={item._id === lastId}
+                  pathOf={pathOf}
+                  onOpenFile={openFile}
+                  onRetry={() => {
+                    // The prompt before this reply, resent as-is in the reply's mode.
+                    const prompt = ordered.slice(index + 1).find((message) => message.role === "user");
+                    if (prompt) sendMessage(prompt.content, prompt.images, item.mode).then(report, unreachable);
+                  }}
+                  onBuildPlan={() => {
+                    setPlanMode(false);
+                    sendMessage(buildPlanMessage(item.content)).then(report, unreachable);
+                  }}
+                  onRestore={checkpoint && !running ? () => confirmRestore(checkpoint) : undefined}
                 />
               );
-            }
-            const checkpoint = checkpointByMessage.get(item._id);
-            return (
-              <AssistantMessage
-                message={item}
-                isLast={item._id === lastId}
-                pathOf={pathOf}
-                onOpenFile={openFile}
-                onRetry={() => {
-                  // The prompt before this reply, resent as-is in the reply's mode.
-                  const prompt = ordered.slice(index + 1).find((message) => message.role === "user");
-                  if (prompt) sendMessage(prompt.content, prompt.images, item.mode).then(report, unreachable);
-                }}
-                onBuildPlan={() => {
-                  setPlanMode(false);
-                  sendMessage(buildPlanMessage(item.content)).then(report, unreachable);
-                }}
-                onRestore={checkpoint && !running ? () => confirmRestore(checkpoint) : undefined}
-              />
-            );
-          }}
-        />
-      )}
-      <View style={{ paddingBottom: insets.bottom }}>
+            }}
+          />
+        )}
+      </View>
+      <Animated.View style={[{ backgroundColor: c.background }, bottom]}>
         <ChatComposer
           running={running}
           agent={agent}
@@ -269,31 +300,32 @@ export default function ProjectChat() {
           skills={enabledSkills}
           onSend={send}
           onStop={stop}
+          onFocusChange={setTyping}
         />
-      </View>
+      </Animated.View>
 
       <Sheet visible={sheet === "menu"} title={project.name} onClose={() => setSheet(undefined)}>
-        <SheetRow label="New conversation" trailing={<Plus size={16} color={c.mutedForeground} />} onPress={newConversation} />
+        <SheetRow label="New conversation" icon={<Plus size={16} color={c.foreground} />} onPress={newConversation} />
         <SheetRow
           label="Past conversations"
-          trailing={<History size={16} color={c.mutedForeground} />}
+          icon={<History size={16} color={c.foreground} />}
           onPress={() => setSheet("conversations")}
         />
         <SheetRow
           label="Version history"
-          trailing={<ClockArrowUp size={16} color={c.mutedForeground} />}
+          icon={<ClockArrowUp size={16} color={c.foreground} />}
           onPress={() => setSheet("versions")}
         />
         <SheetRow
           label="Skills"
           detail={`${enabledSkills.length} enabled`}
-          trailing={<Sparkles size={16} color={c.mutedForeground} />}
+          icon={<Sparkles size={16} color={c.foreground} />}
           onPress={() => setSheet("skills")}
         />
         <SheetRow
           label="Integrations & env"
           detail="Connections and environment variables"
-          trailing={<Plug size={16} color={c.mutedForeground} />}
+          icon={<Plug size={16} color={c.foreground} />}
           onPress={() => {
             setSheet(undefined);
             router.push({ pathname: "/projects/[id]/integrations", params: { id } });
@@ -302,12 +334,12 @@ export default function ProjectChat() {
         <SheetRow
           label="Export to GitHub"
           detail={EXPORT_STATUS[project.exportStatus ?? "idle"]}
-          trailing={<GitBranch size={16} color={c.mutedForeground} />}
+          icon={<GitHubIcon size={16} color={c.foreground} />}
           onPress={() => setSheet("export")}
         />
         <SheetRow
           label="Download ZIP"
-          trailing={<Download size={16} color={c.mutedForeground} />}
+          icon={<Download size={16} color={c.foreground} />}
           onPress={() => {
             setSheet(undefined);
             shareProjectZip(convex, projectId, project.name).catch(() => toast.error("Couldn't create the ZIP"));
@@ -316,7 +348,7 @@ export default function ProjectChat() {
         <SheetRow
           label="Open on the website"
           detail="Live preview"
-          trailing={<ExternalLink size={16} color={c.mutedForeground} />}
+          icon={<ExternalLink size={16} color={c.foreground} />}
           onPress={() => {
             setSheet(undefined);
             WebBrowser.openBrowserAsync(webUrl(`/projects/${projectId}`));
@@ -388,27 +420,27 @@ export default function ProjectChat() {
             label={checkpoint.label || "Agent run"}
             detail={`${timeAgo(checkpoint._creationTime)} · ${checkpoint.fileCount} ${checkpoint.fileCount === 1 ? "file" : "files"}`}
             disabled={running}
-            trailing={<Text style={[styles.restore, { color: c.brandText }]}>Restore</Text>}
+            trailing={
+              <View style={[styles.restore, { borderColor: c.border }]}>
+                <Text style={[monoLabel, { color: c.foreground }]}>Restore</Text>
+              </View>
+            }
             onPress={() => confirmRestore(checkpoint)}
           />
         ))}
       </Sheet>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: 18 },
-  conversationTitle: {
-    fontSize: 12.5,
-    fontFamily: font.medium,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  list: { padding: 16, gap: 18 },
+  headerButton: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
+  conversation: { height: 40, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, borderBottomWidth: 1 },
+  bar: { width: 2, height: 12 },
+  conversationTitle: { flex: 1, fontSize: 14, fontFamily: font.medium },
+  list: { padding: 16, gap: 24 },
   pending: { opacity: 0.6, marginTop: 18 },
   sheetEmpty: { textAlign: "center", paddingVertical: 24, fontSize: 14, fontFamily: font.regular },
-  restore: { fontSize: 13, fontFamily: font.medium },
+  restore: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8 },
 });

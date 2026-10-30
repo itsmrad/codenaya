@@ -7,13 +7,16 @@ import Animated, { useReducedMotion } from "react-native-reanimated";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { AgentRun } from "@/components/agent-run";
+import { monoLabel } from "@/components/grid";
 import { BookOpen, Check, Copy, Hammer, ListChecks, RotateCcw, Undo2 } from "@/components/icons";
+import { Logo } from "@/components/logo";
+import { timeAgo } from "@/lib/format";
 import { fadeUp } from "@/lib/motion";
-import { STALLED_RUN_MS, lastRunActivity, sanitizeAgentText, splitSlashSkills } from "@/lib/shared";
+import { STALLED_RUN_MS, formatDuration, lastRunActivity, sanitizeAgentText, splitSlashSkills } from "@/lib/shared";
 import { type Colors, font, radius, useColors } from "@/lib/theme";
 
 /**
- * The user's message, like the web: images above a muted bubble on the right.
+ * The user's message: a `YOU · time` label, then images above a card on the right.
  * Leading `/name` tokens that name an enabled skill show as chips.
  */
 export function UserMessage({
@@ -21,9 +24,12 @@ export function UserMessage({
   imageUrls = [],
   skillNames,
   animate = false,
+  time,
 }: {
   content: string;
   imageUrls?: string[];
+  /** When it was sent; unset while it is still sending. */
+  time?: number;
   skillNames?: ReadonlySet<string>;
   /** Fades up on mount: a message that arrived while the chat was open. */
   animate?: boolean;
@@ -38,6 +44,7 @@ export function UserMessage({
 
   return (
     <Animated.View entering={animate ? fadeUp() : undefined} style={styles.user}>
+      <Text style={[monoLabel, { color: c.mutedForeground }]}>{time ? `You · ${timeAgo(time)}` : "You"}</Text>
       {imageUrls.length > 0 && (
         <View style={styles.images}>
           {imageUrls.map((url) => (
@@ -46,11 +53,11 @@ export function UserMessage({
         </View>
       )}
       {(text.trim() || skills.length > 0) && (
-        <View style={[styles.bubble, { backgroundColor: c.muted }]}>
+        <View style={[styles.bubble, { backgroundColor: c.card, borderColor: c.border }]}>
           {skills.length > 0 && (
             <View style={styles.skills}>
               {skills.map((name) => (
-                <View key={name} style={[styles.skill, { borderColor: c.border, backgroundColor: c.background }]}>
+                <View key={name} style={[styles.skill, { borderColor: c.border, backgroundColor: c.muted }]}>
                   <BookOpen size={11} color={c.foreground} />
                   <Text style={[styles.skillText, { color: c.foreground }]}>/{name}</Text>
                 </View>
@@ -180,6 +187,13 @@ export function AssistantMessage({
   const [startedProcessing] = useState(status === "processing");
   const shown = useTypewriter(content, startedProcessing && !reduceMotion);
   const isPlan = message.mode === "plan";
+  const meta = [
+    "Codenaya",
+    message.runModel?.label,
+    message.completedAt && formatDuration(message.completedAt - message._creationTime),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const restore = onRestore && status !== "processing" && (
     <IconAction label="Restore to before this run" onPress={onRestore}>
@@ -190,14 +204,18 @@ export function AssistantMessage({
   return (
     // Seen running: it settles in. A reply loaded from history stays still.
     <Animated.View entering={startedProcessing ? fadeUp() : undefined} style={styles.assistant}>
+      <View style={styles.meta}>
+        <Logo size={13} wordmark={false} />
+        <Text style={[monoLabel, styles.flex, { color: c.mutedForeground }]} numberOfLines={1}>
+          {meta}
+        </Text>
+      </View>
       {(status === "processing" || steps.length > 0) && (
         <AgentRun
           steps={steps}
           status={status}
           stalled={stalled}
           startedAt={message._creationTime}
-          completedAt={message.completedAt}
-          model={message.runModel?.label}
           onOpenFile={onOpenFile}
         />
       )}
@@ -220,14 +238,14 @@ export function AssistantMessage({
           {isPlan && (
             <View style={[styles.planBadge, { borderColor: c.border }]}>
               <ListChecks size={12} color={c.mutedForeground} />
-              <Text style={[styles.planText, { color: c.mutedForeground }]}>Plan</Text>
+              <Text style={[monoLabel, { color: c.mutedForeground }]}>Plan</Text>
             </View>
           )}
           <Reply content={shown} />
           {isPlan && isLast && onBuildPlan && (
-            <Pressable onPress={onBuildPlan} style={[styles.build, { backgroundColor: c.primary }]}>
-              <Hammer size={14} color={c.primaryForeground} />
-              <Text style={[styles.buildText, { color: c.primaryForeground }]}>Build this plan</Text>
+            <Pressable onPress={onBuildPlan} style={[styles.build, { backgroundColor: c.brand }]}>
+              <Hammer size={14} color={c.brandForeground} />
+              <Text style={[monoLabel, styles.buildText, { color: c.brandForeground }]}>Build this plan</Text>
             </Pressable>
           )}
           <View style={styles.actions}>
@@ -238,6 +256,7 @@ export function AssistantMessage({
               </IconAction>
             )}
             {restore}
+            {restore && <Text style={[monoLabel, { color: c.mutedForeground }]}>Checkpoint saved</Text>}
           </View>
         </>
       ) : null}
@@ -246,17 +265,11 @@ export function AssistantMessage({
 }
 
 const styles = StyleSheet.create({
-  user: { alignItems: "flex-end", gap: 6 },
+  flex: { flex: 1 },
+  user: { alignItems: "flex-end", gap: 8 },
   images: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 6 },
-  image: { width: 80, height: 80, borderRadius: radius.lg, borderWidth: 1 },
-  bubble: {
-    maxWidth: "88%",
-    borderRadius: 18,
-    borderBottomRightRadius: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    gap: 6,
-  },
+  image: { width: 80, height: 80, borderRadius: 6, borderWidth: 1 },
+  bubble: { maxWidth: "88%", borderWidth: 1, borderRadius: 6, paddingHorizontal: 14, paddingVertical: 11, gap: 6 },
   skills: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
   skill: {
     flexDirection: "row",
@@ -268,11 +281,12 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   skillText: { fontSize: 12, fontFamily: font.medium },
-  userText: { fontSize: 14, lineHeight: 22, fontFamily: font.regular },
+  userText: { fontSize: 15, lineHeight: 23, fontFamily: font.regular },
   assistant: { gap: 12 },
+  meta: { flexDirection: "row", alignItems: "center", gap: 8 },
   reply: { gap: 4 },
   muted: { fontSize: 14, fontFamily: font.regular },
-  actions: { flexDirection: "row", gap: 14, marginTop: -4 },
+  actions: { flexDirection: "row", alignItems: "center", gap: 14, marginTop: -4 },
   action: { padding: 2 },
   pressed: { opacity: 0.5 },
   stalled: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -290,7 +304,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     borderWidth: 1,
-    borderRadius: radius.sm,
+    borderRadius: 6,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -306,15 +320,14 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     marginBottom: -4,
   },
-  planText: { fontSize: 12, fontFamily: font.medium },
   build: {
     alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    borderRadius: radius.sm,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    gap: 8,
+    borderRadius: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
-  buildText: { fontSize: 13, fontFamily: font.medium },
+  buildText: { fontSize: 11, fontFamily: font.monoMedium },
 });
