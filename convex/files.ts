@@ -21,6 +21,7 @@ import {
   CASCADE_BATCH_SIZE,
   releaseStorageIfUnreferenced,
 } from "./projectCascade";
+import { validateInternalKey } from "./internalKey";
 import { getOwnedProject } from "./projects";
 import { Doc, Id } from "./_generated/dataModel";
 
@@ -126,6 +127,26 @@ export const deleteFolderContents = internalMutation({
       await ctx.scheduler.runAfter(0, internal.files.deleteFolderContents, args);
     }
     return null;
+  },
+});
+
+/**
+ * Whether a conversation's project has any file yet: Auto routing (#322) sends
+ * the first build of an empty project to the build model. The caller checks
+ * ownership; the answer only picks a model.
+ */
+export const conversationProjectHasFilesForServer = query({
+  args: { internalKey: v.string(), conversationId: v.id("conversations") },
+  returns: v.boolean(),
+  handler: async (ctx, { internalKey, conversationId }) => {
+    validateInternalKey(internalKey);
+    const conversation = await ctx.db.get("conversations", conversationId);
+    if (!conversation) return false;
+    const file = await ctx.db
+      .query("files")
+      .withIndex("by_project", (q) => q.eq("projectId", conversation.projectId))
+      .first();
+    return file !== null;
   },
 });
 

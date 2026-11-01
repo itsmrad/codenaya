@@ -150,3 +150,25 @@ test("file reads and writes on a project being deleted throw NOT_FOUND", async (
     alice.mutation(api.files.createFile, { projectId, name: "n.ts", content: "" })
   ).rejects.toEqual(notFound);
 });
+
+describe("files.conversationProjectHasFilesForServer (Auto routing, #322)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  test("answers whether the conversation's project has any file yet", async () => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "ik");
+    const { t, projectId } = await setup();
+    const { full, empty } = await t.run(async (ctx) => {
+      const emptyProjectId = await ctx.db.insert("projects", { name: "New", ownerId: ALICE, updatedAt: 0 });
+      return {
+        full: await ctx.db.insert("conversations", { projectId, title: "a", updatedAt: 0 }),
+        empty: await ctx.db.insert("conversations", { projectId: emptyProjectId, title: "b", updatedAt: 0 }),
+      };
+    });
+    const hasFiles = (conversationId: typeof full, internalKey = "ik") =>
+      t.query(api.files.conversationProjectHasFilesForServer, { internalKey, conversationId });
+
+    expect(await hasFiles(full)).toBe(true);
+    expect(await hasFiles(empty)).toBe(false);
+    await expect(hasFiles(full, "wrong")).rejects.toThrow();
+  });
+});

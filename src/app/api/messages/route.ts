@@ -11,10 +11,12 @@ import {
 import { convex } from "@/lib/convex-client";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import {
+  isAutoChoice,
   modelChoiceSchema,
   requireModelChoice,
   takePromoRun,
 } from "@/features/ai-providers/server/resolve-run-model";
+import { classifyRun } from "@/features/ai-providers/auto-route";
 import {
   DISPATCH_FAILED_ERROR,
   cancelProcessingMessage,
@@ -35,6 +37,8 @@ const requestSchema = z.object({
   images: z.array(z.string()).max(MAX_CHAT_IMAGES).optional(),
   // Plan mode (#120): the agent replies with a plan and writes nothing.
   mode: z.literal(PLAN_MODE).optional(),
+  // A fix request ("Fix with AI" #223, loop-breaker retry #306): Auto routes it to the fix model.
+  source: z.literal("fix").optional(),
 });
 
 export async function POST(request: Request) {
@@ -64,7 +68,7 @@ export async function POST(request: Request) {
     return invalid;
   }
 
-  const { conversationId, message, model, images, mode } = data;
+  const { conversationId, message, model, images, mode, source } = data;
 
   if (detectCredential(message).detected) {
     return NextResponse.json(
@@ -77,6 +81,23 @@ export async function POST(request: Request) {
     );
   }
 
+  // Auto (#322) routes by task, which costs it one more read. A malformed id
+  // fails the ownership check below.
+  const task = isAutoChoice(model)
+    ? classifyRun({
+        planMode: mode === PLAN_MODE,
+        hasImages: Boolean(images?.length),
+        source,
+        projectHasFiles: await convex
+          .query(api.files.conversationProjectHasFilesForServer, {
+            internalKey,
+            conversationId: conversationId as Id<"conversations">,
+          })
+          .catch(() => false),
+        message,
+      })
+    : undefined;
+
   // Independent reads, in parallel: each Convex round-trip delays the send.
   const [{ runModel, promoKind, rejected }, { found: conversation, notFound }] =
     await Promise.all([
@@ -85,6 +106,7 @@ export async function POST(request: Request) {
         userId,
         model,
         withImages: Boolean(images?.length),
+        task,
       }),
       requireOwnedConversation({
         internalKey,

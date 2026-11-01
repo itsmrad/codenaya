@@ -18,6 +18,7 @@ import {
   promoRunRefusal,
 } from "@/features/promotions/github-promo";
 
+import { AUTO_MODEL_ID, type RunTask, autoRouteModel, autoRunLabel } from "../auto-route";
 import { type ModelPricing, promoKindOf } from "../catalog";
 import {
   type PlatformProviderId,
@@ -109,6 +110,12 @@ export class ModelChoiceError extends Error {
 const toChoice = (input: ModelChoiceInput): AgentModelChoice =>
   typeof input === "object" ? input : { modelId: input ?? "" };
 
+/** The send picked Auto (#322): the route classifies it and passes its `task`. */
+export const isAutoChoice = (input: ModelChoiceInput) => {
+  const { keyId, modelId } = toChoice(input);
+  return !keyId && modelId === AUTO_MODEL_ID;
+};
+
 /** The message has images and the model cannot read them. */
 const visionRequired = (label: string) =>
   new ModelChoiceError(
@@ -130,17 +137,24 @@ const platformRunLabel = (model: RoutedModel) => runModelLabel({ id: model.id, l
  * changes nothing; `promoKind` tells `takePromoRun` which run to take once the
  * send is known to go. Any other platform model needs credits left (ADR 0011);
  * a run that starts with some may end past zero, and the next send is refused.
+ *
+ * Auto (#322) becomes the `task`'s route model (`autoRouteModel`, among routes
+ * whose provider key is set; else the catalog default) before any of these
+ * checks, so the message and the run record that concrete model.
  */
 export async function validateModelChoice({
   internalKey,
   userId,
   model,
   withImages = false,
+  task = "build",
 }: {
   internalKey: string;
   userId: string;
   model: ModelChoiceInput;
   withImages?: boolean;
+  /** Auto only: what the send is for (`classifyRun`). */
+  task?: RunTask;
 }): Promise<RunModelChoice & { promoKind?: PromoModelKind }> {
   const { keyId, modelId } = toChoice(model);
   if (!keyId) {
@@ -148,11 +162,16 @@ export async function validateModelChoice({
       platformCatalog(internalKey),
       convex.query(api.credits.getForServer, { internalKey, userId }),
     ]);
-    const model = resolveCatalogModel(catalog, modelId);
+    const auto = modelId === AUTO_MODEL_ID;
+    const model =
+      (auto &&
+        autoRouteModel(catalog.models.filter((m) => isPlatformConfigured(m.provider)), task)) ||
+      resolveCatalogModel(catalog, modelId);
     if (!isPlatformConfigured(model.provider)) {
       throw new ModelChoiceError(AI_NOT_CONFIGURED_MESSAGE, 503, "ai_not_configured");
     }
-    const choice = { modelId: model.id, label: platformRunLabel(model), provider: model.provider };
+    const label = auto ? autoRunLabel(model) : platformRunLabel(model);
+    const choice = { modelId: model.id, label, provider: model.provider };
     if (withImages && !model.vision) {
       throw visionRequired(choice.label);
     }

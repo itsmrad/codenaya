@@ -24,6 +24,7 @@ import { PROMO_ENDS_AT, PROMO_REFUSAL_MESSAGES } from "@/features/promotions/git
 import {
   ModelChoiceError,
   ProviderKeyError,
+  isAutoChoice,
   isProviderKeyRejection,
   requireModelChoice,
   resolveRunModel,
@@ -334,6 +335,75 @@ describe("validateModelChoice (API route)", () => {
     });
     expect(rejected?.status).toBe(403);
     expect(await rejected?.json()).toEqual({ error: "AI provider key not found" });
+  });
+});
+
+describe("validateModelChoice: Auto (#322)", () => {
+  const auto = (task?: Parameters<typeof validateModelChoice>[0]["task"], withImages = false) =>
+    validateModelChoice({ internalKey: "ik", userId: "user_1", model: "auto", task, withImages });
+
+  it("runs each task on its route model, labelled as Auto's pick", async () => {
+    expect(await auto("edit")).toEqual({
+      modelId: "openai/gpt-6-luna",
+      label: "Auto · GPT-6 Luna",
+      provider: "openrouter",
+    });
+    for (const task of ["plan", "build", "fix"] as const) {
+      expect(await auto(task)).toMatchObject({ modelId: "anthropic/claude-sonnet-5.5" });
+    }
+    expect(await auto("vision", true)).toMatchObject({ modelId: "anthropic/claude-sonnet-5.5" });
+    // No task (a new project's first prompt) is a build.
+    expect(await auto()).toMatchObject({ label: "Auto · Claude Sonnet 5.5" });
+  });
+
+  it("is a platform choice only: a key's 'auto' model is refused as before", async () => {
+    expect(isAutoChoice("auto")).toBe(true);
+    expect(isAutoChoice({ modelId: "auto" })).toBe(true);
+    expect(isAutoChoice({ keyId: "key_1", modelId: "auto" })).toBe(false);
+    expect(isAutoChoice("openai/gpt-6-luna")).toBe(false);
+
+    mocks.query.mockResolvedValue(openAiKey);
+    await expect(
+      validateModelChoice({ internalKey: "ik", userId: "user_1", model: { keyId: "key_1", modelId: "auto" } }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("never routes to a promo model, and needs no claim", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-platform");
+    mocks.platform.mockReturnValue(ROUTED_SAVED);
+
+    // Sonnet is promo-only here, and no other build route is listed: the default runs.
+    expect(await auto("build")).toEqual({
+      modelId: "google/gemini-3.8-flash",
+      label: "Auto · Gemini 3.8 Flash",
+      provider: "openrouter",
+    });
+    // `toEqual` above: no `promoKind`, so the send takes no promo run.
+    expect(await auto("edit")).toMatchObject({ modelId: "google/gemini-3.8-flash" });
+  });
+
+  it("skips route models whose provider has no key instead of refusing", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    mocks.platform.mockReturnValue({
+      ...ROUTED_SAVED,
+      models: [
+        ...OPUS_FOR_EVERYONE.models.map((model) => ({ ...model, access: "everyone" })),
+        catalogModel("openai/gpt-6.1-sol", "GPT-6.1 Sol"),
+      ],
+    });
+
+    expect(await auto("plan")).toMatchObject({ modelId: "openai/gpt-6.1-sol", label: "Auto · GPT-6.1 Sol" });
+  });
+
+  it("is refused like any platform model once credits are spent", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(BEFORE_PROMO_ENDS);
+    vi.stubEnv("CREDIT_LIMITS_ENFORCED", "true");
+    const day = new Date(BEFORE_PROMO_ENDS).setUTCHours(0, 0, 0, 0);
+    mocks.account.mockReturnValue({ plan: "free", periodStartsAt: day, periodUsed: 60, dayStartsAt: day, dayUsed: 60 });
+
+    await expect(auto("edit")).rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
+    vi.useRealTimers();
   });
 });
 
