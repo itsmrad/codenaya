@@ -110,9 +110,11 @@ export const ProjectIdView = ({
   const [previewOpened, setPreviewOpened] = useState(openOnPreview);
 
   // A run that starts before package.json exists is writing the first build.
-  // The preview mounts (hidden) once package.json lands so the sandbox boots
-  // during the run, and the IDE switches to it when the run ends, unless the
-  // user picked a tab meanwhile. Phones keep the chat and get a toast (#254).
+  // Desktops open on the preview, which shows the build and then the app as
+  // soon as its sandbox runs (#337). Elsewhere the preview mounts (hidden) once
+  // package.json lands so the sandbox boots during the run, and the IDE
+  // switches to it when the run ends, unless the user picked a tab meanwhile.
+  // Phones keep the chat and get a toast (#254).
   const activeRun = useActiveRun(projectId);
   const files = useFiles(projectId);
   const hasPackageJson = files ? hasRootPackageJson(files) : false;
@@ -122,6 +124,10 @@ export const ProjectIdView = ({
   if (!firstBuild && activeRun && files && !hasPackageJson) {
     setFirstBuild(true);
     setViewPickedDuringBuild(false);
+    if (!isCompact) {
+      setSelectedView("preview");
+      setPreviewOpened(true);
+    }
   }
   if (firstBuild && hasPackageJson && !previewOpened) setPreviewOpened(true);
   if (firstBuild && activeRun === null) {
