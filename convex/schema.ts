@@ -17,6 +17,8 @@ export const messageStepValidator = v.object({
   error: v.optional(v.string()),
   startedAt: v.number(),
   endedAt: v.optional(v.number()),
+  // Known-error recipes matched in the tool's error output (#334).
+  recipeIds: v.optional(v.array(v.string())),
 });
 
 export const aiProviderValidator = v.union(

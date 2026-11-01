@@ -10,6 +10,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   mutation: vi.fn(),
+  createSandbox: vi.fn(),
+}));
+
+vi.mock("e2b", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("e2b")>()),
+  Sandbox: { create: mocks.createSandbox },
 }));
 
 vi.mock("@/lib/convex-client", async () => {
@@ -125,6 +131,39 @@ describe("processMessage build-check gate", () => {
     expect(recordedSteps().filter((step) => step.tool === "checkBuild").at(-1)).toMatchObject({
       status: "done",
       text: "Build not checked",
+    });
+  });
+
+  it("sends the known cause and fix with a matched build error and records the recipe on the step", async () => {
+    vi.stubEnv("E2B_API_KEY", "e2b_key");
+    projectFiles = [
+      { _id: "f1", name: "package.json", type: "file", content: "{}" },
+      { _id: "f2", name: "vite.config.ts", type: "file", content: "export default {};\n" },
+    ];
+    const { CommandExitError } = await import("e2b");
+    const build = { exitCode: 1, error: "", stdout: "", stderr: 'Failed to resolve import "./missing" from "src/App.tsx".' };
+    mocks.createSandbox.mockResolvedValue({
+      files: { makeDir: vi.fn(async () => true), write: vi.fn(async () => ({})) },
+      commands: {
+        run: vi
+          .fn()
+          .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
+          .mockRejectedValueOnce(new CommandExitError(build)),
+      },
+      kill: vi.fn(async () => {}),
+    });
+
+    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
+      { data: toolCall("checkBuild") },
+      { data: text("**Notes:** the build fails on ./missing.") },
+    ]);
+
+    const checkResult = JSON.stringify(codingRequests(outcome.inferenceBodies)[1].messages);
+    expect(checkResult).toContain("Likely cause (unresolved-import): ");
+    expect(checkResult).toContain("Known fix: ");
+    expect(recordedSteps().filter((step) => step.tool === "checkBuild").at(-1)).toMatchObject({
+      status: "error",
+      recipeIds: ["unresolved-import"],
     });
   });
 
