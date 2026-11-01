@@ -16,7 +16,7 @@ describe("chatStarters", () => {
   it("offers codebase starters for an imported project, even before its files load", () => {
     const starters = chatStarters({ name: "my-repo", imported: true, hasFiles: false });
     expect(starters.title).toBe("Continue building my-repo");
-    expect(prompts({ name: "my-repo", imported: true, hasFiles: true })).toEqual([
+    expect(prompts({ name: "my-repo", imported: true, hasFiles: false })).toEqual([
       "Explain this codebase",
       "Find and fix bugs",
       "Add a README",
