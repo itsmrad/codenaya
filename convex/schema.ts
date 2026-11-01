@@ -136,6 +136,9 @@ export default defineSchema({
 
   projects: defineTable({
     name: v.string(),
+    // "generated": a random name the first conversation title may replace
+    // (#288). Unset for user-chosen names; renaming clears it.
+    nameSource: v.optional(v.literal("generated")),
     ownerId: v.string(),
     updatedAt: v.number(),
     // Set at creation from a prompt, whose project is seeded with the starter,

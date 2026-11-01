@@ -114,6 +114,8 @@ export async function POST(request: Request) {
         ownerId: userId,
         // Seeded below, so package.json can't mark the first build (#338).
         firstBuildPending: true,
+        // A random name gives way to the first conversation title (#288).
+        ...(template ? {} : { nameSource: "generated" as const }),
       },
     );
 

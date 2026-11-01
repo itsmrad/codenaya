@@ -153,6 +153,8 @@ export const rename = mutation({
 
     await ctx.db.patch("projects", args.id, {
       name,
+      // A chosen name is never replaced by a generated title (#288).
+      nameSource: undefined,
       updatedAt: Date.now(),
     });
   },

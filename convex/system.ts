@@ -35,6 +35,7 @@ import { resolveProjectSkills } from "./skills";
 import { countProjectBuilt } from "./stats";
 import { MAX_ENV_VARS } from "./envVars";
 import { MAX_PROJECT_CONNECTIONS } from "./integrations";
+import { projectNameFromTitle } from "../src/features/projects/utils/project-name";
 
 // Keeps the steps array (and the message document) bounded on long runs.
 const MAX_MESSAGE_STEPS = 100;
@@ -256,6 +257,19 @@ export const updateConversationTitle = mutation({
       title: args.title,
       updatedAt: Date.now(),
     });
+
+    // A project still on its random name takes the first title (#288). In
+    // this mutation, so a rename that landed first always wins. Cleared
+    // either way, so a later conversation never renames the project.
+    const conversation = await ctx.db.get("conversations", args.conversationId);
+    const project = conversation && (await ctx.db.get("projects", conversation.projectId));
+    if (project?.nameSource === "generated") {
+      const name = projectNameFromTitle(args.title);
+      await ctx.db.patch("projects", project._id, {
+        ...(name ? { name, updatedAt: Date.now() } : {}),
+        nameSource: undefined,
+      });
+    }
    },
 });
 
@@ -678,6 +692,7 @@ export const createProjectWithConversation = mutation({
     conversationTitle: v.string(),
     ownerId: v.string(),
     firstBuildPending: v.optional(v.boolean()),
+    nameSource: v.optional(v.literal("generated")),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -689,6 +704,7 @@ export const createProjectWithConversation = mutation({
       ownerId: args.ownerId,
       updatedAt: now,
       ...(args.firstBuildPending ? { firstBuildPending: true } : {}),
+      ...(args.nameSource ? { nameSource: args.nameSource } : {}),
     });
     await countProjectBuilt(ctx);
 
