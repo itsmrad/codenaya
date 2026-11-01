@@ -41,6 +41,7 @@ import {
   describeToolCall,
   sanitizeAgentText,
   toolResultError,
+  toolResultRecipeIds,
 } from '../agent-steps';
 import {
   buildIntegrationsPromptSection,
@@ -740,6 +741,7 @@ export const processMessage = inngest.createFunction(
             return result.toolCalls.map(({ tool, content }) => {
               const error = toolResultError(content, pathOf);
               const label = !error && tool.name === "checkBuild" ? buildCheckLabel(content) : undefined;
+              const recipeIds = toolResultRecipeIds(content);
               return {
                 id: tool.id,
                 kind: "tool" as const,
@@ -747,6 +749,7 @@ export const processMessage = inngest.createFunction(
                 status: error ? ("error" as const) : ("done" as const),
                 ...(error ? { error } : {}),
                 ...(label ? { text: label } : {}),
+                ...(recipeIds.length > 0 ? { recipeIds } : {}),
                 startedAt: endedAt,
                 endedAt,
               };
