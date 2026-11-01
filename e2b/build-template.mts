@@ -14,9 +14,33 @@
  *   npm run e2b:template
  * then set E2B_TEMPLATE=codenaya-node22 wherever the app runs.
  */
+import * as nodeModule from "node:module";
+
 import { Template, defaultBuildLogger } from "e2b";
 
 const TEMPLATE_NAME = "codenaya-node22";
+
+// The starter's own imports are extensionless, as the bundler resolves them;
+// plain Node needs the .ts added. Typed here: @types/node predates
+// registerHooks (Node 22.15+).
+type Resolve = (specifier: string, context: object) => unknown;
+const { registerHooks } = nodeModule as unknown as {
+  registerHooks: (hooks: {
+    resolve: (specifier: string, context: object, nextResolve: Resolve) => unknown;
+  }) => void;
+};
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    try {
+      return nextResolve(specifier, context);
+    } catch (error) {
+      if (/^\.\.?\//.test(specifier) && !/\.[cm]?[jt]s$/.test(specifier)) {
+        return nextResolve(`${specifier}.ts`, context);
+      }
+      throw error;
+    }
+  },
+});
 
 // A computed specifier: Node runs the .ts file directly, and tsc doesn't
 // reject the .ts extension (no allowImportingTsExtensions in tsconfig).

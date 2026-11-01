@@ -475,7 +475,7 @@ Do NOT include any code blocks in the summary beyond the two above. Do NOT narra
 
 /** Added to the request when the project holds only the seeded Vite starter (#338). */
 export const STARTER_IN_PLACE_NOTE =
-  "(This project already has the Vite starter and nothing else: package.json, vite.config.ts, the tsconfig files, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css and src/lib/utils.ts. Don't call scaffoldViteApp, and don't start with listFiles: build on these files, and call listFiles only when you need an ID.)";
+  "(This project already has the Vite starter and nothing else: package.json, vite.config.ts, the tsconfig files, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts and src/components/error-boundary.tsx. Don't call scaffoldViteApp, and don't start with listFiles: build on these files, and call listFiles only when you need an ID.)";
 
 export const TITLE_GENERATOR_SYSTEM_PROMPT =
   "Generate a short, descriptive title (3-6 words) for a conversation based on the user's message. Return ONLY the title, nothing else. No quotes, no punctuation at the end.";
