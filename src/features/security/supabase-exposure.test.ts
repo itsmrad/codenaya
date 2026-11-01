@@ -57,6 +57,44 @@ describe("scanSupabaseSql: tables without RLS", () => {
     ).toEqual(["4:supabase-no-rls"]);
   });
 
+  it("ignores block comments and keeps line numbers right", () => {
+    expect(
+      scan(
+        [
+          "/* create table old_todos (id uuid);",
+          "   still a comment */",
+          "create table todos (id uuid); /* alter table todos enable row level security; */",
+        ].join("\n"),
+      ),
+    ).toEqual(["3:supabase-no-rls"]);
+  });
+
+  it("clears dropped tables and flags a re-create without RLS", () => {
+    expect(
+      scanSupabaseSql([
+        {
+          path: "supabase/migrations/20260101000000_init.sql",
+          content: "create table todos (id uuid);\ncreate table notes (id uuid);\ncreate table tags (id uuid);",
+        },
+        {
+          path: "supabase/migrations/20260102000000_cleanup.sql",
+          content: "drop table if exists public.notes, tags cascade;",
+        },
+      ]).map((f) => `${f.line}:${f.rule}`),
+    ).toEqual(["1:supabase-no-rls"]);
+
+    expect(
+      scan(
+        [
+          "create table todos (id uuid);",
+          "alter table todos enable row level security;",
+          "drop table todos;",
+          "create table todos (id uuid, title text);",
+        ].join("\n"),
+      ),
+    ).toEqual(["4:supabase-no-rls"]);
+  });
+
   it("only reads .sql files under supabase/", () => {
     const content = "create table todos (id uuid);";
 
@@ -83,6 +121,28 @@ describe("scanSupabaseSql: open policies", () => {
       "3:supabase-open-policy",
       "4:supabase-open-policy",
     ]);
+  });
+
+  it("reads quoted role names", () => {
+    expect(
+      scan(
+        [
+          'create policy "Signed in" on todos to "authenticated" using (true);',
+          'create policy "Anon" on todos to "anon" using (true);',
+        ].join("\n"),
+      ),
+    ).toEqual(["2:supabase-open-policy"]);
+  });
+
+  it("skips open policies on tables outside the public schema", () => {
+    expect(
+      scan(
+        [
+          'create policy "Audit" on private.audit using (true);',
+          'create policy "Todos" on "public"."todos" using (true);',
+        ].join("\n"),
+      ),
+    ).toEqual(["2:supabase-open-policy"]);
   });
 
   it("allows policies scoped to a role or to the row owner", () => {

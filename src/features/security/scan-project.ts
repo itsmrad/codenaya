@@ -51,7 +51,14 @@ const PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 const TEMPLATED_PASSWORD = /^[$<{%*[]/;
 const ENV_FILE = /(?:^|\/)\.env(?:\.[\w.-]+)?$/;
 /** `.env.example`, `config.sample`: meant to be shared, so only real-looking keys count. */
-const EXAMPLE_FILE = /\.(?:example|sample)$/i;
+const EXAMPLE_FILE = /\.(?:example|sample|template|dist)$/i;
+const ENV_FILE_KEY = /^\s*(?:export\s+)?([A-Za-z_]\w*)\s*=/gm;
+
+/** A `.env` holding only public-prefixed keys exposes nothing the bundle doesn't already ship. */
+const envFileSeverity = (content: string): ScanSeverity =>
+  [...content.matchAll(ENV_FILE_KEY)].every(([, key]) => isPublicByConvention(key))
+    ? "medium"
+    : "high";
 
 const RULE_LABELS: Record<string, string> = {
   "stored-secret": "Value of a stored secret env var",
@@ -144,7 +151,7 @@ export function scanProject(
     const inClientSource = CLIENT_SOURCE.test(path);
     const isExample = EXAMPLE_FILE.test(path);
     if (ENV_FILE.test(path) && !isExample) {
-      add({ file: path, line: null, rule: "env-file", severity: "high" });
+      add({ file: path, line: null, rule: "env-file", severity: envFileSeverity(content) });
     }
 
     content.split("\n").forEach((text, index) => {
