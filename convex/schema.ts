@@ -224,7 +224,8 @@ export default defineSchema({
    */
   checkpoints: defineTable({
     projectId: v.id("projects"),
-    messageId: v.id("messages"),
+    // The run it was taken before; unset for a "Before pull" checkpoint (#343).
+    messageId: v.optional(v.id("messages")),
     // The prompt that started the run, for the history list.
     label: v.string(),
     fileCount: v.number(),

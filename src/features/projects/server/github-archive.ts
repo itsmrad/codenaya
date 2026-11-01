@@ -14,17 +14,18 @@ export type RepoArchive = {
 };
 
 /**
- * Downloads the repo's default branch as one tarball and reads it in memory,
+ * Downloads the repo's default branch (or `ref`) as one tarball and reads it in memory,
  * so an import costs one GitHub API request however many files the repo has
  * (#364). Caps are checked from each entry's header before its body is read.
  */
 export async function readRepoArchive(
   owner: string,
   repo: string,
-  token: string | null
+  token: string | null,
+  ref?: string
 ): Promise<RepoArchive> {
   const res = await fetch(
-    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/tarball`,
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/tarball${ref ? `/${encodeURIComponent(ref)}` : ""}`,
     {
       headers: {
         Accept: "application/vnd.github+json",
