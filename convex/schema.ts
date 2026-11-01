@@ -224,7 +224,8 @@ export default defineSchema({
     content: v.optional(v.string()),
     storageId: v.optional(v.id("_storage")),
   })
-    .index("by_checkpoint", ["checkpointId"])
+    // Path second: a run's diff reads only the paths it wrote (#225).
+    .index("by_checkpoint_and_path", ["checkpointId", "path"])
     .index("by_project", ["projectId"])
     .index("by_storageId", ["storageId"]),
 

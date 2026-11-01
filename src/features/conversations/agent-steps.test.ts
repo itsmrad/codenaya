@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  type AgentStep,
   buildPathIndex,
   describeToolCall,
   lastRunActivity,
+  runWrittenPaths,
   sanitizeAgentText,
   toolResultError,
 } from "./agent-steps";
@@ -138,5 +140,30 @@ describe("lastRunActivity", () => {
         { id: "b", kind: "tool", status: "running", startedAt: 4_000 },
       ]),
     ).toBe(5_000);
+  });
+});
+
+describe("runWrittenPaths", () => {
+  const step = (tool: string, targets: string[], status: AgentStep["status"] = "done"): AgentStep => ({
+    id: `${tool}:${targets.join(",")}`,
+    kind: "tool",
+    tool,
+    targets,
+    status,
+    startedAt: 0,
+  });
+
+  it("collects finished writes, with a rename's new path next to the old one", () => {
+    expect(
+      runWrittenPaths([
+        step("readFiles", ["a.ts"]),
+        step("createFiles", ["src/a.ts", "src/b.ts"]),
+        step("updateFile", ["src/a.ts"]),
+        step("renameFile", ["src/old.ts", "new.ts"]),
+        step("renameFile", ["root.ts", "top.ts"]),
+        step("deleteFiles", ["lib"]),
+        step("updateFile", ["failed.ts"], "error"),
+      ]),
+    ).toEqual(["src/a.ts", "src/b.ts", "src/old.ts", "src/new.ts", "root.ts", "top.ts", "lib"]);
   });
 });

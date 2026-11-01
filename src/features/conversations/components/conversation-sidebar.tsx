@@ -468,6 +468,10 @@ export const ConversationSidebar = ({
                     setPlanMode(false);
                     void sendMessage(buildPlanMessage(message.content));
                   }}
+                  checkpointId={
+                    checkpoints && (checkpointByMessage.get(message._id)?._id ?? null)
+                  }
+                  revertDisabled={isProcessing}
                   onRestore={
                     checkpointByMessage.has(message._id) && !isProcessing
                       ? () => setRestoreTarget(checkpointByMessage.get(message._id)!)

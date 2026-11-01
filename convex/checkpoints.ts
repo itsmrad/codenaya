@@ -1,10 +1,19 @@
+import { Chunk } from "@codemirror/merge";
+import { Text } from "@codemirror/state";
 import { v } from "convex/values";
 
+import { runWrittenPaths } from "../src/features/conversations/agent-steps";
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
-import { insertFileContent, withContents, writeFileContent } from "./fileContents";
+import {
+  insertFileContent,
+  readFileContent,
+  withContents,
+  writeFileContent,
+} from "./fileContents";
+import { deleteFileTree, findSibling, MAX_PROJECT_FILES } from "./files";
 import { releaseBlobs, releaseStorageIfUnreferenced } from "./projectCascade";
 import { getOwnedProject } from "./projects";
 
@@ -60,10 +69,10 @@ async function projectFiles(ctx: MutationCtx, projectId: Id<"projects">) {
   return files;
 }
 
-const checkpointRows = (ctx: MutationCtx, checkpointId: Id<"checkpoints">) =>
+const checkpointRows = (ctx: QueryCtx, checkpointId: Id<"checkpoints">) =>
   ctx.db
     .query("checkpointFiles")
-    .withIndex("by_checkpoint", (q) => q.eq("checkpointId", checkpointId));
+    .withIndex("by_checkpoint_and_path", (q) => q.eq("checkpointId", checkpointId));
 
 /** Deletes a checkpoint and any blob that only it was keeping alive. */
 async function deleteCheckpoint(
@@ -222,27 +231,284 @@ export const list = query({
   },
 });
 
+/** The caller's checkpoint. */
+async function getOwnedCheckpoint(ctx: QueryCtx, checkpointId: Id<"checkpoints">) {
+  const identity = await verifyAuth(ctx);
+  const checkpoint = await ctx.db.get("checkpoints", checkpointId);
+  if (!checkpoint) {
+    throw new Error("Checkpoint not found");
+  }
+  await getOwnedProject(ctx, checkpoint.projectId, identity.subject);
+  return checkpoint;
+}
+
+/** A running agent would keep writing over the restored files. */
+async function assertNoRunningAgent(
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  action: string,
+) {
+  const running = await ctx.db
+    .query("messages")
+    .withIndex("by_project_status", (q) =>
+      q.eq("projectId", projectId).eq("status", "processing"),
+    )
+    .first();
+  if (running) {
+    throw new Error(`Stop the running agent before ${action}`);
+  }
+}
+
 export const restore = mutation({
   args: { checkpointId: v.id("checkpoints") },
   handler: async (ctx, args) => {
-    const identity = await verifyAuth(ctx);
-    const checkpoint = await ctx.db.get("checkpoints", args.checkpointId);
-    if (!checkpoint) {
-      throw new Error("Checkpoint not found");
-    }
-    await getOwnedProject(ctx, checkpoint.projectId, identity.subject);
-
-    // A running agent would keep writing over the restored files.
-    const running = await ctx.db
-      .query("messages")
-      .withIndex("by_project_status", (q) =>
-        q.eq("projectId", checkpoint.projectId).eq("status", "processing"),
-      )
-      .first();
-    if (running) {
-      throw new Error("Stop the running agent before restoring");
-    }
-
+    const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
+    await assertNoRunningAgent(ctx, checkpoint.projectId, "restoring");
     await restoreCheckpoint(ctx, checkpoint);
+  },
+});
+
+/** Largest side of a file the chat diffs, in characters (#225). */
+export const MAX_DIFF_CHARS = 200_000;
+
+/** What `unifiedMergeView` uses by default, so the counts match the dialog. */
+const DIFF_CONFIG = { scanLimit: 500 };
+
+/** One side of a changed file: its text, or its blob when binary. */
+interface FileState {
+  content?: string;
+  storageId?: Id<"_storage">;
+}
+
+const countLines = (text: string) =>
+  text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+
+/** Lines added and removed going from `before` to `after`, as `git diff` counts them. */
+export function lineDelta(before: string, after: string) {
+  if (before === "" || after === "") {
+    return { additions: countLines(after), deletions: countLines(before) };
+  }
+  const a = Text.of(before.split("\n"));
+  const b = Text.of(after.split("\n"));
+  // A chunk ends one past its last line, or at its start when it has none.
+  const lines = (doc: Text, from: number, to: number) =>
+    to > from ? doc.lineAt(to - 1).number - doc.lineAt(from).number + 1 : 0;
+  let additions = 0;
+  let deletions = 0;
+  for (const chunk of Chunk.build(a, b, DIFF_CONFIG)) {
+    deletions += lines(a, chunk.fromA, chunk.toA);
+    additions += lines(b, chunk.fromB, chunk.toB);
+  }
+  return { additions, deletions };
+}
+
+/** Whether `path` is one of the targets or inside one (a folder stands for its contents). */
+const isUnder = (path: string, targets: string[]) =>
+  targets.some((target) => path === target || path.startsWith(`${target}/`));
+
+/** The checkpoint's files at or under each target path. */
+async function checkpointState(
+  ctx: QueryCtx,
+  checkpointId: Id<"checkpoints">,
+  targets: string[],
+) {
+  const state = new Map<string, FileState>();
+  for (const target of targets) {
+    const rows = [
+      // A file and a folder may share a path, hence 2.
+      ...(await ctx.db
+        .query("checkpointFiles")
+        .withIndex("by_checkpoint_and_path", (q) =>
+          q.eq("checkpointId", checkpointId).eq("path", target),
+        )
+        .take(2)),
+      // "0" sorts right after "/", so this is everything under the folder.
+      ...(await ctx.db
+        .query("checkpointFiles")
+        .withIndex("by_checkpoint_and_path", (q) =>
+          q.eq("checkpointId", checkpointId).gte("path", `${target}/`).lt("path", `${target}0`),
+        )
+        .take(MAX_CHECKPOINT_FILES)),
+    ];
+    for (const row of rows) {
+      if (row.type === "file") {
+        state.set(row.path, { content: row.content, storageId: row.storageId });
+      }
+    }
+  }
+  return state;
+}
+
+/** The project's current files at or under each target path. */
+async function liveState(ctx: QueryCtx, projectId: Id<"projects">, targets: string[]) {
+  const files = await ctx.db
+    .query("files")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .take(MAX_PROJECT_FILES);
+  const state = new Map<string, FileState>();
+  for (const { file, path } of withPaths(files)) {
+    if (file.type !== "file" || !isUnder(path, targets)) continue;
+    state.set(path, {
+      content: file.storageId ? undefined : await readFileContent(ctx, file),
+      storageId: file.storageId,
+    });
+  }
+  return state;
+}
+
+/**
+ * The files the checkpoint's run changed, before and after it (#225). Only the
+ * paths the run wrote count, so manual edits to other files don't show. After
+ * is the snapshot taken before the project's next run, or the live files when
+ * this is the latest run.
+ */
+async function runChanges(ctx: QueryCtx, checkpoint: Doc<"checkpoints">) {
+  const message = await ctx.db.get("messages", checkpoint.messageId);
+  const targets = runWrittenPaths(message?.steps ?? []);
+  if (targets.length === 0) return [];
+
+  const next = await ctx.db
+    .query("checkpoints")
+    .withIndex("by_project", (q) =>
+      q.eq("projectId", checkpoint.projectId).gt("_creationTime", checkpoint._creationTime),
+    )
+    .first();
+  const before = await checkpointState(ctx, checkpoint._id, targets);
+  const after = next
+    ? await checkpointState(ctx, next._id, targets)
+    : await liveState(ctx, checkpoint.projectId, targets);
+
+  return [...new Set([...before.keys(), ...after.keys()])]
+    .sort()
+    .map((path) => ({ path, before: before.get(path), after: after.get(path) }))
+    .filter(
+      ({ before, after }) =>
+        before?.content !== after?.content || before?.storageId !== after?.storageId,
+    );
+}
+
+/** A change as listed in the chat: status and line counts, no contents. */
+function summarize({ path, before, after }: Awaited<ReturnType<typeof runChanges>>[number]) {
+  const binary = Boolean(before?.storageId || after?.storageId);
+  const a = before?.content ?? "";
+  const b = after?.content ?? "";
+  const tooLarge = !binary && Math.max(a.length, b.length) > MAX_DIFF_CHARS;
+  return {
+    path,
+    status: !before ? ("added" as const) : !after ? ("deleted" as const) : ("modified" as const),
+    binary,
+    tooLarge,
+    ...(binary || tooLarge ? {} : lineDelta(a, b)),
+  };
+}
+
+/** The files a run changed, with line counts; no contents (#225). */
+export const listChanges = query({
+  args: { checkpointId: v.id("checkpoints") },
+  handler: async (ctx, args) => {
+    const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
+    return (await runChanges(ctx, checkpoint)).map(summarize);
+  },
+});
+
+/**
+ * One changed file's text before and after the run, or null when the run
+ * didn't change it. Binary and too-large files come without contents.
+ */
+export const fileDiff = query({
+  args: { checkpointId: v.id("checkpoints"), path: v.string() },
+  handler: async (ctx, args) => {
+    const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
+    const change = (await runChanges(ctx, checkpoint)).find(({ path }) => path === args.path);
+    if (!change) return null;
+    const summary = summarize(change);
+    if (summary.binary || summary.tooLarge) return summary;
+    return { ...summary, before: change.before?.content ?? "", after: change.after?.content ?? "" };
+  },
+});
+
+/** The folder at `segments` (undefined: the root); missing ones are created, or give null. */
+async function folderAt(
+  ctx: MutationCtx,
+  projectId: Id<"projects">,
+  segments: string[],
+  create: boolean,
+) {
+  let parentId: Id<"files"> | undefined;
+  for (const name of segments) {
+    const folder = await findSibling(ctx, { projectId, parentId, name, type: "folder" });
+    if (folder) {
+      parentId = folder._id;
+    } else if (create) {
+      parentId = await ctx.db.insert("files", {
+        projectId,
+        parentId,
+        name,
+        type: "folder",
+        updatedAt: Date.now(),
+      });
+    } else {
+      return null;
+    }
+  }
+  return parentId;
+}
+
+/**
+ * Puts one file back as it was before the checkpoint's run (#225): rewritten,
+ * recreated with its folders, or deleted when the run created it. Other files
+ * are left alone.
+ * shortcut: whole file only; hunk revert (#225 follow-up) would add an optional range.
+ */
+export const revertFile = mutation({
+  args: { checkpointId: v.id("checkpoints"), path: v.string() },
+  handler: async (ctx, args) => {
+    const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
+    const { projectId } = checkpoint;
+    await assertNoRunningAgent(ctx, projectId, "reverting");
+
+    const row = (
+      await ctx.db
+        .query("checkpointFiles")
+        .withIndex("by_checkpoint_and_path", (q) =>
+          q.eq("checkpointId", checkpoint._id).eq("path", args.path),
+        )
+        .take(2)
+    ).find((candidate) => candidate.type === "file");
+    const segments = args.path.split("/");
+    const name = segments.pop()!;
+    // Folders are only recreated when there is a file to put back.
+    const parentId = await folderAt(ctx, projectId, segments, Boolean(row));
+    const live =
+      parentId === null
+        ? null
+        : await findSibling(ctx, { projectId, parentId, name, type: "file" });
+
+    const now = Date.now();
+    if (!row) {
+      if (!live) return;
+      await deleteFileTree(ctx, live);
+    } else if (live) {
+      if (live.storageId !== row.storageId) {
+        await ctx.db.patch("files", live._id, { storageId: row.storageId, updatedAt: now });
+        if (live.storageId) await releaseStorageIfUnreferenced(ctx, live.storageId);
+      }
+      if ((await readFileContent(ctx, live)) !== row.content) {
+        await writeFileContent(ctx, live, row.content);
+      }
+    } else {
+      const fileId = await ctx.db.insert("files", {
+        projectId,
+        parentId: parentId ?? undefined,
+        name,
+        type: "file",
+        storageId: row.storageId,
+        updatedAt: now,
+      });
+      if (row.content !== undefined) {
+        await insertFileContent(ctx, fileId, projectId, row.content);
+      }
+    }
+    await ctx.db.patch("projects", projectId, { updatedAt: now });
   },
 });

@@ -117,6 +117,35 @@ export const describeToolCall = (
   return targets.slice(0, MAX_TARGETS);
 };
 
+/** Tools whose finished calls change project files ("N files changed"). */
+export const FILE_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "createFiles",
+  "updateFile",
+  "renameFile",
+  "deleteFiles",
+]);
+
+/**
+ * Every path a run's finished write calls named: created, edited, renamed
+ * from or to, or deleted (#225). A folder path stands for everything under it.
+ */
+export const runWrittenPaths = (steps: AgentStep[]) => [
+  ...new Set(
+    steps
+      .filter(
+        (step) =>
+          step.kind === "tool" && step.status === "done" && FILE_WRITE_TOOLS.has(step.tool ?? ""),
+      )
+      .flatMap(({ tool, targets = [] }) => {
+        if (tool !== "renameFile" || targets.length < 2) return targets;
+        // Renames record the new name only; it lands next to the old path.
+        const [from, name] = targets;
+        const slash = from.lastIndexOf("/");
+        return [from, slash === -1 ? name : `${from.slice(0, slash)}/${name}`];
+      }),
+  ),
+];
+
 /**
  * The error message of an AgentKit tool result, or undefined on success.
  * Tools here report failures by returning an "Error..." string; AgentKit wraps

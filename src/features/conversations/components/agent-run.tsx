@@ -16,6 +16,7 @@ import {
   FilePlus2Icon,
   FileSymlinkIcon,
   FileTextIcon,
+  FileDiffIcon,
   FileX2Icon,
   FolderPlusIcon,
   FolderTreeIcon,
@@ -35,15 +36,22 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
-import { type AgentStep, BUILD_VERIFIED, STALLED_RUN_MS, lastRunActivity } from "../agent-steps";
+import type { Id } from "../../../../convex/_generated/dataModel";
+import {
+  type AgentStep,
+  BUILD_VERIFIED,
+  FILE_WRITE_TOOLS,
+  STALLED_RUN_MS,
+  lastRunActivity,
+} from "../agent-steps";
+import { useRunChanges } from "../hooks/use-checkpoints";
+import { LineDelta, RunDiffDialog, totalDelta } from "./run-diff-dialog";
 import { LoaderGrid } from "./run-loader";
 
 interface ToolMeta {
   icon: LucideIcon;
   running: string;
   done: string;
-  /** Changes project files (counted in "N files changed"). */
-  writes?: boolean;
   /** Consecutive finished calls collapse into one row. */
   mergeable?: boolean;
 }
@@ -51,12 +59,12 @@ interface ToolMeta {
 const TOOL_META: Record<string, ToolMeta> = {
   readFiles: { icon: FileTextIcon, running: "Reading", done: "Read", mergeable: true },
   listFiles: { icon: FolderTreeIcon, running: "Listing files", done: "Listed files", mergeable: true },
-  createFiles: { icon: FilePlus2Icon, running: "Creating", done: "Created", writes: true },
+  createFiles: { icon: FilePlus2Icon, running: "Creating", done: "Created" },
   createFolder: { icon: FolderPlusIcon, running: "Creating folder", done: "Created folder" },
   scaffoldViteApp: { icon: FolderPlusIcon, running: "Scaffolding Vite app", done: "Scaffolded Vite app" },
-  updateFile: { icon: FilePenIcon, running: "Editing", done: "Edited", writes: true },
-  renameFile: { icon: FileSymlinkIcon, running: "Renaming", done: "Renamed", writes: true },
-  deleteFiles: { icon: FileX2Icon, running: "Deleting", done: "Deleted", writes: true },
+  updateFile: { icon: FilePenIcon, running: "Editing", done: "Edited" },
+  renameFile: { icon: FileSymlinkIcon, running: "Renaming", done: "Renamed" },
+  deleteFiles: { icon: FileX2Icon, running: "Deleting", done: "Deleted" },
   scrapeUrls: { icon: GlobeIcon, running: "Fetching", done: "Fetched" },
   setEnvVar: { icon: KeyRoundIcon, running: "Setting env", done: "Set env" },
   loadSkill: { icon: BookOpenIcon, running: "Loading skill", done: "Used skill" },
@@ -359,7 +367,7 @@ const CHANGED_LIMIT = 4;
 const changedFiles = (toolSteps: AgentStep[]) => [
   ...new Set(
     toolSteps
-      .filter((step) => step.status === "done" && toolMeta(step.tool).writes)
+      .filter((step) => step.status === "done" && FILE_WRITE_TOOLS.has(step.tool ?? ""))
       .flatMap((step) =>
         step.tool === "deleteFiles"
           ? []
@@ -378,10 +386,19 @@ const ChangedFiles = ({
   paths,
   animate,
   onOpenFile,
+  delta,
+  onReview,
+  historyGone,
 }: {
   paths: string[];
   animate: boolean;
   onOpenFile?: (path: string) => void;
+  /** The run's line counts, once its diff is known (#225). */
+  delta?: { additions: number; deletions: number };
+  /** Opens the run's diff. */
+  onReview?: () => void;
+  /** The run's checkpoint was pruned, so there is nothing to diff against. */
+  historyGone?: boolean;
 }) => {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? paths : paths.slice(0, CHANGED_LIMIT);
@@ -417,6 +434,22 @@ const ChangedFiles = ({
           +{more} more
         </button>
       )}
+      {onReview && (
+        <button
+          type="button"
+          onClick={onReview}
+          className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11.5px] text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 motion-reduce:transition-none"
+        >
+          <FileDiffIcon className="size-3.5" />
+          Review changes
+          {delta && <LineDelta change={{ binary: false, tooLarge: false, ...delta }} />}
+        </button>
+      )}
+      {historyGone && (
+        <span className="ml-auto inline-flex h-7 items-center text-[11.5px] text-muted-foreground">
+          History no longer available
+        </span>
+      )}
     </div>
   );
 };
@@ -431,6 +464,13 @@ interface AgentRunProps {
   /** Processing, but silent for too long (see `useRunStalled`). */
   stalled?: boolean;
   onOpenFile?: (path: string) => void;
+  /**
+   * The checkpoint taken before this run, which its diff is read from (#225).
+   * Null once it was pruned; undefined while checkpoints load.
+   */
+  checkpointId?: Id<"checkpoints"> | null;
+  /** An agent run is in progress, so files can't be reverted. */
+  revertDisabled?: boolean;
 }
 
 /**
@@ -445,6 +485,8 @@ export const AgentRun = ({
   model,
   stalled = false,
   onOpenFile,
+  checkpointId,
+  revertDisabled = false,
 }: AgentRunProps) => {
   const live = status === "processing" && !stalled;
   const [open, setOpen] = useState(live);
@@ -474,13 +516,17 @@ export const AgentRun = ({
   const errors = toolSteps.filter((step) => step.status === "error").length;
   const changed = new Set(
     toolSteps
-      .filter((step) => toolMeta(step.tool).writes && step.status === "done")
+      .filter((step) => FILE_WRITE_TOOLS.has(step.tool ?? "") && step.status === "done")
       .map((step) => step.targets?.[0])
       .filter(Boolean),
   ).size;
   const endedAt = completedAt ?? toolSteps.at(-1)?.endedAt;
   const hidden = live && !showAll ? Math.max(0, rows.length - LIVE_ROWS) : 0;
   const written = status === "completed" ? changedFiles(toolSteps) : [];
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const changes = useRunChanges(written.length > 0 ? checkpointId : null);
+  const delta = changes && totalDelta(changes);
+  const filesChanged = changes?.length ?? changed;
   const settle =
     startedLive && "animate-in fade-in-0 duration-300 motion-reduce:animate-none";
 
@@ -488,7 +534,9 @@ export const AgentRun = ({
 
   const summary = [
     `${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`,
-    changed > 0 && `${changed} ${changed === 1 ? "file" : "files"} changed`,
+    filesChanged > 0 &&
+      `${filesChanged} ${filesChanged === 1 ? "file" : "files"} changed` +
+        (delta ? ` +${delta.additions} −${delta.deletions}` : ""),
     model,
   ]
     .filter(Boolean)
@@ -595,7 +643,22 @@ export const AgentRun = ({
         </CollapsibleContent>
       )}
       {written.length > 0 && (
-        <ChangedFiles paths={written} animate={startedLive} onOpenFile={onOpenFile} />
+        <ChangedFiles
+          paths={written}
+          animate={startedLive}
+          onOpenFile={onOpenFile}
+          delta={delta}
+          onReview={changes?.length ? () => setReviewOpen(true) : undefined}
+          historyGone={checkpointId === null}
+        />
+      )}
+      {checkpointId && (
+        <RunDiffDialog
+          checkpointId={checkpointId}
+          open={reviewOpen}
+          onOpenChange={setReviewOpen}
+          revertDisabled={revertDisabled}
+        />
       )}
     </Collapsible>
   );
