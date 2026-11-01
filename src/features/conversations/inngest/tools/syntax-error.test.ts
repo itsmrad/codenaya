@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { syntaxError, syntaxErrorNote } from "./syntax-error";
 
@@ -46,5 +46,17 @@ describe("syntaxErrorNote", () => {
     expect(note).toContain("Syntax errors (the content was saved; fix it with editFile");
     expect(note).toContain("App.tsx 1:");
     expect(note).not.toContain("ok.ts");
+  });
+
+  it("skips a file TypeScript throws on and still checks the rest", () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const note = syntaxErrorNote([
+      { name: "types.d.ts", content: "export type A = 1;\n" },
+      { name: "App.tsx", content: "export default () => <div>;" },
+    ]);
+    expect(note).toContain("App.tsx 1:");
+    expect(note).not.toContain("types.d.ts");
+    expect(logged).toHaveBeenCalledTimes(1);
+    logged.mockRestore();
   });
 });

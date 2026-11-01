@@ -155,6 +155,23 @@ describe("editFile tool", () => {
     expect(hasUncheckedWrites([{ toolCalls: [{ tool: { name: "editFile" }, content: { data } }] }])).toBe(false);
   });
 
+  it("reports success for a committed write the syntax check can't run on", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.query.mockReset();
+    mocks.query
+      .mockResolvedValueOnce([{ _id: "types", name: "types.d.ts", type: "file" }])
+      .mockResolvedValueOnce({ _id: "types", content: "export type A = 1;\n" });
+    const data = await createEditFileTool({ projectId, internalKey }).handler(
+      { path: "types.d.ts", edits: [{ oldText: "1", newText: "2" }] } as never,
+      ctx,
+    );
+
+    expect(data).toBe('File "types.d.ts" edited successfully');
+    expect(mocks.mutation).toHaveBeenCalledTimes(1);
+    expect(hasUncheckedWrites([{ toolCalls: [{ tool: { name: "editFile" }, content: { data } }] }])).toBe(true);
+    logged.mockRestore();
+  });
+
   it("reports a syntax error the edit introduced", async () => {
     expect(await edit([{ oldText: "b = 2;", newText: "b = (" }])).toContain("Syntax errors");
     expect(mocks.mutation).toHaveBeenCalledTimes(1);
