@@ -130,9 +130,7 @@ export const postWriteNote = async (
     findings.unshift(...rewrites.map((message) => ({ checkId: "icon-rewrite", message })));
     return projectCheckNote(findings);
   } catch {
-    return projectCheckNote([
-      ...rewrites.map((message) => ({ checkId: "icon-rewrite", message })),
-      { checkId: "unavailable", message: "Project checks unavailable; write succeeded. Use checkBuild before finishing." },
-    ]);
+    // No formatting or further diagnostics here: the write has already committed.
+    return "\nProject checks (content saved):\n- [unavailable] Project checks unavailable; write succeeded. Use checkBuild before finishing.";
   }
 };

@@ -17,7 +17,6 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
 import { createDeleteFilesTool } from "./delete-files";
 import { createListFilesTool } from "./list-files";
-import { hasUncheckedWrites } from "../build-check-gate";
 import { buildProjectTreePromptSection, MAX_PROMPT_TREE_ENTRIES, type ProjectFile } from "./paths";
 import { createReadFilesTool } from "./read-files";
 import { createRenameFileTool } from "./rename-file";
@@ -379,6 +378,23 @@ describe("post-write checks at every boundary", () => {
     expect(db.rows.some((r) => r.content?.includes("Camera as Cammera"))).toBe(true);
     expect(registry).toHaveBeenCalledWith(["not-installed"]);
     expect(step.run).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["update", "edit", "write", "create"])("%s remains successful when post-write diagnostics reject", async (kind) => {
+    const options = { ...opts, registry: vi.fn(async () => { throw new Error("diagnostics failed"); }) };
+    const content = 'import missing from "not-installed";';
+    const result = kind === "update"
+      ? await createUpdateFileTool(options).handler({ path: "src/App.tsx", content }, ctx)
+      : kind === "edit"
+        ? await createEditFileTool(options).handler({ path: "src/App.tsx", edits: [{ oldText: "app", newText: content }] }, ctx)
+        : kind === "write"
+          ? await createWriteFilesTool(options).handler({ files: [{ path: "src/New.tsx", content }] }, ctx)
+          : await createCreateFilesTool(options).handler({ parentId: "src", files: [{ name: "New.tsx", content }] }, ctx);
+    expect(result).toContain("write succeeded");
+    expect(toolResultError({ data: result })).toBeUndefined();
+    const name = { update: "updateFile", edit: "editFile", write: "writeFiles", create: "createFiles" }[kind]!;
+    expect(hasUncheckedWrites([{ toolCalls: [{ tool: { name }, content: { data: result } }] }])).toBe(true);
+    expect(db.rows.some((row) => row.content === content)).toBe(true);
   });
 
   it("returns the persisted result on replay without new writes, queries or registry calls", async () => {
