@@ -138,25 +138,71 @@ test.describe("command palette", () => {
     await page.keyboard.press("Escape");
 
     await openWith(page, "ControlOrMeta+k");
-    await palette(page).getByRole("option", { name: "Toggle chat panel" }).click();
+    await palette(page).getByRole("combobox").fill("Toggle chat panel");
+    await page.keyboard.press("Enter");
     await expect(page.getByRole("button", { name: "New conversation" })).toBeHidden();
     await openWith(page, "ControlOrMeta+k");
-    await palette(page).getByRole("option", { name: "Toggle chat panel" }).click();
+    await palette(page).getByRole("combobox").fill("Toggle chat panel");
+    await page.keyboard.press("Enter");
     await expect(page.getByRole("button", { name: "New conversation" })).toBeVisible();
+  });
+
+  test("palette fits dashboard and IDE in both themes at phone, tablet and desktop widths", async ({ page }) => {
+    test.setTimeout(180_000);
+    await page.route("**/api/sandbox", (route) =>
+      route.fulfill({ status: 503, json: { error: "stubbed", code: "config" } }),
+    );
+    await openFirstProject(page);
+    const projectUrl = page.url();
+    for (const [name, url] of [["dashboard", "/"], ["ide", projectUrl]]) {
+      await page.goto(url);
+      for (const width of [375, 768, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const theme of ["light", "dark"]) {
+          await page.evaluate((value) => {
+            document.documentElement.classList.toggle("dark", value === "dark");
+            document.documentElement.classList.toggle("light", value === "light");
+          }, theme);
+          await openWith(page, "ControlOrMeta+Shift+P");
+          const box = await palette(page).boundingBox();
+          expect(box!.x).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+          await expect(palette(page).getByRole("combobox")).toBeFocused();
+          if (process.env.PALETTE_SCREENSHOT_DIR) {
+            await page.screenshot({ path: `${process.env.PALETTE_SCREENSHOT_DIR}/${name}-${width}-${theme}.png` });
+          }
+          await page.keyboard.press("Escape");
+          await expect(palette(page)).toBeHidden();
+        }
+      }
+    }
   });
 
   test("IDE editor: Cmd/Ctrl+K stays quick edit, Cmd/Ctrl+Shift+P opens the palette", async ({ page }) => {
     test.setTimeout(120_000);
-    // quick-edit.spec.ts seeds this project; reading it here writes nothing.
-    await page.goto("/");
+    // Reuse an existing root text file; this check never seeds the dev database.
     const user = await userConvexClient(page);
-    const project = (await user.query(api.projects.get, {})).find(({ name }) => name === "e2e-quick-edit");
-    test.skip(!project, "needs the e2e-quick-edit project (run quick-edit.spec.ts once)");
+    const projects = await user.query(api.projects.get, {});
+    let fixture: { projectId: (typeof projects)[number]["_id"]; name: string } | undefined;
+    for (const project of projects) {
+      const files = await user.query(api.files.getFiles, { projectId: project._id });
+      for (const file of files.filter((file) => file.type === "file" && !file.parentId && /\.(tsx?|jsx?|html|css|json)$/.test(file.name))) {
+        const stored = await user.query(api.files.getFile, { id: file._id });
+        if (stored.content?.trim()) {
+          fixture = { projectId: project._id, name: file.name };
+          break;
+        }
+      }
+      if (fixture) break;
+    }
+    test.skip(!fixture, "needs an existing project with a nonempty root text file; dev seeding is forbidden");
 
-    await page.goto(`/projects/${project!._id}`);
-    await page.getByRole("button", { name: "math.ts", exact: true }).click();
+    await page.goto(`/projects/${fixture!.projectId}`);
+    await page.getByRole("tab", { name: "Code" }).click();
+    await page.getByRole("button", { name: fixture!.name, exact: true })
+      .and(page.locator('[data-slot="context-menu-trigger"]')).click();
     const editor = page.locator(".cm-content");
-    await expect(editor).toContainText("return");
+    await expect(editor).not.toBeEmpty();
     await editor.focus();
     await page.keyboard.press("ControlOrMeta+a");
     await page.keyboard.press("ControlOrMeta+k");
