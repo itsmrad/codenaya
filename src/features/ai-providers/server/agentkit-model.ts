@@ -1,6 +1,6 @@
 import { anthropic, openai } from "@inngest/agent-kit";
 
-import { baseUrlFor, type AiProviderId } from "../registry";
+import { AI_PROVIDERS, baseUrlFor, type AiProviderId } from "../registry";
 
 /**
  * AgentKit model for any supported provider.
@@ -45,10 +45,44 @@ export function buildAgentKitModel({
     });
   }
 
-  return openai({
+  const adapter = openai({
     model,
     apiKey,
     baseUrl: url,
     ...(temperature !== undefined ? { defaultParameters: { temperature } } : {}),
   });
+  const parallel = AI_PROVIDERS[provider].parallelToolCalls !== false;
+
+  // AgentKit sends `parallel_tool_calls: false` with every tool list, so a turn
+  // could make one call. Allow several, or drop the parameter for an endpoint
+  // that rejects it. A request without tools (the title) never carries it.
+  return {
+    ...adapter,
+    onCall(...args: Parameters<NonNullable<typeof adapter.onCall>>) {
+      adapter.onCall?.(...args);
+      const body = args[1];
+      if (body.parallel_tool_calls !== false) return;
+      if (parallel) body.parallel_tool_calls = true;
+      else delete body.parallel_tool_calls;
+    },
+  };
+}
+
+type AgentKitModel = ReturnType<typeof buildAgentKitModel>;
+type RequestBody = Record<string, unknown>;
+
+/**
+ * The same model with tool calls turned off, for a turn that must answer in
+ * text. Its tools stay in the request: some providers reject tool calls in the
+ * history of a request that declares no tools.
+ */
+export function withoutToolCalls(model: AgentKitModel): AgentKitModel {
+  const onCall = model.onCall as ((adapter: unknown, body: RequestBody) => void) | undefined;
+  return {
+    ...model,
+    onCall(adapter: unknown, body: RequestBody) {
+      onCall?.(adapter, body);
+      if (body.tools) body.tool_choice = model.format === "anthropic" ? { type: "none" } : "none";
+    },
+  } as AgentKitModel;
 }

@@ -2,8 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   type AgentStep,
+  BUILD_CHECK_UNFINISHED,
+  BUILD_NOT_CHECKED,
+  BUILD_VERIFIED,
+  STATIC_CHECKS_FAILED,
+  STATIC_CHECKS_PASSED,
   buildPathIndex,
   describeToolCall,
+  fixedBuildErrors,
   lastRunActivity,
   runWrittenPaths,
   sanitizeAgentText,
@@ -140,6 +146,45 @@ describe("lastRunActivity", () => {
         { id: "b", kind: "tool", status: "running", startedAt: 4_000 },
       ]),
     ).toBe(5_000);
+  });
+});
+
+describe("fixedBuildErrors", () => {
+  const check = (id: string, status: AgentStep["status"], extra: Partial<AgentStep> = {}): AgentStep => ({
+    id,
+    kind: "tool",
+    tool: "checkBuild",
+    status,
+    startedAt: 0,
+    ...extra,
+  });
+  const failed = check("build-fail", "error", { error: "Error: Build failed. Fix these errors" });
+  const staticFailed = check("static-fail", "error", { error: `${STATIC_CHECKS_FAILED}:\n- src/Hero.tsx is missing` });
+  const verified = check("verified", "done", { text: BUILD_VERIFIED });
+  const staticPassed = check("static-pass", "done", { text: STATIC_CHECKS_PASSED });
+
+  it("counts failed checks a later verified build resolved", () => {
+    expect(fixedBuildErrors([failed, verified])).toBe(1);
+    expect(fixedBuildErrors([failed, failed, verified])).toBe(2);
+  });
+
+  it("leaves failures with no verified build after them unresolved", () => {
+    expect(fixedBuildErrors([failed, failed])).toBe(0);
+    expect(fixedBuildErrors([failed, verified, failed])).toBe(1);
+    expect(fixedBuildErrors([failed, staticPassed])).toBe(0);
+  });
+
+  it("lets any passing check resolve a static-check failure, as the finish gate does", () => {
+    const edit: AgentStep = { ...staticPassed, id: "edit", tool: "createFiles", text: undefined };
+    expect(fixedBuildErrors([staticFailed, edit, staticPassed])).toBe(1);
+    expect(fixedBuildErrors([staticFailed, check("not-checked", "done", { text: BUILD_NOT_CHECKED })])).toBe(1);
+    expect(fixedBuildErrors([staticFailed, failed, staticPassed])).toBe(1);
+  });
+
+  it("ignores running checks, checks that could not finish and other tools", () => {
+    const unfinished = check("unfinished", "error", { error: `${BUILD_CHECK_UNFINISHED} (timeout).` });
+    const otherTool: AgentStep = { ...failed, id: "other", tool: "updateFile" };
+    expect(fixedBuildErrors([check("running", "running"), unfinished, otherTool, verified])).toBe(0);
   });
 });
 

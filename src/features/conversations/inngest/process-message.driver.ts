@@ -14,6 +14,21 @@ export const text = (content: string) => ({
   choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }],
 });
 
+export const toolCall = (name: string, args: Record<string, unknown> = {}) => ({
+  choices: [
+    {
+      message: {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: `call_${name}`, type: "function", function: { name, arguments: JSON.stringify(args) } },
+        ],
+      },
+      finish_reason: "tool_calls",
+    },
+  ],
+});
+
 /** One inference result: memoized data, or a failed AI gateway step. */
 export type Inference = { data: unknown } | { error: unknown };
 
