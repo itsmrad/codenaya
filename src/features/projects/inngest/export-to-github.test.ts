@@ -24,7 +24,7 @@ vi.mock("octokit", () => ({
       users: { getAuthenticated: async () => ({ data: { login: "octocat" } }) },
       repos: {
         createForAuthenticatedUser: async () => ({
-          data: { html_url: "https://github.com/octocat/demo" },
+          data: { html_url: "https://github.com/octocat/demo", full_name: "octocat/demo" },
         }),
       },
       git: {
@@ -105,6 +105,16 @@ describe("exportToGithub", () => {
     ]);
     expect(mocks.createCommit.mock.calls[0][0]).toMatchObject({ tree: "tree", parents: ["init"] });
     expect(mocks.updateRef.mock.calls[0][0]).toMatchObject({ ref: "heads/main", sha: "commit" });
+    // Fast-forward over the auto_init commit, never forced (#343).
+    expect(mocks.updateRef.mock.calls[0][0]).not.toHaveProperty("force");
+    // Later changes are pushed to this repo.
+    const linked = mocks.mutation.mock.calls.find(([ref]) => getFunctionName(ref) === "system:setGithubSync");
+    expect(linked?.[1].githubSync).toEqual({
+      repo: "octocat/demo",
+      branch: "main",
+      lastSyncedSha: "commit",
+      lastSyncedAt: expect.any(Number),
+    });
 
     const statuses = mocks.mutation.mock.calls
       .filter(([ref]) => getFunctionName(ref) === "system:updateExportStatus")

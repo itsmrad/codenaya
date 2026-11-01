@@ -101,6 +101,9 @@ export const exportToGithub = inngest.createFunction(
       return ref.object.sha;
     });
 
+    // Runs that start after the files are read are left for the next push.
+    const syncedAt = await step.run("get-sync-time", () => Date.now());
+
     // Fetch all project files with storage URLs
     const files = await step.run("fetch-project-files", async () => {
       return (await convex.query(api.system.getProjectFilesWithUrls, {
@@ -216,19 +219,29 @@ export const exportToGithub = inngest.createFunction(
       });
     });
 
-    // Update the main branch reference to point to our new commit
+    // Fast-forward main to our commit, which builds on the auto_init one
     await step.run("update-branch-ref", async () => {
       return await octokit.rest.git.updateRef({
         owner: user.login,
         repo: repoName,
         ref: "heads/main",
         sha: commit.sha,
-        force: true,
       });
     });
 
-    // Set status to completed with repo URL
+    // Set status to completed with repo URL, and link the repo so later
+    // changes are pushed to it (#343)
     await step.run("set-completed-status", async () => {
+      await convex.mutation(api.system.setGithubSync, {
+        internalKey,
+        projectId,
+        githubSync: {
+          repo: repo.full_name,
+          branch: "main",
+          lastSyncedSha: commit.sha,
+          lastSyncedAt: syncedAt,
+        },
+      });
       await convex.mutation(api.system.updateExportStatus, {
         internalKey,
         projectId,

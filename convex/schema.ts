@@ -116,6 +116,19 @@ export const runModelValidator = v.object({
   provider: v.optional(platformProviderValidator),
 });
 
+/** A project's link to its GitHub repo (#343). */
+export const githubSyncValidator = v.object({
+  repo: v.string(), // "owner/name"
+  branch: v.string(),
+  // The commit on `branch` that matches the project as of `lastSyncedAt`.
+  lastSyncedSha: v.string(),
+  lastSyncedAt: v.number(),
+  // Set while the remote branch has moved on: pushes go to the sync branch
+  // instead, continuing from this commit and time.
+  syncBranchSha: v.optional(v.string()),
+  syncBranchAt: v.optional(v.number()),
+});
+
 export default defineSchema({
   /**
    * Profile mirror of a Clerk user, kept in sync by the Clerk webhook
@@ -154,6 +167,8 @@ export default defineSchema({
       ),
     ),
     exportRepoUrl: v.optional(v.string()),
+    // The GitHub repo this project pushes to (#343), set by the first export.
+    githubSync: v.optional(githubSyncValidator),
     settings: v.optional(
       v.object({
         installCommand: v.optional(v.string()),
