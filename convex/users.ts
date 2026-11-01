@@ -86,6 +86,11 @@ export const upsertFromClerk = internalMutation({
   handler: async (ctx, { clerkUserId, createdAt, ...profile }) => {
     const existing = await getByClerkUserId(ctx, clerkUserId);
 
+    // ensureCurrent can store a newer profile before the sign-up webhook arrives.
+    if (createdAt !== undefined && !existing?.deletedAt) {
+      await recordSignedUp(ctx, clerkUserId, createdAt);
+    }
+
     if (!existing) {
       await ctx.db.insert("users", { clerkUserId, ...profile });
     } else if (!existing.deletedAt && existing.updatedAt <= profile.updatedAt) {
@@ -95,9 +100,6 @@ export const upsertFromClerk = internalMutation({
       return;
     }
 
-    if (createdAt !== undefined) {
-      await recordSignedUp(ctx, clerkUserId, createdAt);
-    }
     await syncShowcaseOwner(ctx, clerkUserId, profile);
   },
 });

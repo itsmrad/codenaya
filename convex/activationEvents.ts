@@ -29,9 +29,8 @@ type EventBody = Body<StoredEvent>;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FUNNEL_WINDOW_MS = 7 * DAY_MS;
 
-// shortcut: one transaction reads at most this many sign-ups (and first builds)
-// per report, about 3k index lookups; page through an action once a week
-// brings more sign-ups than this.
+// shortcut: report caps sign-ups and first builds separately at 500; paginate
+// through an action when either cohort exceeds this limit.
 const MAX_REPORT_ROWS = 500;
 /** `run_finished` rows checked per user for an `ok` one within the window. */
 const MAX_RUNS_CHECKED = 20;
@@ -90,6 +89,8 @@ export async function recordSignedUp(ctx: MutationCtx, userId: string, at: numbe
 export async function recordRunStarted(ctx: MutationCtx, projectId: Id<"projects">) {
   const firstBuild = !(await earliestProjectEvent(ctx, projectId, "run_started"));
   await recordProjectEvent(ctx, projectId, { name: "run_started", props: { firstBuild } });
+  // A separate indexed name keeps later runs out of the report's cohort limit.
+  if (firstBuild) await recordProjectEvent(ctx, projectId, { name: "first_build_started" });
 }
 
 /**
@@ -206,7 +207,7 @@ export const report = internalQuery({
         .take(MAX_REPORT_ROWS + 1);
 
     const signups = await inRange("signed_up");
-    const runStarts = await inRange("run_started");
+    const runStarts = await inRange("first_build_started");
     const truncated = signups.length > MAX_REPORT_ROWS || runStarts.length > MAX_REPORT_ROWS;
 
     const funnel = {
@@ -246,7 +247,7 @@ export const report = internalQuery({
 
     const toSandboxRunning: number[] = [];
     for (const start of runStarts.slice(0, MAX_REPORT_ROWS)) {
-      if (start.name !== "run_started" || !start.props.firstBuild || !start.projectId) continue;
+      if (!start.projectId) continue;
       const projectId = start.projectId;
       const running = await ctx.db
         .query("activationEvents")

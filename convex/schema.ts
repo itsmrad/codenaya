@@ -149,6 +149,7 @@ const activationEventValidator = v.union(
     name: v.literal("run_started"),
     props: v.object({ firstBuild: v.boolean() }),
   }),
+  v.object({ ...activationEventFields, name: v.literal("first_build_started") }),
   v.object({
     ...activationEventFields,
     name: v.literal("run_finished"),

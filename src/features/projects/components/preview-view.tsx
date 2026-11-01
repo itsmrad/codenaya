@@ -160,22 +160,27 @@ export const PreviewView = ({
     window.location.href = `${pathname}?${params.toString()}`;
   }, [activeEngine, pathname, searchParams]);
 
-  // One call per project per page view; refreshes reload the iframe.
-  const recordFirstPreviewShown = useRecordFirstPreviewShown();
-  const recordedPreviewFor = useRef<Id<"projects"> | null>(null);
-  const handlePreviewLoad = useCallback(() => {
-    if (recordedPreviewFor.current === projectId) return;
-    recordedPreviewFor.current = projectId;
-    recordFirstPreviewShown({ projectId }).catch((error) => {
-      console.warn("[preview] failed to record first preview", error);
-    });
-  }, [projectId, recordFirstPreviewShown]);
-
   const isLoading = status === "booting" || status === "installing";
   const building =
     firstBuild && activeRun && files ? (
       <PreviewBuilding steps={activeRun.steps} files={files} />
     ) : null;
+
+  // A pre-warmed iframe can load underneath the first-build overlay.
+  const recordFirstPreviewShown = useRecordFirstPreviewShown();
+  const recordedPreviewFor = useRef<Id<"projects"> | null>(null);
+  const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
+  const previewKey = `${projectId}:${previewUrl}:${refreshKey}`;
+  const previewHidden = Boolean(building);
+  const handlePreviewLoad = useCallback(() => setLoadedPreview(previewKey), [previewKey]);
+  useEffect(() => {
+    if (!previewUrl || loadedPreview !== previewKey || previewHidden || recordedPreviewFor.current === projectId) return;
+    recordedPreviewFor.current = projectId;
+    recordFirstPreviewShown({ projectId }).catch((error) => {
+      console.warn("[preview] failed to record first preview", error);
+    });
+  }, [previewUrl, loadedPreview, previewKey, previewHidden, projectId, recordFirstPreviewShown]);
+
   const content = (
     <PreviewContent
       error={error}

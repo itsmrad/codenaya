@@ -141,6 +141,7 @@ describe("activation event writers", () => {
     expect(events.map(({ name, props }) => ({ name, props }))).toEqual([
       { name: "project_created", props: { source: "landing" } },
       { name: "run_started", props: { firstBuild: true } },
+      { name: "first_build_started", props: undefined },
       { name: "package_json_ready", props: undefined },
       { name: "run_finished", props: { outcome: "ok", firstBuild: true } },
       { name: "sandbox_running", props: { installMs: 4_000, bootMs: 1_500 } },
@@ -180,6 +181,7 @@ describe("activation event writers", () => {
       { name: "run_started", props: { firstBuild: false } },
       { name: "run_finished", props: { outcome: "cancelled", firstBuild: false } },
     ]);
+    expect((await names(t)).filter((name) => name === "first_build_started")).toHaveLength(1);
   });
 
   test("project_created names each source", async () => {
@@ -243,6 +245,40 @@ describe("activation event writers", () => {
     expect(await listEvents(t)).toMatchObject([{ name: "signed_up", userId: ALICE, at: 900 }]);
   });
 
+  test("a delayed sign-up webhook records the cohort after ensureCurrent wins the race", async () => {
+    const t = convexTest(schema, modules);
+    await t.withIdentity({ subject: ALICE, name: "Current profile" }).mutation(api.users.ensureCurrent, {});
+    for (let i = 0; i < 2; i++) {
+      await t.mutation(internal.users.upsertFromClerk, {
+        clerkUserId: ALICE,
+        name: "Old profile",
+        updatedAt: 1_000,
+        createdAt: 900,
+      });
+    }
+
+    expect(await names(t)).toEqual(["signed_up"]);
+    expect(await listEvents(t)).toMatchObject([{ userId: ALICE, at: 900 }]);
+    expect(await t.withIdentity({ subject: ALICE }).query(api.users.current, {})).toMatchObject({
+      name: "Current profile",
+    });
+  });
+
+  test("a delayed sign-up webhook cannot recreate a deleted user's events", async () => {
+    const t = convexTest(schema, modules);
+    await t.run((ctx) => ctx.db.insert("users", {
+      clerkUserId: ALICE,
+      updatedAt: 2_000,
+      deletedAt: 2_000,
+    }));
+    await t.mutation(internal.users.upsertFromClerk, {
+      clerkUserId: ALICE,
+      updatedAt: 1_000,
+      createdAt: 900,
+    });
+    expect(await names(t)).toEqual([]);
+  });
+
   test("first_preview_shown is owner-only", async () => {
     const t = convexTest(schema, modules);
     const { projectId } = await createProject(t);
@@ -297,9 +333,8 @@ describe("activationEvents.report", () => {
         });
         await ctx.db.insert("activationEvents", {
           ...base,
-          name: "run_started",
+          name: "first_build_started",
           at: signedUpAt + 2,
-          props: { firstBuild: true },
         });
         await ctx.db.insert("activationEvents", {
           ...base,
@@ -354,5 +389,26 @@ describe("activationEvents.report", () => {
     const result = await t.query(internal.activationEvents.report, { from: 0, to: DAY });
     expect(result.signupToFirstPreview).toEqual({ count: 0, medianMs: null, p90Ms: null });
     expect(result.funnel.signedUp).toBe(0);
+  });
+
+  test("later runs do not consume the report's first-build limit", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      const projectId = await ctx.db.insert("projects", { name: "p", ownerId: ALICE, updatedAt: 0 });
+      const base = { userId: ALICE, projectId };
+      for (let i = 0; i < 501; i++) {
+        await ctx.db.insert("activationEvents", {
+          ...base, name: "run_started", at: i, props: { firstBuild: false },
+        });
+      }
+      await ctx.db.insert("activationEvents", { ...base, name: "first_build_started", at: 1_000 });
+      await ctx.db.insert("activationEvents", {
+        ...base, name: "sandbox_running", at: 2_000, props: { installMs: 1, bootMs: 1 },
+      });
+    });
+
+    const report = await t.query(internal.activationEvents.report, { from: 0, to: DAY });
+    expect(report.truncated).toBe(false);
+    expect(report.firstBuildToSandboxRunning).toEqual({ count: 1, medianMs: 1_000, p90Ms: 1_000 });
   });
 });
