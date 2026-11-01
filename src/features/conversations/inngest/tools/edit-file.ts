@@ -32,10 +32,10 @@ const paramsSchema = z.object({
 
 const toLf = (text: string) => text.replace(/\r\n/g, "\n");
 
-/** Non-overlapping matches of `search` in `text`, like `split` counts them. */
+/** Matches of `search` in `text`, overlapping ones included: "aba" is in "ababa" twice. */
 const countMatches = (text: string, search: string) => {
   let count = 0;
-  for (let at = text.indexOf(search); at !== -1; at = text.indexOf(search, at + search.length)) {
+  for (let at = text.indexOf(search); at !== -1; at = text.indexOf(search, at + 1)) {
     count += 1;
   }
   return count;
@@ -44,20 +44,25 @@ const countMatches = (text: string, search: string) => {
 /**
  * Applies `edits` in order, each to the result of the one before. All or
  * nothing: the first edit that doesn't match exactly once (or at least once
- * with `replaceAll`) fails the whole call. Line endings are matched as LF and
- * a CRLF file keeps CRLF.
+ * with `replaceAll`) fails the whole call, as does a result equal to `content`.
+ * Edit text is matched with the file's line ending, so a CRLF file stays CRLF;
+ * a file mixing CRLF and LF is refused rather than having its endings changed.
  */
 export const applyEdits = (
   content: string,
   edits: Edit[],
 ): { content: string } | { error: string } => {
   const crlf = content.includes("\r\n");
-  let text = toLf(content);
+  if (crlf && /(^|[^\r])\n/.test(content)) {
+    return { error: "the file mixes CRLF and LF line endings, so editFile can't match it safely; rewrite it with updateFile." };
+  }
+  const withEol = (raw: string) => (crlf ? toLf(raw).replace(/\n/g, "\r\n") : toLf(raw));
+  let text = content;
 
   for (const [i, edit] of edits.entries()) {
     const label = `oldText #${i + 1}`;
-    const oldText = toLf(edit.oldText);
-    const newText = toLf(edit.newText);
+    const oldText = withEol(edit.oldText);
+    const newText = withEol(edit.newText);
     if (!oldText) return { error: `${label} is empty; copy the exact text to replace from the file.` };
 
     const matches = countMatches(text, oldText);
@@ -80,7 +85,10 @@ export const applyEdits = (
     }
   }
 
-  return { content: crlf ? text.replace(/\n/g, "\r\n") : text };
+  if (text === content) {
+    return { error: "the edits leave the file unchanged; make each newText differ from its oldText." };
+  }
+  return { content: text };
 };
 
 export const createEditFileTool = ({ projectId, internalKey }: EditFileToolOptions) => {

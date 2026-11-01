@@ -41,6 +41,13 @@ describe("applyEdits", () => {
     });
   });
 
+  it("counts overlapping matches as ambiguous; replaceAll replaces non-overlapping ones", () => {
+    expect(applyEdits("ababa", [{ oldText: "aba", newText: "X" }])).toEqual({
+      error: "oldText #1 matched 2 times; include more surrounding lines so it matches once, or set replaceAll.",
+    });
+    expect(applyEdits("ababa", [{ oldText: "aba", newText: "X", replaceAll: true }])).toEqual({ content: "Xba" });
+  });
+
   it("applies edits in order and fails as a whole when a later one misses", () => {
     expect(
       applyEdits("one two", [
@@ -62,6 +69,23 @@ describe("applyEdits", () => {
     expect(applyEdits("a\r\nb\r\nc\r\n", [{ oldText: "a\nb", newText: "a\nB\nb" }])).toEqual({
       content: "a\r\nB\r\nb\r\nc\r\n",
     });
+  });
+
+  it("refuses a file that mixes CRLF and LF instead of changing its endings", () => {
+    const mixed = { error: "the file mixes CRLF and LF line endings, so editFile can't match it safely; rewrite it with updateFile." };
+    expect(applyEdits("a\r\nb\nc\n", [{ oldText: "b", newText: "B" }])).toEqual(mixed);
+    expect(applyEdits("\na\r\n", [{ oldText: "a", newText: "A" }])).toEqual(mixed);
+  });
+
+  it("fails when the edits leave the content unchanged", () => {
+    const unchanged = { error: "the edits leave the file unchanged; make each newText differ from its oldText." };
+    expect(applyEdits("a b", [{ oldText: "a", newText: "a" }])).toEqual(unchanged);
+    expect(
+      applyEdits("a b", [
+        { oldText: "a", newText: "c" },
+        { oldText: "c", newText: "a" },
+      ]),
+    ).toEqual(unchanged);
   });
 
   it("inserts newText literally, without replacement patterns", () => {
@@ -109,6 +133,14 @@ describe("editFile tool", () => {
     ).toBe(
       'Error: oldText #2 matched 0 times (after the earlier edits); re-read the file and copy the text exactly. "src/App.tsx" was not changed.',
     );
+    expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an ambiguous edit", [{ oldText: "const ", newText: "let " }], "matched 2 times"],
+    ["an edit that changes nothing", [{ oldText: "a = 1", newText: "a = 1" }], "leave the file unchanged"],
+  ])("writes nothing for %s", async (_name, edits, message) => {
+    expect(await edit(edits)).toContain(message);
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
 
