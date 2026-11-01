@@ -60,7 +60,13 @@ export const StuckRunCard = ({
     )}
     <div className="mt-3 flex flex-wrap gap-1.5">
       {retry && (
-        <Button type="button" size="sm" onClick={retry.onRetry}>
+        // Wraps instead of overflowing a narrow chat panel.
+        <Button
+          type="button"
+          size="sm"
+          onClick={retry.onRetry}
+          className="h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left"
+        >
           <RotateCcwIcon className="size-3.5" />
           Retry on {retry.label}
           <span className="font-normal opacity-80">
