@@ -73,12 +73,46 @@ describe("detectLoop", () => {
     expect(detectLoop([...rounds, passedBuild(), ...rounds, write(ID_A)])).toBeNull();
   });
 
+  it("keeps counting syntax errors across checks that verify no syntax", () => {
+    const broken = () => write(ID_A, syntaxNote("App.tsx 1:5 ')' expected."));
+    const staticOnly = () => call("checkBuild", "Static checks passed\nNo sandbox, so the type check and build did not run.");
+    const notChecked = () => call("checkBuild", "Build not checked\nStatic checks passed.");
+    for (const check of [staticOnly, notChecked]) {
+      expect(detectLoop([broken(), check(), broken(), check()])).toBeNull();
+      expect(detectLoop([broken(), check(), broken(), check(), broken()])).toMatchObject({
+        reason: "repeated-syntax-error",
+      });
+    }
+  });
+
+  it("clears only the rewritten file's syntax count on a clean rewrite", () => {
+    const broken = (fileId: string) => write(fileId, syntaxNote("index.tsx 1:5 ')' expected."));
+    // A was fixed in between, B never was.
+    const results = [broken(ID_A), broken(ID_B), broken(ID_A), broken(ID_B), write(ID_A), broken(ID_A)];
+    expect(detectLoop(results)).toBeNull();
+    expect(detectLoop([...results, broken(ID_B)])).toMatchObject({
+      reason: "repeated-syntax-error",
+      fileId: ID_B,
+    });
+  });
+
   it("starts syntax error counts over after a passing build check", () => {
     const broken = write(ID_A, syntaxNote("App.tsx 1:5 ')' expected."));
     const round = () => [broken, write(ID_A), passedBuild()];
     expect(detectLoop([...round(), ...round(), broken])).toBeNull();
+    // With static-only checks, the repairing rewrite is what clears it.
+    const staticRound = () => [broken, write(ID_A), call("checkBuild", "Static checks passed\nNo sandbox.")];
+    expect(detectLoop([...staticRound(), ...staticRound(), broken])).toBeNull();
     expect(detectLoop([...round(), broken, broken, broken])).toMatchObject({
       reason: "repeated-syntax-error",
+    });
+  });
+
+  it("keeps counting repeated errors across static-only checks", () => {
+    const notFound = () => call("readFiles", 'Error: File with ID "missing" not found.');
+    const staticOnly = () => call("checkBuild", "Static checks passed\nNo sandbox.");
+    expect(detectLoop([notFound(), staticOnly(), notFound(), staticOnly(), notFound()])).toMatchObject({
+      reason: "repeated-error",
     });
   });
 

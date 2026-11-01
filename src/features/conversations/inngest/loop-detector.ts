@@ -1,5 +1,6 @@
 import {
   BUILD_CHECK_UNFINISHED,
+  BUILD_VERIFIED,
   MAX_SAME_ERROR,
   MAX_SAME_FILE_WRITES,
   MAX_SAME_SYNTAX_ERROR,
@@ -63,6 +64,21 @@ const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&
 export const errorSignature = (error: string) =>
   sanitizeAgentText(error).toLowerCase().replace(/\d+/g, "#").replace(/\s+/g, " ").trim();
 
+const createdNames = (input: Record<string, unknown>) =>
+  (Array.isArray(input.files) ? input.files : [])
+    .map((file) => str((file as Record<string, unknown> | null)?.name))
+    .filter(Boolean);
+
+const pathKey = (input: Record<string, unknown>, fileName: string) =>
+  `path:${str(input.parentId)}/${fileName}`;
+
+/** The files a write call wrote: updateFile by id, createFiles by parent and name. */
+const writtenFiles = ({ name, input }: Call): string[] => {
+  if (name === "updateFile") return [`id:${str(input.fileId)}`];
+  if (name === "createFiles") return createdNames(input).map((fileName) => pathKey(input, fileName));
+  return [];
+};
+
 /**
  * `[file key, entry]` for each file a write tool's syntax note reports. An
  * updateFile call writes one file, so its whole note is one entry, keyed by the
@@ -76,16 +92,14 @@ const syntaxErrors = ({ name, input, content }: Call): Array<[string, string]> =
   const note = data.slice(at + SYNTAX_ERRORS_NOTE.length).trim();
   if (name === "updateFile") return [[`id:${str(input.fileId)}`, note]];
 
-  const names = (Array.isArray(input.files) ? input.files : [])
-    .map((file) => str((file as Record<string, unknown> | null)?.name))
-    .filter(Boolean);
+  const names = createdNames(input);
   const entries =
     names.length > 1
       ? note.split(new RegExp(`; (?=(?:${names.map(escapeRegExp).join("|")}) )`))
       : [note];
   return entries.map((entry) => {
     const file = names.find((fileName) => entry.startsWith(`${fileName} `)) ?? entry;
-    return [`path:${str(input.parentId)}/${file}`, entry];
+    return [pathKey(input, file), entry];
   });
 };
 
@@ -126,11 +140,15 @@ export const detectLoop = (results: ToolResults[]): StuckRun | null => {
       }
       continue;
     }
-    // A passing check means the run made progress: earlier failures are resolved.
-    if (call.name === "checkBuild" && buildCheckLabel(call.content)) {
+    const passed = call.name === "checkBuild" ? buildCheckLabel(call.content) : undefined;
+    if (passed) {
+      // Any pass ends the rewrite counts, so runs without a sandbox keep going;
+      // only a real build proves the code parses and the errors are gone.
       writes.clear();
-      syntax.clear();
-      errors.clear();
+      if (passed === BUILD_VERIFIED) {
+        syntax.clear();
+        errors.clear();
+      }
       continue;
     }
 
@@ -142,6 +160,11 @@ export const detectLoop = (results: ToolResults[]): StuckRun | null => {
       if (count >= MAX_SAME_FILE_WRITES) return { reason: "repeated-write", fileId };
     }
     if (notes.length > 0) markFailed();
+    // A file written again without a syntax note was fixed.
+    const broken = new Set(notes.map(([key]) => key));
+    for (const key of writtenFiles(call)) {
+      if (!broken.has(key)) syntax.delete(key);
+    }
     for (const [key, entry] of notes) {
       if (bump(syntax, key) >= MAX_SAME_SYNTAX_ERROR) {
         const shown = sanitizeAgentText(entry).slice(0, 200);
