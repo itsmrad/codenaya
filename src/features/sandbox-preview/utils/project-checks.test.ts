@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { stripComments } from "./missing-references";
 import { projectChecks, projectCheckNote, rewriteIcons } from "./project-checks";
 
-const pkg = (dependencies = {}) => ({ path: "package.json", content: JSON.stringify({ dependencies }) });
+const pkg = (dependencies: Record<string, string> = { "lucide-react": "^1.66.0" }) => ({ path: "package.json", content: JSON.stringify({ dependencies }) });
 const file = (path: string, content: string) => ({ path, content });
 describe("project checks", () => {
   it("reports missing imports, undeclared packages and invalid icons", () => {
-    const findings = projectChecks([pkg(), file("src/App.tsx", 'import { VercelLogo } from "lucide-react"; import x from "./missing";')]);
+    const findings = projectChecks([pkg(), file("src/App.tsx", 'import { VercelLogo } from "lucide-react"; import x from "./missing"; import y from "missing-package";')]);
     expect(findings.map((f) => f.checkId)).toEqual(expect.arrayContaining(["package", "import", "icon"]));
     expect(projectCheckNote(findings).match(/Project checks/g)).toHaveLength(1);
   });
@@ -39,14 +40,14 @@ describe("project checks", () => {
     expect(projectChecks([pkg({ tailwindcss: "^4.0.0", "lucide-react": "0.468.0" }), file("a.ts", '// import { Nope } from "lucide-react";\nimport { Camera } from "lucide-react";'), file("a.css", '@import "tailwindcss";')])).toEqual([]);
     expect(projectCheckNote([])).toBe("");
   });
-  it("marks Next local/Tailwind checks as not checked but still checks packages", () => {
+  it("silently skips Next local/Tailwind checks but still checks packages", () => {
     const findings = projectChecks([pkg({ next: "15", tailwindcss: "4" }), file("a.ts", 'import x from "./missing"; import y from "missing";'), file("a.css", "@tailwind base;")]);
-    expect(findings.map((f) => f.checkId)).toEqual(["package", "framework"]);
+    expect(findings.map((f) => f.checkId)).toEqual(["package"]);
   });
   it("bounds work and handles malformed manifests without throwing", () => {
-    expect(projectChecks([file("package.json", "{")])[0].checkId).toBe("unavailable");
-    expect(projectChecks([file("big.ts", "x".repeat(100_001))])[0].checkId).toBe("limit");
-    expect(projectChecks(Array.from({ length: 501 }, (_, i) => file(i + ".ts", "")))[0].checkId).toBe("limit");
+    expect(projectChecks([file("package.json", "{")])).toEqual([]);
+    expect(projectChecks([file("big.ts", "x".repeat(100_001))])).toEqual([]);
+    expect(projectChecks(Array.from({ length: 501 }, (_, i) => file(i + ".ts", "")))).toEqual([]);
   });
   it("finishes a 100-file project within 50ms", () => {
     const files = [pkg(), ...Array.from({ length: 99 }, (_, i) => file(i + ".ts", "export const A = 1;"))];
@@ -59,14 +60,63 @@ describe("project checks", () => {
 
 describe("icon rewrites", () => {
   it("rewrites only a unique one-character typo, preserving local aliases", () => {
-    expect(rewriteIcons('import { Cammera, Cammera as Photo } from "lucide-react";')).toEqual({
+    expect(rewriteIcons('import { Cammera, Cammera as Photo } from "lucide-react";', "^1.66.0")).toEqual({
       content: 'import { Camera as Cammera, Camera as Photo } from "lucide-react";',
       rewrites: ["Cammera → Camera as Cammera", "Cammera → Camera as Photo"],
     });
   });
   it("leaves valid, distant, ambiguous, and non-lucide imports alone", () => {
     for (const text of ['import { Camera, VercelLogo, ArrowDown0 } from "lucide-react";', 'import { Cammera } from "other";', '// import { Cammera } from "lucide-react";']) {
-      expect(rewriteIcons(text)).toEqual({ content: text, rewrites: [] });
+      expect(rewriteIcons(text, "^1.66.0")).toEqual({ content: text, rewrites: [] });
     }
+  });
+});
+
+describe("review regressions", () => {
+  it("pins the catalog to v1 and includes type-only exports", () => {
+    const source = 'import { BeefOff, HeartX, Github } from "lucide-react"; import type { IconNode, LucideIcon, LucideProps, SVGAttributes } from "lucide-react";';
+    const findings = projectChecks([pkg(), file("a.ts", source)]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('"Github"');
+    expect(rewriteIcons(source, "^1.66.0")).toEqual({ content: source, rewrites: [] });
+  });
+  it.each([undefined, "^0.562.0", "^2.0.0", "latest", "^1 || ^2"])("silently skips icon checks and repairs for %s", (range) => {
+    const source = 'import { Cammera, Github } from "lucide-react";';
+    expect(rewriteIcons(source, range)).toEqual({ content: source, rewrites: [] });
+    const findings = projectChecks([pkg({ "lucide-react": range ?? "*" }), file("a.ts", source)]);
+    expect(findings).toEqual([]);
+  });
+  it("preserves the inline type keyword in a repaired import", () => {
+    expect(rewriteIcons('import { type Cammera as Photo } from "lucide-react";', "^1.66.0").content)
+      .toBe('import { type Camera as Photo } from "lucide-react";');
+  });
+  it("checks remaining files when one file exceeds the size limit", () => {
+    expect(projectChecks([file("huge.ts", "x".repeat(100_001)), file("a.ts", 'import x from "./missing";')])[0].checkId).toBe("import");
+  });
+  it("accepts explicit Tailwind v4 legacy compatibility directives", () => {
+    expect(projectChecks([
+      pkg({ tailwindcss: "^4.3.0", "tailwindcss-animate": "1" }),
+      file("tailwind.config.ts", "export default {}"),
+      file("style.css", '@config "./tailwind.config.ts"; @plugin "tailwindcss-animate";'),
+    ])).toEqual([]);
+  });
+  it("recognizes abstract classes, const enums, generators and dollar identifiers", () => {
+    expect(projectChecks([
+      file("target.ts", "export abstract class Base {} export const enum Color { Red } export function* values() {} export const $value = 1;"),
+      file("a.ts", 'import { Base, Color, values, $value } from "./target";'),
+    ])).toEqual([]);
+  });
+  it("skips malformed or uncertain export targets", () => {
+    expect(projectChecks([file("target.ts", "export const { x } = data;"), file("a.ts", 'import { X } from "./target";')])).toEqual([]);
+    expect(projectChecks([file("target.ts", "export const x = {"), file("a.ts", 'import { X } from "./target";')])).toEqual([]);
+  });
+  it("preserves URLs in strings and JSX text, including text with apostrophes", () => {
+    const source = `const view = <p>Here's http://example.test</p>;
+export const url = "http://example.test"; // actual comment
+export const other = 'http://example.test';`;
+    expect(stripComments(source)).toContain('export const url = "http://example.test";');
+    expect(stripComments(source)).toContain("Here's http://example.test</p>");
+    expect(stripComments(source)).not.toContain("actual comment");
+    expect(projectChecks([file("target.tsx", source), file("a.ts", 'import { url, other } from "./target";')])).toEqual([]);
   });
 });

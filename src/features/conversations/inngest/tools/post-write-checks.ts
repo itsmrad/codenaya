@@ -4,7 +4,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 
-/** Bound registry metadata even when a package has thousands of historical releases. */
+/** Bound the small downloads response too; no package metadata is downloaded. */
 const boundedJson = async (response: Response) => {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("empty registry response");
@@ -24,7 +24,7 @@ const boundedJson = async (response: Response) => {
   }
 };
 
-/** One cache per agent run, shared by all write tools. Public npm only, never credentials. */
+/** Shared within one Inngest invocation; replayed steps retain their saved results. */
 export const createRegistryCheck = () => {
   const cache = new Map<string, Promise<Finding[]>>();
   let active = 0;
@@ -42,6 +42,7 @@ export const createRegistryCheck = () => {
         if (!pending) {
           active++;
           pending = (async (): Promise<Finding[]> => {
+            let exists = false;
             try {
               const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}`, { signal: controller.signal });
               if (response.status === 404) {
@@ -52,13 +53,19 @@ export const createRegistryCheck = () => {
                 await response.body?.cancel();
                 throw new Error("registry unavailable");
               }
-              const metadata = await boundedJson(response);
-              const downloads = await fetch(`https://api.npmjs.org/downloads/point/last-week/${encodeURIComponent(name)}`, { signal: controller.signal }).then(boundedJson);
-              const fresh = Date.now() - Date.parse(metadata.time?.created) < 30 * 86_400_000;
+              exists = true;
+              // Status alone decides existence; never download a full packument.
+              await response.body?.cancel();
+              const downloadsResponse = await fetch(`https://api.npmjs.org/downloads/point/last-week/${encodeURIComponent(name)}`, { signal: controller.signal });
+              if (!downloadsResponse.ok) {
+                await downloadsResponse.body?.cancel();
+                return [{ checkId: "registry", message: `${name}: exists on npm; download reputation not checked.` }];
+              }
+              const downloads = await boundedJson(downloadsResponse);
               const small = typeof downloads.downloads === "number" && downloads.downloads < 1000;
-              return fresh || small ? [{ checkId: "registry", message: `${name}: review this dependency (${fresh ? "created within 30 days" : "fewer than 1k weekly downloads"}).` }] : [];
+              return small ? [{ checkId: "registry", message: `${name}: review this dependency (fewer than 1k weekly downloads).` }] : [];
             } catch {
-              return [{ checkId: "registry", message: `${name}: registry unreachable or response too large; existence/reputation not checked.` }];
+              return [{ checkId: "registry", message: exists ? `${name}: exists on npm; download reputation not checked (registry unreachable or response too large).` : `${name}: registry unreachable; existence/reputation not checked.` }];
             } finally {
               active--;
             }
@@ -73,6 +80,27 @@ export const createRegistryCheck = () => {
   };
 };
 export type RegistryCheck = ReturnType<typeof createRegistryCheck>;
+
+/** Read the project range before any repair; a batch's new manifest takes precedence. */
+export const getIconRewriter = async (
+  internalKey: string,
+  projectId: Id<"projects">,
+  pending: { path: string; content: string }[] = [],
+) => {
+  let range: unknown;
+  try {
+    let manifest = pending.find((file) => file.path === "package.json")?.content;
+    if (manifest === undefined) {
+      const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
+      manifest = rows.find((row) => row.type === "file" && !row.parentId && row.name === "package.json")?.content;
+    }
+    const pkg = JSON.parse(manifest ?? "{}");
+    range = pkg?.dependencies?.["lucide-react"] ?? pkg?.devDependencies?.["lucide-react"];
+  } catch {
+    // Unknown ranges skip repairs, including a failed best-effort manifest read.
+  }
+  return (content: string) => rewriteIcons(content, range);
+};
 
 /** Separate from the version-manifest hook (#331); all failures are advisory after saving. */
 export const postWriteNote = async (
@@ -94,7 +122,7 @@ export const postWriteNote = async (
       if (!path) continue;
       paths.add(path);
       if (touchedIds.includes(row._id)) touched.add(path);
-      if (typeof row.content === "string") files.push({ path, content: row.content });
+      if (typeof row.content === "string" && row.content.length <= 100_000) files.push({ path, content: row.content });
     }
     const findings = projectChecks(files, paths, touched);
     const packages = findings.filter((f) => f.checkId === "package").map((f) => f.message.split(" (")[0]);
@@ -108,5 +136,3 @@ export const postWriteNote = async (
     ]);
   }
 };
-
-export { rewriteIcons };

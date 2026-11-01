@@ -1,4 +1,6 @@
-import * as lucide from "lucide-react";
+// Generated from lucide-react@1.66.0 (the Vite starter), including type exports.
+// Regenerate: node scripts/generate-lucide-exports.mjs 1.66.0
+import lucideExports from "./lucide-exports.v1.json";
 import ts from "typescript";
 import {
   localCandidates, RESOLVE_SUFFIXES, stripComments, undeclaredPackages, unresolvedImports,
@@ -6,10 +8,43 @@ import {
 
 export type CheckFile = { path: string; content: string };
 export type Finding = { checkId: string; message: string };
-const ICONS = new Set(Object.keys(lucide));
+const ICONS = new Set(lucideExports);
 const CANONICAL_ICONS = [...ICONS].filter((name) => /^[A-Z]/.test(name) && !/^(Lucide)|Icon$/.test(name));
-const NAMED_IMPORT = /\bimport\s+(?:type\s+)?(?:[\w$]+\s*,\s*)?\{([^}]+)\}\s*from\s*["']([^"'\n]+)["']/g;
-const names = (list: string) => list.split(",").map((part) => part.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]).filter(Boolean);
+const rangeMajor = (range: unknown) => typeof range === "string"
+  ? range.match(/^[~^]?(\d+)(?:\.(?:\d+|x|\*)){0,2}(?:-[\w.-]+)?$/)?.[1] : undefined;
+export const supportsIconCatalog = (range: unknown) => rangeMajor(range) === "1";
+const parseSource = (file: CheckFile) => {
+  const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true);
+  const diagnostics = (source as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics;
+  return diagnostics?.length ? undefined : source;
+};
+const exportedNames = (source: ts.SourceFile): Set<string> | undefined => {
+  if (/module\.exports|exports\./.test(source.text)) return undefined;
+  const names = new Set<string>();
+  for (const statement of source.statements) {
+    if (ts.isExportAssignment(statement)) {
+      if (statement.isExportEquals) return undefined;
+      names.add("default");
+    } else if (ts.isExportDeclaration(statement)) {
+      if (!statement.exportClause || !ts.isNamedExports(statement.exportClause)) return undefined;
+      for (const entry of statement.exportClause.elements) names.add(entry.name.text);
+    } else if (ts.canHaveModifiers(statement) && ts.getModifiers(statement)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) {
+      if (ts.getModifiers(statement)?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) {
+        names.add("default");
+      } else if (ts.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) {
+          if (!ts.isIdentifier(declaration.name)) return undefined;
+          names.add(declaration.name.text);
+        }
+      } else if ("name" in statement && statement.name && ts.isIdentifier(statement.name as ts.Node)) {
+        names.add((statement.name as ts.Identifier).text);
+      } else {
+        return undefined;
+      }
+    }
+  }
+  return names;
+};
 const resolve = (from: string, specifier: string, paths: Set<string>) =>
   localCandidates(from, specifier)?.flatMap((candidate) => RESOLVE_SUFFIXES.map((suffix) => candidate + suffix)).find((path) => paths.has(path));
 
@@ -26,9 +61,9 @@ const oneEdit = (a: string, b: string) => {
   return edits + (a.length - i) + (b.length - j) === 1;
 };
 
-export const rewriteIcons = (content: string) => {
+export const rewriteIcons = (content: string, lucideRange?: unknown) => {
   const rewrites: string[] = [];
-  if (content.length > 100_000) return { content, rewrites };
+  if (!supportsIconCatalog(lucideRange) || content.length > 100_000) return { content, rewrites };
   try {
     const source = ts.createSourceFile("icons.tsx", content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     const replacements: { start: number; end: number; text: string }[] = [];
@@ -42,7 +77,7 @@ export const rewriteIcons = (content: string) => {
         if (replacements.length >= 20 || ICONS.has(wanted) || wanted.length < 5) continue;
         const closest = CANONICAL_ICONS.filter((name) => oneEdit(name, wanted));
         if (closest.length !== 1) continue;
-        const text = `${closest[0]} as ${specifier.name.text}`;
+        const text = `${specifier.isTypeOnly ? "type " : ""}${closest[0]} as ${specifier.name.text}`;
         rewrites.push(`${wanted} → ${text}`);
         replacements.push({ start: specifier.getStart(source), end: specifier.end, text });
       }
@@ -58,65 +93,79 @@ export const rewriteIcons = (content: string) => {
   }
 };
 
-/** Pure bounded checks. Conservative regexes skip uncertain barrel/CommonJS exports. */
+/** Bounded advisory checks; oversized files and uncertain export targets are skipped. */
 export const projectChecks = (
   input: CheckFile[],
   paths = new Set(input.map((file) => file.path)),
   touched?: Set<string>,
+  { references = true } = {},
 ): Finding[] => {
-  if (input.length > 500 || input.some((f) => f.content.length > 100_000) ||
-      input.reduce((sum, f) => sum + f.content.length, 0) > 2_000_000) {
-    return [{ checkId: "limit", message: "Project checks not checked: snapshot exceeds 500 files, 100 KB/file or 2 MB total; use checkBuild." }];
-  }
   try {
-    const files = input.map((file) => ({ ...file, content: stripComments(file.content) }));
+    let bytes = 0;
+    const files = [...input.filter((f) => f.path === "package.json"), ...input.filter((f) => f.path !== "package.json")]
+      .filter((file) => {
+        if (file.content.length > 100_000 || bytes + file.content.length > 2_000_000) return false;
+        bytes += file.content.length;
+        return true;
+      }).slice(0, 500);
     const byPath = new Map(files.map((f) => [f.path, f]));
+    const sources = new Map<string, ts.SourceFile | undefined>();
+    const sourceOf = (file: CheckFile) => {
+      if (!sources.has(file.path)) sources.set(file.path, parseSource(file));
+      return sources.get(file.path);
+    };
     const affected = files.filter((file) => !touched || touched.has("package.json") || touched.has(file.path) ||
-      [...file.content.matchAll(/\b(?:from\s*|import\s*\(?\s*)["']([^"'\n]+)["']/g)].some(([, specifier]) => touched.has(resolve(file.path, specifier, paths) ?? "")));
-    const pkg = JSON.parse(byPath.get("package.json")?.content ?? "{}");
-    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+      [...stripComments(file.content).matchAll(/\b(?:from\s*|import\s*\(?\s*)["']([^"'\n]+)["']/g)]
+        .some(([, specifier]) => touched.has(resolve(file.path, specifier, paths) ?? "")));
+    let deps: Record<string, unknown> = {};
+    try {
+      const pkg = JSON.parse(stripComments(byPath.get("package.json")?.content ?? "{}"));
+      deps = { ...pkg?.dependencies, ...pkg?.devDependencies };
+    } catch { /* Other checks still work without a valid manifest. */ }
     const next = Boolean(deps.next);
     const findings: Finding[] = [];
     const add = (checkId: string, message: string) => { if (findings.length < 40) findings.push({ checkId, message: message.slice(0, 500) }); };
-    for (const message of undeclaredPackages([...files.filter((f) => f.path.endsWith("package.json")), ...affected.filter((f) => !f.path.endsWith("package.json"))])) add("package", message);
-    if (!next) for (const message of unresolvedImports(affected, paths)) add("import", message);
-    if (next) add("framework", "Local imports and Tailwind drift not checked for Next.js projects.");
-    const major = String(deps.tailwindcss ?? "").match(/^[~^]?(3|4)(?:\.|$)/)?.[1];
+    if (references) {
+      for (const message of undeclaredPackages([...files.filter((f) => f.path.endsWith("package.json")), ...affected.filter((f) => !f.path.endsWith("package.json"))])) add("package", message);
+      if (!next) for (const message of unresolvedImports(affected, paths)) add("import", message);
+    }
+    const major = rangeMajor(deps.tailwindcss);
+    const css = files.filter((f) => /\.css$/.test(f.path)).map((f) => stripComments(f.content));
+    const legacyConfig = css.some((text) => /@config\s+["'][^"']+["']/.test(text));
+    const legacyAnimate = css.some((text) => /@plugin\s+["']tailwindcss-animate["']/.test(text));
     for (const file of affected) {
-      if (/\.[cm]?[jt]sx?$/.test(file.path)) for (const [, list, specifier] of file.content.matchAll(NAMED_IMPORT)) {
-        for (const name of names(list)) {
-          if (specifier === "lucide-react" && !ICONS.has(name)) add("icon", `${file.path}: lucide-react has no export "${name}" in the installed codenaya version.`);
-          if (next) continue;
-          const target = byPath.get(resolve(file.path, specifier, paths) ?? "");
-          if (!target || /export\s*\*|module\.exports|exports\./.test(target.content) || !/\.[cm]?[jt]sx?$/.test(target.path)) continue;
-          const exports = new Set([...target.content.matchAll(/\bexport\s+(?:declare\s+)?(?:async\s+)?(?:const|let|var|function|class|type|interface|enum)\s+(\w+)/g)].map((m) => m[1]));
-          for (const [, block] of target.content.matchAll(/\bexport\s+(?:type\s+)?\{([^}]+)\}/g)) {
-            for (const part of block.split(",")) exports.add(part.trim().replace(/^type\s+/, "").split(/\s+as\s+/).at(-1)!);
-          }
-          // Destructuring/multi-declarations aren't safely covered by the simple scan.
-          if (/export\s+(?:const|let|var)\s*[{[]|export\s+(?:const|let|var)[^;\n]*,/.test(target.content)) continue;
-          if (!exports.has(name)) add("export", `${file.path} imports { ${name} } from ${specifier} (no such export in ${target.path}).`);
+      const source = /\.[cm]?[jt]sx?$/.test(file.path) ? sourceOf(file) : undefined;
+      if (source) for (const statement of source.statements) {
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+        const specifier = statement.moduleSpecifier.text;
+        const bindings = statement.importClause?.namedBindings;
+        const imports = bindings && ts.isNamedImports(bindings)
+          ? bindings.elements.map((entry) => (entry.propertyName ?? entry.name).text) : [];
+        if (specifier === "lucide-react" && supportsIconCatalog(deps["lucide-react"])) {
+          for (const name of imports) if (!ICONS.has(name)) add("icon", `${file.path}: lucide-react v1 has no export "${name}".`);
         }
-      }
-      if (!next && /\.[cm]?[jt]sx?$/.test(file.path)) for (const [, specifier] of file.content.matchAll(/\bimport\s+[\w$]+(?:\s*,[^;]*?)?\s+from\s*["']([^"'\n]+)["']/g)) {
+        if (next) continue;
         const target = byPath.get(resolve(file.path, specifier, paths) ?? "");
-        if (target && /\.[cm]?[jt]sx?$/.test(target.path) &&
-            !/export\s*\*|module\.exports|exports\.|export\s+default|export\s*\{[^}]*\bdefault\b/.test(target.content)) {
-          add("export", `${file.path}: ${specifier} has no default export.`);
-        }
+        if (!target || !/\.[cm]?[jt]sx?$/.test(target.path)) continue;
+        const targetSource = sourceOf(target);
+        const exports = targetSource && exportedNames(targetSource);
+        if (!exports) continue;
+        for (const name of imports) if (!exports.has(name)) add("export", `${file.path} imports { ${name} } from ${specifier} (no such export in ${target.path}).`);
+        if (statement.importClause?.name && !exports.has("default")) add("export", `${file.path}: ${specifier} has no default export.`);
       }
       if (next || !major) continue;
+      const content = stripComments(file.content);
       if (major === "4") {
-        if (/(?:^|\/)tailwind\.config\.[cm]?[jt]s$/.test(file.path)) add("tailwind", `${file.path}: Tailwind v4 uses CSS configuration; migrate to @theme or load legacy config explicitly with @config.`);
-        if (/\.css$/.test(file.path) && /@tailwind\s+(base|components|utilities)\b/.test(file.content)) add("tailwind", `${file.path}: replace v3 @tailwind directives with @import "tailwindcss" for v4.`);
-        if (file.content.includes("tailwindcss-animate")) add("tailwind", `${file.path}: Tailwind v4: replace tailwindcss-animate with tw-animate-css, or load the legacy plugin with @plugin.`);
-      } else if ((/\.css$/.test(file.path) && /@import\s+["']tailwindcss["']|@(theme|plugin|custom-variant)\b/.test(file.content)) || file.content.includes("@tailwindcss/vite")) {
+        if (!legacyConfig && /(?:^|\/)tailwind\.config\.[cm]?[jt]s$/.test(file.path)) add("tailwind", `${file.path}: Tailwind v4 uses CSS configuration; migrate to @theme or load legacy config explicitly with @config.`);
+        if (/\.css$/.test(file.path) && /@tailwind\s+(base|components|utilities)\b/.test(content)) add("tailwind", `${file.path}: replace v3 @tailwind directives with @import "tailwindcss" for v4.`);
+        if (!legacyAnimate && content.includes("tailwindcss-animate")) add("tailwind", `${file.path}: Tailwind v4: replace tailwindcss-animate with tw-animate-css, or load the legacy plugin with @plugin.`);
+      } else if (major === "3" && ((/\.css$/.test(file.path) && /@import\s+["']tailwindcss["']|@(theme|plugin|custom-variant)\b/.test(content)) || content.includes("@tailwindcss/vite"))) {
         add("tailwind", `${file.path}: Tailwind v3 uses @tailwind base/components/utilities, tailwind.config plugins/theme and PostCSS; remove v4 directives and @tailwindcss/vite.`);
       }
     }
     return findings;
   } catch {
-    return [{ checkId: "unavailable", message: "Project checks not checked: invalid package.json or unsupported snapshot." }];
+    return [];
   }
 };
 

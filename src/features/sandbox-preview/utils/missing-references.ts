@@ -14,7 +14,7 @@ type ProjectFile = { path: string; content: string };
 /** Drops line and block comments, leaving string literals (which may contain them) intact. */
 export const stripComments = (text: string) =>
   text.replace(
-    /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
+    /("(?:\\.|[^"\\\n\r])*"|'(?:\\.|[^'\\\n\r])*'|`(?:\\.|[^`\\])*`)|(?<!:)\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
     (match, string: string | undefined) => string ?? "",
   );
 

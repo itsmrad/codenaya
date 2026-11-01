@@ -6,7 +6,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
-import { createRegistryCheck, postWriteNote, rewriteIcons, type RegistryCheck } from "./post-write-checks";
+import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface UpdateFileToolOptions {
@@ -40,8 +40,7 @@ export const createUpdateFileTool = ({
         return `Error: ${parsed.error.issues[0].message}`;
       }
 
-      const prepared = rewriteIcons(parsed.data.content);
-      const { content } = prepared;
+
 
       try {
         return await toolStep?.run("update-file", async () => {
@@ -54,6 +53,9 @@ export const createUpdateFileTool = ({
             return `Error: "${path}" is a folder, not a file. You can only update file contents.`;
           }
 
+          const rewriteIcons = await getIconRewriter(internalKey, projectId, [{ path, content: parsed.data.content }]);
+          const prepared = rewriteIcons(parsed.data.content);
+          const { content } = prepared;
           await convex.mutation(api.system.updateFile, {
             internalKey,
             projectId,

@@ -5,7 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
-import { createRegistryCheck, postWriteNote, rewriteIcons, type RegistryCheck } from "./post-write-checks";
+import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface CreateFilesToolOptions {
@@ -57,8 +57,7 @@ export const createCreateFilesTool = ({
       }
 
       const { parentId } = parsed.data;
-      const prepared = parsed.data.files.map((file) => ({ ...file, ...rewriteIcons(file.content) }));
-      const files = prepared.map(({ name, content }) => ({ name, content }));
+
 
       try {
         return await toolStep?.run("create-files", async () => {
@@ -83,6 +82,10 @@ export const createCreateFilesTool = ({
             }
           }
 
+          const rewriteIcons = await getIconRewriter(internalKey, projectId,
+            resolvedParentId ? [] : parsed.data.files.map((file) => ({ path: file.name, content: file.content })));
+          const prepared = parsed.data.files.map((file) => ({ ...file, ...rewriteIcons(file.content) }));
+          const files = prepared.map(({ name, content }) => ({ name, content }));
           const results = await convex.mutation(api.system.createFiles, {
             internalKey,
             projectId,

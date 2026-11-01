@@ -344,8 +344,9 @@ describe("project tree prompt section", () => {
 
 describe("post-write checks at every boundary", () => {
   it.each(["update", "edit", "write", "create"])("%s saves, rewrites icons and reports project findings in the same step", async (kind) => {
+    db.rows.find((r) => r._id === "pkg")!.content = JSON.stringify({ dependencies: { "lucide-react": "^1.66.0" } });
     const registry = vi.fn(async () => []);
-    const content = 'import { Cammera, VercelLogo } from "lucide-react"; import { X } from "./missing";';
+    const content = 'import { Cammera, VercelLogo } from "lucide-react"; import { X } from "./missing"; import absent from "not-installed";';
     const options = { ...opts, registry };
     const result = kind === "update"
       ? await createUpdateFileTool(options).handler({ path: "src/App.tsx", content }, ctx)
@@ -362,7 +363,7 @@ describe("post-write checks at every boundary", () => {
     expect(result).toContain("./missing");
     expect(String(result).match(/Project checks/g)).toHaveLength(1);
     expect(db.rows.some((r) => r.content?.includes("Camera as Cammera"))).toBe(true);
-    expect(registry).toHaveBeenCalledWith(["lucide-react"]);
+    expect(registry).toHaveBeenCalledWith(["not-installed"]);
     expect(step.run).toHaveBeenCalledTimes(1);
   });
 
@@ -381,7 +382,7 @@ describe("post-write checks at every boundary", () => {
   });
 
   it("keeps a successful write successful when the diagnostic snapshot fails", async () => {
-    mocks.query.mockImplementationOnce(async () => db.rows).mockRejectedValueOnce(new Error("offline"));
+    mocks.query.mockImplementationOnce(async () => db.rows).mockRejectedValueOnce(new Error("offline")).mockRejectedValueOnce(new Error("offline"));
     const result = await createUpdateFileTool(opts).handler({ path: "src/App.tsx", content: "saved" }, ctx);
     expect(result).toContain("write succeeded");
     expect(toolResultError({ data: result })).toBeUndefined();

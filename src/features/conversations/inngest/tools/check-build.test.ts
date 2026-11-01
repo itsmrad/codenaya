@@ -83,7 +83,8 @@ describe("checkProjectBuild", () => {
     expect(e2b.create).not.toHaveBeenCalled();
   });
 
-  it("reuses named-export and Tailwind checks without starting a sandbox", async () => {
+  it("reports named-export and Tailwind heuristics as advisory", async () => {
+    const sandbox = fakeSandbox();
     const result = await check([
       ...starter(),
       { path: "src/ui.ts", content: "export const Button = 1;" },
@@ -92,6 +93,26 @@ describe("checkProjectBuild", () => {
     ]);
     expect(result).toContain("no such export");
     expect(result).toContain("replace v3 @tailwind");
+    expect(result).toMatch(/^Build verified/);
+    expect(sandbox.commands.run).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["next", "oversized", "malformed", "many-files"])("retains unconditional import/package gates for %s snapshots", async (kind) => {
+    const files = starter();
+    const manifest = files.find((f) => f.path === "package.json")!;
+    if (kind === "next") {
+      const pkg = JSON.parse(manifest.content);
+      pkg.dependencies.next = "15";
+      manifest.content = JSON.stringify(pkg);
+    }
+    if (kind === "malformed") manifest.content = "{";
+    if (kind === "oversized") files.push({ path: "large.ts", content: " ".repeat(100_001) });
+    if (kind === "many-files") for (let i = 0; i < 501; i++) files.push({ path: `empty${i}.ts`, content: "" });
+    files.push({ path: "broken.ts", content: 'import x from "./missing"; import y from "undeclared-package";' });
+    const result = await check(files);
+    expect(result).toMatch(/^Error: Static checks failed:/);
+    expect(result).toContain("./missing");
+    if (kind !== "malformed") expect(result).toContain("undeclared-package");
     expect(e2b.create).not.toHaveBeenCalled();
   });
 

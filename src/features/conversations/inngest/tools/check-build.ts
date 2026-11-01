@@ -18,6 +18,8 @@ import {
 import { withErrorHints } from "@/features/sandbox-preview/utils/error-recipes";
 import {
   missingReferencedFiles,
+  undeclaredPackages,
+  unresolvedImports,
 } from "@/features/sandbox-preview/utils/missing-references";
 import { projectChecks } from "@/features/sandbox-preview/utils/project-checks";
 import { convex } from "@/lib/convex-client";
@@ -108,7 +110,8 @@ export const checkProjectBuild = async ({
 }): Promise<string> => {
   const problems = [
     ...missingReferencedFiles(files),
-    ...projectChecks(files, paths).filter((finding) => !["framework", "limit", "unavailable"].includes(finding.checkId)).map((finding) => finding.message),
+    ...undeclaredPackages(files),
+    ...unresolvedImports(files, paths),
   ];
   if (problems.length > 0) {
     return (
@@ -117,14 +120,16 @@ export const checkProjectBuild = async ({
     );
   }
 
+  const advisory = projectChecks(files, paths, undefined, { references: false });
+  const notes = advisory.length ? `\nAdvisory project checks:\n- ${advisory.map((f) => `[${f.checkId}] ${f.message}`).join("\n- ")}` : "";
   const isVite =
     paths.has("package.json") && [...paths].some((path) => /^vite\.config\.[cm]?[jt]s$/.test(path));
   if (!isVite) {
-    return `${BUILD_NOT_CHECKED}\nStatic checks passed. checkBuild only builds Vite projects, so this one was not built.`;
+    return `${BUILD_NOT_CHECKED}\nStatic checks passed. checkBuild only builds Vite projects, so this one was not built.` + notes;
   }
 
   if (!apiKey) {
-    return notBuilt("No build sandbox is configured");
+    return notBuilt("No build sandbox is configured") + notes;
   }
 
   let sandbox: Sandbox;
@@ -132,7 +137,7 @@ export const checkProjectBuild = async ({
     sandbox = await createProjectSandbox({ apiKey, timeoutMs: SANDBOX_TIMEOUT_MS, metadata });
   } catch (error) {
     console.error("[check-build] sandbox creation failed", error);
-    return notBuilt("The build sandbox could not start");
+    return notBuilt("The build sandbox could not start") + notes;
   }
 
   const deadline = Date.now() + CHECK_TIMEOUT_MS;
@@ -155,7 +160,7 @@ export const checkProjectBuild = async ({
       return `Error: Build failed. Fix these errors, then call checkBuild again:\n${failureOutput(build)}`;
     }
 
-    return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.`;
+    return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.` + notes;
   } catch (error) {
     return unfinished(error);
   } finally {

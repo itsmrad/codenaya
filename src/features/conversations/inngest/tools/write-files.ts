@@ -14,7 +14,7 @@ import {
   normalizePath,
   splitPath,
 } from "./paths";
-import { createRegistryCheck, postWriteNote, rewriteIcons, type RegistryCheck } from "./post-write-checks";
+import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface WriteFilesToolOptions {
@@ -99,6 +99,10 @@ export const createWriteFilesTool = ({ projectId, internalKey, registry = create
             }
           }
 
+          const rewriteIcons = await getIconRewriter(internalKey, projectId, [
+            ...updates.map(({ path, content }) => ({ path, content })),
+            ...[...createsByDir].flatMap(([dir, files]) => files.map(({ name, content }) => ({ path: dir ? `${dir}/${name}` : name, content }))),
+          ]);
           const rewritesByPath = new Map<string, string[]>();
           for (const update of updates) {
             const fixed = rewriteIcons(update.content);

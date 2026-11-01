@@ -13,27 +13,37 @@ describe("registry checks", () => {
     await createRegistryCheck()(["missing"]);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
-  it("warns about new or low-download packages and encodes scoped names", async () => {
+  it("warns about low-download packages and encodes scoped names", async () => {
     const fetch = vi.fn()
-      .mockResolvedValueOnce(Response.json({ time: { created: new Date().toISOString() } }))
+      .mockResolvedValueOnce(new Response("packument body must not be read"))
       .mockResolvedValueOnce(Response.json({ downloads: 800 }));
     vi.stubGlobal("fetch", fetch);
-    expect((await createRegistryCheck()(["@scope/pkg"]))[0].message).toContain("created within 30 days");
+    expect((await createRegistryCheck()(["@scope/pkg"]))[0].message).toContain("fewer than 1k weekly downloads");
     expect(fetch.mock.calls[0][0]).toBe("https://registry.npmjs.org/%40scope%2Fpkg");
+  });
+  it("decides existence without consuming even a huge or unreadable packument", async () => {
+    const cancel = vi.fn(async () => {});
+    const getReader = vi.fn(() => { throw new Error("must not read packument"); });
+    const fetch = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, body: { cancel, getReader } })
+      .mockResolvedValueOnce(Response.json({ downloads: 100_000 }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await createRegistryCheck()(["large-package"])).toEqual([]);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(getReader).not.toHaveBeenCalled();
   });
   it("does not warn on established packages", async () => {
     vi.stubGlobal("fetch", vi.fn()
-      .mockResolvedValueOnce(Response.json({ time: { created: "2020-01-01" } }))
+      .mockResolvedValueOnce(new Response("packument body must not be read"))
       .mockResolvedValueOnce(Response.json({ downloads: 100_000 })));
     expect(await createRegistryCheck()(["known"])).toEqual([]);
   });
   it("skips network errors, invalid names and oversized responses softly", async () => {
     const fetch = vi.fn().mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValueOnce(new Response("x".repeat(512_001)));
+      .mockResolvedValueOnce(new Response("exists")).mockResolvedValueOnce(new Response("x".repeat(512_001)));
     vi.stubGlobal("fetch", fetch);
     const check = createRegistryCheck();
     expect((await check(["offline", "https://bad", "big"])).every((f) => f.message.includes("not checked"))).toBe(true);
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
   it("aborts within two seconds and caps concurrency across simultaneous calls", async () => {
     vi.useFakeTimers();
