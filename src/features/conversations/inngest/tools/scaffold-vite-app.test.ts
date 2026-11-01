@@ -82,4 +82,37 @@ describe("scaffoldViteApp tool", () => {
     expect(db.rows.find((row) => row._id === "app")?.content).toBe("mine");
     expect(result).toContain("Kept existing: src/App.tsx (app).");
   });
+
+  it("writes a React 19 + Tailwind v4 starter with no v3 leftovers (#332)", () => {
+    const tool = createScaffoldViteAppTool({ projectId: "p" as never, internalKey: "k" });
+    const read = (path: string) => VITE_REACT_STARTER.find((file) => file.path === path)!.content;
+    const pkg = JSON.parse(read("package.json"));
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+    expect(deps).toMatchObject({
+      react: "^19.2.0",
+      "react-dom": "^19.2.0",
+      "@types/react": "^19.2.0",
+      tailwindcss: expect.stringMatching(/^\^4\./),
+      "@tailwindcss/vite": deps.tailwindcss,
+      "tw-animate-css": expect.any(String),
+      "lucide-react": expect.stringMatching(/^\^1\./),
+      "tailwind-merge": expect.stringMatching(/^\^3\./),
+    });
+    for (const name of ["tailwindcss-animate", "postcss", "autoprefixer"]) {
+      expect(deps).not.toHaveProperty(name);
+    }
+    expect(read("vite.config.ts")).toContain("plugins: [react(), tailwindcss()]");
+    expect(read("src/index.css")).toMatch(/^@import "tailwindcss";\n@import "tw-animate-css";/);
+    expect(read("src/index.css")).toContain("--color-background: var(--background);");
+    expect(JSON.parse(read("components.json")).tailwind.config).toBe("");
+
+    const everything = [
+      tool.description,
+      ...VITE_REACT_STARTER.map((file) => `${file.path}\n${file.content}`),
+    ].join("\n");
+    for (const stale of ["tailwind.config", "postcss.config", "tailwindcss-animate", "@tailwind ", "hsl(var("]) {
+      expect(everything).not.toContain(stale);
+    }
+  });
 });
