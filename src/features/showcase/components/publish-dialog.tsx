@@ -140,6 +140,10 @@ export const PublishDialog = ({
     }
   };
 
+  let submitLabel = "Publish";
+  if (submitting) submitLabel = "Publishing...";
+  if (gate.checking) submitLabel = "Checking for secrets...";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Only the form scrolls, so Cancel and Publish stay in view. */}
@@ -272,11 +276,7 @@ export const PublishDialog = ({
               submitting || gate.checking || hasNoFiles || !title.trim() || !category
             }
           >
-            {gate.checking
-              ? "Checking for secrets..."
-              : submitting
-                ? "Publishing..."
-                : "Publish"}
+            {submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

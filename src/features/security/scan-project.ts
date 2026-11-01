@@ -6,7 +6,10 @@
  * isomorphic. Findings name the file, line and rule, never the matched text.
  */
 
-import { CREDENTIAL_TOKEN_PATTERNS } from "@/features/integrations/credential-guard";
+import {
+  CREDENTIAL_TOKEN_PATTERNS,
+  DSN_PASSWORD_PATTERN,
+} from "@/features/integrations/credential-guard";
 import { PUBLIC_KEY_PREFIXES, isPublicByConvention } from "@/features/integrations/env-keys";
 
 export type ScanSeverity = "high" | "medium";
@@ -14,7 +17,7 @@ export type ScanSeverity = "high" | "medium";
 export interface ScanFinding {
   /** Project-relative path, or `env:<KEY>` for a stored environment variable. */
   file: string;
-  /** 1-based; null for environment variables. */
+  /** 1-based; null for stored env vars and whole-file findings. */
   line: number | null;
   rule: string;
   severity: ScanSeverity;
@@ -41,12 +44,22 @@ const PUBLIC_SECRET_NAME = new RegExp(
 );
 const SERVICE_ROLE = /service_role|SUPABASE_SERVICE/i;
 const CLIENT_SOURCE = /(?:^|\/)src\//;
+const PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+/** `postgres://user:${DB_PASSWORD}@`, `<password>`, `%s`: not a literal password. */
+const TEMPLATED_PASSWORD = /^[$<{%*[]/;
+const ENV_FILE = /(?:^|\/)\.env(?:\.[\w.-]+)?$/;
+/** `.env.example`, `config.sample`: meant to be shared, so only real-looking keys count. */
+const EXAMPLE_FILE = /\.(?:example|sample)$/i;
 
 const RULE_LABELS: Record<string, string> = {
   "stored-secret": "Value of a stored secret env var",
   "public-env-secret": "Secret-looking value in a public env var",
   "public-secret-name": "Secret-looking name with a public prefix",
   "service-role-in-client": "Supabase service role referenced in client code",
+  "private-key": "Private key",
+  "dsn-password": "Password in a connection string",
+  "env-file": "Environment file included in the export",
+  "sk-api-key": "Hard-coded API key (sk-…)",
 };
 
 export const describeRule = (rule: string) =>
@@ -62,17 +75,29 @@ const isSupabaseAnonJwt = (token: string) => {
   }
 };
 
-/** `sk_live_xxxxxxxxxxxxxxxx` and the like in `.env.example` files. */
-const isPlaceholder = (token: string) => new Set(token.slice(-16)).size < 6;
+/**
+ * `sk_live_xxxxxxxxxxxxxxxx`, `sk-your-openai-api-key-here` and the like.
+ * Real generated keys virtually always contain a digit.
+ */
+const isPlaceholder = (token: string) =>
+  !/\d/.test(token) || new Set(token.slice(-16)).size < 6;
 
 /** Labels of the credential patterns in `text`, ignoring anon JWTs and placeholders. */
 const credentialRules = (text: string): string[] =>
   CREDENTIAL_TOKEN_PATTERNS.filter(({ label, pattern }) =>
-    [...text.matchAll(new RegExp(pattern.source, pattern.flags))].some(
+    // matchAll iterates a copy, so the shared global regexes keep no state.
+    [...text.matchAll(pattern)].some(
       ([token]) =>
         !isPlaceholder(token) && !(label === "jwt" && isSupabaseAnonJwt(token)),
     ),
-  ).map(({ label }) => label);
+  )
+    // The `sk-` pattern also matches Anthropic and OpenRouter keys.
+    .map(({ label }) => (label === "openai" ? "sk-api-key" : label));
+
+const hasDsnPassword = (text: string) =>
+  [...text.matchAll(DSN_PASSWORD_PATTERN)].some(
+    ([, , password]) => !TEMPLATED_PASSWORD.test(password),
+  );
 
 export function scanProject(
   files: readonly ScanFile[],
@@ -89,11 +114,21 @@ export function scanProject(
   for (const { path, content } of files) {
     if (content === undefined) continue;
     const inClientSource = CLIENT_SOURCE.test(path);
+    const isExample = EXAMPLE_FILE.test(path);
+    if (ENV_FILE.test(path) && !isExample) {
+      add({ file: path, line: null, rule: "env-file", severity: "high" });
+    }
 
     content.split("\n").forEach((text, index) => {
       const line = index + 1;
       for (const rule of credentialRules(text)) {
         add({ file: path, line, rule, severity: "high" });
+      }
+      if (PRIVATE_KEY.test(text)) {
+        add({ file: path, line, rule: "private-key", severity: "high" });
+      }
+      if (!isExample && hasDsnPassword(text)) {
+        add({ file: path, line, rule: "dsn-password", severity: "high" });
       }
       if (storedSecrets.some((secret) => text.includes(secret))) {
         add({ file: path, line, rule: "stored-secret", severity: "high" });

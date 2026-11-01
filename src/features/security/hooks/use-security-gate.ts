@@ -5,6 +5,7 @@ import type { ScanFinding } from "../scan-project";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
 export interface SecurityGateState {
+  projectId: Id<"projects">;
   findings: ScanFinding[];
   /** The scan itself could not run. */
   failed: boolean;
@@ -29,11 +30,11 @@ export function useSecurityGate(projectId: Id<"projects">) {
         await proceed();
         return;
       }
-      setPending({ findings, failed: false, proceed });
+      setPending({ projectId, findings, failed: false, proceed });
     } catch {
       // Advisory only: a broken scan should not trap the user's code, but they
       // have to say so explicitly.
-      setPending({ findings: [], failed: true, proceed });
+      setPending({ projectId, findings: [], failed: true, proceed });
     } finally {
       setChecking(false);
     }
