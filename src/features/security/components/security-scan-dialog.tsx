@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { useQueueChatMessage } from "@/features/conversations/hooks/use-queue-chat-message";
 
 import type { SecurityGateState } from "../hooks/use-security-gate";
-import { describeRule, fixRequestMessage } from "../scan-project";
+import { SCAN_CATEGORIES, describeRule, fixRequestMessage, ruleCategory } from "../scan-project";
 
 interface SecurityScanDialogProps {
   pending: SecurityGateState | null;
@@ -55,29 +55,41 @@ export const SecurityScanDialog = ({ pending, onDismiss }: SecurityScanDialogPro
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShieldAlertIcon className="size-4 text-destructive" />
-            {pending?.failed ? "Security check didn't run" : "Possible secrets found"}
+            {pending?.failed ? "Security check didn't run" : "Possible security issues found"}
           </DialogTitle>
           <DialogDescription>
             {pending?.failed
               ? "We couldn't check this project for exposed keys. You can try again later or continue without the check."
-              : "This code may expose keys or data to anyone who gets a copy. Move secrets into server-side environment variables before sharing it."}
+              : "This code may expose keys or data to anyone who gets a copy. Fix these before sharing it."}
           </DialogDescription>
         </DialogHeader>
 
         {pending && pending.findings.length > 0 && (
-          <ul className="min-h-0 overflow-y-auto rounded-md border divide-y text-xs">
-            {pending.findings.map((finding) => (
-              <li
-                key={`${finding.file}:${finding.line}:${finding.rule}`}
-                className="flex flex-col gap-0.5 px-3 py-2"
-              >
-                <span className="font-mono break-all">
-                  {finding.line === null ? finding.file : `${finding.file}:${finding.line}`}
-                </span>
-                <span className="text-muted-foreground">{describeRule(finding.rule)}</span>
-              </li>
-            ))}
-          </ul>
+          <div className="min-h-0 overflow-y-auto flex flex-col gap-3">
+            {SCAN_CATEGORIES.map(({ id, title, fix }) => {
+              const findings = pending.findings.filter((f) => ruleCategory(f.rule) === id);
+              if (findings.length === 0) return null;
+              return (
+                <section key={id} className="flex flex-col gap-1.5">
+                  <h3 className="text-sm font-medium">{title}</h3>
+                  <p className="text-xs text-muted-foreground">{fix}</p>
+                  <ul className="rounded-md border divide-y text-xs">
+                    {findings.map((finding) => (
+                      <li
+                        key={`${finding.file}:${finding.line}:${finding.rule}`}
+                        className="flex flex-col gap-0.5 px-3 py-2"
+                      >
+                        <span className="font-mono break-all">
+                          {finding.line === null ? finding.file : `${finding.file}:${finding.line}`}
+                        </span>
+                        <span className="text-muted-foreground">{describeRule(finding.rule)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              );
+            })}
+          </div>
         )}
 
         <div className="flex items-center gap-2">

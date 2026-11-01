@@ -9,6 +9,8 @@
 import { CREDENTIAL_TOKEN_PATTERNS } from "@/features/integrations/credential-guard";
 import { PUBLIC_KEY_PREFIXES, isPublicByConvention } from "@/features/integrations/env-keys";
 
+import { scanSupabaseSql } from "./supabase-exposure";
+
 export type ScanSeverity = "high" | "medium";
 
 export interface ScanFinding {
@@ -47,10 +49,36 @@ const RULE_LABELS: Record<string, string> = {
   "public-env-secret": "Secret-looking value in a public env var",
   "public-secret-name": "Secret-looking name with a public prefix",
   "service-role-in-client": "Supabase service role referenced in client code",
+  "supabase-no-rls": "Supabase table without row level security: anyone with the public key can read and change every row",
+  "supabase-open-policy": "Supabase policy that lets everyone through (using true)",
 };
 
 export const describeRule = (rule: string) =>
   RULE_LABELS[rule] ?? `Hard-coded ${rule} credential`;
+
+/** Groups the dialog and the fix message, each with its plain-English fix. */
+export const SCAN_CATEGORIES = [
+  {
+    id: "secrets",
+    title: "Exposed secrets",
+    fix:
+      "Move each secret into a server-side environment variable (never one with a " +
+      "public prefix such as VITE_ or NEXT_PUBLIC_) and remove it from the code.",
+  },
+  {
+    id: "supabase",
+    title: "Supabase data exposure",
+    fix:
+      "Enable row level security on every Supabase table, give each one policies that " +
+      "only allow a user their own rows (for example auth.uid() = user_id), and keep " +
+      "the service role key in server code only.",
+  },
+] as const;
+
+const SUPABASE_RULES = new Set(["service-role-in-client", "supabase-no-rls", "supabase-open-policy"]);
+
+export const ruleCategory = (rule: string): (typeof SCAN_CATEGORIES)[number]["id"] =>
+  SUPABASE_RULES.has(rule) ? "supabase" : "secrets";
 
 /** Supabase anon keys are JWTs meant for the browser; RLS protects the data. */
 const isSupabaseAnonJwt = (token: string) => {
@@ -107,6 +135,8 @@ export function scanProject(
     });
   }
 
+  scanSupabaseSql(files).forEach(add);
+
   for (const { key, value } of envVars) {
     if (!isPublicByConvention(key)) continue;
     if (SECRET_NAME.test(key) || credentialRules(value).length > 0) {
@@ -122,11 +152,16 @@ export function scanProject(
 /** The chat message "Ask agent to fix" sends: locations and rules, no values. */
 export const fixRequestMessage = (findings: readonly ScanFinding[]) =>
   [
-    "The pre-export security scan found possible secrets or exposed data. " +
-      "Move each secret into a server-side environment variable (never one with a " +
-      "public prefix such as VITE_ or NEXT_PUBLIC_) and remove it from the code:",
-    // `KEY: rule` would trip the chat credential guard's labeled-secret rule.
-    ...findings.map(
-      (f) => `- ${f.line === null ? f.file : `${f.file}:${f.line}`} (${f.rule})`,
-    ),
+    "The pre-export security scan found possible secrets or exposed data.",
+    ...SCAN_CATEGORIES.flatMap(({ id, fix }) => {
+      const inCategory = findings.filter((f) => ruleCategory(f.rule) === id);
+      if (inCategory.length === 0) return [];
+      return [
+        `${fix} Fix these:`,
+        // `KEY: rule` would trip the chat credential guard's labeled-secret rule.
+        ...inCategory.map(
+          (f) => `- ${f.line === null ? f.file : `${f.file}:${f.line}`} (${f.rule})`,
+        ),
+      ];
+    }),
   ].join("\n");
