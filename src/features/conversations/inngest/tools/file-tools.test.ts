@@ -15,6 +15,7 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
 import { createDeleteFilesTool } from "./delete-files";
 import { createListFilesTool } from "./list-files";
+import { hasUncheckedWrites } from "../build-check-gate";
 import { buildProjectTreePromptSection, MAX_PROMPT_TREE_ENTRIES, type ProjectFile } from "./paths";
 import { createReadFilesTool } from "./read-files";
 import { createRenameFileTool } from "./rename-file";
@@ -218,6 +219,19 @@ describe("writeFiles tool", () => {
       ]),
     ).toBe("Wrote 1 file(s). Created: src/x.ts.");
     expect(rowsNamed("x.ts")).toEqual([expect.objectContaining({ content: "last" })]);
+  });
+
+  it("returns an error after a partial write, which the build-check gate still counts", async () => {
+    const commit = mocks.mutation.getMockImplementation()!;
+    mocks.mutation.mockImplementationOnce(commit).mockRejectedValueOnce(new Error("fetch failed"));
+    const data = await write([
+      { path: "src/App.tsx", content: "v2" },
+      { path: "package.json", content: '{"name":"x"}' },
+    ]);
+
+    expect(data).toBe("Error writing files: fetch failed");
+    expect(db.rows.find((r) => r._id === "app")?.content).toBe("v2");
+    expect(hasUncheckedWrites([{ toolCalls: [{ tool: { name: "writeFiles" }, content: { data } }] }])).toBe(true);
   });
 
   it("never writes a folder path ending in / to a file of the same name (#267)", async () => {
