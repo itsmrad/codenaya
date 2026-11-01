@@ -8,8 +8,22 @@ import { ArrowRight } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import { ShowcaseCard } from "@/features/showcase/components/showcase-card";
 import { useShowcaseTrending } from "@/features/showcase/hooks/use-showcase";
+import { cn } from "@/lib/utils";
 
-const STRIP_SIZE = 6;
+const STRIP_SIZE = 4;
+
+/**
+ * How many cards the grid shows from `sm` up: only full rows (#253). Four
+ * fill 2 x 2 and 4 x 1, two or three show two, and a single card stays alone.
+ * Phones scroll every card sideways instead.
+ */
+export const fullRowCount = (count: number) => (count >= 4 ? 4 : count >= 2 ? 2 : count);
+
+const GRID_COLUMNS: Record<number, string> = {
+  4: "sm:grid-cols-2 xl:grid-cols-4",
+  2: "sm:grid-cols-2 sm:max-w-3xl sm:mx-auto",
+  1: "sm:grid-cols-1 sm:max-w-sm sm:mx-auto",
+};
 
 /**
  * Hides its children if they throw. The strip is optional, so a failing query
@@ -70,12 +84,20 @@ const CommunityStrip = () => {
         </div>
 
         {hasProjects && (
-          // Flex rather than grid so a short last row stays centred.
-          <div className="flex flex-wrap justify-center gap-5">
-            {trending.map((project) => (
+          // Phones scroll the row sideways; wider screens show full rows only.
+          <div
+            className={cn(
+              "-mx-6 flex snap-x snap-mandatory scroll-px-6 gap-5 overflow-x-auto px-6 pb-2 sm:mx-0 sm:grid sm:overflow-visible sm:px-0 sm:pb-0",
+              GRID_COLUMNS[fullRowCount(trending.length)],
+            )}
+          >
+            {trending.map((project, index) => (
               <div
                 key={project._id}
-                className="w-full sm:w-[calc((100%-1.25rem)/2)] lg:w-[calc((100%-2.5rem)/3)]"
+                className={cn(
+                  "w-[78%] shrink-0 snap-start sm:w-auto",
+                  index >= fullRowCount(trending.length) && "sm:hidden",
+                )}
               >
                 <ShowcaseCard project={project} href={`/showcase/${project._id}`} />
               </div>

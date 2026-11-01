@@ -41,6 +41,21 @@ test.describe("not-found page", () => {
     });
   }
 
+  // #253: a stale link offers somewhere to go, or a way to start building.
+  test("offers next steps and a prompt composer", async ({ page }) => {
+    await page.goto("/this-page-does-not-exist");
+
+    const suggested = page.getByRole("navigation", { name: "Suggested pages" });
+    for (const [name, href] of [["Showcase", "/showcase"], ["Docs", "/docs"], ["Pricing", "/pricing"]]) {
+      await expect(suggested.getByRole("link", { name })).toHaveAttribute("href", href);
+    }
+
+    const composer = page.getByRole("textbox", { name: "Describe what you want to build" });
+    await composer.fill("A habit tracker with streaks");
+    await composer.press("Enter");
+    await expect(page).toHaveURL(/\/sign-up/);
+  });
+
   test("shows a friendly state for a missing project", async ({ page }) => {
     test.skip(
       !hasClerkCredentials(),
