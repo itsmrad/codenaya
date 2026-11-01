@@ -65,11 +65,13 @@ export const StuckRunCard = ({
           type="button"
           size="sm"
           onClick={retry.onRetry}
-          className="h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left"
+          className="h-auto min-h-8 max-w-full flex-wrap justify-start gap-x-1.5 gap-y-0 py-1.5"
         >
-          <RotateCcwIcon className="size-3.5" />
-          Retry on {retry.label}
-          <span className="font-normal opacity-80">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <RotateCcwIcon className="size-3.5" />
+            Retry on {retry.label}
+          </span>
+          <span className="whitespace-nowrap font-normal opacity-80">
             · ~{usd(retry.costUsd[0])}–{usd(retry.costUsd[1])}
           </span>
         </Button>
