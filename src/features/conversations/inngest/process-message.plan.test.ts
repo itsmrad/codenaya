@@ -41,6 +41,7 @@ const QUERIES: Record<string, () => unknown> = {
 
 const WRITE_TOOLS = [
   "updateFile",
+  "editFile",
   "createFiles",
   "createFolder",
   "scaffoldViteApp",

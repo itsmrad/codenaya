@@ -1,0 +1,124 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  query: vi.fn(),
+  mutation: vi.fn(),
+}));
+
+vi.mock("@/lib/convex-client", () => ({
+  convex: { query: mocks.query, mutation: mocks.mutation },
+}));
+
+import type { Id } from "../../../../../convex/_generated/dataModel";
+import { applyEdits, createEditFileTool } from "./edit-file";
+
+const step = { run: vi.fn(async (_id: string, fn: () => unknown) => fn()) };
+const ctx = { step } as never;
+const internalKey = "key";
+const projectId = "project_a" as Id<"projects">;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("applyEdits", () => {
+  it("replaces a unique match and leaves the rest untouched", () => {
+    expect(applyEdits("a\nb\nc\n", [{ oldText: "b", newText: "B" }])).toEqual({ content: "a\nB\nc\n" });
+  });
+
+  it("fails on a missing match", () => {
+    expect(applyEdits("a\n", [{ oldText: "x", newText: "y" }])).toEqual({
+      error: "oldText #1 matched 0 times; re-read the file and copy the text exactly.",
+    });
+  });
+
+  it("fails on an ambiguous match unless replaceAll is set", () => {
+    expect(applyEdits("x x x", [{ oldText: "x", newText: "y" }])).toEqual({
+      error: "oldText #1 matched 3 times; include more surrounding lines so it matches once, or set replaceAll.",
+    });
+    expect(applyEdits("x x x", [{ oldText: "x", newText: "y", replaceAll: true }])).toEqual({
+      content: "y y y",
+    });
+  });
+
+  it("applies edits in order and fails as a whole when a later one misses", () => {
+    expect(
+      applyEdits("one two", [
+        { oldText: "one", newText: "1" },
+        { oldText: "1 two", newText: "done" },
+      ]),
+    ).toEqual({ content: "done" });
+    expect(
+      applyEdits("one two", [
+        { oldText: "one", newText: "1" },
+        { oldText: "one", newText: "2" },
+      ]),
+    ).toEqual({
+      error: "oldText #2 matched 0 times (after the earlier edits); re-read the file and copy the text exactly.",
+    });
+  });
+
+  it("matches LF text against CRLF content and keeps CRLF", () => {
+    expect(applyEdits("a\r\nb\r\nc\r\n", [{ oldText: "a\nb", newText: "a\nB\nb" }])).toEqual({
+      content: "a\r\nB\r\nb\r\nc\r\n",
+    });
+  });
+
+  it("inserts newText literally, without replacement patterns", () => {
+    expect(applyEdits("price", [{ oldText: "price", newText: "$&$1" }])).toEqual({ content: "$&$1" });
+  });
+
+  it("rejects an empty oldText", () => {
+    expect(applyEdits("a", [{ oldText: "", newText: "b" }])).toEqual({
+      error: "oldText #1 is empty; copy the exact text to replace from the file.",
+    });
+  });
+});
+
+describe("editFile tool", () => {
+  const files = [
+    { _id: "dir", name: "src", type: "folder" },
+    { _id: "app", name: "App.tsx", type: "file", parentId: "dir" },
+  ];
+  const edit = (edits: unknown) =>
+    createEditFileTool({ projectId, internalKey }).handler({ path: "src/App.tsx", edits } as never, ctx);
+
+  beforeEach(() => {
+    mocks.query
+      .mockResolvedValueOnce(files)
+      .mockResolvedValueOnce({ _id: "app", content: "const a = 1;\nconst b = 2;\n" });
+  });
+
+  it("writes the edited content in one step", async () => {
+    expect(await edit([{ oldText: "b = 2", newText: "b = 3" }])).toBe('File "src/App.tsx" edited successfully');
+    expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), {
+      internalKey,
+      projectId,
+      fileId: "app",
+      content: "const a = 1;\nconst b = 3;\n",
+    });
+    expect(step.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes nothing when any edit fails", async () => {
+    expect(
+      await edit([
+        { oldText: "a = 1", newText: "a = 9" },
+        { oldText: "missing", newText: "x" },
+      ]),
+    ).toBe(
+      'Error: oldText #2 matched 0 times (after the earlier edits); re-read the file and copy the text exactly. "src/App.tsx" was not changed.',
+    );
+    expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
+  it("reports a syntax error the edit introduced", async () => {
+    expect(await edit([{ oldText: "b = 2;", newText: "b = (" }])).toContain("Syntax errors");
+    expect(mocks.mutation).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a call without edits before touching the project", async () => {
+    expect(await edit([])).toBe("Error: Provide at least one edit");
+    expect(step.run).not.toHaveBeenCalled();
+  });
+});

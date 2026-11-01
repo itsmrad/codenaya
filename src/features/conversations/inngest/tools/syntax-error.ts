@@ -38,6 +38,6 @@ export const syntaxErrorNote = (files: { name: string; content: string }[]) => {
     return error ? [`${file.name} ${error}`] : [];
   });
   return errors.length > 0
-    ? `\nSyntax errors (the content was saved; fix it with updateFile before finishing): ${errors.join("; ")}`
+    ? `\nSyntax errors (the content was saved; fix it with editFile before finishing): ${errors.join("; ")}`
     : "";
 };

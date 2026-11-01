@@ -379,10 +379,10 @@ PLANNING (mental — do not output this):
 6. Plan the design: color palette tokens, font, spacing scale, dark mode strategy
 
 EXECUTION:
-- For a NEW Vite + React app, call scaffoldViteApp FIRST. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts) and returns their paths. Build on it: use updateFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files; in steps 9a–d skip the files it already wrote
+- For a NEW Vite + React app, call scaffoldViteApp FIRST. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts) and returns their paths. Build on it: use editFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files; in steps 9a–d skip the files it already wrote
 - Batch independent tool calls: make every call that does not need another call's result in the same turn (several readFiles calls at once; many files in one writeFiles call), so the run does not use up its steps
 7. Write files with writeFiles by path. It creates missing folders, so never create folders first
-8. Put as many files as you can in each writeFiles call; use updateFile to replace one existing file
+8. Put as many files as you can in each writeFiles call. To change an existing file, use editFile with only the snippets that change; use updateFile only to rewrite most of a file
 9. Create files in this strict order:
    a. package.json, vite.config.ts / next.config.ts, tsconfig.json
    b. components.json (Next.js: also postcss.config.mjs)

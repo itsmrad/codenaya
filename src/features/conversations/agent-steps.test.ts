@@ -58,6 +58,15 @@ describe("describeToolCall", () => {
     ).toEqual(["src/App.jsx", "Main.jsx"]);
   });
 
+  it("names the edited file's path", () => {
+    expect(
+      describeToolCall(
+        { name: "editFile", input: { path: "src/App.jsx", edits: [{ oldText: "a", newText: "b" }] } },
+        pathOf,
+      ),
+    ).toEqual(["src/App.jsx"]);
+  });
+
   it("never exposes env var values", () => {
     expect(
       describeToolCall(

@@ -43,7 +43,7 @@ describe("syntaxErrorNote", () => {
       { name: "ok.ts", content: "export {};" },
       { name: "App.tsx", content: "export default () => <div>;" },
     ]);
-    expect(note).toContain("Syntax errors (the content was saved; fix it with updateFile");
+    expect(note).toContain("Syntax errors (the content was saved; fix it with editFile");
     expect(note).toContain("App.tsx 1:");
     expect(note).not.toContain("ok.ts");
   });
