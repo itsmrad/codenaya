@@ -278,6 +278,8 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
               size="sm"
               variant="outline"
               className="w-full"
+              // A running agent would write over the pulled files.
+              disabled={!unpushed || unpushed.running}
               onClick={() => startPull()}
             >
               Pull from GitHub

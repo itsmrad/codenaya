@@ -34,7 +34,7 @@ export const pullFromGithub = inngest.createFunction(
     id: "pull-from-github",
     concurrency: [{ key: "event.data.projectId", limit: 1 }],
     triggers: [{ event: "github/sync.pull" }],
-    onFailure: async ({ event, step }) => {
+    onFailure: async ({ event, error, step }) => {
       const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
       if (!internalKey) return;
 
@@ -45,6 +45,8 @@ export const pullFromGithub = inngest.createFunction(
           internalKey,
           projectId,
           status: "failed",
+          // Ours are written for the user; anything else stays in the logs.
+          error: error.name === "NonRetriableError" ? error.message : undefined,
         });
       });
     },
