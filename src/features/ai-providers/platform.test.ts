@@ -67,7 +67,7 @@ describe("envCatalog", () => {
   it("uses the title model as the utility model, hidden when users can't pick it", () => {
     expect(utilityModel(envCatalog("groq"))).toMatchObject({ id: "openai/gpt-oss-20b", hidden: false });
     expect(utilityModel(envCatalog("openrouter"))).toMatchObject({
-      id: "openai/gpt-5.4-mini",
+      id: "anthropic/claude-haiku-5.5",
       provider: "openrouter",
       hidden: true,
     });
@@ -106,7 +106,7 @@ describe("resolveCatalogModel", () => {
     expect(resolveCatalogModel(catalog, "secret").id).toBe("b");
     expect(resolveCatalogModel({ ...catalog, defaultModelId: "secret" }, "gone").id).toBe("a");
     // The env catalog's hidden utility model isn't pickable either.
-    expect(resolveCatalogModel(envCatalog("openrouter"), "openai/gpt-5.4-mini").id).toBe(
+    expect(resolveCatalogModel(envCatalog("openrouter"), "anthropic/claude-haiku-5.5").id).toBe(
       DEFAULT_AGENT_MODEL_ID,
     );
   });

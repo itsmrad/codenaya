@@ -696,7 +696,7 @@ describe("resolveRunModel (agent run)", () => {
       authKey: SECRET,
     });
     expect(target(run.coding()).url).toContain("api.openai.com");
-    expect(target(run.title(0)).id).toBe("gpt-5.4-mini");
+    expect(target(run.title(0)).id).toBe("gpt-6-luna");
   });
 
   it("uses a custom endpoint's base URL and first model for titles", async () => {

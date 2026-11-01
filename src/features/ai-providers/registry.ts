@@ -65,7 +65,7 @@ export const AI_PROVIDERS: Record<AiProviderId, AiProviderMeta> = {
       vision,
     })),
     defaultModel: DEFAULT_AGENT_MODEL_ID,
-    titleModel: "openai/gpt-5.4-mini",
+    titleModel: "anthropic/claude-haiku-5.5",
   },
   openai: {
     id: "openai",
@@ -79,7 +79,7 @@ export const AI_PROVIDERS: Record<AiProviderId, AiProviderMeta> = {
       { id: "gpt-5.4-mini", label: "GPT-5.4 mini", vision: true },
     ],
     defaultModel: "gpt-5.6-luna",
-    titleModel: "gpt-5.4-mini",
+    titleModel: "gpt-6-luna",
   },
   anthropic: {
     id: "anthropic",
@@ -91,10 +91,11 @@ export const AI_PROVIDERS: Record<AiProviderId, AiProviderMeta> = {
       { id: "claude-opus-5-5", label: "Claude Opus 5.5" },
       { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
       { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
+      { id: "claude-haiku-5-5", label: "Claude Haiku 5.5" },
       { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
     ],
     defaultModel: "claude-sonnet-5-5",
-    titleModel: "claude-haiku-4-5",
+    titleModel: "claude-haiku-5-5",
   },
   groq: {
     id: "groq",

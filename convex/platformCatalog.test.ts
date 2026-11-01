@@ -400,7 +400,7 @@ describe("platformCatalog.migrateFromProviderConfigs", () => {
     await t.run(async (ctx) => {
       await ctx.db.insert("platformModelConfigs", {
         provider: "anthropic",
-        models: [legacy("claude-sonnet-4-5", 3, 15), legacy("claude-haiku-4-5", 1, 5)],
+        models: [legacy("claude-sonnet-4-5", 3, 15), legacy("claude-haiku-5-5", 1, 5)],
         defaultModelId: "claude-sonnet-4-5",
         updatedAt: 1,
         updatedBy: ADMIN.subject,
@@ -411,7 +411,7 @@ describe("platformCatalog.migrateFromProviderConfigs", () => {
       fallbackProvider: "anthropic",
     });
     const catalog = await t.query(api.platformCatalog.getForAdmin, {});
-    expect(catalog?.utilityModelId).toBe("claude-haiku-4-5");
+    expect(catalog?.utilityModelId).toBe("claude-haiku-5-5");
     expect(catalog?.models.some((m) => m.vision)).toBe(false);
   });
 
