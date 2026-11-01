@@ -107,3 +107,34 @@ describe("coding agent integration instructions", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain('"@vitejs/plugin-react": "^4.0.0"');
   });
 });
+
+describe("coding agent prompt consistency (#293)", () => {
+  it("has one narration rule: a short sentence with each tool call", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "Every time you call tools, include ONE short sentence of plain text",
+    );
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/Execute silently|NEVER use phrases like "Let me/);
+  });
+
+  it("defaults to Vite + React and uses Next.js only on request", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "Vite + React + TypeScript, unless the user explicitly asks for Next.js",
+    );
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("Full-stack / SSR / data-fetching / auth apps");
+  });
+
+  it("does not spend tool calls re-listing or re-reading files it just wrote", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("don't re-list or re-read files you just wrote");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/call listFiles again|Re-read critical files/);
+  });
+
+  it("keeps edits minimal and the performance rules out of the base prompt", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("make the smallest correct change");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("react_performance_rules");
+  });
+
+  it("trusts the installed versions and keeps third-party API calls off the browser", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("never use APIs or syntax from a newer major");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("usually fails on CORS");
+  });
+});
