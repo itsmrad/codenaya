@@ -164,6 +164,37 @@ test.describe("first build auto-opens the preview", () => {
     expect(errors).toEqual([]);
   });
 
+  test("a later run on a project without a root package.json keeps the tab (desktop)", async ({ page }) => {
+    test.setTimeout(150_000);
+    const errors = collectConsoleErrors(page);
+    await stubSandbox(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+    // Only index.html: every run here looks like a first build.
+    const build = await startFirstBuild(page, "e2e-preview-auto-open-static");
+
+    try {
+      await page.goto(`/projects/${build.projectId}`);
+      const previewTab = page.getByRole("tab", { name: "Preview" });
+      const codeTab = page.getByRole("tab", { name: "Code" });
+      await expect(previewTab).toHaveAttribute("aria-selected", "true", { timeout: 60_000 });
+      await build.run.complete();
+      await page.waitForTimeout(2_000);
+
+      await codeTab.click();
+      const second = await build.startRun();
+      await page.waitForTimeout(3_000);
+      await expect(codeTab).toHaveAttribute("aria-selected", "true");
+      await second.complete();
+      await page.waitForTimeout(2_000);
+      await expect(codeTab).toHaveAttribute("aria-selected", "true");
+    } finally {
+      await build.cleanup();
+    }
+
+    expect(errors).toEqual([]);
+  });
+
   test("offers the preview in a toast on phones", async ({ page }, testInfo) => {
     test.setTimeout(150_000);
     const errors = collectConsoleErrors(page);

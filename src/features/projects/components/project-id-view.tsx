@@ -124,7 +124,9 @@ export const ProjectIdView = ({
   if (!firstBuild && activeRun && files && !hasPackageJson) {
     setFirstBuild(true);
     setViewPickedDuringBuild(false);
-    if (!isCompact) {
+    // Only in place of the empty editor: a project without a root package.json
+    // reads as a first build on every run, and a picked tab must stay.
+    if (!isCompact && selectedView === "chat") {
       setSelectedView("preview");
       setPreviewOpened(true);
     }

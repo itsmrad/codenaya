@@ -62,7 +62,7 @@ test.describe("first build preview", () => {
       await expect(building).toContainText("Creating App.tsx");
       await expect(building.getByRole("list", { name: "Files written so far" })).toContainText("index.html");
 
-      for (const [name, width, height] of [["phone", 375, 812], ["tablet", 768, 1024], ["desktop", 1440, 900]] as const) {
+      for (const [name, width, height] of [["desktop", 1440, 900], ["phone", 375, 812], ["tablet", 768, 1024]] as const) {
         await page.setViewportSize({ width, height });
         await expect(building).toBeVisible();
         await page.screenshot({ path: testInfo.outputPath(`building-${name}.png`) });
@@ -74,8 +74,9 @@ test.describe("first build preview", () => {
       // package.json boots the sandbox while the run is still writing. The stub is
       // running at once, so the card gives way to the app under the bar (#337).
       // Crossing the 1024px breakpoint remounts the IDE, which then can't tell a
-      // first build once package.json exists, so the bar is checked on phone and
-      // tablet only; preview-auto-open.spec.ts checks it on desktop.
+      // first build once package.json exists. End the card checks in the compact
+      // layout so that remount finishes before writing package.json;
+      // preview-auto-open.spec.ts checks the bar on desktop.
       await page.setViewportSize({ width: 375, height: 812 });
       await system.mutation(api.system.createFile, {
         internalKey,

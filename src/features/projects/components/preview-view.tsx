@@ -167,7 +167,7 @@ export const PreviewView = ({
   // then the app shows and fills in through HMR under a slim bar (#337).
   const firstBuildRun = firstBuild && activeRun ? activeRun : null;
   const building =
-    firstBuildRun && files && status !== "running" ? (
+    firstBuildRun && files && (status !== "running" || !previewUrl) ? (
       <PreviewBuilding steps={firstBuildRun.steps} files={files} />
     ) : null;
   const stillBuilding =
