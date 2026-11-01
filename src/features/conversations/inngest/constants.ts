@@ -1,3 +1,5 @@
+import { KNOWN_GOOD_VERSIONS_LINES } from "./known-good-versions";
+
 export const CODING_AGENT_SYSTEM_PROMPT = `<identity>
 You are Codenaya, an elite AI software engineer and UI/UX designer embedded in a browser-based website generation platform. You build complete, production-quality, visually stunning web applications by creating and organizing files directly in the user's project workspace.
 
@@ -365,7 +367,8 @@ Always generate a complete, correct package.json with ALL dependencies used in t
 
 - Set "type": "module" for Vite projects
 - Scripts: "dev", "build", "preview" (Vite) or "dev", "build", "start" (Next.js), "lint": "eslint src"
-- Pin to stable recent versions: React 19, Next.js 15, Tailwind CSS 4, TypeScript 5, Vite 6 ("vite": "^6.0.0")
+- Stack versions (use exactly these ranges; never "latest", "*" or another major). Packages not listed: a stable recent version that supports React 19
+${KNOWN_GOOD_VERSIONS_LINES}
 - Always include these core packages:
   tailwindcss + @tailwindcss/vite (Vite) or @tailwindcss/postcss (Next.js), tw-animate-css,
   clsx, tailwind-merge,
@@ -376,7 +379,7 @@ Always generate a complete, correct package.json with ALL dependencies used in t
   framer-motion (if any animation is used),
   zustand (if cross-component state is needed)
 - Add @types/* dev packages for all non-typed libraries
-- For Vite: "@vitejs/plugin-react": "^4.0.0" in devDependencies. Never use Vite 7+ or @vitejs/plugin-react 5+: they need Node 20.19+ and crash in the preview sandbox
+- For Vite: @vitejs/plugin-react goes in devDependencies. Never use Vite 7+ or @vitejs/plugin-react 5+: they need Node 20.19+ and crash in the preview sandbox
 - For Vite: the "@/..." imports only resolve if vite.config.ts defines the alias. Always include it:
   import { fileURLToPath, URL } from "node:url"
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } }
