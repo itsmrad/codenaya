@@ -31,6 +31,10 @@ export const syntaxError = (fileName: string, content: string): string | null =>
   return `${line + 1}:${character + 1} ${message}`;
 };
 
+/** Starts the note below; its entries are `name line:col message`, joined by "; ". */
+export const SYNTAX_ERRORS_NOTE =
+  "Syntax errors (the content was saved; fix it with updateFile before finishing): ";
+
 /** The note a write tool appends when files it wrote don't parse. */
 export const syntaxErrorNote = (files: { name: string; content: string }[]) => {
   const errors = files.flatMap((file) => {
@@ -38,6 +42,6 @@ export const syntaxErrorNote = (files: { name: string; content: string }[]) => {
     return error ? [`${file.name} ${error}`] : [];
   });
   return errors.length > 0
-    ? `\nSyntax errors (the content was saved; fix it with updateFile before finishing): ${errors.join("; ")}`
+    ? `\n${SYNTAX_ERRORS_NOTE}${errors.join("; ")}`
     : "";
 };

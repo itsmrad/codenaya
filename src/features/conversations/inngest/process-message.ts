@@ -25,6 +25,7 @@ import { createLoadSkillTool } from './tools/load-skill';
 import { createScaffoldViteAppTool } from './tools/scaffold-vite-app';
 import { createCheckBuildTool } from './tools/check-build';
 import { createBuildCheckGate } from './build-check-gate';
+import { STUCK_FALLBACK_REPLY, createLoopGuard, stuckNote } from './loop-detector';
 import type { AgentModelChoice } from '../agent-models';
 import {
   type RunModel,
@@ -644,6 +645,13 @@ export const processMessage = inngest.createFunction(
 
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
+    // Stops a run going in circles (#306), and hints when it repeats the error
+    // the previous run got stuck on.
+    const loopGuard = createLoopGuard(
+      recentMessages
+        .slice(0, recentMessages.findIndex((msg) => msg._id === messageId))
+        .findLast((msg) => msg.role === "assistant")?.stuck?.signature,
+    );
 
     // Re-validated by resolveRunModel: the event is the boundary this function
     // trusts, and anything holding the event key can send one.
@@ -661,8 +669,11 @@ export const processMessage = inngest.createFunction(
         : tools,
       lifecycle: {
         onStart: ({ agent, prompt, history }) => {
+          const { stuck } = loopGuard;
           const nudge =
-            agent.name === SUMMARY_AGENT_NAME ? STEP_BUDGET_NOTE : buildCheckGate.takeNudge();
+            agent.name === SUMMARY_AGENT_NAME
+              ? stuck ? stuckNote(stuck) : STEP_BUDGET_NOTE
+              : buildCheckGate.takeNudge() ?? loopGuard.takeHint();
           return {
             prompt: withImageParts(prompt, imageUrls),
             history: [
@@ -792,6 +803,9 @@ export const processMessage = inngest.createFunction(
         // callCount, not results: seeded history would count as steps.
         const lastStep = callCount >= MAX_AGENT_STEPS - 1;
 
+        // A stuck run has had its summary turn.
+        if (loopGuard.stuck) return undefined;
+
         // Stop routing to this agent if there's a final text response without
         // tool calls, unless files changed since the last passing build check
         // and there are steps left for it.
@@ -800,7 +814,7 @@ export const processMessage = inngest.createFunction(
             ? codingAgent
             : undefined;
         }
-        return lastStep ? summaryAgent : codingAgent;
+        return lastStep || loopGuard.check(results) ? summaryAgent : codingAgent;
       }
     });
 
@@ -818,8 +832,10 @@ export const processMessage = inngest.createFunction(
       (m) => m.type === "text" && m.role === "assistant"
     );
 
-    let assistantResponse =
-      "I processed your request. Let me know if you need anything else!";
+    const { stuck } = loopGuard;
+    let assistantResponse = stuck
+      ? STUCK_FALLBACK_REPLY
+      : "I processed your request. Let me know if you need anything else!";
 
     if (textMessage?.type === "text") {
       assistantResponse =
@@ -839,6 +855,7 @@ export const processMessage = inngest.createFunction(
         internalKey,
         messageId,
         content: assistantResponse,
+        ...(stuck ? { stuck } : {}),
       })
     });
 

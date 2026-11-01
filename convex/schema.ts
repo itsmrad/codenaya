@@ -19,6 +19,21 @@ export const messageStepValidator = v.object({
   endedAt: v.optional(v.number()),
 });
 
+/**
+ * Why a run was stopped as stuck (#306): the loop it was in, the file in the
+ * loop, and the repeated error with its normalised signature (for the next run).
+ */
+export const stuckRunValidator = v.object({
+  reason: v.union(
+    v.literal("repeated-error"),
+    v.literal("repeated-write"),
+    v.literal("repeated-syntax-error"),
+  ),
+  fileId: v.optional(v.string()),
+  error: v.optional(v.string()),
+  signature: v.optional(v.string()),
+});
+
 export const aiProviderValidator = v.union(
   v.literal("openrouter"),
   v.literal("openai"),
@@ -259,6 +274,8 @@ export default defineSchema({
     images: v.optional(v.array(v.id("_storage"))),
     // Assistant messages only: a plan-mode reply, which wrote no files (#120).
     mode: v.optional(v.literal("plan")),
+    // Assistant messages only: the run was stopped going in circles (#306).
+    stuck: v.optional(stuckRunValidator),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"])

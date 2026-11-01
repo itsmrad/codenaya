@@ -1,9 +1,19 @@
 import type { Infer } from "convex/values";
 
-import type { messageStepValidator } from "../../../convex/schema";
+import type { messageStepValidator, stuckRunValidator } from "../../../convex/schema";
 
 /** One recorded row of an agent run (see `messageStepValidator`). */
 export type AgentStep = Infer<typeof messageStepValidator>;
+
+/** Why a run was stopped as stuck (#306, see `stuckRunValidator`). */
+export type StuckRun = Infer<typeof stuckRunValidator>;
+
+/** What each loop looks like, for the agent's stop note and the hand-off card. */
+export const STUCK_REASONS: Record<StuckRun["reason"], string> = {
+  "repeated-error": "the same error came back three times",
+  "repeated-write": "the same file was rewritten four times",
+  "repeated-syntax-error": "the same file failed to parse three times",
+};
 
 /** The slice of an AgentKit tool call this module reads. */
 export interface ToolCallInput {
