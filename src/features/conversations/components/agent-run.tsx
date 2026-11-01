@@ -55,6 +55,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   createFolder: { icon: FolderPlusIcon, running: "Creating folder", done: "Created folder" },
   scaffoldViteApp: { icon: FolderPlusIcon, running: "Scaffolding Vite app", done: "Scaffolded Vite app" },
   updateFile: { icon: FilePenIcon, running: "Editing", done: "Edited", writes: true },
+  editFile: { icon: FilePenIcon, running: "Editing", done: "Edited", writes: true },
   renameFile: { icon: FileSymlinkIcon, running: "Renaming", done: "Renamed", writes: true },
   deleteFiles: { icon: FileX2Icon, running: "Deleting", done: "Deleted", writes: true },
   scrapeUrls: { icon: GlobeIcon, running: "Fetching", done: "Fetched" },

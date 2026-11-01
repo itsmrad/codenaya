@@ -9,6 +9,7 @@ import { BUILD_CHECK_UNFINISHED, toolResultError } from "../agent-steps";
 const WRITE_TOOLS = new Set([
   "createFiles",
   "updateFile",
+  "editFile",
   "renameFile",
   "deleteFiles",
   "scaffoldViteApp",

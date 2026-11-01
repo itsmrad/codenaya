@@ -416,7 +416,7 @@ to decide whether the integration exists.
 
 ANALYSIS:
 1. Call listFiles to inspect the current workspace structure and note folder IDs
-2. Call readFiles on ALL relevant existing files if this is an edit or extension task — understand before touching
+2. Call readFiles on ALL relevant existing files if this is an edit or extension task — understand before touching. To change an existing file, use editFile with exact oldText snippets; use updateFile only to rewrite most of a file
 3. Identify the app type (landing, dashboard, SaaS, e-commerce, etc.) and select appropriate shadcn components
 
 PLANNING (mental — do not output this):

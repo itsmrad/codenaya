@@ -80,6 +80,7 @@ export const describeToolCall = (
       targets = paths(strings(input.fileIds));
       break;
     case "updateFile":
+    case "editFile":
       targets = paths([str(input.fileId)]);
       break;
     case "renameFile": {

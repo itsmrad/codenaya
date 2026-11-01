@@ -35,6 +35,15 @@ describe("describeToolCall", () => {
     ).toEqual(["src/App.jsx"]);
   });
 
+  it("shows the edited file's path for editFile", () => {
+    expect(
+      describeToolCall(
+        { name: "editFile", input: { fileId: ID_A, edits: [{ oldText: "a", newText: "b" }] } },
+        pathOf,
+      ),
+    ).toEqual(["src/App.jsx"]);
+  });
+
   it("joins created file names onto the parent folder path", () => {
     expect(
       describeToolCall(
