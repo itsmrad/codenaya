@@ -527,3 +527,73 @@ describe("run changes (#225)", () => {
     await expect(t.query(api.checkpoints.listChanges, { checkpointId })).rejects.toThrow(/Unauthorized/);
   });
 });
+
+// #259: restores and explorer deletes can be undone.
+describe("undo for restore and delete", () => {
+  beforeEach(() => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", INTERNAL_KEY);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
+  });
+
+  test("restore snapshots the current files first, and restoring that snapshot undoes it", async () => {
+    const { t, alice } = setup();
+    const { projectId, conversationId, index } = await seedProject(t);
+    const beforeRun = await tree(t, projectId);
+    await snapshot(t, projectId, await addRun(t, projectId, conversationId));
+
+    // A manual edit after the run, which a restore would otherwise lose.
+    await alice.mutation(api.files.updateFile, { id: index, content: "<h1>hand edit</h1>" });
+    const edited = await tree(t, projectId);
+
+    const [runCheckpoint] = await alice.query(api.checkpoints.list, { projectId });
+    const undoId = await alice.mutation(api.checkpoints.restore, { checkpointId: runCheckpoint._id });
+    expect(await tree(t, projectId)).toEqual(beforeRun);
+
+    const [newest] = await alice.query(api.checkpoints.list, { projectId });
+    expect(newest).toMatchObject({ _id: undoId, label: "Before restore" });
+    expect(newest.messageId).toBeUndefined();
+
+    await alice.mutation(api.checkpoints.restore, { checkpointId: undoId });
+    expect(await tree(t, projectId)).toEqual(edited);
+  });
+
+  test("restoring the oldest checkpoint at the cap keeps it until the restore is done", async () => {
+    const { t, alice } = setup();
+    const { projectId, conversationId } = await seedProject(t);
+    const before = await tree(t, projectId);
+    for (let run = 0; run < MAX_CHECKPOINTS_PER_PROJECT; run++) {
+      await snapshot(t, projectId, await addRun(t, projectId, conversationId), `run ${run}`);
+    }
+    const oldest = (await alice.query(api.checkpoints.list, { projectId })).at(-1)!;
+
+    await alice.mutation(api.checkpoints.restore, { checkpointId: oldest._id });
+    expect(await tree(t, projectId)).toEqual(before);
+  });
+
+  test("deleting a folder snapshots first, and Undo brings it and its children back", async () => {
+    vi.useFakeTimers();
+    const { t, alice } = setup();
+    const { projectId, src } = await seedProject(t);
+    const before = await tree(t, projectId);
+
+    const undoId = await alice.mutation(api.checkpoints.deleteFileWithUndo, { id: src });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(Object.keys(await tree(t, projectId))).toEqual(["index.html"]);
+    expect((await alice.query(api.checkpoints.list, { projectId }))[0]).toMatchObject({
+      _id: undoId,
+      label: "Before deleting src",
+    });
+
+    await alice.mutation(api.checkpoints.restore, { checkpointId: undoId });
+    expect(await tree(t, projectId)).toEqual(before);
+  });
+
+  test("only the owner can delete with undo", async () => {
+    const { t, bob } = setup();
+    const { src } = await seedProject(t);
+    await expect(bob.mutation(api.checkpoints.deleteFileWithUndo, { id: src })).rejects.toThrow();
+  });
+});

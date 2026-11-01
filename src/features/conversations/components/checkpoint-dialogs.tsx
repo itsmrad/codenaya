@@ -39,7 +39,17 @@ export const RestoreCheckpointDialog = ({
     if (!checkpoint) return;
     onOpenChange(false);
     restore({ checkpointId: checkpoint._id }).then(
-      () => toast.success("Files restored"),
+      (undoCheckpointId) =>
+        toast.success("Files restored", {
+          action: {
+            label: "Undo",
+            onClick: () =>
+              restore({ checkpointId: undoCheckpointId }).then(
+                () => toast.success("Restore undone"),
+                () => toast.error("Couldn't undo the restore"),
+              ),
+          },
+        }),
       () => toast.error("Couldn't restore the files"),
     );
   };
