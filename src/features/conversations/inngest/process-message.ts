@@ -672,8 +672,13 @@ export const processMessage = inngest.createFunction(
             stop: false,
           };
         },
-        onResponse: async ({ result, network }) => {
+        onResponse: async ({ agent, result, network }) => {
           await recordUsage(result.raw, runModel.metering.coding);
+          // The last step must not write without a build check left to run;
+          // this holds when a provider ignores tool_choice "none".
+          if (agent.name === SUMMARY_AGENT_NAME) {
+            result.output = result.output.filter((m) => m.type !== "tool_call");
+          }
           const calls = result.output.flatMap((m) =>
             m.type === "tool_call" ? m.tools : [],
           );
@@ -774,7 +779,7 @@ export const processMessage = inngest.createFunction(
       name: "codenaya-network",
       agents: [codingAgent, summaryAgent],
       maxIter: MAX_AGENT_STEPS,
-      router: ({ network }) => {
+      router: ({ network, callCount }) => {
         const { results } = network.state;
         const lastResult = results.at(-1);
         const hasTextResponse = lastResult?.output.some(
@@ -784,7 +789,8 @@ export const processMessage = inngest.createFunction(
           (m) => m.type === "tool_call"
         );
 
-        const lastStep = results.length >= MAX_AGENT_STEPS - 1;
+        // callCount, not results: seeded history would count as steps.
+        const lastStep = callCount >= MAX_AGENT_STEPS - 1;
 
         // Stop routing to this agent if there's a final text response without
         // tool calls, unless files changed since the last passing build check

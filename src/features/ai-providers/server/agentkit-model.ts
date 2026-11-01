@@ -77,11 +77,11 @@ type RequestBody = Record<string, unknown>;
  * history of a request that declares no tools.
  */
 export function withoutToolCalls(model: AgentKitModel): AgentKitModel {
-  const onCall = model.onCall as (adapter: unknown, body: RequestBody) => void;
+  const onCall = model.onCall as ((adapter: unknown, body: RequestBody) => void) | undefined;
   return {
     ...model,
     onCall(adapter: unknown, body: RequestBody) {
-      onCall(adapter, body);
+      onCall?.(adapter, body);
       if (body.tools) body.tool_choice = model.format === "anthropic" ? { type: "none" } : "none";
     },
   } as AgentKitModel;
