@@ -99,8 +99,8 @@ export const getMessages = query({
 /**
  * The project's in-flight agent run, or null when none is running. The preview
  * reads it to hold off booting a sandbox while the first build is still being
- * written. `firstBuild`: no run in the project has completed yet, which still
- * holds for a project seeded with the starter at creation (#338).
+ * written. `firstBuild`: the project was seeded at creation and no run has
+ * written files yet (#338), which package.json can't tell.
  */
 export const getActiveRun = query({
   args: {
@@ -109,7 +109,7 @@ export const getActiveRun = query({
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
 
-    await getOwnedProject(ctx, args.projectId, identity.subject);
+    const project = await getOwnedProject(ctx, args.projectId, identity.subject);
 
     const message = await ctx.db
       .query("messages")
@@ -119,15 +119,8 @@ export const getActiveRun = query({
       .order("desc")
       .first();
 
-    if (!message) return null;
-
-    const completed = await ctx.db
-      .query("messages")
-      .withIndex("by_project_status", (q) =>
-        q.eq("projectId", args.projectId).eq("status", "completed")
-      )
-      .first();
-
-    return { steps: message.steps ?? [], firstBuild: completed === null };
+    return message
+      ? { steps: message.steps ?? [], firstBuild: project.firstBuildPending === true }
+      : null;
   },
 });

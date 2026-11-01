@@ -55,3 +55,28 @@ describe("seedTemplateFiles", () => {
     });
   });
 });
+
+describe("seedTemplateFiles when Convex fails partway (#338)", () => {
+  it("logs, keeps what was written and never writes the root package.json before its files", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    mutation.mockReset();
+    let calls = 0;
+    mutation.mockImplementation(async (_ref, args) => {
+      if (++calls === 4) throw new Error("Convex down");
+      return `id:${args.name}`;
+    });
+
+    await expect(
+      seedTemplateFiles({ internalKey: "key", projectId: "p1" as never }),
+    ).resolves.toBeUndefined();
+
+    const written = mutation.mock.calls
+      .slice(0, 3)
+      .filter(([ref]) => getFunctionName(ref) === "system:createFiles")
+      .flatMap(([, a]) => a.files.map((f: { name: string }) => f.name));
+    expect(written.length).toBeGreaterThan(0);
+    expect(written).not.toContain("package.json");
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("[seed-template]"), expect.any(Error));
+    error.mockRestore();
+  });
+});

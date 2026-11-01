@@ -4,6 +4,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, test, vi } from "vitest";
 
 import { api } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -80,30 +81,82 @@ describe("conversations.getActiveRun", () => {
 
     expect(await alice.query(api.conversations.getActiveRun, { projectId })).toEqual({
       steps: [step],
-      firstBuild: true,
+      firstBuild: false,
     });
   });
+});
 
-  test("is a first build only until a run in the project completes (#338)", async () => {
+describe("first build (#338)", () => {
+  const INTERNAL_KEY = "test-internal-key";
+  const key = { internalKey: INTERNAL_KEY };
+
+  const seededProject = async (t: T) => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", INTERNAL_KEY);
+    return await t.mutation(api.system.createProjectWithConversation, {
+      ...key,
+      projectName: "p",
+      conversationTitle: "New",
+      ownerId: ALICE,
+      firstBuildPending: true,
+    });
+  };
+
+  const startRun = (t: T, ids: { projectId: Id<"projects">; conversationId: Id<"conversations"> }) =>
+    t.mutation(api.system.createMessage, {
+      ...key,
+      ...ids,
+      role: "assistant",
+      content: "",
+      status: "processing",
+    });
+
+  // Each ends its message completed through updateMessageContent, with no
+  // files written: a failed dispatch, a rejected key, a plan or a Q&A reply.
+  test.each([
+    ["a failed dispatch", {}],
+    ["a rejected key", {}],
+    ["a plan reply", { mode: "plan" as const }],
+  ])("stays a first build after %s, until a run writes files", async (_, fields) => {
+    const { t, alice } = setup();
+    const ids = await seededProject(t);
+
+    const first = await startRun(t, ids);
+    await t.run((ctx) => ctx.db.patch(first, fields));
+    await t.mutation(api.system.updateMessageContent, { ...key, messageId: first, content: "Not built" });
+
+    const retry = await startRun(t, ids);
+    expect(
+      await alice.query(api.conversations.getActiveRun, { projectId: ids.projectId }),
+    ).toMatchObject({ firstBuild: true });
+
+    await t.mutation(api.projects.completeFirstBuild, { ...key, projectId: ids.projectId });
+    await t.mutation(api.system.updateMessageContent, { ...key, messageId: retry, content: "Built" });
+
+    await startRun(t, ids);
+    expect(
+      await alice.query(api.conversations.getActiveRun, { projectId: ids.projectId }),
+    ).toMatchObject({ firstBuild: false });
+  });
+
+  test("a project created without the flag is never flagged", async () => {
     const { t, alice } = setup();
     const { projectId, conversationId } = await seedProject(t);
-    const run = { conversationId, projectId, role: "assistant" as const, content: "" };
-    await t.run(async (ctx) => {
-      await ctx.db.insert("messages", { ...run, status: "cancelled" });
-      await ctx.db.insert("messages", { ...run, status: "processing" });
-    });
-
-    expect(await alice.query(api.conversations.getActiveRun, { projectId })).toMatchObject({
-      firstBuild: true,
-    });
-
-    await t.run(async (ctx) => {
-      await ctx.db.insert("messages", { ...run, content: "Done", status: "completed" });
-    });
+    await t.run((ctx) =>
+      ctx.db.insert("messages", { conversationId, projectId, role: "assistant", content: "", status: "processing" }),
+    );
 
     expect(await alice.query(api.conversations.getActiveRun, { projectId })).toMatchObject({
       firstBuild: false,
     });
+  });
+
+  test("completeFirstBuild needs the internal key", async () => {
+    const { t } = setup();
+    const { projectId } = await seededProject(t);
+
+    await expect(
+      t.mutation(api.projects.completeFirstBuild, { internalKey: "nope", projectId }),
+    ).rejects.toThrow("Invalid internal key");
   });
 });
 

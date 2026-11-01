@@ -8,6 +8,7 @@ import { api } from "../../../../convex/_generated/api";
 import {
   CODING_AGENT_SYSTEM_PROMPT,
   MAX_AGENT_STEPS,
+  STARTER_IN_PLACE_NOTE,
   STEP_BUDGET_NOTE,
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
@@ -23,7 +24,7 @@ import { createSetEnvVarTool } from './tools/set-env-var';
 import { createLoadSkillTool } from './tools/load-skill';
 import { createScaffoldViteAppTool } from './tools/scaffold-vite-app';
 import { createCheckBuildTool } from './tools/check-build';
-import { createBuildCheckGate } from './build-check-gate';
+import { createBuildCheckGate, wroteFiles } from './build-check-gate';
 import type { AgentModelChoice } from '../agent-models';
 import {
   type RunModel,
@@ -62,7 +63,7 @@ import {
   resolveSkills,
 } from '@/features/skills/server/resolve-skills';
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
-import { buildStarterPromptSection } from './starter-prompt';
+import { isStarterOnly } from './starter-only';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
@@ -514,9 +515,10 @@ export const processMessage = inngest.createFunction(
 
     systemPrompt += buildSkillsPromptSection(skills, forced, unavailable);
 
-    // A project seeded with the starter gets its ids up front (#338).
-    systemPrompt += await step.run("describe-starter", async () =>
-      buildStarterPromptSection(
+    // A project seeded with the starter says so in the request, not the
+    // system prompt, so the first turn builds on it (#338).
+    const starterOnly = await step.run("check-starter-only", async () =>
+      isStarterOnly(
         await convex.query(api.system.getProjectFiles, { internalKey, projectId }),
       ),
     );
@@ -774,25 +776,40 @@ export const processMessage = inngest.createFunction(
 
     // The title runs alongside the coding agent, never before it (#338).
     // Started here: earlier, Inngest would plan every step in between as a
-    // parallel step, one extra round trip each.
+    // parallel step, one extra round trip each. It never throws.
+    let titleUsageRecorded = false;
     const titleDone =
       conversation.title === DEFAULT_CONVERSATION_TITLE
         ? generateConversationTitle({
             step,
             runModel,
             request,
-            recordUsage: (raw) =>
-              recordUsage(raw, runModel.metering.title, "record-usage-title"),
+            recordUsage: (raw) => {
+              titleUsageRecorded = true;
+              return recordUsage(raw, runModel.metering.title, "record-usage-title");
+            },
             internalKey,
             conversationId,
           })
         : undefined;
+    // Every way out of the run waits for the title and flushes usage once: a
+    // failed last record has no later one to catch it up. A cancelled run
+    // stops between steps; its per-inference records are its flush.
+    const settleRun = async (id: string) => {
+      await titleDone;
+      if (usageRecords > 0 || titleUsageRecorded) {
+        await sendUsage(id);
+      }
+    };
 
     // Run the agent
     let result;
     try {
-      result = await network.run(request);
+      result = await network.run(
+        starterOnly ? `${request}\n\n${STARTER_IN_PLACE_NOTE}` : request,
+      );
     } catch (error) {
+      await settleRun("record-usage-on-error");
       return await endRunOnKeyRejection(error);
     }
 
@@ -812,12 +829,7 @@ export const processMessage = inngest.createFunction(
           : textMessage.content.map((c) => c.text).join("");
     }
 
-    await titleDone;
-
-    // A failed last record has no later one to catch it up.
-    if (usageRecords > 0 || titleDone) {
-      await sendUsage("record-usage-final");
-    }
+    await settleRun("record-usage-final");
 
     // Update the assistant message with the response (this also sets status to completed)
     await step.run("update-assistant-message", async () => {
@@ -827,6 +839,13 @@ export const processMessage = inngest.createFunction(
         content: assistantResponse,
       })
     });
+
+    // The first run that wrote files ends a seeded project's first build (#338).
+    if (wroteFiles(result.state.results)) {
+      await step.run("complete-first-build", async () => {
+        await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
+      });
+    }
 
     return { success: true, messageId, conversationId };
   }

@@ -112,9 +112,12 @@ export async function POST(request: Request) {
         projectName,
         conversationTitle: DEFAULT_CONVERSATION_TITLE,
         ownerId: userId,
+        // Seeded below, so package.json can't mark the first build (#338).
+        firstBuildPending: true,
       },
     );
 
+    // Never throws: a failed seed leaves the agent to scaffold, as before.
     await seedTemplateFiles({ internalKey, projectId, template });
 
     // Create user message

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildStarterPromptSection } from "./starter-prompt";
+import { isStarterOnly } from "./starter-only";
 import { VITE_REACT_STARTER } from "./vite-starter";
 
 /** Project rows for the given file paths, folders implied, ids like `id:src/App.tsx`. */
@@ -25,21 +25,16 @@ const rowsFor = (paths: string[]) => {
 
 const STARTER_PATHS = VITE_REACT_STARTER.map((file) => file.path);
 
-describe("buildStarterPromptSection", () => {
-  it("lists every starter file and folder with its id and says to skip listFiles and scaffoldViteApp", () => {
-    const section = buildStarterPromptSection(rowsFor(STARTER_PATHS));
-
-    expect(section).toContain("Do not call listFiles or scaffoldViteApp");
-    expect(section).toContain("- package.json (file, id: id:package.json)");
-    expect(section).toContain("- src/lib (folder, id: id:src/lib)");
-    expect(section).toContain("- src/App.tsx (file, id: id:src/App.tsx)");
+describe("isStarterOnly", () => {
+  it("is true for a project that holds exactly the seeded starter", () => {
+    expect(isStarterOnly(rowsFor(STARTER_PATHS))).toBe(true);
   });
 
   it.each([
     ["an empty project", []],
     ["a project the agent has added to", [...STARTER_PATHS, "src/pages/Home.tsx"]],
-    ["a project missing a starter file", STARTER_PATHS.slice(1)],
-  ])("is empty for %s", (_, paths) => {
-    expect(buildStarterPromptSection(rowsFor(paths))).toBe("");
+    ["a partly seeded project", STARTER_PATHS.slice(1)],
+  ])("is false for %s", (_, paths) => {
+    expect(isStarterOnly(rowsFor(paths))).toBe(false);
   });
 });

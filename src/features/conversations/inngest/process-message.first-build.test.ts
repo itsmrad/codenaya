@@ -1,7 +1,8 @@
 /**
  * The first-build critical path (#338) in a real `processMessage` run: the
- * title runs alongside the coding agent instead of before it, and a project
- * seeded with the starter gets its ids in the prompt.
+ * title runs alongside the coding agent and is settled on every way out, a
+ * starter-only project says so in the request, and only a run that wrote
+ * files ends a seeded project's first build.
  */
 
 import { getFunctionName } from "convex/server";
@@ -18,7 +19,8 @@ vi.mock("@/lib/convex-client", async () => {
 });
 
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
-import { drive, text } from "./process-message.driver";
+import { STARTER_IN_PLACE_NOTE } from "./constants";
+import { drive, text, toolCall } from "./process-message.driver";
 import { VITE_REACT_STARTER } from "./vite-starter";
 
 let projectFiles: unknown[];
@@ -37,10 +39,20 @@ interface ChatBody {
   tools?: unknown[];
 }
 
-const codingPrompt = (bodies: unknown[]) =>
-  JSON.stringify((bodies as ChatBody[]).find((body) => body.tools)!.messages[0]);
+const codingRequest = (bodies: unknown[]) => {
+  const { messages } = (bodies as ChatBody[]).find((body) => body.tools)!;
+  return {
+    system: JSON.stringify(messages.find((m) => m.role === "system")),
+    user: JSON.stringify(messages.filter((m) => m.role === "user").at(-1)),
+  };
+};
 const mutations = () =>
   mocks.mutation.mock.calls.map(([ref, args]) => [getFunctionName(ref), args]);
+const called = (name: string) => mutations().filter(([n]) => n === name);
+
+const FAILED = { error: { name: "Error", message: "AI request failed with status 500" } };
+const WRITE = toolCall("createFiles", { parentId: "", files: [{ name: "App.tsx", content: "x" }] });
+const MODEL = { modelId: "x-ai/grok-4.7" };
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -48,66 +60,104 @@ beforeEach(() => {
   vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
   vi.spyOn(console, "error").mockImplementation(() => {});
   mocks.query.mockImplementation(async (ref) => QUERIES[getFunctionName(ref)]?.());
-  mocks.mutation.mockResolvedValue(null);
+  mocks.mutation.mockImplementation(async (ref, args) =>
+    getFunctionName(ref) === "system:createFiles"
+      ? (args as { files: Array<{ name: string }> }).files.map(({ name }) => ({ name, fileId: "f1" }))
+      : null,
+  );
   projectFiles = [];
 });
 
-describe("processMessage first build", () => {
-  it("requests the first coding turn together with the title, then still saves the title", async () => {
-    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
-      { data: text("Todo app") },
+describe("processMessage title off the first-build path", () => {
+  it("requests the coding turn before the title resolves; a later title is still saved", async () => {
+    const outcome = await drive(MODEL, [
+      { data: text("Todo app"), held: true },
       { data: text("Built it.") },
     ]);
 
     expect(outcome.finalType).toBe("function-resolved");
-    const [title, coding] = outcome.inferenceRequests;
-    expect(coding).toBe(title);
-    expect(mutations()).toEqual(
-      expect.arrayContaining([
-        ["system:updateConversationTitle", expect.objectContaining({ title: "Todo app" })],
-        ["system:updateMessageContent", expect.objectContaining({ content: "Built it." })],
-      ]),
+    expect(outcome.inferenceRequests[1]).toBeLessThan(outcome.inferenceResolvedAt[0]!);
+    expect(called("system:updateConversationTitle")).toEqual([
+      ["system:updateConversationTitle", expect.objectContaining({ title: "Todo app" })],
+    ]);
+    expect(called("system:updateMessageContent")).toEqual([
+      ["system:updateMessageContent", expect.objectContaining({ content: "Built it." })],
+    ]);
+  });
+
+  it("finishes with the default title when the title fails after the coding run", async () => {
+    const outcome = await drive(MODEL, [{ ...FAILED, held: true }, { data: text("Built it.") }]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(called("system:updateConversationTitle")).toEqual([]);
+    expect(called("system:updateMessageContent")).toHaveLength(1);
+    // The coding record, then the one final flush.
+    expect(called("credits:recordRunUsage")).toHaveLength(2);
+  });
+
+  it("waits for the title and flushes usage once when the coding run fails", async () => {
+    const outcome = await drive(MODEL, [{ data: text("Todo app"), held: true }, FAILED]);
+
+    expect(outcome.finalType).not.toBe("function-resolved");
+    expect(called("system:updateConversationTitle")).toHaveLength(1);
+    // The title's record, then the error path's flush.
+    expect(called("credits:recordRunUsage")).toHaveLength(2);
+    expect(called("projects:completeFirstBuild")).toEqual([]);
+  });
+
+  it("stops cleanly when cancelled while the title is pending", async () => {
+    const outcome = await drive(
+      MODEL,
+      [{ data: text("Todo app"), held: true }, { data: text("Built it.") }],
+      undefined,
+      {},
+      { cancelWhen: () => called("credits:recordRunUsage").length > 0 },
     );
+
+    expect(outcome.finalType).toBe("cancelled");
+    // The coding turn's own record is the cancelled run's usage.
+    expect(called("credits:recordRunUsage")).toHaveLength(1);
+    expect(called("system:updateConversationTitle")).toEqual([]);
+    expect(called("system:updateMessageContent")).toEqual([]);
+  });
+});
+
+describe("processMessage first build (#338)", () => {
+  it("ends a seeded project's first build when the run wrote files", async () => {
+    await drive(MODEL, [{ data: text("Todo app") }, { data: WRITE }, { data: text("Built it.") }]);
+
+    expect(called("projects:completeFirstBuild")).toEqual([
+      ["projects:completeFirstBuild", { internalKey: "ik", projectId: "p1" }],
+    ]);
   });
 
-  it("finishes the run with the default title when title generation fails", async () => {
-    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
-      { error: { name: "Error", message: "AI request failed with status 500" } },
-      { data: text("Built it.") },
-    ]);
+  it.each([
+    ["a reply that wrote nothing", {}],
+    ["a plan", { mode: "plan" }],
+  ])("leaves the first build pending after %s", async (_, extra) => {
+    await drive(MODEL, [{ data: text("Todo app") }, { data: text("Here's how.") }], "todo app", extra);
 
-    expect(outcome.finalType).toBe("function-resolved");
-    const names = mutations().map(([name]) => name);
-    expect(names).not.toContain("system:updateConversationTitle");
-    expect(mutations()).toContainEqual([
-      "system:updateMessageContent",
-      expect.objectContaining({ content: "Built it." }),
-    ]);
+    expect(called("projects:completeFirstBuild")).toEqual([]);
   });
 
-  it("gives a starter-only project its file ids, so the first turn needs no listFiles", async () => {
+  it("tells a starter-only project's first turn the starter is in place, outside the system prompt", async () => {
     projectFiles = VITE_REACT_STARTER.map(({ path }) => ({
       _id: `id:${path}`,
       name: path,
       type: "file",
     }));
 
-    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
-      { data: text("Todo app") },
-      { data: text("Built it.") },
-    ]);
+    const outcome = await drive(MODEL, [{ data: text("Todo app") }, { data: text("Built it.") }]);
 
-    const prompt = codingPrompt(outcome.inferenceBodies);
-    expect(prompt).toContain("Do not call listFiles or scaffoldViteApp");
-    expect(prompt).toContain("package.json (file, id: id:package.json)");
+    const { system, user } = codingRequest(outcome.inferenceBodies);
+    expect(user).toContain(JSON.stringify(STARTER_IN_PLACE_NOTE).slice(1, -1));
+    expect(system).not.toContain(JSON.stringify(STARTER_IN_PLACE_NOTE).slice(1, -1));
+    expect(system).not.toContain("id:package.json");
   });
 
-  it("leaves the prompt without a workspace section for any other project", async () => {
-    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
-      { data: text("Todo app") },
-      { data: text("Built it.") },
-    ]);
+  it("leaves any other project's request as sent", async () => {
+    const outcome = await drive(MODEL, [{ data: text("Todo app") }, { data: text("Built it.") }]);
 
-    expect(codingPrompt(outcome.inferenceBodies)).not.toContain("## Workspace");
+    expect(codingRequest(outcome.inferenceBodies).user).not.toContain("Vite starter");
   });
 });

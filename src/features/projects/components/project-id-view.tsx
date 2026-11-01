@@ -109,9 +109,9 @@ export const ProjectIdView = ({
   // mount it on first open and keep it mounted so tab switches don't reboot it.
   const [previewOpened, setPreviewOpened] = useState(openOnPreview);
 
-  // A project's first run, or a run that starts before package.json exists,
-  // is writing the first build. Prompt-created projects are seeded with the
-  // starter, so package.json alone can't tell (#338).
+  // A run is writing the first build when the project was seeded and no run
+  // has written files yet, or when it starts before package.json exists.
+  // Seeded projects have package.json from creation, so it can't tell (#338).
   // The preview mounts (hidden) once package.json lands so the sandbox boots
   // during the run, and the IDE switches to it when the run ends, unless the
   // user picked a tab meanwhile. Phones keep the chat and get a toast (#254).
