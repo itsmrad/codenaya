@@ -27,9 +27,9 @@ export const LONG_SINGLE_LINE_MESSAGE = `Use this asset https://example.com/${"v
 const READ_FILES = [
   "vite.config.ts", "src/main.tsx", "src/pages/index.tsx", "package.json", "tsconfig.json",
   "src/lib/index.ts", "src/hooks/useTypewriter.ts", "index.html", "tsconfig.node.json",
-  "src/index.css", "tailwind.config.ts", "src/components/ui/button.tsx",
+  "src/index.css", "src/App.tsx", "src/components/ui/button.tsx",
   "src/components/ui/input.tsx", "src/components/ui/separator.tsx", "src/lib/utils.ts",
-  "postcss.config.js", "components.json",
+  "tsconfig.app.json", "components.json",
 ];
 
 const ASSISTANT_MARKDOWN = `Fixed the import. The landing page lives at \`src/pages/index.tsx\`, see https://vitejs.dev/guide/features.html#${"anchor-".repeat(20)}end for details.
