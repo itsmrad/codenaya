@@ -20,6 +20,8 @@ import { createCreateFilesTool } from './tools/create-files';
 import { createCreateFolderTool } from './tools/create-folder';
 import { createRenameFileTool } from './tools/rename-file';
 import { createDeleteFilesTool } from './tools/delete-files';
+import { createWriteFilesTool } from './tools/write-files';
+import { buildProjectTreePromptSection, getProjectFiles } from './tools/paths';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
 import { createSetEnvVarTool } from './tools/set-env-var';
 import { createLoadSkillTool } from './tools/load-skill';
@@ -68,6 +70,7 @@ import { isStarterOnly } from './starter-only';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
+import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
   type MessageMode,
   PLAN_MODE,
@@ -131,8 +134,7 @@ export const processMessage = inngest.createFunction(
           await convex.mutation(api.system.updateMessageContent, {
             internalKey,
             messageId,
-            content:
-              "My apologies, I encountered an error while processing your request. Let me know if you need anything else!",
+            content: AGENT_FAILURE_MESSAGE,
           });
         });
       }
@@ -294,21 +296,8 @@ export const processMessage = inngest.createFunction(
     const request =
       imageUrls.length > 0 && !message.trim() ? IMAGE_ONLY_PROMPT : message;
 
-    // Build system prompt with conversation history (exclude the current processing message)
-    let systemPrompt = CODING_AGENT_SYSTEM_PROMPT;
-
-    // Filter out the current processing message and empty messages
-    const contextMessages = recentMessages.filter(
-      (msg) => msg._id !== messageId && msg.content.trim() !== ""
-    );
-
-    if (contextMessages.length > 0) {
-      const historyText = contextMessages
-        .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
-        .join("\n\n");
-
-      systemPrompt += `\n\n## Previous Conversation (for context only - do NOT repeat these responses):\n${historyText}\n\n## Current Request:\nRespond ONLY to the user's new message below. Do not repeat or reference your previous responses.`;
-    }
+    // Earlier turns go to the model as chat messages, never in the system prompt.
+    const earlierTurns = priorTurns(recentMessages, messageId);
 
     // ─── MCP integrations ───
     //
@@ -489,8 +478,6 @@ export const processMessage = inngest.createFunction(
       });
     }
 
-    systemPrompt += buildIntegrationsPromptSection(mcpSummaries, mcpWarnings);
-
     // ─── Skills ───
     //
     // Only names and descriptions go in the prompt; loadSkill hands the agent a
@@ -514,7 +501,29 @@ export const processMessage = inngest.createFunction(
       }
     });
 
-    systemPrompt += buildSkillsPromptSection(skills, forced, unavailable);
+    // The project's paths at run start (#292), so the agent addresses files by
+    // path without a listFiles call. Non-fatal: listFiles still works.
+    const projectTree = await step.run("get-project-tree", async () => {
+      try {
+        return buildProjectTreePromptSection(await getProjectFiles(internalKey, projectId));
+      } catch (error) {
+        console.error("[process-message] project tree failed", error);
+        return "";
+      }
+    });
+
+    // Most stable first, so the cacheable prefix is shared across runs (#295):
+    // base, skill index and integrations, then the project tree, forced
+    // skills and plan mode.
+    // Conversation goes in messages (see onStart).
+    const systemPrompt = [
+      CODING_AGENT_SYSTEM_PROMPT,
+      buildSkillsPromptSection(skills),
+      buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
+      projectTree,
+      buildSkillsPromptSection([], forced, unavailable),
+      planMode ? PLAN_MODE_PROMPT : "",
+    ].join("");
 
     // A project seeded with the starter says so in the request, not the
     // system prompt, so the first turn builds on it (#338).
@@ -524,9 +533,6 @@ export const processMessage = inngest.createFunction(
       ),
     );
 
-    if (planMode) {
-      systemPrompt += PLAN_MODE_PROMPT;
-    }
 
     // Display only: mirrors the agent's tool calls onto the assistant message
     // for the chat panel's activity block. Each write is its own step, so replays
@@ -596,6 +602,7 @@ export const processMessage = inngest.createFunction(
     const tools: Tool.Any[] = [
       createListFilesTool({ internalKey, projectId }),
       createReadFilesTool({ projectId, internalKey }),
+      createWriteFilesTool({ projectId, internalKey }),
       createUpdateFileTool({ projectId, internalKey }),
       createEditFileTool({ projectId, internalKey }),
       createCreateFilesTool({ projectId, internalKey }),
@@ -633,8 +640,12 @@ export const processMessage = inngest.createFunction(
         onStart: ({ agent, prompt, history }) => {
           const nudge =
             agent.name === SUMMARY_AGENT_NAME ? STEP_BUDGET_NOTE : buildCheckGate.takeNudge();
+          // AgentKit sends prompt ([system, request]) before history (this
+          // run's turns), so earlier conversation turns go between the two.
+          // Relies on network calls using maxIter: 0; direct agent.run with maxIter > 1 would prepend history each pass.
+          const [system, ...current] = withImageParts(prompt, imageUrls);
           return {
-            prompt: withImageParts(prompt, imageUrls),
+            prompt: [system, ...earlierTurns, ...current],
             history: [
               ...(history ?? []),
               ...(nudge ? [{ type: "text" as const, role: "user" as const, content: nudge }] : []),
@@ -821,8 +832,7 @@ export const processMessage = inngest.createFunction(
       (m) => m.type === "text" && m.role === "assistant"
     );
 
-    let assistantResponse =
-      "I processed your request. Let me know if you need anything else!";
+    let assistantResponse = DEFAULT_REPLY_MESSAGE;
 
     if (textMessage?.type === "text") {
       assistantResponse =

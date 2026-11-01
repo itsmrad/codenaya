@@ -6,6 +6,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
+import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
 import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
 
@@ -20,8 +21,10 @@ const editSchema = z.object({
   replaceAll: z.boolean().optional(),
 });
 
+// `fileId` is not offered to the model; it reads tool calls made before #292.
 const paramsSchema = z.object({
-  fileId: z.string().min(1, "File ID is required"),
+  path: z.string().optional(),
+  fileId: z.string().optional(),
   edits: z.array(editSchema).min(1, "At least one edit is required"),
 });
 
@@ -63,7 +66,7 @@ export const createEditFileTool = ({ projectId, internalKey }: EditFileToolOptio
     description:
       "Edit part of an existing file by replacing exact text. Each oldText must match exactly once (unless replaceAll is set); edits apply in order, and if any edit fails nothing is written. Prefer this over updateFile for changes that leave most of the file as it is.",
     parameters: z.object({
-      fileId: z.string().describe("The ID of the file to edit"),
+      path: z.string().describe('Project-relative path of the file, like "src/App.tsx"'),
       edits: z
         .array(
           z.object({
@@ -80,26 +83,29 @@ export const createEditFileTool = ({ projectId, internalKey }: EditFileToolOptio
         return `Error: ${parsed.error.issues[0].message}`;
       }
 
-      const { fileId, edits } = parsed.data;
+      const { edits } = parsed.data;
 
       try {
         // Read, match and write in one step: on replay the handler runs again,
         // and a read outside the step would see the already edited file.
         return await toolStep?.run("edit-file", async () => {
-          const file = await getFileByAgentId(internalKey, projectId, fileId);
-          if (!file) {
-            return `Error: File with ID "${fileId}" not found. Use listFiles to get valid file IDs.`;
-          }
+          const index = indexProjectFiles(await getProjectFiles(internalKey, projectId));
+          const found = await findProjectFile(internalKey, projectId, index, parsed.data);
+          if ("error" in found) return found.error;
+          const { file, path } = found;
           if (file.type === "folder") {
-            return `Error: "${file.name}" is a folder, not a file. You can only edit file contents.`;
-          }
-          if (file.content === undefined) {
-            return `Error: "${file.name}" has no text content to edit (it may be a binary file).`;
+            return `Error: "${path}" is a folder, not a file. You can only edit file contents.`;
           }
 
-          const result = applyEdits(file.content, edits);
+          // The file list carries no text, so read it.
+          const text = (await getFileByAgentId(internalKey, projectId, file._id))?.content;
+          if (text === undefined) {
+            return `Error: "${path}" has no text content to edit (it may be a binary file).`;
+          }
+
+          const result = applyEdits(text, edits);
           if ("error" in result) {
-            return `Error: ${result.error}. Nothing was written to "${file.name}".`;
+            return `Error: ${result.error}. Nothing was written to "${path}".`;
           }
 
           // Same known-good versions as createFiles and updateFile (#331).
@@ -108,13 +114,13 @@ export const createEditFileTool = ({ projectId, internalKey }: EditFileToolOptio
           await convex.mutation(api.system.updateFile, {
             internalKey,
             projectId,
-            fileId: fileId as Id<"files">,
+            fileId: file._id,
             content,
           });
 
           return (
-            `File "${file.name}" edited successfully (${edits.length} edit${edits.length === 1 ? "" : "s"})` +
-            syntaxErrorNote([{ name: file.name, content }]) +
+            `File "${path}" edited successfully (${edits.length} edit${edits.length === 1 ? "" : "s"})` +
+            syntaxErrorNote([{ name: path, content }]) +
             versionNote
           );
         });

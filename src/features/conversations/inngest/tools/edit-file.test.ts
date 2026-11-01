@@ -1,3 +1,4 @@
+import { getFunctionName } from "convex/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -61,12 +62,31 @@ describe("applyEdits", () => {
 });
 
 describe("editFile tool", () => {
-  const edit = (edits: Array<{ oldText: string; newText: string }>) =>
-    createEditFileTool({ projectId, internalKey: "key" }).handler({ fileId: "f1", edits }, ctx);
+  /**
+   * A project with `src/` holding one file. `getProjectFiles` (the path index,
+   * #292) lists it without text; `getFileById` returns it with `content`.
+   */
+  const project = (file: { name: string; content?: string }) => {
+    const rows = [
+      { _id: "d1", name: "src", type: "folder" },
+      { _id: "f1", name: file.name, type: "file", parentId: "d1" },
+    ];
+    mocks.query.mockImplementation(async (ref, args: { fileId?: string }) =>
+      getFunctionName(ref) === "system:getProjectFiles"
+        ? rows
+        : args.fileId === "f1"
+          ? { ...rows[1], content: file.content }
+          : (rows.find((row) => row._id === args.fileId) ?? null),
+    );
+  };
+  const edit = (path: string, edits: Array<{ oldText: string; newText: string }>) =>
+    createEditFileTool({ projectId, internalKey: "key" }).handler({ path, edits }, ctx);
 
-  it("writes only the edited span", async () => {
-    mocks.query.mockResolvedValue({ _id: "f1", name: "App.tsx", type: "file", content: "a\nb\nc\n" });
-    expect(await edit([{ oldText: "b", newText: "B" }])).toBe('File "App.tsx" edited successfully (1 edit)');
+  it("writes only the edited span, found by path", async () => {
+    project({ name: "App.tsx", content: "a\nb\nc\n" });
+    expect(await edit("src/App.tsx", [{ oldText: "b", newText: "B" }])).toBe(
+      'File "src/App.tsx" edited successfully (1 edit)',
+    );
     expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), {
       internalKey: "key",
       projectId,
@@ -76,13 +96,8 @@ describe("editFile tool", () => {
   });
 
   it("pins an edited package.json to the known-good versions (#331)", async () => {
-    mocks.query.mockResolvedValue({
-      _id: "f1",
-      name: "package.json",
-      type: "file",
-      content: '{ "dependencies": { "react": "^19.0.0" } }',
-    });
-    const result = await edit([{ oldText: '"^19.0.0"', newText: '"latest"' }]);
+    project({ name: "package.json", content: '{ "dependencies": { "react": "^19.0.0" } }' });
+    const result = await edit("src/package.json", [{ oldText: '"^19.0.0"', newText: '"latest"' }]);
 
     expect(result).toContain("Pinned to the starter's known-good versions in package.json: react");
     const written = (mocks.mutation.mock.calls[0][1] as { content: string }).content;
@@ -90,25 +105,36 @@ describe("editFile tool", () => {
   });
 
   it("writes nothing when an edit fails, and says what to do", async () => {
-    mocks.query.mockResolvedValue({ _id: "f1", name: "App.tsx", type: "file", content: "a\n" });
+    project({ name: "App.tsx", content: "a\n" });
     expect(
-      await edit([
+      await edit("src/App.tsx", [
         { oldText: "a", newText: "A" },
         { oldText: "missing", newText: "" },
       ]),
-    ).toBe('Error: oldText #2 matched 0 times; re-read the file with readFiles and copy the text exactly. Nothing was written to "App.tsx".');
+    ).toBe(
+      'Error: oldText #2 matched 0 times; re-read the file with readFiles and copy the text exactly. Nothing was written to "src/App.tsx".',
+    );
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
 
-  it("returns a tool error for a missing file or a folder", async () => {
-    mocks.query.mockResolvedValueOnce(null);
-    expect(await edit([{ oldText: "a", newText: "b" }])).toContain("not found");
-    mocks.query.mockResolvedValueOnce({ _id: "f1", name: "src", type: "folder" });
-    expect(await edit([{ oldText: "a", newText: "b" }])).toContain("is a folder");
+  it("returns a tool error for a missing path, a folder or a binary file", async () => {
+    project({ name: "logo.png" });
+    expect(await edit("src/nope.ts", [{ oldText: "a", newText: "b" }])).toContain('"src/nope.ts" not found');
+    expect(await edit("src", [{ oldText: "a", newText: "b" }])).toContain('"src" is a folder');
+    expect(await edit("src/logo.png", [{ oldText: "a", newText: "b" }])).toContain("no text content");
     expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
+  it("still reads a pre-#292 call that names the file by id", async () => {
+    project({ name: "App.tsx", content: "x" });
+    const result = await createEditFileTool({ projectId, internalKey: "key" }).handler(
+      { fileId: "f1", edits: [{ oldText: "x", newText: "y" }] } as never,
+      ctx,
+    );
+    expect(result).toBe('File "src/App.tsx" edited successfully (1 edit)');
   });
 
   it("rejects an empty edit list", async () => {
-    expect(await edit([])).toBe("Error: At least one edit is required");
+    expect(await edit("src/App.tsx", [])).toBe("Error: At least one edit is required");
   });
 });
