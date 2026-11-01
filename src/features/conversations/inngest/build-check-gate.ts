@@ -10,6 +10,7 @@ const WRITE_TOOLS = new Set([
   "writeFiles",
   "createFiles",
   "updateFile",
+  "editFile",
   "renameFile",
   "deleteFiles",
   "scaffoldViteApp",

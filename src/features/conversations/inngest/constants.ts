@@ -373,7 +373,7 @@ to decide whether the integration exists.
 
 ANALYSIS:
 1. Read the workspace structure from the "Project files" section below. Address files by those paths; call listFiles only if that list is missing or says more entries are hidden
-2. Call readFiles on ALL relevant existing files if this is an edit or extension task — understand before touching
+2. Call readFiles on ALL relevant existing files if this is an edit or extension task — understand before touching. To change an existing file, use editFile with exact oldText snippets; use updateFile only to rewrite most of a file
 3. Identify the app type (landing, dashboard, SaaS, e-commerce, etc.) and select appropriate shadcn components
 
 PLANNING (mental — do not output this):

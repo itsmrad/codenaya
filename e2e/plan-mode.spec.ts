@@ -22,7 +22,7 @@ const PLAN_ITEM = "Add a todo list page";
 const PLAN = `A simple todo app.\n\n### Steps\n- [ ] ${PLAN_ITEM}\n- [ ] Keep todos in local state`;
 const BUILD_REPLY = "Built the todo app";
 const ADDED_FILE = "todo-app.tsx";
-const WRITE_TOOLS = ["writeFiles", "createFiles", "updateFile", "deleteFiles", "renameFile", "createFolder"];
+const WRITE_TOOLS = ["writeFiles", "createFiles", "updateFile", "editFile", "deleteFiles", "renameFile", "createFolder"];
 
 const toolsOf = (request: StubChatRequest) =>
   (request.tools ?? []).map((tool) => tool.function.name);

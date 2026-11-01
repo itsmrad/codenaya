@@ -43,6 +43,15 @@ describe("describeToolCall", () => {
     ).toEqual(["src/App.jsx"]);
   });
 
+  it("shows the edited file's path for editFile", () => {
+    expect(
+      describeToolCall(
+        { name: "editFile", input: { fileId: ID_A, edits: [{ oldText: "a", newText: "b" }] } },
+        pathOf,
+      ),
+    ).toEqual(["src/App.jsx"]);
+  });
+
   it("joins created file names onto the parent folder path", () => {
     expect(
       describeToolCall(
@@ -216,6 +225,10 @@ describe("runWrittenPaths", () => {
     targets,
     status,
     startedAt: 0,
+  });
+
+  it("counts editFile as a write (#291)", () => {
+    expect(runWrittenPaths([step("editFile", ["src/App.tsx"])])).toEqual(["src/App.tsx"]);
   });
 
   it("collects finished writes, with a rename's new path next to the old one", () => {
