@@ -26,6 +26,7 @@ import {
   useAiProviderKeys,
   usePlatformModelsOrCatalog,
 } from "@/features/ai-providers/hooks/use-ai-providers";
+import { estimateRunCredits, formatCredits } from "@/features/billing/plans";
 
 import type { AgentModelChoice } from "../agent-models";
 
@@ -64,6 +65,18 @@ export const AgentModelSelect = ({
     access === "promo_counted" ? `${platform.countedRunsLeft} runs left` : "Unlimited";
   const selectedPromo = !selectedKey && selectedPlatformModel.access !== "everyone";
 
+  // Pre-run cost estimation tooltip logic (#105)
+  const isByok = Boolean(value.keyId);
+  const isPromo = selectedPromo;
+  const { credits } = estimateRunCredits(value.modelId, "quick_edit", isByok || isPromo);
+  const costTooltip = isByok
+    ? "BYOK (Your API Key) • 0 platform credits"
+    : isPromo
+      ? "Free Promotion • 0 platform credits"
+      : credits !== null
+        ? `~${formatCredits(credits)} credits (~$${(credits / 100).toFixed(2)}) est. typical edit`
+        : null;
+
   return (
     <PromptInputSelect
       value={toChoiceValue(value)}
@@ -86,25 +99,43 @@ export const AgentModelSelect = ({
             )}
           </PromptInputSelectTrigger>
         </TooltipTrigger>
-        <TooltipContent>
-          {selectedKey
-            ? runModelLabel(value.modelId, selectedKey)
-            : runModelLabel({ id: selectedPlatformModel.id, label: selectedPlatformModel.name })}
+        <TooltipContent className="flex flex-col gap-0.5 text-xs">
+          <span className="font-medium">
+            {selectedKey
+              ? runModelLabel(value.modelId, selectedKey)
+              : runModelLabel({ id: selectedPlatformModel.id, label: selectedPlatformModel.name })}
+          </span>
+          {costTooltip && (
+            <span className="text-[11px] text-background/80">{costTooltip}</span>
+          )}
         </TooltipContent>
       </Tooltip>
       <PromptInputSelectContent position="popper" align="start" className="max-h-80">
         <SelectGroup>
           <SelectLabel>{PLATFORM_PROVIDER.label}</SelectLabel>
-          {everyoneModels.map((model) => (
-            <PromptInputSelectItem
-              key={model.id}
-              value={toChoiceValue({ modelId: model.id })}
-              data-tag={model.vendor}
-              className={TAGGED_ITEM}
-            >
-              {model.name}
-            </PromptInputSelectItem>
-          ))}
+          {everyoneModels.map((model) => {
+            const { credits: mCredits } = estimateRunCredits(model.id, "quick_edit", false);
+            const tag = mCredits !== null ? `~${formatCredits(mCredits)} cr` : model.vendor;
+            const descId = `model-est-${model.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+            return (
+              <PromptInputSelectItem
+                key={model.id}
+                value={toChoiceValue({ modelId: model.id })}
+                data-tag={tag}
+                aria-describedby={mCredits !== null ? descId : undefined}
+                description={
+                  mCredits !== null ? (
+                    <span id={descId} className="sr-only">
+                      {`Estimated ${formatCredits(mCredits)} credits per edit`}
+                    </span>
+                  ) : undefined
+                }
+                className={TAGGED_ITEM}
+              >
+                {model.name}
+              </PromptInputSelectItem>
+            );
+          })}
         </SelectGroup>
         {promoModels.length > 0 && (
           <SelectGroup>
