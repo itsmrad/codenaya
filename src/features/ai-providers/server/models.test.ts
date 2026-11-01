@@ -17,17 +17,17 @@ describe("buildAgentKitModel", () => {
     expect(model.format).toBe("openai-chat");
     expect(model.url).toBe("https://openrouter.ai/api/v1/chat/completions");
     expect(model.authKey).toBe("sk-or-test");
-    expect(model.options.defaultParameters).toEqual({ temperature: 0.3 });
+    expect(model.options.defaultParameters).toEqual({ temperature: 0.3, parallel_tool_calls: true });
   });
 
-  it("omits default parameters when no temperature is given", () => {
+  it("omits temperature when none is given", () => {
     const model = buildAgentKitModel({
       provider: "openai",
       apiKey: "sk-test",
       model: "gpt-5.6-luna",
     });
     expect(model.url).toBe("https://api.openai.com/v1/chat/completions");
-    expect(model.options.defaultParameters).toBeUndefined();
+    expect(model.options.defaultParameters).toEqual({ parallel_tool_calls: true });
   });
 
   it("sets max_tokens for Anthropic, which requires it, and never temperature, which it rejects", () => {
@@ -50,6 +50,8 @@ describe("buildAgentKitModel", () => {
       model: "llama-4",
     });
     expect(model.url).toBe("https://llm.example.com/v1/chat/completions");
+    // An unknown server may reject the parameter (#290).
+    expect(model.options.defaultParameters).not.toHaveProperty("parallel_tool_calls");
   });
 });
 

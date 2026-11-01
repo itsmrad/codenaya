@@ -49,6 +49,11 @@ export function buildAgentKitModel({
     model,
     apiKey,
     baseUrl: url,
-    ...(temperature !== undefined ? { defaultParameters: { temperature } } : {}),
+    defaultParameters: {
+      ...(temperature !== undefined ? { temperature } : {}),
+      // AgentKit sends `false`, allowing one tool call per turn (#290). A custom
+      // endpoint may not know the parameter, so it keeps AgentKit's default.
+      ...(provider !== "custom" ? { parallel_tool_calls: true } : {}),
+    },
   });
 }

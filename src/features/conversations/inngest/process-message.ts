@@ -84,6 +84,17 @@ interface MessageEvent {
   mode?: MessageMode;
 };
 
+/** Model calls per run (#290). A fresh Vite app alone takes about 20. */
+export const MAX_AGENT_ITERATIONS = 40;
+
+/** Sent with the run's last allowed call, so it ends with a summary, not a tool call. */
+const STEP_BUDGET_NOTE =
+  "Step budget reached: this is your last turn. Do not call any tools. Reply with a short summary of what is done and what is still left to do.";
+
+/** The reply when the last call made tool calls anyway. */
+export const STEP_BUDGET_REPLY =
+  "I ran out of steps before finishing, so this build may be incomplete. Send \"continue\" and I'll pick up where I left off.";
+
 /**
  * The model's reasoning, which AgentKit drops when it parses the response.
  * OpenRouter (and OpenAI-compatible endpoints) return it as `message.reasoning`;
@@ -652,13 +663,15 @@ export const processMessage = inngest.createFunction(
         ? tools.filter((tool) => PLAN_MODE_TOOLS.has(tool.name))
         : tools,
       lifecycle: {
-        onStart: ({ prompt, history }) => {
+        onStart: ({ prompt, history, network }) => {
           const nudge = buildCheckGate.takeNudge();
+          const lastTurn = (network?.state.results.length ?? 0) >= MAX_AGENT_ITERATIONS - 1;
+          const note = lastTurn ? STEP_BUDGET_NOTE : nudge;
           return {
             prompt: withImageParts(prompt, imageUrls),
             history: [
               ...(history ?? []),
-              ...(nudge ? [{ type: "text" as const, role: "user" as const, content: nudge }] : []),
+              ...(note ? [{ type: "text" as const, role: "user" as const, content: note }] : []),
             ],
             stop: false,
           };
@@ -758,7 +771,7 @@ export const processMessage = inngest.createFunction(
     const network = createNetwork({
       name: "codenaya-network",
       agents: [codingAgent],
-      maxIter: 20,
+      maxIter: MAX_AGENT_ITERATIONS,
       router: ({ network }) => {
         const lastResult = network.state.results.at(-1);
         const hasTextResponse = lastResult?.output.some(
@@ -793,10 +806,15 @@ export const processMessage = inngest.createFunction(
       (m) => m.type === "text" && m.role === "assistant"
     );
 
-    let assistantResponse =
-      "I processed your request. Let me know if you need anything else!";
+    // The router only stops on a reply without tool calls, so a last turn with
+    // tool calls means the run hit MAX_AGENT_ITERATIONS mid-work.
+    const ranOutOfSteps = lastResult?.output.some((m) => m.type === "tool_call") ?? false;
 
-    if (textMessage?.type === "text") {
+    let assistantResponse = ranOutOfSteps
+      ? STEP_BUDGET_REPLY
+      : "I processed your request. Let me know if you need anything else!";
+
+    if (!ranOutOfSteps && textMessage?.type === "text") {
       assistantResponse =
         typeof textMessage.content === "string"
           ? textMessage.content

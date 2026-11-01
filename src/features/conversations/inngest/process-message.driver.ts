@@ -51,7 +51,7 @@ export async function drive(
   const inferenceBodies: unknown[] = [];
   let next = 0;
 
-  for (let request = 0; request < 100; request += 1) {
+  for (let request = 0; request < 1000; request += 1) {
     const execution = (
       processMessage as unknown as {
         createExecution: (o: { partialOptions: Record<string, unknown> }) => {

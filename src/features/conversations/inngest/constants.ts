@@ -427,7 +427,7 @@ PLANNING (mental — do not output this):
 EXECUTION:
 - For a NEW Vite + React app, call scaffoldViteApp FIRST. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, postcss.config.js, tailwind.config.ts, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts) and returns their file and folder IDs. Build on it: use updateFile to add dependencies to package.json, extend the theme in tailwind.config.ts, set the design tokens in src/index.css and replace src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files; in steps 9a–d skip the files it already wrote
 7. Create ALL folders first (deepest nesting last) to obtain their IDs
-8. Use createFiles in batches by folder — group files that share a parentId
+8. Use createFiles in batches by folder — group files that share a parentId. Make independent tool calls (several createFolder, createFiles or readFiles) in the same turn; wait for a result only when a later call needs it, such as a new folder's ID
 9. Create files in this strict order:
    a. package.json, vite.config.ts / next.config.ts, tsconfig.json
    b. tailwind.config.ts, postcss.config.js, components.json
