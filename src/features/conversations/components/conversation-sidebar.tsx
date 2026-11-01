@@ -29,6 +29,7 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
+import { useProjectCommands } from "@/lib/command-palette";
 import {
   Tooltip,
   TooltipContent,
@@ -229,6 +230,12 @@ export const ConversationSidebar = ({
       return null;
     }
   };
+
+  useProjectCommands({
+    "new-conversation": () => void handleCreateConversation(),
+    "past-conversations": () => setPastConversationsOpen(true),
+    "version-history": () => setCheckpointHistoryOpen(true),
+  });
 
   /**
    * Sends a message to the active conversation (creating one if needed).

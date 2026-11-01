@@ -5,6 +5,7 @@ import { MotionConfig, motion } from "motion/react";
 import { useUser } from "@clerk/nextjs";
 import { GitBranch, Search } from "lucide-react";
 
+import { useCommandPalette } from "@/lib/command-palette";
 import { useIsMac } from "@/lib/hooks/use-is-mac";
 import { Kbd } from "@/components/ui/kbd";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,7 +20,6 @@ import { takePendingPrompt } from "../utils/pending-prompt";
 import { takePendingImport } from "../utils/pending-import";
 import { githubRepoUrl, parseGithubRepo } from "../utils/github-repo";
 import type { DashboardTab } from "../utils/dashboard-tab";
-import { ProjectsCommandDialog } from "./projects-command-dialog";
 import { FirstRunChecklist } from "./first-run-checklist";
 import { ImportGithubDialog } from "./import-github-dialog";
 import { NewProjectDialog } from "./new-project-dialog";
@@ -35,7 +35,7 @@ interface ProjectsViewProps {
 }
 
 export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
-  const [commandDialogOpen, setCommandDialogOpen] = useState(false);
+  const openCommandPalette = useCommandPalette((state) => state.setOpen);
   const [importDialogOpen, setImportDialogOpen] = useState(linkedRepo !== null);
   const [importRepo, setImportRepo] = useState(linkedRepo);
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
@@ -75,11 +75,8 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Cmd/Ctrl+K is the command palette's, handled app-wide.
       if (e.metaKey || e.ctrlKey) {
-        if (e.key === "k") {
-          e.preventDefault();
-          setCommandDialogOpen(true);
-        }
         if (e.key === "i") {
           e.preventDefault();
           setImportDialogOpen(true);
@@ -117,10 +114,6 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
 
   return (
     <MotionConfig reducedMotion="user">
-      <ProjectsCommandDialog
-        open={commandDialogOpen}
-        onOpenChange={setCommandDialogOpen}
-      />
       <ImportGithubDialog
         // Remount on a new repo so the form takes it as its default value.
         key={importRepo}
@@ -192,7 +185,7 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
                 </button>
                 <span aria-hidden className="h-3 w-px bg-border" />
                 <button
-                  onClick={() => setCommandDialogOpen(true)}
+                  onClick={() => openCommandPalette(true)}
                   className="flex items-center gap-1.5 transition-colors hover:text-foreground"
                 >
                   <Search className="size-3.5" />

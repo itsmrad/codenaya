@@ -19,6 +19,7 @@ import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { useProjectCommands } from "@/lib/command-palette";
 import { CodenayaLogo } from "@/components/codenaya-logo";
 import { HelpMenu } from "@/components/help-menu";
 import { UserMenu } from "@/components/user-menu";
@@ -35,6 +36,8 @@ import { FileExplorer } from "./file-explorer";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { PreviewView } from "./preview-view";
 import { ExportPopover } from "./export-popover";
+import { EnvVarsDialog } from "./env-vars-dialog";
+import { useDownloadZip } from "../hooks/use-download-zip";
 import { useProject } from "../hooks/use-projects";
 import { useFiles } from "../hooks/use-files";
 import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
@@ -163,7 +166,23 @@ export const ProjectIdView = ({
   const showcaseId = useIsProjectPublished(projectId);
   const rename = useProjectRename(project);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [envVarsOpen, setEnvVarsOpen] = useState(false);
+  const { download: downloadZip } = useDownloadZip(projectId);
   const router = useRouter();
+
+  useProjectCommands({
+    "show-code": () => selectView("editor"),
+    "show-preview": () => selectView("preview"),
+    // Desktops toggle the side panel (ProjectIdLayout); here the chat is a tab.
+    "toggle-chat": isCompact
+      ? () => selectView(activeView === "chat" ? "editor" : "chat")
+      : null,
+    publish: showcaseId === null ? () => setPublishDialogOpen(true) : null,
+    "download-zip": () => void downloadZip(),
+    integrations: openIntegrations,
+    skills: () => setSkillsDialogOpen(true),
+    "env-vars": () => setEnvVarsOpen(true),
+  });
 
   return (
     <>
@@ -177,6 +196,11 @@ export const ProjectIdView = ({
         projectId={projectId}
         open={skillsDialogOpen}
         onOpenChange={setSkillsDialogOpen}
+      />
+      <EnvVarsDialog
+        projectId={projectId}
+        open={envVarsOpen}
+        onOpenChange={setEnvVarsOpen}
       />
       {project && (
         <DeleteProjectDialog
@@ -381,7 +405,11 @@ export const ProjectIdView = ({
           )}
         >
           {previewOpened && (
-            <PreviewView projectId={projectId} firstBuild={firstBuild} />
+            <PreviewView
+              projectId={projectId}
+              firstBuild={firstBuild}
+              onOpenEnvVars={() => setEnvVarsOpen(true)}
+            />
           )}
         </div>
       </div>

@@ -87,7 +87,7 @@ test.describe("signed-in dashboard layout", () => {
     await page.goto("/");
 
     await page.getByRole("button", { name: "Find a project" }).click();
-    await expect(page.getByPlaceholder("Search projects...")).toBeVisible();
+    await expect(page.getByPlaceholder("Type a command or search...")).toBeVisible();
   });
 
   test("project search filters the grid", async ({ page }) => {

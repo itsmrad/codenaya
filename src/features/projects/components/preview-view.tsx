@@ -14,6 +14,7 @@ import {
   ServerIcon,
   BoxIcon,
   LockIcon,
+  KeyRoundIcon,
 } from "lucide-react";
 
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
@@ -42,7 +43,6 @@ import { NOTHING_TO_PREVIEW } from "@/features/sandbox-preview/utils/boot-plan";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import { EnvVarsDialog } from "./env-vars-dialog";
 import { useProject } from "../hooks/use-projects";
 import { useFilesWithContent } from "../hooks/use-files";
 import { markPreviewOpened } from "../utils/first-run";
@@ -69,10 +69,13 @@ const stripPlaceholder = (building: boolean, isLoading: boolean) => {
 export const PreviewView = ({
   projectId,
   firstBuild,
+  onOpenEnvVars,
 }: {
   projectId: Id<"projects">;
   /** The agent is writing a new project's first build (see ProjectIdView). */
   firstBuild: boolean;
+  /** Opens the env vars dialog, which ProjectIdView owns so the palette can open it too. */
+  onOpenEnvVars: () => void;
 }) => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -355,7 +358,16 @@ export const PreviewView = ({
           >
             <TerminalSquareIcon className="size-4" />
           </Button>
-          <EnvVarsDialog projectId={projectId} />
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-8 rounded-md hover:bg-muted"
+            title="Environment variables"
+            aria-label="Environment variables"
+            onClick={onOpenEnvVars}
+          >
+            <KeyRoundIcon className="size-4" />
+          </Button>
           <div className="px-1 flex items-center">
             <PreviewSettingsPopover
               projectId={projectId}
