@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CODING_AGENT_SYSTEM_PROMPT } from "./constants";
+import { KNOWN_GOOD_VERSIONS } from "./known-good-versions";
 
 describe("coding agent integration instructions", () => {
   it("treats runtime MCP state as authoritative over generated project files", () => {
@@ -37,8 +38,11 @@ describe("coding agent integration instructions", () => {
   });
 
   it("pins Vite scaffolds to a major the preview sandbox's Node can run, with the @ alias", () => {
-    expect(CODING_AGENT_SYSTEM_PROMPT).toContain('"vite": "^6.0.0"');
-    expect(CODING_AGENT_SYSTEM_PROMPT).toContain('"@vitejs/plugin-react": "^4.0.0"');
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(`"vite": "${KNOWN_GOOD_VERSIONS.vite}"`);
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      `"@vitejs/plugin-react": "${KNOWN_GOOD_VERSIONS["@vitejs/plugin-react"]}"`,
+    );
+    expect(KNOWN_GOOD_VERSIONS.vite).toMatch(/^\^6\./);
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       'resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } }',
     );
@@ -64,7 +68,6 @@ describe("coding agent integration instructions", () => {
   it("describes the React 19 + Tailwind v4 starter stack (#332)", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("STYLING: Tailwind CSS v4 (always)");
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("ROUTING (Vite): react-router-dom v7");
-    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("React 19, Next.js 15, Tailwind CSS 4");
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("It has no brand icons");
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("@theme inline");
     for (const stale of [
@@ -85,5 +88,13 @@ describe("coding agent integration instructions", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       "A project with tailwind.config.ts or @tailwind directives is Tailwind v3 and keeps v3 syntax",
     );
+  });
+
+  it("lists every known-good version, so the prompt matches the starter and write checks (#331)", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Stack versions (use exactly these ranges");
+    for (const [name, range] of Object.entries(KNOWN_GOOD_VERSIONS)) {
+      expect(CODING_AGENT_SYSTEM_PROMPT).toContain(`"${name}": "${range}"`);
+    }
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain('"@vitejs/plugin-react": "^4.0.0"');
   });
 });

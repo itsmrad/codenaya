@@ -6,6 +6,8 @@
  * as-is; the agent extends it instead of reinventing the config.
  */
 
+import { pinnedVersions } from "./known-good-versions";
+
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
 const PACKAGE_JSON = json({
@@ -19,26 +21,26 @@ const PACKAGE_JSON = json({
     preview: "vite preview",
     lint: "eslint src",
   },
-  dependencies: {
-    "@fontsource/inter": "^5.1.0",
-    "class-variance-authority": "^0.7.1",
-    clsx: "^2.1.1",
-    "lucide-react": "^1.66.0",
-    react: "^19.2.0",
-    "react-dom": "^19.2.0",
-    "tailwind-merge": "^3.7.0",
-  },
-  devDependencies: {
-    "@tailwindcss/vite": "^4.3.0",
-    "@types/node": "^22.10.0",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    tailwindcss: "^4.3.0",
-    "tw-animate-css": "^1.4.0",
-    typescript: "~5.6.3",
-    vite: "^6.0.0",
-  },
+  dependencies: pinnedVersions([
+    "@fontsource/inter",
+    "class-variance-authority",
+    "clsx",
+    "lucide-react",
+    "react",
+    "react-dom",
+    "tailwind-merge",
+  ]),
+  devDependencies: pinnedVersions([
+    "@tailwindcss/vite",
+    "@types/node",
+    "@types/react",
+    "@types/react-dom",
+    "@vitejs/plugin-react",
+    "tailwindcss",
+    "tw-animate-css",
+    "typescript",
+    "vite",
+  ]),
 });
 
 const VITE_CONFIG = `import { fileURLToPath, URL } from "node:url";

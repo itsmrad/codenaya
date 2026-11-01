@@ -13,6 +13,7 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
 import { createReadFilesTool } from "./read-files";
 import { createUpdateFileTool } from "./update-file";
+import { createCreateFilesTool } from "./create-files";
 import { createRenameFileTool } from "./rename-file";
 import { createDeleteFilesTool } from "./delete-files";
 
@@ -115,5 +116,33 @@ describe("project scope", () => {
       fileId: "f1",
       content: "x",
     });
+  });
+});
+
+// #331: an unpinned package resolves to today's newest major, which the starter may not run.
+describe("package.json version pins", () => {
+  const latestRouter = JSON.stringify({ dependencies: { "react-router-dom": "latest" } });
+  const savedRouterRange = () =>
+    JSON.parse(mocks.mutation.mock.calls[0][1].content ?? mocks.mutation.mock.calls[0][1].files[0].content)
+      .dependencies["react-router-dom"];
+
+  it("updateFile saves the known-good range and says so", async () => {
+    mocks.query.mockResolvedValue({ _id: "f1", name: "package.json", type: "file" });
+    const result = await createUpdateFileTool({ projectId, internalKey }).handler(
+      { fileId: "f1", content: latestRouter },
+      ctx,
+    );
+    expect(savedRouterRange()).toMatch(/^\^7\./);
+    expect(result).toContain('react-router-dom "latest" →');
+  });
+
+  it("createFiles saves the known-good range and says so", async () => {
+    mocks.mutation.mockResolvedValue([{ name: "package.json" }]);
+    const result = await createCreateFilesTool({ projectId, internalKey }).handler(
+      { parentId: "", files: [{ name: "package.json", content: latestRouter }] },
+      ctx,
+    );
+    expect(savedRouterRange()).toMatch(/^\^7\./);
+    expect(result).toContain('react-router-dom "latest" →');
   });
 });
