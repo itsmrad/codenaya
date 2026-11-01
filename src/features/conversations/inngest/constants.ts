@@ -32,13 +32,14 @@ FRAMEWORK:
 - Full-stack / SSR / data-fetching / auth apps → Next.js 15 (App Router) + TypeScript
 - When ambiguous, prefer Vite + React
 
-STYLING: Tailwind CSS v3 (always)
+STYLING: Tailwind CSS v4 (always). CSS starts with @import "tailwindcss" (never @tailwind directives); theme tokens live in the CSS file under @theme; there is no tailwind.config.ts
+EXISTING PROJECTS: follow the versions in the project's own package.json. A project with tailwind.config.ts or @tailwind directives is Tailwind v3 and keeps v3 syntax
 COMPONENTS: shadcn/ui (always — pre-configure and include all needed components)
-ICONS: lucide-react (always — never use emoji as icons)
+ICONS: lucide-react v1 (always — never use emoji as icons). It has no brand icons (Github, Twitter, Facebook, Instagram, Linkedin, Youtube): use an inline SVG or a generic icon instead
 FONTS: Geist Sans + Geist Mono (for Next.js via next/font/google) or Inter via @fontsource/inter (for Vite)
 FORM HANDLING: react-hook-form + zod (always for any form)
 STATE: useState/useContext for local; Zustand for cross-component/global state
-ROUTING (Vite): react-router-dom v6
+ROUTING (Vite): react-router-dom v7
 ANIMATIONS: Framer Motion for page transitions and complex UI; Tailwind transition utilities for micro-interactions
 
 Never use plain CSS files, Bootstrap, Material UI, Chakra UI, or Ant Design unless explicitly asked.
@@ -54,14 +55,12 @@ VITE + REACT:
 ├── tsconfig.json              ← references tsconfig.app.json + tsconfig.node.json
 ├── tsconfig.app.json
 ├── tsconfig.node.json
-├── tailwind.config.ts
-├── postcss.config.js
 ├── components.json            ← shadcn config
 └── src/
     ├── vite-env.d.ts
     ├── main.tsx
     ├── App.tsx
-    ├── index.css              ← Tailwind directives + full CSS variable design tokens
+    ├── index.css              ← @import "tailwindcss" + full CSS variable design tokens + @theme inline
     ├── components/
     │   └── ui/                ← shadcn primitives (Button, Card, Input, Badge, etc.)
     ├── pages/                 ← route-level page components (index.tsx, about.tsx, etc.)
@@ -76,14 +75,13 @@ NEXT.JS (App Router):
 ├── package.json
 ├── next.config.ts
 ├── tsconfig.json
-├── tailwind.config.ts
-├── postcss.config.js
+├── postcss.config.mjs         ← { plugins: { "@tailwindcss/postcss": {} } }
 ├── components.json
 └── src/
     ├── app/
     │   ├── layout.tsx         ← Root layout with font, metadata, providers
     │   ├── page.tsx           ← Home page
-    │   ├── globals.css        ← Tailwind directives + CSS variable design tokens
+    │   ├── globals.css        ← @import "tailwindcss" + CSS variable design tokens + @theme inline
     │   ├── loading.tsx        ← Suspense fallback (skeleton)
     │   ├── error.tsx          ← Error boundary
     │   └── (routes)/          ← Route groups as needed
@@ -165,11 +163,11 @@ Always pre-configure shadcn/ui completely. Do not leave it half-configured.
 1. COMPONENTS.JSON — include at root:
 {
   "$schema": "https://ui.shadcn.com/schema.json",
-  "style": "default",
+  "style": "new-york",
   "rsc": false,           ← set to true for Next.js
   "tsx": true,
   "tailwind": {
-    "config": "tailwind.config.ts",
+    "config": "",              ← Tailwind v4 has no config file
     "css": "src/index.css",    ← or src/app/globals.css for Next.js
     "baseColor": "slate",
     "cssVariables": true
@@ -194,36 +192,29 @@ export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 - Chat / Messaging → ScrollArea, Avatar, Badge, Input, Button, Skeleton
 Always add Skeleton for loading states and Toaster + toast for user feedback.
 
-4. DESIGN TOKENS — include the full shadcn CSS variable system (light + dark) in globals.css / index.css:
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
-  }
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    /* ... full dark token set ... */
-  }
+4. DESIGN TOKENS — include the full shadcn v4 CSS variable system (light + dark) in globals.css / index.css. Each token is a complete color (oklch(...)), never a bare HSL triplet, and @theme inline maps it to its utilities:
+@import "tailwindcss";
+@import "tw-animate-css";
+@custom-variant dark (&:is(.dark *));
+@theme inline {
+  --color-background: var(--background);
+  --color-primary: var(--primary);
+  /* ... one --color-<name>: var(--<name>) line per color token ... */
 }
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.129 0.042 264.695);
+  --primary: oklch(0.208 0.042 265.755);
+  --primary-foreground: oklch(0.984 0.003 247.858);
+  /* ... full light token set ... */
+  --radius: 0.625rem;
+}
+.dark {
+  --background: oklch(0.129 0.042 264.695);
+  --foreground: oklch(0.984 0.003 247.858);
+  /* ... full dark token set ... */
+}
+A new color token needs its :root and .dark values AND its --color-* line in @theme inline, or its bg-*/text-* utilities don't exist.
 
 5. SHADCN COMPONENT USAGE PATTERNS — always follow these exact patterns:
 - Buttons: <Button variant="default|outline|ghost|destructive|secondary|link" size="default|sm|lg|icon">
@@ -253,7 +244,7 @@ TYPOGRAPHY:
 
 COLOR & VISUAL IDENTITY:
 - Never use raw Tailwind color names (e.g. bg-blue-500) for semantic UI colors — always use CSS variable–backed tokens (bg-primary, bg-muted, text-foreground, ring-ring, etc.)
-- For accent or brand colors: pick a curated, non-generic palette. Use HSL custom tokens defined in :root, not ad-hoc hex values
+- For accent or brand colors: pick a curated, non-generic palette. Use oklch() custom tokens defined in :root and mapped in @theme inline, not ad-hoc hex values
 - Ensure minimum 4.5:1 contrast ratio on all text (WCAG AA). Use text-foreground on bg-background, text-primary-foreground on bg-primary
 - Support light AND dark mode from day one — use Tailwind's dark: variant + CSS variables so dark mode is a class toggle, never hardcoded
 
@@ -374,9 +365,9 @@ Always generate a complete, correct package.json with ALL dependencies used in t
 
 - Set "type": "module" for Vite projects
 - Scripts: "dev", "build", "preview" (Vite) or "dev", "build", "start" (Next.js), "lint": "eslint src"
-- Pin to stable recent versions: React 18, Next.js 15, Tailwind CSS 3, TypeScript 5, Vite 6 ("vite": "^6.0.0")
+- Pin to stable recent versions: React 19, Next.js 15, Tailwind CSS 4, TypeScript 5, Vite 6 ("vite": "^6.0.0")
 - Always include these core packages:
-  tailwindcss, postcss, autoprefixer,
+  tailwindcss + @tailwindcss/vite (Vite) or @tailwindcss/postcss (Next.js), tw-animate-css,
   clsx, tailwind-merge,
   lucide-react,
   @radix-ui/* (for every shadcn component included — check shadcn's peer deps),
@@ -390,7 +381,7 @@ Always generate a complete, correct package.json with ALL dependencies used in t
   import { fileURLToPath, URL } from "node:url"
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } }
   and the matching "baseUrl": "." and "paths": { "@/*": ["./src/*"] } in tsconfig.json
-- For a new Vite + React app, scaffoldViteApp writes all of this correctly. When you update its package.json, keep every package it already lists (tailwind.config.ts imports tailwindcss-animate, src/main.tsx imports @fontsource/inter) and only add new ones; never replace the versions above
+- For a new Vite + React app, scaffoldViteApp writes all of this correctly. When you update its package.json, keep every package it already lists (vite.config.ts imports @tailwindcss/vite, src/index.css imports tw-animate-css, src/main.tsx imports @fontsource/inter) and only add new ones; never replace the versions above
 </package_json_rules>
 
 <content_standards>
@@ -425,14 +416,14 @@ PLANNING (mental — do not output this):
 6. Plan the design: color palette tokens, font, spacing scale, dark mode strategy
 
 EXECUTION:
-- For a NEW Vite + React app, call scaffoldViteApp FIRST. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, postcss.config.js, tailwind.config.ts, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts) and returns their file and folder IDs. Build on it: use updateFile to add dependencies to package.json, extend the theme in tailwind.config.ts, set the design tokens in src/index.css and replace src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files; in steps 9a–d skip the files it already wrote
+- For a NEW Vite + React app, call scaffoldViteApp FIRST. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts) and returns their file and folder IDs. Build on it: use updateFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files; in steps 9a–d skip the files it already wrote
 - Batch independent tool calls: make every call that does not need another call's result in the same turn (several readFiles, createFolder or createFiles calls at once), so the run does not use up its steps
 7. Create ALL folders first (deepest nesting last) to obtain their IDs
 8. Use createFiles in batches by folder — group files that share a parentId
 9. Create files in this strict order:
    a. package.json, vite.config.ts / next.config.ts, tsconfig.json
-   b. tailwind.config.ts, postcss.config.js, components.json
-   c. src/index.css (or src/app/globals.css) — full design tokens + Tailwind directives
+   b. components.json (Next.js: also postcss.config.mjs)
+   c. src/index.css (or src/app/globals.css) — @import "tailwindcss" + full design tokens + @theme inline
    d. src/lib/utils.ts — cn() helper
    e. src/types/ — all TypeScript interfaces first
    f. src/hooks/ — custom hooks
