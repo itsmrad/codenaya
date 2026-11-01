@@ -67,6 +67,11 @@ describe("coding agent integration instructions", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       "The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>.",
     );
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "If you edit src/main.tsx, keep its <ErrorBoundary> and <BrowserRouter>",
+    );
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Vite: scaffoldViteApp already wrote src/main.tsx");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("src/App.tsx / src/main.tsx");
   });
 
   it("describes the React 19 + Tailwind v4 starter stack (#332)", () => {

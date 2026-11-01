@@ -317,13 +317,14 @@ export default function App() {
 // A render error would otherwise unmount the tree and leave a blank page (#335).
 const ERROR_BOUNDARY_TSX = `import { Component, type ErrorInfo, type ReactNode } from "react";
 
-type State = { error: unknown; componentStack?: string | null };
+// A flag, not \`error !== null\`: \`throw null\` must still show the card.
+type State = { hasError: boolean; error?: unknown; componentStack?: string | null };
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
-  state: State = { error: null };
+  state: State = { hasError: false };
 
   static getDerivedStateFromError(error: unknown): State {
-    return { error };
+    return { hasError: true, error };
   }
 
   // React 19 already reports caught errors with console.error, so don't log again.
@@ -332,8 +333,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   }
 
   render() {
-    const { error, componentStack } = this.state;
-    if (error === null) return this.props.children;
+    const { hasError, error, componentStack } = this.state;
+    if (!hasError) return this.props.children;
 
     return (
       <div role="alert" className="flex min-h-screen items-center justify-center bg-background p-6">
@@ -347,13 +348,21 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
               {componentStack.trim()}
             </pre>
           ) : null}
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="mt-6 inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            Reload
-          </button>
+          <div className="mt-6 flex gap-2">
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Reload
+            </button>
+            <a
+              href="/"
+              className="inline-flex h-9 items-center rounded-md border px-4 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+            >
+              Go home
+            </a>
+          </div>
         </div>
       </div>
     );

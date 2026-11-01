@@ -136,6 +136,10 @@ describe("scaffoldViteApp tool", () => {
     expect(boundary).toContain("static getDerivedStateFromError");
     expect(boundary).toContain("import.meta.env.DEV && componentStack");
     expect(boundary).toContain("window.location.reload()");
+    expect(boundary).toContain('<a\n              href="/"');
+    // A flag, so `throw null` / `throw undefined` still show the card.
+    expect(boundary).toContain("return { hasError: true, error };");
+    expect(boundary).toContain("if (!hasError) return this.props.children;");
     expect(tool.description).toContain("Don't add another <BrowserRouter>.");
   });
 });
