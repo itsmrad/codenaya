@@ -65,6 +65,7 @@ test.describe("first-run checklist", () => {
 
   test("the pill expands to the full card with the same progress", async ({ page }) => {
     await openDashboard(page);
+    await page.waitForFunction(() => Boolean((window as { Clerk?: { session?: unknown } }).Clerk?.session));
     const client = await userConvexClient(page);
     test.skip((await client.query(api.projects.get, {})).length === 0, "needs a project");
 
