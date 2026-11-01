@@ -52,6 +52,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   readFiles: { icon: FileTextIcon, running: "Reading", done: "Read", mergeable: true },
   listFiles: { icon: FolderTreeIcon, running: "Listing files", done: "Listed files", mergeable: true },
   createFiles: { icon: FilePlus2Icon, running: "Creating", done: "Created", writes: true },
+  writeFiles: { icon: FilePlus2Icon, running: "Writing", done: "Wrote", writes: true },
   createFolder: { icon: FolderPlusIcon, running: "Creating folder", done: "Created folder" },
   scaffoldViteApp: { icon: FolderPlusIcon, running: "Scaffolding Vite app", done: "Scaffolded Vite app" },
   updateFile: { icon: FilePenIcon, running: "Editing", done: "Edited", writes: true },

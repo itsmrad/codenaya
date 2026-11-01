@@ -35,6 +35,21 @@ describe("describeToolCall", () => {
     ).toEqual(["src/App.jsx"]);
   });
 
+  it("shows paths the agent passes directly (#292)", () => {
+    expect(
+      describeToolCall({ name: "writeFiles", input: { files: [{ path: "src/a.tsx", content: "x" }] } }, pathOf),
+    ).toEqual(["src/a.tsx"]);
+    expect(describeToolCall({ name: "readFiles", input: { paths: ["src/b.tsx"], fileIds: [ID_A] } }, pathOf)).toEqual([
+      "src/b.tsx",
+      "src/App.jsx",
+    ]);
+    expect(describeToolCall({ name: "updateFile", input: { path: "src/c.tsx" } }, pathOf)).toEqual(["src/c.tsx"]);
+    expect(describeToolCall({ name: "renameFile", input: { path: "src/d.tsx", newName: "e.tsx" } }, pathOf)).toEqual([
+      "src/d.tsx",
+      "e.tsx",
+    ]);
+  });
+
   it("joins created file names onto the parent folder path", () => {
     expect(
       describeToolCall(

@@ -1,24 +1,17 @@
 import { z } from "zod";
 import { createTool } from "@inngest/agent-kit";
 
-import { buildPathIndex } from "@/features/conversations/agent-steps";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { VITE_REACT_STARTER } from "../vite-starter";
+import { createFolderEnsurer, loadProjectTree, splitPath } from "./paths";
 
 interface ScaffoldViteAppToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
 }
-
-const splitPath = (path: string) => {
-  const slash = path.lastIndexOf("/");
-  return slash === -1
-    ? { dir: "", name: path }
-    : { dir: path.slice(0, slash), name: path.slice(slash + 1) };
-};
 
 export const createScaffoldViteAppTool = ({
   projectId,
@@ -34,31 +27,8 @@ export const createScaffoldViteAppTool = ({
     handler: async (_params, { step: toolStep }) => {
       try {
         return await toolStep?.run("scaffold-vite-app", async () => {
-          const existing = await convex.query(api.system.getProjectFiles, {
-            internalKey,
-            projectId,
-          });
-          const pathOf = buildPathIndex(existing);
-          const folders = new Map<string, Id<"files">>(
-            existing
-              .filter((file) => file.type === "folder")
-              .map((folder) => [pathOf(folder._id) ?? folder.name, folder._id]),
-          );
-
-          const ensureFolder = async (path: string): Promise<Id<"files"> | undefined> => {
-            if (!path) return undefined;
-            const known = folders.get(path);
-            if (known) return known;
-            const { dir, name } = splitPath(path);
-            const folderId = await convex.mutation(api.system.createFolder, {
-              internalKey,
-              projectId,
-              name,
-              parentId: await ensureFolder(dir),
-            });
-            folders.set(path, folderId);
-            return folderId;
-          };
+          const { byPath } = await loadProjectTree(internalKey, projectId);
+          const ensureFolder = createFolderEnsurer(internalKey, projectId, byPath);
 
           const byDir = new Map<string, { name: string; content: string }[]>();
           for (const file of VITE_REACT_STARTER) {
@@ -84,8 +54,9 @@ export const createScaffoldViteAppTool = ({
             }
           }
 
-          const folderIds = [...folders]
-            .map(([path, id]) => `${path} (${id})`)
+          const folderIds = [...byPath]
+            .filter(([, entry]) => entry.type === "folder")
+            .map(([path, { _id }]) => `${path} (${_id})`)
             .join(", ");
           return [
             `Scaffolded the Vite + React starter. Created: ${created.join(", ") || "nothing"}.`,

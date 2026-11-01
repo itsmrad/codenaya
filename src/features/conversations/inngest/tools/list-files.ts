@@ -1,10 +1,8 @@
 import { z } from "zod";
 import { createTool } from "@inngest/agent-kit";
 
-import { convex } from "@/lib/convex-client";
-
-import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { loadProjectTree } from "./paths";
 
 interface ListFilesToolOptions {
   projectId: Id<"projects">;
@@ -18,36 +16,26 @@ export const createListFilesTool = ({
   return createTool({
     name: "listFiles",
     description:
-      "List all files and folders in the project. Returns names, IDs, types, and parentId for each item. Items with parentId: null are at root level. Use the parentId to understand the folder structure - items with the same parentId are in the same folder.",
-    parameters: z.object({}),
-    handler: async (_, { step: toolStep }) => {
+      "List every file and folder in the project as sorted paths, one per line. Folders end in /. Set withIds to also get each item's ID, which only createFiles and createFolder need.",
+    parameters: z.object({
+      withIds: z.boolean().optional().describe("Also return each item's ID"),
+    }),
+    handler: async ({ withIds }, { step: toolStep }) => {
       try {
         return await toolStep?.run("list-files", async () => {
-          const files = await convex.query(api.system.getProjectFiles, {
-            internalKey,
-            projectId,
-          });
-
-          // Sort: folders first, then files, alphabetically
-          const sorted = files.sort((a, b) => {
-            if (a.type !== b.type) {
-              return a.type === "folder" ? -1 : 1;
-            }
-            return a.name.localeCompare(b.name);
-          });
-
-          const fileList = sorted.map((f) => ({
-            id: f._id,
-            name: f.name,
-            type: f.type,
-            parentId: f.parentId ?? null,
-          }));
-
-          return JSON.stringify(fileList);
-        })
+          const { byPath } = await loadProjectTree(internalKey, projectId);
+          if (byPath.size === 0) return "The project is empty.";
+          return [...byPath]
+            .map(([path, { _id, type }]) => {
+              const shown = type === "folder" ? `${path}/` : path;
+              return withIds ? `${shown} (${_id})` : shown;
+            })
+            .sort()
+            .join("\n");
+        });
       } catch (error) {
         return `Error listing files: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
-    }
+    },
   });
 };

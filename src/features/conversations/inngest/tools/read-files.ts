@@ -3,17 +3,21 @@ import { createTool } from "@inngest/agent-kit";
 
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
+import { loadProjectTree, parseAgentPath } from "./paths";
 
 interface ReadFilesToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
 }
 
-const paramsSchema = z.object({
-  fileIds: z
-    .array(z.string().min(1, "File ID cannot be empty"))
-    .min(1, "Provide at least one file ID"),
-});
+const paramsSchema = z
+  .object({
+    paths: z.array(z.string().min(1, "Path cannot be empty")).optional(),
+    fileIds: z.array(z.string().min(1, "File ID cannot be empty")).optional(),
+  })
+  .refine((p) => (p.paths?.length ?? 0) + (p.fileIds?.length ?? 0) > 0, {
+    message: "Provide at least one path, like src/App.tsx",
+  });
 
 export const createReadFilesTool = ({
   projectId,
@@ -21,9 +25,10 @@ export const createReadFilesTool = ({
 }: ReadFilesToolOptions) => {
   return createTool({
     name: "readFiles",
-    description: "Read the content of files from the project. Returns file contents.",
+    description: "Read files by path, like src/App.tsx. Returns each file's path and content.",
     parameters: z.object({
-      fileIds: z.array(z.string()).describe("Array of file IDs to read"),
+      paths: z.array(z.string()).optional().describe("Project-relative file paths to read"),
+      fileIds: z.array(z.string()).optional().describe("File IDs to read, if you have IDs instead of paths"),
     }),
     handler: async (params, { step: toolStep }) => {
       const parsed = paramsSchema.safeParse(params);
@@ -31,33 +36,37 @@ export const createReadFilesTool = ({
         return `Error: ${parsed.error.issues[0].message}`;
       }
 
-      const { fileIds } = parsed.data;
+      const { paths = [], fileIds = [] } = parsed.data;
 
       try {
         return await toolStep?.run("read-files", async () => {
-          const results: { id: string; name: string; content: string }[] = [];
+          const { byPath, pathOf } = await loadProjectTree(internalKey, projectId);
+          const missing: string[] = [];
+          const ids = [...fileIds];
+          for (const raw of paths) {
+            const target = parseAgentPath(raw);
+            const entry = "path" in target ? byPath.get(target.path) : undefined;
+            if (entry) ids.push(entry._id);
+            else missing.push("error" in target ? target.error : `Nothing at "${target.path}"`);
+          }
 
-          for (const fileId of fileIds) {
+          const results: { id: string; path: string; content: string }[] = [];
+          for (const fileId of ids) {
             const file = await getFileByAgentId(internalKey, projectId, fileId);
-
             if (file && file.content) {
-              results.push({
-                id: file._id,
-                name: file.name,
-                content: file.content,
-              });
-            };
+              results.push({ id: file._id, path: pathOf(file._id) ?? file.name, content: file.content });
+            }
           }
 
           if (results.length === 0) {
-            return "Error: No files found with provided IDs. Use listFiles to get valid fileIDs.";
+            return `Error: No files found${missing.length ? ` (${missing.join("; ")})` : ""}. Use listFiles to see the project's paths.`;
           }
 
-          return JSON.stringify(results);
-        })
+          return JSON.stringify(missing.length ? { files: results, missing } : results);
+        });
       } catch (error) {
         return `Error reading files: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
-    }
+    },
   });
 };

@@ -77,14 +77,19 @@ export const describeToolCall = (
   switch (name) {
     case "readFiles":
     case "deleteFiles":
-      targets = paths(strings(input.fileIds));
+      targets = [...strings(input.paths), ...paths(strings(input.fileIds))];
       break;
     case "updateFile":
-      targets = paths([str(input.fileId)]);
+      targets = str(input.path) ? [str(input.path)] : paths([str(input.fileId)]);
       break;
     case "renameFile": {
-      const from = pathOf(str(input.fileId));
+      const from = str(input.path) || pathOf(str(input.fileId));
       targets = from ? [from, str(input.newName)] : [];
+      break;
+    }
+    case "writeFiles": {
+      const files = Array.isArray(input.files) ? input.files : [];
+      targets = files.map((file) => str((file as Record<string, unknown>)?.path)).filter(Boolean);
       break;
     }
     case "createFiles": {

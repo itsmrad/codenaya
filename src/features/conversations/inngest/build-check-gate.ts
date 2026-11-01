@@ -8,6 +8,7 @@ import { BUILD_CHECK_UNFINISHED, toolResultError } from "../agent-steps";
 /** Tools that change what the build sees. */
 const WRITE_TOOLS = new Set([
   "createFiles",
+  "writeFiles",
   "updateFile",
   "renameFile",
   "deleteFiles",

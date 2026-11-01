@@ -1,3 +1,4 @@
+import { getFunctionName } from "convex/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -27,6 +28,15 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+/**
+ * Routes the mocked Convex reads: `getProjectFiles` (the path index, #292)
+ * gets `tree`, and each `getFileById` gets `lookup(fileId)`.
+ */
+const files = (lookup: (fileId: string) => unknown, tree: unknown[] = []) =>
+  mocks.query.mockImplementation(async (ref, args: { fileId?: string }) =>
+    getFunctionName(ref) === "system:getProjectFiles" ? tree : lookup(args.fileId ?? ""),
+  );
+
 // `system.getFileById` resolves a malformed ID to null (convex/system.test.ts),
 // so the tools see it like any missing file.
 describe("getFileByAgentId", () => {
@@ -41,19 +51,17 @@ describe("readFiles tool", () => {
     createReadFilesTool({ projectId, internalKey }).handler({ fileIds }, ctx);
 
   it("returns a tool error for malformed IDs without throwing inside the step", async () => {
-    mocks.query.mockResolvedValue(null);
+    files(() => null);
     expect(await read(["src/App.tsx"])).toBe(
-      "Error: No files found with provided IDs. Use listFiles to get valid fileIDs.",
+      "Error: No files found. Use listFiles to see the project's paths.",
     );
     expect(step.run).toHaveBeenCalledTimes(1);
   });
 
   it("skips malformed IDs and still reads valid ones", async () => {
-    mocks.query
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ _id: "f1", name: "App.tsx", content: "x" });
+    files((id) => (id === "f1" ? { _id: "f1", name: "App.tsx", content: "x" } : null));
     expect(JSON.parse((await read(["bad", "f1"])) as string)).toEqual([
-      { id: "f1", name: "App.tsx", content: "x" },
+      { id: "f1", path: "App.tsx", content: "x" },
     ]);
   });
 });
@@ -64,9 +72,9 @@ describe("single-file tools", () => {
     ["renameFile", () => createRenameFileTool({ projectId, internalKey }).handler({ fileId: "bad", newName: "a.ts" }, ctx)],
     ["deleteFiles", () => createDeleteFilesTool({ projectId, internalKey }).handler({ fileIds: ["bad"] }, ctx)],
   ])("%s returns a not-found tool error for a malformed ID", async (_name, call) => {
-    mocks.query.mockResolvedValue(null);
+    files(() => null);
     expect(await call()).toBe(
-      'Error: File with ID "bad" not found. Use listFiles to get valid file IDs.',
+      'Error: File with ID "bad" not found. Use listFiles to see the project\'s paths.',
     );
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
@@ -90,16 +98,16 @@ describe("project scope", () => {
     ["renameFile", () => createRenameFileTool({ projectId, internalKey }).handler({ fileId: "foreign", newName: "a.ts" }, ctx)],
     ["deleteFiles", () => createDeleteFilesTool({ projectId, internalKey }).handler({ fileIds: ["foreign"] }, ctx)],
   ])("%s returns a tool error for a foreign file and writes nothing", async (_name, call) => {
-    mocks.query.mockResolvedValue(null);
+    files(() => null);
     expect(await call()).toBe(
-      'Error: File with ID "foreign" not found. Use listFiles to get valid file IDs.',
+      'Error: File with ID "foreign" not found. Use listFiles to see the project\'s paths.',
     );
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
 
   // #219: the id would be shown to the user as "a file".
   it("names the folder, not its id, when asked to update a folder", async () => {
-    mocks.query.mockResolvedValue({ _id: "d1", name: "ui", type: "folder" });
+    files(() => ({ _id: "d1", name: "ui", type: "folder" }));
     expect(
       await createUpdateFileTool({ projectId, internalKey }).handler({ fileId: "d1", content: "x" }, ctx),
     ).toBe('Error: "ui" is a folder, not a file. You can only update file contents.');
@@ -107,7 +115,7 @@ describe("project scope", () => {
   });
 
   it("passes the run's projectId to the write", async () => {
-    mocks.query.mockResolvedValue({ _id: "f1", name: "App.tsx", type: "file" });
+    files(() => ({ _id: "f1", name: "App.tsx", type: "file" }));
     await createUpdateFileTool({ projectId, internalKey }).handler({ fileId: "f1", content: "x" }, ctx);
     expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), {
       internalKey,
