@@ -61,7 +61,9 @@ test("actionable invalid regex/arguments, safe pathological regex and internal-k
     const id = await ctx.db.insert("files", { projectId, name: "adversarial", type: "file", updatedAt: 0 });
     await insertFileContent(ctx, id, projectId, "a".repeat(100_000) + "!");
   });
-  expect(await search({ pattern: "(a+)+$", isRegex: true })).toBe("No matches found.");
+  const result = await search({ pattern: "(a+)+b$", isRegex: true });
+  expect(result).not.toContain("adversarial:1:");
+  expect(result).toContain("Regex search checked only the first 4,000 characters");
 });
 
 test("truncates matching lines with a narrowing hint, but not an exact result count", async () => {
@@ -122,4 +124,21 @@ test("limits content index lookups to 3000, with explicit truncation", async () 
 test("normalises leading ./ and whitespace in path globs", async () => {
   const { search } = await setup();
   expect(await search({ pathGlob: " ./src/**/*.ts " })).toBe(await search({ pathGlob: "src/**/*.ts" }));
+});
+
+test("regex checks only the first 4,000 characters per line and reports the cutoff; literal search checks the suffix", async () => {
+  const { search, t, projectId } = await setup();
+  await t.run(async (ctx) => {
+    const id = await ctx.db.insert("files", { projectId, name: "minified.js", type: "file", updatedAt: 0 });
+    await insertFileContent(ctx, id, projectId, "prefix" + "x".repeat(3994) + "suffix");
+  });
+  const regex = await search({ pattern: "suffix", isRegex: true });
+  expect(regex).not.toContain("minified.js:1:");
+  expect(regex).toContain("Search truncated");
+  expect(regex).toContain("Regex search checked only the first 4,000 characters of each line");
+  expect(await search({ pattern: "prefix", isRegex: true })).toContain("minified.js:1: prefix");
+  const literal = await search({ pattern: "suffix" });
+  expect(literal).toContain("minified.js:1:");
+  expect(literal).not.toContain("Search truncated");
+  expect(literal).not.toContain("Regex search checked only");
 });

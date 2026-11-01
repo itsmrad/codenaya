@@ -409,6 +409,7 @@ export const searchFiles = query({
     let lookups = 0;
     let bytes = 0;
     let truncated = !page.isDone;
+    let regexLinesTruncated = false;
     for (const file of page.page) {
       const path = pathOf(file._id);
       if (file.type !== "file" || file.storageId || !path || (glob && !glob.matcher(path).matches())) continue;
@@ -421,13 +422,18 @@ export const searchFiles = query({
       if (content.includes("\0")) continue;
       const lines = content.split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
-        if (!matches(lines[i])) continue;
-        if (output.length === limit) { truncated = true; break; }
         const text = lines[i];
+        if (args.isRegex && text.length > 4000) regexLinesTruncated = true;
+        if (!matches(args.isRegex ? text.slice(0, 4000) : text)) continue;
+        if (output.length === limit) { truncated = true; break; }
         output.push(`${path}:${i + 1}: ${text.slice(0, 500)}${text.length > 500 ? "… [line clipped; read a range for full text]" : ""}`);
       }
       if (output.length === limit && truncated) break;
     }
-    return [...output, ...(truncated ? [SEARCH_TRUNCATED] : [])].join("\n") || "No matches found.";
+    return [
+      ...output,
+      ...(truncated || regexLinesTruncated ? [SEARCH_TRUNCATED] : []),
+      ...(regexLinesTruncated ? ["Regex search checked only the first 4,000 characters of each line. Use literal search to inspect the rest."] : []),
+    ].join("\n") || "No matches found.";
   },
 });
