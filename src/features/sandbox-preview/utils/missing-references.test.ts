@@ -78,11 +78,11 @@ describe("undeclaredPackages", () => {
   it("names a package a config imports after package.json dropped it", () => {
     const files = starter().map((file) =>
       file.path === "package.json"
-        ? { ...file, content: file.content.replace(/\s*"tailwindcss-animate": "[^"]+",?/, "") }
+        ? { ...file, content: file.content.replace(/\s*"@tailwindcss\/vite": "[^"]+",?/, "") }
         : file,
     );
     expect(undeclaredPackages(files)).toEqual([
-      "tailwindcss-animate (imported by tailwind.config.ts)",
+      "@tailwindcss/vite (imported by vite.config.ts)",
     ]);
   });
 
