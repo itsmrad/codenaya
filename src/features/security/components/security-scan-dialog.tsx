@@ -38,7 +38,10 @@ export const SecurityScanDialog = ({ pending, onDismiss }: SecurityScanDialogPro
 
   const askAgent = () => {
     if (!pending) return;
-    queueChatMessage(fixRequestMessage(pending.findings));
+    queueChatMessage({
+      projectId: pending.projectId,
+      text: fixRequestMessage(pending.findings),
+    });
     toast.success("Asked the agent to fix these");
     close();
   };

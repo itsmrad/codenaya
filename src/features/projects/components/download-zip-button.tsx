@@ -44,6 +44,9 @@ export const DownloadZipButton = ({ projectId }: DownloadZipButtonProps) => {
   };
 
   const isBusy = isDownloading || gate.checking;
+  let label = "Download ZIP";
+  if (isDownloading) label = "Preparing ZIP...";
+  if (gate.checking) label = "Checking for secrets...";
 
   return (
     <>
@@ -61,11 +64,7 @@ export const DownloadZipButton = ({ projectId }: DownloadZipButtonProps) => {
         ) : (
           <DownloadIcon className="size-4" />
         )}
-        {gate.checking
-          ? "Checking for secrets..."
-          : isDownloading
-            ? "Preparing ZIP..."
-            : "Download ZIP"}
+        {label}
       </Button>
     </>
   );

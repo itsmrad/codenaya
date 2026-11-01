@@ -8,6 +8,11 @@ export interface ChatContext {
   endLine: number;
 }
 
+interface QueuedMessage {
+  projectId: string;
+  text: string;
+}
+
 interface ChatStore {
   input: string;
   setInput: (input: string) => void;
@@ -17,11 +22,13 @@ interface ChatStore {
   removeContext: (id: string) => void;
   clearContexts: () => void;
   /** A message to send once the agent is free, from outside the chat (#300). */
-  queuedMessage: string | null;
-  queueMessage: (text: string | null) => void;
+  queuedMessage: QueuedMessage | null;
+  queueMessage: (message: QueuedMessage) => void;
+  /** The queued text for `projectId`, removed from the queue; null when none. */
+  takeQueuedMessage: (projectId: string) => string | null;
 }
 
-export const useChatStore = create<ChatStore>()((set) => ({
+export const useChatStore = create<ChatStore>()((set, get) => ({
   input: "",
   setInput: (input) => set({ input }),
   appendInput: (text) => set((state) => ({ 
@@ -38,4 +45,11 @@ export const useChatStore = create<ChatStore>()((set) => ({
   clearContexts: () => set({ contexts: [] }),
   queuedMessage: null,
   queueMessage: (queuedMessage) => set({ queuedMessage }),
+  // Only the chat of the project it was queued for may send it.
+  takeQueuedMessage: (projectId) => {
+    const queued = get().queuedMessage;
+    if (queued?.projectId !== projectId) return null;
+    set({ queuedMessage: null });
+    return queued.text;
+  },
 }));

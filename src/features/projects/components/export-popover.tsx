@@ -111,6 +111,11 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
     }
   };
 
+  const submitLabel = (isSubmitting: boolean) => {
+    if (gate.checking) return "Checking for secrets...";
+    return isSubmitting ? "Creating..." : "Create Repository";
+  };
+
   const handleCancelExport = async () => {
     await ky.post("/api/github/export/cancel", {
       json: { projectId },
@@ -298,11 +303,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
                 className="w-full"
                 disabled={!canSubmit || isSubmitting}
               >
-                {gate.checking
-                  ? "Checking for secrets..."
-                  : isSubmitting
-                    ? "Creating..."
-                    : "Create Repository"}
+                {submitLabel(isSubmitting)}
               </Button>
             )}
           </form.Subscribe>

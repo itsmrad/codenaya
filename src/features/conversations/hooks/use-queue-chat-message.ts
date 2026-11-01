@@ -1,4 +1,4 @@
 import { useChatStore } from "../store/use-chat-store";
 
-/** Sends a message to the project's chat once the agent is free. */
+/** Sends `{ projectId, text }` to that project's chat once its agent is free. */
 export const useQueueChatMessage = () => useChatStore((state) => state.queueMessage);

@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { detectCredential } from "@/features/integrations/credential-guard";
 
-import { fixRequestMessage, scanProject } from "./scan-project";
+import { describeRule, fixRequestMessage, scanProject } from "./scan-project";
 
 // Built from parts so the repo itself holds no scannable key literals.
 const STRIPE_LIVE = ["sk", "live", "51HxQ2kLm9Np3Rt7Vw0Yz4Ab"].join("_");
 const GITHUB = `ghp_${"aB3dE6gH9jK2mN5pQ8sT1vW4"}`;
+const ANTHROPIC = ["sk", "ant", "api03", "Zx8Qw2Lp5Rt9Vb3Nm7Kc1Hj4"].join("-");
+const PEM_HEADER = ["-----BEGIN", "RSA PRIVATE KEY-----"].join(" ");
 const jwt = (payload: object) =>
   [
     btoa(JSON.stringify({ alg: "HS256", typ: "JWT" })),
@@ -49,9 +51,59 @@ describe("scanProject", () => {
       `STRIPE_SECRET_KEY=${["sk", "live", "x".repeat(24)].join("_")}`,
       `OPENAI_API_KEY=sk-${"X".repeat(24)}`,
       "GITHUB_TOKEN=your-github-token",
+      "DATABASE_URL=postgres://postgres:postgres@localhost:5432/app",
     ].join("\n");
 
     expect(scanProject([{ path: ".env.example", content }], [])).toEqual([]);
+    expect(scanProject([{ path: ".env.sample", content }], [])).toEqual([]);
+  });
+
+  it("treats key-shaped strings without digits as placeholders", () => {
+    const content = 'const openai = new OpenAI({ apiKey: "sk-your-openai-api-key-here" });';
+
+    expect(scanProject([{ path: "README.md", content }], [])).toEqual([]);
+  });
+
+  it("labels sk- keys neutrally, whichever provider issued them", () => {
+    const findings = scanProject([{ path: "lib/ai.ts", content: `"${ANTHROPIC}"` }], []);
+
+    expect(rulesOf(findings)).toEqual(["lib/ai.ts:1:sk-api-key"]);
+    expect(describeRule("sk-api-key")).toBe("Hard-coded API key (sk-…)");
+  });
+
+  it("flags private keys", () => {
+    const content = `${PEM_HEADER}\nMIIEpAIBAAKCAQEA`;
+
+    expect(rulesOf(scanProject([{ path: "certs/server.pem", content }], []))).toEqual([
+      "certs/server.pem:1:private-key",
+    ]);
+  });
+
+  it("flags literal passwords in connection strings, not templated ones", () => {
+    const content = [
+      'const db = "postgres://admin:pass@db.example.com:5432/app";',
+      "const url = `postgres://admin:${process.env.DB_PASSWORD}@host/app`;",
+      'const tpl = "mysql://user:<password>@host/db";',
+    ].join("\n");
+
+    expect(rulesOf(scanProject([{ path: "server/db.ts", content }], []))).toEqual([
+      "server/db.ts:1:dsn-password",
+    ]);
+  });
+
+  it("flags .env files in the export but not example ones", () => {
+    const findings = scanProject(
+      [
+        { path: ".env", content: "API_KEY=q9Zr2LwX7pN4vB8kT1mY6cH3" },
+        { path: "apps/web/.env.local", content: "" },
+        { path: ".env.example", content: "API_KEY=" },
+        { path: ".env.sample", content: "API_KEY=" },
+        { path: "src/env.ts", content: "export {}" },
+      ],
+      [],
+    );
+
+    expect(rulesOf(findings)).toEqual([".env:null:env-file", "apps/web/.env.local:null:env-file"]);
   });
 
   it("finds stored secret values written into a file", () => {
@@ -95,7 +147,7 @@ describe("scanProject", () => {
       [],
     );
 
-    expect(rulesOf(findings)).toEqual([".env:2:public-secret-name"]);
+    expect(rulesOf(findings)).toEqual([".env:null:env-file", ".env:2:public-secret-name"]);
   });
 
   it("skips binary files", () => {
