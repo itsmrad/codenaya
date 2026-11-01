@@ -23,7 +23,7 @@ import { usePreviewErrors } from "@/features/sandbox-preview/hooks/use-preview-e
 import { splitSlashSkills } from "@/features/skills/parse-slash";
 import { cn } from "@/lib/utils";
 
-import type { Doc } from "../../../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { sanitizeAgentText } from "../agent-steps";
 import { useChatStore } from "../store/use-chat-store";
 import { userMessageBlocks } from "../user-message";
@@ -186,6 +186,10 @@ interface AssistantMessageProps {
   onRetry?: () => void;
   /** Set when a checkpoint was taken before this run (#43). */
   onRestore?: () => void;
+  /** The checkpoint taken before this run; null once pruned (#225). */
+  checkpointId?: Id<"checkpoints"> | null;
+  /** An agent run is in progress, so files can't be reverted. */
+  revertDisabled?: boolean;
   /** A plan-mode reply (#120): sends the plan as the next build message. */
   onBuildPlan?: () => void;
 }
@@ -198,6 +202,8 @@ export const AssistantMessage = ({
   onRetry,
   onRestore,
   onBuildPlan,
+  checkpointId,
+  revertDisabled,
 }: AssistantMessageProps) => {
   const [copied, setCopied] = useState(false);
   const status = message.status ?? "completed";
@@ -247,6 +253,8 @@ export const AssistantMessage = ({
           stalled={stalled}
           onOpenFile={onOpenFile}
           previewErrors={isLast ? { ...previewErrors, sending: fixSending } : undefined}
+          checkpointId={checkpointId}
+          revertDisabled={revertDisabled}
         />
       )}
       {stalled && isLast && onRetry && (

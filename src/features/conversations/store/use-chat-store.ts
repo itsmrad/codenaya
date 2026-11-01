@@ -11,12 +11,16 @@ export interface ChatContext {
 /** How a send ended; see `sendMessage` in conversation-sidebar.tsx. */
 export type SendResult = "sent" | "failed" | "blocked";
 
-/** A message another panel asked the chat to send, e.g. "Fix with AI" (#223). */
+/**
+ * A message to send once the agent is free, from outside the chat: "Ask agent
+ * to fix" (#300), the preview's "Fix with AI" (#223).
+ */
 export interface QueuedMessage {
+  projectId: string;
   text: string;
   /** Runs once the message is sent, not when it is refused or fails. */
   onSent?: () => void;
-  /** Set while the send is in flight; the message stays queued until it settles. */
+  /** Taken and in flight; it stays queued until the send settles. */
   sending?: boolean;
 }
 
@@ -29,15 +33,22 @@ interface ChatStore {
   removeContext: (id: string) => void;
   clearContexts: () => void;
   queuedMessage: QueuedMessage | null;
-  /** Ignored while another message is queued or sending, so a double click sends once. */
+  /** Ignored while a message is sending, so a click mid-send doesn't send again. */
   queueMessage: (message: QueuedMessage) => void;
+  /**
+   * The queued text for `projectId`, now marked as sending; null when none, or
+   * when it is already sending. Call `finishQueuedMessage` once the send settles.
+   */
+  takeQueuedMessage: (projectId: string) => string | null;
+  /** Clears the taken message; its `onSent` runs only when it was sent. */
+  finishQueuedMessage: (result: SendResult) => void;
 }
 
-export const useChatStore = create<ChatStore>()((set) => ({
+export const useChatStore = create<ChatStore>()((set, get) => ({
   input: "",
   setInput: (input) => set({ input }),
-  appendInput: (text) => set((state) => ({ 
-    input: state.input ? `${state.input}\n${text}` : text 
+  appendInput: (text) => set((state) => ({
+    input: state.input ? `${state.input}\n${text}` : text
   })),
   contexts: [],
   addContext: (context) => set((state) => {
@@ -49,23 +60,35 @@ export const useChatStore = create<ChatStore>()((set) => ({
   })),
   clearContexts: () => set({ contexts: [] }),
   queuedMessage: null,
-  queueMessage: (message) =>
-    set((state) => (state.queuedMessage ? state : { queuedMessage: message })),
+  queueMessage: (message) => {
+    if (!get().queuedMessage?.sending) set({ queuedMessage: message });
+  },
+  // Only the chat of the project it was queued for may send it.
+  takeQueuedMessage: (projectId) => {
+    const queued = get().queuedMessage;
+    if (queued?.projectId !== projectId || queued.sending) return null;
+    set({ queuedMessage: { ...queued, sending: true } });
+    return queued.text;
+  },
+  finishQueuedMessage: (result) => {
+    const queued = get().queuedMessage;
+    set({ queuedMessage: null });
+    if (result === "sent") queued?.onSent?.();
+  },
 }));
 
-/**
- * Sends the queued message once through `send`. It stays queued, blocking any
- * other, until the send settles; `onSent` runs only when it was sent.
- */
-export const sendQueuedMessage = async (send: (text: string) => Promise<SendResult>) => {
-  const queued = useChatStore.getState().queuedMessage;
-  if (!queued || queued.sending) return;
-  useChatStore.setState({ queuedMessage: { ...queued, sending: true } });
+/** Sends the message queued for `projectId` once through `send`, if there is one. */
+export const sendQueuedMessage = async (
+  projectId: string,
+  send: (text: string) => Promise<SendResult>,
+) => {
+  const { takeQueuedMessage, finishQueuedMessage } = useChatStore.getState();
+  const text = takeQueuedMessage(projectId);
+  if (text === null) return;
   let result: SendResult = "blocked";
   try {
-    result = await send(queued.text);
+    result = await send(text);
   } finally {
-    useChatStore.setState({ queuedMessage: null });
+    finishQueuedMessage(result);
   }
-  if (result === "sent") queued.onSent?.();
 };

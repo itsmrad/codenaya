@@ -11,19 +11,31 @@ const deferredSend = () => {
   return { send, settle: (result: SendResult) => settle(result) };
 };
 
-describe("queued chat messages (#223)", () => {
+describe("queued chat messages", () => {
   beforeEach(() => useChatStore.setState({ queuedMessage: null }));
 
-  it("sends a double-clicked fix once and counts it once", async () => {
+  it("is taken only by the chat of the project it was queued for, once", () => {
+    const { queueMessage, takeQueuedMessage } = useChatStore.getState();
+    queueMessage({ projectId: "project_a", text: "Fix the secrets" });
+
+    // The user switched to another project: its chat must not send it.
+    expect(takeQueuedMessage("project_b")).toBeNull();
+    expect(useChatStore.getState().queuedMessage).not.toBeNull();
+
+    expect(takeQueuedMessage("project_a")).toBe("Fix the secrets");
+    expect(takeQueuedMessage("project_a")).toBeNull();
+  });
+
+  it("sends a double-clicked fix once and counts it once (#223)", async () => {
     const onSent = vi.fn();
     const { send, settle } = deferredSend();
     const { queueMessage } = useChatStore.getState();
 
-    queueMessage({ text: "fix it", onSent });
-    const first = sendQueuedMessage(send);
+    queueMessage({ projectId: "project_a", text: "fix it", onSent });
+    const first = sendQueuedMessage("project_a", send);
     // The second click lands while the first POST is still in flight.
-    queueMessage({ text: "fix it", onSent });
-    void sendQueuedMessage(send);
+    queueMessage({ projectId: "project_a", text: "fix it", onSent });
+    void sendQueuedMessage("project_a", send);
     expect(useChatStore.getState().queuedMessage).toMatchObject({ text: "fix it", sending: true });
 
     settle("sent");
@@ -34,21 +46,31 @@ describe("queued chat messages (#223)", () => {
     expect(useChatStore.getState().queuedMessage).toBeNull();
   });
 
+  it("leaves another project's message for its own chat", async () => {
+    const send = vi.fn(async () => "sent" as const);
+    useChatStore.getState().queueMessage({ projectId: "project_a", text: "fix it" });
+
+    await sendQueuedMessage("project_b", send);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessage).toMatchObject({ projectId: "project_a" });
+  });
+
   it.each(["blocked", "failed"] as const)("doesn't count a %s send as an attempt", async (result) => {
     const onSent = vi.fn();
-    useChatStore.getState().queueMessage({ text: "fix it", onSent });
+    useChatStore.getState().queueMessage({ projectId: "project_a", text: "fix it", onSent });
 
-    await sendQueuedMessage(async () => result);
+    await sendQueuedMessage("project_a", async () => result);
 
     expect(onSent).not.toHaveBeenCalled();
     expect(useChatStore.getState().queuedMessage).toBeNull();
   });
 
   it("frees the queue when the send throws", async () => {
-    useChatStore.getState().queueMessage({ text: "fix it" });
+    useChatStore.getState().queueMessage({ projectId: "project_a", text: "fix it" });
 
     await expect(
-      sendQueuedMessage(async () => {
+      sendQueuedMessage("project_a", async () => {
         throw new Error("network");
       }),
     ).rejects.toThrow("network");

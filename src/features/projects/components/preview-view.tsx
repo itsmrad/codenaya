@@ -58,11 +58,11 @@ import { EnvVarsDialog } from "./env-vars-dialog";
 import { useProject } from "../hooks/use-projects";
 import { useFilesWithContent } from "../hooks/use-files";
 import { markPreviewOpened } from "../utils/first-run";
+import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
 import {
-  useActiveRun,
   useChatMessageQueued,
   useQueueChatMessage,
-} from "@/features/conversations/hooks/use-conversations";
+} from "@/features/conversations/hooks/use-queue-chat-message";
 import {
   usePublicEnvVars,
   useWithheldSecretCount,
@@ -182,12 +182,13 @@ export const PreviewView = ({
   const fixAppError = useCallback(() => {
     if (!appError || !appErrorId) return;
     queueChatMessage({
+      projectId,
       text: buildFixPrompt(appError, terminalOutputRef.current),
       // Only a fix that was actually sent counts towards "Still failing".
       onSent: () =>
         setFixAttempts((attempts) => ({ ...attempts, [appErrorId]: (attempts[appErrorId] ?? 0) + 1 })),
     });
-  }, [appError, appErrorId, queueChatMessage]);
+  }, [appError, appErrorId, projectId, queueChatMessage]);
   // The chat's run block says when a finished run left the preview broken.
   const canFix = appErrorId !== null && (fixAttempts[appErrorId] ?? 0) < MAX_FIX_ATTEMPTS;
   usePublishPreviewErrors(

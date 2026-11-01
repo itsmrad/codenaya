@@ -10,6 +10,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   mutation: vi.fn(),
+  createSandbox: vi.fn(),
+}));
+
+vi.mock("e2b", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("e2b")>()),
+  Sandbox: { create: mocks.createSandbox },
 }));
 
 vi.mock("@/lib/convex-client", async () => {
@@ -18,7 +24,7 @@ vi.mock("@/lib/convex-client", async () => {
 });
 
 import { BUILD_CHECK_NUDGE } from "./build-check-gate";
-import { drive, text } from "./process-message.driver";
+import { drive, text, toolCall } from "./process-message.driver";
 
 let projectFiles: Array<{ _id: string; name: string; type: "file"; content: string }>;
 
@@ -31,21 +37,6 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectFilesWithUrls": () => projectFiles,
   "system:getProjectSkills": () => [],
 };
-
-const toolCall = (name: string, args: Record<string, unknown> = {}) => ({
-  choices: [
-    {
-      message: {
-        role: "assistant",
-        content: null,
-        tool_calls: [
-          { id: `call_${name}`, type: "function", function: { name, arguments: JSON.stringify(args) } },
-        ],
-      },
-      finish_reason: "tool_calls",
-    },
-  ],
-});
 
 const writeMain = (content: string) => {
   projectFiles = [{ _id: "f1", name: "main.ts", type: "file", content }];
@@ -125,6 +116,47 @@ describe("processMessage build-check gate", () => {
     expect(recordedSteps().filter((step) => step.tool === "checkBuild").at(-1)).toMatchObject({
       status: "done",
       text: "Build not checked",
+    });
+  });
+
+  it("sends the known cause and fix with a matched build error and records the recipe on the step", async () => {
+    vi.stubEnv("E2B_API_KEY", "e2b_key");
+    projectFiles = [
+      { _id: "f1", name: "package.json", type: "file", content: "{}" },
+      { _id: "f2", name: "vite.config.ts", type: "file", content: "export default {};\n" },
+      { _id: "f3", name: "tsconfig.app.json", type: "file", content: "{}" },
+    ];
+    const { CommandExitError } = await import("e2b");
+    // tsc runs before the Vite build, so it reports a bad import first.
+    const build = {
+      exitCode: 2,
+      error: "",
+      stdout:
+        "/home/user/app/src/App.tsx(1,21): error TS2307: Cannot find module './missing' or its corresponding type declarations.\n",
+      stderr: "",
+    };
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
+      .mockRejectedValueOnce(new CommandExitError(build));
+    mocks.createSandbox.mockResolvedValue({
+      files: { makeDir: vi.fn(async () => true), write: vi.fn(async () => ({})) },
+      commands: { run },
+      kill: vi.fn(async () => {}),
+    });
+
+    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
+      { data: toolCall("checkBuild") },
+      { data: text("**Notes:** the build fails on ./missing.") },
+    ]);
+
+    expect(run.mock.calls[1][0]).toMatch(/^npx tsc --noEmit -p tsconfig\.app\.json && npx vite build$/);
+    const checkResult = JSON.stringify(codingRequests(outcome.inferenceBodies)[1].messages);
+    expect(checkResult).toContain("Likely cause (unresolved-import): ");
+    expect(checkResult).toContain("Known fix: ");
+    expect(recordedSteps().filter((step) => step.tool === "checkBuild").at(-1)).toMatchObject({
+      status: "error",
+      recipeIds: ["unresolved-import"],
     });
   });
 

@@ -47,6 +47,7 @@ import { INSUFFICIENT_CREDITS_CODE } from "@/features/billing/credits";
 import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 import { useFiles } from "@/features/projects/hooks/use-files";
+import { useProject } from "@/features/projects/hooks/use-projects";
 import {
   SkillSlashMenu,
   useSkillSlashMenu,
@@ -74,6 +75,7 @@ import { buildPathIndex } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
 import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
+import { chatStarters } from "../chat-starters";
 import { type Checkpoint, useCheckpoints } from "../hooks/use-checkpoints";
 import {
   CheckpointHistoryDialog,
@@ -172,6 +174,22 @@ export const ConversationSidebar = ({
     }
     return { pathOf: index, idOfPath: ids };
   }, [files]);
+
+  // Wait for the project, and its files unless it's an import (those load
+  // after the import), so the starters don't swap while loading.
+  const project = useProject(projectId);
+  const starters =
+    project && (project.importStatus || files !== undefined)
+      ? chatStarters({
+          name: project.name,
+          imported: Boolean(project.importStatus),
+          hasFiles: Boolean(files?.length),
+        })
+      : null;
+  // No conversation yet (import, Duplicate, Remix, blank create) or an empty one.
+  const isEmpty = activeConversationId
+    ? conversationMessages?.length === 0
+    : conversations !== undefined;
 
   const handleOpenFile = (path: string) => {
     const fileId = idOfPath.get(path);
@@ -304,9 +322,10 @@ export const ConversationSidebar = ({
     }
   };
 
-  // Sends what another panel queued (the preview's "Fix with AI") through the
-  // same path as a typed message, leaving the composer draft alone. Like a
-  // typed message, it shows at once as pending.
+  // Messages queued from outside the chat ("Ask agent to fix", #300; the
+  // preview's "Fix with AI", #223) are sent once the agent is free, through the
+  // same path as a typed one, leaving the composer draft alone. Like a typed
+  // message, it shows at once as pending.
   const queuedMessage = useChatStore((state) => state.queuedMessage);
   useEffect(() => {
     // Wait for the conversation list, or the send would open a new conversation.
@@ -320,7 +339,7 @@ export const ConversationSidebar = ({
       return;
     }
     // Syncing with the chat store: the send is the external effect.
-    void sendQueuedMessage(async (text) => {
+    void sendQueuedMessage(projectId, async (text) => {
       setPending({ text, imageUrls: [], userCount });
       try {
         return await sendMessage(text);
@@ -328,9 +347,9 @@ export const ConversationSidebar = ({
         setPending(null);
       }
     });
-    // sendMessage is recreated every render; the queued text is what matters.
+    // sendMessage is recreated every render; the queued message is what matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queuedMessage, pending, isProcessing, conversations]);
+  }, [queuedMessage, pending, isProcessing, conversations, projectId]);
 
   const handleSubmit = async (message: PromptInputMessage) => {
     // If processing and no new message, this is just a stop function
@@ -460,8 +479,9 @@ export const ConversationSidebar = ({
             </Button>
           </div>
         </div>
-        {conversationMessages?.length === 0 && !pending ? (
+        {isEmpty && starters && !pending ? (
           <ChatEmptyState
+            starters={starters}
             onSelect={(prompt) => void handleSubmit({ text: prompt, files: [] })}
           />
         ) : (
@@ -496,6 +516,10 @@ export const ConversationSidebar = ({
                     setPlanMode(false);
                     void sendMessage(buildPlanMessage(message.content));
                   }}
+                  checkpointId={
+                    checkpoints && (checkpointByMessage.get(message._id)?._id ?? null)
+                  }
+                  revertDisabled={isProcessing}
                   onRestore={
                     checkpointByMessage.has(message._id) && !isProcessing
                       ? () => setRestoreTarget(checkpointByMessage.get(message._id)!)

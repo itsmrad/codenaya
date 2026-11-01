@@ -2,7 +2,6 @@ import { useMutation, useQuery } from "convex/react";
 
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
-import { useChatStore } from "../store/use-chat-store";
 
 export const useConversation = (id: Id<"conversations"> | null) => {
   return useQuery(api.conversations.getById, id ? { id } : "skip");
@@ -26,9 +25,3 @@ export const useCreateConversation = () => {
 export const useActiveRun = (projectId: Id<"projects">) => {
   return useQuery(api.conversations.getActiveRun, { projectId });
 };
-
-/** Sends a message from outside the chat panel, through the chat's own send path. */
-export const useQueueChatMessage = () => useChatStore((state) => state.queueMessage);
-
-/** A queued message is waiting or sending; another one would be ignored. */
-export const useChatMessageQueued = () => useChatStore((state) => state.queuedMessage !== null);
