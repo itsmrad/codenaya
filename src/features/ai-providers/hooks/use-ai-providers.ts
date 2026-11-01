@@ -1,10 +1,7 @@
 import ky, { HTTPError } from "ky";
 import { useMutation, useQuery } from "convex/react";
 
-import { opusRunsLeft } from "@/features/promotions/github-promo";
-import { usePromoActive, usePromoClaim } from "@/features/promotions/hooks/use-promo";
-
-import { type PromoStanding, type PublicCatalogModel, pickableModels } from "../catalog";
+import { type PublicCatalogModel, pickableModels, promoModelIds } from "../catalog";
 import { envCatalog, platformProviderId } from "../platform";
 import type { AiProviderId } from "../registry";
 import { api } from "../../../../convex/_generated/api";
@@ -23,8 +20,8 @@ export const useAiProviderKeys = () => useQuery(api.aiProviders.list);
 export interface PlatformModels {
   models: PublicCatalogModel[];
   defaultModelId: string;
-  /** The claim's counted promo runs left, for the picker's tags. */
-  countedRunsLeft: number;
+  /** Promo models (ADR 0009), which users can no longer pick. */
+  promoModelIds: string[];
 }
 
 /**
@@ -37,46 +34,28 @@ const usePlatformCatalog = () => {
   return saved === undefined ? undefined : (saved ?? envCatalog(platformProviderId()));
 };
 
-/** The caller's promo standing (ADR 0009). Undefined while the claim loads. */
-const usePromoStanding = (): PromoStanding | undefined => {
-  const claim = usePromoClaim();
-  const active = usePromoActive();
-  if (claim === undefined) return undefined;
-  return { claimed: claim !== null, active, countedRunsLeft: claim ? opusRunsLeft(claim) : 0 };
-};
-
-const NO_PROMO: PromoStanding = { claimed: false, active: false, countedRunsLeft: 0 };
-
-const platformModels = (
-  catalog: { models: readonly (PublicCatalogModel & { hidden?: boolean })[]; defaultModelId: string },
-  promo: PromoStanding,
-): PlatformModels => ({
-  models: pickableModels(catalog.models, promo),
+const platformModels = (catalog: {
+  models: readonly (PublicCatalogModel & { hidden?: boolean })[];
+  defaultModelId: string;
+}): PlatformModels => ({
+  models: pickableModels(catalog.models),
   defaultModelId: catalog.defaultModelId,
-  countedRunsLeft: promo.countedRunsLeft,
+  promoModelIds: promoModelIds(catalog.models),
 });
 
 /**
- * The models the user may pick (ADR 0010): everyone's, plus promo models only
- * with a claim, while the promotion runs, and counted ones only while runs are
- * left, so a stored Opus choice falls back instead of being refused on every
- * send. Undefined while the catalog or the claim is loading.
+ * The models the user may pick (ADR 0010): everyone's, so a stored promo
+ * choice falls back instead of being refused on every send. Undefined while
+ * the catalog is loading.
  */
 export const usePlatformModels = (): PlatformModels | undefined => {
   const catalog = usePlatformCatalog();
-  const promo = usePromoStanding();
-  return catalog && promo && platformModels(catalog, promo);
+  return catalog && platformModels(catalog);
 };
 
-/**
- * `usePlatformModels` for pickers: the env provider's catalog until the
- * catalog loads, and no promo models until the claim does.
- */
+/** `usePlatformModels` for pickers: the env provider's catalog until the catalog loads. */
 export const usePlatformModelsOrCatalog = (): PlatformModels =>
-  platformModels(
-    usePlatformCatalog() ?? envCatalog(platformProviderId()),
-    usePromoStanding() ?? NO_PROMO,
-  );
+  platformModels(usePlatformCatalog() ?? envCatalog(platformProviderId()));
 
 export const useRemoveAiProviderKey = () => useMutation(api.aiProviders.remove);
 
