@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { convexErrorMessage } from "@/lib/convex-error";
+import { cn } from "@/lib/utils";
 
 import { useProject, useUpdateProjectInstructions } from "../hooks/use-projects";
 import { MAX_PROJECT_INSTRUCTIONS_LENGTH } from "../instructions";
@@ -46,7 +47,9 @@ const InstructionsEditor = ({
   const [draft, setDraft] = useState(saved);
   const [saving, setSaving] = useState(false);
 
-  const tooLong = draft.length > MAX_PROJECT_INSTRUCTIONS_LENGTH;
+  // Trimmed, as the server counts it.
+  const length = draft.trim().length;
+  const tooLong = length > MAX_PROJECT_INSTRUCTIONS_LENGTH;
   const changed = draft.trim() !== saved;
 
   const save = async () => {
@@ -66,13 +69,13 @@ const InstructionsEditor = ({
       <div className="flex items-baseline justify-between gap-2">
         <FieldLabel htmlFor="project-instructions">Instructions</FieldLabel>
         <span
-          className={
-            tooLong
-              ? "text-xs text-destructive"
-              : "text-xs text-muted-foreground tabular-nums"
-          }
+          id="project-instructions-count"
+          className={cn(
+            "text-xs tabular-nums",
+            tooLong ? "text-destructive" : "text-muted-foreground",
+          )}
         >
-          {formatCount(draft.length)}
+          {formatCount(length)}
         </span>
       </div>
       <Textarea
@@ -80,11 +83,15 @@ const InstructionsEditor = ({
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         aria-invalid={tooLong}
+        aria-describedby="project-instructions-count project-instructions-hint"
         placeholder={"e.g. Keep the green brand colour.\nAll prices in INR.\nNever change the header."}
         className="max-h-60 min-h-24 text-xs md:text-xs"
       />
       <div className="flex items-start justify-between gap-3">
-        <FieldDescription className={tooLong ? "text-destructive" : undefined}>
+        <FieldDescription
+          id="project-instructions-hint"
+          className={tooLong ? "text-destructive" : undefined}
+        >
           {tooLong
             ? `Keep it under ${MAX_PROJECT_INSTRUCTIONS_LENGTH.toLocaleString("en-US")} characters.`
             : "The agent follows these on every run in this project."}

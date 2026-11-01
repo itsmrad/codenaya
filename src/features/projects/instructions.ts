@@ -1,8 +1,15 @@
 /** Longest project instructions an owner may save (#299). */
 export const MAX_PROJECT_INSTRUCTIONS_LENGTH = 4000;
 
-// Removed from the text so it can't close the delimiter and pose as system rules.
-const DELIMITER_TAG = /<\/?project_instructions\s*>/gi;
+// Any form of the delimiter tag (spaces, attributes, any case), removed from
+// the text so it can't close the delimiter and pose as system rules.
+const DELIMITER_TAG = /<\s*\/?\s*project_instructions\b[^>]*>/gi;
+
+/** Strips delimiter tags until none are left, so nested ones can't rebuild a tag. */
+const stripDelimiterTags = (text: string): string => {
+  const stripped = text.replace(DELIMITER_TAG, "");
+  return stripped === text ? text : stripDelimiterTags(stripped);
+};
 
 /**
  * The system prompt's project instructions section (#299): the owner's
@@ -11,8 +18,7 @@ const DELIMITER_TAG = /<\/?project_instructions\s*>/gi;
  * there are none.
  */
 export function buildProjectInstructionsSection(instructions?: string): string {
-  const text = (instructions ?? "")
-    .replace(DELIMITER_TAG, "")
+  const text = stripDelimiterTags(instructions ?? "")
     .trim()
     .slice(0, MAX_PROJECT_INSTRUCTIONS_LENGTH);
   if (!text) return "";
