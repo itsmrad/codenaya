@@ -79,9 +79,11 @@ describe("coding agent integration instructions", () => {
     ]) {
       expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain(stale);
     }
-    // The only mention of tailwind.config.ts says there is none.
-    expect(CODING_AGENT_SYSTEM_PROMPT.match(/tailwind\.config\.ts/g)).toEqual(["tailwind.config.ts"]);
+    // tailwind.config.ts is only named to say new projects have none and v3 projects keep v3.
+    expect(CODING_AGENT_SYSTEM_PROMPT.match(/tailwind\.config\.ts/g)).toHaveLength(2);
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("there is no tailwind.config.ts");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "A project with tailwind.config.ts or @tailwind directives is Tailwind v3 and keeps v3 syntax",
+    );
   });
 });
-

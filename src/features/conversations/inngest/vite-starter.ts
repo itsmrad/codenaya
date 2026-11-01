@@ -248,10 +248,13 @@ const INDEX_CSS = `@import "tailwindcss";
   --sidebar-ring: oklch(0.551 0.027 264.364);
 }
 
-/* v4 dropped the container's center and padding options. */
+/* v4 dropped the container's center, padding and screens options. */
 @utility container {
   margin-inline: auto;
   padding-inline: 2rem;
+  @variant 2xl {
+    max-width: 1400px;
+  }
 }
 
 @layer base {

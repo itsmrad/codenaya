@@ -33,6 +33,7 @@ FRAMEWORK:
 - When ambiguous, prefer Vite + React
 
 STYLING: Tailwind CSS v4 (always). CSS starts with @import "tailwindcss" (never @tailwind directives); theme tokens live in the CSS file under @theme; there is no tailwind.config.ts
+EXISTING PROJECTS: follow the versions in the project's own package.json. A project with tailwind.config.ts or @tailwind directives is Tailwind v3 and keeps v3 syntax
 COMPONENTS: shadcn/ui (always — pre-configure and include all needed components)
 ICONS: lucide-react v1 (always — never use emoji as icons). It has no brand icons (Github, Twitter, Facebook, Instagram, Linkedin, Youtube): use an inline SVG or a generic icon instead
 FONTS: Geist Sans + Geist Mono (for Next.js via next/font/google) or Inter via @fontsource/inter (for Vite)

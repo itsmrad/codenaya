@@ -3,7 +3,7 @@ import { posix } from "node:path";
 
 /**
  * A tsconfig.json that references a tsconfig.app.json nobody wrote, an
- * index.html whose entry script doesn't exist, or a tailwind.config.ts that
+ * index.html whose entry script doesn't exist, or a vite.config.ts that
  * imports a package missing from package.json, boots into a Vite error
  * overlay (#190). The sandbox checks for them before booting so the user gets
  * the missing file's or package's name instead.
@@ -107,7 +107,7 @@ const packageName = (specifier: string): string | null => {
 
 /**
  * Describes each package the project's code imports but its package.json
- * doesn't declare, e.g. `tailwindcss-animate (imported by tailwind.config.ts)`.
+ * doesn't declare, e.g. `@tailwindcss/vite (imported by vite.config.ts)`.
  */
 export const undeclaredPackages = (files: ProjectFile[]): string[] => {
   const manifest = files.find((file) => file.path === "package.json");
