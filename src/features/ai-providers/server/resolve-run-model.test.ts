@@ -19,7 +19,7 @@ vi.mock("./sealed-key", () => ({ openProviderKey: mocks.openProviderKey }));
 vi.mock("node:dns/promises", () => ({ lookup: mocks.lookup }));
 
 import { DEFAULT_AGENT_MODEL_ID } from "@/features/conversations/agent-models";
-import { PROMO_ENDS_AT } from "@/features/promotions/github-promo";
+import { PROMO_ENDS_AT, PROMO_REFUSAL_MESSAGES } from "@/features/promotions/github-promo";
 
 import {
   ModelChoiceError,
@@ -658,7 +658,7 @@ describe("resolveRunModel (agent run)", () => {
     expect(target(run.coding(0.3)).id).toBe("claude-sonnet-5-5");
   });
 
-  it("ends a promo run with a pointer to /promo when the owner hasn't claimed", async () => {
+  it("ends a promo run with a clear reply when the owner hasn't claimed", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-platform");
     mocks.platform.mockReturnValue(ROUTED_SAVED);
     mocks.query.mockResolvedValue(false);
@@ -666,7 +666,7 @@ describe("resolveRunModel (agent run)", () => {
     const error = await resolve({ modelId: "anthropic/claude-opus-5.5" }).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ProviderKeyError);
-    expect((error as Error).message).toContain("/promo");
+    expect((error as Error).message).toBe(PROMO_REFUSAL_MESSAGES.not_claimed);
   });
 
   it("ends a platform run with a clear reply when the provider has no key", async () => {
