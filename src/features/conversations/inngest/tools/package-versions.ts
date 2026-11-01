@@ -2,9 +2,9 @@ import { KNOWN_GOOD_VERSIONS } from "../known-good-versions";
 
 const DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
 
-/** The major each `||` alternative starts with: `^18 || ^19.1` → [18, 19]. */
+/** The major each `||` alternative starts with, plus hyphen-range endpoints. */
 const majors = (range: string) =>
-  [...range.matchAll(/(?:^|\|\|)\s*[\^~>=<v\s]*(\d+)/g)].map((match) => Number(match[1]));
+  [...range.matchAll(/(?:^|\|\||\s+-)\s*[\^~>=<v\s]*(\d+)/g)].map((match) => Number(match[1]));
 
 /**
  * Checks a package.json the agent wrote against the known-good manifest (#331).
@@ -40,7 +40,10 @@ export const checkPackageVersions = (
       if (/[:/]/.test(range)) continue;
       const knownMajor = majors(known)[0];
       const rangeMajors = majors(range);
-      if (rangeMajors.length === 0 || Math.min(...rangeMajors) > knownMajor) {
+      const unbounded = range.split("||").some((alternative) =>
+        alternative.trim().startsWith(">") && !alternative.includes("<"),
+      );
+      if (rangeMajors.length === 0 || Math.max(...rangeMajors) > knownMajor || unbounded) {
         (deps as Record<string, string>)[name] = known;
         pinned.push(`${name} "${range}" → "${known}"`);
       } else if (!rangeMajors.includes(knownMajor)) {
