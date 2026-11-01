@@ -68,7 +68,9 @@ parallel sends and an event-key holder naming any model.
   `POST /api/promotions/claim`, the banner and the picker's promo group;
   users' pickers offer only `everyone` models. Kept: the admin's promo access
   per model, `promoClaims` (data and functions, so Convex needs no deploy),
-  and the send and run checks, which refuse promo models with `promo_ended`.
+  and the send and run checks: a stale client sending a promo model gets a
+  403 `promo_ended`, or `promo_not_claimed` if the user never claimed.
   A saved promo pick is switched to the user's default once, with a notice.
   Running a new promotion needs admin settings that don't exist yet: its end,
   limits and who may claim are hard-coded here, and there is no claim flow.
+  Until one exists, marking a model "Promo" in /admin hides it from users.

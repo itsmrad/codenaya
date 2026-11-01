@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { type Page, expect, test } from "@playwright/test";
 
 import { promoModelIds } from "../src/features/ai-providers/catalog";
 import { api } from "../convex/_generated/api";
@@ -6,6 +6,9 @@ import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { userConvexClient } from "./convex-client";
 
 const projectId = process.env.E2E_PROJECT_ID;
+
+/** What the user sees; `toContainText` would also read inline script payloads. */
+const visibleText = (page: Page) => page.evaluate(() => document.body.innerText);
 
 /** The GitHub promotion ended Nov 1 2026 (ADR 0009): the site no longer offers it. */
 test.describe("ended GitHub promo", () => {
@@ -15,7 +18,8 @@ test.describe("ended GitHub promo", () => {
 
     for (const path of ["/", "/pricing"]) {
       await page.goto(path);
-      await expect(page.locator("body")).not.toContainText(/promo/i);
+      await expect(page.getByRole("contentinfo")).toBeVisible();
+      expect(await visibleText(page)).not.toMatch(/promo/i);
     }
   });
 
@@ -29,7 +33,7 @@ test.describe("ended GitHub promo", () => {
       await signIn(page);
       await page.goto("/");
       await expect(page.getByRole("heading", { name: "What will you build?" })).toBeVisible();
-      await expect(page.locator("body")).not.toContainText(/promo/i);
+      expect(await visibleText(page)).not.toMatch(/promo/i);
 
       await page.goto(`/projects/${projectId}?engine=webcontainer`);
       await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
@@ -41,7 +45,6 @@ test.describe("ended GitHub promo", () => {
 
     test("a saved promo pick switches to the default once, with a notice", async ({ page }) => {
       await signIn(page);
-      await page.goto("/");
       const catalog = await (await userConvexClient(page)).query(api.platformCatalog.getForUsers, {});
       const [promoId] = catalog ? promoModelIds(catalog.models) : [];
       test.skip(!promoId, "The dev catalog has no promo models to pick");
