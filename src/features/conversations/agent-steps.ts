@@ -1,5 +1,7 @@
 import type { Infer } from "convex/values";
 
+import { recipeIdsIn } from "../sandbox-preview/utils/error-recipes";
+
 import type { messageStepValidator } from "../../../convex/schema";
 
 /** One recorded row of an agent run (see `messageStepValidator`). */
@@ -154,6 +156,12 @@ export const BUILD_CHECK_UNFINISHED = "Error: The build check could not finish";
 export const buildCheckLabel = (content: unknown): string | undefined => {
   const data = (content as { data?: unknown } | null)?.data;
   return typeof data === "string" ? data.trim().split("\n")[0].slice(0, MAX_ERROR) || undefined : undefined;
+};
+
+/** The known-error recipes a tool result's hints name (#334), for the run record. */
+export const toolResultRecipeIds = (content: unknown): string[] => {
+  const data = (content as { data?: unknown } | null)?.data;
+  return typeof data === "string" ? recipeIdsIn(data) : [];
 };
 
 /** Cap for interim "thinking" text recorded alongside tool calls. */
