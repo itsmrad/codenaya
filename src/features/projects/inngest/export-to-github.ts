@@ -101,9 +101,6 @@ export const exportToGithub = inngest.createFunction(
       return ref.object.sha;
     });
 
-    // Runs that start after the files are read are left for the next push.
-    const syncedAt = await step.run("get-sync-time", () => Date.now());
-
     // Fetch all project files with storage URLs
     const files = await step.run("fetch-project-files", async () => {
       return (await convex.query(api.system.getProjectFilesWithUrls, {
@@ -239,7 +236,9 @@ export const exportToGithub = inngest.createFunction(
           repo: repo.full_name,
           branch: "main",
           lastSyncedSha: commit.sha,
-          lastSyncedAt: syncedAt,
+          // On Convex's clock, like the runs it is compared with. Runs after
+          // the newest file write are left for the next push.
+          lastSyncedAt: Math.max(0, ...files.map((file) => file.updatedAt)),
         },
       });
       await convex.mutation(api.system.updateExportStatus, {

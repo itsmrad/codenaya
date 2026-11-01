@@ -202,7 +202,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
             {githubSync ? "Unable to push" : "Unable to export"}
           </p>
           <p className="text-xs text-muted-foreground text-center">
-            Something went wrong. Please try again.
+            {project?.exportError ?? "Something went wrong. Please try again."}
           </p>
           <Button
             size="sm"
@@ -244,7 +244,9 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
           )}
           {unpushed && (
             <p className="text-xs text-muted-foreground">
-              {unpushed.count === 0
+              {unpushed.running
+                ? "An agent run is in progress. Push once it finishes."
+                : unpushed.count === 0
                 ? "No agent runs to push. Manual edits are pushed too."
                 : `${unpushed.count}${unpushed.more ? "+" : ""} agent ${unpushed.count === 1 && !unpushed.more ? "run" : "runs"} not pushed yet.`}
             </p>
@@ -254,7 +256,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
             <Button
               size="sm"
               className="w-full"
-              disabled={gate.checking}
+              disabled={gate.checking || !unpushed || unpushed.running}
               onClick={() => gate.guard(startPush)}
             >
               {gate.checking ? "Checking for secrets..." : "Push changes"}

@@ -167,6 +167,8 @@ export default defineSchema({
       ),
     ),
     exportRepoUrl: v.optional(v.string()),
+    // Why the last GitHub job failed, when it can say (#343).
+    exportError: v.optional(v.string()),
     // The GitHub repo this project pushes to (#343), set by the first export.
     githubSync: v.optional(githubSyncValidator),
     settings: v.optional(

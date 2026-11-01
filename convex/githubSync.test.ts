@@ -86,6 +86,8 @@ describe("GitHub sync state (#343)", () => {
     expect(await alice.query(api.githubSync.unpushedRuns, { projectId: ids.projectId })).toEqual({
       count: 2,
       more: false,
+      // "still running" holds the push back.
+      running: true,
     });
 
     const plan = await t.query(api.system.getGithubPushPlan, {
@@ -111,6 +113,7 @@ describe("GitHub sync state (#343)", () => {
     expect(await alice.query(api.githubSync.unpushedRuns, { projectId: ids.projectId })).toEqual({
       count: MAX_PUSH_RUNS,
       more: true,
+      running: false,
     });
   });
 
@@ -136,7 +139,21 @@ describe("GitHub sync state (#343)", () => {
     expect(await alice.query(api.githubSync.unpushedRuns, { projectId: ids.projectId })).toEqual({
       count: 0,
       more: false,
+      running: false,
     });
+  });
+
+  test("stores why a GitHub job failed until the next status", async () => {
+    const { t } = setup();
+    const { projectId } = await seedProject(t);
+    const status = (args: { status?: "failed" | "exporting"; error?: string }) =>
+      t.mutation(api.system.updateExportStatus, { internalKey: INTERNAL_KEY, projectId, ...args });
+    const exportError = () => t.run(async (ctx) => (await ctx.db.get("projects", projectId))?.exportError);
+
+    await status({ status: "failed", error: "Merge its pull request" });
+    expect(await exportError()).toBe("Merge its pull request");
+    await status({ status: "exporting" });
+    expect(await exportError()).toBeNull();
   });
 
   test("only the owner sees the count", async () => {
