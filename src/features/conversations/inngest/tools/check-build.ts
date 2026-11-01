@@ -144,7 +144,7 @@ export const checkProjectBuild = async ({
   try {
     await writeProjectFiles(sandbox, files);
 
-    const install = await run(sandbox, "npm install --no-audit --no-fund --loglevel=error", timeLeft());
+    const install = await run(sandbox, "npm install --prefer-offline --no-audit --no-fund --loglevel=error", timeLeft());
     if (install.exitCode !== 0) {
       return `Error: npm install failed. Fix package.json, then call checkBuild again:\n${failureOutput(install)}`;
     }
