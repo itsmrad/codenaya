@@ -153,6 +153,10 @@ export default defineSchema({
     name: v.string(),
     ownerId: v.string(),
     updatedAt: v.number(),
+    // Set at creation from a prompt, whose project is seeded with the starter,
+    // and cleared by the first run that writes files (#338). Unset on older
+    // projects, where "no package.json yet" still marks the first build.
+    firstBuildPending: v.optional(v.boolean()),
     importStatus: v.optional(
       v.union(
         v.literal("importing"),

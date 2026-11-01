@@ -28,6 +28,7 @@ const PACKAGE_JSON = json({
     "lucide-react",
     "react",
     "react-dom",
+    "react-router-dom",
     "tailwind-merge",
   ]),
   devDependencies: pinnedVersions([
@@ -272,6 +273,7 @@ const INDEX_CSS = `@import "tailwindcss";
 
 const MAIN_TSX = `import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
 
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/500.css";
@@ -280,20 +282,91 @@ import "@fontsource/inter/700.css";
 import "./index.css";
 
 import App from "./App";
+import { ErrorBoundary } from "./components/error-boundary";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </ErrorBoundary>
   </StrictMode>,
 );
 `;
 
-const APP_TSX = `export default function App() {
+const APP_TSX = `import { Route, Routes } from "react-router-dom";
+
+function Home() {
   return (
     <main className="flex min-h-screen items-center justify-center">
       <h1 className="text-3xl font-semibold tracking-tight">App</h1>
     </main>
   );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+    </Routes>
+  );
+}
+`;
+
+// A render error would otherwise unmount the tree and leave a blank page (#335).
+const ERROR_BOUNDARY_TSX = `import { Component, type ErrorInfo, type ReactNode } from "react";
+
+// A flag, not \`error !== null\`: \`throw null\` must still show the card.
+type State = { hasError: boolean; error?: unknown; componentStack?: string | null };
+
+export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
+  state: State = { hasError: false };
+
+  static getDerivedStateFromError(error: unknown): State {
+    return { hasError: true, error };
+  }
+
+  // React 19 already reports caught errors with console.error, so don't log again.
+  componentDidCatch(_error: unknown, info: ErrorInfo) {
+    this.setState({ componentStack: info.componentStack });
+  }
+
+  render() {
+    const { hasError, error, componentStack } = this.state;
+    if (!hasError) return this.props.children;
+
+    return (
+      <div role="alert" className="flex min-h-screen items-center justify-center bg-background p-6">
+        <div className="w-full max-w-lg rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
+          <h1 className="text-lg font-semibold">Something went wrong</h1>
+          <p className="mt-2 break-words text-sm text-destructive">
+            {error instanceof Error ? error.message : String(error)}
+          </p>
+          {import.meta.env.DEV && componentStack ? (
+            <pre className="mt-4 max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs text-muted-foreground">
+              {componentStack.trim()}
+            </pre>
+          ) : null}
+          <div className="mt-6 flex gap-2">
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="inline-flex min-h-11 min-w-11 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Reload
+            </button>
+            <a
+              href="/"
+              className="inline-flex min-h-11 min-w-11 items-center rounded-md border px-4 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+            >
+              Go home
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
 }
 `;
 
@@ -319,4 +392,5 @@ export const VITE_REACT_STARTER: ReadonlyArray<{ path: string; content: string }
   { path: "src/main.tsx", content: MAIN_TSX },
   { path: "src/App.tsx", content: APP_TSX },
   { path: "src/lib/utils.ts", content: UTILS_TS },
+  { path: "src/components/error-boundary.tsx", content: ERROR_BOUNDARY_TSX },
 ];
