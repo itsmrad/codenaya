@@ -4,6 +4,7 @@ import { ArrowRightIcon } from "lucide-react";
 
 import { Doc } from "../../../../convex/_generated/dataModel";
 import { ProjectCard } from "./project-card";
+import { SORTS } from "./projects-grid";
 
 const RECENT_COUNT = 4;
 
@@ -15,9 +16,7 @@ interface RecentProjectsProps {
 /** The last-edited projects, right under the composer: a sideways row on phones. */
 export const RecentProjects = ({ projects, onViewAll }: RecentProjectsProps) => {
   // The query returns newest-created first; "recent" means last edited.
-  const recent = projects
-    ?.toSorted((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, RECENT_COUNT);
+  const recent = projects && [...projects].sort(SORTS.updated.compare).slice(0, RECENT_COUNT);
 
   return (
     <section aria-labelledby="recent-heading">
