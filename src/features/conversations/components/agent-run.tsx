@@ -515,7 +515,7 @@ export const AgentRun = ({
     setBatch({ count: rows.length, start: Math.min(batch.count, rows.length) });
   }
   const toolSteps = steps.filter((step) => step.kind === "tool");
-  // A build error the agent fixed is reported as fixed, not as a failure.
+  // Failed checks the agent later fixed are reported as a fixed build, not as errors.
   const fixed = fixedBuildErrors(toolSteps);
   const errors = toolSteps.filter((step) => step.status === "error").length - fixed;
   const changed = new Set(
@@ -544,7 +544,7 @@ export const AgentRun = ({
     filesChanged > 0 &&
       `${filesChanged} ${filesChanged === 1 ? "file" : "files"} changed` +
         (delta ? ` +${delta.additions} −${delta.deletions}` : ""),
-    fixed > 0 && `Fixed ${fixed} build ${fixed === 1 ? "error" : "errors"}`,
+    fixed > 0 && "Fixed the build",
     model,
   ]
     .filter(Boolean)
