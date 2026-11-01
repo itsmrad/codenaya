@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getFunctionName } from "convex/server";
+import { toolResultError } from "../../agent-steps";
+import { hasUncheckedWrites } from "../build-check-gate";
 
 type Row = { _id: string; name: string; type: "file" | "folder"; parentId?: string; content?: string };
 
@@ -352,6 +354,9 @@ describe("post-write checks at every boundary", () => {
         : kind === "write"
           ? await createWriteFilesTool(options).handler({ files: [{ path: "src/New.tsx", content }] }, ctx)
           : await createCreateFilesTool(options).handler({ parentId: "src", files: [{ name: "New.tsx", content }] }, ctx);
+    expect(toolResultError({ data: result })).toBeUndefined();
+    const tool = { name: { update: "updateFile", edit: "editFile", write: "writeFiles", create: "createFiles" }[kind]! };
+    expect(hasUncheckedWrites([{ toolCalls: [{ tool, content: { data: result } }] }])).toBe(true);
     expect(result).toContain("[icon-rewrite] Cammera → Camera as Cammera");
     expect(result).toContain("VercelLogo");
     expect(result).toContain("./missing");
@@ -377,7 +382,10 @@ describe("post-write checks at every boundary", () => {
 
   it("keeps a successful write successful when the diagnostic snapshot fails", async () => {
     mocks.query.mockImplementationOnce(async () => db.rows).mockRejectedValueOnce(new Error("offline"));
-    expect(await createUpdateFileTool(opts).handler({ path: "src/App.tsx", content: "saved" }, ctx)).toContain("write succeeded");
+    const result = await createUpdateFileTool(opts).handler({ path: "src/App.tsx", content: "saved" }, ctx);
+    expect(result).toContain("write succeeded");
+    expect(toolResultError({ data: result })).toBeUndefined();
+    expect(hasUncheckedWrites([{ toolCalls: [{ tool: { name: "updateFile" }, content: { data: result } }] }])).toBe(true);
     expect(db.rows.find((r) => r._id === "app")?.content).toBe("saved");
   });
 
