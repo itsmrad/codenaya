@@ -29,7 +29,6 @@ const isFailedRunReply = (content: string) =>
   content === AI_NOT_CONFIGURED_MESSAGE ||
   Object.values(PROMO_REFUSAL_MESSAGES).includes(content) ||
   content === DISPATCH_FAILED_MESSAGE ||
-  content === DEFAULT_REPLY_MESSAGE ||
   content.endsWith(KEY_FAILURE_SUFFIX);
 
 const usableReply = ({ role, status, content }: StoredMessage) =>

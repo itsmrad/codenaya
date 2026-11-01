@@ -24,9 +24,15 @@ describe("priorTurns", () => {
     AI_NOT_CONFIGURED_MESSAGE,
     ...Object.values(PROMO_REFUSAL_MESSAGES),
     DISPATCH_FAILED_MESSAGE,
-    DEFAULT_REPLY_MESSAGE,
   ])("omits the entire failed turn for %s", (content) => {
     expect(priorTurns([user("Try"), reply(content)], "current")).toEqual([]);
+  });
+
+  it("keeps the request and default reply when a successful run had no summary", () => {
+    expect(priorTurns([user("Build a todo app"), reply(DEFAULT_REPLY_MESSAGE)], "current")).toEqual([
+      { type: "text", role: "user", content: "Build a todo app" },
+      { type: "text", role: "assistant", content: DEFAULT_REPLY_MESSAGE },
+    ]);
   });
 
   it("returns earlier turns in order, without the request this run answers", () => {

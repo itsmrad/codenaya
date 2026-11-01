@@ -88,11 +88,17 @@ describe("resolveForcedSkills", () => {
   });
 });
 
-it.each([true, false])("reserves built-in names for loading and slash skills (enabled: %s)", (enabled) => {
+it.each([
+  ["project", true],
+  ["project", false],
+  ["library", true],
+  ["library", false],
+] as const)("resolves built-in clashes with %s skills (built-in enabled: %s)", (scope, enabled) => {
   const builtin = skill("react-performance", "builtin", undefined, enabled);
-  const rows = [skill("react-performance", "project"), skill("react-performance", "library"), builtin];
-  expect(resolveSkills(rows).map((s) => s.source)).toEqual(enabled ? ["builtin"] : []);
+  const rows = [skill("react-performance", scope), builtin];
+  const expectedSource = enabled ? "builtin" : "user";
+  expect(resolveSkills(rows).map((s) => s.source)).toEqual([expectedSource]);
   const result = resolveForcedSkills(rows, ["react-performance"]);
-  expect(result.forced.map((s) => s.source)).toEqual(enabled ? ["builtin"] : []);
-  expect(result.unavailable).toEqual(enabled ? [] : ["react-performance"]);
+  expect(result.forced.map((s) => s.source)).toEqual([expectedSource]);
+  expect(result.unavailable).toEqual([]);
 });

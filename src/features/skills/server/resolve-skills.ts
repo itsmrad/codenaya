@@ -30,9 +30,9 @@ const toAgentSkill = ({ name, description, body, source }: AgentSkill): AgentSki
   source,
 });
 
-// Built-in names are reserved even when disabled: legacy user rows may predate them.
+// Only enabled built-ins shadow legacy user skills with the same name.
 const withoutBuiltinClashes = (skills: readonly ProjectSkill[]) => {
-  const names = new Set(skills.filter((s) => s.scope === "builtin").map((s) => s.name));
+  const names = new Set(skills.filter((s) => s.scope === "builtin" && s.enabled).map((s) => s.name));
   return skills.filter((s) => s.scope === "builtin" || !names.has(s.name));
 };
 

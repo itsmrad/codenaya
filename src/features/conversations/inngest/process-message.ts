@@ -75,8 +75,6 @@ import {
   PLAN_MODE_TOOLS,
 } from '../plan-mode';
 
-export { DEFAULT_REPLY_MESSAGE } from "./lib/conversation-history";
-
 interface MessageEvent {
   messageId: Id<"messages">;
   conversationId: Id<"conversations">;
