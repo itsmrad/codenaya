@@ -8,12 +8,7 @@ import {
   messageStepValidator,
   runModelValidator,
 } from "./schema";
-import {
-  MAX_CHECKPOINT_FILES,
-  applyTree,
-  assertNoRunningAgent,
-  createCheckpoint,
-} from "./checkpoints";
+import { MAX_CHECKPOINT_FILES, createCheckpoint } from "./checkpoints";
 import { runsSince, syncedAt } from "./githubSync";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
@@ -644,57 +639,6 @@ export const setGithubSync = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     await ctx.db.patch("projects", args.projectId, { githubSync: args.githubSync });
-  },
-});
-
-const treeEntryValidator = v.object({
-  path: v.string(),
-  type: v.union(v.literal("file"), v.literal("folder")),
-  content: v.optional(v.string()),
-  storageId: v.optional(v.id("_storage")),
-});
-
-/** "Before pull" (#343): a checkpoint with no run, so the pull can be undone. */
-export const createPullCheckpoint = mutation({
-  args: { internalKey: v.string(), projectId: v.id("projects"), label: v.string() },
-  handler: async (ctx, args) => {
-    validateInternalKey(args.internalKey);
-    await assertNoRunningAgent(ctx, args.projectId, "pulling");
-    return await createCheckpoint(ctx, { projectId: args.projectId, label: args.label });
-  },
-});
-
-/** One batch of a pull (#343): writes these files over the project's, deleting none. */
-export const applyPulledFiles = mutation({
-  args: { internalKey: v.string(), projectId: v.id("projects"), entries: v.array(treeEntryValidator) },
-  handler: async (ctx, args) => {
-    validateInternalKey(args.internalKey);
-    await assertNoRunningAgent(ctx, args.projectId, "pulling");
-    await applyTree(ctx, args.projectId, args.entries);
-  },
-});
-
-/**
- * Ends a pull (#343): deletes what the pulled tree doesn't have and moves the
- * sync point to the pulled commit, so later pushes build on it.
- */
-export const finishPull = mutation({
-  args: {
-    internalKey: v.string(),
-    projectId: v.id("projects"),
-    tree: v.array(v.object({ path: v.string(), type: treeEntryValidator.fields.type })),
-    sha: v.string(),
-  },
-  handler: async (ctx, args) => {
-    validateInternalKey(args.internalKey);
-    const project = await ctx.db.get("projects", args.projectId);
-    if (!project?.githubSync) throw new Error("Project is not linked to a GitHub repository");
-    await assertNoRunningAgent(ctx, args.projectId, "pulling");
-    await applyTree(ctx, args.projectId, [], new Map(args.tree.map(({ path, type }) => [path, type])));
-    const { repo, branch } = project.githubSync;
-    await ctx.db.patch("projects", args.projectId, {
-      githubSync: { repo, branch, lastSyncedSha: args.sha, lastSyncedAt: Date.now() },
-    });
   },
 });
 

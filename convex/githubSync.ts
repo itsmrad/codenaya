@@ -1,9 +1,15 @@
 import { v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
-import { query, type QueryCtx } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
-import { MAX_CHECKPOINTS_PER_PROJECT } from "./checkpoints";
+import {
+  MAX_CHECKPOINTS_PER_PROJECT,
+  applyTree,
+  assertNoRunningAgent,
+  createCheckpoint,
+} from "./checkpoints";
+import { validateInternalKey } from "./internalKey";
 import { getOwnedProject } from "./projects";
 
 /**
@@ -63,5 +69,61 @@ export const unpushedRuns = query({
       )
       .first();
     return { count: runs.length, more, running: running !== null };
+  },
+});
+
+const treeEntryValidator = v.object({
+  path: v.string(),
+  type: v.union(v.literal("file"), v.literal("folder")),
+  content: v.optional(v.string()),
+  storageId: v.optional(v.id("_storage")),
+});
+
+/** "Before pull" (#343): a checkpoint with no run, so the pull can be undone. */
+export const createPullCheckpoint = mutation({
+  args: { internalKey: v.string(), projectId: v.id("projects"), label: v.string() },
+  returns: v.id("checkpoints"),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    await assertNoRunningAgent(ctx, args.projectId, "pulling");
+    return await createCheckpoint(ctx, { projectId: args.projectId, label: args.label });
+  },
+});
+
+/** One batch of a pull (#343): writes these files over the project's, deleting none. */
+export const applyPulledFiles = mutation({
+  args: { internalKey: v.string(), projectId: v.id("projects"), entries: v.array(treeEntryValidator) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    await assertNoRunningAgent(ctx, args.projectId, "pulling");
+    await applyTree(ctx, args.projectId, args.entries);
+    return null;
+  },
+});
+
+/**
+ * Ends a pull (#343): deletes what the pulled tree doesn't have and moves the
+ * sync point to the pulled commit, so later pushes build on it.
+ */
+export const finishPull = mutation({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    tree: v.array(v.object({ path: v.string(), type: treeEntryValidator.fields.type })),
+    sha: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const project = await ctx.db.get("projects", args.projectId);
+    if (!project?.githubSync) throw new Error("Project is not linked to a GitHub repository");
+    await assertNoRunningAgent(ctx, args.projectId, "pulling");
+    await applyTree(ctx, args.projectId, [], new Map(args.tree.map(({ path, type }) => [path, type])));
+    const { repo, branch } = project.githubSync;
+    await ctx.db.patch("projects", args.projectId, {
+      githubSync: { repo, branch, lastSyncedSha: args.sha, lastSyncedAt: Date.now() },
+    });
+    return null;
   },
 });

@@ -57,7 +57,7 @@ const runJob = () =>
 
 /** Each Convex mutation the job ran, by name, with its arguments. */
 const calls = () =>
-  mocks.mutation.mock.calls.map(([fn, args]) => [getFunctionName(fn).replace("system:", ""), args]);
+  mocks.mutation.mock.calls.map(([fn, args]) => [getFunctionName(fn).split(":").pop(), args]);
 
 describe("pullFromGithub (#343)", () => {
   beforeEach(() => {

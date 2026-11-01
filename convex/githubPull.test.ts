@@ -78,19 +78,19 @@ const tree = (t: T, projectId: Id<"projects">) =>
 
 /** What the pull job does with a remote tree: checkpoint, batches, finish. */
 async function pull(t: T, projectId: Id<"projects">, entries: TreeEntry[], batchSize = 2) {
-  await t.mutation(api.system.createPullCheckpoint, {
+  await t.mutation(api.githubSync.createPullCheckpoint, {
     internalKey: INTERNAL_KEY,
     projectId,
     label: "Before pull from GitHub @ abc1234",
   });
   for (let i = 0; i < entries.length; i += batchSize) {
-    await t.mutation(api.system.applyPulledFiles, {
+    await t.mutation(api.githubSync.applyPulledFiles, {
       internalKey: INTERNAL_KEY,
       projectId,
       entries: entries.slice(i, i + batchSize),
     });
   }
-  await t.mutation(api.system.finishPull, {
+  await t.mutation(api.githubSync.finishPull, {
     internalKey: INTERNAL_KEY,
     projectId,
     sha: "abc1234def",
@@ -154,7 +154,7 @@ describe("GitHub pull (#343)", () => {
     const { t } = setup();
     const { projectId } = await seedProject(t);
 
-    await t.mutation(api.system.applyPulledFiles, {
+    await t.mutation(api.githubSync.applyPulledFiles, {
       internalKey: INTERNAL_KEY,
       projectId,
       entries: [{ path: "src", type: "file", content: "now a file" }],
@@ -169,16 +169,16 @@ describe("GitHub pull (#343)", () => {
     const { projectId, conversationId } = await seedProject(t);
 
     await expect(
-      t.mutation(api.system.createPullCheckpoint, { internalKey: "wrong", projectId, label: "" }),
+      t.mutation(api.githubSync.createPullCheckpoint, { internalKey: "wrong", projectId, label: "" }),
     ).rejects.toThrow();
     await t.run((ctx) =>
       ctx.db.insert("messages", { projectId, conversationId, role: "assistant", content: "", status: "processing" }),
     );
     await expect(
-      t.mutation(api.system.createPullCheckpoint, { internalKey: INTERNAL_KEY, projectId, label: "" }),
+      t.mutation(api.githubSync.createPullCheckpoint, { internalKey: INTERNAL_KEY, projectId, label: "" }),
     ).rejects.toThrow(/Stop the running agent/);
     await expect(
-      t.mutation(api.system.applyPulledFiles, { internalKey: INTERNAL_KEY, projectId, entries: [] }),
+      t.mutation(api.githubSync.applyPulledFiles, { internalKey: INTERNAL_KEY, projectId, entries: [] }),
     ).rejects.toThrow(/Stop the running agent/);
   });
 });

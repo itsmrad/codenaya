@@ -76,7 +76,7 @@ export const pullFromGithub = inngest.createFunction(
 
     // Its own step, so a retried apply never snapshots a half-pulled project.
     await step.run("create-checkpoint", async () => {
-      await convex.mutation(api.system.createPullCheckpoint, {
+      await convex.mutation(api.githubSync.createPullCheckpoint, {
         internalKey,
         projectId,
         label: `Before pull from GitHub @ ${sha.slice(0, 7)}`,
@@ -115,9 +115,9 @@ export const pullFromGithub = inngest.createFunction(
 
       // Folders sort first, so each batch's parents already exist.
       for (const batch of chunkFiles(entries)) {
-        await convex.mutation(api.system.applyPulledFiles, { internalKey, projectId, entries: batch });
+        await convex.mutation(api.githubSync.applyPulledFiles, { internalKey, projectId, entries: batch });
       }
-      await convex.mutation(api.system.finishPull, {
+      await convex.mutation(api.githubSync.finishPull, {
         internalKey,
         projectId,
         sha,
