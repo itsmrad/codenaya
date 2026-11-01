@@ -4,7 +4,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../convex/_generated/api";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
-import { userConvexClient } from "./convex-client";
+import { cleanupProject, userConvexClient } from "./convex-client";
 
 const PROJECT_NAME = "e2e-quick-edit";
 const FILE_NAME = "math.ts";
@@ -21,7 +21,7 @@ const seedProject = async (page: Page) => {
     existing?._id ?? (await user.mutation(api.projects.create, { name: PROJECT_NAME }));
 
   const system = new ConvexHttpClient(convexUrl!);
-  await system.mutation(api.system.cleanup, { internalKey: internalKey!, projectId });
+  await cleanupProject(system, internalKey!, projectId);
   await system.mutation(api.system.createFile, {
     internalKey: internalKey!,
     projectId,

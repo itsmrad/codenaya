@@ -1,10 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { ConvexHttpClient } from "convex/browser";
 
-import { api } from "../convex/_generated/api";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
+import { cleanupProject } from "./convex-client";
 
 const PROJECT_NAME = "e2e ide polish";
 
@@ -15,10 +15,7 @@ const ABORTED_SANDBOX = /net::ERR_FAILED/;
 const emptyProject = async (page: Page) => {
   const projectId = await seedPreviewProject(page, PROJECT_NAME);
   const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-  await system.mutation(api.system.cleanup, {
-    internalKey: process.env.CODENAYA_CONVEX_INTERNAL_KEY!,
-    projectId,
-  });
+  await cleanupProject(system, process.env.CODENAYA_CONVEX_INTERNAL_KEY!, projectId);
   return projectId;
 };
 
