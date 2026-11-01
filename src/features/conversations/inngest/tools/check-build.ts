@@ -6,6 +6,7 @@ import {
   BUILD_CHECK_UNFINISHED,
   BUILD_NOT_CHECKED,
   BUILD_VERIFIED,
+  STATIC_CHECKS_FAILED,
   STATIC_CHECKS_PASSED,
   buildPathIndex,
 } from "@/features/conversations/agent-steps";
@@ -114,7 +115,7 @@ export const checkProjectBuild = async ({
   ];
   if (problems.length > 0) {
     return (
-      `Error: Static checks failed:\n- ${problems.join("\n- ")}\n` +
+      `${STATIC_CHECKS_FAILED}:\n- ${problems.join("\n- ")}\n` +
       "Fix these, then call checkBuild again."
     );
   }
@@ -143,7 +144,7 @@ export const checkProjectBuild = async ({
   try {
     await writeProjectFiles(sandbox, files);
 
-    const install = await run(sandbox, "npm install --no-audit --no-fund --loglevel=error", timeLeft());
+    const install = await run(sandbox, "npm install --prefer-offline --no-audit --no-fund --loglevel=error", timeLeft());
     if (install.exitCode !== 0) {
       return `Error: npm install failed. Fix package.json, then call checkBuild again:\n${failureOutput(install)}`;
     }
