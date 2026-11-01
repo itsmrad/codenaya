@@ -72,6 +72,7 @@ const DiffBody = ({ checkpointId, path }: { checkpointId: Id<"checkpoints">; pat
   const note = (text: string) => (
     <p className="p-6 text-center text-sm text-muted-foreground">{text}</p>
   );
+  if (diff instanceof Error) return note("Couldn't load this diff.");
   if (diff === undefined) return note("Loading…");
   if (diff === null) return note("This file no longer differs from before the run.");
   if (!("before" in diff)) {
@@ -120,7 +121,9 @@ export const RunDiffDialog = ({
           <DialogDescription>
             {changes === undefined
               ? "Loading…"
-              : `${changes.length} ${changes.length === 1 ? "file" : "files"} changed, +${total!.additions} −${total!.deletions} lines`}
+              : changes === null
+                ? "This run's diff isn't available."
+                : `${changes.length} ${changes.length === 1 ? "file" : "files"} changed, +${total!.additions} −${total!.deletions} lines`}
           </DialogDescription>
         </DialogHeader>
         {changes?.length === 0 && (

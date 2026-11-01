@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { MAX_CHECKPOINTS_PER_PROJECT, MAX_DIFF_CHARS, lineDelta } from "./checkpoints";
+import { MAX_CHECKPOINTS_PER_PROJECT, MAX_DIFF_CHARS, MAX_DIFF_FILES, lineDelta } from "./checkpoints";
 import { withContents } from "./fileContents";
 import { deleteProjectBatch } from "./projectCascade";
 import schema from "./schema";
@@ -405,7 +405,7 @@ describe("run changes (#225)", () => {
       step("createFiles", ["logo.png", "big.txt"]),
     ]);
 
-    const changes = await alice.query(api.checkpoints.listChanges, { checkpointId });
+    const changes = (await alice.query(api.checkpoints.listChanges, { checkpointId }))!;
     expect(changes.map(({ path, status }) => `${status} ${path}`)).toEqual([
       "added big.txt",
       "added logo.png",
@@ -442,7 +442,7 @@ describe("run changes (#225)", () => {
       "src/main.ts": "console.log(1);",
     });
     expect(
-      (await alice.query(api.checkpoints.listChanges, { checkpointId })).map(({ path }) => path),
+      (await alice.query(api.checkpoints.listChanges, { checkpointId }))!.map(({ path }) => path),
     ).toEqual(["src/app.ts"]);
   });
 
@@ -464,6 +464,43 @@ describe("run changes (#225)", () => {
     // The text the run wrote is gone with it.
     const rows = await t.run((ctx) => ctx.db.query("fileContents").collect());
     expect(rows.map((row) => row.content)).not.toContain("not a png");
+  });
+
+  test("refuses to revert a path the run didn't write", async () => {
+    vi.useFakeTimers();
+    const { t, alice, checkpointId, projectId } = await seedRun();
+    const before = await tree(t, projectId);
+
+    // notes.md was made by hand after the run; reverting it would delete it.
+    await expect(
+      alice.mutation(api.checkpoints.revertFile, { checkpointId, path: "notes.md" }),
+    ).rejects.toThrow(/didn't change that file/);
+    expect(await tree(t, projectId)).toEqual(before);
+  });
+
+  test(`gives no list past ${MAX_DIFF_FILES} files, but still diffs one of them`, async () => {
+    vi.useFakeTimers();
+    const { t, alice } = setup();
+    const { projectId, conversationId } = await seedProject(t);
+    const big = await t.run(async (ctx) => {
+      const folder = await ctx.db.insert("files", { projectId, name: "big", type: "folder", updatedAt: 0 });
+      for (let i = 0; i <= MAX_DIFF_FILES; i++) {
+        await ctx.db.insert("files", { projectId, parentId: folder, name: `f${i}.ts`, type: "file", content: "x", updatedAt: 0 });
+      }
+      return folder;
+    });
+    const messageId = await addRun(t, projectId, conversationId);
+    const checkpointId = await snapshot(t, projectId, messageId);
+    await t.mutation(api.system.deleteFile, { internalKey: INTERNAL_KEY, projectId, fileId: big });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    await setSteps(t, messageId, [step("deleteFiles", ["big"])]);
+
+    expect(await alice.query(api.checkpoints.listChanges, { checkpointId })).toBeNull();
+    expect(await alice.query(api.checkpoints.fileDiff, { checkpointId, path: "big/f0.ts" })).toMatchObject({
+      status: "deleted",
+      before: "x",
+      after: "",
+    });
   });
 
   test("refuses to revert while an agent run is in progress", async () => {

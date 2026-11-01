@@ -43,6 +43,7 @@ import {
   FILE_WRITE_TOOLS,
   STALLED_RUN_MS,
   lastRunActivity,
+  runWrittenPaths,
 } from "../agent-steps";
 import { useRunChanges } from "../hooks/use-checkpoints";
 import { LineDelta, RunDiffDialog, totalDelta } from "./run-diff-dialog";
@@ -388,7 +389,7 @@ const ChangedFiles = ({
   onOpenFile,
   delta,
   onReview,
-  historyGone,
+  note,
 }: {
   paths: string[];
   animate: boolean;
@@ -397,8 +398,8 @@ const ChangedFiles = ({
   delta?: { additions: number; deletions: number };
   /** Opens the run's diff. */
   onReview?: () => void;
-  /** The run's checkpoint was pruned, so there is nothing to diff against. */
-  historyGone?: boolean;
+  /** Why the run has no diff to review. */
+  note?: string;
 }) => {
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? paths : paths.slice(0, CHANGED_LIMIT);
@@ -445,9 +446,9 @@ const ChangedFiles = ({
           {delta && <LineDelta change={{ binary: false, tooLarge: false, ...delta }} />}
         </button>
       )}
-      {historyGone && (
+      {note && (
         <span className="ml-auto inline-flex h-7 items-center text-[11.5px] text-muted-foreground">
-          History no longer available
+          {note}
         </span>
       )}
     </div>
@@ -523,9 +524,11 @@ export const AgentRun = ({
   const endedAt = completedAt ?? toolSteps.at(-1)?.endedAt;
   const hidden = live && !showAll ? Math.max(0, rows.length - LIVE_ROWS) : 0;
   const written = status === "completed" ? changedFiles(toolSteps) : [];
+  // Deletes count here though they have no chip, so a delete-only run can be reviewed.
+  const wrote = status === "completed" && runWrittenPaths(toolSteps).length > 0;
   const [reviewOpen, setReviewOpen] = useState(false);
-  const changes = useRunChanges(written.length > 0 ? checkpointId : null);
-  const delta = changes && totalDelta(changes);
+  const changes = useRunChanges(wrote ? checkpointId : null);
+  const delta = changes ? totalDelta(changes) : undefined;
   const filesChanged = changes?.length ?? changed;
   const settle =
     startedLive && "animate-in fade-in-0 duration-300 motion-reduce:animate-none";
@@ -642,14 +645,20 @@ export const AgentRun = ({
           </div>
         </CollapsibleContent>
       )}
-      {written.length > 0 && (
+      {wrote && (
         <ChangedFiles
           paths={written}
           animate={startedLive}
           onOpenFile={onOpenFile}
           delta={delta}
           onReview={changes?.length ? () => setReviewOpen(true) : undefined}
-          historyGone={checkpointId === null}
+          note={
+            checkpointId === null
+              ? "History no longer available"
+              : changes === null
+                ? "Too many files to diff"
+                : undefined
+          }
         />
       )}
       {checkpointId && (
