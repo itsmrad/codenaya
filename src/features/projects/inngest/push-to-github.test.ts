@@ -67,16 +67,23 @@ function fakeGithub(files: Record<string, string>) {
 
   type Change = { path: string; content?: string; sha?: string | null };
   mocks.github = {
-    getRef: ({ ref }: { ref: string }) => ({ data: { object: { sha: refs.get(ref.replace("heads/", "")) } } }),
+    getRef: ({ ref }: { ref: string }) => {
+      const head = refs.get(ref.replace("heads/", ""));
+      if (!head) throw new RequestError("Not Found", 404, {} as never);
+      return { data: { object: { sha: head } } };
+    },
     getCommit: ({ commit_sha }: { commit_sha: string }) => ({
       data: { tree: { sha: commits.get(commit_sha)!.tree } },
     }),
-    getTree: ({ tree_sha }: { tree_sha: string }) => ({
-      data: { tree: [...trees.get(tree_sha)!].map(([path, sha]) => ({ path, sha, type: "blob" })) },
-    }),
+    getTree: vi.fn(({ tree_sha }: { tree_sha: string }) => ({
+      data: {
+        tree: [...trees.get(tree_sha)!].map(([path, sha]) => ({ path, sha, type: "blob" })),
+        truncated: false,
+      },
+    })),
     createBlob: vi.fn(() => ({ data: { sha: "unused" } })),
-    createTree: vi.fn(({ base_tree, tree }: { base_tree: string; tree: Change[] }) => {
-      const blobs = new Map(trees.get(base_tree));
+    createTree: vi.fn(({ base_tree, tree }: { base_tree?: string; tree: Change[] }) => {
+      const blobs = new Map(base_tree ? trees.get(base_tree) : []);
       for (const change of tree) {
         if (change.content !== undefined) blobs.set(change.path, sha(change.content));
         else if (change.sha === null) blobs.delete(change.path);
@@ -117,14 +124,16 @@ function fakeGithub(files: Record<string, string>) {
   };
 
   /** Someone pushes to the branch from elsewhere. */
-  const pushElsewhere = (branch: string) => {
+  const pushElsewhere = (branch: string, sha = "elsewhere") => {
     const head = refs.get(branch)!;
-    commits.set("elsewhere", { tree: commits.get(head)!.tree, parents: [head], message: "From Cursor" });
-    refs.set(branch, "elsewhere");
+    commits.set(sha, { tree: commits.get(head)!.tree, parents: [head], message: "From Cursor" });
+    refs.set(branch, sha);
   };
 
   return { refs, log, sha, pushElsewhere };
 }
+
+const PLAN_AT = 5000;
 
 const LINKED = { repo: "octocat/demo", branch: "main", lastSyncedSha: "c0", lastSyncedAt: 100 };
 
@@ -143,6 +152,7 @@ function project(opts: {
       case "system:getGithubPushPlan":
         return {
           githubSync: opts.githubSync ?? LINKED,
+          planAt: PLAN_AT,
           more: opts.more ?? false,
           runs: opts.runs.map((run, i) => ({ messageId: `m${i}`, createdAt: 200 + i, ...run })),
         };
@@ -208,7 +218,8 @@ describe("pushToGithub (#343)", () => {
       (args as { tree: { path: string }[] }).tree.map((change) => change.path)
     );
     expect(sent).toEqual([["index.html", "old.txt"], ["footer.html"]]);
-    expect(savedSync()).toEqual({ ...LINKED, lastSyncedSha: gh.refs.get("main"), lastSyncedAt: expect.any(Number) });
+    // The sync time comes from Convex's clock, not this server's.
+    expect(savedSync()).toEqual({ ...LINKED, lastSyncedSha: gh.refs.get("main"), lastSyncedAt: PLAN_AT });
     const statuses = mocks.mutation.mock.calls
       .filter(([ref]) => getFunctionName(ref) === "system:updateExportStatus")
       .map(([, args]) => args.status);
@@ -253,6 +264,40 @@ describe("pushToGithub (#343)", () => {
     await expect(runJob()).rejects.toThrow("not a fast forward");
     await expect(runJob()).resolves.toMatchObject({ branch: "codenaya-sync" });
     expect(gh.refs.get("main")).toBe("elsewhere");
+  });
+
+  it("recreates a deleted sync branch on the next push", async () => {
+    const gh = fakeGithub({ "index.html": "v1" });
+    gh.pushElsewhere("main");
+    project({ runs: [{ prompt: "Edit", summary: "", checkpointId: null }], files: { "index.html": "v2" } });
+    await runJob();
+    const diverged = savedSync();
+    // Its pull request was merged and the branch deleted.
+    gh.refs.delete("codenaya-sync");
+
+    mocks.mutation.mockClear();
+    project({ runs: [{ prompt: "Again", summary: "", checkpointId: null }], files: { "index.html": "v3" }, githubSync: diverged });
+    await expect(runJob()).resolves.toMatchObject({ branch: "codenaya-sync", commits: 1 });
+
+    expect(gh.log("codenaya-sync").map((c) => c.message)).toEqual(["Edit", "Again"]);
+    expect(mocks.github.updateRef).not.toHaveBeenCalled();
+  });
+
+  it("stops with a clear message when the sync branch has commits made on GitHub", async () => {
+    const gh = fakeGithub({ "index.html": "v1" });
+    gh.pushElsewhere("main");
+    project({ runs: [{ prompt: "Edit", summary: "", checkpointId: null }], files: { "index.html": "v2" } });
+    await runJob();
+    const diverged = savedSync();
+    // "Resolve conflicts" on GitHub adds a merge commit to it.
+    gh.pushElsewhere("codenaya-sync", "conflict-fix");
+
+    vi.clearAllMocks();
+    project({ runs: [{ prompt: "Again", summary: "", checkpointId: null }], files: { "index.html": "v3" }, githubSync: diverged });
+    await expect(runJob()).rejects.toThrow(/codenaya-sync branch has commits made on GitHub\. Merge its pull request or delete the branch/);
+
+    expect(gh.refs.get("codenaya-sync")).toBe("conflict-fix");
+    expect(mocks.github.createTree).not.toHaveBeenCalled();
   });
 
   it("falls back to one commit listing the runs when a checkpoint is gone", async () => {
@@ -312,13 +357,54 @@ describe("pushToGithub (#343)", () => {
     expect(mocks.github.updateRef).not.toHaveBeenCalled();
   });
 
+  it("never deletes a binary it could not read", async () => {
+    const gh = fakeGithub({ "index.html": "v1", "logo.png": "old bytes" });
+    mocks.query.mockImplementation(async (ref) =>
+      getFunctionName(ref) === "system:getGithubPushPlan"
+        ? { githubSync: LINKED, planAt: PLAN_AT, more: false, runs: [] }
+        : [
+            { _id: "a", name: "index.html", type: "file", content: "v2" },
+            { _id: "b", name: "logo.png", type: "file", storageId: "s1", storageUrl: null },
+          ]
+    );
+
+    await runJob();
+
+    expect(gh.log("main")[0].files).toEqual({ "index.html": gh.sha("v2"), "logo.png": gh.sha("old bytes") });
+  });
+
+  it("writes one whole tree when GitHub truncates the tree listing", async () => {
+    const gh = fakeGithub({ "index.html": "v1", "gone.txt": "bye" });
+    const getTree = mocks.github.getTree;
+    mocks.github.getTree = ((args: never) => {
+      const { data } = getTree(args) as { data: { tree: { path: string }[] } };
+      // GitHub lists only part of the tree.
+      return { data: { tree: data.tree.slice(0, 1), truncated: true } };
+    }) as never;
+    project({
+      runs: [
+        { prompt: "One", summary: "", checkpointId: null },
+        { prompt: "Two", summary: "", checkpointId: "cp2" },
+      ],
+      checkpoints: { cp2: { "index.html": "v2" } },
+      files: { "index.html": "v3" },
+    });
+
+    await runJob();
+
+    expect(gh.log("main")).toEqual([
+      { message: expect.stringMatching(/^Changes from 2 agent runs/), files: { "index.html": gh.sha("v3") } },
+    ]);
+    expect(vi.mocked(mocks.github.createTree).mock.calls[0][0]).toMatchObject({ base_tree: undefined });
+  });
+
   it("downloads and uploads a binary used at two paths once", async () => {
     const png = Buffer.from([0x89, 0x50, 0x00]);
     const gh = fakeGithub({ "index.html": "v1" });
     mocks.kyGet.mockResolvedValue({ arrayBuffer: async () => Uint8Array.from(png).buffer });
     mocks.query.mockImplementation(async (ref) =>
       getFunctionName(ref) === "system:getGithubPushPlan"
-        ? { githubSync: LINKED, more: false, runs: [] }
+        ? { githubSync: LINKED, planAt: PLAN_AT, more: false, runs: [] }
         : [
             { _id: "a", name: "logo.png", type: "file", storageId: "s1", storageUrl: "https://storage/a" },
             { _id: "b", name: "copy.png", type: "file", storageId: "s1", storageUrl: "https://storage/a" },
@@ -330,6 +416,38 @@ describe("pushToGithub (#343)", () => {
     expect(mocks.kyGet).toHaveBeenCalledTimes(1);
     expect(mocks.github.createBlob).toHaveBeenCalledTimes(1);
     expect(gh.log("main")[0].files).toEqual({ "copy.png": gitBlobSha(png), "logo.png": gitBlobSha(png) });
+  });
+});
+
+describe("pushToGithub onFailure", () => {
+  const onFailure = (error: Error) =>
+    (pushToGithub as unknown as { config: { onFailure: (ctx: unknown) => Promise<void> } }).config.onFailure({
+      event: { data: { event: { data: { projectId: "p1" } } } },
+      error,
+      step: { run: (_name: string, fn: () => unknown) => fn() },
+    });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
+  });
+
+  it("shows the user why a push stopped", async () => {
+    const error = Object.assign(new Error("Merge its pull request"), { name: "NonRetriableError" });
+    await onFailure(error);
+
+    expect(mocks.mutation.mock.calls[0][1]).toEqual({
+      internalKey: "test-key",
+      projectId: "p1",
+      status: "failed",
+      error: "Merge its pull request",
+    });
+  });
+
+  it("keeps other errors out of the UI", async () => {
+    await onFailure(new Error("socket hang up"));
+
+    expect(mocks.mutation.mock.calls[0][1]).toMatchObject({ status: "failed", error: undefined });
   });
 });
 

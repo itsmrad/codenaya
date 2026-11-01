@@ -53,6 +53,7 @@ type ProjectFile = {
   parentId?: string;
   content?: string;
   storageUrl?: string | null;
+  updatedAt?: number;
 };
 
 const runJob = () =>
@@ -63,7 +64,8 @@ const runJob = () =>
     step: { run: (_name: string, fn: () => unknown) => fn(), sleep: async () => {} },
   });
 
-const projectFiles = (files: ProjectFile[]) => mocks.query.mockResolvedValue(files);
+const projectFiles = (files: ProjectFile[]) =>
+  mocks.query.mockResolvedValue(files.map((file) => ({ updatedAt: 100, ...file })));
 
 describe("exportToGithub", () => {
   beforeEach(() => {
@@ -79,8 +81,8 @@ describe("exportToGithub", () => {
     projectFiles([
       { _id: "src", name: "src", type: "folder" },
       { _id: "ui", name: "ui", type: "folder", parentId: "src" },
-      { _id: "a", name: "README.md", type: "file", content: "# hi" },
-      { _id: "b", name: "button.tsx", type: "file", parentId: "ui", content: "" },
+      { _id: "a", name: "README.md", type: "file", content: "# hi", updatedAt: 300 },
+      { _id: "b", name: "button.tsx", type: "file", parentId: "ui", content: "", updatedAt: 700 },
       { _id: "c", name: "logo.png", type: "file", parentId: "src", storageUrl: "https://storage/logo" },
       { _id: "d", name: "lost.bin", type: "file", storageUrl: null },
     ]);
@@ -113,7 +115,8 @@ describe("exportToGithub", () => {
       repo: "octocat/demo",
       branch: "main",
       lastSyncedSha: "commit",
-      lastSyncedAt: expect.any(Number),
+      // The newest file write, on Convex's clock like the runs it is compared with.
+      lastSyncedAt: 700,
     });
 
     const statuses = mocks.mutation.mock.calls

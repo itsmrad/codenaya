@@ -47,7 +47,7 @@ export const pushToGithub = inngest.createFunction(
       },
     ],
     triggers: [{ event: "github/sync.push" }],
-    onFailure: async ({ event, step }) => {
+    onFailure: async ({ event, error, step }) => {
       const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
       if (!internalKey) return;
 
@@ -58,6 +58,8 @@ export const pushToGithub = inngest.createFunction(
           internalKey,
           projectId,
           status: "failed",
+          // Ours are written for the user; anything else stays in the logs.
+          error: error.name === "NonRetriableError" ? error.message : undefined,
         });
       });
     },
@@ -104,8 +106,6 @@ async function pushCommits(
   internalKey: string,
   projectId: Id<"projects">
 ) {
-  // Runs that start after this are left for the next push.
-  const startedAt = Date.now();
   const plan = await convex.query(api.system.getGithubPushPlan, { internalKey, projectId });
   if (!plan) {
     throw new NonRetriableError("Project is not linked to a GitHub repository");
@@ -143,7 +143,7 @@ async function pushCommits(
     snapshots.length === plan.runs.length &&
     plan.runs.length > 0 &&
     !(await anySecrets(internalKey, projectId, snapshots.slice(0, -1)));
-  const commits = perRun
+  let commits = perRun
     ? snapshots
     : [{ message: summaryMessage(plan.runs, plan.more), files: current }];
 
@@ -159,14 +159,20 @@ async function pushCommits(
     tree_sha: parentCommit.tree.sha,
     recursive: "true",
   });
-  let base = {
-    tree: parentCommit.tree.sha,
-    blobs: new Map(
-      remoteTree.tree.flatMap((item) =>
-        item.type === "blob" && item.path && item.sha ? [[item.path, item.sha] as const] : []
-      )
-    ),
-  };
+  // A truncated listing would hide deletions: write one whole tree instead.
+  let base: { tree?: string; blobs: Map<string, string> } = remoteTree.truncated
+    ? { blobs: new Map() }
+    : {
+        tree: parentCommit.tree.sha,
+        blobs: new Map(
+          remoteTree.tree.flatMap((item) =>
+            item.type === "blob" && item.path && item.sha ? [[item.path, item.sha] as const] : []
+          )
+        ),
+      };
+  if (remoteTree.truncated) {
+    commits = [{ message: summaryMessage(plan.runs, plan.more), files: current }];
+  }
 
   const binaries = new Map<string, { bytes: Buffer; sha: string; uploaded: boolean }>();
   let committed = 0;
@@ -209,6 +215,10 @@ async function pushCommits(
           }
           changes.push({ path: file.path, mode: "100644", type: "blob", sha: binary.sha });
         }
+      } else {
+        // A blob we can't read: leave the remote copy alone, never delete it.
+        const kept = base.blobs.get(file.path);
+        if (kept) blobs.set(file.path, kept);
       }
     }
     for (const path of base.blobs.keys()) {
@@ -248,8 +258,8 @@ async function pushCommits(
     projectId,
     githubSync:
       target.branch === sync.branch
-        ? { repo: sync.repo, branch: sync.branch, lastSyncedSha: parent, lastSyncedAt: startedAt }
-        : { ...sync, syncBranchSha: parent, syncBranchAt: startedAt },
+        ? { repo: sync.repo, branch: sync.branch, lastSyncedSha: parent, lastSyncedAt: plan.planAt }
+        : { ...sync, syncBranchSha: parent, syncBranchAt: plan.planAt },
   });
 
   return { repo: sync.repo, branch: target.branch, commits: committed };
@@ -263,17 +273,33 @@ async function pushTarget(octokit: Octokit, owner: string, repo: string, sync: G
   // shortcut: once diverged, pushes keep going to the sync branch until a pull
   // (the next #343 part) moves `lastSyncedSha` to the remote head.
   if (sync.syncBranchSha) {
-    return { branch: GITHUB_SYNC_BRANCH, parent: sync.syncBranchSha, exists: true };
+    const head = await branchHead(octokit, owner, repo, GITHUB_SYNC_BRANCH);
+    // Changes made on GitHub would be reverted by our next snapshot.
+    if (head && head !== sync.syncBranchSha) {
+      throw new NonRetriableError(SYNC_BRANCH_MOVED);
+    }
+    // Deleted, e.g. after its pull request was merged: recreate it.
+    return { branch: GITHUB_SYNC_BRANCH, parent: sync.syncBranchSha, exists: head !== null };
   }
-  const { data: ref } = await octokit.rest.git.getRef({
-    owner,
-    repo,
-    ref: `heads/${sync.branch}`,
-  });
-  if (ref.object.sha === sync.lastSyncedSha) {
+  if ((await branchHead(octokit, owner, repo, sync.branch)) === sync.lastSyncedSha) {
     return { branch: sync.branch, parent: sync.lastSyncedSha, exists: true };
   }
   return { branch: GITHUB_SYNC_BRANCH, parent: sync.lastSyncedSha, exists: false };
+}
+
+const SYNC_BRANCH_MOVED =
+  `The ${GITHUB_SYNC_BRANCH} branch has commits made on GitHub. ` +
+  `Merge its pull request or delete the branch, then push again.`;
+
+/** The branch's head commit, or null when there is no such branch. */
+async function branchHead(octokit: Octokit, owner: string, repo: string, branch: string) {
+  try {
+    const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
+    return ref.object.sha;
+  } catch (error) {
+    if (error instanceof RequestError && error.status === 404) return null;
+    throw error;
+  }
 }
 
 /** Fast-forward only. A branch that moved meanwhile fails the attempt. */
@@ -299,9 +325,7 @@ async function moveBranch(
     // Not a fast-forward. Retrying re-reads the branch: a linked branch that
     // moved sends the push to the sync branch instead.
     if (error instanceof RequestError && error.status === 422 && target.branch === GITHUB_SYNC_BRANCH) {
-      throw new NonRetriableError(
-        `${GITHUB_SYNC_BRANCH} has commits from outside Codenaya; merge or delete it, then push again`
-      );
+      throw new NonRetriableError(SYNC_BRANCH_MOVED);
     }
     throw error;
   }

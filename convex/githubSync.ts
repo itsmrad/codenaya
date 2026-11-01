@@ -45,7 +45,10 @@ export async function runsSince(
   };
 }
 
-/** Runs not pushed yet, for the export button's dot. Null when not linked. */
+/**
+ * Runs not pushed yet, for the export button's dot, and whether one is still
+ * running (its edits would land in a later run's commit). Null when not linked.
+ */
 export const unpushedRuns = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
@@ -53,6 +56,12 @@ export const unpushedRuns = query({
     const project = await getOwnedProject(ctx, args.projectId, identity.subject);
     if (!project.githubSync) return null;
     const { runs, more } = await runsSince(ctx, project._id, syncedAt(project.githubSync));
-    return { count: runs.length, more };
+    const running = await ctx.db
+      .query("messages")
+      .withIndex("by_project_status", (q) =>
+        q.eq("projectId", project._id).eq("status", "processing"),
+      )
+      .first();
+    return { count: runs.length, more, running: running !== null };
   },
 });

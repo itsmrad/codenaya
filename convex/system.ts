@@ -620,6 +620,7 @@ export const updateExportStatus = mutation({
       )
     ),
     repoUrl: v.optional(v.string()),
+    error: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -627,6 +628,7 @@ export const updateExportStatus = mutation({
     await ctx.db.patch("projects", args.projectId, {
       exportStatus: args.status,
       exportRepoUrl: args.repoUrl,
+      exportError: args.error,
       updatedAt: Date.now(),
     });
   },
@@ -714,6 +716,9 @@ export const getGithubPushPlan = query({
     const { runs, more } = await runsSince(ctx, project._id, syncedAt(project.githubSync));
     return {
       githubSync: project.githubSync,
+      // The next sync point, on Convex's clock like `_creationTime`. A cached
+      // result is still right: a newer run would have invalidated it.
+      planAt: Date.now(),
       more,
       runs: await Promise.all(
         runs.map(async (run) => {
