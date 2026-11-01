@@ -83,3 +83,43 @@ test("bounds content reads and clips long result lines", async () => {
   expect(result).toContain("Search truncated");
   expect(result.length).toBeLessThan(4000);
 });
+
+test("regex scans stop at 1 MiB while literal scans keep the 4 MiB budget", async () => {
+  const { search, t, projectId } = await setup();
+  await t.run(async (ctx) => {
+    for (let i = 0; i < 2; i++) {
+      const id = await ctx.db.insert("files", { projectId, name: `budget${i}.ts`, type: "file", updatedAt: 0 });
+      await insertFileContent(ctx, id, projectId, "x".repeat(800_000));
+    }
+  });
+  const regex = await search({ pattern: "^x", isRegex: true });
+  expect(regex).toContain("budget0.ts:1:");
+  expect(regex).not.toContain("budget1.ts:1:");
+  expect(regex).toContain("Search truncated");
+  const literal = await search({ pattern: "x" });
+  expect(literal).toContain("budget0.ts:1:");
+  expect(literal).toContain("budget1.ts:1:");
+  expect(literal).not.toContain("Search truncated");
+});
+
+test("limits content index lookups to 3000, with explicit truncation", async () => {
+  vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
+  const t = convexTest(schema, modules);
+  const projectId = await t.run(async (ctx) => {
+    const projectId = await ctx.db.insert("projects", { name: "many", ownerId: "alice", updatedAt: 0 });
+    for (let i = 0; i <= 3000; i++) {
+      const id = await ctx.db.insert("files", { projectId, name: `file${i}.ts`, type: "file", updatedAt: 0 });
+      await insertFileContent(ctx, id, projectId, i >= 2999 ? "boundary" : "");
+    }
+    return projectId;
+  });
+  const result = await t.query(api.files.searchFiles, { projectId, internalKey: "test-key", pattern: "boundary" });
+  expect(result).toContain("file2999.ts:1: boundary");
+  expect(result).not.toContain("file3000.ts:1:");
+  expect(result).toContain("Search truncated");
+});
+
+test("normalises leading ./ and whitespace in path globs", async () => {
+  const { search } = await setup();
+  expect(await search({ pathGlob: " ./src/**/*.ts " })).toBe(await search({ pathGlob: "src/**/*.ts" }));
+});

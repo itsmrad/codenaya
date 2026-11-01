@@ -20,3 +20,11 @@ it("rejects invalid tool input before querying", async () => {
   expect(await createSearchFilesTool(options).handler({ pattern: "", maxResults: -1 }, { step } as never)).toMatch(/^Error:/);
   expect(mocks.query).not.toHaveBeenCalled();
 });
+
+it("resolves query failures inside the step so Inngest does not retry an expensive search", async () => {
+  mocks.query.mockRejectedValue(new Error("query execution timed out"));
+  const error = "Error: search too expensive; narrow pathGlob or use a literal pattern";
+  expect(await createSearchFilesTool(options).handler({ pattern: "x", isRegex: true }, { step } as never)).toBe(error);
+  await expect(step.run.mock.results[0].value).resolves.toBe(error);
+  expect(mocks.query).toHaveBeenCalledTimes(1);
+});

@@ -1,5 +1,5 @@
 import { buildPathIndex } from "../src/features/conversations/agent-steps";
-import { compilePathGlob, compileSearch, MAX_SEARCH_RESULTS, SEARCH_BYTE_BUDGET, SEARCH_TRUNCATED } from "../src/features/conversations/file-search";
+import { compilePathGlob, compileSearch, MAX_SEARCH_RESULTS, SEARCH_BYTE_BUDGET, REGEX_SEARCH_BYTE_BUDGET, MAX_SEARCH_CONTENT_LOOKUPS, SEARCH_TRUNCATED } from "../src/features/conversations/file-search";
 import { validateInternalKey } from "./internalKey";
 import { v } from "convex/values";
 
@@ -404,15 +404,20 @@ export const searchFiles = query({
       .paginate({ cursor: null, numItems: MAX_PROJECT_FILES, maximumBytesRead: 2 * 1024 * 1024 });
     const pathOf = buildPathIndex(page.page);
     const output: string[] = [];
+    const encoder = new TextEncoder();
+    const byteBudget = args.isRegex ? REGEX_SEARCH_BYTE_BUDGET : SEARCH_BYTE_BUDGET;
+    let lookups = 0;
     let bytes = 0;
     let truncated = !page.isDone;
     for (const file of page.page) {
       const path = pathOf(file._id);
       if (file.type !== "file" || file.storageId || !path || (glob && !glob.matcher(path).matches())) continue;
+      if (lookups === MAX_SEARCH_CONTENT_LOOKUPS) { truncated = true; break; }
+      lookups++;
       const content = await readFileContent(ctx, file);
       if (content === undefined) continue;
-      bytes += new TextEncoder().encode(content).byteLength;
-      if (bytes > SEARCH_BYTE_BUDGET) { truncated = true; break; }
+      bytes += encoder.encode(content).byteLength;
+      if (bytes > byteBudget) { truncated = true; break; }
       if (content.includes("\0")) continue;
       const lines = content.split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {

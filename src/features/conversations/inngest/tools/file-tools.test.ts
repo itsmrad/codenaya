@@ -332,3 +332,20 @@ describe("line-ranged reads (#296)", () => {
     expect(step.run).not.toHaveBeenCalled();
   });
 });
+
+it("rejects a range path missing from paths before reading", async () => {
+  expect(await createReadFilesTool(opts).handler({
+    paths: ["package.json"], ranges: [{ path: "src/App.tsx", startLine: 1 }],
+  }, ctx)).toBe("Error: Every ranges path must also be included in paths");
+  expect(mocks.query).not.toHaveBeenCalled();
+});
+
+it("uses only the first range for a path, including normalised duplicates", async () => {
+  db.rows[1].content = "first\nsecond";
+  expect(await createReadFilesTool(opts).handler({
+    paths: ["./src/App.tsx"], ranges: [
+      { path: "src/App.tsx", startLine: 1, endLine: 1 },
+      { path: "./src/App.tsx", startLine: 2, endLine: 2 },
+    ],
+  }, ctx)).toBe("File: src/App.tsx (lines 1-1 of 2)\n1: first");
+});

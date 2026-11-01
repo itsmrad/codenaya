@@ -2,10 +2,13 @@ import { RE2JS } from "re2js";
 
 export const MAX_SEARCH_RESULTS = 200;
 export const SEARCH_BYTE_BUDGET = 4 * 1024 * 1024;
+export const REGEX_SEARCH_BYTE_BUDGET = 1024 * 1024;
+export const MAX_SEARCH_CONTENT_LOOKUPS = 3000;
 export const SEARCH_TRUNCATED = "Search truncated. Narrow pathGlob or the pattern and search again.";
 
 /** Only *, ** and ? are special; RE2 keeps even adversarial globs linear. */
 export const compilePathGlob = (glob: string) => {
+  glob = glob.trim().replace(/^\.\//, "");
   let pattern = "^";
   for (let i = 0; i < glob.length; i++) {
     const char = glob[i];

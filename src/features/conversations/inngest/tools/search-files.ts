@@ -21,8 +21,13 @@ export const createSearchFilesTool = (options: { projectId: Id<"projects">; inte
     handler: async (params, { step }) => {
       const parsed = parameters.safeParse(params);
       if (!parsed.success) return `Error: ${parsed.error.issues[0].message}`;
-      return await step?.run("search-files", () =>
-        convex.query(api.files.searchFiles, { ...options, ...parsed.data }),
-      );
+      return await step?.run("search-files", async () => {
+        try {
+          return await convex.query(api.files.searchFiles, { ...options, ...parsed.data });
+        } catch {
+          // Persist the tool error so an expensive query is not retried by Inngest.
+          return "Error: search too expensive; narrow pathGlob or use a literal pattern";
+        }
+      });
     },
   });

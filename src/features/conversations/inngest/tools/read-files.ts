@@ -24,7 +24,10 @@ const paramsSchema = z
     fileIds: z.array(z.string()).optional(),
     ranges: rangesSchema.optional(),
   })
-  .refine(({ paths, fileIds }) => (paths ?? fileIds ?? []).length > 0, "Provide at least one path");
+  .refine(({ paths, fileIds }) => (paths ?? fileIds ?? []).length > 0, "Provide at least one path")
+  .refine(({ paths, ranges }) => (ranges ?? []).every((range) =>
+    (paths ?? []).some((path) => normalizePath(path) === normalizePath(range.path)),
+  ), "Every ranges path must also be included in paths");
 
 export const createReadFilesTool = ({
   projectId,
@@ -37,7 +40,7 @@ export const createReadFilesTool = ({
       paths: z
         .array(z.string())
         .describe('Project-relative paths of the files to read, like "src/App.tsx"'),
-      ranges: rangesSchema.optional().describe("Optional inclusive 1-based ranges keyed by path. Only ranged reads include line numbers; do not copy the numbers into file writes."),
+      ranges: rangesSchema.optional().describe("Optional inclusive 1-based ranges keyed by path. Every range path must also be in paths, otherwise returns Error. Only the first range per path is used. Only ranged reads include line numbers; do not copy the numbers into file writes."),
     }),
     handler: async (params, { step: toolStep }) => {
       const parsed = paramsSchema.safeParse(params);
