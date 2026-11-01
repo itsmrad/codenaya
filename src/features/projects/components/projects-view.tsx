@@ -11,7 +11,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CommunityRail } from "@/features/showcase/components/community-rail";
 import { StarterTemplates } from "@/features/templates/components/starter-templates";
 import { takePendingTemplate } from "@/features/templates/utils/pending-template";
-import { PromoBanner } from "@/features/promotions/components/promo-banner";
 
 import { useProjects } from "../hooks/use-projects";
 import { useDashboardTab } from "../hooks/use-dashboard-tab";
@@ -152,7 +151,6 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
           </div>
 
           <div className="mx-auto max-w-2xl">
-            <PromoBanner />
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}

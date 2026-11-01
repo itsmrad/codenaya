@@ -41,12 +41,10 @@ export const DefaultModelSelect = ({
   );
   const defaultKey = keys.find((key) => key._id === defaultKeyId);
   const platform = usePlatformModelsOrCatalog();
-  // Promo models are offered per run, not as a lasting default.
-  const models = platform.models.filter((model) => model.access === "everyone");
   // A platform default no longer offered shows as the one that runs.
   const modelId = defaultKeyId
     ? defaultModelId
-    : resolveCatalogModel({ models, defaultModelId: platform.defaultModelId }, defaultModelId).id;
+    : resolveCatalogModel(platform, defaultModelId).id;
 
   const handleChange = async (value: string) => {
     try {
@@ -76,7 +74,7 @@ export const DefaultModelSelect = ({
         <SelectContent position="popper" className="max-h-80">
           <SelectGroup>
             <SelectLabel>{PLATFORM_PROVIDER.label}</SelectLabel>
-            {models.map((model) => (
+            {platform.models.map((model) => (
               <SelectItem key={model.id} value={toChoiceValue({ modelId: model.id })}>
                 {model.name}
               </SelectItem>

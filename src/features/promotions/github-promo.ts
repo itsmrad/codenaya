@@ -4,7 +4,8 @@
  * the promotion ends.
  *
  * Pure on purpose: Convex enforces these numbers, the routes and the agent run
- * check them, and the page and picker render them from the same constants.
+ * check them. The promotion ended, so the site no longer offers it; admins
+ * still mark promo models in /admin.
  * No imports from `ai-providers`, which depends on this module.
  */
 
@@ -16,8 +17,6 @@ export const MIN_GITHUB_ACCOUNT_AGE_DAYS = 365;
 
 /** Opus runs each claim includes. Sonnet runs are not counted. */
 export const PROMO_OPUS_RUN_LIMIT = 20;
-
-export const PROMO_PATH = "/promo";
 
 /**
  * The run a promo model takes: "opus" counts against the claim's runs,
@@ -59,7 +58,7 @@ export const promoRunRefusal = (
 };
 
 export const PROMO_REFUSAL_MESSAGES: Record<PromoRunRefusal | "not_claimed", string> = {
-  not_claimed: `Claim the free Claude promotion at ${PROMO_PATH} to use this model.`,
+  not_claimed: "This model is only offered in a promotion. Pick another model to continue.",
   ended: "The free Claude promotion has ended. Pick another model to continue.",
   opus_used_up: `You've used all ${PROMO_OPUS_RUN_LIMIT} free Opus 5.5 runs. Claude Sonnet 5.5 is still free until the promotion ends.`,
 };
@@ -67,31 +66,3 @@ export const PROMO_REFUSAL_MESSAGES: Record<PromoRunRefusal | "not_claimed", str
 /** The `code` a send route answers when a promo model can't run. */
 export const isPromoRefusalCode = (code: string | undefined) =>
   code !== undefined && code.startsWith("promo_");
-
-/** Why `POST /api/promotions/claim` refused; the page branches on these. */
-export type PromoClaimErrorCode =
-  | "github_not_linked"
-  | "github_unavailable"
-  | "github_too_new"
-  | "github_already_used"
-  | "already_claimed"
-  | "promo_ended";
-
-export const PROMO_CLAIM_ERROR_MESSAGES: Record<PromoClaimErrorCode, string> = {
-  github_not_linked: "Connect your GitHub account to claim.",
-  github_unavailable: "Couldn't reach GitHub to check your account. Please try again.",
-  github_too_new: `This promotion is for GitHub accounts at least ${MIN_GITHUB_ACCOUNT_AGE_DAYS} days old.`,
-  github_already_used: "This GitHub account was already used to claim the promotion.",
-  already_claimed: "You've already claimed the promotion.",
-  promo_ended: "The promotion has ended.",
-};
-
-/** The end, as the page and banner say it: "Nov 1, 00:00 UTC". */
-export const PROMO_ENDS_LABEL = `${new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-  timeZone: "UTC",
-}).format(PROMO_ENDS_AT)} UTC`;

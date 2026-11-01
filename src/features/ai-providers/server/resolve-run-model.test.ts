@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
@@ -19,6 +19,7 @@ vi.mock("./sealed-key", () => ({ openProviderKey: mocks.openProviderKey }));
 vi.mock("node:dns/promises", () => ({ lookup: mocks.lookup }));
 
 import { DEFAULT_AGENT_MODEL_ID } from "@/features/conversations/agent-models";
+import { PROMO_ENDS_AT, PROMO_REFUSAL_MESSAGES } from "@/features/promotions/github-promo";
 
 import {
   ModelChoiceError,
@@ -31,6 +32,8 @@ import {
 } from "./resolve-run-model";
 
 const SECRET = "sk-user-secret-key-1234";
+// Promo-dependent tests pin the clock here so they don't expire with the promotion.
+const BEFORE_PROMO_ENDS = PROMO_ENDS_AT - 24 * 60 * 60 * 1000;
 
 const openAiKey = {
   _id: "key_1",
@@ -339,7 +342,13 @@ describe("validateModelChoice: promo models (ADR 0009)", () => {
     validateModelChoice({ internalKey: "ik", userId: "user_1", model, withImages });
 
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(BEFORE_PROMO_ENDS);
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-platform");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("accepts a claimant's promo model, taking the kind from its access, without taking a run", async () => {
@@ -397,6 +406,17 @@ describe("validateModelChoice: promo models (ADR 0009)", () => {
     });
   });
 
+  it("refuses a claimant's promo model with promo_ended once the promotion ends", async () => {
+    vi.setSystemTime(PROMO_ENDS_AT);
+    mocks.platform.mockReturnValue(ROUTED_SAVED);
+    mocks.query.mockResolvedValue({ opusRunsUsed: 0 });
+
+    await expect(validate("anthropic/claude-sonnet-5.5")).rejects.toMatchObject({
+      status: 403,
+      code: "promo_ended",
+    });
+  });
+
   it("checks images before reading the claim", async () => {
     mocks.platform.mockReturnValue(ROUTED_SAVED);
 
@@ -421,14 +441,20 @@ describe("validateModelChoice: promo models (ADR 0009)", () => {
 describe("validateModelChoice: credits (ADR 0011)", () => {
   const validate = (model: Parameters<typeof validateModelChoice>[0]["model"]) =>
     validateModelChoice({ internalKey: "ik", userId: "user_1", model });
-  const now = Date.now();
+  const now = BEFORE_PROMO_ENDS;
   const startOfDay = new Date(now).setUTCHours(0, 0, 0, 0);
   const startOfMonth = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1);
   const spentToday = { plan: "free", periodStartsAt: startOfMonth, periodUsed: 60, dayStartsAt: startOfDay, dayUsed: 60 };
 
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-platform");
     vi.stubEnv("CREDIT_LIMITS_ENFORCED", "true");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("lets a spent account run while credit limits aren't enforced", async () => {
@@ -632,7 +658,7 @@ describe("resolveRunModel (agent run)", () => {
     expect(target(run.coding(0.3)).id).toBe("claude-sonnet-5-5");
   });
 
-  it("ends a promo run with a pointer to /promo when the owner hasn't claimed", async () => {
+  it("ends a promo run with a clear reply when the owner hasn't claimed", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-platform");
     mocks.platform.mockReturnValue(ROUTED_SAVED);
     mocks.query.mockResolvedValue(false);
@@ -640,7 +666,7 @@ describe("resolveRunModel (agent run)", () => {
     const error = await resolve({ modelId: "anthropic/claude-opus-5.5" }).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ProviderKeyError);
-    expect((error as Error).message).toContain("/promo");
+    expect((error as Error).message).toBe(PROMO_REFUSAL_MESSAGES.not_claimed);
   });
 
   it("ends a platform run with a clear reply when the provider has no key", async () => {
