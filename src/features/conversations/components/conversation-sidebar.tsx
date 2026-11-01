@@ -322,6 +322,19 @@ export const ConversationSidebar = ({
     }
   };
 
+  // Messages queued from outside the chat ("Ask agent to fix", #300) are sent
+  // once the agent is free, through the same path as a typed one.
+  const queuedMessage = useChatStore((state) => state.queuedMessage);
+  useEffect(() => {
+    if (!queuedMessage || isProcessing || pending) return;
+    const text = useChatStore.getState().takeQueuedMessage(projectId);
+    // sendMessage only sets state after awaiting the network, not synchronously.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (text) void sendMessage(text);
+    // sendMessage is read fresh when the queue changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queuedMessage, isProcessing, pending, projectId]);
+
   const handleSubmit = async (message: PromptInputMessage) => {
     // If processing and no new message, this is just a stop function
     if (
@@ -487,6 +500,10 @@ export const ConversationSidebar = ({
                     setPlanMode(false);
                     void sendMessage(buildPlanMessage(message.content));
                   }}
+                  checkpointId={
+                    checkpoints && (checkpointByMessage.get(message._id)?._id ?? null)
+                  }
+                  revertDisabled={isProcessing}
                   onRestore={
                     checkpointByMessage.has(message._id) && !isProcessing
                       ? () => setRestoreTarget(checkpointByMessage.get(message._id)!)

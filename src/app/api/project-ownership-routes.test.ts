@@ -49,6 +49,7 @@ import { POST as exportResetPOST } from "./github/export/reset/route";
 import { POST as envVarsPOST } from "./env-vars/route";
 import { POST as connectPOST } from "./integrations/connect/route";
 import { POST as oauthStartPOST } from "./integrations/oauth/start/route";
+import { POST as securityScanPOST } from "./projects/security-scan/route";
 
 const ATTACKER = "user_attacker";
 const VICTIM_PROJECT = "victim_project";
@@ -106,6 +107,10 @@ const routes = [
   {
     name: "POST /api/integrations/oauth/start",
     call: () => oauthStartPOST(request({ providerId: "supabase", projectId: VICTIM_PROJECT })),
+  },
+  {
+    name: "POST /api/projects/security-scan",
+    call: () => securityScanPOST(request({ projectId: VICTIM_PROJECT })),
   },
 ];
 
