@@ -28,7 +28,7 @@ const MAX_LABEL_LENGTH = 140;
  * Largest project snapshotted, so a snapshot plus the prune of an old one fit
  * in one transaction (#212). No snapshot holds more rows than this.
  */
-const MAX_CHECKPOINT_FILES = 2000;
+export const MAX_CHECKPOINT_FILES = 2000;
 
 /** Each file of a project with its slash-separated path from the root. */
 function withPaths(files: Doc<"files">[]) {

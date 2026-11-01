@@ -9,6 +9,11 @@ export const useProject = (projectId: Id<"projects">) => {
   return useQuery(api.projects.getById, { id: projectId });
 };
 
+/** Agent runs not pushed to the linked GitHub repo yet (#343). */
+export const useUnpushedRuns = (projectId: Id<"projects">) => {
+  return useQuery(api.githubSync.unpushedRuns, { projectId });
+};
+
 export const useProjects = () => {
   return useQuery(api.projects.get);
 };
