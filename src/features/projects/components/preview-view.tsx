@@ -43,7 +43,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import { EnvVarsDialog } from "./env-vars-dialog";
-import { useProject } from "../hooks/use-projects";
+import { useProject, useRecordFirstPreviewShown } from "../hooks/use-projects";
 import { useFilesWithContent } from "../hooks/use-files";
 import { markPreviewOpened } from "../utils/first-run";
 import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
@@ -160,6 +160,17 @@ export const PreviewView = ({
     window.location.href = `${pathname}?${params.toString()}`;
   }, [activeEngine, pathname, searchParams]);
 
+  // One call per project per page view; refreshes reload the iframe.
+  const recordFirstPreviewShown = useRecordFirstPreviewShown();
+  const recordedPreviewFor = useRef<Id<"projects"> | null>(null);
+  const handlePreviewLoad = useCallback(() => {
+    if (recordedPreviewFor.current === projectId) return;
+    recordedPreviewFor.current = projectId;
+    recordFirstPreviewShown({ projectId }).catch((error) => {
+      console.warn("[preview] failed to record first preview", error);
+    });
+  }, [projectId, recordFirstPreviewShown]);
+
   const isLoading = status === "booting" || status === "installing";
   const building =
     firstBuild && activeRun && files ? (
@@ -181,6 +192,7 @@ export const PreviewView = ({
       onUseWebContainer={() => switchEngine("webcontainer")}
       agentWorking={Boolean(activeRun)}
       building={building}
+      onPreviewLoad={handlePreviewLoad}
     />
   );
 
@@ -447,6 +459,7 @@ const PreviewContent = ({
   onUseWebContainer,
   agentWorking,
   building,
+  onPreviewLoad,
 }: {
   error: string | null | undefined;
   isLoading: boolean;
@@ -464,6 +477,7 @@ const PreviewContent = ({
   agentWorking?: boolean;
   /** The first-build placeholder, shown over the engine until the run ends. */
   building: ReactNode;
+  onPreviewLoad: () => void;
 }) => (
   <div className="size-full rounded-xl overflow-hidden relative isolate">
     <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
@@ -530,6 +544,7 @@ const PreviewContent = ({
           style={{ width: PREVIEW_DEVICE_WIDTHS[device] ?? undefined }}
           data-framed={device !== "desktop"}
           title="Preview"
+          onLoad={onPreviewLoad}
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
           allow="cross-origin-isolated"
         />

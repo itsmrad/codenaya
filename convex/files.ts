@@ -22,6 +22,7 @@ import {
   releaseStorageIfUnreferenced,
 } from "./projectCascade";
 import { getOwnedProject } from "./projects";
+import { recordPackageJsonReady } from "./activationEvents";
 import { Doc, Id } from "./_generated/dataModel";
 
 /** Most files read from one project or folder at once (#53). */
@@ -270,6 +271,7 @@ export const createFile = mutation({
       updatedAt: now,
     });
     await insertFileContent(ctx, fileId, args.projectId, args.content);
+    await recordPackageJsonReady(ctx, args);
 
     await ctx.db.patch("projects", args.projectId, {
       updatedAt: now,

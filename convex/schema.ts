@@ -114,7 +114,72 @@ export const runModelValidator = v.object({
   provider: v.optional(platformProviderValidator),
 });
 
+/** Where a new project came from (`project_created`). */
+export const projectSourceValidator = v.union(
+  v.literal("landing"),
+  v.literal("dashboard"),
+  v.literal("template"),
+  v.literal("import"),
+  v.literal("remix"),
+  v.literal("duplicate"),
+);
+
+/**
+ * Fields every activation event has. The Clerk user id is the only identifier
+ * kept: no prompt text, file names, emails or IPs, so props carry no strings
+ * (#339; `activationEvents.test.ts` checks this).
+ */
+const activationEventFields = {
+  userId: v.string(),
+  projectId: v.optional(v.id("projects")),
+  at: v.number(),
+};
+
+const activationEventValidator = v.union(
+  v.object({ ...activationEventFields, name: v.literal("signed_up") }),
+  v.object({
+    ...activationEventFields,
+    name: v.literal("project_created"),
+    props: v.object({ source: projectSourceValidator }),
+  }),
+  v.object({
+    ...activationEventFields,
+    name: v.literal("run_started"),
+    props: v.object({ firstBuild: v.boolean() }),
+  }),
+  v.object({
+    ...activationEventFields,
+    name: v.literal("run_finished"),
+    props: v.object({
+      outcome: v.union(v.literal("ok"), v.literal("error"), v.literal("cancelled")),
+      firstBuild: v.boolean(),
+    }),
+  }),
+  v.object({ ...activationEventFields, name: v.literal("package_json_ready") }),
+  v.object({
+    ...activationEventFields,
+    name: v.literal("sandbox_running"),
+    props: v.object({ installMs: v.number(), bootMs: v.number() }),
+  }),
+  v.object({ ...activationEventFields, name: v.literal("first_preview_shown") }),
+  v.object({
+    ...activationEventFields,
+    name: v.literal("first_publish_or_export"),
+    props: v.object({ kind: v.union(v.literal("publish"), v.literal("export")) }),
+  }),
+);
+
 export default defineSchema({
+  /**
+   * First-party product events on the way from sign-up to a first preview
+   * (#339). Written by `convex/activationEvents.ts`, read from the dashboard
+   * with `activationEvents:report`. Deleted with the user.
+   */
+  activationEvents: defineTable(activationEventValidator)
+    .index("by_userId_and_name_and_at", ["userId", "name", "at"])
+    .index("by_projectId_and_name_and_at", ["projectId", "name", "at"])
+    .index("by_name_and_at", ["name", "at"]),
+
   /**
    * Profile mirror of a Clerk user, kept in sync by the Clerk webhook
    * (`convex/http.ts`). Ownership everywhere else stays keyed on

@@ -123,6 +123,7 @@ export const processMessage = inngest.createFunction(
             messageId,
             content:
               "My apologies, I encountered an error while processing your request. Let me know if you need anything else!",
+            outcome: "error",
           });
         });
       }
@@ -182,6 +183,7 @@ export const processMessage = inngest.createFunction(
           internalKey,
           messageId,
           content: error.message,
+          outcome: "error",
         });
       });
       return { success: false, messageId, conversationId };
@@ -214,6 +216,7 @@ export const processMessage = inngest.createFunction(
           content: keyFailureMessage(
             `Your ${key.label} key was rejected by the provider.`,
           ),
+          outcome: "error",
         });
       });
       return { success: false, messageId, conversationId };

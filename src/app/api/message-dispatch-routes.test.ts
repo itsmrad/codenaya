@@ -212,11 +212,13 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody, rate
       code: "dispatch_failed",
       ...failureBody,
     });
-    // `updateMessageContent` resolves the placeholder as completed with this text.
+    // `updateMessageContent` resolves the placeholder as completed with this
+    // text, and the run counts as failed in the activation events (#339).
     expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), {
       internalKey: "test-key",
       messageId: "m_assistant",
       content: DISPATCH_FAILED_MESSAGE,
+      outcome: "error",
     });
   });
 

@@ -5,6 +5,7 @@ import { mutation, query, type QueryCtx } from "./_generated/server";
 import {
   aiProviderValidator,
   messageStepValidator,
+  projectSourceValidator,
   runModelValidator,
 } from "./schema";
 import { createCheckpoint } from "./checkpoints";
@@ -33,6 +34,12 @@ import {
 } from "./fileContents";
 import { resolveProjectSkills } from "./skills";
 import { countProjectBuilt } from "./stats";
+import {
+  recordPackageJsonReady,
+  recordProjectEvent,
+  recordRunFinished,
+  recordRunStarted,
+} from "./activationEvents";
 import { MAX_ENV_VARS } from "./envVars";
 import { MAX_PROJECT_CONNECTIONS } from "./integrations";
 
@@ -102,6 +109,9 @@ export const createMessage = mutation({
       ...(args.images?.length ? { images: args.images } : {}),
       ...(args.mode ? { mode: args.mode } : {}),
     });
+    if (args.role === "assistant" && args.status === "processing") {
+      await recordRunStarted(ctx, args.projectId);
+    }
 
     // Update conversation's updatedAt
     await ctx.db.patch("conversations", args.conversationId, {
@@ -117,10 +127,17 @@ export const updateMessageContent = mutation({
     internalKey: v.string(),
     messageId: v.id("messages"),
     content: v.string(),
+    /** Set when the content is a failure reply, so the run counts as an error (#339). */
+    outcome: v.optional(v.literal("error")),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    await recordRunFinished(
+      ctx,
+      await ctx.db.get("messages", args.messageId),
+      args.outcome ?? "ok",
+    );
     await ctx.db.patch("messages", args.messageId, {
       content: args.content,
       status: "completed" as const,
@@ -178,6 +195,13 @@ export const updateMessageStatus = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    if (args.status !== "processing") {
+      await recordRunFinished(
+        ctx,
+        await ctx.db.get("messages", args.messageId),
+        args.status === "cancelled" ? "cancelled" : "ok",
+      );
+    }
     await ctx.db.patch("messages", args.messageId, {
       status: args.status,
       completedAt: args.status === "processing" ? undefined : Date.now(),
@@ -368,6 +392,7 @@ export const createFile = mutation({
       updatedAt: Date.now(),
     });
     await insertFileContent(ctx, fileId, args.projectId, args.content);
+    await recordPackageJsonReady(ctx, args);
 
     return fileId;
   },
@@ -417,6 +442,7 @@ export const createFiles = mutation({
         updatedAt: Date.now(),
       });
       await insertFileContent(ctx, fileId, args.projectId, file.content);
+      await recordPackageJsonReady(ctx, { ...args, name: file.name });
 
       results.push({ name: file.name, fileId });
     }
@@ -622,6 +648,14 @@ export const updateExportStatus = mutation({
       exportRepoUrl: args.repoUrl,
       updatedAt: Date.now(),
     });
+    if (args.status === "completed") {
+      await recordProjectEvent(
+        ctx,
+        args.projectId,
+        { name: "first_publish_or_export", props: { kind: "export" } },
+        { once: true },
+      );
+    }
   },
 });
 
@@ -666,6 +700,10 @@ export const createProject = mutation({
       importStatus: "importing",
     });
     await countProjectBuilt(ctx);
+    await recordProjectEvent(ctx, projectId, {
+      name: "project_created",
+      props: { source: "import" },
+    });
 
     return projectId;
   },
@@ -677,6 +715,7 @@ export const createProjectWithConversation = mutation({
     projectName: v.string(),
     conversationTitle: v.string(),
     ownerId: v.string(),
+    source: projectSourceValidator,
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -689,6 +728,10 @@ export const createProjectWithConversation = mutation({
       updatedAt: now,
     });
     await countProjectBuilt(ctx);
+    await recordProjectEvent(ctx, projectId, {
+      name: "project_created",
+      props: { source: args.source },
+    });
 
     const conversationId = await ctx.db.insert("conversations", {
       projectId,
