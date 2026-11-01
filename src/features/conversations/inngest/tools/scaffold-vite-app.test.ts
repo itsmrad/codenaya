@@ -30,6 +30,7 @@ vi.mock("@/lib/convex-client", () => ({
 
 import { missingReferencedFiles } from "@/features/sandbox-preview/utils/missing-references";
 
+import { KNOWN_GOOD_VERSIONS } from "../known-good-versions";
 import { VITE_REACT_STARTER } from "../vite-starter";
 import { createScaffoldViteAppTool } from "./scaffold-vite-app";
 
@@ -89,10 +90,14 @@ describe("scaffoldViteApp tool", () => {
     const pkg = JSON.parse(read("package.json"));
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 
+    // #331: every starter dependency comes from the known-good manifest.
+    for (const [name, range] of Object.entries(deps)) {
+      expect(range, name).toBe(KNOWN_GOOD_VERSIONS[name as keyof typeof KNOWN_GOOD_VERSIONS]);
+    }
     expect(deps).toMatchObject({
-      react: "^19.2.0",
-      "react-dom": "^19.2.0",
-      "@types/react": "^19.2.0",
+      react: expect.stringMatching(/^\^19\./),
+      "react-dom": deps.react,
+      "@types/react": expect.stringMatching(/^\^19\./),
       tailwindcss: expect.stringMatching(/^\^4\./),
       "@tailwindcss/vite": deps.tailwindcss,
       "tw-animate-css": expect.any(String),

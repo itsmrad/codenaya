@@ -94,6 +94,8 @@ export const missingReferencedFiles = (files: ProjectFile[]): string[] => {
 const SOURCE_FILE = /\.(?:[cm]?[jt]sx?)$/;
 const IMPORT_SPECIFIER =
   /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'`]([^"'`\n]+)["'`]/g;
+// Tailwind v4 CSS pulls packages in too: `@import "tw-animate-css"`, `@plugin "@tailwindcss/typography"`.
+const CSS_IMPORT = /@(?:import|plugin)\s+(?:url\(\s*)?["']([^"'\n]+)["']/g;
 const BUILTINS = new Set(builtinModules);
 
 /** `react-dom/client` → `react-dom`, `@radix-ui/react-slot/x` → `@radix-ui/react-slot`. */
@@ -106,7 +108,7 @@ const packageName = (specifier: string): string | null => {
 };
 
 /**
- * Describes each package the project's code imports but its package.json
+ * Describes each package the project's code or CSS imports but its package.json
  * doesn't declare, e.g. `@tailwindcss/vite (imported by vite.config.ts)`.
  */
 export const undeclaredPackages = (files: ProjectFile[]): string[] => {
@@ -123,12 +125,18 @@ export const undeclaredPackages = (files: ProjectFile[]): string[] => {
   const nestedPackages = files
     .filter((file) => file.path.endsWith("/package.json"))
     .map((file) => file.path.slice(0, -"package.json".length));
+  const paths = new Set(files.map((file) => file.path));
   const undeclared = new Map<string, string>();
 
   for (const file of files) {
-    if (!SOURCE_FILE.test(file.path) || file.path.endsWith(".d.ts")) continue;
     if (nestedPackages.some((dir) => file.path.startsWith(dir))) continue;
-    for (const [, specifier] of stripComments(file.content).matchAll(IMPORT_SPECIFIER)) {
+    const isCss = file.path.endsWith(".css");
+    if (!isCss && (!SOURCE_FILE.test(file.path) || file.path.endsWith(".d.ts"))) continue;
+    for (const [, specifier] of stripComments(file.content).matchAll(
+      isCss ? CSS_IMPORT : IMPORT_SPECIFIER,
+    )) {
+      // CSS resolves `@import "theme.css"` relative to the file before trying a package.
+      if (isCss && paths.has(posix.join(posix.dirname(file.path), specifier))) continue;
       const name = packageName(specifier);
       if (name && !declared.has(name) && !undeclared.has(name)) {
         undeclared.set(name, file.path);

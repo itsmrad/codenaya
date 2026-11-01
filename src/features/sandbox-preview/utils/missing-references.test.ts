@@ -86,6 +86,38 @@ describe("undeclaredPackages", () => {
     ]);
   });
 
+  it("names a package the starter's CSS imports after package.json dropped it (#331)", () => {
+    const files = starter().map((file) =>
+      file.path === "package.json"
+        ? { ...file, content: file.content.replace(/\s*"tw-animate-css": "[^"]+",?/, "") }
+        : file,
+    );
+    expect(undeclaredPackages(files)).toEqual(["tw-animate-css (imported by src/index.css)"]);
+  });
+
+  it("reads CSS @import and @plugin, skipping local files and URLs", () => {
+    const files = withPackageJson({ devDependencies: { tailwindcss: "^4" } }, [
+      {
+        path: "src/styles/app.css",
+        content: [
+          '@import "tailwindcss";',
+          '@import "theme.css";',
+          '@import "./tokens.css";',
+          '@import url("https://fonts.googleapis.com/css2?family=Inter");',
+          '@import url("@fontsource/inter/400.css");',
+          '@plugin "@tailwindcss/typography";',
+          '/* @import "commented-out"; */',
+        ].join("\n"),
+      },
+      { path: "src/styles/theme.css", content: "" },
+      { path: "src/styles/tokens.css", content: "" },
+    ]);
+    expect(undeclaredPackages(files)).toEqual([
+      "@fontsource/inter (imported by src/styles/app.css)",
+      "@tailwindcss/typography (imported by src/styles/app.css)",
+    ]);
+  });
+
   it("reads package names from subpaths, scopes, dynamic imports and require", () => {
     const files = withPackageJson({ dependencies: { react: "18" } }, [
       {
