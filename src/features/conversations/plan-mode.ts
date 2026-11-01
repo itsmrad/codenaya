@@ -1,3 +1,5 @@
+import { STUCK_REASONS, type StuckRun } from "./agent-steps";
+
 /**
  * Plan mode (#120): the agent replies with a build plan and changes nothing.
  * Shared by the composer, the messages route and both message processors.
@@ -33,3 +35,20 @@ The user will review the plan and click "Build this plan" to have it built.`;
 
 /** The build request sent when the user accepts a plan. */
 export const buildPlanMessage = (plan: string) => `Build this plan:\n\n${plan}`;
+
+/**
+ * The plan-mode message "Diagnose in Plan mode" pre-fills for a stuck run
+ * (#306). Error recipes (#334) can add the likely cause of `error` here.
+ */
+export const diagnoseStuckMessage = (
+  stuck: Pick<StuckRun, "reason" | "error">,
+  filePath?: string,
+) =>
+  [
+    `The last run got stuck: ${STUCK_REASONS[stuck.reason]}.`,
+    stuck.error && `The error:\n${stuck.error}`,
+    filePath && `File: ${filePath}`,
+    "Find the root cause before changing anything, and plan a different approach.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
