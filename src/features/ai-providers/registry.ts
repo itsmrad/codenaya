@@ -45,6 +45,8 @@ export interface AiProviderMeta {
   defaultModel?: string;
   /** Small, cheap model for conversation titles. Custom uses its first model. */
   titleModel?: string;
+  /** `false` omits `parallel_tool_calls`, for an OpenAI-format endpoint that rejects it. On when unset. */
+  parallelToolCalls?: boolean;
 }
 
 /** Limits on user-entered model ids for a custom endpoint. */

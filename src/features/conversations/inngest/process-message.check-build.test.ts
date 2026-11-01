@@ -24,7 +24,7 @@ vi.mock("@/lib/convex-client", async () => {
 });
 
 import { BUILD_CHECK_NUDGE } from "./build-check-gate";
-import { drive, text } from "./process-message.driver";
+import { drive, text, toolCall } from "./process-message.driver";
 
 let projectFiles: Array<{ _id: string; name: string; type: "file"; content: string }>;
 
@@ -37,21 +37,6 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectFilesWithUrls": () => projectFiles,
   "system:getProjectSkills": () => [],
 };
-
-const toolCall = (name: string, args: Record<string, unknown> = {}) => ({
-  choices: [
-    {
-      message: {
-        role: "assistant",
-        content: null,
-        tool_calls: [
-          { id: `call_${name}`, type: "function", function: { name, arguments: JSON.stringify(args) } },
-        ],
-      },
-      finish_reason: "tool_calls",
-    },
-  ],
-});
 
 const writeMain = (content: string) => {
   projectFiles = [{ _id: "f1", name: "main.ts", type: "file", content }];

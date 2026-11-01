@@ -7,6 +7,8 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../convex/_generated/api";
 import {
   CODING_AGENT_SYSTEM_PROMPT,
+  MAX_AGENT_STEPS,
+  STEP_BUDGET_NOTE,
   TITLE_GENERATOR_SYSTEM_PROMPT
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
@@ -31,6 +33,7 @@ import {
   keyFailureMessage,
   resolveRunModel,
 } from '@/features/ai-providers/server/resolve-run-model';
+import { withoutToolCalls } from '@/features/ai-providers/server/agentkit-model';
 import type { ModelPricing } from '@/features/ai-providers/catalog';
 import { costUsd, usageOfResponse } from '@/features/billing/credits';
 import {
@@ -84,6 +87,9 @@ interface MessageEvent {
   /** Plan mode (#120): read-only tools, and the reply is a plan. */
   mode?: MessageMode;
 };
+
+/** The agent that runs the last step, with tools off. */
+const SUMMARY_AGENT_NAME = "codenaya-summary";
 
 /**
  * The model's reasoning, which AgentKit drops when it parses the response.
@@ -643,21 +649,24 @@ export const processMessage = inngest.createFunction(
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
 
+    // Re-validated by resolveRunModel: the event is the boundary this function
+    // trusts, and anything holding the event key can send one.
+    const codingModel = runModel.coding(0.3);
+
     // Create the coding agent with file tools
-    const codingAgent = createAgent({
+    const agentOptions: Parameters<typeof createAgent>[0] = {
       name: "codenaya",
       description: "An expert AI coding assistant",
       system: systemPrompt,
-      // Re-validated by resolveRunModel: the event is the boundary this function
-      // trusts, and anything holding the event key can send one.
-      model: runModel.coding(0.3),
+      model: codingModel,
       // Plan mode is enforced here, not just asked for in the prompt.
       tools: planMode
         ? tools.filter((tool) => PLAN_MODE_TOOLS.has(tool.name))
         : tools,
       lifecycle: {
-        onStart: ({ prompt, history }) => {
-          const nudge = buildCheckGate.takeNudge();
+        onStart: ({ agent, prompt, history }) => {
+          const nudge =
+            agent.name === SUMMARY_AGENT_NAME ? STEP_BUDGET_NOTE : buildCheckGate.takeNudge();
           return {
             prompt: withImageParts(prompt, imageUrls),
             history: [
@@ -667,8 +676,13 @@ export const processMessage = inngest.createFunction(
             stop: false,
           };
         },
-        onResponse: async ({ result, network }) => {
+        onResponse: async ({ agent, result, network }) => {
           await recordUsage(result.raw, runModel.metering.coding);
+          // The last step must not write without a build check left to run;
+          // this holds when a provider ignores tool_choice "none".
+          if (agent.name === SUMMARY_AGENT_NAME) {
+            result.output = result.output.filter((m) => m.type !== "tool_call");
+          }
           const calls = result.output.flatMap((m) =>
             m.type === "tool_call" ? m.tools : [],
           );
@@ -758,15 +772,22 @@ export const processMessage = inngest.createFunction(
           return result;
         },
       },
+    };
+    const codingAgent = createAgent(agentOptions);
+    // The run's last step: the same agent with tools off, so it ends with a summary.
+    const summaryAgent = createAgent({
+      ...agentOptions,
+      name: SUMMARY_AGENT_NAME,
+      model: withoutToolCalls(codingModel),
     });
 
-    // Create network with single agent
     const network = createNetwork({
       name: "codenaya-network",
-      agents: [codingAgent],
-      maxIter: 20,
-      router: ({ network }) => {
-        const lastResult = network.state.results.at(-1);
+      agents: [codingAgent, summaryAgent],
+      maxIter: MAX_AGENT_STEPS,
+      router: ({ network, callCount }) => {
+        const { results } = network.state;
+        const lastResult = results.at(-1);
         const hasTextResponse = lastResult?.output.some(
           (m) => m.type === "text" && m.role === "assistant"
         );
@@ -774,14 +795,18 @@ export const processMessage = inngest.createFunction(
           (m) => m.type === "tool_call"
         );
 
+        // callCount, not results: seeded history would count as steps.
+        const lastStep = callCount >= MAX_AGENT_STEPS - 1;
+
         // Stop routing to this agent if there's a final text response without
-        // tool calls, unless files changed since the last passing build check.
+        // tool calls, unless files changed since the last passing build check
+        // and there are steps left for it.
         if (hasTextResponse && !hasToolCalls) {
-          return buildCheckGate.shouldContinue(network.state.results)
+          return !lastStep && buildCheckGate.shouldContinue(results)
             ? codingAgent
             : undefined;
         }
-        return codingAgent;
+        return lastStep ? summaryAgent : codingAgent;
       }
     });
 
