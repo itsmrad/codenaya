@@ -73,6 +73,24 @@ describe("detectLoop", () => {
     expect(detectLoop([...rounds, passedBuild(), ...rounds, write(ID_A)])).toBeNull();
   });
 
+  it("starts syntax error counts over after a passing build check", () => {
+    const broken = write(ID_A, syntaxNote("App.tsx 1:5 ')' expected."));
+    const round = () => [broken, write(ID_A), passedBuild()];
+    expect(detectLoop([...round(), ...round(), broken])).toBeNull();
+    expect(detectLoop([...round(), broken, broken, broken])).toMatchObject({
+      reason: "repeated-syntax-error",
+    });
+  });
+
+  it("starts repeated error counts over after a passing build check", () => {
+    const notFound = () => call("readFiles", 'Error: File with ID "missing" not found.');
+    const round = () => [notFound(), notFound(), passedBuild()];
+    expect(detectLoop([...round(), ...round(), notFound()])).toBeNull();
+    expect(detectLoop([...round(), notFound(), notFound(), notFound()])).toMatchObject({
+      reason: "repeated-error",
+    });
+  });
+
   it("counts writes per file, and not failed writes", () => {
     const rounds = ["alpha", "beta", "gamma", "delta"].flatMap((what, i) => [
       write(i % 2 ? ID_A : ID_B),

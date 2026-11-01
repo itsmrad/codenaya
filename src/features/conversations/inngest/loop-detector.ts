@@ -126,8 +126,11 @@ export const detectLoop = (results: ToolResults[]): StuckRun | null => {
       }
       continue;
     }
+    // A passing check means the run made progress: earlier failures are resolved.
     if (call.name === "checkBuild" && buildCheckLabel(call.content)) {
       writes.clear();
+      syntax.clear();
+      errors.clear();
       continue;
     }
 
