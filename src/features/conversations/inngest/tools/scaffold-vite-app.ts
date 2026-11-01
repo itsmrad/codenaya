@@ -29,7 +29,8 @@ export const createScaffoldViteAppTool = ({
     description:
       "Write the known-good Vite + React + TypeScript + Tailwind + shadcn starter into the project root: " +
       VITE_REACT_STARTER.map((file) => file.path).join(", ") +
-      ". It boots in the preview as-is. Call it first when starting a new Vite + React app, then extend it. Files that already exist are kept.",
+      ". It boots in the preview as-is. Call it first when starting a new Vite + React app, then extend it. Files that already exist are kept. " +
+      "The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>.",
     parameters: z.object({}),
     handler: async (_params, { step: toolStep }) => {
       try {
