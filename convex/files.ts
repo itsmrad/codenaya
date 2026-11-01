@@ -51,7 +51,7 @@ export const assertProjectFolder = async (
 };
 
 /** The caller's file and its project, which must not be mid-deletion (#212). */
-const getOwnedFile = async (
+export const getOwnedFile = async (
   ctx: QueryCtx,
   id: Id<"files">,
   ownerId: string

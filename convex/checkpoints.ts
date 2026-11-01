@@ -13,7 +13,7 @@ import {
   withContents,
   writeFileContent,
 } from "./fileContents";
-import { deleteFileTree, findSibling, MAX_PROJECT_FILES } from "./files";
+import { deleteFileTree, findSibling, getOwnedFile, MAX_PROJECT_FILES } from "./files";
 import { releaseBlobs, releaseStorageIfUnreferenced } from "./projectCascade";
 import { getOwnedProject } from "./projects";
 
@@ -92,30 +92,36 @@ async function deleteCheckpoint(
 }
 
 /**
- * Snapshots the project's files before the run that writes `messageId`.
- * Idempotent per message, so a replayed run step doesn't snapshot its own
- * edits. Keeps the newest MAX_CHECKPOINTS_PER_PROJECT.
+ * Snapshots the project's files before the run that writes `messageId`, or,
+ * without one, before a restore or manual delete (#259). Idempotent per
+ * message, so a replayed run step doesn't snapshot its own edits. Keeps the
+ * newest MAX_CHECKPOINTS_PER_PROJECT, never pruning `keep`.
  */
 export async function createCheckpoint(
   ctx: MutationCtx,
   args: {
     projectId: Id<"projects">;
-    messageId: Id<"messages">;
+    messageId?: Id<"messages">;
     label: string;
+    /** A checkpoint the caller still needs, e.g. the one being restored. */
+    keep?: Id<"checkpoints">;
   },
 ) {
-  const existing = await ctx.db
-    .query("checkpoints")
-    .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
-    .first();
-  if (existing) return existing._id;
+  const { messageId } = args;
+  if (messageId) {
+    const existing = await ctx.db
+      .query("checkpoints")
+      .withIndex("by_message", (q) => q.eq("messageId", messageId))
+      .first();
+    if (existing) return existing._id;
+  }
 
   const files = withPaths(
     await withContents(ctx, args.projectId, await projectFiles(ctx, args.projectId)),
   );
   const checkpointId = await ctx.db.insert("checkpoints", {
     projectId: args.projectId,
-    messageId: args.messageId,
+    ...(messageId ? { messageId } : {}),
     label: args.label.trim().slice(0, MAX_LABEL_LENGTH),
     fileCount: files.filter(({ file }) => file.type === "file").length,
   });
@@ -134,10 +140,11 @@ export async function createCheckpoint(
     .query("checkpoints")
     .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
     .order("desc")
-    // Every snapshot prunes, so at most one is over the cap.
-    .take(MAX_CHECKPOINTS_PER_PROJECT + 1);
+    // Every snapshot prunes, so at most one is over the cap, two when the
+    // previous snapshot kept a checkpoint past it.
+    .take(MAX_CHECKPOINTS_PER_PROJECT + 2);
   for (const checkpoint of stale.slice(MAX_CHECKPOINTS_PER_PROJECT)) {
-    await deleteCheckpoint(ctx, checkpoint);
+    if (checkpoint._id !== args.keep) await deleteCheckpoint(ctx, checkpoint);
   }
 
   return checkpointId;
@@ -259,12 +266,43 @@ async function assertNoRunningAgent(
   }
 }
 
+/**
+ * Restores a checkpoint. Snapshots the current files first, in the same
+ * transaction, and returns that snapshot's id so the restore can be undone
+ * by restoring it (#259).
+ */
 export const restore = mutation({
   args: { checkpointId: v.id("checkpoints") },
   handler: async (ctx, args) => {
     const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
     await assertNoRunningAgent(ctx, checkpoint.projectId, "restoring");
+    const undoCheckpointId = await createCheckpoint(ctx, {
+      projectId: checkpoint.projectId,
+      label: "Before restore",
+      keep: checkpoint._id,
+    });
     await restoreCheckpoint(ctx, checkpoint);
+    return undoCheckpointId;
+  },
+});
+
+/**
+ * Deletes a file or folder from the explorer. Snapshots the project first,
+ * in the same transaction, and returns the snapshot's id so the delete can
+ * be undone by restoring it (#259).
+ */
+export const deleteFileWithUndo = mutation({
+  args: { id: v.id("files") },
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+    const { file } = await getOwnedFile(ctx, args.id, identity.subject);
+    const undoCheckpointId = await createCheckpoint(ctx, {
+      projectId: file.projectId,
+      label: `Before deleting ${file.name}`,
+    });
+    await deleteFileTree(ctx, file);
+    await ctx.db.patch("projects", file.projectId, { updatedAt: Date.now() });
+    return undoCheckpointId;
   },
 });
 
@@ -371,7 +409,9 @@ async function liveState(ctx: QueryCtx, projectId: Id<"projects">, targets: stri
 
 /** The paths the checkpoint's run wrote (a folder stands for its contents). */
 const runTargets = async (ctx: QueryCtx, checkpoint: Doc<"checkpoints">) =>
-  runWrittenPaths((await ctx.db.get("messages", checkpoint.messageId))?.steps ?? []);
+  checkpoint.messageId
+    ? runWrittenPaths((await ctx.db.get("messages", checkpoint.messageId))?.steps ?? [])
+    : [];
 
 /**
  * The files the checkpoint's run changed, before and after it (#225), or just

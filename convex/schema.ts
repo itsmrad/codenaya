@@ -213,7 +213,9 @@ export default defineSchema({
    */
   checkpoints: defineTable({
     projectId: v.id("projects"),
-    messageId: v.id("messages"),
+    // The run it was taken before. Unset for a snapshot taken before a
+    // restore or a manual delete, so that action can be undone (#259).
+    messageId: v.optional(v.id("messages")),
     // The prompt that started the run, for the history list.
     label: v.string(),
     fileCount: v.number(),
