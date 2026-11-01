@@ -105,6 +105,14 @@ describe("writeFiles", () => {
     ]);
   });
 
+  it("pins package.json to the known-good versions, like createFiles (#331)", async () => {
+    const result = await write([{ path: "package.json", content: JSON.stringify({ dependencies: { react: "latest" } }) }]);
+
+    expect(result).toContain("Pinned to the starter's known-good versions in package.json: react");
+    const [written] = mutationsNamed("updateFile") as Array<{ content: string }>;
+    expect(JSON.parse(written.content).dependencies.react).not.toBe("latest");
+  });
+
   it("refuses a folder path, a path inside a file and a .. path, and writes the rest", async () => {
     const result = await write([
       { path: "src", content: "x" },

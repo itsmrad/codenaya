@@ -291,9 +291,12 @@ export async function takePromoRun({
 /** A run's key could not be used. `message` is written as the assistant reply. */
 export class ProviderKeyError extends Error {}
 
+/** Ends every key-failure reply, so history can leave those turns out. */
+export const KEY_FAILURE_SUFFIX = "Your request was not sent to Codenaya's models.";
+
 export const keyFailureMessage = (reason: string) =>
   `${reason} Update it in [Settings → AI providers](${AI_PROVIDERS_SETTINGS_PATH}) and try again. ` +
-  "Your request was not sent to Codenaya's models.";
+  KEY_FAILURE_SUFFIX;
 
 type AgentKitModel = ReturnType<typeof buildAgentKitModel>;
 

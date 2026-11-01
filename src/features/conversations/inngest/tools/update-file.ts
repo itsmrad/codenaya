@@ -6,6 +6,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
+import { checkPackageVersions } from "./package-versions";
 import { resolveFileRef } from "./paths";
 import { syntaxErrorNote } from "./syntax-error";
 
@@ -56,16 +57,19 @@ export const createUpdateFileTool = ({
             return `Error: "${file.name}" is a folder, not a file. You can only update file contents.`;
           }
 
+          const { content: checkedContent, note: versionNote } = checkPackageVersions(file.name, content);
+
           await convex.mutation(api.system.updateFile, {
             internalKey,
             projectId,
             fileId: file._id,
-            content,
+            content: checkedContent,
           });
 
           return (
             `File "${file.name}" updated successfully` +
-            syntaxErrorNote([{ name: file.name, content }])
+            syntaxErrorNote([{ name: file.name, content }]) +
+            versionNote
           );
         });
       } catch (error) {

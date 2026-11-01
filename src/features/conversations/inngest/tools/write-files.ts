@@ -12,6 +12,7 @@ import {
   parseAgentPath,
   splitPath,
 } from "./paths";
+import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface WriteFilesToolOptions {
@@ -55,6 +56,7 @@ export const createWriteFilesTool = ({ projectId, internalKey }: WriteFilesToolO
           const { byPath } = await loadProjectTree(internalKey, projectId);
           const ensureFolder = createFolderEnsurer(internalKey, projectId, byPath);
           const lines: string[] = [];
+          const notes: string[] = [];
           const written: { name: string; content: string }[] = [];
 
           for (const file of rootLast(parsed.data.files)) {
@@ -75,21 +77,25 @@ export const createWriteFilesTool = ({ projectId, internalKey }: WriteFilesToolO
               continue;
             }
 
+            // Same known-good versions as createFiles and updateFile (#331).
+            const { dir, name } = splitPath(path);
+            const { content, note } = checkPackageVersions(name, file.content);
+            if (note) notes.push(note);
+
             if (existing) {
               await convex.mutation(api.system.updateFile, {
                 internalKey,
                 projectId,
                 fileId: existing._id,
-                content: file.content,
+                content,
               });
               lines.push(`Updated ${path}`);
             } else {
-              const { dir, name } = splitPath(path);
               const [result] = await convex.mutation(api.system.createFiles, {
                 internalKey,
                 projectId,
                 parentId: await ensureFolder(dir),
-                files: [{ name, content: file.content }],
+                files: [{ name, content }],
               });
               if (result?.error) {
                 lines.push(`Error: ${path}: ${result.error}`);
@@ -98,10 +104,10 @@ export const createWriteFilesTool = ({ projectId, internalKey }: WriteFilesToolO
               byPath.set(path, { _id: result.fileId as Id<"files">, type: "file" });
               lines.push(`Created ${path}`);
             }
-            written.push({ name: path, content: file.content });
+            written.push({ name: path, content });
           }
 
-          return lines.join("\n") + syntaxErrorNote(written);
+          return lines.join("\n") + syntaxErrorNote(written) + notes.join("");
         });
       } catch (error) {
         return `Error writing files: ${error instanceof Error ? error.message : "Unknown error"}`;
