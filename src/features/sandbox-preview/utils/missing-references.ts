@@ -130,7 +130,8 @@ export const undeclaredPackages = (files: ProjectFile[]): string[] => {
 
   for (const file of files) {
     if (nestedPackages.some((dir) => file.path.startsWith(dir))) continue;
-    const isCss = file.path.endsWith(".css");
+    // Vite serves public/ as-is, so its CSS imports are never resolved as packages.
+    const isCss = file.path.endsWith(".css") && !file.path.startsWith("public/");
     if (!isCss && (!SOURCE_FILE.test(file.path) || file.path.endsWith(".d.ts"))) continue;
     for (const [, specifier] of stripComments(file.content).matchAll(
       isCss ? CSS_IMPORT : IMPORT_SPECIFIER,

@@ -95,7 +95,7 @@ describe("undeclaredPackages", () => {
     expect(undeclaredPackages(files)).toEqual(["tw-animate-css (imported by src/index.css)"]);
   });
 
-  it("reads CSS @import and @plugin, skipping local files and URLs", () => {
+  it("reads CSS @import and @plugin, skipping local files, URLs and public/", () => {
     const files = withPackageJson({ devDependencies: { tailwindcss: "^4" } }, [
       {
         path: "src/styles/app.css",
@@ -111,6 +111,7 @@ describe("undeclaredPackages", () => {
       },
       { path: "src/styles/theme.css", content: "" },
       { path: "src/styles/tokens.css", content: "" },
+      { path: "public/a.css", content: '@import "b.css";' },
     ]);
     expect(undeclaredPackages(files)).toEqual([
       "@fontsource/inter (imported by src/styles/app.css)",

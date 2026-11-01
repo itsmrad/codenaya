@@ -10,8 +10,10 @@ const majors = (range: string) =>
  * Checks a package.json the agent wrote against the known-good manifest (#331).
  * A listed package with no version (`latest`, `*`, `""`, another dist-tag) is
  * rewritten to the manifest range, since npm would resolve it to today's
- * newest major. A pinned but different major is only reported: an existing
- * project may be on Tailwind v3 or React 18 on purpose.
+ * newest major. So is a newer major than the manifest's: nobody has checked it
+ * runs (react-router 8 needs Node >=22.22, Vite 7 crashes the sandbox). An
+ * older major is only reported: an existing project may be on Tailwind v3 or
+ * React 18 on purpose.
  */
 export const checkPackageVersions = (
   fileName: string,
@@ -36,10 +38,12 @@ export const checkPackageVersions = (
       const known: string = KNOWN_GOOD_VERSIONS[name as keyof typeof KNOWN_GOOD_VERSIONS];
       // Protocols (workspace:, npm:, file:, git URLs) aren't registry ranges.
       if (/[:/]/.test(range)) continue;
-      if (!/\d/.test(range)) {
+      const knownMajor = majors(known)[0];
+      const rangeMajors = majors(range);
+      if (rangeMajors.length === 0 || Math.min(...rangeMajors) > knownMajor) {
         (deps as Record<string, string>)[name] = known;
         pinned.push(`${name} "${range}" → "${known}"`);
-      } else if (!majors(range).includes(majors(known)[0])) {
+      } else if (!rangeMajors.includes(knownMajor)) {
         warned.push(`${name} "${range}" (known-good: "${known}")`);
       }
     }
@@ -50,7 +54,7 @@ export const checkPackageVersions = (
     note += `\nPinned to the starter's known-good versions in package.json: ${pinned.join(", ")}.`;
   }
   if (warned.length > 0) {
-    note += `\nVersion check: ${warned.join(", ")} is not the known-good major. Use the known-good range unless this project is already on that major.`;
+    note += `\nVersion check: ${warned.join(", ")} ${warned.length > 1 ? "are" : "is"} not the known-good major. Use the known-good range unless this project is already on that major.`;
   }
   return {
     content: pinned.length > 0 ? `${JSON.stringify(pkg, null, 2)}\n` : content,

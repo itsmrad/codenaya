@@ -28,15 +28,37 @@ describe("checkPackageVersions", () => {
     expect(note).not.toContain("left-pad");
   });
 
-  it("warns on a different major but keeps it, since existing projects may be on it", () => {
-    const original = pkg({ "react-router": "^8.4.0", react: "^18 || ^19" }, { tailwindcss: "^3.4.0" });
+  it("rewrites a newer major than the manifest's, since nobody has checked it runs", () => {
+    const { content, note } = checkPackageVersions(
+      "package.json",
+      pkg({ "react-router": "^8.0.0" }, { vite: "^7.1.0" }),
+    );
+    const written = JSON.parse(content);
+
+    expect(written.dependencies["react-router"]).toBe(KNOWN_GOOD_VERSIONS["react-router"]);
+    expect(written.devDependencies.vite).toBe(KNOWN_GOOD_VERSIONS.vite);
+    expect(note).toContain(`react-router "^8.0.0" → "${KNOWN_GOOD_VERSIONS["react-router"]}"`);
+    expect(note).toContain(`vite "^7.1.0" → "${KNOWN_GOOD_VERSIONS.vite}"`);
+    expect(note).not.toContain("Version check");
+  });
+
+  it("warns on an older major but keeps it, since existing projects may be on it", () => {
+    const original = pkg(
+      { react: "^18.3.1", "lucide-react": "^0.468.0", "react-dom": "^18 || ^19" },
+      { tailwindcss: "^3.4.0" },
+    );
     const { content, note } = checkPackageVersions("package.json", original);
 
     expect(content).toBe(original);
-    expect(note).toContain('react-router "^8.4.0"');
+    expect(note).toContain('react "^18.3.1"');
+    expect(note).toContain('lucide-react "^0.468.0"');
     expect(note).toContain('tailwindcss "^3.4.0"');
-    expect(note).not.toContain("react \"");
+    expect(note).toContain("are not the known-good major");
+    expect(note).not.toContain("react-dom");
     expect(note).not.toContain("Pinned");
+    expect(checkPackageVersions("package.json", pkg({ react: "^18.3.1" })).note).toContain(
+      "is not the known-good major",
+    );
   });
 
   it("leaves matching majors, protocols, other files and invalid JSON alone", () => {
