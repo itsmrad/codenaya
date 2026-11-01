@@ -19,6 +19,8 @@ import { createCreateFilesTool } from './tools/create-files';
 import { createCreateFolderTool } from './tools/create-folder';
 import { createRenameFileTool } from './tools/rename-file';
 import { createDeleteFilesTool } from './tools/delete-files';
+import { createWriteFilesTool } from './tools/write-files';
+import { buildProjectTreePromptSection, getProjectFiles } from './tools/paths';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
 import { createSetEnvVarTool } from './tools/set-env-var';
 import { createLoadSkillTool } from './tools/load-skill';
@@ -498,13 +500,26 @@ export const processMessage = inngest.createFunction(
       }
     });
 
+    // The project's paths at run start (#292), so the agent addresses files by
+    // path without a listFiles call. Non-fatal: listFiles still works.
+    const projectTree = await step.run("get-project-tree", async () => {
+      try {
+        return buildProjectTreePromptSection(await getProjectFiles(internalKey, projectId));
+      } catch (error) {
+        console.error("[process-message] project tree failed", error);
+        return "";
+      }
+    });
+
     // Most stable first, so the cacheable prefix is shared across runs (#295):
-    // base, skill index and integrations, then forced skills and plan mode.
+    // base, skill index and integrations, then the project tree, forced
+    // skills and plan mode.
     // Conversation goes in messages (see onStart).
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
       buildSkillsPromptSection(skills),
       buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
+      projectTree,
       buildSkillsPromptSection([], forced, unavailable),
       planMode ? PLAN_MODE_PROMPT : "",
     ].join("");
@@ -586,6 +601,7 @@ export const processMessage = inngest.createFunction(
     const tools: Tool.Any[] = [
       createListFilesTool({ internalKey, projectId }),
       createReadFilesTool({ projectId, internalKey }),
+      createWriteFilesTool({ projectId, internalKey }),
       createUpdateFileTool({ projectId, internalKey }),
       createCreateFilesTool({ projectId, internalKey }),
       createCreateFolderTool({ projectId, internalKey }),

@@ -39,6 +39,19 @@ export const buildPathIndex = (files: PathIndexFile[]) => {
   return (id: string) => pathOf(id);
 };
 
+/**
+ * A project-relative path without a leading "./" or trailing "/", or undefined
+ * when it is absolute or has empty, "." or ".." segments (#292).
+ */
+export const normalizePath = (raw: string) => {
+  const path = raw.trim().replace(/^\.\//, "").replace(/\/$/, "");
+  if (raw.trim().startsWith("/")) return undefined;
+  const segments = path.split("/");
+  return segments.some((segment) => segment === "" || segment === "." || segment === "..")
+    ? undefined
+    : path;
+};
+
 const MAX_TARGETS = 20;
 const MAX_TEXT = 2000;
 const MAX_ERROR = 200;
@@ -74,21 +87,31 @@ export const describeToolCall = (
   const { name, input } = call;
   const paths = (ids: string[]) =>
     ids.map(pathOf).filter((path): path is string => Boolean(path));
+  const named = (raw: string[]) =>
+    raw.map(normalizePath).filter((path): path is string => Boolean(path));
 
   let targets: string[];
   switch (name) {
+    // Path inputs since #292; `fileId(s)` in calls recorded before it.
     case "readFiles":
     case "deleteFiles":
-      targets = paths(strings(input.fileIds));
+      targets = Array.isArray(input.paths) ? named(strings(input.paths)) : paths(strings(input.fileIds));
       break;
     case "updateFile":
-      targets = paths([str(input.fileId)]);
+      targets = "path" in input ? named([str(input.path)]) : paths([str(input.fileId)]);
       break;
     case "renameFile": {
-      const from = pathOf(str(input.fileId));
+      const from = "path" in input ? named([str(input.path)])[0] : pathOf(str(input.fileId));
       targets = from ? [from, str(input.newName)] : [];
       break;
     }
+    case "writeFiles":
+      targets = named(
+        (Array.isArray(input.files) ? input.files : []).map((file) =>
+          str((file as Record<string, unknown>)?.path),
+        ),
+      );
+      break;
     case "createFiles": {
       const parent = pathOf(str(input.parentId));
       const files = Array.isArray(input.files) ? input.files : [];
@@ -122,6 +145,7 @@ export const describeToolCall = (
 
 /** Tools whose finished calls change project files ("N files changed"). */
 export const FILE_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "writeFiles",
   "createFiles",
   "updateFile",
   "renameFile",

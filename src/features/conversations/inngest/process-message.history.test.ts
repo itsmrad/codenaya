@@ -29,13 +29,14 @@ import { drive, text, toolCall } from "./process-message.driver";
 type Stored = { _id: string; role: "user" | "assistant"; content: string; status?: string; imageUrls?: string[] };
 
 let recentMessages: Stored[] = [];
+let projectFiles: { _id: string; name: string; type: "file" | "folder"; parentId?: string }[] = [];
 
 const QUERIES: Record<string, () => unknown> = {
   "system:getConversationById": () => ({ title: "Existing chat" }),
   "system:getRecentMessages": () => recentMessages,
   "system:getProjectById": () => ({ ownerId: "user_1" }),
   "system:getProjectMcpConnections": () => [],
-  "system:getProjectFiles": () => [],
+  "system:getProjectFiles": () => projectFiles,
   "system:getProjectSkills": () => [],
 };
 
@@ -125,6 +126,18 @@ describe("processMessage conversation history", () => {
     ]);
     expect(request?.messages[0].role).toBe("system");
     expect(JSON.stringify(request?.messages[0])).not.toContain("Build a todo app");
+  });
+
+  it("puts the project's paths in the system prompt (#292)", async () => {
+    recentMessages = conversation();
+    projectFiles = [
+      { _id: "f2", name: "App.tsx", type: "file", parentId: "f1" },
+      { _id: "f1", name: "src", type: "folder" },
+    ];
+    const request = await run();
+    projectFiles = [];
+
+    expect(String(request?.messages[0].content)).toMatch(/## Project files\n.*\nsrc\/\nsrc\/App\.tsx$/);
   });
 
   it("keeps the system prompt byte-identical across runs with different history", async () => {
