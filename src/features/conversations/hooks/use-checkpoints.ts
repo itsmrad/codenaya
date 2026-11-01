@@ -19,20 +19,19 @@ export type RunChange = NonNullable<FunctionReturnType<typeof api.checkpoints.li
 
 /**
  * The files a run changed, with line counts (#225). Skipped without a
- * checkpoint. Null when there is no diff to show (too many files, or the query
- * failed): a failed diff must not throw and take the chat down with it.
+ * checkpoint. Null when the run touched too many files to diff; an Error when
+ * the query failed, returned rather than thrown so it can't take the chat down.
  */
 export const useRunChanges = (
   checkpointId: Id<"checkpoints"> | null | undefined,
-): RunChange[] | null | undefined => {
+): RunChange[] | null | undefined | Error => {
   // `useQueries` hands back a failure as an Error instead of throwing it.
   const queries = useMemo(() => {
     const request: RequestForQueries = {};
     if (checkpointId) request.changes = { query: api.checkpoints.listChanges, args: { checkpointId } };
     return request;
   }, [checkpointId]);
-  const result = useQueries(queries).changes;
-  return result instanceof Error ? null : result;
+  return useQueries(queries).changes;
 };
 
 /** One file's diff, or an Error when it failed to load (not thrown, see above). */

@@ -527,7 +527,8 @@ export const AgentRun = ({
   // Deletes count here though they have no chip, so a delete-only run can be reviewed.
   const wrote = status === "completed" && runWrittenPaths(toolSteps).length > 0;
   const [reviewOpen, setReviewOpen] = useState(false);
-  const changes = useRunChanges(wrote ? checkpointId : null);
+  const result = useRunChanges(wrote ? checkpointId : null);
+  const changes = result instanceof Error ? undefined : result;
   const delta = changes ? totalDelta(changes) : undefined;
   const filesChanged = changes?.length ?? changed;
   const settle =
@@ -655,9 +656,11 @@ export const AgentRun = ({
           note={
             checkpointId === null
               ? "History no longer available"
-              : changes === null
-                ? "Too many files to diff"
-                : undefined
+              : result instanceof Error
+                ? "Diff unavailable"
+                : changes === null
+                  ? "Too many files to diff"
+                  : undefined
           }
         />
       )}

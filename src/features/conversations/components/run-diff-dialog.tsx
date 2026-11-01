@@ -97,7 +97,8 @@ export const RunDiffDialog = ({
   /** An agent run is in progress. */
   revertDisabled: boolean;
 }) => {
-  const changes = useRunChanges(open ? checkpointId : null);
+  const result = useRunChanges(open ? checkpointId : null);
+  const changes = result instanceof Error ? null : result;
   const [selected, setSelected] = useState<string>();
   const [confirming, setConfirming] = useState(false);
   const revert = useRevertFile();

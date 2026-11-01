@@ -114,7 +114,8 @@ export const describeToolCall = (
       // MCP tools are namespaced `provider__tool`.
       targets = name.includes("__") ? [name.slice(name.indexOf("__") + 2)] : [];
   }
-  return targets.slice(0, MAX_TARGETS);
+  // Writes keep every path: a run's diff and revert are built from them (#225).
+  return FILE_WRITE_TOOLS.has(name) ? targets : targets.slice(0, MAX_TARGETS);
 };
 
 /** Tools whose finished calls change project files ("N files changed"). */

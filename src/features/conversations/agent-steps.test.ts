@@ -166,4 +166,14 @@ describe("runWrittenPaths", () => {
       ]),
     ).toEqual(["src/a.ts", "src/b.ts", "src/old.ts", "src/new.ts", "root.ts", "top.ts", "lib"]);
   });
+
+  it("keeps every path of a write over 20 files, so the diff is complete", () => {
+    const files = Array.from({ length: 25 }, (_, i) => ({ name: `f${i}.ts`, content: "" }));
+    const created = describeToolCall({ name: "createFiles", input: { parentId: ID_SRC, files } }, pathOf);
+    expect(created).toHaveLength(25);
+    expect(runWrittenPaths([step("createFiles", created)])).toHaveLength(25);
+    // Reads stay capped; they only label the row.
+    const ids = Array.from({ length: 25 }, () => ID_A);
+    expect(describeToolCall({ name: "readFiles", input: { fileIds: ids } }, pathOf)).toHaveLength(20);
+  });
 });
