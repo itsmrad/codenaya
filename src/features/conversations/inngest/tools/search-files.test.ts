@@ -53,13 +53,17 @@ it.each([
 ])("logs and rethrows other failures: %s", async (message) => {
   const error = new Error(message);
   mocks.query.mockRejectedValue(error);
-  await expect(createSearchFilesTool(options).handler({ pattern: "x" }, { step } as never)).rejects.toBe(error);
+  await expect(createSearchFilesTool(options).handler({ pattern: "x" }, { step } as never)).rejects.toThrow(message);
   expect(console.error).toHaveBeenCalledWith("[searchFiles] query failed", message);
 });
 
-it("redacts the internal key from logged validation errors", async () => {
+it("redacts the internal key from logged and propagated errors without retaining the original stack or cause", async () => {
   const error = new Error(`ArgumentValidationError: internalKey: ${options.internalKey}`);
   mocks.query.mockRejectedValue(error);
-  await expect(createSearchFilesTool(options).handler({ pattern: "x" }, { step } as never)).rejects.toBe(error);
+  await expect(createSearchFilesTool(options).handler({ pattern: "x" }, { step } as never)).rejects.toMatchObject({
+    message: "ArgumentValidationError: internalKey: [redacted]",
+    stack: expect.not.stringContaining(options.internalKey),
+  });
+  await expect(step.run.mock.results[0].value).rejects.not.toHaveProperty("cause");
   expect(console.error).toHaveBeenCalledWith("[searchFiles] query failed", "ArgumentValidationError: internalKey: [redacted]");
 });

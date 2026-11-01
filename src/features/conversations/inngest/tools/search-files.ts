@@ -29,9 +29,9 @@ export const createSearchFilesTool = (options: { projectId: Id<"projects">; inte
           return await convex.query(api.files.searchFiles, { ...options, ...parsed.data });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          console.error("[searchFiles] query failed", options.internalKey
-            ? message.replaceAll(options.internalKey, "[redacted]") : message);
-          if (!searchLimitError.test(message)) throw error;
+          const redacted = options.internalKey ? message.replaceAll(options.internalKey, "[redacted]") : message;
+          console.error("[searchFiles] query failed", redacted);
+          if (!searchLimitError.test(message)) throw new Error(redacted);
           // Persist execution/read-limit errors so the same expensive query is not retried.
           return "Error: search too expensive; narrow pathGlob or use a literal pattern";
         }

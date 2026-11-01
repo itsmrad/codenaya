@@ -136,6 +136,7 @@ test("regex checks only the first 4,000 characters per line and reports the cuto
   expect(regex).not.toContain("minified.js:1:");
   expect(regex).toContain("Search truncated");
   expect(regex).toContain("Regex search checked only the first 4,000 characters of each line");
+  expect(regex).toContain("End anchors ($, \\b) apply at the cutoff");
   expect(await search({ pattern: "prefix", isRegex: true })).toContain("minified.js:1: prefix");
   const literal = await search({ pattern: "suffix" });
   expect(literal).toContain("minified.js:1:");

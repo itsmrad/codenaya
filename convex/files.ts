@@ -433,7 +433,7 @@ export const searchFiles = query({
     return [
       ...output,
       ...(truncated || regexLinesTruncated ? [SEARCH_TRUNCATED] : []),
-      ...(regexLinesTruncated ? ["Regex search checked only the first 4,000 characters of each line. Use literal search to inspect the rest."] : []),
+      ...(regexLinesTruncated ? ["Regex search checked only the first 4,000 characters of each line. End anchors ($, \\b) apply at the cutoff. Use literal search to inspect the rest."] : []),
     ].join("\n") || "No matches found.";
   },
 });
