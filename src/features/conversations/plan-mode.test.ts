@@ -11,7 +11,7 @@ describe("diagnoseStuckMessage", () => {
       },
       "src/App.tsx",
     );
-    expect(message).toContain("the same error came back three times");
+    expect(message).toContain("the same error came back 3 times");
     expect(message).toContain('Failed to resolve import "./hooks"');
     expect(message).toContain("Likely cause (unresolved-import)");
     expect(message).toContain("File: src/App.tsx");
@@ -19,7 +19,7 @@ describe("diagnoseStuckMessage", () => {
 
   it("leaves out what the run did not record", () => {
     expect(diagnoseStuckMessage({ reason: "repeated-write" })).toBe(
-      "The last run got stuck: the same file was rewritten four times.\n\n" +
+      "The last run got stuck: the same file was rewritten 4 times without fixing it.\n\n" +
         "Find the root cause before changing anything, and plan a different approach.",
     );
   });
