@@ -6,6 +6,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
+import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface EditFileToolOptions {
@@ -101,16 +102,20 @@ export const createEditFileTool = ({ projectId, internalKey }: EditFileToolOptio
             return `Error: ${result.error}. Nothing was written to "${file.name}".`;
           }
 
+          // Same known-good versions as createFiles and updateFile (#331).
+          const { content, note: versionNote } = checkPackageVersions(file.name, result.content);
+
           await convex.mutation(api.system.updateFile, {
             internalKey,
             projectId,
             fileId: fileId as Id<"files">,
-            content: result.content,
+            content,
           });
 
           return (
             `File "${file.name}" edited successfully (${edits.length} edit${edits.length === 1 ? "" : "s"})` +
-            syntaxErrorNote([{ name: file.name, content: result.content }])
+            syntaxErrorNote([{ name: file.name, content }]) +
+            versionNote
           );
         });
       } catch (error) {

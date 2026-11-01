@@ -75,6 +75,20 @@ describe("editFile tool", () => {
     });
   });
 
+  it("pins an edited package.json to the known-good versions (#331)", async () => {
+    mocks.query.mockResolvedValue({
+      _id: "f1",
+      name: "package.json",
+      type: "file",
+      content: '{ "dependencies": { "react": "^19.0.0" } }',
+    });
+    const result = await edit([{ oldText: '"^19.0.0"', newText: '"latest"' }]);
+
+    expect(result).toContain("Pinned to the starter's known-good versions in package.json: react");
+    const written = (mocks.mutation.mock.calls[0][1] as { content: string }).content;
+    expect(JSON.parse(written).dependencies.react).not.toBe("latest");
+  });
+
   it("writes nothing when an edit fails, and says what to do", async () => {
     mocks.query.mockResolvedValue({ _id: "f1", name: "App.tsx", type: "file", content: "a\n" });
     expect(
