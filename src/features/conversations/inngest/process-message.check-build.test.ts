@@ -139,17 +139,24 @@ describe("processMessage build-check gate", () => {
     projectFiles = [
       { _id: "f1", name: "package.json", type: "file", content: "{}" },
       { _id: "f2", name: "vite.config.ts", type: "file", content: "export default {};\n" },
+      { _id: "f3", name: "tsconfig.app.json", type: "file", content: "{}" },
     ];
     const { CommandExitError } = await import("e2b");
-    const build = { exitCode: 1, error: "", stdout: "", stderr: 'Failed to resolve import "./missing" from "src/App.tsx".' };
+    // tsc runs before the Vite build, so it reports a bad import first.
+    const build = {
+      exitCode: 2,
+      error: "",
+      stdout:
+        "/home/user/app/src/App.tsx(1,21): error TS2307: Cannot find module './missing' or its corresponding type declarations.\n",
+      stderr: "",
+    };
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
+      .mockRejectedValueOnce(new CommandExitError(build));
     mocks.createSandbox.mockResolvedValue({
       files: { makeDir: vi.fn(async () => true), write: vi.fn(async () => ({})) },
-      commands: {
-        run: vi
-          .fn()
-          .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
-          .mockRejectedValueOnce(new CommandExitError(build)),
-      },
+      commands: { run },
       kill: vi.fn(async () => {}),
     });
 
@@ -158,6 +165,7 @@ describe("processMessage build-check gate", () => {
       { data: text("**Notes:** the build fails on ./missing.") },
     ]);
 
+    expect(run.mock.calls[1][0]).toMatch(/^npx tsc --noEmit -p tsconfig\.app\.json && npx vite build$/);
     const checkResult = JSON.stringify(codingRequests(outcome.inferenceBodies)[1].messages);
     expect(checkResult).toContain("Likely cause (unresolved-import): ");
     expect(checkResult).toContain("Known fix: ");

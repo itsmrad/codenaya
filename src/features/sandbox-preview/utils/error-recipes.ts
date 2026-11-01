@@ -26,21 +26,24 @@ export interface ErrorExplanation {
 export const ERROR_RECIPES: readonly ErrorRecipe[] = [
   {
     id: "unresolved-import",
-    match: /failed to resolve import/i,
+    // Vite, then tsc (TS2307), which checkBuild runs before the Vite build.
+    match: /failed to resolve import|Cannot find module '[^']+' or its corresponding type declarations/i,
     cause: "An import points to a file that does not exist (wrong path or letter case) or to a package missing from package.json.",
     fix: "Correct the import path or create the missing file; for a package, add it to package.json dependencies.",
   },
   {
     id: "missing-named-export",
-    match: /does not provide an export named|is not exported by/i,
+    // Browser, Rollup, then tsc (TS2305, TS2614).
+    match: /does not provide an export named|is not exported by|has no exported member/i,
     cause: "A named import does not match what the module exports, usually a default export imported with braces or the reverse.",
     fix: "Match the import to the export: `import X from` for `export default`, `import { X } from` for `export const X`/`export function X`.",
   },
   {
     id: "process-not-defined",
-    match: /process is not defined/i,
+    // Browser, then tsc (TS2580).
+    match: /process is not defined|Cannot find name 'process'/i,
     cause: "Browser code reads `process.env`, which only exists in Node; Vite does not define `process` in the browser.",
-    fix: "Read env vars as `import.meta.env.VITE_NAME` (the name must start with VITE_) and keep server secrets out of browser code.",
+    fix: "Read env vars as `import.meta.env.VITE_NAME` (the name must start with VITE_) and keep server secrets out of browser code; do not add @types/node to silence it.",
   },
   {
     id: "router-context",
@@ -125,6 +128,7 @@ export const explainError = (text: string): ErrorExplanation[] =>
   }));
 
 const CAUSE_LINE = /^Likely cause \(([a-z0-9-]+)\):/gm;
+const RECIPE_IDS = new Set(ERROR_RECIPES.map((recipe) => recipe.id));
 
 /**
  * `shown` with a "Likely cause / Known fix" block for each recipe matched in
@@ -140,5 +144,13 @@ export const withErrorHints = (shown: string, source = shown) => {
   return `${shown}\n\n${hints.join("\n")}`;
 };
 
-/** The recipe ids in a text produced by `withErrorHints`. */
-export const recipeIdsIn = (text: string) => [...text.matchAll(CAUSE_LINE)].map((match) => match[1]);
+/**
+ * The recipe ids in a text produced by `withErrorHints`, deduplicated. Only
+ * known ids count: any tool result (a scraped page, a file) can contain the
+ * line, and the run record must stay small.
+ */
+export const recipeIdsIn = (text: string) => [
+  ...new Set(
+    [...text.matchAll(CAUSE_LINE)].map((match) => match[1]).filter((id) => RECIPE_IDS.has(id)),
+  ),
+];

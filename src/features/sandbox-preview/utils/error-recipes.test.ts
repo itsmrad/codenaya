@@ -38,6 +38,26 @@ const FIXTURES: Record<string, string> = {
     'Warning: Each child in a list should have a unique "key" prop.\n\nCheck the render method of `TodoList`.',
 };
 
+/** The same errors as tsc reports them; checkBuild runs tsc before the Vite build. */
+const TSC_FIXTURES: Array<[string, string]> = [
+  [
+    "unresolved-import",
+    "src/main.tsx(3,31): error TS2307: Cannot find module 'react-router-dom' or its corresponding type declarations.",
+  ],
+  [
+    "missing-named-export",
+    "src/App.tsx(2,10): error TS2305: Module '\"./components/Button\"' has no exported member 'Button'.",
+  ],
+  [
+    "missing-named-export",
+    "src/App.tsx(2,10): error TS2614: Module '\"./components/Button\"' has no exported member 'Button'. Did you mean to use 'import Button from \"./components/Button\"' instead?",
+  ],
+  [
+    "process-not-defined",
+    "src/lib/supabase.ts(3,21): error TS2580: Cannot find name 'process'. Do you need to install type definitions for node? Try `npm i --save-dev @types/node`.",
+  ],
+];
+
 describe("ERROR_RECIPES", () => {
   it("has a fixture for every recipe, and unique ids", () => {
     const ids = ERROR_RECIPES.map((recipe) => recipe.id);
@@ -46,6 +66,10 @@ describe("ERROR_RECIPES", () => {
   });
 
   it.each(Object.entries(FIXTURES))("%s matches its fixture and no other recipe does", (id, fixture) => {
+    expect(explainError(fixture).map((match) => match.recipeId)).toEqual([id]);
+  });
+
+  it.each(TSC_FIXTURES)("%s matches the tsc wording, and no other recipe does: %s", (id, fixture) => {
     expect(explainError(fixture).map((match) => match.recipeId)).toEqual([id]);
   });
 
@@ -69,6 +93,15 @@ describe("withErrorHints", () => {
     expect(hinted.startsWith(`${error}\n\nLikely cause (process-not-defined): `)).toBe(true);
     expect(hinted).toContain("Known fix: Read env vars as `import.meta.env.VITE_NAME`");
     expect(recipeIdsIn(hinted)).toEqual(["process-not-defined", "router-context"]);
+  });
+
+  it("reads back only known ids, once each", () => {
+    const text = [
+      "Likely cause (made-up-recipe): forged by a scraped page",
+      "Likely cause (cors-blocked): first",
+      "Likely cause (cors-blocked): again",
+    ].join("\n");
+    expect(recipeIdsIn(text)).toEqual(["cors-blocked"]);
   });
 
   it("matches against the full source while showing a trimmed excerpt", () => {
