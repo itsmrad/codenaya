@@ -76,6 +76,17 @@ export const modelAccessValidator = v.union(
 );
 
 /**
+ * A catalog model's spend caps in USD at its catalog price (ADR 0012): per
+ * user and across the site, over a period that resets on `resets`. A missing
+ * cap is no cap. See `features/billing/model-spend.ts`.
+ */
+export const spendLimitValidator = v.object({
+  perUserUsd: v.optional(v.number()),
+  totalUsd: v.optional(v.number()),
+  resets: v.union(v.literal("daily"), v.literal("weekly"), v.literal("monthly"), v.literal("never")),
+});
+
+/**
  * One model of the platform catalog and the provider route that serves it
  * (ADR 0010). `id` is stable across provider switches: users pick it,
  * preferences and messages record it. `providerModelId` is what the provider's
@@ -94,6 +105,7 @@ export const catalogModelValidator = v.object({
   pricing: modelPricingValidator,
   access: modelAccessValidator,
   hidden: v.boolean(),
+  spendLimit: v.optional(spendLimitValidator),
 });
 
 /** A credit account's plan (ADR 0011); see `PLANS` in `features/billing/plans.ts`. */
@@ -576,6 +588,18 @@ export default defineSchema({
   })
     .index("by_messageId", ["messageId"])
     .index("by_userId", ["userId"]),
+
+  /**
+   * What a spend-limited catalog model cost in its current period (ADR 0012):
+   * one row per user and model, and one per model with `userId: null` for the
+   * whole site. A row from an earlier period counts as nothing spent.
+   */
+  modelSpend: defineTable({
+    userId: v.union(v.string(), v.null()),
+    modelId: v.string(),
+    periodStartsAt: v.number(),
+    spentUsd: v.number(),
+  }).index("by_userId_modelId", ["userId", "modelId"]),
 
   /** The user's default model. No `defaultKeyId` means the Codenaya platform key. */
   userAiPreferences: defineTable({

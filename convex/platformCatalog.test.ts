@@ -132,6 +132,9 @@ describe("platformCatalog.save validation", () => {
     ["a fractional context length", [model("a", { contextLength: 1.5 })], {}],
     ["an empty name", [model("a", { name: " " })], {}],
     ["images on the Anthropic route", [model("a", { provider: "anthropic", vision: true })], {}],
+    ["a spend limit with no cap", [model("a", { spendLimit: { resets: "weekly" } })], {}],
+    ["a $0 spend cap", [model("a", { spendLimit: { perUserUsd: 0, resets: "weekly" } })], {}],
+    ["a NaN spend cap", [model("a", { spendLimit: { totalUsd: Number.NaN, resets: "never" } })], {}],
     ["a default that isn't listed", [model("a")], { defaultModelId: "b" }],
     ["a hidden default", [model("a", { hidden: true }), model("b")], { utilityModelId: "b" }],
     [

@@ -14,6 +14,7 @@ import {
   toDraft,
   togglePriceMode,
   toSaveBody,
+  toSpendLimit,
 } from "./catalog-draft";
 import { riskyPriceModelIds } from "./platform-models";
 
@@ -31,6 +32,9 @@ const row = (overrides: Partial<DraftModel> = {}): DraftModel => ({
   price: "8",
   input: "",
   output: "",
+  perUserLimit: "",
+  totalLimit: "",
+  limitResets: "monthly",
   ...overrides,
 });
 
@@ -228,5 +232,30 @@ describe("risky prices", () => {
       row({ id: "c", name: "C", price: "0" }),
     ]);
     expect(riskyModelNames(draft, saved)).toEqual(["B", "C"]);
+  });
+});
+
+describe("spend limits (ADR 0012)", () => {
+  it("saves only the caps that are set, and round-trips through the draft", () => {
+    expect(toSpendLimit(row())).toBeUndefined();
+    const limited = row({ perUserLimit: "1", totalLimit: "", limitResets: "weekly" });
+    expect(toSpendLimit(limited)).toEqual({ perUserUsd: 1, resets: "weekly" });
+
+    const [saved] = toSaveBody(draftOf([limited]), false).models;
+    expect(saved.spendLimit).toEqual({ perUserUsd: 1, resets: "weekly" });
+    expect(toSaveBody(draftOf([row()]), false).models[0]).not.toHaveProperty("spendLimit");
+    expect(toDraft({ models: [saved], defaultModelId: "m", utilityModelId: "m" }).models[0]).toMatchObject({
+      perUserLimit: "1",
+      totalLimit: "",
+      limitResets: "weekly",
+    });
+  });
+
+  it("blocks Save on a zero, negative or non-numeric cap", () => {
+    for (const bad of ["0", "-1", "abc"]) {
+      expect(draftProblems(draftOf([row({ totalLimit: bad })]))).toContainEqual(
+        expect.stringContaining("spend limits"),
+      );
+    }
   });
 });

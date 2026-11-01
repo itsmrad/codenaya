@@ -124,6 +124,7 @@ async function seedOwnedData(t: TestConvex, ownerId: string, files = 1) {
       dayStartsAt: now,
       dayUsed: 2,
     });
+    await ctx.db.insert("modelSpend", { userId: ownerId, modelId: "m", periodStartsAt: 0, spentUsd: 0.01 });
     const sealed = {
       kekProvider: "local",
       kekKeyId: "k1",
@@ -260,6 +261,7 @@ const OWNED_TABLES = [
   "projectSkillSettings",
   "creditLedger",
   "creditAccounts",
+  "modelSpend",
 ] as const;
 
 const countRows = (t: TestConvex) =>

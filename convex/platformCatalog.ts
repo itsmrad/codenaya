@@ -9,6 +9,7 @@ import {
 } from "../src/features/admin/platform-models";
 import type { CatalogModel, ModelPricing } from "../src/features/ai-providers/catalog";
 import { AI_PROVIDERS, MAX_MODEL_ID_LENGTH } from "../src/features/ai-providers/registry";
+import { MAX_SPEND_LIMIT_USD, type SpendLimit } from "../src/features/billing/model-spend";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, mutation, query, type QueryCtx } from "./_generated/server";
 import { type Admin, type AuditChange, requireAdmin, writeAudit } from "./admin";
@@ -82,6 +83,14 @@ function assertValidCatalog({ models, defaultModelId, utilityModelId }: Catalog)
     if (model.provider === "anthropic" && model.vision) {
       throw invalid(`${model.id} can't accept images on the Anthropic route`);
     }
+    const caps = model.spendLimit ? [model.spendLimit.perUserUsd, model.spendLimit.totalUsd] : [];
+    if (
+      model.spendLimit &&
+      (caps.every((cap) => cap === undefined) ||
+        !caps.every((cap) => cap === undefined || (Number.isFinite(cap) && cap > 0 && cap <= MAX_SPEND_LIMIT_USD)))
+    ) {
+      throw invalid(`Set at least one spend cap for ${model.id}, above $0 and at most $${MAX_SPEND_LIMIT_USD}`);
+    }
   }
   // Every user's runs may land on these, so they must be open to everyone. The
   // utility model may be hidden: a cheap model for titles that users don't pick.
@@ -103,6 +112,12 @@ const priceLabel = (pricing: ModelPricing) =>
     ? `$${pricing.usdPerMTok}/M`
     : `$${pricing.inputUsdPerMTok}/$${pricing.outputUsdPerMTok} per M`;
 
+/** "$1/user, $100 total, weekly". */
+const limitLabel = ({ perUserUsd, totalUsd, resets }: SpendLimit) =>
+  [perUserUsd !== undefined && `$${perUserUsd}/user`, totalUsd !== undefined && `$${totalUsd} total`, resets]
+    .filter(Boolean)
+    .join(", ");
+
 const route = (model: CatalogModel) => `${model.provider}:${model.providerModelId}`;
 
 /** The audited fields of a model, each as a short string. */
@@ -117,12 +132,14 @@ const MODEL_FIELDS = [
   "contextLength",
   "vision",
   "tools",
+  "spendLimit",
 ] as const;
 const ROUTE_FIELDS: readonly string[] = ["provider", "providerModelId"];
-const SUMMARIZED_FIELDS: readonly string[] = [...ROUTE_FIELDS, "pricing", "access", "hidden"];
+const SUMMARIZED_FIELDS: readonly string[] = [...ROUTE_FIELDS, "pricing", "access", "hidden", "spendLimit"];
 
 const fieldValue = (model: CatalogModel, field: (typeof MODEL_FIELDS)[number]) => {
   if (field === "pricing") return priceLabel(model.pricing);
+  if (field === "spendLimit") return model.spendLimit && limitLabel(model.spendLimit);
   return model[field] === undefined ? undefined : String(model[field]);
 };
 
@@ -161,6 +178,9 @@ function diffCatalog(before: Catalog | null, after: Catalog) {
     }
     if (changed.includes("access")) parts.push(`access ${m.id}: ${was.access} → ${m.access}`);
     if (changed.includes("hidden")) parts.push(`${m.hidden ? "hid" : "showed"} ${m.id}`);
+    if (changed.includes("spendLimit")) {
+      parts.push(`limit ${m.id}: ${fieldValue(was, "spendLimit") ?? "none"} → ${fieldValue(m, "spendLimit") ?? "none"}`);
+    }
     const edited = changed.filter((f) => !SUMMARIZED_FIELDS.includes(f));
     if (edited.length) parts.push(`edited ${m.id} (${edited.join(", ")})`);
   }

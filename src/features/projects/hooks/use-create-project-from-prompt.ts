@@ -10,6 +10,7 @@ import { detectCredential } from "@/features/integrations/credential-guard";
 import { useAgentModel } from "@/features/conversations/hooks/use-agent-model";
 import type { StarterTemplateId } from "@/features/templates/templates";
 import { INSUFFICIENT_CREDITS_CODE } from "@/features/billing/credits";
+import { MODEL_LIMIT_CODE } from "@/features/billing/model-spend";
 import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 
 const CREDENTIAL_ERROR =
@@ -70,6 +71,7 @@ export const useCreateProjectFromPrompt = () => {
           const refused =
             body.code === "ai_not_configured" ||
             body.code === INSUFFICIENT_CREDITS_CODE ||
+            body.code === MODEL_LIMIT_CODE ||
             isPromoRefusalCode(body.code);
           if (refused && body.error) {
             toast.error(body.error);

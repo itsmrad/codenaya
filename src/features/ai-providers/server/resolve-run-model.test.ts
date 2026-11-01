@@ -1,3 +1,4 @@
+import { getFunctionName } from "convex/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -731,5 +732,70 @@ describe("isProviderKeyRejection", () => {
     undefined,
   ])("leaves %o to the normal failure path", (error) => {
     expect(isProviderKeyRejection(error)).toBe(false);
+  });
+});
+
+describe("validateModelChoice: spend limits (ADR 0012)", () => {
+  const monthly = { perUserUsd: 1, totalUsd: 100, resets: "monthly" as const };
+  const now = Date.now();
+  const thisMonth = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1);
+  const limited = {
+    ...ROUTED_SAVED,
+    models: ROUTED_SAVED.models.map((model) =>
+      model.id === "x-ai/grok-4.7" || model.id === "anthropic/claude-opus-5.5"
+        ? { ...model, spendLimit: monthly }
+        : model,
+    ),
+  };
+  const spent = (user: number, total: number) => ({
+    user: { periodStartsAt: thisMonth, spentUsd: user },
+    total: { periodStartsAt: thisMonth, spentUsd: total },
+  });
+  const answer = (spend: ReturnType<typeof spent>) =>
+    mocks.query.mockImplementation(async (ref) => {
+      const name = getFunctionName(ref);
+      if (name === "modelSpend:getForServer") return spend;
+      if (name === "promoClaims:getForServer") return { opusRunsUsed: 0 };
+      return null;
+    });
+  const validate = (model: string) => validateModelChoice({ internalKey: "ik", userId: "user_1", model });
+
+  beforeEach(() => {
+    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-platform");
+    mocks.platform.mockReturnValue(limited);
+  });
+
+  it("runs a limited model under both caps, and asks for that model's spend", async () => {
+    answer(spent(0.5, 50));
+    expect(await validate("x-ai/grok-4.7")).toMatchObject({ modelId: "x-ai/grok-4.7" });
+    expect(mocks.query).toHaveBeenCalledWith(expect.anything(), {
+      internalKey: "ik",
+      userId: "user_1",
+      modelId: "x-ai/grok-4.7",
+    });
+  });
+
+  it("refuses with 402 model_limit_reached at the user's cap", async () => {
+    answer(spent(1, 50));
+    await expect(validate("x-ai/grok-4.7")).rejects.toMatchObject({
+      status: 402,
+      code: "model_limit_reached",
+      message: expect.stringContaining("your Grok 4.7 allowance this month"),
+    });
+  });
+
+  it("refuses a promo model at the site-wide cap, claim or not", async () => {
+    answer(spent(0, 100));
+    await expect(validate("anthropic/claude-opus-5.5")).rejects.toMatchObject({
+      code: "model_limit_reached",
+      message: expect.stringContaining("Claude Opus 5.5 has reached its usage limit"),
+    });
+  });
+
+  it("never reads spend for a model without a limit", async () => {
+    answer(spent(1_000, 1_000));
+    await validate("google/gemini-3.8-flash");
+    expect(mocks.query.mock.calls.map(([ref]) => getFunctionName(ref))).not.toContain("modelSpend:getForServer");
   });
 });
