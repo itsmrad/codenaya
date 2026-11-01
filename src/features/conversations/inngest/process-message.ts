@@ -7,7 +7,9 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../convex/_generated/api";
 import {
   CODING_AGENT_SYSTEM_PROMPT,
-  TITLE_GENERATOR_SYSTEM_PROMPT
+  MAX_AGENT_STEPS,
+  STARTER_IN_PLACE_NOTE,
+  STEP_BUDGET_NOTE,
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { createReadFilesTool } from './tools/read-files';
@@ -23,7 +25,7 @@ import { createSetEnvVarTool } from './tools/set-env-var';
 import { createLoadSkillTool } from './tools/load-skill';
 import { createScaffoldViteAppTool } from './tools/scaffold-vite-app';
 import { createCheckBuildTool } from './tools/check-build';
-import { createBuildCheckGate } from './build-check-gate';
+import { createBuildCheckGate, wroteFiles } from './build-check-gate';
 import type { AgentModelChoice } from '../agent-models';
 import {
   type RunModel,
@@ -32,6 +34,7 @@ import {
   keyFailureMessage,
   resolveRunModel,
 } from '@/features/ai-providers/server/resolve-run-model';
+import { withoutToolCalls } from '@/features/ai-providers/server/agentkit-model';
 import type { ModelPricing } from '@/features/ai-providers/catalog';
 import { costUsd, usageOfResponse } from '@/features/billing/credits';
 import {
@@ -42,6 +45,7 @@ import {
   describeToolCall,
   sanitizeAgentText,
   toolResultError,
+  toolResultRecipeIds,
 } from '../agent-steps';
 import {
   buildIntegrationsPromptSection,
@@ -60,6 +64,8 @@ import {
   resolveSkills,
 } from '@/features/skills/server/resolve-skills';
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
+import { isStarterOnly } from './starter-only';
+import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
 import {
@@ -84,6 +90,9 @@ interface MessageEvent {
   /** Plan mode (#120): read-only tools, and the reply is a plan. */
   mode?: MessageMode;
 };
+
+/** The agent that runs the last step, with tools off. */
+const SUMMARY_AGENT_NAME = "codenaya-summary";
 
 /**
  * The model's reasoning, which AgentKit drops when it parses the response.
@@ -145,9 +154,6 @@ export const processMessage = inngest.createFunction(
     if (!internalKey) {
       throw new NonRetriableError("CODENAYA_CONVEX_INTERNAL_KEY is not configured");
     }
-
-    // TODO: Check if this is needed
-    await step.sleep("wait-for-db-sync", "1s");
 
     // Get conversation for title generation check
     const conversation = await step.run("get-conversation", async () => {
@@ -257,12 +263,17 @@ export const processMessage = inngest.createFunction(
         }
       });
     };
-    const recordUsage = async (raw: string | undefined, pricing: ModelPricing | undefined) => {
+    const recordUsage = async (
+      raw: string | undefined,
+      pricing: ModelPricing | undefined,
+      // The title runs alongside the coding agent, so it gets a fixed id.
+      id = `record-usage-${++usageRecords}`,
+    ) => {
       const tokens = usageOfResponse(raw);
       usage.inputTokens += tokens.inputTokens;
       usage.outputTokens += tokens.outputTokens;
       usage.costUsd += pricing ? costUsd(pricing, tokens) : 0;
-      await sendUsage(`record-usage-${++usageRecords}`);
+      await sendUsage(id);
     };
 
     // Fetch recent messages for conversation context
@@ -297,51 +308,6 @@ export const processMessage = inngest.createFunction(
         .join("\n\n");
 
       systemPrompt += `\n\n## Previous Conversation (for context only - do NOT repeat these responses):\n${historyText}\n\n## Current Request:\nRespond ONLY to the user's new message below. Do not repeat or reference your previous responses.`;
-    }
-
-    // Generate conversation title if it's still the default
-    const shouldGenerateTitle =
-      conversation.title === DEFAULT_CONVERSATION_TITLE;
-
-    if (shouldGenerateTitle) {
-      const titleAgent = createAgent({
-        name: "title-generator",
-        system: TITLE_GENERATOR_SYSTEM_PROMPT,
-        model: runModel.title(0),
-      });
-
-      let output;
-      try {
-        const result = await titleAgent.run(request, { step });
-        output = result.output;
-        await recordUsage(result.raw, runModel.metering.title);
-      } catch (error) {
-        return await endRunOnKeyRejection(error);
-      }
-
-      const textMessage = output.find(
-        (m) => m.type === "text" && m.role === "assistant"
-      );
-
-      if (textMessage?.type === "text") {
-        const title =
-          typeof textMessage.content === "string"
-            ? textMessage.content.trim()
-            : textMessage.content
-              .map((c) => c.text)
-              .join("")
-              .trim();
-
-        if (title) {
-          await step.run("update-conversation-title", async () => {
-            await convex.mutation(api.system.updateConversationTitle, {
-              internalKey,
-              conversationId,
-              title,
-            });
-          });
-        }
-      }
     }
 
     // ─── MCP integrations ───
@@ -550,6 +516,14 @@ export const processMessage = inngest.createFunction(
 
     systemPrompt += buildSkillsPromptSection(skills, forced, unavailable);
 
+    // A project seeded with the starter says so in the request, not the
+    // system prompt, so the first turn builds on it (#338).
+    const starterOnly = await step.run("check-starter-only", async () =>
+      isStarterOnly(
+        await convex.query(api.system.getProjectFiles, { internalKey, projectId }),
+      ),
+    );
+
     if (planMode) {
       systemPrompt += PLAN_MODE_PROMPT;
     }
@@ -641,21 +615,24 @@ export const processMessage = inngest.createFunction(
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
 
+    // Re-validated by resolveRunModel: the event is the boundary this function
+    // trusts, and anything holding the event key can send one.
+    const codingModel = runModel.coding(0.3);
+
     // Create the coding agent with file tools
-    const codingAgent = createAgent({
+    const agentOptions: Parameters<typeof createAgent>[0] = {
       name: "codenaya",
       description: "An expert AI coding assistant",
       system: systemPrompt,
-      // Re-validated by resolveRunModel: the event is the boundary this function
-      // trusts, and anything holding the event key can send one.
-      model: runModel.coding(0.3),
+      model: codingModel,
       // Plan mode is enforced here, not just asked for in the prompt.
       tools: planMode
         ? tools.filter((tool) => PLAN_MODE_TOOLS.has(tool.name))
         : tools,
       lifecycle: {
-        onStart: ({ prompt, history }) => {
-          const nudge = buildCheckGate.takeNudge();
+        onStart: ({ agent, prompt, history }) => {
+          const nudge =
+            agent.name === SUMMARY_AGENT_NAME ? STEP_BUDGET_NOTE : buildCheckGate.takeNudge();
           return {
             prompt: withImageParts(prompt, imageUrls),
             history: [
@@ -665,8 +642,13 @@ export const processMessage = inngest.createFunction(
             stop: false,
           };
         },
-        onResponse: async ({ result, network }) => {
+        onResponse: async ({ agent, result, network }) => {
           await recordUsage(result.raw, runModel.metering.coding);
+          // The last step must not write without a build check left to run;
+          // this holds when a provider ignores tool_choice "none".
+          if (agent.name === SUMMARY_AGENT_NAME) {
+            result.output = result.output.filter((m) => m.type !== "tool_call");
+          }
           const calls = result.output.flatMap((m) =>
             m.type === "tool_call" ? m.tools : [],
           );
@@ -739,6 +721,7 @@ export const processMessage = inngest.createFunction(
             return result.toolCalls.map(({ tool, content }) => {
               const error = toolResultError(content, pathOf);
               const label = !error && tool.name === "checkBuild" ? buildCheckLabel(content) : undefined;
+              const recipeIds = toolResultRecipeIds(content);
               return {
                 id: tool.id,
                 kind: "tool" as const,
@@ -746,6 +729,7 @@ export const processMessage = inngest.createFunction(
                 status: error ? ("error" as const) : ("done" as const),
                 ...(error ? { error } : {}),
                 ...(label ? { text: label } : {}),
+                ...(recipeIds.length > 0 ? { recipeIds } : {}),
                 startedAt: endedAt,
                 endedAt,
               };
@@ -754,15 +738,22 @@ export const processMessage = inngest.createFunction(
           return result;
         },
       },
+    };
+    const codingAgent = createAgent(agentOptions);
+    // The run's last step: the same agent with tools off, so it ends with a summary.
+    const summaryAgent = createAgent({
+      ...agentOptions,
+      name: SUMMARY_AGENT_NAME,
+      model: withoutToolCalls(codingModel),
     });
 
-    // Create network with single agent
     const network = createNetwork({
       name: "codenaya-network",
-      agents: [codingAgent],
-      maxIter: 20,
-      router: ({ network }) => {
-        const lastResult = network.state.results.at(-1);
+      agents: [codingAgent, summaryAgent],
+      maxIter: MAX_AGENT_STEPS,
+      router: ({ network, callCount }) => {
+        const { results } = network.state;
+        const lastResult = results.at(-1);
         const hasTextResponse = lastResult?.output.some(
           (m) => m.type === "text" && m.role === "assistant"
         );
@@ -770,22 +761,57 @@ export const processMessage = inngest.createFunction(
           (m) => m.type === "tool_call"
         );
 
+        // callCount, not results: seeded history would count as steps.
+        const lastStep = callCount >= MAX_AGENT_STEPS - 1;
+
         // Stop routing to this agent if there's a final text response without
-        // tool calls, unless files changed since the last passing build check.
+        // tool calls, unless files changed since the last passing build check
+        // and there are steps left for it.
         if (hasTextResponse && !hasToolCalls) {
-          return buildCheckGate.shouldContinue(network.state.results)
+          return !lastStep && buildCheckGate.shouldContinue(results)
             ? codingAgent
             : undefined;
         }
-        return codingAgent;
+        return lastStep ? summaryAgent : codingAgent;
       }
     });
+
+    // The title runs alongside the coding agent, never before it (#338).
+    // Started here: earlier, Inngest would plan every step in between as a
+    // parallel step, one extra round trip each. It never throws.
+    let titleUsageRecorded = false;
+    const titleDone =
+      conversation.title === DEFAULT_CONVERSATION_TITLE
+        ? generateConversationTitle({
+            step,
+            runModel,
+            request,
+            recordUsage: (raw) => {
+              titleUsageRecorded = true;
+              return recordUsage(raw, runModel.metering.title, "record-usage-title");
+            },
+            internalKey,
+            conversationId,
+          })
+        : undefined;
+    // Every way out of the run waits for the title and flushes usage once: a
+    // failed last record has no later one to catch it up. A cancelled run
+    // stops between steps; its per-inference records are its flush.
+    const settleRun = async (id: string) => {
+      await titleDone;
+      if (usageRecords > 0 || titleUsageRecorded) {
+        await sendUsage(id);
+      }
+    };
 
     // Run the agent
     let result;
     try {
-      result = await network.run(request);
+      result = await network.run(
+        starterOnly ? `${request}\n\n${STARTER_IN_PLACE_NOTE}` : request,
+      );
     } catch (error) {
+      await settleRun("record-usage-on-error");
       return await endRunOnKeyRejection(error);
     }
 
@@ -805,10 +831,7 @@ export const processMessage = inngest.createFunction(
           : textMessage.content.map((c) => c.text).join("");
     }
 
-    // A failed last record has no later one to catch it up.
-    if (usageRecords > 0) {
-      await sendUsage("record-usage-final");
-    }
+    await settleRun("record-usage-final");
 
     // Update the assistant message with the response (this also sets status to completed)
     await step.run("update-assistant-message", async () => {
@@ -818,6 +841,13 @@ export const processMessage = inngest.createFunction(
         content: assistantResponse,
       })
     });
+
+    // The first run that wrote files ends a seeded project's first build (#338).
+    if (wroteFiles(result.state.results)) {
+      await step.run("complete-first-build", async () => {
+        await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
+      });
+    }
 
     return { success: true, messageId, conversationId };
   }

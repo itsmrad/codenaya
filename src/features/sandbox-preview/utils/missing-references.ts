@@ -3,7 +3,7 @@ import { posix } from "node:path";
 
 /**
  * A tsconfig.json that references a tsconfig.app.json nobody wrote, an
- * index.html whose entry script doesn't exist, or a tailwind.config.ts that
+ * index.html whose entry script doesn't exist, or a vite.config.ts that
  * imports a package missing from package.json, boots into a Vite error
  * overlay (#190). The sandbox checks for them before booting so the user gets
  * the missing file's or package's name instead.
@@ -94,6 +94,8 @@ export const missingReferencedFiles = (files: ProjectFile[]): string[] => {
 const SOURCE_FILE = /\.(?:[cm]?[jt]sx?)$/;
 const IMPORT_SPECIFIER =
   /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'`]([^"'`\n]+)["'`]/g;
+// Tailwind v4 CSS pulls packages in too: `@import "tw-animate-css"`, `@plugin "@tailwindcss/typography"`.
+const CSS_IMPORT = /@(?:import|plugin)\s+(?:url\(\s*)?["']([^"'\n]+)["']/g;
 const BUILTINS = new Set(builtinModules);
 
 /** `react-dom/client` → `react-dom`, `@radix-ui/react-slot/x` → `@radix-ui/react-slot`. */
@@ -106,8 +108,8 @@ const packageName = (specifier: string): string | null => {
 };
 
 /**
- * Describes each package the project's code imports but its package.json
- * doesn't declare, e.g. `tailwindcss-animate (imported by tailwind.config.ts)`.
+ * Describes each package the project's code or CSS imports but its package.json
+ * doesn't declare, e.g. `@tailwindcss/vite (imported by vite.config.ts)`.
  */
 export const undeclaredPackages = (files: ProjectFile[]): string[] => {
   const manifest = files.find((file) => file.path === "package.json");
@@ -123,12 +125,19 @@ export const undeclaredPackages = (files: ProjectFile[]): string[] => {
   const nestedPackages = files
     .filter((file) => file.path.endsWith("/package.json"))
     .map((file) => file.path.slice(0, -"package.json".length));
+  const paths = new Set(files.map((file) => file.path));
   const undeclared = new Map<string, string>();
 
   for (const file of files) {
-    if (!SOURCE_FILE.test(file.path) || file.path.endsWith(".d.ts")) continue;
     if (nestedPackages.some((dir) => file.path.startsWith(dir))) continue;
-    for (const [, specifier] of stripComments(file.content).matchAll(IMPORT_SPECIFIER)) {
+    // Vite serves public/ as-is, so its CSS imports are never resolved as packages.
+    const isCss = file.path.endsWith(".css") && !file.path.startsWith("public/");
+    if (!isCss && (!SOURCE_FILE.test(file.path) || file.path.endsWith(".d.ts"))) continue;
+    for (const [, specifier] of stripComments(file.content).matchAll(
+      isCss ? CSS_IMPORT : IMPORT_SPECIFIER,
+    )) {
+      // CSS resolves `@import "theme.css"` relative to the file before trying a package.
+      if (isCss && paths.has(posix.join(posix.dirname(file.path), specifier))) continue;
       const name = packageName(specifier);
       if (name && !declared.has(name) && !undeclared.has(name)) {
         undeclared.set(name, file.path);

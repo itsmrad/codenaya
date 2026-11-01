@@ -19,6 +19,7 @@ import {
 import { createStreamRedactor } from "@/features/integrations/server/env/stream-redactor";
 import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
 import {
+  DEFAULT_INSTALL_COMMAND,
   MAX_LIVE_SANDBOXES,
   WORK_DIR,
   atLiveSandboxCap,
@@ -259,7 +260,7 @@ export async function POST(request: Request) {
       };
 
       let sandbox: Sandbox | null = null;
-      const installCmd = settings?.installCommand || "npm install";
+      const installCmd = settings?.installCommand || DEFAULT_INSTALL_COMMAND;
 
       const runInstall = (target: Sandbox) =>
         target.commands.run(installCmd, {

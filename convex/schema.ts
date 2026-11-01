@@ -17,6 +17,8 @@ export const messageStepValidator = v.object({
   error: v.optional(v.string()),
   startedAt: v.number(),
   endedAt: v.optional(v.number()),
+  // Known-error recipes matched in the tool's error output (#334).
+  recipeIds: v.optional(v.array(v.string())),
 });
 
 export const aiProviderValidator = v.union(
@@ -136,6 +138,10 @@ export default defineSchema({
     name: v.string(),
     ownerId: v.string(),
     updatedAt: v.number(),
+    // Set at creation from a prompt, whose project is seeded with the starter,
+    // and cleared by the first run that writes files (#338). Unset on older
+    // projects, where "no package.json yet" still marks the first build.
+    firstBuildPending: v.optional(v.boolean()),
     importStatus: v.optional(
       v.union(
         v.literal("importing"),
@@ -224,7 +230,8 @@ export default defineSchema({
     content: v.optional(v.string()),
     storageId: v.optional(v.id("_storage")),
   })
-    .index("by_checkpoint", ["checkpointId"])
+    // Path second: a run's diff reads only the paths it wrote (#225).
+    .index("by_checkpoint_and_path", ["checkpointId", "path"])
     .index("by_project", ["projectId"])
     .index("by_storageId", ["storageId"]),
 

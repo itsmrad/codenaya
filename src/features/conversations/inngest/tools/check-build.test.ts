@@ -112,7 +112,7 @@ describe("checkProjectBuild", () => {
     );
     const commands = sandbox.commands.run.mock.calls.map((call) => (call as unknown[])[0]);
     expect(commands).toEqual([
-      "npm install --no-audit --no-fund --loglevel=error",
+      "npm install --prefer-offline --no-audit --no-fund --loglevel=error",
       "npx tsc --noEmit -p tsconfig.app.json && npx vite build",
     ]);
     expect(sandbox.kill).toHaveBeenCalledTimes(1);
@@ -135,6 +135,18 @@ describe("checkProjectBuild", () => {
     const result = await check();
     expect(result).toMatch(/^Error: npm install failed/);
     expect(result).toContain("left-pad-x");
+  });
+
+  it("adds the known cause and fix for a matched error, even past the trimmed lines", async () => {
+    const progress = Array.from({ length: 45 }, (_, i) => `transforming module ${i}`).join("\n");
+    fakeSandbox(
+      { exitCode: 0 },
+      { exitCode: 1, stdout: `${progress}\n[vite]: Rollup failed to resolve import "react-router-dom" from "src/main.tsx".` },
+    );
+    const result = await check();
+    expect(result).toMatch(/^Error: Build failed/);
+    expect(result).toContain("… 6 more line(s)\n\nLikely cause (unresolved-import): ");
+    expect(result).toContain("\nKnown fix: ");
   });
 
   it("reports a timeout as an unfinished check, not a code error, and still kills the sandbox", async () => {

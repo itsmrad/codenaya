@@ -11,11 +11,11 @@ import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 
 /**
- * The GitHub launch promotion (ADR 0009). Claims are written by
- * `POST /api/promotions/claim`, the only caller that has verified the GitHub
- * account with GitHub itself; runs are counted by the send routes, after their
- * ownership checks and before they create anything. Both hold the internal
- * key. The rules live in `features/promotions/github-promo.ts`.
+ * The GitHub launch promotion (ADR 0009). `claim` is kept for future
+ * admin-run promos and has no callers right now; its caller must verify the
+ * GitHub account with GitHub itself. Runs are counted by the send routes, after
+ * their ownership checks and before they create anything. Both hold the
+ * internal key. The rules live in `features/promotions/github-promo.ts`.
  */
 
 const claimForUser = (ctx: QueryCtx, userId: string) =>
