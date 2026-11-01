@@ -50,13 +50,13 @@ export const createCreateFolderTool = ({
                 fileId: parentId as Id<"files">,
               });
               if (!parentFolder) {
-                return `Error: Parent folder with ID "${parentId}" not found. Use listFiles to get valid folder IDs.`;
+                return `Error: Parent folder not found. Prefer writeFiles, which creates folders by path.`;
               }
               if (parentFolder.type !== "folder") {
                 return `Error: "${parentFolder.name}" is a file, not a folder. Use a folder ID as parentId.`;
               }
             } catch {
-              return `Error: Invalid parentId "${parentId}". Use listFiles to get valid folder IDs, or use empty string for root level.`;
+              return `Error: Invalid parentId. Prefer writeFiles, which creates folders by path.`;
             }
           }
 

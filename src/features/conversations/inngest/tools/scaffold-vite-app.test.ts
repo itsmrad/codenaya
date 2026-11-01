@@ -57,8 +57,8 @@ describe("scaffoldViteApp tool", () => {
       VITE_REACT_STARTER.map((file) => file.path).sort(),
     );
     expect(missingReferencedFiles(paths())).toEqual([]);
-    expect(result).toContain("tsconfig.app.json (id");
-    expect(result).toMatch(/Folders: src \(id\d+\), src\/lib \(id\d+\)/);
+    expect(result).toContain("tsconfig.app.json");
+    expect(result).not.toMatch(/\bid\d+/);
   });
 
   it("writes package.json after every file outside the root", async () => {
@@ -80,7 +80,7 @@ describe("scaffoldViteApp tool", () => {
 
     expect(db.rows.filter((row) => row.name === "src")).toHaveLength(1);
     expect(db.rows.find((row) => row._id === "app")?.content).toBe("mine");
-    expect(result).toContain("Kept existing: src/App.tsx (app).");
+    expect(result).toContain("Kept existing: src/App.tsx.");
   });
 
   it("writes a React 19 + Tailwind v4 starter with no v3 leftovers (#332)", () => {
