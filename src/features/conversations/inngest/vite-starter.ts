@@ -352,13 +352,13 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              className="inline-flex min-h-11 min-w-11 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
             >
               Reload
             </button>
             <a
               href="/"
-              className="inline-flex h-9 items-center rounded-md border px-4 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+              className="inline-flex min-h-11 min-w-11 items-center rounded-md border px-4 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
             >
               Go home
             </a>
