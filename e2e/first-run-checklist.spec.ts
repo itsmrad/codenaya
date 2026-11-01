@@ -46,10 +46,14 @@ test.describe("first-run checklist", () => {
     if ((await client.query(api.projects.get, {})).length === 0) {
       await expect(firstStep).toHaveAttribute("data-done", "false");
       const id = await client.mutation(api.projects.create, { name: "e2e first-run" });
-      // With a project the dashboard switches layout and the card starts as a pill.
-      await expandChecklist(page);
+      // With a project the dashboard switches layout and the card remounts as a pill.
+      await expect(checklistPill(page)).toBeVisible();
+      await checklistPill(page).click();
       await expect(firstStep).toHaveAttribute("data-done", "true");
       await client.mutation(api.projects.remove, { id });
+      // Back to zero projects: the first-run layout returns with the full card.
+      await expect(page.getByRole("tab", { name: "Projects" })).toBeHidden();
+      await expect(checklist).toBeVisible();
     } else {
       await expect(firstStep).toHaveAttribute("data-done", "true");
     }
@@ -70,11 +74,11 @@ test.describe("first-run checklist", () => {
     test.skip((await client.query(api.projects.get, {})).length === 0, "needs a project");
 
     const pill = checklistPill(page);
-    await expect(pill).toHaveAttribute("aria-expanded", "false");
     const done = (await pill.textContent())!.match(/(\d) of 5/)![1];
 
     await pill.click();
     const checklist = page.getByRole("region", { name: "Get started with Codenaya" });
+    await expect(checklist.getByRole("heading", { name: "Get started with Codenaya" })).toBeFocused();
     await expect(checklist).toContainText(`${done} of 5 done`);
     await expect(checklist.locator('li[data-done="true"]')).toHaveCount(Number(done));
   });

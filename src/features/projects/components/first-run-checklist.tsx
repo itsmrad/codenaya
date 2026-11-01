@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useQuery } from "convex/react";
 import { useUser } from "@clerk/nextjs";
@@ -47,6 +47,12 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
   );
   const previewOpened = useSyncExternalStore(subscribe, hasOpenedPreview, () => false);
   const [expanded, setExpanded] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  // Expanding unmounts the focused pill; keep keyboard focus on the card.
+  useEffect(() => {
+    if (expanded) headingRef.current?.focus();
+  }, [expanded]);
 
   const active = dismissed === false;
   const aiKeys = useQuery(api.aiProviders.list, active ? {} : "skip");
@@ -83,15 +89,13 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
     return (
       <button
         onClick={() => setExpanded(true)}
-        aria-expanded={false}
         className="group flex h-8 w-fit items-center gap-2 rounded-full border border-border/60 bg-card px-3 text-xs text-muted-foreground transition-colors hover:border-brand/40 hover:text-foreground"
       >
-        <span aria-hidden className="h-1 w-10 overflow-hidden rounded-full bg-muted">
-          <span
-            className="block h-full rounded-full bg-brand"
-            style={{ width: `${(doneCount / steps.length) * 100}%` }}
-          />
-        </span>
+        <Progress
+          aria-hidden
+          value={(doneCount / steps.length) * 100}
+          className="h-1 w-10 bg-muted [&>[data-slot=progress-indicator]]:bg-brand"
+        />
         <span className="sr-only">Getting started:</span>
         <span className="font-medium tabular-nums text-foreground">
           {doneCount} of {steps.length}
@@ -115,7 +119,12 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 id="first-run-heading" className="text-base font-semibold tracking-tight">
+          <h2
+            id="first-run-heading"
+            ref={headingRef}
+            tabIndex={-1}
+            className="text-base font-semibold tracking-tight outline-none"
+          >
             Get started with Codenaya
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">

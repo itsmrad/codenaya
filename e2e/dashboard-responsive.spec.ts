@@ -45,9 +45,16 @@ test.describe("signed-in dashboard layout", () => {
 
       const card = page.getByRole("region", { name: "Recent" }).getByRole("link").first();
       await expect(card).toBeVisible();
-      // Let the entrance animation settle before measuring.
-      await expect(page.getByRole("tab", { name: "Projects" })).toBeVisible();
-      await page.waitForTimeout(600);
+      // Wait for the entrance animation to settle: two reads in a row agree.
+      let previous = await card.boundingBox();
+      await expect
+        .poll(async () => {
+          const current = await card.boundingBox();
+          const settled = current?.y === previous?.y;
+          previous = current;
+          return settled;
+        })
+        .toBe(true);
       const box = (await card.boundingBox())!;
       expect(box.y).toBeGreaterThanOrEqual(0);
       expect(box.y + box.height).toBeLessThanOrEqual(height);
