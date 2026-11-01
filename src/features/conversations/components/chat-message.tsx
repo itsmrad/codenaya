@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { splitSlashSkills } from "@/features/skills/parse-slash";
 import { cn } from "@/lib/utils";
 
-import type { Doc } from "../../../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { sanitizeAgentText } from "../agent-steps";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
@@ -185,6 +185,10 @@ interface AssistantMessageProps {
   onRetry?: () => void;
   /** Set when a checkpoint was taken before this run (#43). */
   onRestore?: () => void;
+  /** The checkpoint taken before this run; null once pruned (#225). */
+  checkpointId?: Id<"checkpoints"> | null;
+  /** An agent run is in progress, so files can't be reverted. */
+  revertDisabled?: boolean;
   /** A plan-mode reply (#120): sends the plan as the next build message. */
   onBuildPlan?: () => void;
   /** A stuck run (#306), on a model with a tier above it: resends on that one. */
@@ -203,6 +207,8 @@ export const AssistantMessage = ({
   onBuildPlan,
   stuckRetry,
   onDiagnose,
+  checkpointId,
+  revertDisabled,
 }: AssistantMessageProps) => {
   const [copied, setCopied] = useState(false);
   const status = message.status ?? "completed";
@@ -249,6 +255,8 @@ export const AssistantMessage = ({
           model={message.runModel?.label}
           stalled={stalled}
           onOpenFile={onOpenFile}
+          checkpointId={checkpointId}
+          revertDisabled={revertDisabled}
         />
       )}
       {stalled && isLast && onRetry && (

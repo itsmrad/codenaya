@@ -1,3 +1,4 @@
+import { withErrorHints } from "../sandbox-preview/utils/error-recipes";
 import { STUCK_REASONS, type StuckRun } from "./agent-steps";
 
 /**
@@ -38,7 +39,7 @@ export const buildPlanMessage = (plan: string) => `Build this plan:\n\n${plan}`;
 
 /**
  * The plan-mode message "Diagnose in Plan mode" pre-fills for a stuck run
- * (#306). Error recipes (#334) can add the likely cause of `error` here.
+ * (#306), with the likely cause of a known error (#334).
  */
 export const diagnoseStuckMessage = (
   stuck: Pick<StuckRun, "reason" | "error">,
@@ -46,7 +47,7 @@ export const diagnoseStuckMessage = (
 ) =>
   [
     `The last run got stuck: ${STUCK_REASONS[stuck.reason]}.`,
-    stuck.error && `The error:\n${stuck.error}`,
+    stuck.error && withErrorHints(`The error:\n${stuck.error}`),
     filePath && `File: ${filePath}`,
     "Find the root cause before changing anything, and plan a different approach.",
   ]
