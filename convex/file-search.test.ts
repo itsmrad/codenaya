@@ -109,7 +109,7 @@ test("limits content index lookups to 3000, with explicit truncation", async () 
     const projectId = await ctx.db.insert("projects", { name: "many", ownerId: "alice", updatedAt: 0 });
     for (let i = 0; i <= 3000; i++) {
       const id = await ctx.db.insert("files", { projectId, name: `file${i}.ts`, type: "file", updatedAt: 0 });
-      await insertFileContent(ctx, id, projectId, i >= 2999 ? "boundary" : "");
+      if (i >= 2999) await insertFileContent(ctx, id, projectId, "boundary");
     }
     return projectId;
   });
