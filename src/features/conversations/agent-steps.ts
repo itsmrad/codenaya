@@ -156,6 +156,27 @@ export const buildCheckLabel = (content: unknown): string | undefined => {
   return typeof data === "string" ? data.trim().split("\n")[0].slice(0, MAX_ERROR) || undefined : undefined;
 };
 
+/**
+ * Failed checkBuild steps that a later "Build verified" check resolved: the
+ * build errors the agent fixed itself. Running checks and checks that could
+ * not finish are not build errors; failures after the last verified build
+ * stay unresolved.
+ */
+export const fixedBuildErrors = (steps: AgentStep[]) => {
+  let fixed = 0;
+  let pending = 0;
+  for (const step of steps) {
+    if (step.tool !== "checkBuild") continue;
+    if (step.status === "error" && !step.error?.startsWith(BUILD_CHECK_UNFINISHED)) {
+      pending += 1;
+    } else if (step.status === "done" && step.text === BUILD_VERIFIED) {
+      fixed += pending;
+      pending = 0;
+    }
+  }
+  return fixed;
+};
+
 /** Cap for interim "thinking" text recorded alongside tool calls. */
 export const clampStepText = (text: string) => text.trim().slice(0, MAX_TEXT);
 

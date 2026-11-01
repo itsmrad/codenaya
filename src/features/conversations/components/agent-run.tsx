@@ -35,7 +35,13 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
-import { type AgentStep, BUILD_VERIFIED, STALLED_RUN_MS, lastRunActivity } from "../agent-steps";
+import {
+  type AgentStep,
+  BUILD_VERIFIED,
+  STALLED_RUN_MS,
+  fixedBuildErrors,
+  lastRunActivity,
+} from "../agent-steps";
 import { LoaderGrid } from "./run-loader";
 
 interface ToolMeta {
@@ -471,7 +477,9 @@ export const AgentRun = ({
     setBatch({ count: rows.length, start: Math.min(batch.count, rows.length) });
   }
   const toolSteps = steps.filter((step) => step.kind === "tool");
-  const errors = toolSteps.filter((step) => step.status === "error").length;
+  // A build error the agent fixed is reported as fixed, not as a failure.
+  const fixed = fixedBuildErrors(toolSteps);
+  const errors = toolSteps.filter((step) => step.status === "error").length - fixed;
   const changed = new Set(
     toolSteps
       .filter((step) => toolMeta(step.tool).writes && step.status === "done")
@@ -489,6 +497,7 @@ export const AgentRun = ({
   const summary = [
     `${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`,
     changed > 0 && `${changed} ${changed === 1 ? "file" : "files"} changed`,
+    fixed > 0 && `Fixed ${fixed} build ${fixed === 1 ? "error" : "errors"}`,
     model,
   ]
     .filter(Boolean)
