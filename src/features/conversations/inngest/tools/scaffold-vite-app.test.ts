@@ -137,6 +137,9 @@ describe("scaffoldViteApp tool", () => {
     expect(boundary).toContain("import.meta.env.DEV && componentStack");
     expect(boundary).toContain("window.location.reload()");
     expect(boundary).toContain('<a\n              href="/"');
+    // Reload and Go home are touch targets: at least 44px (min-h-11), not h-9.
+    expect(boundary.match(/inline-flex min-h-11 min-w-11 items-center/g)).toHaveLength(2);
+    expect(boundary).not.toContain("h-9");
     // A flag, so `throw null` / `throw undefined` still show the card.
     expect(boundary).toContain("return { hasError: true, error };");
     expect(boundary).toContain("if (!hasError) return this.props.children;");
