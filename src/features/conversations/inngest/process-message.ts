@@ -68,6 +68,7 @@ import { isStarterOnly } from './starter-only';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
+import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
   type MessageMode,
   PLAN_MODE,
@@ -131,8 +132,7 @@ export const processMessage = inngest.createFunction(
           await convex.mutation(api.system.updateMessageContent, {
             internalKey,
             messageId,
-            content:
-              "My apologies, I encountered an error while processing your request. Let me know if you need anything else!",
+            content: AGENT_FAILURE_MESSAGE,
           });
         });
       }
@@ -294,21 +294,8 @@ export const processMessage = inngest.createFunction(
     const request =
       imageUrls.length > 0 && !message.trim() ? IMAGE_ONLY_PROMPT : message;
 
-    // Build system prompt with conversation history (exclude the current processing message)
-    let systemPrompt = CODING_AGENT_SYSTEM_PROMPT;
-
-    // Filter out the current processing message and empty messages
-    const contextMessages = recentMessages.filter(
-      (msg) => msg._id !== messageId && msg.content.trim() !== ""
-    );
-
-    if (contextMessages.length > 0) {
-      const historyText = contextMessages
-        .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
-        .join("\n\n");
-
-      systemPrompt += `\n\n## Previous Conversation (for context only - do NOT repeat these responses):\n${historyText}\n\n## Current Request:\nRespond ONLY to the user's new message below. Do not repeat or reference your previous responses.`;
-    }
+    // Earlier turns go to the model as chat messages, never in the system prompt.
+    const earlierTurns = priorTurns(recentMessages, messageId);
 
     // ─── MCP integrations ───
     //
@@ -489,8 +476,6 @@ export const processMessage = inngest.createFunction(
       });
     }
 
-    systemPrompt += buildIntegrationsPromptSection(mcpSummaries, mcpWarnings);
-
     // ─── Skills ───
     //
     // Only names and descriptions go in the prompt; loadSkill hands the agent a
@@ -514,7 +499,16 @@ export const processMessage = inngest.createFunction(
       }
     });
 
-    systemPrompt += buildSkillsPromptSection(skills, forced, unavailable);
+    // Most stable first, so the cacheable prefix is shared across runs (#295):
+    // base, skill index and integrations, then forced skills and plan mode.
+    // Conversation goes in messages (see onStart).
+    const systemPrompt = [
+      CODING_AGENT_SYSTEM_PROMPT,
+      buildSkillsPromptSection(skills),
+      buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
+      buildSkillsPromptSection([], forced, unavailable),
+      planMode ? PLAN_MODE_PROMPT : "",
+    ].join("");
 
     // A project seeded with the starter says so in the request, not the
     // system prompt, so the first turn builds on it (#338).
@@ -524,9 +518,6 @@ export const processMessage = inngest.createFunction(
       ),
     );
 
-    if (planMode) {
-      systemPrompt += PLAN_MODE_PROMPT;
-    }
 
     // Display only: mirrors the agent's tool calls onto the assistant message
     // for the chat panel's activity block. Each write is its own step, so replays
@@ -643,8 +634,12 @@ export const processMessage = inngest.createFunction(
             agent.name === SUMMARY_AGENT_NAME
               ? summaryNote
               : buildCheckGate.takeNudge() ?? loopGuard.takeHint();
+          // AgentKit sends prompt ([system, request]) before history (this
+          // run's turns), so earlier conversation turns go between the two.
+          // Relies on network calls using maxIter: 0; direct agent.run with maxIter > 1 would prepend history each pass.
+          const [system, ...current] = withImageParts(prompt, imageUrls);
           return {
-            prompt: withImageParts(prompt, imageUrls),
+            prompt: [system, ...earlierTurns, ...current],
             history: [
               ...(history ?? []),
               ...(nudge ? [{ type: "text" as const, role: "user" as const, content: nudge }] : []),
@@ -835,9 +830,7 @@ export const processMessage = inngest.createFunction(
     );
 
     const { stuck } = loopGuard;
-    let assistantResponse = stuck
-      ? STUCK_FALLBACK_REPLY
-      : "I processed your request. Let me know if you need anything else!";
+    let assistantResponse = stuck ? STUCK_FALLBACK_REPLY : DEFAULT_REPLY_MESSAGE;
 
     if (textMessage?.type === "text") {
       assistantResponse =
