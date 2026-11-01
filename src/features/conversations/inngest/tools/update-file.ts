@@ -42,7 +42,7 @@ export const createUpdateFileTool = ({
       try {
         return await toolStep?.run("update-file", async () => {
           const index = indexProjectFiles(await getProjectFiles(internalKey, projectId));
-          const found = findProjectFile(index, parsed.data);
+          const found = await findProjectFile(internalKey, projectId, index, parsed.data);
           if ("error" in found) return found.error;
           const { file, path } = found;
 

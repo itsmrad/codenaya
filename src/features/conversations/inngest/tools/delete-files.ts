@@ -48,7 +48,7 @@ export const createDeleteFilesTool = ({
           // Resolve every target before deleting any, so one bad path deletes nothing.
           const targets = [];
           for (const ref of refs) {
-            const found = findProjectFile(index, ref);
+            const found = await findProjectFile(internalKey, projectId, index, ref);
             if ("error" in found) return found.error;
             targets.push(found);
           }

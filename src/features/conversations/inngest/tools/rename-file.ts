@@ -41,7 +41,7 @@ export const createRenameFileTool = ({
       try {
         return await toolStep?.run("rename-file", async () => {
           const index = indexProjectFiles(await getProjectFiles(internalKey, projectId));
-          const found = findProjectFile(index, parsed.data);
+          const found = await findProjectFile(internalKey, projectId, index, parsed.data);
           if ("error" in found) return found.error;
 
           await convex.mutation(api.system.renameFile, {

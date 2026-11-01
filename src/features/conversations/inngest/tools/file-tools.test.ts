@@ -166,6 +166,22 @@ describe("legacy id calls", () => {
     );
   });
 
+  it("resolves an id directly, so a file past the file-list cap still works", async () => {
+    db.rows.push({ _id: "far", name: "far.ts", type: "file", parentId: "src", content: "old" });
+    const listed = db.rows.filter((r) => r._id !== "far").map((row) => ({ ...row, content: undefined }));
+    mocks.query.mockImplementation(async (ref, args: { fileId?: string }) =>
+      getFunctionName(ref) === "system:getFileById"
+        ? (db.rows.find((r) => r._id === args.fileId) ?? null)
+        : listed,
+    );
+    expect(await createUpdateFileTool(opts).handler({ fileId: "far", content: "export {};" } as never, ctx)).toBe(
+      'File "far.ts" updated successfully',
+    );
+    expect(await createReadFilesTool(opts).handler({ fileIds: ["far"] } as never, ctx)).toBe(
+      JSON.stringify([{ path: "far.ts", content: "export {};" }]),
+    );
+  });
+
   // A malformed id, or one from another project (#209), is not in this project's files.
   it.each([
     ["updateFile", () => createUpdateFileTool(opts).handler({ fileId: "foreign", content: "x" } as never, ctx)],
@@ -173,13 +189,46 @@ describe("legacy id calls", () => {
     ["deleteFiles", () => createDeleteFilesTool(opts).handler({ fileIds: ["foreign"] } as never, ctx)],
   ])("%s returns a not-found tool error for an unknown id and writes nothing", async (_name, call) => {
     expect(await call()).toBe(
-      'Error: File with ID "foreign" not found. Address files by path, like "src/App.tsx".',
+      'Error: File not found. Address files by path, like "src/App.tsx".',
     );
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
 });
 
 describe("writeFiles tool", () => {
+  const rowsNamed = (name: string) => db.rows.filter((r) => r.name === name);
+
+  it.each([
+    [["fresh", "fresh/child.ts"]],
+    [["fresh/child.ts", "fresh"]],
+  ])("refuses a path another path in the call needs as a folder (%j)", async (order) => {
+    db.rows = [];
+    const result = await write(order.map((path) => ({ path, content: path })));
+    expect(result).toBe(
+      "Wrote 1 file(s). Created: fresh/child.ts. Failed: fresh (also a folder of another path in this call).",
+    );
+    expect(rowsNamed("fresh")).toEqual([expect.objectContaining({ type: "folder" })]);
+  });
+
+  it("writes a path listed twice once, with the last content", async () => {
+    expect(
+      await write([
+        { path: "src/x.ts", content: "first" },
+        { path: "./src/x.ts", content: "last" },
+      ]),
+    ).toBe("Wrote 1 file(s). Created: src/x.ts.");
+    expect(rowsNamed("x.ts")).toEqual([expect.objectContaining({ content: "last" })]);
+  });
+
+  it("never writes a folder path ending in / to a file of the same name (#267)", async () => {
+    db.rows.push({ _id: "srcfile", name: "src", type: "file", content: "keep" });
+    expect(await write([{ path: "src/", content: "x" }])).toBe(
+      'Error: No files written. Failed: src/ (ends in "/", so it names a folder; write to a file path).',
+    );
+    expect(db.rows.find((r) => r._id === "srcfile")?.content).toBe("keep");
+    expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
   const write = (files: { path: string; content: string }[]) =>
     createWriteFilesTool(opts).handler({ files }, ctx) as Promise<string>;
 
@@ -216,7 +265,7 @@ describe("writeFiles tool", () => {
       { path: "src/ok.ts", content: "ok" },
     ]);
     expect(result).toBe(
-      'Wrote 1 file(s). Created: src/ok.ts. Failed: src (a folder; write to a file path inside it), package.json/x.ts ("package.json" is a file, not a folder), Invalid path "../escape.ts". Use a project-relative path like "src/App.tsx": no leading "/", and no "..", "." or empty segments..',
+      'Wrote 1 file(s). Created: src/ok.ts. Failed: Invalid path "../escape.ts". Use a project-relative path like "src/App.tsx": no leading "/", and no "..", "." or empty segments., src (a folder; write to a file path inside it), package.json/x.ts ("package.json" is a file, not a folder).',
     );
     expect(db.rows.filter((r) => r.type === "folder")).toHaveLength(1);
   });

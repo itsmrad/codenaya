@@ -59,7 +59,7 @@ export const createReadFilesTool = ({
           const ranged: string[] = [];
 
           for (const ref of refs) {
-            const found = findProjectFile(index, ref);
+            const found = await findProjectFile(internalKey, projectId, index, ref);
             if ("error" in found) {
               errors.push(found.error);
               continue;

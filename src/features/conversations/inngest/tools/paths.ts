@@ -5,6 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { getFileByAgentId } from "./get-file";
 
 /**
  * Path addressing for the agent's file tools (#292): the model names files by
@@ -48,12 +49,15 @@ export type ProjectIndex = ReturnType<typeof indexProjectFiles>;
 /**
  * The file or folder a tool call names by `path`, or by `fileId` in calls made
  * before #292. A path names the file when a file and a folder share it, unless
- * it ends in "/".
+ * it ends in "/". An id is looked up directly (project-scoped), so a file past
+ * the `getProjectFiles` cap still resolves; the index only names it.
  */
-export const findProjectFile = (
+export const findProjectFile = async (
+  internalKey: string,
+  projectId: Id<"projects">,
   index: ProjectIndex,
   ref: { path?: string; fileId?: string },
-): { file: ProjectFile; path: string } | { error: string } => {
+): Promise<{ file: ProjectFile; path: string } | { error: string }> => {
   if (typeof ref.path === "string") {
     const path = normalizePath(ref.path);
     if (path === undefined) return { error: invalidPathError(ref.path) };
@@ -63,16 +67,15 @@ export const findProjectFile = (
       ? { file, path }
       : { error: `Error: "${path}" not found. Use a path from the project's file list.` };
   }
-  const file = ref.fileId ? index.byId.get(ref.fileId) : undefined;
-  const path = file && index.pathOf(file._id);
-  if (!file || !path) {
+  const file = ref.fileId ? await getFileByAgentId(internalKey, projectId, ref.fileId) : null;
+  if (!file) {
     return {
       error: ref.fileId
-        ? `Error: File with ID "${ref.fileId}" not found. Address files by path, like "src/App.tsx".`
+        ? 'Error: File not found. Address files by path, like "src/App.tsx".'
         : 'Error: Provide a path, like "src/App.tsx".',
     };
   }
-  return { file, path };
+  return { file, path: index.pathOf(file._id) ?? file.name };
 };
 
 /**
