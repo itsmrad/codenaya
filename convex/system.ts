@@ -750,7 +750,7 @@ export const getCheckpointFilesWithUrls = query({
     }
     const rows = await ctx.db
       .query("checkpointFiles")
-      .withIndex("by_checkpoint", (q) => q.eq("checkpointId", checkpoint._id))
+      .withIndex("by_checkpoint_and_path", (q) => q.eq("checkpointId", checkpoint._id))
       .take(MAX_CHECKPOINT_FILES);
     return await Promise.all(
       rows.map(async ({ path, type, content, storageId }) => ({
