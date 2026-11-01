@@ -18,7 +18,7 @@ vi.mock("@/lib/convex-client", async () => {
 });
 
 import { AGENT_FAILURE_MESSAGE } from "./lib/conversation-history";
-import { drive, text } from "./process-message.driver";
+import { drive, text, toolCall } from "./process-message.driver";
 
 type Stored = { _id: string; role: "user" | "assistant"; content: string; status?: string };
 
@@ -31,6 +31,7 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectMcpConnections": () => [],
   "system:getProjectFiles": () => [],
   "system:getProjectSkills": () => [],
+  "system:getFileById": () => ({ _id: "f1", name: "a.ts", type: "file", content: "line\n".repeat(6000) }),
 };
 
 interface ChatBody {
@@ -98,3 +99,34 @@ describe("processMessage conversation history", () => {
     expect(second?.messages[0]).toEqual(first?.messages[0]);
   });
 });
+
+
+it("bounds file payloads in a long stub run and deterministically replays the requests", async () => {
+  recentMessages = conversation();
+  const inferences = [
+    ...Array.from({ length: 24 }, (_, i) => {
+      const data = toolCall("readFiles", { fileIds: ["f1"] });
+      data.choices[0].message.tool_calls[0].id = `read_${i}`;
+      return { data };
+    }),
+    { data: text("Done.") },
+  ];
+  const run = () => drive({ modelId: "x-ai/grok-4.7" }, inferences);
+  const first = await run();
+  expect(first.finalType).toBe("function-resolved");
+  const requests = (first.inferenceBodies as ChatBody[]).filter((body) => body.tools?.length);
+  expect(requests).toHaveLength(25);
+  const sizes = requests.map((body) => JSON.stringify(body).length);
+  const system = requests[0].messages[0];
+  expect(requests.every((body) => JSON.stringify(body.messages[0]) === JSON.stringify(system))).toBe(true);
+  expect(sizes.at(-1)!).toBeLessThan(sizes[12] * 1.1);
+  const final = JSON.stringify(requests.at(-1));
+  expect(final).toContain("re-read if needed");
+  const lastTool = requests.at(-1)!.messages.filter((m) => m.role === "tool").at(-1)!;
+  expect(JSON.parse(JSON.parse(lastTool.content as string).data)[0].content.length).toBe(30_000);
+  const untrimmedEstimate = sizes[0] + 24 * (sizes[1] - sizes[0]);
+  process.stdout.write(`[history-trim] ${JSON.stringify({ finalChars: sizes.at(-1), untrimmedEstimate,
+    estimatedTokensSaved: Math.floor((untrimmedEstimate - sizes.at(-1)!) / 4), requestChars: sizes })}\n`);
+  const replay = await run();
+  expect(replay.inferenceBodies).toEqual(first.inferenceBodies);
+}, 20_000);
