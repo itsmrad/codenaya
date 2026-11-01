@@ -9,6 +9,7 @@ import {
   describeToolCall,
   fixedBuildErrors,
   lastRunActivity,
+  runWrittenPaths,
   sanitizeAgentText,
   toolResultError,
 } from "./agent-steps";
@@ -173,5 +174,40 @@ describe("fixedBuildErrors", () => {
     const unfinished = check("error", { error: `${BUILD_CHECK_UNFINISHED} (timeout).` });
     const otherTool: AgentStep = { ...failed, tool: "updateFile" };
     expect(fixedBuildErrors([check("running"), unfinished, otherTool, verified])).toBe(0);
+  });
+});
+
+describe("runWrittenPaths", () => {
+  const step = (tool: string, targets: string[], status: AgentStep["status"] = "done"): AgentStep => ({
+    id: `${tool}:${targets.join(",")}`,
+    kind: "tool",
+    tool,
+    targets,
+    status,
+    startedAt: 0,
+  });
+
+  it("collects finished writes, with a rename's new path next to the old one", () => {
+    expect(
+      runWrittenPaths([
+        step("readFiles", ["a.ts"]),
+        step("createFiles", ["src/a.ts", "src/b.ts"]),
+        step("updateFile", ["src/a.ts"]),
+        step("renameFile", ["src/old.ts", "new.ts"]),
+        step("renameFile", ["root.ts", "top.ts"]),
+        step("deleteFiles", ["lib"]),
+        step("updateFile", ["failed.ts"], "error"),
+      ]),
+    ).toEqual(["src/a.ts", "src/b.ts", "src/old.ts", "src/new.ts", "root.ts", "top.ts", "lib"]);
+  });
+
+  it("keeps every path of a write over 20 files, so the diff is complete", () => {
+    const files = Array.from({ length: 25 }, (_, i) => ({ name: `f${i}.ts`, content: "" }));
+    const created = describeToolCall({ name: "createFiles", input: { parentId: ID_SRC, files } }, pathOf);
+    expect(created).toHaveLength(25);
+    expect(runWrittenPaths([step("createFiles", created)])).toHaveLength(25);
+    // Reads stay capped; they only label the row.
+    const ids = Array.from({ length: 25 }, () => ID_A);
+    expect(describeToolCall({ name: "readFiles", input: { fileIds: ids } }, pathOf)).toHaveLength(20);
   });
 });

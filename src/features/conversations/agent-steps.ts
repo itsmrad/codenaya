@@ -1,5 +1,7 @@
 import type { Infer } from "convex/values";
 
+import { recipeIdsIn } from "../sandbox-preview/utils/error-recipes";
+
 import type { messageStepValidator } from "../../../convex/schema";
 
 /** One recorded row of an agent run (see `messageStepValidator`). */
@@ -114,8 +116,38 @@ export const describeToolCall = (
       // MCP tools are namespaced `provider__tool`.
       targets = name.includes("__") ? [name.slice(name.indexOf("__") + 2)] : [];
   }
-  return targets.slice(0, MAX_TARGETS);
+  // Writes keep every path: a run's diff and revert are built from them (#225).
+  return FILE_WRITE_TOOLS.has(name) ? targets : targets.slice(0, MAX_TARGETS);
 };
+
+/** Tools whose finished calls change project files ("N files changed"). */
+export const FILE_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "createFiles",
+  "updateFile",
+  "renameFile",
+  "deleteFiles",
+]);
+
+/**
+ * Every path a run's finished write calls named: created, edited, renamed
+ * from or to, or deleted (#225). A folder path stands for everything under it.
+ */
+export const runWrittenPaths = (steps: AgentStep[]) => [
+  ...new Set(
+    steps
+      .filter(
+        (step) =>
+          step.kind === "tool" && step.status === "done" && FILE_WRITE_TOOLS.has(step.tool ?? ""),
+      )
+      .flatMap(({ tool, targets = [] }) => {
+        if (tool !== "renameFile" || targets.length < 2) return targets;
+        // Renames record the new name only; it lands next to the old path.
+        const [from, name] = targets;
+        const slash = from.lastIndexOf("/");
+        return [from, slash === -1 ? name : `${from.slice(0, slash)}/${name}`];
+      }),
+  ),
+];
 
 /**
  * The error message of an AgentKit tool result, or undefined on success.
@@ -175,6 +207,12 @@ export const fixedBuildErrors = (steps: AgentStep[]) => {
     }
   }
   return fixed;
+};
+
+/** The known-error recipes a tool result's hints name (#334), for the run record. */
+export const toolResultRecipeIds = (content: unknown): string[] => {
+  const data = (content as { data?: unknown } | null)?.data;
+  return typeof data === "string" ? recipeIdsIn(data) : [];
 };
 
 /** Cap for interim "thinking" text recorded alongside tool calls. */

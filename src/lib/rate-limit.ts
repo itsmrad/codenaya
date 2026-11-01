@@ -282,13 +282,3 @@ export function rateLimitedResponse(result: RateLimitResult): Response {
     },
   );
 }
-
-/**
- * Claiming the GitHub promotion calls GitHub's API once. A person claims once;
- * five a minute covers retries after linking GitHub while stopping a loop.
- */
-export const PROMO_CLAIM_RATE_LIMIT: RateLimitConfig = {
-  scope: "promo-claim",
-  limit: 5,
-  windowMs: 60_000,
-};
