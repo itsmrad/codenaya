@@ -322,6 +322,11 @@ export const ConversationSidebar = ({
     }
   };
 
+  // Panels outside the chat hold their sends (the preview's Fix) while one is in flight.
+  useEffect(() => {
+    useChatStore.setState({ sendPending: pending !== null });
+  }, [pending]);
+
   // Messages queued from outside the chat ("Ask agent to fix", #300; the
   // preview's "Fix with AI", #223) are sent once the agent is free, through the
   // same path as a typed one, leaving the composer draft alone. Like a typed
@@ -339,14 +344,14 @@ export const ConversationSidebar = ({
       return;
     }
     // Syncing with the chat store: the send is the external effect.
-    void sendQueuedMessage(projectId, async (text) => {
+    sendQueuedMessage(projectId, async (text) => {
       setPending({ text, imageUrls: [], userCount });
       try {
         return await sendMessage(text);
       } finally {
         setPending(null);
       }
-    });
+    }).catch(() => toast.error("Message failed to send"));
     // sendMessage is recreated every render; the queued message is what matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queuedMessage, pending, isProcessing, conversations, projectId]);

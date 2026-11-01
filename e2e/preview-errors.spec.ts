@@ -120,9 +120,9 @@ test.describe("preview runtime error banner (#223)", () => {
       await expect(runBlock).toContainText("Finished");
       await expect(runBlock).toContainText("preview has 1 error");
       await runBlock.getByRole("button", { name: "Fix preview errors" }).dblclick();
-      await expect(banner).toContainText("Sending the fix");
+      await expect(banner).toContainText("Waiting for the chat to send");
       await expect(banner.getByRole("button", { name: "Fix with AI" })).toBeDisabled();
-      await expect(banner).not.toContainText("Sending the fix");
+      await expect(banner).not.toContainText("Waiting for the chat to send");
       expect(sent).toHaveLength(1);
       expect(sent[0]).toContain("runtime error");
       expect(sent[0]).toContain("Static exploded");

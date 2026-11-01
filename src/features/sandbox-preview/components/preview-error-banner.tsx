@@ -25,7 +25,7 @@ export const PreviewErrorBanner = ({
   /** Fix runs already sent for this error. */
   attempts: number;
   agentWorking: boolean;
-  /** A fix message is queued or sending. */
+  /** The chat is sending a message, or has one queued. */
   sending: boolean;
   onFix: () => void;
   onShowLogs: () => void;
@@ -34,7 +34,7 @@ export const PreviewErrorBanner = ({
   // Judged once the last fix run is over, not while it is still working.
   const stillFailing = attempts >= MAX_FIX_ATTEMPTS && !agentWorking;
   const fixBlockedReason = sending
-    ? "Sending the fix…"
+    ? "Waiting for the chat to send…"
     : agentWorking
       ? "Available when the agent finishes"
       : null;

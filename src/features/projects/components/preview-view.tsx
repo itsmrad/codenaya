@@ -60,8 +60,10 @@ import { useFilesWithContent } from "../hooks/use-files";
 import { markPreviewOpened } from "../utils/first-run";
 import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
 import {
-  useChatMessageQueued,
+  useChatSendBusy,
   useQueueChatMessage,
+  useUnqueueChatMessage,
+  type QueuedMessage,
 } from "@/features/conversations/hooks/use-queue-chat-message";
 import {
   usePublicEnvVars,
@@ -178,21 +180,30 @@ export const PreviewView = ({
   useEffect(() => {
     terminalOutputRef.current = terminalOutput;
   }, [terminalOutput]);
-  const fixQueued = useChatMessageQueued();
+  const chatBusy = useChatSendBusy();
+  const unqueueChatMessage = useUnqueueChatMessage();
+  // The fix this preview queued, dropped if the preview closes before it is sent.
+  const queuedFixRef = useRef<QueuedMessage | null>(null);
+  useEffect(() => () => {
+    if (queuedFixRef.current) unqueueChatMessage(queuedFixRef.current);
+  }, [unqueueChatMessage]);
   const fixAppError = useCallback(() => {
     if (!appError || !appErrorId) return;
-    queueChatMessage({
+    const message: QueuedMessage = {
       projectId,
       text: buildFixPrompt(appError, terminalOutputRef.current),
       // Only a fix that was actually sent counts towards "Still failing".
       onSent: () =>
         setFixAttempts((attempts) => ({ ...attempts, [appErrorId]: (attempts[appErrorId] ?? 0) + 1 })),
-    });
+    };
+    queuedFixRef.current = message;
+    queueChatMessage(message);
   }, [appError, appErrorId, projectId, queueChatMessage]);
   // The chat's run block says when a finished run left the preview broken.
   const canFix = appErrorId !== null && (fixAttempts[appErrorId] ?? 0) < MAX_FIX_ATTEMPTS;
   usePublishPreviewErrors(
-    previewUrl ? [buildError, runtimeError].filter(Boolean).length : 0,
+    // One: the banner and its fix carry only the error shown (build first).
+    previewUrl && appError ? 1 : 0,
     canFix ? fixAppError : null,
   );
 
@@ -257,7 +268,7 @@ export const PreviewView = ({
             attempts={fixAttempts[appErrorId!] ?? 0}
             // Still loading counts as working: a fix can't start mid-run.
             agentWorking={activeRun !== null}
-            sending={fixQueued}
+            sending={chatBusy}
             onFix={fixAppError}
             onShowLogs={() => setTerminalChoice("open")}
             onDismiss={() => setDismissedErrorId(appErrorId)}

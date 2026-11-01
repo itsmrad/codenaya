@@ -42,13 +42,17 @@ interface ChatStore {
   takeQueuedMessage: (projectId: string) => string | null;
   /** Clears the taken message; its `onSent` runs only when it was sent. */
   finishQueuedMessage: (result: SendResult) => void;
+  /** Drops `message` if it is still waiting, e.g. when the panel that queued it closes. */
+  unqueueMessage: (message: QueuedMessage) => void;
+  /** The chat is sending a message (typed or queued); mirrored from its pending state. */
+  sendPending: boolean;
 }
 
 export const useChatStore = create<ChatStore>()((set, get) => ({
   input: "",
   setInput: (input) => set({ input }),
-  appendInput: (text) => set((state) => ({
-    input: state.input ? `${state.input}\n${text}` : text
+  appendInput: (text) => set((state) => ({ 
+    input: state.input ? `${state.input}\n${text}` : text 
   })),
   contexts: [],
   addContext: (context) => set((state) => {
@@ -75,6 +79,11 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     set({ queuedMessage: null });
     if (result === "sent") queued?.onSent?.();
   },
+  // Once taken, the message is a new object marked sending, so this leaves it be.
+  unqueueMessage: (message) => {
+    if (get().queuedMessage === message) set({ queuedMessage: null });
+  },
+  sendPending: false,
 }));
 
 /** Sends the message queued for `projectId` once through `send`, if there is one. */

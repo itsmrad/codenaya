@@ -66,6 +66,26 @@ describe("queued chat messages", () => {
     expect(useChatStore.getState().queuedMessage).toBeNull();
   });
 
+  it("drops a waiting message only for the panel that queued it", () => {
+    const { queueMessage, unqueueMessage, takeQueuedMessage } = useChatStore.getState();
+    const fix = { projectId: "project_a", text: "fix it" };
+    const other = { projectId: "project_a", text: "fix the secrets" };
+
+    queueMessage(other);
+    unqueueMessage(fix);
+    expect(useChatStore.getState().queuedMessage).toBe(other);
+
+    queueMessage(fix);
+    unqueueMessage(fix);
+    expect(useChatStore.getState().queuedMessage).toBeNull();
+
+    // Once taken, it is sending: closing the preview no longer cancels it.
+    queueMessage(fix);
+    takeQueuedMessage("project_a");
+    unqueueMessage(fix);
+    expect(useChatStore.getState().queuedMessage).toMatchObject({ text: "fix it", sending: true });
+  });
+
   it("frees the queue when the send throws", async () => {
     useChatStore.getState().queueMessage({ projectId: "project_a", text: "fix it" });
 
