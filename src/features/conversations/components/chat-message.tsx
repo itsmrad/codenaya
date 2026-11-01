@@ -19,6 +19,7 @@ import {
 } from "@/components/ai-elements/message";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { usePreviewErrors } from "@/features/sandbox-preview/hooks/use-preview-errors";
 import { splitSlashSkills } from "@/features/skills/parse-slash";
 import { cn } from "@/lib/utils";
 
@@ -205,6 +206,7 @@ export const AssistantMessage = ({
   // crashed): after a long silence, offer a retry instead of a bare spinner.
   // The server fails such a run for good after LOST_RUN_MS.
   const stalled = useRunStalled(message);
+  const previewErrors = usePreviewErrors();
   // Seen running: the reply settles in once it completes. A reply loaded
   // already completed (history) stays still.
   const [startedProcessing] = useState(status === "processing");
@@ -242,6 +244,7 @@ export const AssistantMessage = ({
           model={message.runModel?.label}
           stalled={stalled}
           onOpenFile={onOpenFile}
+          previewErrors={isLast ? previewErrors : undefined}
         />
       )}
       {stalled && isLast && onRetry && (

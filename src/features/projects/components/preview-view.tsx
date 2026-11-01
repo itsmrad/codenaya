@@ -45,7 +45,11 @@ import {
   type AppError,
 } from "@/features/sandbox-preview/utils/app-error";
 import { readPreviewMessage } from "@/features/sandbox-preview/utils/preview-bridge";
-import { PreviewErrorBanner } from "@/features/sandbox-preview/components/preview-error-banner";
+import {
+  MAX_FIX_ATTEMPTS,
+  PreviewErrorBanner,
+} from "@/features/sandbox-preview/components/preview-error-banner";
+import { usePublishPreviewErrors } from "@/features/sandbox-preview/hooks/use-preview-errors";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -162,16 +166,28 @@ export const PreviewView = ({
     setRuntimeError(null);
   }
   // A compile error is usually why the app also throws, so it goes first.
-  const appError = (activeEngine === "sandbox" ? sandbox.appError : null) ?? runtimeError;
+  const buildError = activeEngine === "sandbox" ? sandbox.appError : null;
+  const appError = buildError ?? runtimeError;
   const appErrorId = appError ? appErrorKey(appError) : null;
   const [dismissedErrorId, setDismissedErrorId] = useState<string | null>(null);
   const [fixAttempts, setFixAttempts] = useState<Record<string, number>>({});
   const queueChatMessage = useQueueChatMessage();
-  const fixAppError = () => {
+  // Read when Fix is clicked, so the published fix doesn't change on every log line.
+  const terminalOutputRef = useRef(terminalOutput);
+  useEffect(() => {
+    terminalOutputRef.current = terminalOutput;
+  }, [terminalOutput]);
+  const fixAppError = useCallback(() => {
     if (!appError || !appErrorId) return;
     setFixAttempts((attempts) => ({ ...attempts, [appErrorId]: (attempts[appErrorId] ?? 0) + 1 }));
-    queueChatMessage(buildFixPrompt(appError, terminalOutput));
-  };
+    queueChatMessage(buildFixPrompt(appError, terminalOutputRef.current));
+  }, [appError, appErrorId, queueChatMessage]);
+  // The chat's run block says when a finished run left the preview broken.
+  const canFix = appErrorId !== null && (fixAttempts[appErrorId] ?? 0) < MAX_FIX_ATTEMPTS;
+  usePublishPreviewErrors(
+    previewUrl ? [buildError, runtimeError].filter(Boolean).length : 0,
+    canFix ? fixAppError : null,
+  );
 
   // A failed start opens the terminal even when the user keeps it closed, but
   // that isn't saved as their choice: closing it again only lasts for this error.

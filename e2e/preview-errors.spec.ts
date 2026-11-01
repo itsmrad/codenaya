@@ -17,7 +17,7 @@ test.describe("preview runtime error banner (#223)", () => {
     "Needs Clerk and Convex fixture env",
   );
 
-  test("reports the app's error, ignores forged messages and sends one fix", async ({
+  test("reports the app's error, flags the finished run and guards repeat fixes", async ({
     page,
   }, testInfo) => {
     test.setTimeout(300_000);
@@ -27,24 +27,60 @@ test.describe("preview runtime error banner (#223)", () => {
     const projectId = await user.mutation(api.projects.create, {
       name: `e2e-preview-errors-${Date.now()}`,
     });
-    await new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!).mutation(
-      api.system.createFile,
-      {
-        internalKey: process.env.CODENAYA_CONVEX_INTERNAL_KEY!,
+    const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY!;
+    const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+    await system.mutation(api.system.createFile, {
+      internalKey,
+      projectId,
+      name: "index.html",
+      content: THROWING_PAGE,
+    });
+    // A finished run, so the run block has something to flag.
+    const conversationId = await user.mutation(api.conversations.create, {
+      projectId,
+      title: "Preview errors",
+    });
+    const create = (role: "user" | "assistant", content: string, status?: "processing") =>
+      system.mutation(api.system.createMessage, {
+        internalKey,
+        conversationId,
         projectId,
-        name: "index.html",
-        content: THROWING_PAGE,
-      },
-    );
+        role,
+        content,
+        status,
+      });
+    await create("user", "Make the page");
+    const run = await create("assistant", "", "processing");
+    const now = Date.now();
+    await system.mutation(api.system.upsertMessageSteps, {
+      internalKey,
+      messageId: run,
+      steps: [
+        {
+          id: "edit",
+          kind: "tool",
+          tool: "updateFile",
+          targets: ["index.html"],
+          status: "done",
+          startedAt: now,
+          endedAt: now,
+        },
+      ],
+    });
+    await system.mutation(api.system.updateMessageContent, {
+      internalKey,
+      messageId: run,
+      content: "Made the page.",
+    });
     try {
 
-      const banner = page.getByRole("alert").filter({ hasText: "Runtime error" });
+      const banner = page.getByRole("alert").filter({ hasText: "Static exploded" });
       // A width change can swap the IDE layout and remount the preview, so each
       // width gets its own page load.
       for (const width of [375, 768, 1440]) {
         await page.setViewportSize({ width, height: 800 });
         await page.goto(`/projects/${projectId}?engine=webcontainer&view=preview`);
-        await expect(banner).toContainText("Static exploded", { timeout: 120_000 });
+        await expect(banner).toContainText("Runtime error", { timeout: 120_000 });
         await expect(banner).toHaveCount(1);
         for (const theme of ["light", "dark"] as const) {
           // In place, the way next-themes syncs a change from another tab.
@@ -77,10 +113,21 @@ test.describe("preview runtime error banner (#223)", () => {
         sent.push((route.request().postDataJSON() as { message: string }).message);
         await route.fulfill({ status: 200, json: {} });
       });
-      await banner.getByRole("button", { name: "Fix with AI" }).click();
+      // The finished run doesn't claim success over the broken preview.
+      const runBlock = page.locator('[data-run-status="completed"]');
+      await expect(runBlock).toContainText("Finished");
+      await expect(runBlock).toContainText("preview has 1 error");
+      await runBlock.getByRole("button", { name: "Fix preview errors" }).click();
       await expect.poll(() => sent.length).toBe(1);
       expect(sent[0]).toContain("runtime error");
       expect(sent[0]).toContain("Static exploded");
+
+      // The banner shares the same fix and its two-attempt limit.
+      await banner.getByRole("button", { name: "Fix with AI" }).click();
+      await expect.poll(() => sent.length).toBe(2);
+      await expect(banner).toContainText("Still failing");
+      await expect(banner.getByRole("button", { name: "Fix with AI" })).toHaveCount(0);
+      await expect(runBlock.getByRole("button", { name: "Fix preview errors" })).toHaveCount(0);
 
       await banner.getByRole("button", { name: "Dismiss error" }).click();
       await expect(banner).toHaveCount(0);

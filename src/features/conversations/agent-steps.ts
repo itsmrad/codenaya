@@ -224,3 +224,16 @@ export const LOST_RUN_MESSAGE =
 /** Latest sign of progress in a run: its start, or any step starting or ending. */
 export const lastRunActivity = (startedAt: number, steps: AgentStep[]) =>
   Math.max(startedAt, ...steps.map((step) => step.endedAt ?? step.startedAt));
+
+/**
+ * The run block's note when a finished run left the preview with errors (#223),
+ * or null when its usual summary stands.
+ */
+export const previewErrorsNote = (
+  status: "processing" | "completed" | "cancelled",
+  stalled: boolean,
+  previewErrors: number,
+) =>
+  status === "completed" && !stalled && previewErrors > 0
+    ? `preview has ${previewErrors} ${previewErrors === 1 ? "error" : "errors"}`
+    : null;
