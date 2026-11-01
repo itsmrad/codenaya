@@ -254,6 +254,16 @@ export const SANDBOX_CREATE_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
+/**
+ * A secret scan reads every file and decrypts every secret env var. It runs
+ * once per ZIP, export or publish click, so twenty a minute is generous (#300).
+ */
+export const SECURITY_SCAN_RATE_LIMIT: RateLimitConfig = {
+  scope: "security-scan",
+  limit: 20,
+  windowMs: 60_000,
+};
+
 /** Each call creates a project and an import job (#242). */
 export const GITHUB_IMPORT_RATE_LIMIT: RateLimitConfig = {
   scope: "github-import",
@@ -282,13 +292,3 @@ export function rateLimitedResponse(result: RateLimitResult): Response {
     },
   );
 }
-
-/**
- * Claiming the GitHub promotion calls GitHub's API once. A person claims once;
- * five a minute covers retries after linking GitHub while stopping a loop.
- */
-export const PROMO_CLAIM_RATE_LIMIT: RateLimitConfig = {
-  scope: "promo-claim",
-  limit: 5,
-  windowMs: 60_000,
-};

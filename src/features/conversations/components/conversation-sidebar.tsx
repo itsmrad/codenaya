@@ -47,6 +47,7 @@ import { INSUFFICIENT_CREDITS_CODE } from "@/features/billing/credits";
 import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 import { useFiles } from "@/features/projects/hooks/use-files";
+import { useProject } from "@/features/projects/hooks/use-projects";
 import {
   SkillSlashMenu,
   useSkillSlashMenu,
@@ -74,6 +75,7 @@ import { buildPathIndex } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
 import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
+import { chatStarters } from "../chat-starters";
 import { type Checkpoint, useCheckpoints } from "../hooks/use-checkpoints";
 import {
   CheckpointHistoryDialog,
@@ -172,6 +174,22 @@ export const ConversationSidebar = ({
     }
     return { pathOf: index, idOfPath: ids };
   }, [files]);
+
+  // Wait for the project, and its files unless it's an import (those load
+  // after the import), so the starters don't swap while loading.
+  const project = useProject(projectId);
+  const starters =
+    project && (project.importStatus || files !== undefined)
+      ? chatStarters({
+          name: project.name,
+          imported: Boolean(project.importStatus),
+          hasFiles: Boolean(files?.length),
+        })
+      : null;
+  // No conversation yet (import, Duplicate, Remix, blank create) or an empty one.
+  const isEmpty = activeConversationId
+    ? conversationMessages?.length === 0
+    : conversations !== undefined;
 
   const handleOpenFile = (path: string) => {
     const fileId = idOfPath.get(path);
@@ -304,6 +322,19 @@ export const ConversationSidebar = ({
     }
   };
 
+  // Messages queued from outside the chat ("Ask agent to fix", #300) are sent
+  // once the agent is free, through the same path as a typed one.
+  const queuedMessage = useChatStore((state) => state.queuedMessage);
+  useEffect(() => {
+    if (!queuedMessage || isProcessing || pending) return;
+    const text = useChatStore.getState().takeQueuedMessage(projectId);
+    // sendMessage only sets state after awaiting the network, not synchronously.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (text) void sendMessage(text);
+    // sendMessage is read fresh when the queue changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queuedMessage, isProcessing, pending, projectId]);
+
   const handleSubmit = async (message: PromptInputMessage) => {
     // If processing and no new message, this is just a stop function
     if (
@@ -432,8 +463,9 @@ export const ConversationSidebar = ({
             </Button>
           </div>
         </div>
-        {conversationMessages?.length === 0 && !pending ? (
+        {isEmpty && starters && !pending ? (
           <ChatEmptyState
+            starters={starters}
             onSelect={(prompt) => void handleSubmit({ text: prompt, files: [] })}
           />
         ) : (
@@ -468,6 +500,10 @@ export const ConversationSidebar = ({
                     setPlanMode(false);
                     void sendMessage(buildPlanMessage(message.content));
                   }}
+                  checkpointId={
+                    checkpoints && (checkpointByMessage.get(message._id)?._id ?? null)
+                  }
+                  revertDisabled={isProcessing}
                   onRestore={
                     checkpointByMessage.has(message._id) && !isProcessing
                       ? () => setRestoreTarget(checkpointByMessage.get(message._id)!)

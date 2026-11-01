@@ -5,6 +5,9 @@ import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { userConvexClient } from "./convex-client";
 
+/** The chat empty state's title: projects with files get "Continue building <name>" (#312). */
+export const EMPTY_CHAT_TITLE = /^(What do you want to build\?|Continue building .+)$/;
+
 export const hasInternalKey = () => Boolean(process.env.CODENAYA_CONVEX_INTERNAL_KEY);
 
 /** A pasted Vite error: long unbroken paths plus a code frame. */
