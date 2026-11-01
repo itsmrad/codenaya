@@ -10,7 +10,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 import { GITHUB_SYNC_BRANCH } from "../constants";
 
@@ -42,12 +43,15 @@ export const PullConflictDialog = ({
           restore your files from the history.
         </AlertDialogDescription>
       </AlertDialogHeader>
-      <AlertDialogFooter>
+      {/* Stacked at every width: the two long choices don't fit side by side. */}
+      <AlertDialogFooter className="sm:flex-col-reverse">
         <AlertDialogCancel>Cancel</AlertDialogCancel>
-        <AlertDialogAction asChild>
-          <Button variant="outline" onClick={onKeepLocal}>
-            Keep local and push to {GITHUB_SYNC_BRANCH}
-          </Button>
+        <AlertDialogAction
+          // Outline has no text colour of its own to override the action's primary one.
+          className={cn(buttonVariants({ variant: "outline" }), "text-foreground")}
+          onClick={onKeepLocal}
+        >
+          Keep local and push to {GITHUB_SYNC_BRANCH}
         </AlertDialogAction>
         <AlertDialogAction onClick={onOverwrite}>
           Overwrite local with GitHub
