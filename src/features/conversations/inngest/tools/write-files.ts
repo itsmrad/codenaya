@@ -54,17 +54,29 @@ export const createWriteFilesTool = ({ projectId, internalKey }: WriteFilesToolO
           const ensureFolder = folderEnsurer(internalKey, projectId, folderPaths(index));
 
           const failed: string[] = [];
-          const updates: { path: string; fileId: Id<"files">; content: string }[] = [];
-          const createsByDir = new Map<string, { name: string; content: string }[]>();
+          // Everything is checked before the first write. A path listed twice
+          // is written once, with its last content, like two writes in a row.
+          const batch = new Map<string, string>();
           for (const { path: raw, content } of parsed.data.files) {
             const path = normalizePath(raw);
             if (path === undefined) {
               failed.push(invalidPathError(raw).replace(/^Error: /, ""));
-              continue;
+            } else if (raw.trim().endsWith("/")) {
+              failed.push(`${path}/ (ends in "/", so it names a folder; write to a file path)`);
+            } else {
+              batch.set(path, content);
             }
+          }
+
+          const updates: { path: string; fileId: Id<"files">; content: string }[] = [];
+          const createsByDir = new Map<string, { name: string; content: string }[]>();
+          for (const [path, content] of batch) {
             const entry = index.byPath.get(path);
             const { dir, name } = splitPath(path);
             // A folder can't become a file, and a file can't hold one (#267).
+            // In one call, a path that another path needs as a folder is the
+            // one refused, whichever comes first.
+            const holdsBatchPath = [...batch.keys()].some((other) => other.startsWith(`${path}/`));
             const blocker = dir
               .split("/")
               .map((_, i, parts) => parts.slice(0, i + 1).join("/"))
@@ -72,12 +84,14 @@ export const createWriteFilesTool = ({ projectId, internalKey }: WriteFilesToolO
                 const at = index.byPath.get(ancestor);
                 return at?.file && !at.folder;
               });
-            if (entry?.file) {
-              updates.push({ path, fileId: entry.file._id, content });
-            } else if (entry?.folder) {
+            if (entry?.folder && !entry.file) {
               failed.push(`${path} (a folder; write to a file path inside it)`);
-            } else if (dir && blocker) {
+            } else if (holdsBatchPath) {
+              failed.push(`${path} (also a folder of another path in this call)`);
+            } else if (blocker) {
               failed.push(`${path} ("${blocker}" is a file, not a folder)`);
+            } else if (entry?.file) {
+              updates.push({ path, fileId: entry.file._id, content });
             } else {
               createsByDir.set(dir, [...(createsByDir.get(dir) ?? []), { name, content }]);
             }
@@ -122,9 +136,9 @@ export const createWriteFilesTool = ({ projectId, internalKey }: WriteFilesToolO
               .filter(Boolean)
               .join(" ") +
             syntaxErrorNote(
-              parsed.data.files
-                .map((file) => ({ name: normalizePath(file.path) ?? "", content: file.content }))
-                .filter((file) => written.has(file.name)),
+              [...batch]
+                .filter(([path]) => written.has(path))
+                .map(([name, content]) => ({ name, content })),
             )
           );
         });
