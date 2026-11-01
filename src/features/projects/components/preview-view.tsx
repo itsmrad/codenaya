@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode, type RefObject } from "react";
 import { Allotment } from "allotment";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -38,6 +38,14 @@ import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-
 import { hasRootPackageJson } from "@/features/sandbox-preview/utils/file-tree";
 import type { BootHistory, BootPhase } from "@/features/sandbox-preview/utils/boot-phase";
 import { NOTHING_TO_PREVIEW } from "@/features/sandbox-preview/utils/boot-plan";
+import {
+  appErrorKey,
+  buildFixPrompt,
+  mergeAppError,
+  type AppError,
+} from "@/features/sandbox-preview/utils/app-error";
+import { readPreviewMessage } from "@/features/sandbox-preview/utils/preview-bridge";
+import { PreviewErrorBanner } from "@/features/sandbox-preview/components/preview-error-banner";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -46,7 +54,10 @@ import { EnvVarsDialog } from "./env-vars-dialog";
 import { useProject } from "../hooks/use-projects";
 import { useFilesWithContent } from "../hooks/use-files";
 import { markPreviewOpened } from "../utils/first-run";
-import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
+import {
+  useActiveRun,
+  useQueueChatMessage,
+} from "@/features/conversations/hooks/use-conversations";
 import {
   usePublicEnvVars,
   useWithheldSecretCount,
@@ -128,6 +139,40 @@ export const PreviewView = ({
         : "create";
   const reduceMotion = useReducedMotion();
 
+  // The app's own errors (#223): compile errors from the sandbox's dev server,
+  // runtime errors posted by the bridge script injected into the preview.
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [runtimeError, setRuntimeError] = useState<AppError | null>(null);
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const reported = readPreviewMessage(event, iframeRef.current?.contentWindow, previewUrl);
+      if (reported) setRuntimeError((prev) => mergeAppError(prev, reported));
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [previewUrl]);
+  // An edit or a reload may have fixed it; the bridge reports it again if not.
+  const [runtimeErrorScope, setRuntimeErrorScope] = useState({ files, previewUrl, refreshKey });
+  if (
+    runtimeErrorScope.files !== files ||
+    runtimeErrorScope.previewUrl !== previewUrl ||
+    runtimeErrorScope.refreshKey !== refreshKey
+  ) {
+    setRuntimeErrorScope({ files, previewUrl, refreshKey });
+    setRuntimeError(null);
+  }
+  // A compile error is usually why the app also throws, so it goes first.
+  const appError = (activeEngine === "sandbox" ? sandbox.appError : null) ?? runtimeError;
+  const appErrorId = appError ? appErrorKey(appError) : null;
+  const [dismissedErrorId, setDismissedErrorId] = useState<string | null>(null);
+  const [fixAttempts, setFixAttempts] = useState<Record<string, number>>({});
+  const queueChatMessage = useQueueChatMessage();
+  const fixAppError = () => {
+    if (!appError || !appErrorId) return;
+    setFixAttempts((attempts) => ({ ...attempts, [appErrorId]: (attempts[appErrorId] ?? 0) + 1 }));
+    queueChatMessage(buildFixPrompt(appError, terminalOutput));
+  };
+
   // A failed start opens the terminal even when the user keeps it closed, but
   // that isn't saved as their choice: closing it again only lasts for this error.
   const [errorDismissed, setErrorDismissed] = useState(false);
@@ -167,6 +212,7 @@ export const PreviewView = ({
     ) : null;
   const content = (
     <PreviewContent
+      iframeRef={iframeRef}
       error={error}
       isLoading={isLoading}
       bootPhase={bootPhase}
@@ -181,6 +227,19 @@ export const PreviewView = ({
       onUseWebContainer={() => switchEngine("webcontainer")}
       agentWorking={Boolean(activeRun)}
       building={building}
+      errorBanner={
+        appError && appErrorId !== dismissedErrorId && previewUrl && !building ? (
+          <PreviewErrorBanner
+            error={appError}
+            attempts={fixAttempts[appErrorId!] ?? 0}
+            // Still loading counts as working: a fix can't start mid-run.
+            agentWorking={activeRun !== null}
+            onFix={fixAppError}
+            onShowLogs={() => setTerminalChoice("open")}
+            onDismiss={() => setDismissedErrorId(appErrorId)}
+          />
+        ) : null
+      }
     />
   );
 
@@ -433,6 +492,7 @@ const ERROR_TITLES: Record<SandboxErrorKind, string> = {
 };
 
 const PreviewContent = ({
+  iframeRef,
   error,
   isLoading,
   bootPhase,
@@ -447,7 +507,9 @@ const PreviewContent = ({
   onUseWebContainer,
   agentWorking,
   building,
+  errorBanner,
 }: {
+  iframeRef: RefObject<HTMLIFrameElement | null>;
   error: string | null | undefined;
   isLoading: boolean;
   bootPhase: BootPhase | null;
@@ -464,6 +526,8 @@ const PreviewContent = ({
   agentWorking?: boolean;
   /** The first-build placeholder, shown over the engine until the run ends. */
   building: ReactNode;
+  /** The app's build or runtime error, over the running preview. */
+  errorBanner: ReactNode;
 }) => (
   <div className="size-full rounded-xl overflow-hidden relative isolate">
     <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
@@ -524,6 +588,7 @@ const PreviewContent = ({
     {previewUrl && (
       <div className="size-full flex justify-center bg-muted/30">
         <iframe
+          ref={iframeRef}
           key={refreshKey}
           src={previewUrl}
           className="h-full w-full max-w-full border-0 bg-background data-[framed=true]:border-x data-[framed=true]:border-border/50"
@@ -535,6 +600,8 @@ const PreviewContent = ({
         />
       </div>
     )}
+
+    {errorBanner}
   </div>
 );
 

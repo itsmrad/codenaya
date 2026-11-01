@@ -16,6 +16,9 @@ interface ChatStore {
   addContext: (context: Omit<ChatContext, "id">) => void;
   removeContext: (id: string) => void;
   clearContexts: () => void;
+  /** A message another panel asked the chat to send, e.g. "Fix with AI" (#223). */
+  queuedMessage: string | null;
+  queueMessage: (text: string | null) => void;
 }
 
 export const useChatStore = create<ChatStore>()((set) => ({
@@ -32,5 +35,7 @@ export const useChatStore = create<ChatStore>()((set) => ({
   removeContext: (id) => set((state) => ({
     contexts: state.contexts.filter((c) => c.id !== id)
   })),
-  clearContexts: () => set({ contexts: [] })
+  clearContexts: () => set({ contexts: [] }),
+  queuedMessage: null,
+  queueMessage: (queuedMessage) => set({ queuedMessage }),
 }));

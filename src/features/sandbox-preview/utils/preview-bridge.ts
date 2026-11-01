@@ -1,0 +1,78 @@
+import { z } from "zod";
+
+import { MAX_ERROR_TEXT, type AppError } from "./app-error";
+
+export const PREVIEW_MESSAGE_SOURCE = "codenaya-preview";
+/** Bump when the message shape changes; select-to-edit (#227) extends this protocol. */
+export const PREVIEW_PROTOCOL_VERSION = 1;
+
+/**
+ * Runs inside the previewed app and reports uncaught errors to the IDE. The
+ * preview is cross-origin, so this is the only way they leave the iframe. It is
+ * injected when served (E2B proxy) or mounted (WebContainer), never written to
+ * the user's files, so exports stay clean.
+ */
+export const PREVIEW_BRIDGE_SCRIPT = `<script data-codenaya-preview>(function(){
+if (window.parent === window) return;
+function post(message, stack) {
+  try {
+    window.parent.postMessage({
+      source: ${JSON.stringify(PREVIEW_MESSAGE_SOURCE)},
+      version: ${PREVIEW_PROTOCOL_VERSION},
+      kind: "runtime",
+      message: String(message).slice(0, ${MAX_ERROR_TEXT}),
+      stack: stack ? String(stack).slice(0, ${MAX_ERROR_TEXT}) : undefined
+    }, "*");
+  } catch (e) {}
+}
+window.addEventListener("error", function (event) {
+  var error = event.error;
+  post((error && error.message) || event.message || "Script error", error && error.stack);
+});
+window.addEventListener("unhandledrejection", function (event) {
+  var reason = event.reason;
+  post((reason && reason.message) || String(reason), reason && reason.stack);
+});
+})();</script>`;
+
+/** Puts the bridge first in <head>, so it is listening before the app's scripts run. */
+export const injectPreviewBridge = (html: string) => {
+  if (html.includes("data-codenaya-preview")) return html;
+  const anchor = html.match(/<head[^>]*>/i) ?? html.match(/<html[^>]*>/i);
+  if (!anchor || anchor.index === undefined) return PREVIEW_BRIDGE_SCRIPT + html;
+  const end = anchor.index + anchor[0].length;
+  return html.slice(0, end) + PREVIEW_BRIDGE_SCRIPT + html.slice(end);
+};
+
+const runtimeMessage = z.object({
+  source: z.literal(PREVIEW_MESSAGE_SOURCE),
+  version: z.literal(PREVIEW_PROTOCOL_VERSION),
+  kind: z.literal("runtime"),
+  message: z.string(),
+  stack: z.string().optional(),
+});
+
+/**
+ * The runtime error a preview message reports, or null. Only the preview
+ * iframe's own window on the preview's origin is trusted; anything else on
+ * the page can post messages too.
+ */
+export const readPreviewMessage = (
+  event: Pick<MessageEvent, "data" | "origin" | "source">,
+  frame: Window | null | undefined,
+  previewUrl: string | null | undefined,
+): AppError | null => {
+  if (!frame || !previewUrl || event.source !== frame) return null;
+  try {
+    if (event.origin !== new URL(previewUrl).origin) return null;
+  } catch {
+    return null;
+  }
+  const parsed = runtimeMessage.safeParse(event.data);
+  if (!parsed.success) return null;
+  return {
+    kind: "runtime",
+    message: parsed.data.message.slice(0, MAX_ERROR_TEXT) || "Uncaught error",
+    stack: parsed.data.stack?.slice(0, MAX_ERROR_TEXT),
+  };
+};

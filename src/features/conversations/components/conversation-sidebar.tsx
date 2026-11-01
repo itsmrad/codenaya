@@ -304,6 +304,21 @@ export const ConversationSidebar = ({
     }
   };
 
+  // Sends what another panel queued (the preview's "Fix with AI") through the
+  // same path as a typed message, leaving the composer draft alone.
+  const queuedMessage = useChatStore((state) => state.queuedMessage);
+  useEffect(() => {
+    // Wait for the conversation list, or the send would open a new conversation.
+    if (!queuedMessage || pending || isProcessing || conversations === undefined) return;
+    useChatStore.getState().queueMessage(null);
+    // Syncing with the chat store: the send is the external effect, and it only
+    // touches state on a credential refusal or once a conversation is created.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void sendMessage(queuedMessage);
+    // sendMessage is recreated every render; the queued text is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queuedMessage, pending, isProcessing, conversations]);
+
   const handleSubmit = async (message: PromptInputMessage) => {
     // If processing and no new message, this is just a stop function
     if (

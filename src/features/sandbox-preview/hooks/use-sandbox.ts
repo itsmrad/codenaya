@@ -11,6 +11,12 @@ import {
   type BootPhase,
 } from "@/features/sandbox-preview/utils/boot-phase";
 import {
+  detectBuildError,
+  isHmrSuccess,
+  mergeAppError,
+  type AppError,
+} from "@/features/sandbox-preview/utils/app-error";
+import {
   classifySandboxError,
   type SandboxErrorKind,
 } from "@/features/sandbox-preview/utils/sandbox-error";
@@ -57,6 +63,8 @@ export const useSandbox = ({
   const [errorKind, setErrorKind] = useState<SandboxErrorKind | null>(null);
   const [restartKey, setRestartKey] = useState(0);
   const [terminalOutput, setTerminalOutput] = useState("");
+  /** A compile error the dev server printed after boot (#223). */
+  const [appError, setAppError] = useState<AppError | null>(null);
   const [bootHistory, setBootHistory] = useState<BootHistory>({});
   const [phase, setPhase] = useState<BootPhase | null>(null);
   const [prevEnabled, setPrevEnabled] = useState(enabled);
@@ -69,6 +77,7 @@ export const useSandbox = ({
       setPreviewUrl(null);
       setError(null);
       setErrorKind(null);
+      setAppError(null);
       setPhase(null);
       setBootHistory({});
     }
@@ -172,9 +181,13 @@ export const useSandbox = ({
                 case "status":
                   setStatus(event.status);
                   break;
-                case "output":
+                case "output": {
                   setTerminalOutput((prev) => prev + event.data);
+                  if (isHmrSuccess(event.data)) setAppError(null);
+                  const buildError = detectBuildError(event.data);
+                  if (buildError) setAppError((prev) => mergeAppError(prev, buildError));
                   break;
+                }
                 case "phase":
                   if (isBootPhase(event.phase)) {
                     setPhase(event.phase);
@@ -251,6 +264,10 @@ export const useSandbox = ({
         syncedContentRef.current.set(file.path, file.content);
       }
   
+      // The edit may fix the shown error. If not, the dev server prints it again
+      // once the preview reloads the module, which is after this write lands.
+      setAppError(null);
+
       // Serialize file syncs to prevent out-of-order writes
       syncPromiseRef.current = syncPromiseRef.current
         .then(() =>
@@ -335,6 +352,7 @@ export const useSandbox = ({
     setPreviewUrl(null);
     setError(null);
     setErrorKind(null);
+    setAppError(null);
     setTerminalOutput("");
     setPhase(null);
     setBootHistory({});
@@ -346,6 +364,7 @@ export const useSandbox = ({
     previewUrl,
     error,
     errorKind,
+    appError,
     restart,
     terminalOutput,
     phase,

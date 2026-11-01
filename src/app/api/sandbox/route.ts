@@ -37,6 +37,7 @@ import {
   undeclaredPackages,
 } from "@/features/sandbox-preview/utils/missing-references";
 import { nodeIncompatibility } from "@/features/sandbox-preview/utils/node-compat";
+import { PREVIEW_BRIDGE_SCRIPT } from "@/features/sandbox-preview/utils/preview-bridge";
 import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 import type { BootPhase } from "@/features/sandbox-preview/utils/boot-phase";
 import {
@@ -673,6 +674,16 @@ process.on('unhandledRejection', (reason) => console.error('E2B Proxy Unhandled 
 
 const TARGET_PORT = parseInt(process.env.TARGET_PORT || "${targetPort}", 10);
 const PROXY_PORT = parseInt(process.env.PROXY_PORT || "${proxyPort}", 10);
+const BRIDGE = ${JSON.stringify(PREVIEW_BRIDGE_SCRIPT)};
+
+// Mirrors injectPreviewBridge (preview-bridge.ts): first in <head>, then <html>.
+function injectBridge(html) {
+  if (html.includes('data-codenaya-preview')) return html;
+  const anchor = html.match(/<head[^>]*>/i) || html.match(/<html[^>]*>/i);
+  if (!anchor) return BRIDGE + html;
+  const end = anchor.index + anchor[0].length;
+  return html.slice(0, end) + BRIDGE + html.slice(end);
+}
 
 const server = http.createServer((req, res) => {
   const options = {
@@ -683,11 +694,30 @@ const server = http.createServer((req, res) => {
     headers: req.headers,
   };
   options.headers['host'] = 'localhost:' + TARGET_PORT;
+  // Plain HTML from the dev server, so the error bridge can go in (#223).
+  delete options.headers['accept-encoding'];
 
   const proxyReq = http.request(options, (proxyRes) => {
     const headers = { ...proxyRes.headers };
-    res.writeHead(proxyRes.statusCode, headers);
-    proxyRes.pipe(res, { end: true });
+    const isPage =
+      req.method === 'GET' &&
+      proxyRes.statusCode === 200 &&
+      String(headers['content-type'] || '').includes('text/html') &&
+      !headers['content-encoding'];
+    if (!isPage) {
+      res.writeHead(proxyRes.statusCode, headers);
+      proxyRes.pipe(res, { end: true });
+      return;
+    }
+    const chunks = [];
+    proxyRes.on('data', (chunk) => chunks.push(chunk));
+    proxyRes.on('end', () => {
+      const html = injectBridge(Buffer.concat(chunks).toString('utf8'));
+      delete headers['transfer-encoding'];
+      headers['content-length'] = Buffer.byteLength(html);
+      res.writeHead(proxyRes.statusCode, headers);
+      res.end(html);
+    });
   });
 
   proxyReq.on('error', (err) => {
