@@ -1,10 +1,10 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useQuery } from "convex/react";
 import { useUser } from "@clerk/nextjs";
-import { CheckCircle2Icon, ChevronRightIcon, CircleIcon, XIcon } from "lucide-react";
+import { CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleIcon, XIcon } from "lucide-react";
 
 import { Progress } from "@/components/ui/progress";
 import { ACCOUNT_SETTINGS_URL, AI_PROVIDERS_SETTINGS_URL } from "@/features/settings/nav";
@@ -34,6 +34,7 @@ interface FirstRunChecklistProps {
 /**
  * "Get started" card on the dashboard: five steps whose state comes from the
  * user's real data. Hidden once every step is done or the user dismisses it.
+ * Once the user has a project it starts as a one-line pill that expands.
  */
 export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistProps) => {
   const { user } = useUser();
@@ -45,6 +46,7 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
     () => null,
   );
   const previewOpened = useSyncExternalStore(subscribe, hasOpenedPreview, () => false);
+  const [expanded, setExpanded] = useState(false);
 
   const active = dismissed === false;
   const aiKeys = useQuery(api.aiProviders.list, active ? {} : "skip");
@@ -76,6 +78,30 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
     { id: "addKeyOrSkill", label: "Add an AI key or a skill", href: AI_PROVIDERS_SETTINGS_URL },
     { id: "ship", label: "Publish or export to GitHub", href: latestProject },
   ];
+
+  if (projects.length > 0 && !expanded) {
+    return (
+      <button
+        onClick={() => setExpanded(true)}
+        aria-expanded={false}
+        className="group flex h-8 w-fit items-center gap-2 rounded-full border border-border/60 bg-card px-3 text-xs text-muted-foreground transition-colors hover:border-brand/40 hover:text-foreground"
+      >
+        <span aria-hidden className="h-1 w-10 overflow-hidden rounded-full bg-muted">
+          <span
+            className="block h-full rounded-full bg-brand"
+            style={{ width: `${(doneCount / steps.length) * 100}%` }}
+          />
+        </span>
+        <span className="sr-only">Getting started:</span>
+        <span className="font-medium tabular-nums text-foreground">
+          {doneCount} of {steps.length}
+        </span>
+        <span aria-hidden>·</span>
+        Continue setup
+        <ChevronDownIcon aria-hidden className="size-3.5" />
+      </button>
+    );
+  }
 
   const handleDismiss = () => {
     dismissFirstRun(user.id);
