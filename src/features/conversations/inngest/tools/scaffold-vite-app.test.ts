@@ -30,6 +30,7 @@ vi.mock("@/lib/convex-client", () => ({
 
 import { missingReferencedFiles } from "@/features/sandbox-preview/utils/missing-references";
 
+import { KNOWN_GOOD_VERSIONS } from "../known-good-versions";
 import { VITE_REACT_STARTER } from "../vite-starter";
 import { createScaffoldViteAppTool } from "./scaffold-vite-app";
 
@@ -58,7 +59,7 @@ describe("scaffoldViteApp tool", () => {
     );
     expect(missingReferencedFiles(paths())).toEqual([]);
     expect(result).toContain("tsconfig.app.json (id");
-    expect(result).toMatch(/Folders: src \(id\d+\), src\/lib \(id\d+\)/);
+    expect(result).toMatch(/Folders: src \(id\d+\), src\/lib \(id\d+\), src\/components \(id\d+\)/);
   });
 
   it("writes package.json after every file outside the root", async () => {
@@ -89,10 +90,14 @@ describe("scaffoldViteApp tool", () => {
     const pkg = JSON.parse(read("package.json"));
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 
+    // #331: every starter dependency comes from the known-good manifest.
+    for (const [name, range] of Object.entries(deps)) {
+      expect(range, name).toBe(KNOWN_GOOD_VERSIONS[name as keyof typeof KNOWN_GOOD_VERSIONS]);
+    }
     expect(deps).toMatchObject({
-      react: "^19.2.0",
-      "react-dom": "^19.2.0",
-      "@types/react": "^19.2.0",
+      react: expect.stringMatching(/^\^19\./),
+      "react-dom": deps.react,
+      "@types/react": expect.stringMatching(/^\^19\./),
       tailwindcss: expect.stringMatching(/^\^4\./),
       "@tailwindcss/vite": deps.tailwindcss,
       "tw-animate-css": expect.any(String),
@@ -114,5 +119,27 @@ describe("scaffoldViteApp tool", () => {
     for (const stale of ["tailwind.config", "postcss.config", "tailwindcss-animate", "@tailwind ", "hsl(var("]) {
       expect(everything).not.toContain(stale);
     }
+  });
+
+  it("mounts an error boundary and a router around App (#335)", () => {
+    const tool = createScaffoldViteAppTool({ projectId: "p" as never, internalKey: "k" });
+    const read = (path: string) => VITE_REACT_STARTER.find((file) => file.path === path)!.content;
+
+    expect(JSON.parse(read("package.json")).dependencies["react-router-dom"]).toBe(
+      KNOWN_GOOD_VERSIONS["react-router-dom"],
+    );
+    expect(read("src/main.tsx")).toContain(
+      "<ErrorBoundary>\n      <BrowserRouter>\n        <App />\n      </BrowserRouter>\n    </ErrorBoundary>",
+    );
+    expect(read("src/App.tsx")).toContain('<Route path="/" element={<Home />} />');
+    const boundary = read("src/components/error-boundary.tsx");
+    expect(boundary).toContain("static getDerivedStateFromError");
+    expect(boundary).toContain("import.meta.env.DEV && componentStack");
+    expect(boundary).toContain("window.location.reload()");
+    expect(boundary).toContain('<a\n              href="/"');
+    // A flag, so `throw null` / `throw undefined` still show the card.
+    expect(boundary).toContain("return { hasError: true, error };");
+    expect(boundary).toContain("if (!hasError) return this.props.children;");
+    expect(tool.description).toContain("Don't add another <BrowserRouter>.");
   });
 });
