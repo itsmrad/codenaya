@@ -179,7 +179,7 @@ export const ConversationSidebar = ({
   // after the import), so the starters don't swap while loading.
   const project = useProject(projectId);
   const starters =
-    project && (project.importStatus || files)
+    project && (project.importStatus || files !== undefined)
       ? chatStarters({
           name: project.name,
           imported: Boolean(project.importStatus),
