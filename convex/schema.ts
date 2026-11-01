@@ -53,6 +53,55 @@ export const platformModelValidator = v.object({
 });
 
 /**
+ * A route's price, USD per 1M tokens (ADR 0010). "blended" is one number for
+ * input and output alike; "split" prices them apart.
+ */
+export const modelPricingValidator = v.union(
+  v.object({ mode: v.literal("blended"), usdPerMTok: v.number() }),
+  v.object({
+    mode: v.literal("split"),
+    inputUsdPerMTok: v.number(),
+    outputUsdPerMTok: v.number(),
+  }),
+);
+
+/**
+ * Who may pick a catalog model: everyone, or GitHub promo claimants only
+ * (ADR 0009). "promo_counted" runs use the claim's counted runs.
+ */
+export const modelAccessValidator = v.union(
+  v.literal("everyone"),
+  v.literal("promo_counted"),
+  v.literal("promo_unlimited"),
+);
+
+/**
+ * One model of the platform catalog and the provider route that serves it
+ * (ADR 0010). `id` is stable across provider switches: users pick it,
+ * preferences and messages record it. `providerModelId` is what the provider's
+ * API is called with. `tools` as in `platformModelValidator`. A `hidden` model
+ * keeps its route and price but isn't offered to users.
+ */
+export const catalogModelValidator = v.object({
+  id: v.string(),
+  name: v.string(),
+  vendor: v.string(),
+  provider: platformProviderValidator,
+  providerModelId: v.string(),
+  contextLength: v.optional(v.number()),
+  vision: v.boolean(),
+  tools: v.union(v.literal("reported"), v.literal("confirmed")),
+  pricing: modelPricingValidator,
+  access: modelAccessValidator,
+  hidden: v.boolean(),
+});
+
+/** A credit account's plan (ADR 0011); see `PLANS` in `features/billing/plans.ts`. */
+export const planIdValidator = v.union(v.literal("free"), v.literal("pro"));
+/** Who pays for a run (ADR 0011). Only "platform" runs cost credits. */
+export const runSourceValidator = v.union(v.literal("platform"), v.literal("promo"), v.literal("byok"));
+
+/**
  * The model an assistant message was produced with. `keyId` is set when the
  * run used the user's own key (BYOK), which is what billing reads to charge no
  * credits. `label` is the "provider · model" shown on the run block.
@@ -61,6 +110,8 @@ export const runModelValidator = v.object({
   keyId: v.optional(v.id("aiProviderKeys")),
   modelId: v.string(),
   label: v.string(),
+  // Platform runs since ADR 0010: the provider whose key served it.
+  provider: v.optional(platformProviderValidator),
 });
 
 export default defineSchema({
@@ -477,6 +528,55 @@ export default defineSchema({
     .index("by_user", ["userId"])
     .index("by_user_and_provider", ["userId", "provider"]),
 
+  /**
+   * A claim of the GitHub launch promotion (ADR 0009). One per user, and one
+   * per GitHub account, so a GitHub account linked to several Codenaya users
+   * claims only once. The counter lives here: only its owner's sends touch it.
+   */
+  promoClaims: defineTable({
+    userId: v.string(),
+    githubUserId: v.number(),
+    githubLogin: v.string(),
+    githubCreatedAt: v.number(),
+    opusRunsUsed: v.number(),
+    claimedAt: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_githubUserId", ["githubUserId"]),
+
+  /**
+   * A user's credit usage this month and today (ADR 0011). Created on the first
+   * metered run; none means nothing used. Periods reset lazily on the next read
+   * or charge (`currentUsage` in `features/billing/credits.ts`).
+   */
+  creditAccounts: defineTable({
+    userId: v.string(),
+    plan: planIdValidator,
+    periodStartsAt: v.number(),
+    periodUsed: v.number(),
+    dayStartsAt: v.number(),
+    dayUsed: v.number(),
+  }).index("by_userId", ["userId"]),
+
+  /**
+   * One row per agent run: its running token and cost totals and the credits
+   * charged so far. Every run is recorded, BYOK and promo runs at 0 credits.
+   * Charges set totals rather than add to them, so a retried step is a no-op.
+   */
+  creditLedger: defineTable({
+    userId: v.string(),
+    messageId: v.id("messages"),
+    source: runSourceValidator,
+    model: v.string(),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+    costUsd: v.number(),
+    credits: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_messageId", ["messageId"])
+    .index("by_userId", ["userId"]),
+
   /** The user's default model. No `defaultKeyId` means the Codenaya platform key. */
   userAiPreferences: defineTable({
     userId: v.string(),
@@ -486,10 +586,22 @@ export default defineSchema({
   }).index("by_user", ["userId"]),
 
   /**
-   * The admin's model selection for one platform provider, saved from /admin.
-   * One bounded doc per provider (at most MAX_PLATFORM_MODELS models). No doc
-   * means users get the provider's curated catalog.
+   * The platform model catalog (ADR 0010): every model users may run on
+   * Codenaya's keys, each with its own provider route and price. A single
+   * bounded doc (at most MAX_PLATFORM_MODELS models), read once per send. None
+   * means the env provider's curated catalog (`NEXT_PUBLIC_AI_PROVIDER`).
+   * `utilityModelId` serves chat titles and editor AI.
    */
+  platformCatalog: defineTable({
+    models: v.array(catalogModelValidator),
+    defaultModelId: v.string(),
+    utilityModelId: v.string(),
+    updatedAt: v.number(),
+    // identity.subject of the admin who saved it.
+    updatedBy: v.string(),
+  }),
+
+  /** Deprecated by `platformCatalog` (ADR 0010); kept until migrated, then dropped. */
   platformModelConfigs: defineTable({
     provider: platformProviderValidator,
     models: v.array(platformModelValidator),
@@ -499,10 +611,7 @@ export default defineSchema({
     updatedBy: v.string(),
   }).index("by_provider", ["provider"]),
 
-  /**
-   * Platform settings the admin changes at runtime. A single row; none means
-   * the env defaults (`NEXT_PUBLIC_AI_PROVIDER`).
-   */
+  /** Deprecated by `platformCatalog` (ADR 0010); kept until migrated, then dropped. */
   platformSettings: defineTable({
     activeProvider: platformProviderValidator,
     updatedAt: v.number(),
@@ -516,6 +625,20 @@ export default defineSchema({
     action: v.string(),
     summary: v.string(),
     at: v.number(),
+    // Structured before/after per changed field (ADR 0010); older rows have none.
+    changes: v.optional(
+      v.array(
+        v.object({
+          field: v.string(),
+          before: v.optional(v.string()),
+          after: v.optional(v.string()),
+        }),
+      ),
+    ),
+    // The admin request that made the change, from the Next route.
+    requestId: v.optional(v.string()),
+    ip: v.optional(v.string()),
+    userAgent: v.optional(v.string()),
   }).index("by_at", ["at"]),
 
   /**

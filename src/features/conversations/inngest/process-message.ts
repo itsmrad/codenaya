@@ -31,6 +31,8 @@ import {
   keyFailureMessage,
   resolveRunModel,
 } from '@/features/ai-providers/server/resolve-run-model';
+import type { ModelPricing } from '@/features/ai-providers/catalog';
+import { costUsd, usageOfResponse } from '@/features/billing/credits';
 import {
   type AgentStep,
   buildCheckLabel,
@@ -232,6 +234,36 @@ export const processMessage = inngest.createFunction(
       }
     }
 
+    // ─── Usage (ADR 0011) ───
+    //
+    // Running totals, rebuilt from the memoized inferences on every replay, so
+    // each record step sends the run's total so far: a retried step changes
+    // nothing, and one that failed is caught up by the next (or the final one).
+    const usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+    let usageRecords = 0;
+    const sendUsage = (id: string) => {
+      const totals = { ...usage };
+      return step.run(id, async () => {
+        try {
+          await convex.mutation(api.credits.recordRunUsage, {
+            internalKey,
+            messageId,
+            source: runModel.metering.source,
+            ...totals,
+          });
+        } catch (error) {
+          console.error("[credits] failed to record run usage", error);
+        }
+      });
+    };
+    const recordUsage = async (raw: string | undefined, pricing: ModelPricing | undefined) => {
+      const tokens = usageOfResponse(raw);
+      usage.inputTokens += tokens.inputTokens;
+      usage.outputTokens += tokens.outputTokens;
+      usage.costUsd += pricing ? costUsd(pricing, tokens) : 0;
+      await sendUsage(`record-usage-${++usageRecords}`);
+    };
+
     // Fetch recent messages for conversation context
     const recentMessages = await step.run("get-recent-messages", async () => {
       return await convex.query(api.system.getRecentMessages, {
@@ -279,7 +311,9 @@ export const processMessage = inngest.createFunction(
 
       let output;
       try {
-        ({ output } = await titleAgent.run(request, { step }));
+        const result = await titleAgent.run(request, { step });
+        output = result.output;
+        await recordUsage(result.raw, runModel.metering.title);
       } catch (error) {
         return await endRunOnKeyRejection(error);
       }
@@ -630,6 +664,7 @@ export const processMessage = inngest.createFunction(
           };
         },
         onResponse: async ({ result, network }) => {
+          await recordUsage(result.raw, runModel.metering.coding);
           const calls = result.output.flatMap((m) =>
             m.type === "tool_call" ? m.tools : [],
           );
@@ -766,6 +801,11 @@ export const processMessage = inngest.createFunction(
         typeof textMessage.content === "string"
           ? textMessage.content
           : textMessage.content.map((c) => c.text).join("");
+    }
+
+    // A failed last record has no later one to catch it up.
+    if (usageRecords > 0) {
+      await sendUsage("record-usage-final");
     }
 
     // Update the assistant message with the response (this also sets status to completed)

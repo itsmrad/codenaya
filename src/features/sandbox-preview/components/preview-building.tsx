@@ -1,7 +1,8 @@
 "use client";
 
-import { FileCode2Icon, HammerIcon } from "lucide-react";
+import { FileCode2Icon } from "lucide-react";
 
+import { CodenayaLogo } from "@/components/codenaya-logo";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { liveStepLabel } from "@/features/conversations/components/agent-run";
@@ -38,9 +39,9 @@ export const PreviewBuilding = ({
       className="size-full overflow-y-auto bg-background p-4"
     >
       <div className="mx-auto flex min-h-full max-w-sm flex-col items-center justify-center gap-4 text-center">
-        <div className="relative grid size-12 place-items-center rounded-2xl border border-border/60 bg-muted/40">
-          <span className="absolute inset-0 animate-ping rounded-2xl bg-brand/10 motion-reduce:animate-none" />
-          <HammerIcon className="size-5 text-brand" />
+        <div className="relative grid size-16 place-items-center rounded-2xl border border-border/70 bg-card shadow-xl shadow-brand/5">
+          <span className="absolute inset-0 animate-ping rounded-2xl bg-brand/20 motion-reduce:animate-none opacity-60" />
+          <CodenayaLogo size={36} blinking={true} decorative />
         </div>
         <div className="flex flex-col items-center gap-1">
           <p className="text-sm font-medium text-foreground">Building your app</p>

@@ -43,8 +43,9 @@ describe("platform models", () => {
     expect(agent).toMatchObject({ id: "some-model", authKey: `key-${provider}` });
     expect(agent.url).toContain(url);
 
-    const editor = platformEditorModel(provider);
+    const editor = platformEditorModel({ provider, providerModelId: "small-model" });
     expect(editor.provider).toBe(editorApi);
+    expect(editor.modelId).toBe("small-model");
   });
 
   it("covers every platform provider", () => {
@@ -59,6 +60,7 @@ describe("platform models", () => {
     expect(isPlatformConfigured("groq")).toBe(false);
     expect(error.mock.calls[0][0]).toMatch(/GROQ_API_KEY is not set/);
     expect(() => platformAgentModel("groq", "openai/gpt-oss-120b")).toThrow(/GROQ_API_KEY/);
-    expect(() => platformEditorModel("groq")).toThrow(/GROQ_API_KEY/);
+    expect(() => platformEditorModel({ provider: "groq", providerModelId: "openai/gpt-oss-20b" }))
+      .toThrow(/GROQ_API_KEY/);
   });
 });

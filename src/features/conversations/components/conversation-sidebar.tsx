@@ -41,8 +41,10 @@ import {
   usePlatformModelsOrCatalog,
 } from "@/features/ai-providers/hooks/use-ai-providers";
 import { modelAcceptsImages } from "@/features/ai-providers/registry";
-import { resolvePlatformModel } from "@/features/ai-providers/platform";
+import { resolveCatalogModel } from "@/features/ai-providers/platform";
 import { detectCredential } from "@/features/integrations/credential-guard";
+import { INSUFFICIENT_CREDITS_CODE } from "@/features/billing/credits";
+import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 import { useFiles } from "@/features/projects/hooks/use-files";
 import {
@@ -108,7 +110,7 @@ export const ConversationSidebar = ({
   const platform = usePlatformModelsOrCatalog();
   const modelKey = modelKeys?.find((key) => key._id === agentModel.keyId);
   const acceptsImages = !agentModel.keyId
-    ? resolvePlatformModel(platform.provider, platform.config, agentModel.modelId).vision === true
+    ? resolveCatalogModel(platform, agentModel.modelId).vision
     : !modelKey || modelAcceptsImages(agentModel.modelId, modelKey);
   const [
     selectedConversationId,
@@ -280,8 +282,14 @@ export const ConversationSidebar = ({
           openIntegrations();
           return "blocked";
         }
-        // Platform AI has no key: nothing was saved, so keep the draft.
-        if (body.code === "ai_not_configured" && body.error) {
+        // Platform AI has no key, a promo model can't run (ADR 0009), or the
+        // user is out of credits (ADR 0011):
+        // nothing was saved, so keep the draft.
+        const refused =
+          body.code === "ai_not_configured" ||
+          body.code === INSUFFICIENT_CREDITS_CODE ||
+          isPromoRefusalCode(body.code);
+        if (refused && body.error) {
           toast.error(body.error);
           return "blocked";
         }

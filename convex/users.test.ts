@@ -99,11 +99,30 @@ async function seedOwnedData(t: TestConvex, ownerId: string, files = 1) {
       title: "Chat",
       updatedAt: now,
     });
-    await ctx.db.insert("messages", {
+    const messageId = await ctx.db.insert("messages", {
       conversationId,
       projectId,
       role: "user",
       content: "hi",
+    });
+    await ctx.db.insert("creditLedger", {
+      userId: ownerId,
+      messageId,
+      source: "platform",
+      model: "GPT-5.6 Luna",
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0.01,
+      credits: 2,
+      updatedAt: now,
+    });
+    await ctx.db.insert("creditAccounts", {
+      userId: ownerId,
+      plan: "free",
+      periodStartsAt: now,
+      periodUsed: 2,
+      dayStartsAt: now,
+      dayUsed: 2,
     });
     const sealed = {
       kekProvider: "local",
@@ -239,6 +258,8 @@ const OWNED_TABLES = [
   "userAiPreferences",
   "skills",
   "projectSkillSettings",
+  "creditLedger",
+  "creditAccounts",
 ] as const;
 
 const countRows = (t: TestConvex) =>

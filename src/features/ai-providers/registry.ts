@@ -5,7 +5,7 @@ import {
 
 /**
  * Model providers a user can bring their own key for (BYOK). The Codenaya
- * platform runs on one of them, chosen by env (`platform.ts`).
+ * platform routes each of its models to one of them (`platform.ts`).
  *
  * Client-safe and free of path aliases so the settings UI, the Next.js routes
  * and Convex functions can all import it.

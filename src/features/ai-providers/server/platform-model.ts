@@ -1,10 +1,10 @@
 import { convex } from "@/lib/convex-client";
 
-import { AI_PROVIDERS } from "../registry";
 import {
-  type ActivePlatform,
   type PlatformProviderId,
-  platformConfigFrom,
+  type RoutedCatalog,
+  type RoutedModel,
+  envCatalog,
   platformProviderId,
 } from "../platform";
 import { buildAgentKitModel } from "./agentkit-model";
@@ -12,10 +12,10 @@ import { buildAiSdkModel } from "./ai-sdk-model";
 import { api } from "../../../../convex/_generated/api";
 
 /**
- * Codenaya's own models, on the active platform provider: the admin's choice
- * in /admin, else `NEXT_PUBLIC_AI_PROVIDER` (ADR 0005, ADR 0006). Every
- * function takes the provider from `activePlatform`, never the env alone, so a
- * switch in /admin applies everywhere. Server only: this is the one place that reads the platform keys.
+ * Codenaya's own models, each on its catalog route's provider (ADR 0010): the
+ * admin's catalog in /admin, else `NEXT_PUBLIC_AI_PROVIDER`'s curated one
+ * (ADR 0005). Every run takes its provider from the route it resolved, never
+ * the env alone. Server only: this is the one place that reads the platform keys.
  * They never reach the client, Convex, a step result or a log.
  *
  * Keys are read at call time, not module load, so importing this file never
@@ -39,15 +39,12 @@ export const platformKeyOrNull = (provider: PlatformProviderId) =>
   process.env[PLATFORM_KEY_ENV[provider]]?.trim() || null;
 
 /**
- * The provider and model selection platform requests run on: the admin's in
- * /admin, else the env provider and its catalog. One Convex read.
+ * The catalog platform requests are routed with: the admin's, else the env
+ * provider's curated one. One Convex read.
  */
-export async function activePlatform(internalKey: string): Promise<ActivePlatform> {
-  const { provider, config } = await convex.query(api.platformModels.getActiveForServer, {
-    internalKey,
-    fallbackProvider: platformProviderId(),
-  });
-  return { provider, config: platformConfigFrom(config) };
+export async function platformCatalog(internalKey: string): Promise<RoutedCatalog> {
+  const saved = await convex.query(api.platformCatalog.getForServer, { internalKey });
+  return saved ?? envCatalog(platformProviderId());
 }
 
 /** True when the provider has a key. Lets callers refuse cleanly rather than throw. */
@@ -72,36 +69,32 @@ export function readPlatformApiKey(provider: PlatformProviderId): string {
 }
 
 /**
- * AgentKit model for an agent run.
+ * AgentKit model for an agent run, on a route's provider and its model id.
  *
  * @param temperature Omitted for models that reject it — some reasoning models
  * error on a non-default temperature rather than ignoring it.
  */
 export function platformAgentModel(
   provider: PlatformProviderId,
-  model: string,
+  providerModelId: string,
   temperature?: number,
 ) {
   return buildAgentKitModel({
     provider,
     apiKey: readPlatformApiKey(provider),
-    model,
+    model: providerModelId,
     temperature,
   });
 }
 
-/** The provider's small model, for titles and editor AI. */
-export const platformTitleModel = (provider: PlatformProviderId) =>
-  AI_PROVIDERS[provider].titleModel!;
-
 /**
  * AI SDK model for the editor AI routes. Editor tasks are short and
- * latency-sensitive, so they run on the provider's small model.
+ * latency-sensitive, so they run on the catalog's utility model (`utilityModel`).
  */
-export function platformEditorModel(provider: PlatformProviderId) {
+export function platformEditorModel({ provider, providerModelId }: Pick<RoutedModel, "provider" | "providerModelId">) {
   return buildAiSdkModel({
     provider,
     apiKey: readPlatformApiKey(provider),
-    model: platformTitleModel(provider),
+    model: providerModelId,
   });
 }

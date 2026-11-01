@@ -12,6 +12,7 @@ import { DEFAULT_CONVERSATION_TITLE } from "@/features/conversations/constants";
 import {
   modelChoiceSchema,
   requireModelChoice,
+  takePromoRun,
 } from "@/features/ai-providers/server/resolve-run-model";
 
 import { convex } from "@/lib/convex-client";
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { runModel, rejected } = await requireModelChoice({
+  const { runModel, promoKind, rejected } = await requireModelChoice({
     internalKey,
     userId,
     model,
@@ -87,66 +88,85 @@ export async function POST(request: Request) {
     return rejected;
   }
 
-  // Name it after its template, or generate a random name
-  const projectName = template?.id ?? generateProjectName();
-
-  // Create project and conversation together
-  const { projectId, conversationId } = await convex.mutation(
-    api.system.createProjectWithConversation,
-    {
-      internalKey,
-      projectName,
-      conversationTitle: DEFAULT_CONVERSATION_TITLE,
-      ownerId: userId,
-    },
-  );
-
-  if (template) {
-    await seedTemplateFiles({ internalKey, projectId, template });
-  }
-
-  // Create user message
-  await convex.mutation(api.system.createMessage, {
+  // Before anything is created (ADR 0009).
+  const { promoRun, rejected: promoRejected } = await takePromoRun({
     internalKey,
-    conversationId,
-    projectId,
-    role: "user",
-    content: prompt,
+    userId,
+    promoKind,
   });
 
-  // Create assistant message placeholder with processing status
-  const assistantMessageId = await convex.mutation(
-    api.system.createMessage,
-    {
+  if (promoRejected) {
+    return promoRejected;
+  }
+
+  // A send that fails before its agent run starts gives its promo run back.
+  try {
+    // Name it after its template, or generate a random name
+    const projectName = template?.id ?? generateProjectName();
+
+    // Create project and conversation together
+    const { projectId, conversationId } = await convex.mutation(
+      api.system.createProjectWithConversation,
+      {
+        internalKey,
+        projectName,
+        conversationTitle: DEFAULT_CONVERSATION_TITLE,
+        ownerId: userId,
+      },
+    );
+
+    if (template) {
+      await seedTemplateFiles({ internalKey, projectId, template });
+    }
+
+    // Create user message
+    await convex.mutation(api.system.createMessage, {
       internalKey,
       conversationId,
       projectId,
-      role: "assistant",
-      content: "",
-      status: "processing",
-      runModel,
-    },
-  );
+      role: "user",
+      content: prompt,
+    });
 
-  // Trigger configured backend to process the message
-  const dispatch = await dispatchProcessMessageOrFail({
-    internalKey,
-    messageId: assistantMessageId,
-    conversationId,
-    projectId,
-    ownerId: userId,
-    message: prompt,
-    model: runModel,
-  });
-
-  // The project exists either way: return its id so the client can open it
-  // and the user can retry from the chat.
-  if (!dispatch) {
-    return NextResponse.json(
-      { error: DISPATCH_FAILED_ERROR, code: "dispatch_failed", projectId },
-      { status: 502 },
+    // Create assistant message placeholder with processing status
+    const assistantMessageId = await convex.mutation(
+      api.system.createMessage,
+      {
+        internalKey,
+        conversationId,
+        projectId,
+        role: "assistant",
+        content: "",
+        status: "processing",
+        runModel,
+      },
     );
-  }
 
-  return NextResponse.json({ projectId });
+    // Trigger configured backend to process the message
+    const dispatch = await dispatchProcessMessageOrFail({
+      internalKey,
+      messageId: assistantMessageId,
+      conversationId,
+      projectId,
+      ownerId: userId,
+      message: prompt,
+      model: runModel,
+    });
+
+    // The project exists either way: return its id so the client can open it
+    // and the user can retry from the chat.
+    if (!dispatch) {
+      // A retry from the chat takes its own run.
+      await promoRun.refund();
+      return NextResponse.json(
+        { error: DISPATCH_FAILED_ERROR, code: "dispatch_failed", projectId },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json({ projectId });
+  } catch (error) {
+    await promoRun.refund();
+    throw error;
+  }
 };

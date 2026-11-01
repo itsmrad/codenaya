@@ -1,22 +1,45 @@
 "use client";
 
-import { useState } from "react";
-import { useQuery } from "convex/react";
-import { CircleAlertIcon } from "lucide-react";
+import { CircleAlertIcon, CircleCheckIcon, CircleDashedIcon } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 
-import { api } from "../../../../convex/_generated/api";
+import { type CatalogDraft, useCatalogDraft } from "../hooks/use-catalog-draft";
+import { CatalogCard } from "./catalog-card";
+import type { ProviderOption } from "./provider-picker";
 
-import { type PlatformModelDraft, usePlatformModelDraft } from "../hooks/use-platform-model-draft";
-import type { PlatformProviderId } from "../platform-models";
-import { AddModelsCard } from "./add-models-card";
-import { PlatformModelsCard } from "./platform-models-card";
-import { type PlatformProviderStatus, ProviderCard } from "./provider-card";
+/** A platform provider as the server sees it: never the key, only whether it's set. */
+interface ProviderKeyStatus extends ProviderOption {
+  keyConfigured: boolean;
+}
 
-/** Docked to the bottom of the viewport while the selection has unsaved edits. */
-const SaveBar = ({ draft }: { draft: PlatformModelDraft }) => {
+const ProviderKeys = ({ providers }: { providers: ProviderKeyStatus[] }) => (
+  <section aria-label="Provider keys" className="flex flex-wrap items-center gap-2 text-sm">
+    <span className="mr-1 text-muted-foreground">Provider keys</span>
+    {providers.map((p) => (
+      <Badge key={p.id} variant="outline" className={p.keyConfigured ? undefined : "text-muted-foreground"}>
+        {p.keyConfigured ? <CircleCheckIcon aria-hidden="true" /> : <CircleDashedIcon aria-hidden="true" />}
+        {p.label}
+        {p.keyConfigured ? <span className="sr-only">set</span> : <span>not set</span>}
+      </Badge>
+    ))}
+  </section>
+);
+
+/** Docked to the bottom of the viewport while the catalog has unsaved edits. */
+const SaveBar = ({ draft }: { draft: CatalogDraft }) => {
   const blocked = draft.problems.length > 0;
 
   return (
@@ -39,10 +62,11 @@ const SaveBar = ({ draft }: { draft: PlatformModelDraft }) => {
             )}
           </div>
           <div className="flex shrink-0 gap-2">
-            <Button variant="outline" size="sm" className="flex-1 sm:flex-none" onClick={draft.discard}>
+            <Button variant="outline" size="sm" className="flex-1 sm:flex-none" onClick={draft.discard} disabled={draft.saving}>
               Discard
             </Button>
-            <Button size="sm" className="flex-1 sm:flex-none" onClick={draft.save} disabled={blocked}>
+            <Button size="sm" className="flex-1 sm:flex-none" onClick={() => draft.save()} disabled={blocked || draft.saving}>
+              {draft.saving && <Spinner />}
               Save changes
             </Button>
           </div>
@@ -52,56 +76,53 @@ const SaveBar = ({ draft }: { draft: PlatformModelDraft }) => {
   );
 };
 
-interface ProviderModelsProps {
-  provider: PlatformProviderId;
-  activeProvider: PlatformProviderId;
-  providers: PlatformProviderStatus[];
-  onEdit: (provider: PlatformProviderId) => void;
-}
-
-/** One provider's editor. Remounted per provider, so a draft never crosses providers. */
-const ProviderModels = ({ provider, activeProvider, providers, onEdit }: ProviderModelsProps) => {
-  const draft = usePlatformModelDraft(provider);
-  const label = providers.find((p) => p.id === provider)!.label;
-
-  return (
-    <>
-      <ProviderCard
-        providers={providers}
-        activeProvider={activeProvider}
-        editing={provider}
-        onEdit={onEdit}
-        isDirty={draft.isDirty}
-        hasSavedModels={draft.hasSaved}
-      />
-      <PlatformModelsCard draft={draft} provider={provider} providerLabel={label} isActive={provider === activeProvider} />
-      <AddModelsCard draft={draft} provider={provider} providerLabel={label} />
-      {draft.isDirty && <SaveBar draft={draft} />}
-    </>
-  );
-};
+/** The server refused a $0 or sharply changed price until the admin confirms it. */
+const RiskyPricesDialog = ({ draft }: { draft: CatalogDraft }) => (
+  <AlertDialog open={draft.riskyNames !== null} onOpenChange={(open) => !open && draft.cancelRiskySave()}>
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>Save these prices?</AlertDialogTitle>
+        <AlertDialogDescription>
+          A price of $0, or one that moved by more than half, is usually a typo. It changes what
+          every run on these models costs us.
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      {draft.riskyNames && draft.riskyNames.length > 0 && (
+        <ul className="list-disc space-y-1 pl-5 text-sm">
+          {/* Names can repeat across routes; the list never reorders. */}
+          {draft.riskyNames.map((name, i) => (
+            <li key={i}>{name}</li>
+          ))}
+        </ul>
+      )}
+      <AlertDialogFooter>
+        <AlertDialogCancel>Review prices</AlertDialogCancel>
+        <AlertDialogAction onClick={() => draft.save(true)}>Save anyway</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
+);
 
 export const ModelsTab = ({
   providers,
-  fallbackProvider,
+  fallbackProviderLabel,
 }: {
-  providers: PlatformProviderStatus[];
-  /** `NEXT_PUBLIC_AI_PROVIDER`, active until the admin picks one. */
-  fallbackProvider: PlatformProviderId;
+  providers: ProviderKeyStatus[];
+  fallbackProviderLabel: string;
 }) => {
-  const active = useQuery(api.platformModels.getActive, { fallbackProvider });
-  const [editing, setEditing] = useState<PlatformProviderId | null>(null);
-
-  if (!active) return <Skeleton className="h-48 w-full" aria-label="Loading provider" />;
-  const provider = editing ?? active.provider;
+  const draft = useCatalogDraft();
 
   return (
-    <ProviderModels
-      key={provider}
-      provider={provider}
-      activeProvider={active.provider}
-      providers={providers}
-      onEdit={setEditing}
-    />
+    <>
+      <ProviderKeys providers={providers} />
+      <CatalogCard
+        draft={draft}
+        providers={providers}
+        keyedProviders={providers.filter((p) => p.keyConfigured)}
+        fallbackProviderLabel={fallbackProviderLabel}
+      />
+      {draft.isDirty && <SaveBar draft={draft} />}
+      <RiskyPricesDialog draft={draft} />
+    </>
   );
 };

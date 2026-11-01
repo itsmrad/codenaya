@@ -69,6 +69,44 @@ describe("GET /api/admin/models", () => {
     expect(text).not.toContain(KEY);
   });
 
+  it("doesn't fetch reference prices for OpenRouter, which lists its own", async () => {
+    await get();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("attaches OpenRouter's price as a reference for a provider without prices", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk-test");
+    mocks.fetch.mockImplementation(async (url: string) =>
+      url.startsWith("https://openrouter.ai")
+        ? Response.json({
+            data: [{ id: "openai/gpt-oss-120b", name: "OpenAI: gpt-oss-120b", pricing: { prompt: "0.0000001", completion: "0.0000005" } }],
+          })
+        : Response.json({ data: [{ id: "openai/gpt-oss-120b" }, { id: "llama-3.3-70b-versatile" }] }),
+    );
+
+    const res = await get("groq");
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).models).toMatchObject([
+      { id: "openai/gpt-oss-120b", referencePrice: 0.2 },
+      { id: "llama-3.3-70b-versatile" },
+    ]);
+  });
+
+  it("lists models without references when OpenRouter is down", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk-test");
+    mocks.fetch.mockImplementation(async (url: string) =>
+      url.startsWith("https://openrouter.ai")
+        ? new Response("down", { status: 503 })
+        : Response.json({ data: [{ id: "llama-3.3-70b-versatile" }] }),
+    );
+
+    const res = await get("groq");
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).models).toEqual([expect.not.objectContaining({ referencePrice: expect.anything() })]);
+  });
+
   it("returns 400 for an unknown provider", async () => {
     expect((await get("vertex")).status).toBe(400);
     expect(mocks.fetch).not.toHaveBeenCalled();

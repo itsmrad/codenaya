@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 
 import { AI_PROVIDERS, PLATFORM_PROVIDER, keyModels } from "../registry";
-import { platformModels, resolvePlatformModel } from "../platform";
+import { resolveCatalogModel } from "../platform";
 import { fromChoiceValue, toChoiceValue } from "../model-choice";
 import { usePlatformModelsOrCatalog, useSetAiPreferences } from "../hooks/use-ai-providers";
 import type { AiProviderKeySummary } from "../../../../convex/aiProviders";
@@ -40,11 +40,13 @@ export const DefaultModelSelect = ({
     (key) => key.status === "active" || key._id === defaultKeyId,
   );
   const defaultKey = keys.find((key) => key._id === defaultKeyId);
-  const { provider, config } = usePlatformModelsOrCatalog();
-  // A platform default saved under another provider shows as the one that runs.
+  const platform = usePlatformModelsOrCatalog();
+  // Promo models are offered per run, not as a lasting default.
+  const models = platform.models.filter((model) => model.access === "everyone");
+  // A platform default no longer offered shows as the one that runs.
   const modelId = defaultKeyId
     ? defaultModelId
-    : resolvePlatformModel(provider, config, defaultModelId).id;
+    : resolveCatalogModel({ models, defaultModelId: platform.defaultModelId }, defaultModelId).id;
 
   const handleChange = async (value: string) => {
     try {
@@ -74,9 +76,9 @@ export const DefaultModelSelect = ({
         <SelectContent position="popper" className="max-h-80">
           <SelectGroup>
             <SelectLabel>{PLATFORM_PROVIDER.label}</SelectLabel>
-            {platformModels(provider, config).map((model) => (
+            {models.map((model) => (
               <SelectItem key={model.id} value={toChoiceValue({ modelId: model.id })}>
-                {model.label}
+                {model.name}
               </SelectItem>
             ))}
           </SelectGroup>

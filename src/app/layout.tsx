@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Inter } from "next/font/google";
 import { Suspense } from "react";
+import { Analytics } from "@vercel/analytics/next";
 
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
@@ -93,6 +94,7 @@ export default function RootLayout({
             <ShortcutsDialog />
           </Providers>
         </Suspense>
+        <Analytics />
       </body>
     </html>
   );

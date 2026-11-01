@@ -11,6 +11,12 @@ import {
 
 const NOT_FOUND_HEADING = { level: 1, name: "Page not found" } as const;
 
+// Admin write routes answer anyone but the admin with a 404, before any other check.
+const ADMIN_WRITES = [
+  { url: "/api/admin/catalog", data: { models: [], defaultModelId: "x", utilityModelId: "x", confirmRiskyPrices: false } },
+  { url: "/api/admin/catalog/test", data: { provider: "openrouter", providerModelId: "x" } },
+];
+
 test("/admin is a 404 for signed-out visitors, with no sign-in redirect", async ({ page }) => {
   const response = await page.goto("/admin");
   expect(response?.status()).toBe(404);
@@ -18,9 +24,11 @@ test("/admin is a 404 for signed-out visitors, with no sign-in redirect", async 
   await expect(page.getByRole("heading", NOT_FOUND_HEADING)).toBeVisible();
 });
 
-test("GET /api/admin/models is a 404 when signed out", async ({ request }) => {
-  const response = await request.get("/api/admin/models");
-  expect(response.status()).toBe(404);
+test("admin API routes are a 404 when signed out", async ({ request }) => {
+  expect((await request.get("/api/admin/models")).status()).toBe(404);
+  for (const { url, data } of ADMIN_WRITES) {
+    expect((await request.post(url, { data })).status(), url).toBe(404);
+  }
 });
 
 test("/admin is a 404 for a signed-in user who isn't the admin", async ({ page }) => {
@@ -32,9 +40,12 @@ test("/admin is a 404 for a signed-in user who isn't the admin", async ({ page }
   await expect(page.getByRole("heading", NOT_FOUND_HEADING)).toBeVisible();
   const api404 = await page.request.get("/api/admin/models");
   expect(api404.status()).toBe(404);
+  for (const { url, data } of ADMIN_WRITES) {
+    expect((await page.request.post(url, { data })).status(), url).toBe(404);
+  }
 });
 
-test("the admin sees the model panel", async ({ page }) => {
+test("the admin sees the model catalog", async ({ page }) => {
   // The Convex deployment's ADMIN_EMAIL must be this verified Clerk test user.
   const adminEmail = process.env.E2E_ADMIN_EMAIL;
   test.skip(!hasClerkCredentials() || !adminEmail, "Needs Clerk secrets and E2E_ADMIN_EMAIL");
@@ -44,9 +55,19 @@ test("the admin sees the model panel", async ({ page }) => {
   await signInWithTicket(page, admin.id);
 
   await page.goto("/admin");
-  await expect(page.getByRole("heading", { level: 1, name: "Admin" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Models" })).toBeVisible();
-  await expect(page.getByText("Platform provider")).toBeVisible();
-  await page.getByRole("tab", { name: "Audit log" }).click();
-  await expect(page.getByText("Who changed what")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Models" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Provider keys" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add models" })).toBeVisible();
+
+  // Even with the admin's session, a write from another origin is refused.
+  const crossSite = await page.request.post("/api/admin/catalog/test", {
+    data: { provider: "openrouter", providerModelId: "x" },
+    headers: { Origin: "https://evil.example" },
+  });
+  expect(crossSite.status()).toBe(403);
+
+  // The section nav renders as a sidebar or as tabs, depending on width.
+  await page.getByRole("navigation", { name: "Admin" }).filter({ visible: true }).getByRole("link", { name: "Audit log" }).click();
+  await expect(page).toHaveURL(/\/admin\/audit$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Audit log" })).toBeVisible();
 });

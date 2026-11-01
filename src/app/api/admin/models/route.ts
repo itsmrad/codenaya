@@ -4,6 +4,7 @@ import {
   ProviderModelsError,
   fetchProviderModels,
 } from "@/features/admin/server/fetch-provider-models";
+import { fetchReferencePrices, withReferencePrices } from "@/features/admin/server/reference-prices";
 import { adminOrNull } from "@/features/admin/server/require-admin";
 import { PLATFORM_PROVIDER_IDS, type PlatformProviderId } from "@/features/ai-providers/platform";
 import { PLATFORM_KEY_ENV, platformKeyOrNull } from "@/features/ai-providers/server/platform-model";
@@ -15,8 +16,8 @@ import {
 
 /**
  * GET /api/admin/models?provider=<id>: a platform provider's models, live,
- * for the /admin picker. Any provider can be fetched, so the admin can set up
- * one before making it active. Admin only; anyone else gets the same 404 as a
+ * for the /admin pickers, with OpenRouter's price as a `referencePrice` where
+ * the provider lists none. Admin only; anyone else gets the same 404 as a
  * missing route. Returns normalized rows only: the key and the upstream body
  * never leave.
  */
@@ -43,8 +44,12 @@ export async function GET(request: Request) {
   }
 
   try {
-    const models = await fetchProviderModels(provider, apiKey);
-    return NextResponse.json({ provider, models });
+    // OpenRouter lists its own prices; the others get its price as a reference.
+    const [models, references] = await Promise.all([
+      fetchProviderModels(provider, apiKey),
+      provider === "openrouter" ? new Map<string, number>() : fetchReferencePrices(),
+    ]);
+    return NextResponse.json({ provider, models: withReferencePrices(models, references) });
   } catch (error) {
     if (!(error instanceof ProviderModelsError)) throw error;
     return NextResponse.json(

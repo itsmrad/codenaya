@@ -10,6 +10,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { CommunityRail } from "@/features/showcase/components/community-rail";
 import { StarterTemplates } from "@/features/templates/components/starter-templates";
 import { takePendingTemplate } from "@/features/templates/utils/pending-template";
+import { PromoBanner } from "@/features/promotions/components/promo-banner";
 
 import { useProjects } from "../hooks/use-projects";
 import { useCreateProjectFromPrompt } from "../hooks/use-create-project-from-prompt";
@@ -119,6 +120,7 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
           </div>
 
           <div className="mx-auto max-w-2xl">
+            <PromoBanner />
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}

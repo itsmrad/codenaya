@@ -268,12 +268,6 @@ export const ADMIN_MODELS_FETCH_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
-/** Switching the platform provider is one settings write; admin only. */
-export const ADMIN_PROVIDER_SWITCH_RATE_LIMIT: RateLimitConfig = {
-  scope: "admin-provider-switch",
-  limit: 10,
-  windowMs: 60_000,
-};
 
 /** Standard 429 response with a `Retry-After` header. */
 export function rateLimitedResponse(result: RateLimitResult): Response {
@@ -288,3 +282,13 @@ export function rateLimitedResponse(result: RateLimitResult): Response {
     },
   );
 }
+
+/**
+ * Claiming the GitHub promotion calls GitHub's API once. A person claims once;
+ * five a minute covers retries after linking GitHub while stopping a loop.
+ */
+export const PROMO_CLAIM_RATE_LIMIT: RateLimitConfig = {
+  scope: "promo-claim",
+  limit: 5,
+  windowMs: 60_000,
+};

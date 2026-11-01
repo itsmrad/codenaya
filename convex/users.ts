@@ -260,5 +260,17 @@ async function purgeUserDataBatch(
     .take(CASCADE_BATCH_SIZE);
   if (await deleteRows(ctx, "aiProviderKeys", aiProviderKeys)) return false;
 
+  const ledger = await ctx.db
+    .query("creditLedger")
+    .withIndex("by_userId", (q) => q.eq("userId", userId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "creditLedger", ledger)) return false;
+
+  const creditAccounts = await ctx.db
+    .query("creditAccounts")
+    .withIndex("by_userId", (q) => q.eq("userId", userId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "creditAccounts", creditAccounts)) return false;
+
   return true;
 }

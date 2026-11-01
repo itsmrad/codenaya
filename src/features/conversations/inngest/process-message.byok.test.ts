@@ -98,6 +98,31 @@ describe("processMessage on the user's key", () => {
     );
   });
 
+  it("finishes a multi-step Anthropic tool loop whose turns carry thinking blocks", async () => {
+    mocks.query.mockImplementation(async (ref) =>
+      getFunctionName(ref) === "system:getAiProviderKeyForRun"
+        ? { ...key, provider: "anthropic" }
+        : QUERIES[getFunctionName(ref)]?.(),
+    );
+    const claude = (...content: unknown[]) => ({ data: { role: "assistant", content } });
+    const thinking = { type: "thinking", thinking: "", signature: "sig" };
+
+    const outcome = await drive({ keyId: "key_1", modelId: "claude-opus-5-5" }, [
+      claude({ type: "text", text: "Listing files" }),
+      claude(thinking, { type: "tool_use", id: "t1", name: "listFiles", input: {} }),
+      claude(thinking, thinking, { type: "text", text: "Here are your files." }),
+    ]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    // Title, tool call, then the answer after the tool result.
+    expect(outcome.inferenceUrls).toEqual(Array(3).fill("https://api.anthropic.com/v1/messages"));
+    expect(mutations()).toEqual(
+      expect.arrayContaining([
+        ["system:updateMessageContent", expect.objectContaining({ content: "Here are your files." })],
+      ]),
+    );
+  });
+
   it.each([
     ["an error body the adapter rethrows", { data: { error: { message: "Incorrect API key provided" } } }],
     ["a failed gateway step", { error: { name: "Error", message: "AI request failed with status 401" } }],

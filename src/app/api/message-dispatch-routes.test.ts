@@ -1,16 +1,20 @@
+import { getFunctionName } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   query: vi.fn(),
   mutation: vi.fn(),
+  platform: vi.fn(),
   inngestSend: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/convex-client", async () => {
   const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
+  return {
+    convex: { query: withEnvPlatform(mocks.query, mocks.platform), mutation: mocks.mutation },
+  };
 });
 vi.mock("@/inngest/client", () => ({
   inngest: { send: mocks.inngestSend },
@@ -39,15 +43,16 @@ const post = (body: unknown) =>
 const routes = [
   {
     name: "messages",
-    call: (message = "Build a todo app") =>
-      messagesPOST(post({ conversationId: "c1", message })),
+    call: (message = "Build a todo app", model?: string) =>
+      messagesPOST(post({ conversationId: "c1", message, model })),
     successBody: { success: true, eventId: "evt_1", messageId: "m_assistant" },
     failureBody: { messageId: "m_assistant" },
     rateLimit: AGENT_MESSAGE_RATE_LIMIT,
   },
   {
     name: "projects/create-with-prompt",
-    call: (prompt = "Build a todo app") => createWithPromptPOST(post({ prompt })),
+    call: (prompt = "Build a todo app", model?: string) =>
+      createWithPromptPOST(post({ prompt, model })),
     successBody: { projectId: "p1" },
     failureBody: { projectId: "p1" },
     rateLimit: CREATE_WITH_PROMPT_RATE_LIMIT,
@@ -120,6 +125,73 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody, rate
 
     expect(res.status).toBe(400);
     expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
+  describe("on a promo model (ADR 0009)", () => {
+    const OPUS = "anthropic/claude-opus-5.5";
+    const runArgs = { internalKey: "test-key", userId: "user_1", kind: "opus" };
+    const calledFn = (name: string) =>
+      mocks.mutation.mock.calls.filter(([ref]) => getFunctionName(ref) === name);
+
+    beforeEach(() => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      // The admin's catalog routes Opus to Anthropic, for promo claimants only.
+      const model = {
+        vendor: "v",
+        vision: true,
+        tools: "confirmed",
+        pricing: { mode: "blended", usdPerMTok: 1 },
+        hidden: false,
+      };
+      mocks.platform.mockReturnValue({
+        models: [
+          { ...model, id: "x-ai/grok-4.7", name: "Grok 4.7", provider: "openrouter", providerModelId: "x-ai/grok-4.7", access: "everyone" },
+          { ...model, id: OPUS, name: "Claude Opus 5.5", provider: "anthropic", providerModelId: "claude-opus-5-5", access: "promo_counted" },
+        ],
+        defaultModelId: "x-ai/grok-4.7",
+        utilityModelId: "x-ai/grok-4.7",
+      });
+      const answers: Record<string, unknown> = {
+        "promoClaims:getForServer": { opusRunsUsed: 0 },
+        "system:getOwnedConversation": { _id: "c1", projectId: "p1" },
+        "system:getProcessingMessages": [],
+      };
+      mocks.query.mockImplementation(async (ref) => answers[getFunctionName(ref)]);
+    });
+
+    it("takes one Opus run and keeps it when the run starts", async () => {
+      const res = await call(undefined, OPUS);
+
+      expect(res.status).toBe(200);
+      expect(calledFn("promoClaims:takeRun").map(([, args]) => args)).toEqual([runArgs]);
+      expect(calledFn("promoClaims:refundRun")).toEqual([]);
+      // The message records the route's provider (ADR 0010).
+      expect(calledFn("system:createMessage").find(([, args]) => args.role === "assistant")?.[1])
+        .toMatchObject({
+          runModel: { modelId: OPUS, label: "Codenaya · Claude Opus 5.5", provider: "anthropic" },
+        });
+    });
+
+    it("gives the run back when creating the send throws", async () => {
+      const create = mocks.mutation.getMockImplementation()!;
+      mocks.mutation.mockImplementation(async (ref, args) => {
+        if (args.role === "user") throw new Error("Convex timeout");
+        return create(ref, args);
+      });
+
+      await expect(call(undefined, OPUS)).rejects.toThrow("Convex timeout");
+      expect(calledFn("promoClaims:refundRun").map(([, args]) => args)).toEqual([runArgs]);
+      expect(mocks.inngestSend).not.toHaveBeenCalled();
+    });
+
+    it("gives the run back when dispatch fails", async () => {
+      mocks.inngestSend.mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:8288"));
+
+      const res = await call(undefined, OPUS);
+
+      expect(res.status).toBe(502);
+      expect(calledFn("promoClaims:refundRun").map(([, args]) => args)).toEqual([runArgs]);
+    });
   });
 
   it("marks the placeholder failed and returns 502 when dispatch throws", async () => {

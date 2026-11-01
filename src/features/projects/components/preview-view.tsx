@@ -21,6 +21,7 @@ import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webco
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
 import { PreviewBuilding } from "@/features/sandbox-preview/components/preview-building";
+import { CodenayaLogo } from "@/components/codenaya-logo";
 import { PreviewBootSteps } from "@/features/sandbox-preview/components/preview-boot-steps";
 import {
   PreviewStatusBadge,
@@ -178,6 +179,7 @@ export const PreviewView = ({
       restart={restart}
       errorKind={errorKind}
       onUseWebContainer={() => switchEngine("webcontainer")}
+      agentWorking={Boolean(activeRun)}
       building={building}
     />
   );
@@ -443,6 +445,7 @@ const PreviewContent = ({
   restart,
   errorKind,
   onUseWebContainer,
+  agentWorking,
   building,
 }: {
   error: string | null | undefined;
@@ -457,6 +460,8 @@ const PreviewContent = ({
   restart: () => void;
   errorKind: SandboxErrorKind | null;
   onUseWebContainer: () => void;
+  /** Any message is processing: planning, chatting or writing code. */
+  agentWorking?: boolean;
   /** The first-build placeholder, shown over the engine until the run ends. */
   building: ReactNode;
 }) => (
@@ -465,6 +470,18 @@ const PreviewContent = ({
 
     {/* Laid over the engine so a pre-warmed preview loads underneath it. */}
     {building && <div className="absolute inset-0 z-10">{building}</div>}
+
+    {/* Hidden under the first build: PreviewBuilding already says the same. */}
+    {agentWorking && !building && (
+      <div role="status" className="pointer-events-none absolute top-3 right-3 z-40 flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-card/95 backdrop-blur-md border border-brand/30 shadow-lg text-xs font-medium text-foreground motion-safe:animate-in fade-in-0 duration-200">
+        <span className="relative flex size-2">
+          <span className="motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full bg-brand opacity-75" />
+          <span className="relative inline-flex rounded-full size-2 bg-brand" />
+        </span>
+        <CodenayaLogo size={16} blinking={true} decorative />
+        <span className="text-[11px] text-muted-foreground font-mono">Agent working</span>
+      </div>
+    )}
 
     {error && (
       <div className="size-full flex items-center justify-center text-muted-foreground bg-background p-4">
