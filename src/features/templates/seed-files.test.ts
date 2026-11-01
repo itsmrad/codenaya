@@ -24,6 +24,8 @@ describe("starter templates", () => {
     expect(pkg.name).toBe(template.id);
     expect(pkg.scripts.dev).toBe("vite");
     expect(files.find((f) => f.path === "src/App.tsx")!.content).toContain(template.title);
+    // main.tsx mounts <BrowserRouter> (#335); the template page is the "/" route.
+    expect(files.find((f) => f.path === "src/App.tsx")!.content).toContain('<Route path="/"');
   });
 
   it.each(STARTER_TEMPLATES)("$id seeds the starter scaffoldViteApp writes (#328)", (template) => {

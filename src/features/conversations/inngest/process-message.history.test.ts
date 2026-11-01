@@ -17,10 +17,17 @@ vi.mock("@/lib/convex-client", async () => {
   return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
 });
 
+// Leave enough steps for the 24-read trimming/replay case in this file.
+vi.mock("./constants", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  MAX_AGENT_STEPS: 26,
+}));
+
+import { MAX_AGENT_STEPS, STEP_BUDGET_NOTE } from "./constants";
 import { AGENT_FAILURE_MESSAGE } from "./lib/conversation-history";
 import { drive, text, toolCall } from "./process-message.driver";
 
-type Stored = { _id: string; role: "user" | "assistant"; content: string; status?: string };
+type Stored = { _id: string; role: "user" | "assistant"; content: string; status?: string; imageUrls?: string[] };
 
 let recentMessages: Stored[] = [];
 
@@ -37,6 +44,7 @@ const QUERIES: Record<string, () => unknown> = {
 interface ChatBody {
   messages: Array<{ role: string; content: unknown }>;
   tools?: unknown[];
+  tool_choice?: string;
 }
 
 const firstCodingRequest = (bodies: unknown[]) =>
@@ -65,6 +73,43 @@ beforeEach(() => {
 });
 
 describe("processMessage conversation history", () => {
+  it("attaches images only to the current request when earlier turns exist", async () => {
+    recentMessages = conversation(
+      { _id: "u1", role: "user", content: "Earlier request", imageUrls: ["https://example.com/old.png"] },
+      { _id: "a1", role: "assistant", content: "Earlier reply" },
+    );
+    recentMessages[2].imageUrls = ["https://example.com/current.png"];
+    const request = await run();
+    expect(request?.messages.slice(1)).toEqual([
+      { role: "user", content: "Earlier request" },
+      { role: "assistant", content: "Earlier reply" },
+      { role: "user", content: [
+        { type: "text", text: "Now make it dark" },
+        { type: "image_url", image_url: { url: "https://example.com/current.png" } },
+      ] },
+    ]);
+  });
+
+  it("sends earlier turns to the codenaya-summary last step", async () => {
+    recentMessages = conversation(
+      { _id: "u1", role: "user", content: "Earlier request" },
+      { _id: "a1", role: "assistant", content: "Earlier reply" },
+    );
+    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
+      ...Array.from({ length: MAX_AGENT_STEPS - 1 }, () => ({ data: toolCall("listFiles") })),
+      { data: text("Summary.") },
+    ], "Now make it dark");
+    expect(outcome.finalType).toBe("function-resolved");
+    const last = (outcome.inferenceBodies as ChatBody[]).at(-1)!;
+    expect(last.tool_choice).toBe("none");
+    expect(last.messages.slice(1, 4)).toEqual([
+      { role: "user", content: "Earlier request" },
+      { role: "assistant", content: "Earlier reply" },
+      { role: "user", content: "Now make it dark" },
+    ]);
+    expect(last.messages.at(-1)).toEqual({ role: "user", content: STEP_BUDGET_NOTE });
+  }, 20_000);
+
   it("sends earlier turns as messages, in order, before the request", async () => {
     recentMessages = conversation(
       { _id: "u1", role: "user", content: "Build a todo app" },

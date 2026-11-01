@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { LOST_RUN_MESSAGE } from "../../agent-steps";
 import { keyFailureMessage } from "@/features/ai-providers/server/resolve-run-model";
-import { AGENT_FAILURE_MESSAGE, priorTurns } from "./conversation-history";
+import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from "./conversation-history";
+
+import { AI_NOT_CONFIGURED_MESSAGE } from "@/features/ai-providers/server/platform-model";
+import { PROMO_REFUSAL_MESSAGES } from "@/features/promotions/github-promo";
+import { DISPATCH_FAILED_MESSAGE } from "@/lib/message-processor";
 
 type Status = "processing" | "completed" | "cancelled";
 
@@ -16,6 +20,21 @@ const reply = (content: string, status: Status = "completed") => ({
 });
 
 describe("priorTurns", () => {
+  it.each([
+    AI_NOT_CONFIGURED_MESSAGE,
+    ...Object.values(PROMO_REFUSAL_MESSAGES),
+    DISPATCH_FAILED_MESSAGE,
+  ])("omits the entire failed turn for %s", (content) => {
+    expect(priorTurns([user("Try"), reply(content)], "current")).toEqual([]);
+  });
+
+  it("keeps the request and default reply when a successful run had no summary", () => {
+    expect(priorTurns([user("Build a todo app"), reply(DEFAULT_REPLY_MESSAGE)], "current")).toEqual([
+      { type: "text", role: "user", content: "Build a todo app" },
+      { type: "text", role: "assistant", content: DEFAULT_REPLY_MESSAGE },
+    ]);
+  });
+
   it("returns earlier turns in order, without the request this run answers", () => {
     const current = reply("", "processing");
     const messages = [
