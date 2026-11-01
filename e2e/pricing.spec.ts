@@ -22,9 +22,12 @@ test.describe("pricing page (signed out)", () => {
       "href",
       "/sign-up",
     );
-    const proCta = pro.getByRole("button", { name: "Coming soon" });
-    await expect(proCta).toBeVisible();
-    await expect(proCta).toBeDisabled();
+    // #250: Pro can't be bought yet, so it offers a waitlist instead of a dead button.
+    await expect(pro.getByText("Best value")).toBeVisible();
+    await pro.getByRole("button", { name: "Notify me when Pro launches" }).click();
+    await expect(pro.getByRole("textbox", { name: "Email address" })).toBeVisible();
+    await expect(pro.getByRole("button", { name: "Notify me", exact: true })).toBeEnabled();
+    await expect(page.getByRole("link", { name: "How BYOK works" })).toHaveAttribute("href", "/docs#byok");
 
     await page.waitForLoadState("networkidle");
     expect(errors).toEqual([]);
