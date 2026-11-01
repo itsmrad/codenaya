@@ -64,6 +64,7 @@ import {
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
+import { AGENT_FAILURE_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
   type MessageMode,
   PLAN_MODE,
@@ -127,8 +128,7 @@ export const processMessage = inngest.createFunction(
           await convex.mutation(api.system.updateMessageContent, {
             internalKey,
             messageId,
-            content:
-              "My apologies, I encountered an error while processing your request. Let me know if you need anything else!",
+            content: AGENT_FAILURE_MESSAGE,
           });
         });
       }
@@ -288,21 +288,8 @@ export const processMessage = inngest.createFunction(
     const request =
       imageUrls.length > 0 && !message.trim() ? IMAGE_ONLY_PROMPT : message;
 
-    // Build system prompt with conversation history (exclude the current processing message)
-    let systemPrompt = CODING_AGENT_SYSTEM_PROMPT;
-
-    // Filter out the current processing message and empty messages
-    const contextMessages = recentMessages.filter(
-      (msg) => msg._id !== messageId && msg.content.trim() !== ""
-    );
-
-    if (contextMessages.length > 0) {
-      const historyText = contextMessages
-        .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
-        .join("\n\n");
-
-      systemPrompt += `\n\n## Previous Conversation (for context only - do NOT repeat these responses):\n${historyText}\n\n## Current Request:\nRespond ONLY to the user's new message below. Do not repeat or reference your previous responses.`;
-    }
+    // Earlier turns go to the model as chat messages, never in the system prompt.
+    const earlierTurns = priorTurns(recentMessages, messageId);
 
     // Generate conversation title if it's still the default
     const shouldGenerateTitle =
@@ -528,8 +515,6 @@ export const processMessage = inngest.createFunction(
       });
     }
 
-    systemPrompt += buildIntegrationsPromptSection(mcpSummaries, mcpWarnings);
-
     // ─── Skills ───
     //
     // Only names and descriptions go in the prompt; loadSkill hands the agent a
@@ -553,11 +538,15 @@ export const processMessage = inngest.createFunction(
       }
     });
 
-    systemPrompt += buildSkillsPromptSection(skills, forced, unavailable);
-
-    if (planMode) {
-      systemPrompt += PLAN_MODE_PROMPT;
-    }
+    // Most stable first, so the cacheable prefix is shared across runs (#295):
+    // base, then per-project sections, then per-run ones. Nothing from the
+    // conversation goes here; it is sent as messages (see onStart).
+    const systemPrompt = [
+      CODING_AGENT_SYSTEM_PROMPT,
+      buildSkillsPromptSection(skills, forced, unavailable),
+      buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
+      planMode ? PLAN_MODE_PROMPT : "",
+    ].join("");
 
     // Display only: mirrors the agent's tool calls onto the assistant message
     // for the chat panel's activity block. Each write is its own step, so replays
@@ -663,8 +652,11 @@ export const processMessage = inngest.createFunction(
         onStart: ({ agent, prompt, history }) => {
           const nudge =
             agent.name === SUMMARY_AGENT_NAME ? STEP_BUDGET_NOTE : buildCheckGate.takeNudge();
+          // AgentKit sends prompt ([system, request]) before history (this
+          // run's turns), so earlier conversation turns go between the two.
+          const [system, ...current] = withImageParts(prompt, imageUrls);
           return {
-            prompt: withImageParts(prompt, imageUrls),
+            prompt: [system, ...earlierTurns, ...current],
             history: [
               ...(history ?? []),
               ...(nudge ? [{ type: "text" as const, role: "user" as const, content: nudge }] : []),
