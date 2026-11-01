@@ -60,4 +60,28 @@ describe("coding agent integration instructions", () => {
     );
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("keep every package it already lists");
   });
+
+  it("describes the React 19 + Tailwind v4 starter stack (#332)", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("STYLING: Tailwind CSS v4 (always)");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("ROUTING (Vite): react-router-dom v7");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("React 19, Next.js 15, Tailwind CSS 4");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("It has no brand icons");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("@theme inline");
+    for (const stale of [
+      "React 18",
+      "Tailwind CSS 3",
+      "Tailwind CSS v3",
+      "react-router-dom v6",
+      "tailwindcss-animate",
+      "postcss.config.js",
+      "autoprefixer",
+      "@tailwind base",
+    ]) {
+      expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain(stale);
+    }
+    // The only mention of tailwind.config.ts says there is none.
+    expect(CODING_AGENT_SYSTEM_PROMPT.match(/tailwind\.config\.ts/g)).toEqual(["tailwind.config.ts"]);
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("there is no tailwind.config.ts");
+  });
 });
+
