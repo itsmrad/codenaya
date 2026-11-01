@@ -29,6 +29,9 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
+import { useSecurityGate } from "@/features/security/hooks/use-security-gate";
+import { SecurityScanDialog } from "@/features/security/components/security-scan-dialog";
+
 import { useProject } from "../hooks/use-projects";
 import { GITHUB_NOT_LINKED } from "../constants";
 import { GithubNotLinkedAlert } from "./github-not-linked-alert";
@@ -66,6 +69,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
     setOpen(nextOpen);
   };
 
+  const gate = useSecurityGate(projectId);
   const exportStatus = project?.exportStatus;
   const exportRepoUrl = project?.exportRepoUrl;
 
@@ -78,32 +82,39 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
     validators: {
       onSubmit: formSchema,
     },
-    onSubmit: async ({ value }) => {
-      setGithubNotLinked(false);
-      try {
-        await ky
-          .post("/api/github/export", {
-            json: {
-              projectId,
-              repoName: value.repoName,
-              visibility: value.visibility,
-              description: value.description || undefined,
-            },
-          })
-
-        toast.success("Export started...");
-      } catch (error) {
-        if (error instanceof HTTPError) {
-          const body = await error.response.json<{ error: string; code?: string }>();
-          if (body.code === GITHUB_NOT_LINKED) {
-            setGithubNotLinked(true);
-            return;
-          }
-        }
-        toast.error("Unable to export repository");
-      }
-    },
+    onSubmit: ({ value }) => gate.guard(() => startExport(value)),
   });
+
+  const startExport = async (value: z.infer<typeof formSchema>) => {
+    setGithubNotLinked(false);
+    try {
+      await ky
+        .post("/api/github/export", {
+          json: {
+            projectId,
+            repoName: value.repoName,
+            visibility: value.visibility,
+            description: value.description || undefined,
+          },
+        })
+
+      toast.success("Export started...");
+    } catch (error) {
+      if (error instanceof HTTPError) {
+        const body = await error.response.json<{ error: string; code?: string }>();
+        if (body.code === GITHUB_NOT_LINKED) {
+          setGithubNotLinked(true);
+          return;
+        }
+      }
+      toast.error("Unable to export repository");
+    }
+  };
+
+  const submitLabel = (isSubmitting: boolean) => {
+    if (gate.checking) return "Checking for secrets...";
+    return isSubmitting ? "Creating..." : "Create Repository";
+  };
 
   const handleCancelExport = async () => {
     await ky.post("/api/github/export/cancel", {
@@ -292,7 +303,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
                 className="w-full"
                 disabled={!canSubmit || isSubmitting}
               >
-                {isSubmitting ? "Creating..." : "Create Repository"}
+                {submitLabel(isSubmitting)}
               </Button>
             )}
           </form.Subscribe>
@@ -329,6 +340,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
       </PopoverTrigger>
       <PopoverContent className="w-80" align="start">
         {renderContent()}
+        <SecurityScanDialog pending={gate.pending} onDismiss={gate.dismiss} />
         <div className="mt-4 border-t pt-4">
           <DownloadZipButton projectId={projectId} />
         </div>

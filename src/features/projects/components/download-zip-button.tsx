@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { DownloadIcon, LoaderIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useSecurityGate } from "@/features/security/hooks/use-security-gate";
+import { SecurityScanDialog } from "@/features/security/components/security-scan-dialog";
 
 import { useProject } from "../hooks/use-projects";
 import {
@@ -23,6 +25,7 @@ export const DownloadZipButton = ({ projectId }: DownloadZipButtonProps) => {
   const convex = useConvex();
   const project = useProject(projectId);
   const [isDownloading, setIsDownloading] = React.useState(false);
+  const gate = useSecurityGate(projectId);
 
   const handleDownload = async () => {
     setIsDownloading(true);
@@ -40,21 +43,29 @@ export const DownloadZipButton = ({ projectId }: DownloadZipButtonProps) => {
     }
   };
 
+  const isBusy = isDownloading || gate.checking;
+  let label = "Download ZIP";
+  if (isDownloading) label = "Preparing ZIP...";
+  if (gate.checking) label = "Checking for secrets...";
+
   return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      className="w-full"
-      disabled={isDownloading}
-      onClick={handleDownload}
-    >
-      {isDownloading ? (
-        <LoaderIcon className="size-4 animate-spin" />
-      ) : (
-        <DownloadIcon className="size-4" />
-      )}
-      {isDownloading ? "Preparing ZIP..." : "Download ZIP"}
-    </Button>
+    <>
+      <SecurityScanDialog pending={gate.pending} onDismiss={gate.dismiss} />
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="w-full"
+        disabled={isBusy}
+        onClick={() => gate.guard(handleDownload)}
+      >
+        {isBusy ? (
+          <LoaderIcon className="size-4 animate-spin" />
+        ) : (
+          <DownloadIcon className="size-4" />
+        )}
+        {label}
+      </Button>
+    </>
   );
 };
