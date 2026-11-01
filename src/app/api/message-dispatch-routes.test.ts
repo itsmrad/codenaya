@@ -33,6 +33,7 @@ import {
   checkRateLimit,
   resetRateLimits,
 } from "@/lib/rate-limit";
+import { PROMO_ENDS_AT } from "@/features/promotions/github-promo";
 
 const post = (body: unknown) =>
   new Request("http://localhost/api", {
@@ -134,6 +135,8 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody, rate
       mocks.mutation.mock.calls.filter(([ref]) => getFunctionName(ref) === name);
 
     beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(PROMO_ENDS_AT - 24 * 60 * 60 * 1000);
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
       // The admin's catalog routes Opus to Anthropic, for promo claimants only.
       const model = {
@@ -157,6 +160,10 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody, rate
         "system:getProcessingMessages": [],
       };
       mocks.query.mockImplementation(async (ref) => answers[getFunctionName(ref)]);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
     });
 
     it("takes one Opus run and keeps it when the run starts", async () => {
