@@ -12,6 +12,7 @@ import {
   TITLE_GENERATOR_SYSTEM_PROMPT
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
+import { createSearchFilesTool } from './tools/search-files';
 import { createReadFilesTool } from './tools/read-files';
 import { createListFilesTool } from './tools/list-files';
 import { createUpdateFileTool } from './tools/update-file';
@@ -631,6 +632,7 @@ export const processMessage = inngest.createFunction(
     const tools: Tool.Any[] = [
       createListFilesTool({ internalKey, projectId }),
       createReadFilesTool({ projectId, internalKey }),
+      createSearchFilesTool({ projectId, internalKey }),
       createWriteFilesTool({ projectId, internalKey }),
       createUpdateFileTool({ projectId, internalKey }),
       createCreateFilesTool({ projectId, internalKey }),
