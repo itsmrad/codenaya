@@ -45,24 +45,14 @@ export const promoKindOf = (access: ModelAccess) => {
   return null;
 };
 
-/** The caller's standing in the GitHub promotion (ADR 0009). */
-export interface PromoStanding {
-  claimed: boolean;
-  active: boolean;
-  countedRunsLeft: number;
-}
-
 /**
- * The catalog models a user may pick: everyone's, plus promo models while
- * their claim can run them. Hidden models never.
+ * The catalog models a user may pick: everyone's, never hidden ones. The GitHub
+ * promotion (ADR 0009) ended, so promo models stay in /admin only.
  */
 export const pickableModels = <M extends Pick<CatalogModel, "access"> & { hidden?: boolean }>(
   models: readonly M[],
-  promo: PromoStanding,
-): M[] =>
-  models.filter((model) => {
-    if (model.hidden) return false;
-    if (model.access === "everyone") return true;
-    if (!promo.claimed || !promo.active) return false;
-    return model.access === "promo_unlimited" || promo.countedRunsLeft > 0;
-  });
+): M[] => models.filter((model) => !model.hidden && model.access === "everyone");
+
+/** The ids of promo models, so a saved pick of one can be switched with a notice. */
+export const promoModelIds = (models: readonly Pick<CatalogModel, "id" | "access">[]) =>
+  models.filter((model) => promoKindOf(model.access)).map((model) => model.id);
