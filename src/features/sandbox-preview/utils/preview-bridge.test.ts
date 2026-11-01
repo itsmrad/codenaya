@@ -4,6 +4,7 @@ import {
   PREVIEW_BRIDGE_SCRIPT,
   PREVIEW_MESSAGE_SOURCE,
   injectPreviewBridge,
+  insertBridge,
   readPreviewMessage,
 } from "./preview-bridge";
 
@@ -24,6 +25,19 @@ describe("injectPreviewBridge", () => {
   it("injects only once", () => {
     const once = injectPreviewBridge("<head></head>");
     expect(injectPreviewBridge(once)).toBe(once);
+  });
+
+  it("works from its source alone, the way the E2B proxy runs it", () => {
+    // route.ts writes `const insertBridge = ${String(insertBridge)};` into the proxy.
+    const fromSource = new Function(`return (${String(insertBridge)});`)() as typeof insertBridge;
+    for (const html of [
+      '<html><head lang="en"><title>x</title></head></html>',
+      "<html><body></body></html>",
+      "<h1>Hi</h1>",
+      injectPreviewBridge("<head></head>"),
+    ]) {
+      expect(fromSource(html, PREVIEW_BRIDGE_SCRIPT)).toBe(injectPreviewBridge(html));
+    }
   });
 });
 

@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 
 import type { Doc } from "../../../../convex/_generated/dataModel";
 import { sanitizeAgentText } from "../agent-steps";
+import { useChatStore } from "../store/use-chat-store";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
 
@@ -207,6 +208,7 @@ export const AssistantMessage = ({
   // The server fails such a run for good after LOST_RUN_MS.
   const stalled = useRunStalled(message);
   const previewErrors = usePreviewErrors();
+  const fixSending = useChatStore((state) => state.queuedMessage !== null);
   // Seen running: the reply settles in once it completes. A reply loaded
   // already completed (history) stays still.
   const [startedProcessing] = useState(status === "processing");
@@ -244,7 +246,7 @@ export const AssistantMessage = ({
           model={message.runModel?.label}
           stalled={stalled}
           onOpenFile={onOpenFile}
-          previewErrors={isLast ? previewErrors : undefined}
+          previewErrors={isLast ? { ...previewErrors, sending: fixSending } : undefined}
         />
       )}
       {stalled && isLast && onRetry && (

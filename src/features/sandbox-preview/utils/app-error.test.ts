@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   appErrorKey,
   buildFixPrompt,
+  codeBlock,
   detectBuildError,
   isHmrSuccess,
   logTail,
@@ -113,5 +114,21 @@ describe("buildFixPrompt", () => {
 describe("logTail", () => {
   it("strips escape codes and keeps the text after the last carriage return", () => {
     expect(logTail("\x1b[32mok\x1b[39m\nprogress 10%\rdone\n\n", 2)).toBe("ok\ndone");
+  });
+});
+
+describe("codeBlock", () => {
+  it("uses a plain fence for ordinary text", () => {
+    expect(codeBlock("boom")).toBe("```\nboom\n```");
+  });
+
+  it("outlasts the longest backtick run in the text", () => {
+    expect(codeBlock("see ```js\nx\n``` and `y`")).toBe("````\nsee ```js\nx\n``` and `y`\n````");
+    expect(codeBlock("``````")).toBe("```````\n``````\n```````");
+  });
+
+  it("keeps a fix prompt's error inside its block", () => {
+    const prompt = buildFixPrompt({ kind: "build", message: "Unexpected ``` here" }, "");
+    expect(prompt).toContain("````\nUnexpected ``` here\n````");
   });
 });

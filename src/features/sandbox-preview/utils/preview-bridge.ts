@@ -35,14 +35,20 @@ window.addEventListener("unhandledrejection", function (event) {
 });
 })();</script>`;
 
-/** Puts the bridge first in <head>, so it is listening before the app's scripts run. */
-export const injectPreviewBridge = (html: string) => {
+/**
+ * Puts `bridge` first in <head>, so it is listening before the app's scripts
+ * run. The E2B proxy runs this function's source inside the sandbox, so it
+ * must stay self-contained: no references outside its body.
+ */
+export function insertBridge(html: string, bridge: string): string {
   if (html.includes("data-codenaya-preview")) return html;
-  const anchor = html.match(/<head[^>]*>/i) ?? html.match(/<html[^>]*>/i);
-  if (!anchor || anchor.index === undefined) return PREVIEW_BRIDGE_SCRIPT + html;
+  const anchor = html.match(/<head[^>]*>/i) || html.match(/<html[^>]*>/i);
+  if (!anchor || anchor.index === undefined) return bridge + html;
   const end = anchor.index + anchor[0].length;
-  return html.slice(0, end) + PREVIEW_BRIDGE_SCRIPT + html.slice(end);
-};
+  return html.slice(0, end) + bridge + html.slice(end);
+}
+
+export const injectPreviewBridge = (html: string) => insertBridge(html, PREVIEW_BRIDGE_SCRIPT);
 
 const runtimeMessage = z.object({
   source: z.literal(PREVIEW_MESSAGE_SOURCE),

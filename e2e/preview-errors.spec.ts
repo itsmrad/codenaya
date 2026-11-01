@@ -111,14 +111,19 @@ test.describe("preview runtime error banner (#223)", () => {
       const sent: string[] = [];
       await page.route("**/api/messages", async (route) => {
         sent.push((route.request().postDataJSON() as { message: string }).message);
+        // Slow enough for a second click to land mid-send.
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
         await route.fulfill({ status: 200, json: {} });
       });
       // The finished run doesn't claim success over the broken preview.
       const runBlock = page.locator('[data-run-status="completed"]');
       await expect(runBlock).toContainText("Finished");
       await expect(runBlock).toContainText("preview has 1 error");
-      await runBlock.getByRole("button", { name: "Fix preview errors" }).click();
-      await expect.poll(() => sent.length).toBe(1);
+      await runBlock.getByRole("button", { name: "Fix preview errors" }).dblclick();
+      await expect(banner).toContainText("Sending the fix");
+      await expect(banner.getByRole("button", { name: "Fix with AI" })).toBeDisabled();
+      await expect(banner).not.toContainText("Sending the fix");
+      expect(sent).toHaveLength(1);
       expect(sent[0]).toContain("runtime error");
       expect(sent[0]).toContain("Static exploded");
 

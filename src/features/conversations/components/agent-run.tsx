@@ -439,7 +439,8 @@ interface AgentRunProps {
   stalled?: boolean;
   onOpenFile?: (path: string) => void;
   /** What the open preview reports, for the latest run only (#223). */
-  previewErrors?: { count: number; fix: (() => void) | null };
+  /** `sending`: a fix message is queued or in flight, so Fix waits. */
+  previewErrors?: { count: number; fix: (() => void) | null; sending?: boolean };
 }
 
 /**
@@ -591,6 +592,7 @@ export const AgentRun = ({
             variant="outline"
             className="mr-1.5 h-6 shrink-0 px-2 text-xs"
             aria-label="Fix preview errors"
+            disabled={previewErrors.sending}
             onClick={previewErrors.fix}
           >
             Fix

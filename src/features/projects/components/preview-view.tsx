@@ -60,6 +60,7 @@ import { useFilesWithContent } from "../hooks/use-files";
 import { markPreviewOpened } from "../utils/first-run";
 import {
   useActiveRun,
+  useChatMessageQueued,
   useQueueChatMessage,
 } from "@/features/conversations/hooks/use-conversations";
 import {
@@ -177,10 +178,15 @@ export const PreviewView = ({
   useEffect(() => {
     terminalOutputRef.current = terminalOutput;
   }, [terminalOutput]);
+  const fixQueued = useChatMessageQueued();
   const fixAppError = useCallback(() => {
     if (!appError || !appErrorId) return;
-    setFixAttempts((attempts) => ({ ...attempts, [appErrorId]: (attempts[appErrorId] ?? 0) + 1 }));
-    queueChatMessage(buildFixPrompt(appError, terminalOutputRef.current));
+    queueChatMessage({
+      text: buildFixPrompt(appError, terminalOutputRef.current),
+      // Only a fix that was actually sent counts towards "Still failing".
+      onSent: () =>
+        setFixAttempts((attempts) => ({ ...attempts, [appErrorId]: (attempts[appErrorId] ?? 0) + 1 })),
+    });
   }, [appError, appErrorId, queueChatMessage]);
   // The chat's run block says when a finished run left the preview broken.
   const canFix = appErrorId !== null && (fixAttempts[appErrorId] ?? 0) < MAX_FIX_ATTEMPTS;
@@ -250,6 +256,7 @@ export const PreviewView = ({
             attempts={fixAttempts[appErrorId!] ?? 0}
             // Still loading counts as working: a fix can't start mid-run.
             agentWorking={activeRun !== null}
+            sending={fixQueued}
             onFix={fixAppError}
             onShowLogs={() => setTerminalChoice("open")}
             onDismiss={() => setDismissedErrorId(appErrorId)}

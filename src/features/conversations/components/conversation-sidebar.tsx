@@ -63,7 +63,7 @@ import {
 import { Id } from "../../../../convex/_generated/dataModel";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { PastConversationsDialog } from "./past-conversations-dialog";
-import { useChatStore } from "../store/use-chat-store";
+import { sendQueuedMessage, useChatStore } from "../store/use-chat-store";
 import { useAgentModel } from "../hooks/use-agent-model";
 import { AgentModelSelect } from "./agent-model-select";
 import { useEnhancePrompt } from "../hooks/use-enhance-prompt";
@@ -305,16 +305,29 @@ export const ConversationSidebar = ({
   };
 
   // Sends what another panel queued (the preview's "Fix with AI") through the
-  // same path as a typed message, leaving the composer draft alone.
+  // same path as a typed message, leaving the composer draft alone. Like a
+  // typed message, it shows at once as pending.
   const queuedMessage = useChatStore((state) => state.queuedMessage);
   useEffect(() => {
     // Wait for the conversation list, or the send would open a new conversation.
-    if (!queuedMessage || pending || isProcessing || conversations === undefined) return;
-    useChatStore.getState().queueMessage(null);
-    // Syncing with the chat store: the send is the external effect, and it only
-    // touches state on a credential refusal or once a conversation is created.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void sendMessage(queuedMessage);
+    if (
+      !queuedMessage ||
+      queuedMessage.sending ||
+      pending ||
+      isProcessing ||
+      conversations === undefined
+    ) {
+      return;
+    }
+    // Syncing with the chat store: the send is the external effect.
+    void sendQueuedMessage(async (text) => {
+      setPending({ text, imageUrls: [], userCount });
+      try {
+        return await sendMessage(text);
+      } finally {
+        setPending(null);
+      }
+    });
     // sendMessage is recreated every render; the queued text is what matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queuedMessage, pending, isProcessing, conversations]);

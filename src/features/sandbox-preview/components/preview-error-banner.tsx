@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { AlertTriangleIcon, SparklesIcon, TerminalSquareIcon, XIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ export const PreviewErrorBanner = ({
   error,
   attempts,
   agentWorking,
+  sending,
   onFix,
   onShowLogs,
   onDismiss,
@@ -23,12 +25,20 @@ export const PreviewErrorBanner = ({
   /** Fix runs already sent for this error. */
   attempts: number;
   agentWorking: boolean;
+  /** A fix message is queued or sending. */
+  sending: boolean;
   onFix: () => void;
   onShowLogs: () => void;
   onDismiss: () => void;
 }) => {
   // Judged once the last fix run is over, not while it is still working.
   const stillFailing = attempts >= MAX_FIX_ATTEMPTS && !agentWorking;
+  const fixBlockedReason = sending
+    ? "Sending the fix…"
+    : agentWorking
+      ? "Available when the agent finishes"
+      : null;
+  const reasonId = useId();
   const where = error.file ? `${error.file}${error.line ? `:${error.line}` : ""}` : null;
 
   return (
@@ -62,7 +72,12 @@ export const PreviewErrorBanner = ({
           <XIcon className="size-3.5" />
         </Button>
       </div>
-      <div className="flex flex-wrap justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {!stillFailing && fixBlockedReason && (
+          <p id={reasonId} className="mr-auto text-muted-foreground">
+            {fixBlockedReason}
+          </p>
+        )}
         <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onShowLogs}>
           <TerminalSquareIcon className="size-3.5" />
           Show logs
@@ -71,8 +86,8 @@ export const PreviewErrorBanner = ({
           <Button
             size="sm"
             className="h-7 text-xs"
-            disabled={agentWorking}
-            title={agentWorking ? "Available when the agent finishes" : undefined}
+            disabled={fixBlockedReason !== null}
+            aria-describedby={fixBlockedReason ? reasonId : undefined}
             onClick={onFix}
           >
             <SparklesIcon className="size-3.5" />

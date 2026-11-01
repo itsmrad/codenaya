@@ -82,15 +82,22 @@ export const logTail = (output: string, count = LOG_TAIL_LINES) =>
     .slice(-count)
     .join("\n");
 
+/** A Markdown code block that the text's own backticks can't close early. */
+export const codeBlock = (text: string) => {
+  const longestRun = Math.max(2, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longestRun + 1);
+  return `${fence}\n${text}\n${fence}`;
+};
+
 /** The chat message "Fix with AI" sends. */
 export const buildFixPrompt = (error: AppError, terminalOutput: string) => {
   const where = error.file ? ` in ${error.file}${error.line ? `:${error.line}` : ""}` : "";
   const parts = [
     `The preview shows a ${error.kind} error${where}. Find the cause and fix it.`,
-    `Error:\n\`\`\`\n${error.message}\n\`\`\``,
+    `Error:\n${codeBlock(error.message)}`,
   ];
-  if (error.stack) parts.push(`Stack:\n\`\`\`\n${error.stack}\n\`\`\``);
+  if (error.stack) parts.push(`Stack:\n${codeBlock(error.stack)}`);
   const tail = logTail(terminalOutput);
-  if (tail) parts.push(`Last terminal lines:\n\`\`\`\n${tail}\n\`\`\``);
+  if (tail) parts.push(`Last terminal lines:\n${codeBlock(tail)}`);
   return parts.join("\n\n");
 };
