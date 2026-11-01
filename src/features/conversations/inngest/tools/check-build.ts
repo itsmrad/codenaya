@@ -6,6 +6,7 @@ import {
   BUILD_CHECK_UNFINISHED,
   BUILD_NOT_CHECKED,
   BUILD_VERIFIED,
+  STATIC_CHECKS_FAILED,
   STATIC_CHECKS_PASSED,
   buildPathIndex,
 } from "@/features/conversations/agent-steps";
@@ -15,6 +16,7 @@ import {
   createProjectSandbox,
   writeProjectFiles,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { withErrorHints } from "@/features/sandbox-preview/utils/error-recipes";
 import {
   missingReferencedFiles,
   undeclaredPackages,
@@ -70,9 +72,14 @@ const run = async (sandbox: Sandbox, command: string, timeoutMs: number): Promis
   }
 };
 
-/** Errors first: Vite writes progress to stdout and the failure to stderr. */
-const failureOutput = (result: CommandResult) =>
-  trimBuildOutput(`${result.stderr}\n${result.stdout}`);
+/**
+ * Errors first: Vite writes progress to stdout and the failure to stderr.
+ * Known errors anywhere in the output get their cause and fix appended.
+ */
+const failureOutput = (result: CommandResult) => {
+  const output = `${result.stderr}\n${result.stdout}`;
+  return withErrorHints(trimBuildOutput(output), output);
+};
 
 /** A timeout or a sandbox failure, not a problem in the project's code. */
 const unfinished = (error: unknown) =>
@@ -108,7 +115,7 @@ export const checkProjectBuild = async ({
   ];
   if (problems.length > 0) {
     return (
-      `Error: Static checks failed:\n- ${problems.join("\n- ")}\n` +
+      `${STATIC_CHECKS_FAILED}:\n- ${problems.join("\n- ")}\n` +
       "Fix these, then call checkBuild again."
     );
   }

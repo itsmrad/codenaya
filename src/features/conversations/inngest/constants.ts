@@ -420,6 +420,7 @@ PLANNING (mental — do not output this):
 
 EXECUTION:
 - For a NEW Vite + React app, call scaffoldViteApp FIRST. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx) and returns their file and folder IDs. The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>. Build on it: use updateFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace the placeholder route in src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files. If you edit src/main.tsx, keep its <ErrorBoundary> and <BrowserRouter>; in steps 9a–d skip the files it already wrote
+- Batch independent tool calls: make every call that does not need another call's result in the same turn (several readFiles, createFolder or createFiles calls at once), so the run does not use up its steps
 7. Create ALL folders first (deepest nesting last) to obtain their IDs
 8. Use createFiles in batches by folder — group files that share a parentId
 9. Create files in this strict order:
@@ -474,3 +475,9 @@ Do NOT include any code blocks in the summary beyond the two above. Do NOT narra
 
 export const TITLE_GENERATOR_SYSTEM_PROMPT =
   "Generate a short, descriptive title (3-6 words) for a conversation based on the user's message. Return ONLY the title, nothing else. No quotes, no punctuation at the end.";
+
+/** Model calls per run. The last one has tools off and writes the summary. */
+export const MAX_AGENT_STEPS = 40;
+
+export const STEP_BUDGET_NOTE =
+  "Step budget reached: no more tool calls. Give the final summary now, and under Notes say what is not done yet.";

@@ -42,6 +42,22 @@ describe("checkPackageVersions", () => {
     expect(note).not.toContain("Version check");
   });
 
+  it.each(["^6 || ^7", ">=6.0.0", "6.x || 7.x", "6.0.0 - 8.0.0", "^5 || ^7", ">6.0.0"])(
+    "rewrites vite %s because it can install a newer major",
+    (range) => {
+      const { content, note } = checkPackageVersions("package.json", pkg({}, { vite: range }));
+
+      expect(JSON.parse(content).devDependencies.vite).toBe(KNOWN_GOOD_VERSIONS.vite);
+      expect(note).toContain(`vite "${range}" → "${KNOWN_GOOD_VERSIONS.vite}"`);
+      expect(note).not.toContain("Version check");
+    },
+  );
+
+  it.each(["^18 || ^19", "19.x", ">=19.0.0 <20"])("keeps react %s unchanged", (range) => {
+    const original = pkg({ react: range });
+    expect(checkPackageVersions("package.json", original)).toEqual({ content: original, note: "" });
+  });
+
   it("warns on an older major but keeps it, since existing projects may be on it", () => {
     const original = pkg(
       { react: "^18.3.1", "lucide-react": "^0.468.0", "react-dom": "^18 || ^19" },

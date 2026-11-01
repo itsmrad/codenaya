@@ -1,6 +1,6 @@
 # 0009. GitHub promotion: verified claims and a per-claim Opus run count
 
-- Status: Accepted
+- Status: Accepted. Ended 2026-11-01; the site's claim page, banner and picker promo were removed, admin promo access and the server checks kept (see Consequences)
 - Date: 2026-10-28
 - Related: ADR 0006 (the platform selection this adds to)
 
@@ -63,5 +63,14 @@ parallel sends and an event-key holder naming any model.
 - The picker drops Opus once its runs are used, so a stored Opus choice
   falls back to the user's default instead of being refused on every send.
 - Sonnet is uncapped until the end, so its cost is open-ended for that window.
-- After the promotion, delete `features/promotions`, `promoClaims` and the
-  `promoOnlyModels` hooks in `resolve-run-model.ts`, the picker and the banner.
+- After the promotion ended (2026-11-01), the owner asked to remove it from
+  the site but keep it in /admin for a future promotion. Removed: `/promo`,
+  `POST /api/promotions/claim`, the banner and the picker's promo group;
+  users' pickers offer only `everyone` models. Kept: the admin's promo access
+  per model, `promoClaims` (data and functions, so Convex needs no deploy),
+  and the send and run checks: a stale client sending a promo model gets a
+  403 `promo_ended`, or `promo_not_claimed` if the user never claimed.
+  A saved promo pick is switched to the user's default once, with a notice.
+  Running a new promotion needs admin settings that don't exist yet: its end,
+  limits and who may claim are hard-coded here, and there is no claim flow.
+  Until one exists, marking a model "Promo" in /admin hides it from users.
