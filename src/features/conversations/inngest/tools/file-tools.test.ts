@@ -18,6 +18,8 @@ import { createListFilesTool } from "./list-files";
 import { buildProjectTreePromptSection, MAX_PROMPT_TREE_ENTRIES, type ProjectFile } from "./paths";
 import { createReadFilesTool } from "./read-files";
 import { createRenameFileTool } from "./rename-file";
+import { createCreateFilesTool } from "./create-files";
+import { createEditFileTool } from "./edit-file";
 import { createUpdateFileTool } from "./update-file";
 import { createWriteFilesTool } from "./write-files";
 
@@ -52,7 +54,7 @@ beforeEach(() => {
   mocks.query.mockImplementation(async (ref, args: { fileId?: string }) =>
     getFunctionName(ref) === "system:getFileById"
       ? (db.rows.find((r) => r._id === args.fileId) ?? null)
-      : db.rows.map((row) => ({ ...row, content: undefined })),
+      : db.rows.map((row) => ({ ...row, content: getFunctionName(ref) === "system:getProjectFilesWithUrls" ? row.content : undefined })),
   );
   mocks.mutation.mockImplementation(async (ref, args: Record<string, never>) => {
     switch (getFunctionName(ref)) {
@@ -335,5 +337,54 @@ describe("project tree prompt section", () => {
     expect(lines).toHaveLength(MAX_PROMPT_TREE_ENTRIES + 1);
     expect(lines.slice(0, 2)).toEqual(["package.json", "src/"]);
     expect(lines.at(-1)).toBe("+52 more (call listFiles to see them)");
+  });
+});
+
+describe("post-write checks at every boundary", () => {
+  it.each(["update", "edit", "write", "create"])("%s saves, rewrites icons and reports project findings in the same step", async (kind) => {
+    const registry = vi.fn(async () => []);
+    const content = 'import { Cammera, VercelLogo } from "lucide-react"; import { X } from "./missing";';
+    const options = { ...opts, registry };
+    const result = kind === "update"
+      ? await createUpdateFileTool(options).handler({ path: "src/App.tsx", content }, ctx)
+      : kind === "edit"
+        ? await createEditFileTool(options).handler({ path: "src/App.tsx", edits: [{ oldText: "app", newText: content }] }, ctx)
+        : kind === "write"
+          ? await createWriteFilesTool(options).handler({ files: [{ path: "src/New.tsx", content }] }, ctx)
+          : await createCreateFilesTool(options).handler({ parentId: "src", files: [{ name: "New.tsx", content }] }, ctx);
+    expect(result).toContain("[icon-rewrite] Cammera → Camera as Cammera");
+    expect(result).toContain("VercelLogo");
+    expect(result).toContain("./missing");
+    expect(String(result).match(/Project checks/g)).toHaveLength(1);
+    expect(db.rows.some((r) => r.content?.includes("Camera as Cammera"))).toBe(true);
+    expect(registry).toHaveBeenCalledWith(["lucide-react"]);
+    expect(step.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the persisted result on replay without new writes, queries or registry calls", async () => {
+    let saved: unknown;
+    const replay = { step: { run: async (_id: string, fn: () => unknown) => saved ??= await fn() } } as never;
+    const registry = vi.fn(async () => []);
+    const tool = createUpdateFileTool({ ...opts, registry });
+    const args = { path: "src/App.tsx", content: 'import x from "undeclared";' };
+    const first = await tool.handler(args, replay);
+    const calls = mocks.query.mock.calls.length;
+    expect(await tool.handler(args, replay)).toBe(first);
+    expect(mocks.query).toHaveBeenCalledTimes(calls);
+    expect(mocks.mutation).toHaveBeenCalledTimes(1);
+    expect(registry).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a successful write successful when the diagnostic snapshot fails", async () => {
+    mocks.query.mockImplementationOnce(async () => db.rows).mockRejectedValueOnce(new Error("offline"));
+    expect(await createUpdateFileTool(opts).handler({ path: "src/App.tsx", content: "saved" }, ctx)).toContain("write succeeded");
+    expect(db.rows.find((r) => r._id === "app")?.content).toBe("saved");
+  });
+
+  it("does not check or rewrite a failed create", async () => {
+    const result = await createCreateFilesTool(opts).handler({ parentId: "src", files: [{ name: "App.tsx", content: 'import { Cammera } from "lucide-react";' }] }, ctx);
+    expect(result).toContain("Created 0");
+    expect(result).not.toContain("Project checks");
+    expect(db.rows.find((r) => r._id === "app")?.content).toBe("app");
   });
 });

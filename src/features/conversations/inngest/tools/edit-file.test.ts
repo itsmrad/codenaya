@@ -85,6 +85,7 @@ describe("editFile tool", () => {
 
   beforeEach(() => {
     mocks.query
+      .mockResolvedValue(files)
       .mockResolvedValueOnce(files)
       .mockResolvedValueOnce({ _id: "app", content: "const a = 1;\nconst b = 2;\n" });
   });

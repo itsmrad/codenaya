@@ -18,9 +18,8 @@ import {
 import { withErrorHints } from "@/features/sandbox-preview/utils/error-recipes";
 import {
   missingReferencedFiles,
-  undeclaredPackages,
-  unresolvedImports,
 } from "@/features/sandbox-preview/utils/missing-references";
+import { projectChecks } from "@/features/sandbox-preview/utils/project-checks";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
@@ -109,8 +108,7 @@ export const checkProjectBuild = async ({
 }): Promise<string> => {
   const problems = [
     ...missingReferencedFiles(files),
-    ...undeclaredPackages(files),
-    ...unresolvedImports(files, paths),
+    ...projectChecks(files, paths).filter((finding) => !["framework", "limit", "unavailable"].includes(finding.checkId)).map((finding) => finding.message),
   ];
   if (problems.length > 0) {
     return (

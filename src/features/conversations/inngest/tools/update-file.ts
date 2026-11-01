@@ -6,11 +6,13 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
+import { createRegistryCheck, postWriteNote, rewriteIcons, type RegistryCheck } from "./post-write-checks";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface UpdateFileToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  registry?: RegistryCheck;
 }
 
 // `fileId` is not offered to the model; it reads tool calls made before #292.
@@ -23,6 +25,7 @@ const paramsSchema = z.object({
 export const createUpdateFileTool = ({
   projectId,
   internalKey,
+  registry = createRegistryCheck(),
 }: UpdateFileToolOptions) => {
   return createTool({
     name: "updateFile",
@@ -37,7 +40,8 @@ export const createUpdateFileTool = ({
         return `Error: ${parsed.error.issues[0].message}`;
       }
 
-      const { content } = parsed.data;
+      const prepared = rewriteIcons(parsed.data.content);
+      const { content } = prepared;
 
       try {
         return await toolStep?.run("update-file", async () => {
@@ -59,7 +63,8 @@ export const createUpdateFileTool = ({
 
           return (
             `File "${path}" updated successfully` +
-            syntaxErrorNote([{ name: path, content }])
+            syntaxErrorNote([{ name: path, content }]) +
+            await postWriteNote(internalKey, projectId, [file._id], registry, prepared.rewrites)
           );
         })
       } catch (error) {

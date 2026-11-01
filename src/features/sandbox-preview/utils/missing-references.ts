@@ -12,7 +12,7 @@ import { posix } from "node:path";
 type ProjectFile = { path: string; content: string };
 
 /** Drops line and block comments, leaving string literals (which may contain them) intact. */
-const stripComments = (text: string) =>
+export const stripComments = (text: string) =>
   text.replace(
     /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
     (match, string: string | undefined) => string ?? "",
@@ -139,7 +139,7 @@ export const undeclaredPackages = (files: ProjectFile[]): string[] => {
   return [...undeclared].map(([name, path]) => `${name} (imported by ${path})`);
 };
 
-const RESOLVE_SUFFIXES = [
+export const RESOLVE_SUFFIXES = [
   "",
   ".ts",
   ".tsx",
@@ -160,7 +160,7 @@ const RESOLVE_SUFFIXES = [
  * TypeScript's bundler resolution. Null for anything else, including
  * template-literal and glob imports, which name no single file.
  */
-const localCandidates = (from: string, specifier: string): string[] | null => {
+export const localCandidates = (from: string, specifier: string): string[] | null => {
   const bare = specifier.split(/[?#]/)[0];
   if (/\$\{|\*/.test(bare)) return null;
   const targets = isLocal(bare)

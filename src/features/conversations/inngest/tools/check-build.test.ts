@@ -83,6 +83,18 @@ describe("checkProjectBuild", () => {
     expect(e2b.create).not.toHaveBeenCalled();
   });
 
+  it("reuses named-export and Tailwind checks without starting a sandbox", async () => {
+    const result = await check([
+      ...starter(),
+      { path: "src/ui.ts", content: "export const Button = 1;" },
+      { path: "src/Bad.tsx", content: 'import { Dialog } from "./ui";' },
+      { path: "src/drift.css", content: "@tailwind utilities;" },
+    ]);
+    expect(result).toContain("no such export");
+    expect(result).toContain("replace v3 @tailwind");
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
   it("falls back to the static checks without an E2B key", async () => {
     const result = await check(starter(), null);
     expect(result.split("\n")[0]).toBe(STATIC_CHECKS_PASSED);

@@ -5,11 +5,13 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { createRegistryCheck, postWriteNote, rewriteIcons, type RegistryCheck } from "./post-write-checks";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface CreateFilesToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  registry?: RegistryCheck;
 }
 
 const paramsSchema = z.object({
@@ -27,6 +29,7 @@ const paramsSchema = z.object({
 export const createCreateFilesTool = ({
   projectId,
   internalKey,
+  registry = createRegistryCheck(),
 }: CreateFilesToolOptions) => {
   return createTool({
     name: "createFiles",
@@ -53,7 +56,9 @@ export const createCreateFilesTool = ({
         return `Error: ${parsed.error.issues[0].message}`;
       }
 
-      const { parentId, files } = parsed.data;
+      const { parentId } = parsed.data;
+      const prepared = parsed.data.files.map((file) => ({ ...file, ...rewriteIcons(file.content) }));
+      const files = prepared.map(({ name, content }) => ({ name, content }));
 
       try {
         return await toolStep?.run("create-files", async () => {
@@ -98,7 +103,9 @@ export const createCreateFilesTool = ({
 
           return (
             response +
-            syntaxErrorNote(files.filter((file) => created.some((r) => r.name === file.name)))
+            syntaxErrorNote(files.filter((file) => created.some((r) => r.name === file.name))) +
+            await postWriteNote(internalKey, projectId, created.flatMap((r) => r.fileId ? [r.fileId] : []), registry,
+              prepared.filter((f) => created.some((r) => r.name === f.name)).flatMap((f) => f.rewrites))
           );
         });
       } catch (error) {
