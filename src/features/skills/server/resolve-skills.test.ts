@@ -87,3 +87,12 @@ describe("resolveForcedSkills", () => {
     ]);
   });
 });
+
+it.each([true, false])("reserves built-in names for loading and slash skills (enabled: %s)", (enabled) => {
+  const builtin = skill("react-performance", "builtin", undefined, enabled);
+  const rows = [skill("react-performance", "project"), skill("react-performance", "library"), builtin];
+  expect(resolveSkills(rows).map((s) => s.source)).toEqual(enabled ? ["builtin"] : []);
+  const result = resolveForcedSkills(rows, ["react-performance"]);
+  expect(result.forced.map((s) => s.source)).toEqual(enabled ? ["builtin"] : []);
+  expect(result.unavailable).toEqual(enabled ? [] : ["react-performance"]);
+});

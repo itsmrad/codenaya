@@ -30,13 +30,19 @@ const toAgentSkill = ({ name, description, body, source }: AgentSkill): AgentSki
   source,
 });
 
+// Built-in names are reserved even when disabled: legacy user rows may predate them.
+const withoutBuiltinClashes = (skills: readonly ProjectSkill[]) => {
+  const names = new Set(skills.filter((s) => s.scope === "builtin").map((s) => s.name));
+  return skills.filter((s) => s.scope === "builtin" || !names.has(s.name));
+};
+
 /**
  * The skills for one agent run: enabled only, built-ins first, then project
  * skills, then library skills, most recently updated first within each, capped
  * at `MAX_INDEXED_SKILLS`.
  */
 export function resolveSkills(skills: readonly ProjectSkill[]): AgentSkill[] {
-  return skills
+  return withoutBuiltinClashes(skills)
     .filter((skill) => skill.enabled)
     .sort(
       (a, b) =>
@@ -58,8 +64,9 @@ export function resolveForcedSkills(
 ): { forced: AgentSkill[]; unavailable: string[] } {
   const forced: AgentSkill[] = [];
   const unavailable: string[] = [];
+  const available = withoutBuiltinClashes(skills);
   for (const name of names) {
-    const skill = skills.find((s) => s.enabled && s.name === name);
+    const skill = available.find((s) => s.enabled && s.name === name);
     if (skill) forced.push(toAgentSkill(skill));
     else unavailable.push(name);
   }

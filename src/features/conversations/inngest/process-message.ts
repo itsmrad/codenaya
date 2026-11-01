@@ -65,13 +65,15 @@ import {
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
-import { AGENT_FAILURE_MESSAGE, priorTurns } from './lib/conversation-history';
+import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
   type MessageMode,
   PLAN_MODE,
   PLAN_MODE_PROMPT,
   PLAN_MODE_TOOLS,
 } from '../plan-mode';
+
+export { DEFAULT_REPLY_MESSAGE } from "./lib/conversation-history";
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -540,12 +542,13 @@ export const processMessage = inngest.createFunction(
     });
 
     // Most stable first, so the cacheable prefix is shared across runs (#295):
-    // base, then per-project sections, then per-run ones. Nothing from the
-    // conversation goes here; it is sent as messages (see onStart).
+    // base, skill index and integrations, then forced skills and plan mode.
+    // Conversation goes in messages (see onStart).
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
-      buildSkillsPromptSection(skills, forced, unavailable),
+      buildSkillsPromptSection(skills),
       buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
+      buildSkillsPromptSection([], forced, unavailable),
       planMode ? PLAN_MODE_PROMPT : "",
     ].join("");
 
@@ -655,6 +658,7 @@ export const processMessage = inngest.createFunction(
             agent.name === SUMMARY_AGENT_NAME ? STEP_BUDGET_NOTE : buildCheckGate.takeNudge();
           // AgentKit sends prompt ([system, request]) before history (this
           // run's turns), so earlier conversation turns go between the two.
+          // Relies on network calls using maxIter: 0; direct agent.run with maxIter > 1 would prepend history each pass.
           const [system, ...current] = withImageParts(prompt, imageUrls);
           return {
             prompt: [system, ...earlierTurns, ...current],
@@ -813,8 +817,7 @@ export const processMessage = inngest.createFunction(
       (m) => m.type === "text" && m.role === "assistant"
     );
 
-    let assistantResponse =
-      "I processed your request. Let me know if you need anything else!";
+    let assistantResponse = DEFAULT_REPLY_MESSAGE;
 
     if (textMessage?.type === "text") {
       assistantResponse =
