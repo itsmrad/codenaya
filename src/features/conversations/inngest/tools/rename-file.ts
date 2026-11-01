@@ -5,15 +5,17 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
-import { getFileByAgentId } from "./get-file";
+import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
 
 interface RenameFileToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
 }
 
+// `fileId` is not offered to the model; it reads tool calls made before #292.
 const paramsSchema = z.object({
-  fileId: z.string().min(1, "File ID is required"),
+  path: z.string().optional(),
+  fileId: z.string().optional(),
   newName: z.string().min(1, "New name is required"),
 });
 
@@ -23,10 +25,10 @@ export const createRenameFileTool = ({
 }: RenameFileToolOptions) => {
   return createTool({
     name: "renameFile",
-    description: "Rename a file or folder",
+    description: "Rename a file or folder in place (same parent folder)",
     parameters: z.object({
-      fileId: z.string().describe("The ID of the file or folder to rename"),
-      newName: z.string().describe("The new name for the file or folder"),
+      path: z.string().describe('Project-relative path of the file or folder, like "src/App.tsx"'),
+      newName: z.string().describe("The new name, without a folder path"),
     }),
     handler: async (params, { step: toolStep }) => {
       const parsed = paramsSchema.safeParse(params);
@@ -34,25 +36,22 @@ export const createRenameFileTool = ({
         return `Error: ${parsed.error.issues[0].message}`;
       }
 
-      const { fileId, newName } = parsed.data;
-
-      // Validate file exists before running the step
-      const file = await getFileByAgentId(internalKey, projectId, fileId);
-
-      if (!file) {
-        return `Error: File with ID "${fileId}" not found. Use listFiles to get valid file IDs.`;
-      }
+      const { newName } = parsed.data;
 
       try {
         return await toolStep?.run("rename-file", async () => {
+          const index = indexProjectFiles(await getProjectFiles(internalKey, projectId));
+          const found = findProjectFile(index, parsed.data);
+          if ("error" in found) return found.error;
+
           await convex.mutation(api.system.renameFile, {
             internalKey,
             projectId,
-            fileId: fileId as Id<"files">,
+            fileId: found.file._id,
             newName,
           });
 
-          return `Renamed "${file.name}" to "${newName}" successfully`;        
+          return `Renamed "${found.path}" to "${newName}" successfully`;
         })
       } catch (error) {
         return `Error renaming file: ${error instanceof Error ? error.message : "Unknown error"}`;

@@ -22,7 +22,7 @@ export const createCreateFolderTool = ({
 }: CreateFolderToolOptions) => {
   return createTool({
     name: "createFolder",
-    description: "Create a new folder in the project",
+    description: "Legacy: prefer writeFiles, which creates folders as needed. Create a new folder in the project",
     parameters: z.object({
       name: z.string().describe("The name of the folder to create"),
       parentId: z

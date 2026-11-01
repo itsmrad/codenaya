@@ -5,18 +5,20 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
-import { getFileByAgentId } from "./get-file";
+import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
 
 interface DeleteFilesToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
 }
 
-const paramsSchema = z.object({
-  fileIds: z
-    .array(z.string().min(1, "File ID cannot be empty"))
-    .min(1, "Provide at least one file ID"),
-});
+// `fileIds` is not offered to the model; it reads tool calls made before #292.
+const paramsSchema = z
+  .object({
+    paths: z.array(z.string()).optional(),
+    fileIds: z.array(z.string()).optional(),
+  })
+  .refine(({ paths, fileIds }) => (paths ?? fileIds ?? []).length > 0, "Provide at least one path");
 
 export const createDeleteFilesTool = ({
   projectId,
@@ -27,9 +29,9 @@ export const createDeleteFilesTool = ({
     description:
       "Delete files or folders from the project. If deleting a folder, all contents will be deleted recursively.",
     parameters: z.object({
-      fileIds: z
+      paths: z
         .array(z.string())
-        .describe("Array of file or folder IDs to delete"),
+        .describe('Project-relative paths of the files or folders to delete, like "src/old.tsx"'),
     }),
     handler: async (params, { step: toolStep }) => {
       const parsed = paramsSchema.safeParse(params);
@@ -37,41 +39,29 @@ export const createDeleteFilesTool = ({
         return `Error: ${parsed.error.issues[0].message}`;
       }
 
-      const { fileIds } = parsed.data;
-
-      // Validate all files exist before running the step
-      const filesToDelete: { 
-        id: string; 
-        name: string; 
-        type: string
-      }[] = [];
-
-      for (const fileId of fileIds) {
-        const file = await getFileByAgentId(internalKey, projectId, fileId);
-
-        if (!file) {
-          return `Error: File with ID "${fileId}" not found. Use listFiles to get valid file IDs.`;
-        }
-
-        filesToDelete.push({
-          id: file._id,
-          name: file.name,
-          type: file.type,
-        });
-      }
+      const { paths, fileIds } = parsed.data;
+      const refs = paths ? paths.map((path) => ({ path })) : (fileIds ?? []).map((fileId) => ({ fileId }));
 
       try {
         return await toolStep?.run("delete-files", async () => {
-          const results: string[] = [];
+          const index = indexProjectFiles(await getProjectFiles(internalKey, projectId));
+          // Resolve every target before deleting any, so one bad path deletes nothing.
+          const targets = [];
+          for (const ref of refs) {
+            const found = findProjectFile(index, ref);
+            if ("error" in found) return found.error;
+            targets.push(found);
+          }
 
-          for (const file of filesToDelete) {
+          const results: string[] = [];
+          for (const { file, path } of targets) {
             await convex.mutation(api.system.deleteFile, {
               internalKey,
               projectId,
-              fileId: file.id as Id<"files">,
+              fileId: file._id,
             });
 
-            results.push(`Deleted ${file.type} "${file.name}" successfully`);
+            results.push(`Deleted ${file.type} "${path}" successfully`);
           }
 
           return results.join("\n");

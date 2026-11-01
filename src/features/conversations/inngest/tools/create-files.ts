@@ -31,7 +31,7 @@ export const createCreateFilesTool = ({
   return createTool({
     name: "createFiles",
     description:
-      "Create multiple files at once in the same folder. Use this to batch create files that share the same parent folder. More efficient than creating files one by one.",
+      "Legacy: prefer writeFiles, which takes paths. Create multiple files at once in the same folder. Use this to batch create files that share the same parent folder. More efficient than creating files one by one.",
     parameters: z.object({
       parentId: z
         .string()
