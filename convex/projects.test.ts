@@ -7,6 +7,7 @@ import { api } from "./_generated/api";
 import type { Id, TableNames } from "./_generated/dataModel";
 import { deleteProjectBatch } from "./projectCascade";
 import schema from "./schema";
+import { MAX_PROJECT_INSTRUCTIONS_LENGTH } from "../src/features/projects/instructions";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -394,6 +395,7 @@ describe("project-scoped public mutations", () => {
 
     for (const write of [
       () => alice.mutation(api.projects.updateSettings, { id: projectId, settings: {} }),
+      () => alice.mutation(api.projects.updateInstructions, { id: projectId, instructions: "" }),
       () => alice.mutation(api.conversations.create, { projectId, title: "Chat" }),
       () => alice.mutation(api.chatImages.generateUploadUrl, { projectId }),
       () => alice.mutation(api.envVars.setPublicEnvVar, { projectId, key: "NEXT_PUBLIC_A", value: "1" }),
@@ -455,4 +457,69 @@ test("getPartial clamps its limit", async () => {
 
   expect(await alice.query(api.projects.getPartial, { limit: 1000 })).toHaveLength(50);
   expect(await alice.query(api.projects.getPartial, { limit: -5 })).toHaveLength(1);
+});
+
+describe("project instructions (#299)", () => {
+  test("only the owner reads and writes them; empty text clears them", async () => {
+    const { t, alice, bob } = setup();
+    const projectId = await t.run((ctx) =>
+      ctx.db.insert("projects", { name: "p", ownerId: ALICE, updatedAt: 0 })
+    );
+
+    await alice.mutation(api.projects.updateInstructions, {
+      id: projectId,
+      instructions: "  All prices in INR.\n",
+    });
+    expect((await alice.query(api.projects.getById, { id: projectId })).instructions).toBe(
+      "All prices in INR."
+    );
+
+    await expect(
+      bob.mutation(api.projects.updateInstructions, { id: projectId, instructions: "Use red." })
+    ).rejects.toThrow(/Unauthorized/);
+    await expect(bob.query(api.projects.getById, { id: projectId })).rejects.toThrow(
+      /Unauthorized/
+    );
+    await expect(
+      t.mutation(api.projects.updateInstructions, { id: projectId, instructions: "x" })
+    ).rejects.toThrow();
+
+    await alice.mutation(api.projects.updateInstructions, { id: projectId, instructions: " " });
+    expect(
+      (await alice.query(api.projects.getById, { id: projectId })).instructions
+    ).toBeUndefined();
+  });
+
+  test("rejects text over the limit and keeps the saved value", async () => {
+    const { t, alice } = setup();
+    const projectId = await t.run((ctx) =>
+      ctx.db.insert("projects", { name: "p", ownerId: ALICE, updatedAt: 0, instructions: "Keep" })
+    );
+
+    await expect(
+      alice.mutation(api.projects.updateInstructions, {
+        id: projectId,
+        instructions: "a".repeat(MAX_PROJECT_INSTRUCTIONS_LENGTH + 1),
+      })
+    ).rejects.toEqual(
+      expect.objectContaining({ data: expect.objectContaining({ code: "INVALID_ARGUMENT" }) })
+    );
+    await alice.mutation(api.projects.updateInstructions, {
+      id: projectId,
+      instructions: "a".repeat(MAX_PROJECT_INSTRUCTIONS_LENGTH),
+    });
+    expect(
+      (await alice.query(api.projects.getById, { id: projectId })).instructions
+    ).toHaveLength(MAX_PROJECT_INSTRUCTIONS_LENGTH);
+  });
+
+  test("a duplicate keeps the instructions", async () => {
+    const { t, alice } = setup();
+    const projectId = await t.run((ctx) =>
+      ctx.db.insert("projects", { name: "p", ownerId: ALICE, updatedAt: 0, instructions: "Keep" })
+    );
+
+    const copyId = await alice.mutation(api.projects.duplicate, { id: projectId });
+    expect((await alice.query(api.projects.getById, { id: copyId })).instructions).toBe("Keep");
+  });
 });

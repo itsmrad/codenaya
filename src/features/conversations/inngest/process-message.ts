@@ -62,6 +62,7 @@ import {
   resolveSkills,
 } from '@/features/skills/server/resolve-skills';
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
+import { buildProjectInstructionsSection } from '@/features/projects/instructions';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
 import { AGENT_FAILURE_MESSAGE, priorTurns } from './lib/conversation-history';
@@ -362,6 +363,7 @@ export const processMessage = inngest.createFunction(
     // Project owner, needed by setEnvVar and the approval gate. Resolved from the
     // project row so those act on behalf of whoever owns the work.
     let mcpOwnerId: string | undefined;
+    let projectInstructions: string | undefined;
 
     try {
       // Fetched unconditionally: the owner is needed by setEnvVar, which is useful
@@ -371,6 +373,7 @@ export const processMessage = inngest.createFunction(
         projectId,
       });
       mcpOwnerId = project?.ownerId;
+      projectInstructions = project?.instructions;
 
       let entries = await convex.query(api.system.getProjectMcpConnections, {
         internalKey,
@@ -543,6 +546,7 @@ export const processMessage = inngest.createFunction(
     // conversation goes here; it is sent as messages (see onStart).
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
+      buildProjectInstructionsSection(projectInstructions),
       buildSkillsPromptSection(skills, forced, unavailable),
       buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
       planMode ? PLAN_MODE_PROMPT : "",

@@ -54,6 +54,10 @@ export const useUpdateProjectSettings = () => {
   return useMutation(api.projects.updateSettings);
 };
 
+export const useUpdateProjectInstructions = () => {
+  return useMutation(api.projects.updateInstructions);
+};
+
 export const useDuplicateProject = () => {
   return useMutation(api.projects.duplicate);
 };
