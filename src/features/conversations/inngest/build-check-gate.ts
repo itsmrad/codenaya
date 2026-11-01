@@ -34,7 +34,8 @@ export const hasUncheckedWrites = (results: ToolCalls[]) => {
   let checks = 0;
   for (const { tool, content } of results.flatMap((result) => result.toolCalls)) {
     if (WRITE_TOOLS.has(tool.name)) {
-      unchecked = true;
+      // A failed write changed nothing; the run block and diff skip it the same way.
+      if (toolResultError(content) === undefined) unchecked = true;
     } else if (tool.name === "checkBuild") {
       checks += 1;
       // A check that could not run is not retried: the agent reports it instead.

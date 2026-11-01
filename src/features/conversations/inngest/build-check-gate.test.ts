@@ -15,6 +15,13 @@ describe("hasUncheckedWrites", () => {
     expect(hasUncheckedWrites([turn(call("createFiles")), turn()])).toBe(true);
   });
 
+  it("ignores write calls that failed, returned or thrown", () => {
+    const thrown = { tool: { name: "writeFiles" }, content: { error: { message: "boom" } } };
+    expect(hasUncheckedWrites([turn(call("editFile", "Error: oldText #1 matched 0 times")), turn()])).toBe(false);
+    expect(hasUncheckedWrites([{ toolCalls: [thrown] }, turn()])).toBe(false);
+    expect(hasUncheckedWrites([turn(call("deleteFiles", "Error: File not found"), call("updateFile")), turn()])).toBe(true);
+  });
+
   it("is false once a check passes after the last write", () => {
     expect(hasUncheckedWrites([turn(call("updateFile")), turn(call("checkBuild", "Build verified"))])).toBe(false);
   });

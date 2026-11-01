@@ -10,6 +10,7 @@ vi.mock("@/lib/convex-client", () => ({
 }));
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
+import { hasUncheckedWrites } from "../build-check-gate";
 import { applyEdits, createEditFileTool } from "./edit-file";
 
 const step = { run: vi.fn(async (_id: string, fn: () => unknown) => fn()) };
@@ -139,9 +140,19 @@ describe("editFile tool", () => {
   it.each([
     ["an ambiguous edit", [{ oldText: "const ", newText: "let " }], "matched 2 times"],
     ["an edit that changes nothing", [{ oldText: "a = 1", newText: "a = 1" }], "leave the file unchanged"],
-  ])("writes nothing for %s", async (_name, edits, message) => {
-    expect(await edit(edits)).toContain(message);
+    [
+      "edits that cancel out",
+      [
+        { oldText: "a = 1", newText: "a = 9" },
+        { oldText: "a = 9", newText: "a = 1" },
+      ],
+      "leave the file unchanged",
+    ],
+  ])("writes nothing for %s, and the build-check gate sees no write", async (_name, edits, message) => {
+    const data = await edit(edits);
+    expect(data).toContain(message);
     expect(mocks.mutation).not.toHaveBeenCalled();
+    expect(hasUncheckedWrites([{ toolCalls: [{ tool: { name: "editFile" }, content: { data } }] }])).toBe(false);
   });
 
   it("reports a syntax error the edit introduced", async () => {
