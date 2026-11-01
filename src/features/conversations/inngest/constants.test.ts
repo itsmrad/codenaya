@@ -63,6 +63,10 @@ describe("coding agent integration instructions", () => {
       'each tsconfig "references" and "extends" path, and the index.html entry script',
     );
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("keep every package it already lists");
+    // #335: the starter mounts the router and an error boundary.
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>.",
+    );
   });
 
   it("describes the React 19 + Tailwind v4 starter stack (#332)", () => {

@@ -59,7 +59,7 @@ describe("scaffoldViteApp tool", () => {
     );
     expect(missingReferencedFiles(paths())).toEqual([]);
     expect(result).toContain("tsconfig.app.json (id");
-    expect(result).toMatch(/Folders: src \(id\d+\), src\/lib \(id\d+\)/);
+    expect(result).toMatch(/Folders: src \(id\d+\), src\/lib \(id\d+\), src\/components \(id\d+\)/);
   });
 
   it("writes package.json after every file outside the root", async () => {
@@ -119,5 +119,23 @@ describe("scaffoldViteApp tool", () => {
     for (const stale of ["tailwind.config", "postcss.config", "tailwindcss-animate", "@tailwind ", "hsl(var("]) {
       expect(everything).not.toContain(stale);
     }
+  });
+
+  it("mounts an error boundary and a router around App (#335)", () => {
+    const tool = createScaffoldViteAppTool({ projectId: "p" as never, internalKey: "k" });
+    const read = (path: string) => VITE_REACT_STARTER.find((file) => file.path === path)!.content;
+
+    expect(JSON.parse(read("package.json")).dependencies["react-router-dom"]).toBe(
+      KNOWN_GOOD_VERSIONS["react-router-dom"],
+    );
+    expect(read("src/main.tsx")).toContain(
+      "<ErrorBoundary>\n      <BrowserRouter>\n        <App />\n      </BrowserRouter>\n    </ErrorBoundary>",
+    );
+    expect(read("src/App.tsx")).toContain('<Route path="/" element={<Home />} />');
+    const boundary = read("src/components/error-boundary.tsx");
+    expect(boundary).toContain("static getDerivedStateFromError");
+    expect(boundary).toContain("import.meta.env.DEV && componentStack");
+    expect(boundary).toContain("window.location.reload()");
+    expect(tool.description).toContain("Don't add another <BrowserRouter>.");
   });
 });
