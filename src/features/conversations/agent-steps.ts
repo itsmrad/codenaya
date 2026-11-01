@@ -10,11 +10,16 @@ export type AgentStep = Infer<typeof messageStepValidator>;
 /** Why a run was stopped as stuck (#306, see `stuckRunValidator`). */
 export type StuckRun = Infer<typeof stuckRunValidator>;
 
+// Loop thresholds (#306), applied by `inngest/loop-detector.ts`.
+export const MAX_SAME_ERROR = 3;
+export const MAX_SAME_FILE_WRITES = 4;
+export const MAX_SAME_SYNTAX_ERROR = 3;
+
 /** What each loop looks like, for the agent's stop note and the hand-off card. */
 export const STUCK_REASONS: Record<StuckRun["reason"], string> = {
-  "repeated-error": "the same error came back three times",
-  "repeated-write": "the same file was rewritten four times",
-  "repeated-syntax-error": "the same file failed to parse three times",
+  "repeated-error": `the same error came back ${MAX_SAME_ERROR} times`,
+  "repeated-write": `the same file was rewritten ${MAX_SAME_FILE_WRITES} times without fixing it`,
+  "repeated-syntax-error": `the same file failed to parse ${MAX_SAME_SYNTAX_ERROR} times`,
 };
 
 /** The slice of an AgentKit tool call this module reads. */

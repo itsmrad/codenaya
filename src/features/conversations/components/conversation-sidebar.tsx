@@ -107,7 +107,7 @@ export const ConversationSidebar = ({
   projectId,
 }: ConversationSidebarProps) => {
   const { openIntegrations } = useProjectIntegrations();
-  const { input, setInput, contexts, removeContext, clearContexts } = useChatStore();
+  const { input, setInput, appendInput, contexts, removeContext, clearContexts } = useChatStore();
   const [agentModel, setAgentModel] = useAgentModel();
   const enhancer = useEnhancePrompt(input, setInput);
   const slashMenu = useSkillSlashMenu(projectId, input, setInput);
@@ -536,7 +536,9 @@ export const ConversationSidebar = ({
                     if (!message.stuck) return;
                     const { fileId } = message.stuck;
                     setPlanMode(true);
-                    setInput(diagnoseStuckMessage(message.stuck, fileId && pathOf(fileId)));
+                    // Added after any draft, not over it, then focused to review and send.
+                    appendInput(diagnoseStuckMessage(message.stuck, fileId && pathOf(fileId)));
+                    requestAnimationFrame(() => panelRef.current?.querySelector("textarea")?.focus());
                   }}
                   checkpointId={
                     checkpoints && (checkpointByMessage.get(message._id)?._id ?? null)

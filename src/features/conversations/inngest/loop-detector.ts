@@ -1,6 +1,11 @@
 import {
+  BUILD_CHECK_UNFINISHED,
+  MAX_SAME_ERROR,
+  MAX_SAME_FILE_WRITES,
+  MAX_SAME_SYNTAX_ERROR,
   STUCK_REASONS,
   type StuckRun,
+  buildCheckLabel,
   sanitizeAgentText,
   toolResultError,
 } from "../agent-steps";
@@ -8,13 +13,9 @@ import { SYNTAX_ERRORS_NOTE } from "./tools/syntax-error";
 
 /**
  * Stops a run going in circles (#306): the same tool error, rewrites of one
- * file, or one file that keeps failing to parse. Pure; the router calls it
- * after every turn that made tool calls.
+ * file that keep failing, or one file that keeps failing to parse. Pure; the
+ * router calls it after every turn that made tool calls.
  */
-
-export const MAX_SAME_ERROR = 3;
-export const MAX_SAME_FILE_WRITES = 4;
-export const MAX_SAME_SYNTAX_ERROR = 3;
 
 /** Written when the stuck run's last turn gave no text. */
 export const STUCK_FALLBACK_REPLY =
@@ -36,64 +37,110 @@ type ToolResults = {
   toolCalls: Array<{ tool: { id: string; name: string }; content: unknown }>;
 };
 
+interface Call {
+  name: string;
+  input: Record<string, unknown>;
+  content: unknown;
+}
+
 /** Each tool call of the run with its input. */
-const runCalls = (results: ToolResults[]) =>
+const runCalls = (results: ToolResults[]): Call[] =>
   results.flatMap(({ output, toolCalls }) => {
     const inputs = new Map(
       output.flatMap((m) => (m.type === "tool_call" ? m.tools ?? [] : [])).map((t) => [t.id, t.input]),
     );
-    return toolCalls.map(({ tool, content }) => ({ tool, content, input: inputs.get(tool.id) }));
+    return toolCalls.map(({ tool, content }) => ({
+      name: tool.name,
+      input: (inputs.get(tool.id) ?? {}) as Record<string, unknown>,
+      content,
+    }));
   });
+
+const str = (value: unknown) => (typeof value === "string" ? value : "");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** An error with its ids, numbers (lines, columns, counts) and case evened out. */
 export const errorSignature = (error: string) =>
   sanitizeAgentText(error).toLowerCase().replace(/\d+/g, "#").replace(/\s+/g, " ").trim();
 
-/** `[file name, entry]` for each file a write tool's syntax note reports. */
-const syntaxErrors = (content: unknown): Array<[string, string]> => {
-  const data = (content as { data?: unknown } | null)?.data;
-  const at = typeof data === "string" ? data.indexOf(SYNTAX_ERRORS_NOTE) : -1;
+/**
+ * `[file key, entry]` for each file a write tool's syntax note reports. An
+ * updateFile call writes one file, so its whole note is one entry, keyed by the
+ * file id. createFiles entries are split only before a name it wrote, so a
+ * "; " inside a message can't split one; they are keyed by parent and name.
+ */
+const syntaxErrors = ({ name, input, content }: Call): Array<[string, string]> => {
+  const data = str((content as { data?: unknown } | null)?.data);
+  const at = data.indexOf(SYNTAX_ERRORS_NOTE);
   if (at === -1) return [];
-  return (data as string)
-    .slice(at + SYNTAX_ERRORS_NOTE.length)
-    .split("; ")
-    .map((entry) => [/^(.*?) \d+:\d+ /.exec(entry)?.[1] ?? entry.split(" ")[0], entry]);
+  const note = data.slice(at + SYNTAX_ERRORS_NOTE.length).trim();
+  if (name === "updateFile") return [[`id:${str(input.fileId)}`, note]];
+
+  const names = (Array.isArray(input.files) ? input.files : [])
+    .map((file) => str((file as Record<string, unknown> | null)?.name))
+    .filter(Boolean);
+  const entries =
+    names.length > 1
+      ? note.split(new RegExp(`; (?=(?:${names.map(escapeRegExp).join("|")}) )`))
+      : [note];
+  return entries.map((entry) => {
+    const file = names.find((fileName) => entry.startsWith(`${fileName} `)) ?? entry;
+    return [`path:${str(input.parentId)}/${file}`, entry];
+  });
 };
 
 /** Every error a call reported: its own failure, or the syntax errors it wrote. */
-const callErrors = (content: unknown) => {
-  const error = toolResultError(content);
-  return error ? [error] : syntaxErrors(content).map(([, entry]) => entry);
+const callErrors = (call: Call) => {
+  const error = toolResultError(call.content);
+  return error ? [error] : syntaxErrors(call).map(([, entry]) => entry);
 };
 
 /** The first loop in the run's tool calls, or null while it makes progress. */
 export const detectLoop = (results: ToolResults[]): StuckRun | null => {
-  const counts = new Map<string, number>();
-  const bump = (key: string) => {
+  const errors = new Map<string, number>();
+  const syntax = new Map<string, number>();
+  // Per file: rewrites made after a failure, and whether one followed its last write.
+  // updateFile replaces the whole file, so rewrites alone are normal for hub files.
+  const writes = new Map<string, { count: number; failed: boolean }>();
+  const bump = (counts: Map<string, number>, key: string) => {
     const count = (counts.get(key) ?? 0) + 1;
     counts.set(key, count);
     return count;
   };
+  const markFailed = () => {
+    for (const write of writes.values()) write.failed = true;
+  };
 
-  for (const { tool, content, input: raw } of runCalls(results)) {
-    const input = (raw ?? {}) as { fileId?: unknown };
-    const fileId =
-      tool.name === "updateFile" && typeof input.fileId === "string" ? input.fileId : undefined;
+  for (const call of runCalls(results)) {
+    const fileId = call.name === "updateFile" ? str(call.input.fileId) : "";
     const file = fileId ? { fileId } : {};
 
-    const error = toolResultError(content);
+    const error = toolResultError(call.content);
     if (error) {
+      // A check that could not run (a sandbox timeout) says nothing about the code.
+      if (call.name === "checkBuild" && error.startsWith(BUILD_CHECK_UNFINISHED)) continue;
+      markFailed();
       const signature = errorSignature(error);
-      if (bump(`error:${signature}`) >= MAX_SAME_ERROR) {
+      if (bump(errors, signature) >= MAX_SAME_ERROR) {
         return { reason: "repeated-error", error, signature, ...file };
       }
       continue;
     }
-    if (fileId && bump(`write:${fileId}`) >= MAX_SAME_FILE_WRITES) {
-      return { reason: "repeated-write", fileId };
+    if (call.name === "checkBuild" && buildCheckLabel(call.content)) {
+      writes.clear();
+      continue;
     }
-    for (const [name, entry] of syntaxErrors(content)) {
-      if (bump(`syntax:${name}`) >= MAX_SAME_SYNTAX_ERROR) {
+
+    const notes = syntaxErrors(call);
+    if (fileId) {
+      const previous = writes.get(fileId);
+      const count = previous ? previous.count + (previous.failed ? 1 : 0) : 1;
+      writes.set(fileId, { count, failed: false });
+      if (count >= MAX_SAME_FILE_WRITES) return { reason: "repeated-write", fileId };
+    }
+    if (notes.length > 0) markFailed();
+    for (const [key, entry] of notes) {
+      if (bump(syntax, key) >= MAX_SAME_SYNTAX_ERROR) {
         const shown = sanitizeAgentText(entry).slice(0, 200);
         return { reason: "repeated-syntax-error", error: shown, signature: errorSignature(entry), ...file };
       }
@@ -104,8 +151,8 @@ export const detectLoop = (results: ToolResults[]): StuckRun | null => {
 
 /** Whether any call in the run reported an error with this signature. */
 export const repeatsError = (results: ToolResults[], signature: string) =>
-  runCalls(results).some(({ content }) =>
-    callErrors(content).some((error) => errorSignature(error) === signature),
+  runCalls(results).some((call) =>
+    callErrors(call).some((error) => errorSignature(error) === signature),
   );
 
 /**

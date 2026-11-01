@@ -56,7 +56,10 @@ const TO_SONNET = { id: SONNET, usdPerMTok: [2, 10] } as const;
  * sideways or cheaper switch usually repeats the loop. Each entry is the next
  * model with its OpenRouter list price (USD per 1M tokens in, out; 2026-10-14);
  * null means the strongest of its vendor. Other catalog models step up to Sonnet.
- * shortcut: a hand-kept ladder and prices, replace with the `tier` field once #321 lands.
+ * Prices are hand-kept because the catalog's prices are deliberately not sent
+ * to the browser (`platformCatalog.getForUsers`).
+ * shortcut: a hand-kept ladder and prices; replace with the `tier` field (#321)
+ * and a server-side cost estimate once those land.
  */
 const NEXT_TIER: Record<string, { id: AgentModelId; usdPerMTok: readonly [number, number] } | null> = {
   "anthropic/claude-haiku-5.5": TO_SONNET,
@@ -77,12 +80,13 @@ const FIX_RUN_MTOK = { input: 0.108, output: 0.008 };
  * (caching or a shorter run roughly halves it). Null on a top-tier model or
  * an id outside the catalog.
  */
+const stepUp = (modelId: string) => {
+  if (Object.hasOwn(NEXT_TIER, modelId)) return NEXT_TIER[modelId];
+  return AGENT_MODELS.some((model) => model.id === modelId) ? TO_SONNET : null;
+};
+
 export const nextTier = (modelId: string) => {
-  const next = Object.hasOwn(NEXT_TIER, modelId)
-    ? NEXT_TIER[modelId]
-    : AGENT_MODELS.some((model) => model.id === modelId)
-      ? TO_SONNET
-      : null;
+  const next = stepUp(modelId);
   if (!next) return null;
   const [input, output] = next.usdPerMTok;
   const usd = FIX_RUN_MTOK.input * input + FIX_RUN_MTOK.output * output;

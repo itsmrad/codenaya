@@ -54,7 +54,8 @@ export const StuckRunCard = ({
       It stopped early because {STUCK_REASONS[stuck.reason]}.
     </p>
     {stuck.error && (
-      <p className="mt-2 line-clamp-3 rounded-md bg-background/60 px-2 py-1.5 font-mono text-xs/5 [overflow-wrap:anywhere]">
+      // Shown whole: the run stores at most 200 characters of it.
+      <p className="mt-2 rounded-md bg-background/60 px-2 py-1.5 font-mono text-xs/5 [overflow-wrap:anywhere]">
         {stuck.error}
       </p>
     )}

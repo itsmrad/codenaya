@@ -1,7 +1,7 @@
 /**
- * Loop detection in a real `processMessage` run (#306): a run that rewrites
- * one file over and over stops early with a no-tools explanation turn, and
- * the message is marked stuck for the hand-off card.
+ * Loop detection in a real `processMessage` run (#306): a run that keeps
+ * rewriting one file that doesn't parse stops early with a no-tools
+ * explanation turn, and the message is marked stuck for the hand-off card.
  */
 
 import { getFunctionName } from "convex/server";
@@ -17,8 +17,8 @@ vi.mock("@/lib/convex-client", async () => {
   return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
 });
 
+import { MAX_SAME_SYNTAX_ERROR } from "../agent-steps";
 import {
-  MAX_SAME_FILE_WRITES,
   PREVIOUS_ERROR_HINT,
   STUCK_FALLBACK_REPLY,
   errorSignature,
@@ -57,7 +57,7 @@ const finalUpdate = () =>
     .map(([, args]) => args as Record<string, unknown>)
     .at(-1);
 
-const rewrite = { data: toolCall("updateFile", { fileId: FILE_ID, content: "export default 1;" }) };
+const rewrite = { data: toolCall("updateFile", { fileId: FILE_ID, content: "export default (" }) };
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -73,10 +73,10 @@ beforeEach(() => {
 });
 
 describe("processMessage loop detection", () => {
-  it("stops a run that rewrites one file four times with a no-tools explanation turn", async () => {
-    const explanation = "I rewrote App.tsx four times and the error stayed. Try restoring.";
+  it("stops a run that keeps writing a broken file with a no-tools explanation turn", async () => {
+    const explanation = "I rewrote App.tsx three times and it still doesn't parse. Try restoring.";
     const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
-      ...Array.from({ length: MAX_SAME_FILE_WRITES }, () => rewrite),
+      ...Array.from({ length: MAX_SAME_SYNTAX_ERROR }, () => rewrite),
       { data: text(explanation) },
       // Never reached: the run ends after the explanation.
       rewrite,
@@ -84,24 +84,27 @@ describe("processMessage loop detection", () => {
 
     expect(outcome.finalType).toBe("function-resolved");
     const requests = codingRequests(outcome.inferenceBodies);
-    expect(requests).toHaveLength(MAX_SAME_FILE_WRITES + 1);
+    expect(requests).toHaveLength(MAX_SAME_SYNTAX_ERROR + 1);
     expect(requests.length).toBeLessThan(MAX_AGENT_STEPS);
 
-    const stuck = { reason: "repeated-write", fileId: FILE_ID };
+    const update = finalUpdate();
+    expect(update).toMatchObject({
+      content: explanation,
+      stuck: { reason: "repeated-syntax-error", fileId: FILE_ID, error: expect.stringContaining("App.tsx") },
+    });
     const last = requests.at(-1);
     expect(last?.tool_choice).toBe("none");
-    expect(last?.messages.at(-1)).toEqual({ role: "user", content: stuckNote(stuck as never) });
-    expect(finalUpdate()).toMatchObject({ content: explanation, stuck });
+    expect(last?.messages.at(-1)).toEqual({ role: "user", content: stuckNote(update?.stuck as never) });
   });
 
   it("never ends a stuck run with the generic reply", async () => {
     const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
-      ...Array.from({ length: MAX_SAME_FILE_WRITES }, () => rewrite),
+      ...Array.from({ length: MAX_SAME_SYNTAX_ERROR }, () => rewrite),
       { data: { choices: [{ message: { role: "assistant", content: null }, finish_reason: "stop" }] } },
     ]);
 
     expect(outcome.finalType).toBe("function-resolved");
-    expect(finalUpdate()).toMatchObject({ content: STUCK_FALLBACK_REPLY, stuck: { reason: "repeated-write" } });
+    expect(finalUpdate()).toMatchObject({ content: STUCK_FALLBACK_REPLY, stuck: { reason: "repeated-syntax-error" } });
   });
 
   it("hints once when the run hits the error the previous run got stuck on", async () => {

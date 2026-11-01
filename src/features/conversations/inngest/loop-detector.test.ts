@@ -6,6 +6,7 @@ import {
   detectLoop,
   errorSignature,
 } from "./loop-detector";
+import { BUILD_CHECK_UNFINISHED } from "../agent-steps";
 import { SYNTAX_ERRORS_NOTE } from "./tools/syntax-error";
 
 const ID_A = "k57b9c2xq1m4n8p0r3s6t9v2w5y8z1ab";
@@ -50,24 +51,54 @@ describe("detectLoop", () => {
     expect(detectLoop([...results, ...results.slice(0, 2)])).toBeNull();
   });
 
-  it("trips when one file is written four times, not three", () => {
-    expect(detectLoop(times(3, () => write(ID_A)))).toBeNull();
-    expect(detectLoop(times(4, () => write(ID_A)))).toEqual({ reason: "repeated-write", fileId: ID_A });
+  // Build failures that differ, so only the write rule can trip.
+  const failedBuild = (what: string) => call("checkBuild", `Error: Build failed: ${what} is not defined`);
+  const passedBuild = () => call("checkBuild", "Build verified\nvite build finished");
+  const unfinished = () =>
+    call("checkBuild", `${BUILD_CHECK_UNFINISHED} (sandbox timed out). Report it to the user.`);
+
+  it("lets a healthy run rewrite a hub file as often as it needs", () => {
+    expect(detectLoop(times(6, () => write(ID_A)))).toBeNull();
+    expect(detectLoop(times(4, () => [write(ID_A), passedBuild()]).flat())).toBeNull();
+  });
+
+  it("trips when one file is rewritten four times, each after a failure", () => {
+    const rounds = ["alpha", "beta", "gamma"].flatMap((what) => [write(ID_A), failedBuild(what)]);
+    expect(detectLoop(rounds)).toBeNull();
+    expect(detectLoop([...rounds, write(ID_A)])).toEqual({ reason: "repeated-write", fileId: ID_A });
+  });
+
+  it("starts a file's count over after a passing build check", () => {
+    const rounds = ["alpha", "beta"].flatMap((what) => [write(ID_A), failedBuild(what)]);
+    expect(detectLoop([...rounds, passedBuild(), ...rounds, write(ID_A)])).toBeNull();
   });
 
   it("counts writes per file, and not failed writes", () => {
-    expect(detectLoop(times(6, (i) => write(i % 2 ? ID_A : ID_B)))).toBeNull();
+    const rounds = ["alpha", "beta", "gamma", "delta"].flatMap((what, i) => [
+      write(i % 2 ? ID_A : ID_B),
+      failedBuild(what),
+    ]);
+    expect(detectLoop(rounds)).toBeNull();
     const failed = call("updateFile", "Error update file: conflict", { fileId: ID_A });
-    expect(detectLoop([...times(3, () => write(ID_A)), failed])).toBeNull();
+    expect(detectLoop([failed, failedBuild("alpha"), failed, failedBuild("beta"), write(ID_A)])).toBeNull();
   });
 
   it("counts a turn's parallel calls one by one", () => {
-    const calls = times(4, () => write(ID_A));
+    const calls = [
+      ...["alpha", "beta", "gamma"].flatMap((what) => [write(ID_A), failedBuild(what)]),
+      write(ID_A),
+    ];
     const turn = {
       output: calls.flatMap((c) => c.output),
       toolCalls: calls.flatMap((c) => c.toolCalls),
     };
     expect(detectLoop([turn])).toMatchObject({ reason: "repeated-write" });
+  });
+
+  it("ignores build checks that could not run", () => {
+    expect(detectLoop(times(5, unfinished))).toBeNull();
+    // Nor do they count as a failure after a write.
+    expect(detectLoop(times(5, () => [write(ID_A), unfinished()]).flat())).toBeNull();
   });
 
   it("trips when one file fails to parse three times", () => {
@@ -82,9 +113,37 @@ describe("detectLoop", () => {
     });
   });
 
+  it("keys syntax errors by file id, so two files with one name stay apart", () => {
+    const broken = (fileId: string) => write(fileId, syntaxNote("index.tsx 1:1 ')' expected."));
+    expect(detectLoop([broken(ID_A), broken(ID_B), broken(ID_A), broken(ID_B)])).toBeNull();
+  });
+
+  it("keeps a message with '; ' in it whole", () => {
+    const entry = "App.tsx 2:1 Unexpected token; did you mean '}'? x 3:1";
+    const result = detectLoop(times(3, () => write(ID_A, syntaxNote(entry))));
+    expect(result).toMatchObject({ reason: "repeated-syntax-error", error: entry });
+  });
+
+  it("splits createFiles notes only before a file it wrote", () => {
+    const created = (i: number) =>
+      call(
+        "createFiles",
+        `Created 2 file(s): a.tsx, b.tsx${syntaxNote(`a.tsx 1:1 Expected ';'; b.tsx ${i}:1 ')' expected.`)}`,
+        { parentId: "", files: [{ name: "a.tsx" }, { name: "b.tsx" }] },
+      );
+    expect(detectLoop([created(1), created(2)])).toBeNull();
+    expect(detectLoop([created(1), created(2), created(3)])).toMatchObject({
+      reason: "repeated-syntax-error",
+      error: "a.tsx 1:1 Expected ';'",
+    });
+  });
+
   it("keeps syntax errors in different files apart", () => {
     const results = times(4, (i) =>
-      call("createFiles", `Created 1 file${syntaxNote(`${i}.tsx 1:1 ')' expected.`)}`),
+      call("createFiles", `Created 1 file${syntaxNote(`${i}.tsx 1:1 ')' expected.`)}`, {
+        parentId: "",
+        files: [{ name: `${i}.tsx` }],
+      }),
     );
     expect(detectLoop(results)).toBeNull();
   });

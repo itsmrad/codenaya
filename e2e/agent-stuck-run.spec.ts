@@ -7,12 +7,13 @@ import { userConvexClient } from "./convex-client";
 import { type StubChatRequest, startStubProvider } from "./stub-provider";
 
 /**
- * A run going in circles (#306): the stub rewrites one file until the loop
- * detector stops the run, which then shows the hand-off card. Needs the
+ * A run going in circles (#306): the stub keeps rewriting one file that
+ * doesn't parse until the loop detector stops the run, which then shows the
+ * hand-off card. Needs the
  * Inngest dev server serving this app, as in `byok-agent-run.spec.ts`.
  */
 
-const EXPLANATION = "I rewrote main.ts four times and the error stayed.";
+const EXPLANATION = "I rewrote main.ts three times and it still doesn't parse.";
 const PROMPT = "Fix the entry point";
 // The key offers the run's model and the one a tier up (`nextTier`).
 const RUN_MODEL = "x-ai/grok-4.7";
@@ -26,7 +27,7 @@ const rewriteForever = (request: StubChatRequest) => {
   if ((request as { tool_choice?: unknown }).tool_choice === "none") return undefined;
   if (toolResults(request) === 1) return { name: "listFiles", arguments: {} };
   const fileId = /([a-z0-9]{28,34})\W+name\W+main\.ts/.exec(JSON.stringify(request.messages))?.[1];
-  return { name: "updateFile", arguments: { fileId, content: "export const start = () => {};\n" } };
+  return { name: "updateFile", arguments: { fileId, content: "export const start = (\n" } };
 };
 
 test.describe.serial("stuck agent run", () => {
@@ -84,9 +85,10 @@ test.describe.serial("stuck agent run", () => {
     await expect(page.getByText(/I processed your request/)).toHaveCount(0);
     await test.info().attach("stuck-card", { body: await page.screenshot(), contentType: "image/png" });
 
-    // createFiles, listFiles, four rewrites, then the no-tools explanation.
+    // createFiles, listFiles, three broken rewrites, then the no-tools explanation.
     const coding = stub.requests.filter((request) => request.tools?.length);
-    expect(coding).toHaveLength(7);
+    expect(coding).toHaveLength(6);
+    await expect(card).toContainText("failed to parse 3 times");
 
     await expect(card.getByRole("button", { name: /Diagnose in Plan mode/ })).toBeVisible();
     await expect(card.getByRole("button", { name: /Restore to before this run/ })).toBeVisible();
@@ -94,8 +96,11 @@ test.describe.serial("stuck agent run", () => {
     const retry = card.getByRole("button", { name: /Retry on Claude Sonnet 5\.5 · ~\$0\.15–\$0\.30/ });
     await expect(retry).toBeVisible();
 
+    // Diagnose keeps the draft and moves focus to the composer.
+    await input.fill("My draft");
     await card.getByRole("button", { name: /Diagnose in Plan mode/ }).click();
-    await expect(input).toHaveValue(/The last run got stuck/);
+    await expect(input).toHaveValue(/^My draft\nThe last run got stuck/);
+    await expect(input).toBeFocused();
     await expect(page.getByRole("button", { name: "Plan", exact: true, pressed: true })).toBeVisible();
     await input.fill("");
 

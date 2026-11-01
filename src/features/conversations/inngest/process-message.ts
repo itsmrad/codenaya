@@ -671,9 +671,10 @@ export const processMessage = inngest.createFunction(
       lifecycle: {
         onStart: ({ agent, prompt, history }) => {
           const { stuck } = loopGuard;
+          const summaryNote = stuck ? stuckNote(stuck) : STEP_BUDGET_NOTE;
           const nudge =
             agent.name === SUMMARY_AGENT_NAME
-              ? stuck ? stuckNote(stuck) : STEP_BUDGET_NOTE
+              ? summaryNote
               : buildCheckGate.takeNudge() ?? loopGuard.takeHint();
           return {
             prompt: withImageParts(prompt, imageUrls),
