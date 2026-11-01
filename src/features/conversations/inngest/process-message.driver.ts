@@ -40,6 +40,8 @@ export interface Outcome {
   inferenceUrls: string[];
   /** The request bodies sent with them. */
   inferenceBodies: unknown[];
+  /** Which function invocation found each one: equal means requested together. */
+  inferenceRequests: number[];
 }
 
 export async function drive(
@@ -64,9 +66,10 @@ export async function drive(
   const order: string[] = [];
   const inferenceUrls: string[] = [];
   const inferenceBodies: unknown[] = [];
+  const inferenceRequests: number[] = [];
   let next = 0;
 
-  for (let request = 0; request < 100; request += 1) {
+  for (let request = 0, requestedRunStep: string | undefined; request < 100; request += 1) {
     const execution = (
       processMessage as unknown as {
         createExecution: (o: { partialOptions: Record<string, unknown> }) => {
@@ -81,6 +84,7 @@ export async function drive(
         data: { event, events: [event], runId: "run-under-test", attempt: 0 },
         stepState: { ...stepState },
         stepCompletionOrder: [...order],
+        requestedRunStep,
         reqArgs: [],
         headers: {},
       },
@@ -92,6 +96,8 @@ export async function drive(
       steps?: Array<{ id: string; op?: string; opts?: { url?: string; body?: unknown } }>;
     };
 
+    requestedRunStep = undefined;
+
     if (result.type === "step-ran" && result.step) {
       const { id, data, error } = result.step;
       stepState[id] = { id, ...(error ? { error } : { data }) };
@@ -100,13 +106,19 @@ export async function drive(
     }
 
     if (result.type === "steps-found" && result.steps) {
+      // Parallel step.run calls come back planned; like the platform, ask for
+      // one at a time (the title runs alongside the coding agent, #338).
+      const planned = result.steps.find((found) => found.op === "StepPlanned");
+      if (planned) {
+        requestedRunStep = planned.id;
+        continue;
+      }
       for (const found of result.steps) {
         if (found.op === "AIGateway") {
           inferenceUrls.push(found.opts?.url ?? "");
           inferenceBodies.push(found.opts?.body);
+          inferenceRequests.push(request);
           stepState[found.id] = { id: found.id, ...inferences[Math.min(next++, inferences.length - 1)] };
-        } else if (found.op === "Sleep") {
-          stepState[found.id] = { id: found.id, data: null };
         } else {
           throw new Error(`Unexpected op ${found.op}`);
         }
@@ -115,7 +127,7 @@ export async function drive(
       continue;
     }
 
-    return { finalType: result.type, stepState, inferenceUrls, inferenceBodies };
+    return { finalType: result.type, stepState, inferenceUrls, inferenceBodies, inferenceRequests };
   }
   throw new Error("Function did not settle");
 }

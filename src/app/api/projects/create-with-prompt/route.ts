@@ -115,9 +115,7 @@ export async function POST(request: Request) {
       },
     );
 
-    if (template) {
-      await seedTemplateFiles({ internalKey, projectId, template });
-    }
+    await seedTemplateFiles({ internalKey, projectId, template });
 
     // Create user message
     await convex.mutation(api.system.createMessage, {

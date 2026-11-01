@@ -99,7 +99,8 @@ export const getMessages = query({
 /**
  * The project's in-flight agent run, or null when none is running. The preview
  * reads it to hold off booting a sandbox while the first build is still being
- * written.
+ * written. `firstBuild`: no run in the project has completed yet, which still
+ * holds for a project seeded with the starter at creation (#338).
  */
 export const getActiveRun = query({
   args: {
@@ -118,6 +119,15 @@ export const getActiveRun = query({
       .order("desc")
       .first();
 
-    return message ? { steps: message.steps ?? [] } : null;
+    if (!message) return null;
+
+    const completed = await ctx.db
+      .query("messages")
+      .withIndex("by_project_status", (q) =>
+        q.eq("projectId", args.projectId).eq("status", "completed")
+      )
+      .first();
+
+    return { steps: message.steps ?? [], firstBuild: completed === null };
   },
 });

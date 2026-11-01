@@ -5,6 +5,8 @@ const mutation = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/convex-client", () => ({ convex: { mutation } }));
 
+import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starter";
+
 import { getTemplateSeedFiles } from "../seed-files";
 import { STARTER_TEMPLATES } from "../templates";
 import { seedTemplateFiles } from "./seed-template";
@@ -35,5 +37,21 @@ describe("seedTemplateFiles", () => {
     expect(written).toContainEqual([undefined, "package.json"]);
     expect(written).toContainEqual(["id:src", "App.tsx"]);
     expect(batches.every(([, a]) => a.internalKey === "key" && a.projectId === "p1")).toBe(true);
+  });
+
+  it("seeds the plain Vite starter when there is no template (#338)", async () => {
+    mutation.mockReset();
+    mutation.mockImplementation(async (_ref, args) => `id:${args.name}`);
+
+    await seedTemplateFiles({ internalKey: "key", projectId: "p1" as never });
+
+    const written = mutation.mock.calls
+      .filter(([ref]) => getFunctionName(ref) === "system:createFiles")
+      .flatMap(([, a]) => a.files);
+    expect(written).toHaveLength(VITE_REACT_STARTER.length);
+    expect(written).toContainEqual({
+      name: "package.json",
+      content: VITE_REACT_STARTER.find((f) => f.path === "package.json")!.content,
+    });
   });
 });

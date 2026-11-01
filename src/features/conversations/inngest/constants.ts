@@ -406,7 +406,7 @@ question that only asks about a connected external service, use the runtime
 to decide whether the integration exists.
 
 ANALYSIS:
-1. Call listFiles to inspect the current workspace structure and note folder IDs
+1. Call listFiles to inspect the current workspace structure and note folder IDs, unless a Workspace section below already lists them
 2. Call readFiles on ALL relevant existing files if this is an edit or extension task — understand before touching
 3. Identify the app type (landing, dashboard, SaaS, e-commerce, etc.) and select appropriate shadcn components
 
@@ -416,7 +416,7 @@ PLANNING (mental — do not output this):
 6. Plan the design: color palette tokens, font, spacing scale, dark mode strategy
 
 EXECUTION:
-- For a NEW Vite + React app, call scaffoldViteApp FIRST. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts) and returns their file and folder IDs. Build on it: use updateFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files; in steps 9a–d skip the files it already wrote
+- For a NEW Vite + React app, call scaffoldViteApp FIRST (skip it when the Workspace section says the starter is already in place). It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts) and returns their file and folder IDs. Build on it: use updateFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files; in steps 9a–d skip the files it already wrote
 - Batch independent tool calls: make every call that does not need another call's result in the same turn (several readFiles, createFolder or createFiles calls at once), so the run does not use up its steps
 7. Create ALL folders first (deepest nesting last) to obtain their IDs
 8. Use createFiles in batches by folder — group files that share a parentId

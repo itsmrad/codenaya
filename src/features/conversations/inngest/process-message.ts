@@ -9,7 +9,6 @@ import {
   CODING_AGENT_SYSTEM_PROMPT,
   MAX_AGENT_STEPS,
   STEP_BUDGET_NOTE,
-  TITLE_GENERATOR_SYSTEM_PROMPT
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { createReadFilesTool } from './tools/read-files';
@@ -63,6 +62,8 @@ import {
   resolveSkills,
 } from '@/features/skills/server/resolve-skills';
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
+import { buildStarterPromptSection } from './starter-prompt';
+import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
 import {
@@ -151,9 +152,6 @@ export const processMessage = inngest.createFunction(
     if (!internalKey) {
       throw new NonRetriableError("CODENAYA_CONVEX_INTERNAL_KEY is not configured");
     }
-
-    // TODO: Check if this is needed
-    await step.sleep("wait-for-db-sync", "1s");
 
     // Get conversation for title generation check
     const conversation = await step.run("get-conversation", async () => {
@@ -263,12 +261,17 @@ export const processMessage = inngest.createFunction(
         }
       });
     };
-    const recordUsage = async (raw: string | undefined, pricing: ModelPricing | undefined) => {
+    const recordUsage = async (
+      raw: string | undefined,
+      pricing: ModelPricing | undefined,
+      // The title runs alongside the coding agent, so it gets a fixed id.
+      id = `record-usage-${++usageRecords}`,
+    ) => {
       const tokens = usageOfResponse(raw);
       usage.inputTokens += tokens.inputTokens;
       usage.outputTokens += tokens.outputTokens;
       usage.costUsd += pricing ? costUsd(pricing, tokens) : 0;
-      await sendUsage(`record-usage-${++usageRecords}`);
+      await sendUsage(id);
     };
 
     // Fetch recent messages for conversation context
@@ -303,51 +306,6 @@ export const processMessage = inngest.createFunction(
         .join("\n\n");
 
       systemPrompt += `\n\n## Previous Conversation (for context only - do NOT repeat these responses):\n${historyText}\n\n## Current Request:\nRespond ONLY to the user's new message below. Do not repeat or reference your previous responses.`;
-    }
-
-    // Generate conversation title if it's still the default
-    const shouldGenerateTitle =
-      conversation.title === DEFAULT_CONVERSATION_TITLE;
-
-    if (shouldGenerateTitle) {
-      const titleAgent = createAgent({
-        name: "title-generator",
-        system: TITLE_GENERATOR_SYSTEM_PROMPT,
-        model: runModel.title(0),
-      });
-
-      let output;
-      try {
-        const result = await titleAgent.run(request, { step });
-        output = result.output;
-        await recordUsage(result.raw, runModel.metering.title);
-      } catch (error) {
-        return await endRunOnKeyRejection(error);
-      }
-
-      const textMessage = output.find(
-        (m) => m.type === "text" && m.role === "assistant"
-      );
-
-      if (textMessage?.type === "text") {
-        const title =
-          typeof textMessage.content === "string"
-            ? textMessage.content.trim()
-            : textMessage.content
-              .map((c) => c.text)
-              .join("")
-              .trim();
-
-        if (title) {
-          await step.run("update-conversation-title", async () => {
-            await convex.mutation(api.system.updateConversationTitle, {
-              internalKey,
-              conversationId,
-              title,
-            });
-          });
-        }
-      }
     }
 
     // ─── MCP integrations ───
@@ -555,6 +513,13 @@ export const processMessage = inngest.createFunction(
     });
 
     systemPrompt += buildSkillsPromptSection(skills, forced, unavailable);
+
+    // A project seeded with the starter gets its ids up front (#338).
+    systemPrompt += await step.run("describe-starter", async () =>
+      buildStarterPromptSection(
+        await convex.query(api.system.getProjectFiles, { internalKey, projectId }),
+      ),
+    );
 
     if (planMode) {
       systemPrompt += PLAN_MODE_PROMPT;
@@ -807,6 +772,22 @@ export const processMessage = inngest.createFunction(
       }
     });
 
+    // The title runs alongside the coding agent, never before it (#338).
+    // Started here: earlier, Inngest would plan every step in between as a
+    // parallel step, one extra round trip each.
+    const titleDone =
+      conversation.title === DEFAULT_CONVERSATION_TITLE
+        ? generateConversationTitle({
+            step,
+            runModel,
+            request,
+            recordUsage: (raw) =>
+              recordUsage(raw, runModel.metering.title, "record-usage-title"),
+            internalKey,
+            conversationId,
+          })
+        : undefined;
+
     // Run the agent
     let result;
     try {
@@ -831,8 +812,10 @@ export const processMessage = inngest.createFunction(
           : textMessage.content.map((c) => c.text).join("");
     }
 
+    await titleDone;
+
     // A failed last record has no later one to catch it up.
-    if (usageRecords > 0) {
+    if (usageRecords > 0 || titleDone) {
       await sendUsage("record-usage-final");
     }
 

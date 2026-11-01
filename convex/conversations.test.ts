@@ -80,6 +80,29 @@ describe("conversations.getActiveRun", () => {
 
     expect(await alice.query(api.conversations.getActiveRun, { projectId })).toEqual({
       steps: [step],
+      firstBuild: true,
+    });
+  });
+
+  test("is a first build only until a run in the project completes (#338)", async () => {
+    const { t, alice } = setup();
+    const { projectId, conversationId } = await seedProject(t);
+    const run = { conversationId, projectId, role: "assistant" as const, content: "" };
+    await t.run(async (ctx) => {
+      await ctx.db.insert("messages", { ...run, status: "cancelled" });
+      await ctx.db.insert("messages", { ...run, status: "processing" });
+    });
+
+    expect(await alice.query(api.conversations.getActiveRun, { projectId })).toMatchObject({
+      firstBuild: true,
+    });
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("messages", { ...run, content: "Done", status: "completed" });
+    });
+
+    expect(await alice.query(api.conversations.getActiveRun, { projectId })).toMatchObject({
+      firstBuild: false,
     });
   });
 });
