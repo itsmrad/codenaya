@@ -323,7 +323,8 @@ export async function POST(request: Request) {
         sandbox = await createProjectSandbox({
           apiKey: e2bApiKey,
           timeoutMs: SANDBOX_TIMEOUT_MS,
-          metadata: { userId },
+          // checkBuild finds the project's warm preview by these tags (#465).
+          metadata: projectId ? { userId, projectId } : { userId },
           network: {
             maskRequestHost: "localhost:${PORT}",
           },

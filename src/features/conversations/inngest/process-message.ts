@@ -592,7 +592,7 @@ export const processMessage = inngest.createFunction(
       createScaffoldViteAppTool({ projectId, internalKey }),
       createRenameFileTool({ projectId, internalKey }),
       createDeleteFilesTool({ projectId, internalKey }),
-      createCheckBuildTool({ projectId, internalKey }),
+      createCheckBuildTool({ projectId, internalKey, ownerId: mcpOwnerId }),
       createScrapeUrlsTool(),
       ...(mcpOwnerId
         ? [createSetEnvVarTool({ projectId, ownerId: mcpOwnerId, internalKey })]

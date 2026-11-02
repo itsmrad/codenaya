@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createTool } from "@inngest/agent-kit";
-import { CommandExitError, type CommandResult, type Sandbox } from "e2b";
+import { CommandExitError, type CommandResult, Sandbox, TimeoutError } from "e2b";
 
 import {
   BUILD_CHECK_UNFINISHED,
@@ -11,6 +12,7 @@ import {
   buildPathIndex,
 } from "@/features/conversations/agent-steps";
 import {
+  MAX_LIVE_SANDBOXES,
   type ProjectFile,
   WORK_DIR,
   createProjectSandbox,
@@ -30,6 +32,8 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 interface CheckBuildToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  /** Project owner; finds their running preview sandbox to build in (#465). */
+  ownerId?: string;
 }
 
 /** Install, type check and build together must finish within this. */
@@ -37,6 +41,11 @@ const CHECK_TIMEOUT_MS = 120_000;
 /** E2B reaps the sandbox after this even if the kill below is lost. */
 const SANDBOX_TIMEOUT_MS = 5 * 60_000;
 const MAX_ERROR_LINES = 40;
+/**
+ * A warm preview needs this much time left to be reused, so connecting (which
+ * only ever raises the timeout to this) never extends or shortens it.
+ */
+const WARM_MIN_TIME_LEFT_MS = CHECK_TIMEOUT_MS + 60_000;
 
 const ANSI_ESCAPE = /\u001b\[[\d;]*[A-Za-z]/g;
 
@@ -44,12 +53,12 @@ const ANSI_ESCAPE = /\u001b\[[\d;]*[A-Za-z]/g;
  * The first lines of compiler output, without colour codes, repeated lines or
  * the sandbox's absolute paths, so errors read as `src/App.tsx(3,1): ...`.
  */
-export const trimBuildOutput = (output: string) => {
+export const trimBuildOutput = (output: string, dir = WORK_DIR) => {
   const lines = [
     ...new Set(
       output
         .replace(ANSI_ESCAPE, "")
-        .replaceAll(`${WORK_DIR}/`, "")
+        .replaceAll(`${dir}/`, "")
         .split("\n")
         .map((line) => line.trimEnd())
         .filter(Boolean),
@@ -63,9 +72,14 @@ export const trimBuildOutput = (output: string) => {
 };
 
 /** E2B throws on a non-zero exit; the result is what the caller reports. */
-const run = async (sandbox: Sandbox, command: string, timeoutMs: number): Promise<CommandResult> => {
+const run = async (
+  sandbox: Sandbox,
+  command: string,
+  timeoutMs: number,
+  cwd: string,
+): Promise<CommandResult> => {
   try {
-    return await sandbox.commands.run(command, { cwd: WORK_DIR, timeoutMs });
+    return await sandbox.commands.run(command, { cwd, timeoutMs });
   } catch (error) {
     if (error instanceof CommandExitError) return error;
     throw error;
@@ -76,9 +90,9 @@ const run = async (sandbox: Sandbox, command: string, timeoutMs: number): Promis
  * Errors first: Vite writes progress to stdout and the failure to stderr.
  * Known errors anywhere in the output get their cause and fix appended.
  */
-const failureOutput = (result: CommandResult) => {
+const failureOutput = (result: CommandResult, dir: string) => {
   const output = `${result.stderr}\n${result.stdout}`;
-  return withErrorHints(trimBuildOutput(output), output);
+  return withErrorHints(trimBuildOutput(output, dir), output);
 };
 
 /** A timeout or a sandbox failure, not a problem in the project's code. */
@@ -91,9 +105,109 @@ const notBuilt = (reason: string) =>
   "Say in Notes that the build was not verified.";
 
 /**
- * Static checks, then `npm install`, `tsc --noEmit` and `vite build` in a
- * throwaway sandbox. Returns the tool result: a passing summary, or an
- * "Error: ..." message the agent can act on. Never throws.
+ * Writes the files to `dir`, then runs `npm install`, `tsc --noEmit` and
+ * `vite build` there. Returns the tool result for a finished check; throws on
+ * sandbox failures and timeouts.
+ */
+const buildIn = async (sandbox: Sandbox, dir: string, files: ProjectFile[], paths: Set<string>) => {
+  const deadline = Date.now() + CHECK_TIMEOUT_MS;
+  const timeLeft = () => Math.max(1_000, deadline - Date.now());
+
+  await writeProjectFiles(sandbox, files, dir);
+
+  const install = await run(sandbox, "npm install --prefer-offline --no-audit --no-fund --loglevel=error", timeLeft(), dir);
+  if (install.exitCode !== 0) {
+    return `Error: npm install failed. Fix package.json, then call checkBuild again:\n${failureOutput(install, dir)}`;
+  }
+
+  const tsconfig = ["tsconfig.app.json", "tsconfig.json"].find((path) => paths.has(path));
+  const command = [tsconfig && `npx tsc --noEmit -p ${tsconfig}`, "npx vite build"]
+    .filter(Boolean)
+    .join(" && ");
+  const build = await run(sandbox, command, timeLeft(), dir);
+  if (build.exitCode !== 0) {
+    return `Error: Build failed. Fix these errors, then call checkBuild again:\n${failureOutput(build, dir)}`;
+  }
+
+  return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.`;
+};
+
+/** The project whose running preview a check may build in, and its owner. */
+type WarmPreview = { projectId: string; ownerId: string };
+
+/** An install the preview (or another check) is running; copying node_modules now could catch it half-written. */
+const INSTALLING = /\binstall\b/;
+
+/**
+ * The owner's running preview sandbox for this project, connected, when it has
+ * time left and no install running. The query filters by the tags the preview
+ * route sets; they are checked again here because they decide whose sandbox
+ * this runs in.
+ */
+const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPreview) => {
+  const running = await Sandbox.list({
+    apiKey,
+    query: { metadata: { userId: ownerId, projectId }, state: ["running"] },
+    limit: MAX_LIVE_SANDBOXES,
+  }).nextItems();
+  const info = running.find(
+    (sandbox) =>
+      sandbox.metadata.userId === ownerId &&
+      sandbox.metadata.projectId === projectId &&
+      sandbox.endAt.getTime() - Date.now() > WARM_MIN_TIME_LEFT_MS,
+  );
+  if (!info) return null;
+
+  const sandbox = await Sandbox.connect(info.sandboxId, { apiKey, timeoutMs: WARM_MIN_TIME_LEFT_MS });
+  const processes = await sandbox.commands.list();
+  return processes.some((proc) => INSTALLING.test([proc.cmd, ...proc.args].join(" ")))
+    ? null
+    : sandbox;
+};
+
+/**
+ * The check in the project's warm preview sandbox, or null to use a new one.
+ * It builds in its own directory with a copy of the preview's node_modules, so
+ * the dev server, its HMR and its installed packages are left alone, and the
+ * preview's `.env` is not read, as on the cold path. Never kills the sandbox.
+ */
+const checkInWarmSandbox = async (
+  apiKey: string,
+  preview: WarmPreview,
+  files: ProjectFile[],
+  paths: Set<string>,
+): Promise<string | null> => {
+  const dir = `/home/user/check-build-${randomUUID().slice(0, 8)}`;
+  let sandbox: Sandbox | null = null;
+  try {
+    sandbox = await connectWarmSandbox(apiKey, preview);
+    if (!sandbox) return null;
+    await sandbox.commands.run(`mkdir -p ${dir} && cp -a ${WORK_DIR}/node_modules ${dir}/`, {
+      timeoutMs: 60_000,
+    });
+  } catch (error) {
+    console.error("[check-build] warm sandbox unavailable, starting a new one", error);
+    await sandbox?.commands.run(`rm -rf ${dir}`, { background: true }).catch(() => {});
+    return null;
+  }
+
+  try {
+    return await buildIn(sandbox, dir, files, paths);
+  } catch (error) {
+    // A slow build would time out in a new sandbox too.
+    if (error instanceof TimeoutError) return unfinished(error);
+    console.error("[check-build] warm sandbox failed, starting a new one", error);
+    return null;
+  } finally {
+    await sandbox.commands.run(`rm -rf ${dir}`, { background: true }).catch(() => {});
+  }
+};
+
+/**
+ * Static checks, then `npm install`, `tsc --noEmit` and `vite build`: in the
+ * owner's running preview sandbox when there is one, else in a throwaway
+ * sandbox. Returns the tool result: a passing summary, or an "Error: ..."
+ * message the agent can act on. Never throws.
  *
  * `paths` holds every project file, including uploads with no text content.
  */
@@ -102,11 +216,13 @@ export const checkProjectBuild = async ({
   paths,
   apiKey,
   metadata,
+  preview,
 }: {
   files: ProjectFile[];
   paths: Set<string>;
   apiKey?: string;
   metadata?: Record<string, string>;
+  preview?: WarmPreview;
 }): Promise<string> => {
   const problems = [
     ...missingReferencedFiles(files),
@@ -130,6 +246,11 @@ export const checkProjectBuild = async ({
     return notBuilt("No build sandbox is configured");
   }
 
+  if (preview) {
+    const warm = await checkInWarmSandbox(apiKey, preview, files, paths);
+    if (warm) return warm;
+  }
+
   let sandbox: Sandbox;
   try {
     sandbox = await createProjectSandbox({ apiKey, timeoutMs: SANDBOX_TIMEOUT_MS, metadata });
@@ -138,27 +259,8 @@ export const checkProjectBuild = async ({
     return notBuilt("The build sandbox could not start");
   }
 
-  const deadline = Date.now() + CHECK_TIMEOUT_MS;
-  const timeLeft = () => Math.max(1_000, deadline - Date.now());
-
   try {
-    await writeProjectFiles(sandbox, files);
-
-    const install = await run(sandbox, "npm install --prefer-offline --no-audit --no-fund --loglevel=error", timeLeft());
-    if (install.exitCode !== 0) {
-      return `Error: npm install failed. Fix package.json, then call checkBuild again:\n${failureOutput(install)}`;
-    }
-
-    const tsconfig = ["tsconfig.app.json", "tsconfig.json"].find((path) => paths.has(path));
-    const command = [tsconfig && `npx tsc --noEmit -p ${tsconfig}`, "npx vite build"]
-      .filter(Boolean)
-      .join(" && ");
-    const build = await run(sandbox, command, timeLeft());
-    if (build.exitCode !== 0) {
-      return `Error: Build failed. Fix these errors, then call checkBuild again:\n${failureOutput(build)}`;
-    }
-
-    return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.`;
+    return await buildIn(sandbox, WORK_DIR, files, paths);
   } catch (error) {
     return unfinished(error);
   } finally {
@@ -169,6 +271,7 @@ export const checkProjectBuild = async ({
 export const createCheckBuildTool = ({
   projectId,
   internalKey,
+  ownerId,
 }: CheckBuildToolOptions) => {
   return createTool({
     name: "checkBuild",
@@ -199,6 +302,7 @@ export const createCheckBuildTool = ({
             paths,
             apiKey: process.env.E2B_API_KEY?.trim(),
             metadata: { projectId, purpose: "check-build" },
+            preview: ownerId ? { projectId, ownerId } : undefined,
           });
         });
       } catch (error) {

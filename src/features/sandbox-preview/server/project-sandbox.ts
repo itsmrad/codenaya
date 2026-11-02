@@ -52,9 +52,9 @@ export const createProjectSandbox = (
 ) => Sandbox.create(SANDBOX_TEMPLATE, opts);
 
 /** One batched upload; E2B creates the parent directories. */
-export const writeProjectFiles = async (sandbox: Sandbox, files: ProjectFile[]) => {
-  await sandbox.files.makeDir(WORK_DIR);
+export const writeProjectFiles = async (sandbox: Sandbox, files: ProjectFile[], dir = WORK_DIR) => {
+  await sandbox.files.makeDir(dir);
   await sandbox.files.write(
-    files.map((file) => ({ path: `${WORK_DIR}/${file.path}`, data: file.content })),
+    files.map((file) => ({ path: `${dir}/${file.path}`, data: file.content })),
   );
 };
