@@ -84,7 +84,7 @@ export const createCreateFilesTool = ({
 
           const rewriteIcons = await getIconRewriter(internalKey, projectId,
             resolvedParentId ? [] : parsed.data.files.map((file) => ({ path: file.name, content: file.content })));
-          const prepared = parsed.data.files.map((file) => ({ ...file, ...rewriteIcons(file.content) }));
+          const prepared = parsed.data.files.map((file) => ({ ...file, ...rewriteIcons(file.content, file.name) }));
           const files = prepared.map(({ name, content }) => ({ name, content }));
           const results = await convex.mutation(api.system.createFiles, {
             internalKey,

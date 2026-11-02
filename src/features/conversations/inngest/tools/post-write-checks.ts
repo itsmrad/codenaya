@@ -99,7 +99,7 @@ export const getIconRewriter = async (
   } catch {
     // Unknown ranges skip repairs, including a failed best-effort manifest read.
   }
-  return (content: string) => rewriteIcons(content, range);
+  return (content: string, path: string) => rewriteIcons(content, range, path);
 };
 
 /** Separate from the version-manifest hook (#331); all failures are advisory after saving. */
@@ -130,7 +130,8 @@ export const postWriteNote = async (
     findings.unshift(...rewrites.map((message) => ({ checkId: "icon-rewrite", message })));
     return projectCheckNote(findings);
   } catch {
-    // No formatting or further diagnostics here: the write has already committed.
-    return "\nProject checks (content saved):\n- [unavailable] Project checks unavailable; write succeeded. Use checkBuild before finishing.";
+    // Keep the saved repairs visible even when further diagnostics fail.
+    return "\nProject checks (content saved):\n- [unavailable] Project checks unavailable; write succeeded. Use checkBuild before finishing." +
+      rewrites.slice(0, 60).map((message) => `\n- [icon-rewrite] ${message.slice(0, 500)}`).join("");
   }
 };

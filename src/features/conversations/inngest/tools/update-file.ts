@@ -54,7 +54,7 @@ export const createUpdateFileTool = ({
           }
 
           const rewriteIcons = await getIconRewriter(internalKey, projectId, [{ path, content: parsed.data.content }]);
-          const prepared = rewriteIcons(parsed.data.content);
+          const prepared = rewriteIcons(parsed.data.content, path);
           const { content } = prepared;
           await convex.mutation(api.system.updateFile, {
             internalKey,

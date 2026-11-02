@@ -105,14 +105,14 @@ export const createWriteFilesTool = ({ projectId, internalKey, registry = create
           ]);
           const rewritesByPath = new Map<string, string[]>();
           for (const update of updates) {
-            const fixed = rewriteIcons(update.content);
+            const fixed = rewriteIcons(update.content, update.path);
             update.content = fixed.content;
             batch.set(update.path, fixed.content);
             rewritesByPath.set(update.path, fixed.rewrites);
           }
           for (const [dir, files] of createsByDir) for (const file of files) {
             const path = dir ? `${dir}/${file.name}` : file.name;
-            const fixed = rewriteIcons(file.content);
+            const fixed = rewriteIcons(file.content, path);
             file.content = fixed.content;
             batch.set(path, fixed.content);
             rewritesByPath.set(path, fixed.rewrites);

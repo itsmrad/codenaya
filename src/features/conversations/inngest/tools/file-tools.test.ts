@@ -381,8 +381,9 @@ describe("post-write checks at every boundary", () => {
   });
 
   it.each(["update", "edit", "write", "create"])("%s remains successful when post-write diagnostics reject", async (kind) => {
+    db.rows.find((r) => r._id === "pkg")!.content = JSON.stringify({ dependencies: { "lucide-react": "^1.66.0" } });
     const options = { ...opts, registry: vi.fn(async () => { throw new Error("diagnostics failed"); }) };
-    const content = 'import missing from "not-installed";';
+    const content = 'import { Cammera } from "lucide-react";';
     const result = kind === "update"
       ? await createUpdateFileTool(options).handler({ path: "src/App.tsx", content }, ctx)
       : kind === "edit"
@@ -391,10 +392,11 @@ describe("post-write checks at every boundary", () => {
           ? await createWriteFilesTool(options).handler({ files: [{ path: "src/New.tsx", content }] }, ctx)
           : await createCreateFilesTool(options).handler({ parentId: "src", files: [{ name: "New.tsx", content }] }, ctx);
     expect(result).toContain("write succeeded");
+    expect(result).toContain("[icon-rewrite] Cammera → Camera as Cammera");
     expect(toolResultError({ data: result })).toBeUndefined();
     const name = { update: "updateFile", edit: "editFile", write: "writeFiles", create: "createFiles" }[kind]!;
     expect(hasUncheckedWrites([{ toolCalls: [{ tool: { name }, content: { data: result } }] }])).toBe(true);
-    expect(db.rows.some((row) => row.content === content)).toBe(true);
+    expect(db.rows.some((row) => row.content === content.replace("Cammera", "Camera as Cammera"))).toBe(true);
   });
 
   it("returns the persisted result on replay without new writes, queries or registry calls", async () => {

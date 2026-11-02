@@ -129,7 +129,7 @@ export const createEditFileTool = ({ projectId, internalKey, registry = createRe
           }
 
           const rewriteIcons = await getIconRewriter(internalKey, projectId, [{ path, content: result.content }]);
-          const prepared = rewriteIcons(result.content);
+          const prepared = rewriteIcons(result.content, path);
           result.content = prepared.content;
           await convex.mutation(api.system.updateFile, {
             internalKey,

@@ -8,13 +8,14 @@ import {
 
 export type CheckFile = { path: string; content: string };
 export type Finding = { checkId: string; message: string };
+const ICON_FILE = /\.(?:[jt]sx?|[cm][jt]s|mdx)$/;
 const ICONS = new Set(lucideExports);
 const CANONICAL_ICONS = [...ICONS].filter((name) => /^[A-Z]/.test(name) && !/^(Lucide)|Icon$/.test(name));
 const rangeMajor = (range: unknown) => typeof range === "string"
   ? range.match(/^[~^]?(\d+)(?:\.(?:\d+|x|\*)){0,2}(?:-[\w.-]+)?$/)?.[1] : undefined;
 export const supportsIconCatalog = (range: unknown) => rangeMajor(range) === "1";
 const parseSource = (file: CheckFile) => {
-  const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true);
+  const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, file.path.endsWith(".mdx") ? ts.ScriptKind.TSX : undefined);
   const diagnostics = (source as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics;
   return diagnostics?.length ? undefined : source;
 };
@@ -61,9 +62,9 @@ const oneEdit = (a: string, b: string) => {
   return edits + (a.length - i) + (b.length - j) === 1;
 };
 
-export const rewriteIcons = (content: string, lucideRange?: unknown) => {
+export const rewriteIcons = (content: string, lucideRange: unknown, path: string) => {
   const rewrites: string[] = [];
-  if (!supportsIconCatalog(lucideRange) || content.length > 100_000) return { content, rewrites };
+  if (!ICON_FILE.test(path) || !supportsIconCatalog(lucideRange) || content.length > 100_000) return { content, rewrites };
   try {
     const source = ts.createSourceFile("icons.tsx", content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     const replacements: { start: number; end: number; text: string }[] = [];
@@ -134,7 +135,7 @@ export const projectChecks = (
     const legacyConfig = css.some((text) => /@config\s+["'][^"']+["']/.test(text));
     const legacyAnimate = css.some((text) => /@plugin\s+["']tailwindcss-animate["']/.test(text));
     for (const file of affected) {
-      const source = /\.[cm]?[jt]sx?$/.test(file.path) ? sourceOf(file) : undefined;
+      const source = ICON_FILE.test(file.path) ? sourceOf(file) : undefined;
       if (source) for (const statement of source.statements) {
         if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
         const specifier = statement.moduleSpecifier.text;

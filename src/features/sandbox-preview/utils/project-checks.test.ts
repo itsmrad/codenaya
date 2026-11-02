@@ -59,15 +59,26 @@ describe("project checks", () => {
 });
 
 describe("icon rewrites", () => {
+  it.each(["js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts", "mdx"])("checks and repairs icons in .%s files only", (extension) => {
+    const source = 'import { Cammera } from "lucide-react";';
+    expect(rewriteIcons(source, "^1.66.0", `a.${extension}`).content).toContain("Camera as Cammera");
+    expect(projectChecks([pkg(), file(`a.${extension}`, source)])[0].checkId).toBe("icon");
+  });
+  it("leaves Markdown imports untouched and skips icon findings", () => {
+    const source = 'import { Cammera } from "lucide-react";';
+    expect(rewriteIcons(source, "^1.66.0", "README.md")).toEqual({ content: source, rewrites: [] });
+    expect(projectChecks([pkg(), file("README.md", source)])).toEqual([]);
+  });
+
   it("rewrites only a unique one-character typo, preserving local aliases", () => {
-    expect(rewriteIcons('import { Cammera, Cammera as Photo } from "lucide-react";', "^1.66.0")).toEqual({
+    expect(rewriteIcons('import { Cammera, Cammera as Photo } from "lucide-react";', "^1.66.0", "a.tsx")).toEqual({
       content: 'import { Camera as Cammera, Camera as Photo } from "lucide-react";',
       rewrites: ["Cammera → Camera as Cammera", "Cammera → Camera as Photo"],
     });
   });
   it("leaves valid, distant, ambiguous, and non-lucide imports alone", () => {
     for (const text of ['import { Camera, VercelLogo, ArrowDown0 } from "lucide-react";', 'import { Cammera } from "other";', '// import { Cammera } from "lucide-react";']) {
-      expect(rewriteIcons(text, "^1.66.0")).toEqual({ content: text, rewrites: [] });
+      expect(rewriteIcons(text, "^1.66.0", "a.tsx")).toEqual({ content: text, rewrites: [] });
     }
   });
 });
@@ -78,16 +89,16 @@ describe("review regressions", () => {
     const findings = projectChecks([pkg(), file("a.ts", source)]);
     expect(findings).toHaveLength(1);
     expect(findings[0].message).toContain('"Github"');
-    expect(rewriteIcons(source, "^1.66.0")).toEqual({ content: source, rewrites: [] });
+    expect(rewriteIcons(source, "^1.66.0", "a.tsx")).toEqual({ content: source, rewrites: [] });
   });
   it.each([undefined, "^0.562.0", "^2.0.0", "latest", "^1 || ^2"])("silently skips icon checks and repairs for %s", (range) => {
     const source = 'import { Cammera, Github } from "lucide-react";';
-    expect(rewriteIcons(source, range)).toEqual({ content: source, rewrites: [] });
+    expect(rewriteIcons(source, range, "a.tsx")).toEqual({ content: source, rewrites: [] });
     const findings = projectChecks([pkg({ "lucide-react": range ?? "*" }), file("a.ts", source)]);
     expect(findings).toEqual([]);
   });
   it("preserves the inline type keyword in a repaired import", () => {
-    expect(rewriteIcons('import { type Cammera as Photo } from "lucide-react";', "^1.66.0").content)
+    expect(rewriteIcons('import { type Cammera as Photo } from "lucide-react";', "^1.66.0", "a.tsx").content)
       .toBe('import { type Camera as Photo } from "lucide-react";');
   });
   it("checks remaining files when one file exceeds the size limit", () => {
