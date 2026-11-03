@@ -34,6 +34,10 @@ test.describe.serial("stuck agent run", () => {
   let page: Page;
   let keyId: Id<"aiProviderKeys"> | undefined;
   let projectId: Id<"projects"> | undefined;
+  const fileNames = async () =>
+    (await (await userConvexClient(page)).query(api.files.getFiles, { projectId: projectId! }))
+      .map((file) => file.name)
+      .sort();
 
   test.beforeAll(async ({ browser }) => {
     stub = await startStubProvider(apiKey, {
@@ -62,6 +66,7 @@ test.describe.serial("stuck agent run", () => {
     test.setTimeout(180_000);
     const user = await userConvexClient(page);
     projectId = await user.mutation(api.projects.create, { name: `e2e-stuck-run-${Date.now()}` });
+    const filesBefore = await fileNames();
 
     await page.goto(`/projects/${projectId}?engine=webcontainer`);
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
@@ -90,6 +95,18 @@ test.describe.serial("stuck agent run", () => {
     await expect(card.getByRole("button", { name: /Open main\.ts/ })).toBeVisible();
     const retry = card.getByRole("button", { name: /Retry on Claude Sonnet 5\.5 · ~\$0\.15–\$0\.30/ });
     await expect(retry).toBeVisible();
+
+    // Open file shows the file the run looped on in the editor.
+    await card.getByRole("button", { name: /Open main\.ts/ }).click();
+    await expect(page.getByRole("navigation", { name: "Open files" })).toContainText("main.ts");
+
+    // Restore asks first, then puts the files back as they were before the run.
+    await card.getByRole("button", { name: /Restore to before this run/ }).click();
+    const confirm = page.getByRole("alertdialog");
+    await expect(confirm).toContainText("Restore to before this run?");
+    await confirm.getByRole("button", { name: "Restore" }).click();
+    await expect(page.getByText("Files restored")).toBeVisible();
+    await expect.poll(fileNames).toEqual(filesBefore);
 
     // Diagnose keeps the draft and moves focus to the composer.
     await input.fill("My draft");
