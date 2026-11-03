@@ -42,6 +42,7 @@ import {
   BUILD_VERIFIED,
   FILE_WRITE_TOOLS,
   STALLED_RUN_MS,
+  fixedBuildErrors,
   lastRunActivity,
   runWrittenPaths,
 } from "../agent-steps";
@@ -516,7 +517,9 @@ export const AgentRun = ({
     setBatch({ count: rows.length, start: Math.min(batch.count, rows.length) });
   }
   const toolSteps = steps.filter((step) => step.kind === "tool");
-  const errors = toolSteps.filter((step) => step.status === "error").length;
+  // Failed checks the agent later fixed are reported as a fixed build, not as errors.
+  const fixed = fixedBuildErrors(toolSteps);
+  const errors = toolSteps.filter((step) => step.status === "error").length - fixed;
   const changed = new Set(
     toolSteps
       .filter((step) => FILE_WRITE_TOOLS.has(step.tool ?? "") && step.status === "done")
@@ -543,6 +546,7 @@ export const AgentRun = ({
     filesChanged > 0 &&
       `${filesChanged} ${filesChanged === 1 ? "file" : "files"} changed` +
         (delta ? ` +${delta.additions} −${delta.deletions}` : ""),
+    fixed > 0 && "Fixed the build",
     model,
   ]
     .filter(Boolean)

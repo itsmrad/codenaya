@@ -32,6 +32,12 @@ type ToolCalls = { toolCalls: Array<{ tool: { name: string }; content: unknown }
  * Whether files changed after the last checkBuild that passed or could not
  * run, with a check left to spend.
  */
+/** Whether a write in the run succeeded: a seeded project's first build is done (#338). */
+export const wroteFiles = (results: ToolCalls[]) =>
+  results.some(({ toolCalls }) =>
+    toolCalls.some(({ tool, content }) => WRITE_TOOLS.has(tool.name) && toolResultError(content) === undefined),
+  );
+
 export const hasUncheckedWrites = (results: ToolCalls[]) => {
   let unchecked = false;
   let checks = 0;

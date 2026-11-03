@@ -14,6 +14,7 @@ import {
   normalizePath,
   splitPath,
 } from "./paths";
+import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface WriteFilesToolOptions {
@@ -66,6 +67,13 @@ export const createWriteFilesTool = ({ projectId, internalKey }: WriteFilesToolO
             } else {
               batch.set(path, content);
             }
+          }
+          // #331: every package.json written is checked against the known-good versions.
+          const versionNotes = new Map<string, string>();
+          for (const [path, content] of batch) {
+            const checked = checkPackageVersions(splitPath(path).name, content);
+            batch.set(path, checked.content);
+            if (checked.note) versionNotes.set(path, checked.note);
           }
 
           const updates: { path: string; fileId: Id<"files">; content: string }[] = [];
@@ -139,7 +147,11 @@ export const createWriteFilesTool = ({ projectId, internalKey }: WriteFilesToolO
               [...batch]
                 .filter(([path]) => written.has(path))
                 .map(([name, content]) => ({ name, content })),
-            )
+            ) +
+            [...versionNotes]
+              .filter(([path]) => written.has(path))
+              .map(([, note]) => note)
+              .join("")
           );
         });
       } catch (error) {
