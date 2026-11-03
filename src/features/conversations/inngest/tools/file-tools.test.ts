@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getFunctionName } from "convex/server";
+import { toolResultError } from "../../agent-steps";
+import { hasUncheckedWrites } from "../build-check-gate";
 
 type Row = { _id: string; name: string; type: "file" | "folder"; parentId?: string; content?: string };
 
@@ -10,18 +12,24 @@ const mocks = vi.hoisted(() => ({ query: vi.fn(), mutation: vi.fn() }));
 vi.mock("@/lib/convex-client", () => ({
   convex: { query: mocks.query, mutation: mocks.mutation },
 }));
+// Passthrough spy, so a test can see which lucide-react range the icon rewriter got.
+vi.mock("@/features/sandbox-preview/utils/project-checks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/sandbox-preview/utils/project-checks")>();
+  return { ...actual, rewriteIcons: vi.fn(actual.rewriteIcons) };
+});
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
 import { createCreateFilesTool } from "./create-files";
 import { createDeleteFilesTool } from "./delete-files";
 import { createListFilesTool } from "./list-files";
-import { hasUncheckedWrites } from "../build-check-gate";
 import { buildProjectTreePromptSection, MAX_PROMPT_TREE_ENTRIES, type ProjectFile } from "./paths";
 import { createReadFilesTool } from "./read-files";
 import { createRenameFileTool } from "./rename-file";
+import { createEditFileTool } from "./edit-file";
 import { createUpdateFileTool } from "./update-file";
 import { createWriteFilesTool } from "./write-files";
+import { rewriteIcons } from "@/features/sandbox-preview/utils/project-checks";
 
 // Runs the step body inline, so a throw inside step.run propagates like it
 // would to Inngest (which retries the step).
@@ -54,7 +62,7 @@ beforeEach(() => {
   mocks.query.mockImplementation(async (ref, args: { fileId?: string }) =>
     getFunctionName(ref) === "system:getFileById"
       ? (db.rows.find((r) => r._id === args.fileId) ?? null)
-      : db.rows.map((row) => ({ ...row, content: undefined })),
+      : db.rows.map((row) => ({ ...row, content: getFunctionName(ref) === "system:getProjectFilesWithUrls" ? row.content : undefined })),
   );
   mocks.mutation.mockImplementation(async (ref, args: Record<string, never>) => {
     switch (getFunctionName(ref)) {
@@ -353,6 +361,81 @@ describe("project tree prompt section", () => {
   });
 });
 
+describe("post-write checks at every boundary", () => {
+  it.each(["update", "edit", "write", "create"])("%s saves, rewrites icons and reports project findings in the same step", async (kind) => {
+    db.rows.find((r) => r._id === "pkg")!.content = JSON.stringify({ dependencies: { "lucide-react": "^1.66.0" } });
+    const registry = vi.fn(async () => []);
+    const content = 'import { Cammera, VercelLogo } from "lucide-react"; import { X } from "./missing"; import absent from "not-installed";';
+    const options = { ...opts, registry };
+    const result = kind === "update"
+      ? await createUpdateFileTool(options).handler({ path: "src/App.tsx", content }, ctx)
+      : kind === "edit"
+        ? await createEditFileTool(options).handler({ path: "src/App.tsx", edits: [{ oldText: "app", newText: content }] }, ctx)
+        : kind === "write"
+          ? await createWriteFilesTool(options).handler({ files: [{ path: "src/New.tsx", content }] }, ctx)
+          : await createCreateFilesTool(options).handler({ parentId: "src", files: [{ name: "New.tsx", content }] }, ctx);
+    expect(toolResultError({ data: result })).toBeUndefined();
+    const tool = { name: { update: "updateFile", edit: "editFile", write: "writeFiles", create: "createFiles" }[kind]! };
+    expect(hasUncheckedWrites([{ toolCalls: [{ tool, content: { data: result } }] }])).toBe(true);
+    expect(result).toContain("[icon-rewrite] Cammera → Camera as Cammera");
+    expect(result).toContain("VercelLogo");
+    expect(result).toContain("./missing");
+    expect(String(result).match(/Project checks/g)).toHaveLength(1);
+    expect(db.rows.some((r) => r.content?.includes("Camera as Cammera"))).toBe(true);
+    expect(registry).toHaveBeenCalledWith(["not-installed"]);
+    expect(step.run).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["update", "edit", "write", "create"])("%s remains successful when post-write diagnostics reject", async (kind) => {
+    db.rows.find((r) => r._id === "pkg")!.content = JSON.stringify({ dependencies: { "lucide-react": "^1.66.0" } });
+    const options = { ...opts, registry: vi.fn(async () => { throw new Error("diagnostics failed"); }) };
+    const content = 'import { Cammera } from "lucide-react";';
+    const result = kind === "update"
+      ? await createUpdateFileTool(options).handler({ path: "src/App.tsx", content }, ctx)
+      : kind === "edit"
+        ? await createEditFileTool(options).handler({ path: "src/App.tsx", edits: [{ oldText: "app", newText: content }] }, ctx)
+        : kind === "write"
+          ? await createWriteFilesTool(options).handler({ files: [{ path: "src/New.tsx", content }] }, ctx)
+          : await createCreateFilesTool(options).handler({ parentId: "src", files: [{ name: "New.tsx", content }] }, ctx);
+    expect(result).toContain("write succeeded");
+    expect(result).toContain("[icon-rewrite] Cammera → Camera as Cammera");
+    expect(toolResultError({ data: result })).toBeUndefined();
+    const name = { update: "updateFile", edit: "editFile", write: "writeFiles", create: "createFiles" }[kind]!;
+    expect(hasUncheckedWrites([{ toolCalls: [{ tool: { name }, content: { data: result } }] }])).toBe(true);
+    expect(db.rows.some((row) => row.content === content.replace("Cammera", "Camera as Cammera"))).toBe(true);
+  });
+
+  it("returns the persisted result on replay without new writes, queries or registry calls", async () => {
+    let saved: unknown;
+    const replay = { step: { run: async (_id: string, fn: () => unknown) => saved ??= await fn() } } as never;
+    const registry = vi.fn(async () => []);
+    const tool = createUpdateFileTool({ ...opts, registry });
+    const args = { path: "src/App.tsx", content: 'import x from "undeclared";' };
+    const first = await tool.handler(args, replay);
+    const calls = mocks.query.mock.calls.length;
+    expect(await tool.handler(args, replay)).toBe(first);
+    expect(mocks.query).toHaveBeenCalledTimes(calls);
+    expect(mocks.mutation).toHaveBeenCalledTimes(1);
+    expect(registry).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a successful write successful when the diagnostic snapshot fails", async () => {
+    mocks.query.mockImplementationOnce(async () => db.rows).mockRejectedValueOnce(new Error("offline")).mockRejectedValueOnce(new Error("offline"));
+    const result = await createUpdateFileTool(opts).handler({ path: "src/App.tsx", content: "saved" }, ctx);
+    expect(result).toContain("write succeeded");
+    expect(toolResultError({ data: result })).toBeUndefined();
+    expect(hasUncheckedWrites([{ toolCalls: [{ tool: { name: "updateFile" }, content: { data: result } }] }])).toBe(true);
+    expect(db.rows.find((r) => r._id === "app")?.content).toBe("saved");
+  });
+
+  it("does not check or rewrite a failed create", async () => {
+    const result = await createCreateFilesTool(opts).handler({ parentId: "src", files: [{ name: "App.tsx", content: 'import { Cammera } from "lucide-react";' }] }, ctx);
+    expect(result).toContain("Created 0");
+    expect(result).not.toContain("Project checks");
+    expect(db.rows.find((r) => r._id === "app")?.content).toBe("app");
+  });
+});
+
 describe("line-ranged reads (#296)", () => {
   it("preserves full reads and legacy calls byte-for-byte", async () => {
     db.rows[1].content = "a\r\nb\n";
@@ -454,5 +537,18 @@ describe("package.json version pins", () => {
     expect(savedRouterRange("apps/web/package.json")).toMatch(/^\^7\./);
     expect(savedRouterRange("src/package-notes.json")).toBe("latest");
     expect(result.match(/react-router-dom "latest" →/g)).toHaveLength(2);
+  });
+
+  it("updateFile returns the version and project-check notes, rewriting icons against the pinned manifest", async () => {
+    db.rows.find((r) => r._id === "app")!.content = 'import x from "not-installed";';
+    const manifest = JSON.stringify({ dependencies: { "lucide-react": "latest" } });
+    const result = (await createUpdateFileTool({ ...opts, registry: vi.fn(async () => []) }).handler(
+      { path: "package.json", content: manifest },
+      ctx,
+    )) as string;
+    expect(result).toContain('lucide-react "latest" →');
+    expect(result.match(/Project checks/g)).toHaveLength(1);
+    expect(result).toContain("not-installed");
+    expect(vi.mocked(rewriteIcons)).toHaveBeenCalledWith(expect.stringContaining('"^1.66.0"'), "^1.66.0", "package.json");
   });
 });

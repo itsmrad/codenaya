@@ -15,6 +15,7 @@ import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { createSearchFilesTool } from './tools/search-files';
 import { createReadFilesTool } from './tools/read-files';
 import { createListFilesTool } from './tools/list-files';
+import { createRegistryCheck } from './tools/post-write-checks';
 import { createUpdateFileTool } from './tools/update-file';
 import { createEditFileTool } from './tools/edit-file';
 import { createCreateFilesTool } from './tools/create-files';
@@ -602,14 +603,15 @@ export const processMessage = inngest.createFunction(
       });
     }
 
+    const registry = createRegistryCheck();
     const tools: Tool.Any[] = [
       createListFilesTool({ internalKey, projectId }),
       createReadFilesTool({ projectId, internalKey }),
       createSearchFilesTool({ projectId, internalKey }),
-      createWriteFilesTool({ projectId, internalKey }),
-      createUpdateFileTool({ projectId, internalKey }),
-      createEditFileTool({ projectId, internalKey }),
-      createCreateFilesTool({ projectId, internalKey }),
+      createWriteFilesTool({ projectId, internalKey, registry }),
+      createUpdateFileTool({ projectId, internalKey, registry }),
+      createEditFileTool({ projectId, internalKey, registry }),
+      createCreateFilesTool({ projectId, internalKey, registry }),
       createCreateFolderTool({ projectId, internalKey }),
       createScaffoldViteAppTool({ projectId, internalKey }),
       createRenameFileTool({ projectId, internalKey }),

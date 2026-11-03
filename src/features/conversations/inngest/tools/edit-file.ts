@@ -8,11 +8,13 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
 import { checkPackageVersions } from "./package-versions";
 import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
+import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface EditFileToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  registry?: RegistryCheck;
 }
 
 const editSchema = z.object({
@@ -92,7 +94,7 @@ export const applyEdits = (
   return { content: text };
 };
 
-export const createEditFileTool = ({ projectId, internalKey }: EditFileToolOptions) => {
+export const createEditFileTool = ({ projectId, internalKey, registry = createRegistryCheck() }: EditFileToolOptions) => {
   return createTool({
     name: "editFile",
     description:
@@ -129,17 +131,21 @@ export const createEditFileTool = ({ projectId, internalKey }: EditFileToolOptio
 
           const { content: checkedContent, note: versionNote } = checkPackageVersions(file.name, result.content);
 
+          const rewriteIcons = await getIconRewriter(internalKey, projectId, [{ path, content: checkedContent }]);
+          const prepared = rewriteIcons(checkedContent, path);
+          result.content = prepared.content;
           await convex.mutation(api.system.updateFile, {
             internalKey,
             projectId,
             fileId: file._id,
-            content: checkedContent,
+            content: result.content,
           });
 
           return (
             `File "${path}" edited successfully` +
             syntaxErrorNote([{ name: path, content: result.content }]) +
-            versionNote
+            versionNote +
+            await postWriteNote(internalKey, projectId, [file._id], registry, prepared.rewrites)
           );
         });
       } catch (error) {
