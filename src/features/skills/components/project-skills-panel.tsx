@@ -41,6 +41,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { convexErrorMessage } from "@/lib/convex-error";
 import { SKILLS_SETTINGS_URL } from "@/features/settings/nav";
+import { ProjectInstructionsForm } from "@/features/projects/components/project-instructions-form";
 
 import type { ProjectSkillSummary } from "../types";
 import {
@@ -309,7 +310,7 @@ export const ProjectSkillsPanel = ({
   );
 };
 
-/** The Skills panel as a dialog, opened from the IDE navbar. */
+/** Project instructions and the Skills panel as a dialog, opened from the IDE navbar. */
 export const ProjectSkillsDialog = ({
   projectId,
   open,
@@ -322,13 +323,18 @@ export const ProjectSkillsDialog = ({
   <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
       <DialogHeader>
-        <DialogTitle>Skills</DialogTitle>
+        <DialogTitle>Instructions and skills</DialogTitle>
         <DialogDescription>
-          Choose the skills this project&apos;s agent can use. Library skills
-          are off until you enable them here.
+          Tell this project&apos;s agent what to always follow, and choose the
+          skills it can use. Library skills are off until you enable them here.
         </DialogDescription>
       </DialogHeader>
-      {open && <ProjectSkillsPanel projectId={projectId} />}
+      {open && (
+        <>
+          <ProjectInstructionsForm projectId={projectId} />
+          <ProjectSkillsPanel projectId={projectId} />
+        </>
+      )}
     </DialogContent>
   </Dialog>
 );
