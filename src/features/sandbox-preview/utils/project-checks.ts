@@ -127,7 +127,7 @@ export const projectChecks = (
     const findings: Finding[] = [];
     const add = (checkId: string, message: string) => { if (findings.length < 40) findings.push({ checkId, message: message.slice(0, 500) }); };
     if (references) {
-      for (const message of undeclaredPackages([...files.filter((f) => f.path.endsWith("package.json")), ...affected.filter((f) => !f.path.endsWith("package.json"))])) add("package", message);
+      for (const message of undeclaredPackages([...files.filter((f) => f.path.endsWith("package.json")), ...affected.filter((f) => !f.path.endsWith("package.json"))], paths)) add("package", message);
       if (!next) for (const message of unresolvedImports(affected, paths)) add("import", message);
     }
     const major = rangeMajor(deps.tailwindcss);

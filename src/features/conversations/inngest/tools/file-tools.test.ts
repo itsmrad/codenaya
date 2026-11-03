@@ -12,6 +12,11 @@ const mocks = vi.hoisted(() => ({ query: vi.fn(), mutation: vi.fn() }));
 vi.mock("@/lib/convex-client", () => ({
   convex: { query: mocks.query, mutation: mocks.mutation },
 }));
+// Passthrough spy, so a test can see which lucide-react range the icon rewriter got.
+vi.mock("@/features/sandbox-preview/utils/project-checks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/sandbox-preview/utils/project-checks")>();
+  return { ...actual, rewriteIcons: vi.fn(actual.rewriteIcons) };
+});
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
@@ -24,6 +29,7 @@ import { createRenameFileTool } from "./rename-file";
 import { createEditFileTool } from "./edit-file";
 import { createUpdateFileTool } from "./update-file";
 import { createWriteFilesTool } from "./write-files";
+import { rewriteIcons } from "@/features/sandbox-preview/utils/project-checks";
 
 // Runs the step body inline, so a throw inside step.run propagates like it
 // would to Inngest (which retries the step).
@@ -470,5 +476,18 @@ describe("package.json version pins", () => {
     expect(savedRouterRange("apps/web/package.json")).toMatch(/^\^7\./);
     expect(savedRouterRange("src/package-notes.json")).toBe("latest");
     expect(result.match(/react-router-dom "latest" →/g)).toHaveLength(2);
+  });
+
+  it("updateFile returns the version and project-check notes, rewriting icons against the pinned manifest", async () => {
+    db.rows.find((r) => r._id === "app")!.content = 'import x from "not-installed";';
+    const manifest = JSON.stringify({ dependencies: { "lucide-react": "latest" } });
+    const result = (await createUpdateFileTool({ ...opts, registry: vi.fn(async () => []) }).handler(
+      { path: "package.json", content: manifest },
+      ctx,
+    )) as string;
+    expect(result).toContain('lucide-react "latest" →');
+    expect(result.match(/Project checks/g)).toHaveLength(1);
+    expect(result).toContain("not-installed");
+    expect(vi.mocked(rewriteIcons)).toHaveBeenCalledWith(expect.stringContaining('"^1.66.0"'), "^1.66.0", "package.json");
   });
 });

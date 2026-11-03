@@ -40,6 +40,11 @@ describe("project checks", () => {
     expect(projectChecks([pkg({ tailwindcss: "^4.0.0", "lucide-react": "0.468.0" }), file("a.ts", '// import { Nope } from "lucide-react";\nimport { Camera } from "lucide-react";'), file("a.css", '@import "tailwindcss";')])).toEqual([]);
     expect(projectCheckNote([])).toBe("");
   });
+  it("resolves a CSS import of an untouched sibling file, not as a package", () => {
+    expect(projectChecks([
+      pkg({ tailwindcss: "^4.0.0" }), file("src/index.css", '@import "tailwindcss";\n@import "theme.css";'), file("src/theme.css", ":root {}"),
+    ], undefined, new Set(["src/index.css"]))).toEqual([]);
+  });
   it("silently skips Next local/Tailwind checks but still checks packages", () => {
     const findings = projectChecks([pkg({ next: "15", tailwindcss: "4" }), file("a.ts", 'import x from "./missing"; import y from "missing";'), file("a.css", "@tailwind base;")]);
     expect(findings.map((f) => f.checkId)).toEqual(["package"]);

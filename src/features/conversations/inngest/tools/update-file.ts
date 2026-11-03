@@ -41,8 +41,6 @@ export const createUpdateFileTool = ({
         return `Error: ${parsed.error.issues[0].message}`;
       }
 
-
-
       try {
         return await toolStep?.run("update-file", async () => {
           const index = indexProjectFiles(await getProjectFiles(internalKey, projectId));

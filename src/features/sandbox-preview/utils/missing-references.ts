@@ -111,7 +111,11 @@ const packageName = (specifier: string): string | null => {
  * Describes each package the project's code or CSS imports but its package.json
  * doesn't declare, e.g. `@tailwindcss/vite (imported by vite.config.ts)`.
  */
-export const undeclaredPackages = (files: ProjectFile[]): string[] => {
+export const undeclaredPackages = (
+  files: ProjectFile[],
+  // All project paths, so a CSS import of an untouched sibling file isn't read as a package.
+  paths: Set<string> = new Set(files.map((file) => file.path)),
+): string[] => {
   const manifest = files.find((file) => file.path === "package.json");
   const pkg = manifest ? (parseJsonc(manifest.content) as Record<string, unknown> | null) : null;
   if (!pkg || typeof pkg !== "object") return [];
@@ -125,7 +129,6 @@ export const undeclaredPackages = (files: ProjectFile[]): string[] => {
   const nestedPackages = files
     .filter((file) => file.path.endsWith("/package.json"))
     .map((file) => file.path.slice(0, -"package.json".length));
-  const paths = new Set(files.map((file) => file.path));
   const undeclared = new Map<string, string>();
 
   for (const file of files) {
