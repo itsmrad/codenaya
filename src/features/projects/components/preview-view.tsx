@@ -69,8 +69,11 @@ const stripPlaceholder = (building: boolean, isLoading: boolean) => {
 export const PreviewView = ({
   projectId,
   firstBuild,
+  visible,
 }: {
   projectId: Id<"projects">;
+  /** Its tab is on screen; the IDE keeps it mounted, invisible, behind others. */
+  visible: boolean;
   /** The agent is writing a new project's first build (see ProjectIdView). */
   firstBuild: boolean;
 }) => {
@@ -148,6 +151,11 @@ export const PreviewView = ({
     wasFirstBuild.current = firstBuild;
   }, [firstBuild, status, restart]);
 
+  // The iframe's latest load, so first_preview_shown waits until it is visible.
+  const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
+  const previewKey = `${projectId}:${previewUrl}:${refreshKey}`;
+  const handlePreviewLoad = useCallback(() => setLoadedPreview(previewKey), [previewKey]);
+
   // Only ever called from a user action. WebContainer needs the COOP/COEP headers
   // next.config.ts sets for `?engine=webcontainer`, so switching is a full page
   // load; doing it automatically on a sandbox error turned config errors into a
@@ -165,24 +173,9 @@ export const PreviewView = ({
     firstBuild && activeRun && files ? (
       <PreviewBuilding steps={activeRun.steps} files={files} />
     ) : null;
-
-  // A pre-warmed iframe can load underneath the first-build overlay.
-  const recordFirstPreviewShown = useRecordFirstPreviewShown();
-  const recordedPreviewFor = useRef<Id<"projects"> | null>(null);
-  const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
-  const previewKey = `${projectId}:${previewUrl}:${refreshKey}`;
-  const previewHidden = Boolean(building);
-  const handlePreviewLoad = useCallback(() => setLoadedPreview(previewKey), [previewKey]);
-  useEffect(() => {
-    if (!previewUrl || loadedPreview !== previewKey || previewHidden || recordedPreviewFor.current === projectId) return;
-    recordedPreviewFor.current = projectId;
-    recordFirstPreviewShown({ projectId }).catch((error) => {
-      console.warn("[preview] failed to record first preview", error);
-    });
-  }, [previewUrl, loadedPreview, previewKey, previewHidden, projectId, recordFirstPreviewShown]);
-
   const content = (
     <PreviewContent
+      onPreviewLoad={handlePreviewLoad}
       error={error}
       isLoading={isLoading}
       bootPhase={bootPhase}
@@ -197,7 +190,6 @@ export const PreviewView = ({
       onUseWebContainer={() => switchEngine("webcontainer")}
       agentWorking={Boolean(activeRun)}
       building={building}
-      onPreviewLoad={handlePreviewLoad}
     />
   );
 
@@ -205,6 +197,19 @@ export const PreviewView = ({
   useEffect(() => {
     if (previewUrl) markPreviewOpened();
   }, [previewUrl]);
+
+  // Activation event (#339): once per project per page view, when the loaded
+  // app is on screen: its tab is open and no first-build card covers it.
+  const recordFirstPreviewShown = useRecordFirstPreviewShown();
+  const recordedPreviewFor = useRef<Id<"projects"> | null>(null);
+  const previewShown = visible && !building && loadedPreview === previewKey;
+  useEffect(() => {
+    if (!previewShown || recordedPreviewFor.current === projectId) return;
+    recordedPreviewFor.current = projectId;
+    recordFirstPreviewShown({ projectId }).catch((error) => {
+      console.warn("[preview] failed to record first preview", error);
+    });
+  }, [previewShown, projectId, recordFirstPreviewShown]);
 
   // Automatically refresh the iframe shortly after the dev server announces it's running.
   // The first request to Vite often serves the index.html and CSS instantly but hangs 
@@ -450,6 +455,7 @@ const ERROR_TITLES: Record<SandboxErrorKind, string> = {
 };
 
 const PreviewContent = ({
+  onPreviewLoad,
   error,
   isLoading,
   bootPhase,
@@ -464,8 +470,8 @@ const PreviewContent = ({
   onUseWebContainer,
   agentWorking,
   building,
-  onPreviewLoad,
 }: {
+  onPreviewLoad: () => void;
   error: string | null | undefined;
   isLoading: boolean;
   bootPhase: BootPhase | null;
@@ -482,7 +488,6 @@ const PreviewContent = ({
   agentWorking?: boolean;
   /** The first-build placeholder, shown over the engine until the run ends. */
   building: ReactNode;
-  onPreviewLoad: () => void;
 }) => (
   <div className="size-full rounded-xl overflow-hidden relative isolate">
     <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />

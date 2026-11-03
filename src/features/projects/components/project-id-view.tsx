@@ -383,7 +383,11 @@ export const ProjectIdView = ({
           )}
         >
           {previewOpened && (
-            <PreviewView projectId={projectId} firstBuild={firstBuild} />
+            <PreviewView
+              projectId={projectId}
+              firstBuild={firstBuild}
+              visible={activeView === "preview"}
+            />
           )}
         </div>
       </div>
