@@ -22,6 +22,7 @@ import {
 } from "../src/features/projects/utils/project-name";
 import { MAX_PROJECT_INSTRUCTIONS_LENGTH } from "../src/features/projects/instructions";
 import { countProjectBuilt } from "./stats";
+import { recordProjectEvent } from "./activationEvents";
 
 /** Env vars and skill settings copied per duplicate; far above real usage. */
 const MAX_COPIED_ROWS = 500;
@@ -119,6 +120,10 @@ export const create = mutation({
       updatedAt: Date.now(),
     });
     await countProjectBuilt(ctx);
+    await recordProjectEvent(ctx, projectId, {
+      name: "project_created",
+      props: { source: "dashboard" },
+    });
 
     return projectId;
   },
@@ -205,6 +210,10 @@ export const duplicate = mutation({
       updatedAt: Date.now(),
     });
     await countProjectBuilt(ctx);
+    await recordProjectEvent(ctx, newProjectId, {
+      name: "project_created",
+      props: { source: "duplicate" },
+    });
 
     await copyProjectFiles(ctx, source._id, newProjectId);
 

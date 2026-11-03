@@ -57,7 +57,7 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
     const pendingTemplate = takePendingTemplate();
     const pendingPrompt = takePendingPrompt();
     if (pendingTemplate) void createProject(pendingTemplate.prompt, pendingTemplate.id);
-    else if (pendingPrompt) void createProject(pendingPrompt);
+    else if (pendingPrompt) void createProject(pendingPrompt, undefined, true);
   }, [createProject]);
 
   // A repo from an "Open in Codenaya" link kept across sign-up, when the

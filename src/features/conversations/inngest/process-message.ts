@@ -140,6 +140,7 @@ export const processMessage = inngest.createFunction(
             internalKey,
             messageId,
             content: AGENT_FAILURE_MESSAGE,
+            outcome: "error",
           });
         });
       }
@@ -196,6 +197,7 @@ export const processMessage = inngest.createFunction(
           internalKey,
           messageId,
           content: error.message,
+          outcome: "error",
         });
       });
       return { success: false, messageId, conversationId };
@@ -228,6 +230,7 @@ export const processMessage = inngest.createFunction(
           content: keyFailureMessage(
             `Your ${key.label} key was rejected by the provider.`,
           ),
+          outcome: "error",
         });
       });
       return { success: false, messageId, conversationId };

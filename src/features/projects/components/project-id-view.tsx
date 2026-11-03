@@ -427,6 +427,7 @@ export const ProjectIdView = ({
             <PreviewView
               projectId={projectId}
               firstBuild={firstBuild}
+              visible={activeView === "preview"}
               onOpenEnvVars={() => setEnvVarsOpen(true)}
             />
           )}

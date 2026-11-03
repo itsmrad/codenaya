@@ -43,9 +43,9 @@ import { NOTHING_TO_PREVIEW } from "@/features/sandbox-preview/utils/boot-plan";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import { useProject } from "../hooks/use-projects";
+import { useProject, useRecordFirstPreviewShown } from "../hooks/use-projects";
 import { useFilesWithContent } from "../hooks/use-files";
-import { markPreviewOpened } from "../utils/first-run";
+import { isPreviewOnScreen, markPreviewOpened } from "../utils/first-run";
 import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
 import {
   usePublicEnvVars,
@@ -69,9 +69,12 @@ const stripPlaceholder = (building: boolean, isLoading: boolean) => {
 export const PreviewView = ({
   projectId,
   firstBuild,
+  visible,
   onOpenEnvVars,
 }: {
   projectId: Id<"projects">;
+  /** Its tab is on screen; the IDE keeps it mounted, invisible, behind others. */
+  visible: boolean;
   /** The agent is writing a new project's first build (see ProjectIdView). */
   firstBuild: boolean;
   /** Opens the env vars dialog, which ProjectIdView owns so the palette can open it too. */
@@ -151,6 +154,11 @@ export const PreviewView = ({
     wasFirstBuild.current = firstBuild;
   }, [firstBuild, status, restart]);
 
+  // The iframe's latest load, so first_preview_shown waits until it is visible.
+  const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
+  const previewKey = `${projectId}:${previewUrl}:${refreshKey}`;
+  const handlePreviewLoad = useCallback(() => setLoadedPreview(previewKey), [previewKey]);
+
   // Only ever called from a user action. WebContainer needs the COOP/COEP headers
   // next.config.ts sets for `?engine=webcontainer`, so switching is a full page
   // load; doing it automatically on a sandbox error turned config errors into a
@@ -170,6 +178,7 @@ export const PreviewView = ({
     ) : null;
   const content = (
     <PreviewContent
+      onPreviewLoad={handlePreviewLoad}
       error={error}
       isLoading={isLoading}
       bootPhase={bootPhase}
@@ -191,6 +200,24 @@ export const PreviewView = ({
   useEffect(() => {
     if (previewUrl) markPreviewOpened();
   }, [previewUrl]);
+
+  // Activation event (#339): once per project per page view.
+  const recordFirstPreviewShown = useRecordFirstPreviewShown();
+  const recordedPreviewFor = useRef<Id<"projects"> | null>(null);
+  const previewShown = isPreviewOnScreen({
+    visible,
+    building: Boolean(building),
+    status,
+    error,
+    loaded: loadedPreview === previewKey,
+  });
+  useEffect(() => {
+    if (!previewShown || recordedPreviewFor.current === projectId) return;
+    recordedPreviewFor.current = projectId;
+    recordFirstPreviewShown({ projectId }).catch((error) => {
+      console.warn("[preview] failed to record first preview", error);
+    });
+  }, [previewShown, projectId, recordFirstPreviewShown]);
 
   // Automatically refresh the iframe shortly after the dev server announces it's running.
   // The first request to Vite often serves the index.html and CSS instantly but hangs 
@@ -445,6 +472,7 @@ const ERROR_TITLES: Record<SandboxErrorKind, string> = {
 };
 
 const PreviewContent = ({
+  onPreviewLoad,
   error,
   isLoading,
   bootPhase,
@@ -460,6 +488,7 @@ const PreviewContent = ({
   agentWorking,
   building,
 }: {
+  onPreviewLoad: () => void;
   error: string | null | undefined;
   isLoading: boolean;
   bootPhase: BootPhase | null;
@@ -542,6 +571,7 @@ const PreviewContent = ({
           style={{ width: PREVIEW_DEVICE_WIDTHS[device] ?? undefined }}
           data-framed={device !== "desktop"}
           title="Preview"
+          onLoad={onPreviewLoad}
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
           allow="cross-origin-isolated"
         />

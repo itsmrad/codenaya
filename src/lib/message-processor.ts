@@ -76,6 +76,7 @@ export async function dispatchProcessMessageOrFail(
         internalKey: input.internalKey,
         messageId: input.messageId,
         content: DISPATCH_FAILED_MESSAGE,
+        outcome: "error",
       })
       .catch((updateError) => {
         console.error(

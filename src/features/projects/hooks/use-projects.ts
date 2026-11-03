@@ -67,6 +67,11 @@ export const useDuplicateProject = () => {
   return useMutation(api.projects.duplicate);
 };
 
+/** Activation event (#339); the server keeps only a project's first. */
+export const useRecordFirstPreviewShown = () => {
+  return useMutation(api.activationEvents.recordFirstPreviewShown);
+};
+
 /** Removes the project from the lists right away; the server hides it too. */
 export const useRemoveProject = () => {
   return useMutation(api.projects.remove).withOptimisticUpdate(
