@@ -187,4 +187,5 @@ it("bounds file payloads in a long stub run and deterministically replays the re
     estimatedTokensSaved: Math.floor((untrimmedEstimate - sizes.at(-1)!) / 4), requestChars: sizes })}\n`);
   const replay = await run();
   expect(replay.inferenceBodies).toEqual(first.inferenceBodies);
-}, 20_000);
+  // Two full 24-turn replays: ~10s on a dev machine, and CI runs about twice as slow.
+}, 40_000);

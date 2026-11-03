@@ -14,12 +14,14 @@ import {
   normalizePath,
   splitPath,
 } from "./paths";
+import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface WriteFilesToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  registry?: RegistryCheck;
 }
 
 const paramsSchema = z.object({
@@ -28,7 +30,7 @@ const paramsSchema = z.object({
     .min(1, "Provide at least one file to write"),
 });
 
-export const createWriteFilesTool = ({ projectId, internalKey }: WriteFilesToolOptions) => {
+export const createWriteFilesTool = ({ projectId, internalKey, registry = createRegistryCheck() }: WriteFilesToolOptions) => {
   return createTool({
     name: "writeFiles",
     description:
@@ -105,6 +107,25 @@ export const createWriteFilesTool = ({ projectId, internalKey }: WriteFilesToolO
             }
           }
 
+          const rewriteIcons = await getIconRewriter(internalKey, projectId, [
+            ...updates.map(({ path, content }) => ({ path, content })),
+            ...[...createsByDir].flatMap(([dir, files]) => files.map(({ name, content }) => ({ path: dir ? `${dir}/${name}` : name, content }))),
+          ]);
+          const rewritesByPath = new Map<string, string[]>();
+          for (const update of updates) {
+            const fixed = rewriteIcons(update.content, update.path);
+            update.content = fixed.content;
+            batch.set(update.path, fixed.content);
+            rewritesByPath.set(update.path, fixed.rewrites);
+          }
+          for (const [dir, files] of createsByDir) for (const file of files) {
+            const path = dir ? `${dir}/${file.name}` : file.name;
+            const fixed = rewriteIcons(file.content, path);
+            file.content = fixed.content;
+            batch.set(path, fixed.content);
+            rewritesByPath.set(path, fixed.rewrites);
+          }
+          const writtenIds: string[] = updates.map((u) => u.fileId);
           const created: string[] = [];
           const createIn = async (dir: string, files: { name: string; content: string }[]) => {
             const results = await convex.mutation(api.system.createFiles, {
@@ -116,7 +137,10 @@ export const createWriteFilesTool = ({ projectId, internalKey }: WriteFilesToolO
             for (const result of results) {
               const path = dir ? `${dir}/${result.name}` : result.name;
               if (result.error) failed.push(`${path} (${result.error})`);
-              else created.push(path);
+              else {
+                created.push(path);
+                writtenIds.push(result.fileId!);
+              }
             }
           };
 
@@ -151,7 +175,8 @@ export const createWriteFilesTool = ({ projectId, internalKey }: WriteFilesToolO
             [...versionNotes]
               .filter(([path]) => written.has(path))
               .map(([, note]) => note)
-              .join("")
+              .join("") +
+            await postWriteNote(internalKey, projectId, writtenIds, registry, [...written].flatMap((path) => rewritesByPath.get(path) ?? []))
           );
         });
       } catch (error) {

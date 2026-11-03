@@ -20,6 +20,7 @@ import {
   copyProjectName,
   validateProjectName,
 } from "../src/features/projects/utils/project-name";
+import { MAX_PROJECT_INSTRUCTIONS_LENGTH } from "../src/features/projects/instructions";
 import { countProjectBuilt } from "./stats";
 
 /** Env vars and skill settings copied per duplicate; far above real usage. */
@@ -75,6 +76,31 @@ export const updateSettings = mutation({
 
     await ctx.db.patch("projects", args.id, {
       settings: args.settings,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+/** Sets the project's always-on agent instructions; empty text clears them (#299). */
+export const updateInstructions = mutation({
+  args: {
+    id: v.id("projects"),
+    instructions: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+    await getOwnedProject(ctx, args.id, identity.subject);
+
+    const instructions = args.instructions.trim();
+    if (instructions.length > MAX_PROJECT_INSTRUCTIONS_LENGTH) {
+      throw appError(
+        "INVALID_ARGUMENT",
+        `Instructions must be at most ${MAX_PROJECT_INSTRUCTIONS_LENGTH} characters`,
+      );
+    }
+
+    await ctx.db.patch("projects", args.id, {
+      instructions: instructions || undefined,
       updatedAt: Date.now(),
     });
   },
@@ -160,7 +186,7 @@ export const rename = mutation({
 
 /**
  * Copies a project into a new one named "<name> (copy)": files, settings,
- * project skills with their enabled states, and public env vars. Secret env
+ * instructions, project skills with their enabled states, and public env vars. Secret env
  * vars, conversations and integrations stay with the original.
  */
 export const duplicate = mutation({
@@ -175,6 +201,7 @@ export const duplicate = mutation({
       name: copyProjectName(source.name),
       ownerId: source.ownerId,
       settings: source.settings,
+      instructions: source.instructions,
       updatedAt: Date.now(),
     });
     await countProjectBuilt(ctx);
