@@ -5,6 +5,8 @@ const mutation = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/convex-client", () => ({ convex: { mutation } }));
 
+import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starter";
+
 import { getTemplateSeedFiles } from "../seed-files";
 import { STARTER_TEMPLATES } from "../templates";
 import { seedTemplateFiles } from "./seed-template";
@@ -35,5 +37,48 @@ describe("seedTemplateFiles", () => {
     expect(written).toContainEqual([undefined, "package.json"]);
     expect(written).toContainEqual(["id:src", "App.tsx"]);
     expect(batches.every(([, a]) => a.internalKey === "key" && a.projectId === "p1")).toBe(true);
+  });
+
+  it("seeds the plain Vite starter when there is no template (#338)", async () => {
+    mutation.mockReset();
+    mutation.mockImplementation(async (_ref, args) => `id:${args.name}`);
+
+    await seedTemplateFiles({ internalKey: "key", projectId: "p1" as never });
+
+    const written = mutation.mock.calls
+      .filter(([ref]) => getFunctionName(ref) === "system:createFiles")
+      .flatMap(([, a]) => a.files);
+    expect(written).toHaveLength(VITE_REACT_STARTER.length);
+    expect(written).toContainEqual({
+      name: "package.json",
+      content: VITE_REACT_STARTER.find((f) => f.path === "package.json")!.content,
+    });
+  });
+});
+
+describe("seedTemplateFiles when Convex fails partway (#338)", () => {
+  it("logs, keeps what was written and never writes the root package.json before its files", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    mutation.mockReset();
+    let batches = 0;
+    mutation.mockImplementation(async (ref, args) => {
+      if (getFunctionName(ref) === "system:createFiles" && ++batches === 2) {
+        throw new Error("Convex down");
+      }
+      return `id:${args.name}`;
+    });
+
+    await expect(
+      seedTemplateFiles({ internalKey: "key", projectId: "p1" as never }),
+    ).resolves.toBeUndefined();
+
+    const written = mutation.mock.calls
+      .filter(([ref]) => getFunctionName(ref) === "system:createFiles")
+      .slice(0, 1)
+      .flatMap(([, a]) => a.files.map((f: { name: string }) => f.name));
+    expect(written.length).toBeGreaterThan(0);
+    expect(written).not.toContain("package.json");
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("[seed-template]"), expect.any(Error));
+    error.mockRestore();
   });
 });

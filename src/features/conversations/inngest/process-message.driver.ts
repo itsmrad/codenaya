@@ -29,8 +29,11 @@ export const toolCall = (name: string, args: Record<string, unknown> = {}) => ({
   ],
 });
 
-/** One inference result: memoized data, or a failed AI gateway step. */
-export type Inference = { data: unknown } | { error: unknown };
+/**
+ * One inference result: memoized data, or a failed AI gateway step. A `held`
+ * one resolves only once nothing else can run, so it finishes after the rest.
+ */
+export type Inference = ({ data: unknown } | { error: unknown }) & { held?: boolean };
 
 export interface Outcome {
   finalType: string;
@@ -40,6 +43,10 @@ export interface Outcome {
   inferenceUrls: string[];
   /** The request bodies sent with them. */
   inferenceBodies: unknown[];
+  /** Which function invocation found each one: equal means requested together. */
+  inferenceRequests: number[];
+  /** Which invocation's result resolved each one (undefined: never). */
+  inferenceResolvedAt: Array<number | undefined>;
 }
 
 export async function drive(
@@ -48,6 +55,8 @@ export async function drive(
   message = "List my files",
   /** More event fields, such as `mode`. */
   extra: Record<string, unknown> = {},
+  /** `cancelWhen`: stop between steps once it holds, like `cancelOn` (finalType "cancelled"). */
+  { cancelWhen }: { cancelWhen?: () => boolean } = {},
 ): Promise<Outcome> {
   const event = {
     name: "message/sent",
@@ -64,9 +73,22 @@ export async function drive(
   const order: string[] = [];
   const inferenceUrls: string[] = [];
   const inferenceBodies: unknown[] = [];
-  let next = 0;
+  const inferenceRequests: number[] = [];
+  const assigned = new Map<string, number>();
+  const inferenceResolvedAt: Array<number | undefined> = [];
+  const outcome = (finalType: string): Outcome => ({
+    finalType,
+    stepState,
+    inferenceUrls,
+    inferenceBodies,
+    inferenceRequests,
+    inferenceResolvedAt,
+  });
 
-  for (let request = 0; request < 100; request += 1) {
+  for (let request = 0, requestedRunStep: string | undefined; request < 300; request += 1) {
+    if (cancelWhen?.()) {
+      return outcome("cancelled");
+    }
     const execution = (
       processMessage as unknown as {
         createExecution: (o: { partialOptions: Record<string, unknown> }) => {
@@ -81,6 +103,7 @@ export async function drive(
         data: { event, events: [event], runId: "run-under-test", attempt: 0 },
         stepState: { ...stepState },
         stepCompletionOrder: [...order],
+        requestedRunStep,
         reqArgs: [],
         headers: {},
       },
@@ -92,6 +115,8 @@ export async function drive(
       steps?: Array<{ id: string; op?: string; opts?: { url?: string; body?: unknown } }>;
     };
 
+    requestedRunStep = undefined;
+
     if (result.type === "step-ran" && result.step) {
       const { id, data, error } = result.step;
       stepState[id] = { id, ...(error ? { error } : { data }) };
@@ -100,22 +125,41 @@ export async function drive(
     }
 
     if (result.type === "steps-found" && result.steps) {
-      for (const found of result.steps) {
-        if (found.op === "AIGateway") {
-          inferenceUrls.push(found.opts?.url ?? "");
-          inferenceBodies.push(found.opts?.body);
-          stepState[found.id] = { id: found.id, ...inferences[Math.min(next++, inferences.length - 1)] };
-        } else if (found.op === "Sleep") {
-          stepState[found.id] = { id: found.id, data: null };
-        } else {
-          throw new Error(`Unexpected op ${found.op}`);
-        }
+      const gateways = result.steps.filter((found) => found.op === "AIGateway");
+      for (const found of gateways) {
+        if (assigned.has(found.id)) continue;
+        assigned.set(found.id, inferenceRequests.length);
+        inferenceResolvedAt.push(undefined);
+        inferenceUrls.push(found.opts?.url ?? "");
+        inferenceBodies.push(found.opts?.body);
+        inferenceRequests.push(request);
+      }
+      // Parallel step.run calls come back planned; like the platform, ask for
+      // one at a time (the title runs alongside the coding agent, #338).
+      const planned = result.steps.find((found) => found.op === "StepPlanned");
+      if (planned) {
+        requestedRunStep = planned.id;
+        continue;
+      }
+      const unexpected = result.steps.find((found) => found.op !== "AIGateway");
+      if (unexpected) throw new Error(`Unexpected op ${unexpected.op}`);
+
+      const inferenceOf = (id: string) =>
+        inferences[Math.min(assigned.get(id)!, inferences.length - 1)];
+      const ready = gateways.filter((found) => !inferenceOf(found.id).held);
+      for (const found of ready.length > 0 ? ready : gateways) {
+        const inference = inferenceOf(found.id);
+        stepState[found.id] = {
+          id: found.id,
+          ...("data" in inference ? { data: inference.data } : { error: inference.error }),
+        };
+        inferenceResolvedAt[assigned.get(found.id)!] = request;
         order.push(found.id);
       }
       continue;
     }
 
-    return { finalType: result.type, stepState, inferenceUrls, inferenceBodies };
+    return outcome(result.type);
   }
   throw new Error("Function did not settle");
 }

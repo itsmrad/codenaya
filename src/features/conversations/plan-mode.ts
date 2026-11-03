@@ -15,6 +15,7 @@ export type MessageMode = typeof PLAN_MODE;
 export const PLAN_MODE_TOOLS: ReadonlySet<string> = new Set([
   "listFiles",
   "readFiles",
+  "searchFiles",
   "scrapeUrls",
   "loadSkill",
 ]);
@@ -22,7 +23,7 @@ export const PLAN_MODE_TOOLS: ReadonlySet<string> = new Set([
 export const PLAN_MODE_PROMPT = `
 
 ## Plan mode
-The user wants a plan before anything is built. Do NOT create, edit, rename or delete files, and do not write code. You can only read: list and read the project's files, read URLs and load skills. Integration tools are unavailable.
+The user wants a plan before anything is built. Do NOT create, edit, rename or delete files, and do not write code. You can only read: list, search and read the project's files, read URLs and load skills. Integration tools are unavailable.
 
 Reply with a short build plan in Markdown, and nothing else:
 - One sentence on what will be built.
