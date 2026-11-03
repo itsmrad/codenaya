@@ -4,3 +4,6 @@ export const GITHUB_NOT_LINKED = "GITHUB_NOT_LINKED";
 
 /** Where a GitHub push goes when the linked branch moved outside Codenaya (#343). */
 export const GITHUB_SYNC_BRANCH = "codenaya-sync";
+
+/** Error code of a pull when both GitHub and the project changed since the last sync (#343). */
+export const GITHUB_SYNC_CONFLICT = "GITHUB_SYNC_CONFLICT";
