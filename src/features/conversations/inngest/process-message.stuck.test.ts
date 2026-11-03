@@ -90,7 +90,8 @@ describe("processMessage loop detection", () => {
     const update = finalUpdate();
     expect(update).toMatchObject({
       content: explanation,
-      stuck: { reason: "repeated-syntax-error", fileId: FILE_ID, error: expect.stringContaining("App.tsx") },
+      // The id-addressed call's result names the path, so the run records the path.
+      stuck: { reason: "repeated-syntax-error", path: "App.tsx", error: expect.stringContaining("App.tsx") },
     });
     const last = requests.at(-1);
     expect(last?.tool_choice).toBe("none");

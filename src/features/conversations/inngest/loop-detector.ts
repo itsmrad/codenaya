@@ -77,20 +77,37 @@ const byPath = (raw: string): WrittenFile | undefined => {
   return path ? { key: `path:${path}`, label: path, ref: { path } } : undefined;
 };
 
+// The success result of updateFile names the file's path, however it was addressed.
+const UPDATED = /^File "(.+?)" updated successfully/;
+
+/** Whether writeFiles' summary line lists `path` as created or updated (failed ones read `path (why)`). */
+const wroteToPath = (summary: string, path: string) =>
+  new RegExp(`(?:: |, )${escapeRegExp(path)}(?:, |\\.(?: |$))`).test(summary);
+
 /**
- * The files a write call wrote. updateFile and writeFiles name them by path
- * (#292), so both count toward the same file; updateFile calls made before
- * #292 by id; createFiles by parent and name.
+ * The files a write call actually wrote. updateFile and writeFiles name them by
+ * path (#292), so both count toward the same file. An updateFile by id (calls
+ * made before #292) counts by path too once a result has named its path, which
+ * `pathOfId` keeps for the rest of the run; until then, by id. createFiles
+ * counts by parent and name.
  */
-const writtenFiles = ({ name, input }: Call): WrittenFile[] => {
+const writtenFiles = ({ name, input, content }: Call, pathOfId: Map<string, string>): WrittenFile[] => {
   const files = (Array.isArray(input.files) ? input.files : []) as Array<Record<string, unknown> | null>;
+  const data = str((content as { data?: unknown } | null)?.data);
   if (name === "updateFile") {
-    const file = byPath(str(input.path));
-    if (file) return [file];
     const fileId = str(input.fileId);
+    const named = UPDATED.exec(data)?.[1];
+    if (fileId && named) pathOfId.set(fileId, named);
+    const file = byPath(str(input.path)) ?? byPath(pathOfId.get(fileId) ?? "");
+    if (file) return [file];
     return fileId ? [{ key: `id:${fileId}`, label: "", ref: { fileId } }] : [];
   }
-  if (name === "writeFiles") return files.flatMap((file) => byPath(str(file?.path)) ?? []);
+  if (name === "writeFiles") {
+    const summary = data.split("\n")[0];
+    return files
+      .flatMap((file) => byPath(str(file?.path)) ?? [])
+      .filter(({ label }) => wroteToPath(summary, label));
+  }
   if (name === "createFiles") {
     return files
       .map((file) => str(file?.name))
@@ -125,7 +142,9 @@ const syntaxErrors = (content: unknown, written: WrittenFile[]): Array<[WrittenF
 /** Every error a call reported: its own failure, or the syntax errors it wrote. */
 const callErrors = (call: Call) => {
   const error = toolResultError(call.content);
-  return error ? [error] : syntaxErrors(call.content, writtenFiles(call)).map(([, entry]) => entry);
+  return error
+    ? [error]
+    : syntaxErrors(call.content, writtenFiles(call, new Map())).map(([, entry]) => entry);
 };
 
 /** The first loop in the run's tool calls, or null while it makes progress. */
@@ -143,9 +162,10 @@ export const detectLoop = (results: ToolResults[]): StuckRun | null => {
   const markFailed = () => {
     for (const write of writes.values()) write.failed = true;
   };
+  const pathOfId = new Map<string, string>();
 
   for (const call of runCalls(results)) {
-    const written = writtenFiles(call);
+    const written = writtenFiles(call, pathOfId);
     // The file an error is about, when the call wrote just one.
     const file = written.length === 1 ? written[0].ref : {};
 

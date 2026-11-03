@@ -20,8 +20,10 @@ const call = (name: string, data: string, input: Record<string, unknown> = {}) =
     toolCalls: [{ tool: { id, name }, content: { data } }],
   };
 };
+// Legacy id-addressed updateFile calls; the result names the file's path, as since #292.
+const PATHS: Record<string, string> = { [ID_A]: "src/a/App.tsx", [ID_B]: "src/b/App.tsx" };
 const write = (fileId: string, note = "") =>
-  call("updateFile", `File "App.tsx" updated successfully${note}`, { fileId });
+  call("updateFile", `File "${PATHS[fileId]}" updated successfully${note}`, { fileId });
 const syntaxNote = (entries: string) => `\n${SYNTAX_ERRORS_NOTE}${entries}`;
 const times = <T>(n: number, make: (i: number) => T) => Array.from({ length: n }, (_, i) => make(i));
 
@@ -65,7 +67,7 @@ describe("detectLoop", () => {
   it("trips when one file is rewritten four times, each after a failure", () => {
     const rounds = ["alpha", "beta", "gamma"].flatMap((what) => [write(ID_A), failedBuild(what)]);
     expect(detectLoop(rounds)).toBeNull();
-    expect(detectLoop([...rounds, write(ID_A)])).toEqual({ reason: "repeated-write", fileId: ID_A });
+    expect(detectLoop([...rounds, write(ID_A)])).toEqual({ reason: "repeated-write", path: PATHS[ID_A] });
   });
 
   it("trips on path-based rewrites by updateFile, writeFiles or both (#292)", () => {
@@ -91,7 +93,7 @@ describe("detectLoop", () => {
     const broken = (line: number) =>
       call(
         "writeFiles",
-        `Wrote 2 file(s).${syntaxNote(`src/a.tsx 1:1 Expected ';'; src/b.tsx ${line}:1 ')' expected.`)}`,
+        `Wrote 2 file(s). Updated: src/a.tsx, src/b.tsx.${syntaxNote(`src/a.tsx 1:1 Expected ';'; src/b.tsx ${line}:1 ')' expected.`)}`,
         { files: [{ path: "src/a.tsx" }, { path: "src/b.tsx" }] },
       );
     expect(detectLoop([broken(1), broken(2)])).toBeNull();
@@ -99,6 +101,37 @@ describe("detectLoop", () => {
       reason: "repeated-syntax-error",
       path: "src/a.tsx",
       error: "src/a.tsx 1:1 Expected ';'",
+    });
+  });
+
+  it("counts one file addressed by id, then path, then id again as one file (#292)", () => {
+    const byId = () => write(ID_A, syntaxNote(`${PATHS[ID_A]} 1:5 ')' expected.`));
+    const byPathCall = call(
+      "updateFile",
+      `File "${PATHS[ID_A]}" updated successfully${syntaxNote(`${PATHS[ID_A]} 2:5 ')' expected.`)}`,
+      { path: PATHS[ID_A] },
+    );
+    expect(detectLoop([byId(), byPathCall, byId()])).toMatchObject({
+      reason: "repeated-syntax-error",
+      path: PATHS[ID_A],
+    });
+  });
+
+  it("counts and resets only the paths a partial writeFiles actually wrote", () => {
+    const broken = () =>
+      call("writeFiles", `Wrote 1 file(s). Updated: src/a.tsx.${syntaxNote("src/a.tsx 1:1 ')' expected.")}`, {
+        files: [{ path: "src/a.tsx" }],
+      });
+    // src/a.tsx failed here, so its syntax count must survive the batch.
+    const partial = call(
+      "writeFiles",
+      "Wrote 1 file(s). Created: src/b.tsx. Failed: src/a.tsx (a folder; write to a file path inside it).",
+      { files: [{ path: "src/a.tsx" }, { path: "src/b.tsx" }] },
+    );
+    expect(detectLoop([broken(), broken(), partial])).toBeNull();
+    expect(detectLoop([broken(), broken(), partial, broken()])).toMatchObject({
+      reason: "repeated-syntax-error",
+      path: "src/a.tsx",
     });
   });
 
@@ -126,7 +159,7 @@ describe("detectLoop", () => {
     expect(detectLoop(results)).toBeNull();
     expect(detectLoop([...results, broken(ID_B)])).toMatchObject({
       reason: "repeated-syntax-error",
-      fileId: ID_B,
+      path: PATHS[ID_B],
     });
   });
 
@@ -193,7 +226,7 @@ describe("detectLoop", () => {
     expect(detectLoop([broken(3), broken(9)])).toBeNull();
     expect(detectLoop([broken(3), broken(9), broken(14)])).toMatchObject({
       reason: "repeated-syntax-error",
-      fileId: ID_A,
+      path: PATHS[ID_A],
       error: "App.tsx 14:5 ')' expected.",
       signature: errorSignature("App.tsx 1:5 ')' expected."),
     });
