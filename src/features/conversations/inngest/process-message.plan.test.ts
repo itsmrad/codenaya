@@ -84,7 +84,7 @@ describe("processMessage in plan mode", () => {
     expect(outcome.finalType).toBe("function-resolved");
     const body = codingRequest(outcome.inferenceBodies);
     expect(toolNames(body).sort()).toEqual(
-      ["listFiles", "loadSkill", "readFiles", "scrapeUrls"].sort(),
+      ["listFiles", "loadSkill", "readFiles", "searchFiles", "scrapeUrls"].sort(),
     );
     expect(String(body.messages[0].content)).toContain("## Plan mode");
     expect(mutationNames()).not.toContain("system:createProjectCheckpoint");

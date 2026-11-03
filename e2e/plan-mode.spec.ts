@@ -129,6 +129,7 @@ test.describe.serial("plan mode", () => {
     expect(await fileNames()).toEqual([]);
     const planRequest = stub.requests.find((request) => request.tools?.length)!;
     expect(toolsOf(planRequest)).toContain("listFiles");
+    expect(toolsOf(planRequest)).toContain("searchFiles");
     for (const tool of WRITE_TOOLS) expect(toolsOf(planRequest)).not.toContain(tool);
 
     // Building sends the plan as a build message, which writes files.

@@ -373,7 +373,7 @@ to decide whether the integration exists.
 
 ANALYSIS:
 1. Read the workspace structure from the "Project files" section below. Address files by those paths; call listFiles only if that list is missing or says more entries are hidden
-2. Call readFiles on ALL relevant existing files if this is an edit or extension task — understand before touching
+2. Search for usages with searchFiles before renaming or changing a shared component or prop. Call readFiles on relevant existing files before editing; use ranges for large files. Ranged reads include line numbers for reference only: never copy those numbers into writes
 3. Identify the app type (landing, dashboard, SaaS, e-commerce, etc.) and select appropriate shadcn components
 
 PLANNING (mental — do not output this):
@@ -447,3 +447,6 @@ export const MAX_AGENT_STEPS = 40;
 
 export const STEP_BUDGET_NOTE =
   "Step budget reached: no more tool calls. Give the final summary now, and under Notes say what is not done yet.";
+
+/** Model-only stale file payload marker (#298). */
+export const FILE_HISTORY_PLACEHOLDER = "[{detail}; content omitted; re-read if needed]";

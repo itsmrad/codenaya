@@ -251,3 +251,7 @@ describe("runWrittenPaths", () => {
     expect(describeToolCall({ name: "readFiles", input: { fileIds: ids } }, pathOf)).toHaveLength(20);
   });
 });
+
+it("describes search patterns as labels rather than file paths (#296)", () => {
+  expect(describeToolCall({ name: "searchFiles", input: { pattern: "src/component", pathGlob: "**/*.ts" } }, () => undefined)).toEqual(["src/component"]);
+});

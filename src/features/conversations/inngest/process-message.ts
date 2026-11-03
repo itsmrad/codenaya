@@ -12,6 +12,7 @@ import {
   STEP_BUDGET_NOTE,
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
+import { createSearchFilesTool } from './tools/search-files';
 import { createReadFilesTool } from './tools/read-files';
 import { createListFilesTool } from './tools/list-files';
 import { createRegistryCheck } from './tools/post-write-checks';
@@ -71,6 +72,7 @@ import { isStarterOnly } from './starter-only';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
+import { trimFileHistory } from "./lib/trim-file-history";
 import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
   type MessageMode,
@@ -604,6 +606,7 @@ export const processMessage = inngest.createFunction(
     const tools: Tool.Any[] = [
       createListFilesTool({ internalKey, projectId }),
       createReadFilesTool({ projectId, internalKey }),
+      createSearchFilesTool({ projectId, internalKey }),
       createWriteFilesTool({ projectId, internalKey, registry }),
       createUpdateFileTool({ projectId, internalKey, registry }),
       createEditFileTool({ projectId, internalKey, registry }),
@@ -640,6 +643,7 @@ export const processMessage = inngest.createFunction(
         : tools,
       lifecycle: {
         onStart: ({ agent, prompt, history }) => {
+          const trimmed = trimFileHistory([...earlierTurns, ...(history ?? [])]);
           const nudge =
             agent.name === SUMMARY_AGENT_NAME ? STEP_BUDGET_NOTE : buildCheckGate.takeNudge();
           // AgentKit sends prompt ([system, request]) before history (this
@@ -647,9 +651,9 @@ export const processMessage = inngest.createFunction(
           // Relies on network calls using maxIter: 0; direct agent.run with maxIter > 1 would prepend history each pass.
           const [system, ...current] = withImageParts(prompt, imageUrls);
           return {
-            prompt: [system, ...earlierTurns, ...current],
+            prompt: [system, ...trimmed.slice(0, earlierTurns.length), ...current],
             history: [
-              ...(history ?? []),
+              ...trimmed.slice(earlierTurns.length),
               ...(nudge ? [{ type: "text" as const, role: "user" as const, content: nudge }] : []),
             ],
             stop: false,
