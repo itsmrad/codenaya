@@ -184,6 +184,22 @@ describe("activation event writers", () => {
     expect((await names(t)).filter((name) => name === "first_build_started")).toHaveLength(1);
   });
 
+  test("a run the loop guard stopped counts as an error", async () => {
+    const t = convexTest(schema, modules);
+    const ids = await createProject(t);
+
+    const stuck = await startRun(t, ids);
+    await t.mutation(api.system.updateMessageContent, {
+      internalKey: INTERNAL_KEY,
+      messageId: stuck,
+      content: "I got stuck going in circles on this, so I stopped early.",
+      stuck: { reason: "repeated-write" },
+    });
+
+    const finished = (await listEvents(t)).filter((event) => event.name === "run_finished");
+    expect(finished).toMatchObject([{ props: { outcome: "error", firstBuild: true } }]);
+  });
+
   test("project_created names each source", async () => {
     const t = convexTest(schema, modules);
     const alice = t.withIdentity({ subject: ALICE });
