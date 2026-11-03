@@ -765,6 +765,7 @@ export const createProjectWithConversation = mutation({
     projectName: v.string(),
     conversationTitle: v.string(),
     ownerId: v.string(),
+    firstBuildPending: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -775,6 +776,7 @@ export const createProjectWithConversation = mutation({
       name: args.projectName,
       ownerId: args.ownerId,
       updatedAt: now,
+      ...(args.firstBuildPending ? { firstBuildPending: true } : {}),
     });
     await countProjectBuilt(ctx);
 

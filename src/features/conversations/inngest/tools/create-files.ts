@@ -5,6 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface CreateFilesToolOptions {
@@ -31,7 +32,7 @@ export const createCreateFilesTool = ({
   return createTool({
     name: "createFiles",
     description:
-      "Create multiple files at once in the same folder. Use this to batch create files that share the same parent folder. More efficient than creating files one by one.",
+      "Legacy: prefer writeFiles, which takes paths. Create multiple files at once in the same folder. Use this to batch create files that share the same parent folder. More efficient than creating files one by one.",
     parameters: z.object({
       parentId: z
         .string()
@@ -53,7 +54,12 @@ export const createCreateFilesTool = ({
         return `Error: ${parsed.error.issues[0].message}`;
       }
 
-      const { parentId, files } = parsed.data;
+      const { parentId } = parsed.data;
+      const checked = parsed.data.files.map((file) => ({
+        file,
+        ...checkPackageVersions(file.name, file.content),
+      }));
+      const files = checked.map(({ file, content }) => ({ ...file, content }));
 
       try {
         return await toolStep?.run("create-files", async () => {
@@ -68,13 +74,13 @@ export const createCreateFilesTool = ({
                 fileId: resolvedParentId,
               });
               if (!parentFolder) {
-                return `Error: Parent folder with ID "${parentId}" not found. Use listFiles to get valid folder IDs.`;
+                return `Error: Parent folder not found. Prefer writeFiles, which takes paths.`;
               }
               if (parentFolder.type !== "folder") {
                 return `Error: "${parentFolder.name}" is a file, not a folder. Use a folder ID as parentId.`;
               }
             } catch {
-              return `Error: Invalid parentId "${parentId}". Use listFiles to get valid folder IDs, or use empty string for root level.`;
+              return `Error: Invalid parentId. Prefer writeFiles, which takes paths.`;
             }
           }
 
@@ -98,7 +104,11 @@ export const createCreateFilesTool = ({
 
           return (
             response +
-            syntaxErrorNote(files.filter((file) => created.some((r) => r.name === file.name)))
+            syntaxErrorNote(files.filter((file) => created.some((r) => r.name === file.name))) +
+            checked
+              .filter(({ file }) => created.some((r) => r.name === file.name))
+              .map(({ note }) => note)
+              .join("")
           );
         });
       } catch (error) {
