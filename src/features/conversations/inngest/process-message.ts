@@ -16,6 +16,7 @@ import { createSearchFilesTool } from './tools/search-files';
 import { createReadFilesTool } from './tools/read-files';
 import { createListFilesTool } from './tools/list-files';
 import { createUpdateFileTool } from './tools/update-file';
+import { createEditFileTool } from './tools/edit-file';
 import { createCreateFilesTool } from './tools/create-files';
 import { createCreateFolderTool } from './tools/create-folder';
 import { createRenameFileTool } from './tools/rename-file';
@@ -606,6 +607,7 @@ export const processMessage = inngest.createFunction(
       createSearchFilesTool({ projectId, internalKey }),
       createWriteFilesTool({ projectId, internalKey }),
       createUpdateFileTool({ projectId, internalKey }),
+      createEditFileTool({ projectId, internalKey }),
       createCreateFilesTool({ projectId, internalKey }),
       createCreateFolderTool({ projectId, internalKey }),
       createScaffoldViteAppTool({ projectId, internalKey }),
