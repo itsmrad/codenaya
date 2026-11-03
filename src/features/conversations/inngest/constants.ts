@@ -447,3 +447,6 @@ export const MAX_AGENT_STEPS = 40;
 
 export const STEP_BUDGET_NOTE =
   "Step budget reached: no more tool calls. Give the final summary now, and under Notes say what is not done yet.";
+
+/** Model-only stale file payload marker (#298). */
+export const FILE_HISTORY_PLACEHOLDER = "[{detail}; content omitted; re-read if needed]";
