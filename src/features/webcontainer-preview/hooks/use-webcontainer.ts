@@ -5,6 +5,7 @@ import {
   buildFileTree,
   getFilePath
 } from "@/features/webcontainer-preview/utils/file-tree";
+import { injectPreviewBridge } from "@/features/sandbox-preview/utils/preview-bridge";
 import { serialiseDotenv } from "@/features/integrations/dotenv";
 import { buildFlatFileList } from "@/features/sandbox-preview/utils/file-tree";
 import {
@@ -113,6 +114,11 @@ export const useWebContainer = ({
 
         const fileTree = buildFileTree(files);
         await container.mount(fileTree);
+        // Reports the app's runtime errors to the IDE (#223); only the mounted copy changes.
+        const rootIndex = files.find((file) => file.name === "index.html" && !file.parentId);
+        if (rootIndex?.content) {
+          await container.fs.writeFile("index.html", injectPreviewBridge(rootIndex.content));
+        }
 
         // Public environment variables only. This runs in the browser, so a secret
         // written here would be readable by the end user and by anyone they share
@@ -205,7 +211,9 @@ export const useWebContainer = ({
         if (file.type !== "file" || file.storageId || !file.content) continue;
 
         const filePath = getFilePath(file, filesMap);
-        container.fs.writeFile(filePath, file.content).catch(() => {});
+        const content =
+          filePath === "index.html" ? injectPreviewBridge(file.content) : file.content;
+        container.fs.writeFile(filePath, content).catch(() => {});
       }
     }, 500);
 

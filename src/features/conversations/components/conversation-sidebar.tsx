@@ -64,7 +64,7 @@ import {
 import { Id } from "../../../../convex/_generated/dataModel";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { PastConversationsDialog } from "./past-conversations-dialog";
-import { useChatStore } from "../store/use-chat-store";
+import { sendQueuedMessage, useChatStore } from "../store/use-chat-store";
 import { useAgentModel } from "../hooks/use-agent-model";
 import { AgentModelSelect } from "./agent-model-select";
 import { useEnhancePrompt } from "../hooks/use-enhance-prompt";
@@ -322,18 +322,39 @@ export const ConversationSidebar = ({
     }
   };
 
-  // Messages queued from outside the chat ("Ask agent to fix", #300) are sent
-  // once the agent is free, through the same path as a typed one.
+  // Panels outside the chat hold their sends (the preview's Fix) while one is in flight.
+  useEffect(() => {
+    useChatStore.setState({ sendPending: pending !== null });
+  }, [pending]);
+
+  // Messages queued from outside the chat ("Ask agent to fix", #300; the
+  // preview's "Fix with AI", #223) are sent once the agent is free, through the
+  // same path as a typed one, leaving the composer draft alone. Like a typed
+  // message, it shows at once as pending.
   const queuedMessage = useChatStore((state) => state.queuedMessage);
   useEffect(() => {
-    if (!queuedMessage || isProcessing || pending) return;
-    const text = useChatStore.getState().takeQueuedMessage(projectId);
-    // sendMessage only sets state after awaiting the network, not synchronously.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (text) void sendMessage(text);
-    // sendMessage is read fresh when the queue changes.
+    // Wait for the conversation list, or the send would open a new conversation.
+    if (
+      !queuedMessage ||
+      queuedMessage.sending ||
+      pending ||
+      isProcessing ||
+      conversations === undefined
+    ) {
+      return;
+    }
+    // Syncing with the chat store: the send is the external effect.
+    sendQueuedMessage(projectId, async (text) => {
+      setPending({ text, imageUrls: [], userCount });
+      try {
+        return await sendMessage(text);
+      } finally {
+        setPending(null);
+      }
+    }).catch(() => toast.error("Message failed to send"));
+    // sendMessage is recreated every render; the queued message is what matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queuedMessage, isProcessing, pending, projectId]);
+  }, [queuedMessage, pending, isProcessing, conversations, projectId]);
 
   const handleSubmit = async (message: PromptInputMessage) => {
     // If processing and no new message, this is just a stop function

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode, type RefObject } from "react";
 import { Allotment } from "allotment";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -38,6 +38,21 @@ import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-
 import { hasRootPackageJson } from "@/features/sandbox-preview/utils/file-tree";
 import type { BootHistory, BootPhase } from "@/features/sandbox-preview/utils/boot-phase";
 import { NOTHING_TO_PREVIEW } from "@/features/sandbox-preview/utils/boot-plan";
+import {
+  appErrorKey,
+  bannerError,
+  buildFixPrompt,
+  mergeAppError,
+  trackFixAttempts,
+  type AppError,
+  type FixAttempts,
+} from "@/features/sandbox-preview/utils/app-error";
+import { readPreviewMessage } from "@/features/sandbox-preview/utils/preview-bridge";
+import {
+  MAX_FIX_ATTEMPTS,
+  PreviewErrorBanner,
+} from "@/features/sandbox-preview/components/preview-error-banner";
+import { usePublishPreviewErrors } from "@/features/sandbox-preview/hooks/use-preview-errors";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -47,6 +62,12 @@ import { useProject } from "../hooks/use-projects";
 import { useFilesWithContent } from "../hooks/use-files";
 import { markPreviewOpened } from "../utils/first-run";
 import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
+import {
+  useChatSendBlock,
+  useQueueChatMessage,
+  useUnqueueChatMessage,
+  type QueuedMessage,
+} from "@/features/conversations/hooks/use-queue-chat-message";
 import {
   usePublicEnvVars,
   useWithheldSecretCount,
@@ -128,6 +149,93 @@ export const PreviewView = ({
         : "create";
   const reduceMotion = useReducedMotion();
 
+  // The app's own errors (#223): compile errors from the sandbox's dev server,
+  // runtime errors posted by the bridge script injected into the preview.
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [runtimeError, setRuntimeError] = useState<AppError | null>(null);
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const reported = readPreviewMessage(event, iframeRef.current?.contentWindow, previewUrl);
+      if (reported) setRuntimeError((prev) => mergeAppError(prev, reported));
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [previewUrl]);
+  // An edit or a reload may have fixed it; the bridge reports it again if not.
+  const [runtimeErrorScope, setRuntimeErrorScope] = useState({ files, previewUrl, refreshKey });
+  if (
+    runtimeErrorScope.files !== files ||
+    runtimeErrorScope.previewUrl !== previewUrl ||
+    runtimeErrorScope.refreshKey !== refreshKey
+  ) {
+    setRuntimeErrorScope({ files, previewUrl, refreshKey });
+    setRuntimeError(null);
+  }
+  // A compile error is usually why the app also throws, so it goes first.
+  const buildError = activeEngine === "sandbox" ? sandbox.appError : null;
+  const appError = buildError ?? runtimeError;
+  const appErrorId = appError ? appErrorKey(appError) : null;
+  const [dismissedErrorId, setDismissedErrorId] = useState<string | null>(null);
+  const [fixAttempts, setFixAttempts] = useState<FixAttempts>({ errorId: null, count: 0 });
+  const trackedAttempts = trackFixAttempts(fixAttempts, appErrorId);
+  if (trackedAttempts !== fixAttempts) setFixAttempts(trackedAttempts);
+  const attempts = trackedAttempts.errorId === appErrorId ? trackedAttempts.count : 0;
+  const queueChatMessage = useQueueChatMessage();
+  // Read when Fix is clicked, so the published fix doesn't change on every log line.
+  const terminalOutputRef = useRef(terminalOutput);
+  useEffect(() => {
+    terminalOutputRef.current = terminalOutput;
+  }, [terminalOutput]);
+  const chatBlock = useChatSendBlock(projectId);
+  const unqueueChatMessage = useUnqueueChatMessage();
+  // The fix this preview queued, dropped if the preview closes before it is sent.
+  const queuedFixRef = useRef<QueuedMessage | null>(null);
+  useEffect(() => () => {
+    if (queuedFixRef.current) unqueueChatMessage(queuedFixRef.current);
+  }, [unqueueChatMessage]);
+  const fixAppError = useCallback(() => {
+    if (!appError || !appErrorId) return;
+    const message: QueuedMessage = {
+      projectId,
+      text: buildFixPrompt(appError, terminalOutputRef.current),
+      // Only a fix that was actually sent counts towards "Still failing".
+      onSent: () =>
+        setFixAttempts((prev) =>
+          prev.errorId === appErrorId
+            ? { ...prev, count: prev.count + 1 }
+            : { errorId: appErrorId, count: 1 },
+        ),
+    };
+    queuedFixRef.current = message;
+    queueChatMessage(message);
+  }, [appError, appErrorId, projectId, queueChatMessage, setFixAttempts]);
+  // The chat's run block says when a finished run left the preview broken.
+  const canFix = appErrorId !== null && attempts < MAX_FIX_ATTEMPTS;
+  usePublishPreviewErrors(
+    // One: the banner and its fix carry only the error shown (build first).
+    previewUrl && appError ? 1 : 0,
+    canFix ? fixAppError : null,
+  );
+  const shownError = bannerError(appError, {
+    dismissedId: dismissedErrorId,
+    previewReady: Boolean(previewUrl),
+    // Still loading counts as running, so a first build's errors never flash.
+    firstBuildRunning: firstBuild && activeRun !== null,
+  });
+  const errorBanner =
+    shownError && appErrorId ? (
+      <PreviewErrorBanner
+        error={shownError}
+        attempts={attempts}
+        // Still loading counts as working: a fix can't start mid-run.
+        agentWorking={activeRun !== null}
+        chatBlock={chatBlock}
+        onFix={fixAppError}
+        onShowLogs={() => setTerminalChoice("open")}
+        onDismiss={() => setDismissedErrorId(appErrorId)}
+      />
+    ) : null;
+
   // A failed start opens the terminal even when the user keeps it closed, but
   // that isn't saved as their choice: closing it again only lasts for this error.
   const [errorDismissed, setErrorDismissed] = useState(false);
@@ -167,6 +275,8 @@ export const PreviewView = ({
     ) : null;
   const content = (
     <PreviewContent
+      iframeRef={iframeRef}
+      errorBanner={errorBanner}
       error={error}
       isLoading={isLoading}
       bootPhase={bootPhase}
@@ -433,6 +543,8 @@ const ERROR_TITLES: Record<SandboxErrorKind, string> = {
 };
 
 const PreviewContent = ({
+  iframeRef,
+  errorBanner,
   error,
   isLoading,
   bootPhase,
@@ -448,6 +560,9 @@ const PreviewContent = ({
   agentWorking,
   building,
 }: {
+  iframeRef: RefObject<HTMLIFrameElement | null>;
+  /** The app's build or runtime error, over the running preview. */
+  errorBanner: ReactNode;
   error: string | null | undefined;
   isLoading: boolean;
   bootPhase: BootPhase | null;
@@ -524,6 +639,7 @@ const PreviewContent = ({
     {previewUrl && (
       <div className="size-full flex justify-center bg-muted/30">
         <iframe
+          ref={iframeRef}
           key={refreshKey}
           src={previewUrl}
           className="h-full w-full max-w-full border-0 bg-background data-[framed=true]:border-x data-[framed=true]:border-border/50"
@@ -535,6 +651,8 @@ const PreviewContent = ({
         />
       </div>
     )}
+
+    {errorBanner}
   </div>
 );
 
