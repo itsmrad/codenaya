@@ -37,36 +37,52 @@ export const useCommandPalette = create<CommandPaletteStore>()((set) => ({
   commands: {},
 }));
 
+type Handlers = Partial<Record<ProjectCommandId, Run | null>>;
+
+/**
+ * Registers the actions in `handlers` that have one (a `null` handler hides
+ * its action). Each looks its handler up in `getHandlers()` at run time, so it
+ * always runs the latest. Returns the unregister, which leaves an id alone if
+ * another component has registered it since.
+ */
+export const registerProjectCommands = (
+  handlers: Handlers,
+  getHandlers: () => Handlers,
+) => {
+  const registered = new Map<ProjectCommandId, Run>();
+  for (const id of Object.keys(handlers) as ProjectCommandId[]) {
+    if (handlers[id]) registered.set(id, () => getHandlers()[id]?.());
+  }
+  useCommandPalette.setState((state) => ({
+    commands: { ...state.commands, ...Object.fromEntries(registered) },
+  }));
+  return () =>
+    useCommandPalette.setState((state) => {
+      const commands = { ...state.commands };
+      for (const [id, run] of registered) if (commands[id] === run) delete commands[id];
+      return { commands };
+    });
+};
+
 /**
  * Offers IDE actions in the command palette while the calling component is
  * mounted. A `null` handler hides the action (e.g. Publish once published).
  */
-export const useProjectCommands = (
-  handlers: Partial<Record<ProjectCommandId, Run | null>>,
-) => {
+export const useProjectCommands = (handlers: Handlers) => {
   // Read at run time, so a re-render's new closures never re-register.
   const latest = useRef(handlers);
   useEffect(() => {
     latest.current = handlers;
   });
 
+  // Re-register only when the set of available actions changes.
   const ids = (Object.keys(handlers) as ProjectCommandId[])
     .filter((id) => handlers[id])
     .join(",");
 
   useEffect(() => {
     if (!ids) return;
-    const registered = ids.split(",") as ProjectCommandId[];
-    useCommandPalette.setState((state) => {
-      const commands = { ...state.commands };
-      for (const id of registered) commands[id] = () => latest.current[id]?.();
-      return { commands };
-    });
-    return () =>
-      useCommandPalette.setState((state) => {
-        const commands = { ...state.commands };
-        for (const id of registered) delete commands[id];
-        return { commands };
-      });
+    // The effect above has already stored this render's handlers.
+    return registerProjectCommands(latest.current, () => latest.current);
   }, [ids]);
 };

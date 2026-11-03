@@ -141,9 +141,23 @@ test.describe("command palette", () => {
     await palette(page).getByRole("combobox").fill("Toggle chat panel");
     await page.keyboard.press("Enter");
     await expect(page.getByRole("button", { name: "New conversation" })).toBeHidden();
+    // The toolbar brings the hidden panel back.
+    await page.getByRole("button", { name: "Show chat panel" }).click();
+    await expect(page.getByRole("button", { name: "New conversation" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Show chat panel" })).toBeHidden();
+
+    // A chat action shows the hidden panel first.
     await openWith(page, "ControlOrMeta+k");
     await palette(page).getByRole("combobox").fill("Toggle chat panel");
     await page.keyboard.press("Enter");
+    await expect(page.getByRole("button", { name: "New conversation" })).toBeHidden();
+    // Let the closing palette finish animating out, or its input takes the key.
+    await expect(palette(page)).toBeHidden();
+    await openWith(page, "ControlOrMeta+k");
+    await palette(page).getByRole("option", { name: "Version history" }).click();
+    await expect(page.getByRole("dialog", { name: "Version history" })).toBeVisible();
+    // The modal hides the page from screen readers until it closes.
+    await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "New conversation" })).toBeVisible();
   });
 

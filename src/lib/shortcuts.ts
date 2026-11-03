@@ -73,9 +73,13 @@ export const isShortcutSheetKey = (event: KeyboardEvent): boolean => {
 const isInCodeEditor = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement && target.closest(".cm-editor") !== null;
 
-/** Cmd/Ctrl+K outside the code editor, or Cmd/Ctrl+Shift+P anywhere. */
-export const isCommandPaletteKey = (event: KeyboardEvent): boolean => {
-  if (event.defaultPrevented || event.altKey || !(event.metaKey || event.ctrlKey)) return false;
+/**
+ * Cmd/Ctrl+K outside the code editor, or Cmd/Ctrl+Shift+P anywhere. Only ⌘
+ * counts on Mac, so Ctrl+K stays the text fields' native kill-line there.
+ */
+export const isCommandPaletteKey = (event: KeyboardEvent, isMac: boolean): boolean => {
+  const mod = isMac ? event.metaKey : event.ctrlKey;
+  if (event.defaultPrevented || event.altKey || !mod) return false;
   const key = event.key.toLowerCase();
   if (event.shiftKey) return key === "p";
   return key === "k" && !isInCodeEditor(event.target);

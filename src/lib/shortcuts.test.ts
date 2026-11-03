@@ -107,29 +107,37 @@ describe("isShortcutSheetKey", () => {
   describe("isCommandPaletteKey", () => {
     const editor = new FakeElement("DIV", true, true) as unknown as EventTarget;
 
-    it("opens on Cmd/Ctrl+K outside the code editor, text fields included", () => {
-      expect(isCommandPaletteKey(keyEvent({ key: "k", metaKey: true }))).toBe(true);
+    it("opens on ⌘K on Mac and Ctrl+K elsewhere, text fields included", () => {
+      expect(isCommandPaletteKey(keyEvent({ key: "k", metaKey: true }), true)).toBe(true);
       const target = new FakeElement("TEXTAREA") as unknown as EventTarget;
-      expect(isCommandPaletteKey(keyEvent({ key: "k", ctrlKey: true, target }))).toBe(true);
+      expect(isCommandPaletteKey(keyEvent({ key: "k", ctrlKey: true, target }), false)).toBe(true);
+    });
+
+    it("leaves Ctrl+K to the native kill-line on Mac", () => {
+      const target = new FakeElement("TEXTAREA") as unknown as EventTarget;
+      expect(isCommandPaletteKey(keyEvent({ key: "k", ctrlKey: true, target }), true)).toBe(false);
+      expect(isCommandPaletteKey(keyEvent({ key: "p", ctrlKey: true, shiftKey: true }), true)).toBe(false);
     });
 
     it("leaves Cmd/Ctrl+K to quick edit inside the code editor", () => {
-      expect(isCommandPaletteKey(keyEvent({ key: "k", ctrlKey: true, target: editor }))).toBe(false);
+      expect(isCommandPaletteKey(keyEvent({ key: "k", ctrlKey: true, target: editor }), false)).toBe(false);
+      expect(isCommandPaletteKey(keyEvent({ key: "k", metaKey: true, target: editor }), true)).toBe(false);
     });
 
     it("opens on Cmd/Ctrl+Shift+P anywhere, the editor included", () => {
       expect(
-        isCommandPaletteKey(keyEvent({ key: "P", ctrlKey: true, shiftKey: true, target: editor })),
+        isCommandPaletteKey(keyEvent({ key: "P", ctrlKey: true, shiftKey: true, target: editor }), false),
       ).toBe(true);
-      expect(isCommandPaletteKey(keyEvent({ key: "p", metaKey: true, shiftKey: true }))).toBe(true);
+      expect(isCommandPaletteKey(keyEvent({ key: "p", metaKey: true, shiftKey: true }), true)).toBe(true);
     });
 
     it("ignores other combos and keys another handler took", () => {
-      expect(isCommandPaletteKey(keyEvent({ key: "k" }))).toBe(false);
-      expect(isCommandPaletteKey(keyEvent({ key: "p", ctrlKey: true }))).toBe(false);
-      expect(isCommandPaletteKey(keyEvent({ key: "K", ctrlKey: true, shiftKey: true }))).toBe(false);
-      expect(isCommandPaletteKey(keyEvent({ key: "k", ctrlKey: true, altKey: true }))).toBe(false);
-      expect(isCommandPaletteKey(keyEvent({ key: "k", ctrlKey: true, defaultPrevented: true }))).toBe(false);
+      expect(isCommandPaletteKey(keyEvent({ key: "k" }), false)).toBe(false);
+      expect(isCommandPaletteKey(keyEvent({ key: "k", metaKey: true }), false)).toBe(false);
+      expect(isCommandPaletteKey(keyEvent({ key: "p", ctrlKey: true }), false)).toBe(false);
+      expect(isCommandPaletteKey(keyEvent({ key: "K", ctrlKey: true, shiftKey: true }), false)).toBe(false);
+      expect(isCommandPaletteKey(keyEvent({ key: "k", ctrlKey: true, altKey: true }), false)).toBe(false);
+      expect(isCommandPaletteKey(keyEvent({ key: "k", ctrlKey: true, defaultPrevented: true }), false)).toBe(false);
     });
   });
 });

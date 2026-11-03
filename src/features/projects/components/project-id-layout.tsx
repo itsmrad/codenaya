@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect } from "react";
 import { Allotment } from "allotment";
 
 import { useIsCompact } from "@/hooks/use-mobile";
 import { useProjectCommands } from "@/lib/command-palette";
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
 import { ProjectIntegrationsProvider } from "@/features/integrations/components/project-integrations-context";
+
+import { useChatPanelStore } from "../store/use-chat-panel-store";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 
@@ -25,10 +27,12 @@ export const ProjectIdLayout = ({
   // Phones and tablets get a tabbed layout instead: ProjectIdView renders the
   // chat as one of its full-size tabs, so the side-by-side panes are skipped.
   const isCompact = useIsCompact();
-  const [isChatVisible, setIsChatVisible] = useState(true);
+  const { isHidden: isChatHidden, setHidden: setChatHidden } = useChatPanelStore();
   useProjectCommands({
-    "toggle-chat": isCompact ? null : () => setIsChatVisible((visible) => !visible),
+    "toggle-chat": isCompact ? null : () => setChatHidden(!useChatPanelStore.getState().isHidden),
   });
+  // Every project opens with the chat showing.
+  useEffect(() => () => setChatHidden(false), [setChatHidden]);
 
   return (
     <ProjectIntegrationsProvider projectId={projectId}>
@@ -46,7 +50,7 @@ export const ProjectIdLayout = ({
         >
           <Allotment.Pane
             snap
-            visible={isChatVisible}
+            visible={!isChatHidden}
             minSize={MIN_SIDEBAR_WIDTH}
             maxSize={MAX_SIDEBAR_WIDTH}
             preferredSize={DEFAULT_CONVERSATION_SIDEBAR_WIDTH}

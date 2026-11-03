@@ -46,9 +46,11 @@ import {
   useCommandPalette,
 } from "@/lib/command-palette";
 import { isCommandPaletteKey } from "@/lib/shortcuts";
+import { isMacPlatform } from "@/lib/hooks/use-is-mac";
 import { SETTINGS_NAV } from "@/features/settings/nav";
 
 import { useProjects } from "../hooks/use-projects";
+import { useChatPanelStore } from "../store/use-chat-panel-store";
 import { ImportGithubDialog } from "./import-github-dialog";
 import { NewProjectDialog } from "./new-project-dialog";
 import { Doc } from "../../../../convex/_generated/dataModel";
@@ -66,6 +68,13 @@ const PROJECT_COMMAND_ICONS: Record<ProjectCommandId, LucideIcon> = {
   skills: SparklesIcon,
   "env-vars": KeyRoundIcon,
 };
+
+/** Actions that act on the chat, so a hidden chat panel is shown first. */
+const CHAT_COMMANDS = new Set<ProjectCommandId>([
+  "new-conversation",
+  "past-conversations",
+  "version-history",
+]);
 
 const ICON_CLASS = "size-4 text-muted-foreground";
 
@@ -122,7 +131,7 @@ export const CommandPalette = () => {
   useEffect(() => {
     if (!isSignedIn) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!isCommandPaletteKey(event)) return;
+      if (!isCommandPaletteKey(event, isMacPlatform())) return;
       event.preventDefault();
       setOpen(!useCommandPalette.getState().open);
     };
@@ -161,7 +170,10 @@ export const CommandPalette = () => {
                 const Icon = PROJECT_COMMAND_ICONS[id];
                 return (
                   // Values are unique, so "Skills" here and in Go to don't clash.
-                  <CommandItem key={id} value={`project ${label}`} onSelect={run(commands[id]!)}>
+                  <CommandItem key={id} value={`project ${label}`} onSelect={run(() => {
+                    if (CHAT_COMMANDS.has(id)) useChatPanelStore.getState().setHidden(false);
+                    commands[id]!();
+                  })}>
                     <Icon className={ICON_CLASS} />
                     <span>{label}</span>
                   </CommandItem>
