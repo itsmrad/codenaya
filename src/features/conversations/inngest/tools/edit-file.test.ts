@@ -12,6 +12,7 @@ vi.mock("@/lib/convex-client", () => ({
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { hasUncheckedWrites } from "../build-check-gate";
 import { applyEdits, createEditFileTool } from "./edit-file";
+import { KNOWN_GOOD_VERSIONS } from "../known-good-versions";
 
 const step = { run: vi.fn(async (_id: string, fn: () => unknown) => fn()) };
 const ctx = { step } as never;
@@ -170,6 +171,21 @@ describe("editFile tool", () => {
     expect(mocks.mutation).toHaveBeenCalledTimes(1);
     expect(hasUncheckedWrites([{ toolCalls: [{ tool: { name: "editFile" }, content: { data } }] }])).toBe(true);
     logged.mockRestore();
+  });
+
+  it("checks package.json versions like updateFile (#331)", async () => {
+    mocks.query.mockReset();
+    mocks.query
+      .mockResolvedValueOnce([{ _id: "pkg", name: "package.json", type: "file" }])
+      .mockResolvedValueOnce({ _id: "pkg", content: '{"dependencies":{"zod":"^3.0.0"}}' });
+    const data = await createEditFileTool({ projectId, internalKey }).handler(
+      { path: "package.json", edits: [{ oldText: '"zod":"^3.0.0"', newText: '"zod":"^3.0.0","react-router":"latest"' }] } as never,
+      ctx,
+    );
+
+    expect(data).toContain(`react-router "latest" → "${KNOWN_GOOD_VERSIONS["react-router"]}"`);
+    const written = JSON.parse(mocks.mutation.mock.calls[0][1].content);
+    expect(written.dependencies["react-router"]).toBe(KNOWN_GOOD_VERSIONS["react-router"]);
   });
 
   it("reports a syntax error the edit introduced", async () => {

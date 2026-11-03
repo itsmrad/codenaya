@@ -6,6 +6,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
+import { checkPackageVersions } from "./package-versions";
 import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
 import { syntaxErrorNote } from "./syntax-error";
 
@@ -126,16 +127,19 @@ export const createEditFileTool = ({ projectId, internalKey }: EditFileToolOptio
             return `Error: ${result.error} "${path}" was not changed.`;
           }
 
+          const { content: checkedContent, note: versionNote } = checkPackageVersions(file.name, result.content);
+
           await convex.mutation(api.system.updateFile, {
             internalKey,
             projectId,
             fileId: file._id,
-            content: result.content,
+            content: checkedContent,
           });
 
           return (
             `File "${path}" edited successfully` +
-            syntaxErrorNote([{ name: path, content: result.content }])
+            syntaxErrorNote([{ name: path, content: result.content }]) +
+            versionNote
           );
         });
       } catch (error) {
