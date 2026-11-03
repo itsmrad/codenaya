@@ -77,15 +77,19 @@ const tree = (t: T, projectId: Id<"projects">) =>
   });
 
 /** What the pull job does with a remote tree: checkpoint, prune, batches, finish. */
-async function pull(t: T, projectId: Id<"projects">, entries: TreeEntry[], batchSize = 2) {
-  await t.mutation(api.githubSync.createPullCheckpoint, {
+const beforePull = (t: T, projectId: Id<"projects">) =>
+  t.mutation(api.githubSync.createPullCheckpoint, {
     internalKey: INTERNAL_KEY,
     projectId,
     label: "Before pull from GitHub @ abc1234",
   });
+
+async function pull(t: T, projectId: Id<"projects">, entries: TreeEntry[], batchSize = 2) {
+  const checkpointId = await beforePull(t, projectId);
   await t.mutation(api.githubSync.applyPulledFiles, {
     internalKey: INTERNAL_KEY,
     projectId,
+    checkpointId,
     entries: [],
     tree: entries.map(({ path, type }) => ({ path, type })),
   });
@@ -93,12 +97,14 @@ async function pull(t: T, projectId: Id<"projects">, entries: TreeEntry[], batch
     await t.mutation(api.githubSync.applyPulledFiles, {
       internalKey: INTERNAL_KEY,
       projectId,
+      checkpointId,
       entries: entries.slice(i, i + batchSize),
     });
   }
   await t.mutation(api.githubSync.finishPull, {
     internalKey: INTERNAL_KEY,
     projectId,
+    checkpointId,
     sha: "abc1234def",
   });
 }
@@ -162,6 +168,7 @@ describe("GitHub pull (#343)", () => {
     await t.mutation(api.githubSync.applyPulledFiles, {
       internalKey: INTERNAL_KEY,
       projectId,
+      checkpointId: await beforePull(t, projectId),
       entries: [{ path: "src", type: "file", content: "now a file" }],
     });
 
@@ -176,6 +183,7 @@ describe("GitHub pull (#343)", () => {
     await expect(
       t.mutation(api.githubSync.createPullCheckpoint, { internalKey: "wrong", projectId, label: "" }),
     ).rejects.toThrow();
+    const checkpointId = await beforePull(t, projectId);
     await t.run((ctx) =>
       ctx.db.insert("messages", { projectId, conversationId, role: "assistant", content: "", status: "processing" }),
     );
@@ -184,12 +192,57 @@ describe("GitHub pull (#343)", () => {
     ).rejects.toThrow(/Stop the running agent/);
     // Typed, so the job can make it final instead of retrying over the run.
     await expect(
-      t.mutation(api.githubSync.applyPulledFiles, { internalKey: INTERNAL_KEY, projectId, entries: [] }),
-    ).rejects.toMatchObject({ data: { code: "CONFLICT", message: "Stop the running agent before pulling" } });
+      t.mutation(api.githubSync.applyPulledFiles, { internalKey: INTERNAL_KEY, projectId, checkpointId, entries: [] }),
+    ).rejects.toMatchObject({ data: { code: "CONFLICT", message: expect.stringMatching(/^The project changed during the pull\. Restore the "Before pull" checkpoint/) } });
     await expect(
-      t.mutation(api.githubSync.finishPull, { internalKey: INTERNAL_KEY, projectId, sha: "abc" }),
-    ).rejects.toThrow(/Stop the running agent/);
+      t.mutation(api.githubSync.finishPull, { internalKey: INTERNAL_KEY, projectId, checkpointId, sha: "abc" }),
+    ).rejects.toThrow(/changed during the pull/);
     expect(await t.query(api.githubSync.isAgentRunning, { internalKey: INTERNAL_KEY, projectId })).toBe(true);
+  });
+
+  test("refuses to write once a run has finished since the Before pull checkpoint, even one that took no snapshot", async () => {
+    const { t } = setup();
+    const { projectId, conversationId } = await seedProject(t);
+    const checkpointId = await beforePull(t, projectId);
+    const run = (mode?: "plan") =>
+      t.run((ctx) =>
+        ctx.db.insert("messages", {
+          projectId,
+          conversationId,
+          role: "assistant",
+          content: "",
+          status: "completed",
+          ...(mode ? { mode } : {}),
+        }),
+      );
+    const write = () =>
+      t.mutation(api.githubSync.applyPulledFiles, {
+        internalKey: INTERNAL_KEY,
+        projectId,
+        checkpointId,
+        entries: [{ path: "index.html", type: "file", content: "<h1>from GitHub</h1>" }],
+      });
+
+    // A plan-mode reply writes nothing, so the pull may go on.
+    await run("plan");
+    await write();
+    await run();
+
+    await expect(write()).rejects.toMatchObject({ data: { code: "CONFLICT" } });
+    await expect(
+      t.mutation(api.githubSync.finishPull, { internalKey: INTERNAL_KEY, projectId, checkpointId, sha: "abc" }),
+    ).rejects.toThrow(/changed during the pull/);
+  });
+
+  test("refuses to write once the sync was cancelled", async () => {
+    const { t } = setup();
+    const { projectId } = await seedProject(t);
+    const checkpointId = await beforePull(t, projectId);
+    await t.mutation(api.system.updateExportStatus, { internalKey: INTERNAL_KEY, projectId, status: "cancelled" });
+
+    await expect(
+      t.mutation(api.githubSync.applyPulledFiles, { internalKey: INTERNAL_KEY, projectId, checkpointId, entries: [] }),
+    ).rejects.toMatchObject({ data: { code: "CONFLICT", message: expect.stringMatching(/^The pull was cancelled\. Restore/) } });
   });
 
   test("replaces most of a big project without going over the file cap", async () => {

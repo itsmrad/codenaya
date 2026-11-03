@@ -10,6 +10,7 @@ import {
   createCheckpoint,
   runningAgent,
 } from "./checkpoints";
+import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { getOwnedProject } from "./projects";
 
@@ -101,6 +102,34 @@ export const isAgentRunning = query({
   },
 });
 
+const RESTORE_HINT = 'Restore the "Before pull" checkpoint from the history if needed, then pull again.';
+
+/**
+ * A pull writes only while the project is as its "Before pull" checkpoint
+ * left it (#343): no run since, none running, not cancelled. A retry after a
+ * backoff would otherwise write GitHub's tree over a finished run that no
+ * checkpoint holds. Runs are checked themselves, not their checkpoints, which
+ * are best effort.
+ */
+async function assertPullCanWrite(
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  checkpointId: Id<"checkpoints">,
+) {
+  const project = await ctx.db.get("projects", projectId);
+  if (project?.exportStatus === "cancelled") {
+    throw appError("CONFLICT", `The pull was cancelled. ${RESTORE_HINT}`);
+  }
+  const checkpoint = await ctx.db.get("checkpoints", checkpointId);
+  if (
+    checkpoint?.projectId !== projectId ||
+    (await runningAgent(ctx, projectId)) ||
+    (await runsSince(ctx, projectId, checkpoint._creationTime)).runs.length > 0
+  ) {
+    throw appError("CONFLICT", `The project changed during the pull. ${RESTORE_HINT}`);
+  }
+}
+
 /**
  * One batch of a pull (#343): writes these files over the project's. With
  * `tree` (the whole pulled tree, sent once before the batches), it first
@@ -111,13 +140,15 @@ export const applyPulledFiles = mutation({
   args: {
     internalKey: v.string(),
     projectId: v.id("projects"),
+    // The pull's "Before pull" checkpoint.
+    checkpointId: v.id("checkpoints"),
     entries: v.array(treeEntryValidator),
     tree: v.optional(v.array(v.object({ path: v.string(), type: treeEntryValidator.fields.type }))),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
-    await assertNoRunningAgent(ctx, args.projectId, "pulling");
+    await assertPullCanWrite(ctx, args.projectId, args.checkpointId);
     const keep = args.tree && new Map(args.tree.map(({ path, type }) => [path, type]));
     await applyTree(ctx, args.projectId, args.entries, keep);
     return null;
@@ -126,13 +157,18 @@ export const applyPulledFiles = mutation({
 
 /** Ends a pull (#343): moves the sync point to the pulled commit, so later pushes build on it. */
 export const finishPull = mutation({
-  args: { internalKey: v.string(), projectId: v.id("projects"), sha: v.string() },
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    checkpointId: v.id("checkpoints"),
+    sha: v.string(),
+  },
   returns: v.null(),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     const project = await ctx.db.get("projects", args.projectId);
     if (!project?.githubSync) throw new Error("Project is not linked to a GitHub repository");
-    await assertNoRunningAgent(ctx, args.projectId, "pulling");
+    await assertPullCanWrite(ctx, args.projectId, args.checkpointId);
     const { repo, branch } = project.githubSync;
     await ctx.db.patch("projects", args.projectId, {
       githubSync: { repo, branch, lastSyncedSha: args.sha, lastSyncedAt: Date.now() },

@@ -249,6 +249,12 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
               ({githubSync.branch})
             </p>
           </div>
+          {exportStatus === "cancelled" && (
+            <p className="text-xs text-muted-foreground">
+              Sync cancelled. If a pull had started changing files, restore its
+              &ldquo;Before pull&rdquo; checkpoint from the history.
+            </p>
+          )}
           {githubSync.syncBranchSha && (
             <p className="text-xs text-muted-foreground">
               {githubSync.branch} changed on GitHub, so your changes are on the{" "}

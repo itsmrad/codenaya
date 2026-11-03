@@ -53,10 +53,16 @@ function tarball(entries: Entry[]) {
 
 const fetchMock = vi.fn();
 
-const runJob = () =>
+/** One attempt of the job. Steps in `done` return their saved result, as on an Inngest retry. */
+const runJob = (done = new Map<string, unknown>()) =>
   (pullFromGithub as unknown as (ctx: unknown) => Promise<unknown>)({
     event: { data: { projectId: "p1", userId: "user_1", sha: "abc1234def" } },
-    step: { run: (_name: string, fn: () => unknown) => fn() },
+    step: {
+      run: async (name: string, fn: () => unknown) => {
+        if (!done.has(name)) done.set(name, await fn());
+        return done.get(name);
+      },
+    },
   });
 
 /** Each Convex mutation the job ran, by name, with its arguments. */
@@ -79,9 +85,12 @@ describe("pullFromGithub (#343)", () => {
     vi.clearAllMocks();
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
     vi.stubGlobal("fetch", fetchMock);
-    mocks.mutation.mockImplementation(async (fn) =>
-      getFunctionName(fn).endsWith("generateUploadUrl") ? "https://upload.test/1" : null
-    );
+    mocks.mutation.mockImplementation(async (fn) => {
+      const name = getFunctionName(fn);
+      if (name.endsWith("generateUploadUrl")) return "https://upload.test/1";
+      if (name.endsWith("createPullCheckpoint")) return "cp_1";
+      return null;
+    });
     serve([
       { path: "src/", type: "Directory" },
       { path: "src/app.ts", body: "export {};" },
@@ -121,7 +130,38 @@ describe("pullFromGithub (#343)", () => {
       { path: "src/app.ts", type: "file", content: "export {};" },
       { path: "index.html", type: "file", content: "<h1>from GitHub</h1>" },
     ]);
-    expect(finish).toMatchObject({ sha: "abc1234def" });
+    expect(finish).toMatchObject({ sha: "abc1234def", checkpointId: "cp_1" });
+    // Every write names the checkpoint, so Convex can refuse once a run came after it.
+    expect(written().every(([, args]) => args.checkpointId === "cp_1")).toBe(true);
+  });
+
+  it("refuses for good on a retry when a run finished during the backoff", async () => {
+    const changed = new ConvexError({
+      code: "CONFLICT",
+      message: 'The project changed during the pull. Restore the "Before pull" checkpoint from the history if needed, then pull again.',
+    });
+    let attempt = 0;
+    mocks.mutation.mockImplementation(async (fn) => {
+      const name = getFunctionName(fn);
+      if (name.endsWith("createPullCheckpoint")) return "cp_1";
+      if (name.endsWith("applyPulledFiles")) {
+        attempt += 1;
+        // First attempt: a transient failure. By the retry, a run has finished.
+        if (attempt === 1) throw new Error("Convex is unavailable");
+        throw changed;
+      }
+      return null;
+    });
+    const done = new Map<string, unknown>();
+
+    await expect(runJob(done)).rejects.toMatchObject({ name: "Error" });
+    await expect(runJob(done)).rejects.toMatchObject({
+      name: "NonRetriableError",
+      message: expect.stringMatching(/changed during the pull\. Restore the "Before pull" checkpoint/),
+    });
+    // The checkpoint is the first attempt's, never retaken over a half-pulled tree.
+    expect(calls().filter(([name]) => name === "createPullCheckpoint")).toHaveLength(1);
+    expect(calls().map(([name]) => name)).not.toContain("finishPull");
   });
 
   it("uploads binaries and sends them by blob id", async () => {

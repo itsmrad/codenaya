@@ -11,7 +11,7 @@ export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 export type RepoArchive = {
   folders: string[];
   files: { path: string; content: Buffer<ArrayBuffer> }[];
-  // Entries left out: symlinks and submodules.
+  // Entries left out, such as symlinks. (Submodules arrive as empty folders.)
   skipped: string[];
 };
 
@@ -55,7 +55,7 @@ export async function readRepoArchive(
       if (path && entry.type === "Directory") {
         archive.folders.push(path);
       }
-      // Symlinks and submodules aren't imported.
+      // Symlinks aren't imported; submodules are empty folders in the archive.
       if (path && entry.type !== "File" && entry.type !== "Directory") {
         archive.skipped.push(path);
       }

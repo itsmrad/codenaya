@@ -34,6 +34,14 @@ export const pullFromGithub = inngest.createFunction(
   {
     id: "pull-from-github",
     concurrency: [{ key: "event.data.projectId", limit: 1 }],
+    // Takes effect between steps; within the apply step, the Convex side
+    // refuses the next batch once the status reads "cancelled".
+    cancelOn: [
+      {
+        event: "github/export.cancel",
+        if: "event.data.projectId == async.data.projectId",
+      },
+    ],
     triggers: [{ event: "github/sync.pull" }],
     onFailure: async ({ event, error, step }) => {
       const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
@@ -76,8 +84,8 @@ export const pullFromGithub = inngest.createFunction(
     const [owner, repo] = project.githubSync.repo.split("/");
 
     // Its own step, so a retried apply never snapshots a half-pulled project.
-    await step.run("create-checkpoint", async () => {
-      await convex
+    const checkpointId = await step.run("create-checkpoint", async () => {
+      return await convex
         .mutation(api.githubSync.createPullCheckpoint, {
           internalKey,
           projectId,
@@ -119,6 +127,7 @@ export const pullFromGithub = inngest.createFunction(
         .mutation(api.githubSync.applyPulledFiles, {
           internalKey,
           projectId,
+          checkpointId,
           entries: [],
           tree: [
             ...folders.map((path) => ({ path, type: "folder" as const })),
@@ -136,7 +145,9 @@ export const pullFromGithub = inngest.createFunction(
           entries.push({ path: file.path, type: "file", content });
         } else {
           // shortcut: re-uploads unchanged binaries and applyTree drops the
-          // copy; compare hashes first if pulls of asset-heavy repos get slow.
+          // copy, and blobs uploaded before a failed or refused batch are
+          // never referenced or freed; compare hashes first (and upload only
+          // changed files) if asset-heavy repos make either matter.
           const storageId = await uploadBlob(internalKey, file.content);
           entries.push({ path: file.path, type: "file", storageId });
         }
@@ -145,11 +156,11 @@ export const pullFromGithub = inngest.createFunction(
       // Folders sort first, so each batch's parents already exist.
       for (const batch of chunkFiles(entries)) {
         await convex
-          .mutation(api.githubSync.applyPulledFiles, { internalKey, projectId, entries: batch })
+          .mutation(api.githubSync.applyPulledFiles, { internalKey, projectId, checkpointId, entries: batch })
           .catch(refusalIsFinal);
       }
       await convex
-        .mutation(api.githubSync.finishPull, { internalKey, projectId, sha })
+        .mutation(api.githubSync.finishPull, { internalKey, projectId, checkpointId, sha })
         .catch(refusalIsFinal);
     });
 
@@ -167,8 +178,9 @@ export const pullFromGithub = inngest.createFunction(
 );
 
 /**
- * Our Convex refusals (an agent started running, the file cap) are final: a
- * retry would only write over the run. Their message is shown to the user.
+ * Our Convex refusals (a run since the checkpoint, a cancel, the file cap)
+ * are final: a retry would only write over the run. Their message, which says
+ * how to undo a half-applied pull, is shown to the user.
  */
 function refusalIsFinal(error: unknown): never {
   const refusal = getAppError(error);
