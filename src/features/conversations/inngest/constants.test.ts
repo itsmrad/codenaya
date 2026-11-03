@@ -128,6 +128,12 @@ describe("coding agent prompt consistency (#293)", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/call listFiles again|Re-read critical files/);
   });
 
+  it("addresses files by path from the prompt's file list (#292)", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain('Read the workspace structure from the "Project files" section');
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Write files with writeFiles by path");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/Call listFiles to inspect|Create ALL folders first|createFolder|createFiles|folder IDs/);
+  });
+
   it("keeps edits minimal and the performance rules out of the base prompt", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("make the smallest correct change");
     expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("react_performance_rules");

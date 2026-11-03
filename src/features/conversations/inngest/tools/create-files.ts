@@ -32,7 +32,7 @@ export const createCreateFilesTool = ({
   return createTool({
     name: "createFiles",
     description:
-      "Create multiple files at once in the same folder. Use this to batch create files that share the same parent folder. More efficient than creating files one by one.",
+      "Legacy: prefer writeFiles, which takes paths. Create multiple files at once in the same folder. Use this to batch create files that share the same parent folder. More efficient than creating files one by one.",
     parameters: z.object({
       parentId: z
         .string()
@@ -74,13 +74,13 @@ export const createCreateFilesTool = ({
                 fileId: resolvedParentId,
               });
               if (!parentFolder) {
-                return `Error: Parent folder with ID "${parentId}" not found. Use listFiles to get valid folder IDs.`;
+                return `Error: Parent folder not found. Prefer writeFiles, which takes paths.`;
               }
               if (parentFolder.type !== "folder") {
                 return `Error: "${parentFolder.name}" is a file, not a folder. Use a folder ID as parentId.`;
               }
             } catch {
-              return `Error: Invalid parentId "${parentId}". Use listFiles to get valid folder IDs, or use empty string for root level.`;
+              return `Error: Invalid parentId. Prefer writeFiles, which takes paths.`;
             }
           }
 
