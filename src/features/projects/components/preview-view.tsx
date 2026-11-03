@@ -40,6 +40,7 @@ import type { BootHistory, BootPhase } from "@/features/sandbox-preview/utils/bo
 import { NOTHING_TO_PREVIEW } from "@/features/sandbox-preview/utils/boot-plan";
 import {
   appErrorKey,
+  bannerError,
   buildFixPrompt,
   mergeAppError,
   type AppError,
@@ -206,6 +207,25 @@ export const PreviewView = ({
     previewUrl && appError ? 1 : 0,
     canFix ? fixAppError : null,
   );
+  const shownError = bannerError(appError, {
+    dismissedId: dismissedErrorId,
+    previewReady: Boolean(previewUrl),
+    // Still loading counts as running, so a first build's errors never flash.
+    firstBuildRunning: firstBuild && activeRun !== null,
+  });
+  const errorBanner =
+    shownError && appErrorId ? (
+      <PreviewErrorBanner
+        error={shownError}
+        attempts={fixAttempts[appErrorId] ?? 0}
+        // Still loading counts as working: a fix can't start mid-run.
+        agentWorking={activeRun !== null}
+        sending={chatBusy}
+        onFix={fixAppError}
+        onShowLogs={() => setTerminalChoice("open")}
+        onDismiss={() => setDismissedErrorId(appErrorId)}
+      />
+    ) : null;
 
   // A failed start opens the terminal even when the user keeps it closed, but
   // that isn't saved as their choice: closing it again only lasts for this error.
@@ -247,6 +267,7 @@ export const PreviewView = ({
   const content = (
     <PreviewContent
       iframeRef={iframeRef}
+      errorBanner={errorBanner}
       error={error}
       isLoading={isLoading}
       bootPhase={bootPhase}
@@ -261,20 +282,6 @@ export const PreviewView = ({
       onUseWebContainer={() => switchEngine("webcontainer")}
       agentWorking={Boolean(activeRun)}
       building={building}
-      errorBanner={
-        appError && appErrorId !== dismissedErrorId && previewUrl && !building ? (
-          <PreviewErrorBanner
-            error={appError}
-            attempts={fixAttempts[appErrorId!] ?? 0}
-            // Still loading counts as working: a fix can't start mid-run.
-            agentWorking={activeRun !== null}
-            sending={chatBusy}
-            onFix={fixAppError}
-            onShowLogs={() => setTerminalChoice("open")}
-            onDismiss={() => setDismissedErrorId(appErrorId)}
-          />
-        ) : null
-      }
     />
   );
 
@@ -528,6 +535,7 @@ const ERROR_TITLES: Record<SandboxErrorKind, string> = {
 
 const PreviewContent = ({
   iframeRef,
+  errorBanner,
   error,
   isLoading,
   bootPhase,
@@ -542,9 +550,10 @@ const PreviewContent = ({
   onUseWebContainer,
   agentWorking,
   building,
-  errorBanner,
 }: {
   iframeRef: RefObject<HTMLIFrameElement | null>;
+  /** The app's build or runtime error, over the running preview. */
+  errorBanner: ReactNode;
   error: string | null | undefined;
   isLoading: boolean;
   bootPhase: BootPhase | null;
@@ -561,8 +570,6 @@ const PreviewContent = ({
   agentWorking?: boolean;
   /** The first-build placeholder, shown over the engine until the run ends. */
   building: ReactNode;
-  /** The app's build or runtime error, over the running preview. */
-  errorBanner: ReactNode;
 }) => (
   <div className="size-full rounded-xl overflow-hidden relative isolate">
     <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />

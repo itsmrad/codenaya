@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   PREVIEW_BRIDGE_SCRIPT,
   PREVIEW_MESSAGE_SOURCE,
+  firstError,
   injectPreviewBridge,
   insertBridge,
   readPreviewMessage,
@@ -86,5 +87,28 @@ describe("readPreviewMessage", () => {
     const error = readPreviewMessage({ ...event, data: { ...data, message: long, stack: long } }, frame, previewUrl);
     expect(error?.message).toHaveLength(2048);
     expect(error?.stack).toHaveLength(2048);
+  });
+});
+
+describe("firstError", () => {
+  const error = new Error("Render exploded");
+
+  it("finds the Error in any argument position", () => {
+    expect(firstError([error])).toBe(error);
+    // React 19: the error boundary's message first, the Error second (#335).
+    expect(firstError(["The above error occurred in the <App> component.", error])).toBe(error);
+    expect(firstError(["%o\n\n%s", error, "info"])).toBe(error);
+  });
+
+  it("returns null when no argument is an Error", () => {
+    expect(firstError([])).toBeNull();
+    expect(firstError(["Warning: something", { message: "not an Error" }, 42])).toBeNull();
+  });
+
+  it("works from its source alone, the way the bridge script runs it", () => {
+    const fromSource = new Function(`return (${String(firstError)});`)() as typeof firstError;
+    expect(fromSource(["boundary message", error])).toBe(error);
+    expect(fromSource(["no error here"])).toBeNull();
+    expect(PREVIEW_BRIDGE_SCRIPT).toContain(String(firstError));
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   appErrorKey,
+  bannerError,
   buildFixPrompt,
   codeBlock,
   detectBuildError,
@@ -130,5 +131,24 @@ describe("codeBlock", () => {
   it("keeps a fix prompt's error inside its block", () => {
     const prompt = buildFixPrompt({ kind: "build", message: "Unexpected ``` here" }, "");
     expect(prompt).toContain("````\nUnexpected ``` here\n````");
+  });
+});
+
+describe("bannerError", () => {
+  const error = { kind: "build" as const, message: "boom", file: "src/App.tsx" };
+  const shown = { dismissedId: null, previewReady: true, firstBuildRunning: false };
+
+  it("shows an error over a running preview", () => {
+    expect(bannerError(error, shown)).toBe(error);
+  });
+
+  it("hides it while a new project's first build is still running (#337)", () => {
+    expect(bannerError(error, { ...shown, firstBuildRunning: true })).toBeNull();
+  });
+
+  it("hides it once dismissed, without a preview, or with no error", () => {
+    expect(bannerError(error, { ...shown, dismissedId: appErrorKey(error) })).toBeNull();
+    expect(bannerError(error, { ...shown, previewReady: false })).toBeNull();
+    expect(bannerError(null, shown)).toBeNull();
   });
 });

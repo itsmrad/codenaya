@@ -65,6 +65,21 @@ export const isHmrSuccess = (chunk: string) => HMR_SUCCESS.test(clean(chunk));
 export const appErrorKey = (error: AppError) =>
   `${error.kind}\n${error.message}\n${error.file ?? ""}`;
 
+/**
+ * The error the banner shows, or null: not once dismissed, not without a
+ * running preview, and not while a new project's first build is still being
+ * written, when half-written files are expected to fail (#337).
+ */
+export const bannerError = (
+  error: AppError | null,
+  {
+    dismissedId,
+    previewReady,
+    firstBuildRunning,
+  }: { dismissedId: string | null; previewReady: boolean; firstBuildRunning: boolean },
+) =>
+  error && previewReady && !firstBuildRunning && appErrorKey(error) !== dismissedId ? error : null;
+
 /** Keeps the shown error when a repeat arrives, so HMR re-throws don't flicker. */
 export const mergeAppError = (prev: AppError | null, next: AppError) =>
   prev && appErrorKey(prev) === appErrorKey(next) && prev.line ? prev : next;

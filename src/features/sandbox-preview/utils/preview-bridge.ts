@@ -7,7 +7,20 @@ export const PREVIEW_MESSAGE_SOURCE = "codenaya-preview";
 export const PREVIEW_PROTOCOL_VERSION = 1;
 
 /**
- * Runs inside the previewed app and reports uncaught errors to the IDE. The
+ * The first Error among console arguments, wherever it sits: React logs a
+ * caught render error after the error boundary's message (#335). Runs inside
+ * the preview from its source, so it must stay self-contained.
+ */
+export function firstError(args: ArrayLike<unknown>): Error | null {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] instanceof Error) return args[i] as Error;
+  }
+  return null;
+}
+
+/**
+ * Runs inside the previewed app and reports uncaught errors to the IDE, plus
+ * errors an error boundary caught, which React reports only to console.error. The
  * preview is cross-origin, so this is the only way they leave the iframe. It is
  * injected when served (E2B proxy) or mounted (WebContainer), never written to
  * the user's files, so exports stay clean.
@@ -33,6 +46,13 @@ window.addEventListener("unhandledrejection", function (event) {
   var reason = event.reason;
   post((reason && reason.message) || String(reason), reason && reason.stack);
 });
+var firstError = ${String(firstError)};
+var consoleError = console.error;
+console.error = function () {
+  var error = firstError(arguments);
+  if (error) post(error.message || String(error), error.stack);
+  return consoleError.apply(this, arguments);
+};
 })();</script>`;
 
 /**
