@@ -1,27 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MotionConfig, motion } from "motion/react";
 import { useUser } from "@clerk/nextjs";
 import { GitBranch, Search } from "lucide-react";
 
 import { useIsMac } from "@/lib/hooks/use-is-mac";
 import { Kbd } from "@/components/ui/kbd";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CommunityRail } from "@/features/showcase/components/community-rail";
 import { StarterTemplates } from "@/features/templates/components/starter-templates";
 import { takePendingTemplate } from "@/features/templates/utils/pending-template";
 
 import { useProjects } from "../hooks/use-projects";
+import { useDashboardTab } from "../hooks/use-dashboard-tab";
 import { useCreateProjectFromPrompt } from "../hooks/use-create-project-from-prompt";
 import { takePendingPrompt } from "../utils/pending-prompt";
 import { takePendingImport } from "../utils/pending-import";
 import { githubRepoUrl, parseGithubRepo } from "../utils/github-repo";
+import type { DashboardTab } from "../utils/dashboard-tab";
 import { ProjectsCommandDialog } from "./projects-command-dialog";
 import { FirstRunChecklist } from "./first-run-checklist";
 import { ImportGithubDialog } from "./import-github-dialog";
 import { NewProjectDialog } from "./new-project-dialog";
 import { PromptComposer } from "./prompt-composer";
 import { ProjectsGrid } from "./projects-grid";
+import { RecentProjects } from "./recent-projects";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -39,8 +43,12 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
   const { user } = useUser();
 
   const allProjects = useProjects();
+  // First-run users keep the stacked layout; returning users (and the loading
+  // state, since most visits are returning) get Recent plus tabs.
   const hasNoProjects = allProjects?.length === 0;
   const { createProject, isSubmitting } = useCreateProjectFromPrompt();
+  const [tab, setTab] = useDashboardTab();
+  const tabsRef = useRef<HTMLDivElement>(null);
 
   // A template picked on /showcase or a prompt typed on the landing page
   // before signing up: create its project now. Taking them clears them, so
@@ -87,6 +95,26 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  const checklist = (
+    <FirstRunChecklist
+      projects={allProjects}
+      onNewProject={() => setNewProjectDialogOpen(true)}
+    />
+  );
+  const projectsGrid = (
+    <ProjectsGrid
+      projects={allProjects}
+      onNewProject={() => setNewProjectDialogOpen(true)}
+      onImport={() => setImportDialogOpen(true)}
+    />
+  );
+  const templates = (
+    <StarterTemplates
+      title="Start from a template"
+      description="Official starters that boot in the preview, then the agent builds them out"
+    />
+  );
+
   return (
     <MotionConfig reducedMotion="user">
       <ProjectsCommandDialog
@@ -110,7 +138,11 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
 
       <main className="h-full overflow-y-auto bg-background">
         {/* ─── Hero: the prompt composer ─── */}
-        <section className="relative isolate overflow-hidden px-4 pt-14 pb-12 md:px-8 md:pt-20 md:pb-16">
+        <section
+          className={`relative isolate overflow-hidden px-4 md:px-8 ${
+            hasNoProjects ? "pt-14 pb-12 md:pt-20 md:pb-16" : "pt-6 pb-6 md:pt-12 md:pb-10"
+          }`}
+        >
           {/* Static backdrop: a soft brand glow over a dot grid that fades out. */}
           <div aria-hidden className="absolute inset-0 -z-10">
             <div className="absolute inset-0 bg-[radial-gradient(color-mix(in_oklab,var(--foreground)_10%,transparent)_1px,transparent_1px)] bg-size-[22px_22px] mask-[radial-gradient(ellipse_70%_60%_at_50%_0%,black,transparent)]" />
@@ -172,27 +204,49 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
           </div>
         </section>
 
-        {/* ─── Your work, then the community ─── */}
+        {/* ─── Your work, then templates and the community ─── */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.5, delay: 0.2, ease: EASE }}
-          className="mx-auto max-w-6xl space-y-14 px-4 pb-16 md:px-8"
+          className={`mx-auto max-w-6xl px-4 pb-16 md:px-8 ${hasNoProjects ? "space-y-14" : "space-y-10"}`}
         >
-          <FirstRunChecklist
-            projects={allProjects}
-            onNewProject={() => setNewProjectDialogOpen(true)}
-          />
-          <ProjectsGrid
-            projects={allProjects}
-            onNewProject={() => setNewProjectDialogOpen(true)}
-            onImport={() => setImportDialogOpen(true)}
-          />
-          <StarterTemplates
-            title="Start from a template"
-            description="Official starters that boot in the preview, then the agent builds them out"
-          />
-          <CommunityRail />
+          {hasNoProjects ? (
+            <>
+              {checklist}
+              {projectsGrid}
+              {templates}
+              <CommunityRail />
+            </>
+          ) : (
+            <>
+              <RecentProjects
+                projects={allProjects}
+                onViewAll={() => {
+                  setTab("projects");
+                  tabsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              />
+              {checklist}
+              <Tabs
+                ref={tabsRef}
+                value={tab}
+                onValueChange={(value) => setTab(value as DashboardTab)}
+                className="scroll-mt-4 gap-6"
+              >
+                <TabsList>
+                  <TabsTrigger value="projects" className="px-4">Projects</TabsTrigger>
+                  <TabsTrigger value="templates" className="px-4">Templates</TabsTrigger>
+                  <TabsTrigger value="community" className="px-4">Community</TabsTrigger>
+                </TabsList>
+                <TabsContent value="projects">{projectsGrid}</TabsContent>
+                <TabsContent value="templates">{templates}</TabsContent>
+                <TabsContent value="community">
+                  <CommunityRail />
+                </TabsContent>
+              </Tabs>
+            </>
+          )}
         </motion.div>
       </main>
     </MotionConfig>

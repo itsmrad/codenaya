@@ -21,6 +21,23 @@ export const messageStepValidator = v.object({
   recipeIds: v.optional(v.array(v.string())),
 });
 
+/**
+ * Why a run was stopped as stuck (#306): the loop it was in, the file in the
+ * loop (by path, or by id for calls made before #292), and the repeated error
+ * with its normalised signature (for the next run).
+ */
+export const stuckRunValidator = v.object({
+  reason: v.union(
+    v.literal("repeated-error"),
+    v.literal("repeated-write"),
+    v.literal("repeated-syntax-error"),
+  ),
+  fileId: v.optional(v.string()),
+  path: v.optional(v.string()),
+  error: v.optional(v.string()),
+  signature: v.optional(v.string()),
+});
+
 export const aiProviderValidator = v.union(
   v.literal("openrouter"),
   v.literal("openai"),
@@ -184,6 +201,9 @@ export default defineSchema({
         devCommand: v.optional(v.string()),
       })
     ),
+    // Always-on agent instructions from the owner (#299), at most
+    // MAX_PROJECT_INSTRUCTIONS_LENGTH characters.
+    instructions: v.optional(v.string()),
     // Set when the owner deletes the project. The project is hidden at once
     // while `projects.deleteBatch` removes its data in the background.
     deletingAt: v.optional(v.number()),
@@ -287,6 +307,8 @@ export default defineSchema({
     images: v.optional(v.array(v.id("_storage"))),
     // Assistant messages only: a plan-mode reply, which wrote no files (#120).
     mode: v.optional(v.literal("plan")),
+    // Assistant messages only: the run was stopped going in circles (#306).
+    stuck: v.optional(stuckRunValidator),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"])

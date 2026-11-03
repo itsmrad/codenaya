@@ -7,11 +7,13 @@ import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { checkPackageVersions } from "./package-versions";
 import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
+import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface UpdateFileToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  registry?: RegistryCheck;
 }
 
 // `fileId` is not offered to the model; it reads tool calls made before #292.
@@ -24,6 +26,7 @@ const paramsSchema = z.object({
 export const createUpdateFileTool = ({
   projectId,
   internalKey,
+  registry = createRegistryCheck(),
 }: UpdateFileToolOptions) => {
   return createTool({
     name: "updateFile",
@@ -38,8 +41,6 @@ export const createUpdateFileTool = ({
         return `Error: ${parsed.error.issues[0].message}`;
       }
 
-      const { content } = parsed.data;
-
       try {
         return await toolStep?.run("update-file", async () => {
           const index = indexProjectFiles(await getProjectFiles(internalKey, projectId));
@@ -51,19 +52,22 @@ export const createUpdateFileTool = ({
             return `Error: "${path}" is a folder, not a file. You can only update file contents.`;
           }
 
-          const { content: checkedContent, note: versionNote } = checkPackageVersions(file.name, content);
-
+          const { content: checkedContent, note: versionNote } = checkPackageVersions(file.name, parsed.data.content);
+          const rewriteIcons = await getIconRewriter(internalKey, projectId, [{ path, content: checkedContent }]);
+          const prepared = rewriteIcons(checkedContent, path);
+          const { content } = prepared;
           await convex.mutation(api.system.updateFile, {
             internalKey,
             projectId,
             fileId: file._id,
-            content: checkedContent,
+            content,
           });
 
           return (
             `File "${path}" updated successfully` +
             syntaxErrorNote([{ name: path, content }]) +
-            versionNote
+            versionNote +
+            await postWriteNote(internalKey, projectId, [file._id], registry, prepared.rewrites)
           );
         })
       } catch (error) {

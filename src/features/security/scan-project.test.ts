@@ -98,12 +98,26 @@ describe("scanProject", () => {
         { path: "apps/web/.env.local", content: "" },
         { path: ".env.example", content: "API_KEY=" },
         { path: ".env.sample", content: "API_KEY=" },
+        { path: ".env.template", content: "API_KEY=" },
+        { path: ".env.dist", content: "API_KEY=" },
         { path: "src/env.ts", content: "export {}" },
       ],
       [],
     );
 
     expect(rulesOf(findings)).toEqual([".env:null:env-file", "apps/web/.env.local:null:env-file"]);
+  });
+
+  it("rates a .env with only public-prefixed keys as medium", () => {
+    const severityOf = (content: string) =>
+      scanProject([{ path: ".env", content }], []).find((f) => f.rule === "env-file")?.severity;
+
+    expect(
+      severityOf("# public only\nVITE_API_URL=https://api.example.com\nexport NEXT_PUBLIC_SITE=x\nPUBLIC_NAME=y"),
+    ).toBe("medium");
+    expect(severityOf("VITE_API_URL=https://api.example.com\nDATABASE_URL=postgres://localhost/app")).toBe(
+      "high",
+    );
   });
 
   it("finds stored secret values written into a file", () => {
