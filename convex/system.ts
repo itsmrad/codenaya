@@ -5,6 +5,7 @@ import { mutation, query, type QueryCtx } from "./_generated/server";
 import {
   aiProviderValidator,
   messageStepValidator,
+  stuckRunValidator,
   runModelValidator,
 } from "./schema";
 import { createCheckpoint } from "./checkpoints";
@@ -117,6 +118,7 @@ export const updateMessageContent = mutation({
     internalKey: v.string(),
     messageId: v.id("messages"),
     content: v.string(),
+    stuck: v.optional(stuckRunValidator),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -125,6 +127,7 @@ export const updateMessageContent = mutation({
       content: args.content,
       status: "completed" as const,
       completedAt: Date.now(),
+      ...(args.stuck ? { stuck: args.stuck } : {}),
     });
   },
 });
