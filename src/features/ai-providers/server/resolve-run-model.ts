@@ -330,12 +330,12 @@ export class ProviderKeyError extends Error {}
 export const KEY_FAILURE_SUFFIX = "Your request was not sent to Codenaya's models.";
 
 /**
- * A run whose message has images, on a model that can't read them: the
- * catalog changed after the send (the model was removed, hidden or lost
- * vision), so the run never sends the images (#322).
+ * A run whose message has images, when the catalog changed after the send:
+ * the model picked for it was removed or hidden (so another one would run) or
+ * lost vision. The run never sends the images (#322).
  */
 export const RUN_IMAGES_REFUSED_MESSAGE =
-  "The model for this chat can't read images anymore. Pick a model that can read images and send again. " +
+  "The model picked for this chat can't take images anymore. Pick a model that can read images and send again. " +
   KEY_FAILURE_SUFFIX;
 
 export const keyFailureMessage = (reason: string) =>
@@ -351,7 +351,11 @@ export interface RunModel {
   coding: (temperature?: number) => AgentKitModel;
   /** The conversation title model, on the same provider. */
   title: (temperature?: number) => AgentKitModel;
-  /** Whether the coding model reads images, as resolved now, not at send time. */
+  /**
+   * Whether this run may send images: the model reads them, as resolved now,
+   * and is the model the send picked. A substitute (the default, run when the
+   * pick was removed or hidden) was never checked against Auto's pool.
+   */
   acceptsImages: boolean;
   /**
    * BYOK only: whether the provider still accepts the key (the free
@@ -409,7 +413,7 @@ export async function resolveRunModel({
     return {
       coding: (temperature) => platformAgentModel(model.provider, model.providerModelId, temperature),
       title: (temperature) => platformAgentModel(title.provider, title.providerModelId, temperature),
-      acceptsImages: model.vision,
+      acceptsImages: model.vision && model.id === choice.modelId,
       metering: {
         source: promoKindOf(model.access) ? "promo" : "platform",
         coding: model.pricing,

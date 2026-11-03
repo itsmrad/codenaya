@@ -86,6 +86,24 @@ describe("processMessage with images after a catalog change", () => {
     expect(replies()).toEqual([RUN_IMAGES_REFUSED_MESSAGE]);
   });
 
+  // A vision-capable default outside Auto's pool ["seer", "remaining-text"] must not get them either.
+  it.each([
+    ["hidden", [model("vision-default", true), model("seer", true, true), model("remaining-text", false)]],
+    ["removed, with the pool shrunk to the rest", [model("vision-default", true), model("remaining-text", false)]],
+  ])("refuses the run when the pick was %s, even if the default reads images", async (_, models) => {
+    mocks.catalog.mockReturnValue({
+      models,
+      defaultModelId: "vision-default",
+      utilityModelId: "vision-default",
+      autoModelIds: models.some((m) => m.id === "seer") ? ["seer", "remaining-text"] : ["remaining-text"],
+    });
+
+    const outcome = await run();
+
+    expect(outcome.inferenceUrls).toEqual([]);
+    expect(replies()).toEqual([RUN_IMAGES_REFUSED_MESSAGE]);
+  });
+
   it("still sends the images to a model that reads them", async () => {
     mocks.catalog.mockReturnValue(catalog(model("text-default", false), model("seer", true)));
 
