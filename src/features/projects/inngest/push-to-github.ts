@@ -289,7 +289,7 @@ async function pushTarget(octokit: Octokit, owner: string, repo: string, sync: G
 
 const SYNC_BRANCH_MOVED =
   `The ${GITHUB_SYNC_BRANCH} branch has commits made on GitHub. ` +
-  `Merge its pull request or delete the branch, then push again.`;
+  `Delete the branch (merge its pull request first to keep those changes), then push again.`;
 
 /** The branch's head commit, or null when there is no such branch. */
 async function branchHead(octokit: Octokit, owner: string, repo: string, branch: string) {

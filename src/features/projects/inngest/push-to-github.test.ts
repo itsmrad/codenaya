@@ -294,7 +294,7 @@ describe("pushToGithub (#343)", () => {
 
     vi.clearAllMocks();
     project({ runs: [{ prompt: "Again", summary: "", checkpointId: null }], files: { "index.html": "v3" }, githubSync: diverged });
-    await expect(runJob()).rejects.toThrow(/codenaya-sync branch has commits made on GitHub\. Merge its pull request or delete the branch/);
+    await expect(runJob()).rejects.toThrow(/codenaya-sync branch has commits made on GitHub\. Delete the branch \(merge its pull request first to keep those changes\), then push again/);
 
     expect(gh.refs.get("codenaya-sync")).toBe("conflict-fix");
     expect(mocks.github.createTree).not.toHaveBeenCalled();
