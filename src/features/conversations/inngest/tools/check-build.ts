@@ -367,10 +367,19 @@ export const createCheckBuildTool = ({
           // The metadata list has no text since #412; this one carries it.
           const [rows, envVars] = await Promise.all([
             convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId }),
-            convex.query(api.system.getEnvVarsForSandbox, { internalKey, projectId }),
+            // Null when unknown; the check then builds cold, where no variables are written.
+            convex.query(api.system.getEnvVarsForSandbox, { internalKey, projectId }).catch((error) => {
+              console.error("[check-build] could not read the project's variables", error);
+              return null;
+            }),
           ]);
           // Opened only to redact them from the result; no sandbox gets them.
-          if (envVars.length > 0) secrets = secretValuesFrom(await resolveProjectEnv(envVars));
+          if (envVars?.length) {
+            secrets = await resolveProjectEnv(envVars).then(secretValuesFrom, (error) => {
+              console.error("[check-build] could not open the project's secrets to redact", error);
+              return [];
+            });
+          }
           const pathOf = buildPathIndex(rows);
           const files: ProjectFile[] = [];
           const paths = new Set<string>();
@@ -389,7 +398,7 @@ export const createCheckBuildTool = ({
             secrets,
             // The preview's sandbox has these variables in .env, where install
             // scripts and vite.config could read them into the output.
-            preview: ownerId && envVars.length === 0 ? { projectId, ownerId } : undefined,
+            preview: ownerId && envVars?.length === 0 ? { projectId, ownerId } : undefined,
           });
         });
       } catch (error) {

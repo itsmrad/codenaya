@@ -556,11 +556,12 @@ describe("checkBuild tool (#465)", () => {
     return rows;
   };
 
-  const runTool = async (envVars: unknown[]) => {
+  const runTool = async (envVars: unknown, arrange?: () => void) => {
     vi.stubEnv("E2B_API_KEY", "e2b_key");
     mocks.query.mockImplementation(async (ref) =>
       getFunctionName(ref) === "system:getEnvVarsForSandbox" ? envVars : rowsOf(starter()),
     );
+    arrange?.();
     const tool = createCheckBuildTool({ projectId: "proj_1" as never, internalKey: "internal", ownerId: "user_1" });
     const step = { run: vi.fn(async (_name: string, fn: () => Promise<string>) => fn()) };
     return tool.handler({}, { step } as unknown as Parameters<typeof tool.handler>[1]);
@@ -580,6 +581,29 @@ describe("checkBuild tool (#465)", () => {
     expect(e2b.create).toHaveBeenCalledTimes(1);
     expect(result).toContain("DATABASE_URL=[redacted]");
     expect(result).not.toContain(SECRET);
+  });
+
+  it.each([
+    ["reading the variables fails", () => mocks.query.mockImplementation(async (ref) => {
+      if (getFunctionName(ref) === "system:getEnvVarsForSandbox") throw new Error("Convex unavailable");
+      return rowsOf(starter());
+    })],
+    ["the secrets cannot be opened", () => mocks.resolveEnv.mockRejectedValue(new Error("CODENAYA_LOCAL_KEK is not set"))],
+  ])("still checks, cold, when %s", async (_case, arrange) => {
+    fakeSandbox();
+
+    const result = await runTool([{ _id: "env_1", key: "DATABASE_URL", visibility: "secret" }], arrange);
+
+    expect(result?.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(e2b.list).not.toHaveBeenCalled();
+    expect(e2b.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the static-check result when the variables come back missing", async () => {
+    // As in tests whose Convex mock does not know the query (#456).
+    const result = await runTool(undefined, () => vi.stubEnv("E2B_API_KEY", ""));
+
+    expect(result?.split("\n")[0]).toBe(STATIC_CHECKS_PASSED);
   });
 
   it("looks for the owner's warm preview when the project has no variables", async () => {
