@@ -1,3 +1,6 @@
+import { buildPathIndex } from "../src/features/conversations/agent-steps";
+import { compilePathGlob, compileSearch, MAX_SEARCH_RESULTS, SEARCH_BYTE_BUDGET, REGEX_SEARCH_BYTE_BUDGET, MAX_SEARCH_CONTENT_LOOKUPS, SEARCH_TRUNCATED } from "../src/features/conversations/file-search";
+import { validateInternalKey } from "./internalKey";
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
@@ -373,5 +376,64 @@ export const updateFile = mutation({
     await ctx.db.patch("projects", file.projectId, {
       updatedAt: Date.now(),
     });
+  },
+});
+
+/** Server-only agent search; the run authenticates ownership before binding projectId. */
+export const searchFiles = query({
+  args: {
+    internalKey: v.string(), projectId: v.id("projects"), pattern: v.string(),
+    isRegex: v.optional(v.boolean()), pathGlob: v.optional(v.string()),
+    maxResults: v.optional(v.number()),
+  },
+  returns: v.string(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    if ((args.pathGlob?.length ?? 0) > 500) return "Error: pathGlob must be at most 500 characters.";
+    if (args.maxResults !== undefined && (!Number.isInteger(args.maxResults) || args.maxResults < 1)) {
+      return "Error: maxResults must be a positive integer.";
+    }
+    let matches: (line: string) => boolean;
+    try { matches = compileSearch(args.pattern, args.isRegex); }
+    catch (error) { return `Error: ${(error as Error).message}`; }
+    const glob = args.pathGlob ? compilePathGlob(args.pathGlob) : undefined;
+    const limit = Math.min(args.maxResults ?? 50, MAX_SEARCH_RESULTS);
+    // Bound metadata too: pre-backfill file docs may still contain large text.
+    const page = await ctx.db.query("files")
+      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
+      .paginate({ cursor: null, numItems: MAX_PROJECT_FILES, maximumBytesRead: 2 * 1024 * 1024 });
+    const pathOf = buildPathIndex(page.page);
+    const output: string[] = [];
+    const encoder = new TextEncoder();
+    const byteBudget = args.isRegex ? REGEX_SEARCH_BYTE_BUDGET : SEARCH_BYTE_BUDGET;
+    let lookups = 0;
+    let bytes = 0;
+    let truncated = !page.isDone;
+    let regexLinesTruncated = false;
+    for (const file of page.page) {
+      const path = pathOf(file._id);
+      if (file.type !== "file" || file.storageId || !path || (glob && !glob.matcher(path).matches())) continue;
+      if (lookups === MAX_SEARCH_CONTENT_LOOKUPS) { truncated = true; break; }
+      lookups++;
+      const content = await readFileContent(ctx, file);
+      if (content === undefined) continue;
+      bytes += encoder.encode(content).byteLength;
+      if (bytes > byteBudget) { truncated = true; break; }
+      if (content.includes("\0")) continue;
+      const lines = content.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const text = lines[i];
+        if (args.isRegex && text.length > 4000) regexLinesTruncated = true;
+        if (!matches(args.isRegex ? text.slice(0, 4000) : text)) continue;
+        if (output.length === limit) { truncated = true; break; }
+        output.push(`${path}:${i + 1}: ${text.slice(0, 500)}${text.length > 500 ? "… [line clipped; read a range for full text]" : ""}`);
+      }
+      if (output.length === limit && truncated) break;
+    }
+    return [
+      ...output,
+      ...(truncated || regexLinesTruncated ? [SEARCH_TRUNCATED] : []),
+      ...(regexLinesTruncated ? ["Regex search checked only the first 4,000 characters of each line. End anchors ($, \\b) apply at the cutoff. Use literal search to inspect the rest."] : []),
+    ].join("\n") || "No matches found.";
   },
 });

@@ -17,6 +17,7 @@ vi.mock("@/lib/convex-client", async () => {
   return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
 });
 
+import { PLAN_MODE_PROMPT } from "../plan-mode";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { drive, text } from "./process-message.driver";
 
@@ -90,6 +91,27 @@ beforeEach(() => {
 });
 
 describe("processMessage with skills", () => {
+  it("keeps the project prefix identical before slash skills and plan mode", async () => {
+    // An MCP outage adds a real integrations warning, exposing ordering regressions.
+    mocks.query.mockImplementation(async (ref) => {
+      if (getFunctionName(ref) === "system:getProjectMcpConnections") throw new Error("MCP offline");
+      return QUERIES[getFunctionName(ref)]?.();
+    });
+    const plain = await drive(PLATFORM_MODEL, [{ data: text("Title") }, { data: text("Done.") }]);
+    const forced = await drive(PLATFORM_MODEL, [{ data: text("Title") }, { data: text("Done.") }],
+      "/seo-metadata /nope add a sitemap", { mode: "plan" });
+    const prefix = systemPrompt(codingRequests(plain.inferenceBodies)[0]);
+    const prompt = systemPrompt(codingRequests(forced.inferenceBodies)[0]);
+    expect(prefix).toContain("## Available skills");
+    expect(prefix).toContain("Integrations could not be loaded");
+    expect(prompt.slice(0, prefix.length)).toBe(prefix);
+    const suffix = prompt.slice(prefix.length);
+    expect(suffix).toContain("## Active skills");
+    expect(suffix).toContain("## Unavailable skills");
+    expect(suffix).toContain(SEO_BODY);
+    expect(suffix.endsWith(PLAN_MODE_PROMPT)).toBe(true);
+  });
+
   it("indexes enabled skills and loads a body on demand", async () => {
     const outcome = await drive(PLATFORM_MODEL, [
       { data: text("SEO") },

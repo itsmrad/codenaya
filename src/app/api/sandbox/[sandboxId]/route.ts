@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 import { parseJsonBody } from "@/lib/parse-json-body";
-import { projectFilesSchema } from "@/features/sandbox-preview/server/project-sandbox";
+import {
+  DEFAULT_INSTALL_COMMAND,
+  projectFilesSchema,
+} from "@/features/sandbox-preview/server/project-sandbox";
 import {
   forgetSandbox,
   getOwnedSandbox,
@@ -119,7 +122,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       files.some((file) => file.path === "package.json") &&
       !requestReinstall(sandboxId)
     ) {
-      await sandbox.commands.run(installCommand || "npm install", {
+      await sandbox.commands.run(installCommand || DEFAULT_INSTALL_COMMAND, {
         cwd: WORK_DIR,
         timeoutMs: 5 * 60 * 1000,
       });
