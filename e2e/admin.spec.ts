@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { type Page, expect, test } from "@playwright/test";
 
 import {
   addTestingToken,
@@ -45,14 +45,24 @@ test("/admin is a 404 for a signed-in user who isn't the admin", async ({ page }
   }
 });
 
-test("the admin sees the model catalog", async ({ page }) => {
-  // The Convex deployment's ADMIN_EMAIL must be this verified Clerk test user.
+/** Signs in as the admin, or skips. The Convex deployment's ADMIN_EMAIL must be this verified Clerk test user. */
+const signInAsAdmin = async (page: Page) => {
   const adminEmail = process.env.E2E_ADMIN_EMAIL;
   test.skip(!hasClerkCredentials() || !adminEmail, "Needs Clerk secrets and E2E_ADMIN_EMAIL");
   await addTestingToken(page);
   const admin = await ensureTestUser(adminEmail);
   await revokeStaleSessions(admin.id);
   await signInWithTicket(page, admin.id);
+};
+
+const switchTheme = (page: Page, theme: "light" | "dark") =>
+  page.evaluate((value) => {
+    localStorage.setItem("theme", value);
+    window.dispatchEvent(new StorageEvent("storage", { key: "theme", newValue: value }));
+  }, theme);
+
+test("the admin sees the model catalog", async ({ page }) => {
+  await signInAsAdmin(page);
 
   await page.goto("/admin");
   await expect(page.getByRole("heading", { level: 1, name: "Models" })).toBeVisible();
@@ -70,4 +80,30 @@ test("the admin sees the model catalog", async ({ page }) => {
   await page.getByRole("navigation", { name: "Admin" }).filter({ visible: true }).getByRole("link", { name: "Audit log" }).click();
   await expect(page).toHaveURL(/\/admin\/audit$/);
   await expect(page.getByRole("heading", { level: 1, name: "Audit log" })).toBeVisible();
+});
+
+test("the admin picks Auto's models in the catalog draft (#322)", async ({ page }, testInfo) => {
+  await signInAsAdmin(page);
+  await page.goto("/admin");
+
+  const list = page.getByRole("list", { name: "Auto models" });
+  const card = page.locator('[data-slot="card"]').filter({ has: list });
+  const pick = list.getByRole("checkbox", { checked: false, disabled: false }).first();
+  await pick.check();
+  await expect(pick).toBeChecked();
+  const saveBar = page.getByRole("region", { name: "Unsaved changes" });
+  await expect(saveBar).toBeVisible();
+
+  for (const theme of ["light", "dark"] as const) {
+    await switchTheme(page, theme);
+    for (const width of [375, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await card.scrollIntoViewIfNeeded();
+      await card.screenshot({ path: testInfo.outputPath(`admin-auto-${theme}-${width}.png`) });
+    }
+  }
+
+  // Leaves the saved catalog as it was.
+  await saveBar.getByRole("button", { name: "Discard" }).click();
+  await expect(saveBar).toBeHidden();
 });
