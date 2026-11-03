@@ -9,12 +9,13 @@ import type { ScanFile, ScanFinding } from "./scan-project";
 // plain Postgres migrations aren't flagged; widen if the agent writes SQL elsewhere.
 const SUPABASE_SQL = /(?:^|\/)supabase\/.*\.sql$/i;
 
-// One pattern, so statements come back in file order: create (1), enable RLS (2), drop (3).
+// One pattern, so statements come back in file order: create (1 `if not exists`, 2 table),
+// enable/disable RLS (3 table, 4 enable|disable), drop (5).
 // Temporary tables never match: `temp` sits between `create` and `table`.
 const TABLE_STATEMENT = new RegExp(
   [
-    String.raw`\bcreate\s+(?:unlogged\s+)?table\s+(?:if\s+not\s+exists\s+)?([\w."]+)`,
-    String.raw`\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([\w."]+)\s+enable\s+row\s+level\s+security`,
+    String.raw`\bcreate\s+(?:unlogged\s+)?table\s+(if\s+not\s+exists\s+)?([\w."]+)`,
+    String.raw`\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([\w."]+)\s+(enable|disable)\s+row\s+level\s+security`,
     String.raw`\bdrop\s+table\s+(?:if\s+exists\s+)?([\w."]+(?:\s*,\s*[\w."]+)*)`,
   ].join("|"),
   "gi",
@@ -30,11 +31,16 @@ const tableName = (raw: string) => raw.replace(/"/g, "").toLowerCase().replace(/
 /** Only the public schema is served by Supabase's API. */
 const isExposed = (raw: string) => !tableName(raw).includes(".");
 
+// One left-to-right pass: string literals, quoted identifiers and dollar-quoted bodies
+// are matched first and kept whole, so comment markers inside them are not comments.
+// shortcut: E'..' backslash escapes and nested block comments aren't modelled; add if seen.
+const SQL_TOKEN = /'(?:[^']|'')*'|"(?:[^"]|"")*"|(\$(?:[A-Za-z_]\w*)?\$)[\s\S]*?\1|--[^\n]*|\/\*[\s\S]*?(?:\*\/|$)/g;
+
 /** Drops `--` and block comments but keeps every newline, so line numbers still hold. */
 const stripComments = (sql: string) =>
-  sql
-    .replace(/--[^\n]*/g, "")
-    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ""));
+  sql.replace(SQL_TOKEN, (token) =>
+    token.startsWith("--") || token.startsWith("/*") ? token.replace(/[^\n]/g, "") : token,
+  );
 
 const lineAt = (text: string, index: number) => text.slice(0, index).split("\n").length;
 
@@ -55,25 +61,35 @@ export function scanSupabaseSql(files: readonly ScanFile[]): ScanFinding[] {
     // Migration file names start with a timestamp, so path order is run order.
     .sort((a, b) => a.path.localeCompare(b.path));
 
-  // Public tables created and not (yet) given RLS, replayed in run order so a
-  // later `enable` or `drop` clears a table and a re-create counts again.
-  const withoutRls = new Map<string, ScanFinding>();
+  // Known public tables replayed in run order: a finding while RLS is off, null once it's on.
+  // A later `enable` or `drop` clears a table; `disable` or a re-create flags it again.
+  const tables = new Map<string, ScanFinding | null>();
   for (const { path, sql } of sqlFiles) {
-    for (const { 1: created, 2: secured, 3: dropped, index } of sql.matchAll(TABLE_STATEMENT)) {
+    for (const {
+      1: ifNotExists,
+      2: created,
+      3: altered,
+      4: toggle,
+      5: dropped,
+      index,
+    } of sql.matchAll(TABLE_STATEMENT)) {
+      const noRls = (): ScanFinding => ({
+        file: path,
+        line: lineAt(sql, index),
+        rule: "supabase-no-rls",
+        severity: "high",
+      });
       if (created && isExposed(created)) {
-        withoutRls.set(tableName(created), {
-          file: path,
-          line: lineAt(sql, index),
-          rule: "supabase-no-rls",
-          severity: "high",
-        });
-      } else if (secured) {
-        withoutRls.delete(tableName(secured));
+        // `if not exists` on a table that's already there is a no-op: it keeps its RLS state.
+        if (!(ifNotExists && tables.has(tableName(created)))) tables.set(tableName(created), noRls());
+      } else if (altered && isExposed(altered)) {
+        tables.set(tableName(altered), toggle.toLowerCase() === "enable" ? null : noRls());
       } else if (dropped) {
-        dropped.split(",").forEach((raw) => withoutRls.delete(tableName(raw.trim())));
+        dropped.split(",").forEach((raw) => tables.delete(tableName(raw.trim())));
       }
     }
   }
+  const withoutRls = [...tables.values()].filter((finding) => finding !== null);
 
   const openPolicies = sqlFiles.flatMap(({ path, sql }) =>
     [...sql.matchAll(CREATE_POLICY)]
@@ -86,5 +102,5 @@ export function scanSupabaseSql(files: readonly ScanFile[]): ScanFinding[] {
       })),
   );
 
-  return [...withoutRls.values(), ...openPolicies];
+  return [...withoutRls, ...openPolicies];
 }

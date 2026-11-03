@@ -69,6 +69,48 @@ describe("scanSupabaseSql: tables without RLS", () => {
     ).toEqual(["3:supabase-no-rls"]);
   });
 
+  it("keeps comment markers inside strings, quoted names and dollar bodies from hiding SQL", () => {
+    expect(
+      scan(
+        [
+          "insert into notes (body) values ('-- not a comment'); create table todos (id uuid);",
+          "insert into notes (body) values ('/* not a comment'); create table tags (id uuid);",
+          'create table "a--b" (id uuid);',
+          "do $$ begin perform 1; -- note $$; create table posts (id uuid);",
+          "do $fn$ select '/*' $fn$; create table drafts (id uuid);",
+          "/* it's */ create table links (id uuid);",
+        ].join("\n"),
+      ),
+    ).toEqual([1, 2, 3, 4, 5, 6].map((line) => `${line}:supabase-no-rls`));
+  });
+
+  it("flags a table whose RLS is disabled again after being enabled", () => {
+    expect(
+      scan(
+        [
+          "create table todos (id uuid);",
+          "alter table todos enable row level security;",
+          "alter table public.todos disable row level security;",
+        ].join("\n"),
+      ),
+    ).toEqual(["3:supabase-no-rls"]);
+  });
+
+  it("keeps RLS on when `create table if not exists` hits an existing table", () => {
+    expect(
+      scanSupabaseSql([
+        {
+          path: MIGRATION,
+          content: "create table todos (id uuid);\nalter table todos enable row level security;",
+        },
+        {
+          path: "supabase/migrations/20260102000000_again.sql",
+          content: "create table if not exists todos (id uuid);",
+        },
+      ]),
+    ).toEqual([]);
+  });
+
   it("clears dropped tables and flags a re-create without RLS", () => {
     expect(
       scanSupabaseSql([
