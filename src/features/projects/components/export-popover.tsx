@@ -62,7 +62,8 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
   const project = useProject(projectId);
   const [open, setOpen] = React.useState(false);
   const [githubNotLinked, setGithubNotLinked] = React.useState(false);
-  const [pullConflict, setPullConflict] = React.useState(false);
+  // Why the last pull needs a choice: local changes, or pushed ones not merged yet.
+  const [pullConflict, setPullConflict] = React.useState<"changed" | "unmerged" | null>(null);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
@@ -101,13 +102,20 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
       toast.success(result.upToDate ? "Already up to date" : messages.started);
     } catch (error) {
       if (error instanceof HTTPError) {
-        const body = await error.response.json<{ error: string; code?: string }>();
-        if (body.code === GITHUB_NOT_LINKED) {
+        // A proxy or a crash can answer with HTML.
+        const body = await error.response
+          .json<{ error?: string; code?: string; unmerged?: boolean }>()
+          .catch(() => null);
+        if (body?.code === GITHUB_NOT_LINKED) {
           setGithubNotLinked(true);
           return;
         }
-        if (body.code === GITHUB_SYNC_CONFLICT) {
-          setPullConflict(true);
+        if (body?.code === GITHUB_SYNC_CONFLICT) {
+          setPullConflict(body.unmerged ? "unmerged" : "changed");
+          return;
+        }
+        if (body?.error) {
+          toast.error(body.error);
           return;
         }
       }
@@ -452,8 +460,9 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
       {githubSync && (
         <PullConflictDialog
           branch={githubSync.branch}
-          open={pullConflict}
-          onOpenChange={setPullConflict}
+          open={pullConflict !== null}
+          unmerged={pullConflict === "unmerged"}
+          onOpenChange={(open) => !open && setPullConflict(null)}
           // Reopened: the dialog's click closed the popover, which shows the
           // progress and the secret scan.
           onOverwrite={() => {

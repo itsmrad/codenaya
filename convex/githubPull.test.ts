@@ -76,12 +76,18 @@ const tree = (t: T, projectId: Id<"projects">) =>
     );
   });
 
-/** What the pull job does with a remote tree: checkpoint, batches, finish. */
+/** What the pull job does with a remote tree: checkpoint, prune, batches, finish. */
 async function pull(t: T, projectId: Id<"projects">, entries: TreeEntry[], batchSize = 2) {
   await t.mutation(api.githubSync.createPullCheckpoint, {
     internalKey: INTERNAL_KEY,
     projectId,
     label: "Before pull from GitHub @ abc1234",
+  });
+  await t.mutation(api.githubSync.applyPulledFiles, {
+    internalKey: INTERNAL_KEY,
+    projectId,
+    entries: [],
+    tree: entries.map(({ path, type }) => ({ path, type })),
   });
   for (let i = 0; i < entries.length; i += batchSize) {
     await t.mutation(api.githubSync.applyPulledFiles, {
@@ -94,7 +100,6 @@ async function pull(t: T, projectId: Id<"projects">, entries: TreeEntry[], batch
     internalKey: INTERNAL_KEY,
     projectId,
     sha: "abc1234def",
-    tree: entries.map(({ path, type }) => ({ path, type })),
   });
 }
 
@@ -177,8 +182,36 @@ describe("GitHub pull (#343)", () => {
     await expect(
       t.mutation(api.githubSync.createPullCheckpoint, { internalKey: INTERNAL_KEY, projectId, label: "" }),
     ).rejects.toThrow(/Stop the running agent/);
+    // Typed, so the job can make it final instead of retrying over the run.
     await expect(
       t.mutation(api.githubSync.applyPulledFiles, { internalKey: INTERNAL_KEY, projectId, entries: [] }),
+    ).rejects.toMatchObject({ data: { code: "CONFLICT", message: "Stop the running agent before pulling" } });
+    await expect(
+      t.mutation(api.githubSync.finishPull, { internalKey: INTERNAL_KEY, projectId, sha: "abc" }),
     ).rejects.toThrow(/Stop the running agent/);
+    expect(await t.query(api.githubSync.isAgentRunning, { internalKey: INTERNAL_KEY, projectId })).toBe(true);
+  });
+
+  test("replaces most of a big project without going over the file cap", async () => {
+    const { t } = setup();
+    const { projectId } = await seedProject(t);
+    // 1,100 local files and 1,100 different remote ones: 2,200 at once if the
+    // new ones landed before the old ones went.
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 1100; i++) {
+        await ctx.db.insert("files", { projectId, name: `old-${i}.ts`, type: "file", content: "", updatedAt: 0 });
+      }
+    });
+    const remote: TreeEntry[] = Array.from({ length: 1100 }, (_, i) => ({
+      path: `new-${i}.ts`,
+      type: "file",
+      content: "",
+    }));
+
+    await pull(t, projectId, remote, 100);
+
+    const files = Object.keys(await tree(t, projectId));
+    expect(files).toHaveLength(1100);
+    expect(files.every((path) => path.startsWith("new-"))).toBe(true);
   });
 });

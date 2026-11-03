@@ -11,6 +11,8 @@ export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 export type RepoArchive = {
   folders: string[];
   files: { path: string; content: Buffer<ArrayBuffer> }[];
+  // Entries left out: symlinks and submodules.
+  skipped: string[];
 };
 
 /**
@@ -37,7 +39,7 @@ export async function readRepoArchive(
     throw new Error(`GitHub archive download failed: ${res.status}`);
   }
 
-  const archive: RepoArchive = { folders: [], files: [] };
+  const archive: RepoArchive = { folders: [], files: [], skipped: [] };
   const reads: Promise<void>[] = [];
   let fileCount = 0;
   let totalBytes = 0;
@@ -54,6 +56,9 @@ export async function readRepoArchive(
         archive.folders.push(path);
       }
       // Symlinks and submodules aren't imported.
+      if (path && entry.type !== "File" && entry.type !== "Directory") {
+        archive.skipped.push(path);
+      }
       if (!path || entry.type !== "File") {
         entry.resume();
         return;

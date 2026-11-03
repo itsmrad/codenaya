@@ -8,6 +8,7 @@ import {
   applyTree,
   assertNoRunningAgent,
   createCheckpoint,
+  runningAgent,
 } from "./checkpoints";
 import { validateInternalKey } from "./internalKey";
 import { getOwnedProject } from "./projects";
@@ -90,36 +91,48 @@ export const createPullCheckpoint = mutation({
   },
 });
 
-/** One batch of a pull (#343): writes these files over the project's, deleting none. */
-export const applyPulledFiles = mutation({
-  args: { internalKey: v.string(), projectId: v.id("projects"), entries: v.array(treeEntryValidator) },
-  returns: v.null(),
+/** Whether an agent run is in progress, so the pull route can refuse up front (#343). */
+export const isAgentRunning = query({
+  args: { internalKey: v.string(), projectId: v.id("projects") },
+  returns: v.boolean(),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
-    await assertNoRunningAgent(ctx, args.projectId, "pulling");
-    await applyTree(ctx, args.projectId, args.entries);
-    return null;
+    return (await runningAgent(ctx, args.projectId)) !== null;
   },
 });
 
 /**
- * Ends a pull (#343): deletes what the pulled tree doesn't have and moves the
- * sync point to the pulled commit, so later pushes build on it.
+ * One batch of a pull (#343): writes these files over the project's. With
+ * `tree` (the whole pulled tree, sent once before the batches), it first
+ * deletes every path the tree doesn't have, so the batches never push the
+ * project over the file cap.
  */
-export const finishPull = mutation({
+export const applyPulledFiles = mutation({
   args: {
     internalKey: v.string(),
     projectId: v.id("projects"),
-    tree: v.array(v.object({ path: v.string(), type: treeEntryValidator.fields.type })),
-    sha: v.string(),
+    entries: v.array(treeEntryValidator),
+    tree: v.optional(v.array(v.object({ path: v.string(), type: treeEntryValidator.fields.type }))),
   },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    await assertNoRunningAgent(ctx, args.projectId, "pulling");
+    const keep = args.tree && new Map(args.tree.map(({ path, type }) => [path, type]));
+    await applyTree(ctx, args.projectId, args.entries, keep);
+    return null;
+  },
+});
+
+/** Ends a pull (#343): moves the sync point to the pulled commit, so later pushes build on it. */
+export const finishPull = mutation({
+  args: { internalKey: v.string(), projectId: v.id("projects"), sha: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     const project = await ctx.db.get("projects", args.projectId);
     if (!project?.githubSync) throw new Error("Project is not linked to a GitHub repository");
     await assertNoRunningAgent(ctx, args.projectId, "pulling");
-    await applyTree(ctx, args.projectId, [], new Map(args.tree.map(({ path, type }) => [path, type])));
     const { repo, branch } = project.githubSync;
     await ctx.db.patch("projects", args.projectId, {
       githubSync: { repo, branch, lastSyncedSha: args.sha, lastSyncedAt: Date.now() },

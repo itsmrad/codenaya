@@ -277,20 +277,25 @@ async function getOwnedCheckpoint(ctx: QueryCtx, checkpointId: Id<"checkpoints">
   return checkpoint;
 }
 
+/** The project's agent run in progress, if any. */
+export const runningAgent = (ctx: QueryCtx, projectId: Id<"projects">) =>
+  ctx.db
+    .query("messages")
+    .withIndex("by_project_status", (q) =>
+      q.eq("projectId", projectId).eq("status", "processing"),
+    )
+    .first();
+
 /** A running agent would keep writing over the restored files. */
 export async function assertNoRunningAgent(
   ctx: QueryCtx,
   projectId: Id<"projects">,
   action: string,
 ) {
-  const running = await ctx.db
-    .query("messages")
-    .withIndex("by_project_status", (q) =>
-      q.eq("projectId", projectId).eq("status", "processing"),
-    )
-    .first();
-  if (running) {
-    throw new Error(`Stop the running agent before ${action}`);
+  if (await runningAgent(ctx, projectId)) {
+    // Typed, so the message survives production redaction and a pull job can
+    // tell it apart from a transient failure (#343).
+    throw appError("CONFLICT", `Stop the running agent before ${action}`);
   }
 }
 
