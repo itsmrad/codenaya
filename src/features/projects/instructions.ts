@@ -1,9 +1,10 @@
 /** Longest project instructions an owner may save (#299). */
 export const MAX_PROJECT_INSTRUCTIONS_LENGTH = 4000;
 
-// Any form of the delimiter tag (spaces, attributes, any case), removed from
-// the text so it can't close the delimiter and pose as system rules.
-const DELIMITER_TAG = /<\s*\/?\s*project_instructions\b[^>]*>/gi;
+// Any form of the delimiter tag (spaces, attributes, any case, unterminated),
+// removed from the text so it can't close the delimiter and pose as system
+// rules. It stops at a line end, so an unclosed tag can't swallow later lines.
+const DELIMITER_TAG = /<\s*\/?\s*project_instructions\b[^<>\n]*>?/gi;
 
 /** Strips delimiter tags until none are left, so nested ones can't rebuild a tag. */
 const stripDelimiterTags = (text: string): string => {
