@@ -315,6 +315,14 @@ describe("createLoopGuard", () => {
     expect(guard.takeHint()).toBeUndefined();
   });
 
+  it("hints when an id-addressed write repeats the previous run's path-based syntax error", () => {
+    // The previous run got stuck on this file by path; this run addresses it by id.
+    const previous = errorSignature(`${PATHS[ID_A]} 3:5 ')' expected.`);
+    const guard = createLoopGuard(previous);
+    guard.check([write(ID_A, syntaxNote(`${PATHS[ID_A]} 9:5 ')' expected.`))]);
+    expect(guard.takeHint()).toBe(PREVIOUS_ERROR_HINT);
+  });
+
   it("gives no hint without a previous error, and keeps the loop it found", () => {
     const guard = createLoopGuard();
     expect(guard.check([notFound, notFound, notFound])).toMatchObject({ reason: "repeated-error" });

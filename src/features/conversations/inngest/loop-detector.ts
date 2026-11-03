@@ -143,11 +143,11 @@ const syntaxErrors = (content: unknown, written: WrittenFile[]): Array<[WrittenF
 };
 
 /** Every error a call reported: its own failure, or the syntax errors it wrote. */
-const callErrors = (call: Call) => {
+const callErrors = (call: Call, pathOfId: Map<string, string>) => {
   const error = toolResultError(call.content);
   return error
     ? [error]
-    : syntaxErrors(call.content, writtenFiles(call, new Map())).map(([, entry]) => entry);
+    : syntaxErrors(call.content, writtenFiles(call, pathOfId)).map(([, entry]) => entry);
 };
 
 /** The first loop in the run's tool calls, or null while it makes progress. */
@@ -221,10 +221,13 @@ export const detectLoop = (results: ToolResults[]): StuckRun | null => {
 };
 
 /** Whether any call in the run reported an error with this signature. */
-export const repeatsError = (results: ToolResults[], signature: string) =>
-  runCalls(results).some((call) =>
-    callErrors(call).some((error) => errorSignature(error) === signature),
+export const repeatsError = (results: ToolResults[], signature: string) => {
+  // One map for the run, in call order, as in detectLoop.
+  const pathOfId = new Map<string, string>();
+  return runCalls(results).some((call) =>
+    callErrors(call, pathOfId).some((error) => errorSignature(error) === signature),
   );
+};
 
 /**
  * Per run: `check` after each tool turn finds a loop (kept once found) and
