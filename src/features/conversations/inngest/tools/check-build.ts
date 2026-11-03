@@ -50,7 +50,9 @@ const STEP_BUDGET_MS = 240_000;
 const MIN_COLD_BUILD_MS = 60_000;
 /** Copying the preview's node_modules; seconds for the starter. */
 const COPY_TIMEOUT_MS = 30_000;
-const CLEANUP_TIMEOUT_MS = 10_000;
+const CREATE_TIMEOUT_MS = 30_000;
+/** Listing, connecting, process lists, state reads and cleanup. */
+const SHORT_CALL_MS = 10_000;
 /** E2B reaps the sandbox after this even if the kill below is lost. */
 const SANDBOX_TIMEOUT_MS = 5 * 60_000;
 const MAX_ERROR_LINES = 40;
@@ -84,6 +86,35 @@ export const trimBuildOutput = (output: string, dir = WORK_DIR) => {
   ].join("\n");
 };
 
+/** One check: its files, the step deadline it must finish by, and the secrets to redact. */
+type BuildJob = {
+  files: ProjectFile[];
+  /** Every project file, including uploads with no text content. */
+  paths: Set<string>;
+  deadline: number;
+  secrets: readonly string[];
+};
+
+/** The step budget ran out; reported as an unfinished check. */
+class OutOfTime extends Error {
+  constructor() {
+    super("The check ran out of time");
+  }
+}
+
+/** `cap`, or the time left before `deadline` if that is shorter. Throws once it is spent. */
+const within = (deadline: number, cap: number) => {
+  const left = Math.min(cap, deadline - Date.now());
+  if (left <= 0) throw new OutOfTime();
+  return left;
+};
+
+/** The preview route's secret redaction, over a whole text rather than a stream. */
+const redact = (text: string, secrets: readonly string[]) => {
+  const redactor = createStreamRedactor(secrets);
+  return redactor.push(text) + redactor.flush();
+};
+
 /** E2B throws on a non-zero exit; the result is what the caller reports. */
 const run = async (
   sandbox: Sandbox,
@@ -92,7 +123,7 @@ const run = async (
   cwd: string,
 ): Promise<CommandResult> => {
   try {
-    return await sandbox.commands.run(command, { cwd, timeoutMs });
+    return await sandbox.commands.run(command, { cwd, timeoutMs, requestTimeoutMs: timeoutMs });
   } catch (error) {
     if (error instanceof CommandExitError) return error;
     throw error;
@@ -101,23 +132,18 @@ const run = async (
 
 /**
  * Errors first: Vite writes progress to stdout and the failure to stderr.
+ * Secrets are redacted before trimming, which could cut a multi-line one.
  * Known errors anywhere in the output get their cause and fix appended.
  */
-const failureOutput = (result: CommandResult, dir: string) => {
-  const output = `${result.stderr}\n${result.stdout}`;
+const failureOutput = (result: CommandResult, dir: string, secrets: readonly string[]) => {
+  const output = redact(`${result.stderr}\n${result.stdout}`, secrets);
   return withErrorHints(trimBuildOutput(output, dir), output);
 };
 
 /** A timeout or a sandbox failure, not a problem in the project's code. */
-const unfinished = (error: unknown) =>
-  `${BUILD_CHECK_UNFINISHED} (${error instanceof Error ? error.message : "Unknown error"}). ` +
+const unfinished = (error: unknown, secrets: readonly string[] = []) =>
+  `${BUILD_CHECK_UNFINISHED} (${redact(error instanceof Error ? error.message : "Unknown error", secrets)}). ` +
   "This is not an error in the project's code. Say in Notes that the build was not verified.";
-
-/** The preview route's secret redaction, over a whole result rather than a stream. */
-const redact = (text: string, secrets: readonly string[] = []) => {
-  const redactor = createStreamRedactor(secrets);
-  return redactor.push(text) + redactor.flush();
-};
 
 const notBuilt = (reason: string) =>
   `${STATIC_CHECKS_PASSED}\n${reason}, so the type check and build did not run. ` +
@@ -125,24 +151,18 @@ const notBuilt = (reason: string) =>
 
 /**
  * Writes the files to `dir`, then runs `npm install`, `tsc --noEmit` and
- * `vite build` there, by `stepDeadline` at the latest. Returns the tool result
- * for a finished check; throws on sandbox failures and timeouts.
+ * `vite build` there, within CHECK_TIMEOUT_MS and the step deadline. Returns
+ * the tool result for a finished check; throws on sandbox failures and timeouts.
  */
-const buildIn = async (
-  sandbox: Sandbox,
-  dir: string,
-  files: ProjectFile[],
-  paths: Set<string>,
-  stepDeadline: number,
-) => {
-  const deadline = Math.min(Date.now() + CHECK_TIMEOUT_MS, stepDeadline);
-  const timeLeft = () => Math.max(1_000, deadline - Date.now());
+const buildIn = async (sandbox: Sandbox, dir: string, { files, paths, deadline, secrets }: BuildJob) => {
+  const buildDeadline = Math.min(Date.now() + CHECK_TIMEOUT_MS, deadline);
+  const timeLeft = () => within(buildDeadline, CHECK_TIMEOUT_MS);
 
-  await writeProjectFiles(sandbox, files, dir);
+  await writeProjectFiles(sandbox, files, dir, { requestTimeoutMs: timeLeft() });
 
   const install = await run(sandbox, "npm install --prefer-offline --no-audit --no-fund --loglevel=error", timeLeft(), dir);
   if (install.exitCode !== 0) {
-    return `Error: npm install failed. Fix package.json, then call checkBuild again:\n${failureOutput(install, dir)}`;
+    return `Error: npm install failed. Fix package.json, then call checkBuild again:\n${failureOutput(install, dir, secrets)}`;
   }
 
   const tsconfig = ["tsconfig.app.json", "tsconfig.json"].find((path) => paths.has(path));
@@ -151,7 +171,7 @@ const buildIn = async (
     .join(" && ");
   const build = await run(sandbox, command, timeLeft(), dir);
   if (build.exitCode !== 0) {
-    return `Error: Build failed. Fix these errors, then call checkBuild again:\n${failureOutput(build, dir)}`;
+    return `Error: Build failed. Fix these errors, then call checkBuild again:\n${failureOutput(build, dir, secrets)}`;
   }
 
   return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.`;
@@ -163,8 +183,10 @@ type WarmPreview = { projectId: string; ownerId: string };
 /** An install the preview (or another check) is running; copying node_modules now could catch it half-written. */
 const INSTALLING = /\b(?:npm|pnpm|yarn|bun)\b.*\s(?:install|i|add|ci)(?:\s|$)/;
 
-const installRunning = async (sandbox: Sandbox) =>
-  (await sandbox.commands.list()).some((proc) => INSTALLING.test([proc.cmd, ...proc.args].join(" ")));
+const installRunning = async (sandbox: Sandbox, deadline: number) =>
+  (await sandbox.commands.list({ requestTimeoutMs: within(deadline, SHORT_CALL_MS) })).some((proc) =>
+    INSTALLING.test([proc.cmd, ...proc.args].join(" ")),
+  );
 
 /**
  * What an install changes, and any `.env` the preview was given (it can outlive
@@ -176,8 +198,8 @@ const PREVIEW_STATE =
   "node_modules node_modules/.package-lock.json .env .env.local 2>/dev/null; " +
   "md5sum package.json package-lock.json 2>/dev/null; true";
 
-const previewState = async (sandbox: Sandbox) =>
-  (await sandbox.commands.run(PREVIEW_STATE, { cwd: WORK_DIR, timeoutMs: CLEANUP_TIMEOUT_MS })).stdout;
+const previewState = async (sandbox: Sandbox, deadline: number) =>
+  (await run(sandbox, PREVIEW_STATE, within(deadline, SHORT_CALL_MS), WORK_DIR)).stdout;
 
 /**
  * The owner's running preview sandbox for this project, connected, when it has
@@ -185,11 +207,12 @@ const previewState = async (sandbox: Sandbox) =>
  * route sets; they are checked again here because they decide whose sandbox
  * this runs in.
  */
-const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPreview) => {
+const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPreview, deadline: number) => {
   const running = await Sandbox.list({
     apiKey,
     query: { metadata: { userId: ownerId, projectId }, state: ["running"] },
     limit: MAX_LIVE_SANDBOXES,
+    requestTimeoutMs: within(deadline, SHORT_CALL_MS),
   }).nextItems();
   const info = running.find(
     (sandbox) =>
@@ -199,8 +222,12 @@ const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPr
   );
   if (!info) return null;
 
-  const sandbox = await Sandbox.connect(info.sandboxId, { apiKey, timeoutMs: WARM_MIN_TIME_LEFT_MS });
-  return (await installRunning(sandbox)) ? null : sandbox;
+  const sandbox = await Sandbox.connect(info.sandboxId, {
+    apiKey,
+    timeoutMs: WARM_MIN_TIME_LEFT_MS,
+    requestTimeoutMs: within(deadline, SHORT_CALL_MS),
+  });
+  return (await installRunning(sandbox, deadline)) ? null : sandbox;
 };
 
 /**
@@ -209,36 +236,37 @@ const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPr
  * the dev server, its HMR and its installed packages are left alone, and the
  * preview's `.env` is not read, as on the cold path. Never kills the sandbox.
  */
-const checkInWarmSandbox = async (
-  apiKey: string,
-  preview: WarmPreview,
-  files: ProjectFile[],
-  paths: Set<string>,
-  stepDeadline: number,
-): Promise<string | null> => {
+const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: BuildJob): Promise<string | null> => {
   const dir = `/home/user/check-build-${randomUUID().slice(0, 8)}`;
   let sandbox: Sandbox | null = null;
   let building = false;
   try {
-    sandbox = await connectWarmSandbox(apiKey, preview);
+    sandbox = await connectWarmSandbox(apiKey, preview, job.deadline);
     if (!sandbox) return null;
-    const before = await previewState(sandbox);
+    const before = await previewState(sandbox, job.deadline);
     if (before.includes(".env")) return null;
     await sandbox.commands.run(`mkdir -p ${dir} && cp -a ${WORK_DIR}/node_modules ${dir}/`, {
-      timeoutMs: COPY_TIMEOUT_MS,
+      timeoutMs: within(job.deadline, COPY_TIMEOUT_MS),
+      requestTimeoutMs: within(job.deadline, COPY_TIMEOUT_MS),
     });
-    if ((await previewState(sandbox)) !== before || (await installRunning(sandbox))) return null;
+    if ((await previewState(sandbox, job.deadline)) !== before || (await installRunning(sandbox, job.deadline))) {
+      return null;
+    }
 
     building = true;
-    return await buildIn(sandbox, dir, files, paths, stepDeadline);
+    return await buildIn(sandbox, dir, job);
   } catch (error) {
+    if (error instanceof OutOfTime) return unfinished(error);
     // A slow build would time out in a new sandbox too.
-    if (building && error instanceof TimeoutError) return unfinished(error);
+    if (building && error instanceof TimeoutError) return unfinished(error, job.secrets);
     console.error("[check-build] warm sandbox unavailable, starting a new one", error);
     return null;
   } finally {
-    // Never kill: this is the user's live preview. Bounded, and best effort.
-    await sandbox?.commands.run(`rm -rf ${dir}`, { timeoutMs: CLEANUP_TIMEOUT_MS }).catch(() => {});
+    // Never kill: this is the user's live preview. Bounded, best effort, and
+    // inside the margin STEP_BUDGET_MS leaves.
+    await sandbox
+      ?.commands.run(`rm -rf ${dir}`, { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS })
+      .catch(() => {});
   }
 };
 
@@ -255,15 +283,20 @@ type CheckOptions = {
 /**
  * Static checks, then `npm install`, `tsc --noEmit` and `vite build`: in the
  * owner's running preview sandbox when there is one, else in a throwaway
- * sandbox. Returns the tool result, with `secrets` redacted: a passing summary,
- * or an "Error: ..." message the agent can act on. Never throws.
+ * sandbox. Returns the tool result, with `secrets` redacted from the raw
+ * output before it is trimmed: a passing summary, or an "Error: ..." message
+ * the agent can act on. Never throws.
  *
  * `paths` holds every project file, including uploads with no text content.
  */
-export const checkProjectBuild = async (options: CheckOptions) =>
-  redact(await check(options), options.secrets);
-
-const check = async ({ files, paths, apiKey, metadata, preview }: CheckOptions): Promise<string> => {
+export const checkProjectBuild = async ({
+  files,
+  paths,
+  apiKey,
+  metadata,
+  preview,
+  secrets = [],
+}: CheckOptions): Promise<string> => {
   const problems = [
     ...missingReferencedFiles(files),
     ...undeclaredPackages(files),
@@ -286,27 +319,30 @@ const check = async ({ files, paths, apiKey, metadata, preview }: CheckOptions):
     return notBuilt("No build sandbox is configured");
   }
 
-  const stepDeadline = Date.now() + STEP_BUDGET_MS;
+  const job: BuildJob = { files, paths, deadline: Date.now() + STEP_BUDGET_MS, secrets };
   if (preview) {
-    const warm = await checkInWarmSandbox(apiKey, preview, files, paths, stepDeadline);
+    const warm = await checkInWarmSandbox(apiKey, preview, job);
     if (warm) return warm;
-    if (stepDeadline - Date.now() < MIN_COLD_BUILD_MS) {
-      return unfinished(new Error("No time left to build in a new sandbox"));
-    }
+    if (job.deadline - Date.now() < MIN_COLD_BUILD_MS) return unfinished(new OutOfTime());
   }
 
   let sandbox: Sandbox;
   try {
-    sandbox = await createProjectSandbox({ apiKey, timeoutMs: SANDBOX_TIMEOUT_MS, metadata });
+    sandbox = await createProjectSandbox({
+      apiKey,
+      timeoutMs: SANDBOX_TIMEOUT_MS,
+      metadata,
+      requestTimeoutMs: within(job.deadline, CREATE_TIMEOUT_MS),
+    });
   } catch (error) {
     console.error("[check-build] sandbox creation failed", error);
     return notBuilt("The build sandbox could not start");
   }
 
   try {
-    return await buildIn(sandbox, WORK_DIR, files, paths, stepDeadline);
+    return await buildIn(sandbox, WORK_DIR, job);
   } catch (error) {
-    return unfinished(error);
+    return unfinished(error, secrets);
   } finally {
     await sandbox.kill().catch(() => {});
   }
@@ -356,7 +392,7 @@ export const createCheckBuildTool = ({
           });
         });
       } catch (error) {
-        return redact(unfinished(error), secrets);
+        return unfinished(error, secrets);
       }
     },
   });

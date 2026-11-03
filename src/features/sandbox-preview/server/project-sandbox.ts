@@ -48,13 +48,19 @@ export const atLiveSandboxCap = async (apiKey: string, userId: string) => {
 };
 
 export const createProjectSandbox = (
-  opts: Pick<SandboxOpts, "apiKey" | "timeoutMs" | "metadata" | "network">,
+  opts: Pick<SandboxOpts, "apiKey" | "timeoutMs" | "metadata" | "network" | "requestTimeoutMs">,
 ) => Sandbox.create(SANDBOX_TEMPLATE, opts);
 
 /** One batched upload; E2B creates the parent directories. */
-export const writeProjectFiles = async (sandbox: Sandbox, files: ProjectFile[], dir = WORK_DIR) => {
-  await sandbox.files.makeDir(dir);
+export const writeProjectFiles = async (
+  sandbox: Sandbox,
+  files: ProjectFile[],
+  dir = WORK_DIR,
+  opts?: { requestTimeoutMs?: number },
+) => {
+  await sandbox.files.makeDir(dir, opts);
   await sandbox.files.write(
     files.map((file) => ({ path: `${dir}/${file.path}`, data: file.content })),
+    opts,
   );
 };

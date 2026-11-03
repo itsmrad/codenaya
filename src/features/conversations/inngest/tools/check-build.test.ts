@@ -126,6 +126,7 @@ describe("checkProjectBuild", () => {
     expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
     expect(sandbox.files.write).toHaveBeenCalledWith(
       expect.arrayContaining([{ path: "/home/user/app/src/App.tsx", data: expect.any(String) }]),
+      { requestTimeoutMs: expect.any(Number) },
     );
     const commands = sandbox.commands.run.mock.calls.map((call) => (call as unknown[])[0]);
     expect(commands).toEqual([
@@ -190,6 +191,27 @@ describe("checkProjectBuild redaction (#465)", () => {
     expect(result).toMatch(/^Error: Build failed/);
     expect(result).toContain("postgres://app:[redacted]@db");
     expect(result).not.toContain(SECRET);
+  });
+
+  it("redacts a multi-line secret before the 40-line cap can cut it", async () => {
+    const key = [
+      "-----BEGIN PRIVATE KEY-----",
+      "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCSYNTHETICKEYMATERIAL",
+      "-----END PRIVATE KEY-----",
+    ].join("\n");
+    const progress = Array.from({ length: 38 }, (_, i) => `transforming module ${i}`).join("\n");
+    fakeSandbox({ exitCode: 0 }, { exitCode: 1, stdout: `${progress}\n${key}\nerror during build` });
+    const files = starter();
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      apiKey: "e2b_key",
+      secrets: [key],
+    });
+    expect(result).toMatch(/^Error: Build failed/);
+    expect(result).toContain("[redacted]");
+    expect(result).not.toContain("SYNTHETICKEYMATERIAL");
+    expect(result).not.toContain("BEGIN PRIVATE KEY");
   });
 
   it("redacts the project's secrets from an unfinished check", async () => {
@@ -258,7 +280,11 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
       }),
     );
     // No longer than the time the sandbox already has left, so its timeout is unchanged.
-    expect(e2b.connect).toHaveBeenCalledWith("sbx_warm_0", { apiKey: "e2b_key", timeoutMs: 300_000 });
+    expect(e2b.connect).toHaveBeenCalledWith("sbx_warm_0", {
+      apiKey: "e2b_key",
+      timeoutMs: 300_000,
+      requestTimeoutMs: 10_000,
+    });
     const [stateBefore, copy, stateAfter, install, build, cleanup] = commandsOf(warm);
     expect(stateBefore).toMatch(/^stat /);
     expect(stateAfter).toBe(stateBefore);
@@ -269,9 +295,10 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expect(warm.commands.run.mock.calls[3][1]).toMatchObject({ cwd: dir });
     expect(cleanup).toBe(`rm -rf ${dir}`);
     // Awaited and bounded, not left running in the background.
-    expect(warm.commands.run.mock.calls[5][1]).toEqual({ timeoutMs: 10_000 });
+    expect(warm.commands.run.mock.calls[5][1]).toEqual({ timeoutMs: 10_000, requestTimeoutMs: 10_000 });
     expect(warm.files.write).toHaveBeenCalledWith(
       expect.arrayContaining([{ path: `${dir}/src/App.tsx`, data: expect.any(String) }]),
+      { requestTimeoutMs: expect.any(Number) },
     );
     expect(warm.kill).not.toHaveBeenCalled();
     expect(e2b.create).not.toHaveBeenCalled();
@@ -418,7 +445,42 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
 
     const result = await warmCheck();
 
-    expect(result).toMatch(/^Error: The build check could not finish \(No time left to build in a new sandbox\)/);
+    expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("stops with an unfinished check when slow discovery spends the step budget", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    e2b.list.mockReturnValue({
+      nextItems: async () => {
+        now += 250_000;
+        return [{ sandboxId: "sbx_warm_0", metadata: { userId: "user_1", projectId: "proj_1" }, endAt: new Date(now + 3_600_000) }];
+      },
+    });
+    fakeSandbox();
+
+    const result = await warmCheck();
+
+    expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expect(e2b.connect).not.toHaveBeenCalled();
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("never starts the install once a slow copy has spent the step budget", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    listed({});
+    const warm = warmSandbox((command) => {
+      if (command.startsWith("mkdir")) now += 245_000;
+      return undefined;
+    });
+
+    const result = await warmCheck();
+
+    expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expect(commandsOf(warm).some((run) => run.startsWith("npm install"))).toBe(false);
+    expect(warm.kill).not.toHaveBeenCalled();
     expect(e2b.create).not.toHaveBeenCalled();
   });
 
