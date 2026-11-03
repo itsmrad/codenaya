@@ -23,7 +23,8 @@ export const messageStepValidator = v.object({
 
 /**
  * Why a run was stopped as stuck (#306): the loop it was in, the file in the
- * loop, and the repeated error with its normalised signature (for the next run).
+ * loop (by path, or by id for calls made before #292), and the repeated error
+ * with its normalised signature (for the next run).
  */
 export const stuckRunValidator = v.object({
   reason: v.union(
@@ -32,6 +33,7 @@ export const stuckRunValidator = v.object({
     v.literal("repeated-syntax-error"),
   ),
   fileId: v.optional(v.string()),
+  path: v.optional(v.string()),
   error: v.optional(v.string()),
   signature: v.optional(v.string()),
 });

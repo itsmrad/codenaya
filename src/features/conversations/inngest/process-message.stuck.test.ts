@@ -28,7 +28,7 @@ import { MAX_AGENT_STEPS } from "./constants";
 import { drive, text, toolCall } from "./process-message.driver";
 
 const FILE_ID = "k57b9c2xq1m4n8p0r3s6t9v2w5y8z1ab";
-const NOT_FOUND = "Error: No files found with provided IDs. Use listFiles to get valid fileIDs.";
+const NOT_FOUND = `Error: "src/nope.ts" not found. Use a path from the project's file list.`;
 
 let recentMessages: unknown[] = [];
 const QUERIES: Record<string, () => unknown> = {
@@ -114,13 +114,11 @@ describe("processMessage loop detection", () => {
       { _id: "u1", role: "user", content: "It's still broken" },
       { _id: "m1", role: "assistant", content: "" },
     ];
-    QUERIES["system:getFileById"] = () => null;
-    const missing = { data: toolCall("readFiles", { fileIds: ["nope"] }) };
+    const missing = { data: toolCall("readFiles", { paths: ["src/nope.ts"] }) };
     const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
       missing,
       { data: text("Done.") },
     ]);
-    QUERIES["system:getFileById"] = () => ({ _id: FILE_ID, name: "App.tsx", type: "file" });
 
     expect(outcome.finalType).toBe("function-resolved");
     const requests = codingRequests(outcome.inferenceBodies);

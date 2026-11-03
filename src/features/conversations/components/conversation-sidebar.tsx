@@ -77,7 +77,7 @@ import {
   diagnoseStuckMessage,
 } from "../plan-mode";
 import { type AgentModelChoice, nextTier } from "../agent-models";
-import { buildPathIndex } from "../agent-steps";
+import { buildPathIndex, stuckFilePath } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
 import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
@@ -534,10 +534,9 @@ export const ConversationSidebar = ({
                   stuckRetry={message.stuck && stuckRetry(message, messageIndex)}
                   onDiagnose={() => {
                     if (!message.stuck) return;
-                    const { fileId } = message.stuck;
                     setPlanMode(true);
                     // Added after any draft, not over it, then focused to review and send.
-                    appendInput(diagnoseStuckMessage(message.stuck, fileId && pathOf(fileId)));
+                    appendInput(diagnoseStuckMessage(message.stuck, stuckFilePath(message.stuck, pathOf)));
                     requestAnimationFrame(() => panelRef.current?.querySelector("textarea")?.focus());
                   }}
                   checkpointId={

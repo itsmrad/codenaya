@@ -23,7 +23,7 @@ import { splitSlashSkills } from "@/features/skills/parse-slash";
 import { cn } from "@/lib/utils";
 
 import type { Doc, Id } from "../../../../convex/_generated/dataModel";
-import { sanitizeAgentText } from "../agent-steps";
+import { sanitizeAgentText, stuckFilePath } from "../agent-steps";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
 import { type StuckRetry, StuckRunCard } from "./stuck-run-card";
@@ -295,7 +295,7 @@ export const AssistantMessage = ({
           {message.stuck && (
             <StuckRunCard
               stuck={message.stuck}
-              filePath={message.stuck.fileId && pathOf?.(message.stuck.fileId)}
+              filePath={stuckFilePath(message.stuck, pathOf)}
               retry={isLast ? stuckRetry : undefined}
               onDiagnose={isLast ? onDiagnose : undefined}
               onRestore={onRestore}

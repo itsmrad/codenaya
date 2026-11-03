@@ -15,6 +15,12 @@ export const MAX_SAME_ERROR = 3;
 export const MAX_SAME_FILE_WRITES = 4;
 export const MAX_SAME_SYNTAX_ERROR = 3;
 
+/** The path of the file a stuck run looped on: recorded by path, or by id before #292. */
+export const stuckFilePath = (
+  { fileId, path }: StuckRun,
+  pathOf?: (fileId: string) => string | undefined,
+) => path ?? (fileId ? pathOf?.(fileId) : undefined);
+
 /** What each loop looks like, for the agent's stop note and the hand-off card. */
 export const STUCK_REASONS: Record<StuckRun["reason"], string> = {
   "repeated-error": `the same error came back ${MAX_SAME_ERROR} times`,

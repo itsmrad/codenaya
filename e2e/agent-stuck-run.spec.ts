@@ -19,16 +19,11 @@ const PROMPT = "Fix the entry point";
 const RUN_MODEL = "x-ai/grok-4.7";
 const RETRY_MODEL = "anthropic/claude-sonnet-5.5";
 
-const toolResults = (request: StubChatRequest) =>
-  request.messages.filter((message) => message.role === "tool").length;
-
-/** createFiles, listFiles for the id, then updateFile on it until tools are off. */
-const rewriteForever = (request: StubChatRequest) => {
-  if ((request as { tool_choice?: unknown }).tool_choice === "none") return undefined;
-  if (toolResults(request) === 1) return { name: "listFiles", arguments: {} };
-  const fileId = /([a-z0-9]{28,34})\W+name\W+main\.ts/.exec(JSON.stringify(request.messages))?.[1];
-  return { name: "updateFile", arguments: { fileId, content: "export const start = (\n" } };
-};
+/** After writeFiles, updateFile on the same path until tools are off. */
+const rewriteForever = (request: StubChatRequest) =>
+  (request as { tool_choice?: unknown }).tool_choice === "none"
+    ? undefined
+    : { name: "updateFile", arguments: { path: "src/main.ts", content: "export const start = (\n" } };
 
 test.describe.serial("stuck agent run", () => {
   test.skip(!hasClerkCredentials(), "Needs CLERK_SECRET_KEY and NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
@@ -43,7 +38,7 @@ test.describe.serial("stuck agent run", () => {
   test.beforeAll(async ({ browser }) => {
     stub = await startStubProvider(apiKey, {
       reply: EXPLANATION,
-      toolCall: { name: "createFiles", arguments: { parentId: "", files: [{ name: "main.ts", content: "start();\n" }] } },
+      toolCall: { name: "writeFiles", arguments: { files: [{ path: "src/main.ts", content: "start();\n" }] } },
       followUp: rewriteForever,
     });
     page = await browser.newPage();
@@ -85,9 +80,9 @@ test.describe.serial("stuck agent run", () => {
     await expect(page.getByText(/I processed your request/)).toHaveCount(0);
     await test.info().attach("stuck-card", { body: await page.screenshot(), contentType: "image/png" });
 
-    // createFiles, listFiles, three broken rewrites, then the no-tools explanation.
+    // writeFiles, three broken rewrites, then the no-tools explanation.
     const coding = stub.requests.filter((request) => request.tools?.length);
-    expect(coding).toHaveLength(6);
+    expect(coding).toHaveLength(5);
     await expect(card).toContainText("failed to parse 3 times");
 
     await expect(card.getByRole("button", { name: /Diagnose in Plan mode/ })).toBeVisible();

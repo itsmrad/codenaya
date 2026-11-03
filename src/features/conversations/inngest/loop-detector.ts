@@ -7,6 +7,7 @@ import {
   STUCK_REASONS,
   type StuckRun,
   buildCheckLabel,
+  normalizePath,
   sanitizeAgentText,
   toolResultError,
 } from "../agent-steps";
@@ -64,49 +65,67 @@ const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&
 export const errorSignature = (error: string) =>
   sanitizeAgentText(error).toLowerCase().replace(/\d+/g, "#").replace(/\s+/g, " ").trim();
 
-const createdNames = (input: Record<string, unknown>) =>
-  (Array.isArray(input.files) ? input.files : [])
-    .map((file) => str((file as Record<string, unknown> | null)?.name))
-    .filter(Boolean);
+/** A file a write call wrote: its count key, the name its syntax note uses, and how the card opens it. */
+interface WrittenFile {
+  key: string;
+  label: string;
+  ref: { fileId?: string; path?: string };
+}
 
-const pathKey = (input: Record<string, unknown>, fileName: string) =>
-  `path:${str(input.parentId)}/${fileName}`;
-
-/** The files a write call wrote: updateFile by id, createFiles by parent and name. */
-const writtenFiles = ({ name, input }: Call): string[] => {
-  if (name === "updateFile") return [`id:${str(input.fileId)}`];
-  if (name === "createFiles") return createdNames(input).map((fileName) => pathKey(input, fileName));
-  return [];
+const byPath = (raw: string): WrittenFile | undefined => {
+  const path = normalizePath(raw);
+  return path ? { key: `path:${path}`, label: path, ref: { path } } : undefined;
 };
 
 /**
- * `[file key, entry]` for each file a write tool's syntax note reports. An
- * updateFile call writes one file, so its whole note is one entry, keyed by the
- * file id. createFiles entries are split only before a name it wrote, so a
- * "; " inside a message can't split one; they are keyed by parent and name.
+ * The files a write call wrote. updateFile and writeFiles name them by path
+ * (#292), so both count toward the same file; updateFile calls made before
+ * #292 by id; createFiles by parent and name.
  */
-const syntaxErrors = ({ name, input, content }: Call): Array<[string, string]> => {
+const writtenFiles = ({ name, input }: Call): WrittenFile[] => {
+  const files = (Array.isArray(input.files) ? input.files : []) as Array<Record<string, unknown> | null>;
+  if (name === "updateFile") {
+    const file = byPath(str(input.path));
+    if (file) return [file];
+    const fileId = str(input.fileId);
+    return fileId ? [{ key: `id:${fileId}`, label: "", ref: { fileId } }] : [];
+  }
+  if (name === "writeFiles") return files.flatMap((file) => byPath(str(file?.path)) ?? []);
+  if (name === "createFiles") {
+    return files
+      .map((file) => str(file?.name))
+      .filter(Boolean)
+      .map((fileName) => ({ key: `parent:${str(input.parentId)}/${fileName}`, label: fileName, ref: {} }));
+  }
+  return [];
+};
+
+/** Rewrites of these replace whole files; createFiles of an existing name fails instead. */
+const REWRITE_TOOLS = new Set(["updateFile", "writeFiles"]);
+
+/**
+ * Each file a write call's syntax note reports, with its entry. A call that
+ * wrote one file has one entry: its whole note. Otherwise the note is split
+ * only before a name the call wrote, so a "; " inside a message can't split one.
+ */
+const syntaxErrors = (content: unknown, written: WrittenFile[]): Array<[WrittenFile, string]> => {
   const data = str((content as { data?: unknown } | null)?.data);
   const at = data.indexOf(SYNTAX_ERRORS_NOTE);
   if (at === -1) return [];
   const note = data.slice(at + SYNTAX_ERRORS_NOTE.length).trim();
-  if (name === "updateFile") return [[`id:${str(input.fileId)}`, note]];
+  const unknown = (entry: string): WrittenFile => ({ key: `note:${entry}`, label: "", ref: {} });
+  if (written.length <= 1) return [[written[0] ?? unknown(note), note]];
 
-  const names = createdNames(input);
-  const entries =
-    names.length > 1
-      ? note.split(new RegExp(`; (?=(?:${names.map(escapeRegExp).join("|")}) )`))
-      : [note];
-  return entries.map((entry) => {
-    const file = names.find((fileName) => entry.startsWith(`${fileName} `)) ?? entry;
-    return [pathKey(input, file), entry];
-  });
+  const labels = written.map((file) => escapeRegExp(file.label)).join("|");
+  return note
+    .split(new RegExp(`; (?=(?:${labels}) )`))
+    .map((entry) => [written.find((file) => entry.startsWith(`${file.label} `)) ?? unknown(entry), entry]);
 };
 
 /** Every error a call reported: its own failure, or the syntax errors it wrote. */
 const callErrors = (call: Call) => {
   const error = toolResultError(call.content);
-  return error ? [error] : syntaxErrors(call).map(([, entry]) => entry);
+  return error ? [error] : syntaxErrors(call.content, writtenFiles(call)).map(([, entry]) => entry);
 };
 
 /** The first loop in the run's tool calls, or null while it makes progress. */
@@ -114,7 +133,7 @@ export const detectLoop = (results: ToolResults[]): StuckRun | null => {
   const errors = new Map<string, number>();
   const syntax = new Map<string, number>();
   // Per file: rewrites made after a failure, and whether one followed its last write.
-  // updateFile replaces the whole file, so rewrites alone are normal for hub files.
+  // A rewrite replaces the whole file, so rewrites alone are normal for hub files.
   const writes = new Map<string, { count: number; failed: boolean }>();
   const bump = (counts: Map<string, number>, key: string) => {
     const count = (counts.get(key) ?? 0) + 1;
@@ -126,8 +145,9 @@ export const detectLoop = (results: ToolResults[]): StuckRun | null => {
   };
 
   for (const call of runCalls(results)) {
-    const fileId = call.name === "updateFile" ? str(call.input.fileId) : "";
-    const file = fileId ? { fileId } : {};
+    const written = writtenFiles(call);
+    // The file an error is about, when the call wrote just one.
+    const file = written.length === 1 ? written[0].ref : {};
 
     const error = toolResultError(call.content);
     if (error) {
@@ -152,23 +172,25 @@ export const detectLoop = (results: ToolResults[]): StuckRun | null => {
       continue;
     }
 
-    const notes = syntaxErrors(call);
-    if (fileId) {
-      const previous = writes.get(fileId);
-      const count = previous ? previous.count + (previous.failed ? 1 : 0) : 1;
-      writes.set(fileId, { count, failed: false });
-      if (count >= MAX_SAME_FILE_WRITES) return { reason: "repeated-write", fileId };
+    const notes = syntaxErrors(call.content, written);
+    if (REWRITE_TOOLS.has(call.name)) {
+      for (const { key, ref } of written) {
+        const previous = writes.get(key);
+        const count = previous ? previous.count + (previous.failed ? 1 : 0) : 1;
+        writes.set(key, { count, failed: false });
+        if (count >= MAX_SAME_FILE_WRITES) return { reason: "repeated-write", ...ref };
+      }
     }
     if (notes.length > 0) markFailed();
     // A file written again without a syntax note was fixed.
-    const broken = new Set(notes.map(([key]) => key));
-    for (const key of writtenFiles(call)) {
+    const broken = new Set(notes.map(([{ key }]) => key));
+    for (const { key } of written) {
       if (!broken.has(key)) syntax.delete(key);
     }
-    for (const [key, entry] of notes) {
+    for (const [{ key, ref }, entry] of notes) {
       if (bump(syntax, key) >= MAX_SAME_SYNTAX_ERROR) {
         const shown = sanitizeAgentText(entry).slice(0, 200);
-        return { reason: "repeated-syntax-error", error: shown, signature: errorSignature(entry), ...file };
+        return { reason: "repeated-syntax-error", error: shown, signature: errorSignature(entry), ...ref };
       }
     }
   }

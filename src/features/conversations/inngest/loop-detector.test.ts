@@ -68,6 +68,40 @@ describe("detectLoop", () => {
     expect(detectLoop([...rounds, write(ID_A)])).toEqual({ reason: "repeated-write", fileId: ID_A });
   });
 
+  it("trips on path-based rewrites by updateFile, writeFiles or both (#292)", () => {
+    const update = () => call("updateFile", 'File "src/App.tsx" updated successfully', { path: "./src/App.tsx" });
+    const writeAll = () =>
+      call("writeFiles", "Wrote 2 file(s). Updated: src/App.tsx, src/main.tsx.", {
+        files: [{ path: "src/App.tsx" }, { path: "src/main.tsx" }],
+      });
+    const failures = ["alpha", "beta", "gamma"].map(failedBuild);
+    const rounds = (rewrite: (i: number) => ReturnType<typeof call>) => [
+      ...failures.flatMap((failure, i) => [rewrite(i), failure]),
+      rewrite(3),
+    ];
+    const stuck = { reason: "repeated-write", path: "src/App.tsx" };
+    expect(detectLoop(rounds(update))).toEqual(stuck);
+    expect(detectLoop(rounds(writeAll))).toEqual(stuck);
+    expect(detectLoop(rounds((i) => (i % 2 ? update() : writeAll())))).toEqual(stuck);
+    // Healthy path rewrites still don't trip.
+    expect(detectLoop(times(6, update))).toBeNull();
+  });
+
+  it("splits writeFiles syntax notes by the paths it wrote", () => {
+    const broken = (line: number) =>
+      call(
+        "writeFiles",
+        `Wrote 2 file(s).${syntaxNote(`src/a.tsx 1:1 Expected ';'; src/b.tsx ${line}:1 ')' expected.`)}`,
+        { files: [{ path: "src/a.tsx" }, { path: "src/b.tsx" }] },
+      );
+    expect(detectLoop([broken(1), broken(2)])).toBeNull();
+    expect(detectLoop([broken(1), broken(2), broken(3)])).toMatchObject({
+      reason: "repeated-syntax-error",
+      path: "src/a.tsx",
+      error: "src/a.tsx 1:1 Expected ';'",
+    });
+  });
+
   it("starts a file's count over after a passing build check", () => {
     const rounds = ["alpha", "beta"].flatMap((what) => [write(ID_A), failedBuild(what)]);
     expect(detectLoop([...rounds, passedBuild(), ...rounds, write(ID_A)])).toBeNull();
