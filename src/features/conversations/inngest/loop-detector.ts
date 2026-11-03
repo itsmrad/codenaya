@@ -134,10 +134,12 @@ const syntaxErrors = (content: unknown, written: WrittenFile[]): Array<[WrittenF
   const unknown = (entry: string): WrittenFile => ({ key: `note:${entry}`, label: "", ref: {} });
   if (written.length <= 1) return [[written[0] ?? unknown(note), note]];
 
-  const labels = written.map((file) => escapeRegExp(file.label)).join("|");
+  // Longest first: a path may contain spaces, so "x.ts y.ts 1:1" also starts with "x.ts ".
+  const byLength = [...written].sort((a, b) => b.label.length - a.label.length);
+  const labels = byLength.map((file) => escapeRegExp(file.label)).join("|");
   return note
     .split(new RegExp(`; (?=(?:${labels}) )`))
-    .map((entry) => [written.find((file) => entry.startsWith(`${file.label} `)) ?? unknown(entry), entry]);
+    .map((entry) => [byLength.find((file) => entry.startsWith(`${file.label} `)) ?? unknown(entry), entry]);
 };
 
 /** Every error a call reported: its own failure, or the syntax errors it wrote. */

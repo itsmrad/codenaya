@@ -110,6 +110,20 @@ describe("detectLoop", () => {
     });
   });
 
+  it("attributes a syntax note to the longest path it starts with", () => {
+    // "src/x.ts y.ts" (a space in the name) also starts with "src/x.ts ".
+    const broken = (line: number) =>
+      call(
+        "writeFiles",
+        `Wrote 2 file(s). Updated: src/x.ts, src/x.ts y.ts.${syntaxNote(`src/x.ts y.ts ${line}:1 ')' expected.`)}`,
+        { files: [{ path: "src/x.ts" }, { path: "src/x.ts y.ts" }] },
+      );
+    expect(detectLoop([broken(1), broken(2), broken(3)])).toMatchObject({
+      reason: "repeated-syntax-error",
+      path: "src/x.ts y.ts",
+    });
+  });
+
   it("splits writeFiles syntax notes by the paths it wrote", () => {
     const broken = (line: number) =>
       call(
