@@ -29,6 +29,8 @@ export function installPreviewBridge(
       const found = error as ErrorLike;
       const message = String((found && found.message) || fallback).slice(0, maxText);
       const stack = found && found.stack ? String(found.stack).slice(0, maxText) : undefined;
+      // A benign browser notice, not an app error; nothing to fix.
+      if (/^ResizeObserver loop/.test(message)) return;
       // One error can arrive twice in the same task (window error and its log).
       // Only then: the IDE clears the banner on every edit and needs a repeat
       // after the edit to show the error again.

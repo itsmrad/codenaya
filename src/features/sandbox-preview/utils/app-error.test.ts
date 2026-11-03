@@ -4,11 +4,13 @@ import {
   appErrorKey,
   bannerError,
   buildFixPrompt,
+  createBuildErrorDetector,
   codeBlock,
   detectBuildError,
   isHmrSuccess,
   logTail,
   mergeAppError,
+  trackFixAttempts,
 } from "./app-error";
 
 describe("detectBuildError", () => {
@@ -150,5 +152,54 @@ describe("bannerError", () => {
     expect(bannerError(error, { ...shown, dismissedId: appErrorKey(error) })).toBeNull();
     expect(bannerError(error, { ...shown, previewReady: false })).toBeNull();
     expect(bannerError(null, shown)).toBeNull();
+  });
+});
+
+describe("trackFixAttempts", () => {
+  const start = { errorId: null, count: 0 };
+
+  it("keeps the count while the same error is cleared between fix runs", () => {
+    const afterTwo = { errorId: "a", count: 2 };
+    expect(trackFixAttempts(afterTwo, null)).toBe(afterTwo);
+    expect(trackFixAttempts(afterTwo, "a")).toBe(afterTwo);
+  });
+
+  it("starts again when a different error becomes active", () => {
+    expect(trackFixAttempts({ errorId: "a", count: 2 }, "b")).toEqual({ errorId: "b", count: 0 });
+    expect(trackFixAttempts(start, "a")).toEqual({ errorId: "a", count: 0 });
+  });
+
+  it("doesn't carry old attempts over when an earlier error comes back after another", () => {
+    const onB = trackFixAttempts({ errorId: "a", count: 2 }, "b");
+    expect(trackFixAttempts(onB, "a")).toEqual({ errorId: "a", count: 0 });
+  });
+});
+
+describe("createBuildErrorDetector", () => {
+  const chunk =
+    '[vite] Internal server error: Failed to resolve import "./Missing" from "src/App.jsx". Does the file exist?\n' +
+    "  Plugin: vite:import-analysis\n" +
+    "  File: /home/user/app/src/App.jsx:1:20\n";
+
+  it("reads an error the stream split across chunks", () => {
+    const css =
+      "[plugin:vite:css] [postcss] /home/user/app/src/index.css:5:1: The `border-border` class does not exist.\n";
+    const [head, rest] = [css.slice(0, 10), css.slice(10)]; // "[plugin:vi" | "te:css] ..."
+    expect(detectBuildError(head)).toBeNull();
+    expect(detectBuildError(rest)).toBeNull();
+
+    const detector = createBuildErrorDetector();
+    expect(detector.push(head)).toBeNull();
+    expect(detector.push(rest)).toMatchObject({ file: "src/index.css", line: 5 });
+  });
+
+  it("forgets earlier output once reset, and keeps only a bounded tail", () => {
+    const detector = createBuildErrorDetector();
+    detector.push(chunk);
+    detector.reset();
+    expect(detector.push("  VITE ready\n")).toBeNull();
+
+    detector.push(chunk);
+    expect(detector.push("x".repeat(10_000))).toBeNull();
   });
 });

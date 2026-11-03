@@ -43,7 +43,9 @@ import {
   bannerError,
   buildFixPrompt,
   mergeAppError,
+  trackFixAttempts,
   type AppError,
+  type FixAttempts,
 } from "@/features/sandbox-preview/utils/app-error";
 import { readPreviewMessage } from "@/features/sandbox-preview/utils/preview-bridge";
 import {
@@ -174,7 +176,10 @@ export const PreviewView = ({
   const appError = buildError ?? runtimeError;
   const appErrorId = appError ? appErrorKey(appError) : null;
   const [dismissedErrorId, setDismissedErrorId] = useState<string | null>(null);
-  const [fixAttempts, setFixAttempts] = useState<Record<string, number>>({});
+  const [fixAttempts, setFixAttempts] = useState<FixAttempts>({ errorId: null, count: 0 });
+  const trackedAttempts = trackFixAttempts(fixAttempts, appErrorId);
+  if (trackedAttempts !== fixAttempts) setFixAttempts(trackedAttempts);
+  const attempts = trackedAttempts.errorId === appErrorId ? trackedAttempts.count : 0;
   const queueChatMessage = useQueueChatMessage();
   // Read when Fix is clicked, so the published fix doesn't change on every log line.
   const terminalOutputRef = useRef(terminalOutput);
@@ -195,13 +200,17 @@ export const PreviewView = ({
       text: buildFixPrompt(appError, terminalOutputRef.current),
       // Only a fix that was actually sent counts towards "Still failing".
       onSent: () =>
-        setFixAttempts((attempts) => ({ ...attempts, [appErrorId]: (attempts[appErrorId] ?? 0) + 1 })),
+        setFixAttempts((prev) =>
+          prev.errorId === appErrorId
+            ? { ...prev, count: prev.count + 1 }
+            : { errorId: appErrorId, count: 1 },
+        ),
     };
     queuedFixRef.current = message;
     queueChatMessage(message);
-  }, [appError, appErrorId, projectId, queueChatMessage]);
+  }, [appError, appErrorId, projectId, queueChatMessage, setFixAttempts]);
   // The chat's run block says when a finished run left the preview broken.
-  const canFix = appErrorId !== null && (fixAttempts[appErrorId] ?? 0) < MAX_FIX_ATTEMPTS;
+  const canFix = appErrorId !== null && attempts < MAX_FIX_ATTEMPTS;
   usePublishPreviewErrors(
     // One: the banner and its fix carry only the error shown (build first).
     previewUrl && appError ? 1 : 0,
@@ -217,7 +226,7 @@ export const PreviewView = ({
     shownError && appErrorId ? (
       <PreviewErrorBanner
         error={shownError}
-        attempts={fixAttempts[appErrorId] ?? 0}
+        attempts={attempts}
         // Still loading counts as working: a fix can't start mid-run.
         agentWorking={activeRun !== null}
         chatBlock={chatBlock}

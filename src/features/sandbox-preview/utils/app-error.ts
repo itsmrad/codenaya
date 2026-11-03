@@ -58,6 +58,25 @@ export const detectBuildError = (chunk: string): AppError | null => {
   return { kind: "build", message: message.slice(0, MAX_ERROR_TEXT) };
 };
 
+const BUILD_LOG_TAIL = 8192;
+
+/**
+ * `detectBuildError` over the recent output, so an error the stream split
+ * across chunks is still read. Reset it wherever the shown error is cleared.
+ */
+export const createBuildErrorDetector = () => {
+  let tail = "";
+  return {
+    push: (chunk: string) => {
+      tail = (tail + chunk).slice(-BUILD_LOG_TAIL);
+      return detectBuildError(tail);
+    },
+    reset: () => {
+      tail = "";
+    },
+  };
+};
+
 /** Vite applied an update: an earlier compile error may be gone. */
 export const isHmrSuccess = (chunk: string) => HMR_SUCCESS.test(clean(chunk));
 
@@ -79,6 +98,20 @@ export const bannerError = (
   }: { dismissedId: string | null; previewReady: boolean; firstBuildRunning: boolean },
 ) =>
   error && previewReady && !firstBuildRunning && appErrorKey(error) !== dismissedId ? error : null;
+
+/** Fix runs sent for the error that was active last. */
+export interface FixAttempts {
+  errorId: string | null;
+  count: number;
+}
+
+/**
+ * Starts the count again when a different error becomes active. A cleared
+ * error keeps its count: the IDE clears it on every edit, between fix runs, so
+ * repeated failed fixes still reach "Still failing".
+ */
+export const trackFixAttempts = (prev: FixAttempts, activeId: string | null): FixAttempts =>
+  activeId !== null && activeId !== prev.errorId ? { errorId: activeId, count: 0 } : prev;
 
 /** Keeps the shown error when a repeat arrives, so HMR re-throws don't flicker. */
 export const mergeAppError = (prev: AppError | null, next: AppError) =>

@@ -11,7 +11,7 @@ import {
   type BootPhase,
 } from "@/features/sandbox-preview/utils/boot-phase";
 import {
-  detectBuildError,
+  createBuildErrorDetector,
   isHmrSuccess,
   mergeAppError,
   type AppError,
@@ -65,6 +65,7 @@ export const useSandbox = ({
   const [terminalOutput, setTerminalOutput] = useState("");
   /** A compile error the dev server printed after boot (#223). */
   const [appError, setAppError] = useState<AppError | null>(null);
+  const [buildErrors] = useState(createBuildErrorDetector);
   const [bootHistory, setBootHistory] = useState<BootHistory>({});
   const [phase, setPhase] = useState<BootPhase | null>(null);
   const [prevEnabled, setPrevEnabled] = useState(enabled);
@@ -121,6 +122,7 @@ export const useSandbox = ({
 
     const start = async () => {
       try {
+        buildErrors.reset();
         setStatus("booting");
         setError(null);
         setTerminalOutput("");
@@ -183,8 +185,11 @@ export const useSandbox = ({
                   break;
                 case "output": {
                   setTerminalOutput((prev) => prev + event.data);
-                  if (isHmrSuccess(event.data)) setAppError(null);
-                  const buildError = detectBuildError(event.data);
+                  if (isHmrSuccess(event.data)) {
+                    setAppError(null);
+                    buildErrors.reset();
+                  }
+                  const buildError = buildErrors.push(event.data);
                   if (buildError) setAppError((prev) => mergeAppError(prev, buildError));
                   break;
                 }
@@ -267,6 +272,7 @@ export const useSandbox = ({
       // The edit may fix the shown error. If not, the dev server prints it again
       // once the preview reloads the module, which is after this write lands.
       setAppError(null);
+      buildErrors.reset();
 
       // Serialize file syncs to prevent out-of-order writes
       syncPromiseRef.current = syncPromiseRef.current
@@ -287,7 +293,7 @@ export const useSandbox = ({
     }, 300); // Short enough to feel instant, long enough to batch a burst of writes
 
     return () => clearTimeout(timeoutId);
-  }, [files, status, settings?.installCommand]);
+  }, [files, status, settings?.installCommand, buildErrors]);
 
   // Cleanup sandbox on unmount or when disabled
   useEffect(() => {
@@ -353,11 +359,12 @@ export const useSandbox = ({
     setError(null);
     setErrorKind(null);
     setAppError(null);
+    buildErrors.reset();
     setTerminalOutput("");
     setPhase(null);
     setBootHistory({});
     setRestartKey((k) => k + 1);
-  }, [killSandbox]);
+  }, [killSandbox, buildErrors]);
 
   return {
     status,

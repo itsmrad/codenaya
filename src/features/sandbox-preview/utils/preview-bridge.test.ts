@@ -153,6 +153,15 @@ describe("installPreviewBridge", () => {
     ]);
   });
 
+  it("ignores the browser's ResizeObserver loop notices, but not Script error.", () => {
+    const { listeners, posted } = setup();
+
+    listeners.error({ error: null, message: "ResizeObserver loop completed with undelivered notifications." });
+    listeners.error({ error: null, message: "ResizeObserver loop limit exceeded" });
+    listeners.error({ error: null, message: "Script error." });
+    expect(posted.map((message) => message.message)).toEqual(["Script error."]);
+  });
+
   it("reports a thrown non-Error from the boundary log", () => {
     const { win, posted } = setup();
 
