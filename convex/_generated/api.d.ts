@@ -20,6 +20,7 @@ import type * as envVars from "../envVars.js";
 import type * as errors from "../errors.js";
 import type * as fileContents from "../fileContents.js";
 import type * as files from "../files.js";
+import type * as githubSync from "../githubSync.js";
 import type * as http from "../http.js";
 import type * as integrations from "../integrations.js";
 import type * as internalKey from "../internalKey.js";
@@ -54,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   errors: typeof errors;
   fileContents: typeof fileContents;
   files: typeof files;
+  githubSync: typeof githubSync;
   http: typeof http;
   integrations: typeof integrations;
   internalKey: typeof internalKey;
