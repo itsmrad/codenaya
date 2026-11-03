@@ -102,6 +102,7 @@ describe("installPreviewBridge", () => {
       parent: { postMessage: (message: { message: string; stack?: string }) => posted.push(message) },
       addEventListener: (type: string, listener: (event: unknown) => void) => (listeners[type] = listener),
       console: { error: original },
+      setTimeout,
     };
     install(win as unknown as typeof window, PREVIEW_MESSAGE_SOURCE, 1, 2048);
     return { win, listeners, posted, original };
@@ -124,10 +125,39 @@ describe("installPreviewBridge", () => {
       expect.objectContaining({ source: PREVIEW_MESSAGE_SOURCE, kind: "runtime", message: "Render exploded" }),
     ]);
 
-    // A repeated log, or the same error from window, isn't posted again.
+    // Within the same task a repeat isn't posted again.
     win.console.error(...boundaryLog(error));
     expect(posted).toHaveLength(1);
     expect(original).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports the same error again after the tick, as after an edit that didn't fix it", async () => {
+    const { win, listeners, posted } = setup();
+    const error = new Error("Still broken");
+
+    win.console.error(...boundaryLog(error));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // React Refresh retries the boundary and logs the identical error.
+    win.console.error(...boundaryLog(error));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // A stackless rejection repeated by a re-clicked handler.
+    listeners.unhandledrejection({ reason: "no stack" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    listeners.unhandledrejection({ reason: "no stack" });
+
+    expect(posted.map((message) => message.message)).toEqual([
+      "Still broken",
+      "Still broken",
+      "no stack",
+      "no stack",
+    ]);
+  });
+
+  it("reports a thrown non-Error from the boundary log", () => {
+    const { win, posted } = setup();
+
+    win.console.error(...boundaryLog("boom"));
+    expect(posted).toEqual([expect.objectContaining({ message: "boom" })]);
   });
 
   it("dedupes window error and a log of the same error", () => {

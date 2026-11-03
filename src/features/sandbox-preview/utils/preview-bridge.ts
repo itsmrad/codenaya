@@ -29,10 +29,15 @@ export function installPreviewBridge(
       const found = error as ErrorLike;
       const message = String((found && found.message) || fallback).slice(0, maxText);
       const stack = found && found.stack ? String(found.stack).slice(0, maxText) : undefined;
-      // One error often arrives twice (window error and a log, or a repeated log).
+      // One error can arrive twice in the same task (window error and its log).
+      // Only then: the IDE clears the banner on every edit and needs a repeat
+      // after the edit to show the error again.
       const key = message + "\n" + (stack || "");
       if (key === lastPosted) return;
       lastPosted = key;
+      win.setTimeout(() => {
+        lastPosted = "";
+      }, 0);
       win.parent.postMessage({ source, version, kind: "runtime", message, stack }, "*");
     } catch {
       // A hostile error object must not break the app.
@@ -59,6 +64,10 @@ export function installPreviewBridge(
           }
         }
         if (boundaryLog && error) report(error, "Uncaught error");
+        // `throw "boom"`: no Error, so React's %o argument is the thrown value.
+        else if (boundaryLog && typeof args[0] === "string" && args[0].indexOf("%o") === 0) {
+          report(args[1], args[1]);
+        }
       } catch {
         // Same as above: reporting never gets in the app's way.
       } finally {
