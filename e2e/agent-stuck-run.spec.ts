@@ -107,8 +107,10 @@ test.describe.serial("stuck agent run", () => {
     const before = stub.requests.length;
     await retry.click();
     await expect(trigger).toHaveText(RETRY_MODEL);
-    await expect.poll(() => stub.requests.slice(before).some((r) => r.model === RETRY_MODEL)).toBe(true);
-    const resent = stub.requests.slice(before).find((r) => r.model === RETRY_MODEL && r.tools?.length);
+    // Tools-bearing only: the key check's no-tools "hi" probe uses the retry model first.
+    const resentOnRetryModel = (r: StubChatRequest) => r.model === RETRY_MODEL && Boolean(r.tools?.length);
+    await expect.poll(() => stub.requests.slice(before).some(resentOnRetryModel)).toBe(true);
+    const resent = stub.requests.slice(before).find(resentOnRetryModel);
     expect(JSON.stringify(resent?.messages)).toContain(PROMPT);
 
     // The stub loops the retry too; Restore is offered only once no run is going.
