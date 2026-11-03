@@ -133,6 +133,22 @@ describe("autoRouteModel", () => {
       expect(autoRouteModel(gated, "build", ["gone", "top", "mid", "cheap"])?.id).toBe("cheap");
     });
 
+    it("never routes images outside a pool whose members are all hidden or promo", () => {
+      const gated = [
+        model("seer", { vision: true, hidden: true }),
+        model("promo-seer", { vision: true, access: "promo_unlimited" }),
+        model("google/gemini-3.8-flash", { vision: true }),
+        model("anthropic/claude-sonnet-5.5", { usd: 6 }),
+      ];
+      for (const only of [["seer"], ["promo-seer"]]) {
+        expect(autoRouteModel(gated, "vision", only), only[0]).toBeUndefined();
+        // Text sends keep Auto working on the fixed routes.
+        expect(autoRouteModel(gated, "build", only)?.id).toBe("anthropic/claude-sonnet-5.5");
+      }
+      // No pool at all: the fixed vision routes.
+      expect(autoRouteModel(gated, "vision", [])?.id).toBe("google/gemini-3.8-flash");
+    });
+
     it("falls back to the fixed routes when no member is usable or it's empty", () => {
       for (const empty of [[], ["gone"], undefined]) {
         expect(autoRouteModel(models, "build", empty)?.id).toBe("anthropic/claude-sonnet-5.5");

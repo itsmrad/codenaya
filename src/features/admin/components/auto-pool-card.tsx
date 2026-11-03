@@ -20,6 +20,7 @@ export const AutoPoolCard = ({ draft }: { draft: CatalogDraft }) => {
   if (!current || current.models.length === 0) return null;
   const pool = new Set(current.autoModelIds);
   const pickable = new Set(pickableModels(current.models).map((m) => m.id));
+  // Hidden and promo members are skipped at send time, so they don't count.
   const usable = current.models.filter((m) => pool.has(m.id) && pickable.has(m.id));
 
   return (
@@ -33,10 +34,10 @@ export const AutoPoolCard = ({ draft }: { draft: CatalogDraft }) => {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {usable.length > 0 && !usable.some((m) => m.vision) && (
+        {pool.size > 0 && !usable.some((m) => m.vision) && (
           <p className="flex items-center gap-1.5 text-sm text-destructive">
             <CircleAlertIcon className="size-4 shrink-0" aria-hidden="true" />
-            No model here reads images, so image sends on Auto are refused.
+            No usable model in Auto&apos;s pool reads images, so image sends on Auto are refused.
           </p>
         )}
         <ul aria-label="Auto models" className="divide-y">

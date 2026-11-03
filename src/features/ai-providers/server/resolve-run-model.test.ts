@@ -462,6 +462,26 @@ describe("validateModelChoice: Auto (#322)", () => {
       expect(await auto("build")).toMatchObject({ modelId: "smart" });
     });
 
+    it.each([
+      ["hidden", { hidden: true }],
+      ["promo", { access: "promo_unlimited" }],
+      ["keyless", { provider: "anthropic" }],
+    ])("refuses images when its only vision member is %s, never leaving the pool", async (_, gate) => {
+      mocks.platform.mockReturnValue({
+        ...POOLED,
+        models: [...POOLED.models, catalogModel("google/gemini-3.8-flash", "Gemini 3.8 Flash"), catalogModel("only", "Only", gate)],
+        autoModelIds: ["only"],
+      });
+
+      await expect(auto("vision", true)).rejects.toMatchObject({
+        message: AUTO_NO_VISION_MESSAGE,
+        status: 400,
+        code: "auto_no_vision_model",
+      });
+      // Text sends fall back to the fixed routes, so Auto keeps working.
+      expect(await auto("build")).toMatchObject({ modelId: "anthropic/claude-sonnet-5.5" });
+    });
+
     it("keeps the fixed routes when it's empty or only lists models it can't use", async () => {
       for (const autoModelIds of [[], ["removed", "keyless"]]) {
         mocks.platform.mockReturnValue({ ...POOLED, autoModelIds });

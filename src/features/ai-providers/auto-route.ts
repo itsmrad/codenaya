@@ -85,10 +85,12 @@ const priceOf = (model: RoutableModel) => (model.pricing ? blendedUsdPerMTok(mod
  * everyone, never hidden, so never a promo model), and for "vision" only among
  * models that read images.
  *
- * With an admin pool (`autoModelIds`) that has any such model, it routes only
- * within the pool: short edits to the cheapest, everything else to the most
- * capable, price standing in for capability (ties: catalog order). Pool ids no
- * longer in the catalog are ignored. Without one, the fixed `MODEL_ROUTES`.
+ * With an admin pool (`autoModelIds`), it routes only within the pool: short
+ * edits to the cheapest, everything else to the most capable, price standing
+ * in for capability (ties: catalog order). Pool ids no longer in the catalog
+ * are ignored. Image sends never leave a configured pool; text sends fall back
+ * to the fixed `MODEL_ROUTES` when no pool member is usable, so Auto keeps
+ * working until the admin fixes the pool. Without a pool, `MODEL_ROUTES`.
  * Undefined when nothing fits.
  */
 export function autoRouteModel<M extends RoutableModel>(
@@ -99,7 +101,7 @@ export function autoRouteModel<M extends RoutableModel>(
   const usable = pickableModels(models);
   const fits = (model: M) => task !== "vision" || model.vision;
   const pooled = usable.filter((model) => pool?.includes(model.id));
-  if (pooled.length) {
+  if (pooled.length || (pool?.length && task === "vision")) {
     const cheapest = task === "edit";
     return pooled
       .filter(fits)

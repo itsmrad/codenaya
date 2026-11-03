@@ -329,6 +329,15 @@ export class ProviderKeyError extends Error {}
 /** Ends every key-failure reply, so history can leave those turns out. */
 export const KEY_FAILURE_SUFFIX = "Your request was not sent to Codenaya's models.";
 
+/**
+ * A run whose message has images, on a model that can't read them: the
+ * catalog changed after the send (the model was removed, hidden or lost
+ * vision), so the run never sends the images (#322).
+ */
+export const RUN_IMAGES_REFUSED_MESSAGE =
+  "The model for this chat can't read images anymore. Pick a model that can read images and send again. " +
+  KEY_FAILURE_SUFFIX;
+
 export const keyFailureMessage = (reason: string) =>
   `${reason} Update it in [Settings → AI providers](${AI_PROVIDERS_SETTINGS_PATH}) and try again. ` +
   KEY_FAILURE_SUFFIX;
@@ -342,6 +351,8 @@ export interface RunModel {
   coding: (temperature?: number) => AgentKitModel;
   /** The conversation title model, on the same provider. */
   title: (temperature?: number) => AgentKitModel;
+  /** Whether the coding model reads images, as resolved now, not at send time. */
+  acceptsImages: boolean;
   /**
    * BYOK only: whether the provider still accepts the key (the free
    * test-connection call) and the account can still pay for inference
@@ -398,6 +409,7 @@ export async function resolveRunModel({
     return {
       coding: (temperature) => platformAgentModel(model.provider, model.providerModelId, temperature),
       title: (temperature) => platformAgentModel(title.provider, title.providerModelId, temperature),
+      acceptsImages: model.vision,
       metering: {
         source: promoKindOf(model.access) ? "promo" : "platform",
         coding: model.pricing,
@@ -458,6 +470,7 @@ export async function resolveRunModel({
     key: { _id: key._id, userId: key.userId, label: key.label },
     coding: (temperature) => build(choice.modelId, temperature),
     title: (temperature) => build(titleModel, temperature),
+    acceptsImages: modelAcceptsImages(choice.modelId, key),
     metering: { source: "byok" },
     // Only a definite refusal counts: an unreachable provider is left for the
     // inference itself to retry.
