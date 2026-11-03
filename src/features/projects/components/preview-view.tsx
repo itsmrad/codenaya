@@ -61,7 +61,7 @@ import { useFilesWithContent } from "../hooks/use-files";
 import { markPreviewOpened } from "../utils/first-run";
 import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
 import {
-  useChatSendBusy,
+  useChatSendBlock,
   useQueueChatMessage,
   useUnqueueChatMessage,
   type QueuedMessage,
@@ -181,7 +181,7 @@ export const PreviewView = ({
   useEffect(() => {
     terminalOutputRef.current = terminalOutput;
   }, [terminalOutput]);
-  const chatBusy = useChatSendBusy();
+  const chatBlock = useChatSendBlock(projectId);
   const unqueueChatMessage = useUnqueueChatMessage();
   // The fix this preview queued, dropped if the preview closes before it is sent.
   const queuedFixRef = useRef<QueuedMessage | null>(null);
@@ -220,7 +220,7 @@ export const PreviewView = ({
         attempts={fixAttempts[appErrorId] ?? 0}
         // Still loading counts as working: a fix can't start mid-run.
         agentWorking={activeRun !== null}
-        sending={chatBusy}
+        chatBlock={chatBlock}
         onFix={fixAppError}
         onShowLogs={() => setTerminalChoice("open")}
         onDismiss={() => setDismissedErrorId(appErrorId)}

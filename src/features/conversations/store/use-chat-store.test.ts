@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { type SendResult, sendQueuedMessage, useChatStore } from "./use-chat-store";
+import { type SendResult, chatSendBlock, sendQueuedMessage, useChatStore } from "./use-chat-store";
 
 /** A send that settles when the test says so, like a slow /api/messages POST. */
 const deferredSend = () => {
@@ -96,5 +96,24 @@ describe("queued chat messages", () => {
     ).rejects.toThrow("network");
 
     expect(useChatStore.getState().queuedMessage).toBeNull();
+  });
+});
+
+describe("chatSendBlock (#223)", () => {
+  const queued = (projectId: string) => ({ projectId, text: "fix it" });
+
+  it("is clear when the chat is idle with nothing queued", () => {
+    expect(chatSendBlock({ sendPending: false, queuedMessage: null }, "project_b")).toBeNull();
+  });
+
+  it("waits while the chat sends or this project has a message queued", () => {
+    expect(chatSendBlock({ sendPending: true, queuedMessage: null }, "project_b")).toBe("sending");
+    expect(chatSendBlock({ sendPending: false, queuedMessage: queued("project_b") }, "project_b")).toBe("sending");
+  });
+
+  it("names another project's queued message, which a new one would replace", () => {
+    expect(chatSendBlock({ sendPending: false, queuedMessage: queued("project_a") }, "project_b")).toBe(
+      "other-project",
+    );
   });
 });

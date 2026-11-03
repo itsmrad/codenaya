@@ -6,54 +6,74 @@ export const PREVIEW_MESSAGE_SOURCE = "codenaya-preview";
 /** Bump when the message shape changes; select-to-edit (#227) extends this protocol. */
 export const PREVIEW_PROTOCOL_VERSION = 1;
 
+type ErrorLike = { message?: unknown; stack?: unknown } | null | undefined;
+
 /**
- * The first Error among console arguments, wherever it sits: React logs a
- * caught render error after the error boundary's message (#335). Runs inside
- * the preview from its source, so it must stay self-contained.
+ * Runs inside the previewed app and reports its errors to the IDE: uncaught
+ * errors and rejections, and errors an error boundary caught, which React
+ * reports only to console.error, after "The above error occurred…" (#335). The
+ * preview is cross-origin, so this is the only way they leave the iframe. It
+ * runs from its source, so it must stay self-contained, and it must never
+ * break the app: every report is guarded and the app's console.error always runs.
  */
-export function firstError(args: ArrayLike<unknown>): Error | null {
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] instanceof Error) return args[i] as Error;
-  }
-  return null;
+export function installPreviewBridge(
+  win: typeof window,
+  source: string,
+  version: number,
+  maxText: number,
+): void {
+  if (win.parent === win) return;
+  let lastPosted = "";
+  const report = (error: unknown, fallback: unknown) => {
+    try {
+      const found = error as ErrorLike;
+      const message = String((found && found.message) || fallback).slice(0, maxText);
+      const stack = found && found.stack ? String(found.stack).slice(0, maxText) : undefined;
+      // One error often arrives twice (window error and a log, or a repeated log).
+      const key = message + "\n" + (stack || "");
+      if (key === lastPosted) return;
+      lastPosted = key;
+      win.parent.postMessage({ source, version, kind: "runtime", message, stack }, "*");
+    } catch {
+      // A hostile error object must not break the app.
+    }
+  };
+  win.addEventListener("error", (event) => report(event.error, event.message || "Script error"));
+  win.addEventListener("unhandledrejection", (event) => report(event.reason, event.reason));
+
+  const consoleError = win.console.error;
+  let reporting = false;
+  win.console.error = function (this: unknown, ...args: unknown[]) {
+    if (!reporting) {
+      reporting = true;
+      try {
+        // Only React's log for a boundary-caught error: an app's own
+        // `catch (e) { console.error(e) }` is handled and stays quiet.
+        let boundaryLog = false;
+        let error: unknown = null;
+        for (const arg of args) {
+          if (typeof arg === "string" && arg.indexOf("The above error occurred") === 0) {
+            boundaryLog = true;
+          } else if (error === null && arg instanceof Error) {
+            error = arg;
+          }
+        }
+        if (boundaryLog && error) report(error, "Uncaught error");
+      } catch {
+        // Same as above: reporting never gets in the app's way.
+      } finally {
+        reporting = false;
+      }
+    }
+    return consoleError.apply(this, args);
+  };
 }
 
 /**
- * Runs inside the previewed app and reports uncaught errors to the IDE, plus
- * errors an error boundary caught, which React reports only to console.error. The
- * preview is cross-origin, so this is the only way they leave the iframe. It is
- * injected when served (E2B proxy) or mounted (WebContainer), never written to
- * the user's files, so exports stay clean.
+ * The bridge as a script tag. It is injected when served (E2B proxy) or
+ * mounted (WebContainer), never written to the user's files, so exports stay clean.
  */
-export const PREVIEW_BRIDGE_SCRIPT = `<script data-codenaya-preview>(function(){
-if (window.parent === window) return;
-function post(message, stack) {
-  try {
-    window.parent.postMessage({
-      source: ${JSON.stringify(PREVIEW_MESSAGE_SOURCE)},
-      version: ${PREVIEW_PROTOCOL_VERSION},
-      kind: "runtime",
-      message: String(message).slice(0, ${MAX_ERROR_TEXT}),
-      stack: stack ? String(stack).slice(0, ${MAX_ERROR_TEXT}) : undefined
-    }, "*");
-  } catch (e) {}
-}
-window.addEventListener("error", function (event) {
-  var error = event.error;
-  post((error && error.message) || event.message || "Script error", error && error.stack);
-});
-window.addEventListener("unhandledrejection", function (event) {
-  var reason = event.reason;
-  post((reason && reason.message) || String(reason), reason && reason.stack);
-});
-var firstError = ${String(firstError)};
-var consoleError = console.error;
-console.error = function () {
-  var error = firstError(arguments);
-  if (error) post(error.message || String(error), error.stack);
-  return consoleError.apply(this, arguments);
-};
-})();</script>`;
+export const PREVIEW_BRIDGE_SCRIPT = `<script data-codenaya-preview>(${String(installPreviewBridge)})(window, ${JSON.stringify(PREVIEW_MESSAGE_SOURCE)}, ${PREVIEW_PROTOCOL_VERSION}, ${MAX_ERROR_TEXT});</script>`;
 
 /**
  * Puts `bridge` first in <head>, so it is listening before the app's scripts

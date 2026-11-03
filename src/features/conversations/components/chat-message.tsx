@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 
 import type { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { sanitizeAgentText } from "../agent-steps";
-import { useChatSendBusy } from "../hooks/use-queue-chat-message";
+import { useChatSendBlock } from "../hooks/use-queue-chat-message";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
 
@@ -214,7 +214,7 @@ export const AssistantMessage = ({
   // The server fails such a run for good after LOST_RUN_MS.
   const stalled = useRunStalled(message);
   const previewErrors = usePreviewErrors();
-  const fixSending = useChatSendBusy();
+  const fixSending = useChatSendBlock(message.projectId) !== null;
   // Seen running: the reply settles in once it completes. A reply loaded
   // already completed (history) stays still.
   const [startedProcessing] = useState(status === "processing");

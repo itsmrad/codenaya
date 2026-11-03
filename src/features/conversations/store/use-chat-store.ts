@@ -86,6 +86,21 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   sendPending: false,
 }));
 
+/**
+ * Why a send queued from `projectId` must wait, or null. "sending": the chat is
+ * sending, or this project already has a message queued. "other-project": the
+ * one queue slot holds another project's message, which a new one would replace.
+ */
+export const chatSendBlock = (
+  state: Pick<ChatStore, "sendPending" | "queuedMessage">,
+  projectId: string,
+) =>
+  state.sendPending || state.queuedMessage?.projectId === projectId
+    ? ("sending" as const)
+    : state.queuedMessage
+      ? ("other-project" as const)
+      : null;
+
 /** Sends the message queued for `projectId` once through `send`, if there is one. */
 export const sendQueuedMessage = async (
   projectId: string,

@@ -1,4 +1,4 @@
-import { useChatStore } from "../store/use-chat-store";
+import { chatSendBlock, useChatStore } from "../store/use-chat-store";
 
 export type { QueuedMessage } from "../store/use-chat-store";
 
@@ -8,6 +8,6 @@ export const useQueueChatMessage = () => useChatStore((state) => state.queueMess
 /** See `unqueueMessage` in the chat store. */
 export const useUnqueueChatMessage = () => useChatStore((state) => state.unqueueMessage);
 
-/** The chat is sending, or has a message queued, so a Fix button waits (#223). */
-export const useChatSendBusy = () =>
-  useChatStore((state) => state.sendPending || state.queuedMessage !== null);
+/** Why a Fix button in `projectId` waits, or null (#223); see `chatSendBlock`. */
+export const useChatSendBlock = (projectId: string) =>
+  useChatStore((state) => chatSendBlock(state, projectId));

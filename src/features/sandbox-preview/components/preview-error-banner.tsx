@@ -16,7 +16,7 @@ export const PreviewErrorBanner = ({
   error,
   attempts,
   agentWorking,
-  sending,
+  chatBlock,
   onFix,
   onShowLogs,
   onDismiss,
@@ -25,19 +25,22 @@ export const PreviewErrorBanner = ({
   /** Fix runs already sent for this error. */
   attempts: number;
   agentWorking: boolean;
-  /** The chat is sending a message, or has one queued. */
-  sending: boolean;
+  /** Why the chat can't take a fix yet; see `chatSendBlock`. */
+  chatBlock: "sending" | "other-project" | null;
   onFix: () => void;
   onShowLogs: () => void;
   onDismiss: () => void;
 }) => {
   // Judged once the last fix run is over, not while it is still working.
   const stillFailing = attempts >= MAX_FIX_ATTEMPTS && !agentWorking;
-  const fixBlockedReason = sending
-    ? "Waiting for the chat to send…"
-    : agentWorking
-      ? "Available when the agent finishes"
-      : null;
+  const fixBlockedReason =
+    chatBlock === "sending"
+      ? "Waiting for the chat to send…"
+      : chatBlock === "other-project"
+        ? "Another project has a message waiting to send"
+        : agentWorking
+          ? "Available when the agent finishes"
+          : null;
   const reasonId = useId();
   const where = error.file ? `${error.file}${error.line ? `:${error.line}` : ""}` : null;
 
