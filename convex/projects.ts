@@ -11,6 +11,7 @@ import {
 } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
+import { validateInternalKey } from "./internalKey";
 import { deleteProjectBatch } from "./projectCascade";
 import { copyProjectFiles } from "./projectCopy";
 import { userSkillKey } from "../src/features/skills/types";
@@ -278,5 +279,21 @@ export const deleteBatch = internalMutation({
         id: args.id,
       });
     }
+  },
+});
+/**
+ * Ends a seeded project's first build (#338): called by the agent run that
+ * wrote files and finished. Failed, cancelled, plan and Q&A runs leave it set.
+ */
+export const completeFirstBuild = mutation({
+  args: { internalKey: v.string(), projectId: v.id("projects") },
+  returns: v.null(),
+  handler: async (ctx, { internalKey, projectId }) => {
+    validateInternalKey(internalKey);
+    const project = await ctx.db.get("projects", projectId);
+    if (project?.firstBuildPending) {
+      await ctx.db.patch("projects", projectId, { firstBuildPending: undefined });
+    }
+    return null;
   },
 });

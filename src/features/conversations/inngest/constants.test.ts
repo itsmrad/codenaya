@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CODING_AGENT_SYSTEM_PROMPT } from "./constants";
+import { KNOWN_GOOD_VERSIONS } from "./known-good-versions";
 
 describe("coding agent integration instructions", () => {
   it("treats runtime MCP state as authoritative over generated project files", () => {
@@ -37,8 +38,11 @@ describe("coding agent integration instructions", () => {
   });
 
   it("pins Vite scaffolds to a major the preview sandbox's Node can run, with the @ alias", () => {
-    expect(CODING_AGENT_SYSTEM_PROMPT).toContain('"vite": "^6.0.0"');
-    expect(CODING_AGENT_SYSTEM_PROMPT).toContain('"@vitejs/plugin-react": "^4.0.0"');
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(`"vite": "${KNOWN_GOOD_VERSIONS.vite}"`);
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      `"@vitejs/plugin-react": "${KNOWN_GOOD_VERSIONS["@vitejs/plugin-react"]}"`,
+    );
+    expect(KNOWN_GOOD_VERSIONS.vite).toMatch(/^\^6\./);
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       'resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } }',
     );
@@ -59,12 +63,20 @@ describe("coding agent integration instructions", () => {
       'each tsconfig "references" and "extends" path, and the index.html entry script',
     );
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("keep every package it already lists");
+    // #335: the starter mounts the router and an error boundary.
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>.",
+    );
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "If you edit src/main.tsx, keep its <ErrorBoundary> and <BrowserRouter>",
+    );
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Vite: scaffoldViteApp already wrote src/main.tsx");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("src/App.tsx / src/main.tsx");
   });
 
   it("describes the React 19 + Tailwind v4 starter stack (#332)", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("STYLING: Tailwind CSS v4 (always)");
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("ROUTING (Vite): react-router-dom v7");
-    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("React 19, Next.js 15, Tailwind CSS 4");
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("It has no brand icons");
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("@theme inline");
     for (const stale of [
@@ -85,5 +97,50 @@ describe("coding agent integration instructions", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       "A project with tailwind.config.ts or @tailwind directives is Tailwind v3 and keeps v3 syntax",
     );
+  });
+
+  it("lists every known-good version, so the prompt matches the starter and write checks (#331)", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Stack versions (use exactly these ranges");
+    for (const [name, range] of Object.entries(KNOWN_GOOD_VERSIONS)) {
+      expect(CODING_AGENT_SYSTEM_PROMPT).toContain(`"${name}": "${range}"`);
+    }
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain('"@vitejs/plugin-react": "^4.0.0"');
+  });
+});
+
+describe("coding agent prompt consistency (#293)", () => {
+  it("has one narration rule: a short sentence with each tool call", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "Every time you call tools, include ONE short sentence of plain text",
+    );
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/Execute silently|NEVER use phrases like "Let me/);
+  });
+
+  it("defaults to Vite + React and uses Next.js only on request", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "Vite + React + TypeScript, unless the user explicitly asks for Next.js",
+    );
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("Full-stack / SSR / data-fetching / auth apps");
+  });
+
+  it("does not spend tool calls re-listing or re-reading files it just wrote", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("don't re-list or re-read files you just wrote");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/call listFiles again|Re-read critical files/);
+  });
+
+  it("addresses files by path from the prompt's file list (#292)", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain('Read the workspace structure from the "Project files" section');
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Write files with writeFiles by path");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/Call listFiles to inspect|Create ALL folders first|createFolder|createFiles|folder IDs/);
+  });
+
+  it("keeps edits minimal and the performance rules out of the base prompt", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("make the smallest correct change");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("react_performance_rules");
+  });
+
+  it("trusts the installed versions and keeps third-party API calls off the browser", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("never use APIs or syntax from a newer major");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("usually fails on CORS");
   });
 });
