@@ -89,11 +89,17 @@ describe("detectLoop", () => {
     expect(detectLoop(times(6, update))).toBeNull();
   });
 
-  it("counts editFile with updateFile on the same path (#291)", () => {
+  it("counts editFile with updateFile and writeFiles on the same path (#291)", () => {
     const edit = () => call("editFile", 'File "src/App.tsx" edited successfully', { path: "src/App.tsx" });
     const update = () => call("updateFile", 'File "src/App.tsx" updated successfully', { path: "src/App.tsx" });
-    const rounds = ["alpha", "beta", "gamma"].flatMap((what, i) => [i % 2 ? update() : edit(), failedBuild(what)]);
-    expect(detectLoop([...rounds, edit()])).toEqual({ reason: "repeated-write", path: "src/App.tsx" });
+    const writeAll = () =>
+      call("writeFiles", "Wrote 1 file(s). Updated: src/App.tsx.", { files: [{ path: "./src/App.tsx" }] });
+    const stuck = { reason: "repeated-write", path: "src/App.tsx" };
+    const failures = ["alpha", "beta", "gamma"].map(failedBuild);
+    // editFile alone, then all three tools on the one path.
+    expect(detectLoop([...failures.flatMap((failure) => [edit(), failure]), edit()])).toEqual(stuck);
+    const mixed = [edit, update, writeAll];
+    expect(detectLoop([...failures.flatMap((failure, i) => [mixed[i](), failure]), edit()])).toEqual(stuck);
     const broken = () =>
       call("editFile", `File "src/App.tsx" edited successfully${syntaxNote("src/App.tsx 1:1 ')' expected.")}`, {
         path: "src/App.tsx",
