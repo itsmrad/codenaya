@@ -33,8 +33,9 @@ import { useSecurityGate } from "@/features/security/hooks/use-security-gate";
 import { SecurityScanDialog } from "@/features/security/components/security-scan-dialog";
 
 import { useProject, useUnpushedRuns } from "../hooks/use-projects";
-import { GITHUB_NOT_LINKED, GITHUB_SYNC_BRANCH } from "../constants";
+import { GITHUB_NOT_LINKED, GITHUB_SYNC_BRANCH, GITHUB_SYNC_CONFLICT } from "../constants";
 import { GithubNotLinkedAlert } from "./github-not-linked-alert";
+import { PullConflictDialog } from "./pull-conflict-dialog";
 import { DownloadZipButton } from "./download-zip-button";
 
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -61,6 +62,8 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
   const project = useProject(projectId);
   const [open, setOpen] = React.useState(false);
   const [githubNotLinked, setGithubNotLinked] = React.useState(false);
+  // Why the last pull needs a choice: local changes, or pushed ones not merged yet.
+  const [pullConflict, setPullConflict] = React.useState<"changed" | "unmerged" | null>(null);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
@@ -94,14 +97,25 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
   ) => {
     setGithubNotLinked(false);
     try {
-      await ky.post(url, { json });
+      const result = await ky.post(url, { json }).json<{ upToDate?: boolean }>();
 
-      toast.success(messages.started);
+      toast.success(result.upToDate ? "Already up to date" : messages.started);
     } catch (error) {
       if (error instanceof HTTPError) {
-        const body = await error.response.json<{ error: string; code?: string }>();
-        if (body.code === GITHUB_NOT_LINKED) {
+        // A proxy or a crash can answer with HTML.
+        const body = await error.response
+          .json<{ error?: string; code?: string; unmerged?: boolean }>()
+          .catch(() => null);
+        if (body?.code === GITHUB_NOT_LINKED) {
           setGithubNotLinked(true);
+          return;
+        }
+        if (body?.code === GITHUB_SYNC_CONFLICT) {
+          setPullConflict(body.unmerged ? "unmerged" : "changed");
+          return;
+        }
+        if (body?.error) {
+          toast.error(body.error);
           return;
         }
       }
@@ -128,6 +142,13 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
       { started: "Push started...", failed: "Unable to push changes" }
     );
 
+  const startPull = (overwrite?: boolean) =>
+    startJob(
+      "/api/github/pull",
+      { projectId, overwrite },
+      { started: "Pull started...", failed: "Unable to pull changes" }
+    );
+
   const submitLabel = (isSubmitting: boolean) => {
     if (gate.checking) return "Checking for secrets...";
     return isSubmitting ? "Creating..." : "Create Repository";
@@ -152,7 +173,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
         <div className="flex flex-col items-center gap-3">
           <LoaderIcon className="size-6 animate-spin text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
-            {githubSync ? "Pushing to GitHub..." : "Exporting to GitHub..."}
+            {githubSync ? "Syncing with GitHub..." : "Exporting to GitHub..."}
           </p>
           <Button
             size="sm"
@@ -199,7 +220,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
         <div className="flex flex-col items-center gap-3">
           <XCircleIcon className="size-6 text-rose-500" />
           <p className="text-sm font-medium">
-            {githubSync ? "Unable to push" : "Unable to export"}
+            {githubSync ? "Unable to sync" : "Unable to export"}
           </p>
           <p className="text-xs text-muted-foreground text-center">
             {project?.exportError ?? "Something went wrong. Please try again."}
@@ -221,13 +242,19 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
       return (
         <div className="space-y-4">
           <div className="space-y-1">
-            <h4 className="font-medium text-sm">Push to GitHub</h4>
+            <h4 className="font-medium text-sm">Sync with GitHub</h4>
             <p className="text-xs text-muted-foreground break-all">
               Linked to{" "}
               <span className="font-medium text-foreground">{githubSync.repo}</span>{" "}
               ({githubSync.branch})
             </p>
           </div>
+          {exportStatus === "cancelled" && (
+            <p className="text-xs text-muted-foreground">
+              Sync cancelled. If a pull had started changing files, restore its
+              &ldquo;Before pull&rdquo; checkpoint from the history.
+            </p>
+          )}
           {githubSync.syncBranchSha && (
             <p className="text-xs text-muted-foreground">
               {githubSync.branch} changed on GitHub, so your changes are on the{" "}
@@ -260,6 +287,16 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
               onClick={() => gate.guard(startPush)}
             >
               {gate.checking ? "Checking for secrets..." : "Push changes"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              // A running agent would write over the pulled files.
+              disabled={!unpushed || unpushed.running}
+              onClick={() => startPull()}
+            >
+              Pull from GitHub
             </Button>
             <Button size="sm" variant="outline" className="w-full" asChild>
               <Link href={repoUrl} target="_blank" rel="noopener noreferrer">
@@ -426,6 +463,24 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
           <DownloadZipButton projectId={projectId} />
         </div>
       </PopoverContent>
+      {githubSync && (
+        <PullConflictDialog
+          branch={githubSync.branch}
+          open={pullConflict !== null}
+          unmerged={pullConflict === "unmerged"}
+          onOpenChange={(open) => !open && setPullConflict(null)}
+          // Reopened: the dialog's click closed the popover, which shows the
+          // progress and the secret scan.
+          onOverwrite={() => {
+            setOpen(true);
+            void startPull(true);
+          }}
+          onKeepLocal={() => {
+            setOpen(true);
+            gate.guard(startPush);
+          }}
+        />
+      )}
     </Popover>
   );
 };

@@ -258,6 +258,9 @@ export default defineSchema({
     exportError: v.optional(v.string()),
     // The GitHub repo this project pushes to (#343), set by the first export.
     githubSync: v.optional(githubSyncValidator),
+    // The "Before pull" checkpoint of the pull allowed to write files (#343).
+    // Any later sync status (a cancel, a push, another pull) clears it.
+    activePullCheckpointId: v.optional(v.id("checkpoints")),
     settings: v.optional(
       v.object({
         installCommand: v.optional(v.string()),
@@ -316,7 +319,8 @@ export default defineSchema({
    */
   checkpoints: defineTable({
     projectId: v.id("projects"),
-    messageId: v.id("messages"),
+    // The run it was taken before; unset for a "Before pull" checkpoint (#343).
+    messageId: v.optional(v.id("messages")),
     // The prompt that started the run, for the history list.
     label: v.string(),
     fileCount: v.number(),

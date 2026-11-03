@@ -331,7 +331,7 @@ async function moveBranch(
   }
 }
 
-async function currentFiles(internalKey: string, projectId: Id<"projects">) {
+export async function currentFiles(internalKey: string, projectId: Id<"projects">) {
   const files = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
   const byId = new Map(files.map((file) => [file._id, file]));
   return files

@@ -11,6 +11,7 @@ import {
   EyeIcon,
   LoaderIcon,
   MessageSquareIcon,
+  PanelLeftOpenIcon,
   PlugIcon,
   RocketIcon,
   SparklesIcon,
@@ -19,6 +20,7 @@ import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { useProjectCommands } from "@/lib/command-palette";
 import { CodenayaLogo } from "@/components/codenaya-logo";
 import { HelpMenu } from "@/components/help-menu";
 import { UserMenu } from "@/components/user-menu";
@@ -35,6 +37,10 @@ import { FileExplorer } from "./file-explorer";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { PreviewView } from "./preview-view";
 import { ExportPopover } from "./export-popover";
+import { EnvVarsDialog } from "./env-vars-dialog";
+import { useDownloadZip } from "../hooks/use-download-zip";
+import { useChatPanelStore } from "../store/use-chat-panel-store";
+import { SecurityScanDialog } from "@/features/security/components/security-scan-dialog";
 import { useProject } from "../hooks/use-projects";
 import { useFiles } from "../hooks/use-files";
 import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
@@ -165,7 +171,24 @@ export const ProjectIdView = ({
   const showcaseId = useIsProjectPublished(projectId);
   const rename = useProjectRename(project);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [envVarsOpen, setEnvVarsOpen] = useState(false);
+  const zipExport = useDownloadZip(projectId);
+  const { isHidden: isChatHidden, setHidden: setChatHidden } = useChatPanelStore();
   const router = useRouter();
+
+  useProjectCommands({
+    "show-code": () => selectView("editor"),
+    "show-preview": () => selectView("preview"),
+    // Desktops toggle the side panel (ProjectIdLayout); here the chat is a tab.
+    "toggle-chat": isCompact
+      ? () => selectView(activeView === "chat" ? "editor" : "chat")
+      : null,
+    publish: showcaseId === null ? () => setPublishDialogOpen(true) : null,
+    "download-zip": () => void zipExport.download(),
+    integrations: openIntegrations,
+    skills: () => setSkillsDialogOpen(true),
+    "env-vars": () => setEnvVarsOpen(true),
+  });
 
   return (
     <>
@@ -180,6 +203,13 @@ export const ProjectIdView = ({
         open={skillsDialogOpen}
         onOpenChange={setSkillsDialogOpen}
       />
+      <EnvVarsDialog
+        projectId={projectId}
+        open={envVarsOpen}
+        onOpenChange={setEnvVarsOpen}
+      />
+      {/* The palette's Export ZIP; the Export popover's button has its own. */}
+      <SecurityScanDialog pending={zipExport.gate.pending} onDismiss={zipExport.gate.dismiss} />
       {project && (
         <DeleteProjectDialog
           project={project}
@@ -193,6 +223,17 @@ export const ProjectIdView = ({
       <nav className="shrink-0 h-11 flex items-center gap-3 px-3 rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]">
         {/* Left: Brand + Project Name + Save */}
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          {/* Brings back the desktop chat panel after "Toggle chat panel". */}
+          {!isCompact && isChatHidden && (
+            <button
+              onClick={() => setChatHidden(false)}
+              aria-label="Show chat panel"
+              title="Show chat panel"
+              className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            >
+              <PanelLeftOpenIcon aria-hidden="true" className="size-4" />
+            </button>
+          )}
           {/* Brand */}
           <Link href="/" className="flex items-center gap-2 shrink-0 group">
             <CodenayaLogo
@@ -387,6 +428,7 @@ export const ProjectIdView = ({
               projectId={projectId}
               firstBuild={firstBuild}
               visible={activeView === "preview"}
+              onOpenEnvVars={() => setEnvVarsOpen(true)}
             />
           )}
         </div>

@@ -654,6 +654,8 @@ export const updateExportStatus = mutation({
       exportStatus: args.status,
       exportRepoUrl: args.repoUrl,
       exportError: args.error,
+      // A cancel or a new sync ends a running pull's right to write (#343).
+      activePullCheckpointId: undefined,
       updatedAt: Date.now(),
     });
     if (args.status === "completed") {
