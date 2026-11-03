@@ -4,10 +4,13 @@ import type { Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import {
   aiProviderValidator,
+  githubSyncValidator,
   messageStepValidator,
+  stuckRunValidator,
   runModelValidator,
 } from "./schema";
-import { createCheckpoint } from "./checkpoints";
+import { MAX_CHECKPOINT_FILES, createCheckpoint } from "./checkpoints";
+import { runsSince, syncedAt } from "./githubSync";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import {
@@ -117,6 +120,7 @@ export const updateMessageContent = mutation({
     internalKey: v.string(),
     messageId: v.id("messages"),
     content: v.string(),
+    stuck: v.optional(stuckRunValidator),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -125,6 +129,7 @@ export const updateMessageContent = mutation({
       content: args.content,
       status: "completed" as const,
       completedAt: Date.now(),
+      ...(args.stuck ? { stuck: args.stuck } : {}),
     });
   },
 });
@@ -613,6 +618,7 @@ export const updateExportStatus = mutation({
       )
     ),
     repoUrl: v.optional(v.string()),
+    error: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -620,8 +626,93 @@ export const updateExportStatus = mutation({
     await ctx.db.patch("projects", args.projectId, {
       exportStatus: args.status,
       exportRepoUrl: args.repoUrl,
+      exportError: args.error,
       updatedAt: Date.now(),
     });
+  },
+});
+
+/** Links the project to its GitHub repo or moves its sync point (#343). */
+export const setGithubSync = mutation({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    githubSync: githubSyncValidator,
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    await ctx.db.patch("projects", args.projectId, { githubSync: args.githubSync });
+  },
+});
+
+/**
+ * What a GitHub push commits (#343): the agent runs since the last sync, each
+ * with its prompt, its summary and the checkpoint taken just before it.
+ */
+export const getGithubPushPlan = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const project = await ctx.db.get("projects", args.projectId);
+    if (!project?.githubSync) return null;
+
+    const { runs, more } = await runsSince(ctx, project._id, syncedAt(project.githubSync));
+    return {
+      githubSync: project.githubSync,
+      // The next sync point, on Convex's clock like `_creationTime`. A cached
+      // result is still right: a newer run would have invalidated it.
+      planAt: Date.now(),
+      more,
+      runs: await Promise.all(
+        runs.map(async (run) => {
+          const checkpoint = await ctx.db
+            .query("checkpoints")
+            .withIndex("by_message", (q) => q.eq("messageId", run._id))
+            .first();
+          return {
+            messageId: run._id,
+            createdAt: run._creationTime,
+            prompt: checkpoint?.label ?? "",
+            summary: run.content,
+            checkpointId: checkpoint?._id ?? null,
+          };
+        }),
+      ),
+    };
+  },
+});
+
+/** A checkpoint's files with their paths, binary ones with a download URL. */
+export const getCheckpointFilesWithUrls = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    checkpointId: v.id("checkpoints"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const checkpoint = await ctx.db.get("checkpoints", args.checkpointId);
+    if (!checkpoint || checkpoint.projectId !== args.projectId) {
+      throw new Error("Checkpoint not found");
+    }
+    const rows = await ctx.db
+      .query("checkpointFiles")
+      .withIndex("by_checkpoint_and_path", (q) => q.eq("checkpointId", checkpoint._id))
+      .take(MAX_CHECKPOINT_FILES);
+    return await Promise.all(
+      rows.map(async ({ path, type, content, storageId }) => ({
+        path,
+        type,
+        content,
+        storageId,
+        storageUrl: storageId ? await ctx.storage.getUrl(storageId) : null,
+      })),
+    );
   },
 });
 

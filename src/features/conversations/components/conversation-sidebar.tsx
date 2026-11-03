@@ -41,7 +41,7 @@ import {
   useAiProviderKeys,
   usePlatformModelsOrCatalog,
 } from "@/features/ai-providers/hooks/use-ai-providers";
-import { modelAcceptsImages } from "@/features/ai-providers/registry";
+import { modelAcceptsImages, modelIdsFor } from "@/features/ai-providers/registry";
 import { resolveCatalogModel } from "@/features/ai-providers/platform";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { INSUFFICIENT_CREDITS_CODE } from "@/features/billing/credits";
@@ -62,7 +62,7 @@ import {
   useMessages,
 } from "../hooks/use-conversations";
 
-import { Id } from "../../../../convex/_generated/dataModel";
+import { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { PastConversationsDialog } from "./past-conversations-dialog";
 import { useChatStore } from "../store/use-chat-store";
@@ -71,8 +71,14 @@ import { AgentModelSelect } from "./agent-model-select";
 import { useEnhancePrompt } from "../hooks/use-enhance-prompt";
 import { EnhancePromptButton } from "./enhance-prompt-button";
 import { PlanModeToggle } from "./plan-mode-toggle";
-import { type MessageMode, PLAN_MODE, buildPlanMessage } from "../plan-mode";
-import { buildPathIndex } from "../agent-steps";
+import {
+  type MessageMode,
+  PLAN_MODE,
+  buildPlanMessage,
+  diagnoseStuckMessage,
+} from "../plan-mode";
+import { type AgentModelChoice, nextTier } from "../agent-models";
+import { buildPathIndex, stuckFilePath } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
 import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
@@ -102,7 +108,7 @@ export const ConversationSidebar = ({
   projectId,
 }: ConversationSidebarProps) => {
   const { openIntegrations } = useProjectIntegrations();
-  const { input, setInput, contexts, removeContext, clearContexts } = useChatStore();
+  const { input, setInput, appendInput, contexts, removeContext, clearContexts } = useChatStore();
   const [agentModel, setAgentModel] = useAgentModel();
   const enhancer = useEnhancePrompt(input, setInput);
   const slashMenu = useSkillSlashMenu(projectId, input, setInput);
@@ -265,6 +271,7 @@ export const ConversationSidebar = ({
     text: string,
     images?: Id<"_storage">[],
     mode?: MessageMode,
+    model: AgentModelChoice = agentModel,
   ): Promise<"sent" | "failed" | "blocked"> => {
     if (detectCredential(text).detected) {
       toast.error(
@@ -289,7 +296,7 @@ export const ConversationSidebar = ({
         json: {
           conversationId,
           message: text,
-          model: agentModel,
+          model,
           images,
           mode,
         },
@@ -399,6 +406,37 @@ export const ConversationSidebar = ({
     }
   }
 
+  /** Resends the prompt a reply answered, as-is, leaving the composer draft and contexts alone. */
+  const resend = (messageIndex: number, mode?: MessageMode, model?: AgentModelChoice) => {
+    const prompt = conversationMessages
+      ?.slice(0, messageIndex)
+      .findLast((m) => m.role === "user");
+    if (prompt) void sendMessage(prompt.content, prompt.images, mode, model);
+  };
+
+  /**
+   * A stuck run's retry (#306): one tier up, on the run's key or the platform,
+   * whichever served it, and only when that one offers the model.
+   */
+  const stuckRetry = (message: Doc<"messages">, messageIndex: number) => {
+    const runModel = message.runModel;
+    const next = runModel && nextTier(runModel.modelId);
+    if (!next) return undefined;
+    const key = runModel.keyId && modelKeys?.find((k) => k._id === runModel.keyId);
+    const offered = runModel.keyId
+      ? Boolean(key && modelIdsFor(key).includes(next.id))
+      : platform.models.some((m) => m.id === next.id);
+    if (!offered) return undefined;
+    const choice = { ...(runModel.keyId ? { keyId: runModel.keyId } : {}), modelId: next.id };
+    return {
+      ...next,
+      onRetry: () => {
+        setAgentModel(choice);
+        resend(messageIndex, message.mode, choice);
+      },
+    };
+  };
+
   /** Throws (keeping the attachments) when the images can't be sent. */
   const uploadMessageImages = async (files: FileUIPart[]) => {
     if (!acceptsImages) {
@@ -495,17 +533,18 @@ export const ConversationSidebar = ({
                   isLast={messageIndex === conversationMessages.length - 1}
                   pathOf={pathOf}
                   onOpenFile={handleOpenFile}
-                  onRetry={() => {
-                    const prompt = conversationMessages
-                      .slice(0, messageIndex)
-                      .findLast((m) => m.role === "user");
-                    // Resend the prompt as-is, in the reply's mode, leaving the
-                    // composer draft and attached contexts alone.
-                    if (prompt) void sendMessage(prompt.content, prompt.images, message.mode);
-                  }}
+                  onRetry={() => resend(messageIndex, message.mode)}
                   onBuildPlan={() => {
                     setPlanMode(false);
                     void sendMessage(buildPlanMessage(message.content));
+                  }}
+                  stuckRetry={message.stuck && stuckRetry(message, messageIndex)}
+                  onDiagnose={() => {
+                    if (!message.stuck) return;
+                    setPlanMode(true);
+                    // Added after any draft, not over it, then focused to review and send.
+                    appendInput(diagnoseStuckMessage(message.stuck, stuckFilePath(message.stuck, pathOf)));
+                    requestAnimationFrame(() => panelRef.current?.querySelector("textarea")?.focus());
                   }}
                   checkpointId={
                     checkpoints && (checkpointByMessage.get(message._id)?._id ?? null)
