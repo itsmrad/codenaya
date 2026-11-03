@@ -309,6 +309,28 @@ export const deleteBatch = internalMutation({
   },
 });
 /**
+ * Whether a conversation's project still needs its first build: seeded and not
+ * yet built (#338), or with no files at all. Auto routing (#322) sends it to the
+ * build model. The caller checks ownership; the answer only picks a model.
+ */
+export const conversationNeedsFirstBuildForServer = query({
+  args: { internalKey: v.string(), conversationId: v.id("conversations") },
+  returns: v.boolean(),
+  handler: async (ctx, { internalKey, conversationId }) => {
+    validateInternalKey(internalKey);
+    const conversation = await ctx.db.get("conversations", conversationId);
+    const project = conversation && (await ctx.db.get("projects", conversation.projectId));
+    if (!project) return true;
+    if (project.firstBuildPending === true) return true;
+    const file = await ctx.db
+      .query("files")
+      .withIndex("by_project", (q) => q.eq("projectId", project._id))
+      .first();
+    return file === null;
+  },
+});
+
+/**
  * Ends a seeded project's first build (#338): called by the agent run that
  * wrote files and finished. Failed, cancelled, plan and Q&A runs leave it set.
  */

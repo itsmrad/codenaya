@@ -1,8 +1,9 @@
 import ky, { HTTPError } from "ky";
 import { useMutation, useQuery } from "convex/react";
 
+import { AUTO_MODEL, autoRouteModel } from "../auto-route";
 import { type PublicCatalogModel, pickableModels, promoModelIds } from "../catalog";
-import { envCatalog, platformProviderId } from "../platform";
+import { envCatalog, platformProviderId, resolveCatalogModel } from "../platform";
 import type { AiProviderId } from "../registry";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -34,14 +35,24 @@ const usePlatformCatalog = () => {
   return saved === undefined ? undefined : (saved ?? envCatalog(platformProviderId()));
 };
 
-const platformModels = (catalog: {
+export const platformModels = (catalog: {
   models: readonly (PublicCatalogModel & { hidden?: boolean })[];
   defaultModelId: string;
-}): PlatformModels => ({
-  models: pickableModels(catalog.models),
-  defaultModelId: catalog.defaultModelId,
-  promoModelIds: promoModelIds(catalog.models),
-});
+  autoModelIds?: readonly string[];
+}): PlatformModels => {
+  const models = pickableModels(catalog.models);
+  const promo = promoModelIds(catalog.models);
+  // Auto (#322) is offered only when the catalog has a model it routes builds to.
+  if (!autoRouteModel(models, "build", catalog.autoModelIds)) {
+    return { models, defaultModelId: catalog.defaultModelId, promoModelIds: promo };
+  }
+  return {
+    models: [AUTO_MODEL, ...models],
+    // Resolved before Auto joins the list, so a fallback default is never Auto.
+    defaultModelId: resolveCatalogModel({ models, defaultModelId: catalog.defaultModelId }, undefined).id,
+    promoModelIds: promo,
+  };
+};
 
 /**
  * The models the user may pick (ADR 0010): everyone's, so a stored promo

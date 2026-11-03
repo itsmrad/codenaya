@@ -35,6 +35,7 @@ import type { AgentModelChoice } from '../agent-models';
 import {
   type RunModel,
   ProviderKeyError,
+  RUN_IMAGES_REFUSED_MESSAGE,
   isProviderKeyRejection,
   keyFailureMessage,
   resolveRunModel,
@@ -300,6 +301,18 @@ export const processMessage = inngest.createFunction(
       recentMessages
         .slice(0, recentMessages.findIndex((msg) => msg._id === messageId))
         .findLast((msg) => msg.role === "user")?.imageUrls ?? [];
+    // The catalog can change between the send and this run (a queued run, a
+    // retry): never send images to a model that can't read them (#322).
+    if (imageUrls.length > 0 && !runModel.acceptsImages) {
+      await step.run("images-refused", async () => {
+        await convex.mutation(api.system.updateMessageContent, {
+          internalKey,
+          messageId,
+          content: RUN_IMAGES_REFUSED_MESSAGE,
+        });
+      });
+      return { success: false, messageId, conversationId };
+    }
     // A message can be images alone; the agents still need a request to answer.
     const request =
       imageUrls.length > 0 && !message.trim() ? IMAGE_ONLY_PROMPT : message;
