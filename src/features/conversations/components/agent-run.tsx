@@ -7,6 +7,7 @@ import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import {
   BookOpenIcon,
+  SearchIcon,
   BrainIcon,
   CheckCircle2Icon,
   ChevronRightIcon,
@@ -61,12 +62,15 @@ interface ToolMeta {
 }
 
 const TOOL_META: Record<string, ToolMeta> = {
+  searchFiles: { icon: SearchIcon, running: "Searching for", done: "Searched for" },
   readFiles: { icon: FileTextIcon, running: "Reading", done: "Read", mergeable: true },
   listFiles: { icon: FolderTreeIcon, running: "Listing files", done: "Listed files", mergeable: true },
+  writeFiles: { icon: FilePlus2Icon, running: "Writing", done: "Wrote" },
   createFiles: { icon: FilePlus2Icon, running: "Creating", done: "Created" },
   createFolder: { icon: FolderPlusIcon, running: "Creating folder", done: "Created folder" },
   scaffoldViteApp: { icon: FolderPlusIcon, running: "Scaffolding Vite app", done: "Scaffolded Vite app" },
   updateFile: { icon: FilePenIcon, running: "Editing", done: "Edited" },
+  editFile: { icon: FilePenIcon, running: "Editing", done: "Edited" },
   renameFile: { icon: FileSymlinkIcon, running: "Renaming", done: "Renamed" },
   deleteFiles: { icon: FileX2Icon, running: "Deleting", done: "Deleted" },
   scrapeUrls: { icon: GlobeIcon, running: "Fetching", done: "Fetched" },
@@ -165,7 +169,7 @@ const FileChip = ({ path, onOpen, label = false }: FileChipProps) => {
 const CHIP_LIMIT = 6;
 
 /** Tools whose targets are not project files: their chips never open. */
-const NON_FILE_TOOLS = new Set(["scrapeUrls", "setEnvVar", "loadSkill", "checkBuild"]);
+const NON_FILE_TOOLS = new Set(["searchFiles", "scrapeUrls", "setEnvVar", "loadSkill", "checkBuild"]);
 
 const isFileTool = (tool = "") => !NON_FILE_TOOLS.has(tool) && !tool.includes("__");
 

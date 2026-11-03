@@ -15,6 +15,12 @@ export const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || "base";
 /** Where project files are written inside the sandbox. */
 export const WORK_DIR = "/home/user/app";
 
+/**
+ * Install unless the project overrides it. --prefer-offline uses the npm cache
+ * the E2B template warms with the starter's dependencies (#338).
+ */
+export const DEFAULT_INSTALL_COMMAND = "npm install --prefer-offline --no-audit --no-fund";
+
 export type ProjectFile = { path: string; content: string };
 
 /** The non-empty `files` batch the sandbox routes accept from the client (#235). */
