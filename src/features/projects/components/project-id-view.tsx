@@ -109,7 +109,9 @@ export const ProjectIdView = ({
   // mount it on first open and keep it mounted so tab switches don't reboot it.
   const [previewOpened, setPreviewOpened] = useState(openOnPreview);
 
-  // A run that starts before package.json exists is writing the first build.
+  // A run is writing the first build when the project was seeded and no run
+  // has written files yet, or when it starts before package.json exists.
+  // Seeded projects have package.json from creation, so it can't tell (#338).
   // Desktops open on the preview, which shows the build and then the app as
   // soon as its sandbox runs (#337). Elsewhere the preview mounts (hidden) once
   // package.json lands so the sandbox boots during the run, and the IDE
@@ -121,7 +123,7 @@ export const ProjectIdView = ({
   const [firstBuild, setFirstBuild] = useState(false);
   const [viewPickedDuringBuild, setViewPickedDuringBuild] = useState(false);
   const [previewReadyToasts, setPreviewReadyToasts] = useState(0);
-  if (!firstBuild && activeRun && files && !hasPackageJson) {
+  if (!firstBuild && activeRun && (activeRun.firstBuild || (files && !hasPackageJson))) {
     setFirstBuild(true);
     setViewPickedDuringBuild(false);
     // Only in place of the empty editor: a project without a root package.json
