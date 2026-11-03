@@ -15,6 +15,7 @@ import {
   splitPath,
 } from "./paths";
 import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
+import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface WriteFilesToolOptions {
@@ -68,6 +69,13 @@ export const createWriteFilesTool = ({ projectId, internalKey, registry = create
             } else {
               batch.set(path, content);
             }
+          }
+          // #331: every package.json written is checked against the known-good versions.
+          const versionNotes = new Map<string, string>();
+          for (const [path, content] of batch) {
+            const checked = checkPackageVersions(splitPath(path).name, content);
+            batch.set(path, checked.content);
+            if (checked.note) versionNotes.set(path, checked.note);
           }
 
           const updates: { path: string; fileId: Id<"files">; content: string }[] = [];
@@ -164,6 +172,10 @@ export const createWriteFilesTool = ({ projectId, internalKey, registry = create
                 .filter(([path]) => written.has(path))
                 .map(([name, content]) => ({ name, content })),
             ) +
+            [...versionNotes]
+              .filter(([path]) => written.has(path))
+              .map(([, note]) => note)
+              .join("") +
             await postWriteNote(internalKey, projectId, writtenIds, registry, [...written].flatMap((path) => rewritesByPath.get(path) ?? []))
           );
         });

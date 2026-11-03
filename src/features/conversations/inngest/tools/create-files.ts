@@ -6,6 +6,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
+import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface CreateFilesToolOptions {
@@ -57,7 +58,11 @@ export const createCreateFilesTool = ({
       }
 
       const { parentId } = parsed.data;
-
+      const checked = parsed.data.files.map((file) => ({
+        file,
+        ...checkPackageVersions(file.name, file.content),
+      }));
+      const checkedFiles = checked.map(({ file, content }) => ({ ...file, content }));
 
       try {
         return await toolStep?.run("create-files", async () => {
@@ -83,8 +88,8 @@ export const createCreateFilesTool = ({
           }
 
           const rewriteIcons = await getIconRewriter(internalKey, projectId,
-            resolvedParentId ? [] : parsed.data.files.map((file) => ({ path: file.name, content: file.content })));
-          const prepared = parsed.data.files.map((file) => ({ ...file, ...rewriteIcons(file.content, file.name) }));
+            resolvedParentId ? [] : checkedFiles.map((file) => ({ path: file.name, content: file.content })));
+          const prepared = checkedFiles.map((file) => ({ ...file, ...rewriteIcons(file.content, file.name) }));
           const files = prepared.map(({ name, content }) => ({ name, content }));
           const results = await convex.mutation(api.system.createFiles, {
             internalKey,
@@ -107,6 +112,10 @@ export const createCreateFilesTool = ({
           return (
             response +
             syntaxErrorNote(files.filter((file) => created.some((r) => r.name === file.name))) +
+            checked
+              .filter(({ file }) => created.some((r) => r.name === file.name))
+              .map(({ note }) => note)
+              .join("") +
             await postWriteNote(internalKey, projectId, created.flatMap((r) => r.fileId ? [r.fileId] : []), registry,
               prepared.filter((f) => created.some((r) => r.name === f.name)).flatMap((f) => f.rewrites))
           );

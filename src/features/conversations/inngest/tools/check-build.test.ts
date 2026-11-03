@@ -145,7 +145,7 @@ describe("checkProjectBuild", () => {
     );
     const commands = sandbox.commands.run.mock.calls.map((call) => (call as unknown[])[0]);
     expect(commands).toEqual([
-      "npm install --no-audit --no-fund --loglevel=error",
+      "npm install --prefer-offline --no-audit --no-fund --loglevel=error",
       "npx tsc --noEmit -p tsconfig.app.json && npx vite build",
     ]);
     expect(sandbox.kill).toHaveBeenCalledTimes(1);

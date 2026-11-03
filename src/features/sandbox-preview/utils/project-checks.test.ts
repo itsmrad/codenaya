@@ -30,7 +30,7 @@ describe("project checks", () => {
     ["4", "@tailwind utilities;", 'replace v3 @tailwind'],
     ["3", '@import "tailwindcss"; @theme {} @plugin "x"; @custom-variant dark;', "Tailwind v3"],
   ])("detects Tailwind drift for v%s", (version, css, message) => {
-    expect(projectChecks([pkg({ tailwindcss: "^" + version + ".0.0" }), file("src/style.css", css)])[0].message).toContain(message);
+    expect(projectChecks([pkg({ tailwindcss: "^" + version + ".0.0" }), file("src/style.css", css)]).find((finding) => finding.checkId === "tailwind")?.message).toContain(message);
   });
   it("flags v4 config/plugins and v3 Vite integration", () => {
     expect(projectChecks([pkg({ tailwindcss: "4.0.0", "tailwindcss-animate": "1" }), file("tailwind.config.ts", "export default {}")])).toHaveLength(2);

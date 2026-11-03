@@ -5,6 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { checkPackageVersions } from "./package-versions";
 import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
 import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { syntaxErrorNote } from "./syntax-error";
@@ -53,8 +54,9 @@ export const createUpdateFileTool = ({
             return `Error: "${path}" is a folder, not a file. You can only update file contents.`;
           }
 
-          const rewriteIcons = await getIconRewriter(internalKey, projectId, [{ path, content: parsed.data.content }]);
-          const prepared = rewriteIcons(parsed.data.content, path);
+          const { content: checkedContent, note: versionNote } = checkPackageVersions(file.name, parsed.data.content);
+          const rewriteIcons = await getIconRewriter(internalKey, projectId, [{ path, content: checkedContent }]);
+          const prepared = rewriteIcons(checkedContent, path);
           const { content } = prepared;
           await convex.mutation(api.system.updateFile, {
             internalKey,
@@ -66,6 +68,7 @@ export const createUpdateFileTool = ({
           return (
             `File "${path}" updated successfully` +
             syntaxErrorNote([{ name: path, content }]) +
+            versionNote +
             await postWriteNote(internalKey, projectId, [file._id], registry, prepared.rewrites)
           );
         })

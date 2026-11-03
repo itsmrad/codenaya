@@ -6,6 +6,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
+import { checkPackageVersions } from "./package-versions";
 import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
 import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { syntaxErrorNote } from "./syntax-error";
@@ -128,8 +129,10 @@ export const createEditFileTool = ({ projectId, internalKey, registry = createRe
             return `Error: ${result.error} "${path}" was not changed.`;
           }
 
-          const rewriteIcons = await getIconRewriter(internalKey, projectId, [{ path, content: result.content }]);
-          const prepared = rewriteIcons(result.content, path);
+          const { content: checkedContent, note: versionNote } = checkPackageVersions(file.name, result.content);
+
+          const rewriteIcons = await getIconRewriter(internalKey, projectId, [{ path, content: checkedContent }]);
+          const prepared = rewriteIcons(checkedContent, path);
           result.content = prepared.content;
           await convex.mutation(api.system.updateFile, {
             internalKey,
@@ -141,6 +144,7 @@ export const createEditFileTool = ({ projectId, internalKey, registry = createRe
           return (
             `File "${path}" edited successfully` +
             syntaxErrorNote([{ name: path, content: result.content }]) +
+            versionNote +
             await postWriteNote(internalKey, projectId, [file._id], registry, prepared.rewrites)
           );
         });
