@@ -19,6 +19,7 @@ vi.mock("./sealed-key", () => ({ openProviderKey: mocks.openProviderKey }));
 vi.mock("node:dns/promises", () => ({ lookup: mocks.lookup }));
 
 import { DEFAULT_AGENT_MODEL_ID } from "@/features/conversations/agent-models";
+import { AUTO_NO_VISION_MESSAGE } from "@/features/ai-providers/auto-route";
 import { PROMO_ENDS_AT, PROMO_REFUSAL_MESSAGES } from "@/features/promotions/github-promo";
 
 import {
@@ -393,6 +394,80 @@ describe("validateModelChoice: Auto (#322)", () => {
     });
 
     expect(await auto("plan")).toMatchObject({ modelId: "openai/gpt-6.1-sol", label: "Auto · GPT-6.1 Sol" });
+  });
+
+  it("routes images only to a vision route model, refusing when there is none", async () => {
+    mocks.platform.mockReturnValue({
+      models: [
+        catalogModel("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5", { vision: false }),
+        catalogModel("google/gemini-3.8-flash", "Gemini 3.8 Flash"),
+      ],
+      defaultModelId: "anthropic/claude-sonnet-5.5",
+      utilityModelId: "anthropic/claude-sonnet-5.5",
+    });
+    // Plan mode with images still needs a vision model.
+    expect(await auto("plan", true)).toMatchObject({ modelId: "google/gemini-3.8-flash" });
+
+    mocks.platform.mockReturnValue({
+      models: [catalogModel("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5", { vision: false })],
+      defaultModelId: "anthropic/claude-sonnet-5.5",
+      utilityModelId: "anthropic/claude-sonnet-5.5",
+    });
+    await expect(auto("vision", true)).rejects.toMatchObject({
+      message: AUTO_NO_VISION_MESSAGE,
+      status: 400,
+      code: "auto_no_vision_model",
+    });
+  });
+
+  describe("with an admin pool", () => {
+    const POOLED = {
+      models: [
+        catalogModel("cheap", "Cheap", { vision: false, pricing: { mode: "blended", usdPerMTok: 0.5 } }),
+        catalogModel("seer", "Seer", { pricing: { mode: "blended", usdPerMTok: 3 } }),
+        catalogModel("smart", "Smart", {
+          vision: false,
+          pricing: { mode: "split", inputUsdPerMTok: 4, outputUsdPerMTok: 20 },
+        }),
+        catalogModel("keyless", "Keyless", { provider: "anthropic", vision: false, pricing: { mode: "blended", usdPerMTok: 50 } }),
+        catalogModel("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5", { pricing: { mode: "blended", usdPerMTok: 99 } }),
+      ],
+      defaultModelId: "anthropic/claude-sonnet-5.5",
+      utilityModelId: "cheap",
+      autoModelIds: ["cheap", "seer", "smart", "keyless", "removed"],
+    };
+
+    beforeEach(() => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "");
+      mocks.platform.mockReturnValue(POOLED);
+    });
+
+    it("runs builds, plans and fixes on its most capable model, edits on its cheapest", async () => {
+      for (const task of ["plan", "build", "fix"] as const) {
+        // Keyless costs more but has no provider key; the catalog default is outside the pool.
+        expect(await auto(task)).toEqual({ modelId: "smart", label: "Auto · Smart", provider: "openrouter" });
+      }
+      expect(await auto("edit")).toMatchObject({ modelId: "cheap" });
+    });
+
+    it("sends images only to its vision models, whatever the task", async () => {
+      expect(await auto("vision", true)).toMatchObject({ modelId: "seer" });
+      expect(await auto("edit", true)).toMatchObject({ modelId: "seer" });
+    });
+
+    it("refuses images when it has no vision model, never using one outside it", async () => {
+      mocks.platform.mockReturnValue({ ...POOLED, autoModelIds: ["cheap", "smart"] });
+
+      await expect(auto("vision", true)).rejects.toMatchObject({ message: AUTO_NO_VISION_MESSAGE, status: 400 });
+      expect(await auto("build")).toMatchObject({ modelId: "smart" });
+    });
+
+    it("keeps the fixed routes when it's empty or only lists models it can't use", async () => {
+      for (const autoModelIds of [[], ["removed", "keyless"]]) {
+        mocks.platform.mockReturnValue({ ...POOLED, autoModelIds });
+        expect(await auto("build")).toMatchObject({ modelId: "anthropic/claude-sonnet-5.5" });
+      }
+    });
   });
 
   it("is refused like any platform model once credits are spent", async () => {

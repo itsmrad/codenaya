@@ -1,9 +1,10 @@
 import { buildPlanMessage } from "../conversations/plan-mode";
-import { type PublicCatalogModel, pickableModels } from "./catalog";
+import { type ModelPricing, type PublicCatalogModel, blendedUsdPerMTok, pickableModels } from "./catalog";
 
 /**
  * The opt-in "Auto" platform model (#322): each send runs on a model picked for
- * its task, from a fixed map and only among the catalog models users may pick.
+ * its task, from the admin's Auto pool or else a fixed map, and only among the
+ * catalog models users may pick.
  * The send route resolves it to a concrete model id (`validateModelChoice`), so
  * the run, its metering and the promo/credit gates only ever see a real model.
  * Pure and client-safe: the picker lists the entry, the server routes with it.
@@ -68,19 +69,49 @@ export const MODEL_ROUTES: Record<RunTask, readonly string[]> = {
   vision: ["anthropic/claude-sonnet-5.5", "google/gemini-3.8-flash"],
 };
 
+/** Sent when an image send on Auto finds no model that can read images. */
+export const AUTO_NO_VISION_MESSAGE = "Auto has no image-capable model. Pick a model that can read images.";
+
+type RoutableModel = Pick<PublicCatalogModel, "id" | "access" | "vision"> & {
+  hidden?: boolean;
+  pricing?: ModelPricing;
+};
+
+/** A model's blended price; capability's stand-in (unpriced, as client-side, is $0). */
+const priceOf = (model: RoutableModel) => (model.pricing ? blendedUsdPerMTok(model.pricing) : 0);
+
 /**
- * The model Auto runs a task on: the first route model users may pick (offered
- * to everyone, never hidden, so never a promo model). Undefined when the
- * catalog has none of them; the server then runs the catalog default.
+ * The model Auto runs a task on, only among models users may pick (offered to
+ * everyone, never hidden, so never a promo model), and for "vision" only among
+ * models that read images.
+ *
+ * With an admin pool (`autoModelIds`) that has any such model, it routes only
+ * within the pool: short edits to the cheapest, everything else to the most
+ * capable, price standing in for capability (ties: catalog order). Pool ids no
+ * longer in the catalog are ignored. Without one, the fixed `MODEL_ROUTES`.
+ * Undefined when nothing fits.
  */
-export function autoRouteModel<M extends Pick<PublicCatalogModel, "id" | "access"> & { hidden?: boolean }>(
+export function autoRouteModel<M extends RoutableModel>(
   models: readonly M[],
   task: RunTask,
+  pool?: readonly string[],
 ): M | undefined {
   const usable = pickableModels(models);
+  const fits = (model: M) => task !== "vision" || model.vision;
+  const pooled = usable.filter((model) => pool?.includes(model.id));
+  if (pooled.length) {
+    const cheapest = task === "edit";
+    return pooled
+      .filter(fits)
+      .reduce<M | undefined>(
+        (best, model) =>
+          !best || (cheapest ? priceOf(model) < priceOf(best) : priceOf(model) > priceOf(best)) ? model : best,
+        undefined,
+      );
+  }
   return MODEL_ROUTES[task]
     .map((id) => usable.find((model) => model.id === id))
-    .find((model) => model !== undefined);
+    .find((model) => model !== undefined && fits(model));
 }
 
 /** The label a run routed by Auto shows on its run block, e.g. "Auto · Claude Sonnet 5.5". */

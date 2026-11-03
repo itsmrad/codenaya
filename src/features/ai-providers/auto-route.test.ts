@@ -56,12 +56,20 @@ describe("MODEL_ROUTES", () => {
 });
 
 describe("autoRouteModel", () => {
-  const model = (id: string, extra: { access?: ModelAccess; hidden?: boolean } = {}) => ({
-    id,
-    access: "everyone" as ModelAccess,
-    hidden: false,
-    ...extra,
-  });
+  const model = (
+    id: string,
+    extra: { access?: ModelAccess; hidden?: boolean; vision?: boolean; usd?: number } = {},
+  ) => {
+    const { usd = 1, ...rest } = extra;
+    return {
+      id,
+      access: "everyone" as ModelAccess,
+      hidden: false,
+      vision: false,
+      pricing: { mode: "blended" as const, usdPerMTok: usd },
+      ...rest,
+    };
+  };
 
   it("picks the task's first route model the catalog offers", () => {
     const models = [model("openai/gpt-6.1-sol"), model("anthropic/claude-sonnet-5.5"), model("openai/gpt-6-luna")];
@@ -82,5 +90,53 @@ describe("autoRouteModel", () => {
 
   it("finds nothing when the catalog has none of the route's models", () => {
     expect(autoRouteModel([model("x-ai/grok-4.7")], "build")).toBeUndefined();
+  });
+
+  it("routes image sends past a non-vision route model to a vision one", () => {
+    const models = [
+      model("anthropic/claude-sonnet-5.5"),
+      model("google/gemini-3.8-flash", { vision: true }),
+    ];
+    expect(autoRouteModel(models, "vision")?.id).toBe("google/gemini-3.8-flash");
+    expect(autoRouteModel(models.slice(0, 1), "vision")).toBeUndefined();
+  });
+
+  describe("with an admin pool", () => {
+    const models = [
+      model("cheap", { usd: 0.5 }),
+      model("mid", { usd: 4, vision: true }),
+      model("top", { usd: 12 }),
+      model("top-twin", { usd: 12 }),
+      model("anthropic/claude-sonnet-5.5", { usd: 6, vision: true }),
+    ];
+    const pool = ["cheap", "mid", "top", "top-twin"];
+
+    it("sends builds, plans and fixes to the priciest, edits to the cheapest", () => {
+      for (const task of ["build", "plan", "fix"] as const) {
+        expect(autoRouteModel(models, task, pool)?.id, task).toBe("top");
+      }
+      expect(autoRouteModel(models, "edit", pool)?.id).toBe("cheap");
+    });
+
+    it("sends images only to the pool's vision models", () => {
+      expect(autoRouteModel(models, "vision", pool)?.id).toBe("mid");
+      // A vision model outside the pool is never used.
+      expect(autoRouteModel(models, "vision", ["cheap", "top"])).toBeUndefined();
+    });
+
+    it("skips hidden, promo and removed members", () => {
+      const gated = [
+        model("top", { usd: 12, hidden: true }),
+        model("mid", { usd: 4, access: "promo_counted" }),
+        model("cheap", { usd: 0.5 }),
+      ];
+      expect(autoRouteModel(gated, "build", ["gone", "top", "mid", "cheap"])?.id).toBe("cheap");
+    });
+
+    it("falls back to the fixed routes when no member is usable or it's empty", () => {
+      for (const empty of [[], ["gone"], undefined]) {
+        expect(autoRouteModel(models, "build", empty)?.id).toBe("anthropic/claude-sonnet-5.5");
+      }
+    });
   });
 });

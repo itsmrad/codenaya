@@ -38,11 +38,12 @@ const usePlatformCatalog = () => {
 export const platformModels = (catalog: {
   models: readonly (PublicCatalogModel & { hidden?: boolean })[];
   defaultModelId: string;
+  autoModelIds?: readonly string[];
 }): PlatformModels => {
   const models = pickableModels(catalog.models);
   const promo = promoModelIds(catalog.models);
   // Auto (#322) is offered only when the catalog has a model it routes builds to.
-  if (!autoRouteModel(models, "build")) {
+  if (!autoRouteModel(models, "build", catalog.autoModelIds)) {
     return { models, defaultModelId: catalog.defaultModelId, promoModelIds: promo };
   }
   return {

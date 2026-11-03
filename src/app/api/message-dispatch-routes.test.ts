@@ -303,6 +303,39 @@ describe("POST /api/messages with Auto (#322)", () => {
     expect(recordedRunModel()).toMatchObject({ label: "Auto · Claude Sonnet 5.5" });
   });
 
+  it("refuses an image send when Auto's pool has no vision model, creating nothing", async () => {
+    const pooled = (id: string, vision: boolean) => ({
+      id,
+      name: id,
+      vendor: "v",
+      provider: "openrouter",
+      providerModelId: id,
+      vision,
+      tools: "confirmed",
+      pricing: { mode: "blended", usdPerMTok: 1 },
+      access: "everyone",
+      hidden: false,
+    });
+    mocks.platform.mockReturnValue({
+      models: [pooled("text-only", false), pooled("seer", true)],
+      defaultModelId: "seer",
+      utilityModelId: "seer",
+      autoModelIds: ["text-only"],
+    });
+
+    const res = await messagesPOST(
+      post({ conversationId: "c1", message: "Match this", model: "auto", images: ["data:image/png;base64,AA=="] }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "Auto has no image-capable model. Pick a model that can read images.",
+      code: "auto_no_vision_model",
+    });
+    expect(mocks.mutation).not.toHaveBeenCalled();
+    expect(mocks.inngestSend).not.toHaveBeenCalled();
+  });
+
   it("makes no extra read for a model the user picked", async () => {
     const res = await send("x-ai/grok-4.7");
 

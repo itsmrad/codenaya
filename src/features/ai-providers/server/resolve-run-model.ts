@@ -18,7 +18,13 @@ import {
   promoRunRefusal,
 } from "@/features/promotions/github-promo";
 
-import { AUTO_MODEL_ID, type RunTask, autoRouteModel, autoRunLabel } from "../auto-route";
+import {
+  AUTO_MODEL_ID,
+  AUTO_NO_VISION_MESSAGE,
+  type RunTask,
+  autoRouteModel,
+  autoRunLabel,
+} from "../auto-route";
 import { type ModelPricing, promoKindOf } from "../catalog";
 import {
   type PlatformProviderId,
@@ -138,9 +144,11 @@ const platformRunLabel = (model: RoutedModel) => runModelLabel({ id: model.id, l
  * send is known to go. Any other platform model needs credits left (ADR 0011);
  * a run that starts with some may end past zero, and the next send is refused.
  *
- * Auto (#322) becomes the `task`'s route model (`autoRouteModel`, among routes
- * whose provider key is set; else the catalog default) before any of these
- * checks, so the message and the run record that concrete model.
+ * Auto (#322) becomes the `task`'s route model (`autoRouteModel`: the admin's
+ * pool, else the fixed routes, among routes whose provider key is set; else the
+ * catalog default) before any of these checks, so the message and the run
+ * record that concrete model. An image send on Auto only ever routes to a
+ * vision model, and is refused when there is none.
  */
 export async function validateModelChoice({
   internalKey,
@@ -163,10 +171,18 @@ export async function validateModelChoice({
       convex.query(api.credits.getForServer, { internalKey, userId }),
     ]);
     const auto = modelId === AUTO_MODEL_ID;
-    const model =
-      (auto &&
-        autoRouteModel(catalog.models.filter((m) => isPlatformConfigured(m.provider)), task)) ||
-      resolveCatalogModel(catalog, modelId);
+    const routed =
+      auto &&
+      autoRouteModel(
+        catalog.models.filter((m) => isPlatformConfigured(m.provider)),
+        // Images need a vision model whatever the task, plan mode included.
+        withImages ? "vision" : task,
+        catalog.autoModelIds,
+      );
+    if (auto && withImages && !routed) {
+      throw new ModelChoiceError(AUTO_NO_VISION_MESSAGE, 400, "auto_no_vision_model");
+    }
+    const model = routed || resolveCatalogModel(catalog, modelId);
     if (!isPlatformConfigured(model.provider)) {
       throw new ModelChoiceError(AI_NOT_CONFIGURED_MESSAGE, 503, "ai_not_configured");
     }

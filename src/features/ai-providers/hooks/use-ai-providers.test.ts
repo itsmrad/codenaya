@@ -37,6 +37,15 @@ describe("platformModels (picker)", () => {
     expect(models.map((m) => m.id)).toEqual(["x-ai/grok-4.7"]);
   });
 
+  it("offers Auto when only the admin's Auto pool has a model it can use", () => {
+    const catalog = { models: [model("x-ai/grok-4.7"), model("hidden", "everyone", true)], defaultModelId: "x-ai/grok-4.7" };
+
+    expect(platformModels({ ...catalog, autoModelIds: ["x-ai/grok-4.7"] }).models[0]?.id).toBe(AUTO_MODEL_ID);
+    expect(platformModels({ ...catalog, autoModelIds: ["hidden", "gone"] }).models.map((m) => m.id)).toEqual([
+      "x-ai/grok-4.7",
+    ]);
+  });
+
   it("never makes Auto the default, even when the saved default isn't pickable", () => {
     const { defaultModelId } = platformModels({
       models: [model("anthropic/claude-opus-5.5", "promo_counted"), model("openai/gpt-6.1-sol")],

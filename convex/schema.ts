@@ -642,6 +642,8 @@ export default defineSchema({
     models: v.array(catalogModelValidator),
     defaultModelId: v.string(),
     utilityModelId: v.string(),
+    // The models Auto (#322) may route to; unset or empty: its fixed routes.
+    autoModelIds: v.optional(v.array(v.string())),
     updatedAt: v.number(),
     // identity.subject of the admin who saved it.
     updatedBy: v.string(),
