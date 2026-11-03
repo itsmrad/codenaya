@@ -39,6 +39,19 @@ export const buildPathIndex = (files: PathIndexFile[]) => {
   return (id: string) => pathOf(id);
 };
 
+/**
+ * A project-relative path without a leading "./" or trailing "/", or undefined
+ * when it is absolute or has empty, "." or ".." segments (#292).
+ */
+export const normalizePath = (raw: string) => {
+  const path = raw.trim().replace(/^\.\//, "").replace(/\/$/, "");
+  if (raw.trim().startsWith("/")) return undefined;
+  const segments = path.split("/");
+  return segments.some((segment) => segment === "" || segment === "." || segment === "..")
+    ? undefined
+    : path;
+};
+
 const MAX_TARGETS = 20;
 const MAX_TEXT = 2000;
 const MAX_ERROR = 200;
@@ -74,21 +87,35 @@ export const describeToolCall = (
   const { name, input } = call;
   const paths = (ids: string[]) =>
     ids.map(pathOf).filter((path): path is string => Boolean(path));
+  const named = (raw: string[]) =>
+    raw.map(normalizePath).filter((path): path is string => Boolean(path));
 
   let targets: string[];
   switch (name) {
+    case "searchFiles":
+      targets = str(input.pattern) ? [str(input.pattern)] : [];
+      break;
+    // Path inputs since #292; `fileId(s)` in calls recorded before it.
     case "readFiles":
     case "deleteFiles":
-      targets = paths(strings(input.fileIds));
+      targets = Array.isArray(input.paths) ? named(strings(input.paths)) : paths(strings(input.fileIds));
       break;
     case "updateFile":
-      targets = paths([str(input.fileId)]);
+    case "editFile":
+      targets = "path" in input ? named([str(input.path)]) : paths([str(input.fileId)]);
       break;
     case "renameFile": {
-      const from = pathOf(str(input.fileId));
+      const from = "path" in input ? named([str(input.path)])[0] : pathOf(str(input.fileId));
       targets = from ? [from, str(input.newName)] : [];
       break;
     }
+    case "writeFiles":
+      targets = named(
+        (Array.isArray(input.files) ? input.files : []).map((file) =>
+          str((file as Record<string, unknown>)?.path),
+        ),
+      );
+      break;
     case "createFiles": {
       const parent = pathOf(str(input.parentId));
       const files = Array.isArray(input.files) ? input.files : [];
@@ -122,8 +149,10 @@ export const describeToolCall = (
 
 /** Tools whose finished calls change project files ("N files changed"). */
 export const FILE_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "writeFiles",
   "createFiles",
   "updateFile",
+  "editFile",
   "renameFile",
   "deleteFiles",
 ]);
@@ -178,6 +207,8 @@ export const STATIC_CHECKS_PASSED = "Static checks passed";
 export const BUILD_NOT_CHECKED = "Build not checked";
 /** Starts a checkBuild result that failed for reasons outside the project's code. */
 export const BUILD_CHECK_UNFINISHED = "Error: The build check could not finish";
+/** Starts a checkBuild result whose in-process static checks found problems. */
+export const STATIC_CHECKS_FAILED = "Error: Static checks failed";
 
 /**
  * The first line of a passing checkBuild result ("Build verified", "Static
@@ -186,6 +217,33 @@ export const BUILD_CHECK_UNFINISHED = "Error: The build check could not finish";
 export const buildCheckLabel = (content: unknown): string | undefined => {
   const data = (content as { data?: unknown } | null)?.data;
   return typeof data === "string" ? data.trim().split("\n")[0].slice(0, MAX_ERROR) || undefined : undefined;
+};
+
+/**
+ * Failed checkBuild steps that a later passing check resolved. A static-check
+ * failure is resolved by any passing check, as in the finish gate; an install
+ * or build failure only by "Build verified". Running checks and checks that
+ * could not finish don't count, and failures after the last pass stay open.
+ */
+export const fixedBuildErrors = (steps: AgentStep[]) => {
+  let fixed = 0;
+  let pendingStatic = 0;
+  let pendingBuild = 0;
+  for (const step of steps) {
+    if (step.tool !== "checkBuild") continue;
+    if (step.status === "error" && !step.error?.startsWith(BUILD_CHECK_UNFINISHED)) {
+      if (step.error?.startsWith(STATIC_CHECKS_FAILED)) pendingStatic += 1;
+      else pendingBuild += 1;
+    } else if (step.status === "done") {
+      fixed += pendingStatic;
+      pendingStatic = 0;
+      if (step.text === BUILD_VERIFIED) {
+        fixed += pendingBuild;
+        pendingBuild = 0;
+      }
+    }
+  }
+  return fixed;
 };
 
 /** The known-error recipes a tool result's hints name (#334), for the run record. */

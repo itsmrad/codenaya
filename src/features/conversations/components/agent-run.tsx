@@ -7,6 +7,7 @@ import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import {
   BookOpenIcon,
+  SearchIcon,
   BrainIcon,
   CheckCircle2Icon,
   ChevronRightIcon,
@@ -42,6 +43,7 @@ import {
   BUILD_VERIFIED,
   FILE_WRITE_TOOLS,
   STALLED_RUN_MS,
+  fixedBuildErrors,
   lastRunActivity,
   runWrittenPaths,
 } from "../agent-steps";
@@ -58,12 +60,15 @@ interface ToolMeta {
 }
 
 const TOOL_META: Record<string, ToolMeta> = {
+  searchFiles: { icon: SearchIcon, running: "Searching for", done: "Searched for" },
   readFiles: { icon: FileTextIcon, running: "Reading", done: "Read", mergeable: true },
   listFiles: { icon: FolderTreeIcon, running: "Listing files", done: "Listed files", mergeable: true },
+  writeFiles: { icon: FilePlus2Icon, running: "Writing", done: "Wrote" },
   createFiles: { icon: FilePlus2Icon, running: "Creating", done: "Created" },
   createFolder: { icon: FolderPlusIcon, running: "Creating folder", done: "Created folder" },
   scaffoldViteApp: { icon: FolderPlusIcon, running: "Scaffolding Vite app", done: "Scaffolded Vite app" },
   updateFile: { icon: FilePenIcon, running: "Editing", done: "Edited" },
+  editFile: { icon: FilePenIcon, running: "Editing", done: "Edited" },
   renameFile: { icon: FileSymlinkIcon, running: "Renaming", done: "Renamed" },
   deleteFiles: { icon: FileX2Icon, running: "Deleting", done: "Deleted" },
   scrapeUrls: { icon: GlobeIcon, running: "Fetching", done: "Fetched" },
@@ -162,7 +167,7 @@ const FileChip = ({ path, onOpen, label = false }: FileChipProps) => {
 const CHIP_LIMIT = 6;
 
 /** Tools whose targets are not project files: their chips never open. */
-const NON_FILE_TOOLS = new Set(["scrapeUrls", "setEnvVar", "loadSkill", "checkBuild"]);
+const NON_FILE_TOOLS = new Set(["searchFiles", "scrapeUrls", "setEnvVar", "loadSkill", "checkBuild"]);
 
 const isFileTool = (tool = "") => !NON_FILE_TOOLS.has(tool) && !tool.includes("__");
 
@@ -514,7 +519,9 @@ export const AgentRun = ({
     setBatch({ count: rows.length, start: Math.min(batch.count, rows.length) });
   }
   const toolSteps = steps.filter((step) => step.kind === "tool");
-  const errors = toolSteps.filter((step) => step.status === "error").length;
+  // Failed checks the agent later fixed are reported as a fixed build, not as errors.
+  const fixed = fixedBuildErrors(toolSteps);
+  const errors = toolSteps.filter((step) => step.status === "error").length - fixed;
   const changed = new Set(
     toolSteps
       .filter((step) => FILE_WRITE_TOOLS.has(step.tool ?? "") && step.status === "done")
@@ -541,6 +548,7 @@ export const AgentRun = ({
     filesChanged > 0 &&
       `${filesChanged} ${filesChanged === 1 ? "file" : "files"} changed` +
         (delta ? ` +${delta.additions} −${delta.deletions}` : ""),
+    fixed > 0 && "Fixed the build",
     model,
   ]
     .filter(Boolean)
