@@ -13,6 +13,7 @@ vi.mock("@/lib/convex-client", () => ({
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
+import { createCreateFilesTool } from "./create-files";
 import { createDeleteFilesTool } from "./delete-files";
 import { createListFilesTool } from "./list-files";
 import { buildProjectTreePromptSection, MAX_PROMPT_TREE_ENTRIES, type ProjectFile } from "./paths";
@@ -397,4 +398,47 @@ it("uses only the first range for a path, including normalised duplicates", asyn
       { path: "./src/App.tsx", startLine: 2, endLine: 2 },
     ],
   }, ctx)).toBe("File: src/App.tsx (lines 1-1 of 2)\n1: first");
+});
+
+// #331: an unpinned package resolves to today's newest major, which the starter may not run.
+describe("package.json version pins", () => {
+  const latestRouter = JSON.stringify({ dependencies: { "react-router-dom": "latest" } });
+  const savedRouterRange = (path = "package.json") =>
+    JSON.parse(db.rows.find((r) => r.type === "file" && pathOf(r) === path)!.content!).dependencies[
+      "react-router-dom"
+    ];
+
+  it("updateFile saves the known-good range and says so", async () => {
+    const result = await createUpdateFileTool(opts).handler({ path: "package.json", content: latestRouter }, ctx);
+    expect(savedRouterRange()).toMatch(/^\^7\./);
+    expect(result).toContain('react-router-dom "latest" →');
+  });
+
+  it("createFiles saves the known-good range and says so", async () => {
+    db.rows = [];
+    const result = await createCreateFilesTool(opts).handler(
+      { parentId: "", files: [{ name: "package.json", content: latestRouter }] },
+      ctx,
+    );
+    expect(savedRouterRange()).toMatch(/^\^7\./);
+    expect(result).toContain('react-router-dom "latest" →');
+  });
+
+  // writeFiles is a package.json write path too, for new and existing files.
+  it("writeFiles saves the known-good range and says so", async () => {
+    const result = (await createWriteFilesTool(opts).handler(
+      {
+        files: [
+          { path: "package.json", content: latestRouter },
+          { path: "apps/web/package.json", content: latestRouter },
+          { path: "src/package-notes.json", content: latestRouter },
+        ],
+      },
+      ctx,
+    )) as string;
+    expect(savedRouterRange()).toMatch(/^\^7\./);
+    expect(savedRouterRange("apps/web/package.json")).toMatch(/^\^7\./);
+    expect(savedRouterRange("src/package-notes.json")).toBe("latest");
+    expect(result.match(/react-router-dom "latest" →/g)).toHaveLength(2);
+  });
 });

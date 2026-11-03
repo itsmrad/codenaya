@@ -8,8 +8,8 @@ import { api } from "../../../../convex/_generated/api";
 import {
   CODING_AGENT_SYSTEM_PROMPT,
   MAX_AGENT_STEPS,
+  STARTER_IN_PLACE_NOTE,
   STEP_BUDGET_NOTE,
-  TITLE_GENERATOR_SYSTEM_PROMPT
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { createSearchFilesTool } from './tools/search-files';
@@ -27,7 +27,7 @@ import { createSetEnvVarTool } from './tools/set-env-var';
 import { createLoadSkillTool } from './tools/load-skill';
 import { createScaffoldViteAppTool } from './tools/scaffold-vite-app';
 import { createCheckBuildTool } from './tools/check-build';
-import { createBuildCheckGate } from './build-check-gate';
+import { createBuildCheckGate, wroteFiles } from './build-check-gate';
 import type { AgentModelChoice } from '../agent-models';
 import {
   type RunModel,
@@ -66,9 +66,11 @@ import {
   resolveSkills,
 } from '@/features/skills/server/resolve-skills';
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
+import { isStarterOnly } from './starter-only';
+import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
-import { AGENT_FAILURE_MESSAGE, priorTurns } from './lib/conversation-history';
+import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
   type MessageMode,
   PLAN_MODE,
@@ -154,9 +156,6 @@ export const processMessage = inngest.createFunction(
     if (!internalKey) {
       throw new NonRetriableError("CODENAYA_CONVEX_INTERNAL_KEY is not configured");
     }
-
-    // TODO: Check if this is needed
-    await step.sleep("wait-for-db-sync", "1s");
 
     // Get conversation for title generation check
     const conversation = await step.run("get-conversation", async () => {
@@ -266,12 +265,17 @@ export const processMessage = inngest.createFunction(
         }
       });
     };
-    const recordUsage = async (raw: string | undefined, pricing: ModelPricing | undefined) => {
+    const recordUsage = async (
+      raw: string | undefined,
+      pricing: ModelPricing | undefined,
+      // The title runs alongside the coding agent, so it gets a fixed id.
+      id = `record-usage-${++usageRecords}`,
+    ) => {
       const tokens = usageOfResponse(raw);
       usage.inputTokens += tokens.inputTokens;
       usage.outputTokens += tokens.outputTokens;
       usage.costUsd += pricing ? costUsd(pricing, tokens) : 0;
-      await sendUsage(`record-usage-${++usageRecords}`);
+      await sendUsage(id);
     };
 
     // Fetch recent messages for conversation context
@@ -294,51 +298,6 @@ export const processMessage = inngest.createFunction(
 
     // Earlier turns go to the model as chat messages, never in the system prompt.
     const earlierTurns = priorTurns(recentMessages, messageId);
-
-    // Generate conversation title if it's still the default
-    const shouldGenerateTitle =
-      conversation.title === DEFAULT_CONVERSATION_TITLE;
-
-    if (shouldGenerateTitle) {
-      const titleAgent = createAgent({
-        name: "title-generator",
-        system: TITLE_GENERATOR_SYSTEM_PROMPT,
-        model: runModel.title(0),
-      });
-
-      let output;
-      try {
-        const result = await titleAgent.run(request, { step });
-        output = result.output;
-        await recordUsage(result.raw, runModel.metering.title);
-      } catch (error) {
-        return await endRunOnKeyRejection(error);
-      }
-
-      const textMessage = output.find(
-        (m) => m.type === "text" && m.role === "assistant"
-      );
-
-      if (textMessage?.type === "text") {
-        const title =
-          typeof textMessage.content === "string"
-            ? textMessage.content.trim()
-            : textMessage.content
-              .map((c) => c.text)
-              .join("")
-              .trim();
-
-        if (title) {
-          await step.run("update-conversation-title", async () => {
-            await convex.mutation(api.system.updateConversationTitle, {
-              internalKey,
-              conversationId,
-              title,
-            });
-          });
-        }
-      }
-    }
 
     // ─── MCP integrations ───
     //
@@ -554,15 +513,26 @@ export const processMessage = inngest.createFunction(
     });
 
     // Most stable first, so the cacheable prefix is shared across runs (#295):
-    // base, then per-project sections, then per-run ones. Nothing from the
-    // conversation goes here; it is sent as messages (see onStart).
+    // base, skill index and integrations, then the project tree, forced
+    // skills and plan mode.
+    // Conversation goes in messages (see onStart).
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
-      buildSkillsPromptSection(skills, forced, unavailable),
+      buildSkillsPromptSection(skills),
       buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
       projectTree,
+      buildSkillsPromptSection([], forced, unavailable),
       planMode ? PLAN_MODE_PROMPT : "",
     ].join("");
+
+    // A project seeded with the starter says so in the request, not the
+    // system prompt, so the first turn builds on it (#338).
+    const starterOnly = await step.run("check-starter-only", async () =>
+      isStarterOnly(
+        await convex.query(api.system.getProjectFiles, { internalKey, projectId }),
+      ),
+    );
+
 
     // Display only: mirrors the agent's tool calls onto the assistant message
     // for the chat panel's activity block. Each write is its own step, so replays
@@ -672,6 +642,7 @@ export const processMessage = inngest.createFunction(
             agent.name === SUMMARY_AGENT_NAME ? STEP_BUDGET_NOTE : buildCheckGate.takeNudge();
           // AgentKit sends prompt ([system, request]) before history (this
           // run's turns), so earlier conversation turns go between the two.
+          // Relies on network calls using maxIter: 0; direct agent.run with maxIter > 1 would prepend history each pass.
           const [system, ...current] = withImageParts(prompt, imageUrls);
           return {
             prompt: [system, ...earlierTurns, ...current],
@@ -816,11 +787,42 @@ export const processMessage = inngest.createFunction(
       }
     });
 
+    // The title runs alongside the coding agent, never before it (#338).
+    // Started here: earlier, Inngest would plan every step in between as a
+    // parallel step, one extra round trip each. It never throws.
+    let titleUsageRecorded = false;
+    const titleDone =
+      conversation.title === DEFAULT_CONVERSATION_TITLE
+        ? generateConversationTitle({
+            step,
+            runModel,
+            request,
+            recordUsage: (raw) => {
+              titleUsageRecorded = true;
+              return recordUsage(raw, runModel.metering.title, "record-usage-title");
+            },
+            internalKey,
+            conversationId,
+          })
+        : undefined;
+    // Every way out of the run waits for the title and flushes usage once: a
+    // failed last record has no later one to catch it up. A cancelled run
+    // stops between steps; its per-inference records are its flush.
+    const settleRun = async (id: string) => {
+      await titleDone;
+      if (usageRecords > 0 || titleUsageRecorded) {
+        await sendUsage(id);
+      }
+    };
+
     // Run the agent
     let result;
     try {
-      result = await network.run(request);
+      result = await network.run(
+        starterOnly ? `${request}\n\n${STARTER_IN_PLACE_NOTE}` : request,
+      );
     } catch (error) {
+      await settleRun("record-usage-on-error");
       return await endRunOnKeyRejection(error);
     }
 
@@ -830,8 +832,7 @@ export const processMessage = inngest.createFunction(
       (m) => m.type === "text" && m.role === "assistant"
     );
 
-    let assistantResponse =
-      "I processed your request. Let me know if you need anything else!";
+    let assistantResponse = DEFAULT_REPLY_MESSAGE;
 
     if (textMessage?.type === "text") {
       assistantResponse =
@@ -840,10 +841,7 @@ export const processMessage = inngest.createFunction(
           : textMessage.content.map((c) => c.text).join("");
     }
 
-    // A failed last record has no later one to catch it up.
-    if (usageRecords > 0) {
-      await sendUsage("record-usage-final");
-    }
+    await settleRun("record-usage-final");
 
     // Update the assistant message with the response (this also sets status to completed)
     await step.run("update-assistant-message", async () => {
@@ -853,6 +851,13 @@ export const processMessage = inngest.createFunction(
         content: assistantResponse,
       })
     });
+
+    // The first run that wrote files ends a seeded project's first build (#338).
+    if (wroteFiles(result.state.results)) {
+      await step.run("complete-first-build", async () => {
+        await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
+      });
+    }
 
     return { success: true, messageId, conversationId };
   }

@@ -5,6 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface CreateFilesToolOptions {
@@ -53,7 +54,12 @@ export const createCreateFilesTool = ({
         return `Error: ${parsed.error.issues[0].message}`;
       }
 
-      const { parentId, files } = parsed.data;
+      const { parentId } = parsed.data;
+      const checked = parsed.data.files.map((file) => ({
+        file,
+        ...checkPackageVersions(file.name, file.content),
+      }));
+      const files = checked.map(({ file, content }) => ({ ...file, content }));
 
       try {
         return await toolStep?.run("create-files", async () => {
@@ -98,7 +104,11 @@ export const createCreateFilesTool = ({
 
           return (
             response +
-            syntaxErrorNote(files.filter((file) => created.some((r) => r.name === file.name)))
+            syntaxErrorNote(files.filter((file) => created.some((r) => r.name === file.name))) +
+            checked
+              .filter(({ file }) => created.some((r) => r.name === file.name))
+              .map(({ note }) => note)
+              .join("")
           );
         });
       } catch (error) {
