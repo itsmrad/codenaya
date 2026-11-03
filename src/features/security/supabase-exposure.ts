@@ -37,10 +37,13 @@ const isExposed = (raw: string) => !tableName(raw).includes(".");
 const SQL_TOKEN = /'(?:[^']|'')*'|"(?:[^"]|"")*"|(\$(?:[A-Za-z_]\w*)?\$)[\s\S]*?\1|--[^\n]*|\/\*[\s\S]*?(?:\*\/|$)/g;
 
 /** Drops `--` and block comments but keeps every newline, so line numbers still hold. */
-const stripComments = (sql: string) =>
-  sql.replace(SQL_TOKEN, (token) =>
-    token.startsWith("--") || token.startsWith("/*") ? token.replace(/[^\n]/g, "") : token,
-  );
+const stripComments = (sql: string): string =>
+  sql.replace(SQL_TOKEN, (token, tag?: string) => {
+    if (token.startsWith("--") || token.startsWith("/*")) return token.replace(/[^\n]/g, "");
+    // A DO block or function body is SQL too: strip its comments, keep the $tag$ quotes.
+    if (tag) return tag + stripComments(token.slice(tag.length, -tag.length)) + tag;
+    return token;
+  });
 
 const lineAt = (text: string, index: number) => text.slice(0, index).split("\n").length;
 

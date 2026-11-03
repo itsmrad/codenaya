@@ -84,6 +84,17 @@ describe("scanSupabaseSql: tables without RLS", () => {
     ).toEqual([1, 2, 3, 4, 5, 6].map((line) => `${line}:supabase-no-rls`));
   });
 
+  it("ignores commented-out statements inside dollar-quoted bodies", () => {
+    expect(scan("create table a (id int);\ndo $$ begin -- drop table a;\n end $$;")).toEqual([
+      "1:supabase-no-rls",
+    ]);
+    expect(
+      scan(
+        "create table a (id int); create function f() returns void as $$\n -- alter table a enable row level security;\n$$ language sql;",
+      ),
+    ).toEqual(["1:supabase-no-rls"]);
+  });
+
   it("flags a table whose RLS is disabled again after being enabled", () => {
     expect(
       scan(
