@@ -122,6 +122,7 @@ export const describeToolCall = (
       targets = Array.isArray(input.paths) ? named(strings(input.paths)) : paths(strings(input.fileIds));
       break;
     case "updateFile":
+    case "editFile":
       targets = "path" in input ? named([str(input.path)]) : paths([str(input.fileId)]);
       break;
     case "renameFile": {
@@ -172,6 +173,7 @@ export const FILE_WRITE_TOOLS: ReadonlySet<string> = new Set([
   "writeFiles",
   "createFiles",
   "updateFile",
+  "editFile",
   "renameFile",
   "deleteFiles",
 ]);

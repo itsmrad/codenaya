@@ -64,6 +64,15 @@ describe("describeToolCall", () => {
     ).toEqual(["src/App.jsx", "Main.jsx"]);
   });
 
+  it("names the edited file's path", () => {
+    expect(
+      describeToolCall(
+        { name: "editFile", input: { path: "src/App.jsx", edits: [{ oldText: "a", newText: "b" }] } },
+        pathOf,
+      ),
+    ).toEqual(["src/App.jsx"]);
+  });
+
   it("names path inputs (#292), normalized and without invalid ones", () => {
     expect(
       describeToolCall({ name: "readFiles", input: { paths: ["./src/a.ts", "../x", "src/"] } }, pathOf),

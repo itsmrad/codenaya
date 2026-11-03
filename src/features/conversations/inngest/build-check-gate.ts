@@ -10,10 +10,14 @@ const WRITE_TOOLS = new Set([
   "writeFiles",
   "createFiles",
   "updateFile",
+  "editFile",
   "renameFile",
   "deleteFiles",
   "scaffoldViteApp",
 ]);
+
+/** Write tools that make at most one (transactional) mutation, so an error result means nothing changed. */
+const ATOMIC_WRITE_TOOLS = new Set(["updateFile", "editFile", "renameFile"]);
 
 /** One check plus the two fix attempts the prompt allows. */
 export const MAX_BUILD_CHECKS = 3;
@@ -39,7 +43,8 @@ export const hasUncheckedWrites = (results: ToolCalls[]) => {
   let checks = 0;
   for (const { tool, content } of results.flatMap((result) => result.toolCalls)) {
     if (WRITE_TOOLS.has(tool.name)) {
-      unchecked = true;
+      // Multi-mutation tools may have written some files before failing.
+      if (!ATOMIC_WRITE_TOOLS.has(tool.name) || toolResultError(content) === undefined) unchecked = true;
     } else if (tool.name === "checkBuild") {
       checks += 1;
       // A check that could not run is not retried: the agent reports it instead.
