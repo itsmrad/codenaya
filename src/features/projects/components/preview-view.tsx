@@ -45,7 +45,7 @@ import { cn } from "@/lib/utils";
 import { EnvVarsDialog } from "./env-vars-dialog";
 import { useProject, useRecordFirstPreviewShown } from "../hooks/use-projects";
 import { useFilesWithContent } from "../hooks/use-files";
-import { markPreviewOpened } from "../utils/first-run";
+import { isPreviewOnScreen, markPreviewOpened } from "../utils/first-run";
 import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
 import {
   usePublicEnvVars,
@@ -198,11 +198,16 @@ export const PreviewView = ({
     if (previewUrl) markPreviewOpened();
   }, [previewUrl]);
 
-  // Activation event (#339): once per project per page view, when the loaded
-  // app is on screen: its tab is open and no first-build card covers it.
+  // Activation event (#339): once per project per page view.
   const recordFirstPreviewShown = useRecordFirstPreviewShown();
   const recordedPreviewFor = useRef<Id<"projects"> | null>(null);
-  const previewShown = visible && !building && loadedPreview === previewKey;
+  const previewShown = isPreviewOnScreen({
+    visible,
+    building: Boolean(building),
+    status,
+    error,
+    loaded: loadedPreview === previewKey,
+  });
   useEffect(() => {
     if (!previewShown || recordedPreviewFor.current === projectId) return;
     recordedPreviewFor.current = projectId;
