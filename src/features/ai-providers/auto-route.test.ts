@@ -15,7 +15,7 @@ const send = (overrides: Partial<Parameters<typeof classifyRun>[0]> = {}) =>
   classifyRun({
     planMode: false,
     hasImages: false,
-    projectHasFiles: true,
+    firstBuild: false,
     message: "Make the header blue",
     ...overrides,
   });
@@ -24,12 +24,13 @@ describe("classifyRun", () => {
   it.each<[string, Partial<Parameters<typeof classifyRun>[0]>, RunTask]>([
     ["plan mode", { planMode: true }, "plan"],
     ["plan mode with images", { planMode: true, hasImages: true }, "plan"],
-    ["plan mode in an empty project", { planMode: true, projectHasFiles: false }, "plan"],
+    ["plan mode before the first build", { planMode: true, firstBuild: true }, "plan"],
     ["an image edit", { hasImages: true }, "vision"],
     ["images with a fix request", { hasImages: true, source: "fix" }, "vision"],
     ["a fix request", { source: "fix" }, "fix"],
-    ["a short fix request in an empty project", { source: "fix", projectHasFiles: false }, "fix"],
-    ["a short first message in an empty project", { projectHasFiles: false }, "build"],
+    ["a short fix request before the first build", { source: "fix", firstBuild: true }, "fix"],
+    ["a short first message in an empty project", { firstBuild: true }, "build"],
+    ["a short retry in a seeded project whose first run didn't finish", { firstBuild: true, message: "try again" }, "build"],
     ["a short follow-up", {}, "edit"],
     ["a follow-up just under the edit limit", { message: "x".repeat(EDIT_MAX_CHARS - 1) }, "edit"],
     ["a follow-up at the edit limit", { message: "x".repeat(EDIT_MAX_CHARS) }, "build"],

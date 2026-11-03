@@ -28,28 +28,29 @@ export const EDIT_MAX_CHARS = 400;
 
 /**
  * The task of a send, deterministic and in precedence order: plan mode, then
- * images, then an explicit fix request, then the first build of an empty
- * project or an accepted plan ("Build this plan"), then short (edit) vs long
- * (build) follow-ups.
+ * images, then an explicit fix request, then a project's first build (no
+ * finished build yet) or an accepted plan ("Build this plan"), then short
+ * (edit) vs long (build) follow-ups.
  */
 export function classifyRun({
   planMode,
   hasImages,
   source,
-  projectHasFiles,
+  firstBuild,
   message,
 }: {
   planMode: boolean;
   hasImages: boolean;
   /** "fix" from "Fix with AI" (#223) or a loop-breaker retry (#306). */
   source?: "fix";
-  projectHasFiles: boolean;
+  /** The project has no finished build yet (`conversationNeedsFirstBuildForServer`). */
+  firstBuild: boolean;
   message: string;
 }): RunTask {
   if (planMode) return "plan";
   if (hasImages) return "vision";
   if (source === "fix") return "fix";
-  if (!projectHasFiles || message.startsWith(buildPlanMessage(""))) return "build";
+  if (firstBuild || message.startsWith(buildPlanMessage(""))) return "build";
   return message.length < EDIT_MAX_CHARS ? "edit" : "build";
 }
 

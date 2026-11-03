@@ -35,7 +35,7 @@ const usePlatformCatalog = () => {
   return saved === undefined ? undefined : (saved ?? envCatalog(platformProviderId()));
 };
 
-const platformModels = (catalog: {
+export const platformModels = (catalog: {
   models: readonly (PublicCatalogModel & { hidden?: boolean })[];
   defaultModelId: string;
 }): PlatformModels => {

@@ -456,3 +456,39 @@ test("getPartial clamps its limit", async () => {
   expect(await alice.query(api.projects.getPartial, { limit: 1000 })).toHaveLength(50);
   expect(await alice.query(api.projects.getPartial, { limit: -5 })).toHaveLength(1);
 });
+
+describe("projects.conversationNeedsFirstBuildForServer (Auto routing, #322)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  test("is true until the project's first build: seeded and pending, or empty", async () => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "ik");
+    const t = convexTest(schema, modules);
+    const conversations = await t.run(async (ctx) => {
+      const project = async (fields: { files: boolean; firstBuildPending?: boolean }) => {
+        const projectId = await ctx.db.insert("projects", {
+          name: "p",
+          ownerId: ALICE,
+          updatedAt: 0,
+          ...(fields.firstBuildPending ? { firstBuildPending: true } : {}),
+        });
+        if (fields.files) {
+          await ctx.db.insert("files", { projectId, name: "package.json", type: "file", content: "{}", updatedAt: 0 });
+        }
+        return await ctx.db.insert("conversations", { projectId, title: "c", updatedAt: 0 });
+      };
+      return {
+        empty: await project({ files: false }),
+        seeded: await project({ files: true, firstBuildPending: true }),
+        built: await project({ files: true }),
+      };
+    });
+    const needsFirstBuild = (conversationId: Id<"conversations">, internalKey = "ik") =>
+      t.query(api.projects.conversationNeedsFirstBuildForServer, { internalKey, conversationId });
+
+    expect(await needsFirstBuild(conversations.empty)).toBe(true);
+    // A seeded starter whose first run didn't finish (#338) still needs its build.
+    expect(await needsFirstBuild(conversations.seeded)).toBe(true);
+    expect(await needsFirstBuild(conversations.built)).toBe(false);
+    await expect(needsFirstBuild(conversations.built, "wrong")).rejects.toThrow();
+  });
+});

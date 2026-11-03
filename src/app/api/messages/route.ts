@@ -81,33 +81,37 @@ export async function POST(request: Request) {
     );
   }
 
-  // Auto (#322) routes by task, which costs it one more read. A malformed id
-  // fails the ownership check below.
-  const task = isAutoChoice(model)
-    ? classifyRun({
-        planMode: mode === PLAN_MODE,
-        hasImages: Boolean(images?.length),
-        source,
-        projectHasFiles: await convex
-          .query(api.files.conversationProjectHasFilesForServer, {
-            internalKey,
-            conversationId: conversationId as Id<"conversations">,
-          })
-          .catch(() => false),
-        message,
-      })
-    : undefined;
+  // Auto (#322) routes by task, which needs one more read: alongside the
+  // ownership check. A failed read (or a malformed id, which fails that check)
+  // is a build.
+  const autoTask = async () =>
+    isAutoChoice(model)
+      ? classifyRun({
+          planMode: mode === PLAN_MODE,
+          hasImages: Boolean(images?.length),
+          source,
+          firstBuild: await convex
+            .query(api.projects.conversationNeedsFirstBuildForServer, {
+              internalKey,
+              conversationId: conversationId as Id<"conversations">,
+            })
+            .catch(() => true),
+          message,
+        })
+      : undefined;
 
   // Independent reads, in parallel: each Convex round-trip delays the send.
   const [{ runModel, promoKind, rejected }, { found: conversation, notFound }] =
     await Promise.all([
-      requireModelChoice({
-        internalKey,
-        userId,
-        model,
-        withImages: Boolean(images?.length),
-        task,
-      }),
+      autoTask().then((task) =>
+        requireModelChoice({
+          internalKey,
+          userId,
+          model,
+          withImages: Boolean(images?.length),
+          task,
+        }),
+      ),
       requireOwnedConversation({
         internalKey,
         userId,
