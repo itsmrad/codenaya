@@ -19,6 +19,8 @@ import { createCreateFilesTool } from './tools/create-files';
 import { createCreateFolderTool } from './tools/create-folder';
 import { createRenameFileTool } from './tools/rename-file';
 import { createDeleteFilesTool } from './tools/delete-files';
+import { createWriteFilesTool } from './tools/write-files';
+import { buildProjectTreePromptSection, getProjectFiles } from './tools/paths';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
 import { createSetEnvVarTool } from './tools/set-env-var';
 import { createLoadSkillTool } from './tools/load-skill';
@@ -68,6 +70,7 @@ import { isStarterOnly } from './starter-only';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
+import { trimFileHistory } from "./lib/trim-file-history";
 import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
   type MessageMode,
@@ -499,13 +502,26 @@ export const processMessage = inngest.createFunction(
       }
     });
 
+    // The project's paths at run start (#292), so the agent addresses files by
+    // path without a listFiles call. Non-fatal: listFiles still works.
+    const projectTree = await step.run("get-project-tree", async () => {
+      try {
+        return buildProjectTreePromptSection(await getProjectFiles(internalKey, projectId));
+      } catch (error) {
+        console.error("[process-message] project tree failed", error);
+        return "";
+      }
+    });
+
     // Most stable first, so the cacheable prefix is shared across runs (#295):
-    // base, skill index and integrations, then forced skills and plan mode.
+    // base, skill index and integrations, then the project tree, forced
+    // skills and plan mode.
     // Conversation goes in messages (see onStart).
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
       buildSkillsPromptSection(skills),
       buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
+      projectTree,
       buildSkillsPromptSection([], forced, unavailable),
       planMode ? PLAN_MODE_PROMPT : "",
     ].join("");
@@ -587,6 +603,7 @@ export const processMessage = inngest.createFunction(
     const tools: Tool.Any[] = [
       createListFilesTool({ internalKey, projectId }),
       createReadFilesTool({ projectId, internalKey }),
+      createWriteFilesTool({ projectId, internalKey }),
       createUpdateFileTool({ projectId, internalKey }),
       createCreateFilesTool({ projectId, internalKey }),
       createCreateFolderTool({ projectId, internalKey }),
@@ -628,6 +645,7 @@ export const processMessage = inngest.createFunction(
         : tools,
       lifecycle: {
         onStart: ({ agent, prompt, history }) => {
+          const trimmed = trimFileHistory([...earlierTurns, ...(history ?? [])]);
           const { stuck } = loopGuard;
           const summaryNote = stuck ? stuckNote(stuck) : STEP_BUDGET_NOTE;
           const nudge =
@@ -639,9 +657,9 @@ export const processMessage = inngest.createFunction(
           // Relies on network calls using maxIter: 0; direct agent.run with maxIter > 1 would prepend history each pass.
           const [system, ...current] = withImageParts(prompt, imageUrls);
           return {
-            prompt: [system, ...earlierTurns, ...current],
+            prompt: [system, ...trimmed.slice(0, earlierTurns.length), ...current],
             history: [
-              ...(history ?? []),
+              ...trimmed.slice(earlierTurns.length),
               ...(nudge ? [{ type: "text" as const, role: "user" as const, content: nudge }] : []),
             ],
             stop: false,

@@ -64,6 +64,26 @@ describe("describeToolCall", () => {
     ).toEqual(["src/App.jsx", "Main.jsx"]);
   });
 
+  it("names path inputs (#292), normalized and without invalid ones", () => {
+    expect(
+      describeToolCall({ name: "readFiles", input: { paths: ["./src/a.ts", "../x", "src/"] } }, pathOf),
+    ).toEqual(["src/a.ts", "src"]);
+    expect(describeToolCall({ name: "updateFile", input: { path: "src/a.ts", content: "" } }, pathOf)).toEqual([
+      "src/a.ts",
+    ]);
+    expect(
+      describeToolCall({ name: "renameFile", input: { path: "src/a.ts", newName: "b.ts" } }, pathOf),
+    ).toEqual(["src/a.ts", "b.ts"]);
+    const written = describeToolCall(
+      { name: "writeFiles", input: { files: [{ path: "src/ui/b.tsx" }, { path: "/abs" }] } },
+      pathOf,
+    );
+    expect(written).toEqual(["src/ui/b.tsx"]);
+    expect(runWrittenPaths([{ id: "w", kind: "tool", tool: "writeFiles", targets: written, status: "done", startedAt: 0 }])).toEqual([
+      "src/ui/b.tsx",
+    ]);
+  });
+
   it("never exposes env var values", () => {
     expect(
       describeToolCall(

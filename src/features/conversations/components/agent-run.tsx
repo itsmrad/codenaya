@@ -61,6 +61,7 @@ interface ToolMeta {
 const TOOL_META: Record<string, ToolMeta> = {
   readFiles: { icon: FileTextIcon, running: "Reading", done: "Read", mergeable: true },
   listFiles: { icon: FolderTreeIcon, running: "Listing files", done: "Listed files", mergeable: true },
+  writeFiles: { icon: FilePlus2Icon, running: "Writing", done: "Wrote" },
   createFiles: { icon: FilePlus2Icon, running: "Creating", done: "Created" },
   createFolder: { icon: FolderPlusIcon, running: "Creating folder", done: "Created folder" },
   scaffoldViteApp: { icon: FolderPlusIcon, running: "Scaffolding Vite app", done: "Scaffolded Vite app" },
