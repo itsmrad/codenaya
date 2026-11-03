@@ -89,6 +89,21 @@ describe("detectLoop", () => {
     expect(detectLoop(times(6, update))).toBeNull();
   });
 
+  it("counts editFile with updateFile on the same path (#291)", () => {
+    const edit = () => call("editFile", 'File "src/App.tsx" edited successfully', { path: "src/App.tsx" });
+    const update = () => call("updateFile", 'File "src/App.tsx" updated successfully', { path: "src/App.tsx" });
+    const rounds = ["alpha", "beta", "gamma"].flatMap((what, i) => [i % 2 ? update() : edit(), failedBuild(what)]);
+    expect(detectLoop([...rounds, edit()])).toEqual({ reason: "repeated-write", path: "src/App.tsx" });
+    const broken = () =>
+      call("editFile", `File "src/App.tsx" edited successfully${syntaxNote("src/App.tsx 1:1 ')' expected.")}`, {
+        path: "src/App.tsx",
+      });
+    expect(detectLoop([broken(), broken(), broken()])).toMatchObject({
+      reason: "repeated-syntax-error",
+      path: "src/App.tsx",
+    });
+  });
+
   it("splits writeFiles syntax notes by the paths it wrote", () => {
     const broken = (line: number) =>
       call(

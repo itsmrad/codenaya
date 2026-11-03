@@ -77,16 +77,17 @@ const byPath = (raw: string): WrittenFile | undefined => {
   return path ? { key: `path:${path}`, label: path, ref: { path } } : undefined;
 };
 
-// The success result of updateFile names the file's path, however it was addressed.
-const UPDATED = /^File "(.+?)" updated successfully/;
+// The success result of updateFile and editFile names the file's path, however it was addressed.
+const UPDATED = /^File "(.+?)" (?:updated|edited) successfully/;
 
 /** Whether writeFiles' summary line lists `path` as created or updated (failed ones read `path (why)`). */
 const wroteToPath = (summary: string, path: string) =>
   new RegExp(`(?:: |, )${escapeRegExp(path)}(?:, |\\.(?: |$))`).test(summary);
 
 /**
- * The files a write call actually wrote. updateFile and writeFiles name them by
- * path (#292), so both count toward the same file. An updateFile by id (calls
+ * The files a write call actually wrote. updateFile, editFile (#291) and
+ * writeFiles name them by path (#292), so all count toward the same file. An
+ * updateFile by id (calls
  * made before #292) counts by path too once a result has named its path, which
  * `pathOfId` keeps for the rest of the run; until then, by id. createFiles
  * counts by parent and name.
@@ -94,7 +95,7 @@ const wroteToPath = (summary: string, path: string) =>
 const writtenFiles = ({ name, input, content }: Call, pathOfId: Map<string, string>): WrittenFile[] => {
   const files = (Array.isArray(input.files) ? input.files : []) as Array<Record<string, unknown> | null>;
   const data = str((content as { data?: unknown } | null)?.data);
-  if (name === "updateFile") {
+  if (name === "updateFile" || name === "editFile") {
     const fileId = str(input.fileId);
     const named = UPDATED.exec(data)?.[1];
     if (fileId && named) pathOfId.set(fileId, named);
@@ -117,8 +118,8 @@ const writtenFiles = ({ name, input, content }: Call, pathOfId: Map<string, stri
   return [];
 };
 
-/** Rewrites of these replace whole files; createFiles of an existing name fails instead. */
-const REWRITE_TOOLS = new Set(["updateFile", "writeFiles"]);
+/** These change an existing file; createFiles of an existing name fails instead. */
+const REWRITE_TOOLS = new Set(["updateFile", "editFile", "writeFiles"]);
 
 /**
  * Each file a write call's syntax note reports, with its entry. A call that
