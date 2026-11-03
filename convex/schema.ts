@@ -175,6 +175,9 @@ export default defineSchema({
     exportError: v.optional(v.string()),
     // The GitHub repo this project pushes to (#343), set by the first export.
     githubSync: v.optional(githubSyncValidator),
+    // The "Before pull" checkpoint of the pull allowed to write files (#343).
+    // Any later sync status (a cancel, a push, another pull) clears it.
+    activePullCheckpointId: v.optional(v.id("checkpoints")),
     settings: v.optional(
       v.object({
         installCommand: v.optional(v.string()),

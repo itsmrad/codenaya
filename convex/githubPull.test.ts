@@ -234,15 +234,32 @@ describe("GitHub pull (#343)", () => {
     ).rejects.toThrow(/changed during the pull/);
   });
 
-  test("refuses to write once the sync was cancelled", async () => {
+  test("a cancelled pull can't write again once a new sync starts, and finishing ends a pull's right to write", async () => {
     const { t } = setup();
     const { projectId } = await seedProject(t);
-    const checkpointId = await beforePull(t, projectId);
-    await t.mutation(api.system.updateExportStatus, { internalKey: INTERNAL_KEY, projectId, status: "cancelled" });
+    const status = (s: "cancelled" | "exporting") =>
+      t.mutation(api.system.updateExportStatus, { internalKey: INTERNAL_KEY, projectId, status: s });
+    const write = (checkpointId: Id<"checkpoints">) =>
+      t.mutation(api.githubSync.applyPulledFiles, { internalKey: INTERNAL_KEY, projectId, checkpointId, entries: [] });
+    const finish = (checkpointId: Id<"checkpoints">) =>
+      t.mutation(api.githubSync.finishPull, { internalKey: INTERNAL_KEY, projectId, checkpointId, sha: "abc" });
 
-    await expect(
-      t.mutation(api.githubSync.applyPulledFiles, { internalKey: INTERNAL_KEY, projectId, checkpointId, entries: [] }),
-    ).rejects.toMatchObject({ data: { code: "CONFLICT", message: expect.stringMatching(/^The pull was cancelled\. Restore/) } });
+    const old = await beforePull(t, projectId);
+    await status("cancelled");
+    // A push or pull started right after Cancel sets the status back.
+    await status("exporting");
+    await expect(write(old)).rejects.toMatchObject({
+      data: { code: "CONFLICT", message: expect.stringMatching(/^The pull was cancelled or replaced by another sync\. Restore/) },
+    });
+    await expect(finish(old)).rejects.toThrow(/cancelled or replaced/);
+
+    // A newer pull replaces the old one's right to write.
+    const first = await beforePull(t, projectId);
+    const second = await beforePull(t, projectId);
+    await expect(write(first)).rejects.toThrow(/cancelled or replaced/);
+    await write(second);
+    await finish(second);
+    await expect(write(second)).rejects.toThrow(/cancelled or replaced/);
   });
 
   test("replaces most of a big project without going over the file cap", async () => {

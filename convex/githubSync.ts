@@ -88,7 +88,9 @@ export const createPullCheckpoint = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     await assertNoRunningAgent(ctx, args.projectId, "pulling");
-    return await createCheckpoint(ctx, { projectId: args.projectId, label: args.label });
+    const checkpointId = await createCheckpoint(ctx, { projectId: args.projectId, label: args.label });
+    await ctx.db.patch("projects", args.projectId, { activePullCheckpointId: checkpointId });
+    return checkpointId;
   },
 });
 
@@ -106,7 +108,8 @@ const RESTORE_HINT = 'Restore the "Before pull" checkpoint from the history if n
 
 /**
  * A pull writes only while the project is as its "Before pull" checkpoint
- * left it (#343): no run since, none running, not cancelled. A retry after a
+ * left it (#343): still the active pull (no cancel or newer sync since), no
+ * run since, none running. A retry after a
  * backoff would otherwise write GitHub's tree over a finished run that no
  * checkpoint holds. Runs are checked themselves, not their checkpoints, which
  * are best effort.
@@ -117,14 +120,16 @@ async function assertPullCanWrite(
   checkpointId: Id<"checkpoints">,
 ) {
   const project = await ctx.db.get("projects", projectId);
-  if (project?.exportStatus === "cancelled") {
-    throw appError("CONFLICT", `The pull was cancelled. ${RESTORE_HINT}`);
+  if (project?.activePullCheckpointId !== checkpointId) {
+    throw appError("CONFLICT", `The pull was cancelled or replaced by another sync. ${RESTORE_HINT}`);
   }
   const checkpoint = await ctx.db.get("checkpoints", checkpointId);
+  const since = checkpoint && (await runsSince(ctx, projectId, checkpoint._creationTime));
   if (
-    checkpoint?.projectId !== projectId ||
-    (await runningAgent(ctx, projectId)) ||
-    (await runsSince(ctx, projectId, checkpoint._creationTime)).runs.length > 0
+    !since ||
+    since.runs.length > 0 ||
+    since.more ||
+    (await runningAgent(ctx, projectId))
   ) {
     throw appError("CONFLICT", `The project changed during the pull. ${RESTORE_HINT}`);
   }
@@ -172,6 +177,7 @@ export const finishPull = mutation({
     const { repo, branch } = project.githubSync;
     await ctx.db.patch("projects", args.projectId, {
       githubSync: { repo, branch, lastSyncedSha: args.sha, lastSyncedAt: Date.now() },
+      activePullCheckpointId: undefined,
     });
     return null;
   },
