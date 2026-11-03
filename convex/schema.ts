@@ -198,6 +198,9 @@ export default defineSchema({
         devCommand: v.optional(v.string()),
       })
     ),
+    // Always-on agent instructions from the owner (#299), at most
+    // MAX_PROJECT_INSTRUCTIONS_LENGTH characters.
+    instructions: v.optional(v.string()),
     // Set when the owner deletes the project. The project is hidden at once
     // while `projects.deleteBatch` removes its data in the background.
     deletingAt: v.optional(v.number()),
