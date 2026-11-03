@@ -214,6 +214,25 @@ describe("checkProjectBuild redaction (#465)", () => {
     expect(result).not.toContain("BEGIN PRIVATE KEY");
   });
 
+  it.each([
+    ["split by a colour code", `token=sk_live_SYNTHETIC_\u001b[0m0123456789`],
+    ["printed with CRLF line endings", "-----BEGIN PRIVATE KEY-----\r\nMIIEvQSYNTHETICCRLFKEY\r\n-----END PRIVATE KEY-----"],
+  ])("redacts a secret %s, which only trimming puts back together", async (_case, printed) => {
+    const secret = printed.includes("PRIVATE")
+      ? "-----BEGIN PRIVATE KEY-----\nMIIEvQSYNTHETICCRLFKEY\n-----END PRIVATE KEY-----"
+      : SECRET;
+    fakeSandbox({ exitCode: 0 }, { exitCode: 1, stderr: printed });
+    const files = starter();
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      apiKey: "e2b_key",
+      secrets: [secret],
+    });
+    expect(result).toContain("[redacted]");
+    expect(result).not.toContain("SYNTHETIC");
+  });
+
   it("redacts the project's secrets from an unfinished check", async () => {
     fakeSandbox(new TimeoutError(`Command timed out: ${SECRET}`));
     const files = starter();
@@ -481,6 +500,22 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
     expect(commandsOf(warm).some((run) => run.startsWith("npm install"))).toBe(false);
     expect(warm.kill).not.toHaveBeenCalled();
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("reports a warm build that hits its 120 s cap as unfinished, without a cold build", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    listed({});
+    const warm = warmSandbox((command) => {
+      if (command.startsWith("npm install")) now += 125_000;
+      return undefined;
+    });
+
+    const result = await warmCheck();
+
+    expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expect(commandsOf(warm).some((run) => run.startsWith("npx tsc"))).toBe(false);
     expect(e2b.create).not.toHaveBeenCalled();
   });
 

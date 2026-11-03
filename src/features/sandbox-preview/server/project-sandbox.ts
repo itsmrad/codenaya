@@ -51,16 +51,19 @@ export const createProjectSandbox = (
   opts: Pick<SandboxOpts, "apiKey" | "timeoutMs" | "metadata" | "network" | "requestTimeoutMs">,
 ) => Sandbox.create(SANDBOX_TEMPLATE, opts);
 
-/** One batched upload; E2B creates the parent directories. */
+/**
+ * One batched upload; E2B creates the parent directories. `timeLeft` bounds
+ * each request by what is left of the caller's budget.
+ */
 export const writeProjectFiles = async (
   sandbox: Sandbox,
   files: ProjectFile[],
   dir = WORK_DIR,
-  opts?: { requestTimeoutMs?: number },
+  timeLeft?: () => number,
 ) => {
-  await sandbox.files.makeDir(dir, opts);
+  await sandbox.files.makeDir(dir, { requestTimeoutMs: timeLeft?.() });
   await sandbox.files.write(
     files.map((file) => ({ path: `${dir}/${file.path}`, data: file.content })),
-    opts,
+    { requestTimeoutMs: timeLeft?.() },
   );
 };

@@ -132,12 +132,13 @@ const run = async (
 
 /**
  * Errors first: Vite writes progress to stdout and the failure to stderr.
- * Secrets are redacted before trimming, which could cut a multi-line one.
+ * Secrets are redacted before trimming, which could cut a multi-line one, and
+ * after it, since dropping colour codes, `\r` and paths can rejoin one.
  * Known errors anywhere in the output get their cause and fix appended.
  */
 const failureOutput = (result: CommandResult, dir: string, secrets: readonly string[]) => {
   const output = redact(`${result.stderr}\n${result.stdout}`, secrets);
-  return withErrorHints(trimBuildOutput(output, dir), output);
+  return redact(withErrorHints(trimBuildOutput(output, dir), output), secrets);
 };
 
 /** A timeout or a sandbox failure, not a problem in the project's code. */
@@ -158,7 +159,7 @@ const buildIn = async (sandbox: Sandbox, dir: string, { files, paths, deadline, 
   const buildDeadline = Math.min(Date.now() + CHECK_TIMEOUT_MS, deadline);
   const timeLeft = () => within(buildDeadline, CHECK_TIMEOUT_MS);
 
-  await writeProjectFiles(sandbox, files, dir, { requestTimeoutMs: timeLeft() });
+  await writeProjectFiles(sandbox, files, dir, timeLeft);
 
   const install = await run(sandbox, "npm install --prefer-offline --no-audit --no-fund --loglevel=error", timeLeft(), dir);
   if (install.exitCode !== 0) {
