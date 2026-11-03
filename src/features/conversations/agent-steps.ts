@@ -113,6 +113,9 @@ export const describeToolCall = (
 
   let targets: string[];
   switch (name) {
+    case "searchFiles":
+      targets = str(input.pattern) ? [str(input.pattern)] : [];
+      break;
     // Path inputs since #292; `fileId(s)` in calls recorded before it.
     case "readFiles":
     case "deleteFiles":

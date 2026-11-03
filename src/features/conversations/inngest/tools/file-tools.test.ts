@@ -339,6 +339,67 @@ describe("project tree prompt section", () => {
   });
 });
 
+describe("line-ranged reads (#296)", () => {
+  it("preserves full reads and legacy calls byte-for-byte", async () => {
+    db.rows[1].content = "a\r\nb\n";
+    for (const params of [{ paths: ["src/App.tsx"] }, { fileIds: ["app"] }]) {
+      expect(await createReadFilesTool(opts).handler(params as never, ctx)).toBe(JSON.stringify([
+        { path: "src/App.tsx", content: "a\r\nb\n" },
+      ]));
+    }
+  });
+
+  it("numbers only the requested inclusive range with its path and actual bounds", async () => {
+    db.rows[1].content = "first\r\nsecond\r\nthird";
+    expect(await createReadFilesTool(opts).handler({ paths: ["src/App.tsx"], ranges: [
+      { path: "./src/App.tsx", startLine: 2, endLine: 2 },
+    ] }, ctx)).toBe("File: src/App.tsx (lines 2-2 of 3)\n2: second");
+  });
+
+  it("combines unchanged full reads with a ranged file", async () => {
+    expect(await createReadFilesTool(opts).handler({
+      paths: ["src/App.tsx", "package.json"],
+      ranges: [{ path: "src/App.tsx", startLine: 1 }],
+    }, ctx)).toBe('[{"path":"package.json","content":"{}"}]\nFile: src/App.tsx (lines 1-1 of 1)\n1: app');
+  });
+
+  it("clamps out-of-range requests and handles empty files", async () => {
+    for (const content of ["first\nlast", ""]) {
+      db.rows[1].content = content;
+      const result = await createReadFilesTool(opts).handler({ paths: ["src/App.tsx"], ranges: [
+        { path: "src/App.tsx", startLine: 20, endLine: 30 },
+      ] }, ctx);
+      expect(result).toContain("requested range clamped");
+      expect(result).toContain(content ? "2: last" : "1: ");
+    }
+  });
+
+  it.each([{ startLine: 0 }, { startLine: 2.5 }, { startLine: 3, endLine: 2 }])("rejects invalid range %j", async (range) => {
+    const result = await createReadFilesTool(opts).handler({ paths: ["src/App.tsx"], ranges: [
+      { path: "src/App.tsx", ...range },
+    ] }, ctx);
+    expect(result).toMatch(/^Error:/);
+    expect(step.run).not.toHaveBeenCalled();
+  });
+});
+
+it("rejects a range path missing from paths before reading", async () => {
+  expect(await createReadFilesTool(opts).handler({
+    paths: ["package.json"], ranges: [{ path: "src/App.tsx", startLine: 1 }],
+  }, ctx)).toBe("Error: Every ranges path must also be included in paths");
+  expect(mocks.query).not.toHaveBeenCalled();
+});
+
+it("uses only the first range for a path, including normalised duplicates", async () => {
+  db.rows[1].content = "first\nsecond";
+  expect(await createReadFilesTool(opts).handler({
+    paths: ["./src/App.tsx"], ranges: [
+      { path: "src/App.tsx", startLine: 1, endLine: 1 },
+      { path: "./src/App.tsx", startLine: 2, endLine: 2 },
+    ],
+  }, ctx)).toBe("File: src/App.tsx (lines 1-1 of 2)\n1: first");
+});
+
 // #331: an unpinned package resolves to today's newest major, which the starter may not run.
 describe("package.json version pins", () => {
   const latestRouter = JSON.stringify({ dependencies: { "react-router-dom": "latest" } });
