@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Allotment } from "allotment";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -27,6 +27,7 @@ import { UserMenu } from "@/components/user-menu";
 import { useIsCompact, useIsMobile } from "@/hooks/use-mobile";
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
 import { EditorView } from "@/features/editor/components/editor-view";
+import { useEditorStore } from "@/features/editor/store/use-editor-store";
 import {
   Tooltip,
   TooltipContent,
@@ -52,13 +53,19 @@ import { PublishedMenu } from "@/features/showcase/components/published-menu";
 import { useIsProjectPublished } from "@/features/showcase/hooks/use-showcase";
 import { useProjectIntegrations } from "@/features/integrations/components/project-integrations-context";
 import { ProjectSkillsDialog } from "@/features/skills/components/project-skills-panel";
+import {
+  type IdeView,
+  loadIdeSession,
+  restorableTabs,
+  saveIdeSession,
+} from "../utils/ide-session";
 
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 800;
 const DEFAULT_SIDEBAR_WIDTH = 350;
 const DEFAULT_MAIN_SIZE = 1000;
 
-type IdeView = "chat" | "editor" | "preview";
+const noopSubscribe = () => () => {};
 
 const VIEW_TABS = [
   { view: "chat", label: "Chat", icon: MessageSquareIcon },
@@ -105,15 +112,23 @@ export const ProjectIdView = ({
   // Switching preview engines reloads the page with `?view=preview` so the user
   // lands back on the preview they were using.
   const openOnPreview = useSearchParams().get("view") === "preview";
-  // Otherwise phones and tablets open on the chat; desktops show the chat as a
-  // side panel (see ProjectIdLayout), so there "chat" falls back to the editor.
-  const [selectedView, setSelectedView] = useState<IdeView>(
-    openOnPreview ? "preview" : "chat",
+  // Otherwise the view the user left the project on (#315), read in the browser
+  // only so the server renders the default; else phones and tablets open on
+  // the chat, and desktops, which show the chat as a side panel (see
+  // ProjectIdLayout), fall back to the editor.
+  const savedView = useSyncExternalStore(
+    noopSubscribe,
+    () => loadIdeSession(projectId)?.view ?? null,
+    () => null,
   );
+  const [pickedView, setSelectedView] = useState<IdeView | null>(openOnPreview ? "preview" : null);
+  const selectedView: IdeView = pickedView ?? savedView ?? "chat";
   const activeView = !isCompact && selectedView === "chat" ? "editor" : selectedView;
   // The preview boots a cloud sandbox or WebContainer as soon as it mounts, so
   // mount it on first open and keep it mounted so tab switches don't reboot it.
+  // It only opens by itself when the user left the project on it.
   const [previewOpened, setPreviewOpened] = useState(openOnPreview);
+  if (activeView === "preview" && !previewOpened) setPreviewOpened(true);
 
   // A run is writing the first build when the project was seeded and no run
   // has written files yet, or when it starts before package.json exists.
@@ -124,6 +139,25 @@ export const ProjectIdView = ({
   const activeRun = useActiveRun(projectId);
   const files = useFiles(projectId);
   const hasPackageJson = files ? hasRootPackageJson(files) : false;
+
+  // Reopen the saved tabs once the file list is in, minus deleted files, then
+  // keep the session saved as the user moves around (#315).
+  const restoreTabs = useEditorStore((state) => state.restoreTabs);
+  const { openTabs, activeTabId } = useEditorStore((state) => state.getTabState(projectId));
+  const tabsRestored = useRef(false);
+  useEffect(() => {
+    if (tabsRestored.current || !files) return;
+    tabsRestored.current = true;
+    const session = loadIdeSession(projectId);
+    if (!session) return;
+    const tabs = restorableTabs(session, new Set(files.map((file) => file._id)));
+    restoreTabs(projectId, tabs.openTabs as Id<"files">[], tabs.activeTabId as Id<"files"> | null);
+  }, [files, projectId, restoreTabs]);
+  useEffect(() => {
+    // Not before the restore, or the empty starting tabs would overwrite the saved ones.
+    if (!tabsRestored.current) return;
+    saveIdeSession(projectId, { view: activeView, openTabs, activeTabId });
+  }, [projectId, activeView, openTabs, activeTabId]);
   const [firstBuild, setFirstBuild] = useState(false);
   const [viewPickedDuringBuild, setViewPickedDuringBuild] = useState(false);
   const [previewReadyToasts, setPreviewReadyToasts] = useState(0);
@@ -139,7 +173,6 @@ export const ProjectIdView = ({
         setPreviewReadyToasts((count) => count + 1);
       } else {
         setSelectedView("preview");
-        setPreviewOpened(true);
       }
     }
   }
@@ -153,7 +186,6 @@ export const ProjectIdView = ({
         label: "Open",
         onClick: () => {
           setSelectedView("preview");
-          setPreviewOpened(true);
         },
       },
     });
@@ -161,7 +193,6 @@ export const ProjectIdView = ({
 
   const selectView = (view: IdeView) => {
     setSelectedView(view);
-    if (view === "preview") setPreviewOpened(true);
     if (firstBuild) setViewPickedDuringBuild(true);
   };
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
