@@ -14,13 +14,22 @@ export const savePendingPrompt = (prompt: string) => {
   }
 };
 
-/** Returns the saved prompt at most once: reading it also clears it. */
-export const takePendingPrompt = (): string | null => {
+/** The saved prompt, left in place: the auth pages show it before sign-up (#252). */
+export const peekPendingPrompt = (): string | null => {
   try {
-    const prompt = localStorage.getItem(PENDING_PROMPT_KEY);
-    localStorage.removeItem(PENDING_PROMPT_KEY);
-    return prompt?.trim() || null;
+    return localStorage.getItem(PENDING_PROMPT_KEY)?.trim() || null;
   } catch {
     return null;
   }
+};
+
+/** Returns the saved prompt at most once: reading it also clears it. */
+export const takePendingPrompt = (): string | null => {
+  const prompt = peekPendingPrompt();
+  try {
+    localStorage.removeItem(PENDING_PROMPT_KEY);
+  } catch {
+    // Storage is unavailable: there is nothing to clear.
+  }
+  return prompt;
 };

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   PENDING_TEMPLATE_KEY,
+  peekPendingTemplate,
   savePendingTemplate,
   takePendingTemplate,
 } from "./pending-template";
@@ -47,5 +48,13 @@ describe("pending template", () => {
 
     expect(() => savePendingTemplate("blog")).not.toThrow();
     expect(takePendingTemplate()).toBeNull();
+  });
+
+  it("peeks at the template without clearing it (#252)", () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    savePendingTemplate("landing-page");
+    expect(peekPendingTemplate()?.title).toBe("Landing page");
+    expect(takePendingTemplate()?.id).toBe("landing-page");
+    expect(peekPendingTemplate()).toBeNull();
   });
 });

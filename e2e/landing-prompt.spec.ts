@@ -35,6 +35,42 @@ test.describe("landing hero prompt", () => {
     expect(errors).toEqual([]);
   });
 
+  // #252: the auth page shows what will start, without consuming it.
+  test("the sign-up page shows the pending prompt as text and leaves it for the dashboard", async ({ page }) => {
+    await page.goto("/");
+    await submitHeroPrompt(page, 'A <script>alert("x")</script> recipe app');
+    await expect(page).toHaveURL(/\/sign-up/);
+
+    const note = page.getByRole("status").filter({ hasText: "Your prompt will start building right after sign-up" });
+    await expect(note).toBeVisible();
+    await expect(note).toContainText('A <script>alert("x")</script> recipe app');
+    expect(await pendingPrompt(page)).toBe('A <script>alert("x")</script> recipe app');
+
+    await page.goto("/sign-in");
+    await expect(page.getByRole("status").filter({ hasText: "right after you log in" })).toBeVisible();
+  });
+
+  test("the auth pages show no prompt block without a pending prompt", async ({ page }) => {
+    await page.goto("/sign-up");
+    await page.evaluate((key) => localStorage.removeItem(key), PENDING_PROMPT_KEY);
+    await page.reload();
+    await expect(page.getByText("Your prompt will start building")).toHaveCount(0);
+  });
+
+  test("the auth pages add a side panel on wide screens only, without overflow", async ({ page }) => {
+    for (const [width, height, panel] of [[1440, 900, true], [1024, 800, true], [768, 1024, false], [375, 812, false]] as const) {
+      await page.setViewportSize({ width, height });
+      await page.goto("/sign-up");
+      const aside = page.getByRole("complementary", { name: "Why Codenaya" });
+      if (panel) await expect(aside).toBeVisible();
+      else await expect(aside).toBeHidden();
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow, `horizontal overflow at ${width}px`).toBe(0);
+    }
+  });
+
   test("a starter chip fills the hero prompt without leaving the page", async ({ page }) => {
     await page.goto("/");
 

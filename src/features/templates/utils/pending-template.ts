@@ -16,13 +16,23 @@ export const savePendingTemplate = (templateId: string) => {
   }
 };
 
-/** Returns the saved template at most once: reading it also clears it. */
-export const takePendingTemplate = (): StarterTemplate | null => {
+/** The saved template, left in place: the auth pages show it before sign-up (#252). */
+export const peekPendingTemplate = (): StarterTemplate | null => {
   try {
     const templateId = localStorage.getItem(PENDING_TEMPLATE_KEY);
-    localStorage.removeItem(PENDING_TEMPLATE_KEY);
     return templateId ? (getStarterTemplate(templateId) ?? null) : null;
   } catch {
     return null;
   }
+};
+
+/** Returns the saved template at most once: reading it also clears it. */
+export const takePendingTemplate = (): StarterTemplate | null => {
+  const template = peekPendingTemplate();
+  try {
+    localStorage.removeItem(PENDING_TEMPLATE_KEY);
+  } catch {
+    // Storage is unavailable: there is nothing to clear.
+  }
+  return template;
 };
