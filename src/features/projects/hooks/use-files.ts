@@ -18,8 +18,22 @@ export const isOptimisticFileId = (id: string | null | undefined): boolean => {
   return typeof id === "string" && id.includes("-");
 };
 
+// Project-wide file reads re-read every file on each write, and an import
+// writes thousands, so they load once the import is done (#411).
+const useImportDone = (projectId: Id<"projects"> | null) => {
+  const project = useQuery(api.projects.getById, projectId ? { id: projectId } : "skip");
+  return project != null && project.importStatus !== "importing";
+};
+
 export const useFiles = (projectId: Id<"projects"> | null) => {
-  return useQuery(api.files.getFiles, projectId ? { projectId } : "skip");
+  const ready = useImportDone(projectId);
+  return useQuery(api.files.getFiles, projectId && ready ? { projectId } : "skip");
+};
+
+/** The files with their text, for the preview. `useFiles` is metadata only (#412). */
+export const useFilesWithContent = (projectId: Id<"projects"> | null) => {
+  const ready = useImportDone(projectId);
+  return useQuery(api.files.getFilesWithUrls, projectId && ready ? { projectId } : "skip");
 };
 
 export const useFile = (fileId: Id<"files"> | null) => {

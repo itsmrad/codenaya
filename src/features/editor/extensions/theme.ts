@@ -17,6 +17,9 @@ export const customTheme = EditorView.theme({
     fontFamily: "var(--font-nerd-mono), monospace",
     fontSize: "14px",
   },
+  ".cm-cursor, .cm-dropCursor": {
+    borderLeftWidth: "2px",
+  },
   ".cm-scroller": {
     scrollbarWidth: "thin",
     scrollbarColor: "#3f3f46 transparent",
@@ -28,6 +31,14 @@ export const customTheme = EditorView.theme({
     border: "1px solid var(--input) !important",
   },
 })
+
+// Brand caret in the dark theme only: --brand is too faint on the light
+// background, where lightEditorTheme's accessible cursor colour applies.
+export const darkCursorTheme = EditorView.theme({
+  ".cm-cursor, .cm-dropCursor": {
+    borderLeftColor: "var(--brand) !important",
+  },
+}, { dark: true });
 
 // One Dark's palette, darkened for light backgrounds: every token colour
 // reaches WCAG AA (>= 4.5:1) on the app background, active line and selection.

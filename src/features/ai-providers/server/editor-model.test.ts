@@ -3,13 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   mutation: vi.fn(),
+  platform: vi.fn(),
   openProviderKey: vi.fn(),
   buildAiSdkModel: vi.fn(),
 }));
 
 vi.mock("@/lib/convex-client", async () => {
   const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
+  return {
+    convex: { query: withEnvPlatform(mocks.query, mocks.platform), mutation: mocks.mutation },
+  };
 });
 vi.mock("./sealed-key", () => ({ openProviderKey: mocks.openProviderKey }));
 vi.mock("./ai-sdk-model", () => ({ buildAiSdkModel: mocks.buildAiSdkModel }));
@@ -72,6 +75,51 @@ describe("resolveEditorModel", () => {
     mocks.query.mockResolvedValue(null);
 
     expect(await resolve()).toBeNull();
+  });
+
+  describe("with a saved catalog (ADR 0010)", () => {
+    const utility = {
+      id: "haiku",
+      name: "Claude Haiku 4.5",
+      vendor: "Anthropic",
+      provider: "anthropic",
+      providerModelId: "claude-haiku-4-5",
+      vision: false,
+      tools: "confirmed",
+      pricing: { mode: "blended", usdPerMTok: 1 },
+      access: "everyone",
+      hidden: true,
+    };
+    const catalog = {
+      models: [{ ...utility, id: "grok", provider: "openrouter", providerModelId: "x-ai/grok-4.7", hidden: false }, utility],
+      defaultModelId: "grok",
+      utilityModelId: "haiku",
+    };
+
+    beforeEach(() => {
+      mocks.platform.mockReturnValue(catalog);
+      mocks.query.mockResolvedValue(null);
+    });
+
+    it("runs on the utility model's route and key", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-platform");
+
+      expect((await resolve())?.model).toEqual({
+        byok: { provider: "anthropic", apiKey: "sk-ant-platform", model: "claude-haiku-4-5" },
+      });
+    });
+
+    it("falls back to the default model's route when the utility route has no key", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "");
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      expect((await resolve())?.model).toEqual({
+        byok: { provider: "openrouter", apiKey: "sk-or-platform", model: "x-ai/grok-4.7" },
+      });
+
+      vi.stubEnv("OPENROUTER_API_KEY", "");
+      expect(await resolve()).toBeNull();
+    });
   });
 
   it("uses the default key's provider and its small model", async () => {

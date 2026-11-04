@@ -1,5 +1,6 @@
-import Image from "next/image";
 import { useEffect, useRef } from "react";
+
+import { CodenayaLogo } from "@/components/codenaya-logo";
 
 import { useFile, useUpdateFile } from "@/features/projects/hooks/use-files";
 
@@ -55,12 +56,10 @@ export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
       <div className="flex-1 min-h-0 bg-background">
         {!activeFile && (
           <div className="size-full flex flex-col items-center justify-center gap-3">
-            <Image
-              src="/logo-alt.svg"
-              alt="Codenaya"
-              width={40}
-              height={48}
-              className="opacity-25 dark:invert-0 invert"
+            <CodenayaLogo
+              size={48}
+              blinking={true}
+              className="opacity-30 transition-opacity hover:opacity-70"
             />
             <p className="text-xs text-muted-foreground">
               Select a file from the explorer to start editing

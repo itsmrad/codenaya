@@ -91,7 +91,7 @@ describe("system file functions are scoped to the run's project", () => {
 
     await t.mutation(api.system.updateFile, { ...scope, fileId: a.fileId, content: "// v2" });
     await t.mutation(api.system.renameFile, { ...scope, fileId: a.fileId, newName: "app.ts" });
-    expect(await t.run((ctx) => ctx.db.get("files", a.fileId))).toMatchObject({
+    expect(await t.query(api.system.getFileById, { ...scope, fileId: a.fileId })).toMatchObject({
       name: "app.ts",
       content: "// v2",
     });

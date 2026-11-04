@@ -1,13 +1,14 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
+import { toast } from "sonner";
 
 import { modelIdsFor } from "@/features/ai-providers/registry";
 import {
-  type ActivePlatform,
-  platformModels,
+  envCatalog,
   platformProviderId,
-  resolvePlatformModel,
+  resolveCatalogModel,
 } from "@/features/ai-providers/platform";
 import {
+  type PlatformModels,
   useAiPreferences,
   useAiProviderKeys,
   usePlatformModels,
@@ -17,6 +18,9 @@ import type { AiProviderKeySummary } from "../../../../convex/aiProviders";
 import type { AgentModelChoice } from "../agent-models";
 
 const STORAGE_KEY = "codenaya:agent-model";
+
+const PROMO_ENDED_NOTICE =
+  "The free Claude promotion has ended, so we switched you to your default model.";
 
 // In-memory copy so the choice still sticks for the session when storage is
 // unavailable (private mode, blocked site data). `undefined` means "not read
@@ -86,18 +90,18 @@ function setModel(model: AgentModelChoice) {
 }
 
 /**
- * Whether a choice can still be sent: one of the platform provider's models,
- * or a model of one of the user's keys. While either list is loading the
- * choice is kept; the server validates it either way.
+ * Whether a choice can still be sent: one of the platform models the user may
+ * pick, or a model of one of the user's keys. While any of the lists is
+ * loading the choice is kept; the server validates it either way.
  */
 function isAvailable(
   choice: AgentModelChoice,
   keys: AiProviderKeySummary[] | undefined,
-  platform: ActivePlatform | undefined,
+  platform: PlatformModels | undefined,
 ) {
   if (!choice.keyId) {
     if (!platform) return true;
-    return platformModels(platform.provider, platform.config).some((m) => m.id === choice.modelId);
+    return platform.models.some((m) => m.id === choice.modelId);
   }
   if (!keys) return true;
   const key = keys.find((k) => k._id === choice.keyId);
@@ -119,7 +123,6 @@ export function useAgentModel() {
   const keys = useAiProviderKeys();
   const preferences = useAiPreferences();
   const platform = usePlatformModels();
-  const fallback = platform ?? { provider: platformProviderId(), config: null };
 
   const preferred: AgentModelChoice | null = preferences
     ? {
@@ -132,7 +135,27 @@ export function useAgentModel() {
     [stored, preferred].find(
       (choice): choice is AgentModelChoice =>
         choice !== null && isAvailable(choice, keys, platform),
-    ) ?? { modelId: resolvePlatformModel(fallback.provider, fallback.config, undefined).id };
+    ) ?? {
+      modelId: resolveCatalogModel<{ id: string }>(
+        platform ?? envCatalog(platformProviderId()),
+        undefined,
+      ).id,
+    };
+
+  // A pick saved during the ended GitHub promotion (ADR 0009): say so once and
+  // save the fallback, after the keys and preferences that decide it load.
+  const endedPromoPick =
+    stored !== null &&
+    !stored.keyId &&
+    platform?.promoModelIds.includes(stored.modelId) === true &&
+    keys !== undefined &&
+    preferences !== undefined;
+  const { keyId, modelId } = model;
+  useEffect(() => {
+    if (!endedPromoPick) return;
+    setModel(keyId ? { keyId, modelId } : { modelId });
+    toast.info(PROMO_ENDED_NOTICE, { id: "promo-ended" });
+  }, [endedPromoPick, keyId, modelId]);
 
   return [model, setModel] as const;
 }

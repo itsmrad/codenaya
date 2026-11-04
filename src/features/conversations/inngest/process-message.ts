@@ -7,30 +7,42 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../convex/_generated/api";
 import {
   CODING_AGENT_SYSTEM_PROMPT,
-  TITLE_GENERATOR_SYSTEM_PROMPT
+  MAX_AGENT_STEPS,
+  STARTER_IN_PLACE_NOTE,
+  STEP_BUDGET_NOTE,
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
+import { createSearchFilesTool } from './tools/search-files';
 import { createReadFilesTool } from './tools/read-files';
 import { createListFilesTool } from './tools/list-files';
+import { createRegistryCheck } from './tools/post-write-checks';
 import { createUpdateFileTool } from './tools/update-file';
+import { createEditFileTool } from './tools/edit-file';
 import { createCreateFilesTool } from './tools/create-files';
 import { createCreateFolderTool } from './tools/create-folder';
 import { createRenameFileTool } from './tools/rename-file';
 import { createDeleteFilesTool } from './tools/delete-files';
+import { createWriteFilesTool } from './tools/write-files';
+import { buildProjectTreePromptSection, getProjectFiles } from './tools/paths';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
 import { createSetEnvVarTool } from './tools/set-env-var';
 import { createLoadSkillTool } from './tools/load-skill';
 import { createScaffoldViteAppTool } from './tools/scaffold-vite-app';
 import { createCheckBuildTool } from './tools/check-build';
-import { createBuildCheckGate } from './build-check-gate';
+import { createBuildCheckGate, wroteFiles } from './build-check-gate';
+import { STUCK_FALLBACK_REPLY, createLoopGuard, stuckNote } from './loop-detector';
 import type { AgentModelChoice } from '../agent-models';
 import {
   type RunModel,
   ProviderKeyError,
+  RUN_IMAGES_REFUSED_MESSAGE,
   isProviderKeyRejection,
   keyFailureMessage,
   resolveRunModel,
 } from '@/features/ai-providers/server/resolve-run-model';
+import { withoutToolCalls } from '@/features/ai-providers/server/agentkit-model';
+import type { ModelPricing } from '@/features/ai-providers/catalog';
+import { costUsd, usageOfResponse } from '@/features/billing/credits';
 import {
   type AgentStep,
   buildCheckLabel,
@@ -39,6 +51,7 @@ import {
   describeToolCall,
   sanitizeAgentText,
   toolResultError,
+  toolResultRecipeIds,
 } from '../agent-steps';
 import {
   buildIntegrationsPromptSection,
@@ -57,8 +70,13 @@ import {
   resolveSkills,
 } from '@/features/skills/server/resolve-skills';
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
+import { buildProjectInstructionsSection } from '@/features/projects/instructions';
+import { isStarterOnly } from './starter-only';
+import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
+import { trimFileHistory } from "./lib/trim-file-history";
+import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
   type MessageMode,
   PLAN_MODE,
@@ -81,6 +99,9 @@ interface MessageEvent {
   /** Plan mode (#120): read-only tools, and the reply is a plan. */
   mode?: MessageMode;
 };
+
+/** The agent that runs the last step, with tools off. */
+const SUMMARY_AGENT_NAME = "codenaya-summary";
 
 /**
  * The model's reasoning, which AgentKit drops when it parses the response.
@@ -119,8 +140,8 @@ export const processMessage = inngest.createFunction(
           await convex.mutation(api.system.updateMessageContent, {
             internalKey,
             messageId,
-            content:
-              "My apologies, I encountered an error while processing your request. Let me know if you need anything else!",
+            content: AGENT_FAILURE_MESSAGE,
+            outcome: "error",
           });
         });
       }
@@ -142,9 +163,6 @@ export const processMessage = inngest.createFunction(
     if (!internalKey) {
       throw new NonRetriableError("CODENAYA_CONVEX_INTERNAL_KEY is not configured");
     }
-
-    // TODO: Check if this is needed
-    await step.sleep("wait-for-db-sync", "1s");
 
     // Get conversation for title generation check
     const conversation = await step.run("get-conversation", async () => {
@@ -180,6 +198,7 @@ export const processMessage = inngest.createFunction(
           internalKey,
           messageId,
           content: error.message,
+          outcome: "error",
         });
       });
       return { success: false, messageId, conversationId };
@@ -212,6 +231,7 @@ export const processMessage = inngest.createFunction(
           content: keyFailureMessage(
             `Your ${key.label} key was rejected by the provider.`,
           ),
+          outcome: "error",
         });
       });
       return { success: false, messageId, conversationId };
@@ -232,6 +252,41 @@ export const processMessage = inngest.createFunction(
       }
     }
 
+    // ─── Usage (ADR 0011) ───
+    //
+    // Running totals, rebuilt from the memoized inferences on every replay, so
+    // each record step sends the run's total so far: a retried step changes
+    // nothing, and one that failed is caught up by the next (or the final one).
+    const usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+    let usageRecords = 0;
+    const sendUsage = (id: string) => {
+      const totals = { ...usage };
+      return step.run(id, async () => {
+        try {
+          await convex.mutation(api.credits.recordRunUsage, {
+            internalKey,
+            messageId,
+            source: runModel.metering.source,
+            ...totals,
+          });
+        } catch (error) {
+          console.error("[credits] failed to record run usage", error);
+        }
+      });
+    };
+    const recordUsage = async (
+      raw: string | undefined,
+      pricing: ModelPricing | undefined,
+      // The title runs alongside the coding agent, so it gets a fixed id.
+      id = `record-usage-${++usageRecords}`,
+    ) => {
+      const tokens = usageOfResponse(raw);
+      usage.inputTokens += tokens.inputTokens;
+      usage.outputTokens += tokens.outputTokens;
+      usage.costUsd += pricing ? costUsd(pricing, tokens) : 0;
+      await sendUsage(id);
+    };
+
     // Fetch recent messages for conversation context
     const recentMessages = await step.run("get-recent-messages", async () => {
       return await convex.query(api.system.getRecentMessages, {
@@ -246,68 +301,24 @@ export const processMessage = inngest.createFunction(
       recentMessages
         .slice(0, recentMessages.findIndex((msg) => msg._id === messageId))
         .findLast((msg) => msg.role === "user")?.imageUrls ?? [];
+    // The catalog can change between the send and this run (a queued run, a
+    // retry): never send images to a model that can't read them (#322).
+    if (imageUrls.length > 0 && !runModel.acceptsImages) {
+      await step.run("images-refused", async () => {
+        await convex.mutation(api.system.updateMessageContent, {
+          internalKey,
+          messageId,
+          content: RUN_IMAGES_REFUSED_MESSAGE,
+        });
+      });
+      return { success: false, messageId, conversationId };
+    }
     // A message can be images alone; the agents still need a request to answer.
     const request =
       imageUrls.length > 0 && !message.trim() ? IMAGE_ONLY_PROMPT : message;
 
-    // Build system prompt with conversation history (exclude the current processing message)
-    let systemPrompt = CODING_AGENT_SYSTEM_PROMPT;
-
-    // Filter out the current processing message and empty messages
-    const contextMessages = recentMessages.filter(
-      (msg) => msg._id !== messageId && msg.content.trim() !== ""
-    );
-
-    if (contextMessages.length > 0) {
-      const historyText = contextMessages
-        .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
-        .join("\n\n");
-
-      systemPrompt += `\n\n## Previous Conversation (for context only - do NOT repeat these responses):\n${historyText}\n\n## Current Request:\nRespond ONLY to the user's new message below. Do not repeat or reference your previous responses.`;
-    }
-
-    // Generate conversation title if it's still the default
-    const shouldGenerateTitle =
-      conversation.title === DEFAULT_CONVERSATION_TITLE;
-
-    if (shouldGenerateTitle) {
-      const titleAgent = createAgent({
-        name: "title-generator",
-        system: TITLE_GENERATOR_SYSTEM_PROMPT,
-        model: runModel.title(0),
-      });
-
-      let output;
-      try {
-        ({ output } = await titleAgent.run(request, { step }));
-      } catch (error) {
-        return await endRunOnKeyRejection(error);
-      }
-
-      const textMessage = output.find(
-        (m) => m.type === "text" && m.role === "assistant"
-      );
-
-      if (textMessage?.type === "text") {
-        const title =
-          typeof textMessage.content === "string"
-            ? textMessage.content.trim()
-            : textMessage.content
-              .map((c) => c.text)
-              .join("")
-              .trim();
-
-        if (title) {
-          await step.run("update-conversation-title", async () => {
-            await convex.mutation(api.system.updateConversationTitle, {
-              internalKey,
-              conversationId,
-              title,
-            });
-          });
-        }
-      }
-    }
+    // Earlier turns go to the model as chat messages, never in the system prompt.
+    const earlierTurns = priorTurns(recentMessages, messageId);
 
     // ─── MCP integrations ───
     //
@@ -335,6 +346,7 @@ export const processMessage = inngest.createFunction(
     // Project owner, needed by setEnvVar and the approval gate. Resolved from the
     // project row so those act on behalf of whoever owns the work.
     let mcpOwnerId: string | undefined;
+    let projectInstructions: string | undefined;
 
     try {
       // Fetched unconditionally: the owner is needed by setEnvVar, which is useful
@@ -344,6 +356,7 @@ export const processMessage = inngest.createFunction(
         projectId,
       });
       mcpOwnerId = project?.ownerId;
+      projectInstructions = project?.instructions;
 
       let entries = await convex.query(api.system.getProjectMcpConnections, {
         internalKey,
@@ -488,8 +501,6 @@ export const processMessage = inngest.createFunction(
       });
     }
 
-    systemPrompt += buildIntegrationsPromptSection(mcpSummaries, mcpWarnings);
-
     // ─── Skills ───
     //
     // Only names and descriptions go in the prompt; loadSkill hands the agent a
@@ -513,11 +524,39 @@ export const processMessage = inngest.createFunction(
       }
     });
 
-    systemPrompt += buildSkillsPromptSection(skills, forced, unavailable);
+    // The project's paths at run start (#292), so the agent addresses files by
+    // path without a listFiles call. Non-fatal: listFiles still works.
+    const projectTree = await step.run("get-project-tree", async () => {
+      try {
+        return buildProjectTreePromptSection(await getProjectFiles(internalKey, projectId));
+      } catch (error) {
+        console.error("[process-message] project tree failed", error);
+        return "";
+      }
+    });
 
-    if (planMode) {
-      systemPrompt += PLAN_MODE_PROMPT;
-    }
+    // Most stable first, so the cacheable prefix is shared across runs (#295):
+    // base, project instructions, skill index and integrations, then the project tree, forced
+    // skills and plan mode.
+    // Conversation goes in messages (see onStart).
+    const systemPrompt = [
+      CODING_AGENT_SYSTEM_PROMPT,
+      buildProjectInstructionsSection(projectInstructions),
+      buildSkillsPromptSection(skills),
+      buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
+      projectTree,
+      buildSkillsPromptSection([], forced, unavailable),
+      planMode ? PLAN_MODE_PROMPT : "",
+    ].join("");
+
+    // A project seeded with the starter says so in the request, not the
+    // system prompt, so the first turn builds on it (#338).
+    const starterOnly = await step.run("check-starter-only", async () =>
+      isStarterOnly(
+        await convex.query(api.system.getProjectFiles, { internalKey, projectId }),
+      ),
+    );
+
 
     // Display only: mirrors the agent's tool calls onto the assistant message
     // for the chat panel's activity block. Each write is its own step, so replays
@@ -584,11 +623,15 @@ export const processMessage = inngest.createFunction(
       });
     }
 
+    const registry = createRegistryCheck();
     const tools: Tool.Any[] = [
       createListFilesTool({ internalKey, projectId }),
       createReadFilesTool({ projectId, internalKey }),
-      createUpdateFileTool({ projectId, internalKey }),
-      createCreateFilesTool({ projectId, internalKey }),
+      createSearchFilesTool({ projectId, internalKey }),
+      createWriteFilesTool({ projectId, internalKey, registry }),
+      createUpdateFileTool({ projectId, internalKey, registry }),
+      createEditFileTool({ projectId, internalKey, registry }),
+      createCreateFilesTool({ projectId, internalKey, registry }),
       createCreateFolderTool({ projectId, internalKey }),
       createScaffoldViteAppTool({ projectId, internalKey }),
       createRenameFileTool({ projectId, internalKey }),
@@ -604,32 +647,57 @@ export const processMessage = inngest.createFunction(
 
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
+    // Stops a run going in circles (#306), and hints when it repeats the error
+    // the previous run got stuck on.
+    const loopGuard = createLoopGuard(
+      recentMessages
+        .slice(0, recentMessages.findIndex((msg) => msg._id === messageId))
+        .findLast((msg) => msg.role === "assistant")?.stuck?.signature,
+    );
+
+    // Re-validated by resolveRunModel: the event is the boundary this function
+    // trusts, and anything holding the event key can send one.
+    const codingModel = runModel.coding(0.3);
 
     // Create the coding agent with file tools
-    const codingAgent = createAgent({
+    const agentOptions: Parameters<typeof createAgent>[0] = {
       name: "codenaya",
       description: "An expert AI coding assistant",
       system: systemPrompt,
-      // Re-validated by resolveRunModel: the event is the boundary this function
-      // trusts, and anything holding the event key can send one.
-      model: runModel.coding(0.3),
+      model: codingModel,
       // Plan mode is enforced here, not just asked for in the prompt.
       tools: planMode
         ? tools.filter((tool) => PLAN_MODE_TOOLS.has(tool.name))
         : tools,
       lifecycle: {
-        onStart: ({ prompt, history }) => {
-          const nudge = buildCheckGate.takeNudge();
+        onStart: ({ agent, prompt, history }) => {
+          const trimmed = trimFileHistory([...earlierTurns, ...(history ?? [])]);
+          const { stuck } = loopGuard;
+          const summaryNote = stuck ? stuckNote(stuck) : STEP_BUDGET_NOTE;
+          const nudge =
+            agent.name === SUMMARY_AGENT_NAME
+              ? summaryNote
+              : buildCheckGate.takeNudge() ?? loopGuard.takeHint();
+          // AgentKit sends prompt ([system, request]) before history (this
+          // run's turns), so earlier conversation turns go between the two.
+          // Relies on network calls using maxIter: 0; direct agent.run with maxIter > 1 would prepend history each pass.
+          const [system, ...current] = withImageParts(prompt, imageUrls);
           return {
-            prompt: withImageParts(prompt, imageUrls),
+            prompt: [system, ...trimmed.slice(0, earlierTurns.length), ...current],
             history: [
-              ...(history ?? []),
+              ...trimmed.slice(earlierTurns.length),
               ...(nudge ? [{ type: "text" as const, role: "user" as const, content: nudge }] : []),
             ],
             stop: false,
           };
         },
-        onResponse: async ({ result, network }) => {
+        onResponse: async ({ agent, result, network }) => {
+          await recordUsage(result.raw, runModel.metering.coding);
+          // The last step must not write without a build check left to run;
+          // this holds when a provider ignores tool_choice "none".
+          if (agent.name === SUMMARY_AGENT_NAME) {
+            result.output = result.output.filter((m) => m.type !== "tool_call");
+          }
           const calls = result.output.flatMap((m) =>
             m.type === "tool_call" ? m.tools : [],
           );
@@ -702,6 +770,7 @@ export const processMessage = inngest.createFunction(
             return result.toolCalls.map(({ tool, content }) => {
               const error = toolResultError(content, pathOf);
               const label = !error && tool.name === "checkBuild" ? buildCheckLabel(content) : undefined;
+              const recipeIds = toolResultRecipeIds(content);
               return {
                 id: tool.id,
                 kind: "tool" as const,
@@ -709,6 +778,7 @@ export const processMessage = inngest.createFunction(
                 status: error ? ("error" as const) : ("done" as const),
                 ...(error ? { error } : {}),
                 ...(label ? { text: label } : {}),
+                ...(recipeIds.length > 0 ? { recipeIds } : {}),
                 startedAt: endedAt,
                 endedAt,
               };
@@ -717,15 +787,22 @@ export const processMessage = inngest.createFunction(
           return result;
         },
       },
+    };
+    const codingAgent = createAgent(agentOptions);
+    // The run's last step: the same agent with tools off, so it ends with a summary.
+    const summaryAgent = createAgent({
+      ...agentOptions,
+      name: SUMMARY_AGENT_NAME,
+      model: withoutToolCalls(codingModel),
     });
 
-    // Create network with single agent
     const network = createNetwork({
       name: "codenaya-network",
-      agents: [codingAgent],
-      maxIter: 20,
-      router: ({ network }) => {
-        const lastResult = network.state.results.at(-1);
+      agents: [codingAgent, summaryAgent],
+      maxIter: MAX_AGENT_STEPS,
+      router: ({ network, callCount }) => {
+        const { results } = network.state;
+        const lastResult = results.at(-1);
         const hasTextResponse = lastResult?.output.some(
           (m) => m.type === "text" && m.role === "assistant"
         );
@@ -733,22 +810,60 @@ export const processMessage = inngest.createFunction(
           (m) => m.type === "tool_call"
         );
 
+        // callCount, not results: seeded history would count as steps.
+        const lastStep = callCount >= MAX_AGENT_STEPS - 1;
+
+        // A stuck run has had its summary turn.
+        if (loopGuard.stuck) return undefined;
+
         // Stop routing to this agent if there's a final text response without
-        // tool calls, unless files changed since the last passing build check.
+        // tool calls, unless files changed since the last passing build check
+        // and there are steps left for it.
         if (hasTextResponse && !hasToolCalls) {
-          return buildCheckGate.shouldContinue(network.state.results)
+          return !lastStep && buildCheckGate.shouldContinue(results)
             ? codingAgent
             : undefined;
         }
-        return codingAgent;
+        return lastStep || loopGuard.check(results) ? summaryAgent : codingAgent;
       }
     });
+
+    // The title runs alongside the coding agent, never before it (#338).
+    // Started here: earlier, Inngest would plan every step in between as a
+    // parallel step, one extra round trip each. It never throws.
+    let titleUsageRecorded = false;
+    const titleDone =
+      conversation.title === DEFAULT_CONVERSATION_TITLE
+        ? generateConversationTitle({
+            step,
+            runModel,
+            request,
+            recordUsage: (raw) => {
+              titleUsageRecorded = true;
+              return recordUsage(raw, runModel.metering.title, "record-usage-title");
+            },
+            internalKey,
+            conversationId,
+          })
+        : undefined;
+    // Every way out of the run waits for the title and flushes usage once: a
+    // failed last record has no later one to catch it up. A cancelled run
+    // stops between steps; its per-inference records are its flush.
+    const settleRun = async (id: string) => {
+      await titleDone;
+      if (usageRecords > 0 || titleUsageRecorded) {
+        await sendUsage(id);
+      }
+    };
 
     // Run the agent
     let result;
     try {
-      result = await network.run(request);
+      result = await network.run(
+        starterOnly ? `${request}\n\n${STARTER_IN_PLACE_NOTE}` : request,
+      );
     } catch (error) {
+      await settleRun("record-usage-on-error");
       return await endRunOnKeyRejection(error);
     }
 
@@ -758,8 +873,8 @@ export const processMessage = inngest.createFunction(
       (m) => m.type === "text" && m.role === "assistant"
     );
 
-    let assistantResponse =
-      "I processed your request. Let me know if you need anything else!";
+    const { stuck } = loopGuard;
+    let assistantResponse = stuck ? STUCK_FALLBACK_REPLY : DEFAULT_REPLY_MESSAGE;
 
     if (textMessage?.type === "text") {
       assistantResponse =
@@ -768,14 +883,24 @@ export const processMessage = inngest.createFunction(
           : textMessage.content.map((c) => c.text).join("");
     }
 
+    await settleRun("record-usage-final");
+
     // Update the assistant message with the response (this also sets status to completed)
     await step.run("update-assistant-message", async () => {
       await convex.mutation(api.system.updateMessageContent, {
         internalKey,
         messageId,
         content: assistantResponse,
+        ...(stuck ? { stuck } : {}),
       })
     });
+
+    // The first run that wrote files ends a seeded project's first build (#338).
+    if (wroteFiles(result.state.results)) {
+      await step.run("complete-first-build", async () => {
+        await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
+      });
+    }
 
     return { success: true, messageId, conversationId };
   }

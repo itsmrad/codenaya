@@ -7,8 +7,9 @@ export type SeedFile = { path: string; content: string };
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
 const appTsx = (template: StarterTemplate) => `import { Sparkles } from "lucide-react";
+import { Route, Routes } from "react-router-dom";
 
-export default function App() {
+function Home() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-white p-6 text-center text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <Sparkles className="size-8 text-indigo-500" />
@@ -17,6 +18,14 @@ export default function App() {
         ${template.description}
       </p>
     </main>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+    </Routes>
   );
 }
 `;

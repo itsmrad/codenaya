@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_AGENT_MODEL_ID } from "../conversations/agent-models";
-import { platformModels, platformProviderId, resolvePlatformModel } from "./platform";
+import {
+  type RoutedModel,
+  envCatalog,
+  platformProviderId,
+  resolveCatalogModel,
+  utilityModel,
+} from "./platform";
 import { AI_PROVIDERS } from "./registry";
 
 afterEach(() => {
@@ -36,44 +42,83 @@ describe("platformProviderId", () => {
   });
 });
 
-describe("resolvePlatformModel", () => {
-  it("keeps a listed model", () => {
-    expect(resolvePlatformModel("openrouter", null, "x-ai/grok-4.7").id).toBe("x-ai/grok-4.7");
-    expect(resolvePlatformModel("groq", null, "openai/gpt-oss-20b").id).toBe("openai/gpt-oss-20b");
+describe("envCatalog", () => {
+  it("routes every curated model to the env provider, for everyone", () => {
+    const catalog = envCatalog("groq");
+
+    expect(catalog.defaultModelId).toBe(AI_PROVIDERS.groq.defaultModel);
+    expect(catalog.models.map((model) => model.id)).toEqual(
+      AI_PROVIDERS.groq.models.map((model) => model.id),
+    );
+    expect(catalog.models[0]).toEqual({
+      id: "openai/gpt-oss-120b",
+      name: "GPT-OSS 120B",
+      vendor: "OpenAI",
+      vision: false,
+      provider: "groq",
+      providerModelId: "openai/gpt-oss-120b",
+      access: "everyone",
+      hidden: false,
+    });
+    // A curated model without a vendor is the provider's own.
+    expect(envCatalog("anthropic").models[0]?.vendor).toBe("Anthropic");
+  });
+
+  it("uses the title model as the utility model, hidden when users can't pick it", () => {
+    expect(utilityModel(envCatalog("groq"))).toMatchObject({ id: "openai/gpt-oss-20b", hidden: false });
+    expect(utilityModel(envCatalog("openrouter"))).toMatchObject({
+      id: "openai/gpt-5.4-mini",
+      provider: "openrouter",
+      hidden: true,
+    });
+  });
+});
+
+describe("resolveCatalogModel", () => {
+  const model = (id: string, extra: Partial<RoutedModel> = {}): RoutedModel => ({
+    id,
+    name: id,
+    vendor: "v",
+    vision: false,
+    provider: "openrouter",
+    providerModelId: id,
+    access: "everyone",
+    hidden: false,
+    ...extra,
+  });
+
+  it("keeps an offered model", () => {
+    expect(resolveCatalogModel(envCatalog("openrouter"), "x-ai/grok-4.7").id).toBe("x-ai/grok-4.7");
   });
 
   it.each([undefined, "", "openai/not-a-real-model", "OPENAI/GPT-5.6-LUNA", " openai/gpt-5.6-luna"])(
-    "falls back to the provider default for %j",
+    "falls back to the default for %j",
     (id) => {
-      expect(resolvePlatformModel("openrouter", null, id).id).toBe(DEFAULT_AGENT_MODEL_ID);
+      expect(resolveCatalogModel(envCatalog("openrouter"), id).id).toBe(DEFAULT_AGENT_MODEL_ID);
     },
   );
 
-  it("replaces another provider's id (an old conversation's model) with the default", () => {
-    expect(resolvePlatformModel("anthropic", null, DEFAULT_AGENT_MODEL_ID).id).toBe(
-      AI_PROVIDERS.anthropic.defaultModel,
-    );
-    expect(resolvePlatformModel("groq", null, "claude-opus-5-5").id).toBe(
-      AI_PROVIDERS.groq.defaultModel,
+  it("never offers a hidden model, even as the default", () => {
+    const catalog = {
+      models: [model("secret", { hidden: true }), model("a"), model("b")],
+      defaultModelId: "b",
+    };
+    expect(resolveCatalogModel(catalog, "secret").id).toBe("b");
+    expect(resolveCatalogModel({ ...catalog, defaultModelId: "secret" }, "gone").id).toBe("a");
+    // The env catalog's hidden utility model isn't pickable either.
+    expect(resolveCatalogModel(envCatalog("openrouter"), "openai/gpt-5.4-mini").id).toBe(
+      DEFAULT_AGENT_MODEL_ID,
     );
   });
 
-  it("uses an admin selection, its default, then the catalog default", () => {
-    const models = [
-      { id: "openai/gpt-oss-20b", label: "small" },
-      { id: "qwen/qwen3.8-27b", label: "qwen" },
-    ];
-    expect(platformModels("groq", { models, defaultModelId: "qwen/qwen3.8-27b" })).toBe(models);
-    expect(resolvePlatformModel("groq", { models, defaultModelId: "qwen/qwen3.8-27b" }, "nope").id)
-      .toBe("qwen/qwen3.8-27b");
-    // A removed selection default falls to the catalog default, if listed...
-    const withCatalogDefault = [...models, { id: "openai/gpt-oss-120b", label: "big" }];
-    expect(
-      resolvePlatformModel("groq", { models: withCatalogDefault, defaultModelId: "gone" }, "nope").id,
-    ).toBe("openai/gpt-oss-120b");
-    // ...else to the first listed model.
-    expect(resolvePlatformModel("groq", { models, defaultModelId: "gone" }, "nope").id).toBe(
-      "openai/gpt-oss-20b",
-    );
+  it("falls back to the first offered model when the default is gone", () => {
+    expect(resolveCatalogModel({ models: [model("a"), model("b")], defaultModelId: "gone" }, "x").id)
+      .toBe("a");
+  });
+
+  it("takes the utility model by id even when hidden, else the default", () => {
+    const models = [model("a"), model("mini", { hidden: true })];
+    expect(utilityModel({ models, defaultModelId: "a", utilityModelId: "mini" }).id).toBe("mini");
+    expect(utilityModel({ models, defaultModelId: "a", utilityModelId: "gone" }).id).toBe("a");
   });
 });

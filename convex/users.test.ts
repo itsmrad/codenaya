@@ -99,11 +99,37 @@ async function seedOwnedData(t: TestConvex, ownerId: string, files = 1) {
       title: "Chat",
       updatedAt: now,
     });
-    await ctx.db.insert("messages", {
+    const messageId = await ctx.db.insert("messages", {
       conversationId,
       projectId,
       role: "user",
       content: "hi",
+    });
+    await ctx.db.insert("activationEvents", {
+      name: "project_created",
+      userId: ownerId,
+      projectId,
+      at: now,
+      props: { source: "dashboard" },
+    });
+    await ctx.db.insert("creditLedger", {
+      userId: ownerId,
+      messageId,
+      source: "platform",
+      model: "GPT-5.6 Luna",
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0.01,
+      credits: 2,
+      updatedAt: now,
+    });
+    await ctx.db.insert("creditAccounts", {
+      userId: ownerId,
+      plan: "free",
+      periodStartsAt: now,
+      periodUsed: 2,
+      dayStartsAt: now,
+      dayUsed: 2,
     });
     const sealed = {
       kekProvider: "local",
@@ -239,6 +265,9 @@ const OWNED_TABLES = [
   "userAiPreferences",
   "skills",
   "projectSkillSettings",
+  "creditLedger",
+  "creditAccounts",
+  "activationEvents",
 ] as const;
 
 const countRows = (t: TestConvex) =>
@@ -369,7 +398,11 @@ describe("POST /clerk-users-webhook", () => {
     // More files than one batch so the purge has to reschedule itself.
     const alice = await seedOwnedData(t, ALICE, 250);
     const bob = await seedOwnedData(t, BOB);
-    await t.fetch("/clerk-users-webhook", signedRequest(userEvent("user.created", ALICE)));
+    // Also records Alice's `signed_up`, which the purge must remove too.
+    await t.fetch(
+      "/clerk-users-webhook",
+      signedRequest(userEvent("user.created", ALICE, { created_at: 500 })),
+    );
 
     // Alice voted on Bob's entry; the purge takes that vote back out.
     await t.run(async (ctx) => {

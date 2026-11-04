@@ -59,8 +59,15 @@ const runJob = () =>
     step: { run: (_name: string, fn: () => unknown) => fn() },
   });
 
+// Flattens `createFiles` batches so each file reads like a single create.
 const created = (name: string) =>
-  mocks.mutation.mock.calls.filter(([, args]) => args.name === name);
+  mocks.mutation.mock.calls
+    .flatMap(([fn, args]) =>
+      args.files ? args.files.map((file: object) => [fn, { ...args, ...file }]) : [[fn, args]]
+    )
+    .filter(([, args]) => args.name === name);
+
+const batches = () => mocks.mutation.mock.calls.filter(([, args]) => args.files).map(([, args]) => args);
 
 describe("importGithubRepo", () => {
   beforeEach(() => {
@@ -113,6 +120,67 @@ describe("importGithubRepo", () => {
     expect(created("src")[0][1]).toMatchObject({ parentId: undefined });
     expect(created("ui")[0][1]).toMatchObject({ parentId: "id:src" });
     expect(created("button.ts")[0][1]).toMatchObject({ parentId: "id:ui" });
+  });
+
+  it("writes a folder's text files in one createFiles call (#411)", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        tarball([
+          { path: "src/", type: "Directory" },
+          { path: "src/a.ts", body: "a" },
+          { path: "src/b.ts", body: "b" },
+        ])
+      )
+    );
+
+    await runJob();
+
+    expect(batches()).toEqual([
+      expect.objectContaining({
+        parentId: "id:src",
+        files: [
+          { name: "a.ts", content: "a" },
+          { name: "b.ts", content: "b" },
+        ],
+      }),
+    ]);
+  });
+
+  it.each([
+    { cap: "file count", count: 101, size: 1 },
+    { cap: "bytes", count: 5, size: 850 * 1024 },
+  ])("splits a folder's batch at the $cap cap", async ({ count, size }) => {
+    const files = Array.from({ length: count }, (_, i) => ({ path: `f${i}`, body: "x".repeat(size) }));
+    fetchMock.mockResolvedValue(new Response(tarball(files)));
+
+    await runJob();
+
+    expect(batches().map((batch) => batch.files.length)).toEqual([count - 1, 1]);
+  });
+
+  it("skips a text file over the document size cap and imports the rest", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        tarball([
+          { path: "big.json", body: "x".repeat(901 * 1024) },
+          { path: "README.md", body: "# hi" },
+        ])
+      )
+    );
+
+    await expect(runJob()).resolves.toMatchObject({ success: true });
+
+    expect(created("big.json")).toHaveLength(0);
+    expect(created("README.md")).toHaveLength(1);
+  });
+
+  it("fails the step when a batch write fails, so the retry re-imports from clean", async () => {
+    mocks.mutation.mockImplementation(async (_fn, args) => {
+      if (args.files) throw new Error("transient");
+      return args.name ? `id:${args.name}` : { deleted: 0, done: true };
+    });
+
+    await expect(runJob()).rejects.toThrow("transient");
   });
 
   it("uploads a binary file to storage instead of writing it as text", async () => {

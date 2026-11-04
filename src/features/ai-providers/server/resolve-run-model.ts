@@ -2,9 +2,36 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { convex } from "@/lib/convex-client";
+import {
+  CREDIT_REFUSAL_MESSAGES,
+  INSUFFICIENT_CREDITS_CODE,
+  type RunSource,
+  creditRefusal,
+} from "@/features/billing/credits";
+import { PLANS } from "@/features/billing/plans";
 import type { AgentModelChoice } from "@/features/conversations/agent-models";
 
-import { resolvePlatformModel } from "../platform";
+import {
+  PROMO_REFUSAL_MESSAGES,
+  type PromoModelKind,
+  type PromoRunRefusal,
+  promoRunRefusal,
+} from "@/features/promotions/github-promo";
+
+import {
+  AUTO_MODEL_ID,
+  AUTO_NO_VISION_MESSAGE,
+  type RunTask,
+  autoRouteModel,
+  autoRunLabel,
+} from "../auto-route";
+import { type ModelPricing, promoKindOf } from "../catalog";
+import {
+  type PlatformProviderId,
+  type RoutedModel,
+  resolveCatalogModel,
+  utilityModel,
+} from "../platform";
 import {
   modelAcceptsImages,
   modelIdsFor,
@@ -15,10 +42,9 @@ import { buildAgentKitModel } from "./agentkit-model";
 import { assertSafeProviderBaseUrl } from "./base-url";
 import {
   AI_NOT_CONFIGURED_MESSAGE,
-  activePlatform,
   isPlatformConfigured,
   platformAgentModel,
-  platformTitleModel,
+  platformCatalog,
 } from "./platform-model";
 import { openProviderKey } from "./sealed-key";
 import { OUT_OF_CREDIT_PATTERN, isOutOfCredit, testConnection } from "./test-connection";
@@ -69,6 +95,8 @@ export interface RunModelChoice {
   keyId?: Id<"aiProviderKeys">;
   modelId: string;
   label: string;
+  /** Platform runs: the provider whose key serves the model's route. */
+  provider?: PlatformProviderId;
 }
 
 /**
@@ -78,7 +106,7 @@ export interface RunModelChoice {
 export class ModelChoiceError extends Error {
   constructor(
     message: string,
-    readonly status: 400 | 403 | 503,
+    readonly status: 400 | 402 | 403 | 503,
     readonly code?: string,
   ) {
     super(message);
@@ -88,6 +116,12 @@ export class ModelChoiceError extends Error {
 const toChoice = (input: ModelChoiceInput): AgentModelChoice =>
   typeof input === "object" ? input : { modelId: input ?? "" };
 
+/** The send picked Auto (#322): the route classifies it and passes its `task`. */
+export const isAutoChoice = (input: ModelChoiceInput) => {
+  const { keyId, modelId } = toChoice(input);
+  return !keyId && modelId === AUTO_MODEL_ID;
+};
+
 /** The message has images and the model cannot read them. */
 const visionRequired = (label: string) =>
   new ModelChoiceError(
@@ -95,35 +129,85 @@ const visionRequired = (label: string) =>
     400,
   );
 
+/** Platform models are labelled as the platform's, whichever provider serves them. */
+const platformRunLabel = (model: RoutedModel) => runModelLabel({ id: model.id, label: model.name });
+
 /**
- * Route-side check. Platform ids outside the active provider's selection
- * (/admin, else its catalog) fall back to its default, and a platform without
- * a key is refused; a BYOK choice must name a key the caller owns and a model
- * that key's provider offers. With `withImages`, the model must accept images.
+ * Route-side check. Platform ids the catalog doesn't offer (unknown or hidden)
+ * fall back to its default, and a model whose route's provider has no key is
+ * refused, never re-routed; a BYOK choice must name a key the caller owns and
+ * a model that key's provider offers. With `withImages`, the model must accept
+ * images.
+ *
+ * A promo model (ADR 0009) needs the caller's claim with a run left. The check
+ * changes nothing; `promoKind` tells `takePromoRun` which run to take once the
+ * send is known to go. Any other platform model needs credits left (ADR 0011);
+ * a run that starts with some may end past zero, and the next send is refused.
+ *
+ * Auto (#322) becomes the `task`'s route model (`autoRouteModel`: the admin's
+ * pool, else the fixed routes, among routes whose provider key is set; else the
+ * catalog default) before any of these checks, so the message and the run
+ * record that concrete model. An image send on Auto only ever routes to a
+ * vision model, and is refused when there is none.
  */
 export async function validateModelChoice({
   internalKey,
   userId,
   model,
   withImages = false,
+  task = "build",
 }: {
   internalKey: string;
   userId: string;
   model: ModelChoiceInput;
   withImages?: boolean;
-}): Promise<RunModelChoice> {
+  /** Auto only: what the send is for (`classifyRun`). */
+  task?: RunTask;
+}): Promise<RunModelChoice & { promoKind?: PromoModelKind }> {
   const { keyId, modelId } = toChoice(model);
   if (!keyId) {
-    const { provider, config } = await activePlatform(internalKey);
-    if (!isPlatformConfigured(provider)) {
+    const [catalog, account] = await Promise.all([
+      platformCatalog(internalKey),
+      convex.query(api.credits.getForServer, { internalKey, userId }),
+    ]);
+    const auto = modelId === AUTO_MODEL_ID;
+    const routed =
+      auto &&
+      autoRouteModel(
+        catalog.models.filter((m) => isPlatformConfigured(m.provider)),
+        // Images need a vision model whatever the task, plan mode included.
+        withImages ? "vision" : task,
+        catalog.autoModelIds,
+      );
+    if (auto && withImages && !routed) {
+      throw new ModelChoiceError(AUTO_NO_VISION_MESSAGE, 400, "auto_no_vision_model");
+    }
+    const model = routed || resolveCatalogModel(catalog, modelId);
+    if (!isPlatformConfigured(model.provider)) {
       throw new ModelChoiceError(AI_NOT_CONFIGURED_MESSAGE, 503, "ai_not_configured");
     }
-    const model = resolvePlatformModel(provider, config, modelId);
-    const label = runModelLabel(model);
+    const label = auto ? autoRunLabel(model) : platformRunLabel(model);
+    const choice = { modelId: model.id, label, provider: model.provider };
     if (withImages && !model.vision) {
-      throw visionRequired(label);
+      throw visionRequired(choice.label);
     }
-    return { modelId: model.id, label };
+    const promoKind = promoKindOf(model.access);
+    if (promoKind) {
+      const claim = await convex.query(api.promoClaims.getForServer, { internalKey, userId });
+      const refusal = claim ? promoRunRefusal(claim, { kind: promoKind }, Date.now()) : "not_claimed";
+      if (refusal) {
+        throw promoRefused(refusal);
+      }
+      return { ...choice, promoKind };
+    }
+    // Usage is always recorded; the cap only applies once billing is live (#105).
+    const refusal =
+      process.env.CREDIT_LIMITS_ENFORCED === "true" &&
+      creditRefusal(PLANS[account?.plan ?? "free"], account, Date.now());
+    if (refusal) {
+      throw new ModelChoiceError(CREDIT_REFUSAL_MESSAGES[refusal], 402, INSUFFICIENT_CREDITS_CODE);
+    }
+    return choice;
   }
 
   // A malformed id fails Convex argument validation: same answer as a foreign one.
@@ -152,38 +236,111 @@ export async function validateModelChoice({
 
 /**
  * `validateModelChoice` for route handlers: a refused choice comes back as the
- * JSON error response to return.
+ * JSON error response to return. `runModel` is what the message records;
+ * `promoKind` goes to `takePromoRun`.
  *
- *   const { runModel, rejected } = await requireModelChoice({ ... });
+ *   const { runModel, promoKind, rejected } = await requireModelChoice({ ... });
  *   if (rejected) return rejected;
  */
 export async function requireModelChoice(
   args: Parameters<typeof validateModelChoice>[0],
 ): Promise<
-  | { runModel: RunModelChoice; rejected?: undefined }
-  | { runModel?: undefined; rejected: NextResponse }
+  | { runModel: RunModelChoice; promoKind?: PromoModelKind; rejected?: undefined }
+  | { runModel?: undefined; promoKind?: undefined; rejected: NextResponse }
 > {
   try {
-    return { runModel: await validateModelChoice(args) };
+    const { promoKind, ...runModel } = await validateModelChoice(args);
+    return { runModel, promoKind };
   } catch (error) {
     if (error instanceof ModelChoiceError) {
-      return {
-        rejected: NextResponse.json(
-          { error: error.message, ...(error.code ? { code: error.code } : {}) },
-          { status: error.status },
-        ),
-      };
+      return { rejected: modelChoiceErrorResponse(error) };
     }
     throw error;
   }
 }
 
+const modelChoiceErrorResponse = (error: ModelChoiceError) =>
+  NextResponse.json(
+    { error: error.message, ...(error.code ? { code: error.code } : {}) },
+    { status: error.status },
+  );
+
+const promoRefused = (refusal: PromoRunRefusal | "not_claimed") =>
+  new ModelChoiceError(PROMO_REFUSAL_MESSAGES[refusal], 403, `promo_${refusal}`);
+
+/**
+ * A promo run a send took. `refund` gives it back when the send fails before
+ * its agent run starts; it never throws, so it can't replace the route's own
+ * error response (a failed refund is logged and the run stays used).
+ */
+export interface PromoRun {
+  refund: () => Promise<void>;
+}
+
+const NO_PROMO_RUN: PromoRun = { refund: async () => {} };
+
+/**
+ * Takes the promo run (ADR 0009) a validated choice needs, in one Convex
+ * transaction, so two sends racing for the last Opus run can't both pass.
+ * Call it after the route's ownership checks and before it creates anything;
+ * without a `promoKind` it takes nothing. A refusal comes back as the
+ * response to return.
+ *
+ *   const { promoRun, rejected } = await takePromoRun({ internalKey, userId, promoKind });
+ *   if (rejected) return rejected;
+ *   try { ...create and dispatch; on a failed dispatch, await promoRun.refund()... }
+ *   catch (error) { await promoRun.refund(); throw error; }
+ */
+export async function takePromoRun({
+  internalKey,
+  userId,
+  promoKind,
+}: {
+  internalKey: string;
+  userId: string;
+  promoKind: PromoModelKind | undefined;
+}): Promise<
+  | { promoRun: PromoRun; rejected?: undefined }
+  | { promoRun?: undefined; rejected: NextResponse }
+> {
+  if (!promoKind) {
+    return { promoRun: NO_PROMO_RUN };
+  }
+
+  const args = { internalKey, userId, kind: promoKind };
+  const refusal = await convex.mutation(api.promoClaims.takeRun, args);
+  if (refusal) {
+    return { rejected: modelChoiceErrorResponse(promoRefused(refusal)) };
+  }
+  return {
+    promoRun: {
+      refund: async () => {
+        await convex.mutation(api.promoClaims.refundRun, args).catch((error: unknown) => {
+          console.error("[promo] couldn't refund a promo run", error);
+        });
+      },
+    },
+  };
+}
+
 /** A run's key could not be used. `message` is written as the assistant reply. */
 export class ProviderKeyError extends Error {}
 
+/** Ends every key-failure reply, so history can leave those turns out. */
+export const KEY_FAILURE_SUFFIX = "Your request was not sent to Codenaya's models.";
+
+/**
+ * A run whose message has images, when the catalog changed after the send:
+ * the model picked for it was removed or hidden (so another one would run) or
+ * lost vision. The run never sends the images (#322).
+ */
+export const RUN_IMAGES_REFUSED_MESSAGE =
+  "The model picked for this chat can't take images anymore. Pick a model that can read images and send again. " +
+  KEY_FAILURE_SUFFIX;
+
 export const keyFailureMessage = (reason: string) =>
   `${reason} Update it in [Settings → AI providers](${AI_PROVIDERS_SETTINGS_PATH}) and try again. ` +
-  "Your request was not sent to Codenaya's models.";
+  KEY_FAILURE_SUFFIX;
 
 type AgentKitModel = ReturnType<typeof buildAgentKitModel>;
 
@@ -195,6 +352,12 @@ export interface RunModel {
   /** The conversation title model, on the same provider. */
   title: (temperature?: number) => AgentKitModel;
   /**
+   * Whether this run may send images: the model reads them, as resolved now,
+   * and is the model the send picked. A substitute (the default, run when the
+   * pick was removed or hidden) was never checked against Auto's pool.
+   */
+  acceptsImages: boolean;
+  /**
    * BYOK only: whether the provider still accepts the key (the free
    * test-connection call) and the account can still pay for inference
    * (`isOutOfCredit`). Inngest retries a failed inference with backoff before
@@ -203,6 +366,11 @@ export interface RunModel {
    * as a step.
    */
   checkKey?: () => Promise<{ rejected: boolean }>;
+  /**
+   * Who pays (ADR 0011), and the catalog prices the run's usage is charged
+   * at. No price (the env catalog, BYOK) records tokens at $0.
+   */
+  metering: { source: RunSource; coding?: ModelPricing; title?: ModelPricing };
 }
 
 /**
@@ -222,17 +390,35 @@ export async function resolveRunModel({
   choice: AgentModelChoice;
 }): Promise<RunModel> {
   if (!choice.keyId) {
-    // Re-read, not taken from the event: the admin may have switched provider
+    // Re-read, not taken from the event: the admin may have re-routed, hidden
     // or removed the model since the route checked it.
-    const { provider, config } = await activePlatform(internalKey);
+    const catalog = await platformCatalog(internalKey);
+    const model = resolveCatalogModel(catalog, choice.modelId);
     // The key can go missing between the route's check and the run (a redeploy).
-    if (!isPlatformConfigured(provider)) {
+    if (!isPlatformConfigured(model.provider)) {
       throw new ProviderKeyError(AI_NOT_CONFIGURED_MESSAGE);
     }
-    const modelId = resolvePlatformModel(provider, config, choice.modelId).id;
+    // The send took the run and checked the end date; the run re-checks only
+    // the claim, so a run queued just before the end still goes ahead.
+    if (
+      promoKindOf(model.access) &&
+      !(await convex.query(api.promoClaims.hasClaimForProjectOwner, { internalKey, projectId }))
+    ) {
+      throw new ProviderKeyError(PROMO_REFUSAL_MESSAGES.not_claimed);
+    }
+    // A title is no reason to fail the run: without the utility route's key
+    // it is written by the run's own model.
+    const utility = utilityModel(catalog);
+    const title = isPlatformConfigured(utility.provider) ? utility : model;
     return {
-      coding: (temperature) => platformAgentModel(provider, modelId, temperature),
-      title: (temperature) => platformAgentModel(provider, platformTitleModel(provider), temperature),
+      coding: (temperature) => platformAgentModel(model.provider, model.providerModelId, temperature),
+      title: (temperature) => platformAgentModel(title.provider, title.providerModelId, temperature),
+      acceptsImages: model.vision && model.id === choice.modelId,
+      metering: {
+        source: promoKindOf(model.access) ? "promo" : "platform",
+        coding: model.pricing,
+        title: title.pricing,
+      },
     };
   }
 
@@ -288,6 +474,8 @@ export async function resolveRunModel({
     key: { _id: key._id, userId: key.userId, label: key.label },
     coding: (temperature) => build(choice.modelId, temperature),
     title: (temperature) => build(titleModel, temperature),
+    acceptsImages: modelAcceptsImages(choice.modelId, key),
+    metering: { source: "byok" },
     // Only a definite refusal counts: an unreachable provider is left for the
     // inference itself to retry.
     checkKey: async () => {

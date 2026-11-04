@@ -2,12 +2,13 @@ import type { LanguageModel } from "ai";
 import { NextResponse } from "next/server";
 
 import { convex } from "@/lib/convex-client";
+import { resolveCatalogModel, utilityModel } from "../platform";
 import { AI_PROVIDERS, PROVIDER_KEY_ERROR_CODE, modelIdsFor } from "../registry";
 import { buildAiSdkModel } from "./ai-sdk-model";
 import {
   AI_NOT_CONFIGURED_MESSAGE,
-  activePlatform,
   isPlatformConfigured,
+  platformCatalog,
   platformEditorModel,
 } from "./platform-model";
 import { ProviderKeyError, isProviderKeyRejection } from "./resolve-run-model";
@@ -54,15 +55,17 @@ export async function resolveEditorModel({
   userId: string;
 }): Promise<EditorModel | null> {
   // In parallel, so a platform request pays no extra round trip.
-  const [byok, platform] = await Promise.all([
+  const [byok, catalog] = await Promise.all([
     convex.query(api.system.getDefaultAiProviderKey, { internalKey, userId }),
-    activePlatform(internalKey),
+    platformCatalog(internalKey),
   ]);
 
   if (!byok) {
-    return isPlatformConfigured(platform.provider)
-      ? { model: platformEditorModel(platform.provider) }
-      : null;
+    // A keyless utility route falls back to the default model, as titles do.
+    const model = [utilityModel(catalog), resolveCatalogModel(catalog, undefined)].find((m) =>
+      isPlatformConfigured(m.provider),
+    );
+    return model ? { model: platformEditorModel(model) } : null;
   }
 
   const { key, modelId } = byok;

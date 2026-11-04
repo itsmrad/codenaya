@@ -14,6 +14,7 @@ import {
   ServerIcon,
   BoxIcon,
   LockIcon,
+  KeyRoundIcon,
 } from "lucide-react";
 
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
@@ -21,6 +22,7 @@ import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webco
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
 import { PreviewBuilding } from "@/features/sandbox-preview/components/preview-building";
+import { CodenayaLogo } from "@/components/codenaya-logo";
 import { PreviewBootSteps } from "@/features/sandbox-preview/components/preview-boot-steps";
 import {
   PreviewStatusBadge,
@@ -41,10 +43,9 @@ import { NOTHING_TO_PREVIEW } from "@/features/sandbox-preview/utils/boot-plan";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import { EnvVarsDialog } from "./env-vars-dialog";
-import { useProject } from "../hooks/use-projects";
-import { useFiles } from "../hooks/use-files";
-import { markPreviewOpened } from "../utils/first-run";
+import { useProject, useRecordFirstPreviewShown } from "../hooks/use-projects";
+import { useFilesWithContent } from "../hooks/use-files";
+import { isPreviewOnScreen, markPreviewOpened } from "../utils/first-run";
 import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
 import {
   usePublicEnvVars,
@@ -68,16 +69,22 @@ const stripPlaceholder = (building: boolean, isLoading: boolean) => {
 export const PreviewView = ({
   projectId,
   firstBuild,
+  visible,
+  onOpenEnvVars,
 }: {
   projectId: Id<"projects">;
+  /** Its tab is on screen; the IDE keeps it mounted, invisible, behind others. */
+  visible: boolean;
   /** The agent is writing a new project's first build (see ProjectIdView). */
   firstBuild: boolean;
+  /** Opens the env vars dialog, which ProjectIdView owns so the palette can open it too. */
+  onOpenEnvVars: () => void;
 }) => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   
   const project = useProject(projectId);
-  const files = useFiles(projectId);
+  const files = useFilesWithContent(projectId);
   const [terminalChoice, setTerminalChoice] = usePreviewTerminal();
   const [refreshKey, setRefreshKey] = useState(0);
   const [device, setDevice] = usePreviewDevice();
@@ -147,6 +154,11 @@ export const PreviewView = ({
     wasFirstBuild.current = firstBuild;
   }, [firstBuild, status, restart]);
 
+  // The iframe's latest load, so first_preview_shown waits until it is visible.
+  const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
+  const previewKey = `${projectId}:${previewUrl}:${refreshKey}`;
+  const handlePreviewLoad = useCallback(() => setLoadedPreview(previewKey), [previewKey]);
+
   // Only ever called from a user action. WebContainer needs the COOP/COEP headers
   // next.config.ts sets for `?engine=webcontainer`, so switching is a full page
   // load; doing it automatically on a sandbox error turned config errors into a
@@ -166,6 +178,7 @@ export const PreviewView = ({
     ) : null;
   const content = (
     <PreviewContent
+      onPreviewLoad={handlePreviewLoad}
       error={error}
       isLoading={isLoading}
       bootPhase={bootPhase}
@@ -178,6 +191,7 @@ export const PreviewView = ({
       restart={restart}
       errorKind={errorKind}
       onUseWebContainer={() => switchEngine("webcontainer")}
+      agentWorking={Boolean(activeRun)}
       building={building}
     />
   );
@@ -186,6 +200,24 @@ export const PreviewView = ({
   useEffect(() => {
     if (previewUrl) markPreviewOpened();
   }, [previewUrl]);
+
+  // Activation event (#339): once per project per page view.
+  const recordFirstPreviewShown = useRecordFirstPreviewShown();
+  const recordedPreviewFor = useRef<Id<"projects"> | null>(null);
+  const previewShown = isPreviewOnScreen({
+    visible,
+    building: Boolean(building),
+    status,
+    error,
+    loaded: loadedPreview === previewKey,
+  });
+  useEffect(() => {
+    if (!previewShown || recordedPreviewFor.current === projectId) return;
+    recordedPreviewFor.current = projectId;
+    recordFirstPreviewShown({ projectId }).catch((error) => {
+      console.warn("[preview] failed to record first preview", error);
+    });
+  }, [previewShown, projectId, recordFirstPreviewShown]);
 
   // Automatically refresh the iframe shortly after the dev server announces it's running.
   // The first request to Vite often serves the index.html and CSS instantly but hangs 
@@ -353,7 +385,16 @@ export const PreviewView = ({
           >
             <TerminalSquareIcon className="size-4" />
           </Button>
-          <EnvVarsDialog projectId={projectId} />
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-8 rounded-md hover:bg-muted"
+            title="Environment variables"
+            aria-label="Environment variables"
+            onClick={onOpenEnvVars}
+          >
+            <KeyRoundIcon className="size-4" />
+          </Button>
           <div className="px-1 flex items-center">
             <PreviewSettingsPopover
               projectId={projectId}
@@ -431,6 +472,7 @@ const ERROR_TITLES: Record<SandboxErrorKind, string> = {
 };
 
 const PreviewContent = ({
+  onPreviewLoad,
   error,
   isLoading,
   bootPhase,
@@ -443,8 +485,10 @@ const PreviewContent = ({
   restart,
   errorKind,
   onUseWebContainer,
+  agentWorking,
   building,
 }: {
+  onPreviewLoad: () => void;
   error: string | null | undefined;
   isLoading: boolean;
   bootPhase: BootPhase | null;
@@ -457,6 +501,8 @@ const PreviewContent = ({
   restart: () => void;
   errorKind: SandboxErrorKind | null;
   onUseWebContainer: () => void;
+  /** Any message is processing: planning, chatting or writing code. */
+  agentWorking?: boolean;
   /** The first-build placeholder, shown over the engine until the run ends. */
   building: ReactNode;
 }) => (
@@ -465,6 +511,18 @@ const PreviewContent = ({
 
     {/* Laid over the engine so a pre-warmed preview loads underneath it. */}
     {building && <div className="absolute inset-0 z-10">{building}</div>}
+
+    {/* Hidden under the first build: PreviewBuilding already says the same. */}
+    {agentWorking && !building && (
+      <div role="status" className="pointer-events-none absolute top-3 right-3 z-40 flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-card/95 backdrop-blur-md border border-brand/30 shadow-lg text-xs font-medium text-foreground motion-safe:animate-in fade-in-0 duration-200">
+        <span className="relative flex size-2">
+          <span className="motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full bg-brand opacity-75" />
+          <span className="relative inline-flex rounded-full size-2 bg-brand" />
+        </span>
+        <CodenayaLogo size={16} blinking={true} decorative />
+        <span className="text-[11px] text-muted-foreground font-mono">Agent working</span>
+      </div>
+    )}
 
     {error && (
       <div className="size-full flex items-center justify-center text-muted-foreground bg-background p-4">
@@ -513,6 +571,7 @@ const PreviewContent = ({
           style={{ width: PREVIEW_DEVICE_WIDTHS[device] ?? undefined }}
           data-framed={device !== "desktop"}
           title="Preview"
+          onLoad={onPreviewLoad}
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
           allow="cross-origin-isolated"
         />

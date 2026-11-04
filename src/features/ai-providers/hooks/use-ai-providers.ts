@@ -1,7 +1,9 @@
 import ky, { HTTPError } from "ky";
 import { useMutation, useQuery } from "convex/react";
 
-import { type ActivePlatform, platformConfigFrom, platformProviderId } from "../platform";
+import { AUTO_MODEL, autoRouteModel } from "../auto-route";
+import { type PublicCatalogModel, pickableModels, promoModelIds } from "../catalog";
+import { envCatalog, platformProviderId, resolveCatalogModel } from "../platform";
 import type { AiProviderId } from "../registry";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -15,19 +17,56 @@ import { Id } from "../../../../convex/_generated/dataModel";
 /** The signed-in user's keys, newest first, as browser-safe summaries. */
 export const useAiProviderKeys = () => useQuery(api.aiProviders.list);
 
+/** The platform models the user may pick now, and the platform default. */
+export interface PlatformModels {
+  models: PublicCatalogModel[];
+  defaultModelId: string;
+  /** Promo models (ADR 0009), which users can no longer pick. */
+  promoModelIds: string[];
+}
+
 /**
- * The platform provider and the models users may pick on it: the admin's
- * selection in /admin, live (a removed model leaves open pickers at once),
- * else the env provider's catalog. Undefined while loading.
+ * The catalog users pick from: the admin's in /admin, live (a removed model
+ * leaves open pickers at once), else the env provider's. Never routes or
+ * prices. Undefined while loading.
  */
-export const usePlatformModels = (): ActivePlatform | undefined => {
-  const active = useQuery(api.platformModels.getActive, { fallbackProvider: platformProviderId() });
-  return active && { provider: active.provider, config: platformConfigFrom(active.config) };
+const usePlatformCatalog = () => {
+  const saved = useQuery(api.platformCatalog.getForUsers);
+  return saved === undefined ? undefined : (saved ?? envCatalog(platformProviderId()));
 };
 
-/** `usePlatformModels`, showing the env provider's catalog until it loads. */
-export const usePlatformModelsOrCatalog = (): ActivePlatform =>
-  usePlatformModels() ?? { provider: platformProviderId(), config: null };
+export const platformModels = (catalog: {
+  models: readonly (PublicCatalogModel & { hidden?: boolean })[];
+  defaultModelId: string;
+  autoModelIds?: readonly string[];
+}): PlatformModels => {
+  const models = pickableModels(catalog.models);
+  const promo = promoModelIds(catalog.models);
+  // Auto (#322) is offered only when the catalog has a model it routes builds to.
+  if (!autoRouteModel(models, "build", catalog.autoModelIds)) {
+    return { models, defaultModelId: catalog.defaultModelId, promoModelIds: promo };
+  }
+  return {
+    models: [AUTO_MODEL, ...models],
+    // Resolved before Auto joins the list, so a fallback default is never Auto.
+    defaultModelId: resolveCatalogModel({ models, defaultModelId: catalog.defaultModelId }, undefined).id,
+    promoModelIds: promo,
+  };
+};
+
+/**
+ * The models the user may pick (ADR 0010): everyone's, so a stored promo
+ * choice falls back instead of being refused on every send. Undefined while
+ * the catalog is loading.
+ */
+export const usePlatformModels = (): PlatformModels | undefined => {
+  const catalog = usePlatformCatalog();
+  return catalog && platformModels(catalog);
+};
+
+/** `usePlatformModels` for pickers: the env provider's catalog until the catalog loads. */
+export const usePlatformModelsOrCatalog = (): PlatformModels =>
+  platformModels(usePlatformCatalog() ?? envCatalog(platformProviderId()));
 
 export const useRemoveAiProviderKey = () => useMutation(api.aiProviders.remove);
 

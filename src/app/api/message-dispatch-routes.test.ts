@@ -1,16 +1,20 @@
+import { getFunctionName } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   query: vi.fn(),
   mutation: vi.fn(),
+  platform: vi.fn(),
   inngestSend: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/convex-client", async () => {
   const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
+  return {
+    convex: { query: withEnvPlatform(mocks.query, mocks.platform), mutation: mocks.mutation },
+  };
 });
 vi.mock("@/inngest/client", () => ({
   inngest: { send: mocks.inngestSend },
@@ -29,6 +33,7 @@ import {
   checkRateLimit,
   resetRateLimits,
 } from "@/lib/rate-limit";
+import { PROMO_ENDS_AT } from "@/features/promotions/github-promo";
 
 const post = (body: unknown) =>
   new Request("http://localhost/api", {
@@ -39,15 +44,16 @@ const post = (body: unknown) =>
 const routes = [
   {
     name: "messages",
-    call: (message = "Build a todo app") =>
-      messagesPOST(post({ conversationId: "c1", message })),
+    call: (message = "Build a todo app", model?: string) =>
+      messagesPOST(post({ conversationId: "c1", message, model })),
     successBody: { success: true, eventId: "evt_1", messageId: "m_assistant" },
     failureBody: { messageId: "m_assistant" },
     rateLimit: AGENT_MESSAGE_RATE_LIMIT,
   },
   {
     name: "projects/create-with-prompt",
-    call: (prompt = "Build a todo app") => createWithPromptPOST(post({ prompt })),
+    call: (prompt = "Build a todo app", model?: string) =>
+      createWithPromptPOST(post({ prompt, model })),
     successBody: { projectId: "p1" },
     failureBody: { projectId: "p1" },
     rateLimit: CREATE_WITH_PROMPT_RATE_LIMIT,
@@ -122,6 +128,79 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody, rate
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
 
+  describe("on a promo model (ADR 0009)", () => {
+    const OPUS = "anthropic/claude-opus-5.5";
+    const runArgs = { internalKey: "test-key", userId: "user_1", kind: "opus" };
+    const calledFn = (name: string) =>
+      mocks.mutation.mock.calls.filter(([ref]) => getFunctionName(ref) === name);
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(PROMO_ENDS_AT - 24 * 60 * 60 * 1000);
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      // The admin's catalog routes Opus to Anthropic, for promo claimants only.
+      const model = {
+        vendor: "v",
+        vision: true,
+        tools: "confirmed",
+        pricing: { mode: "blended", usdPerMTok: 1 },
+        hidden: false,
+      };
+      mocks.platform.mockReturnValue({
+        models: [
+          { ...model, id: "x-ai/grok-4.7", name: "Grok 4.7", provider: "openrouter", providerModelId: "x-ai/grok-4.7", access: "everyone" },
+          { ...model, id: OPUS, name: "Claude Opus 5.5", provider: "anthropic", providerModelId: "claude-opus-5-5", access: "promo_counted" },
+        ],
+        defaultModelId: "x-ai/grok-4.7",
+        utilityModelId: "x-ai/grok-4.7",
+      });
+      const answers: Record<string, unknown> = {
+        "promoClaims:getForServer": { opusRunsUsed: 0 },
+        "system:getOwnedConversation": { _id: "c1", projectId: "p1" },
+        "system:getProcessingMessages": [],
+      };
+      mocks.query.mockImplementation(async (ref) => answers[getFunctionName(ref)]);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("takes one Opus run and keeps it when the run starts", async () => {
+      const res = await call(undefined, OPUS);
+
+      expect(res.status).toBe(200);
+      expect(calledFn("promoClaims:takeRun").map(([, args]) => args)).toEqual([runArgs]);
+      expect(calledFn("promoClaims:refundRun")).toEqual([]);
+      // The message records the route's provider (ADR 0010).
+      expect(calledFn("system:createMessage").find(([, args]) => args.role === "assistant")?.[1])
+        .toMatchObject({
+          runModel: { modelId: OPUS, label: "Codenaya · Claude Opus 5.5", provider: "anthropic" },
+        });
+    });
+
+    it("gives the run back when creating the send throws", async () => {
+      const create = mocks.mutation.getMockImplementation()!;
+      mocks.mutation.mockImplementation(async (ref, args) => {
+        if (args.role === "user") throw new Error("Convex timeout");
+        return create(ref, args);
+      });
+
+      await expect(call(undefined, OPUS)).rejects.toThrow("Convex timeout");
+      expect(calledFn("promoClaims:refundRun").map(([, args]) => args)).toEqual([runArgs]);
+      expect(mocks.inngestSend).not.toHaveBeenCalled();
+    });
+
+    it("gives the run back when dispatch fails", async () => {
+      mocks.inngestSend.mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:8288"));
+
+      const res = await call(undefined, OPUS);
+
+      expect(res.status).toBe(502);
+      expect(calledFn("promoClaims:refundRun").map(([, args]) => args)).toEqual([runArgs]);
+    });
+  });
+
   it("marks the placeholder failed and returns 502 when dispatch throws", async () => {
     mocks.inngestSend.mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:8288"));
 
@@ -133,11 +212,13 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody, rate
       code: "dispatch_failed",
       ...failureBody,
     });
-    // `updateMessageContent` resolves the placeholder as completed with this text.
+    // `updateMessageContent` resolves the placeholder as completed with this
+    // text, and the run counts as failed in the activation events (#339).
     expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), {
       internalKey: "test-key",
       messageId: "m_assistant",
       content: DISPATCH_FAILED_MESSAGE,
+      outcome: "error",
     });
   });
 
@@ -153,6 +234,116 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody, rate
 
     expect(res.status).toBe(502);
     expect(await res.json()).toMatchObject({ code: "dispatch_failed" });
+  });
+});
+
+describe("POST /api/messages with Auto (#322)", () => {
+  const FIRST_BUILD = "projects:conversationNeedsFirstBuildForServer";
+  let firstBuild: () => Promise<boolean>;
+  const send = (model: string, message = "Make the header blue") =>
+    messagesPOST(post({ conversationId: "c1", message, model }));
+  const queried = (name: string) =>
+    mocks.query.mock.calls.filter(([ref]) => getFunctionName(ref) === name).map(([, args]) => args);
+  const recordedRunModel = () =>
+    mocks.mutation.mock.calls.find(([, args]) => args.role === "assistant")?.[1].runModel;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    resetRateLimits();
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.auth.mockResolvedValue({ userId: "user_1" });
+    firstBuild = async () => false;
+    const answers: Record<string, () => unknown> = {
+      [FIRST_BUILD]: () => firstBuild(),
+      "system:getOwnedConversation": () => ({ _id: "c1", projectId: "p1" }),
+      "system:getProcessingMessages": () => [],
+    };
+    mocks.query.mockImplementation(async (ref) => answers[getFunctionName(ref)]?.());
+    mocks.mutation.mockImplementation(async (_ref, args) =>
+      args.role === "assistant" ? "m_assistant" : null,
+    );
+    mocks.inngestSend.mockResolvedValue({ ids: ["evt_1"] });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("reads the first-build state and routes a short follow-up as an edit", async () => {
+    const res = await send("auto");
+
+    expect(res.status).toBe(200);
+    expect(queried(FIRST_BUILD)).toEqual([{ internalKey: "test-key", conversationId: "c1" }]);
+    expect(recordedRunModel()).toEqual({
+      modelId: "openai/gpt-6-luna",
+      label: "Auto · GPT-6 Luna",
+      provider: "openrouter",
+    });
+    // The run gets the concrete model, never "auto".
+    expect(mocks.inngestSend.mock.calls[0][0].data.model).toMatchObject({ modelId: "openai/gpt-6-luna" });
+  });
+
+  it("routes a short retry before the first build finished as a build", async () => {
+    firstBuild = async () => true;
+
+    await send("auto", "try again");
+
+    expect(recordedRunModel()).toMatchObject({ modelId: "anthropic/claude-sonnet-5.5" });
+  });
+
+  it("routes as a build when the first-build read fails", async () => {
+    firstBuild = async () => {
+      throw new Error("Convex unavailable");
+    };
+
+    const res = await send("auto");
+
+    expect(res.status).toBe(200);
+    expect(recordedRunModel()).toMatchObject({ label: "Auto · Claude Sonnet 5.5" });
+  });
+
+  it("refuses an image send when Auto's pool has no vision model, creating nothing", async () => {
+    const pooled = (id: string, vision: boolean) => ({
+      id,
+      name: id,
+      vendor: "v",
+      provider: "openrouter",
+      providerModelId: id,
+      vision,
+      tools: "confirmed",
+      pricing: { mode: "blended", usdPerMTok: 1 },
+      access: "everyone",
+      hidden: false,
+    });
+    mocks.platform.mockReturnValue({
+      models: [pooled("text-only", false), pooled("seer", true)],
+      defaultModelId: "seer",
+      utilityModelId: "seer",
+      autoModelIds: ["text-only"],
+    });
+
+    const res = await messagesPOST(
+      post({ conversationId: "c1", message: "Match this", model: "auto", images: ["data:image/png;base64,AA=="] }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "Auto has no image-capable model. Pick a model that can read images.",
+      code: "auto_no_vision_model",
+    });
+    expect(mocks.mutation).not.toHaveBeenCalled();
+    expect(mocks.inngestSend).not.toHaveBeenCalled();
+  });
+
+  it("makes no extra read for a model the user picked", async () => {
+    const res = await send("x-ai/grok-4.7");
+
+    expect(res.status).toBe(200);
+    expect(queried(FIRST_BUILD)).toEqual([]);
+    expect(recordedRunModel()).toMatchObject({ modelId: "x-ai/grok-4.7" });
   });
 });
 

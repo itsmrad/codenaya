@@ -254,6 +254,16 @@ export const SANDBOX_CREATE_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
+/**
+ * A secret scan reads every file and decrypts every secret env var. It runs
+ * once per ZIP, export or publish click, so twenty a minute is generous (#300).
+ */
+export const SECURITY_SCAN_RATE_LIMIT: RateLimitConfig = {
+  scope: "security-scan",
+  limit: 20,
+  windowMs: 60_000,
+};
+
 /** Each call creates a project and an import job (#242). */
 export const GITHUB_IMPORT_RATE_LIMIT: RateLimitConfig = {
   scope: "github-import",
@@ -268,12 +278,6 @@ export const ADMIN_MODELS_FETCH_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
-/** Switching the platform provider is one settings write; admin only. */
-export const ADMIN_PROVIDER_SWITCH_RATE_LIMIT: RateLimitConfig = {
-  scope: "admin-provider-switch",
-  limit: 10,
-  windowMs: 60_000,
-};
 
 /** Standard 429 response with a `Retry-After` header. */
 export function rateLimitedResponse(result: RateLimitResult): Response {

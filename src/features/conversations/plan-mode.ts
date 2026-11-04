@@ -1,3 +1,6 @@
+import { withErrorHints } from "../sandbox-preview/utils/error-recipes";
+import { STUCK_REASONS, type StuckRun } from "./agent-steps";
+
 /**
  * Plan mode (#120): the agent replies with a build plan and changes nothing.
  * Shared by the composer, the messages route and both message processors.
@@ -15,6 +18,7 @@ export type MessageMode = typeof PLAN_MODE;
 export const PLAN_MODE_TOOLS: ReadonlySet<string> = new Set([
   "listFiles",
   "readFiles",
+  "searchFiles",
   "scrapeUrls",
   "loadSkill",
 ]);
@@ -22,7 +26,7 @@ export const PLAN_MODE_TOOLS: ReadonlySet<string> = new Set([
 export const PLAN_MODE_PROMPT = `
 
 ## Plan mode
-The user wants a plan before anything is built. Do NOT create, edit, rename or delete files, and do not write code. You can only read: list and read the project's files, read URLs and load skills. Integration tools are unavailable.
+The user wants a plan before anything is built. Do NOT create, edit, rename or delete files, and do not write code. You can only read: list, search and read the project's files, read URLs and load skills. Integration tools are unavailable.
 
 Reply with a short build plan in Markdown, and nothing else:
 - One sentence on what will be built.
@@ -33,3 +37,20 @@ The user will review the plan and click "Build this plan" to have it built.`;
 
 /** The build request sent when the user accepts a plan. */
 export const buildPlanMessage = (plan: string) => `Build this plan:\n\n${plan}`;
+
+/**
+ * The plan-mode message "Diagnose in Plan mode" pre-fills for a stuck run
+ * (#306), with the likely cause of a known error (#334).
+ */
+export const diagnoseStuckMessage = (
+  stuck: Pick<StuckRun, "reason" | "error">,
+  filePath?: string,
+) =>
+  [
+    `The last run got stuck: ${STUCK_REASONS[stuck.reason]}.`,
+    stuck.error && withErrorHints(`The error:\n${stuck.error}`),
+    filePath && `File: ${filePath}`,
+    "Find the root cause before changing anything, and plan a different approach.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");

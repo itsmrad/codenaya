@@ -7,7 +7,7 @@ import { indentWithTab } from "@codemirror/commands";
 import { indentationMarkers } from "@replit/codemirror-indentation-markers";
 
 import { minimap } from "../extensions/minimap";
-import { customTheme, lightTheme } from "../extensions/theme";
+import { customTheme, darkCursorTheme, lightTheme } from "../extensions/theme";
 import { getLanguageExtension } from "../extensions/language-extension";
 import { customSetup } from "../extensions/custom-setup";
 import { suggestion } from "../extensions/suggestion";
@@ -17,8 +17,8 @@ import { selectionTooltip } from "../extensions/selection-tooltip";
 // Below this width the minimap takes too much of the code area.
 const MINIMAP_MIN_EDITOR_WIDTH = 600;
 
-const editorTheme = (resolvedTheme?: string) =>
-  resolvedTheme === "light" ? lightTheme : oneDark;
+export const editorTheme = (resolvedTheme?: string) =>
+  resolvedTheme === "light" ? lightTheme : [oneDark, darkCursorTheme];
 
 interface Props {
   fileName: string;

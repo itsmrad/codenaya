@@ -346,3 +346,6 @@ if (notFound) return notFound;
 | [0004](adr/0004-e2e-clerk-user-pool.md) | e2e tests sign in from a pool of Clerk test users |
 | [0005](adr/0005-platform-ai-provider-by-env.md) | Platform AI provider chosen by env; Workflow backend retired |
 | [0006](adr/0006-platform-provider-and-models-in-admin.md) | Platform provider and models set at runtime in /admin; env is the fallback |
+| [0008](adr/0008-file-contents-table.md) | A text file's content lives in `fileContents`, not on the `files` doc |
+| [0009](adr/0009-github-promotion-claims.md) | GitHub promotion: verified claims and a per-claim Opus run count |
+| [0011](adr/0011-credit-metering.md) | Credits metered per run at catalog prices; usage-based accounts with lazy monthly and daily resets |

@@ -36,7 +36,7 @@ The component tree uses these hooks internally; you can also import them elsewhe
 
 `useDeleteFile({ projectId, parentId })` — mutation that removes the item from the cache and closes any open editor tab for it.
 
-`useFiles(projectId)` / `useFile(fileId)` — flat file-list and single-file reads for use outside the explorer (breadcrumbs, editor, etc.).
+`useFiles(projectId)` / `useFile(fileId)` — flat file-list (metadata only) and single-file (with text) reads for use outside the explorer (breadcrumbs, editor, etc.). `useFilesWithContent(projectId)` — every file with its text, for the preview.
 
 `useFilePath(fileId)` — resolves the full path segment array for a file; useful for breadcrumb displays.
 

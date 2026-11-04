@@ -20,8 +20,9 @@ export const ThemeToggle = ({ className }: ThemeToggleProps) => {
   const { resolvedTheme, setTheme } = useTheme();
   const mounted = useSyncExternalStore(subscribe, () => true, () => false);
 
-  // Default to dark during SSR to prevent hydration flashes
-  const isDark = mounted ? resolvedTheme === "dark" : true;
+  // The theme is only known in the browser. Until then the switch keeps its
+  // space but stays invisible, so it never shows the wrong position.
+  const isDark = mounted && resolvedTheme === "dark";
 
   const toggleTheme = () => {
     setTheme(isDark ? "light" : "dark");
@@ -37,6 +38,7 @@ export const ThemeToggle = ({ className }: ThemeToggleProps) => {
       onClick={toggleTheme}
       className={cn(
         "relative inline-flex h-8 w-14 shrink-0 cursor-pointer items-center rounded-full border border-border/80 bg-secondary/80 p-0.5 transition-colors duration-200 hover:border-border hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        !mounted && "invisible",
         className,
       )}
     >

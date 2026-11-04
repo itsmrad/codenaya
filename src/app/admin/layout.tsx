@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { AppNavbar } from "@/components/app-navbar";
 import { AuthLoadingView } from "@/features/auth/components/auth-loading-view";
 import { ConvexAuthBoundary } from "@/features/auth/components/convex-auth-boundary";
+import { AdminNav } from "@/features/admin/components/admin-nav";
 import { adminOrNull } from "@/features/admin/server/require-admin";
 
 // Blocks on the session like the settings pages; see `instant` there.
@@ -17,7 +18,10 @@ const AdminContent = async ({ children }: { children: React.ReactNode }) => {
 
   return (
     <ConvexAuthBoundary>
-      <main className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 lg:py-10">{children}</main>
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 lg:flex-row lg:gap-10 lg:py-10">
+        <AdminNav />
+        <main className="min-w-0 flex-1 space-y-6">{children}</main>
+      </div>
     </ConvexAuthBoundary>
   );
 };

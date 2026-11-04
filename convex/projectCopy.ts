@@ -9,6 +9,7 @@ import {
   type MutationCtx,
 } from "./_generated/server";
 import { appError } from "./errors";
+import { insertFileContent, withContents } from "./fileContents";
 import { releaseStorageIfUnreferenced } from "./projectCascade";
 
 /**
@@ -48,16 +49,21 @@ export async function copyProjectFiles(
   const idMap = new Map<Id<"files">, Id<"files">>();
   const binaryFileIds: Id<"files">[] = [];
 
-  for (const file of sourceFiles) {
+  // ponytail: 5,000 files write up to 15k docs (file, content row, parent
+  // patch) of the 16k per transaction; insert parents first to drop the patch
+  // pass if MAX_COPY_FILES ever rises.
+  for (const file of await withContents(ctx, sourceId, sourceFiles)) {
     const newFileId = await ctx.db.insert("files", {
       projectId: targetId,
       parentId: undefined,
       name: file.name,
       type: file.type,
-      content: file.content,
       storageId: file.storageId,
       updatedAt: now,
     });
+    if (file.content !== undefined) {
+      await insertFileContent(ctx, newFileId, targetId, file.content);
+    }
     idMap.set(file._id, newFileId);
     if (file.storageId) {
       binaryFileIds.push(newFileId);

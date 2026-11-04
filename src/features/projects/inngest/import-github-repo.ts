@@ -6,9 +6,17 @@ import { convex } from "@/lib/convex-client";
 import { inngest } from "@/inngest/client";
 import { getJobGithubToken } from "@/features/projects/server/github-token";
 import { readRepoArchive } from "@/features/projects/server/github-archive";
+import { planSeedTree, type SeedFile } from "@/features/templates/seed-files";
 
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
+
+// ponytail: fixed caps, well inside Convex's 16 MiB args/writes and 4,096
+// queries per mutation (createFiles runs one sibling lookup per file).
+export const MAX_BATCH_FILES = 100;
+const MAX_BATCH_BYTES = 4 * 1024 * 1024;
+// A Convex document is capped at 1 MiB; a bigger file would fail its batch.
+export const MAX_TEXT_FILE_BYTES = 900 * 1024;
 
 interface ImportGithubRepoEvent {
   owner: string;
@@ -86,6 +94,8 @@ export const importGithubRepo = inngest.createFunction(
         });
       }
 
+      const textFiles: SeedFile[] = [];
+
       for (const file of files) {
         try {
           const buffer = file.content;
@@ -97,17 +107,7 @@ export const importGithubRepo = inngest.createFunction(
           const parentId = parentPath ? folderIdMap[parentPath] : undefined;
 
           if (isBinary) {
-            const uploadUrl = await convex.mutation(
-              api.system.generateUploadUrl,
-              { internalKey }
-            );
-
-            const { storageId } = await ky
-              .post(uploadUrl, {
-                headers: { "Content-Type": "application/octet-stream" },
-                body: buffer,
-              })
-              .json<{ storageId: Id<"_storage"> }>();
+            const storageId = await uploadBlob(internalKey, buffer);
 
             await convex.mutation(api.system.createBinaryFile, {
               internalKey,
@@ -118,17 +118,27 @@ export const importGithubRepo = inngest.createFunction(
             });
           } else {
             const content = buffer.toString("utf-8");
-
-            await convex.mutation(api.system.createFile, {
-              internalKey,
-              projectId,
-              name,
-              content,
-              parentId,
-            });
+            if (Buffer.byteLength(content) > MAX_TEXT_FILE_BYTES) {
+              console.error(`Failed to import file: ${file.path}`);
+            } else {
+              textFiles.push({ path: file.path, content });
+            }
           }
         } catch {
           console.error(`Failed to import file: ${file.path}`);
+        }
+      }
+
+      // One write per batch, not per file: each write re-runs every file-list
+      // subscriber (#411). A failed batch throws, and the retry starts clean.
+      for (const [folder, folderFiles] of planSeedTree(textFiles).filesByFolder) {
+        for (const batch of chunkFiles(folderFiles)) {
+          await convex.mutation(api.system.createFiles, {
+            internalKey,
+            projectId,
+            parentId: folder ? folderIdMap[folder] : undefined,
+            files: batch,
+          });
         }
       }
     });
@@ -144,3 +154,33 @@ export const importGithubRepo = inngest.createFunction(
     return { success: true, projectId };
   }
 );
+
+/** Stores a binary file's bytes in Convex storage. */
+export async function uploadBlob(internalKey: string, body: Buffer<ArrayBuffer>) {
+  const uploadUrl = await convex.mutation(api.system.generateUploadUrl, { internalKey });
+  const { storageId } = await ky
+    .post(uploadUrl, {
+      headers: { "Content-Type": "application/octet-stream" },
+      body,
+    })
+    .json<{ storageId: Id<"_storage"> }>();
+  return storageId;
+}
+
+/** Cuts a folder's files into batches within MAX_BATCH_FILES and MAX_BATCH_BYTES. */
+export function chunkFiles<T extends { content?: string }>(files: T[]) {
+  const batches: T[][] = [];
+  let bytes = 0;
+  for (const file of files) {
+    const size = Buffer.byteLength(file.content ?? "");
+    const batch = batches.at(-1);
+    if (batch && batch.length < MAX_BATCH_FILES && bytes + size <= MAX_BATCH_BYTES) {
+      batch.push(file);
+      bytes += size;
+    } else {
+      batches.push([file]);
+      bytes = size;
+    }
+  }
+  return batches;
+}

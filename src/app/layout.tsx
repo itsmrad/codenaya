@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Inter } from "next/font/google";
 import { Suspense } from "react";
+import { Analytics } from "@vercel/analytics/next";
 
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
 import { ShortcutsDialog } from "@/components/shortcuts-dialog";
+import { CommandPalette } from "@/features/projects/components/command-palette";
 import { AuthLoadingView } from "@/features/auth/components/auth-loading-view";
 import { AGENT_MODELS } from "@/features/conversations/agent-models";
 
@@ -91,8 +93,10 @@ export default function RootLayout({
             {children}
             <Toaster />
             <ShortcutsDialog />
+            <CommandPalette />
           </Providers>
         </Suspense>
+        <Analytics />
       </body>
     </html>
   );

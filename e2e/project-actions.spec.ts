@@ -5,17 +5,17 @@ import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
 
+// The Recent row repeats the newest cards, so lookups stay inside the grid.
+const projectsGrid = (page: Page) => page.getByRole("region", { name: "Your projects" });
+
 /** Opens the dashboard with the grid filtered down to `name`. */
 const openDashboard = async (page: Page, name: string) => {
   await page.goto("/");
-  await page
-    .getByRole("region", { name: "Your projects" })
-    .getByRole("searchbox", { name: "Search projects" })
-    .fill(name);
+  await projectsGrid(page).getByRole("searchbox", { name: "Search projects" }).fill(name);
 };
 
 const cardMenu = (page: Page, name: string) =>
-  page.getByRole("button", { name: `Actions for ${name}`, exact: true });
+  projectsGrid(page).getByRole("button", { name: `Actions for ${name}`, exact: true });
 
 const confirmDelete = async (page: Page) => {
   const dialog = page.getByRole("alertdialog");
@@ -62,7 +62,9 @@ test.describe("project actions", () => {
         ).toBe(true);
 
         // The copy has the same file tree.
-        await page.getByRole("link", { name: new RegExp(copyName.replace(/[()]/g, "\\$&")) }).click();
+        await projectsGrid(page)
+          .getByRole("link", { name: new RegExp(copyName.replace(/[()]/g, "\\$&")) })
+          .click();
         await page.waitForURL(/\/projects\//);
         const copyUrl = page.url();
         // Phones and tablets open on the chat, below desktop width.

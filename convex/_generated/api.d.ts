@@ -8,24 +8,29 @@
  * @module
  */
 
+import type * as activationEvents from "../activationEvents.js";
 import type * as admin from "../admin.js";
 import type * as aiProviders from "../aiProviders.js";
 import type * as auth from "../auth.js";
 import type * as chatImages from "../chatImages.js";
 import type * as checkpoints from "../checkpoints.js";
 import type * as conversations from "../conversations.js";
+import type * as credits from "../credits.js";
 import type * as crons from "../crons.js";
 import type * as envVars from "../envVars.js";
 import type * as errors from "../errors.js";
+import type * as fileContents from "../fileContents.js";
 import type * as files from "../files.js";
+import type * as githubSync from "../githubSync.js";
 import type * as http from "../http.js";
 import type * as integrations from "../integrations.js";
 import type * as internalKey from "../internalKey.js";
 import type * as maintenance from "../maintenance.js";
-import type * as platformModels from "../platformModels.js";
+import type * as platformCatalog from "../platformCatalog.js";
 import type * as projectCascade from "../projectCascade.js";
 import type * as projectCopy from "../projectCopy.js";
 import type * as projects from "../projects.js";
+import type * as promoClaims from "../promoClaims.js";
 import type * as showcase from "../showcase.js";
 import type * as skills from "../skills.js";
 import type * as stats from "../stats.js";
@@ -39,24 +44,29 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  activationEvents: typeof activationEvents;
   admin: typeof admin;
   aiProviders: typeof aiProviders;
   auth: typeof auth;
   chatImages: typeof chatImages;
   checkpoints: typeof checkpoints;
   conversations: typeof conversations;
+  credits: typeof credits;
   crons: typeof crons;
   envVars: typeof envVars;
   errors: typeof errors;
+  fileContents: typeof fileContents;
   files: typeof files;
+  githubSync: typeof githubSync;
   http: typeof http;
   integrations: typeof integrations;
   internalKey: typeof internalKey;
   maintenance: typeof maintenance;
-  platformModels: typeof platformModels;
+  platformCatalog: typeof platformCatalog;
   projectCascade: typeof projectCascade;
   projectCopy: typeof projectCopy;
   projects: typeof projects;
+  promoClaims: typeof promoClaims;
   showcase: typeof showcase;
   skills: typeof skills;
   stats: typeof stats;

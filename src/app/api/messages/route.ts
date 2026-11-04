@@ -11,9 +11,12 @@ import {
 import { convex } from "@/lib/convex-client";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import {
+  isAutoChoice,
   modelChoiceSchema,
   requireModelChoice,
+  takePromoRun,
 } from "@/features/ai-providers/server/resolve-run-model";
+import { classifyRun } from "@/features/ai-providers/auto-route";
 import {
   DISPATCH_FAILED_ERROR,
   cancelProcessingMessage,
@@ -34,6 +37,8 @@ const requestSchema = z.object({
   images: z.array(z.string()).max(MAX_CHAT_IMAGES).optional(),
   // Plan mode (#120): the agent replies with a plan and writes nothing.
   mode: z.literal(PLAN_MODE).optional(),
+  // A fix request ("Fix with AI" #223, loop-breaker retry #306): Auto routes it to the fix model.
+  source: z.literal("fix").optional(),
 });
 
 export async function POST(request: Request) {
@@ -63,7 +68,7 @@ export async function POST(request: Request) {
     return invalid;
   }
 
-  const { conversationId, message, model, images, mode } = data;
+  const { conversationId, message, model, images, mode, source } = data;
 
   if (detectCredential(message).detected) {
     return NextResponse.json(
@@ -76,15 +81,37 @@ export async function POST(request: Request) {
     );
   }
 
+  // Auto (#322) routes by task, which needs one more read: alongside the
+  // ownership check. A failed read (or a malformed id, which fails that check)
+  // is a build.
+  const autoTask = async () =>
+    isAutoChoice(model)
+      ? classifyRun({
+          planMode: mode === PLAN_MODE,
+          hasImages: Boolean(images?.length),
+          source,
+          firstBuild: await convex
+            .query(api.projects.conversationNeedsFirstBuildForServer, {
+              internalKey,
+              conversationId: conversationId as Id<"conversations">,
+            })
+            .catch(() => true),
+          message,
+        })
+      : undefined;
+
   // Independent reads, in parallel: each Convex round-trip delays the send.
-  const [{ runModel, rejected }, { found: conversation, notFound }] =
+  const [{ runModel, promoKind, rejected }, { found: conversation, notFound }] =
     await Promise.all([
-      requireModelChoice({
-        internalKey,
-        userId,
-        model,
-        withImages: Boolean(images?.length),
-      }),
+      autoTask().then((task) =>
+        requireModelChoice({
+          internalKey,
+          userId,
+          model,
+          withImages: Boolean(images?.length),
+          task,
+        }),
+      ),
       requireOwnedConversation({
         internalKey,
         userId,
@@ -100,81 +127,100 @@ export async function POST(request: Request) {
     return notFound;
   }
 
-  const projectId = conversation.projectId;
-
-  // Find all processing messages in this project
-  const processingMessages = await convex.query(
-    api.system.getProcessingMessages,
-    {
-      internalKey,
-      projectId,
-    }
-  );
-
-  if (processingMessages.length > 0) {
-    // Cancel all processing messages
-    await Promise.all(
-      processingMessages.map((msg) =>
-        cancelProcessingMessage({ internalKey, messageId: msg._id })
-      )
-    );
-  }
-
-  // Create user message
-  await convex.mutation(api.system.createMessage, {
+  // After the ownership check and before anything changes (ADR 0009).
+  const { promoRun, rejected: promoRejected } = await takePromoRun({
     internalKey,
-    conversationId: conversation._id,
-    projectId,
-    role: "user",
-    content: message,
-    // Only sent with images: only the sender's own uploads can be attached.
-    ...(images?.length
-      ? { images: images as Id<"_storage">[], ownerId: userId }
-      : {}),
+    userId,
+    promoKind,
   });
 
-  // Create assistant message placeholder with processing status
-  const assistantMessageId = await convex.mutation(
-    api.system.createMessage,
-    {
+  if (promoRejected) {
+    return promoRejected;
+  }
+
+  // A send that fails before its agent run starts gives its promo run back.
+  try {
+    const projectId = conversation.projectId;
+
+    // Find all processing messages in this project
+    const processingMessages = await convex.query(
+      api.system.getProcessingMessages,
+      {
+        internalKey,
+        projectId,
+      }
+    );
+
+    if (processingMessages.length > 0) {
+      // Cancel all processing messages
+      await Promise.all(
+        processingMessages.map((msg) =>
+          cancelProcessingMessage({ internalKey, messageId: msg._id })
+        )
+      );
+    }
+
+    // Create user message
+    await convex.mutation(api.system.createMessage, {
       internalKey,
       conversationId: conversation._id,
       projectId,
-      role: "assistant",
-      content: "",
-      status: "processing",
-      runModel,
-      mode,
-    }
-  );
+      role: "user",
+      content: message,
+      // Only sent with images: only the sender's own uploads can be attached.
+      ...(images?.length
+        ? { images: images as Id<"_storage">[], ownerId: userId }
+        : {}),
+    });
 
-  // Trigger the configured message processor (Inngest or Vercel Workflow)
-  const dispatch = await dispatchProcessMessageOrFail({
-    internalKey,
-    messageId: assistantMessageId,
-    conversationId: conversation._id,
-    projectId,
-    ownerId: userId,
-    message,
-    model: runModel,
-    mode,
-  });
-
-  if (!dispatch) {
-    return NextResponse.json(
+    // Create assistant message placeholder with processing status
+    const assistantMessageId = await convex.mutation(
+      api.system.createMessage,
       {
-        error: DISPATCH_FAILED_ERROR,
-        code: "dispatch_failed",
-        messageId: assistantMessageId,
-      },
-      { status: 502 },
+        internalKey,
+        conversationId: conversation._id,
+        projectId,
+        role: "assistant",
+        content: "",
+        status: "processing",
+        runModel,
+        mode,
+      }
     );
-  }
 
-  return NextResponse.json({
-    success: true,
-    backend: dispatch.backend,
-    eventId: dispatch.eventId,
-    messageId: assistantMessageId,
-  });
+    // Trigger the configured message processor (Inngest or Vercel Workflow)
+    const dispatch = await dispatchProcessMessageOrFail({
+      internalKey,
+      messageId: assistantMessageId,
+      conversationId: conversation._id,
+      projectId,
+      ownerId: userId,
+      message,
+      model: runModel,
+      mode,
+    });
+
+    if (!dispatch) {
+      // The user retries from the chat; that send takes its own run.
+      await promoRun.refund();
+      return NextResponse.json(
+        {
+          error: DISPATCH_FAILED_ERROR,
+          code: "dispatch_failed",
+          messageId: assistantMessageId,
+        },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      backend: dispatch.backend,
+      eventId: dispatch.eventId,
+      messageId: assistantMessageId,
+    });
+  } catch (error) {
+    await promoRun.refund();
+    throw error;
+  }
 };

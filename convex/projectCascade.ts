@@ -157,6 +157,12 @@ export async function deleteProjectBatch(
   ctx: MutationCtx,
   projectId: Id<"projects">,
 ): Promise<boolean> {
+  const contents = await ctx.db
+    .query("fileContents")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "fileContents", contents)) return false;
+
   const files = await ctx.db
     .query("files")
     .withIndex("by_project", (q) => q.eq("projectId", projectId))
