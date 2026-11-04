@@ -82,14 +82,16 @@ const RenderCell = ({ value, isCodenaya }: { value: boolean | string; isCodenaya
   if (value === true) {
     return (
       <div className={`inline-flex items-center justify-center size-6 rounded-full ${isCodenaya ? "bg-brand/20 text-brand" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"}`}>
-        <Check className="size-4 stroke-[2.5]" />
+        <Check aria-hidden className="size-4 stroke-[2.5]" />
+        <span className="sr-only">Yes</span>
       </div>
     );
   }
   if (value === false) {
     return (
       <div className="inline-flex items-center justify-center size-6 rounded-full bg-muted text-muted-foreground/60">
-        <X className="size-3.5" />
+        <X aria-hidden className="size-3.5" />
+        <span className="sr-only">No</span>
       </div>
     );
   }

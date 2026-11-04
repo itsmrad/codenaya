@@ -218,8 +218,13 @@ export const LandingPlayground = () => {
 
   const current = MODES[activeMode];
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(current.code);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(current.code);
+    } catch {
+      // Denied, or no clipboard outside a secure context: don't claim success.
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -230,7 +235,7 @@ export const LandingPlayground = () => {
         {/* Section Heading */}
         <div className="text-center mb-10 md:mb-14">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-brand/20 bg-brand/10 text-xs font-mono text-brand-text mb-4">
-            <span className="size-1.5 rounded-full bg-brand animate-pulse" />
+            <span className="size-1.5 rounded-full bg-brand animate-pulse motion-reduce:animate-none" />
             Interactive Developer Studio
           </div>
           <h2 className="text-3xl md:text-5xl font-bold tracking-tight text-foreground">
@@ -326,7 +331,7 @@ export const LandingPlayground = () => {
               <p className="text-sm font-medium text-foreground truncate">{current.prompt}</p>
             </div>
             <div className="hidden lg:flex items-center gap-1.5 text-xs text-brand-text font-mono shrink-0">
-              <span className="size-2 rounded-full bg-brand animate-ping" />
+              <span className="size-2 rounded-full bg-brand animate-ping motion-reduce:animate-none" />
               Agent Active
             </div>
           </div>
@@ -452,7 +457,7 @@ export const LandingPlayground = () => {
                     <div className="w-full max-w-md p-6 rounded-2xl border border-border/80 bg-card shadow-lg space-y-4 text-left">
                       <div className="flex items-center justify-between border-b border-border/50 pb-3">
                         <div className="flex items-center gap-2">
-                          <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                          <span className="size-2 rounded-full bg-emerald-500 animate-pulse motion-reduce:animate-none" />
                           <span className="text-xs font-mono font-medium text-foreground">Sandbox Live Preview</span>
                         </div>
                         <span className="text-[11px] font-mono text-muted-foreground">localhost:5173</span>
@@ -512,8 +517,6 @@ export const LandingPlayground = () => {
                           className={
                             line.startsWith("$")
                               ? "text-emerald-400 font-bold"
-                              : line.includes("error") || line.includes("Error")
-                              ? "text-red-400"
                               : line.startsWith("[agent]")
                               ? "text-brand"
                               : line.startsWith("[firecrawl]")
@@ -525,7 +528,7 @@ export const LandingPlayground = () => {
                         </div>
                       ))}
                       <div className="flex items-center gap-1.5 pt-2 text-neutral-500">
-                        <span className="size-1.5 rounded-full bg-emerald-400 animate-ping" />
+                        <span className="size-1.5 rounded-full bg-emerald-400 animate-ping motion-reduce:animate-none" />
                         <span>Ready for next prompt</span>
                       </div>
                     </div>

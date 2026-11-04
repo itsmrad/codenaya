@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useTheme } from "next-themes";
 import { SmoothScrollProvider } from "@/components/smooth-scroll-provider";
 import { MarketingNavbar } from "@/components/marketing-navbar";
 import { SideGlyphs } from "./side-glyphs";
@@ -18,9 +19,15 @@ import { LandingCTA } from "./cta-section";
 import { LandingFooter } from "./footer";
 
 export const LandingPage = () => {
+  // The user's theme (next-themes, attribute="class"), restored on leaving.
+  const { resolvedTheme } = useTheme();
+  const themeRef = useRef(resolvedTheme);
+  useEffect(() => {
+    themeRef.current = resolvedTheme;
+  }, [resolvedTheme]);
+
   useEffect(() => {
     const root = document.documentElement;
-    const wasDark = root.classList.contains("dark");
     root.classList.remove("dark");
     root.classList.add("light");
 
@@ -40,10 +47,8 @@ export const LandingPage = () => {
 
     return () => {
       observer.disconnect();
-      if (wasDark) {
-        root.classList.add("dark");
-        root.classList.remove("light");
-      }
+      root.classList.remove("light", "dark");
+      if (themeRef.current) root.classList.add(themeRef.current);
     };
   }, []);
 
