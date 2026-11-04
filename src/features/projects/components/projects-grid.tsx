@@ -17,7 +17,7 @@ import { useIsMac } from "@/lib/hooks/use-is-mac";
 import { Doc } from "../../../../convex/_generated/dataModel";
 import { ProjectCard } from "./project-card";
 
-const SORTS = {
+export const SORTS = {
   updated: { label: "Last edited", compare: (a: Doc<"projects">, b: Doc<"projects">) => b.updatedAt - a.updatedAt },
   created: { label: "Newest", compare: (a: Doc<"projects">, b: Doc<"projects">) => b._creationTime - a._creationTime },
   name: { label: "Name", compare: (a: Doc<"projects">, b: Doc<"projects">) => a.name.localeCompare(b.name) },

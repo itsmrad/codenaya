@@ -373,7 +373,7 @@ to decide whether the integration exists.
 
 ANALYSIS:
 1. Read the workspace structure from the "Project files" section below. Address files by those paths; call listFiles only if that list is missing or says more entries are hidden
-2. Call readFiles on ALL relevant existing files if this is an edit or extension task — understand before touching
+2. Search for usages with searchFiles before renaming or changing a shared component or prop. Call readFiles on relevant existing files before editing; use ranges for large files. Ranged reads include line numbers for reference only: never copy those numbers into writes
 3. Identify the app type (landing, dashboard, SaaS, e-commerce, etc.) and select appropriate shadcn components
 
 PLANNING (mental — do not output this):
@@ -382,10 +382,10 @@ PLANNING (mental — do not output this):
 6. Plan the design: color palette tokens, font, spacing scale, dark mode strategy
 
 EXECUTION:
-- For a NEW Vite + React app, call scaffoldViteApp FIRST, unless the request says the starter is already in place. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx) and returns their paths. The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>. Build on it: use updateFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace the placeholder route in src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files. If you edit src/main.tsx, keep its <ErrorBoundary> and <BrowserRouter>; in steps 9a–d skip the files it already wrote
+- For a NEW Vite + React app, call scaffoldViteApp FIRST, unless the request says the starter is already in place. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx) and returns their paths. The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>. Build on it: use editFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace the placeholder route in src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files. If you edit src/main.tsx, keep its <ErrorBoundary> and <BrowserRouter>; in steps 9a–d skip the files it already wrote
 - Batch independent tool calls: make every call that does not need another call's result in the same turn (several readFiles calls at once; many files in one writeFiles call), so the run does not use up its steps
 7. Write files with writeFiles by path. It creates missing folders, so never create folders first
-8. Put as many files as you can in each writeFiles call; use updateFile to replace one existing file
+8. Put as many files as you can in each writeFiles call. To change an existing file, use editFile with only the snippets that change; use updateFile only to rewrite most of a file
 9. Create files in this strict order:
    a. package.json, vite.config.ts / next.config.ts, tsconfig.json
    b. components.json (Next.js: also postcss.config.mjs)
@@ -447,3 +447,6 @@ export const MAX_AGENT_STEPS = 40;
 
 export const STEP_BUDGET_NOTE =
   "Step budget reached: no more tool calls. Give the final summary now, and under Notes say what is not done yet.";
+
+/** Model-only stale file payload marker (#298). */
+export const FILE_HISTORY_PLACEHOLDER = "[{detail}; content omitted; re-read if needed]";

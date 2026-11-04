@@ -35,6 +35,8 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectFiles": () => [],
   "system:getProjectFilesWithUrls": () => [],
   "system:getProjectSkills": () => [],
+  // The deleteFiles calls below must succeed: a failed write doesn't count for the build-check gate.
+  "system:getFileById": () => ({ _id: "f1", name: "old.ts", type: "file" }),
 };
 
 interface ChatBody {

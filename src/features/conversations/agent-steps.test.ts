@@ -69,6 +69,15 @@ describe("describeToolCall", () => {
     ).toEqual(["src/App.jsx", "Main.jsx"]);
   });
 
+  it("names the edited file's path", () => {
+    expect(
+      describeToolCall(
+        { name: "editFile", input: { path: "src/App.jsx", edits: [{ oldText: "a", newText: "b" }] } },
+        pathOf,
+      ),
+    ).toEqual(["src/App.jsx"]);
+  });
+
   it("names path inputs (#292), normalized and without invalid ones", () => {
     expect(
       describeToolCall({ name: "readFiles", input: { paths: ["./src/a.ts", "../x", "src/"] } }, pathOf),
@@ -267,6 +276,12 @@ describe("runWaitHint", () => {
     expect(runWaitHint({ startedAt: 0, steps: [], now: FIRST_STEP_HINT_MS })).toMatch(/^Planning the work/);
   });
 
+  it("holds the planning hint off while thinking steps keep arriving", () => {
+    const thinking: AgentStep = { id: "th", kind: "thinking", status: "done", startedAt: 19_000, endedAt: 19_000 };
+    expect(runWaitHint({ startedAt: 0, steps: [thinking], now: FIRST_STEP_HINT_MS })).toBeUndefined();
+    expect(runWaitHint({ startedAt: 0, steps: [thinking], now: 19_000 + FIRST_STEP_HINT_MS })).toMatch(/^Planning the work/);
+  });
+
   it("drops the planning hint once a tool step arrives, while the run keeps moving", () => {
     expect(runWaitHint({ startedAt: 0, steps: [tool(30_000)], now: 40_000 })).toBeUndefined();
   });
@@ -323,4 +338,8 @@ describe("writtenFilePaths", () => {
       ]),
     ).toEqual([]);
   });
+});
+
+it("describes search patterns as labels rather than file paths (#296)", () => {
+  expect(describeToolCall({ name: "searchFiles", input: { pattern: "src/component", pathGlob: "**/*.ts" } }, () => undefined)).toEqual(["src/component"]);
 });

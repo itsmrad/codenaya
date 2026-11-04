@@ -58,7 +58,7 @@ export const createScaffoldViteAppTool = ({
           return [
             `Scaffolded the Vite + React starter. Created: ${created.join(", ") || "nothing"}.`,
             kept.length > 0 ? `Kept existing: ${kept.join(", ")}.` : "",
-            "Extend package.json with updateFile, keeping every package it lists: the starter's config and entry files import them.",
+            "Extend package.json with editFile, keeping every package it lists: the starter's config and entry files import them.",
           ]
             .filter(Boolean)
             .join("\n");
