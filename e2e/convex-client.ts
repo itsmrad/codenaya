@@ -18,18 +18,23 @@ export const userConvexClient = async (page: Page) => {
   return client;
 };
 
+/** Far more batches than any fixture project needs; past it, cleanup is stuck. */
+const MAX_CLEANUP_BATCHES = 100;
+
 /**
  * Empties a project. `system.cleanup` deletes in batches (file text first,
  * #412), so one call can leave files behind and a reseed then fails with
- * "File already exists" (#469). Calls it until it reports done.
+ * "File already exists" (#469). Calls it until it reports done, and fails
+ * loudly instead of hanging if it never does.
  */
 export const cleanupProject = async (
   system: ConvexHttpClient,
   internalKey: string,
   projectId: Id<"projects">,
 ) => {
-  let result;
-  do {
-    result = await system.mutation(api.system.cleanup, { internalKey, projectId });
-  } while (!result.done);
+  for (let batch = 0; batch < MAX_CLEANUP_BATCHES; batch++) {
+    const { done } = await system.mutation(api.system.cleanup, { internalKey, projectId });
+    if (done) return;
+  }
+  throw new Error(`system.cleanup did not finish project ${projectId} in ${MAX_CLEANUP_BATCHES} batches`);
 };
