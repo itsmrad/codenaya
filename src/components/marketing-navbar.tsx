@@ -20,6 +20,7 @@ import { SIGN_IN_URL, SIGN_UP_URL } from "@/features/auth/constants";
 import { CodenayaLogo } from "@/components/codenaya-logo";
 import { CustomCursor } from "@/components/ui/custom-cursor";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "./theme-toggle";
 
 import { UserMenu } from "./user-menu";
 
@@ -114,6 +115,7 @@ export const MarketingNavbar = ({ overlay = false }: MarketingNavbarProps) => {
           </div>
 
           <div className="hidden md:flex items-center gap-1.5">
+            <ThemeToggle />
             {isSignedIn === true && (
               <>
                 <Button asChild variant="ghost" className={pillButton}>
@@ -138,7 +140,9 @@ export const MarketingNavbar = ({ overlay = false }: MarketingNavbarProps) => {
             )}
           </div>
 
+          {/* One toggle on phones, in the bar: not repeated in the drawer. */}
           <div className="flex items-center gap-1 md:hidden">
+            <ThemeToggle />
             {isSignedIn === true && <UserMenu avatarClassName="size-7" />}
             <Sheet>
               <SheetTrigger asChild>
