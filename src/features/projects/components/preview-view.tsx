@@ -173,9 +173,7 @@ export const PreviewView = ({
 
   const isLoading = status === "booting" || status === "installing";
   const building =
-    firstBuild && activeRun && files ? (
-      <PreviewBuilding steps={activeRun.steps} files={files} />
-    ) : null;
+    firstBuild && activeRun ? <PreviewBuilding steps={activeRun.steps} /> : null;
   const content = (
     <PreviewContent
       onPreviewLoad={handlePreviewLoad}

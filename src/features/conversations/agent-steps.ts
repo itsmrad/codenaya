@@ -341,3 +341,55 @@ export const LOST_RUN_MESSAGE =
 /** Latest sign of progress in a run: its start, or any step starting or ending. */
 export const lastRunActivity = (startedAt: number, steps: AgentStep[]) =>
   Math.max(startedAt, ...steps.map((step) => step.endedAt ?? step.startedAt));
+
+/** A live run with no step yet gets a planning hint after this long (#478). */
+export const FIRST_STEP_HINT_MS = 20_000;
+
+/** A live run with no progress for this long is called slow, ahead of the stall. */
+export const SLOW_RUN_MS = 2 * 60_000;
+
+/**
+ * A short, time-based status line for a live run that has gone quiet (#478),
+ * or undefined while it is making progress. Past `STALLED_RUN_MS` the run row
+ * reports the stall itself.
+ */
+export const runWaitHint = ({
+  startedAt,
+  steps,
+  now,
+}: {
+  startedAt: number;
+  steps: AgentStep[];
+  now: number;
+}) => {
+  const quietFor = now - lastRunActivity(startedAt, steps);
+  if (quietFor >= SLOW_RUN_MS) {
+    return "Taking longer than usual. You can keep waiting, or stop it and try again.";
+  }
+  // From the latest progress, so a thinking step that just arrived holds it off.
+  if (!steps.some((step) => step.kind === "tool") && quietFor >= FIRST_STEP_HINT_MS) {
+    return "Planning the work. The first step can take a minute or two.";
+  }
+  return undefined;
+};
+
+/** Write tools whose targets aren't files with new content. */
+const NO_CONTENT_WRITES: ReadonlySet<string> = new Set(["renameFile", "deleteFiles"]);
+
+/**
+ * Paths the run's finished steps wrote, newest first, each once (#478). Any
+ * tool in FILE_WRITE_TOOLS counts, so a new write tool is listed with no change here.
+ */
+export const writtenFilePaths = (steps: AgentStep[]) => [
+  ...new Set(
+    steps
+      .filter(
+        (step) =>
+          step.status === "done" &&
+          FILE_WRITE_TOOLS.has(step.tool ?? "") &&
+          !NO_CONTENT_WRITES.has(step.tool ?? ""),
+      )
+      .flatMap((step) => step.targets ?? [])
+      .reverse(),
+  ),
+];
