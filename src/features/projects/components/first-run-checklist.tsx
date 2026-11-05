@@ -1,10 +1,10 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useQuery } from "convex/react";
 import { useUser } from "@clerk/nextjs";
-import { CheckCircle2Icon, ChevronRightIcon, CircleIcon, XIcon } from "lucide-react";
+import { CheckCircle2Icon, ChevronDownIcon, ChevronRightIcon, CircleIcon, XIcon } from "lucide-react";
 
 import { Progress } from "@/components/ui/progress";
 import { ACCOUNT_SETTINGS_URL, AI_PROVIDERS_SETTINGS_URL } from "@/features/settings/nav";
@@ -34,6 +34,7 @@ interface FirstRunChecklistProps {
 /**
  * "Get started" card on the dashboard: five steps whose state comes from the
  * user's real data. Hidden once every step is done or the user dismisses it.
+ * Once the user has a project it starts as a one-line pill that expands.
  */
 export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistProps) => {
   const { user } = useUser();
@@ -45,6 +46,13 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
     () => null,
   );
   const previewOpened = useSyncExternalStore(subscribe, hasOpenedPreview, () => false);
+  const [expanded, setExpanded] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  // Expanding unmounts the focused pill; keep keyboard focus on the card.
+  useEffect(() => {
+    if (expanded) headingRef.current?.focus();
+  }, [expanded]);
 
   const active = dismissed === false;
   const aiKeys = useQuery(api.aiProviders.list, active ? {} : "skip");
@@ -77,6 +85,28 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
     { id: "ship", label: "Publish or export to GitHub", href: latestProject },
   ];
 
+  if (projects.length > 0 && !expanded) {
+    return (
+      <button
+        onClick={() => setExpanded(true)}
+        className="group flex h-8 w-fit items-center gap-2 rounded-full border border-border/60 bg-card px-3 text-xs text-muted-foreground transition-colors hover:border-brand/40 hover:text-foreground"
+      >
+        <Progress
+          aria-hidden
+          value={(doneCount / steps.length) * 100}
+          className="h-1 w-10 bg-muted [&>[data-slot=progress-indicator]]:bg-brand"
+        />
+        <span className="sr-only">Getting started:</span>
+        <span className="font-medium tabular-nums text-foreground">
+          {doneCount} of {steps.length}
+        </span>
+        <span aria-hidden>·</span>
+        Continue setup
+        <ChevronDownIcon aria-hidden className="size-3.5" />
+      </button>
+    );
+  }
+
   const handleDismiss = () => {
     dismissFirstRun(user.id);
     listeners.forEach((listener) => listener());
@@ -86,7 +116,12 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
     <section aria-labelledby="first-run-heading" className="border-b border-border">
       <div className="flex items-start justify-between gap-3 px-6 pt-8 md:px-8">
         <div className="min-w-0">
-          <h2 id="first-run-heading" className="text-base font-semibold tracking-tight">
+          <h2
+            id="first-run-heading"
+            ref={headingRef}
+            tabIndex={-1}
+            className="text-base font-semibold tracking-tight outline-none"
+          >
             Get started with Codenaya
           </h2>
           <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">

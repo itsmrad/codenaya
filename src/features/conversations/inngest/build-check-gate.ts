@@ -7,12 +7,17 @@ import { BUILD_CHECK_UNFINISHED, toolResultError } from "../agent-steps";
 
 /** Tools that change what the build sees. */
 const WRITE_TOOLS = new Set([
+  "writeFiles",
   "createFiles",
   "updateFile",
+  "editFile",
   "renameFile",
   "deleteFiles",
   "scaffoldViteApp",
 ]);
+
+/** Write tools that make at most one (transactional) mutation, so an error result means nothing changed. */
+const ATOMIC_WRITE_TOOLS = new Set(["updateFile", "editFile", "renameFile"]);
 
 /** One check plus the two fix attempts the prompt allows. */
 export const MAX_BUILD_CHECKS = 3;
@@ -27,12 +32,19 @@ type ToolCalls = { toolCalls: Array<{ tool: { name: string }; content: unknown }
  * Whether files changed after the last checkBuild that passed or could not
  * run, with a check left to spend.
  */
+/** Whether a write in the run succeeded: a seeded project's first build is done (#338). */
+export const wroteFiles = (results: ToolCalls[]) =>
+  results.some(({ toolCalls }) =>
+    toolCalls.some(({ tool, content }) => WRITE_TOOLS.has(tool.name) && toolResultError(content) === undefined),
+  );
+
 export const hasUncheckedWrites = (results: ToolCalls[]) => {
   let unchecked = false;
   let checks = 0;
   for (const { tool, content } of results.flatMap((result) => result.toolCalls)) {
     if (WRITE_TOOLS.has(tool.name)) {
-      unchecked = true;
+      // Multi-mutation tools may have written some files before failing.
+      if (!ATOMIC_WRITE_TOOLS.has(tool.name) || toolResultError(content) === undefined) unchecked = true;
     } else if (tool.name === "checkBuild") {
       checks += 1;
       // A check that could not run is not retried: the agent reports it instead.

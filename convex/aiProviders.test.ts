@@ -245,7 +245,7 @@ describe("aiProviders", () => {
     const keyId = await createKey(t, ALICE);
     const { projectId, conversationId } = await t.mutation(
       api.system.createProjectWithConversation,
-      { internalKey: INTERNAL_KEY, projectName: "p", conversationTitle: "New", ownerId: ALICE },
+      { internalKey: INTERNAL_KEY, projectName: "p", conversationTitle: "New", ownerId: ALICE, source: "dashboard" },
     );
 
     const runModel = { keyId, modelId: "gpt-5.6-luna", label: "OpenAI · GPT-5.6 Luna" };

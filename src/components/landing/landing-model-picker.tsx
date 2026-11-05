@@ -13,7 +13,6 @@ import { MenuHeader } from "@/components/menu-chrome";
 import { VendorIcon } from "@/components/vendor-icon";
 import { cn } from "@/lib/utils";
 
-const NO_PROMO = { claimed: false, active: false, countedRunsLeft: 0 };
 const ENV_CATALOG = envCatalog(platformProviderId());
 
 /** The model chip in the landing prompt box's header. */
@@ -22,7 +21,7 @@ export const LandingModelPicker = () => {
   // else the env catalog's. The pick is saved where the dashboard reads it.
   const saved = useQuery(api.platformCatalog.getForVisitors);
   const catalog: { models: readonly PublicCatalogModel[]; defaultModelId: string } = saved ?? ENV_CATALOG;
-  const models = pickableModels(catalog.models, NO_PROMO);
+  const models = pickableModels(catalog.models);
   const stored = useStoredAgentModel();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);

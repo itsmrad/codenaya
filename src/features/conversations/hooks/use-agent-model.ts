@@ -1,4 +1,5 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
+import { toast } from "sonner";
 
 import { modelIdsFor } from "@/features/ai-providers/registry";
 import {
@@ -17,6 +18,9 @@ import type { AiProviderKeySummary } from "../../../../convex/aiProviders";
 import type { AgentModelChoice } from "../agent-models";
 
 const STORAGE_KEY = "codenaya:agent-model";
+
+const PROMO_ENDED_NOTICE =
+  "The free Claude promotion has ended, so we switched you to your default model.";
 
 // In-memory copy so the choice still sticks for the session when storage is
 // unavailable (private mode, blocked site data). `undefined` means "not read
@@ -88,9 +92,8 @@ export function setModel(model: AgentModelChoice) {
 
 /**
  * Whether a choice can still be sent: one of the platform models the user may
- * pick (promo models included while their claim can run them), or a model of
- * one of the user's keys. While any of the lists is loading the choice is
- * kept; the server validates it either way.
+ * pick, or a model of one of the user's keys. While any of the lists is
+ * loading the choice is kept; the server validates it either way.
  */
 function isAvailable(
   choice: AgentModelChoice,
@@ -139,6 +142,21 @@ export function useAgentModel() {
         undefined,
       ).id,
     };
+
+  // A pick saved during the ended GitHub promotion (ADR 0009): say so once and
+  // save the fallback, after the keys and preferences that decide it load.
+  const endedPromoPick =
+    stored !== null &&
+    !stored.keyId &&
+    platform?.promoModelIds.includes(stored.modelId) === true &&
+    keys !== undefined &&
+    preferences !== undefined;
+  const { keyId, modelId } = model;
+  useEffect(() => {
+    if (!endedPromoPick) return;
+    setModel(keyId ? { keyId, modelId } : { modelId });
+    toast.info(PROMO_ENDED_NOTICE, { id: "promo-ended" });
+  }, [endedPromoPick, keyId, modelId]);
 
   return [model, setModel] as const;
 }

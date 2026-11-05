@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   PROMO_ENDS_AT,
-  PROMO_ENDS_LABEL,
   PROMO_OPUS_RUN_LIMIT,
   isGithubAccountOldEnough,
   isPromoActive,
@@ -18,7 +17,6 @@ describe("github promo rules", () => {
     expect(new Date(PROMO_ENDS_AT).toISOString()).toBe("2026-11-01T00:00:00.000Z");
     expect(isPromoActive(PROMO_ENDS_AT - 1)).toBe(true);
     expect(isPromoActive(PROMO_ENDS_AT)).toBe(false);
-    expect(PROMO_ENDS_LABEL).toBe("Nov 1, 00:00 UTC");
   });
 
   it("needs a GitHub account at least 365 days old", () => {

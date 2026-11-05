@@ -6,12 +6,6 @@ import { ArrowRight } from "lucide-react";
 
 import { MarketingNavbar } from "@/components/marketing-navbar";
 import { SmoothScrollProvider } from "@/components/smooth-scroll-provider";
-import {
-  PROMO_ENDS_LABEL,
-  PROMO_OPUS_RUN_LIMIT,
-  PROMO_PATH,
-} from "@/features/promotions/github-promo";
-import { usePromoActive } from "@/features/promotions/hooks/use-promo";
 import { LandingFooter } from "./footer";
 import { LandingThemeToggle, useLandingTheme } from "./landing-theme";
 
@@ -21,7 +15,6 @@ import { LandingThemeToggle, useLandingTheme } from "./landing-theme";
  * theme switch, one framed 1200px column for the content, and the footer.
  */
 export const PublicShell = ({ children }: { children: ReactNode }) => {
-  const promoActive = usePromoActive();
   const { theme, toggle } = useLandingTheme();
 
   return (
@@ -31,37 +24,18 @@ export const PublicShell = ({ children }: { children: ReactNode }) => {
       <div
         className={`${theme} relative flex min-h-screen flex-col overflow-x-clip bg-background text-foreground`}
       >
-        {/* The launch offer, until it ends; then the BYOK note. */}
-        {promoActive ? (
-          <Link
-            href={PROMO_PATH}
-            className="group flex h-9 items-center justify-center gap-2 bg-brand px-4 text-center text-xs font-medium text-brand-foreground transition-colors hover:bg-brand/90"
-          >
-            <span className="rounded bg-brand-foreground/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] max-sm:hidden">
-              Free until {PROMO_ENDS_LABEL}
-            </span>
-            <span className="truncate">
-              Claude Opus 5.5, on us: {PROMO_OPUS_RUN_LIMIT} free Opus runs and unlimited Sonnet 5.5
-            </span>
-            <span className="flex shrink-0 items-center gap-1 underline-offset-2 group-hover:underline">
-              Claim{" "}
-              <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
-            </span>
-          </Link>
-        ) : (
-          <Link
-            href="/docs"
-            className="group flex h-9 items-center justify-center gap-2 border-b border-border px-4 text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <span className="rounded bg-brand/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-brand-text">
-              BYOK
-            </span>
-            <span className="truncate">
-              Run the agent on your own OpenRouter, OpenAI, Anthropic or Groq key
-            </span>
-            <ArrowRight className="size-3 shrink-0 transition-transform group-hover:translate-x-0.5" />
-          </Link>
-        )}
+        <Link
+          href="/docs"
+          className="group flex h-9 items-center justify-center gap-2 border-b border-border px-4 text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <span className="rounded bg-brand/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-brand-text">
+            BYOK
+          </span>
+          <span className="truncate">
+            Run the agent on your own OpenRouter, OpenAI, Anthropic or Groq key
+          </span>
+          <ArrowRight className="size-3 shrink-0 transition-transform group-hover:translate-x-0.5" />
+        </Link>
         <MarketingNavbar themeToggle={<LandingThemeToggle theme={theme} onToggle={toggle} />} />
         {/* The grid: one framed column, sections stacked on shared borders. */}
         <main className="mx-auto w-full max-w-[1200px] flex-1 border-x border-border">

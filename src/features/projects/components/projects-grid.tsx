@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 import { Doc } from "../../../../convex/_generated/dataModel";
 import { ProjectCard } from "./project-card";
 
-const SORTS = {
+export const SORTS = {
   updated: { label: "Last edited", compare: (a: Doc<"projects">, b: Doc<"projects">) => b.updatedAt - a.updatedAt },
   created: { label: "Newest", compare: (a: Doc<"projects">, b: Doc<"projects">) => b._creationTime - a._creationTime },
   name: { label: "Name", compare: (a: Doc<"projects">, b: Doc<"projects">) => a.name.localeCompare(b.name) },
@@ -173,7 +173,7 @@ export const ProjectsGrid = ({ projects, onNewProject, onImport }: ProjectsGridP
 };
 
 /** One cell of the grid; borders on its right and bottom meet the next cell's. */
-const CELL = "spotlight border-r border-b border-border p-4 md:p-5";
+export const CELL = "spotlight border-r border-b border-border p-4 md:p-5";
 
 /**
  * Cells on shared borders at any count: the grid runs 1px past its frame on

@@ -47,3 +47,52 @@ export interface AgentModelChoice {
   keyId?: string;
   modelId: string;
 }
+
+const SONNET: AgentModelId = "anthropic/claude-sonnet-5.5";
+const TO_SONNET = { id: SONNET, usdPerMTok: [2, 10] } as const;
+
+/**
+ * "Retry with another model" on a stuck run (#306) steps one tier up: a
+ * sideways or cheaper switch usually repeats the loop. Each entry is the next
+ * model with its OpenRouter list price (USD per 1M tokens in, out; 2026-10-14);
+ * null means the strongest of its vendor. Other catalog models step up to Sonnet.
+ * Prices are hand-kept because the catalog's prices are deliberately not sent
+ * to the browser (`platformCatalog.getForUsers`).
+ * shortcut: a hand-kept ladder and prices; replace with the `tier` field (#321)
+ * and a server-side cost estimate once those land.
+ */
+const NEXT_TIER: Record<string, { id: AgentModelId; usdPerMTok: readonly [number, number] } | null> = {
+  "anthropic/claude-haiku-5.5": TO_SONNET,
+  [SONNET]: { id: "anthropic/claude-opus-5.5", usdPerMTok: [4, 20] },
+  "openai/gpt-6-luna": { id: "openai/gpt-6.1-sol", usdPerMTok: [2, 10] },
+  "google/gemini-3.8-flash": { id: "google/gemini-3.1-pro-preview", usdPerMTok: [2, 12] },
+  "anthropic/claude-opus-5.5": null,
+  "anthropic/claude-fable-5.1": null,
+  "openai/gpt-6.1-sol": null,
+  "google/gemini-3.1-pro-preview": null,
+};
+
+/** A typical error-fix run: about 6 model calls, ~108k tokens in and ~8k out. */
+const FIX_RUN_MTOK = { input: 0.108, output: 0.008 };
+
+/**
+ * The model to retry a stuck run on, with a rough cost range for the retry
+ * (caching or a shorter run roughly halves it). Null on a top-tier model or
+ * an id outside the catalog.
+ */
+const stepUp = (modelId: string) => {
+  if (Object.hasOwn(NEXT_TIER, modelId)) return NEXT_TIER[modelId];
+  return AGENT_MODELS.some((model) => model.id === modelId) ? TO_SONNET : null;
+};
+
+export const nextTier = (modelId: string) => {
+  const next = stepUp(modelId);
+  if (!next) return null;
+  const [input, output] = next.usdPerMTok;
+  const usd = FIX_RUN_MTOK.input * input + FIX_RUN_MTOK.output * output;
+  return {
+    id: next.id,
+    label: AGENT_MODELS.find((model) => model.id === next.id)?.label ?? next.id,
+    costUsd: [usd / 2, usd] as const,
+  };
+};

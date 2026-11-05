@@ -26,6 +26,25 @@ const write = (key: string) => {
 export const markPreviewOpened = () => write(PREVIEW_OPENED_KEY);
 export const hasOpenedPreview = () => read(PREVIEW_OPENED_KEY);
 
+/**
+ * The loaded app is on screen, for `first_preview_shown` (#339): its tab is
+ * open, the dev server runs, and neither the first-build card nor the error
+ * panel covers it. A failed stream keeps its preview URL, so a load from
+ * before the error still matches.
+ */
+export const isPreviewOnScreen = (preview: {
+  visible: boolean;
+  building: boolean;
+  status: string;
+  error: string | null | undefined;
+  loaded: boolean;
+}) =>
+  preview.visible &&
+  !preview.building &&
+  preview.status === "running" &&
+  !preview.error &&
+  preview.loaded;
+
 /** Dismissal is per user, so a shared browser keeps each user's choice. */
 export const dismissFirstRun = (userId: string) => write(DISMISSED_KEY_PREFIX + userId);
 export const isFirstRunDismissed = (userId: string) => read(DISMISSED_KEY_PREFIX + userId);

@@ -33,6 +33,8 @@ export interface RoutedCatalog {
   models: readonly RoutedModel[];
   defaultModelId: string;
   utilityModelId: string;
+  /** The admin's Auto pool (#322); unset on the env catalog. */
+  autoModelIds?: readonly string[];
 }
 
 let warnedInvalid = false;

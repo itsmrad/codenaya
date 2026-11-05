@@ -56,7 +56,7 @@ test.describe("dashboard prompt composer", () => {
     test.skip(projects.length > 0, "the e2e user already has projects");
 
     await expect(page.getByRole("button", { name: "Import from GitHub" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Portfolio", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Start from a template" })).toBeVisible();
     await expect(page.getByText("No projects yet")).toHaveCount(0);
   });
 });

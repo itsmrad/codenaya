@@ -30,6 +30,7 @@ vi.mock("@/lib/convex-client", () => ({
 
 import { missingReferencedFiles } from "@/features/sandbox-preview/utils/missing-references";
 
+import { KNOWN_GOOD_VERSIONS } from "../known-good-versions";
 import { VITE_REACT_STARTER } from "../vite-starter";
 import { createScaffoldViteAppTool } from "./scaffold-vite-app";
 
@@ -57,8 +58,9 @@ describe("scaffoldViteApp tool", () => {
       VITE_REACT_STARTER.map((file) => file.path).sort(),
     );
     expect(missingReferencedFiles(paths())).toEqual([]);
-    expect(result).toContain("tsconfig.app.json (id");
-    expect(result).toMatch(/Folders: src \(id\d+\), src\/lib \(id\d+\)/);
+    expect(result).toContain("tsconfig.app.json");
+    expect(result).toContain("src/components/error-boundary.tsx");
+    expect(result).not.toMatch(/\bid\d+/);
   });
 
   it("writes package.json after every file outside the root", async () => {
@@ -80,6 +82,68 @@ describe("scaffoldViteApp tool", () => {
 
     expect(db.rows.filter((row) => row.name === "src")).toHaveLength(1);
     expect(db.rows.find((row) => row._id === "app")?.content).toBe("mine");
-    expect(result).toContain("Kept existing: src/App.tsx (app).");
+    expect(result).toContain("Kept existing: src/App.tsx.");
+  });
+
+  it("writes a React 19 + Tailwind v4 starter with no v3 leftovers (#332)", () => {
+    const tool = createScaffoldViteAppTool({ projectId: "p" as never, internalKey: "k" });
+    const read = (path: string) => VITE_REACT_STARTER.find((file) => file.path === path)!.content;
+    const pkg = JSON.parse(read("package.json"));
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+    // #331: every starter dependency comes from the known-good manifest.
+    for (const [name, range] of Object.entries(deps)) {
+      expect(range, name).toBe(KNOWN_GOOD_VERSIONS[name as keyof typeof KNOWN_GOOD_VERSIONS]);
+    }
+    expect(deps).toMatchObject({
+      react: expect.stringMatching(/^\^19\./),
+      "react-dom": deps.react,
+      "@types/react": expect.stringMatching(/^\^19\./),
+      tailwindcss: expect.stringMatching(/^\^4\./),
+      "@tailwindcss/vite": deps.tailwindcss,
+      "tw-animate-css": expect.any(String),
+      "lucide-react": expect.stringMatching(/^\^1\./),
+      "tailwind-merge": expect.stringMatching(/^\^3\./),
+    });
+    for (const name of ["tailwindcss-animate", "postcss", "autoprefixer"]) {
+      expect(deps).not.toHaveProperty(name);
+    }
+    expect(read("vite.config.ts")).toContain("plugins: [react(), tailwindcss()]");
+    expect(read("src/index.css")).toMatch(/^@import "tailwindcss";\n@import "tw-animate-css";/);
+    expect(read("src/index.css")).toContain("--color-background: var(--background);");
+    expect(JSON.parse(read("components.json")).tailwind.config).toBe("");
+
+    const everything = [
+      tool.description,
+      ...VITE_REACT_STARTER.map((file) => `${file.path}\n${file.content}`),
+    ].join("\n");
+    for (const stale of ["tailwind.config", "postcss.config", "tailwindcss-animate", "@tailwind ", "hsl(var("]) {
+      expect(everything).not.toContain(stale);
+    }
+  });
+
+  it("mounts an error boundary and a router around App (#335)", () => {
+    const tool = createScaffoldViteAppTool({ projectId: "p" as never, internalKey: "k" });
+    const read = (path: string) => VITE_REACT_STARTER.find((file) => file.path === path)!.content;
+
+    expect(JSON.parse(read("package.json")).dependencies["react-router-dom"]).toBe(
+      KNOWN_GOOD_VERSIONS["react-router-dom"],
+    );
+    expect(read("src/main.tsx")).toContain(
+      "<ErrorBoundary>\n      <BrowserRouter>\n        <App />\n      </BrowserRouter>\n    </ErrorBoundary>",
+    );
+    expect(read("src/App.tsx")).toContain('<Route path="/" element={<Home />} />');
+    const boundary = read("src/components/error-boundary.tsx");
+    expect(boundary).toContain("static getDerivedStateFromError");
+    expect(boundary).toContain("import.meta.env.DEV && componentStack");
+    expect(boundary).toContain("window.location.reload()");
+    expect(boundary).toContain('<a\n              href="/"');
+    // Reload and Go home are touch targets: at least 44px (min-h-11), not h-9.
+    expect(boundary.match(/inline-flex min-h-11 min-w-11 items-center/g)).toHaveLength(2);
+    expect(boundary).not.toContain("h-9");
+    // A flag, so `throw null` / `throw undefined` still show the card.
+    expect(boundary).toContain("return { hasError: true, error };");
+    expect(boundary).toContain("if (!hasError) return this.props.children;");
+    expect(tool.description).toContain("Don't add another <BrowserRouter>.");
   });
 });

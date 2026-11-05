@@ -216,19 +216,31 @@ export const exportToGithub = inngest.createFunction(
       });
     });
 
-    // Update the main branch reference to point to our new commit
+    // Fast-forward main to our commit, which builds on the auto_init one
     await step.run("update-branch-ref", async () => {
       return await octokit.rest.git.updateRef({
         owner: user.login,
         repo: repoName,
         ref: "heads/main",
         sha: commit.sha,
-        force: true,
       });
     });
 
-    // Set status to completed with repo URL
+    // Set status to completed with repo URL, and link the repo so later
+    // changes are pushed to it (#343)
     await step.run("set-completed-status", async () => {
+      await convex.mutation(api.system.setGithubSync, {
+        internalKey,
+        projectId,
+        githubSync: {
+          repo: repo.full_name,
+          branch: "main",
+          lastSyncedSha: commit.sha,
+          // On Convex's clock, like the runs it is compared with. Runs after
+          // the newest file write are left for the next push.
+          lastSyncedAt: Math.max(0, ...files.map((file) => file.updatedAt)),
+        },
+      });
       await convex.mutation(api.system.updateExportStatus, {
         internalKey,
         projectId,

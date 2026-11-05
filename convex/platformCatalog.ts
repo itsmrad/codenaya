@@ -37,15 +37,20 @@ const catalogFields = {
   models: v.array(catalogModelValidator),
   defaultModelId: v.string(),
   utilityModelId: v.string(),
+  autoModelIds: v.optional(v.array(v.string())),
 };
 
-type Catalog = Pick<Doc<"platformCatalog">, "models" | "defaultModelId" | "utilityModelId">;
+type Catalog = Pick<Doc<"platformCatalog">, "models" | "defaultModelId" | "utilityModelId" | "autoModelIds">;
 
 /** The single catalog doc; there is at most one. */
 const getCatalog = (ctx: QueryCtx) => ctx.db.query("platformCatalog").first();
 
 const publicCatalogValidator = v.union(
-  v.object({ models: v.array(publicCatalogModelValidator), defaultModelId: v.string() }),
+  v.object({
+    models: v.array(publicCatalogModelValidator),
+    defaultModelId: v.string(),
+    autoModelIds: v.optional(v.array(v.string())),
+  }),
   v.null(),
 );
 
@@ -192,6 +197,12 @@ function diffCatalog(before: Catalog | null, after: Catalog) {
       parts.push(`${label} → ${after[field]}`);
     }
   }
+  const poolBefore = (before?.autoModelIds ?? []).join(", ");
+  const poolAfter = (after.autoModelIds ?? []).join(", ");
+  if (poolBefore !== poolAfter) {
+    changes.push({ field: "autoModelIds", before: poolBefore, after: poolAfter });
+    parts.push(`auto pool → ${poolAfter || "fixed routes"}`);
+  }
   return { changes, summary: parts.join("; ") || "no changes" };
 }
 
@@ -205,7 +216,13 @@ export const getForUsers = query({
   handler: async (ctx) => {
     await verifyAuth(ctx);
     const catalog = await getCatalog(ctx);
-    return catalog && toPublic(catalog, (m) => !m.hidden);
+    return (
+      catalog && {
+        ...toPublic(catalog, (m) => !m.hidden),
+        // Lets the picker offer Auto when only the pool has models it routes to.
+        autoModelIds: catalog.autoModelIds,
+      }
+    );
   },
 });
 
@@ -234,6 +251,7 @@ export const getForServer = query({
         models: catalog.models,
         defaultModelId: catalog.defaultModelId,
         utilityModelId: catalog.utilityModelId,
+        autoModelIds: catalog.autoModelIds,
       }
     );
   },
@@ -254,6 +272,7 @@ export const getForAdmin = query({
         models: catalog.models,
         defaultModelId: catalog.defaultModelId,
         utilityModelId: catalog.utilityModelId,
+        autoModelIds: catalog.autoModelIds,
         updatedAt: catalog.updatedAt,
         updatedBy: catalog.updatedBy,
       }
@@ -265,7 +284,8 @@ export const getForAdmin = query({
  * Replaces the catalog. Admin token AND internal key: the route has already
  * checked step-up auth and that every route's provider key is set. A $0 price
  * or a price change over 50% is refused unless `confirmRiskyPrices`. Writes a
- * structured audit row in the same transaction.
+ * structured audit row in the same transaction. Auto pool ids (#322) that
+ * aren't catalog models are dropped.
  */
 export const save = mutation({
   args: {
@@ -279,9 +299,12 @@ export const save = mutation({
     }),
   },
   returns: v.null(),
-  handler: async (ctx, { internalKey, confirmRiskyPrices, request, ...catalog }) => {
+  handler: async (ctx, { internalKey, confirmRiskyPrices, request, autoModelIds, ...rest }) => {
     const admin = await requireAdmin(ctx);
     validateInternalKey(internalKey);
+    const ids = new Set(autoModelIds);
+    const pool = rest.models.filter((m) => ids.has(m.id)).map((m) => m.id);
+    const catalog: Catalog = { ...rest, ...(pool.length ? { autoModelIds: pool } : {}) };
     assertValidCatalog(catalog);
 
     const existing = await getCatalog(ctx);

@@ -63,6 +63,7 @@ next-env.d.ts
 # local implementation notes
 /steps
 /.swc
+graphify-out/
 
 # clerk configuration (can include secrets)
 /.clerk/
