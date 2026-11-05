@@ -298,6 +298,21 @@ describe("platformCatalog reads", () => {
     });
   });
 
+  test("getForVisitors needs no sign-in and keeps only everyone's visible models", async () => {
+    const base = setup();
+    expect(await base.query(api.platformCatalog.getForVisitors, {})).toBeNull();
+
+    await save(base.withIdentity(ADMIN), [
+      model("a"),
+      model("secret", { hidden: true }),
+      model("opus", { access: "promo_counted" }),
+    ]);
+    expect(await base.query(api.platformCatalog.getForVisitors, {})).toEqual({
+      models: [{ id: "a", name: "A", vendor: "acme", vision: false, access: "everyone" }],
+      defaultModelId: "a",
+    });
+  });
+
   test("getForServer returns routes and prices with the key and rejects a bad key", async () => {
     const t = asAdmin();
     const args = { internalKey: INTERNAL_KEY };

@@ -5,8 +5,7 @@ import { cache, Suspense } from "react";
 import { ArrowLeftIcon } from "lucide-react";
 import { fetchQuery } from "convex/nextjs";
 
-import { MarketingNavbar } from "@/components/marketing-navbar";
-import { LandingFooter } from "@/components/landing/footer";
+import { PublicShell } from "@/components/landing/public-shell";
 import { Spinner } from "@/components/ui/spinner";
 import { ShowcaseDetail } from "@/features/showcase/components/showcase-detail";
 
@@ -67,28 +66,28 @@ const ShowcaseIdContent = async ({ params }: ShowcaseIdPageProps) => {
 // Public: readable signed out so a published app can be shared by link.
 const ShowcaseIdPage = (props: ShowcaseIdPageProps) => {
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <MarketingNavbar />
-      <main className="flex-1 mx-auto w-full max-w-3xl px-4 py-8 md:px-8 md:py-12">
-        <Link
-          href="/showcase"
-          className="mb-4 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeftIcon className="size-3.5" />
-          Community showcase
-        </Link>
-        <Suspense
-          fallback={
-            <div className="flex justify-center py-24">
-              <Spinner className="size-6 text-ring" />
-            </div>
-          }
-        >
-          <ShowcaseIdContent {...props} />
-        </Suspense>
-      </main>
-      <LandingFooter />
-    </div>
+    <PublicShell>
+      <Link
+        href="/showcase"
+        className="flex h-11 items-center gap-2 border-b border-border px-6 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground md:px-8"
+      >
+        <ArrowLeftIcon className="size-3.5" />
+        Community showcase
+      </Link>
+      <div className="border-b border-border px-4 py-10 md:px-8 md:py-14">
+        <div className="mx-auto w-full max-w-3xl">
+          <Suspense
+            fallback={
+              <div className="flex justify-center py-24">
+                <Spinner className="size-6 text-ring" />
+              </div>
+            }
+          >
+            <ShowcaseIdContent {...props} />
+          </Suspense>
+        </div>
+      </div>
+    </PublicShell>
   );
 };
 

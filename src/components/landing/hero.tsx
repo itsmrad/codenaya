@@ -1,127 +1,114 @@
 "use client";
 
-import { useRef } from "react";
-import { motion, useInView } from "motion/react";
+import Link from "next/link";
+import { motion, useReducedMotion } from "motion/react";
 import { ArrowRight } from "lucide-react";
+
+import { AI_PROVIDER_IDS } from "@/features/ai-providers/registry";
+import { GITHUB_REPO_URL } from "@/lib/site";
 import { GridPattern } from "./grid-pattern";
+import { HeroDemo } from "./hero-demo";
 import { LandingPromptComposer } from "./landing-prompt-composer";
-import { Noise } from "./noise";
+import { CountUp } from "./reveal";
+
+const EASE = [0.22, 1, 0.36, 1] as const;
+
+const CHIPS = ["Bring your own key", "Cloud sandbox", "GitHub export", "Desktop + phone"];
+
+// Named providers only; "custom" is the any-endpoint option, counted by the "+".
+const NAMED_PROVIDERS = AI_PROVIDER_IDS.filter((id) => id !== "custom").length;
+
+const STATS = [
+  { value: 300, suffix: "", caption: "Free credits every month" },
+  { value: NAMED_PROVIDERS, suffix: "+", caption: "Key providers, plus any OpenAI-compatible endpoint" },
+  { value: 0, suffix: "", caption: "Things to install on your machine" },
+  { value: 1, suffix: " click", caption: "To export to GitHub or a ZIP" },
+];
 
 export const LandingHero = () => {
-  const heroRef = useRef<HTMLDivElement>(null);
-  const isInView = useInView(heroRef, { once: true, amount: 0.3 });
-
-  const headline = ["Build with AI.", "Ship from your browser."];
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.12,
-        delayChildren: 0.4,
-      },
-    },
-  };
-
-  const lineVariants = {
-    hidden: { opacity: 0, y: 60, filter: "blur(10px)" },
-    visible: {
-      opacity: 1,
-      y: 0,
-      filter: "blur(0px)",
-      transition: {
-        duration: 0.8,
-        ease: [0.22, 1, 0.36, 1] as const,
-      },
-    },
-  };
-
-  const fadeUp = {
-    hidden: { opacity: 0, y: 30 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: {
-        duration: 0.7,
-        ease: [0.22, 1, 0.36, 1] as const,
-      },
-    },
-  };
+  const reduceMotion = useReducedMotion();
+  const enter = (delay: number) => ({
+    initial: reduceMotion ? false : { opacity: 0, y: 18, filter: "blur(6px)" },
+    animate: { opacity: 1, y: 0, filter: "blur(0px)" },
+    transition: { duration: 0.7, delay, ease: EASE },
+  });
 
   return (
-    <section
-      ref={heroRef}
-      className="relative w-full overflow-hidden pt-28 pb-16 md:pt-40 md:pb-20"
-    >
-      {/* Background layers */}
-      <div className="absolute inset-0 bg-background" />
+    <section className="relative border-b border-border">
+      <div className="relative overflow-hidden px-6 pt-20 pb-14 text-center md:px-12 md:pt-28 md:pb-20">
+        {/* The grid fades out from the top centre */}
+        <div className="pointer-events-none absolute inset-0 [mask-image:radial-gradient(ellipse_70%_60%_at_50%_0%,black,transparent)]">
+          <GridPattern />
+        </div>
 
-      {/* Subtle grid */}
-      <GridPattern />
-
-      {/* Noise texture */}
-      <Noise />
-
-      {/* Vignette */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,var(--background)_80%)] opacity-60" />
-
-      {/* Content */}
-      <div className="relative z-10 max-w-5xl mx-auto px-6 md:px-8 text-center">
-        <motion.div
-          variants={containerVariants}
-          initial="hidden"
-          animate={isInView ? "visible" : "hidden"}
-          className="space-y-8"
-        >
-          {/* Badge */}
-          <motion.div variants={fadeUp} className="flex justify-center">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-border/60 bg-card/50 backdrop-blur-sm text-xs font-medium text-muted-foreground">
-              <span className="size-1.5 rounded-full bg-brand animate-pulse" />
-              AI-Powered Browser IDE
-            </div>
-          </motion.div>
-
-          {/* Headline */}
-          <div className="space-y-2">
-            {headline.map((line, i) => (
-              <motion.h1
-                key={i}
-                variants={lineVariants}
-                className="text-[2.5rem] sm:text-6xl lg:text-7xl font-bold tracking-tighter leading-[1.05] text-foreground"
-              >
-                {line}
-              </motion.h1>
+        <div className="relative mx-auto max-w-5xl">
+          <motion.ul {...enter(0.1)} className="flex flex-wrap justify-center gap-x-1 gap-y-2">
+            {CHIPS.map((chip) => (
+              <li key={chip} className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                [ {chip} ]
+              </li>
             ))}
-          </div>
+          </motion.ul>
 
-          {/* Subtitle */}
-          <motion.p
-            variants={fadeUp}
-            className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed font-light"
+          <motion.h1
+            {...enter(0.2)}
+            className="mt-7 text-[2.75rem] font-semibold leading-[1.02] tracking-[-0.045em] text-foreground sm:text-6xl lg:text-[5.25rem]"
           >
-            A browser IDE with an AI agent that writes your code, a live preview
-            to run it, and GitHub export when it&apos;s done. On desktop or phone.
+            Build with AI.
+            <br />
+            Ship from your <span className="text-brand">browser</span>.
+          </motion.h1>
+
+          <motion.p {...enter(0.3)} className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
+            A browser IDE with an AI agent that writes your code, a live preview to run it, and GitHub
+            export when it&apos;s done. On desktop or phone.
           </motion.p>
 
-          {/* Prompt: typing comes first, sign-up second */}
-          <motion.div variants={fadeUp} className="mx-auto max-w-2xl pt-4">
-            <LandingPromptComposer showStarters className="text-left" />
-            <a
-              href="https://github.com/itsmrad/codenaya"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-5 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              View on GitHub
-              <ArrowRight className="size-3.5" />
-            </a>
+          <motion.div {...enter(0.4)} className="mx-auto mt-10 max-w-3xl">
+            <LandingPromptComposer className="text-left" />
+            <div className="mt-5 flex items-center justify-center gap-5 text-xs text-muted-foreground">
+              <a
+                href={GITHUB_REPO_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground"
+              >
+                View on GitHub <ArrowRight className="size-3.5" />
+              </a>
+              <span aria-hidden className="h-3 w-px bg-border" />
+              <Link href="/docs" className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground">
+                Read the docs <ArrowRight className="size-3.5" />
+              </Link>
+            </div>
           </motion.div>
-        </motion.div>
+        </div>
       </div>
 
-      {/* Bottom fade */}
-      <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
+      <motion.div
+        initial={reduceMotion ? false : { opacity: 0, y: 40 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.9, delay: 0.55, ease: EASE }}
+        className="border-t border-border bg-muted/40 p-3 md:p-8"
+      >
+        <HeroDemo />
+      </motion.div>
+
+      <dl className="grid grid-cols-2 border-t border-border md:grid-cols-4">
+        {STATS.map((stat, i) => (
+          <div
+            key={stat.caption}
+            className="flex flex-col gap-3 border-border p-6 odd:border-r md:p-8 md:border-r md:last:border-r-0 max-md:[&:nth-child(-n+2)]:border-b"
+          >
+            <dt className="text-xs leading-relaxed text-muted-foreground">
+              <span className="font-mono text-foreground">Fig {i + 1}.</span> {stat.caption}
+            </dt>
+            <dd className="order-first font-mono text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
+              <CountUp to={stat.value} />
+              <span className="text-[0.6em] text-brand">{stat.suffix}</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
     </section>
   );
 };

@@ -12,6 +12,7 @@ import {
 } from "@/features/auth/constants";
 import { useEnsureCurrentUser } from "@/features/auth/hooks/use-ensure-current-user";
 
+import { SpotlightTracker } from "./spotlight";
 import { ThemeProvider } from "./theme-provider";
 
 const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
@@ -53,10 +54,11 @@ export const Providers = ({ children }: { children: React.ReactNode }) => {
         <EnsureCurrentUser />
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
+          defaultTheme="light"
           enableSystem
           disableTransitionOnChange
         >
+          <SpotlightTracker />
           {children}
         </ThemeProvider>
       </ConvexProviderWithClerk>

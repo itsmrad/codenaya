@@ -13,6 +13,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useIsMac } from "@/lib/hooks/use-is-mac";
+import { MENU_CONTENT, MENU_ITEM, MenuHeader } from "@/components/menu-chrome";
+import { cn } from "@/lib/utils";
 
 import { Doc } from "../../../../convex/_generated/dataModel";
 import { ProjectCard } from "./project-card";
@@ -48,37 +50,52 @@ export const ProjectsGrid = ({ projects, onNewProject, onImport }: ProjectsGridP
 
   return (
     <section aria-labelledby="projects-heading">
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <h2 id="projects-heading" className="flex items-baseline gap-2 text-base font-semibold tracking-tight">
-          Your projects
-          {hasProjects && (
-            <span className="text-xs font-normal tabular-nums text-muted-foreground">{projects!.length}</span>
+      <div className="flex flex-wrap items-end justify-between gap-4 px-6 pt-10 pb-6 md:px-8">
+        <div>
+          <h2 id="projects-heading" className="flex items-baseline gap-3 text-3xl font-semibold tracking-[-0.035em]">
+            <span>
+              Your <span className="text-brand">projects</span>
+            </span>
+            {hasProjects && (
+              <span className="font-mono text-xs font-normal tabular-nums tracking-normal text-muted-foreground">
+                [ {projects!.length} ]
+              </span>
+            )}
+          </h2>
+          {hasProjects && sort === "updated" && (
+            <p className="mt-1 text-sm text-muted-foreground">Last edited first, so you can pick up where you left off.</p>
           )}
-        </h2>
+        </div>
         {hasProjects && (
-          <div className="flex w-full items-center gap-2 sm:w-auto">
-            <div className="relative flex-1 sm:w-56 sm:flex-none">
-              <SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/60" />
+          // Search and sort as one control, in the prompt box's window style.
+          <div className="flex h-9 w-full items-stretch overflow-hidden rounded-md border border-border bg-card transition-[border-color,box-shadow] focus-within:border-brand/50 focus-within:ring-4 focus-within:ring-brand/10 sm:w-auto">
+            <div className="relative flex flex-1 items-center sm:w-64 sm:flex-none">
+              <SearchIcon className="pointer-events-none absolute left-3 size-3.5 text-muted-foreground/70" />
               <input
                 type="search"
                 aria-label="Search projects"
                 placeholder="Search projects…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                className="h-8 w-full rounded-lg border border-border/60 bg-card pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground/60 transition-colors focus:border-ring/50 focus:outline-none focus:ring-2 focus:ring-ring/15"
+                className="h-full w-full bg-transparent pl-8 pr-3 font-mono text-[12px] text-foreground outline-none placeholder:text-muted-foreground/60"
               />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border/60 bg-card px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+                <button className="flex shrink-0 items-center gap-1.5 border-l border-border bg-muted/40 px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-muted data-[state=open]:bg-muted data-[state=open]:text-foreground">
                   <ArrowUpDownIcon className="size-3.5" />
                   {SORTS[sort].label}
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-40">
-                <DropdownMenuRadioGroup value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+              <DropdownMenuContent align="end" sideOffset={6} className={cn(MENU_CONTENT, "w-48")}>
+                <MenuHeader>Sort by</MenuHeader>
+                <DropdownMenuRadioGroup value={sort} onValueChange={(v) => setSort(v as SortKey)} className="p-1">
                   {(Object.keys(SORTS) as SortKey[]).map((key) => (
-                    <DropdownMenuRadioItem key={key} value={key}>
+                    <DropdownMenuRadioItem
+                      key={key}
+                      value={key}
+                      className={cn(MENU_ITEM, "pl-8 data-[state=checked]:text-foreground [&_svg]:fill-brand [&_svg]:text-brand")}
+                    >
                       {SORTS[key].label}
                     </DropdownMenuRadioItem>
                   ))}
@@ -90,67 +107,80 @@ export const ProjectsGrid = ({ projects, onNewProject, onImport }: ProjectsGridP
       </div>
 
       {projects === undefined ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Cells>
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="aspect-[16/12.5] animate-pulse rounded-xl bg-muted/40" />
+            <div key={i} className={CELL}>
+              <div className="aspect-[16/12.5] animate-pulse rounded-md bg-muted/50" />
+            </div>
           ))}
-        </div>
+        </Cells>
       ) : !hasProjects ? (
-        <div className="flex flex-col items-center rounded-2xl border border-dashed border-border px-6 py-12 text-center">
-          <div className="grid size-11 place-items-center rounded-xl bg-brand/10">
-            <FolderPlusIcon className="size-5 text-brand" />
-          </div>
+        <div className="relative flex flex-col items-center overflow-hidden border-t border-border px-6 py-16 text-center">
+          <div aria-hidden className="absolute inset-0 -z-10 bg-[radial-gradient(color-mix(in_oklab,var(--foreground)_9%,transparent)_1px,transparent_1px)] bg-size-[18px_18px] mask-[radial-gradient(ellipse_50%_70%_at_50%_50%,black,transparent)]" />
+          <FolderPlusIcon className="size-6 text-brand" />
           <p className="mt-4 text-sm font-medium">Your first project will appear here</p>
           <p className="mt-1 max-w-sm text-xs text-muted-foreground">
             Describe an app above or pick one of the ideas. Already have code?
           </p>
           <button
             onClick={onImport}
-            className="mt-4 h-8 rounded-lg border border-border bg-card px-3 text-xs font-medium transition-colors hover:border-brand/40 hover:text-brand"
+            className="mt-5 h-9 rounded-md border border-border bg-card px-4 text-xs font-medium transition-colors hover:border-brand/40 hover:text-brand"
           >
             Import a GitHub repo
           </button>
         </div>
       ) : filtered.length === 0 ? (
-        <p className="py-12 text-center text-sm text-muted-foreground">No projects match “{query}”</p>
+        <p className="border-t border-border py-14 text-center text-sm text-muted-foreground">No projects match “{query}”</p>
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Cells>
             {!query && (
-              <button
-                onClick={onNewProject}
-                className="group flex min-h-14 items-center justify-center gap-2.5 rounded-xl sm:min-h-40 sm:flex-col border border-dashed border-border text-muted-foreground transition-colors hover:border-brand/50 hover:bg-brand/[0.03] hover:text-foreground"
-              >
-                <span className="grid size-7 place-items-center rounded-full bg-muted sm:size-9 transition-colors group-hover:bg-brand/15 group-hover:text-brand">
-                  <PlusIcon className="size-4" />
-                </span>
-                <span className="text-sm font-medium">New project</span>
-                <Kbd className="hidden text-[10px] sm:inline-flex">{isMac ? "⌘J" : "Ctrl+J"}</Kbd>
-              </button>
+              <div className={CELL}>
+                <button
+                  onClick={onNewProject}
+                  className="group flex h-full min-h-14 w-full items-center justify-center gap-2.5 rounded-md border border-dashed border-border text-muted-foreground transition-colors hover:border-brand/50 hover:bg-brand/[0.03] hover:text-foreground sm:min-h-40 sm:flex-col"
+                >
+                  <PlusIcon className="size-5 transition-transform duration-300 group-hover:rotate-90 group-hover:text-brand" />
+                  <span className="text-sm font-medium">New project</span>
+                  <Kbd className="hidden text-[10px] sm:inline-flex">{isMac ? "⌘J" : "Ctrl+J"}</Kbd>
+                </button>
+              </div>
             )}
             {visible.map((project, i) => (
               <motion.div
                 key={project._id}
-                initial={{ opacity: 0, y: 8 }}
+                initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25, delay: Math.min(i * 0.04, 0.3), ease: "easeOut" }}
+                transition={{ duration: 0.4, delay: Math.min(i * 0.05, 0.35), ease: [0.22, 1, 0.36, 1] }}
+                className={CELL}
               >
                 <ProjectCard project={project} />
               </motion.div>
             ))}
-          </div>
+          </Cells>
           {!query && filtered.length > COLLAPSED_COUNT && (
-            <div className="mt-5 flex justify-center">
-              <button
-                onClick={() => setShowAll((v) => !v)}
-                className="h-8 rounded-lg border border-border/60 bg-card px-3 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {showAll ? "Show less" : `Show all ${filtered.length}`}
-              </button>
-            </div>
+            <button
+              onClick={() => setShowAll((v) => !v)}
+              className="flex w-full items-center justify-center border-t border-border py-4 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+            >
+              {showAll ? "Show less" : `Show all ${filtered.length}`}
+            </button>
           )}
         </>
       )}
     </section>
   );
 };
+
+/** One cell of the grid; borders on its right and bottom meet the next cell's. */
+export const CELL = "spotlight border-r border-b border-border p-4 md:p-5";
+
+/**
+ * Cells on shared borders at any count: the grid runs 1px past its frame on
+ * the right and bottom, so the outer edges fall on the page's own lines.
+ */
+const Cells = ({ children }: { children: React.ReactNode }) => (
+  <div className="overflow-hidden border-t border-border">
+    <div className="-mr-px -mb-px grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">{children}</div>
+  </div>
+);

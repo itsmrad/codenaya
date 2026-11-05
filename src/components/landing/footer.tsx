@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "motion/react";
 import { FaGithub } from "react-icons/fa";
 
 import { GITHUB_REPO_URL, REPORT_ISSUE_URL } from "@/lib/site";
@@ -49,63 +48,57 @@ const FooterLinkItem = ({ label, href }: FooterLink) =>
     </a>
   );
 
-export const LandingFooter = () => {
-  return (
-    <footer className="relative border-t border-border/40 py-12">
-      <div className="max-w-7xl mx-auto px-6 md:px-8">
-        <div className="flex flex-col md:flex-row md:justify-between gap-10">
-          {/* Brand */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            whileInView={{ opacity: 1 }}
-            viewport={{ once: true }}
-            className="flex flex-col gap-3 max-w-xs"
-          >
-            <Link href="/" className="flex items-center gap-3">
-              <CodenayaLogo size={20} />
-              <span className="text-sm font-medium text-foreground">codenaya</span>
-            </Link>
-            <p className="text-sm text-muted-foreground">
-              Build apps from your browser with an AI agent.
-            </p>
-          </motion.div>
-
-          {/* Link columns */}
-          <nav
-            aria-label="Footer"
-            className="grid grid-cols-1 sm:grid-cols-3 gap-8 sm:gap-16"
-          >
-            {FOOTER_COLUMNS.map((column) => (
-              <div key={column.title} className="flex flex-col gap-3">
-                <h2 className="text-xs font-medium uppercase tracking-[0.15em] text-foreground">
-                  {column.title}
-                </h2>
-                <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
-                  {column.links.map((link) => (
-                    <li key={link.label}>
-                      <FooterLinkItem {...link} />
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </nav>
-        </div>
-
-        {/* Bottom bar */}
-        <div className="mt-10 pt-6 border-t border-border/40 flex items-center justify-between gap-4 text-sm text-muted-foreground">
-          <span>© {new Date().getFullYear()} Codenaya</span>
-          <a
-            href={GITHUB_REPO_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Codenaya on GitHub"
-            className="text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <FaGithub className="size-4" />
-          </a>
-        </div>
+/** The footer, on the same framed grid as the page above it. */
+export const LandingFooter = () => (
+  <footer className="mx-auto w-full max-w-[1200px] border-x border-border">
+    <div className="grid md:grid-cols-[1.4fr_repeat(3,1fr)]">
+      <div className="flex flex-col gap-4 border-b border-border p-6 md:border-r md:border-b-0 md:p-8">
+        <Link href="/" className="flex items-center gap-2.5">
+          <CodenayaLogo size={22} />
+          <span className="text-[15px] font-semibold tracking-tight text-foreground">codenaya</span>
+        </Link>
+        <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
+          Build apps from your browser with an AI agent.
+        </p>
       </div>
-    </footer>
-  );
-};
+      {/* `contents` keeps the columns as cells of the grid above. */}
+      <nav aria-label="Footer" className="contents">
+        {FOOTER_COLUMNS.map((column) => (
+          <div
+            key={column.title}
+            className="flex flex-col gap-4 border-border p-6 not-last:border-b md:p-8 md:not-last:border-r md:not-last:border-b-0"
+          >
+            <h2 className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{column.title}</h2>
+            <ul className="flex flex-col gap-2.5 text-sm text-foreground/80">
+              {column.links.map((link) => (
+                <li key={link.label}>
+                  <FooterLinkItem {...link} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </nav>
+    </div>
+
+    {/* The wordmark, cropped by the bottom edge */}
+    <div aria-hidden className="overflow-hidden border-t border-border">
+      <p className="translate-y-[18%] select-none text-center text-[clamp(4rem,19vw,15rem)] font-semibold leading-none tracking-[-0.06em] text-foreground/[0.05]">
+        codenaya
+      </p>
+    </div>
+
+    <div className="flex items-center justify-between gap-4 border-t border-border px-6 py-4 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground md:px-8">
+      <span>© {new Date().getFullYear()} Codenaya</span>
+      <a
+        href={GITHUB_REPO_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Codenaya on GitHub"
+        className="transition-colors hover:text-foreground"
+      >
+        <FaGithub className="size-4" />
+      </a>
+    </div>
+  </footer>
+);

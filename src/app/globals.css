@@ -7,7 +7,9 @@
    numbers (#286). */
 @source inline("list-decimal");
 
-@custom-variant dark (&:is(.dark *));
+/* The nearest `.light` or `.dark` wins, so the landing page can pick its own
+   theme inside the app's: a `.light` subtree of a dark app, or the reverse. */
+@custom-variant dark (&:is(.dark *):not(.dark .light *));
 
 @theme inline {
   --color-background: var(--background);
@@ -138,7 +140,8 @@
  * Inspired by: Swiss/International, Japandi, Kinetic, Modernist
  */
 
-:root {
+:root,
+.light {
   --radius: 0.75rem;
   --background: #faf8f5;
   --foreground: #1a1a1a;
@@ -247,19 +250,6 @@ html.lenis, html.lenis body {
   overflow: hidden;
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  @apply w-2 h-2;
-}
-
-::-webkit-scrollbar-track {
-  @apply bg-transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  @apply rounded-full bg-border border-[1px] border-transparent border-solid bg-clip-padding;
-}
-
 /* Allotment overrides for IDE */
 :root {
   --focus-border: transparent;
@@ -360,54 +350,160 @@ html.lenis, html.lenis body {
   @apply resize-none bg-transparent outline-none dark:bg-transparent;
 }
 
-/* Dashboard prompt composer: the chat composer's box, larger, with a slowly
-   rotating brand-colored border while focused. */
+/* While the prompt box has focus, a light orbits its border and an ambient
+   orange glow turns behind it. */
 @property --composer-angle {
   syntax: "<angle>";
   initial-value: 0deg;
   inherits: false;
 }
-@keyframes composer-border-spin {
+@keyframes composer-orbit {
   to {
     --composer-angle: 360deg;
   }
 }
-.prompt-composer {
+.composer-orbit {
   position: relative;
-  border-radius: 1rem;
 }
-.prompt-composer [data-slot="input-group"] {
-  @apply rounded-2xl!;
-}
-.prompt-composer::before {
+.composer-orbit::before,
+.composer-orbit::after {
   content: "";
   position: absolute;
-  inset: -1px;
-  z-index: 1;
-  padding: 1.5px;
-  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 400ms ease;
   background: conic-gradient(
     from var(--composer-angle),
     transparent 0%,
-    var(--brand) 18%,
-    color-mix(in oklab, var(--brand) 30%, #a78bfa) 32%,
+    var(--brand) 10%,
+    color-mix(in oklab, var(--brand) 45%, white) 16%,
+    transparent 30%,
     transparent 50%,
-    transparent 100%
+    color-mix(in oklab, var(--brand) 70%, transparent) 62%,
+    transparent 78%
   );
+  animation: composer-orbit 4s linear infinite;
+}
+/* The orbiting light: a 1.5px ring over the border. */
+.composer-orbit::before {
+  inset: -1px;
+  z-index: 2;
+  padding: 1.5px;
+  border-radius: inherit;
   mask:
     linear-gradient(#000 0 0) content-box exclude,
     linear-gradient(#000 0 0);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 200ms ease;
-  animation: composer-border-spin 4s linear infinite;
 }
-.prompt-composer:focus-within::before {
+/* The ambient light: the same gradient, blurred out behind the box. */
+.composer-orbit::after {
+  inset: -10px;
+  z-index: -1;
+  border-radius: 1rem;
+  filter: blur(22px);
+}
+.composer-orbit:focus-within::before {
   opacity: 1;
 }
+.composer-orbit:focus-within::after {
+  opacity: 0.55;
+}
 @media (prefers-reduced-motion: reduce) {
-  .prompt-composer::before {
+  .composer-orbit::before,
+  .composer-orbit::after {
     animation: none;
+  }
+}
+
+/* The prompt box's model menu (Radix Select): a plain scrollbar instead of
+   the scroll arrows, and an edge-to-edge list so the header and footer
+   strips can stick to its top and bottom. */
+.model-menu [data-slot="select-scroll-up-button"],
+.model-menu [data-slot="select-scroll-down-button"] {
+  display: none;
+}
+.model-menu [data-radix-select-viewport] {
+  padding: 0 !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: color-mix(in oklab, var(--foreground) 22%, transparent) transparent;
+  /* Keeps a row reached by the arrow keys clear of the sticky strips. */
+  scroll-padding-block: 2.25rem;
+}
+.model-menu [data-slot="select-group"] {
+  padding: 0.25rem;
+}
+
+/* The prompt box window (PromptComposer): the shared InputGroup flattened
+   into it, so the window draws the border and focus ring. */
+.composer-window [data-slot="input-group"] {
+  /* Visible overflow, so a toolbar menu can open up over the prompt. */
+  @apply overflow-visible! rounded-none! border-0! bg-transparent! shadow-none! ring-0!;
+}
+.composer-window [data-slot="input-group-control"] {
+  @apply resize-none bg-transparent outline-none dark:bg-transparent;
+}
+
+/* Starter templates as edge-to-edge cells on the page grid (showcase and
+   dashboard). The page draws the section header, so the component's own
+   heading stays for screen readers only. */
+.templates-grid section > div:first-child {
+  @apply sr-only;
+}
+.templates-grid section > div:last-child {
+  @apply mx-0 gap-0 border-t border-border px-0 pb-0 max-sm:gap-3 max-sm:px-4 max-sm:py-4;
+}
+.templates-grid section > div:last-child > div {
+  @apply flex;
+}
+.templates-grid button[aria-label^="Use the"] {
+  @apply flex flex-col rounded-none! border-border bg-transparent shadow-none! transition-colors hover:bg-brand/[0.04] sm:border-0 sm:border-r sm:border-b;
+}
+/* The frame's rails close the last column. */
+@media (min-width: 40rem) and (max-width: 63.99rem) {
+  .templates-grid section > div:last-child > div:nth-child(2n) button {
+    border-right-width: 0;
+  }
+}
+@media (min-width: 64rem) {
+  .templates-grid section > div:last-child > div:nth-child(3n) button {
+    border-right-width: 0;
+  }
+}
+.templates-grid button[aria-label^="Use the"] > div:first-child {
+  @apply border-b border-border;
+}
+/* Tags sit on the bottom edge, so a one-line description doesn't misalign the row. */
+.templates-grid button[aria-label^="Use the"] > div:last-child {
+  @apply flex flex-1 flex-col p-6;
+}
+.templates-grid button[aria-label^="Use the"] > div:last-child > div:last-child {
+  @apply mt-auto pt-3;
+}
+.templates-grid button[aria-label^="Use the"] [data-slot="badge"] {
+  @apply rounded-sm bg-muted font-mono text-[9px] tracking-[0.08em] text-muted-foreground uppercase;
+}
+
+/* Small looping landing visuals (features.tsx). */
+@keyframes landing-flow {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+@keyframes landing-fill {
+  0% {
+    transform: scaleX(0);
+  }
+  70%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-window *,
+  [class*="animate-[landing-"] {
+    animation: none !important;
   }
 }
 
@@ -426,4 +522,65 @@ html.lenis, html.lenis body {
     radial-gradient(at 15% 10%, oklch(0.42 0.12 var(--cover-h)) 0, transparent 60%),
     radial-gradient(at 90% 95%, oklch(0.38 0.12 var(--cover-h2)) 0, transparent 55%),
     oklch(0.2 0.03 var(--cover-h));
+}
+
+/* ─── Finishing touches ─── */
+
+::selection {
+  background-color: color-mix(in oklab, var(--brand) 28%, transparent);
+}
+
+/* A soft brand glow that follows the cursor across a grid cell (SpotlightTracker). */
+.spotlight {
+  position: relative;
+  isolation: isolate;
+}
+.spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 300ms ease;
+  background: radial-gradient(
+    360px circle at var(--spot-x, 50%) var(--spot-y, 50%),
+    color-mix(in oklab, var(--brand) 9%, transparent),
+    transparent 70%
+  );
+}
+.spotlight:hover::before {
+  opacity: 1;
+}
+
+/* A light sweep across a brand button on hover. */
+@utility sheen {
+  position: relative;
+  overflow: hidden;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    transform: translateX(-120%);
+    background: linear-gradient(110deg, transparent 35%, rgb(255 255 255 / 0.35) 50%, transparent 65%);
+    transition: transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  &:hover::after {
+    transform: translateX(120%);
+  }
+}
+
+/* The theme switch grows as a circle (revealTheme), so no cross-fade. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight::before,
+  .sheen::after {
+    display: none;
+  }
 }

@@ -2,24 +2,16 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Check, Minus } from "lucide-react";
 
-import { MarketingNavbar } from "@/components/marketing-navbar";
-import { LandingFooter } from "@/components/landing/footer";
+import { PublicShell } from "@/components/landing/public-shell";
+import { CountUp, Reveal } from "@/components/landing/reveal";
+import { SectionHeader } from "@/components/landing/section-header";
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -30,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { SIGN_UP_URL } from "@/features/auth/constants";
 import { formatCredits, PLANS, TOP_UP, type Plan } from "@/features/billing/plans";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
   title: "Pricing — Codenaya",
@@ -118,6 +111,24 @@ const FAQ: { question: string; answer: string }[] = [
   },
 ];
 
+const CREDIT_FACTS: { prefix?: string; value?: number; suffix: string; caption: string }[] = [
+  {
+    prefix: "$0.01",
+    suffix: " / credit",
+    caption: "One credit is a cent of AI usage. A small edit costs less than a new feature.",
+  },
+  {
+    value: free.monthlyCredits,
+    suffix: " free",
+    caption: `Credits every month on ${free.name}, up to ${formatCredits(free.dailyCreditCap ?? 0)} a day.`,
+  },
+  {
+    value: 0,
+    suffix: " credits",
+    caption: "Used by runs on your own key, with no daily limit, on every plan.",
+  },
+];
+
 const ComparisonValue = ({ value }: { value: string | boolean }) => {
   if (value === true) {
     return <Check aria-label="Included" className="size-4 text-brand" />;
@@ -131,124 +142,180 @@ const ComparisonValue = ({ value }: { value: string | boolean }) => {
 // Public: a static page, so signed-out visitors can see the plans.
 const PricingPage = () => {
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <MarketingNavbar />
-      <main className="flex-1 mx-auto w-full max-w-5xl px-4 py-10 md:px-8 md:py-16">
-        <div className="text-center">
-          <p className="text-xs uppercase tracking-[0.25em] text-brand-text font-mono mb-4">
-            Pricing
-          </p>
-          <h1 className="text-3xl md:text-5xl font-bold tracking-tighter text-foreground">
-            Start free. Bring your own key.
-          </h1>
-          <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
-            Use our credits, or run the agent on your own key with no limits. BYOK is free on
-            every plan.
-          </p>
-        </div>
+    <PublicShell>
+      <section className="border-b border-border">
+        <SectionHeader
+          as="h1"
+          label="Pricing"
+          title="Start free."
+          accent="Bring your own key."
+          description="Use our credits, or run the agent on your own key with no limits. BYOK is free on every plan."
+        />
 
         {/* Plans */}
-        <div className="mt-12 grid gap-6 md:grid-cols-2 max-w-4xl mx-auto">
-          {PLAN_CARDS.map(({ plan, description, features }) => (
-            <Card
+        <div className="grid border-t border-border md:grid-cols-2">
+          {PLAN_CARDS.map(({ plan, description, features }, i) => (
+            <Reveal
               key={plan.id}
-              data-testid={`plan-${plan.id}`}
-              className={plan.id === "pro" ? "border-brand/60" : undefined}
+              delay={i * 0.12}
+              className={cn(
+                "spotlight flex flex-col p-6 md:p-10",
+                plan.id === "free"
+                  ? "border-border max-md:border-b md:border-r"
+                  : "bg-brand/[0.04]",
+              )}
             >
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  {plan.name}
-                  {plan.id === "pro" && <Badge variant="secondary">Coming soon</Badge>}
-                </CardTitle>
-                <CardDescription>{description}</CardDescription>
-              </CardHeader>
-              <CardContent className="flex-1">
-                <p className="flex items-baseline gap-1">
-                  <span className="text-4xl font-bold tracking-tight text-foreground">
-                    ${plan.priceUsdPerMonth}
+              <div data-testid={`plan-${plan.id}`} className="flex flex-1 flex-col">
+                {plan.id === "pro" && (
+                  <span aria-hidden className="absolute inset-x-0 top-0 h-0.5 bg-brand" />
+                )}
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-semibold text-foreground">{plan.name}</h2>
+                  {plan.id === "pro" && (
+                    <span className="rounded bg-brand px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-brand-foreground">
+                      Coming soon
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+                <p className="mt-8 flex items-baseline gap-1">
+                  <span className="font-mono text-5xl font-semibold tracking-tight text-foreground">
+                    $<CountUp to={plan.priceUsdPerMonth} />
                   </span>
                   <span className="text-sm text-muted-foreground">/month</span>
                 </p>
-                <p className="mt-1 text-sm font-medium text-foreground">
+                <p className="mt-2 text-sm font-medium text-foreground">
                   {formatCredits(plan.monthlyCredits)} credits a month
                 </p>
-                <ul className="mt-6 flex flex-col gap-2 text-sm text-muted-foreground">
+                <ul className="mt-8 flex flex-1 flex-col gap-3 border-t border-border pt-6 text-sm text-muted-foreground">
                   {features.map((feature) => (
-                    <li key={feature} className="flex items-start gap-2">
+                    <li key={feature} className="flex items-start gap-2.5">
                       <Check className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden />
                       {feature}
                     </li>
                   ))}
                 </ul>
-              </CardContent>
-              <CardFooter>
-                {plan.id === "free" ? (
-                  <Button
-                    asChild
-                    className="w-full bg-brand text-brand-foreground hover:bg-brand/90"
-                  >
-                    <Link href={SIGN_UP_URL}>Get started</Link>
-                  </Button>
-                ) : (
-                  // Checkout ships with billing (#105).
-                  <Button className="w-full" variant="outline" disabled>
-                    Coming soon
-                  </Button>
-                )}
-              </CardFooter>
-            </Card>
+                <div className="mt-8">
+                  {plan.id === "free" ? (
+                    <Button
+                      asChild
+                      className="h-10 w-full rounded-md bg-brand text-brand-foreground shadow-[inset_0_-4px_8px_rgb(0_0_0/0.12),0_1px_2px_rgb(232_130_79/0.4)] hover:bg-brand/90"
+                    >
+                      <Link href={SIGN_UP_URL}>Get started</Link>
+                    </Button>
+                  ) : (
+                    // Checkout ships with billing (#105).
+                    <Button className="h-10 w-full rounded-md" variant="outline" disabled>
+                      Coming soon
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </Reveal>
           ))}
         </div>
-        <p className="mt-6 text-center text-sm text-muted-foreground">
-          Need more credits? Pro members can buy top-ups: {topUp}. Top-ups are for paid plans only.
+        <p className="border-t border-border px-6 py-5 text-sm text-muted-foreground md:px-10">
+          <span className="font-mono text-foreground">[*]</span> Need more credits? Pro members can
+          buy top-ups: {topUp}. Top-ups are for paid plans only.
         </p>
+      </section>
 
-        {/* Comparison */}
-        <section className="mt-20 max-w-4xl mx-auto">
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground">
-            Compare plans
-          </h2>
-          <Table className="mt-6">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Feature</TableHead>
-                <TableHead>{free.name}</TableHead>
-                <TableHead>{pro.name}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {COMPARISON.map((row) => (
-                <TableRow key={row.feature}>
-                  <TableCell className="whitespace-normal font-medium">{row.feature}</TableCell>
-                  <TableCell className="whitespace-normal">
-                    <ComparisonValue value={row.free} />
-                  </TableCell>
-                  <TableCell className="whitespace-normal">
-                    <ComparisonValue value={row.pro} />
-                  </TableCell>
+      {/* How credits work */}
+      <section className="border-b border-border">
+        <SectionHeader
+          label="Credits"
+          title="How credits"
+          accent="work."
+          description="You pay for the AI work a run actually needs. Nothing is charged for runs on your own key."
+        />
+        <dl className="grid border-t border-border md:grid-cols-3">
+          {CREDIT_FACTS.map((fact, i) => (
+            <Reveal
+              key={fact.caption}
+              delay={i * 0.1}
+              className="flex flex-col gap-3 border-border p-6 not-last:border-b md:p-8 md:not-last:border-r md:not-last:border-b-0"
+            >
+              <dt className="text-sm leading-relaxed text-muted-foreground">{fact.caption}</dt>
+              <dd className="order-first font-mono text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
+                {fact.prefix}
+                {fact.value === undefined ? null : <CountUp to={fact.value} />}
+                <span className="text-[0.6em] text-brand">{fact.suffix}</span>
+              </dd>
+            </Reveal>
+          ))}
+        </dl>
+      </section>
+
+      {/* Comparison */}
+      <section className="border-b border-border">
+        <SectionHeader label="Compare" title="Compare" accent="plans." />
+        <div className="border-t border-border px-2 md:px-4">
+          <Reveal>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="px-4 font-mono text-[11px] uppercase tracking-[0.14em]">
+                    Feature
+                  </TableHead>
+                  <TableHead className="px-4 font-mono text-[11px] uppercase tracking-[0.14em]">
+                    {free.name}
+                  </TableHead>
+                  <TableHead className="px-4 font-mono text-[11px] uppercase tracking-[0.14em] text-brand-text">
+                    {pro.name}
+                  </TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </section>
+              </TableHeader>
+              <TableBody>
+                {COMPARISON.map((row) => (
+                  <TableRow key={row.feature}>
+                    <TableCell className="whitespace-normal px-4 py-4 font-medium">
+                      {row.feature}
+                    </TableCell>
+                    <TableCell className="whitespace-normal px-4 py-4">
+                      <ComparisonValue value={row.free} />
+                    </TableCell>
+                    <TableCell className="whitespace-normal px-4 py-4">
+                      <ComparisonValue value={row.pro} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Reveal>
+        </div>
+      </section>
 
-        {/* FAQ */}
-        <section className="mt-20 max-w-3xl mx-auto">
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground">
-            Frequently asked questions
-          </h2>
-          <Accordion type="single" collapsible className="mt-6">
-            {FAQ.map(({ question, answer }) => (
-              <AccordionItem key={question} value={question}>
-                <AccordionTrigger>{question}</AccordionTrigger>
-                <AccordionContent className="text-muted-foreground">{answer}</AccordionContent>
-              </AccordionItem>
-            ))}
-          </Accordion>
-        </section>
-      </main>
-      <LandingFooter />
-    </div>
+      {/* FAQ */}
+      <section className="border-b border-border">
+        <div className="grid lg:grid-cols-[2fr_3fr]">
+          <div className="border-border lg:border-r">
+            <SectionHeader label="FAQ" title="Questions," accent="answered." />
+          </div>
+          <div className="border-border max-lg:border-t">
+            {/* Continues the label bar's line across this column */}
+            <div aria-hidden className="hidden h-11 border-b border-border lg:block" />
+            <Reveal>
+              <Accordion type="single" collapsible>
+                {FAQ.map(({ question, answer }) => (
+                  <AccordionItem
+                    key={question}
+                    value={question}
+                    className="border-border px-6 md:px-8"
+                  >
+                    <AccordionTrigger className="py-5 text-[15px] font-medium hover:no-underline">
+                      {question}
+                    </AccordionTrigger>
+                    <AccordionContent className="text-[15px] leading-relaxed text-muted-foreground">
+                      {answer}
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            </Reveal>
+          </div>
+        </div>
+      </section>
+    </PublicShell>
   );
 };
 

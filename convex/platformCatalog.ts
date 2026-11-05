@@ -45,6 +45,28 @@ type Catalog = Pick<Doc<"platformCatalog">, "models" | "defaultModelId" | "utili
 /** The single catalog doc; there is at most one. */
 const getCatalog = (ctx: QueryCtx) => ctx.db.query("platformCatalog").first();
 
+const publicCatalogValidator = v.union(
+  v.object({
+    models: v.array(publicCatalogModelValidator),
+    defaultModelId: v.string(),
+    autoModelIds: v.optional(v.array(v.string())),
+  }),
+  v.null(),
+);
+
+/** The kept models for pickers, without routes or prices. */
+const toPublic = (catalog: Catalog, keep: (model: Catalog["models"][number]) => boolean) => ({
+  models: catalog.models.filter(keep).map(({ id, name, vendor, vision, contextLength, access }) => ({
+    id,
+    name,
+    vendor,
+    vision,
+    contextLength,
+    access,
+  })),
+  defaultModelId: catalog.defaultModelId,
+});
+
 const invalid = (message: string) => appError("INVALID_ARGUMENT", message);
 
 const isPrice = (n: number) => Number.isFinite(n) && n >= 0 && n <= MAX_USD_PER_MTOK;
@@ -190,34 +212,30 @@ function diffCatalog(before: Catalog | null, after: Catalog) {
  */
 export const getForUsers = query({
   args: {},
-  returns: v.union(
-    v.object({
-      models: v.array(publicCatalogModelValidator),
-      defaultModelId: v.string(),
-      autoModelIds: v.optional(v.array(v.string())),
-    }),
-    v.null(),
-  ),
+  returns: publicCatalogValidator,
   handler: async (ctx) => {
     await verifyAuth(ctx);
     const catalog = await getCatalog(ctx);
     return (
       catalog && {
-        models: catalog.models
-          .filter((m) => !m.hidden)
-          .map(({ id, name, vendor, vision, contextLength, access }) => ({
-            id,
-            name,
-            vendor,
-            vision,
-            contextLength,
-            access,
-          })),
-        defaultModelId: catalog.defaultModelId,
+        ...toPublic(catalog, (m) => !m.hidden),
         // Lets the picker offer Auto when only the pool has models it routes to.
         autoModelIds: catalog.autoModelIds,
       }
     );
+  },
+});
+
+/**
+ * The landing page's picker for signed-out visitors: only models open to
+ * everyone, since promo models need a claim. Null: no catalog saved.
+ */
+export const getForVisitors = query({
+  args: {},
+  returns: publicCatalogValidator,
+  handler: async (ctx) => {
+    const catalog = await getCatalog(ctx);
+    return catalog && toPublic(catalog, (m) => !m.hidden && m.access === "everyone");
   },
 });
 
