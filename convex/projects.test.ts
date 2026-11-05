@@ -441,7 +441,7 @@ describe("typed project errors (#266)", () => {
       name: "quick.ts",
       content: "",
     });
-    expect((await alice.query(api.files.getFile, { id: fileId })).name).toBe("quick.ts");
+    expect((await alice.query(api.files.getFile, { id: fileId }))?.name).toBe("quick.ts");
   });
 });
 

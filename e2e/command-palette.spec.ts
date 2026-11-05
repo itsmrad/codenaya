@@ -202,7 +202,7 @@ test.describe("command palette", () => {
       const files = await user.query(api.files.getFiles, { projectId: project._id });
       for (const file of files.filter((file) => file.type === "file" && !file.parentId && /\.(tsx?|jsx?|html|css|json)$/.test(file.name))) {
         const stored = await user.query(api.files.getFile, { id: file._id });
-        if (stored.content?.trim()) {
+        if (stored?.content?.trim()) {
           fixture = { projectId: project._id, name: file.name };
           break;
         }

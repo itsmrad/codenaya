@@ -137,6 +137,17 @@ describe("files.deleteFile", () => {
   });
 });
 
+test("reading a deleted file returns nothing, a foreign file still throws", async () => {
+  const { alice, fileId, otherFolderId } = await setup();
+  await alice.mutation(api.files.deleteFile, { id: fileId });
+  const forbidden = expect.objectContaining({ data: expect.objectContaining({ code: "FORBIDDEN" }) });
+
+  await expect(alice.query(api.files.getFile, { id: fileId })).resolves.toBeNull();
+  await expect(alice.query(api.files.getFilePath, { id: fileId })).resolves.toEqual([]);
+  await expect(alice.query(api.files.getFile, { id: otherFolderId })).rejects.toEqual(forbidden);
+  await expect(alice.query(api.files.getFilePath, { id: otherFolderId })).rejects.toEqual(forbidden);
+});
+
 // getOwnedProject treats a project being deleted as gone (#212).
 test("file reads and writes on a project being deleted throw NOT_FOUND", async () => {
   const { t, alice, projectId, fileId } = await setup();
