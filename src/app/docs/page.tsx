@@ -13,6 +13,8 @@ import { REPORT_ISSUE_URL } from "@/lib/site";
 import { SHORTCUTS, SHORTCUT_SCOPES, formatShortcutKey } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 
+import { DocsToc } from "./docs-toc";
+
 export const metadata: Metadata = {
   title: "Docs — Codenaya",
   description:
@@ -278,20 +280,7 @@ const DocsPage = () => {
         </p>
 
         <div className="mt-10 grid gap-10 md:grid-cols-[11rem_1fr]">
-          <nav aria-label="On this page" className="md:sticky md:top-24 md:self-start">
-            <h2 className="mb-3 text-xs font-medium uppercase tracking-[0.15em] text-foreground">
-              On this page
-            </h2>
-            <ul className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground md:flex-col">
-              {SECTIONS.map(({ id, title }) => (
-                <li key={id}>
-                  <a href={`#${id}`} className="hover:text-foreground transition-colors">
-                    {title}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </nav>
+          <DocsToc sections={SECTIONS.map(({ id, title }) => ({ id, title }))} />
 
           <div
             className={cn(
