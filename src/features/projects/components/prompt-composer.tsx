@@ -69,7 +69,8 @@ const useTypedPlaceholder = (enabled: boolean) => {
 const ComposerModelSelect = ({ disabled }: { disabled: boolean }) => {
   const [agentModel, setAgentModel] = useAgentModel();
   return (
-    <div className={cn(CELL, "border-r")}>
+    // Shrinks before Clear and Build do; the name truncates, the tooltip keeps it readable.
+    <div className={cn(CELL, "min-w-0 shrink border-r")}>
       <AgentModelSelect
         value={agentModel}
         onValueChange={setAgentModel}

@@ -425,6 +425,8 @@ html.lenis, html.lenis body {
   padding: 0 !important;
   scrollbar-width: thin !important;
   scrollbar-color: color-mix(in oklab, var(--foreground) 22%, transparent) transparent;
+  /* Keeps a row reached by the arrow keys clear of the sticky strips. */
+  scroll-padding-block: 2.25rem;
 }
 .model-menu [data-slot="select-group"] {
   padding: 0.25rem;
