@@ -1,15 +1,12 @@
 "use client";
 
-import { useRef } from "react";
-import { motion, useInView } from "motion/react";
+import { motion } from "motion/react";
 import { ArrowRight } from "lucide-react";
 import { GridPattern } from "./grid-pattern";
 import { LandingPromptComposer } from "./landing-prompt-composer";
 import { Noise } from "./noise";
 
 export const LandingHero = () => {
-  const heroRef = useRef<HTMLDivElement>(null);
-  const isInView = useInView(heroRef, { once: true, amount: 0.3 });
 
   const headline = ["Build with AI.", "Ship from your browser."];
 
@@ -51,36 +48,22 @@ export const LandingHero = () => {
 
   return (
     <section
-      ref={heroRef}
       className="relative w-full overflow-hidden pt-28 pb-16 md:pt-40 md:pb-20"
     >
-      {/* Background layers */}
-      <div className="absolute inset-0 bg-background" />
-
       {/* Subtle grid */}
       <GridPattern />
 
       {/* Noise texture */}
       <Noise />
 
-      {/* Vignette */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,var(--background)_80%)] opacity-60" />
-
       {/* Content */}
       <div className="relative z-10 max-w-5xl mx-auto px-6 md:px-8 text-center">
         <motion.div
           variants={containerVariants}
           initial="hidden"
-          animate={isInView ? "visible" : "hidden"}
+          animate="visible"
           className="space-y-8"
         >
-          {/* Badge */}
-          <motion.div variants={fadeUp} className="flex justify-center">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-border/60 bg-card/50 backdrop-blur-sm text-xs font-medium text-muted-foreground">
-              <span className="size-1.5 rounded-full bg-brand animate-pulse" />
-              AI-Powered Browser IDE
-            </div>
-          </motion.div>
 
           {/* Headline */}
           <div className="space-y-2">
@@ -119,9 +102,6 @@ export const LandingHero = () => {
           </motion.div>
         </motion.div>
       </div>
-
-      {/* Bottom fade */}
-      <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
     </section>
   );
 };

@@ -51,8 +51,17 @@ const FooterLinkItem = ({ label, href }: FooterLink) =>
 
 export const LandingFooter = () => {
   return (
-    <footer className="relative border-t border-border/40 py-12">
-      <div className="max-w-7xl mx-auto px-6 md:px-8">
+    <footer className="relative z-20 border-t border-border bg-card shadow-[0_-8px_30px_-4px_rgba(0,0,0,0.05)] dark:shadow-[0_-20px_50px_-8px_rgba(0,0,0,0.7)] py-14 md:py-16">
+      {/* Top border specular depth highlights */}
+      <div className="absolute -top-px left-0 right-0 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+      <div className="absolute -top-px left-1/2 -translate-x-1/2 w-1/2 max-w-xl h-px bg-gradient-to-r from-transparent via-brand/40 to-transparent" />
+
+      {/* Ambient background depth glow */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-[600px] h-40 bg-brand/[0.04] dark:bg-brand/[0.07] blur-3xl rounded-full" />
+      </div>
+
+      <div className="relative max-w-7xl mx-auto px-6 md:px-8">
         <div className="flex flex-col md:flex-row md:justify-between gap-10">
           {/* Brand */}
           <motion.div

@@ -92,7 +92,7 @@ export const LandingFeatures = () => {
               }}
               className={`${feature.span} group relative`}
             >
-              <div className="relative h-full p-6 md:p-8 rounded-xl border border-border/60 bg-card/50 transition-colors duration-200 hover:border-border">
+              <div className="relative h-full p-6 md:p-8 rounded-xl border border-border bg-card shadow-sm transition-colors duration-200 hover:border-brand/50">
                 <div className="space-y-4">
                   <div className="inline-flex items-center justify-center size-10 rounded-xl bg-brand/10 text-brand">
                     <feature.icon className="size-5" />

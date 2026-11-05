@@ -3,10 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { motion } from "motion/react";
 import { Menu } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  NavbarPill,
+  NavbarPillBody,
+  NavbarPillItem,
+} from "@/components/ui/navbar-pill";
 import {
   Sheet,
   SheetClose,
@@ -17,9 +21,9 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { SIGN_IN_URL, SIGN_UP_URL } from "@/features/auth/constants";
+import { cn } from "@/lib/utils";
 import { CodenayaLogo } from "@/components/codenaya-logo";
 import { CustomCursor } from "@/components/ui/custom-cursor";
-import { cn } from "@/lib/utils";
 
 import { UserMenu } from "./user-menu";
 
@@ -33,17 +37,8 @@ const NAV_LINKS = [
 const isActive = (pathname: string, href: string) =>
   pathname === href || pathname.startsWith(`${href}/`);
 
-/**
- * The bar's surface: a glass pill floating over the page. Only these classes
- * differ between the floating and the full-width variant of the header.
- */
-const SURFACE = {
-  header: "px-3 pt-3 md:pt-4",
-  nav: "max-w-5xl rounded-full pl-5 pr-2 bg-card/70 dark:bg-card/55 backdrop-blur-xl backdrop-saturate-150 border border-border shadow-[0_8px_32px_-12px_rgb(0_0_0/0.12)] dark:shadow-[inset_0_1px_0_rgb(255_255_255/0.05)]",
-};
-
 const pillButton = "h-9 rounded-full px-4 text-sm font-medium";
-const solidButton = "bg-foreground text-background hover:bg-foreground/85";
+const solidButton = "bg-foreground text-background hover:bg-foreground/85 shadow-sm";
 
 /** The current section is marked with the accent: a 6px dot, as status is elsewhere. */
 const ActiveDot = () => <span aria-hidden className="inline-block size-1.5 shrink-0 rounded-full bg-brand" />;
@@ -51,9 +46,9 @@ const ActiveDot = () => <span aria-hidden className="inline-block size-1.5 shrin
 const Brand = () => (
   <Link
     href="/"
-    className="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    className="flex items-center gap-2.5 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring group"
   >
-    <CodenayaLogo blinking size={22} />
+    <CodenayaLogo blinking size={22} className="transition-transform duration-200 group-hover:scale-105" />
     <span className="text-[15px] font-semibold tracking-tight text-foreground">codenaya</span>
   </Link>
 );
@@ -77,37 +72,22 @@ export const MarketingNavbar = ({ overlay = false }: MarketingNavbarProps) => {
       {/* Mounted here so the cursor is on every public page and never in the IDE.
           A sibling, not a child: the header's transform would trap its `fixed`. */}
       <CustomCursor />
-      <motion.header
-        initial={overlay ? { y: -8, opacity: 0 } : false}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
-        className={cn("top-0 z-50", overlay ? "fixed inset-x-0" : "sticky", SURFACE.header)}
-      >
-        <nav
-          aria-label="Main"
-          className={cn("mx-auto h-14 flex items-center justify-between", SURFACE.nav)}
-        >
+      <NavbarPill overlay={overlay}>
+        <NavbarPillBody>
           <div className="flex items-center gap-5">
             <Brand />
-            <span aria-hidden className="hidden md:block h-4 w-px bg-border" />
+            <span aria-hidden className="hidden md:block h-4 w-px bg-border/60" />
 
             <ul className="hidden md:flex items-center gap-1">
               {NAV_LINKS.map(({ href, label }) => {
                 const active = isActive(pathname, href);
                 return (
-                  <li key={href}>
-                    <Link
-                      href={href}
-                      aria-current={active ? "page" : undefined}
-                      className={cn(
-                        "flex h-8 items-center gap-2 rounded-full px-3 font-mono text-[11px] uppercase tracking-[0.14em] transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {active && <ActiveDot />}
-                      {label}
-                    </Link>
-                  </li>
+                  <NavbarPillItem
+                    key={href}
+                    href={href}
+                    label={label}
+                    active={active}
+                  />
                 );
               })}
             </ul>
@@ -212,8 +192,8 @@ export const MarketingNavbar = ({ overlay = false }: MarketingNavbarProps) => {
               </SheetContent>
             </Sheet>
           </div>
-        </nav>
-      </motion.header>
+        </NavbarPillBody>
+      </NavbarPill>
     </>
   );
 };
