@@ -5,7 +5,6 @@ import { motion, useReducedMotion } from "motion/react";
 import { ArrowRight } from "lucide-react";
 
 import { AI_PROVIDER_IDS } from "@/features/ai-providers/registry";
-import { AGENT_MODELS } from "@/features/conversations/agent-models";
 import { GITHUB_REPO_URL } from "@/lib/site";
 import { GridPattern } from "./grid-pattern";
 import { HeroDemo } from "./hero-demo";
@@ -20,7 +19,7 @@ const CHIPS = ["Bring your own key", "Cloud sandbox", "GitHub export", "Desktop 
 const NAMED_PROVIDERS = AI_PROVIDER_IDS.filter((id) => id !== "custom").length;
 
 const STATS = [
-  { value: AGENT_MODELS.length, suffix: "", caption: "Agent models, switch any time" },
+  { value: 300, suffix: "", caption: "Free credits every month" },
   { value: NAMED_PROVIDERS, suffix: "+", caption: "Key providers, plus any OpenAI-compatible endpoint" },
   { value: 0, suffix: "", caption: "Things to install on your machine" },
   { value: 1, suffix: " click", caption: "To export to GitHub or a ZIP" },
@@ -100,13 +99,13 @@ export const LandingHero = () => {
             key={stat.caption}
             className="flex flex-col gap-3 border-border p-6 odd:border-r md:p-8 md:border-r md:last:border-r-0 max-md:[&:nth-child(-n+2)]:border-b"
           >
-            <dd className="font-mono text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
-              <CountUp to={stat.value} />
-              <span className="text-[0.6em] text-brand">{stat.suffix}</span>
-            </dd>
             <dt className="text-xs leading-relaxed text-muted-foreground">
               <span className="font-mono text-foreground">Fig {i + 1}.</span> {stat.caption}
             </dt>
+            <dd className="order-first font-mono text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
+              <CountUp to={stat.value} />
+              <span className="text-[0.6em] text-brand">{stat.suffix}</span>
+            </dd>
           </div>
         ))}
       </dl>

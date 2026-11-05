@@ -52,7 +52,7 @@ const POINTS: Point[] = [
         <span className="truncate font-mono text-[11px] text-muted-foreground">stripe.create_price</span>
         <span className="flex gap-1.5 text-[11px]">
           <span className="rounded border border-border px-2 py-0.5 text-muted-foreground">Deny</span>
-          <span className="animate-pulse rounded bg-brand px-2 py-0.5 font-medium text-brand-foreground">Approve</span>
+          <span className="motion-safe:animate-pulse rounded bg-brand px-2 py-0.5 font-medium text-brand-foreground">Approve</span>
         </span>
       </div>
     ),

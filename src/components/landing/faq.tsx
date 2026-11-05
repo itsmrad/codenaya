@@ -1,7 +1,6 @@
 "use client";
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { AGENT_MODELS } from "@/features/conversations/agent-models";
 import { SectionHeader } from "./section-header";
 
 const QUESTIONS = [
@@ -15,7 +14,7 @@ const QUESTIONS = [
   },
   {
     q: "Which models can the agent use?",
-    a: `${AGENT_MODELS.length} models, including Claude, GPT, Gemini, Grok, DeepSeek and Qwen. You can switch models at any time.`,
+    a: "Claude, GPT, Gemini, Grok, DeepSeek, Qwen and more. You can switch models at any time.",
   },
   {
     q: "Is it free?",

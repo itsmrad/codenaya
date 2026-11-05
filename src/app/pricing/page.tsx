@@ -235,12 +235,12 @@ const PricingPage = () => {
               delay={i * 0.1}
               className="flex flex-col gap-3 border-border p-6 not-last:border-b md:p-8 md:not-last:border-r md:not-last:border-b-0"
             >
-              <dd className="font-mono text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
+              <dt className="text-sm leading-relaxed text-muted-foreground">{fact.caption}</dt>
+              <dd className="order-first font-mono text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
                 {fact.prefix}
                 {fact.value === undefined ? null : <CountUp to={fact.value} />}
                 <span className="text-[0.6em] text-brand">{fact.suffix}</span>
               </dd>
-              <dt className="text-sm leading-relaxed text-muted-foreground">{fact.caption}</dt>
             </Reveal>
           ))}
         </dl>

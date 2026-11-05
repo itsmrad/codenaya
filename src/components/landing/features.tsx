@@ -24,7 +24,7 @@ const FEATURES: Feature[] = [
     icon: Bot,
     tag: "AI agent with model choice",
     title: "Model choice.",
-    body: `The agent writes and edits files across your project. Switch between ${AGENT_MODELS.length} models, including Claude, GPT and Gemini, and use Cmd+K for quick edits.`,
+    body: "The agent writes and edits files across your project. Switch between models, including Claude, GPT and Gemini, and use Cmd+K for quick edits.",
     visual: <ModelPicker />,
     wide: true,
   },
@@ -161,7 +161,7 @@ function Terminal() {
           {line}
         </div>
       ))}
-      <span className="inline-block h-3 w-1.5 animate-pulse bg-white/70" />
+      <span className="inline-block h-3 w-1.5 motion-safe:animate-pulse bg-white/70" />
     </Panel>
   );
 }
@@ -192,7 +192,7 @@ function Skills() {
     <Panel className="max-w-md p-3">
       <div className="rounded border border-border px-3 py-2 font-mono text-[12px] text-foreground">
         /{SKILLS[active]}
-        <span className="ml-0.5 inline-block h-3 w-px translate-y-0.5 animate-pulse bg-foreground" />
+        <span className="ml-0.5 inline-block h-3 w-px translate-y-0.5 motion-safe:animate-pulse bg-foreground" />
       </div>
       <div className="mt-2 flex flex-col gap-0.5">
         {SKILLS.map((skill, i) => (

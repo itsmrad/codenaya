@@ -4,7 +4,6 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 import { AI_PROVIDER_IDS, AI_PROVIDERS } from "@/features/ai-providers/registry";
-import { AGENT_MODELS } from "@/features/conversations/agent-models";
 import { cn } from "@/lib/utils";
 import { SectionHeader } from "./section-header";
 
@@ -18,7 +17,7 @@ const detailFor = (id: (typeof AI_PROVIDER_IDS)[number]) => {
 };
 
 const CELLS = [
-  { name: "Codenaya", detail: `${AGENT_MODELS.length} models, nothing to set up`, tag: "Credits", highlight: true },
+  { name: "Codenaya", detail: "Models included, nothing to set up", tag: "Credits", highlight: true },
   ...AI_PROVIDER_IDS.map((id) => ({
     name: AI_PROVIDERS[id].label.replace(" (OpenAI-compatible)", ""),
     detail: detailFor(id),

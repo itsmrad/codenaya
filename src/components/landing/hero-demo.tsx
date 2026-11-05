@@ -125,7 +125,7 @@ export const HeroDemo = () => {
             <div
               key={file}
               className={cn(
-                "flex items-center gap-2 rounded px-2 py-1.5 font-mono text-[12px] transition-all duration-300",
+                "flex items-center gap-2 rounded px-2 py-1.5 font-mono text-[12px] transition-colors duration-300",
                 i < filesWritten || previewReady ? "text-foreground" : "text-muted-foreground/40",
                 writing === i && "bg-brand/10 text-brand-text",
               )}

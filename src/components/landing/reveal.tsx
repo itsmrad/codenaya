@@ -36,8 +36,12 @@ export const CountUp = ({ to }: { to: number }) => {
   const reduceMotion = useReducedMotion();
 
   useEffect(() => {
-    if (!inView || reduceMotion || !ref.current) return;
+    if (!inView || !ref.current) return;
     const node = ref.current;
+    if (reduceMotion) {
+      node.textContent = to.toLocaleString("en-US");
+      return;
+    }
     const controls = animate(0, to, {
       duration: 1.2,
       ease: EASE,

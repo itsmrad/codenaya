@@ -79,7 +79,7 @@ function DescribeVisual() {
           >
             {text}
           </motion.span>
-          <span className="ml-0.5 h-3.5 w-px animate-pulse bg-foreground" />
+          <span className="ml-0.5 h-3.5 w-px motion-safe:animate-pulse bg-foreground" />
         </div>
         <div className="mt-3 flex items-center justify-between">
           <span className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
@@ -146,7 +146,7 @@ function ShipVisual() {
           </motion.div>
         ))}
         <div className="flex items-center gap-2 px-1 font-mono text-[10px] text-muted-foreground">
-          <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" /> Preview running
+          <span className="size-1.5 motion-safe:animate-pulse rounded-full bg-emerald-500" /> Preview running
         </div>
       </div>
     </div>

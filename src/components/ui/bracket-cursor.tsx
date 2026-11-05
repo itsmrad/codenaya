@@ -83,6 +83,13 @@ export function BracketCursor() {
       if (!frame) frame = requestAnimationFrame(loop);
     };
 
+    const aimAt = (el: Element | null) => {
+      const text = el?.closest(TEXT);
+      target = text ? null : (el?.closest(INTERACTIVE) ?? null);
+      setMode(text ? "input" : target ? "hover" : "idle");
+      kick();
+    };
+
     const onMove = (event: MouseEvent) => {
       mouse.x = event.clientX;
       mouse.y = event.clientY;
@@ -92,11 +99,11 @@ export function BracketCursor() {
         shown = true;
         setVisible(true);
       }
-      const el = event.target as Element | null;
-      const text = el?.closest(TEXT);
-      target = text ? null : (el?.closest(INTERACTIVE) ?? null);
-      setMode(text ? "input" : target ? "hover" : "idle");
-      kick();
+      aimAt(event.target as Element | null);
+    };
+    // Scrolling moves the page under a still pointer.
+    const onScroll = () => {
+      if (shown) aimAt(document.elementFromPoint(mouse.x, mouse.y));
     };
     const onDown = () => setDown(true);
     const onUp = () => setDown(false);
@@ -112,14 +119,14 @@ export function BracketCursor() {
     window.addEventListener("mousemove", onMove, { passive: true });
     window.addEventListener("mousedown", onDown, { passive: true });
     window.addEventListener("mouseup", onUp, { passive: true });
-    window.addEventListener("scroll", kick, { passive: true });
+    window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("blur", hide);
     document.addEventListener("mouseout", onOut);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("mouseup", onUp);
-      window.removeEventListener("scroll", kick);
+      window.removeEventListener("scroll", onScroll);
       window.removeEventListener("blur", hide);
       document.removeEventListener("mouseout", onOut);
       cancelAnimationFrame(frame);
