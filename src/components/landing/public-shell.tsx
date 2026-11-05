@@ -36,7 +36,10 @@ export const PublicShell = ({ children }: { children: ReactNode }) => {
           </span>
           <ArrowRight className="size-3 shrink-0 transition-transform group-hover:translate-x-0.5" />
         </Link>
-        <MarketingNavbar themeToggle={<LandingThemeToggle theme={theme} onToggle={toggle} />} />
+        <MarketingNavbar
+          themeToggle={<LandingThemeToggle theme={theme} onToggle={toggle} />}
+          menuClassName={theme}
+        />
         {/* The grid: one framed column, sections stacked on shared borders. */}
         <main className="mx-auto w-full max-w-[1200px] flex-1 border-x border-border">
           {children}

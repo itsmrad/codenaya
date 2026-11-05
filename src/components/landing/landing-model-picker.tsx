@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "convex/react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Check, ChevronDown } from "lucide-react";
 
 import { api } from "../../../convex/_generated/api";
@@ -20,10 +20,14 @@ export const LandingModelPicker = () => {
   // The models a new account gets: the admin's catalog (everyone's models),
   // else the env catalog's. The pick is saved where the dashboard reads it.
   const saved = useQuery(api.platformCatalog.getForVisitors);
-  const catalog: { models: readonly PublicCatalogModel[]; defaultModelId: string } = saved ?? ENV_CATALOG;
+  const catalog: {
+    models: readonly (PublicCatalogModel & { hidden?: boolean })[];
+    defaultModelId: string;
+  } = saved ?? ENV_CATALOG;
   const models = pickableModels(catalog.models);
   const stored = useStoredAgentModel();
   const [open, setOpen] = useState(false);
+  const reduceMotion = useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
 
   const selected =
@@ -68,9 +72,9 @@ export const LandingModelPicker = () => {
           <motion.div
             // Lenis smooth-scrolls the page; this lets the wheel scroll the list instead.
             data-lenis-prevent
-            initial={{ opacity: 0, y: 4, scale: 0.98 }}
+            initial={reduceMotion ? false : { opacity: 0, y: 4, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 4, scale: 0.98 }}
+            exit={reduceMotion ? undefined : { opacity: 0, y: 4, scale: 0.98 }}
             transition={{ duration: 0.15 }}
             className="absolute bottom-full left-0 z-30 mb-2 max-h-80 w-72 origin-bottom-left overflow-y-auto overscroll-contain rounded-md border border-border bg-card normal-case tracking-normal shadow-[0_16px_48px_-20px_rgb(0_0_0/0.35)]"
           >
@@ -79,9 +83,11 @@ export const LandingModelPicker = () => {
               {models.map((model) => {
                 const active = model.id === selected.id;
                 return (
-                  <li key={model.id} role="option" aria-selected={active}>
+                  <li key={model.id} role="presentation">
                     <button
                       type="button"
+                      role="option"
+                      aria-selected={active}
                       onClick={() => {
                         setModel({ modelId: model.id });
                         setOpen(false);

@@ -17,7 +17,7 @@ const STRIP_SIZE = 6;
  * (e.g. the frontend deployed before the Convex functions it reads) must not
  * take the landing page down with it.
  */
-class HideOnError extends Component<{ children: ReactNode }, { failed: boolean }> {
+export class HideOnError extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
 
   static getDerivedStateFromError() {
@@ -66,12 +66,15 @@ const CommunityStrip = () => {
       />
 
       {hasProjects && (
-        <div className="grid gap-px border-t border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
-          {trending.map((project) => (
-            <div key={project._id} className="bg-background p-4 md:p-5">
-              <ShowcaseCard project={project} href={`/showcase/${project._id}`} />
-            </div>
-          ))}
+        // Per-cell lines, clipped at the outer edges, so a short last row leaves plain background.
+        <div className="overflow-hidden border-t border-border">
+          <div className="-mr-px -mb-px grid sm:grid-cols-2 lg:grid-cols-3">
+            {trending.map((project) => (
+              <div key={project._id} className="border-r border-b border-border p-4 md:p-5">
+                <ShowcaseCard project={project} href={`/showcase/${project._id}`} />
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

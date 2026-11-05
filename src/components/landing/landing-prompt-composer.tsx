@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { SIGN_IN_URL } from "@/features/auth/constants";
 import { PromptComposer } from "@/features/projects/components/prompt-composer";
 import { savePendingPrompt } from "@/features/projects/utils/pending-prompt";
+import { HideOnError } from "./community-strip";
 import { LandingModelPicker } from "./landing-model-picker";
 
 /**
@@ -27,7 +28,11 @@ export const LandingPromptComposer = ({ className }: { className?: string }) => 
       onSubmit={handleSubmit}
       showModelSelect={false}
       showEnhance={false}
-      tools={<LandingModelPicker />}
+      tools={
+        <HideOnError>
+          <LandingModelPicker />
+        </HideOnError>
+      }
       className={className}
     />
   );

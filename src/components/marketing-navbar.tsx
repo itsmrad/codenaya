@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { motion, useScroll } from "motion/react";
+import { motion, useReducedMotion, useScroll } from "motion/react";
 import { Menu } from "lucide-react";
 import { FaGithub } from "react-icons/fa";
 
@@ -56,12 +56,20 @@ const Brand = () => (
 /**
  * The one header for every public page: Showcase, Pricing, Docs, plus auth
  * actions. `themeToggle` is the landing page's own theme switch, shown in a
- * cell of its own.
+ * cell of its own. `menuClassName` carries the landing theme into the phone
+ * menu, which is portaled outside the page's themed wrapper.
  */
-export const MarketingNavbar = ({ themeToggle }: { themeToggle?: ReactNode }) => {
+export const MarketingNavbar = ({
+  themeToggle,
+  menuClassName,
+}: {
+  themeToggle?: ReactNode;
+  menuClassName?: string;
+}) => {
   const pathname = usePathname();
   const { isSignedIn } = useAuth();
   const { scrollYProgress } = useScroll();
+  const reduceMotion = useReducedMotion();
 
   return (
     <>
@@ -69,7 +77,7 @@ export const MarketingNavbar = ({ themeToggle }: { themeToggle?: ReactNode }) =>
           A sibling, not a child: the header's transform would trap its `fixed`. */}
       <SiteCursor />
       <motion.header
-        initial={{ y: -8, opacity: 0 }}
+        initial={reduceMotion ? false : { y: -8, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
         className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl backdrop-saturate-150"
@@ -154,7 +162,7 @@ export const MarketingNavbar = ({ themeToggle }: { themeToggle?: ReactNode }) =>
                   <Menu className="size-5" strokeWidth={1.5} />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="right" className="w-full gap-0 shadow-none sm:max-w-sm">
+              <SheetContent side="right" className={cn("w-full gap-0 text-foreground shadow-none sm:max-w-sm", menuClassName)}>
                 <SheetHeader className="h-14 flex-row items-center px-5 py-0">
                   <SheetTitle className="sr-only">Menu</SheetTitle>
                   <SheetDescription className="sr-only">Site navigation</SheetDescription>

@@ -14,6 +14,8 @@ type LandingTheme = "light" | "dark";
 
 const STORAGE_KEY = "codenaya-landing-theme";
 const listeners = new Set<() => void>();
+// The choice for this page load, set only when storage refuses it.
+let unsaved: LandingTheme | undefined;
 
 const subscribe = (onChange: () => void) => {
   listeners.add(onChange);
@@ -26,6 +28,7 @@ const subscribe = (onChange: () => void) => {
 
 // Storage can throw (private mode, blocked site data); fall back to light.
 const read = (): LandingTheme => {
+  if (unsaved) return unsaved;
   try {
     return localStorage.getItem(STORAGE_KEY) === "dark" ? "dark" : "light";
   } catch {
@@ -37,10 +40,12 @@ export const useLandingTheme = () => {
   const theme = useSyncExternalStore(subscribe, read, (): LandingTheme => "light");
 
   const toggle = () => {
+    const next = theme === "dark" ? "light" : "dark";
     try {
-      localStorage.setItem(STORAGE_KEY, theme === "dark" ? "light" : "dark");
+      localStorage.setItem(STORAGE_KEY, next);
+      unsaved = undefined;
     } catch {
-      return;
+      unsaved = next;
     }
     listeners.forEach((listener) => listener());
   };
