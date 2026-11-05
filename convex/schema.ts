@@ -920,4 +920,12 @@ export default defineSchema({
     .index("by_project_and_createdAt", ["projectId", "createdAt"])
     .index("by_createdAt", ["createdAt"])
     .index("by_invocation", ["mcpInvocationId"]),
+
+  /** "Notify me when Pro launches" sign-ups (#250), one row per email. */
+  proWaitlist: defineTable({
+    email: v.string(),
+    /** Clerk user id, when the visitor was signed in. */
+    userId: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_email", ["email"]),
 });

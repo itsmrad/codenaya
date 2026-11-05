@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Check, Minus } from "lucide-react";
 
 import { MarketingNavbar } from "@/components/marketing-navbar";
+import { ProWaitlist } from "@/features/billing/components/pro-waitlist";
 import { LandingFooter } from "@/components/landing/footer";
 import {
   Accordion,
@@ -153,12 +154,17 @@ const PricingPage = () => {
             <Card
               key={plan.id}
               data-testid={`plan-${plan.id}`}
-              className={plan.id === "pro" ? "border-brand/60" : undefined}
+              className={plan.id === "pro" ? "border-brand/60 shadow-lg shadow-brand/10 ring-1 ring-brand/30" : undefined}
             >
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
                   {plan.name}
-                  {plan.id === "pro" && <Badge variant="secondary">Coming soon</Badge>}
+                  {plan.id === "pro" && (
+                    <>
+                      <Badge className="bg-brand text-brand-foreground">Best value</Badge>
+                      <Badge variant="secondary">Coming soon</Badge>
+                    </>
+                  )}
                 </CardTitle>
                 <CardDescription>{description}</CardDescription>
               </CardHeader>
@@ -190,10 +196,8 @@ const PricingPage = () => {
                     <Link href={SIGN_UP_URL}>Get started</Link>
                   </Button>
                 ) : (
-                  // Checkout ships with billing (#105).
-                  <Button className="w-full" variant="outline" disabled>
-                    Coming soon
-                  </Button>
+                  // Checkout ships with billing (#105); until then, a waitlist (#250).
+                  <ProWaitlist />
                 )}
               </CardFooter>
             </Card>
@@ -202,6 +206,17 @@ const PricingPage = () => {
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Need more credits? Pro members can buy top-ups: {topUp}. Top-ups are for paid plans only.
         </p>
+
+        {/* BYOK band (#250): the free path for heavy users. */}
+        <div className="mt-10 max-w-4xl mx-auto rounded-xl border border-border bg-card px-6 py-5 flex flex-col items-center gap-3 text-center sm:flex-row sm:justify-between sm:text-left">
+          <p className="text-sm text-foreground">
+            <span className="font-medium">Have an API key?</span>{" "}
+            <span className="text-muted-foreground">Runs on your own key are unlimited on Free.</span>
+          </p>
+          <Button asChild variant="outline" size="sm" className="shrink-0">
+            <Link href="/docs#byok">How BYOK works</Link>
+          </Button>
+        </div>
 
         {/* Comparison */}
         <section className="mt-20 max-w-4xl mx-auto">

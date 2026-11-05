@@ -36,6 +36,7 @@ import type * as skills from "../skills.js";
 import type * as stats from "../stats.js";
 import type * as system from "../system.js";
 import type * as users from "../users.js";
+import type * as waitlist from "../waitlist.js";
 
 import type {
   ApiFromModules,
@@ -72,6 +73,7 @@ declare const fullApi: ApiFromModules<{
   stats: typeof stats;
   system: typeof system;
   users: typeof users;
+  waitlist: typeof waitlist;
 }>;
 
 /**
