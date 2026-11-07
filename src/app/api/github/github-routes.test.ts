@@ -23,6 +23,7 @@ vi.mock("@/inngest/client", () => ({
 
 import { POST as importPOST } from "./import/route";
 import { POST as exportPOST } from "./export/route";
+import { POST as pushPOST } from "./push/route";
 import { GITHUB_NOT_LINKED } from "@/features/projects/constants";
 import {
   GITHUB_IMPORT_RATE_LIMIT,
@@ -40,6 +41,13 @@ const post = (body: unknown) =>
     body: JSON.stringify(body),
   });
 
+const LINKED = {
+  repo: "octocat/widgets",
+  branch: "main",
+  lastSyncedSha: "abc",
+  lastSyncedAt: 1,
+};
+
 const routes = [
   {
     name: "import",
@@ -49,9 +57,14 @@ const routes = [
     name: "export",
     call: () => exportPOST(post({ projectId: "p1", repoName: "widgets" })),
   },
+  {
+    name: "push",
+    call: () => pushPOST(post({ projectId: "p1" })),
+    githubSync: LINKED,
+  },
 ];
 
-describe.each(routes)("POST /api/github/$name", ({ call }) => {
+describe.each(routes)("POST /api/github/$name", ({ call, githubSync }) => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
@@ -59,7 +72,7 @@ describe.each(routes)("POST /api/github/$name", ({ call }) => {
     mocks.auth.mockResolvedValue({ userId: "user_1", has: () => false });
     mocks.createProject.mockResolvedValue("p1");
     // Export checks the caller owns the project (#208).
-    mocks.query.mockResolvedValue({ _id: "p1", ownerId: "user_1" });
+    mocks.query.mockResolvedValue({ _id: "p1", ownerId: "user_1", githubSync });
     mocks.inngestSend.mockResolvedValue({ ids: ["evt_1"] });
     // The import route checks GitHub for public repos (#364): private by default.
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })));
@@ -97,6 +110,33 @@ describe.each(routes)("POST /api/github/$name", ({ call }) => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ code: GITHUB_NOT_LINKED });
+    expect(mocks.inngestSend).not.toHaveBeenCalled();
+  });
+});
+
+describe("GitHub sync link (#343)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
+    mocks.auth.mockResolvedValue({ userId: "user_1", has: () => false });
+    mocks.getUserOauthAccessToken.mockResolvedValue({ data: [{ token: "gho_test" }] });
+  });
+
+  it("never exports a linked project to a new repo", async () => {
+    mocks.query.mockResolvedValue({ _id: "p1", ownerId: "user_1", githubSync: LINKED });
+
+    const res = await exportPOST(post({ projectId: "p1", repoName: "widgets" }));
+
+    expect(res.status).toBe(409);
+    expect(mocks.inngestSend).not.toHaveBeenCalled();
+  });
+
+  it("refuses to push a project that was never exported", async () => {
+    mocks.query.mockResolvedValue({ _id: "p1", ownerId: "user_1" });
+
+    const res = await pushPOST(post({ projectId: "p1" }));
+
+    expect(res.status).toBe(400);
     expect(mocks.inngestSend).not.toHaveBeenCalled();
   });
 });

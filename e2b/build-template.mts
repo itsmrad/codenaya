@@ -12,13 +12,13 @@
  *
  * Usage (needs E2B_API_KEY; builds into that key's E2B team):
  *   npm run e2b:template
- * then set E2B_TEMPLATE=codenaya-node22 wherever the app runs.
+ * Uses E2B_TEMPLATE (default: codenaya-node22); set the same value in the app.
  */
 import * as nodeModule from "node:module";
 
 import { Template, defaultBuildLogger } from "e2b";
 
-const TEMPLATE_NAME = "codenaya-node22";
+const TEMPLATE_NAME = process.env.E2B_TEMPLATE?.trim() || "codenaya-node22";
 
 // The starter's own imports are extensionless, as the bundler resolves them;
 // plain Node needs the .ts added. Typed here: @types/node predates

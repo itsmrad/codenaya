@@ -97,6 +97,7 @@ describe("first build (#338)", () => {
       projectName: "p",
       conversationTitle: "New",
       ownerId: ALICE,
+      source: "template",
       firstBuildPending: true,
     });
   };

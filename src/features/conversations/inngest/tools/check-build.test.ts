@@ -100,6 +100,39 @@ describe("checkProjectBuild", () => {
     expect(e2b.create).not.toHaveBeenCalled();
   });
 
+  it("reports named-export and Tailwind heuristics as advisory", async () => {
+    const sandbox = fakeSandbox();
+    const result = await check([
+      ...starter(),
+      { path: "src/ui.ts", content: "export const Button = 1;" },
+      { path: "src/Bad.tsx", content: 'import { Dialog } from "./ui";' },
+      { path: "src/drift.css", content: "@tailwind utilities;" },
+    ]);
+    expect(result).toContain("no such export");
+    expect(result).toContain("replace v3 @tailwind");
+    expect(result).toMatch(/^Build verified/);
+    expect(sandbox.commands.run).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["next", "oversized", "malformed", "many-files"])("retains unconditional import/package gates for %s snapshots", async (kind) => {
+    const files = starter();
+    const manifest = files.find((f) => f.path === "package.json")!;
+    if (kind === "next") {
+      const pkg = JSON.parse(manifest.content);
+      pkg.dependencies.next = "15";
+      manifest.content = JSON.stringify(pkg);
+    }
+    if (kind === "malformed") manifest.content = "{";
+    if (kind === "oversized") files.push({ path: "large.ts", content: " ".repeat(100_001) });
+    if (kind === "many-files") for (let i = 0; i < 501; i++) files.push({ path: `empty${i}.ts`, content: "" });
+    files.push({ path: "broken.ts", content: 'import x from "./missing"; import y from "undeclared-package";' });
+    const result = await check(files);
+    expect(result).toMatch(/^Error: Static checks failed:/);
+    expect(result).toContain("./missing");
+    if (kind !== "malformed") expect(result).toContain("undeclared-package");
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
   it("falls back to the static checks without an E2B key", async () => {
     const result = await check(starter(), null);
     expect(result.split("\n")[0]).toBe(STATIC_CHECKS_PASSED);
@@ -251,14 +284,14 @@ const DEV_SERVER: Proc = { cmd: "/bin/bash", args: ["-l", "-c", "npm run dev -- 
 const installing = (command: string): Proc => ({ cmd: "/bin/bash", args: ["-l", "-c", command] });
 
 describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
-  const warmCheck = () => {
-    const files = starter();
+  const warmCheck = (files = starter(), secrets?: string[]) => {
     return checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
       apiKey: "e2b_key",
       metadata: { projectId: "proj_1", purpose: "check-build" },
       preview: { projectId: "proj_1", ownerId: "user_1" },
+      secrets,
     });
   };
   const listed = (...infos: Array<{ metadata?: Record<string, string>; minutesLeft?: number }>) =>
@@ -321,6 +354,36 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     );
     expect(warm.kill).not.toHaveBeenCalled();
     expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  /** Builds, but imports an export App.tsx lacks: an advisory finding (#333). */
+  const withAdvisory = (name: string) => [
+    ...starter(),
+    { path: "src/Extra.tsx", content: `import { ${name} } from "./App";\nexport const extra = ${name};\n` },
+  ];
+
+  it("keeps the advisory project checks on a passing build, warm and cold", async () => {
+    listed({});
+    warmSandbox();
+    const warm = await warmCheck(withAdvisory("Nope"));
+    expect(warm.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(warm).toContain("\nAdvisory project checks:\n- [export] src/Extra.tsx imports { Nope } from ./App");
+    expect(e2b.create).not.toHaveBeenCalled();
+
+    listed();
+    fakeSandbox();
+    const cold = await warmCheck(withAdvisory("Nope"));
+    expect(cold.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(cold).toContain("[export] src/Extra.tsx imports { Nope } from ./App");
+    expect(e2b.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("redacts the project's secrets from the advisory notes", async () => {
+    listed();
+    fakeSandbox();
+    const result = await warmCheck(withAdvisory("SYNTHETIC_SECRET_NAME"), ["SYNTHETIC_SECRET_NAME"]);
+    expect(result).toContain("imports { [redacted] } from ./App");
+    expect(result).not.toContain("SYNTHETIC_SECRET_NAME");
   });
 
   it("reports build errors from the warm sandbox with its paths made relative", async () => {

@@ -111,6 +111,7 @@ describe("editFile tool", () => {
 
   beforeEach(() => {
     mocks.query
+      .mockResolvedValue(files)
       .mockResolvedValueOnce(files)
       .mockResolvedValueOnce({ _id: "app", content: "const a = 1;\nconst b = 2;\n" });
   });
@@ -161,7 +162,8 @@ describe("editFile tool", () => {
     mocks.query.mockReset();
     mocks.query
       .mockResolvedValueOnce([{ _id: "types", name: "types.d.ts", type: "file" }])
-      .mockResolvedValueOnce({ _id: "types", content: "export type A = 1;\n" });
+      .mockResolvedValueOnce({ _id: "types", content: "export type A = 1;\n" })
+      .mockResolvedValue([{ _id: "types", name: "types.d.ts", type: "file", content: "export type A = 2;\n" }]);
     const data = await createEditFileTool({ projectId, internalKey }).handler(
       { path: "types.d.ts", edits: [{ oldText: "1", newText: "2" }] } as never,
       ctx,

@@ -26,6 +26,7 @@ import {
   undeclaredPackages,
   unresolvedImports,
 } from "@/features/sandbox-preview/utils/missing-references";
+import { projectChecks } from "@/features/sandbox-preview/utils/project-checks";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
@@ -93,6 +94,8 @@ type BuildJob = {
   paths: Set<string>;
   deadline: number;
   secrets: readonly string[];
+  /** Advisory findings appended to a passing result (#333). */
+  notes: string;
 };
 
 /** The step budget ran out; reported as an unfinished check. */
@@ -155,7 +158,7 @@ const notBuilt = (reason: string) =>
  * `vite build` there, within CHECK_TIMEOUT_MS and the step deadline. Returns
  * the tool result for a finished check; throws on sandbox failures and timeouts.
  */
-const buildIn = async (sandbox: Sandbox, dir: string, { files, paths, deadline, secrets }: BuildJob) => {
+const buildIn = async (sandbox: Sandbox, dir: string, { files, paths, deadline, secrets, notes }: BuildJob) => {
   const buildDeadline = Math.min(Date.now() + CHECK_TIMEOUT_MS, deadline);
   const timeLeft = () => within(buildDeadline, CHECK_TIMEOUT_MS);
 
@@ -175,7 +178,7 @@ const buildIn = async (sandbox: Sandbox, dir: string, { files, paths, deadline, 
     return `Error: Build failed. Fix these errors, then call checkBuild again:\n${failureOutput(build, dir, secrets)}`;
   }
 
-  return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.`;
+  return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.` + notes;
 };
 
 /** The project whose running preview a check may build in, and its owner. */
@@ -310,17 +313,19 @@ export const checkProjectBuild = async ({
     );
   }
 
+  const advisory = projectChecks(files, paths, undefined, { references: false });
+  const notes = advisory.length ? redact(`\nAdvisory project checks:\n- ${advisory.map((f) => `[${f.checkId}] ${f.message}`).join("\n- ")}`, secrets) : "";
   const isVite =
     paths.has("package.json") && [...paths].some((path) => /^vite\.config\.[cm]?[jt]s$/.test(path));
   if (!isVite) {
-    return `${BUILD_NOT_CHECKED}\nStatic checks passed. checkBuild only builds Vite projects, so this one was not built.`;
+    return `${BUILD_NOT_CHECKED}\nStatic checks passed. checkBuild only builds Vite projects, so this one was not built.` + notes;
   }
 
   if (!apiKey) {
-    return notBuilt("No build sandbox is configured");
+    return notBuilt("No build sandbox is configured") + notes;
   }
 
-  const job: BuildJob = { files, paths, deadline: Date.now() + STEP_BUDGET_MS, secrets };
+  const job: BuildJob = { files, paths, deadline: Date.now() + STEP_BUDGET_MS, secrets, notes };
   if (preview) {
     const warm = await checkInWarmSandbox(apiKey, preview, job);
     if (warm) return warm;
@@ -337,7 +342,7 @@ export const checkProjectBuild = async ({
     });
   } catch (error) {
     console.error("[check-build] sandbox creation failed", error);
-    return notBuilt("The build sandbox could not start");
+    return notBuilt("The build sandbox could not start") + notes;
   }
 
   try {

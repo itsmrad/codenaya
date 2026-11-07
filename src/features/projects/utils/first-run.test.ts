@@ -5,6 +5,7 @@ import {
   getFirstRunProgress,
   hasOpenedPreview,
   isFirstRunDismissed,
+  isPreviewOnScreen,
   markPreviewOpened,
 } from "./first-run";
 
@@ -88,5 +89,38 @@ describe("getFirstRunProgress", () => {
     expect(
       getFirstRunProgress({ ...empty, projects: [{ exportStatus: "completed" }] }).ship,
     ).toBe(true);
+  });
+});
+
+describe("isPreviewOnScreen", () => {
+  const shown: Parameters<typeof isPreviewOnScreen>[0] = {
+    visible: true,
+    building: false,
+    status: "running",
+    error: null,
+    loaded: true,
+  };
+
+  it("needs an open tab, a running preview with no error, no build card, and a load", () => {
+    expect(isPreviewOnScreen(shown)).toBe(true);
+    expect(isPreviewOnScreen({ ...shown, visible: false })).toBe(false);
+    expect(isPreviewOnScreen({ ...shown, building: true })).toBe(false);
+    expect(isPreviewOnScreen({ ...shown, status: "installing" })).toBe(false);
+    expect(isPreviewOnScreen({ ...shown, loaded: false })).toBe(false);
+  });
+
+  it("waits out a stream error over a preview that loaded while hidden", () => {
+    // Loaded behind the Code tab: not on screen yet.
+    let preview = { ...shown, visible: false };
+    expect(isPreviewOnScreen(preview)).toBe(false);
+    // The stream fails but keeps its URL, so the earlier load still matches.
+    preview = { ...preview, status: "error", error: "Preview failed to start" };
+    // Opening Preview shows the error panel, not the app.
+    preview = { ...preview, visible: true };
+    expect(isPreviewOnScreen(preview)).toBe(false);
+    // Restart: a new boot whose iframe has not loaded yet, then its load.
+    preview = { ...preview, status: "running", error: null, loaded: false };
+    expect(isPreviewOnScreen(preview)).toBe(false);
+    expect(isPreviewOnScreen({ ...preview, loaded: true })).toBe(true);
   });
 });

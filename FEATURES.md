@@ -125,7 +125,7 @@ Open bugs only. Gaps found in code without an issue are listed on the flow itsel
   user), `/api/sandbox/[sandboxId]` (file sync, kill); `features/webcontainer-preview/*`
   (public env vars only); `projects.updateSettings`; COOP/COEP headers in `next.config.ts`
   (only with `?engine=webcontainer`).
-- Env: `E2B_API_KEY`; `E2B_TEMPLATE=codenaya-node22` (built by `npm run e2b:template`).
+- Env: `E2B_API_KEY`; `E2B_TEMPLATE=codenaya-node22` (built by `npm run e2b:template`, which reads `E2B_TEMPLATE` and defaults to `codenaya-node22`).
 - E2E: `preview-lazy.spec.ts`, `preview-boot-steps.spec.ts`, `preview-terminal.spec.ts`,
   `preview-open-tab.spec.ts`, `preview-device.spec.ts`, `preview-auto-open.spec.ts`,
   `preview-building.spec.ts`, `preview-e2b-prewarm.spec.ts`, `preview-e2b-hmr.spec.ts`,
