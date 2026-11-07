@@ -77,7 +77,7 @@ test.describe("first build auto-opens the preview", () => {
   );
 
   for (const [device, width, height] of [["desktop", 1440, 900], ["tablet", 768, 1024]] as const) {
-    test(`boots once package.json lands and switches to Preview when the run completes (${device})`, async ({ page }, testInfo) => {
+    test(`boots once package.json lands and shows Preview (${device})`, async ({ page }, testInfo) => {
       test.setTimeout(150_000);
       const errors = collectConsoleErrors(page);
       const sandbox = await stubSandbox(page);
@@ -87,30 +87,42 @@ test.describe("first build auto-opens the preview", () => {
 
       try {
         await page.goto(`/projects/${build.projectId}`);
-        // Desktops keep the chat beside the Code tab; tablets open on the Chat tab.
-        const startTab = page.getByRole("tab", { name: device === "desktop" ? "Code" : "Chat" });
+        // Desktops open on Preview for the first build (#337); tablets stay on the Chat tab.
+        const startTab = page.getByRole("tab", { name: device === "desktop" ? "Preview" : "Chat" });
         const previewTab = page.getByRole("tab", { name: "Preview" });
+        const iframe = page.locator('iframe[title="Preview"]');
+        const stillBuilding = page.getByRole("status", { name: "Still building" });
         await expect(startTab).toHaveAttribute("aria-selected", "true", { timeout: 60_000 });
         await page.waitForTimeout(5_000);
         expect(sandbox.boots).toBe(0);
 
-        // Pre-warm: the sandbox boots while the run is still writing, behind the current tab.
+        // Pre-warm: the sandbox boots while the run is still writing.
         await build.writePackageJson();
         await expect.poll(() => sandbox.boots, { timeout: 30_000 }).toBeGreaterThan(0);
         await expect(startTab).toHaveAttribute("aria-selected", "true");
+        if (device === "desktop") {
+          // The stubbed sandbox is running mid-run: the app shows under the bar.
+          await expect(iframe).toBeVisible({ timeout: 30_000 });
+          await expect(stillBuilding).toBeVisible();
+        }
         await page.screenshot({ path: testInfo.outputPath(`during-build-${device}.png`) });
 
         await build.run.complete();
         await expect(previewTab).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
-        await expect(page.locator('iframe[title="Preview"]')).toBeVisible();
+        await expect(iframe).toBeVisible();
         await expect(page.getByRole("status", { name: "Building your app" })).toBeHidden();
+        await expect(stillBuilding).toBeHidden();
         await page.screenshot({ path: testInfo.outputPath(`auto-opened-${device}.png`) });
 
-        // Later runs leave the selected tab alone.
+        // Later runs leave the selected tab alone and show no bar.
         const codeTab = page.getByRole("tab", { name: "Code" });
         await codeTab.click();
         const second = await build.startRun();
         await page.waitForTimeout(2_000);
+        await previewTab.click();
+        await expect(page.getByText("Agent working")).toBeVisible();
+        await expect(stillBuilding).toBeHidden();
+        await codeTab.click();
         await second.complete();
         await page.waitForTimeout(3_000);
         await expect(codeTab).toHaveAttribute("aria-selected", "true");
@@ -144,6 +156,37 @@ test.describe("first build auto-opens the preview", () => {
 
       await build.run.complete();
       await page.waitForTimeout(3_000);
+      await expect(codeTab).toHaveAttribute("aria-selected", "true");
+    } finally {
+      await build.cleanup();
+    }
+
+    expect(errors).toEqual([]);
+  });
+
+  test("a later run on a project without a root package.json keeps the tab (desktop)", async ({ page }) => {
+    test.setTimeout(150_000);
+    const errors = collectConsoleErrors(page);
+    await stubSandbox(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+    // Only index.html: every run here looks like a first build.
+    const build = await startFirstBuild(page, "e2e-preview-auto-open-static");
+
+    try {
+      await page.goto(`/projects/${build.projectId}`);
+      const previewTab = page.getByRole("tab", { name: "Preview" });
+      const codeTab = page.getByRole("tab", { name: "Code" });
+      await expect(previewTab).toHaveAttribute("aria-selected", "true", { timeout: 60_000 });
+      await build.run.complete();
+      await page.waitForTimeout(2_000);
+
+      await codeTab.click();
+      const second = await build.startRun();
+      await page.waitForTimeout(3_000);
+      await expect(codeTab).toHaveAttribute("aria-selected", "true");
+      await second.complete();
+      await page.waitForTimeout(2_000);
       await expect(codeTab).toHaveAttribute("aria-selected", "true");
     } finally {
       await build.cleanup();
