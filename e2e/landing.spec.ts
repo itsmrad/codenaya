@@ -69,8 +69,8 @@ test.describe("landing layout", () => {
     await page.goto("/");
 
     const header = await page.locator("header").boundingBox();
-    const badge = await page.getByText("AI-Powered Browser IDE").boundingBox();
-    expect(badge!.y - (header!.y + header!.height)).toBeGreaterThanOrEqual(24);
+    const heading = await page.getByRole("heading", { level: 1, name: "Build with AI." }).boundingBox();
+    expect(heading!.y - (header!.y + header!.height)).toBeGreaterThanOrEqual(24);
 
     const composer = await page
       .getByRole("textbox", { name: "Describe what you want to build" })

@@ -164,7 +164,7 @@ export const PromptComposer = ({
               ref={textareaRef}
               aria-label="Describe what you want to build"
               placeholder={placeholder}
-              className="min-h-20 px-4 pt-4 pb-1 text-[15px]/6 placeholder:text-muted-foreground/60"
+              className="min-h-12 px-6 pt-3 pb-1 text-[15px]/6 placeholder:text-muted-foreground/60"
               onChange={(e) => setInput(e.target.value)}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
@@ -173,7 +173,7 @@ export const PromptComposer = ({
               autoFocus={autoFocus}
             />
           </PromptInputBody>
-          <PromptInputFooter className="h-12 px-2.5 py-0">
+          <PromptInputFooter className="h-10 px-4 pb-1.5 pt-0">
             <PromptInputTools>
               {showEnhance && (
                 <EnhancePromptButton
@@ -187,7 +187,7 @@ export const PromptComposer = ({
             <PromptInputSubmit
               disabled={!input.trim() || isBusy}
               aria-label="Create project"
-              className="size-8 rounded-lg disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
+              className="size-8 rounded-full disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
             >
               {isSubmitting ? (
                 <Loader2Icon className="size-4 animate-spin" />

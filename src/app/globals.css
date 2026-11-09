@@ -50,6 +50,8 @@
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-brand-text: var(--brand-text);
+  --color-canvas: var(--canvas);
+  --color-ember: var(--ember);
 }
 
 /* Chat motion: the live-run pixel loader and the entry of newly arrived rows.
@@ -175,6 +177,12 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+
+  /* Codenaya Landing Theme Tokens */
+  --canvas: #FAFAF9;
+  --text: #09090B;
+  --raised: rgba(9, 9, 11, 0.06);
+  --ember: #E5481F;
 }
 
 .dark {
@@ -212,6 +220,57 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
+
+  /* Codenaya Landing Theme Tokens */
+  --canvas: #09090B;
+  --text: #FAFAF9;
+  --raised: #1C1C21;
+  --ember: #FF5F3A;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --canvas: #09090B;
+    --text: #FAFAF9;
+    --raised: #1C1C21;
+    --ember: #FF5F3A;
+  }
+}
+
+/* SideGlyphs background canvas */
+.side-glyphs-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 0,
+    #000 15%,
+    transparent 29%,
+    transparent 71%,
+    #000 85%,
+    #000 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    #000 0,
+    #000 15%,
+    transparent 29%,
+    transparent 71%,
+    #000 85%,
+    #000 100%
+  );
+}
+
+@media (max-width: 900px) {
+  .side-glyphs-canvas {
+    -webkit-mask-image: none;
+    mask-image: none;
+    opacity: 0.28;
+  }
 }
 
 @layer base {
@@ -374,10 +433,10 @@ html.lenis, html.lenis body {
 }
 .prompt-composer {
   position: relative;
-  border-radius: 1rem;
+  border-radius: 9999px;
 }
 .prompt-composer [data-slot="input-group"] {
-  @apply rounded-2xl!;
+  @apply rounded-full!;
 }
 .prompt-composer::before {
   content: "";

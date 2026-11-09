@@ -24,7 +24,7 @@ export const LandingDemo = () => {
   return (
     <section aria-label="Product demo" className="relative pb-14 md:pb-20">
       <div className="max-w-5xl mx-auto px-6 md:px-8">
-        <div className="overflow-hidden rounded-xl border border-border/60 bg-card/50 shadow-sm">
+        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-md">
           <video
             ref={videoRef}
             className="block aspect-video w-full object-cover"
