@@ -28,7 +28,10 @@ import {
   PreviewTerminal,
   type PreviewTerminalHandle,
 } from "@/features/sandbox-preview/components/preview-terminal";
-import { sliceClearedOutput } from "@/features/sandbox-preview/utils/log-viewer";
+import {
+  sliceClearedOutput,
+  shouldResetClearedOffset,
+} from "@/features/sandbox-preview/utils/log-viewer";
 import { PreviewBuilding } from "@/features/sandbox-preview/components/preview-building";
 import { CodenayaLogo } from "@/components/codenaya-logo";
 import { PreviewBootSteps } from "@/features/sandbox-preview/components/preview-boot-steps";
@@ -155,12 +158,19 @@ export const PreviewView = ({
   };
 
   const terminalRef = useRef<PreviewTerminalHandle>(null);
+  const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [clearedOffset, setClearedOffset] = useState(0);
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (terminalOutput.length < clearedOffset) {
+    return () => {
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (shouldResetClearedOffset(terminalOutput.length, clearedOffset)) {
       setClearedOffset(0);
     }
   }, [terminalOutput.length, clearedOffset]);
@@ -170,7 +180,8 @@ export const PreviewView = ({
     const ok = await terminalRef.current.copyLogs();
     if (ok) {
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
+      copiedTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
     }
   }, []);
 
