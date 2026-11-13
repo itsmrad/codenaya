@@ -28,7 +28,10 @@ const SettingsContent = async ({ children }: { children: React.ReactNode }) => {
               <SettingsNav />
             </div>
           </aside>
-          <main className="min-w-0 flex-1 space-y-6 px-4 py-8 sm:px-6 md:px-8 lg:py-10">{children}</main>
+          {/* Cards and primary buttons in the dashboard's style: small radius, no shadow, brand action. */}
+          <main className="min-w-0 flex-1 space-y-6 px-4 py-8 sm:px-6 md:px-8 lg:py-10 [&_[data-slot=card]]:rounded-md [&_[data-slot=card]]:shadow-none [&_[data-slot=button][data-variant=default]]:bg-brand [&_[data-slot=button][data-variant=default]]:text-brand-foreground [&_[data-slot=button][data-variant=default]:hover]:bg-brand/90">
+            {children}
+          </main>
         </div>
       </div>
     </ConvexAuthBoundary>
@@ -37,7 +40,7 @@ const SettingsContent = async ({ children }: { children: React.ReactNode }) => {
 
 const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="min-h-screen flex flex-col overflow-x-clip bg-background">
       <AppNavbar framed />
       <Suspense fallback={<AuthLoadingView />}>
         <SettingsContent>{children}</SettingsContent>

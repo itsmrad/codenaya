@@ -85,7 +85,7 @@ const ComposerModelSelect = ({ disabled }: { disabled: boolean }) => {
           </p>
         }
         // Fill the cell, so the whole cell hovers and clicks like Templates.
-        triggerClassName="h-full data-[size=sm]:h-full max-w-56 rounded-none px-3 font-mono text-[10px] uppercase tracking-[0.12em] hover:bg-muted/50 dark:hover:bg-muted/50 aria-expanded:bg-muted/50"
+        triggerClassName="h-full data-[size=sm]:h-full max-w-96 rounded-none px-3 font-mono text-[10px] uppercase tracking-[0.12em] hover:bg-muted/50 dark:hover:bg-muted/50 aria-expanded:bg-muted/50"
       />
     </div>
   );

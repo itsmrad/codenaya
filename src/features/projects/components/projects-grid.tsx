@@ -142,7 +142,7 @@ export const ProjectsGrid = ({ projects, onNewProject, onImport }: ProjectsGridP
                 >
                   <PlusIcon className="size-5 transition-transform duration-300 group-hover:rotate-90 group-hover:text-brand" />
                   <span className="text-sm font-medium">New project</span>
-                  <Kbd className="hidden text-[10px] sm:inline-flex">{isMac ? "⌘J" : "Ctrl+J"}</Kbd>
+                  <Kbd className="hidden text-[11px] sm:inline-flex">{isMac ? "⌘J" : "Ctrl+J"}</Kbd>
                 </button>
               </div>
             )}

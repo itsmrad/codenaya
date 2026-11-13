@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MotionConfig, motion, useReducedMotion } from "motion/react";
-import { formatDistanceToNow } from "date-fns";
-import { useUser } from "@clerk/nextjs";
+import { MotionConfig, motion } from "motion/react";
 import { GitBranch, Search } from "lucide-react";
 
 import { useCommandPalette } from "@/lib/command-palette";
@@ -14,7 +12,7 @@ import { CommunityRail } from "@/features/showcase/components/community-rail";
 import { StarterTemplates } from "@/features/templates/components/starter-templates";
 import { takePendingTemplate } from "@/features/templates/utils/pending-template";
 import { GridPattern } from "@/components/landing/grid-pattern";
-import { CountUp, Reveal } from "@/components/landing/reveal";
+import { Reveal } from "@/components/landing/reveal";
 import { LabelBar, SectionHeader } from "@/components/landing/section-header";
 
 import { useProjects } from "../hooks/use-projects";
@@ -31,6 +29,8 @@ import { PromptComposer } from "./prompt-composer";
 import { ProjectsGrid } from "./projects-grid";
 import { RecentProjects } from "./recent-projects";
 
+// Recent only adds something once the Projects tab below no longer shows them all at a glance.
+const RECENT_MIN = 4;
 const EASE = [0.22, 1, 0.36, 1] as const;
 
 /** A dashboard tab as a cell of the grid. */
@@ -48,32 +48,18 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
   const [importRepo, setImportRepo] = useState(linkedRepo);
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
   const isMac = useIsMac();
-  const { user } = useUser();
 
   const allProjects = useProjects();
   // First-run users keep the stacked layout; returning users (and the loading
   // state, since most visits are returning) get Recent plus tabs.
   const hasNoProjects = allProjects?.length === 0;
   const { createProject, isSubmitting } = useCreateProjectFromPrompt();
-  const reduceMotion = useReducedMotion();
   const enter = (delay: number) => ({
-    initial: reduceMotion ? false : { opacity: 0, y: 18, filter: "blur(6px)" },
-    animate: { opacity: 1, y: 0, filter: "blur(0px)" },
+    initial: { opacity: 0, y: 8 },
+    animate: { opacity: 1, y: 0 },
     transition: { duration: 0.7, delay, ease: EASE },
   });
 
-  // From the user's own projects; a dash while they load.
-  const onGithub = allProjects?.filter(
-    (p) => p.importStatus === "completed" || p.exportStatus === "completed",
-  ).length;
-  const lastEdited = allProjects?.length
-    ? formatDistanceToNow(Math.max(...allProjects.map((p) => p.updatedAt)), { addSuffix: true })
-    : null;
-  const stats = [
-    { value: allProjects ? <CountUp to={allProjects.length} /> : "—", caption: "Projects" },
-    { value: onGithub !== undefined ? <CountUp to={onGithub} /> : "—", caption: "Linked to GitHub" },
-    { value: lastEdited ?? "—", caption: "Last edited" },
-  ];
   const [tab, setTab] = useDashboardTab();
   const tabsRef = useRef<HTMLDivElement>(null);
 
@@ -132,28 +118,6 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
       onImport={() => setImportDialogOpen(true)}
     />
   );
-  const overview = (
-    /* ─── At a glance: after the projects, which are what a returning user came for ─── */
-    <section className="border-b border-border">
-      <LabelBar label="Overview" />
-      <Reveal>
-        <dl className="grid md:grid-cols-3">
-          {stats.map((stat) => (
-            // A label over its value; nothing truncates.
-            <div
-              key={stat.caption}
-              className="flex flex-col gap-1 border-border px-6 py-4 max-md:not-last:border-b md:px-8 md:not-last:border-r"
-            >
-              <dt className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                {stat.caption}
-              </dt>
-              <dd className="text-lg font-semibold tracking-tight text-foreground">{stat.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </Reveal>
-    </section>
-  );
   const templates = (
     /* ─── Templates, as cells on the grid (`templates-grid` in globals.css) ─── */
     <section className="templates-grid max-sm:border-b max-sm:border-border">
@@ -198,7 +162,7 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
         onOpenChange={setNewProjectDialogOpen}
       />
 
-      <main className="flex flex-1 flex-col bg-background">
+      <main className="flex flex-1 flex-col overflow-x-clip bg-background">
         {/* The landing page's grid: one framed column, sections on shared borders. */}
         <div className="mx-auto w-full max-w-[1200px] flex-1 border-x border-border">
           {/* ─── Hero: the prompt composer ─── */}
@@ -206,25 +170,18 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
             <div className={`relative isolate overflow-hidden px-6 md:px-12 ${
                 hasNoProjects ? "pt-16 pb-14 md:pt-20 md:pb-16" : "pt-8 pb-8 md:pt-12 md:pb-10"
               }`}>
-              {/* The landing hero's backdrop: a grid fading out from the top centre, and a soft glow. */}
+              {/* The landing hero's backdrop: a grid fading out from the top centre. */}
               <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
                 <div className="absolute inset-0 mask-[radial-gradient(ellipse_70%_60%_at_50%_0%,black,transparent)]">
                   <GridPattern />
                 </div>
-                <div className="absolute left-1/2 top-[-14rem] h-[26rem] w-[44rem] max-w-[140vw] -translate-x-1/2 rounded-full bg-brand/15 blur-[110px] dark:bg-brand/10" />
               </div>
 
               <div className="mx-auto max-w-3xl">
                 <div className="text-center">
-                  <motion.p
-                    {...enter(0.05)}
-                    className="h-5 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground"
-                  >
-                    {user?.firstName ? `[ Welcome back, ${user.firstName} ]` : null}
-                  </motion.p>
                   <motion.h2
                     {...enter(0.12)}
-                    className="mt-5 text-[2.5rem] font-semibold leading-[1.02] tracking-[-0.045em] text-foreground sm:text-6xl"
+                    className="text-[2.5rem] font-medium leading-[1.04] tracking-[-0.03em] text-foreground sm:text-6xl"
                   >
                     What will you <span className="text-brand">build?</span>
                   </motion.h2>
@@ -247,7 +204,7 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
                     >
                       <GitBranch className="size-3.5" />
                       Import from GitHub
-                      <Kbd className="hidden text-[10px] sm:inline-flex">{isMac ? "⌘I" : "Ctrl+I"}</Kbd>
+                      <Kbd className="hidden text-[11px] sm:inline-flex">{isMac ? "⌘I" : "Ctrl+I"}</Kbd>
                     </button>
                     <span aria-hidden className="h-3 w-px bg-border" />
                     <button
@@ -256,7 +213,7 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
                     >
                       <Search className="size-3.5" />
                       Find a project
-                      <Kbd className="hidden text-[10px] sm:inline-flex">{isMac ? "⌘K" : "Ctrl+K"}</Kbd>
+                      <Kbd className="hidden text-[11px] sm:inline-flex">{isMac ? "⌘K" : "Ctrl+K"}</Kbd>
                     </button>
                   </div>
                 </motion.div>
@@ -272,24 +229,24 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
                 {checklist}
                 <Reveal>{projectsGrid}</Reveal>
               </section>
-              {overview}
               {templates}
               {community}
             </>
           ) : (
             <>
-              <section className="border-b border-border">
+              <section className="hidden border-b border-border has-[>:nth-child(2)]:block">
                 <LabelBar label="Workspace" />
                 {checklist}
-                <RecentProjects
-                  projects={allProjects}
-                  onViewAll={() => {
-                    setTab("projects");
-                    tabsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                  }}
-                />
+                {allProjects && allProjects.length > RECENT_MIN && (
+                  <RecentProjects
+                    projects={allProjects}
+                    onViewAll={() => {
+                      setTab("projects");
+                      tabsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                  />
+                )}
               </section>
-              {overview}
               <Tabs
                 ref={tabsRef}
                 value={tab}

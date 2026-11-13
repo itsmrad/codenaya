@@ -10,7 +10,7 @@ import {
   PencilIcon,
   PlusIcon,
   SearchIcon,
-  SparklesIcon,
+  ScrollTextIcon,
   Trash2Icon,
 } from "lucide-react";
 
@@ -132,7 +132,7 @@ export const SkillsGallery = () => {
         <Empty className="border border-dashed">
           <EmptyHeader>
             <EmptyMedia variant="icon">
-              <SparklesIcon />
+              <ScrollTextIcon />
             </EmptyMedia>
             <EmptyTitle>No skills in your library yet</EmptyTitle>
             <EmptyDescription>

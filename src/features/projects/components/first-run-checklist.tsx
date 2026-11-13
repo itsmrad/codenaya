@@ -89,7 +89,7 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
     return (
       <button
         onClick={() => setExpanded(true)}
-        className="group flex h-8 w-fit items-center gap-2 rounded-full border border-border/60 bg-card px-3 text-xs text-muted-foreground transition-colors hover:border-brand/40 hover:text-foreground"
+        className="group mx-6 my-4 flex h-8 w-fit items-center gap-2 rounded-md border border-border/60 bg-card px-3 md:mx-8 text-xs text-muted-foreground transition-colors hover:border-brand/40 hover:text-foreground"
       >
         <Progress
           aria-hidden
