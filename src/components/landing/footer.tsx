@@ -81,13 +81,6 @@ export const LandingFooter = () => (
       </nav>
     </div>
 
-    {/* The wordmark, cropped by the bottom edge */}
-    <div aria-hidden className="overflow-hidden border-t border-border">
-      <p className="translate-y-[18%] select-none text-center text-[clamp(4rem,19vw,15rem)] font-semibold leading-none tracking-[-0.06em] text-foreground/[0.05]">
-        codenaya
-      </p>
-    </div>
-
     <div className="flex items-center justify-between gap-4 border-t border-border px-6 py-4 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground md:px-8">
       <span>© {new Date().getFullYear()} Codenaya</span>
       <a

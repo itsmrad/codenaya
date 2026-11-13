@@ -60,7 +60,7 @@ export const LandingModelPicker = () => {
         aria-expanded={open}
         aria-label={`Model: ${selected.name}`}
         onClick={() => setOpen((value) => !value)}
-        className="flex h-full items-center gap-1.5 border-r border-border px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground transition-colors hover:bg-muted/50 aria-expanded:bg-muted/50"
+        className="flex h-full items-center gap-1.5 border-r border-border px-3 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground transition-colors hover:bg-muted/50 aria-expanded:bg-muted/50"
       >
         <span className="size-1.5 rounded-full bg-brand" />
         <span className="max-w-32 truncate whitespace-nowrap">{selected.name}</span>
@@ -99,7 +99,7 @@ export const LandingModelPicker = () => {
                     >
                       <VendorIcon vendor={model.vendor} />
                       <span className="flex-1 truncate">{model.name}</span>
-                      <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
+                      <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-muted-foreground">
                         {model.vendor}
                       </span>
                       <Check className={cn("size-3 text-brand", !active && "invisible")} />
@@ -108,7 +108,7 @@ export const LandingModelPicker = () => {
                 );
               })}
             </ul>
-            <p className="sticky bottom-0 border-t border-border bg-card px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            <p className="sticky bottom-0 border-t border-border bg-card px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
               Kept for your first project
             </p>
           </motion.div>

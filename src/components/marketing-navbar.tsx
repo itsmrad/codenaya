@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { motion, useReducedMotion, useScroll } from "motion/react";
+import { motion, useScroll, useTransform } from "motion/react";
 import { Menu } from "lucide-react";
 import { FaGithub } from "react-icons/fa";
 
@@ -38,7 +38,7 @@ const isActive = (pathname: string, href: string) =>
 
 const cell = "flex h-full items-center border-border";
 const brandButton =
-  "sheen h-9 rounded-md bg-brand px-4 text-sm font-medium text-brand-foreground shadow-[inset_0_-4px_8px_rgb(0_0_0/0.12),0_1px_2px_rgb(232_130_79/0.4)] hover:bg-brand/90";
+  "h-9 rounded-md bg-brand px-4 text-sm font-medium text-brand-foreground shadow-[inset_0_-4px_8px_rgb(0_0_0/0.12)] hover:bg-brand/90";
 
 /** The current section is marked with the accent: a 6px dot, as status is elsewhere. */
 const ActiveDot = () => <span aria-hidden className="inline-block size-1.5 shrink-0 rounded-full bg-brand" />;
@@ -48,7 +48,7 @@ const Brand = () => (
     href="/"
     className="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
   >
-    <CodenayaLogo blinking size={22} />
+    <CodenayaLogo size={22} />
     <span className="text-[15px] font-semibold tracking-tight text-foreground">codenaya</span>
   </Link>
 );
@@ -68,8 +68,9 @@ export const MarketingNavbar = ({
 }) => {
   const pathname = usePathname();
   const { isSignedIn } = useAuth();
-  const { scrollYProgress } = useScroll();
-  const reduceMotion = useReducedMotion();
+  const { scrollY, scrollYProgress } = useScroll();
+  // Hidden at the top, so a page too short to scroll never shows a full line.
+  const progressOpacity = useTransform(scrollY, [0, 1], [0, 1]);
 
   return (
     <>
@@ -77,15 +78,15 @@ export const MarketingNavbar = ({
           A sibling, not a child: the header's transform would trap its `fixed`. */}
       <SiteCursor />
       <motion.header
-        initial={reduceMotion ? false : { y: -8, opacity: 0 }}
+        initial={{ y: -8, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
         className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl backdrop-saturate-150"
       >
         {/* A hairline under the bar that fills as the page scrolls. */}
         <motion.div
           aria-hidden
-          style={{ scaleX: scrollYProgress }}
+          style={{ scaleX: scrollYProgress, opacity: progressOpacity }}
           className="absolute inset-x-0 -bottom-px h-px origin-left bg-brand"
         />
         {/* Cells on the same 1200px frame as the landing page's grid */}

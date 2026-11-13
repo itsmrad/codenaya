@@ -32,7 +32,7 @@ export const LandingProviders = () => (
       index={3}
       label="Your key or ours"
       title="Bring any key."
-      accent="Or none."
+      accent="Or none"
       description="Start free with 300 credits a month. Add your own provider key for unlimited runs on any plan. You pay your provider directly."
     />
     <ul className="grid grid-cols-2 border-t border-border lg:grid-cols-3">
@@ -51,7 +51,7 @@ export const LandingProviders = () => (
             <span className="text-base font-semibold text-foreground">{cell.name}</span>
             <span
               className={cn(
-                "rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em]",
+                "rounded px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-[0.1em]",
                 cell.highlight ? "bg-brand text-brand-foreground" : "bg-muted text-muted-foreground",
               )}
             >

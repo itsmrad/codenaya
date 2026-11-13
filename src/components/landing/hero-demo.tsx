@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { motion, useInView, useReducedMotion } from "motion/react";
-import { Check, FileCode2, Loader2, Sparkles } from "lucide-react";
+import { motion, useInView } from "motion/react";
+import { Check, FileCode2, ListChecks, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useHydratedReducedMotion } from "./reveal";
 
 const PROMPT = "Build a pomodoro timer with a task list";
 const FILES = [
@@ -41,7 +42,7 @@ const useRunClock = (running: boolean) => {
 export const HeroDemo = () => {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { amount: 0.3 });
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useHydratedReducedMotion();
   const clock = useRunClock(inView && !reduceMotion);
   const tick = reduceMotion ? PREVIEW_AT : clock;
 
@@ -85,7 +86,7 @@ export const HeroDemo = () => {
               className="flex flex-col gap-2 text-[13px]"
             >
               <div className="flex items-center gap-2 text-muted-foreground">
-                <Sparkles className="size-3.5 text-brand" />
+                <ListChecks className="size-3.5" />
                 Planning 4 files with Claude Sonnet 5.5
               </div>
               {FILES.slice(0, Math.min(FILES.length, filesWritten + 1)).map((file, i) =>
@@ -176,5 +177,5 @@ export const HeroDemo = () => {
 };
 
 const Label = ({ children }: { children: string }) => (
-  <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{children}</span>
+  <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{children}</span>
 );

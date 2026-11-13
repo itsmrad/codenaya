@@ -52,7 +52,7 @@ const POINTS: Point[] = [
         <span className="truncate font-mono text-[11px] text-muted-foreground">stripe.create_price</span>
         <span className="flex gap-1.5 text-[11px]">
           <span className="rounded border border-border px-2 py-0.5 text-muted-foreground">Deny</span>
-          <span className="motion-safe:animate-pulse rounded bg-brand px-2 py-0.5 font-medium text-brand-foreground">Approve</span>
+          <span className="rounded bg-brand px-2 py-0.5 font-medium text-brand-foreground">Approve</span>
         </span>
       </div>
     ),
@@ -100,7 +100,7 @@ const POINTS: Point[] = [
       <Row>
         <span className="size-1.5 rounded-full bg-destructive" />
         <span className="truncate text-muted-foreground">Key rejected, run stopped</span>
-        <span className="ml-auto font-mono text-[10px] text-foreground">0 credits</span>
+        <span className="ml-auto font-mono text-[11px] text-foreground">0 credits</span>
       </Row>
     ),
   },
@@ -109,10 +109,10 @@ const POINTS: Point[] = [
 export const LandingTrust = () => (
   <section className="border-b border-border">
     <SectionHeader
-      index={5}
+      index={4}
       label="In control"
       title="Your code, your keys,"
-      accent="your call."
+      accent="your call"
       description="Codenaya is built so you never have to trust it with more than it needs."
     />
     <ul className="grid border-t border-border sm:grid-cols-2 lg:grid-cols-3">
@@ -122,20 +122,20 @@ export const LandingTrust = () => (
           className="spotlight group flex flex-col border-border max-sm:not-last:border-b sm:max-lg:odd:border-r sm:max-lg:[&:nth-last-child(n+3)]:border-b lg:[&:not(:nth-child(3n))]:border-r lg:[&:nth-last-child(n+4)]:border-b"
         >
           <Reveal delay={(i % 3) * 0.08} className="flex flex-1 flex-col">
-            <div className="flex h-36 items-center justify-center border-b border-border bg-muted/30 p-6 transition-colors group-hover:bg-brand/[0.04]">
+            <div className="flex h-36 items-center justify-center border-b border-border bg-muted/30 p-6 transition-colors group-hover:bg-muted/50">
               {/* A small window, like the feature cells above */}
               <div className="w-full max-w-xs overflow-hidden rounded-md border border-border bg-card shadow-sm">
                 <div className="flex h-6 items-center gap-1 border-b border-border px-2">
                   {[0, 1, 2].map((dot) => (
                     <span key={dot} className="size-1.5 rounded-full bg-muted-foreground/25" />
                   ))}
-                  <span className="ml-2 font-mono text-[9px] text-muted-foreground">{window}</span>
+                  <span className="ml-2 font-mono text-[11px] text-muted-foreground">{window}</span>
                 </div>
                 <div className="px-3 py-2.5 text-[12px]">{visual}</div>
               </div>
             </div>
             <div className="flex flex-col gap-3 p-6 md:p-8">
-              <Icon strokeWidth={1.5} className="size-5 text-brand" />
+              <Icon strokeWidth={1.5} className="size-5 text-muted-foreground" />
               <p className="text-sm leading-relaxed text-muted-foreground">
                 <strong className="font-semibold text-foreground">{title}</strong> {body}
               </p>
@@ -154,7 +154,7 @@ function Row({ children }: { children: ReactNode }) {
 function Tag({ children, muted = false }: { children: string; muted?: boolean }) {
   return (
     <span
-      className={`ml-auto rounded px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] ${muted ? "bg-muted text-muted-foreground" : "bg-brand/15 text-brand-text"}`}
+      className={`ml-auto rounded px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-[0.1em] ${muted ? "bg-muted text-muted-foreground" : "bg-brand/15 text-brand-text"}`}
     >
       {children}
     </span>
@@ -163,7 +163,7 @@ function Tag({ children, muted = false }: { children: string; muted?: boolean })
 
 function Status({ children }: { children: string }) {
   return (
-    <span className="ml-auto flex items-center gap-1 font-mono text-[10px] text-emerald-600">
+    <span className="ml-auto flex items-center gap-1 font-mono text-[11px] text-emerald-600">
       <Check className="size-3" /> {children}
     </span>
   );

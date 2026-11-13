@@ -16,10 +16,10 @@ export const LandingModelMarquee = () => {
       <p className="flex items-center border-b border-border px-6 py-4 font-mono text-[11px] uppercase leading-relaxed tracking-[0.14em] text-muted-foreground md:border-r md:border-b-0">
         Works with the models you already use
       </p>
-      <div className="relative overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_8%,black_92%,transparent)] motion-reduce:[mask-image:none]">
+      <div className="relative overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_8%,black_92%,transparent)] motion-reduce:overflow-x-auto motion-reduce:[mask-image:none]">
         <motion.ul
-          // Stopped by reduced motion: every model wraps into view, without the loop's copy.
-          className="flex w-max motion-reduce:w-full motion-reduce:flex-wrap"
+          // Stopped by reduced motion: one row that scrolls sideways, without the loop's copy.
+          className="flex w-max"
           animate={reduceMotion ? undefined : { x: ["0%", "-50%"] }}
           transition={{ duration: 45, ease: "linear", repeat: Infinity }}
         >
@@ -33,7 +33,7 @@ export const LandingModelMarquee = () => {
               )}
             >
               <span className="text-sm font-medium text-foreground">{model.label}</span>
-              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+              <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                 {model.provider}
               </span>
             </li>

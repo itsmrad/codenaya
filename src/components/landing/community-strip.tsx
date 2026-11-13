@@ -50,10 +50,9 @@ const CommunityStrip = () => {
   return (
     <section aria-label="Built with Codenaya" className="border-b border-border">
       <SectionHeader
-        index={4}
         label="Community"
         title="Built with"
-        accent="Codenaya."
+        accent="Codenaya"
         description={
           [
             projectsBuilt &&

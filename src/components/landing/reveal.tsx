@@ -1,9 +1,26 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { animate, motion, useInView, useReducedMotion } from "motion/react";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
+
+const REDUCE = "(prefers-reduced-motion: reduce)";
+
+/**
+ * Reduced motion for markup that depends on it: `false` while hydrating, like
+ * the server, then the real value, so the first render always matches.
+ */
+export const useHydratedReducedMotion = () =>
+  useSyncExternalStore(
+    (onChange) => {
+      const query = matchMedia(REDUCE);
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    },
+    () => matchMedia(REDUCE).matches,
+    () => false,
+  );
 
 /** Fades and lifts its children in the first time they scroll into view. */
 export const Reveal = ({
@@ -15,10 +32,9 @@ export const Reveal = ({
   delay?: number;
   className?: string;
 }) => {
-  const reduceMotion = useReducedMotion();
   return (
     <motion.div
-      initial={reduceMotion ? false : { opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 8 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, amount: 0.15 }}
       transition={{ duration: 0.6, delay, ease: EASE }}

@@ -43,11 +43,10 @@ export const LandingFaq = () => (
     <div className="grid lg:grid-cols-[2fr_3fr]">
       <div className="border-border lg:border-r">
         <SectionHeader
-          index={6}
+          index={5}
           label="FAQ"
-          title="Questions,"
-          accent="answered."
-          description="Everything you need to know before your first prompt."
+          title="Before your"
+          accent="first prompt"
         />
       </div>
       <div className="border-border max-lg:border-t">

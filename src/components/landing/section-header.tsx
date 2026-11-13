@@ -1,12 +1,12 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 
 import { cn } from "@/lib/utils";
 
-/** Numbered sections on the page; the label reads `[ 01 / 06 ]`. */
-const SECTION_COUNT = 6;
+/** Numbered sections on the page; the label reads `[ 01 / 05 ]`. */
+const SECTION_COUNT = 5;
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -57,25 +57,23 @@ export const SectionHeader = ({
   description?: string;
   as?: "h1" | "h2";
 }) => {
-  const reduceMotion = useReducedMotion();
-
   return (
     <>
       <LabelBar index={index} label={label} />
       <motion.div
-        initial={reduceMotion ? false : { opacity: 0, y: 24, filter: "blur(6px)" }}
-        whileInView={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+        initial={{ opacity: 0, y: 8 }}
+        whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.4 }}
         transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         className="px-6 pt-14 pb-10 md:px-8 md:pt-20 md:pb-14"
       >
         <Heading
-          className="max-w-3xl text-4xl font-semibold leading-[1.05] tracking-[-0.035em] text-foreground md:text-[3.25rem]"
+          className="max-w-3xl text-4xl font-medium leading-[1.08] tracking-[-0.03em] text-pretty text-foreground md:text-[3.25rem]"
         >
           {title} {accent && <span className="text-brand">{accent}</span>}
         </Heading>
         {description && (
-          <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted-foreground">{description}</p>
+          <p className="mt-5 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">{description}</p>
         )}
       </motion.div>
     </>

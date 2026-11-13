@@ -482,24 +482,6 @@ html.lenis, html.lenis body {
   @apply rounded-sm bg-muted font-mono text-[9px] tracking-[0.08em] text-muted-foreground uppercase;
 }
 
-/* Small looping landing visuals (features.tsx). */
-@keyframes landing-flow {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(250%);
-  }
-}
-@keyframes landing-fill {
-  0% {
-    transform: scaleX(0);
-  }
-  70%,
-  100% {
-    transform: scaleX(1);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .composer-window *,
   [class*="animate-[landing-"] {
@@ -512,16 +494,16 @@ html.lenis, html.lenis body {
 .project-cover {
   --cover-accent: oklch(0.62 0.17 var(--cover-h));
   background:
-    radial-gradient(at 15% 10%, oklch(0.86 0.09 var(--cover-h)) 0, transparent 60%),
-    radial-gradient(at 90% 95%, oklch(0.84 0.1 var(--cover-h2)) 0, transparent 55%),
-    oklch(0.95 0.025 var(--cover-h));
+    radial-gradient(at 15% 10%, oklch(0.92 0.025 var(--cover-h)) 0, transparent 60%),
+    radial-gradient(at 90% 95%, oklch(0.91 0.025 var(--cover-h2)) 0, transparent 55%),
+    oklch(0.96 0.008 var(--cover-h));
 }
 .dark .project-cover {
   --cover-accent: oklch(0.7 0.15 var(--cover-h));
   background:
-    radial-gradient(at 15% 10%, oklch(0.42 0.12 var(--cover-h)) 0, transparent 60%),
-    radial-gradient(at 90% 95%, oklch(0.38 0.12 var(--cover-h2)) 0, transparent 55%),
-    oklch(0.2 0.03 var(--cover-h));
+    radial-gradient(at 15% 10%, oklch(0.3 0.03 var(--cover-h)) 0, transparent 60%),
+    radial-gradient(at 90% 95%, oklch(0.28 0.03 var(--cover-h2)) 0, transparent 55%),
+    oklch(0.2 0.008 var(--cover-h));
 }
 
 /* ─── Finishing touches ─── */
@@ -530,7 +512,7 @@ html.lenis, html.lenis body {
   background-color: color-mix(in oklab, var(--brand) 28%, transparent);
 }
 
-/* A soft brand glow that follows the cursor across a grid cell (SpotlightTracker). */
+/* A faint light that follows the cursor across a grid cell (SpotlightTracker). */
 .spotlight {
   position: relative;
   isolation: isolate;
@@ -545,7 +527,7 @@ html.lenis, html.lenis body {
   transition: opacity 300ms ease;
   background: radial-gradient(
     360px circle at var(--spot-x, 50%) var(--spot-y, 50%),
-    color-mix(in oklab, var(--brand) 9%, transparent),
+    color-mix(in oklab, var(--foreground) 4%, transparent),
     transparent 70%
   );
 }

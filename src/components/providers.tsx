@@ -1,5 +1,7 @@
 "use client";
 
+import { MotionConfig } from "motion/react";
+
 import { ConvexReactClient } from "convex/react";
 import { ClerkProvider, useAuth } from "@clerk/nextjs";
 import { shadcn } from "@clerk/ui/themes";
@@ -59,7 +61,7 @@ export const Providers = ({ children }: { children: React.ReactNode }) => {
           disableTransitionOnChange
         >
           <SpotlightTracker />
-          {children}
+          <MotionConfig reducedMotion="user">{children}</MotionConfig>
         </ThemeProvider>
       </ConvexProviderWithClerk>
     </ClerkProvider>

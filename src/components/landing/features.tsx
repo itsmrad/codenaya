@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 import { Bot, Download, FolderGit2, KeyRound, MonitorPlay, Puzzle, type LucideIcon } from "lucide-react";
 
 import { AGENT_MODELS } from "@/features/conversations/agent-models";
 import { cn } from "@/lib/utils";
+import { useHydratedReducedMotion } from "./reveal";
 import { SectionHeader } from "./section-header";
 
 const PICKER_MODELS = AGENT_MODELS.slice(0, 5);
@@ -72,9 +73,9 @@ export const LandingFeatures = () => (
     <SectionHeader
       index={2}
       label="Features"
-      title="Everything you need"
-      accent="to ship."
-      description="An agent, a sandbox and your code, in one tab. Every part is built to get out of your way."
+      title="From prompt"
+      accent="to repo"
+      description="An agent, a sandbox and your code, in one tab."
     />
     <div className="grid border-t border-border md:grid-cols-2 lg:grid-cols-3">
       {FEATURES.map(({ icon: Icon, tag, title, body, visual, wide }, i) => (
@@ -100,7 +101,7 @@ export const LandingFeatures = () => (
               <strong className="font-semibold text-foreground">{title}</strong> {body}
             </p>
           </div>
-          <div className="relative mt-auto flex h-52 items-center justify-center overflow-hidden border-t border-border bg-muted/30 p-6 transition-colors group-hover:bg-brand/[0.04]">
+          <div className="relative mt-auto flex h-52 items-center justify-center overflow-hidden border-t border-border bg-muted/30 p-6 transition-colors group-hover:bg-muted/50">
             {visual}
           </div>
         </motion.article>
@@ -111,7 +112,7 @@ export const LandingFeatures = () => (
 
 /** Cycles through `count` items every `ms`, unless the user prefers reduced motion. */
 const useCycle = (count: number, ms: number) => {
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useHydratedReducedMotion();
   const [index, setIndex] = useState(0);
   useEffect(() => {
     if (reduceMotion) return;
@@ -141,7 +142,7 @@ function ModelPicker() {
             <motion.span layoutId="model-picker" className="absolute inset-0 rounded bg-brand/10" />
           )}
           <span className="relative">{model.label}</span>
-          <span className="relative font-mono text-[10px] uppercase tracking-[0.12em]">{model.provider}</span>
+          <span className="relative font-mono text-[11px] uppercase tracking-[0.12em]">{model.provider}</span>
         </div>
       ))}
     </Panel>
@@ -152,7 +153,7 @@ const TERMINAL_LINES = ["$ npm install", "added 214 packages in 6s", "$ npm run 
 
 function Terminal() {
   const shown = useCycle(TERMINAL_LINES.length + 2, 700);
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useHydratedReducedMotion();
   const count = reduceMotion ? TERMINAL_LINES.length : Math.min(shown + 1, TERMINAL_LINES.length);
   return (
     <Panel className="bg-[#111110] p-3 font-mono text-[11px] leading-5">
@@ -174,7 +175,7 @@ function RepoFlow() {
         you/repo
       </Panel>
       <div className="relative h-px w-10 overflow-hidden bg-border">
-        <span className="absolute inset-y-0 w-4 animate-[landing-flow_1.6s_linear_infinite] bg-brand" />
+        <span className="absolute inset-y-0 right-0 w-4 bg-brand" />
       </div>
       <Panel className="flex-1 border-brand/40 px-3 py-2 text-foreground">
         <span className="mb-1 block size-3.5 rounded-sm bg-brand" />
@@ -204,7 +205,7 @@ function Skills() {
             )}
           >
             /{skill}
-            <span className="text-[10px]">SKILL.md</span>
+            <span className="text-[11px]">SKILL.md</span>
           </div>
         ))}
       </div>
@@ -223,7 +224,7 @@ function KeyField() {
           <span
             key={provider}
             className={cn(
-              "rounded px-2 py-1 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors duration-300",
+              "rounded px-2 py-1 font-mono text-[11px] uppercase tracking-[0.1em] transition-colors duration-300",
               i === active ? "bg-foreground text-background" : "text-muted-foreground",
             )}
           >
@@ -234,7 +235,7 @@ function KeyField() {
       <div className="mt-3 flex items-center gap-2 rounded border border-border px-3 py-2 font-mono text-[12px] text-foreground">
         <KeyRound className="size-3.5 text-muted-foreground" />
         ••••3f9a
-        <span className="ml-auto text-[10px] text-emerald-600">no credits</span>
+        <span className="ml-auto text-[11px] text-emerald-600">no credits</span>
       </div>
     </Panel>
   );
@@ -247,7 +248,7 @@ function ZipBar() {
         habit-tracker.zip <span className="text-muted-foreground">48 KB</span>
       </div>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
-        <span className="block h-full w-full origin-left animate-[landing-fill_2.4s_ease-in-out_infinite] rounded-full bg-brand" />
+        <span className="block h-full w-full rounded-full bg-brand" />
       </div>
     </Panel>
   );

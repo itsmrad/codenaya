@@ -1,17 +1,18 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 import { Check, Download, FolderGit2 } from "lucide-react";
 
+import { useHydratedReducedMotion } from "./reveal";
 import { SectionHeader } from "./section-header";
 
 const CODE_LINES = [
   { indent: 0, width: 62, tone: "bg-brand/50" },
   { indent: 1, width: 48, tone: "bg-foreground/15" },
   { indent: 1, width: 70, tone: "bg-foreground/15" },
-  { indent: 2, width: 40, tone: "bg-sky-500/30" },
+  { indent: 2, width: 40, tone: "bg-foreground/15" },
   { indent: 2, width: 55, tone: "bg-foreground/15" },
-  { indent: 1, width: 30, tone: "bg-emerald-500/30" },
+  { indent: 1, width: 30, tone: "bg-foreground/15" },
   { indent: 0, width: 18, tone: "bg-foreground/15" },
 ];
 
@@ -39,7 +40,7 @@ export const LandingHowItWorks = () => (
       index={1}
       label="How it works"
       title="Three moves."
-      accent="No setup."
+      accent="No setup"
       description="Codenaya runs in the browser. There is nothing to install, so the first prompt is the first step."
     />
     <ol className="grid border-t border-border md:grid-cols-3">
@@ -62,7 +63,7 @@ export const LandingHowItWorks = () => (
 );
 
 /** Looping animations play only without reduced motion; otherwise they show their end state. */
-const useLoop = () => !useReducedMotion();
+const useLoop = () => !useHydratedReducedMotion();
 
 function DescribeVisual() {
   const loop = useLoop();
@@ -82,7 +83,7 @@ function DescribeVisual() {
           <span className="ml-0.5 h-3.5 w-px motion-safe:animate-pulse bg-foreground" />
         </div>
         <div className="mt-3 flex items-center justify-between">
-          <span className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
             <FolderGit2 className="size-3" /> or import a repo
           </span>
           <span className="size-6 rounded bg-brand shadow-[inset_0_-3px_6px_rgb(0_0_0/0.15)]" />
@@ -97,7 +98,7 @@ function CodeVisual() {
   return (
     <div className="absolute inset-0 flex items-center justify-center p-6">
       <div className="w-full max-w-64 rounded-md border border-border bg-card p-3 shadow-sm">
-        <div className="mb-3 flex gap-1.5 font-mono text-[10px]">
+        <div className="mb-3 flex gap-1.5 font-mono text-[11px]">
           <span className="rounded bg-brand/10 px-1.5 py-0.5 text-brand-text">habits.tsx</span>
           <span className="px-1.5 py-0.5 text-muted-foreground">streak.ts</span>
         </div>
@@ -126,14 +127,14 @@ function ShipVisual() {
   const loop = useLoop();
   return (
     <div className="absolute inset-0 flex items-center justify-center gap-3 p-6">
-      <div className="flex w-full max-w-64 flex-col gap-2">
+      <div className="flex w-full max-w-72 flex-col gap-2">
         {[
           { icon: FolderGit2, label: "Export to GitHub", detail: "habit-tracker" },
           { icon: Download, label: "Download ZIP", detail: "48 KB" },
         ].map(({ icon: Icon, label, detail }, i) => (
           <motion.div
             key={label}
-            className="flex items-center gap-2.5 rounded-md border border-border bg-card px-3 py-2.5 text-[12px] shadow-sm"
+            className="flex items-center gap-2.5 rounded-md border border-border bg-card px-3 py-2.5 text-[12px] whitespace-nowrap shadow-sm"
             initial={loop ? { opacity: 0, y: 8 } : false}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
@@ -141,11 +142,11 @@ function ShipVisual() {
           >
             <Icon className="size-3.5 text-muted-foreground" />
             <span className="font-medium text-foreground">{label}</span>
-            <span className="ml-auto font-mono text-[10px] text-muted-foreground">{detail}</span>
+            <span className="ml-auto min-w-0 truncate font-mono text-[11px] text-muted-foreground">{detail}</span>
             <Check className="size-3.5 text-emerald-600" />
           </motion.div>
         ))}
-        <div className="flex items-center gap-2 px-1 font-mono text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-2 px-1 font-mono text-[11px] text-muted-foreground">
           <span className="size-1.5 motion-safe:animate-pulse rounded-full bg-emerald-500" /> Preview running
         </div>
       </div>
