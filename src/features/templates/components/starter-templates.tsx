@@ -36,7 +36,7 @@ const TemplateCards = ({ onSelect, pendingId, disabled }: TemplateCardsProps) =>
           className={cn(CARD_CLASS, "h-full disabled:cursor-default disabled:hover:shadow-none")}
         >
           <div className="relative aspect-video w-full overflow-hidden bg-muted/30">
-            <ProjectCover seed={template.id} className="size-full" />
+            <ProjectCover seed={template.id} layout={template.cover} className="size-full" />
             {pendingId === template.id && (
               <div className="absolute inset-0 flex items-center justify-center gap-2 bg-background/70 text-xs font-medium backdrop-blur-sm">
                 <Loader2Icon className="size-4 animate-spin" />
@@ -45,13 +45,13 @@ const TemplateCards = ({ onSelect, pendingId, disabled }: TemplateCardsProps) =>
             )}
           </div>
           <div className="space-y-2 p-4">
-            <h3 className="text-sm font-semibold text-foreground transition-colors group-hover:text-brand">
+            <h3 className="text-sm font-semibold text-foreground transition-colors group-hover:text-brand-text">
               {template.title}
             </h3>
             <p className="line-clamp-2 text-xs text-muted-foreground">{template.description}</p>
             <div className="flex flex-wrap gap-1">
               {template.techStack.map((tag) => (
-                <Badge key={tag} variant="secondary" className="px-1.5 py-0 text-[10px]">
+                <Badge key={tag} variant="secondary" className="px-1.5 py-0 text-[11px]">
                   {tag}
                 </Badge>
               ))}

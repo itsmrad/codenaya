@@ -41,12 +41,12 @@ export const ShowcaseCard = ({ project, href, onClick }: ShowcaseCardProps) => {
 
         <div className="flex flex-wrap gap-1">
           {project.techStack.slice(0, 3).map((tag) => (
-            <Badge key={tag} variant="secondary" className="text-[10px] px-1.5 py-0">
+            <Badge key={tag} variant="secondary" className="text-[11px] px-1.5 py-0">
               {tag}
             </Badge>
           ))}
           {project.techStack.length > 3 && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+            <Badge variant="secondary" className="text-[11px] px-1.5 py-0">
               +{project.techStack.length - 3}
             </Badge>
           )}

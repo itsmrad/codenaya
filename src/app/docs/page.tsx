@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { ArrowRight, FolderGit2, KeyRound, MonitorPlay, Sparkles } from "lucide-react";
+import { ArrowRight, BookOpen, FolderGit2, KeyRound, MonitorPlay } from "lucide-react";
 
 import { PublicShell } from "@/components/landing/public-shell";
 import { Reveal } from "@/components/landing/reveal";
@@ -37,7 +37,7 @@ const Section = ({ id, title, children }: { id: string; title: string; children:
 
 /** The most-read topics, as cards above the full docs. Not headings, so the section titles stay unique. */
 const QUICK_START = [
-  { id: "getting-started", icon: Sparkles, label: "Getting started", body: "Describe an app and watch the agent build it." },
+  { id: "getting-started", icon: BookOpen, label: "Getting started", body: "Describe an app and watch the agent build it." },
   { id: "preview", icon: MonitorPlay, label: "Live preview", body: "Run your app in a cloud sandbox with a terminal." },
   { id: "github", icon: FolderGit2, label: "GitHub & ZIP", body: "Import a repo, export a new one, or download a ZIP." },
   { id: "byok", icon: KeyRound, label: "Your own key", body: "Unlimited runs on your OpenRouter, OpenAI or Anthropic key." },
@@ -301,14 +301,14 @@ const DocsPage = () => {
             >
               <a
                 href={`#${id}`}
-                className="group flex h-full flex-col gap-3 p-6 transition-colors hover:bg-brand/[0.04] md:p-8"
+                className="group flex h-full flex-col gap-3 p-6 transition-colors hover:bg-muted/50 md:p-8"
               >
                 <span className="flex items-center justify-between">
                   <Icon
                     strokeWidth={1.5}
-                    className="size-6 text-brand transition-transform duration-300 group-hover:-translate-y-0.5"
+                    className="size-6 text-muted-foreground transition-colors group-hover:text-foreground"
                   />
-                  <span aria-hidden className="font-mono text-[10px] text-muted-foreground">
+                  <span aria-hidden className="font-mono text-[11px] text-muted-foreground">
                     {String(i + 1).padStart(2, "0")}
                   </span>
                 </span>

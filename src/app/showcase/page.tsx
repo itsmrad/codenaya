@@ -31,7 +31,7 @@ const ShowcasePage = () => {
           as="h1"
           label="Showcase"
           title="Community"
-          accent="showcase."
+          accent="showcase"
           description="Apps people built with Codenaya. Open one to preview it or remix a copy into your workspace."
         />
       </section>
@@ -41,7 +41,7 @@ const ShowcasePage = () => {
         <SectionHeader
           label="Templates"
           title="Start from"
-          accent="a template."
+          accent="a template"
           description="Official starters. Pick one and the agent builds it out into a full project."
         />
         <Reveal>
@@ -56,7 +56,7 @@ const ShowcasePage = () => {
         <SectionHeader
           label="Community"
           title="Shared by"
-          accent="builders."
+          accent="builders"
           description="Search, sort and filter the apps people published, then open one to try it."
         />
         <div className="border-t border-border px-6 py-10 md:px-8 md:py-12">
@@ -67,7 +67,7 @@ const ShowcasePage = () => {
       </section>
 
       <section className="border-b border-border">
-        <SectionHeader label="Publish" title="Put yours" accent="on the wall." />
+        <SectionHeader label="Publish" title="Put yours" accent="on the wall" />
         <ol className="grid border-t border-border md:grid-cols-[repeat(3,1fr)_auto]">
           {PUBLISH_STEPS.map((step, i) => (
             <li key={step.title} className="border-border max-md:border-b md:border-r">

@@ -38,6 +38,18 @@ const clerkAppearance = {
   },
 };
 
+// Clerk's own subtitles ("Welcome back! Please sign in to continue") replaced
+// with plain, specific lines.
+const clerkLocalization = {
+  signIn: { start: { subtitle: "Use GitHub, Google or your email" } },
+  signUp: {
+    start: {
+      subtitle: "Start free with 300 credits a month",
+      subtitleCombined: "Start free with 300 credits a month",
+    },
+  },
+};
+
 const EnsureCurrentUser = () => {
   useEnsureCurrentUser();
   return null;
@@ -47,6 +59,7 @@ export const Providers = ({ children }: { children: React.ReactNode }) => {
   return (
     <ClerkProvider
       appearance={clerkAppearance}
+      localization={clerkLocalization}
       signInUrl={SIGN_IN_URL}
       signUpUrl={SIGN_UP_URL}
       signInFallbackRedirectUrl={AFTER_AUTH_URL}

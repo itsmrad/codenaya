@@ -131,7 +131,7 @@ const CREDIT_FACTS: { prefix?: string; value?: number; suffix: string; caption: 
 
 const ComparisonValue = ({ value }: { value: string | boolean }) => {
   if (value === true) {
-    return <Check aria-label="Included" className="size-4 text-brand" />;
+    return <Check aria-label="Included" className="size-4 text-muted-foreground" />;
   }
   if (value === false) {
     return <Minus aria-label="Not included" className="size-4 text-muted-foreground" />;
@@ -148,7 +148,7 @@ const PricingPage = () => {
           as="h1"
           label="Pricing"
           title="Start free."
-          accent="Bring your own key."
+          accent="Bring your own key"
           description="Use our credits, or run the agent on your own key with no limits. BYOK is free on every plan."
         />
 
@@ -172,14 +172,14 @@ const PricingPage = () => {
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-semibold text-foreground">{plan.name}</h2>
                   {plan.id === "pro" && (
-                    <span className="rounded bg-brand px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-brand-foreground">
+                    <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-[0.1em] text-muted-foreground">
                       Coming soon
                     </span>
                   )}
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{description}</p>
                 <p className="mt-8 flex items-baseline gap-1">
-                  <span className="font-mono text-5xl font-semibold tracking-tight text-foreground">
+                  <span className="font-mono text-5xl font-medium tracking-tight tabular-nums text-foreground">
                     $<CountUp to={plan.priceUsdPerMonth} />
                   </span>
                   <span className="text-sm text-muted-foreground">/month</span>
@@ -190,7 +190,7 @@ const PricingPage = () => {
                 <ul className="mt-8 flex flex-1 flex-col gap-3 border-t border-border pt-6 text-sm text-muted-foreground">
                   {features.map((feature) => (
                     <li key={feature} className="flex items-start gap-2.5">
-                      <Check className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden />
+                      <Check className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
                       {feature}
                     </li>
                   ))}
@@ -199,7 +199,7 @@ const PricingPage = () => {
                   {plan.id === "free" ? (
                     <Button
                       asChild
-                      className="h-10 w-full rounded-md bg-brand text-brand-foreground shadow-[inset_0_-4px_8px_rgb(0_0_0/0.12),0_1px_2px_rgb(232_130_79/0.4)] hover:bg-brand/90"
+                      className="h-10 w-full rounded-md bg-brand text-brand-foreground shadow-[inset_0_-4px_8px_rgb(0_0_0/0.12)] hover:bg-brand/90"
                     >
                       <Link href={SIGN_UP_URL}>Get started</Link>
                     </Button>
@@ -225,7 +225,7 @@ const PricingPage = () => {
         <SectionHeader
           label="Credits"
           title="How credits"
-          accent="work."
+          accent="work"
           description="You pay for the AI work a run actually needs. Nothing is charged for runs on your own key."
         />
         <dl className="grid border-t border-border md:grid-cols-3">
@@ -236,10 +236,10 @@ const PricingPage = () => {
               className="flex flex-col gap-3 border-border p-6 not-last:border-b md:p-8 md:not-last:border-r md:not-last:border-b-0"
             >
               <dt className="text-sm leading-relaxed text-muted-foreground">{fact.caption}</dt>
-              <dd className="order-first font-mono text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
+              <dd className="order-first font-mono text-4xl font-medium tracking-tight tabular-nums text-foreground md:text-5xl">
                 {fact.prefix}
                 {fact.value === undefined ? null : <CountUp to={fact.value} />}
-                <span className="text-[0.6em] text-brand">{fact.suffix}</span>
+                <span className="text-[0.6em] text-muted-foreground">{fact.suffix}</span>
               </dd>
             </Reveal>
           ))}
@@ -248,7 +248,7 @@ const PricingPage = () => {
 
       {/* Comparison */}
       <section className="border-b border-border">
-        <SectionHeader label="Compare" title="Compare" accent="plans." />
+        <SectionHeader label="Compare" title="Compare" accent="plans" />
         <div className="border-t border-border px-2 md:px-4">
           <Reveal>
             <Table>
@@ -289,7 +289,7 @@ const PricingPage = () => {
       <section className="border-b border-border">
         <div className="grid lg:grid-cols-[2fr_3fr]">
           <div className="border-border lg:border-r">
-            <SectionHeader label="FAQ" title="Questions," accent="answered." />
+            <SectionHeader label="FAQ" title="Credits and keys," accent="explained" />
           </div>
           <div className="border-border max-lg:border-t">
             {/* Continues the label bar's line across this column */}

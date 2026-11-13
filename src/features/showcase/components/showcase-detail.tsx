@@ -180,7 +180,7 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
         <div className="space-y-3">
           {displayProject.techStack.length > 0 && (
             <div className="space-y-1.5">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
                 Tech Stack
               </p>
               <div className="flex flex-wrap gap-1.5">
@@ -194,7 +194,7 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
           )}
           {displayProject.designStyle.length > 0 && (
             <div className="space-y-1.5">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
                 Design Style
               </p>
               <div className="flex flex-wrap gap-1.5">
