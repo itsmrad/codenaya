@@ -55,6 +55,11 @@ export function BracketCursor() {
     let frame = 0;
 
     const loop = () => {
+      // A click can remove or hide the hovered element; its rect is then 0x0 at
+      // the top-left corner, so re-aim at whatever is under the pointer now.
+      if (target && (!target.isConnected || !target.getClientRects().length)) {
+        aimAt(document.elementFromPoint(mouse.x, mouse.y));
+      }
       // The brackets wrap the hovered element, else sit around the pointer.
       const rect = target ? target.getBoundingClientRect() : null;
       const goal = rect
@@ -101,7 +106,7 @@ export function BracketCursor() {
       }
       aimAt(event.target as Element | null);
     };
-    // Scrolling moves the page under a still pointer.
+    // Scrolling moves the page (or any inner panel, hence capture) under a still pointer.
     const onScroll = () => {
       if (shown) aimAt(document.elementFromPoint(mouse.x, mouse.y));
     };
@@ -119,14 +124,14 @@ export function BracketCursor() {
     window.addEventListener("mousemove", onMove, { passive: true });
     window.addEventListener("mousedown", onDown, { passive: true });
     window.addEventListener("mouseup", onUp, { passive: true });
-    window.addEventListener("scroll", onScroll, { passive: true });
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
     window.addEventListener("blur", hide);
     document.addEventListener("mouseout", onOut);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("mouseup", onUp);
-      window.removeEventListener("scroll", onScroll);
+      document.removeEventListener("scroll", onScroll, { capture: true });
       window.removeEventListener("blur", hide);
       document.removeEventListener("mouseout", onOut);
       cancelAnimationFrame(frame);
