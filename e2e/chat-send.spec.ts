@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { EMPTY_CHAT_TITLE } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 
 const projectId = process.env.E2E_PROJECT_ID;
@@ -18,7 +19,7 @@ test.describe("sending a chat message", () => {
     // The dev-tools badge covers the composer's bottom-left corner.
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     await page.getByRole("button", { name: "New conversation" }).click();
-    await expect(page.getByText("What do you want to build?")).toBeVisible();
+    await expect(page.getByText(EMPTY_CHAT_TITLE)).toBeVisible();
 
     // The send request stays open until the test answers it.
     let requests = 0;

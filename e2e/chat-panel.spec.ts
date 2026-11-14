@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { chatEntryAnimations } from "./chat-fixtures";
+import { chatEntryAnimations, EMPTY_CHAT_TITLE } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 
@@ -22,8 +22,8 @@ test.describe("chat panel", () => {
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
 
     await page.getByRole("button", { name: "New conversation" }).click();
-    await expect(page.getByText("What do you want to build?")).toBeVisible();
-    await expect(page.getByRole("button", { name: /landing page/ })).toBeVisible();
+    await expect(page.getByText(EMPTY_CHAT_TITLE)).toBeVisible();
+    await expect(page.getByRole("button", { name: /landing page|dark mode|Explain this codebase/ })).toBeVisible();
 
     const input = page.getByPlaceholder("Describe a change or ask a question…");
     const send = page.getByRole("button", { name: "Send" });

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { EMPTY_CHAT_TITLE } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 
@@ -31,7 +32,7 @@ test.describe("chat when the agent cannot be dispatched", () => {
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     // A conversation of its own, so other specs on this project can't interfere.
     await page.getByRole("button", { name: "New conversation" }).click();
-    await expect(page.getByText("What do you want to build?")).toBeVisible();
+    await expect(page.getByText(EMPTY_CHAT_TITLE)).toBeVisible();
 
     const composer = page.getByPlaceholder("Describe a change or ask a question…");
     const failedReplies = page.getByText(/agent service is unreachable/);

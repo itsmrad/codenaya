@@ -1,9 +1,32 @@
 import type { Infer } from "convex/values";
 
-import type { messageStepValidator } from "../../../convex/schema";
+import { recipeIdsIn } from "../sandbox-preview/utils/error-recipes";
+
+import type { messageStepValidator, stuckRunValidator } from "../../../convex/schema";
 
 /** One recorded row of an agent run (see `messageStepValidator`). */
 export type AgentStep = Infer<typeof messageStepValidator>;
+
+/** Why a run was stopped as stuck (#306, see `stuckRunValidator`). */
+export type StuckRun = Infer<typeof stuckRunValidator>;
+
+// Loop thresholds (#306), applied by `inngest/loop-detector.ts`.
+export const MAX_SAME_ERROR = 3;
+export const MAX_SAME_FILE_WRITES = 4;
+export const MAX_SAME_SYNTAX_ERROR = 3;
+
+/** The path of the file a stuck run looped on: recorded by path, or by id before #292. */
+export const stuckFilePath = (
+  { fileId, path }: StuckRun,
+  pathOf?: (fileId: string) => string | undefined,
+) => path ?? (fileId ? pathOf?.(fileId) : undefined);
+
+/** What each loop looks like, for the agent's stop note and the hand-off card. */
+export const STUCK_REASONS: Record<StuckRun["reason"], string> = {
+  "repeated-error": `the same error came back ${MAX_SAME_ERROR} times`,
+  "repeated-write": `the same file was rewritten ${MAX_SAME_FILE_WRITES} times without fixing it`,
+  "repeated-syntax-error": `the same file failed to parse ${MAX_SAME_SYNTAX_ERROR} times`,
+};
 
 /** The slice of an AgentKit tool call this module reads. */
 export interface ToolCallInput {
@@ -35,6 +58,19 @@ export const buildPathIndex = (files: PathIndexFile[]) => {
     return path;
   };
   return (id: string) => pathOf(id);
+};
+
+/**
+ * A project-relative path without a leading "./" or trailing "/", or undefined
+ * when it is absolute or has empty, "." or ".." segments (#292).
+ */
+export const normalizePath = (raw: string) => {
+  const path = raw.trim().replace(/^\.\//, "").replace(/\/$/, "");
+  if (raw.trim().startsWith("/")) return undefined;
+  const segments = path.split("/");
+  return segments.some((segment) => segment === "" || segment === "." || segment === "..")
+    ? undefined
+    : path;
 };
 
 const MAX_TARGETS = 20;
@@ -72,21 +108,35 @@ export const describeToolCall = (
   const { name, input } = call;
   const paths = (ids: string[]) =>
     ids.map(pathOf).filter((path): path is string => Boolean(path));
+  const named = (raw: string[]) =>
+    raw.map(normalizePath).filter((path): path is string => Boolean(path));
 
   let targets: string[];
   switch (name) {
+    case "searchFiles":
+      targets = str(input.pattern) ? [str(input.pattern)] : [];
+      break;
+    // Path inputs since #292; `fileId(s)` in calls recorded before it.
     case "readFiles":
     case "deleteFiles":
-      targets = paths(strings(input.fileIds));
+      targets = Array.isArray(input.paths) ? named(strings(input.paths)) : paths(strings(input.fileIds));
       break;
     case "updateFile":
-      targets = paths([str(input.fileId)]);
+    case "editFile":
+      targets = "path" in input ? named([str(input.path)]) : paths([str(input.fileId)]);
       break;
     case "renameFile": {
-      const from = pathOf(str(input.fileId));
+      const from = "path" in input ? named([str(input.path)])[0] : pathOf(str(input.fileId));
       targets = from ? [from, str(input.newName)] : [];
       break;
     }
+    case "writeFiles":
+      targets = named(
+        (Array.isArray(input.files) ? input.files : []).map((file) =>
+          str((file as Record<string, unknown>)?.path),
+        ),
+      );
+      break;
     case "createFiles": {
       const parent = pathOf(str(input.parentId));
       const files = Array.isArray(input.files) ? input.files : [];
@@ -114,8 +164,40 @@ export const describeToolCall = (
       // MCP tools are namespaced `provider__tool`.
       targets = name.includes("__") ? [name.slice(name.indexOf("__") + 2)] : [];
   }
-  return targets.slice(0, MAX_TARGETS);
+  // Writes keep every path: a run's diff and revert are built from them (#225).
+  return FILE_WRITE_TOOLS.has(name) ? targets : targets.slice(0, MAX_TARGETS);
 };
+
+/** Tools whose finished calls change project files ("N files changed"). */
+export const FILE_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "writeFiles",
+  "createFiles",
+  "updateFile",
+  "editFile",
+  "renameFile",
+  "deleteFiles",
+]);
+
+/**
+ * Every path a run's finished write calls named: created, edited, renamed
+ * from or to, or deleted (#225). A folder path stands for everything under it.
+ */
+export const runWrittenPaths = (steps: AgentStep[]) => [
+  ...new Set(
+    steps
+      .filter(
+        (step) =>
+          step.kind === "tool" && step.status === "done" && FILE_WRITE_TOOLS.has(step.tool ?? ""),
+      )
+      .flatMap(({ tool, targets = [] }) => {
+        if (tool !== "renameFile" || targets.length < 2) return targets;
+        // Renames record the new name only; it lands next to the old path.
+        const [from, name] = targets;
+        const slash = from.lastIndexOf("/");
+        return [from, slash === -1 ? name : `${from.slice(0, slash)}/${name}`];
+      }),
+  ),
+];
 
 /**
  * The error message of an AgentKit tool result, or undefined on success.
@@ -146,6 +228,8 @@ export const STATIC_CHECKS_PASSED = "Static checks passed";
 export const BUILD_NOT_CHECKED = "Build not checked";
 /** Starts a checkBuild result that failed for reasons outside the project's code. */
 export const BUILD_CHECK_UNFINISHED = "Error: The build check could not finish";
+/** Starts a checkBuild result whose in-process static checks found problems. */
+export const STATIC_CHECKS_FAILED = "Error: Static checks failed";
 
 /**
  * The first line of a passing checkBuild result ("Build verified", "Static
@@ -154,6 +238,39 @@ export const BUILD_CHECK_UNFINISHED = "Error: The build check could not finish";
 export const buildCheckLabel = (content: unknown): string | undefined => {
   const data = (content as { data?: unknown } | null)?.data;
   return typeof data === "string" ? data.trim().split("\n")[0].slice(0, MAX_ERROR) || undefined : undefined;
+};
+
+/**
+ * Failed checkBuild steps that a later passing check resolved. A static-check
+ * failure is resolved by any passing check, as in the finish gate; an install
+ * or build failure only by "Build verified". Running checks and checks that
+ * could not finish don't count, and failures after the last pass stay open.
+ */
+export const fixedBuildErrors = (steps: AgentStep[]) => {
+  let fixed = 0;
+  let pendingStatic = 0;
+  let pendingBuild = 0;
+  for (const step of steps) {
+    if (step.tool !== "checkBuild") continue;
+    if (step.status === "error" && !step.error?.startsWith(BUILD_CHECK_UNFINISHED)) {
+      if (step.error?.startsWith(STATIC_CHECKS_FAILED)) pendingStatic += 1;
+      else pendingBuild += 1;
+    } else if (step.status === "done") {
+      fixed += pendingStatic;
+      pendingStatic = 0;
+      if (step.text === BUILD_VERIFIED) {
+        fixed += pendingBuild;
+        pendingBuild = 0;
+      }
+    }
+  }
+  return fixed;
+};
+
+/** The known-error recipes a tool result's hints name (#334), for the run record. */
+export const toolResultRecipeIds = (content: unknown): string[] => {
+  const data = (content as { data?: unknown } | null)?.data;
+  return typeof data === "string" ? recipeIdsIn(data) : [];
 };
 
 /** Cap for interim "thinking" text recorded alongside tool calls. */

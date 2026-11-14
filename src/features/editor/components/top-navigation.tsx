@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 
 import { useFile } from "@/features/projects/hooks/use-files";
@@ -24,6 +26,11 @@ const Tab = ({
     openFile,
     closeTab,
   } = useEditor(projectId);
+
+  // Deleted while open (restore, agent, explorer, another browser tab).
+  useEffect(() => {
+    if (file === null) closeTab(fileId);
+  }, [file, fileId, closeTab]);
 
   const isActive = activeTabId === fileId;
   const isPreview = previewTabId === fileId;
