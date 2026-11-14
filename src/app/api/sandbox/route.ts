@@ -1,4 +1,4 @@
-import { AuthenticationError, RateLimitError, type Sandbox } from "e2b";
+import { AuthenticationError, CommandExitError, RateLimitError, type Sandbox } from "e2b";
 import { z } from "zod";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 import { parseJsonBody } from "@/lib/parse-json-body";
@@ -301,15 +301,22 @@ export async function POST(request: Request) {
       let sandbox: Sandbox | null = null;
       const installCmd = settings?.installCommand || DEFAULT_INSTALL_COMMAND;
 
+      // E2B throws on a non-zero exit; the callers report it as an install
+      // failure, which the preview offers to fix (#491).
       const runInstall = (target: Sandbox, timeoutMs: number) =>
-        target.commands.run(installCmd, {
-          cwd: WORK_DIR,
-          timeoutMs,
-          // Install may run postinstall scripts or a build that needs config.
-          envs: toProcessEnv(envEntries),
-          onStdout: (data) => send({ type: "output", data }),
-          onStderr: (data) => send({ type: "output", data }),
-        });
+        target.commands
+          .run(installCmd, {
+            cwd: WORK_DIR,
+            timeoutMs,
+            // Install may run postinstall scripts or a build that needs config.
+            envs: toProcessEnv(envEntries),
+            onStdout: (data) => send({ type: "output", data }),
+            onStderr: (data) => send({ type: "output", data }),
+          })
+          .catch((error: unknown) => {
+            if (error instanceof CommandExitError) return error;
+            throw error;
+          });
 
       // The first build boots the preview from its starter while the agent is
       // still writing, so dependencies it adds to package.json later have to be

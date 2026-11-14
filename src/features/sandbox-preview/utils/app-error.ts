@@ -1,4 +1,7 @@
+import { NOTHING_TO_PREVIEW } from "./boot-plan";
+import { withErrorHints } from "./error-recipes";
 import { ANSI_PATTERN } from "./last-log-line";
+import type { SandboxErrorKind } from "./sandbox-error";
 
 /** An error in the user's app (not the sandbox), shown over the preview (#223). */
 export interface AppError {
@@ -18,6 +21,12 @@ const ERROR_LINE =
 // "3:04:05 PM [vite] (client) Pre-transform error: " and similar log prefixes.
 const LOG_PREFIX =
   /^.*?\[vite\]\s*(?:\([a-z]+\)\s*)?(?:Internal server error:|Pre-transform error:)?\s*/i;
+// The sandbox route's line for a failed install (#491).
+const INSTALL_FAILED = /^Error: (.+ failed with exit code \d+)$/;
+const NPM_ERROR_CODE = /npm (?:ERR!|error) code (\S+)/g;
+// npm couldn't reach the registry: the sandbox's network, not the app's dependencies.
+const NETWORK_FAILURE =
+  /\b(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ENETUNREACH)\b|npm (?:ERR!|error) network/;
 const HMR_SUCCESS = /\[vite\].*\b(?:hmr update|page reload)\b/;
 // The sandbox's project root (WORK_DIR); paths read better relative to it.
 const WORK_DIR_PREFIX = /\/home\/user\/app\//g;
@@ -36,8 +45,20 @@ const clean = (text: string) =>
 export const detectBuildError = (chunk: string): AppError | null => {
   const text = clean(chunk);
   const lines = text.split(/\r?\n/);
-  const index = lines.findIndex((line) => ERROR_LINE.test(line));
+  const index = lines.findIndex(
+    (line) => ERROR_LINE.test(line) || INSTALL_FAILED.test(line.trim()),
+  );
   if (index === -1) return null;
+
+  const install = lines[index].trim().match(INSTALL_FAILED);
+  if (install) {
+    const before = lines.slice(0, index).join("\n");
+    if (NETWORK_FAILURE.test(before)) return null;
+    // The last npm error code says which failure this is, e.g. ERESOLVE.
+    const code = [...before.matchAll(NPM_ERROR_CODE)].at(-1)?.[1];
+    const message = code ? `${install[1]} (${code})` : install[1];
+    return { kind: "build", message: message.slice(0, MAX_ERROR_TEXT), file: "package.json" };
+  }
 
   let message = lines[index].replace(LOG_PREFIX, "").trim();
   // "Transform failed with 1 error:" says nothing until the next line.
@@ -101,6 +122,32 @@ export const bannerError = (
 ) =>
   error && previewReady && !firstBuildRunning && appErrorKey(error) !== dismissedId ? error : null;
 
+/**
+ * A failed start the app's own output can explain, such as a failed npm
+ * install (#491). Not a sandbox setup failure, and not a project with nothing
+ * to preview: no fix to the code helps those.
+ */
+export const isAppStartFailure = (kind: SandboxErrorKind | null, message: string | null) =>
+  kind === "transient" && message !== NOTHING_TO_PREVIEW;
+
+/**
+ * The shown error to fix without a click (#491), or null. Only once no run is
+ * active and the chat is free; each error once, and at most `max` per session,
+ * so a fix that fails can't loop. The banner's button stays for retries.
+ */
+export const autoFixTarget = (
+  errorId: string | null,
+  {
+    runActive,
+    chatBusy,
+    sent,
+    max,
+  }: { runActive: boolean; chatBusy: boolean; sent: readonly string[]; max: number },
+) =>
+  errorId !== null && !runActive && !chatBusy && sent.length < max && !sent.includes(errorId)
+    ? errorId
+    : null;
+
 /** Fix runs sent for the error that was active last. */
 export interface FixAttempts {
   errorId: string | null;
@@ -149,5 +196,5 @@ export const buildFixPrompt = (error: AppError, terminalOutput: string) => {
   if (error.stack) parts.push(`Stack:\n${codeBlock(error.stack)}`);
   const tail = logTail(terminalOutput);
   if (tail) parts.push(`Last terminal lines:\n${codeBlock(tail)}`);
-  return parts.join("\n\n");
+  return withErrorHints(parts.join("\n\n"));
 };

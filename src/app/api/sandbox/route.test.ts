@@ -25,8 +25,20 @@ vi.mock("e2b", () => ({
   },
   AuthenticationError: class extends Error {},
   RateLimitError: class extends Error {},
+  CommandExitError: class extends Error {
+    constructor(readonly result: { exitCode: number; stderr: string; error: string }) {
+      super(result.error);
+    }
+    get exitCode() {
+      return this.result.exitCode;
+    }
+    get stderr() {
+      return this.result.stderr;
+    }
+  },
 }));
 
+import { CommandExitError } from "e2b";
 import { POST } from "./route";
 import {
   SANDBOX_CREATE_RATE_LIMIT,
@@ -461,5 +473,31 @@ describe("POST /api/sandbox replaces the project's earlier preview (#492)", () =
     ).text();
 
     expect(mocks.sandboxKill).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/sandbox install failure (#491)", () => {
+  it("reports a non-zero npm install as an install failure, not E2B's exit status", async () => {
+    mocks.sandboxList.mockReturnValue({ nextItems: async () => [] });
+    const run = vi.fn(async (command: string) => {
+      if (command === "node --version") return { exitCode: 0, stdout: "v22.0.0\n", stderr: "" };
+      throw new (CommandExitError as unknown as new (result: object) => Error)({
+        exitCode: 1,
+        stderr: "npm error code ERESOLVE",
+        error: "exit status 1",
+      });
+    });
+    mocks.sandboxCreate.mockResolvedValue({
+      sandboxId: "sbx_1",
+      commands: { run },
+      files: { makeDir: vi.fn(), write: vi.fn() },
+      kill: vi.fn(),
+    });
+    const files = [{ path: "package.json", content: '{"scripts":{"dev":"vite"}}' }];
+
+    const body = await (await POST(request("POST", JSON.stringify({ files })))).text();
+
+    expect(body).toContain("failed with exit code 1\\nnpm error code ERESOLVE");
+    expect(body).not.toContain("exit status 1");
   });
 });

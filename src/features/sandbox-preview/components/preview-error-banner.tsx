@@ -15,6 +15,7 @@ export const MAX_FIX_ATTEMPTS = 2;
 export const PreviewErrorBanner = ({
   error,
   attempts,
+  autoFixed,
   agentWorking,
   chatBlock,
   onFix,
@@ -24,6 +25,8 @@ export const PreviewErrorBanner = ({
   error: AppError;
   /** Fix runs already sent for this error. */
   attempts: number;
+  /** A fix for this error was sent without a click (#491). */
+  autoFixed: boolean;
   agentWorking: boolean;
   /** Why the chat can't take a fix yet; see `chatSendBlock`. */
   chatBlock: "sending" | "other-project" | null;
@@ -59,6 +62,9 @@ export const PreviewErrorBanner = ({
           <p className="mt-1 line-clamp-3 break-words font-mono text-muted-foreground">
             {error.message}
           </p>
+          {autoFixed && !stillFailing && (
+            <p className="mt-1 text-muted-foreground">Codenaya sent a fix to the agent automatically.</p>
+          )}
           {stillFailing && (
             <p className="mt-1 text-muted-foreground">
               {MAX_FIX_ATTEMPTS} fixes didn&apos;t clear it. Check the logs, or describe what you see in chat.

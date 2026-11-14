@@ -45,8 +45,10 @@ import type { BootHistory, BootPhase } from "@/features/sandbox-preview/utils/bo
 import { NOTHING_TO_PREVIEW } from "@/features/sandbox-preview/utils/boot-plan";
 import {
   appErrorKey,
+  autoFixTarget,
   bannerError,
   buildFixPrompt,
+  isAppStartFailure,
   mergeAppError,
   trackFixAttempts,
   type AppError,
@@ -83,6 +85,14 @@ import { Id } from "../../../../convex/_generated/dataModel";
 type PreviewEngine = "sandbox" | "webcontainer";
 
 const WAITING_FOR_BUILD = "Waiting for the first build...";
+
+/** How long an error must stay shown after a run before it is fixed without a click. */
+const AUTO_FIX_DELAY_MS = 3000;
+/**
+ * How long after a run its errors are fixed without a click: long enough for
+ * a reinstall to fail, short enough to leave the user's own edits alone.
+ */
+const AUTO_FIX_WINDOW_MS = 2 * 60_000;
 
 /** What the collapsed terminal shows until the engine writes its first line. */
 const stripPlaceholder = (building: boolean, isLoading: boolean) => {
@@ -231,17 +241,56 @@ export const PreviewView = ({
     previewUrl && appError ? 1 : 0,
     canFix ? fixAppError : null,
   );
+  // A failed npm install stops the boot, so its error shows over the start error.
+  const appStartFailed = status === "error" && isAppStartFailure(errorKind, error);
   const shownError = bannerError(appError, {
     dismissedId: dismissedErrorId,
-    previewReady: Boolean(previewUrl),
+    previewReady: Boolean(previewUrl) || appStartFailed,
     // Still loading counts as running, so a first build's errors never flash.
     firstBuildRunning: firstBuild && activeRun !== null,
   });
+
+  // An error a run left is fixed without a click once the run is over (#491).
+  const runActive = Boolean(activeRun);
+  const [prevRunActive, setPrevRunActive] = useState(runActive);
+  const [autoFixArmed, setAutoFixArmed] = useState(false);
+  if (runActive !== prevRunActive) {
+    setPrevRunActive(runActive);
+    setAutoFixArmed(!runActive);
+  }
+  useEffect(() => {
+    if (!autoFixArmed) return;
+    const timer = setTimeout(() => setAutoFixArmed(false), AUTO_FIX_WINDOW_MS);
+    return () => clearTimeout(timer);
+  }, [autoFixArmed]);
+  const [autoFixedIds, setAutoFixedIds] = useState<string[]>([]);
+  const autoFixId = autoFixTarget(shownError && canFix && autoFixArmed ? appErrorId : null, {
+    runActive: activeRun !== null,
+    chatBusy: chatBlock !== null,
+    sent: autoFixedIds,
+    max: MAX_FIX_ATTEMPTS,
+  });
+  // Read when the timer fires: log lines re-create the error, and so the fix.
+  const fixAppErrorRef = useRef(fixAppError);
+  useEffect(() => {
+    fixAppErrorRef.current = fixAppError;
+  }, [fixAppError]);
+  useEffect(() => {
+    if (!autoFixId) return;
+    // The run's last edits are still syncing; they clear an error they fixed.
+    const timer = setTimeout(() => {
+      setAutoFixedIds((ids) => [...ids, autoFixId]);
+      fixAppErrorRef.current();
+    }, AUTO_FIX_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [autoFixId]);
+
   const errorBanner =
     shownError && appErrorId ? (
       <PreviewErrorBanner
         error={shownError}
         attempts={attempts}
+        autoFixed={autoFixedIds.includes(appErrorId)}
         // Still loading counts as working: a fix can't start mid-run.
         agentWorking={activeRun !== null}
         chatBlock={chatBlock}
@@ -264,12 +313,17 @@ export const PreviewView = ({
   };
 
   // A boot that started mid-build can fail on files the agent hadn't written
-  // yet; boot once more against the finished build.
+  // yet; boot once more against the finished build. Likewise after a run that
+  // may have fixed a failed install: the stopped sandbox can't take the edit.
   const wasFirstBuild = useRef(firstBuild);
+  const wasRunActive = useRef(runActive);
   useEffect(() => {
-    if (wasFirstBuild.current && !firstBuild && status === "error") restart();
+    const firstBuildEnded = wasFirstBuild.current && !firstBuild;
+    const fixRunEnded = wasRunActive.current && !runActive && appStartFailed && buildError;
+    if (status === "error" && (firstBuildEnded || fixRunEnded)) restart();
     wasFirstBuild.current = firstBuild;
-  }, [firstBuild, status, restart]);
+    wasRunActive.current = runActive;
+  }, [firstBuild, runActive, appStartFailed, buildError, status, restart]);
 
   // The iframe's latest load, so first_preview_shown waits until it is visible.
   const [loadedPreview, setLoadedPreview] = useState<string | null>(null);

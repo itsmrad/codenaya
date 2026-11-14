@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
+import { NOTHING_TO_PREVIEW } from "./boot-plan";
 import {
   appErrorKey,
+  autoFixTarget,
   bannerError,
   buildFixPrompt,
   createBuildErrorDetector,
   codeBlock,
   detectBuildError,
+  isAppStartFailure,
   isHmrSuccess,
   logTail,
   mergeAppError,
@@ -60,6 +63,47 @@ describe("detectBuildError", () => {
     ).toMatchObject({ file: "src/App.tsx", line: 3 });
   });
 
+  describe("npm install failures (#491)", () => {
+    const install = "npm install --prefer-offline --no-audit --no-fund";
+
+    it("reads the sandbox route's install line as a build error on package.json", () => {
+      const output =
+        `$ ${install}\n` +
+        "npm error code ERESOLVE\n" +
+        "npm error ERESOLVE unable to resolve dependency tree\n" +
+        `\nError: ${install} failed with exit code 1\n` +
+        "npm error code ERESOLVE\n";
+      expect(detectBuildError(output)).toEqual({
+        kind: "build",
+        message: `${install} failed with exit code 1 (ERESOLVE)`,
+        file: "package.json",
+      });
+    });
+
+    it("reads a reinstall failure without an npm code", () => {
+      expect(detectBuildError(`\npackage.json changed.\n$ pnpm install\n\nError: pnpm install failed with exit code 1\n`)).toEqual({
+        kind: "build",
+        message: "pnpm install failed with exit code 1",
+        file: "package.json",
+      });
+    });
+
+    it("leaves a network failure to the start error", () => {
+      expect(
+        detectBuildError(
+          "npm error code ETIMEDOUT\nnpm error network request to https://registry.npmjs.org/react failed\n" +
+            `Error: ${install} failed with exit code 1\n`,
+        ),
+      ).toBeNull();
+      expect(detectBuildError(`npm error code EAI_AGAIN\nError: ${install} failed with exit code 1\n`)).toBeNull();
+    });
+
+    it("ignores other lines that mention an exit code", () => {
+      expect(detectBuildError("Error: Command failed with exit code 1: vite build\n")).toBeNull();
+      expect(detectBuildError("Error: exit status 1\n")).toBeNull();
+    });
+  });
+
   it("ignores ordinary output", () => {
     expect(detectBuildError("  VITE v6.0.0  ready in 312 ms\n  ➜  Local:   http://localhost:5173/\n")).toBeNull();
     expect(detectBuildError("[vite] hmr update /src/App.jsx\n")).toBeNull();
@@ -107,6 +151,15 @@ describe("buildFixPrompt", () => {
     expect(prompt).not.toContain("line 9\n");
   });
 
+  it("appends the known cause and fix for a recognised error (#334)", () => {
+    const prompt = buildFixPrompt(
+      { kind: "build", message: "npm install failed with exit code 1 (ERESOLVE)", file: "package.json" },
+      "npm error code ERESOLVE\n",
+    );
+    expect(prompt).toContain("Likely cause (npm-eresolve):");
+    expect(prompt).toContain("Known fix:");
+  });
+
   it("leaves out sections it has nothing for", () => {
     expect(buildFixPrompt({ kind: "build", message: "boom" }, "")).toBe(
       "The preview shows a build error. Find the cause and fix it.\n\nError:\n```\nboom\n```",
@@ -152,6 +205,36 @@ describe("bannerError", () => {
     expect(bannerError(error, { ...shown, dismissedId: appErrorKey(error) })).toBeNull();
     expect(bannerError(error, { ...shown, previewReady: false })).toBeNull();
     expect(bannerError(null, shown)).toBeNull();
+  });
+});
+
+describe("isAppStartFailure", () => {
+  it("is a failed start the app's code can fix", () => {
+    expect(isAppStartFailure("transient", "npm install failed with exit code 1")).toBe(true);
+  });
+
+  it("is not a sandbox setup failure, or a project with nothing to preview", () => {
+    expect(isAppStartFailure("config", "E2B_API_KEY is not set")).toBe(false);
+    expect(isAppStartFailure("rate_limit", "Sandbox limit reached")).toBe(false);
+    expect(isAppStartFailure("transient", NOTHING_TO_PREVIEW)).toBe(false);
+    expect(isAppStartFailure(null, null)).toBe(false);
+  });
+});
+
+describe("autoFixTarget (#491)", () => {
+  const idle = { runActive: false, chatBusy: false, sent: [] as string[], max: 2 };
+
+  it("fixes the shown error once the run is over and the chat is free", () => {
+    expect(autoFixTarget("a", idle)).toBe("a");
+    expect(autoFixTarget("a", { ...idle, runActive: true })).toBeNull();
+    expect(autoFixTarget("a", { ...idle, chatBusy: true })).toBeNull();
+    expect(autoFixTarget(null, idle)).toBeNull();
+  });
+
+  it("fixes each error once, and at most max per session", () => {
+    expect(autoFixTarget("a", { ...idle, sent: ["a"] })).toBeNull();
+    expect(autoFixTarget("b", { ...idle, sent: ["a"] })).toBe("b");
+    expect(autoFixTarget("c", { ...idle, sent: ["a", "b"] })).toBeNull();
   });
 });
 
