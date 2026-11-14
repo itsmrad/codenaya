@@ -108,6 +108,7 @@ import {
   MAX_CHAT_IMAGES,
   MAX_CHAT_IMAGE_BYTES,
 } from "../chat-images";
+import { visionSwitchTarget } from "../vision-switch";
 
 interface ConversationSidebarProps {
   projectId: Id<"projects">;
@@ -133,6 +134,7 @@ export const ConversationSidebar = ({
   const acceptsImages = !agentModel.keyId
     ? resolveCatalogModel(platform, agentModel.modelId).vision
     : !modelKey || modelAcceptsImages(agentModel.modelId, modelKey);
+  const visionSwitch = acceptsImages ? undefined : visionSwitchTarget(agentModel, platform, modelKey);
   const [
     selectedConversationId,
     setSelectedConversationId,
@@ -713,7 +715,11 @@ export const ConversationSidebar = ({
             }
           >
             <PromptInputBody>
-              <ComposerImages acceptsImages={acceptsImages} />
+              <ComposerImages
+                acceptsImages={acceptsImages}
+                visionSwitch={visionSwitch}
+                onSwitchModel={setAgentModel}
+              />
               {contexts.length > 0 && (
                 <div className="flex w-full flex-wrap justify-start gap-2 p-2 pb-0">
                   {contexts.map((ctx) => (
