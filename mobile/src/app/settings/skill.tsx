@@ -158,7 +158,7 @@ function SkillForm({
         />
         {!readOnly && (
           <Text style={[styles.muted, { color: c.mutedForeground }]}>
-            The agent sees every enabled skill's name and description, and reads the instructions when a task matches.
+            The agent sees every enabled skill&apos;s name and description, and reads the instructions when a task matches.
           </Text>
         )}
         {error && <Text style={[styles.muted, { color: c.destructive }]}>{error}</Text>}

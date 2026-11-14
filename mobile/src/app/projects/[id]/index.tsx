@@ -191,6 +191,7 @@ export default function ProjectChat() {
   // A dashboard prompt with images: sent here, where images upload to the project.
   useEffect(() => {
     const first = takeFirstMessage(projectId);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- dispatch the pending prompt once when navigation opens the project
     if (first) send(first.text, first.images).then(report, unreachable);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the project opens
   }, [projectId]);

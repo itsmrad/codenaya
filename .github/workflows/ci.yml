@@ -50,3 +50,42 @@ jobs:
           NEXT_PUBLIC_CONVEX_URL: https://placeholder.convex.cloud
           # pk_test_ + base64("example.clerk.accounts.dev$")
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk
+
+  mobile:
+    name: Mobile typecheck and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Detect mobile changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if git diff --name-only "$BASE_SHA" HEAD -- mobile/ | grep -q .; then
+            echo "mobile=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v5
+        if: steps.changes.outputs.mobile == 'true'
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+
+      # Mobile shares pure modules and generated Convex types with the web app.
+      - run: npm ci --no-audit --no-fund
+        if: steps.changes.outputs.mobile == 'true'
+
+      - run: npm ci --no-audit --no-fund
+        if: steps.changes.outputs.mobile == 'true'
+        working-directory: mobile
+
+      - run: npm run typecheck && npm run lint
+        if: steps.changes.outputs.mobile == 'true'
+        working-directory: mobile

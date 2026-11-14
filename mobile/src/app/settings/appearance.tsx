@@ -69,7 +69,7 @@ export default function AppearanceSettings() {
           })}
         </View>
       </View>
-      <Text style={[styles.note, { color: c.mutedForeground }]}>System follows your phone's light or dark setting.</Text>
+      <Text style={[styles.note, { color: c.mutedForeground }]}>System follows your phone&apos;s light or dark setting.</Text>
     </View>
   );
 }

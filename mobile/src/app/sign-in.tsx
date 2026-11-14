@@ -18,7 +18,7 @@ import { Corners, DotGrid, LabelStrip, monoLabel } from "@/components/grid";
 import { ArrowRight } from "@/components/icons";
 import { Logo } from "@/components/logo";
 import { webUrl } from "@/lib/http";
-import { font, radius, useColors } from "@/lib/theme";
+import { font, useColors } from "@/lib/theme";
 
 // Closes Google's browser tab when it redirects back to the app.
 WebBrowser.maybeCompleteAuthSession();

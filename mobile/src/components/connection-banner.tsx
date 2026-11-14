@@ -21,6 +21,7 @@ export function ConnectionBanner() {
   const [lost, setLost] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset the grace period when the external connection recovers
     if (isWebSocketConnected) return setLost(false);
     const timer = setTimeout(() => setLost(true), GRACE_MS);
     return () => clearTimeout(timer);
@@ -35,7 +36,7 @@ export function ConnectionBanner() {
       style={[styles.banner, { top: insets.top + 6, backgroundColor: c.card, borderColor: c.border }]}
     >
       <ActivityIndicator size="small" color={c.mutedForeground} />
-      <Text style={[monoLabel, { color: c.foreground }]}>Can't reach Codenaya · Reconnecting</Text>
+      <Text style={[monoLabel, { color: c.foreground }]}>Can&apos;t reach Codenaya · Reconnecting</Text>
     </Animated.View>
   );
 }

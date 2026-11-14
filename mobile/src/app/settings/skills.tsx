@@ -164,7 +164,7 @@ export default function SkillsSettings() {
         <LabelStrip label="Built-in" />
         {builtins.length === 0 ? (
           <Text style={[styles.empty, { color: c.mutedForeground, borderColor: c.border }]}>
-            No built-in skills match "{search.trim()}".
+            No built-in skills match &quot;{search.trim()}&quot;.
           </Text>
         ) : (
           builtins.map((skill) => (
@@ -205,7 +205,7 @@ export default function SkillsSettings() {
           </Text>
         ) : shown.length === 0 ? (
           <Text style={[styles.empty, { color: c.mutedForeground, borderColor: c.border }]}>
-            No skills match "{search.trim()}".
+            No skills match &quot;{search.trim()}&quot;.
           </Text>
         ) : (
           shown.map((skill) => (
@@ -232,7 +232,7 @@ export default function SkillsSettings() {
         )}
       </View>
       <Text style={[styles.note, { color: c.mutedForeground }]}>
-        Library skills are off in every project until you enable them in that project's Skills.
+        Library skills are off in every project until you enable them in that project&apos;s Skills.
       </Text>
 
       <Sheet visible={menuOpen} title="Add a skill" onClose={() => setMenuOpen(false)}>
