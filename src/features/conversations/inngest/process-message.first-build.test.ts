@@ -20,7 +20,7 @@ vi.mock("@/lib/convex-client", async () => {
 });
 
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
-import { BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
+import { BUILD_NOT_BUILT_NOTE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
 import { STARTER_IN_PLACE_NOTE } from "./constants";
 import { drive, text, toolCall } from "./process-message.driver";
 import { VITE_REACT_STARTER } from "./vite-starter";
@@ -141,7 +141,7 @@ describe("processMessage first build (#338)", () => {
     expect(called("system:updateMessageContent")).toEqual([
       [
         "system:updateMessageContent",
-        expect.objectContaining({ content: `Built it.\n\n${BUILD_UNVERIFIED_NOTE}`, outcome: "error" }),
+        expect.objectContaining({ content: `Built it.\n\n${BUILD_NOT_BUILT_NOTE}`, outcome: "error" }),
       ],
     ]);
   });

@@ -33,7 +33,6 @@ import {
   BUILD_CHECK_RESERVE_STEPS,
   BUILD_REPAIR_NUDGE,
   createBuildCheckGate,
-  MAX_BUILD_CHECKS,
   unverifiedBuildNote,
   wroteFiles,
 } from './build-check-gate';
@@ -707,11 +706,11 @@ export const processMessage = inngest.createFunction(
               ? summaryNote
               : takeCutOffNote() ?? buildCheckGate.takeNudge() ?? loopGuard.takeHint();
           if (nudge === BUILD_REPAIR_NUDGE) {
-            const attempt = buildCheckGate.forced;
+            const attempt = buildCheckGate.repairs;
             await recordSteps("record-build-repair", () => [{
               id: `build-repair-${attempt}`,
               kind: "thinking" as const,
-              text: `The build check failed, so the agent is fixing it (attempt ${attempt} of ${MAX_BUILD_CHECKS}).`,
+              text: `The build check failed, so the agent is fixing it (attempt ${attempt}).`,
               status: "done" as const,
               startedAt: Date.now(),
             }], false);

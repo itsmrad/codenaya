@@ -24,7 +24,7 @@ vi.mock("@/lib/convex-client", async () => {
   return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
 });
 
-import { BUILD_CHECK_NUDGE, BUILD_FAILED_NOTE, BUILD_REPAIR_NUDGE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
+import { BUILD_CHECK_NUDGE, BUILD_FAILED_NOTE, BUILD_NOT_BUILT_NOTE, BUILD_REPAIR_NUDGE } from "./build-check-gate";
 import { drive, text, toolCall } from "./process-message.driver";
 
 let projectFiles: Array<{ _id: string; name: string; type: "file"; content: string }>;
@@ -125,6 +125,13 @@ describe("processMessage build-check gate", () => {
     const check = recordedSteps().filter((step) => step.tool === "checkBuild").at(-1);
     expect(check).toMatchObject({ status: "error" });
     expect(String(check?.error)).toContain("Static checks failed");
+
+    // The forced check turn is not a repair: the first fix turn is attempt 1.
+    const repairs = recordedSteps().filter((step) => String(step.id).startsWith("build-repair-"));
+    expect(repairs.map((step) => [step.id, step.text])).toEqual([
+      ["build-repair-1", expect.stringContaining("(attempt 1)")],
+      ["build-repair-2", expect.stringContaining("(attempt 2)")],
+    ]);
   });
 
   it("does not end on a failed check: the fix turn repairs it and the run finishes verified", async () => {
@@ -157,7 +164,7 @@ describe("processMessage build-check gate", () => {
     });
     expect(recordedSteps().find((step) => step.id === "build-repair-1")).toMatchObject({
       kind: "thinking",
-      text: expect.stringContaining("attempt 1 of 3"),
+      text: expect.stringContaining("(attempt 1)"),
     });
     const update = mutationArgs("system:updateMessageContent").at(-1);
     expect(update).toMatchObject({ content: summary });
@@ -212,7 +219,7 @@ describe("processMessage build-check gate", () => {
     });
     // Not a Vite project, so nothing was built: the reply says so.
     expect(mutationArgs("system:updateMessageContent").at(-1)).toMatchObject({
-      content: `${summary}\n\n${BUILD_UNVERIFIED_NOTE}`,
+      content: `${summary}\n\n${BUILD_NOT_BUILT_NOTE}`,
       outcome: "error",
     });
     expect(mutationArgs("projects:completeFirstBuild")).toEqual([]);

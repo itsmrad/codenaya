@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BUILD_CHECK_NUDGE,
   BUILD_FAILED_NOTE,
+  BUILD_NOT_BUILT_NOTE,
   BUILD_REPAIR_NUDGE,
   BUILD_RESERVE_NUDGE,
   BUILD_UNVERIFIED_NOTE,
@@ -92,7 +93,7 @@ describe("unverifiedBuildNote", () => {
     const notVite = call("checkBuild", "Build not checked\nStatic checks passed. checkBuild only builds Vite projects, so this one was not built.");
     const noResult = { tool: { name: "checkBuild" }, content: undefined };
     for (const check of [staticOnly, noSandbox, notVite, noResult]) {
-      expect(unverifiedBuildNote([writes, { toolCalls: [check] }])).toBe(BUILD_UNVERIFIED_NOTE);
+      expect(unverifiedBuildNote([writes, { toolCalls: [check] }])).toBe(BUILD_NOT_BUILT_NOTE);
       // Nothing to fix: the gate does not route back for another check.
       expect(hasUncheckedWrites([writes, { toolCalls: [check] }, turn()])).toBe(false);
     }
@@ -113,7 +114,8 @@ describe("createBuildCheckGate", () => {
 
     expect(gate.takeNudge()).toBeUndefined();
     expect(gate.shouldContinue(results)).toBe(true);
-    expect(gate.forced).toBe(1);
+    // A check turn is not a repair.
+    expect(gate.repairs).toBe(0);
     expect(gate.takeNudge()).toBe(BUILD_CHECK_NUDGE);
     expect(gate.takeNudge()).toBeUndefined();
   });
@@ -126,6 +128,7 @@ describe("createBuildCheckGate", () => {
     for (let attempt = 1; attempt <= MAX_BUILD_CHECKS; attempt += 1) {
       expect(gate.shouldContinue(results)).toBe(true);
       expect(gate.takeNudge()).toBe(BUILD_REPAIR_NUDGE);
+      expect(gate.repairs).toBe(attempt);
     }
     expect(gate.shouldContinue(results)).toBe(false);
     expect(gate.takeNudge()).toBeUndefined();

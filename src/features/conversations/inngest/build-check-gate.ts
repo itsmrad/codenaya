@@ -40,6 +40,9 @@ export const BUILD_FAILED_NOTE =
   "**Build check:** The build still has errors after the fix attempts this run allows, so the preview may not work yet. Ask me to fix the build errors to try again.";
 export const BUILD_UNVERIFIED_NOTE =
   "**Build check:** The build was not verified after the last changes, so the preview may not work yet. Ask me to check the build to verify it.";
+// Another check would not build it either (no build sandbox, or not a Vite project).
+export const BUILD_NOT_BUILT_NOTE =
+  "**Build check:** Static checks passed, but the app could not be built here, so it has not been verified. Check the preview before relying on it.";
 
 type ToolCalls = { toolCalls: Array<{ tool: { name: string }; content: unknown }> };
 
@@ -92,7 +95,8 @@ export const hasUncheckedWrites = (results: ToolCalls[]) => {
 export const unverifiedBuildNote = (results: ToolCalls[]) => {
   const { wrote, last } = buildState(results);
   if (!wrote || last === "passed") return undefined;
-  return last === "failed" ? BUILD_FAILED_NOTE : BUILD_UNVERIFIED_NOTE;
+  if (last === "failed") return BUILD_FAILED_NOTE;
+  return last === "unverified" ? BUILD_NOT_BUILT_NOTE : BUILD_UNVERIFIED_NOTE;
 };
 
 /**
@@ -102,13 +106,16 @@ export const unverifiedBuildNote = (results: ToolCalls[]) => {
  */
 export const createBuildCheckGate = () => {
   let forced = 0;
+  let repairs = 0;
   let reserved = false;
   let nudge: string | undefined;
   return {
     shouldContinue(results: ToolCalls[]) {
       if (forced >= MAX_BUILD_CHECKS || !hasUncheckedWrites(results)) return false;
       forced += 1;
-      nudge = buildState(results).last === "failed" ? BUILD_REPAIR_NUDGE : BUILD_CHECK_NUDGE;
+      const failed = buildState(results).last === "failed";
+      if (failed) repairs += 1;
+      nudge = failed ? BUILD_REPAIR_NUDGE : BUILD_CHECK_NUDGE;
       return true;
     },
     reserve(results: ToolCalls[]) {
@@ -121,9 +128,9 @@ export const createBuildCheckGate = () => {
       nudge = undefined;
       return pending;
     },
-    /** Turns forced so far, for the run block's repair steps. */
-    get forced() {
-      return forced;
+    /** Fix turns forced after a failed check so far, for the run block's repair steps. */
+    get repairs() {
+      return repairs;
     },
   };
 };

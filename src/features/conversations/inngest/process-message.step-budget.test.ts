@@ -23,7 +23,7 @@ vi.mock("./constants", async (importOriginal) => ({
   MAX_AGENT_STEPS: 4,
 }));
 
-import { BUILD_CHECK_NUDGE, BUILD_RESERVE_NUDGE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
+import { BUILD_CHECK_NUDGE, BUILD_NOT_BUILT_NOTE, BUILD_RESERVE_NUDGE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
 import { MAX_AGENT_STEPS, STEP_BUDGET_NOTE } from "./constants";
 import { drive, text, toolCall } from "./process-message.driver";
 
@@ -202,7 +202,7 @@ describe("processMessage step budget", () => {
     expect(JSON.stringify(last?.messages)).not.toContain(BUILD_CHECK_NUDGE);
     // No sandbox here, so the check could not verify the build.
     expect(mutationArgs("system:updateMessageContent").at(-1)).toMatchObject({
-      content: `${summary}\n\n${BUILD_UNVERIFIED_NOTE}`,
+      content: `${summary}\n\n${BUILD_NOT_BUILT_NOTE}`,
     });
   });
 });
