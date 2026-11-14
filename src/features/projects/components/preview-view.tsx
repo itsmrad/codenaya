@@ -815,6 +815,9 @@ const PreviewContent = ({
           style={{ width: PREVIEW_DEVICE_WIDTHS[device] ?? undefined }}
           data-framed={device !== "desktop"}
           title="Preview"
+          // Covered: out of reach of keyboard and screen readers, but still
+          // mounted so its bridge reports errors.
+          inert={Boolean(building)}
           onLoad={onPreviewLoad}
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
           allow="cross-origin-isolated"

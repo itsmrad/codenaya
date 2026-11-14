@@ -69,8 +69,18 @@ const startFirstBuild = async (page: Page, name: string) => {
         name: "package.json",
         content: "{}\n",
       }),
-    writeFile: (name: string) =>
-      system.mutation(api.system.createFile, { internalKey, projectId, name, content: `${name}\n` }),
+    /** Writes `name` as the first run, which lists it on the build card after the file lands. */
+    writeFile: async (name: string) => {
+      await system.mutation(api.system.createFile, { internalKey, projectId, name, content: `${name}\n` });
+      const now = Date.now();
+      await system.mutation(api.system.upsertMessageSteps, {
+        internalKey,
+        messageId: runs[0],
+        steps: [
+          { id: name, kind: "tool", tool: "writeFiles", targets: [name], status: "done", startedAt: now, endedAt: now },
+        ],
+      });
+    },
     cleanup: () =>
       Promise.all(
         runs.map((messageId) =>
@@ -152,17 +162,33 @@ test.describe("first build auto-opens the preview", () => {
     const build = await startFirstBuild(page, "e2e-preview-auto-open-writing");
 
     try {
+      // The page's time only moves when the test moves it, so slow Convex
+      // round trips can't stretch the gap between writes past the window.
+      await page.clock.install();
       await page.goto(`/projects/${build.projectId}`);
-      await expect(page.getByRole("status", { name: "Building your app" })).toBeVisible({ timeout: 60_000 });
+      const card = page.getByRole("status", { name: "Building your app" });
+      await expect(card).toBeVisible({ timeout: 60_000 });
+      await page.clock.pauseAt(Date.now() + 1_000);
       await build.writePackageJson();
-      // Writes closer together than the quiet window: install would race them.
+      // Writes 1s apart, under the 2s quiet window: install would race them.
       for (let index = 0; index < 6; index += 1) {
-        await page.waitForTimeout(1_000);
-        await build.writeFile(`part-${index}.txt`);
+        const name = `part-${index}.txt`;
+        await build.writeFile(name);
+        // Listed after the file landed: the page has the write.
+        await expect(card.getByText(name)).toBeVisible({ timeout: 30_000 });
+        await page.clock.runFor(1_000);
       }
       expect(sandbox.boots).toBe(0);
       // Quiet now: it boots while the run is still going.
-      await expect.poll(() => sandbox.boots, { timeout: 30_000 }).toBeGreaterThan(0);
+      await expect
+        .poll(
+          async () => {
+            await page.clock.runFor(500);
+            return sandbox.boots;
+          },
+          { timeout: 30_000 },
+        )
+        .toBeGreaterThan(0);
       await expect(page.getByRole("status", { name: "Still building" })).toBeVisible({ timeout: 30_000 });
     } finally {
       await build.cleanup();
@@ -224,6 +250,8 @@ test.describe("first build auto-opens the preview", () => {
       await expect(page.getByRole("button", { name: "Refresh page" })).toBeEnabled({ timeout: 30_000 });
       await page.waitForTimeout(5_000);
       await expect(buildCard).toBeVisible();
+      // Covered, so out of the keyboard's and screen readers' reach.
+      await expect(page.locator('iframe[title="Preview"]')).toHaveAttribute("inert", "");
       await expect(page.getByRole("status", { name: "Still building" })).toBeHidden();
       await expect(banner).toHaveCount(0);
       expect(sent).toHaveLength(0);
@@ -248,6 +276,7 @@ test.describe("first build auto-opens the preview", () => {
       await expect(fixing).toBeHidden();
       await expect(buildCard).toBeHidden();
       await expect(banner).toContainText("Codenaya sent a fix to the agent automatically.");
+      await expect(page.locator('iframe[title="Preview"]')).not.toHaveAttribute("inert");
       await expect(banner.getByRole("button", { name: "Fix with AI" })).toBeEnabled();
       await page.waitForTimeout(5_000);
       expect(sent).toHaveLength(1);
