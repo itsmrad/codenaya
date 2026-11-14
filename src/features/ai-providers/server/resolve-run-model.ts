@@ -179,7 +179,8 @@ const platformRunLabel = (model: RoutedModel) => runModelLabel({ id: model.id, l
  * catalog default) before any of these checks, so the message and the run
  * record that concrete model. An image send on Auto only ever routes to a
  * vision model, and is refused when there is none. Auto skips models at
- * their spend limit; with none left it falls to the default, checked as usual.
+ * their spend limit; with none left it falls to the default, checked as usual,
+ * and an image send whose vision models are all at their limit gets the 402.
  */
 export async function validateModelChoice({
   internalKey,
@@ -216,6 +217,9 @@ export async function validateModelChoice({
         catalog.autoModelIds,
       );
     if (auto && withImages && !routed) {
+      // A vision model Auto would pick but for its spend limit gets that limit's refusal.
+      const capped = autoRouteModel(configured, "vision", catalog.autoModelIds);
+      if (capped) await refuseOverSpendLimit({ internalKey, userId, model: capped });
       throw new ModelChoiceError(AUTO_NO_VISION_MESSAGE, 400, "auto_no_vision_model");
     }
     const model = routed || resolveCatalogModel(catalog, modelId);

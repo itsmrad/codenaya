@@ -1007,6 +1007,18 @@ describe("validateModelChoice: spend limits (ADR 0012)", () => {
     expect(await auto()).toMatchObject({ modelId: "google/gemini-3.8-flash", label: "Auto · Gemini 3.8 Flash" });
   });
 
+  it("refuses an Auto image send with 402 when its only vision model is at its limit", async () => {
+    mocks.platform.mockReturnValue({ ...limited, autoModelIds: ["x-ai/grok-4.7"] });
+    answer(spent(1, 50));
+    await expect(
+      validateModelChoice({ internalKey: "ik", userId: "user_1", model: "auto", withImages: true }),
+    ).rejects.toMatchObject({
+      status: 402,
+      code: "model_limit_reached",
+      message: expect.stringContaining("your Grok 4.7 allowance this month"),
+    });
+  });
+
   it("never reads spend for a model without a limit", async () => {
     answer(spent(1_000, 1_000));
     await validate("google/gemini-3.8-flash");
