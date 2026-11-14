@@ -17,6 +17,8 @@ vi.mock("@/lib/convex-client", async () => {
   return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
 });
 
+import { withEnvPlatform } from "@/features/ai-providers/server/active-platform.mock";
+
 import { drive, text, toolCall } from "./process-message.driver";
 
 const QUERIES: Record<string, () => unknown> = {
@@ -113,6 +115,34 @@ describe("processMessage swarm mode", () => {
     expect(recorded.find((step) => step.tool === "delegateTasks")?.targets).toEqual(["Pages", "Navigation"]);
     // Worker writes count as the run's writes (#338).
     expect(mutationArgs("projects:completeFirstBuild")).toHaveLength(1);
+  });
+
+  it("runs a sub-orchestrator on Sonnet beside a worker, with room for its own workers", async () => {
+    mocks.query.mockImplementation(withEnvPlatform(async (ref) => QUERIES[getFunctionName(ref)]?.(), () => ({
+      models: ["x-ai/grok-4.7", "anthropic/claude-haiku-5.5", "anthropic/claude-sonnet-5.5"].map((id) => ({
+        id, name: id, vendor: "a", provider: "openrouter", providerModelId: id, vision: false, tools: "reported",
+        pricing: { mode: "blended", usdPerMTok: 1 }, access: "everyone", hidden: id !== "x-ai/grok-4.7",
+      })),
+      defaultModelId: "x-ai/grok-4.7",
+      utilityModelId: "x-ai/grok-4.7",
+    })));
+    const plan = { tasks: [{ ...PLAN.tasks[0], role: "sub-orchestrator" }, PLAN.tasks[1]] };
+    const outcome = await swarm([
+      { data: toolCall("delegateTasks", plan) },
+      { data: toolCall("checkBuild") },
+      { data: text("Done.") },
+    ], [{ ...DONE, writtenPaths: ["src/pages/home.tsx", "src/pages/about.tsx"] }, NAV_DONE]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(mutationArgs("agentTasks:createTasks")[0].tasks).toEqual([
+      expect.objectContaining({ taskId: "pages", role: "sub-orchestrator", modelId: "anthropic/claude-sonnet-5.5" }),
+      expect.objectContaining({ taskId: "nav", role: "worker", modelId: "anthropic/claude-haiku-5.5" }),
+    ]);
+    expect(outcome.invocations).toEqual([
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_0", depth: 1 }) }, timeout: "25m" }),
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_1", depth: 1 }) }, timeout: "12m" }),
+    ]);
+    expect(toolResults(outcome.inferenceBodies)[0]).toContain("Files written: src/pages/home.tsx, src/pages/about.tsx");
   });
 
   it("returns an invalid plan as an Error to re-plan, then runs the valid one", async () => {

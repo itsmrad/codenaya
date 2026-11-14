@@ -452,8 +452,9 @@ export async function resolveRunModel({
     // or removed the model since the route checked it.
     const catalog = await platformCatalog(internalKey);
     // A direct lookup: resolveCatalogModel drops hidden models, and the worker model may be a hidden utility.
+    // A promo entry needs the owner's claim; the run's own model needs none it doesn't already have.
     const workerModel = workerModelIds.map((id) => catalog.models.find((m) => m.id === id))
-      .find((m) => m && isPlatformConfigured(m.provider));
+      .find((m) => m && isPlatformConfigured(m.provider) && !promoKindOf(m.access));
     const model = workerModel ?? resolveCatalogModel(catalog, choice.modelId);
     // The key can go missing between the route's check and the run (a redeploy).
     if (!isPlatformConfigured(model.provider)) {

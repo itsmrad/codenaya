@@ -36,6 +36,29 @@ describe("validatePlan", () => {
   });
 });
 
+describe("validatePlan roles and nesting", () => {
+  const sub = (id: string, ownedPaths: string[]) => ({ ...task(id, ownedPaths), role: "sub-orchestrator" as const });
+  const within = { withinPaths: ["src/shop"] };
+
+  it("allows at most two sub-orchestrators", () => {
+    expect(validatePlan({ tasks: [sub("a", ["src/a/"]), sub("b", ["src/b/"]), task("c", ["src/c.ts"])] })).toHaveProperty("tasks");
+    expect(validatePlan({ tasks: [sub("a", ["src/a/"]), sub("b", ["src/b/"]), sub("c", ["src/c/"])] })).toMatch(/At most 2/);
+  });
+
+  it("keeps a sub-orchestrator's 2-3 workers inside its paths and apart", () => {
+    expect(validatePlan({ tasks: [task("cart", ["src/shop/cart/"]), task("list", ["src/shop/list.tsx"])] }, within))
+      .toMatchObject({ tasks: [{ ownedPaths: ["src/shop/cart"] }, { ownedPaths: ["src/shop/list.tsx"] }] });
+    expect(validatePlan({ tasks: [task("cart", ["src/shop/cart/"]), task("nav", ["src/nav.tsx"])] }, within)).toMatch(/outside your owned paths/);
+    expect(validatePlan({ tasks: [task("all", ["src/shop"]), task("cart", ["src/shop/cart.tsx"])] }, within)).toMatch(/overlap/);
+    expect(validatePlan({ tasks: [task("cart", ["src/shop/cart/"]), task("x", ["src/shop/cart/x.ts"])] }, within)).toMatch(/overlap/);
+    // A trailing-slash or "./" spelling of the parent's own folder is the same path.
+    expect(validatePlan({ tasks: [task("a", ["./src/shop/a.ts"]), task("b", ["src/shop/b.ts"])] }, { withinPaths: ["src/shop/"] })).toHaveProperty("tasks");
+    const four = ["a", "b", "c", "d"].map((id) => task(id, [`src/shop/${id}.ts`]));
+    expect(validatePlan({ tasks: four }, within)).toMatch(/at most 3/);
+    expect(validatePlan({ tasks: [sub("a", ["src/shop/a/"]), task("b", ["src/shop/b.ts"])] }, within)).toMatch(/only be workers/);
+  });
+});
+
 describe("ownsPath", () => {
   it("covers owned files and everything inside owned folders, nothing else", () => {
     const owned = ["src/pages/", "src/hooks/use-cart.ts"];

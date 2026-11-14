@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api } from "./_generated/api";
 import { deleteProjectBatch, CASCADE_BATCH_SIZE } from "./projectCascade";
 import schema from "./schema";
-import { MAX_SWARM_TASKS } from "./swarm";
+import { MAX_SWARM_AGENTS } from "./swarm";
 
 const modules = import.meta.glob("./**/*.ts");
 const INTERNAL_KEY = "test-internal-key";
@@ -66,11 +66,16 @@ describe("agentTasks", () => {
     const parent = await seedMessage(t);
     const other = await seedMessage(t, BOB);
     await expect(create(t, { ...parent, projectId: other.projectId })).rejects.toMatchObject({ data: { code: "NOT_FOUND" } });
-    const tasks = Array.from({ length: MAX_SWARM_TASKS }, (_, i) => task(`task-${i}`));
+    const tasks = Array.from({ length: 4 }, (_, i) => task(`task-${i}`));
     const ids = await create(t, parent, tasks.slice(0, 2));
     expect(await create(t, parent, tasks)).toMatchObject([ids[0], ids[1], expect.any(String), expect.any(String)]);
+    // A sub-orchestrator's workers count toward the same per-message cap: the 9th agent is refused.
+    const children = Array.from({ length: MAX_SWARM_AGENTS - 4 }, (_, i) => ({ ...task(`task-0/c${i}`), parentTaskId: "task-0" }));
+    await create(t, parent, children);
     await expect(create(t, parent, [task("extra")])).rejects.toMatchObject({ data: { code: "LIMIT_EXCEEDED" } });
-    expect(await get(t, parent.messageId)).toHaveLength(MAX_SWARM_TASKS);
+    const rows = await get(t, parent.messageId);
+    expect(rows).toHaveLength(MAX_SWARM_AGENTS);
+    expect(rows.at(-1)).toMatchObject({ taskId: "task-0/c3", parentTaskId: "task-0" });
   });
 
   test("only a swarm-mode assistant reply can have tasks", async () => {
@@ -146,7 +151,7 @@ describe("agentTasks", () => {
     const args = { internalKey: INTERNAL_KEY, agentTaskId };
     const startArgs = { ...args, parentMessageId: parent.messageId, projectId: parent.projectId };
     expect(await t.mutation(api.agentTasks.startTask, startArgs)).toEqual({
-      ...task(), role: undefined, ...parent, status: "running",
+      ...task(), ...parent, status: "running",
     });
     vi.setSystemTime(2000);
     expect(await t.mutation(api.agentTasks.startTask, startArgs)).toMatchObject({ status: "running", ownedPaths: ["src/page.tsx"] });
