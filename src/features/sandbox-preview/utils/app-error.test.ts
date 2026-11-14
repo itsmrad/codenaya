@@ -482,6 +482,22 @@ describe("createAutoFixer (#491)", () => {
       expect(fixing).toBe(false);
     });
 
+    it("spends nothing on errors that come and go while the run writes", () => {
+      update({ runActive: true });
+      for (const errorId of ["half-written a", null, "half-written b", null]) {
+        update({ errorId, files: [errorId] });
+        vi.advanceTimersByTime(10_000);
+      }
+      expect(fixing).toBe(false);
+      expect(fix).not.toHaveBeenCalled();
+
+      // The finished build is clean: nothing to fix, nothing covered.
+      update({ runActive: false, errorId: null });
+      vi.advanceTimersByTime(10_000);
+      expect(fixing).toBe(false);
+      expect(fix).not.toHaveBeenCalled();
+    });
+
     it("is never on for a page load with an error already shown", () => {
       update({ errorId: "a" });
       expect(fixing).toBe(false);

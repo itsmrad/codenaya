@@ -365,18 +365,25 @@ export const PreviewView = ({
 
   const isLoading = status === "booting" || status === "installing";
   // The build card covers the preview until the pre-warmed sandbox is running;
-  // then the app shows and fills in through HMR under a slim bar (#337). A
-  // failed boot shows its error under the bar instead of hiding behind the card.
+  // then the app shows and fills in through HMR under a slim bar (#337). Once
+  // the half-written app breaks, the card covers it again until the run ends,
+  // so its errors neither show nor flicker as files land (#486). A failed boot
+  // shows its error under the bar instead of hiding behind the card.
   const firstBuildRun = firstBuild && activeRun ? activeRun : null;
+  const [brokenDuringBuild, setBrokenDuringBuild] = useState(false);
+  if (brokenDuringBuild && !firstBuildRun) setBrokenDuringBuild(false);
+  if (!brokenDuringBuild && firstBuildRun && appError) setBrokenDuringBuild(true);
   const building =
-    firstBuildRun && status !== "error" && (status !== "running" || !previewUrl) ? (
+    firstBuildRun &&
+    status !== "error" &&
+    (status !== "running" || !previewUrl || brokenDuringBuild) ? (
       <PreviewBuilding steps={firstBuildRun.steps} />
     ) : null;
   const stillBuilding =
-    firstBuildRun && !building ? liveStepLabel(firstBuildRun.steps) : null;
+    firstBuildRun && !building && !autoFixing ? liveStepLabel(firstBuildRun.steps) : null;
+  // Over the build card too: a fix run on a first build still pending (#501).
   // The app stays mounted underneath, so its bridge still reports errors.
-  const fixing =
-    autoFixing && !building ? <PreviewBuilding steps={activeRun?.steps ?? []} fixing /> : null;
+  const cover = autoFixing ? <PreviewBuilding steps={activeRun?.steps ?? []} fixing /> : building;
   const content = (
     <PreviewContent
       onPreviewLoad={handlePreviewLoad}
@@ -395,8 +402,8 @@ export const PreviewView = ({
       errorKind={errorKind}
       onUseWebContainer={() => switchEngine("webcontainer")}
       agentWorking={Boolean(activeRun)}
-      building={building ?? fixing}
-      stillBuilding={fixing ? null : stillBuilding}
+      building={cover}
+      stillBuilding={stillBuilding}
     />
   );
 

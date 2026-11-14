@@ -3,7 +3,7 @@ import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
-import { hasClerkCredentials, signIn } from "./clerk-auth";
+import { ensureTestUser, hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
 import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
@@ -169,9 +169,9 @@ test.describe("first build auto-opens the preview", () => {
     }
   });
 
-  test("covers a first build's error with Fixing until its fix run ends (#305)", async ({ page }) => {
-    test.setTimeout(150_000);
-    // The app the run left doesn't compile.
+  test("covers a broken first build until its run ends, then shows Fixing (#486, #305)", async ({ page }) => {
+    test.setTimeout(180_000);
+    // The app the run leaves doesn't compile.
     await stubSandbox(page, [
       '[vite] Pre-transform error: Failed to resolve import "./Missing" from "src/App.jsx". Does the file exist?\n',
     ]);
@@ -183,41 +183,76 @@ test.describe("first build auto-opens the preview", () => {
     });
     await page.setViewportSize({ width: 1440, height: 900 });
     await signIn(page);
-    const build = await startFirstBuild(page, "e2e-preview-auto-open-fixing");
+
+    // A prompt-created project whose first build stays pending: no run here
+    // verifies a build, like an unverified one (#501), so every run reads as
+    // the first build.
+    const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY!;
+    const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+    const { projectId, conversationId } = await system.mutation(api.system.createProjectWithConversation, {
+      internalKey,
+      projectName: `e2e-preview-auto-open-fixing-${Date.now()}`,
+      conversationTitle: "Fixing",
+      ownerId: (await ensureTestUser()).id,
+      source: "dashboard",
+      firstBuildPending: true,
+    });
+    const startRun = async () => {
+      const messageId = await system.mutation(api.system.createMessage, {
+        internalKey,
+        conversationId,
+        projectId,
+        role: "assistant",
+        content: "",
+        status: "processing",
+      });
+      return () =>
+        system.mutation(api.system.updateMessageStatus, { internalKey, messageId, status: "completed" });
+    };
 
     try {
-      await page.goto(`/projects/${build.projectId}`);
+      const completeBuild = await startRun();
+      await page.goto(`/projects/${projectId}`);
+      const buildCard = page.getByRole("status", { name: "Building your app" });
       const fixing = page.getByRole("status", { name: "Fixing an error" });
       const banner = page.getByRole("alert").filter({ hasText: "Build error" });
-      await expect(page.getByRole("status", { name: "Building your app" })).toBeVisible({ timeout: 60_000 });
-      await build.writePackageJson();
-      await expect(page.getByRole("status", { name: "Still building" })).toBeVisible({ timeout: 30_000 });
-      // Mid-build errors are the build's business: no banner, no fix.
-      await page.waitForTimeout(2_000);
-      await expect(banner).toHaveCount(0);
+      await expect(buildCard).toBeVisible({ timeout: 60_000 });
+      await system.mutation(api.system.createFile, { internalKey, projectId, name: "package.json", content: "{}\n" });
 
-      await build.run.complete();
+      // The sandbox boots mid-run and reports the half-written app's error:
+      // the card stays over it, with no banner and no fix.
+      await expect(page.getByRole("button", { name: "Refresh page" })).toBeEnabled({ timeout: 30_000 });
+      await page.waitForTimeout(5_000);
+      await expect(buildCard).toBeVisible();
+      await expect(page.getByRole("status", { name: "Still building" })).toBeHidden();
+      await expect(banner).toHaveCount(0);
+      expect(sent).toHaveLength(0);
+
+      // The run ends with the error still there: Fixing, and one fix sent.
+      await completeBuild();
       await expect(fixing).toBeVisible({ timeout: 30_000 });
+      await expect(buildCard).toBeHidden();
       await expect(banner).toHaveCount(0);
       await expect.poll(() => sent.length, { timeout: 30_000 }).toBe(1);
       expect(sent[0]).toContain("Failed to resolve import");
 
-      // The fix run: still covered, with no second fix.
-      const fixRun = await build.startRun();
+      // The fix run, a first build too: still Fixing, with no second fix.
+      const completeFix = await startRun();
       await page.waitForTimeout(5_000);
       await expect(fixing).toBeVisible();
       await expect(banner).toHaveCount(0);
-      await fixRun.complete();
+      await completeFix();
 
-      // It left the error: the banner comes back with its actions, not another automatic fix.
+      // It left the error: the cover lifts and the banner offers the next step.
       await expect(banner).toBeVisible({ timeout: 30_000 });
       await expect(fixing).toBeHidden();
+      await expect(buildCard).toBeHidden();
       await expect(banner).toContainText("Codenaya sent a fix to the agent automatically.");
       await expect(banner.getByRole("button", { name: "Fix with AI" })).toBeEnabled();
       await page.waitForTimeout(5_000);
       expect(sent).toHaveLength(1);
     } finally {
-      await build.cleanup();
+      await (await userConvexClient(page)).mutation(api.projects.remove, { id: projectId }).catch(() => {});
     }
   });
 
