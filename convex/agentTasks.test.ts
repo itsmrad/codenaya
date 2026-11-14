@@ -26,7 +26,7 @@ const seedMessage = (t: TestConvex, ownerId = ALICE) => t.run(async (ctx) => {
 });
 
 const task = (taskId = "build-ui") => ({
-  taskId, role: "worker" as const, title: "Build UI", brief: "Build the page",
+  taskId, role: "worker" as "worker" | "sub-orchestrator", title: "Build UI", brief: "Build the page",
   ownedPaths: ["src/page.tsx"], modelId: "haiku-test", model: "Haiku test",
 });
 const create = (t: TestConvex, parent: Awaited<ReturnType<typeof seedMessage>>, tasks = [task()]) =>
