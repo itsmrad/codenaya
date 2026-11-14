@@ -51,7 +51,8 @@ export const ShowcaseFeed = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/50" />
             <input
               type="text"
-              placeholder="Search showcase..."
+              placeholder="Search"
+              aria-label="Search showcase"
               value={showcaseSearch}
               onChange={(e) => setShowcaseSearch(e.target.value)}
               className="w-full h-8 pl-8 pr-3 rounded-lg bg-muted/30 border border-border/40 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand/40 transition-all"
@@ -96,13 +97,13 @@ export const ShowcaseFeed = () => {
           <div className="mb-4 p-3 rounded-xl border border-border/40 bg-card/50 space-y-3">
             {/* Category */}
             <div className="space-y-1.5">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Category</p>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Category</p>
               <div className="flex flex-wrap gap-1">
                 {CATEGORY_OPTIONS.map((cat) => (
                   <Badge
                     key={cat.value}
                     variant={selectedCategory === cat.value ? "default" : "outline"}
-                    className="cursor-pointer text-[10px] px-2 py-0"
+                    className="cursor-pointer text-[11px] px-2 py-0"
                     onClick={() => setSelectedCategory(selectedCategory === cat.value ? undefined : cat.value)}
                   >
                     {cat.label}
@@ -112,13 +113,13 @@ export const ShowcaseFeed = () => {
             </div>
             {/* Tech */}
             <div className="space-y-1.5">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tech Stack</p>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Tech Stack</p>
               <div className="flex flex-wrap gap-1">
                 {TECH_STACK_OPTIONS.map((tag) => (
                   <Badge
                     key={tag}
                     variant={selectedTech.includes(tag) ? "default" : "outline"}
-                    className="cursor-pointer text-[10px] px-2 py-0"
+                    className="cursor-pointer text-[11px] px-2 py-0"
                     onClick={() => setSelectedTech((prev) => prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag])}
                   >
                     {tag}
@@ -128,13 +129,13 @@ export const ShowcaseFeed = () => {
             </div>
             {/* Design */}
             <div className="space-y-1.5">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Design Style</p>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Design Style</p>
               <div className="flex flex-wrap gap-1">
                 {DESIGN_STYLE_OPTIONS.map((tag) => (
                   <Badge
                     key={tag}
                     variant={selectedDesign.includes(tag) ? "default" : "outline"}
-                    className="cursor-pointer text-[10px] px-2 py-0"
+                    className="cursor-pointer text-[11px] px-2 py-0"
                     onClick={() => setSelectedDesign((prev) => prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag])}
                   >
                     {tag}
@@ -161,7 +162,7 @@ export const ShowcaseFeed = () => {
                 ? "Loading..."
                 : searching || hasActiveFilters
                   ? "No projects match your filters"
-                  : "No showcase projects yet. Be the first to publish!"}
+                  : "No showcase projects yet"}
             </p>
           </div>
         ) : (

@@ -104,7 +104,7 @@ describe.each(routes)("POST /api/$name", ({ call, result }) => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(result);
     const { model } = mocks.generateObject.mock.calls[0][0];
-    expect(model.modelId).toBe("openai/gpt-5.4-mini");
+    expect(model.modelId).toBe("anthropic/claude-haiku-5.5");
     expect(model.provider).toBe("openai.chat");
   });
 
@@ -116,7 +116,7 @@ describe.each(routes)("POST /api/$name", ({ call, result }) => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(result);
     const { model } = mocks.generateObject.mock.calls[0][0];
-    expect(model.modelId).toBe("gpt-5.4-mini");
+    expect(model.modelId).toBe("gpt-6-luna");
     expect(model.provider).toBe("openai.responses");
   });
 

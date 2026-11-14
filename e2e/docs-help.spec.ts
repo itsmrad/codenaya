@@ -95,17 +95,13 @@ test.describe("help menu (signed in)", () => {
     await page.goto("/");
   });
 
-  test("links to the docs, shortcuts and bug reports", async ({ page }) => {
+  test("links to the shortcuts and bug reports", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await openHelpMenu(page);
 
     await expect(helpMenu(page).getByRole("menuitem", { name: "Report a bug" })).toHaveAttribute(
       "href",
       /github\.com\/itsmrad\/codenaya\/issues\/new$/,
-    );
-    await expect(helpMenu(page).getByRole("menuitem", { name: "Docs" })).toHaveAttribute(
-      "href",
-      "/docs",
     );
 
     await helpMenu(page).getByRole("menuitem", { name: "Keyboard shortcuts" }).click();
@@ -125,8 +121,7 @@ test.describe("help menu (signed in)", () => {
     await expect(page.getByRole("tab", { name: "Code" })).toBeVisible({ timeout: 60_000 });
 
     await openHelpMenu(page);
-    await helpMenu(page).getByRole("menuitem", { name: "Docs" }).click();
-    await expect(page).toHaveURL(/\/docs$/, { timeout: 30_000 });
-    await expect(page.getByRole("heading", { name: "Getting started" })).toBeVisible();
+    await expect(helpMenu(page).getByRole("menuitem", { name: "Keyboard shortcuts" })).toBeVisible();
+    await expect(helpMenu(page).getByRole("menuitem", { name: "Report a bug" })).toBeVisible();
   });
 });

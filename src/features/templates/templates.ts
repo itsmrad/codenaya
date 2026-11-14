@@ -9,6 +9,7 @@
 export const STARTER_TEMPLATES = [
   {
     id: "landing-page",
+    cover: "landing",
     title: "Landing page",
     description: "Hero, feature highlights, pricing table, FAQ and a sign-up call to action.",
     techStack: ["React", "Vite", "Tailwind"],
@@ -17,6 +18,7 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "saas-dashboard",
+    cover: "dashboard",
     title: "SaaS dashboard",
     description: "Sidebar layout with KPI cards, a revenue chart and a recent orders table.",
     techStack: ["React", "Vite", "Tailwind", "Recharts"],
@@ -25,6 +27,7 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "portfolio",
+    cover: "landing",
     title: "Portfolio",
     description: "Personal site with an about section, project grid and contact form.",
     techStack: ["React", "Vite", "Tailwind"],
@@ -33,6 +36,7 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "blog",
+    cover: "list",
     title: "Blog",
     description: "Post list with tags and search, plus readable article pages.",
     techStack: ["React", "Vite", "Tailwind", "React Router"],
@@ -41,6 +45,7 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "ecommerce-storefront",
+    cover: "landing",
     title: "E-commerce storefront",
     description: "Product catalog with filters, product pages and a working cart.",
     techStack: ["React", "Vite", "Tailwind", "React Router"],
@@ -49,6 +54,7 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "admin-crud",
+    cover: "dashboard",
     title: "Admin CRUD",
     description: "Manage records in a searchable table with create, edit and delete dialogs.",
     techStack: ["React", "Vite", "Tailwind"],

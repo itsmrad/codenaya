@@ -148,7 +148,7 @@ describe("validateModelChoice (API route)", () => {
     });
     expect(await validate(undefined)).toMatchObject({ modelId: DEFAULT_AGENT_MODEL_ID });
     // Users can't pick the env catalog's hidden utility model.
-    expect(await validate("openai/gpt-5.4-mini")).toMatchObject({ modelId: DEFAULT_AGENT_MODEL_ID });
+    expect(await validate("anthropic/claude-haiku-5.5")).toMatchObject({ modelId: DEFAULT_AGENT_MODEL_ID });
     expect(mocks.query).not.toHaveBeenCalled();
   });
 
@@ -861,7 +861,7 @@ describe("resolveRunModel (agent run)", () => {
       authKey: SECRET,
     });
     expect(target(run.coding()).url).toContain("api.openai.com");
-    expect(target(run.title(0)).id).toBe("gpt-5.4-mini");
+    expect(target(run.title(0)).id).toBe("gpt-6-luna");
   });
 
   it("uses a custom endpoint's base URL and first model for titles", async () => {

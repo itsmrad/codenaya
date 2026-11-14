@@ -2,7 +2,7 @@ import {
   KeyRoundIcon,
   PaletteIcon,
   PlugIcon,
-  SparklesIcon,
+  ScrollTextIcon,
   UserIcon,
 } from "lucide-react";
 
@@ -22,7 +22,7 @@ export const SKILLS_SETTINGS_URL = "/settings/skills";
 export const SETTINGS_NAV: SectionNavItem[] = [
   { href: ACCOUNT_SETTINGS_URL, label: "Account", icon: UserIcon },
   { href: AI_PROVIDERS_SETTINGS_URL, label: "AI providers", icon: KeyRoundIcon },
-  { href: SKILLS_SETTINGS_URL, label: "Skills", icon: SparklesIcon },
+  { href: SKILLS_SETTINGS_URL, label: "Skills", icon: ScrollTextIcon },
   { href: "/settings/integrations", label: "Integrations", icon: PlugIcon },
   { href: "/settings/appearance", label: "Appearance", icon: PaletteIcon },
 ];

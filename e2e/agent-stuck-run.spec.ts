@@ -122,16 +122,16 @@ test.describe.serial("stuck agent run", () => {
     const openFiles = page.getByRole("navigation", { name: "Open files" });
     await first.getByRole("button", { name: /Open main\.ts/ }).click();
     await expect(openFiles).toContainText("main.ts");
-    await page.getByRole("button", { name: "Close main.ts" }).click();
-    await expect(openFiles).not.toContainText("main.ts");
 
-    // Restore last, with main.ts closed: restoring away a file open in the editor
-    // currently breaks the project view (separate editor bug).
+    // Restore with main.ts still open: its tab closes and the project view stays.
     await first.getByRole("button", { name: /Restore to before this run/ }).click();
     const confirm = page.getByRole("alertdialog");
     await expect(confirm).toContainText("Restore to before this run?");
     await confirm.getByRole("button", { name: "Restore" }).click();
     await expect(page.getByText("Files restored")).toBeVisible();
     await expect.poll(fileNames).toEqual(filesBefore);
+    await expect(openFiles).not.toContainText("main.ts");
+    await expect(input).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Project not found" })).toHaveCount(0);
   });
 });

@@ -2,7 +2,6 @@ import { expect, test } from "@playwright/test";
 
 import { api } from "../convex/_generated/api";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
-import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
 
 const SMOKE_PROMPT = "e2e dashboard smoke: reply OK and change nothing.";
@@ -17,20 +16,6 @@ test.describe("dashboard prompt composer", () => {
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
   });
 
-  test("a starter chip fills the composer without sending", async ({ page }) => {
-    const errors = collectConsoleErrors(page);
-    const composer = page.getByRole("main").getByRole("textbox", {
-      name: "Describe what you want to build",
-    });
-    await expect(composer).toBeVisible();
-
-    await page.getByRole("button", { name: "Portfolio", exact: true }).click();
-
-    await expect(composer).toHaveValue(/Portfolio/);
-    await expect(composer).toBeFocused();
-    await expect(page).toHaveURL("/");
-    expect(errors).toEqual([]);
-  });
 
   test("a prompt creates a project and opens it with the agent running", async ({ page }) => {
     test.setTimeout(120_000);
@@ -71,7 +56,7 @@ test.describe("dashboard prompt composer", () => {
     test.skip(projects.length > 0, "the e2e user already has projects");
 
     await expect(page.getByRole("button", { name: "Import from GitHub" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Portfolio", exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Start from a template" })).toBeVisible();
     await expect(page.getByText("No projects yet")).toHaveCount(0);
   });
 });

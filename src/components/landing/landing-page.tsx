@@ -1,30 +1,28 @@
 "use client";
 
-import { SmoothScrollProvider } from "@/components/smooth-scroll-provider";
-import { MarketingNavbar } from "@/components/marketing-navbar";
 import { LandingHero } from "./hero";
-import { LandingDemo } from "./demo-video";
-import { LandingCommunityStrip } from "./community-strip";
-import { LandingFeatures } from "./features";
+import { LandingModelMarquee } from "./model-marquee";
 import { LandingHowItWorks } from "./how-it-works";
+import { LandingFeatures } from "./features";
+import { LandingProviders } from "./providers";
+import { LandingCommunityStrip } from "./community-strip";
+import { LandingTrust } from "./trust";
+import { LandingFaq } from "./faq";
 import { LandingCTA } from "./cta-section";
-import { LandingFooter } from "./footer";
+import { PublicShell } from "./public-shell";
 
 export const LandingPage = () => {
   return (
-    <SmoothScrollProvider>
-      <div className="relative min-h-screen bg-background overflow-x-hidden">
-        <MarketingNavbar overlay />
-        <main>
-          <LandingHero />
-          <LandingDemo />
-          <LandingCommunityStrip />
-          <LandingFeatures />
-          <LandingHowItWorks />
-          <LandingCTA />
-        </main>
-        <LandingFooter />
-      </div>
-    </SmoothScrollProvider>
+    <PublicShell>
+      <LandingHero />
+      <LandingModelMarquee />
+      <LandingHowItWorks />
+      <LandingFeatures />
+      <LandingProviders />
+      <LandingCommunityStrip />
+      <LandingTrust />
+      <LandingFaq />
+      <LandingCTA />
+    </PublicShell>
   );
 };

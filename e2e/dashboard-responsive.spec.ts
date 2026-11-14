@@ -118,7 +118,7 @@ test.describe("signed-in dashboard layout", () => {
     await page.goto("/showcase");
 
     await expect(page.getByRole("heading", { name: "Community showcase" })).toBeVisible();
-    await expect(page.getByPlaceholder("Search showcase...")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Search showcase" })).toBeVisible();
     expect(errors).toEqual([]);
   });
 });

@@ -1,15 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useReducedMotion } from "motion/react";
 import {
   ArrowUpIcon,
-  ChartColumnIcon,
-  KanbanSquareIcon,
-  ListTodoIcon,
   Loader2Icon,
-  RocketIcon,
-  UserRoundIcon,
+  XIcon,
 } from "lucide-react";
 
 import {
@@ -21,41 +17,13 @@ import {
   PromptInputTools,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
-import { Suggestion } from "@/components/ai-elements/suggestion";
 import { AgentModelSelect } from "@/features/conversations/components/agent-model-select";
 import { EnhancePromptButton } from "@/features/conversations/components/enhance-prompt-button";
 import { useAgentModel } from "@/features/conversations/hooks/use-agent-model";
 import { useEnhancePrompt } from "@/features/conversations/hooks/use-enhance-prompt";
+import { GridCross } from "@/components/landing/section-header";
+import { MENU_CONTENT, MenuHeader } from "@/components/menu-chrome";
 import { cn } from "@/lib/utils";
-
-/** Starter ideas: a chip fills the composer with the prompt, it never sends. */
-export const STARTER_PROMPTS = [
-  {
-    label: "SaaS landing page",
-    icon: RocketIcon,
-    prompt: "SaaS landing page with a hero, feature highlights, a pricing table and an FAQ",
-  },
-  {
-    label: "Todo app with auth",
-    icon: ListTodoIcon,
-    prompt: "Todo app with auth: sign up and log in, and each user sees only their own tasks",
-  },
-  {
-    label: "Portfolio",
-    icon: UserRoundIcon,
-    prompt: "Portfolio site with an about section, a projects grid and a contact form",
-  },
-  {
-    label: "Dashboard with charts",
-    icon: ChartColumnIcon,
-    prompt: "Dashboard with charts: KPI cards, a revenue line chart and a sortable orders table",
-  },
-  {
-    label: "Kanban board",
-    icon: KanbanSquareIcon,
-    prompt: "Kanban board with drag-and-drop cards across To do, In progress and Done columns",
-  },
-] as const;
 
 const PLACEHOLDER_PREFIX = "Ask Codenaya to build ";
 const PLACEHOLDER_IDEAS = [
@@ -101,39 +69,68 @@ const useTypedPlaceholder = (enabled: boolean) => {
 const ComposerModelSelect = ({ disabled }: { disabled: boolean }) => {
   const [agentModel, setAgentModel] = useAgentModel();
   return (
-    <AgentModelSelect
-      value={agentModel}
-      onValueChange={setAgentModel}
-      disabled={disabled}
-    />
+    // Shrinks before Clear and Build do; the name truncates, the tooltip keeps it readable.
+    <div className={cn(CELL, "min-w-0 shrink border-r")}>
+      <AgentModelSelect
+        value={agentModel}
+        onValueChange={setAgentModel}
+        disabled={disabled}
+        contentClassName={MODEL_MENU}
+        withIcons
+        // Pinned to the list's top and bottom while the models scroll between them.
+        header={<MenuHeader className="sticky top-0 z-10 bg-muted">Agent model</MenuHeader>}
+        footer={
+          <p className="sticky bottom-0 z-10 border-t border-border bg-popover px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Shared with the chat · switch any time
+          </p>
+        }
+        // Fill the cell, so the whole cell hovers and clicks like Templates.
+        triggerClassName="h-full data-[size=sm]:h-full max-w-96 rounded-none px-3 font-mono text-[10px] uppercase tracking-[0.12em] hover:bg-muted/50 dark:hover:bg-muted/50 aria-expanded:bg-muted/50"
+      />
+    </div>
   );
 };
+
+/** The model list in the menu look (menu-chrome): mono group labels, brand highlight. */
+const MODEL_MENU = cn(
+  MENU_CONTENT,
+  "model-menu",
+  "[&_[data-slot=select-label]]:font-mono [&_[data-slot=select-label]]:text-[10px] [&_[data-slot=select-label]]:uppercase [&_[data-slot=select-label]]:tracking-[0.14em] [&_[data-slot=select-item]]:py-2 [&_[data-slot=select-item]]:text-[13px] [&_[data-slot=select-item]:focus]:bg-brand/[0.07]",
+);
+
+/** A toolbar cell: full height, divided by lines, like the navbar's cells. */
+const CELL = "flex h-full shrink-0 items-center border-border";
+const TOOL = cn(
+  CELL,
+  "gap-1.5 border-r px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:bg-muted/50 disabled:pointer-events-none disabled:opacity-50 data-[state=open]:bg-muted/50 data-[state=open]:text-foreground",
+);
 
 interface PromptComposerProps {
   /** Resolves to true when the prompt was accepted; the box is then cleared. */
   onSubmit: (prompt: string) => Promise<boolean>;
   isSubmitting?: boolean;
-  /** Show the starter chips under the box. */
-  showStarters?: boolean;
   /** Show the agent model chip (shares the chat's saved choice). */
   showModelSelect?: boolean;
   /** Show the Enhance prompt button (needs a signed-in user). */
   showEnhance?: boolean;
+  /** Extra toolbar items, e.g. the landing page's signed-out model picker. */
+  tools?: ReactNode;
   autoFocus?: boolean;
   className?: string;
 }
 
 /**
- * The "describe what to build" box: a large prompt input with the chat
- * composer's look, an optional model chip and starter chips. Used by the
- * dashboard hero, the new-project dialog and the landing page.
+ * The "describe what to build" box, as a window on the page grid: a mono label
+ * strip, the prompt, and a toolbar of cells (Enhance, the model; then a
+ * character count, Clear and Build). Used by the dashboard hero, the new-project dialog and the
+ * landing page.
  */
 export const PromptComposer = ({
   onSubmit,
   isSubmitting = false,
-  showStarters = false,
   showModelSelect = true,
   showEnhance = true,
+  tools,
   autoFocus,
   className,
 }: PromptComposerProps) => {
@@ -150,21 +147,41 @@ export const PromptComposer = ({
     if (await onSubmit(message.text)) setInput("");
   };
 
-  const handleStarter = (prompt: string) => {
+  const fill = (prompt: string) => {
     setInput(prompt);
     textareaRef.current?.focus();
   };
 
   return (
-    <div className={cn("w-full", className)}>
-      <div className="prompt-composer chat-composer">
+    // A window on the page grid: `+` marks on its corners, a mono label strip,
+    // the prompt, and a toolbar of cells ending in the Build cell.
+    <div className={cn("group/composer relative isolate w-full text-left", className)}>
+      <GridCross className="-top-[5px] -left-[5px]" />
+      <GridCross className="-top-[5px] -right-[5px]" />
+      <GridCross className="-bottom-[5px] -left-[5px]" />
+      <GridCross className="-right-[5px] -bottom-[5px]" />
+
+      {/* `composer-orbit` (globals.css): an orange light circles the box while it has focus. */}
+      <div className="composer-window composer-orbit rounded-md border border-border bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04),0_16px_48px_-28px_rgb(0_0_0/0.3)] transition-[border-color] duration-300 focus-within:border-brand/30">
+        {/* Label strip */}
+        <div className="flex h-9 items-center justify-between gap-3 border-b border-border px-4 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          <span className="flex items-center gap-2.5">
+            <span aria-hidden className="h-3 w-0.5 bg-brand" />
+            <span>[ {isSubmitting ? "Creating project…" : "New project"} ]</span>
+          </span>
+          <span className="flex items-center gap-2 max-sm:hidden">
+            <span className={cn("size-1.5 rounded-full bg-brand", isBusy ? "animate-ping" : "animate-pulse")} />
+            ↵ Build · ⇧↵ New line
+          </span>
+        </div>
+
         <PromptInput onSubmit={handleSubmit}>
           <PromptInputBody>
             <PromptInputTextarea
               ref={textareaRef}
               aria-label="Describe what you want to build"
               placeholder={placeholder}
-              className="min-h-20 px-4 pt-4 pb-1 text-[15px]/6 placeholder:text-muted-foreground/60"
+              className="min-h-24 px-5 pt-4 pb-3 text-[15px]/7 placeholder:text-muted-foreground/55"
               onChange={(e) => setInput(e.target.value)}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
@@ -173,48 +190,61 @@ export const PromptComposer = ({
               autoFocus={autoFocus}
             />
           </PromptInputBody>
-          <PromptInputFooter className="h-12 px-2.5 py-0">
-            <PromptInputTools>
+
+          {/* Toolbar of cells; p-0! beats the addon's own padding so every cell centres. */}
+          <PromptInputFooter className="h-11 items-stretch gap-0 border-t border-border p-0!">
+            <PromptInputTools className="min-w-0 items-stretch gap-0">
               {showEnhance && (
                 <EnhancePromptButton
                   enhancer={enhancer}
                   value={input}
                   disabled={isSubmitting}
+                  showLabel
+                  className={cn(TOOL, "h-full rounded-none [&_svg]:size-3.5")}
                 />
               )}
+              {tools}
               {showModelSelect && <ComposerModelSelect disabled={isSubmitting} />}
             </PromptInputTools>
-            <PromptInputSubmit
-              disabled={!input.trim() || isBusy}
-              aria-label="Create project"
-              className="size-8 rounded-lg disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
-            >
-              {isSubmitting ? (
-                <Loader2Icon className="size-4 animate-spin" />
-              ) : (
-                <ArrowUpIcon className="size-4" />
+
+            <div className="flex items-stretch">
+              {input && (
+                <span
+                  className={cn(
+                    CELL,
+                    "border-l px-3 font-mono text-[10px] tabular-nums tracking-[0.12em] text-muted-foreground max-md:hidden",
+                  )}
+                >
+                  {input.length.toLocaleString("en-US")} CHARS
+                </span>
               )}
-            </PromptInputSubmit>
+              {/* Always in the bar, like Enhance; disabled while there's nothing to clear. */}
+              <button
+                type="button"
+                aria-label="Clear prompt"
+                onClick={() => fill("")}
+                disabled={isBusy || !input}
+                className={cn(TOOL, "border-r-0 border-l")}
+              >
+                <XIcon className="size-3.5" />
+                <span className="max-sm:sr-only">Clear</span>
+              </button>
+              <PromptInputSubmit
+                disabled={!input.trim() || isBusy}
+                aria-label="Create project"
+                className="sheen h-full w-auto gap-2 rounded-none rounded-br-[5px] border-l border-border bg-brand px-4 font-mono text-[10px] uppercase tracking-[0.14em] text-brand-foreground hover:bg-brand/90 disabled:bg-muted/60 disabled:text-muted-foreground disabled:opacity-100 has-[>svg]:px-4"
+              >
+                <span className="max-sm:hidden">{isSubmitting ? "Building" : "Build"}</span>
+                {isSubmitting ? (
+                  <Loader2Icon className="size-3.5 animate-spin" />
+                ) : (
+                  <ArrowUpIcon className="size-3.5" />
+                )}
+              </PromptInputSubmit>
+            </div>
           </PromptInputFooter>
         </PromptInput>
       </div>
-
-      {showStarters && (
-        <div className="mt-4 flex flex-wrap justify-center gap-2">
-          {STARTER_PROMPTS.map(({ label, icon: Icon, prompt }) => (
-            <Suggestion
-              key={label}
-              suggestion={prompt}
-              onClick={handleStarter}
-              disabled={isSubmitting}
-              className="h-8 gap-1.5 rounded-full border-border/60 bg-card/60 px-3 text-xs font-normal text-muted-foreground backdrop-blur-sm transition-colors hover:border-brand/40 hover:text-foreground"
-            >
-              <Icon className="size-3.5" />
-              {label}
-            </Suggestion>
-          ))}
-        </div>
-      )}
     </div>
   );
 };

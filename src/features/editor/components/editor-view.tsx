@@ -1,10 +1,9 @@
 import { useEffect, useRef } from "react";
 
-import { CodenayaLogo } from "@/components/codenaya-logo";
-
 import { useFile, useUpdateFile } from "@/features/projects/hooks/use-files";
 
 import { CodeEditor } from "./code-editor";
+import { EditorEmptyState } from "./editor-empty-state";
 import { useEditor } from "../hooks/use-editor";
 import { TopNavigation } from "./top-navigation";
 import { FileBreadcrumbs } from "./file-breadcrumbs";
@@ -54,18 +53,7 @@ export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
       </div>
       {activeTabId && <FileBreadcrumbs projectId={projectId} />}
       <div className="flex-1 min-h-0 bg-background">
-        {!activeFile && (
-          <div className="size-full flex flex-col items-center justify-center gap-3">
-            <CodenayaLogo
-              size={48}
-              blinking={true}
-              className="opacity-30 transition-opacity hover:opacity-70"
-            />
-            <p className="text-xs text-muted-foreground">
-              Select a file from the explorer to start editing
-            </p>
-          </div>
-        )}
+        {!activeFile && <EditorEmptyState projectId={projectId} />}
         {isActiveFileText && (
           <CodeEditor
             key={activeFile._id}
