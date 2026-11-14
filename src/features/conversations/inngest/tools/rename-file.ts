@@ -5,7 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
-import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
+import { findProjectFile, getProjectFiles, indexProjectFiles, lockedPathError } from "./paths";
 
 interface RenameFileToolOptions {
   projectId: Id<"projects">;
@@ -43,6 +43,8 @@ export const createRenameFileTool = ({
           const index = indexProjectFiles(await getProjectFiles(internalKey, projectId));
           const found = await findProjectFile(internalKey, projectId, index, parsed.data);
           if ("error" in found) return found.error;
+          const locked = lockedPathError(index, found.path, true);
+          if (locked) return `Error: ${locked}`;
 
           await convex.mutation(api.system.renameFile, {
             internalKey,

@@ -317,7 +317,7 @@ export const MessageResponse = memo(
     <Streamdown
       shikiTheme={["one-dark-pro", "one-light"]}
       className={cn(
-        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>div]:bg-accent [&>div]:rounded-md",
+        "w-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&>div]:bg-accent [&>div]:rounded-md",
         className
       )}
       {...props}

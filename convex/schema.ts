@@ -325,9 +325,12 @@ export default defineSchema({
     // Legacy: text moved to `fileContents` (#412); kept until the backfill has run everywhere.
     content: v.optional(v.string()),
     storageId: v.optional(v.id("_storage")), // Binary files only
+    // Locked by the user from AI edits; covers a folder's descendants (#307).
+    locked: v.optional(v.boolean()),
     updatedAt: v.number(),
   })
     .index("by_project", ["projectId"])
+    .index("by_project_and_locked", ["projectId", "locked"])
     .index("by_parent", ["parentId"])
     .index("by_project_and_parent_and_name", ["projectId", "parentId", "name"])
     .index("by_storageId", ["storageId"]),
@@ -370,6 +373,7 @@ export default defineSchema({
     type: v.union(v.literal("file"), v.literal("folder")),
     content: v.optional(v.string()),
     storageId: v.optional(v.id("_storage")),
+    locked: v.optional(v.boolean()),
   })
     // Path second: a run's diff reads only the paths it wrote (#225).
     .index("by_checkpoint_and_path", ["checkpointId", "path"])
