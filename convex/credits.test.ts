@@ -205,6 +205,7 @@ describe("model spend limits (ADR 0012)", () => {
     const messageId = await seedMessage(t);
     // This existing parent row has no agentTaskId, just like pre-swarm ledger rows.
     await record(t, messageId, { inputTokens: 100, outputTokens: 10, costUsd: 0.04 });
+    await t.run((ctx) => ctx.db.patch("messages", messageId, { mode: "swarm" }));
     const projectId = await t.run(async (ctx) => (await ctx.db.get("messages", messageId))!.projectId);
     const ids = await t.mutation(api.agentTasks.createTasks, {
       internalKey: INTERNAL_KEY, messageId, projectId,

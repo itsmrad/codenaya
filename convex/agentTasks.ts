@@ -26,6 +26,9 @@ export const createTasks = mutation({
     if (!message || message.projectId !== args.projectId || !project || project.deletingAt !== undefined) {
       throw appError("NOT_FOUND", "Message not found");
     }
+    if (message.role !== "assistant" || message.mode !== "swarm") {
+      throw appError("INVALID_ARGUMENT", "Only a swarm reply can have tasks");
+    }
     const existing = await ctx.db.query("agentTasks")
       .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
       .take(MAX_SWARM_TASKS + 1);
@@ -62,7 +65,8 @@ export const upsertTaskSteps = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     const task = await ctx.db.get("agentTasks", args.agentTaskId);
-    if (!task) return null; // The project may have been deleted mid-run.
+    // The project may have been deleted mid-run; a finished task's steps are final.
+    if (!task || task.status === "done" || task.status === "error") return null;
     await ctx.db.patch("agentTasks", task._id, {
       steps: mergeMessageSteps(task.steps, args.steps),
       updatedAt: Date.now(),
@@ -122,6 +126,7 @@ export const finishTask = mutation({
       status: args.status,
       summary: args.summary,
       error: args.error,
+      startedAt: task.startedAt ?? now,
       endedAt: now,
       updatedAt: now,
     });

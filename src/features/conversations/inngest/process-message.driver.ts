@@ -51,6 +51,8 @@ export interface Outcome {
   inferenceResolvedAt: Array<number | undefined>;
   /** What the function returned. */
   data?: unknown;
+  /** The options of each `step.invoke`, in order. */
+  invocations: unknown[];
 }
 
 export async function drive(
@@ -63,6 +65,7 @@ export async function drive(
   { cancelWhen, fn = processMessage, invokeResults = [] }: {
     cancelWhen?: () => boolean;
     fn?: InngestFunction.Any;
+    /** Each `step.invoke`'s result in order; an Error fails that invoke. */
     invokeResults?: unknown[];
   } = {},
 ): Promise<Outcome> {
@@ -84,6 +87,7 @@ export async function drive(
   const inferenceRequests: number[] = [];
   const assigned = new Map<string, number>();
   let invoked = 0;
+  const invocations: unknown[] = [];
   const inferenceResolvedAt: Array<number | undefined> = [];
   const outcome = (finalType: string): Outcome => ({
     finalType,
@@ -92,6 +96,7 @@ export async function drive(
     inferenceBodies,
     inferenceRequests,
     inferenceResolvedAt,
+    invocations,
   });
 
   for (let request = 0, requestedRunStep: string | undefined; request < 300; request += 1) {
@@ -154,7 +159,11 @@ export async function drive(
       const invokes = result.steps.filter((found) => found.op === "InvokeFunction");
       for (const found of invokes) {
         if (invoked >= invokeResults.length) throw new Error("No canned InvokeFunction result");
-        stepState[found.id] = { id: found.id, data: invokeResults[invoked++] };
+        const canned = invokeResults[invoked++];
+        invocations.push(found.opts);
+        stepState[found.id] = canned instanceof Error
+          ? { id: found.id, error: { name: canned.name, message: canned.message } }
+          : { id: found.id, data: canned };
         order.push(found.id);
       }
       if (invokes.length) continue;

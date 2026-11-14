@@ -44,16 +44,16 @@ const post = (body: unknown) =>
 const routes = [
   {
     name: "messages",
-    call: (message = "Build a todo app", model?: string) =>
-      messagesPOST(post({ conversationId: "c1", message, model })),
+    call: (message = "Build a todo app", model?: string, mode?: string) =>
+      messagesPOST(post({ conversationId: "c1", message, model, mode })),
     successBody: { success: true, eventId: "evt_1", messageId: "m_assistant" },
     failureBody: { messageId: "m_assistant" },
     rateLimit: AGENT_MESSAGE_RATE_LIMIT,
   },
   {
     name: "projects/create-with-prompt",
-    call: (prompt = "Build a todo app", model?: string) =>
-      createWithPromptPOST(post({ prompt, model })),
+    call: (prompt = "Build a todo app", model?: string, mode?: string) =>
+      createWithPromptPOST(post({ prompt, model, mode })),
     successBody: { projectId: "p1" },
     failureBody: { projectId: "p1" },
     rateLimit: CREATE_WITH_PROMPT_RATE_LIMIT,
@@ -97,6 +97,15 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody, rate
     );
     // The key of process-message's per-user concurrency (#242).
     expect(mocks.inngestSend.mock.calls[0][0].data).toMatchObject({ ownerId: "user_1" });
+  });
+
+  it("runs a swarm reply in swarm mode, and refuses an unknown mode", async () => {
+    expect((await call(undefined, undefined, "swarm")).status).toBe(200);
+    expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ role: "assistant", mode: "swarm" }));
+    expect(mocks.inngestSend.mock.calls[0][0].data).toMatchObject({ mode: "swarm" });
+
+    expect((await call(undefined, undefined, "hive")).status).toBe(400);
+    expect(mocks.inngestSend).toHaveBeenCalledTimes(1);
   });
 
   it("answers 503 ai_not_configured without the platform key, creating nothing", async () => {

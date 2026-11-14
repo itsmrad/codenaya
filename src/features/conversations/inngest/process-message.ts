@@ -91,6 +91,7 @@ import {
   PLAN_MODE_PROMPT,
   PLAN_MODE_TOOLS,
 } from '../plan-mode';
+import { swarmRun } from './lib/swarm-run';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -547,6 +548,7 @@ export const processMessage = inngest.createFunction(
     // base, project instructions, skill index and integrations, then the project tree, forced
     // skills and plan mode.
     // Conversation goes in messages (see onStart).
+    const swarm = swarmRun({ ...(event.data as MessageEvent), internalKey });
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
       buildProjectInstructionsSection(projectInstructions),
@@ -555,6 +557,7 @@ export const processMessage = inngest.createFunction(
       projectTree,
       buildSkillsPromptSection([], forced, unavailable),
       planMode ? PLAN_MODE_PROMPT : "",
+      swarm.promptNote,
     ].join("");
 
     // A project seeded with the starter says so in the request, not the
@@ -651,6 +654,7 @@ export const processMessage = inngest.createFunction(
         : []),
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
+      ...swarm.tools,
     ].map(refuseCutOffCalls);
 
     // Plan-mode runs write nothing, so the gate never fires for them.

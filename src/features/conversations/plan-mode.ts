@@ -8,7 +8,9 @@ import { STUCK_REASONS, type StuckRun } from "./agent-steps";
 
 /** Sent with a message to run it in plan mode; omitted means build. */
 export const PLAN_MODE = "plan";
-export type MessageMode = typeof PLAN_MODE | "swarm";
+/** Sent with a message to run it as an orchestrator with parallel workers. */
+export const SWARM_MODE = "swarm";
+export type MessageMode = typeof PLAN_MODE | typeof SWARM_MODE;
 
 /**
  * The only tools a plan-mode run gets, by name: reading the project and the

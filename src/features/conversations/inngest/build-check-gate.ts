@@ -14,6 +14,7 @@ const WRITE_TOOLS = new Set([
   "renameFile",
   "deleteFiles",
   "scaffoldViteApp",
+  "delegateTasks",
 ]);
 
 /** Write tools that make at most one (transactional) mutation, so an error result means nothing changed. */

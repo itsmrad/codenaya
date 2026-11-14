@@ -73,6 +73,27 @@ describe("agentTasks", () => {
     expect(await get(t, parent.messageId)).toHaveLength(MAX_SWARM_TASKS);
   });
 
+  test("only a swarm-mode assistant reply can have tasks", async () => {
+    const t = setup();
+    const parent = await seedMessage(t);
+    for (const patch of [{ mode: undefined }, { mode: "plan" as const }, { role: "user" as const }]) {
+      await t.run((ctx) => ctx.db.patch("messages", parent.messageId, { mode: "swarm", role: "assistant", ...patch }));
+      await expect(create(t, parent)).rejects.toMatchObject({ data: { code: "INVALID_ARGUMENT" } });
+    }
+    expect(await get(t, parent.messageId)).toEqual([]);
+  });
+
+  test("a finished task keeps its steps, and finishing an unstarted one sets startedAt", async () => {
+    const t = setup();
+    const parent = await seedMessage(t);
+    const [agentTaskId] = await create(t, parent);
+    const step = { id: "late", kind: "thinking" as const, startedAt: 10, status: "done" as const };
+    vi.setSystemTime(2000);
+    await t.mutation(api.agentTasks.finishTask, { internalKey: INTERNAL_KEY, agentTaskId, status: "error", error: "Failed" });
+    await t.mutation(api.agentTasks.upsertTaskSteps, { internalKey: INTERNAL_KEY, agentTaskId, steps: [step] });
+    expect((await get(t, parent.messageId))[0]).toMatchObject({ status: "error", steps: [], startedAt: 2000, endedAt: 2000 });
+  });
+
   test("only the project owner can list a message's tasks, in creation order", async () => {
     const t = setup();
     const parent = await seedMessage(t);
