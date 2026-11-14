@@ -164,7 +164,7 @@ describe("scaffoldViteApp tool", () => {
       KNOWN_GOOD_VERSIONS["react-router-dom"],
     );
     expect(read("src/main.tsx")).toContain(
-      "<ErrorBoundary>\n      <BrowserRouter>\n        <App />\n      </BrowserRouter>\n    </ErrorBoundary>",
+      "<ErrorBoundary>\n      <BrowserRouter>\n        <App />\n        <Toaster />\n      </BrowserRouter>\n    </ErrorBoundary>",
     );
     expect(read("src/App.tsx")).toContain('<Route path="/" element={<Home />} />');
     const boundary = read("src/components/error-boundary.tsx");

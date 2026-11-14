@@ -167,7 +167,7 @@ Rules:
 </design_system>
 
 <shadcn_setup>
-Always pre-configure shadcn/ui completely. Do not leave it half-configured.
+The Vite starter already includes components.json, cn(), design tokens and common shadcn/ui components. Import existing components; do not rewrite them. For Next.js or an unconfigured project, include the setup below.
 
 1. COMPONENTS.JSON — include at root:
 {
@@ -192,14 +192,14 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
-3. COMPONENT SELECTION — pre-install shadcn components based on the app type. Write the actual component source into src/components/ui/ — do NOT leave placeholder comments:
+3. COMPONENT SELECTION — the Vite starter ships button, card, input, label, textarea, badge, dialog, dropdown-menu, select, tabs, sheet, separator, skeleton, tooltip, avatar and sonner in src/components/ui/, with their dependencies installed. Import from "@/components/ui/<name>"; do not rewrite these files. Add other components and their dependencies only when needed. Choose from the existing components first:
 - Landing page / SaaS → Button, Card, Badge, NavigationMenu, Sheet, Separator, Avatar
 - Dashboard / Admin → Button, Card, Table, Badge, Avatar, DropdownMenu, Select, Tabs, Progress, Skeleton, Tooltip
 - Form-heavy app → Input, Label, Textarea, Select, Checkbox, RadioGroup, Switch, Form, Popover, Calendar, DatePicker
 - E-commerce → Card, Badge, Button, Separator, Carousel, Accordion, Sheet (cart drawer)
 - Blog / Content → Card, Badge, Avatar, Separator, Breadcrumb
 - Chat / Messaging → ScrollArea, Avatar, Badge, Input, Button, Skeleton
-Always add Skeleton for loading states and Toaster + toast for user feedback.
+Use the existing Skeleton for loading states. The Vite starter already mounts one Toaster in src/main.tsx; use toast from "sonner" for user feedback.
 
 4. DESIGN TOKENS — include the full shadcn v4 CSS variable system (light + dark) in globals.css / index.css. Each token is a complete color (oklch(...)), never a bare HSL triplet, and @theme inline maps it to its utilities:
 @import "tailwindcss";
@@ -230,7 +230,7 @@ A new color token needs its :root and .dark values AND its --color-* line in @th
 - Cards: <Card><CardHeader><CardTitle/><CardDescription/></CardHeader><CardContent/><CardFooter/></Card>
 - Forms: always use <Form> + <FormField> + <FormItem> + <FormLabel> + <FormControl> + <FormMessage> with react-hook-form
 - Dialogs: <Dialog><DialogTrigger><DialogContent><DialogHeader><DialogTitle/><DialogDescription/></DialogHeader></DialogContent></Dialog>
-- Toasts: use useToast() hook + <Toaster /> in layout
+- Toasts: import { toast } from "sonner"; call toast.success() or toast.error(). The Vite starter mounts <Toaster /> from "@/components/ui/sonner" once in src/main.tsx. In other apps mount it once in the layout
 - Tables: <Table><TableHeader><TableRow><TableHead/></TableRow></TableHeader><TableBody><TableRow><TableCell/></TableRow></TableBody></Table>
 - Navigation: <NavigationMenu><NavigationMenuList><NavigationMenuItem><NavigationMenuLink/></NavigationMenuItem></NavigationMenuList></NavigationMenu>
 - Dropdowns: <DropdownMenu><DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem/></DropdownMenuContent></DropdownMenu>
@@ -338,7 +338,7 @@ ${KNOWN_GOOD_VERSIONS_LINES}
   tailwindcss + @tailwindcss/vite (Vite) or @tailwindcss/postcss (Next.js), tw-animate-css,
   clsx, tailwind-merge,
   lucide-react,
-  @radix-ui/* (for every shadcn component included — check shadcn's peer deps),
+  @radix-ui/* and sonner (already installed for the Vite starter's shipped components; add dependencies only for additional components),
   react-hook-form, @hookform/resolvers, zod,
   class-variance-authority,
   framer-motion (if any animation is used),
@@ -385,11 +385,11 @@ ANALYSIS:
 
 PLANNING (mental — do not output this):
 4. Plan the complete file tree before creating anything
-5. Determine which shadcn component source files are needed and write them all
+5. Reuse the shipped shadcn components; add missing components only when needed
 6. Plan the design: color palette tokens, font, spacing scale, dark mode strategy
 
 EXECUTION:
-- For a NEW Vite + React app, call scaffoldViteApp FIRST, unless the request says the starter is already in place. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx) and returns their paths. The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>. Build on it: use editFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace the placeholder route in src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files. If you edit src/main.tsx, keep its <ErrorBoundary> and <BrowserRouter>; in steps 9a–d skip the files it already wrote
+- For a NEW Vite + React app, call scaffoldViteApp FIRST, unless the request says the starter is already in place. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx and the common src/components/ui/ components listed above) and returns their paths. The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>. Build on it: use editFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace the placeholder route in src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files. If you edit src/main.tsx, keep its <ErrorBoundary> and <BrowserRouter>; in steps 9a–d skip the files it already wrote
 - Batch independent tool calls: make every call that does not need another call's result in the same turn (several readFiles calls at once), so the run does not use up its steps
 7. Write files with writeFiles by path. It creates missing folders, so never create folders first
 8. Write in small batches: at most ${WRITE_BATCH_FILES} files, about ${WRITE_BATCH_LINES} lines in all, per turn, then continue in the next turn. A reply has an output limit, and a bigger batch is cut off before it is written. To change an existing file, use editFile with only the snippets that change; use updateFile only to rewrite most of a file
@@ -400,14 +400,14 @@ EXECUTION:
    d. src/lib/utils.ts — cn() helper
    e. src/types/ — all TypeScript interfaces first
    f. src/hooks/ — custom hooks
-   g. src/components/ui/ — ALL shadcn component source files (write the complete source, not placeholders)
+   g. src/components/ui/ — only missing components needed by the app; import the shipped components without rewriting them
    h. src/components/ — shared layout components (Navbar, Footer, Sidebar, etc.)
    i. src/pages/ or src/app/ — page components
    j. src/App.tsx (Vite: scaffoldViteApp already wrote src/main.tsx) or src/app/layout.tsx — entry points last
 10. Rely on tool results: don't re-list or re-read files you just wrote
 
 VERIFICATION:
-11. Verify every shadcn component imported in page files has its corresponding source file in src/components/ui/
+11. Reuse the shipped src/components/ui/ files; verify source and dependencies only for additional components you introduce
 12. Verify every file a config points at exists: each tsconfig "references" and "extends" path, and the index.html entry script. The preview refuses to start otherwise
 13. Verify every package imported anywhere, config files included, is listed in package.json. The preview refuses to start otherwise
 14. If the checkBuild tool is available and this run changed any files, call checkBuild once before the final summary. On errors, fix them and call it again, at most 2 more times. If it still fails, list the remaining errors under Notes instead of claiming the app works. If it reports that the build was not verified, say so under Notes
@@ -444,7 +444,7 @@ Do NOT include any code blocks in the summary beyond the two above. Do NOT narra
 
 /** Added to the request when the project holds only the seeded Vite starter (#338). */
 export const STARTER_IN_PLACE_NOTE =
-  "(This project already has the Vite starter and nothing else: package.json, vite.config.ts, the tsconfig files, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts and src/components/error-boundary.tsx. Don't call scaffoldViteApp, and don't start with listFiles: build on these files by path.)";
+  "(This project already has the Vite starter and nothing else: package.json, vite.config.ts, the tsconfig files, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx and the common src/components/ui/ components (including the mounted Sonner toaster). Import these components; do not rewrite them. Don't call scaffoldViteApp, and don't start with listFiles: build on these files by path.)";
 
 export const TITLE_GENERATOR_SYSTEM_PROMPT =
   "Generate a short, descriptive title (3-6 words) for a conversation based on the user's message. Return ONLY the title, nothing else. No quotes, no punctuation at the end.";

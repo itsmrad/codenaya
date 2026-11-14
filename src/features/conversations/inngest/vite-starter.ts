@@ -7,6 +7,7 @@
  */
 
 import { pinnedVersions } from "./known-good-versions";
+import { VITE_STARTER_UI } from "./vite-starter-ui";
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -24,6 +25,16 @@ const PACKAGE_JSON = json({
   dependencies: pinnedVersions([
     "@fontsource/inter",
     "@hookform/resolvers",
+    "@radix-ui/react-avatar",
+    "@radix-ui/react-dialog",
+    "@radix-ui/react-dropdown-menu",
+    "@radix-ui/react-label",
+    "@radix-ui/react-select",
+    "@radix-ui/react-separator",
+    "@radix-ui/react-slot",
+    "@radix-ui/react-tabs",
+    "@radix-ui/react-tooltip",
+    "sonner",
     "class-variance-authority",
     "clsx",
     "lucide-react",
@@ -65,6 +76,16 @@ export default defineConfig({
   optimizeDeps: {
     include: [
       "@hookform/resolvers/zod",
+      "@radix-ui/react-avatar",
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-dropdown-menu",
+      "@radix-ui/react-label",
+      "@radix-ui/react-select",
+      "@radix-ui/react-separator",
+      "@radix-ui/react-slot",
+      "@radix-ui/react-tabs",
+      "@radix-ui/react-tooltip",
+      "sonner",
       "class-variance-authority",
       "clsx",
       "lucide-react",
@@ -304,12 +325,14 @@ import "./index.css";
 
 import App from "./App";
 import { ErrorBoundary } from "./components/error-boundary";
+import { Toaster } from "./components/ui/sonner";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
       <BrowserRouter>
         <App />
+        <Toaster />
       </BrowserRouter>
     </ErrorBoundary>
   </StrictMode>,
@@ -414,4 +437,5 @@ export const VITE_REACT_STARTER: ReadonlyArray<{ path: string; content: string }
   { path: "src/App.tsx", content: APP_TSX },
   { path: "src/lib/utils.ts", content: UTILS_TS },
   { path: "src/components/error-boundary.tsx", content: ERROR_BOUNDARY_TSX },
+  ...VITE_STARTER_UI,
 ];

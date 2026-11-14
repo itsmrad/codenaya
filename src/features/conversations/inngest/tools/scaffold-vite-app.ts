@@ -23,7 +23,7 @@ export const createScaffoldViteAppTool = ({
     description:
       "Write the known-good Vite + React + TypeScript + Tailwind + shadcn starter into the project root: " +
       VITE_REACT_STARTER.map((file) => file.path).join(", ") +
-      ". It boots in the preview as-is. Call it first when starting a new Vite + React app, then extend it. Files that already exist are kept. " +
+      ". Common shadcn/ui components and their Radix dependencies are already included: import from @/components/ui/<name>, do not rewrite them. Add other components only when needed. Sonner Toaster is mounted in src/main.tsx; import toast from sonner. It boots in the preview as-is. Call it first when starting a new Vite + React app, then extend it. Files that already exist are kept. " +
       "The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>.",
     parameters: z.object({}),
     handler: async (_params, { step: toolStep }) => {
