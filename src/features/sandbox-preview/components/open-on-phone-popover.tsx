@@ -10,7 +10,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { QRCode } from "./qr-code";
+import { PreviewQrCode } from "./qr-code";
 
 interface OpenOnPhonePopoverProps {
   previewUrl: string | null;
@@ -96,7 +96,7 @@ export const OpenOnPhonePopover = ({
               </div>
 
               <div className="p-3 bg-white rounded-lg border shadow-xs flex items-center justify-center">
-                <QRCode value={previewUrl} size={150} />
+                <PreviewQrCode url={previewUrl} />
               </div>
 
               <p className="text-[11px] text-muted-foreground text-center leading-relaxed">
