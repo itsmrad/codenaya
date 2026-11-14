@@ -86,7 +86,7 @@ describe("processMessage in plan mode", () => {
     expect(toolNames(body).sort()).toEqual(
       ["listFiles", "loadSkill", "readFiles", "searchFiles", "scrapeUrls"].sort(),
     );
-    expect(String(body.messages[0].content)).toContain("## Plan mode");
+    expect(String(body.messages[0].content)).toContain("## Ask / Plan mode");
     expect(mutationNames()).not.toContain("system:createProjectCheckpoint");
     expect(mocks.mutation).toHaveBeenCalledWith(
       expect.anything(),
@@ -102,7 +102,7 @@ describe("processMessage in plan mode", () => {
 
     const body = codingRequest(outcome.inferenceBodies);
     expect(toolNames(body)).toEqual(expect.arrayContaining(WRITE_TOOLS));
-    expect(String(body.messages[0].content)).not.toContain("## Plan mode");
+    expect(String(body.messages[0].content)).not.toContain("## Ask / Plan mode");
     expect(mutationNames()).toContain("system:createProjectCheckpoint");
   });
 });

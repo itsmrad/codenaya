@@ -9,8 +9,9 @@ import { userConvexClient } from "./convex-client";
 import { STUB_MODEL, startStubProvider, type StubChatRequest } from "./stub-provider";
 
 /**
- * Plan mode (#120): with Plan on, the agent replies with a checklist and the
- * project is left alone; "Build this plan" then runs a build that writes files.
+ * Ask / Plan mode (#120, #311): with it on, the agent replies with a checklist
+ * and the project is left alone; "Build this plan" then runs a build that
+ * writes files. A question gets a plain answer, with nothing to build.
  *
  * The runs are real (Inngest + a local OpenAI-compatible stub on a BYOK key, as
  * in `byok-agent-run.spec.ts`), so this needs the Inngest dev server serving
@@ -22,11 +23,14 @@ const PLAN_ITEM = "Add a todo list page";
 const PLAN = `A simple todo app.\n\n### Steps\n- [ ] ${PLAN_ITEM}\n- [ ] Keep todos in local state`;
 const BUILD_REPLY = "Built the todo app";
 const ADDED_FILE = "todo-app.tsx";
+const QUESTION = "what does useAuth do?";
+const ANSWER = "useAuth returns the signed-in user";
 const WRITE_TOOLS = ["writeFiles", "createFiles", "updateFile", "deleteFiles", "renameFile", "createFolder"];
 
 const toolsOf = (request: StubChatRequest) =>
   (request.tools ?? []).map((tool) => tool.function.name);
 const isBuild = (request: StubChatRequest) => toolsOf(request).includes("createFiles");
+const isQuestion = (request: StubChatRequest) => JSON.stringify(request.messages).includes(QUESTION);
 
 test.describe.serial("plan mode", () => {
   test.skip(
@@ -47,7 +51,7 @@ test.describe.serial("plan mode", () => {
 
   test.beforeAll(async ({ browser }) => {
     stub = await startStubProvider(apiKey, {
-      reply: (request) => (isBuild(request) ? BUILD_REPLY : PLAN),
+      reply: (request) => (isQuestion(request) ? ANSWER : isBuild(request) ? BUILD_REPLY : PLAN),
       toolCall: (request) =>
         isBuild(request)
           ? {
@@ -105,7 +109,7 @@ test.describe.serial("plan mode", () => {
       .click();
     await expect(trigger).toHaveText(STUB_MODEL);
 
-    const planToggle = page.getByRole("button", { name: "Plan", exact: true });
+    const planToggle = page.getByRole("button", { name: "Ask / Plan", exact: true });
     await planToggle.click();
     await expect(planToggle).toHaveAttribute("aria-pressed", "true");
 
@@ -144,5 +148,27 @@ test.describe.serial("plan mode", () => {
     });
 
     expect(errors.filter((error) => !error.includes("webcontainer-api.io"))).toEqual([]);
+  });
+
+  test("answers a question with nothing to build", async () => {
+    test.setTimeout(180_000);
+    const filesBefore = await fileNames();
+    const toggle = page.getByRole("button", { name: "Ask / Plan", exact: true });
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    const input = page.getByPlaceholder("Describe a change or ask a question…");
+    await input.fill(QUESTION);
+    await input.press("Enter");
+
+    await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 120_000 });
+    await expect(page.getByRole("button", { name: "Build this plan" })).toHaveCount(0);
+    await test.info().attach("answer-reply", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+    const askRequest = stub.requests.find((request) => isQuestion(request) && request.tools?.length)!;
+    for (const tool of WRITE_TOOLS) expect(toolsOf(askRequest)).not.toContain(tool);
+    expect(await fileNames()).toEqual(filesBefore);
   });
 });
