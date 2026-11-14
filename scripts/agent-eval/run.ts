@@ -38,7 +38,7 @@ async function main() {
   const directory = `scripts/agent-eval/results/${new Date().toISOString().replace(/[:.]/g, "-")}`;
   await mkdir(directory, { recursive: true });
   const scores: Judged[] = [];
-  const { browser, page: auth, user } = await session(values["base-url"]!, asAdmin);
+  const { close, page: auth, user } = await session(values["base-url"]!, asAdmin);
   try {
     for (const model of models) for (let run = 1; run <= count; run++) {
       let saasId: Id<"projects"> | undefined;
@@ -72,7 +72,7 @@ async function main() {
         }
       }
     }
-  } finally { await browser.close(); }
+  } finally { await close(); }
 }
 
 type Judged = Score & { judge?: Awaited<ReturnType<typeof judge>> };

@@ -7,6 +7,8 @@ export function sanitize(value: unknown): string {
   for (const [name, secret] of Object.entries(process.env)) {
     if (/KEY|TOKEN|SECRET|PASSWORD|KEK|EMAIL/.test(name) && secret && secret.length >= 8) text = text.split(secret).join("[REDACTED]");
   }
+  const email = process.env.ADMIN_EMAIL?.trim();
+  if (email) text = text.replace(new RegExp(email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "[REDACTED]");
   return text.replace(/(?:Bearer\s+)?eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[REDACTED]")
     .replace(/((?:https?|wss?):[^\s"\\?]+)\?[^\s"\\]+/g, "$1?[REDACTED]");
 }

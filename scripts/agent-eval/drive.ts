@@ -95,10 +95,13 @@ export async function drive(page: Page, user: ConvexHttpClient, options: Options
       // Stop through the app path before ending observation, including failures.
       try { await post(page, "/api/messages/cancel", { projectId: trail.projectId }); }
       catch (error) { trail.error = `${trail.error ?? ""}; cleanup cancel: ${String(error)}`; }
-      await page.goto("about:blank"); // So the project page cannot boot a new sandbox after these stop.
+      // So the project page cannot boot a new sandbox after these stop; a crashed page cannot either.
+      await page.goto("about:blank").catch(() => {});
       for (const id of new Set(trail.sandboxEvents.map((e) => e.sandboxId).filter(Boolean))) {
-        const result = await page.request.delete(`/api/sandbox/${id}`);
-        if (!result.ok() && result.status() !== 404) trail.error = `${trail.error ?? ""}; sandbox cleanup HTTP ${result.status()}`;
+        try {
+          const result = await page.request.delete(`/api/sandbox/${id}`);
+          if (!result.ok() && result.status() !== 404) trail.error = `${trail.error ?? ""}; sandbox cleanup HTTP ${result.status()}`;
+        } catch (error) { trail.error = `${trail.error ?? ""}; sandbox cleanup: ${String(error)}`; }
       }
     }
     trail.endedAt = Date.now();
