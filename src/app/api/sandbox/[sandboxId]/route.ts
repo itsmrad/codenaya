@@ -11,6 +11,13 @@ import {
   requestReinstall,
 } from "@/features/sandbox-preview/server/sandbox-registry";
 import { RESTART_VITE_COMMAND } from "@/features/sandbox-preview/server/restart-vite";
+import {
+  boundedTimeout,
+  streamBudget,
+} from "@/features/sandbox-preview/server/stream-budget";
+
+/** Vercel Hobby's maximum. A sync's install is bounded to answer before it (#492). */
+export const maxDuration = 300;
 
 const patchSchema = z.object({
   files: projectFilesSchema,
@@ -83,6 +90,7 @@ export async function POST(request: Request, { params }: RouteParams) {
  * re-runs the install so dependencies added after the boot are there (#254).
  */
 export async function PATCH(request: Request, { params }: RouteParams) {
+  const budget = streamBudget(Date.now());
   const { userId, unauthorized } = await requireUserId();
 
   if (unauthorized) {
@@ -117,14 +125,15 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     );
 
     // The instance that booted the sandbox installs through the boot stream,
-    // where the output reaches the terminal. Any other instance installs here.
+    // where the output reaches the terminal. Any other instance, or any sync
+    // after that stream has ended (#492), installs here.
     if (
       files.some((file) => file.path === "package.json") &&
       !requestReinstall(sandboxId)
     ) {
       await sandbox.commands.run(installCommand || DEFAULT_INSTALL_COMMAND, {
         cwd: WORK_DIR,
-        timeoutMs: 5 * 60 * 1000,
+        timeoutMs: boundedTimeout(5 * 60 * 1000, budget.left()),
       });
       await sandbox.commands.run(RESTART_VITE_COMMAND, { cwd: WORK_DIR });
     }

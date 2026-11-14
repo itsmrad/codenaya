@@ -59,4 +59,82 @@ describe("debounceSerial", () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(task).not.toHaveBeenCalled();
   });
+  it("runs a scheduled task on flush without waiting for the delay (#492)", async () => {
+    const task = vi.fn().mockResolvedValue(undefined);
+    const { schedule, flush } = debounceSerial(task, 2000);
+
+    schedule();
+    await flush();
+    expect(task).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(task).toHaveBeenCalledTimes(1);
+  });
+
+  it("on flush, waits for the running task and the run queued behind it", async () => {
+    let finish = () => {};
+    const task = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { schedule, flush } = debounceSerial(task, 100);
+
+    schedule();
+    await vi.advanceTimersByTimeAsync(100);
+    schedule();
+
+    let flushed = false;
+    const flushing = flush().then(() => {
+      flushed = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(flushed).toBe(false);
+
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(task).toHaveBeenCalledTimes(2);
+    expect(flushed).toBe(false);
+
+    finish();
+    await flushing;
+    expect(flushed).toBe(true);
+  });
+
+  it("resolves flush at once when nothing is scheduled", async () => {
+    const task = vi.fn().mockResolvedValue(undefined);
+    const { flush } = debounceSerial(task, 100);
+
+    await flush();
+    expect(task).not.toHaveBeenCalled();
+  });
+
+  it("calls onDrained only after a run scheduled during the flush has finished", async () => {
+    const order: string[] = [];
+    let finish = () => {};
+    const task = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = () => {
+            order.push("ran");
+            resolve();
+          };
+        }),
+    );
+    const { schedule, flush } = debounceSerial(task, 100);
+
+    schedule();
+    const flushing = flush(() => order.push("drained"));
+    await vi.advanceTimersByTimeAsync(0);
+    schedule();
+
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order).toEqual(["ran"]);
+
+    finish();
+    await flushing;
+    expect(order).toEqual(["ran", "ran", "drained"]);
+  });
 });
