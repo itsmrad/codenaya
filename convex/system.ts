@@ -28,6 +28,9 @@ import {
   deleteFileTree,
   findSibling,
   getProjectFile,
+  lockedError,
+  lockedPath,
+  lockedPathUnder,
 } from "./files";
 import {
   insertFileContent,
@@ -47,6 +50,7 @@ import {
 import { MAX_ENV_VARS } from "./envVars";
 import { MAX_PROJECT_CONNECTIONS } from "./integrations";
 import { projectNameFromTitle } from "../src/features/projects/utils/project-name";
+import { lockedPathMessage } from "../src/features/conversations/agent-steps";
 
 /** Most messages `getRecentMessages` returns as agent context (#53). */
 const MAX_RECENT_MESSAGES = 50;
@@ -366,6 +370,8 @@ export const updateFile = mutation({
     if (!file) {
       throw new Error("File not found");
     }
+    const locked = await lockedPath(ctx, args.projectId, file._id);
+    if (locked) throw lockedError(locked);
 
     await writeFileContent(ctx, file, args.content);
 
@@ -389,6 +395,8 @@ export const createFile = mutation({
     if (await findSibling(ctx, { ...args, type: "file" })) {
       throw new Error("File already exists");
     }
+    const locked = await lockedPath(ctx, args.projectId, args.parentId, args.name);
+    if (locked) throw lockedError(locked);
 
     const fileId = await ctx.db.insert("files", {
       projectId: args.projectId,
@@ -422,8 +430,18 @@ export const createFiles = mutation({
     await assertProjectFolder(ctx, args.projectId, args.parentId);
 
     const results: { name: string; fileId: string; error?: string }[] = [];
+    const lockedParent = await lockedPath(ctx, args.projectId, args.parentId);
 
     for (const file of args.files) {
+      // Reported per file, like an existing one, so the rest of a batch still lands.
+      if (lockedParent) {
+        results.push({
+          name: file.name,
+          fileId: "",
+          error: lockedPathMessage(`${lockedParent}/${file.name}`),
+        });
+        continue;
+      }
       const existing = await findSibling(ctx, {
         projectId: args.projectId,
         parentId: args.parentId,
@@ -472,6 +490,8 @@ export const createFolder = mutation({
     if (await findSibling(ctx, { ...args, type: "folder" })) {
       throw new Error("Folder already exists");
     }
+    const locked = await lockedPath(ctx, args.projectId, args.parentId, args.name);
+    if (locked) throw lockedError(locked);
 
     const fileId = await ctx.db.insert("files", {
       projectId: args.projectId,
@@ -500,6 +520,8 @@ export const renameFile = mutation({
     if (!file) {
       throw new Error("File not found");
     }
+    const locked = await lockedPathUnder(ctx, file);
+    if (locked) throw lockedError(locked);
 
     // Check if a file with the new name already exists in the same parent folder
     if (await findSibling(ctx, { ...file, name: args.newName }, args.fileId)) {
@@ -529,6 +551,8 @@ export const deleteFile = mutation({
     if (!file) {
       throw new Error("File not found");
     }
+    const locked = await lockedPathUnder(ctx, file);
+    if (locked) throw lockedError(locked);
 
     await deleteFileTree(ctx, file);
 
@@ -596,6 +620,8 @@ export const createBinaryFile = mutation({
     if (await findSibling(ctx, { ...args, type: "file" })) {
       throw new Error("File already exists");
     }
+    const locked = await lockedPath(ctx, args.projectId, args.parentId, args.name);
+    if (locked) throw lockedError(locked);
 
     const fileId = await ctx.db.insert("files", {
       projectId: args.projectId,

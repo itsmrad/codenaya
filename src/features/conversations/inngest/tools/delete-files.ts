@@ -5,7 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
-import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
+import { findProjectFile, getProjectFiles, indexProjectFiles, lockedPathError } from "./paths";
 
 interface DeleteFilesToolOptions {
   projectId: Id<"projects">;
@@ -50,6 +50,8 @@ export const createDeleteFilesTool = ({
           for (const ref of refs) {
             const found = await findProjectFile(internalKey, projectId, index, ref);
             if ("error" in found) return found.error;
+            const locked = lockedPathError(index, found.path, true);
+            if (locked) return `Error: ${locked} Nothing was deleted.`;
             targets.push(found);
           }
 
