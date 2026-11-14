@@ -165,11 +165,14 @@ export const ProjectIdView = ({
     const tabs = restorableTabs(session, new Set(files.map((file) => file._id)));
     restoreTabs(projectId, tabs.openTabs as Id<"files">[], tabs.activeTabId as Id<"files"> | null);
   }, [files, projectId, restoreTabs]);
+  // Chat-first keeps the picked view rather than its Preview fallback, so a
+  // saved Code view reopens after switching back to the IDE.
+  const sessionView = mode === "chat" ? selectedView : activeView;
   useEffect(() => {
     // Not before the restore, or the empty starting tabs would overwrite the saved ones.
     if (!tabsRestored.current) return;
-    saveIdeSession(projectId, { view: activeView, openTabs, activeTabId });
-  }, [projectId, activeView, openTabs, activeTabId]);
+    saveIdeSession(projectId, { view: sessionView, openTabs, activeTabId });
+  }, [projectId, sessionView, openTabs, activeTabId]);
   const [firstBuild, setFirstBuild] = useState(false);
   const [viewPickedDuringBuild, setViewPickedDuringBuild] = useState(false);
   const [previewReadyToasts, setPreviewReadyToasts] = useState(0);
