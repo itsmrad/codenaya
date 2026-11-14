@@ -20,6 +20,12 @@ const STUB_REPLY = "Built the page.";
 const calledCheckBuild = (request: StubChatRequest) =>
   JSON.stringify(request.messages).includes('"name":"checkBuild"');
 
+/** checkBuild calls in a request's history; the last request's history is the whole run. */
+const checkBuildCalls = (request: StubChatRequest) =>
+  request.messages
+    .flatMap((message) => (message as { tool_calls?: Array<{ function: { name: string } }> }).tool_calls ?? [])
+    .filter((call) => call.function.name === "checkBuild").length;
+
 test.describe.serial("agent checkBuild", () => {
   test.skip(
     !hasClerkCredentials(),
@@ -144,7 +150,8 @@ test.describe.serial("agent checkBuild", () => {
     // reply to it and to each fix note: three forced turns, no more.
     const coding = stub.requests.slice(before).filter((request) => request.tools?.length);
     expect(coding).toHaveLength(6);
-    expect(coding.filter(calledCheckBuild)).toHaveLength(1);
+    // One check: the stub answers only the first note, not the fix notes.
+    expect(checkBuildCalls(coding.at(-1)!)).toBe(1);
     expect(errors.filter((error) => !error.includes("webcontainer-api.io"))).toEqual([]);
   });
 
