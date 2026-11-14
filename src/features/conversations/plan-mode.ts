@@ -38,7 +38,9 @@ If the user asks for something to be built or changed, reply with a short build 
 
 The user will review the plan and click "Build this plan" to have it built.`;
 
-const PLAN_SECTION = /^#{2,4}\s+(Pages|Components|Data|Steps)\s*$/m;
+// A section title line: "### Steps", "## 1. Steps:", "**Steps**", "### **Data**".
+const PLAN_SECTION =
+  /^(?:#{1,4}\s+(?:\*\*)?|\*\*)(?:\d+[.)]\s*)?(?:Pages|Components|Data|Steps):?(?:\*\*)?:?\s*$/im;
 const PLAN_ITEM = /^\s*[-*] \[ \] /m;
 
 /** A reply is a plan, not an answer, when it has a plan section and a checklist (#311). */
@@ -49,7 +51,7 @@ export const isPlanReply = (content: string) =>
 export const buildPlanMessage = (plan: string) => `Build this plan:\n\n${plan}`;
 
 /**
- * The plan-mode message "Diagnose in Plan mode" pre-fills for a stuck run
+ * The plan-mode message "Diagnose in Ask / Plan mode" pre-fills for a stuck run
  * (#306), with the likely cause of a known error (#334).
  */
 export const diagnoseStuckMessage = (

@@ -85,7 +85,7 @@ export const StuckRunCard = ({
           onClick={onDiagnose}
         >
           <ListChecksIcon className="size-3.5" />
-          Diagnose in Plan mode
+          Diagnose in Ask / Plan mode
         </Button>
       )}
       {onRestore && (

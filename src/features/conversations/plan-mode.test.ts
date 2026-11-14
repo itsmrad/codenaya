@@ -31,9 +31,24 @@ describe("isPlanReply", () => {
     expect(isPlanReply("## Components\n* [ ] TodoList")).toBe(true);
   });
 
+  it.each([
+    ["a trailing colon", "### Steps:"],
+    ["a bold title", "**Steps**"],
+    ["a bold title with a colon", "**Steps:**"],
+    ["a numbered heading", "### 1. Steps"],
+    ["a bold heading", "## **Data**"],
+    ["a level-1 heading", "# Pages"],
+  ])("accepts a section with %s", (_, title) => {
+    expect(isPlanReply(`A todo app.\n\n${title}\n- [ ] Add a todo list page`)).toBe(true);
+  });
+
   it("is an answer without them", () => {
     expect(isPlanReply("`useAuth` reads the Clerk session in `src/hooks/use-auth.ts`.")).toBe(false);
     expect(isPlanReply("### Steps it takes\n1. Reads the session")).toBe(false);
     expect(isPlanReply("- [ ] a checklist with no plan section")).toBe(false);
+    expect(
+      isPlanReply("`useAuth` has a few steps.\n\n### How the steps work\n- [ ] not a plan section"),
+    ).toBe(false);
+    expect(isPlanReply("Steps\n- [ ] a bare word is not a section title")).toBe(false);
   });
 });
