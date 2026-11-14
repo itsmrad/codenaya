@@ -17,7 +17,7 @@ import { selectionTooltip } from "../extensions/selection-tooltip";
 // Below this width the minimap takes too much of the code area.
 const MINIMAP_MIN_EDITOR_WIDTH = 600;
 
-const editorTheme = (resolvedTheme?: string) =>
+export const editorTheme = (resolvedTheme?: string) =>
   resolvedTheme === "light" ? lightTheme : [oneDark, darkCursorTheme];
 
 interface Props {

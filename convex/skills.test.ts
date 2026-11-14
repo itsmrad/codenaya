@@ -145,6 +145,7 @@ describe("skills", () => {
 
     expect(skills.map(({ name, scope, enabled }) => ({ name, scope, enabled }))).toEqual([
       { name: "find-skills", scope: "builtin", enabled: false },
+      { name: "react-performance", scope: "builtin", enabled: false },
       { name: "alpha", scope: "library", enabled: false },
       { name: "beta", scope: "library", enabled: false },
     ]);
@@ -164,7 +165,7 @@ describe("skills", () => {
       enabled: true,
     });
     const inP2 = await alice.query(api.skills.listProjectSkills, { projectId: p2 });
-    expect(inP2.map((s) => s.name)).toEqual(["find-skills"]);
+    expect(inP2.map((s) => s.name)).toEqual(["find-skills", "react-performance"]);
     expect(await alice.query(api.skills.listLibrary, {})).toEqual([]);
   });
 
@@ -182,6 +183,7 @@ describe("skills", () => {
     let skills = await alice.query(api.skills.listProjectSkills, { projectId });
     expect(skills.map((s) => [s.name, s.enabled])).toEqual([
       ["find-skills", true],
+      ["react-performance", false],
       ["alpha", false],
       ["local", true],
     ]);
@@ -194,7 +196,7 @@ describe("skills", () => {
     skills = await alice.query(api.skills.listProjectSkills, { projectId });
     expect(skills.every((s) => !s.enabled)).toBe(true);
     // One row per skill, updated in place.
-    expect(await countSettings(t)).toBe(3);
+    expect(await countSettings(t)).toBe(4);
 
     await expect(
       alice.mutation(api.skills.setProjectSkillEnabled, {

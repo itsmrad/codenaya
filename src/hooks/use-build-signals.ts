@@ -231,20 +231,26 @@ export const useBuildSignalPreferences = () => {
 
   useEffect(() => {
     const updatePermission = () => {
-      if (typeof window !== "undefined" && "Notification" in window) {
-        setPermission(Notification.permission);
-      } else {
-        setPermission("unsupported");
+      const next: NotificationPermission | "unsupported" =
+        typeof window !== "undefined" && "Notification" in window
+          ? Notification.permission
+          : "unsupported";
+      setPermission((prev) => (prev === next ? prev : next));
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        updatePermission();
       }
     };
 
     updatePermission();
     window.addEventListener("focus", updatePermission);
-    document.addEventListener("visibilitychange", updatePermission);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       window.removeEventListener("focus", updatePermission);
-      document.removeEventListener("visibilitychange", updatePermission);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 
@@ -327,20 +333,23 @@ export const useBuildSignals = ({
   useEffect(() => {
     if (typeof window === "undefined") return;
 
+    const cleanupListeners = () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+
     const unlock = () => {
+      cleanupListeners();
       const ctx = getAudioContext();
       if (ctx && ctx.state === "suspended") {
         ctx.resume().catch(() => {});
       }
     };
 
-    window.addEventListener("pointerdown", unlock, { passive: true, once: true });
-    window.addEventListener("keydown", unlock, { passive: true, once: true });
+    window.addEventListener("pointerdown", unlock, { passive: true });
+    window.addEventListener("keydown", unlock, { passive: true });
 
-    return () => {
-      window.removeEventListener("pointerdown", unlock);
-      window.removeEventListener("keydown", unlock);
-    };
+    return cleanupListeners;
   }, []);
 
   // Compute and update base document title

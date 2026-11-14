@@ -51,6 +51,14 @@ export async function POST(request: Request) {
     return notFound;
   }
 
+  // A linked project pushes to its repo instead of making another (#343).
+  if (project.githubSync) {
+    return NextResponse.json(
+      { error: "This project is already linked to a GitHub repository" },
+      { status: 409 }
+    );
+  }
+
   // Checked here for a clear error; the job looks the token up itself (#211).
   if (!(await getGithubToken(userId))) {
     return githubNotLinkedResponse();

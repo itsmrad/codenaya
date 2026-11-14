@@ -33,6 +33,8 @@ import {
 } from "../constants/tags";
 import { usePublish, useGenerateUploadUrl } from "../hooks/use-showcase";
 import { useFiles } from "@/features/projects/hooks/use-files";
+import { useSecurityGate } from "@/features/security/hooks/use-security-gate";
+import { SecurityScanDialog } from "@/features/security/components/security-scan-dialog";
 import { Id } from "../../../../convex/_generated/dataModel";
 
 interface PublishDialogProps {
@@ -50,6 +52,7 @@ export const PublishDialog = ({
 }: PublishDialogProps) => {
   const publish = usePublish();
   const generateUploadUrl = useGenerateUploadUrl();
+  const gate = useSecurityGate(projectId);
   const files = useFiles(open ? projectId : null);
   // An empty project has nothing to show; wait for files to load before saying so.
   const hasNoFiles =
@@ -113,6 +116,10 @@ export const PublishDialog = ({
       return;
     }
 
+    await gate.guard(publishEntry);
+  };
+
+  const publishEntry = async () => {
     setSubmitting(true);
     try {
       await publish({
@@ -133,10 +140,15 @@ export const PublishDialog = ({
     }
   };
 
+  let submitLabel = "Publish";
+  if (submitting) submitLabel = "Publishing...";
+  if (gate.checking) submitLabel = "Checking for secrets...";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Only the form scrolls, so Cancel and Publish stay in view. */}
       <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
+        <SecurityScanDialog pending={gate.pending} onDismiss={gate.dismiss} />
         <DialogHeader>
           <DialogTitle>Publish to Showcase</DialogTitle>
           <DialogDescription>
@@ -260,9 +272,11 @@ export const PublishDialog = ({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={submitting || hasNoFiles || !title.trim() || !category}
+            disabled={
+              submitting || gate.checking || hasNoFiles || !title.trim() || !category
+            }
           >
-            {submitting ? "Publishing..." : "Publish"}
+            {submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
