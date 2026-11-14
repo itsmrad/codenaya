@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBuildTitle } from "./use-build-signals";
+import { formatBuildTitle, getBuildStatus } from "./use-build-signals";
 
 describe("formatBuildTitle", () => {
   const base = "my-next-app · Codenaya";
@@ -20,5 +20,24 @@ describe("formatBuildTitle", () => {
     expect(formatBuildTitle("Codenaya", "building")).toBe("● Building · Codenaya");
     expect(formatBuildTitle("Codenaya", "done")).toBe("✓ Done · Codenaya");
     expect(formatBuildTitle("Codenaya", "idle")).toBe("Codenaya");
+  });
+});
+
+describe("getBuildStatus", () => {
+  const run = { _id: "run-1" };
+
+  it("stays building while a run is active, even if a previous run was done", () => {
+    expect(getBuildStatus(run, false)).toBe("building");
+    expect(getBuildStatus(run, true)).toBe("building");
+  });
+
+  it("shows done after a run until it is cleared", () => {
+    expect(getBuildStatus(null, true)).toBe("done");
+    expect(getBuildStatus(null, false)).toBe("idle");
+  });
+
+  it("does not invent a run while the query is loading", () => {
+    expect(getBuildStatus(undefined, false)).toBe("idle");
+    expect(getBuildStatus(undefined, true)).toBe("done");
   });
 });

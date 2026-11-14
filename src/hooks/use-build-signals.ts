@@ -35,6 +35,18 @@ export const formatBuildTitle = (
   return baseTitle;
 };
 
+/**
+ * A live run always reads as building, so clearing "done" on focus can't hide
+ * a run that is still going.
+ */
+export const getBuildStatus = (
+  activeRun: ActiveRun | null | undefined,
+  done: boolean
+): BuildSignalStatus => {
+  if (activeRun) return "building";
+  return done ? "done" : "idle";
+};
+
 // ─── Web Audio API Synthesizer with User Gesture Unlock ───────────────
 
 // Standard web audio practice for UI sound effects: keep a single lazily-initialized
@@ -186,10 +198,12 @@ interface PreferencesSnapshot {
   notifEnabled: boolean;
 }
 
-let cachedPreferencesSnapshot: PreferencesSnapshot = {
+const DEFAULT_PREFERENCES: PreferencesSnapshot = {
   soundEnabled: false,
   notifEnabled: false,
 };
+
+let cachedPreferencesSnapshot = DEFAULT_PREFERENCES;
 
 const subscribeToStorage = (callback: () => void) => {
   if (typeof window === "undefined") return () => {};
@@ -222,7 +236,8 @@ export const useBuildSignalPreferences = () => {
   const { soundEnabled, notifEnabled } = useSyncExternalStore(
     subscribeToStorage,
     getPreferencesSnapshot,
-    () => cachedPreferencesSnapshot
+    // The server never sees localStorage; hydrate with the defaults it rendered.
+    () => DEFAULT_PREFERENCES
   );
 
   const [permission, setPermission] = useState<
@@ -325,9 +340,29 @@ export const useBuildSignals = ({
   onOpenPreview,
 }: UseBuildSignalsProps) => {
   const { soundEnabled, notifEnabled } = useBuildSignalPreferences();
-  const [status, setStatus] = useState<BuildSignalStatus>("idle");
-  const prevRunRef = useRef<ActiveRun | null | undefined>(activeRun);
-  const baseTitleRef = useRef<string>("");
+  const [hadRun, setHadRun] = useState(false);
+  const [done, setDone] = useState(false);
+  const [finishes, setFinishes] = useState(0);
+  const handledFinishesRef = useRef(0);
+
+  // Track run transitions during render, as ProjectIdView does for the first
+  // build. `undefined` (still loading) is skipped; only `null` ends a run.
+  if (activeRun && !hadRun) setHadRun(true);
+  if (activeRun === null && hadRun) {
+    setHadRun(false);
+    setDone(true);
+    setFinishes((count) => count + 1);
+  }
+  const status = getBuildStatus(activeRun, done);
+
+  // Leaving the project page restores the title and favicon it found.
+  useEffect(() => {
+    const initialTitle = document.title;
+    return () => {
+      document.title = initialTitle;
+      updateFaviconBadge("idle");
+    };
+  }, []);
 
   // Initialize AudioContext user gesture unlock with proper listener cleanup
   useEffect(() => {
@@ -356,7 +391,6 @@ export const useBuildSignals = ({
   useEffect(() => {
     if (typeof document === "undefined") return;
     const projectTitle = projectName ? `${projectName} · Codenaya` : "Codenaya";
-    baseTitleRef.current = projectTitle;
     document.title = formatBuildTitle(projectTitle, status);
   }, [projectName, status]);
 
@@ -365,59 +399,45 @@ export const useBuildSignals = ({
     updateFaviconBadge(status);
   }, [status]);
 
-  // Monitor activeRun transitions
+  // Sound and notification for a run that ended while the tab was hidden
   useEffect(() => {
-    const wasRunning = prevRunRef.current !== undefined && prevRunRef.current !== null;
-    const isRunning = activeRun !== undefined && activeRun !== null;
-    prevRunRef.current = activeRun;
+    if (finishes === handledFinishesRef.current) return;
+    handledFinishesRef.current = finishes;
+    if (document.visibilityState !== "hidden") return;
 
-    if (isRunning) {
-      setStatus("building");
-    } else if (wasRunning && !isRunning) {
-      // Run just completed!
-      setStatus("done");
+    if (soundEnabled) {
+      playBuildDoneChime();
+    }
 
-      // Check if user is in another tab (hidden)
-      const isTabHidden =
-        typeof document !== "undefined" && document.visibilityState === "hidden";
+    if (
+      notifEnabled &&
+      "Notification" in window &&
+      Notification.permission === "granted"
+    ) {
+      try {
+        const notif = new Notification("Your app is ready", {
+          body: "Open preview to see your changes",
+          icon: "/icon.svg",
+        });
 
-      if (isTabHidden) {
-        if (soundEnabled) {
-          playBuildDoneChime();
-        }
-
-        if (
-          notifEnabled &&
-          typeof window !== "undefined" &&
-          "Notification" in window &&
-          Notification.permission === "granted"
-        ) {
-          try {
-            const notif = new Notification("Your app is ready", {
-              body: "Open preview to see your changes",
-              icon: "/icon.svg",
-            });
-
-            notif.onclick = () => {
-              window.focus();
-              onOpenPreview?.();
-              notif.close();
-            };
-          } catch {
-            // Gracefully ignore notification dispatch errors
-          }
-        }
+        notif.onclick = () => {
+          window.focus();
+          onOpenPreview?.();
+          notif.close();
+        };
+      } catch {
+        // Gracefully ignore notification dispatch errors
       }
     }
-  }, [activeRun, soundEnabled, notifEnabled, onOpenPreview]);
+  }, [finishes, soundEnabled, notifEnabled, onOpenPreview]);
 
-  // Reset signals to idle when tab regains focus or visibility
+  // Clear the done signal when the tab regains focus or visibility
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const resetToIdle = () => {
       if (document.visibilityState === "visible") {
-        setStatus("idle");
+        setDone(false);
       }
     };
 
