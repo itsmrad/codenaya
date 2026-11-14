@@ -3,6 +3,7 @@ import { tokenCost } from "./cost";
 import { score } from "./score";
 import { isRuntimeError, sanitize } from "./capture";
 import { assertDevTarget } from "./guard";
+import { ADMIN_TITLE, deleteAfterScoring, projectTitle } from "./projects";
 import type { Trail } from "./types";
 
 const fixture = (): Trail => ({
@@ -69,6 +70,19 @@ describe("agent evaluation", () => {
       [dev, "https://codenaya.app"],
       [dev, "http://localhost.evil.example"],
     ] as const) expect(() => assertDevTarget(env, url)).toThrow(/Refusing/);
+  });
+  it("names projects from a title template and rejects invalid names", () => {
+    expect(projectTitle(ADMIN_TITLE, "booking", "claude-haiku-5-5")).toBe("Night build — booking — single Haiku 5.5");
+    expect(projectTitle("{app}/{config}/{app}", "saas", "google/gemini-4-hydrogen")).toBe("saas/single Gemini 4 Hydrogen/saas");
+    expect(() => projectTitle(" ", "crm", "claude-opus-5-5")).toThrow(/--title/);
+    expect(() => projectTitle("x".repeat(101), "crm", "claude-opus-5-5")).toThrow(/--title/);
+  });
+  it("never deletes admin builds, kept, unscored or follow-up projects", () => {
+    const run = { asAdmin: false, keep: false, scored: true, followupPending: false };
+    expect(deleteAfterScoring(run)).toBe(true);
+    for (const change of [{ asAdmin: true }, { keep: true }, { scored: false }, { followupPending: true }]) {
+      expect(deleteAfterScoring({ ...run, ...change })).toBe(false);
+    }
   });
   it("redacts credentials and signed URLs from persisted diagnostics", () => {
     process.env.EVAL_TEST_SECRET = "secret-for-eval-test";
