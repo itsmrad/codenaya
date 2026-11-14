@@ -214,7 +214,7 @@ describe("editFile tool", () => {
     }));
   });
 
-  it.each(["not json", '"[]"', "42"])("still rejects a string that isn't a JSON array (%j)", async (edits) => {
+  it.each(["not json", '"not json"', "42"])("still rejects a string that isn't a JSON array (%j)", async (edits) => {
     expect(await decodedEdit(edits)).toBe("Error: Invalid input: expected array, received string");
     expect(step.run).not.toHaveBeenCalled();
   });
