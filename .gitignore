@@ -74,3 +74,6 @@ graphify-out/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# Opt-in live eval artifacts and local spend ledger (baselines are curated).
+/scripts/agent-eval/results/
