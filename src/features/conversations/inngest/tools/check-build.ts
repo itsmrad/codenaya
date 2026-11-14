@@ -113,7 +113,7 @@ const within = (deadline: number, cap: number) => {
 };
 
 /** The preview route's secret redaction, over a whole text rather than a stream. */
-const redact = (text: string, secrets: readonly string[]) => {
+export const redact = (text: string, secrets: readonly string[]) => {
   const redactor = createStreamRedactor(secrets);
   return redactor.push(text) + redactor.flush();
 };
@@ -274,20 +274,30 @@ const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: Bui
   }
 };
 
+/** A relative path that stays inside the directory it is joined to. */
+export const isSafeProjectPath = (path: string) =>
+  !!path && !path.startsWith("/") && !path.includes("\\") &&
+  path.split("/").every((part) => part && part !== "." && part !== "..");
+
 type CheckOptions = {
   files: ProjectFile[];
   paths: Set<string>;
   apiKey?: string;
   metadata?: Record<string, string>;
   preview?: WarmPreview;
+  /**
+   * Build in this caller-owned sandbox, in a directory of its own: no lookup,
+   * no new sandbox, never killed. Takes precedence over `preview` and `apiKey`.
+   */
+  sandbox?: Sandbox;
   /** The project's secret values, redacted from whatever the check returns. */
   secrets?: string[];
 };
 
 /**
  * Static checks, then `npm install`, `tsc --noEmit` and `vite build`: in the
- * owner's running preview sandbox when there is one, else in a throwaway
- * sandbox. Returns the tool result, with `secrets` redacted from the raw
+ * given `sandbox`, else the owner's running preview sandbox when there is one,
+ * else a throwaway sandbox. Returns the tool result, with `secrets` redacted from the raw
  * output before it is trimmed: a passing summary, or an "Error: ..." message
  * the agent can act on. Never throws.
  *
@@ -299,6 +309,7 @@ export const checkProjectBuild = async ({
   apiKey,
   metadata,
   preview,
+  sandbox: suppliedSandbox,
   secrets = [],
 }: CheckOptions): Promise<string> => {
   const problems = [
@@ -308,8 +319,8 @@ export const checkProjectBuild = async ({
   ];
   if (problems.length > 0) {
     return (
-      `${STATIC_CHECKS_FAILED}:\n- ${problems.join("\n- ")}\n` +
-      "Fix these, then call checkBuild again."
+      redact(`${STATIC_CHECKS_FAILED}:\n- ${problems.join("\n- ")}\n` +
+      "Fix these, then call checkBuild again.", secrets)
     );
   }
 
@@ -321,11 +332,29 @@ export const checkProjectBuild = async ({
     return `${BUILD_NOT_CHECKED}\nStatic checks passed. checkBuild only builds Vite projects, so this one was not built.` + notes;
   }
 
+  const job: BuildJob = { files, paths, deadline: Date.now() + STEP_BUDGET_MS, secrets, notes };
+  if (suppliedSandbox) {
+    // Snapshot files must stay inside this check's directory.
+    if (!files.every(({ path }) => isSafeProjectPath(path))) {
+      return `${STATIC_CHECKS_FAILED}: Invalid project file path.`;
+    }
+    const dir = `/home/user/check-build-${randomUUID()}`;
+    try {
+      return await buildIn(suppliedSandbox, dir, job);
+    } catch (error) {
+      return unfinished(error, secrets);
+    } finally {
+      // Never kill: the caller owns this sandbox. Only our directory goes.
+      await suppliedSandbox.commands
+        .run(`rm -rf ${dir}`, { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS })
+        .catch(() => {});
+    }
+  }
+
   if (!apiKey) {
     return notBuilt("No build sandbox is configured") + notes;
   }
 
-  const job: BuildJob = { files, paths, deadline: Date.now() + STEP_BUDGET_MS, secrets, notes };
   if (preview) {
     const warm = await checkInWarmSandbox(apiKey, preview, job);
     if (warm) return warm;

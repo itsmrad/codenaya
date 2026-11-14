@@ -13,7 +13,7 @@ vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal)
   resolveProjectEnv: mocks.resolveEnv,
 }));
 
-import { CommandExitError, type CommandResult, TimeoutError } from "e2b";
+import { CommandExitError, type CommandResult, type Sandbox, TimeoutError } from "e2b";
 import { getFunctionName } from "convex/server";
 
 import { VITE_REACT_STARTER } from "../vite-starter";
@@ -138,6 +138,39 @@ describe("checkProjectBuild", () => {
     expect(result.split("\n")[0]).toBe(STATIC_CHECKS_PASSED);
     expect(result).toContain("No build sandbox is configured");
     expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("builds in a given sandbox's own directory, without a key, lookup, new sandbox or kill", async () => {
+    const sandbox = sandboxWith(() => undefined);
+    const files = starter();
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandbox: sandbox as unknown as Sandbox,
+    });
+
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    const commands = sandbox.commands.run.mock.calls.map(([command, opts]) => [command, (opts as { cwd?: string })?.cwd]);
+    const dir = commands[0][1]!;
+    expect(dir).toMatch(/^\/home\/user\/check-build-[\w-]+$/);
+    expect(commands.at(-1)).toEqual([`rm -rf ${dir}`, undefined]);
+    expect(sandbox.kill).not.toHaveBeenCalled();
+    expect(e2b.create).not.toHaveBeenCalled();
+    expect(e2b.list).not.toHaveBeenCalled();
+    expect(e2b.connect).not.toHaveBeenCalled();
+  });
+
+  it("refuses snapshot paths that would leave a given sandbox's check directory", async () => {
+    const sandbox = sandboxWith(() => undefined);
+    const files = [...starter(), { path: "../outside.ts", content: "" }];
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandbox: sandbox as unknown as Sandbox,
+    });
+
+    expect(result).toBe("Error: Static checks failed: Invalid project file path.");
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
   });
 
   it("falls back to the static checks when the sandbox cannot start", async () => {
