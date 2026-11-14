@@ -4,62 +4,26 @@ import { installFailure } from "./install-failure";
 
 describe("installFailure (#497)", () => {
   const SECRET = "sk_live_synthetic_0123456789";
-  const command = "npm install";
 
-  it("ends in the failed-install line and redacts injected secrets", () => {
-    const failure = installFailure(
-      {
-        exitCode: 1,
-        stdout: `postinstall: API_KEY=${SECRET}\n`,
-        stderr: "npm error code ERESOLVE\n",
-      },
-      command,
-      [SECRET],
-    );
+  it("keeps only the exit code and npm's last error code, never the output", () => {
+    const failure = installFailure({
+      exitCode: 1,
+      stdout: `postinstall: API_KEY=${SECRET}\nnpm warn code EOLD\n`,
+      stderr: `npm error code E404\nnpm error ${SECRET}\nnpm ERR! code ERESOLVE\n`,
+    });
 
-    expect(failure.exitCode).toBe(1);
-    expect(failure.output).not.toContain(SECRET);
-    expect(failure.output).toContain("API_KEY=[redacted]");
-    expect(failure.output).toContain("npm error code ERESOLVE");
-    expect(failure.output.trimEnd().split("\n").at(-1)).toBe(
-      "Error: npm install failed with exit code 1",
-    );
+    expect(failure).toEqual({ exitCode: 1, code: "ERESOLVE" });
+    expect(JSON.stringify(failure)).not.toContain(SECRET);
   });
 
-  it("redacts before the tail is cut, so no part of a secret is left", () => {
-    // Sized so the 4096-character cut falls 10 characters into the secret.
-    const exitLine = "\nError: npm install failed with exit code 1";
-    const padding = "x".repeat(4096 - (SECRET.length - 10) - exitLine.length);
-    const unredacted = `${SECRET}${padding}${exitLine}`.slice(-4096);
-    expect(unredacted.startsWith(SECRET.slice(10))).toBe(true);
-
-    const failure = installFailure(
-      { exitCode: 1, stdout: `${SECRET}${padding}`, stderr: "" },
-      command,
-      [SECRET],
-    );
-
-    expect(failure.output).not.toContain(SECRET.slice(10));
-    expect(failure.output.length).toBeLessThanOrEqual(4097);
-  });
-
-  it("keeps only the last lines", () => {
-    const stdout = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
-    const lines = installFailure({ exitCode: 1, stdout, stderr: "" }, command, []).output
-      .trimEnd()
-      .split("\n");
-
-    expect(lines).toHaveLength(40);
-    expect(lines[0]).toBe("line 61");
-  });
-
-  it("sends no output or command when the secrets couldn't be loaded", () => {
-    const failure = installFailure(
-      { exitCode: 1, stdout: SECRET, stderr: SECRET },
-      `${command} --token=${SECRET}`,
-      null,
-    );
-
-    expect(failure.output).toBe("Error: The install failed with exit code 1\n");
+  it("has no code when nothing matches the strict pattern", () => {
+    for (const stderr of [
+      "",
+      "Error: something broke\n",
+      `npm error code ${SECRET}\n`,
+      "npm error code e404\n",
+    ]) {
+      expect(installFailure({ exitCode: 2, stdout: "", stderr })).toEqual({ exitCode: 2 });
+    }
   });
 });

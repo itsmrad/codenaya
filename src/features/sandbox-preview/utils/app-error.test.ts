@@ -431,13 +431,11 @@ describe("createAutoFixer (#491)", () => {
 });
 
 describe("readInstallFailure (#497)", () => {
-  const output =
-    "npm error code ERESOLVE\nnpm error ERESOLVE unable to resolve dependency tree\n" +
-    "Error: npm install failed with exit code 1\n";
-
   it("turns a sync's failed reinstall into a package.json build error", () => {
-    expect(readInstallFailure({ success: true, installFailed: { exitCode: 1, output } })).toEqual({
-      output,
+    expect(
+      readInstallFailure({ success: true, installFailed: { exitCode: 1, code: "ERESOLVE" } }, "npm install"),
+    ).toEqual({
+      output: "npm error code ERESOLVE\nError: npm install failed with exit code 1\n",
       error: {
         kind: "build",
         message: "npm install failed with exit code 1 (ERESOLVE)",
@@ -446,17 +444,23 @@ describe("readInstallFailure (#497)", () => {
     });
   });
 
-  it("shows the output but no error for a network failure", () => {
-    const network = "npm error code ETIMEDOUT\nError: npm install failed with exit code 1\n";
-    expect(readInstallFailure({ installFailed: { exitCode: 1, output: network } })).toEqual({
-      output: network,
-      error: null,
+  it("builds the message without a code when npm printed none", () => {
+    expect(readInstallFailure({ installFailed: { exitCode: 2 } }, "pnpm install")?.error).toEqual({
+      kind: "build",
+      message: "pnpm install failed with exit code 2",
+      file: "package.json",
     });
   });
 
+  it("shows no error for a network failure", () => {
+    expect(
+      readInstallFailure({ installFailed: { exitCode: 1, code: "ETIMEDOUT" } }, "npm install")?.error,
+    ).toBeNull();
+  });
+
   it("is null for a sync that installed nothing, or a malformed body", () => {
-    for (const body of [{ success: true, synced: 1 }, { installFailed: { output: 1 } }, null, "x"]) {
-      expect(readInstallFailure(body)).toBeNull();
+    for (const body of [{ success: true, synced: 1 }, { installFailed: { exitCode: "1" } }, null, "x"]) {
+      expect(readInstallFailure(body, "npm install")).toBeNull();
     }
   });
 });

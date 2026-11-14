@@ -569,70 +569,43 @@ describe("POST /api/sandbox install failure (#491)", () => {
 describe("PATCH /api/sandbox/[sandboxId] install failure (#497)", () => {
   const SECRET = "sk_live_synthetic_0123456789";
 
-  const failingSync = (stdout: string) => {
+  it("answers with the exit code and npm code only, keeps the sandbox and skips the restart", async () => {
     const run = vi.fn(async (command: string) => {
       if (command === RESTART_VITE_COMMAND) return { exitCode: 0, stdout: "", stderr: "" };
       throw new (CommandExitError as unknown as new (result: object) => Error)({
         exitCode: 1,
-        stdout,
-        stderr: "npm error code E404\n",
+        stdout: `postinstall: API_KEY=${SECRET}\n`,
+        stderr: `npm error code ERESOLVE\nnpm error ${SECRET}\n`,
         error: "exit status 1",
       });
     });
     mocks.sandboxConnect.mockResolvedValue({
       sandboxId: "sbx_patch",
-      getInfo: async () => ({ metadata: { userId: "user_1", projectId: "proj_1" } }),
+      getInfo: async () => ({ metadata: { userId: "user_1" } }),
       files: { write: vi.fn() },
       commands: { run },
     });
-    return run;
-  };
-
-  const sync = () =>
-    PATCH(
-      request("PATCH", JSON.stringify({ files: [{ path: "package.json", content: "{}" }] })),
-      { params: Promise.resolve({ sandboxId: "sbx_patch" }) },
-    );
-
-  afterEach(() => forgetSandbox("sbx_patch"));
-
-  it("answers with a redacted output tail, keeps the sandbox and skips the restart", async () => {
-    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
-    mocks.query.mockResolvedValue([]);
-    mocks.resolveProjectEnv.mockResolvedValue({
-      publicEntries: [],
-      secretEntries: [{ key: "API_KEY", value: SECRET }],
-      failedKeys: [],
-    });
-    const run = failingSync(`postinstall: API_KEY=${SECRET}\n`);
+    const sync = () =>
+      PATCH(
+        request("PATCH", JSON.stringify({ files: [{ path: "package.json", content: "{}" }] })),
+        { params: Promise.resolve({ sandboxId: "sbx_patch" }) },
+      );
 
     const response = await sync();
-    const text = await response.clone().text();
-    const body = await response.json();
+    const text = await response.text();
 
     expect(response.status).toBe(200);
     expect(text).not.toContain(SECRET);
-    expect(body.installFailed.exitCode).toBe(1);
-    expect(body.installFailed.output).toContain("API_KEY=[redacted]");
-    expect(body.installFailed.output).toContain("npm error code E404");
-    expect(body.installFailed.output).toContain(
-      `Error: ${DEFAULT_INSTALL_COMMAND} failed with exit code 1`,
-    );
+    expect(JSON.parse(text)).toEqual({
+      success: true,
+      synced: 1,
+      installFailed: { exitCode: 1, code: "ERESOLVE" },
+    });
     expect(run).not.toHaveBeenCalledWith(RESTART_VITE_COMMAND, expect.anything());
 
     // The handle stays cached: the next sync doesn't connect again.
     await sync();
     expect(mocks.sandboxConnect).toHaveBeenCalledTimes(1);
-  });
-
-  it("sends no output when the project's secrets can't be loaded", async () => {
-    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
-    mocks.query.mockRejectedValue(new Error("convex down"));
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    failingSync(`API_KEY=${SECRET}\n`);
-
-    const body = await (await sync()).json();
-
-    expect(body.installFailed.output).toBe("Error: The install failed with exit code 1\n");
+    forgetSandbox("sbx_patch");
   });
 });

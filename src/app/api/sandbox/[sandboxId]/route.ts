@@ -14,7 +14,6 @@ import {
 import { RESTART_VITE_COMMAND } from "@/features/sandbox-preview/server/restart-vite";
 import {
   installFailure,
-  sandboxSecretValues,
   type InstallFailure,
 } from "@/features/sandbox-preview/server/install-failure";
 import {
@@ -94,8 +93,8 @@ export async function POST(request: Request, { params }: RouteParams) {
  * Syncs file changes to a running sandbox for hot-reload.
  * Accepts an array of { path, content } objects. A changed package.json
  * re-runs the install so dependencies added after the boot are there (#254).
- * A failed install answers `installFailed` with a redacted output tail, so the
- * preview can show it after the boot stream has ended (#497).
+ * A failed install answers `installFailed` with its exit code and npm error
+ * code, so the preview can show it after the boot stream has ended (#497).
  */
 export async function PATCH(request: Request, { params }: RouteParams) {
   const budget = streamBudget(Date.now());
@@ -152,7 +151,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
           throw error;
         });
       if (result.exitCode !== 0) {
-        installFailed = installFailure(result, command, await sandboxSecretValues(sandbox));
+        installFailed = installFailure(result);
       } else {
         await sandbox.commands.run(RESTART_VITE_COMMAND, { cwd: WORK_DIR });
       }

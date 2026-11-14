@@ -82,13 +82,18 @@ export const detectBuildError = (chunk: string): AppError | null => {
 };
 
 /**
- * A sync's failed reinstall (#497): the output for the terminal, and the build
- * error it shows, or null when the sync installed nothing or succeeded.
+ * A sync's failed reinstall (#497): the line for the terminal, and the build
+ * error it shows (none for a network failure), or null when the sync installed
+ * nothing or succeeded. The route sends only the exit code and npm's code.
  */
-export const readInstallFailure = (body: unknown) => {
-  const failed = (body as { installFailed?: { output?: unknown } } | null)?.installFailed;
-  if (!failed || typeof failed.output !== "string") return null;
-  return { output: failed.output, error: detectBuildError(failed.output) };
+export const readInstallFailure = (body: unknown, command: string) => {
+  const failed = (body as { installFailed?: { exitCode?: unknown; code?: unknown } } | null)
+    ?.installFailed;
+  if (!failed || typeof failed.exitCode !== "number") return null;
+  const code = typeof failed.code === "string" ? `npm error code ${failed.code}\n` : "";
+  // The lines detectBuildError reads from the boot stream (#491).
+  const output = `${code}Error: ${command} failed with exit code ${failed.exitCode}\n`;
+  return { output, error: detectBuildError(output) };
 };
 
 // The overlay's location: "/home/user/app/src/App.tsx:3:20".

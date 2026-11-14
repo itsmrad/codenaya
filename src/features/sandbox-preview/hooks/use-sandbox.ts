@@ -317,7 +317,10 @@ export const useSandbox = ({
         )
         // After the boot stream ends, a failed reinstall reaches only this (#497).
         .then(async (response) => {
-          const failure = readInstallFailure(await response.json().catch(() => null));
+          const failure = readInstallFailure(
+            await response.json().catch(() => null),
+            settings?.installCommand || "npm install",
+          );
           // Not after a restart: that sandbox is gone.
           if (!failure || sandboxIdRef.current !== sandboxId) return;
           setTerminalOutput((prev) => `${prev}\npackage.json changed.\n${failure.output}`);
