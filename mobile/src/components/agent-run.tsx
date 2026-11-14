@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition, useReducedMotion } from "react-native-reanimated";
 
@@ -118,17 +118,6 @@ const liveStepLabel = (rows: Row[]) => {
   return current
     ? `${rowLabel(current, true)}${current.targets[0] ? ` ${basename(current.targets[0])}` : ""}…`
     : "Thinking…";
-};
-
-/** Ticks once a second while `active`, for the live run's timer. */
-const useNow = (active: boolean) => {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [active]);
-  return now;
 };
 
 /** A live run's orange dot, pulsing in a soft halo. Reduced motion holds it still. */
@@ -316,9 +305,6 @@ function StepRow({
   );
 }
 
-/** Rows shown while live; earlier ones hide behind "+N earlier steps". */
-const LIVE_ROWS = 4;
-
 /**
  * One assistant turn's agent activity, like the web's AgentRun: live with a
  * timer while running, then a one-line summary that expands to every step.
@@ -326,31 +312,23 @@ const LIVE_ROWS = 4;
 export function AgentRun({
   steps,
   status,
-  startedAt,
   stalled = false,
+  defaultOpen,
   onOpenFile,
 }: {
   steps: AgentStep[];
   status: "processing" | "completed" | "cancelled";
-  startedAt: number;
   /** Processing, but silent for too long (see useRunStalled). */
   stalled?: boolean;
+  /** Open once the run ends: a run watched live stays open, history starts closed. */
+  defaultOpen?: boolean;
   onOpenFile?: (path: string) => void;
 }) {
   const c = useColors();
   const live = status === "processing" && !stalled;
-  const [open, setOpen] = useState(live);
-  const toggled = useRef(false);
-  const now = useNow(live);
+  const [open, setOpen] = useState(defaultOpen ?? false);
   // Mounted mid-run: the summary settles in when it ends. History stays still.
   const [startedLive] = useState(live);
-
-  // Collapse shortly after the run ends, unless the user took control.
-  useEffect(() => {
-    if (live || toggled.current) return;
-    const timer = setTimeout(() => setOpen(false), 600);
-    return () => clearTimeout(timer);
-  }, [live]);
 
   const rows = toRows(steps);
   // Rows that arrived since the last update form a batch that fades up with a
@@ -368,7 +346,16 @@ export function AgentRun({
       .filter(Boolean),
   ).size;
   const verified = toolSteps.some((step) => step.tool === "checkBuild" && step.text === BUILD_VERIFIED);
-  const hidden = live ? Math.max(0, rows.length - LIVE_ROWS) : 0;
+
+  // While it runs, one line says what it is doing, e.g. "Editing habit-card.tsx…".
+  if (live) {
+    return (
+      <View style={styles.liveLine}>
+        <LiveDot c={c} />
+        <LiveLabel text={liveStepLabel(rows)} c={c} />
+      </View>
+    );
+  }
 
   const summary = [
     `${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`,
@@ -382,25 +369,15 @@ export function AgentRun({
       layout={LinearTransition.duration(200)}
       style={[styles.run, { backgroundColor: c.card, borderColor: c.border }]}
     >
-      {/* A `[ AGENT RUN ]` strip, as on the web's windows; live, the current step. */}
+      {/* A `[ RUN ]` strip, as on the web's windows. */}
       <Pressable
         style={({ pressed }) => [styles.header, { backgroundColor: pressed ? c.muted : c.background }]}
-        onPress={() => {
-          toggled.current = true;
-          setOpen((value) => !value);
-        }}
+        onPress={() => setOpen((value) => !value)}
         disabled={rows.length === 0}
       >
-        {live ? (
-          <>
-            <LiveDot c={c} />
-            <LiveLabel text={liveStepLabel(rows)} c={c} />
-            <Text style={[monoLabel, styles.timer, { color: c.mutedForeground }]}>{formatDuration(now - startedAt)}</Text>
-          </>
-        ) : (
           <Animated.View entering={startedLive ? FadeIn.duration(300) : undefined} style={styles.summary}>
             <View style={[styles.bar, { backgroundColor: c.brand }]} />
-            <Text style={[monoLabel, styles.flex, { color: c.mutedForeground }]}>[ Agent run ]</Text>
+            <Text style={[monoLabel, styles.flex, { color: c.mutedForeground }]}>[ Run ]</Text>
             {stalled || errors > 0 || status === "cancelled" ? (
               <>
                 <CircleAlert size={13} color={status === "cancelled" && !stalled ? c.mutedForeground : c.destructive} />
@@ -427,7 +404,6 @@ export function AgentRun({
             )}
             <Chevron open={open} c={c} />
           </Animated.View>
-        )}
       </Pressable>
       {open && rows.length > 0 && (
         <Animated.View
@@ -435,19 +411,13 @@ export function AgentRun({
           exiting={FadeOut.duration(150)}
           style={{ backgroundColor: c.card }}
         >
-          {hidden > 0 && (
-            <Text style={[styles.more, styles.earlier, { color: c.mutedForeground, borderColor: c.border }]}>
-              +{hidden} earlier {hidden === 1 ? "step" : "steps"}
-            </Text>
-          )}
-          {rows.slice(hidden).map((row, index) => {
-            const position = hidden + index;
+          {rows.map((row, index) => {
             return (
               <StepRow
                 key={row.key}
                 row={row}
                 live={live}
-                entryIndex={position >= batch.start ? position - batch.start : undefined}
+                entryIndex={index >= batch.start ? index - batch.start : undefined}
                 c={c}
                 onOpenFile={onOpenFile}
               />
@@ -468,15 +438,13 @@ const styles = StyleSheet.create({
   dotWrap: { width: 16, height: 16, alignItems: "center", justifyContent: "center" },
   halo: { position: "absolute", width: 16, height: 16, borderRadius: 8 },
   dot: { width: 8, height: 8, borderRadius: 4 },
-  timer: { fontVariant: ["tabular-nums"] },
+  liveLine: { flexDirection: "row", alignItems: "center", gap: 10 },
   step: { borderTopWidth: 1 },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 11 },
   rowText: { flex: 1, fontSize: 13, fontFamily: font.regular },
   target: { fontFamily: font.mono, fontSize: 12.5 },
   path: { flex: 1, fontSize: 13, fontFamily: font.mono },
   result: { fontSize: 12, fontFamily: font.mono, maxWidth: "40%" },
-  more: { fontSize: 12, fontFamily: font.regular },
-  earlier: { borderTopWidth: 1, paddingLeft: 38, paddingVertical: 9 },
   thought: { marginLeft: 38, borderLeftWidth: 1, paddingLeft: 12, marginBottom: 10 },
   thoughtText: { fontSize: 12.5, lineHeight: 19, fontFamily: font.regular },
   error: { fontSize: 12, paddingLeft: 38, paddingRight: 14, paddingBottom: 10, fontFamily: font.regular },

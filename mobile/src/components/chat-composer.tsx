@@ -16,7 +16,7 @@ import {
 import Animated from "react-native-reanimated";
 
 import { Corners, LabelStrip, Orbit, monoLabel } from "@/components/grid";
-import { ArrowUp, Check, ChevronDown, ListChecks, Paperclip, Slash, Square, Undo2, WandSparkles, X } from "@/components/icons";
+import { ArrowUp, Check, ChevronDown, ListChecks, Paperclip, Slash, Sparkle, Square, Undo2, WandSparkles, X } from "@/components/icons";
 import { Sheet, SheetRow, SheetSection } from "@/components/sheet";
 import type { useAgentModel } from "@/lib/agent-model";
 import { postApi } from "@/lib/http";
@@ -29,6 +29,7 @@ type AgentModel = ReturnType<typeof useAgentModel>;
 function ToolButton({
   icon,
   label,
+  trailing,
   active,
   disabled,
   onPress,
@@ -38,6 +39,7 @@ function ToolButton({
 }: {
   icon: ReactNode;
   label?: string;
+  trailing?: ReactNode;
   /** Gives up width first, truncating its label (the model name). */
   shrink?: boolean;
   active?: boolean;
@@ -60,12 +62,13 @@ function ToolButton({
         disabled && styles.disabled,
       ]}
     >
+      {icon}
       {label && (
         <Text style={[styles.toolText, shrink && styles.shrink, { color: c.foreground }]} numberOfLines={1}>
           {label}
         </Text>
       )}
-      {icon}
+      {trailing}
     </Pressable>
   );
 }
@@ -285,13 +288,38 @@ export function ChatComposer({
                 onFocusChange?.(false);
               }}
               placeholder={
-                running ? "Codenaya is working…" : planMode ? "Describe what to plan…" : "Ask Codenaya to change something…"
+                planMode ? "Describe what to plan…" : skills.length > 0 ? "Ask for a change, or type / for skills…" : "Ask for a change…"
               }
               placeholderTextColor={c.mutedForeground}
               multiline
             />
             {/* One row of cells, no scrolling: the model name truncates so every tool fits. */}
             <View style={[styles.footer, { borderColor: c.border }]}>
+              <ToolButton
+                c={c}
+                accessibilityLabel="Attach images"
+                icon={<Paperclip size={15} color={c.mutedForeground} />}
+                onPress={pickImages}
+                disabled={busy || running || images.length >= MAX_CHAT_IMAGES}
+              />
+              <ToolButton
+                c={c}
+                accessibilityLabel="Agent model"
+                icon={<Sparkle size={14} color={c.mutedForeground} />}
+                label={modelName}
+                trailing={<ChevronDown size={13} color={c.mutedForeground} />}
+                shrink
+                onPress={() => setSheet("model")}
+                disabled={running}
+              />
+              <ToolButton
+                c={c}
+                accessibilityLabel="Plan mode"
+                icon={<ListChecks size={15} color={planMode ? c.brandText : c.mutedForeground} />}
+                active={planMode}
+                onPress={() => onPlanModeChange(!planMode)}
+                disabled={running}
+              />
               {canUndo ? (
                 <ToolButton
                   c={c}
@@ -314,30 +342,6 @@ export function ChatComposer({
                   disabled={running || enhancing || !text.trim()}
                 />
               )}
-              <ToolButton
-                c={c}
-                accessibilityLabel="Attach images"
-                icon={<Paperclip size={15} color={c.mutedForeground} />}
-                onPress={pickImages}
-                disabled={busy || running || images.length >= MAX_CHAT_IMAGES}
-              />
-              <ToolButton
-                c={c}
-                accessibilityLabel="Agent model"
-                icon={<ChevronDown size={13} color={c.mutedForeground} />}
-                label={modelName}
-                shrink
-                onPress={() => setSheet("model")}
-                disabled={running}
-              />
-              <ToolButton
-                c={c}
-                accessibilityLabel="Plan mode"
-                icon={<ListChecks size={15} color={planMode ? c.brandText : c.mutedForeground} />}
-                active={planMode}
-                onPress={() => onPlanModeChange(!planMode)}
-                disabled={running}
-              />
               {skills.length > 0 && (
                 <ToolButton
                   c={c}

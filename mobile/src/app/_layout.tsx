@@ -96,7 +96,9 @@ function Screens() {
     <SheetHost>
       <Stack
         screenOptions={{
-          header: GridHeader,
+          // As an element: the stack calls `header` as a plain function, so a
+          // screen that swaps in its own header would change the hook count.
+          header: (props) => <GridHeader {...props} />,
           // iOS keeps its native push; Android gets the same slide-over (its
           // default fades and jumps), played in reverse on back.
           animation: Platform.OS === "android" ? "ios_from_right" : "default",
@@ -113,7 +115,6 @@ function Screens() {
           />
           <Stack.Screen name="projects/index" options={{ title: "All projects" }} />
         <Stack.Screen name="projects/[id]/index" options={{ title: "" }} />
-          <Stack.Screen name="projects/[id]/files" options={{ title: "Files" }} />
           <Stack.Screen name="projects/[id]/file" options={{ title: "" }} />
         <Stack.Screen name="projects/[id]/integrations" options={{ title: "Integrations & env" }} />
         <Stack.Screen name="settings/index" options={{ title: "Settings" }} />

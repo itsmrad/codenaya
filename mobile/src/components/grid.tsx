@@ -153,34 +153,44 @@ const STATUS_GAP = 10;
  */
 export function GridHeader({ back, options, route, navigation }: NativeStackHeaderProps) {
   const c = useColors();
-  const insets = useSafeAreaInsets();
   const title = typeof options.headerTitle === "string" ? options.headerTitle : (options.title ?? route.name);
   const item = { tintColor: c.foreground, canGoBack: back != null };
   return (
-    // The status bar sits above its own rule, as in the mockup, with room
-    // below it to match the gap above the camera cutout.
+    <HeaderFrame>
+      {options.headerLeft ? (
+        <View style={styles.headerCell}>{options.headerLeft(item)}</View>
+      ) : (
+        back && (
+          <Pressable
+            onPress={navigation.goBack}
+            accessibilityLabel="Back"
+            style={({ pressed }) => [styles.backCell, { borderColor: c.border }, pressed && { backgroundColor: c.muted }]}
+          >
+            <ChevronLeft size={20} color={c.foreground} />
+          </Pressable>
+        )
+      )}
+      <Text style={[styles.headerTitle, { color: c.foreground }]} numberOfLines={1}>
+        {title}
+      </Text>
+      {options.headerRight && (
+        <View style={[styles.headerRight, { borderColor: c.border }]}>{options.headerRight(item)}</View>
+      )}
+    </HeaderFrame>
+  );
+}
+
+/**
+ * A header's frame: the status bar sits above its own rule, as in the mockup,
+ * with room below it to match the gap above the camera cutout. A screen with
+ * its own cells (the project) fills it directly.
+ */
+export function HeaderFrame({ children }: { children: ReactNode }) {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+  return (
     <View style={{ paddingTop: insets.top + STATUS_GAP, backgroundColor: c.background }}>
-      <View style={[styles.header, { borderColor: c.border }]}>
-        {options.headerLeft ? (
-          <View style={styles.headerCell}>{options.headerLeft(item)}</View>
-        ) : (
-          back && (
-            <Pressable
-              onPress={navigation.goBack}
-              accessibilityLabel="Back"
-              style={({ pressed }) => [styles.backCell, { borderColor: c.border }, pressed && { backgroundColor: c.muted }]}
-            >
-              <ChevronLeft size={20} color={c.foreground} />
-            </Pressable>
-          )
-        )}
-        <Text style={[styles.headerTitle, { color: c.foreground }]} numberOfLines={1}>
-          {title}
-        </Text>
-        {options.headerRight && (
-          <View style={[styles.headerRight, { borderColor: c.border }]}>{options.headerRight(item)}</View>
-        )}
-      </View>
+      <View style={[styles.header, { borderColor: c.border }]}>{children}</View>
     </View>
   );
 }

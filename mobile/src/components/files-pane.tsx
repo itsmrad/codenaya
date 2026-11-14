@@ -1,9 +1,9 @@
 import { useMutation, useQuery } from "convex/react";
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 
-import type { Doc, Id } from "../../../../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { confirm, toast } from "@/components/dialogs";
 import { monoLabel } from "@/components/grid";
 import {
@@ -47,15 +47,14 @@ const ICONS: Record<string, [LucideIcon, string]> = {
 };
 
 /**
- * The project's files as a tree, like the web's file explorer: folders open in
- * place, + creates a file or folder at the root, and long-press renames,
- * deletes or (on a folder) creates inside it.
+ * The project's files as a tree (the project's Code tab), like the web's file
+ * explorer: folders open in place, + creates a file or folder at the root, and
+ * long-press renames, deletes or (on a folder) creates inside it.
  */
-export default function Files() {
+export function FilesPane({ projectId }: { projectId: Id<"projects"> }) {
   const c = useColors();
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const projectId = id as Id<"projects">;
+  const id = projectId;
   // The chat already subscribes to these, so they are usually cached.
   const project = useQuery(api.projects.getById, { id: projectId });
   const files = useQuery(api.files.getFiles, { projectId });
@@ -142,19 +141,6 @@ export default function Files() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerRight: () => (
-            <Pressable
-              onPress={() => setSheet("new")}
-              accessibilityLabel="New file or folder"
-              style={({ pressed }) => [styles.headerButton, pressed && { backgroundColor: c.muted }]}
-            >
-              <Plus size={20} color={c.foreground} />
-            </Pressable>
-          ),
-        }}
-      />
       <View style={[styles.crumb, { backgroundColor: c.card, borderColor: c.border }]}>
         <Folder size={16} color={c.mutedForeground} />
         <Text style={[styles.crumbText, { color: c.mutedForeground }]} numberOfLines={1}>
@@ -163,6 +149,13 @@ export default function Files() {
         <Text style={[monoLabel, { color: c.mutedForeground }]}>
           {files.filter((file) => file.type === "file").length} files
         </Text>
+        <Pressable
+          onPress={() => setSheet("new")}
+          accessibilityLabel="New file or folder"
+          style={({ pressed }) => [styles.add, { borderColor: c.border }, pressed && { backgroundColor: c.muted }]}
+        >
+          <Plus size={18} color={c.foreground} />
+        </Pressable>
       </View>
       <FlatList
         data={rows}
@@ -255,8 +248,8 @@ export default function Files() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  headerButton: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
-  crumb: { height: 36, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, borderBottomWidth: 1 },
+  crumb: { height: 40, flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 16, borderBottomWidth: 1 },
+  add: { width: 48, alignSelf: "stretch", alignItems: "center", justifyContent: "center", borderLeftWidth: 1 },
   crumbText: { flex: 1, fontSize: 12, fontFamily: font.mono },
   row: { height: 44, flexDirection: "row", alignItems: "center", gap: 10, paddingRight: 16, borderBottomWidth: 1 },
   chevron: { width: 16 },

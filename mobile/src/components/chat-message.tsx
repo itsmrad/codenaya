@@ -204,18 +204,21 @@ export function AssistantMessage({
   return (
     // Seen running: it settles in. A reply loaded from history stays still.
     <Animated.View entering={startedProcessing ? fadeUp() : undefined} style={styles.assistant}>
-      <View style={styles.meta}>
-        <Logo size={13} wordmark={false} />
-        <Text style={[monoLabel, styles.flex, { color: c.mutedForeground }]} numberOfLines={1}>
-          {meta}
-        </Text>
-      </View>
+      {/* While it runs, the run's live line stands alone. */}
+      {(status !== "processing" || stalled) && (
+        <View style={styles.meta}>
+          <Logo size={13} wordmark={false} />
+          <Text style={[monoLabel, styles.flex, { color: c.mutedForeground }]} numberOfLines={1}>
+            {meta}
+          </Text>
+        </View>
+      )}
       {(status === "processing" || steps.length > 0) && (
         <AgentRun
           steps={steps}
           status={status}
           stalled={stalled}
-          startedAt={message._creationTime}
+          defaultOpen={startedProcessing}
           onOpenFile={onOpenFile}
         />
       )}

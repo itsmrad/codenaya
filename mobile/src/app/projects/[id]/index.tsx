@@ -3,7 +3,7 @@ import { useConvex, useMutation, useQuery } from "convex/react";
 import type { ImagePickerAsset } from "expo-image-picker";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -19,27 +19,53 @@ import Animated, { useAnimatedKeyboard, useAnimatedStyle } from "react-native-re
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { confirm, toast } from "@/components/dialogs";
 import { ChatComposer } from "@/components/chat-composer";
+import { FilesPane } from "@/components/files-pane";
+import { PreviewPane } from "@/components/preview-pane";
 import { ChatEmptyState } from "@/components/chat-empty-state";
 import { AssistantMessage, UserMessage, useRunStalled } from "@/components/chat-message";
 import { GithubExportSheet } from "@/components/github-export-sheet";
 import { GitHubIcon } from "@/components/github-icon";
-import { DotGrid, monoLabel } from "@/components/grid";
-import { ClockArrowUp, Download, ExternalLink, FolderTree, History, MoreHorizontal, Plug, Plus, Sparkles } from "@/components/icons";
+import { DotGrid, HeaderFrame, monoLabel } from "@/components/grid";
+import {
+  ChevronDown,
+  CodeXml,
+  Download,
+  ExternalLink,
+  Eye,
+  History,
+  type LucideIcon,
+  MessageSquare,
+  MessagesSquare,
+  MoreHorizontal,
+  Plug,
+  Plus,
+  Sparkles,
+} from "@/components/icons";
+import { Logo } from "@/components/logo";
 import { Sheet, SheetRow } from "@/components/sheet";
+import { UserAvatar } from "@/components/user-avatar";
 import { useAgentModel } from "@/lib/agent-model";
 import { api } from "@/lib/api";
 import { useUploadChatImages } from "@/lib/chat-images";
+import { useSandbox } from "@/lib/sandbox";
 import { takeFirstMessage } from "@/lib/create-project";
 import { timeAgo } from "@/lib/format";
 import { postApi, webUrl } from "@/lib/http";
 import { shareProjectZip } from "@/lib/project-zip";
-import { PLAN_MODE, buildPathIndex, buildPlanMessage } from "@/lib/shared";
+import { PLAN_MODE, buildPathIndex, buildPlanMessage, hasRootPackageJson } from "@/lib/shared";
 import { font, useColors } from "@/lib/theme";
 
 /** Same title the web gives a new conversation (DEFAULT_CONVERSATION_TITLE). */
 const NEW_CONVERSATION_TITLE = "New conversation";
 
 type MessageMode = typeof PLAN_MODE | undefined;
+
+const TABS: { key: Tab; label: string; Icon: LucideIcon }[] = [
+  { key: "chat", label: "Chat", Icon: MessageSquare },
+  { key: "code", label: "Code", Icon: CodeXml },
+  { key: "preview", label: "Preview", Icon: Eye },
+];
+type Tab = "chat" | "code" | "preview";
 
 /** The export job's state, under "Export to GitHub" in the menu. */
 const EXPORT_STATUS = {
@@ -51,9 +77,9 @@ const EXPORT_STATUS = {
 };
 
 /**
- * A project's chat, like the web's conversation panel: conversations (new,
- * past), version history, live run steps, and a composer with model, plan
- * mode, skills, images and enhance.
+ * A project, like the web's IDE in three tabs: the chat (conversations, version
+ * history, live runs, and a composer with model, plan mode, skills, images and
+ * enhance), the code, and the preview.
  */
 export default function ProjectChat() {
   const c = useColors();
@@ -63,14 +89,15 @@ export default function ProjectChat() {
   // Translucent bars: the app draws edge to edge, so the hook must not inset
   // the root view under the status bar (or turn edge to edge off on unmount).
   const keyboard = useAnimatedKeyboard({ isStatusBarTranslucentAndroid: true, isNavigationBarTranslucentAndroid: true });
-  // The composer sits on the keyboard when it is up, else above the gesture bar.
-  const bottom = useAnimatedStyle(() => ({ paddingBottom: Math.max(keyboard.height.value, insets.bottom) }));
+  // The screen ends at the keyboard while it is up; the tab bar clears the gesture bar.
+  const bottom = useAnimatedStyle(() => ({ paddingBottom: keyboard.height.value }));
   const router = useRouter();
   const { getToken } = useAuth();
   const { id } = useLocalSearchParams<{ id: string }>();
   const projectId = id as Id<"projects">;
 
   const project = useQuery(api.projects.getById, { id: projectId });
+  const projects = useQuery(api.projects.get);
   const conversations = useQuery(api.conversations.getByProject, { projectId });
   const [selectedId, setSelectedId] = useState<Id<"conversations">>();
   const conversationId = selectedId ?? conversations?.[0]?._id;
@@ -94,7 +121,18 @@ export default function ProjectChat() {
 
   const [planMode, setPlanMode] = useState(false);
   const [typing, setTyping] = useState(false);
-  const [sheet, setSheet] = useState<"menu" | "conversations" | "versions" | "export" | "skills">();
+  const [tab, setTab] = useState<Tab>("chat");
+  // The sandbox boots the first time Preview opens, then runs until the project closes.
+  const [previewOpened, setPreviewOpened] = useState(false);
+  const previewFiles = useQuery(api.files.getFilesWithUrls, previewOpened ? { projectId } : "skip");
+  const hasPackageJson = previewFiles && hasRootPackageJson(previewFiles);
+  const sandbox = useSandbox({
+    projectId,
+    files: previewFiles,
+    enabled: Boolean(hasPackageJson),
+    settings: project?.settings,
+  });
+  const [sheet, setSheet] = useState<"menu" | "projects" | "conversations" | "versions" | "export" | "skills">();
   // Shown at once, until the request saves the real message (as on the web).
   const [pending, setPending] = useState<{ text: string; imageUrls: string[] }>();
 
@@ -162,7 +200,6 @@ export default function ProjectChat() {
   };
 
   const newConversation = async () => {
-    setSheet(undefined);
     try {
       setSelectedId(await createConversation({ projectId, title: NEW_CONVERSATION_TITLE }));
     } catch {
@@ -192,130 +229,163 @@ export default function ProjectChat() {
   const lastId = messages?.at(-1)?._id;
 
   return (
-    <View style={styles.flex}>
+    <Animated.View style={[styles.flex, bottom]}>
       <Stack.Screen
         options={{
-          title: project.name,
-          // Two header cells: files, then the menu.
-          headerRight: () => (
-            <>
+          // The project's own header cells: logo, name (switches project), menu, account.
+          header: () => (
+            <HeaderFrame>
+              <HeaderCell label="Dashboard" onPress={() => router.dismissTo("/")} edge="right">
+                <Logo size={22} wordmark={false} />
+              </HeaderCell>
               <Pressable
-                onPress={() => router.push({ pathname: "/projects/[id]/files", params: { id } })}
-                accessibilityLabel="Files"
-                style={({ pressed }) => [styles.headerButton, pressed && { backgroundColor: c.muted }]}
+                onPress={() => setSheet("projects")}
+                accessibilityLabel="Switch project"
+                style={({ pressed }) => [styles.nameCell, pressed && { backgroundColor: c.muted }]}
               >
-                <FolderTree size={18} color={c.foreground} />
+                <Text style={[styles.name, { color: c.foreground }]} numberOfLines={1}>
+                  {project.name}
+                </Text>
+                <ChevronDown size={16} color={c.mutedForeground} />
               </Pressable>
-              <Pressable
-                onPress={() => setSheet("menu")}
-                accessibilityLabel="Conversation menu"
-                style={({ pressed }) => [
-                  styles.headerButton,
-                  { borderLeftWidth: 1, borderColor: c.border },
-                  pressed && { backgroundColor: c.muted },
-                ]}
-              >
+              <HeaderCell label="Project menu" onPress={() => setSheet("menu")}>
                 <MoreHorizontal size={20} color={c.foreground} />
-              </Pressable>
-            </>
+              </HeaderCell>
+              <HeaderCell label="Settings" onPress={() => router.push("/settings")} wide>
+                <UserAvatar size={32} />
+              </HeaderCell>
+            </HeaderFrame>
           ),
         }}
       />
-      <View style={[styles.conversation, { backgroundColor: c.card, borderColor: c.border }]}>
-        <View style={[styles.bar, { backgroundColor: c.brand }]} />
-        <Text style={[styles.conversationTitle, { color: c.foreground }]} numberOfLines={1}>
-          {conversation?.title ?? NEW_CONVERSATION_TITLE}
-        </Text>
-        {messages && messages.length > 0 && (
-          <Text style={[monoLabel, { color: c.mutedForeground }]}>
-            {messages.length} {messages.length === 1 ? "message" : "messages"}
-          </Text>
-        )}
-      </View>
 
-      <View style={styles.flex}>
-        <DotGrid />
-        {messages === undefined && conversationId ? (
-          <ActivityIndicator style={styles.flex} color={c.mutedForeground} />
-        ) : !messages?.length && !pending ? (
-          <ChatEmptyState typing={typing} onSelect={(prompt) => send(prompt, []).then(report)} />
-        ) : (
-          <FlatList
-            // Inverted: the newest message sits at the bottom and new steps keep
-            // it in view without manual scrolling.
-            inverted
-            data={ordered}
-            keyExtractor={(message) => message._id}
-            contentContainerStyle={styles.list}
-            keyboardShouldPersistTaps="handled"
-            // The list is inverted, so its header sits below the newest message.
-            ListHeaderComponent={
-              pending && (
-                <View style={styles.pending}>
-                  <UserMessage content={pending.text} imageUrls={pending.imageUrls} skillNames={skillNames} animate />
-                </View>
-              )
-            }
-            renderItem={({ item, index }) => {
-              if (item.role === "user") {
-                return (
-                  <UserMessage
-                    content={item.content}
-                    time={item._creationTime}
-                    imageUrls={item.imageUrls}
-                    skillNames={skillNames}
-                    animate={Boolean(history && !history.ids.has(item._id)) && !pending}
-                  />
-                );
-              }
-              const checkpoint = checkpointByMessage.get(item._id);
-              return (
-                <AssistantMessage
-                  message={item}
-                  isLast={item._id === lastId}
-                  pathOf={pathOf}
-                  onOpenFile={openFile}
-                  onRetry={() => {
-                    // The prompt before this reply, resent as-is in the reply's mode.
-                    const prompt = ordered.slice(index + 1).find((message) => message.role === "user");
-                    if (prompt) sendMessage(prompt.content, prompt.images, item.mode).then(report, unreachable);
-                  }}
-                  onBuildPlan={() => {
-                    setPlanMode(false);
-                    sendMessage(buildPlanMessage(item.content)).then(report, unreachable);
-                  }}
-                  onRestore={checkpoint && !running ? () => confirmRestore(checkpoint) : undefined}
-                />
-              );
-            }}
-          />
-        )}
-      </View>
-      <Animated.View style={[{ backgroundColor: c.background }, bottom]}>
-        <ChatComposer
-          running={running}
-          agent={agent}
-          planMode={planMode}
-          onPlanModeChange={setPlanMode}
-          skills={enabledSkills}
-          onSend={send}
-          onStop={stop}
-          onFocusChange={setTyping}
-        />
-      </Animated.View>
+      {tab === "chat" ? (
+        <>
+          {/* The chat's strip: the conversation's title, version history, past conversations and a new one. */}
+          <View style={[styles.strip, { borderColor: c.border }]}>
+            <View style={[styles.bar, { backgroundColor: c.brand }]} />
+            <Text style={[styles.conversationTitle, { color: c.foreground }]} numberOfLines={1}>
+              {conversation?.title ?? NEW_CONVERSATION_TITLE}
+            </Text>
+            <StripCell label="Version history" onPress={() => setSheet("versions")}>
+              <History size={17} color={c.foreground} />
+            </StripCell>
+            <StripCell label="Past conversations" onPress={() => setSheet("conversations")}>
+              <MessagesSquare size={17} color={c.foreground} />
+            </StripCell>
+            <StripCell label="New conversation" onPress={newConversation} wide>
+              <Plus size={16} color={c.foreground} />
+              <Text style={[monoLabel, { color: c.foreground }]}>New</Text>
+            </StripCell>
+          </View>
+
+          <View style={styles.flex}>
+            <DotGrid />
+            {messages === undefined && conversationId ? (
+              <ActivityIndicator style={styles.flex} color={c.mutedForeground} />
+            ) : !messages?.length && !pending ? (
+              <ChatEmptyState typing={typing} onSelect={(prompt) => send(prompt, []).then(report)} />
+            ) : (
+              <FlatList
+                // Inverted: the newest message sits at the bottom and new steps keep
+                // it in view without manual scrolling.
+                inverted
+                data={ordered}
+                keyExtractor={(message) => message._id}
+                contentContainerStyle={styles.list}
+                keyboardShouldPersistTaps="handled"
+                // The list is inverted, so its header sits below the newest message.
+                ListHeaderComponent={
+                  pending && (
+                    <View style={styles.pending}>
+                      <UserMessage content={pending.text} imageUrls={pending.imageUrls} skillNames={skillNames} animate />
+                    </View>
+                  )
+                }
+                renderItem={({ item, index }) => {
+                  if (item.role === "user") {
+                    return (
+                      <UserMessage
+                        content={item.content}
+                        time={item._creationTime}
+                        imageUrls={item.imageUrls}
+                        skillNames={skillNames}
+                        animate={Boolean(history && !history.ids.has(item._id)) && !pending}
+                      />
+                    );
+                  }
+                  const checkpoint = checkpointByMessage.get(item._id);
+                  return (
+                    <AssistantMessage
+                      message={item}
+                      isLast={item._id === lastId}
+                      pathOf={pathOf}
+                      onOpenFile={openFile}
+                      onRetry={() => {
+                        // The prompt before this reply, resent as-is in the reply's mode.
+                        const prompt = ordered.slice(index + 1).find((message) => message.role === "user");
+                        if (prompt) sendMessage(prompt.content, prompt.images, item.mode).then(report, unreachable);
+                      }}
+                      onBuildPlan={() => {
+                        setPlanMode(false);
+                        sendMessage(buildPlanMessage(item.content)).then(report, unreachable);
+                      }}
+                      onRestore={checkpoint && !running ? () => confirmRestore(checkpoint) : undefined}
+                    />
+                  );
+                }}
+              />
+            )}
+          </View>
+          <View style={{ backgroundColor: c.background }}>
+            <ChatComposer
+              running={running}
+              agent={agent}
+              planMode={planMode}
+              onPlanModeChange={setPlanMode}
+              skills={enabledSkills}
+              onSend={send}
+              onStop={stop}
+              onFocusChange={setTyping}
+            />
+          </View>
+        </>
+      ) : tab === "code" ? (
+        <FilesPane projectId={projectId} />
+      ) : (
+        <PreviewPane sandbox={sandbox} hasPackageJson={hasPackageJson} />
+      )}
+
+      {/* Chat, Code and Preview; hidden while typing, so the composer sits on the keyboard. */}
+      {!typing && (
+        <View style={[styles.tabs, { borderColor: c.border, paddingBottom: insets.bottom }]}>
+          {TABS.map(({ key, label, Icon }, index) => {
+            const active = tab === key;
+            return (
+              <Pressable
+                key={key}
+                onPress={() => {
+                  setTab(key);
+                  if (key === "preview") setPreviewOpened(true);
+                }}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                style={[
+                  styles.tab,
+                  { backgroundColor: active ? c.card : c.background, borderColor: c.border },
+                  index > 0 && styles.tabDivider,
+                ]}
+              >
+                <View style={[styles.tabMark, { backgroundColor: active ? c.brand : "transparent" }]} />
+                <Icon size={18} color={active ? c.foreground : c.mutedForeground} />
+                <Text style={[monoLabel, { color: active ? c.foreground : c.mutedForeground }]}>{label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
 
       <Sheet visible={sheet === "menu"} title={project.name} onClose={() => setSheet(undefined)}>
-        <SheetRow label="New conversation" icon={<Plus size={16} color={c.foreground} />} onPress={newConversation} />
-        <SheetRow
-          label="Past conversations"
-          icon={<History size={16} color={c.foreground} />}
-          onPress={() => setSheet("conversations")}
-        />
-        <SheetRow
-          label="Version history"
-          icon={<ClockArrowUp size={16} color={c.foreground} />}
-          onPress={() => setSheet("versions")}
-        />
         <SheetRow
           label="Skills"
           detail={`${enabledSkills.length} enabled`}
@@ -354,6 +424,23 @@ export default function ProjectChat() {
             WebBrowser.openBrowserAsync(webUrl(`/projects/${projectId}`));
           }}
         />
+      </Sheet>
+
+      <Sheet visible={sheet === "projects"} title="Projects" onClose={() => setSheet(undefined)}>
+        {[...(projects ?? [])]
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .map((item) => (
+            <SheetRow
+              key={item._id}
+              label={item.name}
+              detail={timeAgo(item.updatedAt)}
+              selected={item._id === projectId}
+              onPress={() => {
+                setSheet(undefined);
+                if (item._id !== projectId) router.replace({ pathname: "/projects/[id]", params: { id: item._id } });
+              }}
+            />
+          ))}
       </Sheet>
 
       <Sheet
@@ -464,16 +551,80 @@ export default function ProjectChat() {
           );
         })}
       </Sheet>
-    </View>
+    </Animated.View>
+  );
+}
+
+/** A square header cell: an icon or the avatar, split off by a rule. */
+function HeaderCell({
+  label,
+  onPress,
+  edge = "left",
+  wide,
+  children,
+}: {
+  label: string;
+  onPress: () => void;
+  edge?: "left" | "right";
+  wide?: boolean;
+  children: ReactNode;
+}) {
+  const c = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityLabel={label}
+      style={({ pressed }) => [
+        styles.headerCell,
+        wide && styles.wideCell,
+        edge === "left" ? styles.ruleLeft : styles.ruleRight,
+        { borderColor: c.border },
+        pressed && { backgroundColor: c.muted },
+      ]}
+    >
+      {children}
+    </Pressable>
+  );
+}
+
+/** A cell on the chat's strip, split off by a rule. */
+function StripCell({ label, onPress, wide, children }: { label: string; onPress: () => void; wide?: boolean; children: ReactNode }) {
+  const c = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityLabel={label}
+      style={({ pressed }) => [
+        styles.stripCell,
+        wide && styles.stripWide,
+        { borderColor: c.border },
+        pressed && { backgroundColor: c.muted },
+      ]}
+    >
+      {children}
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  headerButton: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
-  conversation: { height: 40, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, borderBottomWidth: 1 },
+  headerCell: { width: 44, alignItems: "center", justifyContent: "center" },
+  wideCell: { width: 52 },
+  ruleLeft: { borderLeftWidth: 1 },
+  ruleRight: { borderRightWidth: 1 },
+  nameCell: { flex: 1, height: 48, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14 },
+  name: { flexShrink: 1, fontSize: 17, letterSpacing: -0.2, fontFamily: font.medium },
+  // No gap: it would sit inside each cell's rule and push its icon off centre.
+  strip: { height: 40, flexDirection: "row", alignItems: "center", paddingLeft: 16, borderBottomWidth: 1 },
+  stripCell: { width: 44, alignSelf: "stretch", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderLeftWidth: 1 },
+  stripWide: { width: undefined, paddingHorizontal: 16 },
   bar: { width: 2, height: 12 },
-  conversationTitle: { flex: 1, fontSize: 14, fontFamily: font.medium },
+  conversationTitle: { flex: 1, fontSize: 14, fontFamily: font.medium, marginLeft: 10, marginRight: 12 },
+  tabs: { flexDirection: "row", borderTopWidth: 1 },
+  tab: { flex: 1, height: 56, alignItems: "center", justifyContent: "center", gap: 4 },
+  tabDivider: { borderLeftWidth: 1 },
+  // The active tab's orange rule along its top edge.
+  tabMark: { position: "absolute", top: -1, left: 0, right: 0, height: 2 },
   list: { padding: 16, gap: 24 },
   pending: { opacity: 0.6, marginTop: 18 },
   sheetEmpty: { textAlign: "center", paddingVertical: 24, fontSize: 14, fontFamily: font.regular },
