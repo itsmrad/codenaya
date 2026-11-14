@@ -59,6 +59,7 @@ export async function copyProjectFiles(
       name: file.name,
       type: file.type,
       storageId: file.storageId,
+      locked: file.locked,
       updatedAt: now,
     });
     if (file.content !== undefined) {

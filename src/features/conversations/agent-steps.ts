@@ -60,6 +60,10 @@ export const buildPathIndex = (files: PathIndexFile[]) => {
   return (id: string) => pathOf(id);
 };
 
+/** A write tool's error for a path the user locked from AI edits (#307). */
+export const lockedPathMessage = (path: string) =>
+  `${path} is locked by the user. Don't modify it; explain the change you'd make instead.`;
+
 /**
  * A project-relative path without a leading "./" or trailing "/", or undefined
  * when it is absolute or has empty, "." or ".." segments (#292).

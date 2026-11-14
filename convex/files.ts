@@ -1,4 +1,4 @@
-import { buildPathIndex } from "../src/features/conversations/agent-steps";
+import { buildPathIndex, lockedPathMessage } from "../src/features/conversations/agent-steps";
 import { compilePathGlob, compileSearch, MAX_SEARCH_RESULTS, SEARCH_BYTE_BUDGET, REGEX_SEARCH_BYTE_BUDGET, MAX_SEARCH_CONTENT_LOOKUPS, SEARCH_TRUNCATED } from "../src/features/conversations/file-search";
 import { validateInternalKey } from "./internalKey";
 import { v } from "convex/values";
@@ -53,6 +53,61 @@ export const assertProjectFolder = async (
     throw new Error("Parent folder not found");
   }
 };
+
+// `fileId` and the folders above it, nearest first.
+const withAncestors = async (
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  fileId: Id<"files"> | undefined
+) => {
+  const chain: Doc<"files">[] = [];
+  for (let id = fileId; id; ) {
+    const file = await getProjectFile(ctx, projectId, id);
+    if (!file) break;
+    chain.push(file);
+    id = file.parentId;
+  }
+  return chain;
+};
+
+const chainPath = (chain: Doc<"files">[]) =>
+  chain.map((file) => file.name).reverse().join("/");
+
+/**
+ * The path of `name` inside folder `fileId` (or of `fileId` itself), if it or a
+ * folder above it is locked by the user (#307); null when the write may go ahead.
+ */
+export const lockedPath = async (
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  fileId: Id<"files"> | undefined,
+  name?: string
+) => {
+  const chain = await withAncestors(ctx, projectId, fileId);
+  if (!chain.some((file) => file.locked)) return null;
+  return name === undefined ? chainPath(chain) : `${chainPath(chain)}/${name}`;
+};
+
+/** Like `lockedPath`, but a folder is also locked by a locked file or folder inside it. */
+export const lockedPathUnder = async (ctx: QueryCtx, file: Doc<"files">) => {
+  const own = await lockedPath(ctx, file.projectId, file._id);
+  if (own || file.type !== "folder") return own;
+  const locked = ctx.db
+    .query("files")
+    .withIndex("by_project_and_locked", (q) =>
+      q.eq("projectId", file.projectId).eq("locked", true)
+    );
+  // Bounded by what the user locked by hand.
+  for await (const row of locked) {
+    const chain = await withAncestors(ctx, file.projectId, row._id);
+    if (chain.some((ancestor) => ancestor._id === file._id)) return chainPath(chain);
+  }
+  return null;
+};
+
+/** The tool error the agent reads for a locked path (#307). */
+export const lockedError = (path: string) =>
+  appError("FORBIDDEN", lockedPathMessage(path));
 
 /** The caller's file and its project, which must not be mid-deletion (#212). */
 export const getOwnedFile = async (
@@ -384,6 +439,19 @@ export const updateFile = mutation({
     await ctx.db.patch("projects", file.projectId, {
       updatedAt: Date.now(),
     });
+  },
+});
+
+/** Locks a file or folder (and everything in it) from AI edits, or unlocks it (#307). */
+export const setLocked = mutation({
+  args: { id: v.id("files"), locked: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+    await getOwnedFile(ctx, args.id, identity.subject);
+    // Unlocked rows drop the field, so the lock index holds only locked rows.
+    await ctx.db.patch("files", args.id, { locked: args.locked || undefined });
+    return null;
   },
 });
 
