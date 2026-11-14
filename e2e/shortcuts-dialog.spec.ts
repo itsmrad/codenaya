@@ -47,7 +47,7 @@ test.describe("keyboard shortcut sheet", () => {
   });
 
   test("the command palette has a Keyboard shortcuts item", async ({ page }) => {
-    const palette = page.getByRole("dialog", { name: "Search Projects" });
+    const palette = page.getByRole("dialog", { name: "Command palette" });
     await expect(async () => {
       await page.keyboard.press("ControlOrMeta+k");
       await expect(palette).toBeVisible({ timeout: 1_000 });

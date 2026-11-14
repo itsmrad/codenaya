@@ -35,6 +35,7 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectMcpConnections": () => [],
   "system:getProjectFiles": () => projectFiles,
   "system:getProjectFilesWithUrls": () => projectFiles,
+  "system:getEnvVarsForSandbox": () => [],
   "system:getProjectSkills": () => [],
 };
 
