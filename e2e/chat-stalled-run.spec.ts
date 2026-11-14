@@ -68,14 +68,14 @@ test.describe("chat when an agent run stops responding", () => {
       await expect(composer).toBeDisabled();
 
       // Past the stall threshold with no new steps.
-      await page.clock.fastForward("06:00");
+      await page.clock.fastForward("11:00");
 
       const run = page.locator('[data-run-status="stalled"]');
       await expect(run).toBeVisible();
       await expect(run.getByText("Stopped responding")).toBeVisible();
       await expect(run.getByText("Thinking…")).toHaveCount(0);
       await expect(page.getByText("Taking too long")).toBeVisible();
-      await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Stop and retry" })).toBeVisible();
 
       // Retry is the only action: the composer offers Send, not Stop.
       await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);

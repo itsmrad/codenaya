@@ -1,0 +1,30 @@
+diff --git a/node_modules/@inngest/agent-kit/dist/chunk-BSWKEFTT.js b/node_modules/@inngest/agent-kit/dist/chunk-BSWKEFTT.js
+index 9fe3f71..23d7828 100644
+--- a/node_modules/@inngest/agent-kit/dist/chunk-BSWKEFTT.js
++++ b/node_modules/@inngest/agent-kit/dist/chunk-BSWKEFTT.js
+@@ -541,7 +541,9 @@ var responseParser2 = (input) => {
+             function: tool.function.name,
+             // Duplicate for backward compatibility
+             // Use safe parser to handle OpenAI's JSON quirks (like backticks in strings)
+-            input: safeParseOpenAIJson(tool.function.arguments || "{}")
++            // A reply cut off at the output limit has broken arguments; the
++            // caller sees finish_reason and refuses the call instead.
++            input: finish_reason === "length" ? {} : safeParseOpenAIJson(tool.function.arguments || "{}")
+           };
+         })
+       }));
+diff --git a/node_modules/@inngest/agent-kit/dist/index.cjs b/node_modules/@inngest/agent-kit/dist/index.cjs
+index e73b9d2..2dec904 100644
+--- a/node_modules/@inngest/agent-kit/dist/index.cjs
++++ b/node_modules/@inngest/agent-kit/dist/index.cjs
+@@ -1359,7 +1359,9 @@ var responseParser2 = (input) => {
+             function: tool.function.name,
+             // Duplicate for backward compatibility
+             // Use safe parser to handle OpenAI's JSON quirks (like backticks in strings)
+-            input: safeParseOpenAIJson(tool.function.arguments || "{}")
++            // A reply cut off at the output limit has broken arguments; the
++            // caller sees finish_reason and refuses the call instead.
++            input: finish_reason === "length" ? {} : safeParseOpenAIJson(tool.function.arguments || "{}")
+           };
+         })
+       }));

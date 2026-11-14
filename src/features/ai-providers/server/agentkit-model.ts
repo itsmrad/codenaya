@@ -12,10 +12,18 @@ import { AI_PROVIDERS, baseUrlFor, type AiProviderId } from "../registry";
  * 400 (`temperature` is deprecated for this model). Its response parser is
  * patched (patches/@inngest+agent-kit+*.patch) to skip `thinking` blocks it
  * would crash on; drop the patch once AgentKit handles unknown block types.
+ * A second patch (`+002+openai-length-cutoff`) keeps the OpenAI parser from
+ * throwing on a tool call cut off at the output limit (#493).
  */
 
-/** Output cap for Anthropic, which has no default. Enough for large file writes. */
-export const ANTHROPIC_MAX_TOKENS = 16_384;
+/**
+ * Output cap for Anthropic, which has no default (#493). Thinking counts toward
+ * it, so it leaves room for thinking plus one bounded write batch
+ * (`WRITE_BATCH_FILES`). Within every listed model's limit (128K; 64K on Haiku
+ * 4.5) and low enough for a non-streaming request to finish in a few minutes.
+ * A reply that still hits it is caught in the run (`inngest/lib/output-limit.ts`).
+ */
+export const ANTHROPIC_MAX_TOKENS = 32_000;
 
 export interface ModelTarget {
   provider: AiProviderId;

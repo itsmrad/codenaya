@@ -324,15 +324,36 @@ export const sanitizeAgentText = (
     .join("")
     .trim();
 
-/** A run with no recorded progress for this long offers the user a retry. */
-export const STALLED_RUN_MS = 5 * 60_000;
+/**
+ * A run with no recorded progress for this long offers the user a retry (#493).
+ * Progress is only recorded between model calls, so this must stay well above
+ * one model turn (several minutes on a large write).
+ */
+export const STALLED_RUN_MS = 10 * 60_000;
 
 /**
  * A run with no recorded progress for this long is presumed lost (its worker
  * died or the backend dropped it) and is failed server-side, so a reload no
- * longer shows it as running.
+ * longer shows it as running. Twice the stall, so the cron never fails a run
+ * the user is still being told to wait for.
  */
-export const LOST_RUN_MS = 10 * 60_000;
+export const LOST_RUN_MS = 2 * STALLED_RUN_MS;
+
+/** Id of the run's one heartbeat step (#493). The run block doesn't show it. */
+export const TURN_HEARTBEAT_ID = "turn-heartbeat";
+
+/**
+ * The heartbeat recorded as each model turn starts, so a long turn is not
+ * mistaken for a stall. One step per run: the upsert keeps its first
+ * `startedAt`, and `endedAt` carries the latest turn start.
+ */
+export const turnHeartbeat = (now: number): AgentStep => ({
+  id: TURN_HEARTBEAT_ID,
+  kind: "thinking",
+  status: "done",
+  startedAt: now,
+  endedAt: now,
+});
 
 /** Written in place of the reply when a lost run is failed. */
 export const LOST_RUN_MESSAGE =

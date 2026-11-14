@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { type AgentStep, BUILD_VERIFIED, FIRST_STEP_HINT_MS, SLOW_RUN_MS } from "../agent-steps";
+import { type AgentStep, BUILD_VERIFIED, FIRST_STEP_HINT_MS, SLOW_RUN_MS, turnHeartbeat } from "../agent-steps";
 import { AgentRun } from "./agent-run";
 
 // The run diff loads from Convex; the header under test doesn't need it.
@@ -73,6 +73,13 @@ describe("AgentRun while live", () => {
   it("stays quiet while steps keep arriving", () => {
     const html = live([step("a", "writeFiles", "running", { startedAt: 1_000_000 + 25_000, endedAt: undefined })], 30_000);
     expect(html).toContain('<p role="status" class="sr-only"></p>');
+  });
+
+  it("counts a turn start as progress, without showing it as a row (#493)", () => {
+    const html = live([turnHeartbeat(1_000_000 + SLOW_RUN_MS)], SLOW_RUN_MS + 30_000);
+    expect(html).not.toContain("Taking longer");
+    expect(html).not.toContain("Thought");
+    expect(html).toContain("Thinking…");
   });
 
   it("shows no hint once the run has finished", () => {

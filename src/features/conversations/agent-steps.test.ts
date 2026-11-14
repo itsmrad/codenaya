@@ -6,10 +6,12 @@ import {
   BUILD_NOT_CHECKED,
   BUILD_VERIFIED,
   FIRST_STEP_HINT_MS,
+  LOST_RUN_MS,
   SLOW_RUN_MS,
   STALLED_RUN_MS,
   STATIC_CHECKS_FAILED,
   STATIC_CHECKS_PASSED,
+  TURN_HEARTBEAT_ID,
   buildPathIndex,
   describeToolCall,
   fixedBuildErrors,
@@ -19,6 +21,7 @@ import {
   runWrittenPaths,
   sanitizeAgentText,
   toolResultError,
+  turnHeartbeat,
   writtenFilePaths,
 } from "./agent-steps";
 
@@ -181,6 +184,25 @@ describe("lastRunActivity", () => {
         { id: "b", kind: "tool", status: "running", startedAt: 4_000 },
       ]),
     ).toBe(5_000);
+  });
+});
+
+describe("run stall thresholds (#493)", () => {
+  it("allow a long model turn before a run is called stalled", () => {
+    expect(STALLED_RUN_MS).toBeGreaterThanOrEqual(10 * 60_000);
+  });
+
+  it("never fail a run server-side before the user is offered a retry", () => {
+    expect(LOST_RUN_MS).toBeGreaterThan(STALLED_RUN_MS);
+  });
+
+  it("count a turn start as progress through the heartbeat step", () => {
+    const steps: AgentStep[] = [
+      { id: "a", kind: "tool", status: "done", startedAt: 2_000, endedAt: 3_000 },
+      turnHeartbeat(9_000),
+    ];
+    expect(steps[1].id).toBe(TURN_HEARTBEAT_ID);
+    expect(lastRunActivity(1_000, steps)).toBe(9_000);
   });
 });
 

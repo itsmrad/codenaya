@@ -44,6 +44,7 @@ import {
   BUILD_VERIFIED,
   FILE_WRITE_TOOLS,
   STALLED_RUN_MS,
+  TURN_HEARTBEAT_ID,
   fixedBuildErrors,
   lastRunActivity,
   previewErrorsNote,
@@ -101,6 +102,8 @@ interface Row {
 const toRows = (steps: AgentStep[]): Row[] => {
   const rows: Row[] = [];
   for (const step of steps) {
+    // Bookkeeping for the stall clock, not something the agent did.
+    if (step.id === TURN_HEARTBEAT_ID) continue;
     const previous = rows.at(-1);
     const merge =
       previous &&

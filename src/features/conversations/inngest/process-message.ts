@@ -52,6 +52,7 @@ import {
   sanitizeAgentText,
   toolResultError,
   toolResultRecipeIds,
+  turnHeartbeat,
 } from '../agent-steps';
 import {
   buildIntegrationsPromptSection,
@@ -76,6 +77,13 @@ import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
 import { trimFileHistory } from "./lib/trim-file-history";
+import {
+  MAX_CUT_OFF_RETRIES,
+  OUTPUT_LIMIT_NOTE,
+  hitOutputLimit,
+  markCutOffCalls,
+  refuseCutOffCalls,
+} from './lib/output-limit';
 import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
   type MessageMode,
@@ -147,7 +155,7 @@ export const processMessage = inngest.createFunction(
       }
     }
   },
-  async ({ event, step, runId }) => {
+  async ({ event, step, runId, logger }) => {
     const {
       messageId,
       conversationId,
@@ -643,7 +651,7 @@ export const processMessage = inngest.createFunction(
         : []),
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
-    ];
+    ].map(refuseCutOffCalls);
 
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
@@ -654,6 +662,16 @@ export const processMessage = inngest.createFunction(
         .slice(0, recentMessages.findIndex((msg) => msg._id === messageId))
         .findLast((msg) => msg.role === "assistant")?.stuck?.signature,
     );
+
+    // Set when a reply hit the output limit before any tool call (#493); its
+    // cut-off tool calls are refused by `refuseCutOffCalls` instead.
+    let cutOffNote = false;
+    let cutOffRetries = 0;
+    const takeCutOffNote = () => {
+      const note = cutOffNote ? OUTPUT_LIMIT_NOTE : undefined;
+      cutOffNote = false;
+      return note;
+    };
 
     // Re-validated by resolveRunModel: the event is the boundary this function
     // trusts, and anything holding the event key can send one.
@@ -670,14 +688,17 @@ export const processMessage = inngest.createFunction(
         ? tools.filter((tool) => PLAN_MODE_TOOLS.has(tool.name))
         : tools,
       lifecycle: {
-        onStart: ({ agent, prompt, history }) => {
+        onStart: async ({ agent, prompt, history }) => {
+          // Progress is otherwise recorded only after a turn, so a long turn
+          // would read as a stall (#493).
+          await recordSteps("record-turn-start", () => [turnHeartbeat(Date.now())], false);
           const trimmed = trimFileHistory([...earlierTurns, ...(history ?? [])]);
           const { stuck } = loopGuard;
           const summaryNote = stuck ? stuckNote(stuck) : STEP_BUDGET_NOTE;
           const nudge =
             agent.name === SUMMARY_AGENT_NAME
               ? summaryNote
-              : buildCheckGate.takeNudge() ?? loopGuard.takeHint();
+              : takeCutOffNote() ?? buildCheckGate.takeNudge() ?? loopGuard.takeHint();
           // AgentKit sends prompt ([system, request]) before history (this
           // run's turns), so earlier conversation turns go between the two.
           // Relies on network calls using maxIter: 0; direct agent.run with maxIter > 1 would prepend history each pass.
@@ -701,9 +722,13 @@ export const processMessage = inngest.createFunction(
           const calls = result.output.flatMap((m) =>
             m.type === "tool_call" ? m.tools : [],
           );
+          const cutOff = hitOutputLimit(result.raw);
+          // Inngest's logger skips replays, so each cut-off reply logs once.
+          if (cutOff) logger.warn("[agent] reply hit the output limit", { messageId, calls: calls.length });
           // Raw reasoning can echo tool markup, model tokens and document ids.
           const reasoning = sanitizeAgentText(modelReasoning(result.raw));
           if (calls.length === 0) {
+            if (cutOff) cutOffNote = true;
             if (reasoning) {
               // A run routed back by the build-check gate has two final turns.
               const turn = network?.state.results.length ?? 0;
@@ -755,6 +780,8 @@ export const processMessage = inngest.createFunction(
               })),
             ];
           }, true);
+          // After recording, so the run block still names the files it tried.
+          if (cutOff) markCutOffCalls(result.output);
           return result;
         },
         onFinish: async ({ result }) => {
@@ -815,6 +842,13 @@ export const processMessage = inngest.createFunction(
 
         // A stuck run has had its summary turn.
         if (loopGuard.stuck) return undefined;
+
+        // A reply cut off before any tool call is unfinished even when it has
+        // text: give it another turn with the note, a bounded number of times.
+        if (cutOffNote && !lastStep && cutOffRetries < MAX_CUT_OFF_RETRIES) {
+          cutOffRetries += 1;
+          return codingAgent;
+        }
 
         // Stop routing to this agent if there's a final text response without
         // tool calls, unless files changed since the last passing build check

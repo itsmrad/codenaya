@@ -271,7 +271,8 @@ export const AssistantMessage = ({
           </span>
           <Button type="button" size="sm" variant="outline" onClick={onRetry}>
             <RotateCcwIcon className="size-3.5" />
-            Retry
+            {/* Says what it does: sending stops the run that is still processing (#493). */}
+            Stop and retry
           </Button>
         </div>
       )}
