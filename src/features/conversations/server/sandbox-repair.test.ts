@@ -33,7 +33,7 @@ const fakeSandbox = ({
       : { exitCode: 0 },
   find,
 }: {
-  install?: (dir: string) => Answer;
+  install?: (app: string) => Answer;
   build?: (app: string, dir: string) => Answer;
   find?: () => Answer;
 } = {}) => {
@@ -77,7 +77,7 @@ const fakeSandbox = ({
             .join("\n");
           return answer({ exitCode: 0, stdout });
         }
-        if (command.startsWith("npm install")) return answer(install(cwd));
+        if (command.startsWith("npm install")) return answer(install(fs.get(`${cwd}/src/App.tsx`) ?? ""));
         if (command.includes("vite build")) {
           const app = fs.get(`${cwd}/src/App.tsx`) ?? "";
           builtApps.push(app);
@@ -184,15 +184,13 @@ describe("verifyAndFix", () => {
     },
     {
       kind: "install",
-      sandbox: () => {
-        const sandbox = fakeSandbox({
-          install: (dir) =>
-            sandbox.fs.get(`${dir}/src/App.tsx`)?.includes("BROKEN")
+      sandbox: () =>
+        fakeSandbox({
+          install: (app) =>
+            app.includes("BROKEN")
               ? { exitCode: 1, stderr: "npm error 404 Not Found - GET https://registry.npmjs.org/nope" }
               : { exitCode: 0 },
-        });
-        return sandbox;
-      },
+        }),
       error: { kind: "install" },
     },
   ])("repairs a $kind failure with the model, then re-checks the sandbox's new files", async ({ sandbox: make, error }) => {
