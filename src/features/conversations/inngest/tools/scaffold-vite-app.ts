@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createTool } from "@inngest/agent-kit";
 
 import { convex } from "@/lib/convex-client";
+import { getAppError } from "@/lib/convex-error";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
@@ -57,10 +58,20 @@ export const createScaffoldViteAppTool = ({
               heldBack = files.map((file) => file.name);
               break;
             }
+            let parentId;
+            try {
+              parentId = await ensureFolder(dir);
+            } catch (error) {
+              // A folder locked after the snapshot also refuses the folders inside it (#548).
+              if (getAppError(error)?.code !== "FORBIDDEN") throw error;
+              locked.push(...files.map((file) => `${dir}/${file.name}`));
+              blocked = true;
+              continue;
+            }
             const results = await convex.mutation(api.system.createFiles, {
               internalKey,
               projectId,
-              parentId: await ensureFolder(dir),
+              parentId,
               files,
             });
             for (const result of results) {
@@ -77,12 +88,12 @@ export const createScaffoldViteAppTool = ({
 
           // An "Error" result, so the run doesn't count it as a finished starter (#548).
           return [
-            heldBack.length > 0
-              ? `Error: Incomplete scaffold. Locks kept starter files out, so ${heldBack.join(", ")} were not written either and the preview won't start. Created: ${created.join(", ") || "nothing"}.`
+            blocked
+              ? `Error: Incomplete scaffold. Locks kept starter files out${heldBack.length > 0 ? `, so ${heldBack.join(", ")} were not written either and the preview won't start` : ""}. Created: ${created.join(", ") || "nothing"}.`
               : `Scaffolded the Vite + React starter. Created: ${created.join(", ") || "nothing"}.`,
             kept.length > 0 ? `Kept existing: ${kept.join(", ")}.` : "",
             locked.length > 0 ? `Not written, locked by the user: ${locked.join(", ")}. Don't modify them.` : "",
-            heldBack.length > 0
+            blocked
               ? "Tell the user the Vite starter needs these paths unlocked."
               : "Extend package.json with editFile, keeping every package it lists: the starter's config and entry files import them.",
           ]

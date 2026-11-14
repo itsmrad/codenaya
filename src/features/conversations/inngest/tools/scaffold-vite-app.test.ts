@@ -15,9 +15,16 @@ vi.mock("@/lib/convex-client", () => ({
           db.rows.push({ ...row, _id });
           return _id;
         };
-        if (!args.files) return insert({ name: args.name!, type: "folder", parentId: args.parentId });
-        // Like createFiles: a write into a locked folder is refused per file, with no id.
         const parentLocked = db.rows.find((row) => row._id === args.parentId)?.locked;
+        if (!args.files) {
+          // Like createFolder: a folder inside a locked one is refused with a FORBIDDEN error.
+          if (parentLocked) {
+            const { ConvexError } = await import("convex/values");
+            throw new ConvexError({ code: "FORBIDDEN", message: `${args.name} is locked by the user.` });
+          }
+          return insert({ name: args.name!, type: "folder", parentId: args.parentId });
+        }
+        // Like createFiles: a write into a locked folder is refused per file, with no id.
         return args.files.map((file) => {
           if (parentLocked) return { name: file.name, fileId: "", error: `${file.name} is locked by the user.` };
           const existing = db.rows.find(
@@ -221,7 +228,23 @@ describe("scaffoldViteApp and an incomplete starter (#548)", () => {
     expect(result).not.toContain("Kept existing");
     expect(isError(result)).toBe(true);
     expect(result).toMatch(/Not written, locked by the user: .*src\/main\.tsx/);
+    // src/lib can't be created inside the now-locked src: named, not lost in a thrown error.
+    expect(result).toMatch(/Not written, locked by the user: .*src\/lib\/utils\.ts/);
     expect(result).not.toMatch(/Created: .*src\/main\.tsx/);
+  });
+
+  it("reports an error when the root files are all locked and a lock blocks an entry file", async () => {
+    const root = VITE_REACT_STARTER.filter((file) => !file.path.includes("/"));
+    db.rows = [
+      { _id: "src", name: "src", type: "folder", locked: true },
+      ...root.map((file, i) => ({ _id: `root${i}`, name: file.path, type: "file" as const, content: "mine", locked: true })),
+    ];
+
+    const result = await scaffold();
+
+    expect(isError(result)).toBe(true);
+    expect(result).not.toContain("Scaffolded");
+    expect(result).toMatch(/Not written, locked by the user: .*src\/main\.tsx/);
   });
 
   it("still succeeds when only existing files are locked", async () => {
