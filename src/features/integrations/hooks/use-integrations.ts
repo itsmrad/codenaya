@@ -14,6 +14,10 @@ import { Id } from "../../../../convex/_generated/dataModel";
  * sealed credential fields.
  */
 
+export const useConnectionProjects = (connectionId: Id<"userConnections">) => {
+  return useQuery(api.integrations.listConnectionProjects, { connectionId });
+};
+
 /** Every connection the signed-in user holds, newest first. */
 export const useUserConnections = () => {
   return useQuery(api.integrations.listUserConnections);

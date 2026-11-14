@@ -964,6 +964,94 @@ export const createUserConnection = mutation({
   },
 });
 
+/** Metadata needed to replace a credential, never its sealed payload. */
+const reconnectArgs = {
+  internalKey: v.string(),
+  userId: v.string(),
+  connectionId: v.string(),
+  providerId: v.string(),
+  authMode: v.union(v.literal("oauth"), v.literal("api_key")),
+};
+
+async function reconnectConnection(
+  ctx: QueryCtx,
+  args: {
+    userId: string;
+    connectionId: string;
+    providerId: string;
+    authMode: "oauth" | "api_key";
+  },
+) {
+  const id = ctx.db.normalizeId("userConnections", args.connectionId);
+  const connection = id ? await ctx.db.get("userConnections", id) : null;
+  return connection?.userId === args.userId &&
+    connection.providerId === args.providerId &&
+    connection.authMode === args.authMode
+    ? connection
+    : null;
+}
+
+export const getConnectionForReconnect = query({
+  args: reconnectArgs,
+  returns: v.union(
+    v.null(),
+    v.object({
+      _id: v.id("userConnections"),
+      credentialRef: v.string(),
+      serverUrl: v.string(),
+      scopes: v.array(v.string()),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const connection = await reconnectConnection(ctx, args);
+    return connection
+      ? {
+          _id: connection._id,
+          credentialRef: connection.credentialRef,
+          serverUrl: connection.serverUrl,
+          scopes: connection.scopes,
+        }
+      : null;
+  },
+});
+
+export const updateUserConnectionCredential = mutation({
+  args: {
+    ...reconnectArgs,
+    ...sealedFields,
+    maskedPreview: v.string(),
+    tokenExpiresAt: v.optional(v.number()),
+    oauthClientId: v.optional(v.string()),
+    authServerUrl: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const connection = await reconnectConnection(ctx, args);
+    if (!connection) throw appError("NOT_FOUND", "Connection not found");
+    await ctx.db.patch("userConnections", connection._id, {
+      kekProvider: args.kekProvider,
+      kekKeyId: args.kekKeyId,
+      wrappedDek: args.wrappedDek,
+      ciphertext: args.ciphertext,
+      iv: args.iv,
+      authTag: args.authTag,
+      maskedPreview: args.maskedPreview,
+      tokenExpiresAt: args.tokenExpiresAt,
+      oauthClientId: args.oauthClientId,
+      authServerUrl: args.authServerUrl,
+      status: "active",
+      statusMessage: undefined,
+      // A refresh started before reconnect must not overwrite the new credential.
+      refreshLeaseId: undefined,
+      refreshLeaseExpiresAt: undefined,
+      updatedAt: Date.now(),
+    });
+    return null;
+  },
+});
+
 /**
  * The connection when it belongs to `projectId`'s owner, else `null`. Agent runs
  * act for a project, so they may only touch that owner's credentials (#239).
@@ -1535,6 +1623,8 @@ export const recordMcpToolCall = mutation({
     durationMs: v.number(),
     errorMessage: v.optional(v.string()),
     mcpInvocationId: v.optional(v.string()),
+    /** Set to record the connection's "last used" time on ok/error calls. */
+    projectConnectionId: v.optional(v.id("projectConnections")),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -1575,8 +1665,21 @@ export const recordMcpToolCall = mutation({
       createdAt: Date.now(),
       mcpInvocationId: args.mcpInvocationId,
     });
+
+    // Denied/blocked calls never reached the service, so they don't count as use.
+    if (!args.projectConnectionId || (args.status !== "ok" && args.status !== "error")) return;
+    const link = await ctx.db.get("projectConnections", args.projectConnectionId);
+    if (link?.projectId !== project._id) return;
+    const connection = await projectOwnerConnectionOrNull(ctx, project._id, link.userConnectionId);
+    const now = Date.now();
+    // Throttled so a busy run doesn't rewrite the connection on every call.
+    if (connection && now - (connection.lastUsedAt ?? 0) >= LAST_USED_THROTTLE_MS) {
+      await ctx.db.patch("userConnections", connection._id, { lastUsedAt: now });
+    }
   },
 });
+
+const LAST_USED_THROTTLE_MS = 60_000;
 
 
 /**

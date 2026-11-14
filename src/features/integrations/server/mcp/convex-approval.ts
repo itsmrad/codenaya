@@ -163,6 +163,7 @@ export function createConvexAuditSink(ctx: ConvexMcpContext): McpAuditSink {
       errorMessage: entry.errorMessage,
       // The join key back to the approval row, the step ids and the log lines.
       mcpInvocationId: entry.invocationId,
+      projectConnectionId: entry.projectConnectionId as Id<"projectConnections">,
     });
   };
 }

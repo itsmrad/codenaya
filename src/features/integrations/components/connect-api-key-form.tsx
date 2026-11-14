@@ -80,6 +80,7 @@ const buildSchema = (isCustom: boolean) =>
   });
 
 interface OAuthConnectPanelProps {
+  connectionId?: Id<"userConnections">;
   providerId: string;
   projectId?: Id<"projects">;
   displayName: string;
@@ -99,6 +100,7 @@ interface OAuthConnectPanelProps {
  * hooks cannot sit behind a return.
  */
 const OAuthConnectPanel = ({
+  connectionId,
   providerId,
   projectId,
   displayName,
@@ -132,7 +134,7 @@ const OAuthConnectPanel = ({
 
   const handleStart = () => {
     notifiedRef.current = null;
-    void start(providerId, projectId);
+    void start(providerId, projectId, connectionId);
   };
 
   const isPending = state === "pending";
@@ -247,6 +249,7 @@ const OAuthConnectPanel = ({
 };
 
 interface ConnectApiKeyFormProps {
+  connection?: { _id: Id<"userConnections">; authMode: "oauth" | "api_key"; label: string; serverUrl: string };
   providerId: string;
   projectId?: Id<"projects">;
   /** Called after a connection is created, so the parent can reset its flow. */
@@ -254,6 +257,7 @@ interface ConnectApiKeyFormProps {
 }
 
 export const ConnectApiKeyForm = ({
+  connection,
   providerId,
   projectId,
   onConnected,
@@ -265,9 +269,9 @@ export const ConnectApiKeyForm = ({
     ? "Custom MCP server"
     : provider?.displayName ?? providerId;
 
-  const oauthAvailable = provider ? supportsOAuth(provider.authModes) : false;
+  const oauthAvailable = connection ? connection.authMode === "oauth" : provider ? supportsOAuth(provider.authModes) : false;
   // Custom servers are always key-based; catalog providers say so themselves.
-  const apiKeyAvailable = isCustom
+  const apiKeyAvailable = connection ? connection.authMode === "api_key" : isCustom
     ? true
     : provider
       ? supportsApiKey(provider.authModes)
@@ -284,8 +288,8 @@ export const ConnectApiKeyForm = ({
   const form = useForm({
     defaultValues: {
       apiKey: "",
-      label: "",
-      serverUrl: "",
+      label: connection?.label ?? "",
+      serverUrl: connection?.serverUrl ?? "",
     },
     validators: {
       onSubmit: buildSchema(isCustom),
@@ -296,6 +300,7 @@ export const ConnectApiKeyForm = ({
           .post("/api/integrations/connect", {
             json: {
               providerId,
+              connectionId: connection?._id,
               apiKey: value.apiKey,
               label: value.label.trim() || undefined,
               serverUrl: isCustom ? value.serverUrl.trim() : undefined,
@@ -423,7 +428,7 @@ export const ConnectApiKeyForm = ({
       }}
     >
       <div className="space-y-4">
-        {isCustom && (
+        {isCustom && !connection && (
           <form.Field name="serverUrl">
             {(field) => {
               const isInvalid =
@@ -474,7 +479,7 @@ export const ConnectApiKeyForm = ({
           }}
         </form.Field>
 
-        <form.Field name="label">
+        {!connection && <form.Field name="label">
           {(field) => {
             const isInvalid =
               field.state.meta.isTouched && !field.state.meta.isValid;
@@ -495,7 +500,7 @@ export const ConnectApiKeyForm = ({
               </Field>
             );
           }}
-        </form.Field>
+        </form.Field>}
 
         {notes}
 
@@ -509,7 +514,7 @@ export const ConnectApiKeyForm = ({
               className="w-full"
               disabled={!canSubmit || isSubmitting}
             >
-              {isSubmitting ? "Verifying..." : "Connect"}
+              {isSubmitting ? "Verifying..." : connection ? "Replace key" : "Connect"}
             </Button>
           )}
         </form.Subscribe>
@@ -520,12 +525,13 @@ export const ConnectApiKeyForm = ({
   return (
     <div className="space-y-4">
       <div className="space-y-1">
-        <h4 className="text-sm font-medium">Connect {displayName}</h4>
+        <h4 className="text-sm font-medium">{connection ? "Reconnect" : "Connect"} {displayName}</h4>
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
 
       {oauthAvailable && (
         <OAuthConnectPanel
+          connectionId={connection?._id}
           providerId={providerId}
           projectId={projectId}
           displayName={displayName}
