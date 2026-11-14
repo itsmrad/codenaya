@@ -327,6 +327,37 @@ describe("processMessage repair after the run", () => {
     expect(mocks.listSandboxes).not.toHaveBeenCalled();
   });
 
+  it("runs only for the message run's ends, and never fails itself", async () => {
+    const { triggers } = (stopRepairSandboxes as unknown as { opts: { triggers: unknown[] } }).opts;
+    const filter = "event.data.function_id == 'codenaya-process-message'";
+    expect(triggers).toEqual([
+      { event: "inngest/function.failed", if: filter },
+      { event: "inngest/function.cancelled", if: filter },
+    ]);
+
+    mocks.listSandboxes.mockImplementation(() => {
+      throw new Error("E2B down");
+    });
+    const outcome = await drive({}, [], "", { run_id: "run_7" }, {
+      fn: stopRepairSandboxes,
+      eventName: "inngest/function.failed",
+    });
+    expect(outcome.finalType).toBe("function-resolved");
+  });
+
+  it("still stops the sandbox it knows when the lookup by run fails", async () => {
+    mocks.verifyAndFix.mockImplementation(
+      scriptedRepair({ ok: true, status: "verified", errors: [], filesChanged: ["main.ts"], attempts: 1 }),
+    );
+    mocks.listSandboxes.mockImplementation(() => {
+      throw new Error("E2B down");
+    });
+
+    await drive({ modelId: "x-ai/grok-4.7" }, FAILED_RUN);
+
+    expect(mocks.killSandbox).toHaveBeenCalledWith("sbx_repair", { apiKey: "e2b_key" });
+  });
+
   it("stops a cancelled run before the repair", async () => {
     const outcome = await drive({ modelId: "x-ai/grok-4.7" }, FAILED_RUN, "Build it", {}, {
       cancelWhen: () => mocks.createSandbox.mock.calls.length > 0,

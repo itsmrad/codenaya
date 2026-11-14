@@ -204,8 +204,10 @@ export const repairBuild = async ({
   });
 
   await step("kill-repair-sandbox", async () => {
-    await killRepairSandboxes(options.runId).catch((error) => {
-      console.error("[build-repair] could not stop the repair sandbox", error);
+    await killRepairSandboxes(options.runId).catch(async (error) => {
+      console.error("[build-repair] could not stop the repair sandboxes", error);
+      // At least the one this run knows; best effort, E2B reaps it anyway.
+      await Sandbox.kill(sandboxId, { apiKey }).catch(() => {});
     });
     return null;
   });
