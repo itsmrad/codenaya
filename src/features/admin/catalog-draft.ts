@@ -31,6 +31,7 @@ export interface SavedCatalog {
   models: CatalogModel[];
   defaultModelId: string;
   utilityModelId: string;
+  autoModelIds?: string[];
 }
 
 export interface DraftModel extends Omit<CatalogModel, "tools" | "pricing" | "spendLimit"> {
@@ -53,6 +54,8 @@ export interface Draft {
   models: DraftModel[];
   defaultModelId: string;
   utilityModelId: string;
+  /** The models Auto may route to (#322); empty: its fixed routes. */
+  autoModelIds: string[];
 }
 
 /** The body `POST /api/admin/catalog` takes. */
@@ -60,6 +63,7 @@ export interface CatalogSaveBody {
   models: CatalogModel[];
   defaultModelId: string;
   utilityModelId: string;
+  autoModelIds: string[];
   confirmRiskyPrices: boolean;
 }
 
@@ -146,6 +150,7 @@ export const toDraft = (saved: SavedCatalog | null): Draft => ({
   })),
   defaultModelId: saved?.defaultModelId ?? "",
   utilityModelId: saved?.utilityModelId ?? "",
+  autoModelIds: saved?.autoModelIds ?? [],
 });
 
 /** What a listed model fills in for a route on `provider`: capabilities and a blended price. */
@@ -193,6 +198,7 @@ export function addModels(draft: Draft, provider: PlatformProviderId, listed: Li
   const ids = new Set(draft.models.map((m) => m.id));
   const models = [...draft.models, ...listed.filter((m) => !ids.has(m.id)).map((m) => fromListed(m, provider))];
   return {
+    ...draft,
     models,
     defaultModelId: draft.defaultModelId || firstDefaultable(models),
     utilityModelId: draft.utilityModelId || firstDefaultable(models),
@@ -204,10 +210,17 @@ export function removeModel(draft: Draft, id: string): Draft {
   const models = draft.models.filter((m) => m.id !== id);
   return {
     models,
+    autoModelIds: draft.autoModelIds.filter((poolId) => poolId !== id),
     defaultModelId: draft.defaultModelId === id ? firstDefaultable(models) : draft.defaultModelId,
     utilityModelId: draft.utilityModelId === id ? firstDefaultable(models) : draft.utilityModelId,
   };
 }
+
+/** Adds a model to the Auto pool, or takes it out. */
+export const toggleAuto = (draft: Draft, id: string, on: boolean): Draft => ({
+  ...draft,
+  autoModelIds: on ? [...new Set([...draft.autoModelIds, id])] : draft.autoModelIds.filter((poolId) => poolId !== id),
+});
 
 /** Moves a model to another route; `id`, name, access and visibility stay. */
 export const reroute = (model: DraftModel, provider: PlatformProviderId, listed: ListedModel): DraftModel => ({
@@ -219,6 +232,7 @@ export const reroute = (model: DraftModel, provider: PlatformProviderId, listed:
 export const toSaveBody = (draft: Draft, confirmRiskyPrices: boolean): CatalogSaveBody => ({
   defaultModelId: draft.defaultModelId,
   utilityModelId: draft.utilityModelId,
+  autoModelIds: draft.autoModelIds,
   confirmRiskyPrices,
   models: draft.models.map((model) => {
     const spendLimit = toSpendLimit(model);

@@ -6,6 +6,8 @@
  * as-is; the agent extends it instead of reinventing the config.
  */
 
+import { pinnedVersions } from "./known-good-versions";
+
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
 const PACKAGE_JSON = json({
@@ -19,36 +21,37 @@ const PACKAGE_JSON = json({
     preview: "vite preview",
     lint: "eslint src",
   },
-  dependencies: {
-    "@fontsource/inter": "^5.1.0",
-    "class-variance-authority": "^0.7.1",
-    clsx: "^2.1.1",
-    "lucide-react": "^0.468.0",
-    react: "^18.3.1",
-    "react-dom": "^18.3.1",
-    "tailwind-merge": "^2.6.0",
-    "tailwindcss-animate": "^1.0.7",
-  },
-  devDependencies: {
-    "@types/node": "^22.10.0",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
-    autoprefixer: "^10.4.20",
-    postcss: "^8.4.49",
-    tailwindcss: "^3.4.17",
-    typescript: "~5.6.3",
-    vite: "^6.0.0",
-  },
+  dependencies: pinnedVersions([
+    "@fontsource/inter",
+    "class-variance-authority",
+    "clsx",
+    "lucide-react",
+    "react",
+    "react-dom",
+    "react-router-dom",
+    "tailwind-merge",
+  ]),
+  devDependencies: pinnedVersions([
+    "@tailwindcss/vite",
+    "@types/node",
+    "@types/react",
+    "@types/react-dom",
+    "@vitejs/plugin-react",
+    "tailwindcss",
+    "tw-animate-css",
+    "typescript",
+    "vite",
+  ]),
 });
 
 const VITE_CONFIG = `import { fileURLToPath, URL } from "node:url";
 
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
 });
 `;
@@ -93,7 +96,7 @@ const TSCONFIG_NODE = json({
     noEmit: true,
     strict: true,
   },
-  include: ["vite.config.ts", "tailwind.config.ts"],
+  include: ["vite.config.ts"],
 });
 
 const INDEX_HTML = `<!doctype html>
@@ -110,120 +113,156 @@ const INDEX_HTML = `<!doctype html>
 </html>
 `;
 
-const POSTCSS_CONFIG = `export default {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
-  },
-};
-`;
-
-const TAILWIND_CONFIG = `import type { Config } from "tailwindcss";
-import animate from "tailwindcss-animate";
-
-const color = (name: string) => ({
-  DEFAULT: \`hsl(var(--\${name}))\`,
-  foreground: \`hsl(var(--\${name}-foreground))\`,
-});
-
-export default {
-  darkMode: ["class"],
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  theme: {
-    container: { center: true, padding: "2rem", screens: { "2xl": "1400px" } },
-    extend: {
-      fontFamily: { sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"] },
-      colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
-        primary: color("primary"),
-        secondary: color("secondary"),
-        destructive: color("destructive"),
-        muted: color("muted"),
-        accent: color("accent"),
-        popover: color("popover"),
-        card: color("card"),
-      },
-      borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
-      },
-    },
-  },
-  plugins: [animate],
-} satisfies Config;
-`;
-
 const COMPONENTS_JSON = json({
   $schema: "https://ui.shadcn.com/schema.json",
-  style: "default",
+  style: "new-york",
   rsc: false,
   tsx: true,
   tailwind: {
-    config: "tailwind.config.ts",
+    config: "",
     css: "src/index.css",
     baseColor: "slate",
     cssVariables: true,
+    prefix: "",
   },
-  aliases: { components: "@/components", utils: "@/lib/utils" },
+  iconLibrary: "lucide",
+  aliases: {
+    components: "@/components",
+    utils: "@/lib/utils",
+    ui: "@/components/ui",
+    lib: "@/lib",
+    hooks: "@/hooks",
+  },
 });
 
-const INDEX_CSS = `@tailwind base;
-@tailwind components;
-@tailwind utilities;
+const INDEX_CSS = `@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.129 0.042 264.695);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.129 0.042 264.695);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.129 0.042 264.695);
+  --primary: oklch(0.208 0.042 265.755);
+  --primary-foreground: oklch(0.984 0.003 247.858);
+  --secondary: oklch(0.968 0.007 247.896);
+  --secondary-foreground: oklch(0.208 0.042 265.755);
+  --muted: oklch(0.968 0.007 247.896);
+  --muted-foreground: oklch(0.554 0.046 257.417);
+  --accent: oklch(0.968 0.007 247.896);
+  --accent-foreground: oklch(0.208 0.042 265.755);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(0.929 0.013 255.508);
+  --input: oklch(0.929 0.013 255.508);
+  --ring: oklch(0.704 0.04 256.788);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.984 0.003 247.858);
+  --sidebar-foreground: oklch(0.129 0.042 264.695);
+  --sidebar-primary: oklch(0.208 0.042 265.755);
+  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-accent: oklch(0.968 0.007 247.896);
+  --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
+  --sidebar-border: oklch(0.929 0.013 255.508);
+  --sidebar-ring: oklch(0.704 0.04 256.788);
+}
+
+.dark {
+  --background: oklch(0.129 0.042 264.695);
+  --foreground: oklch(0.984 0.003 247.858);
+  --card: oklch(0.208 0.042 265.755);
+  --card-foreground: oklch(0.984 0.003 247.858);
+  --popover: oklch(0.208 0.042 265.755);
+  --popover-foreground: oklch(0.984 0.003 247.858);
+  --primary: oklch(0.929 0.013 255.508);
+  --primary-foreground: oklch(0.208 0.042 265.755);
+  --secondary: oklch(0.279 0.041 260.031);
+  --secondary-foreground: oklch(0.984 0.003 247.858);
+  --muted: oklch(0.279 0.041 260.031);
+  --muted-foreground: oklch(0.704 0.04 256.788);
+  --accent: oklch(0.279 0.041 260.031);
+  --accent-foreground: oklch(0.984 0.003 247.858);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.551 0.027 264.364);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.208 0.042 265.755);
+  --sidebar-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-accent: oklch(0.279 0.041 260.031);
+  --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.551 0.027 264.364);
+}
+
+/* v4 dropped the container's center, padding and screens options. */
+@utility container {
+  margin-inline: auto;
+  padding-inline: 2rem;
+  @variant 2xl {
+    max-width: 1400px;
+  }
+}
 
 @layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-  }
-
   * {
-    @apply border-border;
+    @apply border-border outline-ring/50;
   }
 
   body {
@@ -234,6 +273,7 @@ const INDEX_CSS = `@tailwind base;
 
 const MAIN_TSX = `import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
 
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/500.css";
@@ -242,20 +282,91 @@ import "@fontsource/inter/700.css";
 import "./index.css";
 
 import App from "./App";
+import { ErrorBoundary } from "./components/error-boundary";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </ErrorBoundary>
   </StrictMode>,
 );
 `;
 
-const APP_TSX = `export default function App() {
+const APP_TSX = `import { Route, Routes } from "react-router-dom";
+
+function Home() {
   return (
     <main className="flex min-h-screen items-center justify-center">
       <h1 className="text-3xl font-semibold tracking-tight">App</h1>
     </main>
   );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+    </Routes>
+  );
+}
+`;
+
+// A render error would otherwise unmount the tree and leave a blank page (#335).
+const ERROR_BOUNDARY_TSX = `import { Component, type ErrorInfo, type ReactNode } from "react";
+
+// A flag, not \`error !== null\`: \`throw null\` must still show the card.
+type State = { hasError: boolean; error?: unknown; componentStack?: string | null };
+
+export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
+  state: State = { hasError: false };
+
+  static getDerivedStateFromError(error: unknown): State {
+    return { hasError: true, error };
+  }
+
+  // React 19 already reports caught errors with console.error, so don't log again.
+  componentDidCatch(_error: unknown, info: ErrorInfo) {
+    this.setState({ componentStack: info.componentStack });
+  }
+
+  render() {
+    const { hasError, error, componentStack } = this.state;
+    if (!hasError) return this.props.children;
+
+    return (
+      <div role="alert" className="flex min-h-screen items-center justify-center bg-background p-6">
+        <div className="w-full max-w-lg rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
+          <h1 className="text-lg font-semibold">Something went wrong</h1>
+          <p className="mt-2 break-words text-sm text-destructive">
+            {error instanceof Error ? error.message : String(error)}
+          </p>
+          {import.meta.env.DEV && componentStack ? (
+            <pre className="mt-4 max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs text-muted-foreground">
+              {componentStack.trim()}
+            </pre>
+          ) : null}
+          <div className="mt-6 flex gap-2">
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="inline-flex min-h-11 min-w-11 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Reload
+            </button>
+            <a
+              href="/"
+              className="inline-flex min-h-11 min-w-11 items-center rounded-md border px-4 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+            >
+              Go home
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
 }
 `;
 
@@ -275,12 +386,11 @@ export const VITE_REACT_STARTER: ReadonlyArray<{ path: string; content: string }
   { path: "tsconfig.app.json", content: TSCONFIG_APP },
   { path: "tsconfig.node.json", content: TSCONFIG_NODE },
   { path: "index.html", content: INDEX_HTML },
-  { path: "postcss.config.js", content: POSTCSS_CONFIG },
-  { path: "tailwind.config.ts", content: TAILWIND_CONFIG },
   { path: "components.json", content: COMPONENTS_JSON },
   { path: "src/vite-env.d.ts", content: '/// <reference types="vite/client" />\n' },
   { path: "src/index.css", content: INDEX_CSS },
   { path: "src/main.tsx", content: MAIN_TSX },
   { path: "src/App.tsx", content: APP_TSX },
   { path: "src/lib/utils.ts", content: UTILS_TS },
+  { path: "src/components/error-boundary.tsx", content: ERROR_BOUNDARY_TSX },
 ];

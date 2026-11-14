@@ -49,6 +49,8 @@ const requestSchema = z
     models: z.array(modelSchema).min(1).max(MAX_PLATFORM_MODELS),
     defaultModelId: modelId,
     utilityModelId: modelId,
+    // Auto's pool (#322); Convex drops ids that aren't catalog models.
+    autoModelIds: z.array(modelId).max(MAX_PLATFORM_MODELS).optional(),
     confirmRiskyPrices: z.boolean(),
   })
   .superRefine(({ models, defaultModelId, utilityModelId }, ctx) => {

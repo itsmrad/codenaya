@@ -19,6 +19,13 @@ import {
   promoRunRefusal,
 } from "@/features/promotions/github-promo";
 
+import {
+  AUTO_MODEL_ID,
+  AUTO_NO_VISION_MESSAGE,
+  type RunTask,
+  autoRouteModel,
+  autoRunLabel,
+} from "../auto-route";
 import { type ModelPricing, promoKindOf } from "../catalog";
 import {
   type PlatformProviderId,
@@ -129,6 +136,12 @@ async function refuseOverSpendLimit({
 const toChoice = (input: ModelChoiceInput): AgentModelChoice =>
   typeof input === "object" ? input : { modelId: input ?? "" };
 
+/** The send picked Auto (#322): the route classifies it and passes its `task`. */
+export const isAutoChoice = (input: ModelChoiceInput) => {
+  const { keyId, modelId } = toChoice(input);
+  return !keyId && modelId === AUTO_MODEL_ID;
+};
+
 /** The message has images and the model cannot read them. */
 const visionRequired = (label: string) =>
   new ModelChoiceError(
@@ -151,17 +164,26 @@ const platformRunLabel = (model: RoutedModel) => runModelLabel({ id: model.id, l
  * send is known to go. Any other platform model needs credits left (ADR 0011);
  * a run that starts with some may end past zero, and the next send is refused.
  * A model with a spend limit (ADR 0012), promo or not, needs room under it.
+ *
+ * Auto (#322) becomes the `task`'s route model (`autoRouteModel`: the admin's
+ * pool, else the fixed routes, among routes whose provider key is set; else the
+ * catalog default) before any of these checks, so the message and the run
+ * record that concrete model. An image send on Auto only ever routes to a
+ * vision model, and is refused when there is none.
  */
 export async function validateModelChoice({
   internalKey,
   userId,
   model,
   withImages = false,
+  task = "build",
 }: {
   internalKey: string;
   userId: string;
   model: ModelChoiceInput;
   withImages?: boolean;
+  /** Auto only: what the send is for (`classifyRun`). */
+  task?: RunTask;
 }): Promise<RunModelChoice & { promoKind?: PromoModelKind }> {
   const { keyId, modelId } = toChoice(model);
   if (!keyId) {
@@ -169,11 +191,24 @@ export async function validateModelChoice({
       platformCatalog(internalKey),
       convex.query(api.credits.getForServer, { internalKey, userId }),
     ]);
-    const model = resolveCatalogModel(catalog, modelId);
+    const auto = modelId === AUTO_MODEL_ID;
+    const routed =
+      auto &&
+      autoRouteModel(
+        catalog.models.filter((m) => isPlatformConfigured(m.provider)),
+        // Images need a vision model whatever the task, plan mode included.
+        withImages ? "vision" : task,
+        catalog.autoModelIds,
+      );
+    if (auto && withImages && !routed) {
+      throw new ModelChoiceError(AUTO_NO_VISION_MESSAGE, 400, "auto_no_vision_model");
+    }
+    const model = routed || resolveCatalogModel(catalog, modelId);
     if (!isPlatformConfigured(model.provider)) {
       throw new ModelChoiceError(AI_NOT_CONFIGURED_MESSAGE, 503, "ai_not_configured");
     }
-    const choice = { modelId: model.id, label: platformRunLabel(model), provider: model.provider };
+    const label = auto ? autoRunLabel(model) : platformRunLabel(model);
+    const choice = { modelId: model.id, label, provider: model.provider };
     if (withImages && !model.vision) {
       throw visionRequired(choice.label);
     }
@@ -315,9 +350,21 @@ export async function takePromoRun({
 /** A run's key could not be used. `message` is written as the assistant reply. */
 export class ProviderKeyError extends Error {}
 
+/** Ends every key-failure reply, so history can leave those turns out. */
+export const KEY_FAILURE_SUFFIX = "Your request was not sent to Codenaya's models.";
+
+/**
+ * A run whose message has images, when the catalog changed after the send:
+ * the model picked for it was removed or hidden (so another one would run) or
+ * lost vision. The run never sends the images (#322).
+ */
+export const RUN_IMAGES_REFUSED_MESSAGE =
+  "The model picked for this chat can't take images anymore. Pick a model that can read images and send again. " +
+  KEY_FAILURE_SUFFIX;
+
 export const keyFailureMessage = (reason: string) =>
   `${reason} Update it in [Settings → AI providers](${AI_PROVIDERS_SETTINGS_PATH}) and try again. ` +
-  "Your request was not sent to Codenaya's models.";
+  KEY_FAILURE_SUFFIX;
 
 type AgentKitModel = ReturnType<typeof buildAgentKitModel>;
 
@@ -328,6 +375,12 @@ export interface RunModel {
   coding: (temperature?: number) => AgentKitModel;
   /** The conversation title model, on the same provider. */
   title: (temperature?: number) => AgentKitModel;
+  /**
+   * Whether this run may send images: the model reads them, as resolved now,
+   * and is the model the send picked. A substitute (the default, run when the
+   * pick was removed or hidden) was never checked against Auto's pool.
+   */
+  acceptsImages: boolean;
   /**
    * BYOK only: whether the provider still accepts the key (the free
    * test-connection call) and the account can still pay for inference
@@ -384,6 +437,7 @@ export async function resolveRunModel({
     return {
       coding: (temperature) => platformAgentModel(model.provider, model.providerModelId, temperature),
       title: (temperature) => platformAgentModel(title.provider, title.providerModelId, temperature),
+      acceptsImages: model.vision && model.id === choice.modelId,
       metering: {
         source: promoKindOf(model.access) ? "promo" : "platform",
         coding: model.pricing,
@@ -444,6 +498,7 @@ export async function resolveRunModel({
     key: { _id: key._id, userId: key.userId, label: key.label },
     coding: (temperature) => build(choice.modelId, temperature),
     title: (temperature) => build(titleModel, temperature),
+    acceptsImages: modelAcceptsImages(choice.modelId, key),
     metering: { source: "byok" },
     // Only a definite refusal counts: an unreachable provider is left for the
     // inference itself to retry.

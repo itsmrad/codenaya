@@ -16,6 +16,7 @@ import {
   deleteRows,
   deleteShowcaseBatch,
 } from "./projectCascade";
+import { recordSignedUp } from "./activationEvents";
 
 /**
  * Users mirrored from Clerk.
@@ -79,9 +80,16 @@ export const upsertFromClerk = internalMutation({
     ...profileFields,
     // Clerk's `updated_at` for this version of the user.
     updatedAt: v.number(),
+    // Clerk's `created_at`: when the user signed up.
+    createdAt: v.optional(v.number()),
   },
-  handler: async (ctx, { clerkUserId, ...profile }) => {
+  handler: async (ctx, { clerkUserId, createdAt, ...profile }) => {
     const existing = await getByClerkUserId(ctx, clerkUserId);
+
+    // ensureCurrent can store a newer profile before the sign-up webhook arrives.
+    if (createdAt !== undefined && !existing?.deletedAt) {
+      await recordSignedUp(ctx, clerkUserId, createdAt);
+    }
 
     if (!existing) {
       await ctx.db.insert("users", { clerkUserId, ...profile });
@@ -278,6 +286,12 @@ async function purgeUserDataBatch(
     .withIndex("by_userId_modelId", (q) => q.eq("userId", userId))
     .take(CASCADE_BATCH_SIZE);
   if (await deleteRows(ctx, "modelSpend", modelSpend)) return false;
+
+  const activationEvents = await ctx.db
+    .query("activationEvents")
+    .withIndex("by_userId_and_name_and_at", (q) => q.eq("userId", userId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "activationEvents", activationEvents)) return false;
 
   return true;
 }

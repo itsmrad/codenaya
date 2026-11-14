@@ -15,6 +15,7 @@ import {
   togglePriceMode,
   toSaveBody,
   toSpendLimit,
+  toggleAuto,
 } from "./catalog-draft";
 import { riskyPriceModelIds } from "./platform-models";
 
@@ -42,6 +43,7 @@ const draftOf = (models: DraftModel[], ids: Partial<Draft> = {}): Draft => ({
   models,
   defaultModelId: models[0]?.id ?? "",
   utilityModelId: models[0]?.id ?? "",
+  autoModelIds: [],
   ...ids,
 });
 
@@ -145,6 +147,15 @@ describe("catalog draft", () => {
     expect(removeModel(draft, "b")).toMatchObject({ defaultModelId: "a", utilityModelId: "a" });
   });
 
+  it("adds to and takes from the Auto pool once, and a removed model leaves it", () => {
+    const draft = draftOf([row({ id: "a" }), row({ id: "b" })]);
+    const pooled = toggleAuto(toggleAuto(toggleAuto(draft, "a", true), "b", true), "a", true);
+    expect(pooled.autoModelIds).toEqual(["a", "b"]);
+    expect(toggleAuto(pooled, "a", false).autoModelIds).toEqual(["b"]);
+    expect(removeModel(pooled, "b").autoModelIds).toEqual(["a"]);
+    expect(addModels(pooled, "groq", []).autoModelIds).toEqual(["a", "b"]);
+  });
+
   it("serializes the save body with numeric pricing and confirmed tools", () => {
     const body = toSaveBody(
       draftOf([
@@ -156,6 +167,7 @@ describe("catalog draft", () => {
     expect(body).toEqual({
       defaultModelId: "a",
       utilityModelId: "a",
+      autoModelIds: [],
       confirmRiskyPrices: true,
       models: [
         {
@@ -189,7 +201,9 @@ describe("catalog draft", () => {
 
   it("round-trips a saved catalog through the draft", () => {
     const saved: SavedCatalog = toSaveBody(
-      draftOf([row({ id: "a" }), row({ id: "b", priceMode: "split", input: "1", output: "2" })]),
+      draftOf([row({ id: "a" }), row({ id: "b", priceMode: "split", input: "1", output: "2" })], {
+        autoModelIds: ["b"],
+      }),
       false,
     );
     expect(toSaveBody(toDraft(saved), false)).toEqual({ ...saved, confirmRiskyPrices: false });

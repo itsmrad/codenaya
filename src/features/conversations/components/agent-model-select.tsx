@@ -41,8 +41,7 @@ interface AgentModelSelectProps {
 }
 
 /**
- * Codenaya's models, the promo models the user claimed (ADR 0009), and one
- * group per active key the user brought. A key that has since been marked
+ * Codenaya's models and one group per active key the user brought. A key that has since been marked
  * invalid stays listed while it is selected, so the current choice still
  * shows (and the run explains what is wrong).
  */
@@ -57,12 +56,7 @@ export const AgentModelSelect = ({
   );
   const selectedKey = keys.find((key) => key._id === value.keyId);
   const platform = usePlatformModelsOrCatalog();
-  const everyoneModels = platform.models.filter((model) => model.access === "everyone");
-  const promoModels = platform.models.filter((model) => model.access !== "everyone");
   const selectedPlatformModel = resolveCatalogModel(platform, value.modelId);
-  const promoLimit = (access: (typeof platform.models)[number]["access"]) =>
-    access === "promo_counted" ? `${platform.countedRunsLeft} runs left` : "Unlimited";
-  const selectedPromo = !selectedKey && selectedPlatformModel.access !== "everyone";
 
   return (
     <PromptInputSelect
@@ -79,11 +73,6 @@ export const AgentModelSelect = ({
             className="h-7 min-w-0 max-w-64 gap-1 rounded-md px-2 text-xs dark:bg-transparent dark:hover:bg-accent"
           >
             <PromptInputSelectValue />
-            {selectedPromo && (
-              <span className="shrink-0 rounded bg-primary/10 px-1 text-[10px] font-medium text-primary">
-                Promo · {promoLimit(selectedPlatformModel.access)}
-              </span>
-            )}
           </PromptInputSelectTrigger>
         </TooltipTrigger>
         <TooltipContent>
@@ -95,7 +84,7 @@ export const AgentModelSelect = ({
       <PromptInputSelectContent position="popper" align="start" className="max-h-80">
         <SelectGroup>
           <SelectLabel>{PLATFORM_PROVIDER.label}</SelectLabel>
-          {everyoneModels.map((model) => (
+          {platform.models.map((model) => (
             <PromptInputSelectItem
               key={model.id}
               value={toChoiceValue({ modelId: model.id })}
@@ -106,21 +95,6 @@ export const AgentModelSelect = ({
             </PromptInputSelectItem>
           ))}
         </SelectGroup>
-        {promoModels.length > 0 && (
-          <SelectGroup>
-            <SelectLabel>Free promotion</SelectLabel>
-            {promoModels.map((model) => (
-              <PromptInputSelectItem
-                key={model.id}
-                value={toChoiceValue({ modelId: model.id })}
-                data-tag={promoLimit(model.access)}
-                className={TAGGED_ITEM}
-              >
-                {model.name}
-              </PromptInputSelectItem>
-            ))}
-          </SelectGroup>
-        )}
         {keyGroups.map((key) => (
           <SelectGroup key={key._id}>
             <SelectLabel>

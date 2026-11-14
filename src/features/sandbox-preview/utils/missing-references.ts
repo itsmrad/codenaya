@@ -3,7 +3,7 @@ import { posix } from "node:path";
 
 /**
  * A tsconfig.json that references a tsconfig.app.json nobody wrote, an
- * index.html whose entry script doesn't exist, or a tailwind.config.ts that
+ * index.html whose entry script doesn't exist, or a vite.config.ts that
  * imports a package missing from package.json, boots into a Vite error
  * overlay (#190). The sandbox checks for them before booting so the user gets
  * the missing file's or package's name instead.
@@ -12,9 +12,9 @@ import { posix } from "node:path";
 type ProjectFile = { path: string; content: string };
 
 /** Drops line and block comments, leaving string literals (which may contain them) intact. */
-const stripComments = (text: string) =>
+export const stripComments = (text: string) =>
   text.replace(
-    /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
+    /("(?:\\.|[^"\\\n\r])*"|'(?:\\.|[^'\\\n\r])*'|`(?:\\.|[^`\\])*`)|(?<!:)\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
     (match, string: string | undefined) => string ?? "",
   );
 
@@ -94,6 +94,8 @@ export const missingReferencedFiles = (files: ProjectFile[]): string[] => {
 const SOURCE_FILE = /\.(?:[cm]?[jt]sx?)$/;
 const IMPORT_SPECIFIER =
   /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'`]([^"'`\n]+)["'`]/g;
+// Tailwind v4 CSS pulls packages in too: `@import "tw-animate-css"`, `@plugin "@tailwindcss/typography"`.
+const CSS_IMPORT = /@(?:import|plugin)\s+(?:url\(\s*)?["']([^"'\n]+)["']/g;
 const BUILTINS = new Set(builtinModules);
 
 /** `react-dom/client` → `react-dom`, `@radix-ui/react-slot/x` → `@radix-ui/react-slot`. */
@@ -106,10 +108,14 @@ const packageName = (specifier: string): string | null => {
 };
 
 /**
- * Describes each package the project's code imports but its package.json
- * doesn't declare, e.g. `tailwindcss-animate (imported by tailwind.config.ts)`.
+ * Describes each package the project's code or CSS imports but its package.json
+ * doesn't declare, e.g. `@tailwindcss/vite (imported by vite.config.ts)`.
  */
-export const undeclaredPackages = (files: ProjectFile[]): string[] => {
+export const undeclaredPackages = (
+  files: ProjectFile[],
+  // All project paths, so a CSS import of an untouched sibling file isn't read as a package.
+  paths: Set<string> = new Set(files.map((file) => file.path)),
+): string[] => {
   const manifest = files.find((file) => file.path === "package.json");
   const pkg = manifest ? (parseJsonc(manifest.content) as Record<string, unknown> | null) : null;
   if (!pkg || typeof pkg !== "object") return [];
@@ -126,9 +132,15 @@ export const undeclaredPackages = (files: ProjectFile[]): string[] => {
   const undeclared = new Map<string, string>();
 
   for (const file of files) {
-    if (!SOURCE_FILE.test(file.path) || file.path.endsWith(".d.ts")) continue;
     if (nestedPackages.some((dir) => file.path.startsWith(dir))) continue;
-    for (const [, specifier] of stripComments(file.content).matchAll(IMPORT_SPECIFIER)) {
+    // Vite serves public/ as-is, so its CSS imports are never resolved as packages.
+    const isCss = file.path.endsWith(".css") && !file.path.startsWith("public/");
+    if (!isCss && (!SOURCE_FILE.test(file.path) || file.path.endsWith(".d.ts"))) continue;
+    for (const [, specifier] of stripComments(file.content).matchAll(
+      isCss ? CSS_IMPORT : IMPORT_SPECIFIER,
+    )) {
+      // CSS resolves `@import "theme.css"` relative to the file before trying a package.
+      if (isCss && paths.has(posix.join(posix.dirname(file.path), specifier))) continue;
       const name = packageName(specifier);
       if (name && !declared.has(name) && !undeclared.has(name)) {
         undeclared.set(name, file.path);
@@ -139,7 +151,7 @@ export const undeclaredPackages = (files: ProjectFile[]): string[] => {
   return [...undeclared].map(([name, path]) => `${name} (imported by ${path})`);
 };
 
-const RESOLVE_SUFFIXES = [
+export const RESOLVE_SUFFIXES = [
   "",
   ".ts",
   ".tsx",
@@ -160,7 +172,7 @@ const RESOLVE_SUFFIXES = [
  * TypeScript's bundler resolution. Null for anything else, including
  * template-literal and glob imports, which name no single file.
  */
-const localCandidates = (from: string, specifier: string): string[] | null => {
+export const localCandidates = (from: string, specifier: string): string[] | null => {
   const bare = specifier.split(/[?#]/)[0];
   if (/\$\{|\*/.test(bare)) return null;
   const targets = isLocal(bare)

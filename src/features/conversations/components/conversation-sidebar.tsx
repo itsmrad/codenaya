@@ -29,6 +29,7 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
+import { useProjectCommands } from "@/lib/command-palette";
 import {
   Tooltip,
   TooltipContent,
@@ -40,7 +41,7 @@ import {
   useAiProviderKeys,
   usePlatformModelsOrCatalog,
 } from "@/features/ai-providers/hooks/use-ai-providers";
-import { modelAcceptsImages } from "@/features/ai-providers/registry";
+import { modelAcceptsImages, modelIdsFor } from "@/features/ai-providers/registry";
 import { resolveCatalogModel } from "@/features/ai-providers/platform";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { INSUFFICIENT_CREDITS_CODE } from "@/features/billing/credits";
@@ -48,6 +49,7 @@ import { MODEL_LIMIT_CODE } from "@/features/billing/model-spend";
 import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 import { useFiles } from "@/features/projects/hooks/use-files";
+import { useProject } from "@/features/projects/hooks/use-projects";
 import {
   SkillSlashMenu,
   useSkillSlashMenu,
@@ -61,7 +63,7 @@ import {
   useMessages,
 } from "../hooks/use-conversations";
 
-import { Id } from "../../../../convex/_generated/dataModel";
+import { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { PastConversationsDialog } from "./past-conversations-dialog";
 import { useChatStore } from "../store/use-chat-store";
@@ -70,11 +72,18 @@ import { AgentModelSelect } from "./agent-model-select";
 import { useEnhancePrompt } from "../hooks/use-enhance-prompt";
 import { EnhancePromptButton } from "./enhance-prompt-button";
 import { PlanModeToggle } from "./plan-mode-toggle";
-import { type MessageMode, PLAN_MODE, buildPlanMessage } from "../plan-mode";
-import { buildPathIndex } from "../agent-steps";
+import {
+  type MessageMode,
+  PLAN_MODE,
+  buildPlanMessage,
+  diagnoseStuckMessage,
+} from "../plan-mode";
+import { type AgentModelChoice, nextTier } from "../agent-models";
+import { buildPathIndex, stuckFilePath } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
 import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
+import { chatStarters } from "../chat-starters";
 import { type Checkpoint, useCheckpoints } from "../hooks/use-checkpoints";
 import {
   CheckpointHistoryDialog,
@@ -100,7 +109,7 @@ export const ConversationSidebar = ({
   projectId,
 }: ConversationSidebarProps) => {
   const { openIntegrations } = useProjectIntegrations();
-  const { input, setInput, contexts, removeContext, clearContexts } = useChatStore();
+  const { input, setInput, appendInput, contexts, removeContext, clearContexts } = useChatStore();
   const [agentModel, setAgentModel] = useAgentModel();
   const enhancer = useEnhancePrompt(input, setInput);
   const slashMenu = useSkillSlashMenu(projectId, input, setInput);
@@ -174,6 +183,22 @@ export const ConversationSidebar = ({
     return { pathOf: index, idOfPath: ids };
   }, [files]);
 
+  // Wait for the project, and its files unless it's an import (those load
+  // after the import), so the starters don't swap while loading.
+  const project = useProject(projectId);
+  const starters =
+    project && (project.importStatus || files !== undefined)
+      ? chatStarters({
+          name: project.name,
+          imported: Boolean(project.importStatus),
+          hasFiles: Boolean(files?.length),
+        })
+      : null;
+  // No conversation yet (import, Duplicate, Remix, blank create) or an empty one.
+  const isEmpty = activeConversationId
+    ? conversationMessages?.length === 0
+    : conversations !== undefined;
+
   const handleOpenFile = (path: string) => {
     const fileId = idOfPath.get(path);
     if (fileId) openFile(fileId, { pinned: true });
@@ -231,6 +256,12 @@ export const ConversationSidebar = ({
     }
   };
 
+  useProjectCommands({
+    "new-conversation": () => void handleCreateConversation(),
+    "past-conversations": () => setPastConversationsOpen(true),
+    "version-history": () => setCheckpointHistoryOpen(true),
+  });
+
   /**
    * Sends a message to the active conversation (creating one if needed).
    * Resolves to "sent", "failed" (saved, but the reply is marked failed with a
@@ -241,6 +272,7 @@ export const ConversationSidebar = ({
     text: string,
     images?: Id<"_storage">[],
     mode?: MessageMode,
+    model: AgentModelChoice = agentModel,
   ): Promise<"sent" | "failed" | "blocked"> => {
     if (detectCredential(text).detected) {
       toast.error(
@@ -265,7 +297,7 @@ export const ConversationSidebar = ({
         json: {
           conversationId,
           message: text,
-          model: agentModel,
+          model,
           images,
           mode,
         },
@@ -305,6 +337,19 @@ export const ConversationSidebar = ({
       return "blocked";
     }
   };
+
+  // Messages queued from outside the chat ("Ask agent to fix", #300) are sent
+  // once the agent is free, through the same path as a typed one.
+  const queuedMessage = useChatStore((state) => state.queuedMessage);
+  useEffect(() => {
+    if (!queuedMessage || isProcessing || pending) return;
+    const text = useChatStore.getState().takeQueuedMessage(projectId);
+    // sendMessage only sets state after awaiting the network, not synchronously.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (text) void sendMessage(text);
+    // sendMessage is read fresh when the queue changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queuedMessage, isProcessing, pending, projectId]);
 
   const handleSubmit = async (message: PromptInputMessage) => {
     // If processing and no new message, this is just a stop function
@@ -362,6 +407,37 @@ export const ConversationSidebar = ({
       }
     }
   }
+
+  /** Resends the prompt a reply answered, as-is, leaving the composer draft and contexts alone. */
+  const resend = (messageIndex: number, mode?: MessageMode, model?: AgentModelChoice) => {
+    const prompt = conversationMessages
+      ?.slice(0, messageIndex)
+      .findLast((m) => m.role === "user");
+    if (prompt) void sendMessage(prompt.content, prompt.images, mode, model);
+  };
+
+  /**
+   * A stuck run's retry (#306): one tier up, on the run's key or the platform,
+   * whichever served it, and only when that one offers the model.
+   */
+  const stuckRetry = (message: Doc<"messages">, messageIndex: number) => {
+    const runModel = message.runModel;
+    const next = runModel && nextTier(runModel.modelId);
+    if (!next) return undefined;
+    const key = runModel.keyId && modelKeys?.find((k) => k._id === runModel.keyId);
+    const offered = runModel.keyId
+      ? Boolean(key && modelIdsFor(key).includes(next.id))
+      : platform.models.some((m) => m.id === next.id);
+    if (!offered) return undefined;
+    const choice = { ...(runModel.keyId ? { keyId: runModel.keyId } : {}), modelId: next.id };
+    return {
+      ...next,
+      onRetry: () => {
+        setAgentModel(choice);
+        resend(messageIndex, message.mode, choice);
+      },
+    };
+  };
 
   /** Throws (keeping the attachments) when the images can't be sent. */
   const uploadMessageImages = async (files: FileUIPart[]) => {
@@ -434,8 +510,9 @@ export const ConversationSidebar = ({
             </Button>
           </div>
         </div>
-        {conversationMessages?.length === 0 && !pending ? (
+        {isEmpty && starters && !pending ? (
           <ChatEmptyState
+            starters={starters}
             onSelect={(prompt) => void handleSubmit({ text: prompt, files: [] })}
           />
         ) : (
@@ -458,18 +535,23 @@ export const ConversationSidebar = ({
                   isLast={messageIndex === conversationMessages.length - 1}
                   pathOf={pathOf}
                   onOpenFile={handleOpenFile}
-                  onRetry={() => {
-                    const prompt = conversationMessages
-                      .slice(0, messageIndex)
-                      .findLast((m) => m.role === "user");
-                    // Resend the prompt as-is, in the reply's mode, leaving the
-                    // composer draft and attached contexts alone.
-                    if (prompt) void sendMessage(prompt.content, prompt.images, message.mode);
-                  }}
+                  onRetry={() => resend(messageIndex, message.mode)}
                   onBuildPlan={() => {
                     setPlanMode(false);
                     void sendMessage(buildPlanMessage(message.content));
                   }}
+                  stuckRetry={message.stuck && stuckRetry(message, messageIndex)}
+                  onDiagnose={() => {
+                    if (!message.stuck) return;
+                    setPlanMode(true);
+                    // Added after any draft, not over it, then focused to review and send.
+                    appendInput(diagnoseStuckMessage(message.stuck, stuckFilePath(message.stuck, pathOf)));
+                    requestAnimationFrame(() => panelRef.current?.querySelector("textarea")?.focus());
+                  }}
+                  checkpointId={
+                    checkpoints && (checkpointByMessage.get(message._id)?._id ?? null)
+                  }
+                  revertDisabled={isProcessing}
                   onRestore={
                     checkpointByMessage.has(message._id) && !isProcessing
                       ? () => setRestoreTarget(checkpointByMessage.get(message._id)!)

@@ -3,6 +3,7 @@ import { Sandbox } from "e2b";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { EMPTY_CHAT_TITLE } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
@@ -85,7 +86,7 @@ test.describe.serial("agent checkBuild", () => {
     // The dev-tools badge covers the composer's bottom-left corner.
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     await page.getByRole("button", { name: "New conversation" }).click();
-    await expect(page.getByText("What do you want to build?")).toBeVisible();
+    await expect(page.getByText(EMPTY_CHAT_TITLE)).toBeVisible();
 
     const trigger = page.getByRole("combobox", { name: "Agent model" });
     await trigger.click();
