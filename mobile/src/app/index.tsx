@@ -1,9 +1,8 @@
 import { useMutation, useQuery } from "convex/react";
 import { Stack, useRouter } from "expo-router";
-import { useHeaderHeight } from "expo-router/react-navigation";
 import { Fragment, useEffect } from "react";
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import Animated from "react-native-reanimated";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import Animated, { useAnimatedKeyboard, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { FirstRunChecklist } from "@/components/first-run-checklist";
@@ -22,7 +21,10 @@ const RECENT_COUNT = 3;
 export default function Dashboard() {
   const c = useColors();
   const router = useRouter();
-  const headerHeight = useHeaderHeight();
+  // As the project chat: KeyboardAvoidingView left a gap above the keyboard on
+  // Android, so the page ends at the keyboard's top edge instead.
+  const keyboard = useAnimatedKeyboard({ isStatusBarTranslucentAndroid: true, isNavigationBarTranslucentAndroid: true });
+  const aboveKeyboard = useAnimatedStyle(() => ({ paddingBottom: keyboard.height.value }));
   const insets = useSafeAreaInsets();
   const projects = useQuery(api.projects.get);
   const ensureCurrent = useMutation(api.users.ensureCurrent);
@@ -35,7 +37,7 @@ export default function Dashboard() {
   }, [ensureCurrent]);
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior="padding" keyboardVerticalOffset={headerHeight}>
+    <Animated.View style={[styles.flex, aboveKeyboard]}>
       <Stack.Screen
         options={{
           headerRight: () => (
@@ -112,7 +114,7 @@ export default function Dashboard() {
           <StarterTemplates />
         </Animated.View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </Animated.View>
   );
 }
 
