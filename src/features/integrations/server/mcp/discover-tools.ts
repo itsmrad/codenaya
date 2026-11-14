@@ -29,6 +29,8 @@ import {
   detectToolDrift,
   fingerprintTools,
   hasDrift,
+  isAnnotatedReadOnly,
+  upgradeLegacyBaseline,
   type McpToolDefinition,
   type ToolDrift,
   type ToolFingerprint,
@@ -51,7 +53,10 @@ export const MAX_TOOLS_PER_CONNECTION = 40;
 export interface DiscoveredTool extends McpToolDefinition {
   /** Name the model sees, namespaced by provider. */
   qualifiedName: string;
-  /** True when this tool mutates state and needs an approval gate. */
+  /**
+   * True when this tool needs an approval gate: it may mutate state, or nothing
+   * trustworthy says it cannot. See `requiresApproval`.
+   */
   destructive: boolean;
 }
 
@@ -84,6 +89,31 @@ export interface DiscoveryFailure {
  */
 export function qualifyToolName(namespace: string, toolName: string): string {
   return `${namespace}__${toolName}`;
+}
+
+/**
+ * Whether a call to this tool must pass the approval gate. Fails closed.
+ *
+ * - Listed in the catalog's `destructiveTools`: always gated. Server hints are
+ *   advisory and never override the known write list.
+ * - `destructiveHint: true`: always gated, even beside `readOnlyHint: true`.
+ * - Otherwise ungated only when classified read-only, either by an explicit
+ *   `readOnlyHint: true` or because the link uses the provider's own
+ *   server-enforced read-only mode. Missing or malformed hints are gated.
+ *
+ * Custom servers take the same rule with an empty list. Their `readOnlyHint` is
+ * honoured because the server that declares it also executes the call: a false
+ * hint gives it nothing it lacked, while the gate still stops the model from
+ * running unannotated or declared writes unreviewed. A hint flipped after
+ * approval is caught by the fingerprint (see `fingerprintTool`).
+ */
+export function requiresApproval(
+  server: Pick<ResolvedMcpServer, "destructiveTools" | "readOnlyEnforced">,
+  tool: McpToolDefinition,
+): boolean {
+  if (server.destructiveTools.includes(tool.name)) return true;
+  if (tool.annotations?.destructiveHint === true) return true;
+  return !(isAnnotatedReadOnly(tool) || server.readOnlyEnforced === true);
 }
 
 /**
@@ -153,6 +183,11 @@ export async function discoverTools(
         typeof tool.description === "string" ? tool.description : undefined,
       title: typeof tool.title === "string" ? tool.title : undefined,
       inputSchema: tool.inputSchema,
+      // Only the hints the approval policy reads; the rest cannot change it.
+      annotations: tool.annotations && {
+        readOnlyHint: tool.annotations.readOnlyHint,
+        destructiveHint: tool.annotations.destructiveHint,
+      },
     }));
 
     // The allowlist is applied before the cap, so an explicit selection is never
@@ -166,7 +201,7 @@ export async function discoverTools(
     // definitions that can never reach the model.
     const fingerprints = fingerprintTools(allowed);
 
-    const baseline = server.toolBaseline ?? [];
+    const baseline = upgradeLegacyBaseline(server.toolBaseline ?? [], allowed);
     const drift = detectToolDrift(fingerprints, baseline);
 
     // A first connection has no baseline, so everything reads as "added". That is
@@ -184,7 +219,7 @@ export async function discoverTools(
     const tools: DiscoveredTool[] = kept.map((tool) => ({
       ...tool,
       qualifiedName: qualifyToolName(server.namespace, tool.name),
-      destructive: server.destructiveTools.includes(tool.name),
+      destructive: requiresApproval(server, tool),
     }));
 
     const info = client.getServerVersion();

@@ -45,11 +45,35 @@
 
 import { createHash } from "node:crypto";
 
+/**
+ * The MCP tool annotations the approval policy reads.
+ *
+ * Typed `unknown` because they arrive from the server: only a literal `true`
+ * counts, so a missing, malformed or string-valued hint fails closed.
+ */
+export interface McpToolAnnotations {
+  readOnlyHint?: unknown;
+  destructiveHint?: unknown;
+}
+
 export interface McpToolDefinition {
   name: string;
   description?: string;
   title?: string;
   inputSchema?: unknown;
+  annotations?: McpToolAnnotations;
+}
+
+/**
+ * Whether the server explicitly declares this tool read-only.
+ *
+ * `destructiveHint: true` wins over a conflicting `readOnlyHint: true`.
+ */
+export function isAnnotatedReadOnly(tool: McpToolDefinition): boolean {
+  return (
+    tool.annotations?.readOnlyHint === true &&
+    tool.annotations.destructiveHint !== true
+  );
 }
 
 export interface ToolFingerprint {
@@ -90,18 +114,60 @@ function stableStringify(value: unknown): string {
  * those would produce drift alarms on benign changes, and an alarm that fires
  * often is an alarm that gets ignored.
  */
-export function fingerprintTool(tool: McpToolDefinition): ToolFingerprint {
+function digestDefinition(tool: McpToolDefinition): string {
   const material = stableStringify({
     name: tool.name,
     description: tool.description ?? null,
     title: tool.title ?? null,
     inputSchema: tool.inputSchema ?? null,
   });
+  return createHash("sha256").update(material).digest("hex").slice(0, 32);
+}
 
+/**
+ * Prefix marking a digest that also covers the read-only classification.
+ * Baselines recorded before it existed carry a bare digest.
+ */
+const CLASSIFIED_PREFIX = "v2:";
+
+/**
+ * The read-only classification is covered too, because it decides whether the
+ * tool runs without approval: a server flipping an approved write tool to
+ * `readOnlyHint: true` must read as drift, not silently drop the gate. Only the
+ * derived boolean is digested, so benign hint changes (`openWorldHint`, a title)
+ * do not raise alarms.
+ */
+export function fingerprintTool(tool: McpToolDefinition): ToolFingerprint {
+  const classification = isAnnotatedReadOnly(tool) ? "ro" : "gated";
   return {
     name: tool.name,
-    digest: createHash("sha256").update(material).digest("hex").slice(0, 32),
+    digest: `${CLASSIFIED_PREFIX}${classification}:${digestDefinition(tool)}`,
   };
+}
+
+/**
+ * Accept baseline entries recorded before the classification was digested.
+ *
+ * A bare digest that still matches the tool's definition is upgraded to the
+ * current digest instead of reading as "changed"; otherwise every existing
+ * connection would withhold its tools after deploy. This grandfathers at most
+ * the first run per connection, because the run re-records a classified
+ * baseline. It grants nothing new: before classification, every unlisted tool
+ * already ran without approval.
+ */
+export function upgradeLegacyBaseline(
+  baseline: readonly ToolFingerprint[],
+  tools: readonly McpToolDefinition[],
+): ToolFingerprint[] {
+  const byName = new Map(tools.map((tool) => [tool.name, tool]));
+  return baseline.map((entry) => {
+    const tool = byName.get(entry.name);
+    return !entry.digest.startsWith(CLASSIFIED_PREFIX) &&
+      tool &&
+      digestDefinition(tool) === entry.digest
+      ? fingerprintTool(tool)
+      : entry;
+  });
 }
 
 /** Fingerprint a tool list, sorted by name so the baseline is order-stable. */

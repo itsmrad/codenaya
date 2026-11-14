@@ -88,6 +88,12 @@ export interface ResolvedMcpServer {
   headers: Record<string, string>;
   trustedHostnames: readonly string[];
   readOnly: boolean;
+  /**
+   * True when `readOnly` is enforced by the provider's server (catalog
+   * `supportsReadOnly`), not merely recorded. Lets unannotated tools run
+   * ungated on such links. Absent means false, which fails closed.
+   */
+  readOnlyEnforced?: boolean;
   writeApproved: boolean;
   allowedTools?: readonly string[];
   destructiveTools: readonly string[];
@@ -256,6 +262,7 @@ export async function resolveMcpServers(
       },
       trustedHostnames: isCustom ? [] : provider.trustedHostnames,
       readOnly: link.readOnly,
+      readOnlyEnforced: link.readOnly && provider?.supportsReadOnly === true,
       writeApproved: link.writeApproved,
       allowedTools: link.allowedTools,
       destructiveTools: provider?.destructiveTools ?? [],
