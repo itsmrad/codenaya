@@ -78,7 +78,7 @@ export const PreviewBuilding = ({ steps }: { steps: AgentStep[] }) => {
         </ul>
 
         <p className="text-xs text-muted-foreground">
-          Preview starts when the first build finishes
+          The preview appears as soon as your app starts
         </p>
       </div>
     </div>

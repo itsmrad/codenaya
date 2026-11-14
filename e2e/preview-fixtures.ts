@@ -18,7 +18,11 @@ export const seedPreviewProject = async (page: Page, name: string) => {
   const projectId = existing?._id ?? (await user.mutation(api.projects.create, { name }));
 
   const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-  await system.mutation(api.system.cleanup, { internalKey, projectId });
+  // Cleanup deletes in batches (file text first), so one call can leave the files.
+  let cleaned;
+  do {
+    cleaned = await system.mutation(api.system.cleanup, { internalKey, projectId });
+  } while (cleaned.done === false);
   await system.mutation(api.system.createFile, {
     internalKey,
     projectId,
