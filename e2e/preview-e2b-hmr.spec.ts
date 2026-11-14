@@ -91,6 +91,8 @@ test.describe("E2B preview hot reload", () => {
     );
     // Debounce + PATCH round trip to E2B + Vite's hot update (#179).
     expect(editMs).toBeLessThan(3_000);
-    expect(errors).toEqual([]);
+    // Chromium logs the 503 injected above; any other error still fails.
+    const injected503 = /status of 503\b.*\/api\/sandbox\/[^/\s)]+\)$/;
+    expect(errors.filter((error) => !injected503.test(error))).toEqual([]);
   });
 });

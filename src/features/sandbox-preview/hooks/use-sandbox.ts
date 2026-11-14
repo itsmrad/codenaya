@@ -331,6 +331,10 @@ export const useSandbox = ({
           const { error } = failure;
           if (error) setAppError((prev) => mergeAppError(prev, error));
         } catch {
+          // The write may have landed anyway, so a revert must still be resent.
+          if (sandboxIdRef.current === sandboxId) {
+            for (const file of changedFiles) syncedContentRef.current.delete(file.path);
+          }
           if (cancelled || !isCurrent()) return;
           if (failures < 3) {
             timeoutId = setTimeout(sync, 1_000 * 2 ** failures++);

@@ -205,6 +205,21 @@ describe("sandbox file sync acknowledgements", () => {
     expect(patch).toHaveBeenCalledTimes(1);
   });
 
+  it("resends a reverted file after a failed sync whose write may have landed", async () => {
+    edit("A");
+    await vi.advanceTimersByTimeAsync(300);
+    patch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    edit("B");
+    await vi.advanceTimersByTimeAsync(300);
+    edit("A");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(payloads()).toEqual([
+      [{ path: "App.tsx", content: "A" }],
+      [{ path: "App.tsx", content: "B" }],
+      [{ path: "App.tsx", content: "A" }],
+    ]);
+  });
+
   it("reports an install failure even when files change during the reinstall", async () => {
     const inflight = deferred<Response>();
     patch.mockReturnValueOnce(inflight.promise);
