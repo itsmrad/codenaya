@@ -54,7 +54,7 @@ async function main() {
           await writeFile(`${runDirectory}/score.json`, sanitize(result));
           scored = true;
           await writeFile(`${directory}/scoreboard.md`, scoreboard(scores, values["base-url"]!));
-          console.log(`${id}: completed=${result.completed}, preview=${result.preview.loaded}, tokens=${result.tokensIn}/${result.tokensOut}, $${result.usd.toFixed(6)}; ${runDirectory}`);
+          console.log(`${id}: completed=${result.completed}, preview=${result.previewOk}, tokens=${result.tokensIn}/${result.tokensOut}, $${result.usd.toFixed(6)}; ${runDirectory}`);
           if (name === "saas") saasId = projectId;
         } finally {
           await page.close();
@@ -70,7 +70,7 @@ async function main() {
 type Judged = Score & { judge?: Awaited<ReturnType<typeof judge>> };
 
 function scoreboard(scores: Judged[], base: string) {
-  return `# Agent evaluation\n\n| Model / prompt | Completed | Build passes | Tool errors | Calls ≈ / cap | Preview | Fixes | First preview / wall (s) | Tokens in/out | USD | Judge | Project |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n` + scores.map((s) => `| ${s.id} | ${s.completed} | ${s.checkBuild.filter((c) => c.passed).length}/${s.checkBuild.length} | ${s.toolErrorCount} | ${s.modelCallsApprox}/${s.iterationCapHit || s.capped} | ${s.preview.loaded && !s.preview.overlay} | ${s.autoFixCount} | ${s.firstPreviewMs === null ? "—" : (s.firstPreviewMs / 1000).toFixed(1)} / ${(s.wallMs / 1000).toFixed(1)} | ${s.tokensIn}/${s.tokensOut} | ${s.usd.toFixed(6)} | ${s.judge ? `${s.judge.score}/10, ${s.judge.passed}/${s.judge.total}` : "—"} | [open](${base}/projects/${s.projectId}) |`).join("\n") + "\n";
+  return `# Agent evaluation\n\n| Model / prompt | Completed | Build passes | Tool errors | Calls ≈ / cap | Preview | Fixes | First preview / wall (s) | Tokens in/out | USD | Judge | Project |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n` + scores.map((s) => `| ${s.id} | ${s.completed} | ${s.checkBuild.filter((c) => c.passed).length}/${s.checkBuild.length} | ${s.toolErrorCount} | ${s.modelCallsApprox}/${s.iterationCapHit || s.capped} | ${s.previewOk} | ${s.autoFixCount} | ${s.firstPreviewMs === null ? "—" : (s.firstPreviewMs / 1000).toFixed(1)} / ${(s.wallMs / 1000).toFixed(1)} | ${s.tokensIn}/${s.tokensOut} | ${s.usd.toFixed(6)} | ${s.judge ? `${s.judge.score}/10, ${s.judge.passed}/${s.judge.total}` : "—"} | [open](${base}/projects/${s.projectId}) |`).join("\n") + "\n";
 }
 
 main().catch((error) => { console.error(JSON.parse(sanitize({ error: String(error) })).error); process.exitCode = 1; });

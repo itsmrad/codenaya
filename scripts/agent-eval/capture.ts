@@ -48,6 +48,12 @@ export async function capture(page: Page, trail: Trail) {
   });
 }
 
+// E2B's proxy refuses Vite's HMR websocket while the app itself runs fine.
+const HMR_NOISE = [/^WebSocket connection to 'wss:\/\/[^']*' failed/, /^\[vite\] failed to connect to websocket/];
+export const isHmrNoise = (text: string) => HMR_NOISE.some((pattern) => pattern.test(text));
+/** Uncaught render errors, which leave an error boundary instead of the app. */
+export const isRuntimeError = (text: string) => /\b(?:TypeError|ReferenceError)\b|Cannot read properties of/.test(text);
+
 export const isAppUrl = (url: string) => {
   try { return /\.(?:e2b\.app|e2b\.dev)$/.test(new URL(url).hostname); } catch { return false; }
 };
@@ -67,8 +73,11 @@ export async function screenshot(page: Page, directory: string, trail: Trail) {
   if (!src || !isAppUrl(src)) throw new Error("No E2B iframe URL for app screenshot");
   const app = await page.context().newPage();
   try {
+    trail.preview.errors = [];
     app.on("console", (message) => {
-      if (message.type() === "error" && isAppUrl(message.location().url)) trail.consoleErrors.push({ text: message.text(), url: message.location().url });
+      if (message.type() !== "error" || !isAppUrl(message.location().url)) return;
+      trail.consoleErrors.push({ text: message.text(), url: message.location().url });
+      trail.preview.errors!.push(message.text()); // A fresh load: build-time errors excluded.
     });
     await app.goto(src, { waitUntil: "domcontentloaded", timeout: 30_000 });
     await app.locator("#root > *, vite-error-overlay").first().waitFor({ timeout: 30_000 });

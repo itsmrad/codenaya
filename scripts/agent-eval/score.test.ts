@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { tokenCost } from "./cost";
 import { score } from "./score";
-import { sanitize } from "./capture";
+import { isRuntimeError, sanitize } from "./capture";
 import type { Trail } from "./types";
 
 const fixture = (): Trail => ({
@@ -32,6 +32,20 @@ describe("agent evaluation", () => {
     trail.messages[0].content = "Step budget reached: no more tool calls.";
     trail.messages[0].steps!.push({ id: "error", kind: "tool", tool: "editFile", status: "error", error: "Missing file", startedAt: 2000 });
     expect(score(trail, [])).toMatchObject({ iterationCapHit: true, toolErrorCount: 1, modelCallsApprox: 1 });
+  });
+  it("fails the preview on a runtime error in the final load and drops HMR noise", () => {
+    const trail = fixture();
+    trail.consoleErrors = [
+      { text: "WebSocket connection to 'wss://4000-abc.e2b.app/?token=x' failed: Error during WebSocket handshake", url: "https://4000-abc.e2b.app/" },
+      { text: "[vite] failed to connect to websocket.\nyour current setup:", url: "https://4000-abc.e2b.app/" },
+      { text: "Invalid hook call.", url: "https://4000-abc.e2b.app/" },
+    ];
+    trail.preview.errors = ["WebSocket connection to 'wss://localhost:5173/' failed: net::ERR_CONNECTION_REFUSED"];
+    expect(score(trail, [])).toMatchObject({ previewOk: true, consoleErrors: [{ text: "Invalid hook call." }] });
+    trail.preview.errors.push("TypeError: Cannot read properties of null (reading 'useContext')");
+    expect(score(trail, []).previewOk).toBe(false);
+    expect(isRuntimeError("Uncaught ReferenceError: x is not defined")).toBe(true);
+    expect(isRuntimeError("Failed to load resource: 404")).toBe(false);
   });
   it("prices tiers and cache usage; rejects unknown models and invalid usage", () => {
     expect(tokenCost("claude-haiku-5-5", 10000, 2000)).toBe(0.002);

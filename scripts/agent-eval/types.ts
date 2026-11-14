@@ -9,5 +9,5 @@ export type Trail = {
   messages: Message[]; usage: Usage[]; sandboxEvents: SandboxEvent[];
   consoleErrors: { text: string; url: string }[];
   capped: boolean; error?: string;
-  preview: { loaded: boolean; overlay: boolean; screenshot?: string };
+  preview: { loaded: boolean; overlay: boolean; screenshot?: string; errors?: string[] };
 };

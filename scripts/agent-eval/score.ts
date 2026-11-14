@@ -1,4 +1,5 @@
 import { missingReferencedFiles, undeclaredPackages, unresolvedImports } from "../../src/features/sandbox-preview/utils/missing-references";
+import { isHmrNoise, isRuntimeError } from "./capture";
 import { totalUsd } from "./cost";
 import type { Trail } from "./types";
 
@@ -19,7 +20,8 @@ export function score(trail: Trail, files: { path: string; content: string }[]) 
     checkBuild: checks, toolErrorCount: toolErrors.length, toolErrors,
     modelCallsApprox, iterationCapHit: assistants.some((m) => new Set((m.steps ?? []).map((s) => s.startedAt)).size >= 39 || /Step budget reached/.test(m.content)),
     missingReferencedFiles: missingReferencedFiles(files), undeclaredPackages: undeclaredPackages(files), unresolvedImports: unresolvedImports(files),
-    preview: trail.preview, consoleErrors: trail.consoleErrors,
+    preview: trail.preview, consoleErrors: trail.consoleErrors.filter((e) => !isHmrNoise(e.text)),
+    previewOk: trail.preview.loaded && !trail.preview.overlay && !(trail.preview.errors ?? []).some(isRuntimeError),
     sandboxErrors: trail.sandboxEvents.filter((e) => e.type === "error"),
     autoFixCount: trail.messages.filter((m) => m.role === "user" && m.content.startsWith("The preview shows a")).length,
     autoFixOutcomes: assistants.slice(1).map((m) => ({ status: m.status, stuck: m.stuck })),
