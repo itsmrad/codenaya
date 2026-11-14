@@ -557,7 +557,7 @@ export const processMessage = inngest.createFunction(
     // base, project instructions, skill index and integrations, then the project tree, forced
     // skills and plan mode.
     // Conversation goes in messages (see onStart).
-    const swarm = swarmRun({ ...(event.data as MessageEvent), internalKey });
+    const swarm = await swarmRun({ ...(event.data as MessageEvent), internalKey, step });
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
       buildProjectInstructionsSection(projectInstructions),

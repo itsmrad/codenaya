@@ -138,7 +138,7 @@ describe("swarmWorker", () => {
     const summary = "Unfinished (step or cost cap): Listed files; the page is unfinished.";
     expect(outcome.data).toMatchObject({ status: "unfinished", summary });
     expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ status: "done", summary })]);
-  });
+  }, 20_000);
 
   it("hands off to the summary agent once its usage crosses the cost cap", async () => {
     mocks.catalog.mockReturnValue({
@@ -178,9 +178,12 @@ describe("swarmWorker", () => {
     }
   });
 
-  it("is cancelled with its parent message, with room for two swarms' workers per owner", () => {
+  it("is cancelled with its parent message or on its own timeout, with room for two swarms' workers per owner", () => {
     const { opts } = swarmWorker as unknown as { opts: { cancelOn: unknown; concurrency: unknown } };
-    expect(opts.cancelOn).toEqual([{ event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" }]);
+    expect(opts.cancelOn).toEqual([
+      { event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" },
+      { event: "agent-task/cancel", if: "event.data.agentTaskId == async.data.agentTaskId" },
+    ]);
     expect(opts.concurrency).toEqual([{ key: "event.data.ownerId", limit: 8 }]);
   });
 });

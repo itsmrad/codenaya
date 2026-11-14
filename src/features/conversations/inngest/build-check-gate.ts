@@ -19,8 +19,11 @@ const WRITE_TOOLS = new Set([
   "delegateTasks",
 ]);
 
-/** Write tools that make at most one (transactional) mutation, so an error result means nothing changed. */
-const ATOMIC_WRITE_TOOLS = new Set(["updateFile", "editFile", "renameFile"]);
+/**
+ * Write tools whose error result means nothing changed: one (transactional) mutation, or a
+ * delegateTasks call that was refused or whose workers wrote nothing.
+ */
+const ATOMIC_WRITE_TOOLS = new Set(["updateFile", "editFile", "renameFile", "delegateTasks"]);
 
 /** One check plus the two fix attempts the prompt allows; also caps the turns the gate forces. */
 export const MAX_BUILD_CHECKS = 3;
