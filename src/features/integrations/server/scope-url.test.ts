@@ -26,7 +26,7 @@ function urlFor(id: ProviderId, selection: ProjectScopeSelection): string {
 }
 
 describe("catalog", () => {
-  it("exposes exactly the nine curated providers", () => {
+  it("exposes exactly the fourteen curated providers", () => {
     expect(listProviders().map((p) => p.id)).toEqual([
       "supabase",
       "neon",
@@ -37,6 +37,11 @@ describe("catalog", () => {
       "sentry",
       "cloudflare",
       "linear",
+      "posthog",
+      "resend",
+      "upstash",
+      "sanity",
+      "planetscale",
     ]);
   });
 
@@ -80,6 +85,19 @@ describe("catalog", () => {
     expect(isDestructiveTool("nope", "anything")).toBe(false);
   });
 
+  it.each([
+    ["posthog", "exec"],
+    ["resend", "send-email"], ["resend", "send-batch-emails"], ["resend", "send-broadcast"],
+    ["resend", "send-inbox-draft"], ["resend", "reply-to-inbox-thread-email"],
+    ["upstash", "redis_run_command"], ["upstash", "qstash_publish_message"],
+    ["upstash", "redis_change_plan"], ["upstash", "qstash_set_plan"], ["upstash", "vector_upsert"],
+    ["sanity", "publish_documents"], ["sanity", "deploy_schema"], ["sanity", "deploy_studio"],
+    ["sanity", "add_cors_origin"], ["sanity", "cors_origins_delete"], ["sanity", "run_sanity_cli"],
+    ["planetscale", "planetscale_execute_write_query"], ["planetscale", "planetscale_update_payment_method"],
+  ])("marks the verified %s tool %s destructive", (id, tool) => {
+    expect(isDestructiveTool(id, tool)).toBe(true);
+  });
+
   it("returns a sorted, de-duplicated hostname allowlist", () => {
     const hostnames = getTrustedHostnames();
     expect(hostnames).toEqual([
@@ -88,10 +106,15 @@ describe("catalog", () => {
       "mcp.context7.com",
       "mcp.linear.app",
       "mcp.neon.tech",
+      "mcp.posthog.com",
       "mcp.prisma.io",
+      "mcp.pscale.dev",
+      "mcp.resend.com",
+      "mcp.sanity.io",
       "mcp.sentry.dev",
       "mcp.stripe.com",
       "mcp.supabase.com",
+      "mcp.upstash.com",
     ]);
     expect(new Set(hostnames).size).toBe(hostnames.length);
   });
@@ -115,6 +138,11 @@ describe("buildScopedMcpUrl — default (unscoped) URLs", () => {
     ["sentry", "https://mcp.sentry.dev/mcp"],
     ["cloudflare", "https://mcp.cloudflare.com/mcp"],
     ["linear", "https://mcp.linear.app/mcp"],
+    ["posthog", "https://mcp.posthog.com/mcp"],
+    ["resend", "https://mcp.resend.com/mcp"],
+    ["upstash", "https://mcp.upstash.com/mcp"],
+    ["sanity", "https://mcp.sanity.io/"],
+    ["planetscale", "https://mcp.pscale.dev/mcp/planetscale"],
   ];
 
   for (const [id, expected] of cases) {
@@ -157,11 +185,49 @@ describe("buildScopedMcpUrl — read-only per provider mechanism", () => {
 
   it("ignores readOnly for providers that cannot express it in the URL", () => {
     // Enforcement for these falls to the destructive-tool approval gate.
-    for (const id of ["stripe", "context7", "prisma", "cloudflare", "sentry"] as const) {
+    for (const id of ["stripe", "context7", "prisma", "cloudflare", "sentry", "resend", "upstash", "sanity"] as const) {
       expect(provider(id).supportsReadOnly).toBe(false);
       expect(urlFor(id, { readOnly: true })).toBe(urlFor(id, UNSCOPED));
       expect(buildScopedMcpUrl(provider(id), { readOnly: true }).headers).toEqual({});
     }
+  });
+});
+
+describe("buildScopedMcpUrl — backend services", () => {
+  it("combines PostHog feature and project scope with its read-only header", () => {
+    expect(buildScopedMcpUrl(provider("posthog"), {
+      readOnly: true, features: ["insights", "flags", "flags"], projectRef: " 123 ",
+    })).toEqual({
+      url: "https://mcp.posthog.com/mcp?features=flags%2Cinsights&project_id=123",
+      headers: { "x-posthog-read-only": "true" },
+    });
+  });
+
+  it("sends Upstash groups only when explicitly selected, without a read-only flag", () => {
+    expect(buildScopedMcpUrl(provider("upstash"), {
+      readOnly: true, features: ["vector_search", "redis", "qstash_workflow"], projectRef: "ignored",
+    })).toEqual({
+      url: "https://mcp.upstash.com/mcp?features=qstash_workflow%2Credis%2Cvector_search",
+      headers: {},
+    });
+    expect(urlFor("upstash", { readOnly: true, features: [] })).toBe(
+      "https://mcp.upstash.com/mcp",
+    );
+  });
+
+  it("uses PlanetScale's Insights-only endpoint without pretending to scope a database", () => {
+    expect(buildScopedMcpUrl(provider("planetscale"), {
+      readOnly: true, projectRef: "ignored", features: ["ignored"],
+    })).toEqual({
+      url: "https://mcp.pscale.dev/mcp/planetscale-insights-only",
+      headers: {},
+    });
+  });
+
+  it.each(["resend", "sanity"] as const)("does not invent %s URL scoping", (id) => {
+    expect(buildScopedMcpUrl(provider(id), {
+      readOnly: true, projectRef: "ignored", features: ["ignored"], orgSlug: "ignored",
+    })).toEqual({ url: urlFor(id, UNSCOPED), headers: {} });
   });
 });
 

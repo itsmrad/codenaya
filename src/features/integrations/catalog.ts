@@ -303,6 +303,157 @@ const CATALOG = {
       "create_document",
     ],
   },
+
+  // Endpoint, auth and scoping: https://posthog.com/docs/model-context-protocol/faq
+  // Tool names: https://posthog.com/docs/model-context-protocol/tools
+  posthog: {
+    id: "posthog",
+    displayName: "PostHog",
+    mcpUrl: "https://mcp.posthog.com/mcp",
+    authModes: ["oauth", "api_key"],
+    trustedHostnames: ["mcp.posthog.com"],
+    supportsReadOnly: true,
+    scope: {
+      queryParams: [
+        { param: "features", value: { kind: "list", field: "features", encoding: "csv" } },
+        { param: "project_id", value: { kind: "string", field: "projectRef" } },
+      ],
+      headers: [
+        { header: "x-posthog-read-only", value: { kind: "flag", field: "readOnly", whenTrue: "true" } },
+      ],
+    },
+    destructiveTools: [
+      "exec", // CLI mode can dispatch writes as well as reads.
+      "action-create", "action-update", "action-delete",
+      "dashboard-create", "dashboard-update", "dashboard-delete",
+      "survey-create", "survey-update", "survey-delete",
+    ],
+    apiKey: {
+      header: "Authorization",
+      valuePrefix: "Bearer ",
+      hint: "PostHog personal API key (MCP Server preset)",
+    },
+    notes:
+      "Read-only is enforced by the x-posthog-read-only header. Feature groups and project_id narrow the session; the personal API key's MCP Server preset also limits project access.",
+  },
+
+  // https://resend.com/docs/mcp-server; exact tool names: resend/resend-mcp src/tools.
+  resend: {
+    id: "resend",
+    displayName: "Resend",
+    mcpUrl: "https://mcp.resend.com/mcp",
+    authModes: ["oauth", "api_key"],
+    trustedHostnames: ["mcp.resend.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    destructiveTools: [
+      "send-email", "send-batch-emails", "cancel-email", "update-email", "share-email",
+      "create-broadcast", "send-broadcast", "cancel-broadcast", "duplicate-broadcast",
+      "remove-broadcast", "compose-broadcast", "update-broadcast",
+      "send-new-inbox-email", "send-inbox-draft", "reply-to-inbox-thread-email",
+      "forward-inbox-thread-email",
+      "create-domain", "update-domain", "remove-domain", "verify-domain",
+      "create-domain-claim", "verify-domain-claim",
+      "create-template", "compose-template", "update-template", "remove-template",
+      "publish-template", "duplicate-template",
+    ],
+    apiKey: {
+      header: "Authorization",
+      valuePrefix: "Bearer ",
+      hint: "Resend API key (re_...)",
+    },
+    notes:
+      "No URL-level scoping or read-only mode. Sending tools deliver real email; use limited API key or OAuth permissions and review write approvals.",
+  },
+
+  // https://upstash.com/docs/agent-resources/mcp
+  upstash: {
+    id: "upstash",
+    displayName: "Upstash",
+    mcpUrl: "https://mcp.upstash.com/mcp",
+    authModes: ["oauth", "api_key"],
+    trustedHostnames: ["mcp.upstash.com"],
+    supportsReadOnly: false,
+    scope: {
+      queryParams: [
+        { param: "features", value: { kind: "list", field: "features", encoding: "csv" } },
+      ],
+      headers: [],
+    },
+    destructiveTools: [
+      "redis_create_database", "redis_create_branch", "redis_create_backup",
+      "redis_set_daily_backup", "redis_rename_database", "redis_set_eviction",
+      "redis_set_auto_upgrade", "redis_change_plan", "redis_set_prod_pack",
+      "redis_set_budget", "redis_update_read_regions", "redis_reset_credentials",
+      "redis_delete_database", "redis_run_command",
+      "qstash_publish_message", "qstash_flow_control_manage", "qstash_manage_schedule",
+      "workflow_manage_run", "dlq_manage", "qstash_set_plan", "qstash_set_prod_pack",
+      "qstash_set_budget", "qstash_reset_token",
+      "index_create", "index_set_plan", "index_reset_credentials", "index_update",
+      "index_rename_namespace", "index_delete", "index_delete_documents",
+      "index_reset", "index_delete_namespace", "vector_upsert", "search_upsert",
+    ],
+    apiKey: {
+      header: "Authorization",
+      valuePrefix: "Bearer ",
+      hint: "Upstash developer API key in email:API_KEY format",
+    },
+    notes:
+      "Select features explicitly (redis, qstash_workflow, vector_search) to narrow the tools. Omitting features uses broader vendor defaults, including other product groups. No URL-level read-only enforcement: choose read-only at OAuth consent or use a read-only developer key. Redis commands, QStash publishing and plan changes can write data or incur spend.",
+  },
+
+  // Endpoint, auth and exact tool names: https://www.sanity.io/docs/ai/mcp-server
+  sanity: {
+    id: "sanity",
+    displayName: "Sanity",
+    mcpUrl: "https://mcp.sanity.io",
+    authModes: ["oauth", "api_key"],
+    trustedHostnames: ["mcp.sanity.io"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    destructiveTools: [
+      "deploy_schema", "undeploy_schema", "schema_types_delete", "schema_fields_patch",
+      "deploy_studio", "create_documents", "create_version", "patch_documents",
+      "publish_documents", "unpublish_documents", "discard_drafts", "version_discard",
+      "create_project", "add_cors_origin", "cors_origins_delete",
+      "create_dataset", "update_dataset", "create_release",
+      "dataset_assets_upload_from_web_chatgpt", "dataset_assets_upload_from_url",
+      "dataset_assets_upload_from_file", "media_library_upload_from_url",
+      "media_library_upload_from_file", "media_library_create_documents",
+      "media_library_patch_documents", "media_library_publish_documents",
+      "media_library_discard_drafts", "media_library_link_assets",
+      "generate_image", "transform_image", "run_sanity_cli",
+    ],
+    apiKey: {
+      header: "Authorization",
+      valuePrefix: "Bearer ",
+      hint: "Sanity API token",
+    },
+    notes:
+      "No URL-level project scoping or read-only mode. Token roles or OAuth permissions determine access. Publishing, schema or Studio deployment, and CORS changes write to your project and require review.",
+  },
+
+  // https://planetscale.com/docs/mcp-server
+  planetscale: {
+    id: "planetscale",
+    displayName: "PlanetScale",
+    mcpUrl: "https://mcp.pscale.dev/mcp/planetscale",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.pscale.dev"],
+    trustedAuthorizationServerOrigins: ["https://api.planetscale.com"],
+    supportsReadOnly: true,
+    scope: {
+      queryParams: [],
+      headers: [],
+      path: {
+        kind: "readonly-path",
+        readOnlyUrl: "https://mcp.pscale.dev/mcp/planetscale-insights-only",
+      },
+    },
+    destructiveTools: ["planetscale_execute_write_query", "planetscale_update_payment_method"],
+    notes:
+      "Read-only selects the Insights-only endpoint, excluding both read and write query execution. Other permissions, including billing, remain controlled by OAuth consent and write approvals. No URL-level database scoping. Postgres IP restrictions must allow the MCP server's documented egress IPs.",
+  },
 } as const satisfies Record<string, ProviderDefinition>;
 
 /** Catalog provider identifiers, derived from the registry itself. */
