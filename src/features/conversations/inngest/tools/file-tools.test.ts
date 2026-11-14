@@ -3,7 +3,7 @@ import { getFunctionName } from "convex/server";
 import { toolResultError } from "../../agent-steps";
 import { hasUncheckedWrites } from "../build-check-gate";
 
-type Row = { _id: string; name: string; type: "file" | "folder"; parentId?: string; content?: string };
+type Row = { _id: string; name: string; type: "file" | "folder"; parentId?: string; content?: string; locked?: boolean };
 
 // A fake `files` table for one project; the tools only ever see this project.
 const db = vi.hoisted(() => ({ rows: [] as Row[] }));
@@ -550,5 +550,51 @@ describe("package.json version pins", () => {
     expect(result.match(/Project checks/g)).toHaveLength(1);
     expect(result).toContain("not-installed");
     expect(vi.mocked(rewriteIcons)).toHaveBeenCalledWith(expect.stringContaining('"^1.66.0"'), "^1.66.0", "package.json");
+  });
+});
+
+describe("locked paths (#307)", () => {
+  const lockMessage = (path: string) =>
+    `${path} is locked by the user. Don't modify it; explain the change you'd make instead.`;
+  const lock = (id: string) => (db.rows.find((r) => r._id === id)!.locked = true);
+
+  it("refuses a locked file and a file under a locked folder, before any write", async () => {
+    lock("app");
+    expect(await createUpdateFileTool(opts).handler({ path: "src/App.tsx", content: "x" }, ctx)).toBe(
+      `Error: ${lockMessage("src/App.tsx")}`,
+    );
+    expect(
+      await createEditFileTool(opts).handler({ path: "src/App.tsx", edits: [{ oldText: "app", newText: "x" }] }, ctx),
+    ).toBe(`Error: ${lockMessage("src/App.tsx")}`);
+    expect(await createRenameFileTool(opts).handler({ path: "src/App.tsx", newName: "Main.tsx" }, ctx)).toBe(
+      `Error: ${lockMessage("src/App.tsx")}`,
+    );
+    expect(mocks.mutation).not.toHaveBeenCalled();
+    expect(db.rows.find((r) => r._id === "app")?.content).toBe("app");
+  });
+
+  it("deletes nothing when a folder holds a locked file", async () => {
+    lock("app");
+    expect(await createDeleteFilesTool(opts).handler({ paths: ["package.json", "src"] }, ctx)).toBe(
+      `Error: ${lockMessage("src/App.tsx")} Nothing was deleted.`,
+    );
+    expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
+  it("writeFiles refuses new files inside a locked folder and still writes the unlocked sibling", async () => {
+    lock("src");
+    const result = await createWriteFilesTool(opts).handler(
+      { files: [{ path: "src/new/x.ts", content: "x" }, { path: "src/App.tsx", content: "x" }, { path: "ok.ts", content: "ok" }] },
+      ctx,
+    );
+    expect(result).toBe(`Wrote 1 file(s). Created: ok.ts. Failed: ${lockMessage("src/new/x.ts")}, ${lockMessage("src/App.tsx")}.`);
+    expect(mutationNames()).toEqual(["system:createFiles"]);
+  });
+
+  it("names locked paths in the prompt so the model plans around them", () => {
+    lock("src");
+    expect(buildProjectTreePromptSection(db.rows as unknown as ProjectFile[])).toContain(
+      "Locked by the user, so writes to these and anything inside them are refused: src",
+    );
   });
 });

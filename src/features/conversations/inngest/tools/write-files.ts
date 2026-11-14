@@ -11,6 +11,7 @@ import {
   getProjectFiles,
   indexProjectFiles,
   invalidPathError,
+  lockedPathError,
   normalizePath,
   splitPath,
 } from "./paths";
@@ -95,7 +96,10 @@ export const createWriteFilesTool = ({ projectId, internalKey, registry = create
                 const at = index.byPath.get(ancestor);
                 return at?.file && !at.folder;
               });
-            if (entry?.folder && !entry.file) {
+            const locked = lockedPathError(index, path);
+            if (locked) {
+              failed.push(locked);
+            } else if (entry?.folder && !entry.file) {
               failed.push(`${path} (a folder; write to a file path inside it)`);
             } else if (holdsBatchPath) {
               failed.push(`${path} (also a folder of another path in this call)`);
