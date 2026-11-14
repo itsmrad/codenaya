@@ -120,6 +120,9 @@ export const PreviewView = ({
 
   const activeInstance = activeEngine === "sandbox" ? sandbox : webcontainer;
   const { status, previewUrl, error, restart, terminalOutput } = activeInstance;
+  // A restart empties the output; forget the clear so the new run shows in
+  // full even when it repeats the cleared lines (#480).
+  if (clearedLogs && !terminalOutput.startsWith(clearedLogs)) setClearedLogs("");
   const errorKind = activeEngine === "sandbox" ? sandbox.errorKind : null;
   // WebContainer has no phase events: booting covers creating it and writing
   // the files, installing covers the install and starting the dev server.
