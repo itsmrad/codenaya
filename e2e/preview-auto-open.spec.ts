@@ -8,14 +8,22 @@ import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
 import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
 
-/** Stubs the sandbox so the boot resolves at once; returns the boot request count. */
-const stubSandbox = async (page: Page) => {
+/**
+ * Stubs the sandbox so the boot resolves at once, after any `output` lines;
+ * returns the boot request count.
+ */
+const stubSandbox = async (page: Page, output: string[] = []) => {
   const counter = { boots: 0 };
   await page.route("**/api/sandbox", (route) => {
     counter.boots += 1;
     return route.fulfill({
       contentType: "application/x-ndjson",
-      body: `${JSON.stringify({ type: "ready", sandboxId: "e2e-sandbox", previewUrl: "about:blank" })}\n`,
+      body: [
+        ...output.map((data) => ({ type: "output", data })),
+        { type: "ready", sandboxId: "e2e-sandbox", previewUrl: "about:blank" },
+      ]
+        .map((event) => `${JSON.stringify(event)}\n`)
+        .join(""),
     });
   });
   // File sync and teardown of the stubbed sandbox.
@@ -61,6 +69,8 @@ const startFirstBuild = async (page: Page, name: string) => {
         name: "package.json",
         content: "{}\n",
       }),
+    writeFile: (name: string) =>
+      system.mutation(api.system.createFile, { internalKey, projectId, name, content: `${name}\n` }),
     cleanup: () =>
       Promise.all(
         runs.map((messageId) =>
@@ -133,6 +143,83 @@ test.describe("first build auto-opens the preview", () => {
       expect(errors).toEqual([]);
     });
   }
+
+  test("holds the boot while the first build keeps writing (#486)", async ({ page }) => {
+    test.setTimeout(150_000);
+    const sandbox = await stubSandbox(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+    const build = await startFirstBuild(page, "e2e-preview-auto-open-writing");
+
+    try {
+      await page.goto(`/projects/${build.projectId}`);
+      await expect(page.getByRole("status", { name: "Building your app" })).toBeVisible({ timeout: 60_000 });
+      await build.writePackageJson();
+      // Writes closer together than the quiet window: install would race them.
+      for (let index = 0; index < 6; index += 1) {
+        await page.waitForTimeout(1_000);
+        await build.writeFile(`part-${index}.txt`);
+      }
+      expect(sandbox.boots).toBe(0);
+      // Quiet now: it boots while the run is still going.
+      await expect.poll(() => sandbox.boots, { timeout: 30_000 }).toBeGreaterThan(0);
+      await expect(page.getByRole("status", { name: "Still building" })).toBeVisible({ timeout: 30_000 });
+    } finally {
+      await build.cleanup();
+    }
+  });
+
+  test("covers a first build's error with Fixing until its fix run ends (#305)", async ({ page }) => {
+    test.setTimeout(150_000);
+    // The app the run left doesn't compile.
+    await stubSandbox(page, [
+      '[vite] Pre-transform error: Failed to resolve import "./Missing" from "src/App.jsx". Does the file exist?\n',
+    ]);
+    // Stubbed, so no agent run (or model spend) starts.
+    const sent: string[] = [];
+    await page.route("**/api/messages", (route) => {
+      sent.push((route.request().postDataJSON() as { message: string }).message);
+      return route.fulfill({ status: 200, json: {} });
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+    const build = await startFirstBuild(page, "e2e-preview-auto-open-fixing");
+
+    try {
+      await page.goto(`/projects/${build.projectId}`);
+      const fixing = page.getByRole("status", { name: "Fixing an error" });
+      const banner = page.getByRole("alert").filter({ hasText: "Build error" });
+      await expect(page.getByRole("status", { name: "Building your app" })).toBeVisible({ timeout: 60_000 });
+      await build.writePackageJson();
+      await expect(page.getByRole("status", { name: "Still building" })).toBeVisible({ timeout: 30_000 });
+      // Mid-build errors are the build's business: no banner, no fix.
+      await page.waitForTimeout(2_000);
+      await expect(banner).toHaveCount(0);
+
+      await build.run.complete();
+      await expect(fixing).toBeVisible({ timeout: 30_000 });
+      await expect(banner).toHaveCount(0);
+      await expect.poll(() => sent.length, { timeout: 30_000 }).toBe(1);
+      expect(sent[0]).toContain("Failed to resolve import");
+
+      // The fix run: still covered, with no second fix.
+      const fixRun = await build.startRun();
+      await page.waitForTimeout(5_000);
+      await expect(fixing).toBeVisible();
+      await expect(banner).toHaveCount(0);
+      await fixRun.complete();
+
+      // It left the error: the banner comes back with its actions, not another automatic fix.
+      await expect(banner).toBeVisible({ timeout: 30_000 });
+      await expect(fixing).toBeHidden();
+      await expect(banner).toContainText("Codenaya sent a fix to the agent automatically.");
+      await expect(banner.getByRole("button", { name: "Fix with AI" })).toBeEnabled();
+      await page.waitForTimeout(5_000);
+      expect(sent).toHaveLength(1);
+    } finally {
+      await build.cleanup();
+    }
+  });
 
   test("keeps the tab the user picked during the first build", async ({ page }) => {
     test.setTimeout(150_000);
