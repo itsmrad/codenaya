@@ -11,7 +11,8 @@ import { STUB_MODEL, startStubProvider, type StubChatRequest } from "./stub-prov
 /**
  * Ask / Plan mode (#120, #311): with it on, the agent replies with a checklist
  * and the project is left alone; "Build this plan" then runs a build that
- * writes files. A question gets a plain answer, with nothing to build.
+ * writes files. A question gets a plain answer, with nothing to build. The
+ * plan can be edited before it is built (#527).
  *
  * The runs are real (Inngest + a local OpenAI-compatible stub on a BYOK key, as
  * in `byok-agent-run.spec.ts`), so this needs the Inngest dev server serving
@@ -30,7 +31,10 @@ const WRITE_TOOLS = ["writeFiles", "createFiles", "updateFile", "deleteFiles", "
 const toolsOf = (request: StubChatRequest) =>
   (request.tools ?? []).map((tool) => tool.function.name);
 const isBuild = (request: StubChatRequest) => toolsOf(request).includes("createFiles");
-const isQuestion = (request: StubChatRequest) => JSON.stringify(request.messages).includes(QUESTION);
+// The latest user message only: later runs carry the question in their history.
+const isQuestion = (request: StubChatRequest) =>
+  JSON.stringify(request.messages.filter((m) => m.role === "user").at(-1)?.content).includes(QUESTION);
+const EDITED_ITEM = "Add a footer with a contact link";
 
 test.describe.serial("plan mode", () => {
   test.skip(
@@ -170,5 +174,46 @@ test.describe.serial("plan mode", () => {
     const askRequest = stub.requests.find((request) => isQuestion(request) && request.tools?.length)!;
     for (const tool of WRITE_TOOLS) expect(toolsOf(askRequest)).not.toContain(tool);
     expect(await fileNames()).toEqual(filesBefore);
+  });
+
+  test("edits the plan before building it, on a phone-width panel", async () => {
+    test.setTimeout(240_000);
+    await page.setViewportSize({ width: 375, height: 740 });
+    const input = page.getByPlaceholder("Describe a change or ask a question…");
+    await input.fill("todo app with a footer");
+    await input.press("Enter");
+    const build = page.getByRole("button", { name: "Build this plan" });
+    await expect(build).toBeVisible({ timeout: 120_000 });
+
+    // Cancel leaves the plan as it was.
+    const edit = page.getByRole("button", { name: "Edit plan" });
+    await edit.click();
+    const editor = page.getByRole("textbox", { name: "Edit plan" });
+    await expect(editor).toHaveValue(PLAN);
+    await editor.fill("thrown away");
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(page.locator(".task-list-item", { hasText: PLAN_ITEM }).last()).toBeVisible();
+
+    // An empty plan cannot be built.
+    await edit.click();
+    await editor.fill("  ");
+    const buildEdited = page.getByRole("button", { name: "Build edited plan" });
+    await expect(buildEdited).toBeDisabled();
+
+    await editor.fill(`${PLAN}\n- [ ] ${EDITED_ITEM}`);
+    await expect(buildEdited).toBeInViewport();
+    await test.info().attach("plan-editor-375", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+    const before = stub.requests.length;
+    await buildEdited.click();
+
+    // The edited plan is the user's message, and the build gets it.
+    await expect(page.getByText(EDITED_ITEM)).toBeVisible();
+    await expect(page.getByText(BUILD_REPLY).last()).toBeVisible({ timeout: 120_000 });
+    const editedBuild = stub.requests.slice(before).find(isBuild);
+    expect(JSON.stringify(editedBuild?.messages)).toContain(EDITED_ITEM);
   });
 });

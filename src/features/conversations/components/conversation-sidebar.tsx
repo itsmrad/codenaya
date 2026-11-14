@@ -75,7 +75,6 @@ import { PlanModeToggle } from "./plan-mode-toggle";
 import {
   type MessageMode,
   PLAN_MODE,
-  buildPlanMessage,
   diagnoseStuckMessage,
 } from "../plan-mode";
 import { type AgentModelChoice, nextTier } from "../agent-models";
@@ -560,9 +559,9 @@ export const ConversationSidebar = ({
                   pathOf={pathOf}
                   onOpenFile={handleOpenFile}
                   onRetry={() => resend(messageIndex, message.mode)}
-                  onBuildPlan={() => {
+                  onBuildPlan={(build) => {
                     setPlanMode(false);
-                    void sendMessage(buildPlanMessage(message.content));
+                    void sendMessage(build);
                   }}
                   stuckRetry={message.stuck && stuckRetry(message, messageIndex)}
                   onDiagnose={() => {
