@@ -41,6 +41,7 @@ async function main() {
         const runDirectory = `${directory}/runs/${id}`;
         const page = await auth.context().newPage();
         let projectId: Id<"projects"> | undefined;
+        let scored = false;
         try {
           const cap = Math.min(remaining, Number(values["max-usd"] ?? (model.includes("haiku") ? 0.75 : model.includes("sonnet") ? 2 : 3)));
           if (name === "followup" && !saasId) throw new Error("Cannot follow up: saas did not create a project");
@@ -51,12 +52,15 @@ async function main() {
           if (values.judge && trail.preview.screenshot) result.judge = await judge(trail.id, values["judge-model"]!, prompts[name].prompt, prompts[name].rubric, `${runDirectory}/${trail.preview.screenshot}`);
           scores.push(result);
           await writeFile(`${runDirectory}/score.json`, sanitize(result));
+          scored = true;
           await writeFile(`${directory}/scoreboard.md`, scoreboard(scores, values["base-url"]!));
           console.log(`${id}: completed=${result.completed}, preview=${result.preview.loaded}, tokens=${result.tokensIn}/${result.tokensOut}, $${result.usd.toFixed(6)}; ${runDirectory}`);
           if (name === "saas") saasId = projectId;
         } finally {
           await page.close();
-          if (projectId && !values.keep && !(name === "saas" && names.includes("followup"))) await (await userConvexClient(auth)).mutation(api.projects.remove, { id: projectId });
+          // Keep an unscored project so its final files can still be checked.
+          if (projectId && !scored) console.error(`${id}: not scored; kept project ${projectId}`);
+          if (projectId && scored && !values.keep && !(name === "saas" && names.includes("followup"))) await (await userConvexClient(auth)).mutation(api.projects.remove, { id: projectId });
         }
       }
     }
