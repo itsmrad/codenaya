@@ -85,7 +85,10 @@ test.describe("project actions", () => {
         await expect(input).toHaveAttribute("aria-invalid", "true");
         await input.fill(renamed);
         await input.press("Enter");
-        await expect(page.getByRole("button", { name: renamed, exact: true })).toBeVisible();
+        // The file explorer's tree toggle also carries the project name, so look in the navbar.
+        await expect(
+          page.getByRole("navigation").getByRole("button", { name: renamed, exact: true }),
+        ).toBeVisible();
 
         // IDE menu → Delete → back on the dashboard without it.
         await page.getByRole("button", { name: "Project actions" }).click();
