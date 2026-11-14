@@ -8,6 +8,7 @@ import { FaGithub } from "react-icons/fa";
 import {
   AlertCircleIcon,
   ExternalLinkIcon,
+  GlobeIcon,
   LinkIcon,
   MoreHorizontalIcon,
 } from "lucide-react";
@@ -17,11 +18,31 @@ import { MENU_ITEM } from "@/components/menu-chrome";
 import { ProjectCover, getCoverHue, getInitials } from "@/components/project-cover";
 
 import { Doc } from "../../../../convex/_generated/dataModel";
+import type { LastRunStatus, ProjectCardStatus } from "../utils/project-status";
 import { DeleteProjectDialog, ProjectActionsMenu, RenameProjectDialog } from "./project-actions";
 
+type CardProject = Doc<"projects"> & ProjectCardStatus;
+
+const base =
+  "flex items-center gap-1.5 rounded-full border border-border/60 bg-background/85 px-2 py-0.5 text-[11px] font-medium backdrop-blur-sm";
+
+const RUN_BADGES: Record<LastRunStatus, { label: string; dot: string; text?: string }> = {
+  running: { label: "Running", dot: "animate-pulse bg-brand" },
+  failed: { label: "Run failed", dot: "bg-destructive", text: "text-destructive" },
+  done: { label: "Done", dot: "bg-emerald-500", text: "text-muted-foreground" },
+};
+
+const RunBadge = ({ status }: { status: LastRunStatus }) => {
+  const { label, dot, text } = RUN_BADGES[status];
+  return (
+    <span className={`${base} ${text ?? ""}`}>
+      <span className={`size-1.5 rounded-full ${dot}`} />
+      {label}
+    </span>
+  );
+};
+
 const StatusBadge = ({ project }: { project: Doc<"projects"> }) => {
-  const base =
-    "absolute left-2.5 top-2.5 flex items-center gap-1.5 rounded-full border border-border/60 bg-background/85 px-2 py-0.5 text-[11px] font-medium backdrop-blur-sm";
 
   if (project.importStatus === "importing") {
     return (
@@ -54,7 +75,7 @@ const StatusBadge = ({ project }: { project: Doc<"projects"> }) => {
  * A project in the dashboard grid: a generated cover, name, last edit and
  * status. The menu holds link actions plus rename (in a dialog), duplicate and delete.
  */
-export const ProjectCard = ({ project }: { project: Doc<"projects"> }) => {
+export const ProjectCard = ({ project }: { project: CardProject }) => {
   const href = `/projects/${project._id}`;
   const [renameOpen, setRenameOpen] = useState(false);
   // Remounts the rename dialog per opening, so it starts from the current name.
@@ -78,7 +99,17 @@ export const ProjectCard = ({ project }: { project: Doc<"projects"> }) => {
           seed={project._id}
           className="aspect-16/10 w-full transition-transform duration-500 ease-out group-hover:scale-[1.03] motion-reduce:group-hover:scale-100"
         />
-        <StatusBadge project={project} />
+        {/* Clear of the actions button at the top right. */}
+        <div className="absolute left-2.5 right-12 top-2.5 flex flex-wrap gap-1.5">
+          <StatusBadge project={project} />
+          {project.published && (
+            <span className={base}>
+              <GlobeIcon className="size-3 text-brand" />
+              Published
+            </span>
+          )}
+          {project.lastRun && <RunBadge status={project.lastRun} />}
+        </div>
       </div>
       <div className="flex items-center gap-2.5 pt-3">
         <span
