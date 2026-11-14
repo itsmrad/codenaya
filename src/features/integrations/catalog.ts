@@ -703,6 +703,7 @@ const CATALOG = {
       "update_work_item",
       "create_issue",
       "add_branch",
+      "create_branch",
       "fork_repository",
       "add_commit",
       "save_pipeline",
@@ -741,6 +742,7 @@ const CATALOG = {
       "create_production_instance",
       "set_oauth_provider_credentials",
       "configure_mcp_server",
+      "check_mcp_server",
       "submit_feedback",
     ],
     notes:

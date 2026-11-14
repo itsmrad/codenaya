@@ -37,6 +37,7 @@ import type {
   QueryParamScopeRule,
   ScopeFlagField,
   ScopeListField,
+  ScopeListOptions,
   ScopeStringField,
   ScopeValueSource,
   ScopedMcpTarget,
@@ -66,17 +67,23 @@ function readString(
  * Sorting is what makes two selections that mean the same thing produce the
  * same URL. Every list field in the catalog is an unordered set of feature or
  * category names, so reordering carries no meaning to lose.
+ *
+ * When the provider declares options for the field, anything else is dropped.
+ * Stored selections are free-form strings, so this is what stops a direct
+ * write from enabling an undeclared group (e.g. `all`) the UI never offers.
  */
 function readList(
   selection: ProjectScopeSelection,
   field: ScopeListField,
+  options: ScopeListOptions | undefined,
 ): readonly string[] {
   const raw = selection[field];
   if (raw === undefined) return [];
+  const allowed = options?.[field]?.map((option) => option.id);
   const cleaned = new Set<string>();
   for (const entry of raw) {
     const trimmed = entry.trim();
-    if (trimmed !== "") cleaned.add(trimmed);
+    if (trimmed !== "" && (!allowed || allowed.includes(trimmed))) cleaned.add(trimmed);
   }
   return [...cleaned].sort();
 }
@@ -91,6 +98,7 @@ function readList(
 function resolveValues(
   source: ScopeValueSource,
   selection: ProjectScopeSelection,
+  options: ScopeListOptions | undefined,
 ): readonly string[] {
   switch (source.kind) {
     case "flag":
@@ -100,7 +108,7 @@ function resolveValues(
       return value === undefined ? [] : [value];
     }
     case "list": {
-      const values = readList(selection, source.field);
+      const values = readList(selection, source.field, options);
       if (values.length === 0) return [];
       return source.encoding === "csv" ? [values.join(",")] : values;
     }
@@ -166,6 +174,7 @@ function applyQueryParams(
   url: URL,
   selection: ProjectScopeSelection,
   rules: readonly QueryParamScopeRule[],
+  options: ScopeListOptions | undefined,
 ): void {
   // Rebuilt from scratch rather than mutated in place so ordering is a
   // function of the declared rules, not of however the base URL was written.
@@ -175,7 +184,7 @@ function applyQueryParams(
   }
 
   for (const rule of rules) {
-    for (const value of resolveValues(rule.value, selection)) {
+    for (const value of resolveValues(rule.value, selection, options)) {
       // `append`, never `set`: Neon's `category` is expected once per value.
       params.append(rule.param, value);
     }
@@ -194,10 +203,11 @@ function applyQueryParams(
 function buildHeaders(
   selection: ProjectScopeSelection,
   rules: readonly HeaderScopeRule[],
+  options: ScopeListOptions | undefined,
 ): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const rule of rules) {
-    const values = resolveValues(rule.value, selection);
+    const values = resolveValues(rule.value, selection, options);
     if (values.length === 0) continue;
     headers[rule.header] = values.join(",");
   }
@@ -234,10 +244,10 @@ export function buildScopedMcpUrl(
     applyPathSegments(url, provider, selection, path.segments);
   }
 
-  applyQueryParams(url, selection, provider.scope.queryParams);
+  applyQueryParams(url, selection, provider.scope.queryParams, provider.scopeOptions);
 
   return {
     url: url.toString(),
-    headers: buildHeaders(selection, provider.scope.headers),
+    headers: buildHeaders(selection, provider.scope.headers, provider.scopeOptions),
   };
 }

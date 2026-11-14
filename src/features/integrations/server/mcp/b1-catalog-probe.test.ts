@@ -177,6 +177,24 @@ describe.each(CASES)("$id SDK handshake and tools/list (no vendor network)", (fi
   });
 });
 
+it("drops stored GitLab toolsets the catalog does not declare before they reach the runtime header", async () => {
+  const sealed = await getSecretSealer().seal(
+    JSON.stringify({ type: "oauth", accessToken: SECRET }),
+    secretContext("userConnections", "ref", "credential"),
+  );
+  const resolved = await resolveMcpServers([{
+    link: { _id: "link", readOnly: false, writeApproved: false, providerScope: { toolsets: ["all", "orbit", "core"] } },
+    connection: {
+      _id: "conn", providerId: "gitlab", label: "GitLab", authMode: "oauth",
+      serverUrl: PROVIDERS.gitlab.mcpUrl, credentialRef: "ref", ...sealed,
+    },
+  }]);
+  expect(resolved.problems).toEqual([]);
+  expect(resolved.servers[0].headers).toEqual({
+    "X-Gitlab-Enabled-Mcp-Server-Toolsets": "core", Authorization: `Bearer ${SECRET}`,
+  });
+});
+
 describe.each(CASES.filter(({ id }) => id === "notion" || id === "gitlab"))("$id API-key connect probe", (fixture) => {
   it("uses the registry header and prefix in both the connect probe and runtime", async () => {
     mocks.createTransport = () => startServer(fixture);

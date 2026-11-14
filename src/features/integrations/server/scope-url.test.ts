@@ -88,8 +88,8 @@ describe("catalog", () => {
   it.each([
     ["notion", 32, ["notion-create-file-upload", "notion-update-enabled-skills", "notion-spawn-session", "notion-calendar-cancel-events"]],
     ["atlassian", 116, ["executeRead", "executeWrite", "executeDestructive", "replaceConfluenceContentPermissions", "queryInsightsSql", "queryInsightsAi"]],
-    ["gitlab", 23, ["create_merge_request_note", "update_merge_request", "create_work_item", "manage_pipeline", "send_duo_session_input", "attach_scan_profile"]],
-    ["clerk", 11, ["put_instance_config", "check_domain_dns", "set_oauth_provider_credentials", "configure_mcp_server", "submit_feedback"]],
+    ["gitlab", 24, ["create_merge_request_note", "update_merge_request", "create_work_item", "create_branch", "manage_pipeline", "send_duo_session_input", "attach_scan_profile"]],
+    ["clerk", 12, ["put_instance_config", "check_domain_dns", "set_oauth_provider_credentials", "configure_mcp_server", "check_mcp_server", "submit_feedback"]],
   ] as const)("retains the audited %s write inventory, including indirect and configuration writes", (id, count, sensitive) => {
     const tools = PROVIDERS[id].destructiveTools;
     expect(tools).toHaveLength(count);
@@ -632,6 +632,30 @@ describe("buildScopedMcpUrl — GitLab fixed toolsets", () => {
     expect(buildScopedMcpUrl(PROVIDERS.gitlab, UNSCOPED)).toEqual({
       url: "https://gitlab.com/api/v4/mcp", headers: {},
     });
+  });
+});
+
+describe("buildScopedMcpUrl — undeclared list values", () => {
+  it("drops GitLab toolsets outside the declared options, such as all and orbit", () => {
+    expect(buildScopedMcpUrl(PROVIDERS.gitlab, { readOnly: false, toolsets: ["all", "orbit"] }))
+      .toEqual({ url: "https://gitlab.com/api/v4/mcp", headers: {} });
+    expect(buildScopedMcpUrl(PROVIDERS.gitlab, {
+      readOnly: false, toolsets: ["orbit", "core", "all", "wikis"],
+    }).headers).toEqual({ "X-Gitlab-Enabled-Mcp-Server-Toolsets": "core,wikis" });
+  });
+
+  it("drops undeclared query-param values for existing providers while keeping valid ones", () => {
+    expect(urlFor("supabase", { readOnly: false, features: ["database", "everything", "docs"] }))
+      .toBe(urlFor("supabase", { readOnly: false, features: ["database", "docs"] }));
+    expect(urlFor("neon", { readOnly: false, categories: ["all", "schema"] }))
+      .toBe("https://mcp.neon.tech/mcp?category=schema");
+    expect(urlFor("supabase", { readOnly: false, features: ["everything"] }))
+      .toBe(urlFor("supabase", UNSCOPED));
+  });
+
+  it("passes values through when a provider declares no options for the field", () => {
+    expect(buildScopedMcpUrl(provider("github"), { readOnly: false, toolsets: ["repos"] }).headers)
+      .toEqual({ "X-MCP-Toolsets": "repos" });
   });
 });
 
