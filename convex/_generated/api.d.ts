@@ -39,6 +39,7 @@ import type * as skills from "../skills.js";
 import type * as stats from "../stats.js";
 import type * as swarm from "../swarm.js";
 import type * as system from "../system.js";
+import type * as userPreferences from "../userPreferences.js";
 import type * as users from "../users.js";
 import type * as waitlist from "../waitlist.js";
 
@@ -80,6 +81,7 @@ declare const fullApi: ApiFromModules<{
   stats: typeof stats;
   swarm: typeof swarm;
   system: typeof system;
+  userPreferences: typeof userPreferences;
   users: typeof users;
   waitlist: typeof waitlist;
 }>;

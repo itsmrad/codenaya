@@ -60,6 +60,8 @@ import {
   restorableTabs,
   saveIdeSession,
 } from "../utils/ide-session";
+import { activeViewFor, visibleViews } from "../utils/workspace-mode";
+import { useWorkspaceMode } from "@/features/settings/hooks/use-workspace-mode";
 
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 800;
@@ -124,7 +126,13 @@ export const ProjectIdView = ({
   );
   const [pickedView, setSelectedView] = useState<IdeView | null>(openOnPreview ? "preview" : null);
   const selectedView: IdeView = pickedView ?? savedView ?? "chat";
-  const activeView = !isCompact && selectedView === "chat" ? "editor" : selectedView;
+  // Chat-first hides the code (#524); "Open code for this session" shows the
+  // IDE for this visit without changing the setting.
+  const { mode: accountMode } = useWorkspaceMode();
+  const [codeOpened, setCodeOpened] = useState(false);
+  const mode = codeOpened ? "ide" : accountMode;
+  const viewTabs = VIEW_TABS.filter(({ view }) => visibleViews(mode, isCompact).includes(view));
+  const activeView = activeViewFor(selectedView, mode, isCompact);
   // The preview boots a cloud sandbox or WebContainer as soon as it mounts, so
   // mount it on first open and keep it mounted so tab switches don't reboot it.
   // It only opens by itself when the user left the project on it.
@@ -219,12 +227,18 @@ export const ProjectIdView = ({
   const { isHidden: isChatHidden, setHidden: setChatHidden } = useChatPanelStore();
   const router = useRouter();
 
+  const openCode = () => {
+    setCodeOpened(true);
+    selectView("editor");
+  };
+
   useProjectCommands({
-    "show-code": () => selectView("editor"),
+    "show-code": mode === "ide" ? () => selectView("editor") : null,
+    "open-code-session": mode === "chat" ? openCode : null,
     "show-preview": () => selectView("preview"),
     // Desktops toggle the side panel (ProjectIdLayout); here the chat is a tab.
     "toggle-chat": isCompact
-      ? () => selectView(activeView === "chat" ? "editor" : "chat")
+      ? () => selectView(activeView === "chat" ? activeViewFor("editor", mode, true) : "chat")
       : null,
     publish: showcaseId === null ? () => setPublishDialogOpen(true) : null,
     "download-zip": () => void zipExport.download(),
@@ -356,27 +370,36 @@ export const ProjectIdView = ({
 
         {/* Center: view tabs (phones use the bottom tab bar; desktops keep
             the chat beside them, so they only switch Code / Preview) */}
-        {!isMobile && (
+        {!isMobile && viewTabs.length > 1 && (
           <div
             role="tablist"
             aria-label="Workspace views"
             className="flex items-center p-0.5 bg-muted/40 rounded-lg border border-border/40"
           >
-            {VIEW_TABS.filter(({ view }) => isCompact || view !== "chat").map(
-              ({ view, label }) => (
-                <Tab
-                  key={view}
-                  label={label}
-                  isActive={activeView === view}
-                  onClick={() => selectView(view)}
-                />
-              )
-            )}
+            {viewTabs.map(({ view, label }) => (
+              <Tab
+                key={view}
+                label={label}
+                isActive={activeView === view}
+                onClick={() => selectView(view)}
+              />
+            ))}
           </div>
         )}
 
         {/* Right: Publish + Export + Help + User (phones hide it while renaming to make room) */}
         <div className={cn("flex items-center gap-1.5 shrink-0", rename.isRenaming && "hidden @xl:flex")}>
+          {mode === "chat" && (
+            <button
+              onClick={openCode}
+              aria-label="Open code for this session"
+              title="Open code for this session"
+              className="flex items-center gap-1.5 h-8 px-2 @3xl:px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
+            >
+              <CodeIcon aria-hidden="true" className="size-3.5" />
+              <span className="hidden @3xl:inline">Open code</span>
+            </button>
+          )}
           {showcaseId && (
             <PublishedMenu
               showcaseId={showcaseId}
@@ -433,6 +456,7 @@ export const ProjectIdView = ({
             </div>
           </div>
         )}
+        {mode === "ide" && (
         <div
           className={cn(
             "absolute inset-0 flex gap-2 transition-none",
@@ -466,6 +490,7 @@ export const ProjectIdView = ({
             </Allotment.Pane>
           </Allotment>
         </div>
+        )}
         <div
           className={cn(
             "absolute inset-0 flex flex-col",
@@ -488,9 +513,12 @@ export const ProjectIdView = ({
         <div
           role="tablist"
           aria-label="Workspace views"
-          className="shrink-0 grid grid-cols-3 gap-1 p-1 mb-[env(safe-area-inset-bottom)] rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]"
+          className={cn(
+            "shrink-0 grid gap-1 p-1 mb-[env(safe-area-inset-bottom)] rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]",
+            viewTabs.length === 2 ? "grid-cols-2" : "grid-cols-3"
+          )}
         >
-          {VIEW_TABS.map(({ view, label, icon: Icon }) => (
+          {viewTabs.map(({ view, label, icon: Icon }) => (
             <button
               key={view}
               type="button"
