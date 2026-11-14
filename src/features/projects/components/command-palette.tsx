@@ -58,6 +58,7 @@ import { Doc } from "../../../../convex/_generated/dataModel";
 
 const PROJECT_COMMAND_ICONS: Record<ProjectCommandId, LucideIcon> = {
   "show-code": CodeIcon,
+  "open-code-session": CodeIcon,
   "show-preview": EyeIcon,
   "toggle-chat": PanelLeftIcon,
   "new-conversation": PlusIcon,
