@@ -1,4 +1,4 @@
-import { CommandExitError } from "e2b";
+import { CommandExitError, TimeoutError } from "e2b";
 import { z } from "zod";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 import { parseJsonBody } from "@/lib/parse-json-body";
@@ -140,19 +140,34 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       !requestReinstall(sandboxId)
     ) {
       const command = installCommand || DEFAULT_INSTALL_COMMAND;
+      // Retain only the safe npm code for a timeout; output and exception
+      // messages may include injected secrets, even ones since rotated (#498).
+      let tail = "";
+      let timeoutFailure: InstallFailure = { exitCode: 124 };
+      const observe = (chunk: string) => {
+        tail = (tail + chunk).slice(-8192);
+        const failure = installFailure({ exitCode: 124, stdout: tail, stderr: "" });
+        if (failure.code) timeoutFailure = failure;
+      };
       const result = await sandbox.commands
         .run(command, {
           cwd: WORK_DIR,
           timeoutMs: boundedTimeout(5 * 60 * 1000, budget.left()),
+          onStdout: observe,
+          onStderr: observe,
         })
         .catch((error: unknown) => {
           // A non-zero exit is the app's failure, not a dead sandbox (#491).
           if (error instanceof CommandExitError) return error;
+          if (error instanceof TimeoutError) {
+            installFailed = timeoutFailure;
+            return null;
+          }
           throw error;
         });
-      if (result.exitCode !== 0) {
+      if (result && result.exitCode !== 0) {
         installFailed = installFailure(result);
-      } else {
+      } else if (result) {
         await sandbox.commands.run(RESTART_VITE_COMMAND, { cwd: WORK_DIR });
       }
     }
