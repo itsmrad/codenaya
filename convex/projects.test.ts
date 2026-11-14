@@ -559,3 +559,67 @@ describe("project instructions (#299)", () => {
     expect((await alice.query(api.projects.getById, { id: copyId })).instructions).toBe("Keep");
   });
 });
+
+describe("projects.get card status (#318)", () => {
+  test("adds published and last-run status from the owner's rows only", async () => {
+    const { t, alice } = setup();
+    const insertProject = (ownerId: string, name: string) =>
+      t.run((ctx) => ctx.db.insert("projects", { name, ownerId, updatedAt: Date.now() }));
+    const live = await insertProject(ALICE, "live");
+    const broken = await insertProject(ALICE, "broken");
+    const quiet = await insertProject(ALICE, "quiet");
+    const bobs = await insertProject(BOB, "bobs");
+
+    await t.run(async (ctx) => {
+      const entry = (projectId: Id<"projects">, ownerId: string, status: "published" | "removed") =>
+        ctx.db.insert("showcaseProjects", {
+          projectId,
+          ownerId,
+          ownerName: ownerId,
+          title: "Demo",
+          description: "Demo",
+          techStack: [],
+          designStyle: [],
+          category: "web",
+          upvotes: 0,
+          downvotes: 0,
+          viewCount: 0,
+          importCount: 0,
+          status,
+          publishedAt: 1,
+          updatedAt: 1,
+        });
+      await entry(live, ALICE, "published");
+      await entry(quiet, ALICE, "removed");
+      await entry(bobs, BOB, "published");
+
+      const started = (projectId: Id<"projects">, userId: string, at: number) =>
+        ctx.db.insert("activationEvents", {
+          name: "run_started",
+          userId,
+          projectId,
+          at,
+          props: { firstBuild: false },
+        });
+      await started(live, ALICE, 10);
+      await started(broken, ALICE, 10);
+      await ctx.db.insert("activationEvents", {
+        name: "run_finished",
+        userId: ALICE,
+        projectId: broken,
+        at: 20,
+        props: { outcome: "error", firstBuild: false },
+      });
+      await started(bobs, BOB, 10);
+    });
+
+    const cards = Object.fromEntries(
+      (await alice.query(api.projects.get, {})).map((p) => [p.name, [p.published, p.lastRun]]),
+    );
+    expect(cards).toEqual({
+      live: [true, "running"],
+      broken: [undefined, "failed"],
+      quiet: [undefined, undefined],
+    });
+  });
+});
