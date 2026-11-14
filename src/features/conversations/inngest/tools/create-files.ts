@@ -7,6 +7,7 @@ import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { checkPackageVersions } from "./package-versions";
+import { jsonArg } from "./json-arg";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface CreateFilesToolOptions {
@@ -17,14 +18,16 @@ interface CreateFilesToolOptions {
 
 const paramsSchema = z.object({
   parentId: z.string(),
-  files: z
-    .array(
-      z.object({
-        name: z.string().min(1, "File name cannot be empty"),
-        content: z.string(),
-      })
-    )
-    .min(1, "Provide at least one file to create"),
+  files: jsonArg(
+    z
+      .array(
+        z.object({
+          name: z.string().min(1, "File name cannot be empty"),
+          content: z.string(),
+        })
+      )
+      .min(1, "Provide at least one file to create"),
+  ),
 });
 
 export const createCreateFilesTool = ({

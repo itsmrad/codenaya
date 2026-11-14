@@ -3,6 +3,7 @@ import { createTool } from "@inngest/agent-kit";
 
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
+import { jsonArg } from "./json-arg";
 import { findProjectFile, getProjectFiles, indexProjectFiles, normalizePath } from "./paths";
 
 interface ReadFilesToolOptions {
@@ -20,9 +21,9 @@ const rangesSchema = z.array(z.object({
 // `fileIds` is not offered to the model; it reads tool calls made before #292.
 const paramsSchema = z
   .object({
-    paths: z.array(z.string()).optional(),
+    paths: jsonArg(z.array(z.string())).optional(),
     fileIds: z.array(z.string()).optional(),
-    ranges: rangesSchema.optional(),
+    ranges: jsonArg(rangesSchema).optional(),
   })
   .refine(({ paths, fileIds }) => (paths ?? fileIds ?? []).length > 0, "Provide at least one path")
   .refine(({ paths, ranges }) => (ranges ?? []).every((range) =>

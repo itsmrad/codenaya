@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
@@ -198,5 +199,29 @@ describe("editFile tool", () => {
   it("rejects a call without edits before touching the project", async () => {
     expect(await edit([])).toBe("Error: Provide at least one edit");
     expect(step.run).not.toHaveBeenCalled();
+  });
+
+  it("applies edits sent as a JSON string like an array (Haiku 5.5)", async () => {
+    expect(await edit(JSON.stringify([{ oldText: "b = 2", newText: "b = 3" }]))).toMatch(
+      /^File "src\/App.tsx" edited successfully/,
+    );
+    expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      content: "const a = 1;\nconst b = 3;\n",
+    }));
+  });
+
+  it.each(["not json", '"[]"', "42"])("still rejects a string that isn't a JSON array (%j)", async (edits) => {
+    expect(await edit(edits)).toBe("Error: Invalid input: expected array, received string");
+    expect(step.run).not.toHaveBeenCalled();
+  });
+
+  it("still tells the model edits is an array", () => {
+    const { parameters } = createEditFileTool({ projectId, internalKey });
+    // The targets AgentKit's Anthropic and OpenAI adapters use.
+    for (const target of ["draft-2020-12", "draft-7"] as const) {
+      expect(z.toJSONSchema(parameters!, { target })).toMatchObject({
+        properties: { edits: { type: "array", items: { type: "object" } } },
+      });
+    }
   });
 });

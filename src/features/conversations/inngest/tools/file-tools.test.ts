@@ -113,6 +113,11 @@ describe("path resolution", () => {
     ]);
   });
 
+  it("reads paths sent as a JSON string like an array", async () => {
+    const result = (await createReadFilesTool(opts).handler({ paths: '["src/App.tsx"]' } as never, ctx)) as string;
+    expect(JSON.parse(result)).toEqual([{ path: "src/App.tsx", content: "app" }]);
+  });
+
   it.each(["/etc/passwd", "../secrets", "src/../package.json", "src//App.tsx", ""])(
     "rejects %j with an actionable error and touches nothing",
     async (path) => {
@@ -254,6 +259,19 @@ describe("writeFiles tool", () => {
 
   const write = (files: { path: string; content: string }[]) =>
     createWriteFilesTool(opts).handler({ files }, ctx) as Promise<string>;
+
+  it("writes files sent as a JSON string like an array", async () => {
+    db.rows = [];
+    const files = JSON.stringify([{ path: "src/x.ts", content: "x" }]);
+    expect(await createWriteFilesTool(opts).handler({ files } as never, ctx)).toBe("Wrote 1 file(s). Created: src/x.ts.");
+  });
+
+  it("names the missing content field instead of a bare type error", async () => {
+    expect(await createWriteFilesTool(opts).handler({ files: [{ path: "src/x.ts" }] } as never, ctx)).toBe(
+      'Error: Each file needs a "content" string with the complete file content',
+    );
+    expect(mocks.mutation).not.toHaveBeenCalled();
+  });
 
   it("creates nested folders and files in one call, with no createFolder calls from the agent", async () => {
     const result = await write([
