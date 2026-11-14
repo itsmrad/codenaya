@@ -20,6 +20,9 @@ test.describe("docs page (signed out)", () => {
       .click();
     await expect(page).toHaveURL(/\/docs#integrations$/);
     await expect(integrations).toBeInViewport();
+    await expect(page.locator("#integrations")).toContainText(
+      "To choose which projects can use a connection, open each project’s Integrations dialog and link it there.",
+    );
 
     await page.waitForLoadState("networkidle");
     expect(errors).toEqual([]);

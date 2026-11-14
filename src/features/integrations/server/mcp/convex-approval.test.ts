@@ -143,6 +143,8 @@ describe("createConvexAuditSink", () => {
       argsDigest: "abc123",
       durationMs: 12,
       mcpInvocationId: "inv1",
+      // Lets the mutation record the connection's "last used" time.
+      projectConnectionId: "pc1",
     });
     expect(row.redactionSummary).toMatch(/^[0-9a-f]{16}$/);
   });
