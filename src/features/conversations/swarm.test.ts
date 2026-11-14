@@ -43,6 +43,9 @@ describe("validatePlan roles and nesting", () => {
   it("allows at most two sub-orchestrators", () => {
     expect(validatePlan({ tasks: [sub("a", ["src/a/"]), sub("b", ["src/b/"]), task("c", ["src/c.ts"])] })).toHaveProperty("tasks");
     expect(validatePlan({ tasks: [sub("a", ["src/a/"]), sub("b", ["src/b/"]), sub("c", ["src/c/"])] })).toMatch(/At most 2/);
+    // A platform run without SWARM_PLATFORM_MAX_DEPTH=2 has workers only.
+    expect(validatePlan({ tasks: [sub("a", ["src/a/"]), task("c", ["src/c.ts"])] }, { maxDepth: 1 })).toMatch(/Sub-orchestrators are off/);
+    expect(validatePlan({ tasks: [task("a", ["src/a/"]), task("c", ["src/c.ts"])] }, { maxDepth: 1 })).toHaveProperty("tasks");
   });
 
   it("keeps a sub-orchestrator's 2-3 workers inside its paths and apart", () => {

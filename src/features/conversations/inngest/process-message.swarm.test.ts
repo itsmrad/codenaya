@@ -5,6 +5,7 @@
  */
 
 import { getFunctionName } from "convex/server";
+import { ConvexError } from "convex/values";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -30,6 +31,7 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectFilesWithUrls": () => [],
   "system:getEnvVarsForSandbox": () => [],
   "system:getProjectSkills": () => [],
+  "swarm:getSwarmSettings": () => ({ platformMaxDepth: 2 }),
 };
 
 const MUTATIONS: Record<string, (args: Record<string, unknown>) => unknown> = {
@@ -200,6 +202,45 @@ describe("processMessage swarm mode", () => {
     expect(outcome.finalType).toBe("cancelled");
     expect(outcome.invocations).toEqual([]);
     expect(mutationArgs("system:updateMessageContent")).toEqual([]);
+  });
+
+  it("keeps a platform swarm at depth 1 unless SWARM_PLATFORM_MAX_DEPTH allows sub-orchestrators", async () => {
+    const queries: Record<string, () => unknown> = { ...QUERIES, "swarm:getSwarmSettings": () => ({ platformMaxDepth: 1 }) };
+    mocks.query.mockImplementation(async (ref) => queries[getFunctionName(ref)]?.());
+    const plan = { tasks: [{ ...PLAN.tasks[0], role: "sub-orchestrator" }, PLAN.tasks[1]] };
+    const outcome = await swarm([
+      { data: toolCall("delegateTasks", plan) },
+      { data: toolCall("delegateTasks", PLAN) },
+      { data: toolCall("checkBuild") },
+      { data: text("Done.") },
+    ], [DONE, NAV_DONE]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    const [first] = codingRequests(outcome.inferenceBodies);
+    expect(String(first.messages[0].content)).toContain("## Swarm mode");
+    expect(String(first.messages[0].content)).not.toContain("sub-orchestrator");
+    expect(toolResults(outcome.inferenceBodies)[0]).toMatch(/^Error: Sub-orchestrators are off for this run/);
+    expect(mutationArgs("agentTasks:createTasks")).toEqual([expect.objectContaining({ byok: false })]);
+  });
+
+  it("builds alone when another platform swarm of the owner's is running", async () => {
+    mocks.mutation.mockImplementation(async (ref, args) => {
+      if (getFunctionName(ref) === "agentTasks:createTasks") {
+        throw new ConvexError({ code: "CONFLICT", message: "Another swarm is already running for this account" });
+      }
+      return MUTATIONS[getFunctionName(ref)]?.(args) ?? null;
+    });
+    const outcome = await swarm([
+      { data: toolCall("delegateTasks", PLAN) },
+      { data: writeApp },
+      { data: toolCall("checkBuild") },
+      { data: text("Done.") },
+    ], [DONE, NAV_DONE]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(toolResults(outcome.inferenceBodies)[0])
+      .toBe("Error: another swarm is already running for this account; build this one yourself.");
+    expect(outcome.invocations).toEqual([]);
   });
 
   it("offers no delegateTasks and no swarm note outside swarm mode", async () => {

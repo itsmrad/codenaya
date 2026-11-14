@@ -51,14 +51,19 @@ export const ownsPath = (ownedPaths: readonly string[], raw: string): boolean =>
 /**
  * Tool-facing validation errors let the orchestrator repair its plan.
  * `withinPaths`: a sub-orchestrator's plan, whose workers split its own owned paths.
+ * `maxDepth`: how deep this run's swarm may go; below MAX_SWARM_DEPTH it has no sub-orchestrators.
  */
-export const validatePlan = (input: unknown, { withinPaths }: { withinPaths?: readonly string[] } = {}): SwarmPlan | string => {
+export const validatePlan = (
+  input: unknown,
+  { withinPaths, maxDepth = MAX_SWARM_DEPTH }: { withinPaths?: readonly string[]; maxDepth?: number } = {},
+): SwarmPlan | string => {
   const parsed = swarmPlanSchema.safeParse(input);
   if (!parsed.success) return `Error: ${parsed.error.issues[0].message}`;
   const { tasks } = parsed.data;
   if (new Set(tasks.map((task) => task.id)).size !== tasks.length) return "Error: Task ids must be unique.";
   const subs = tasks.filter((task) => task.role === "sub-orchestrator").length;
   if (withinPaths && subs) return "Error: Your tasks can only be workers.";
+  if (subs && maxDepth < MAX_SWARM_DEPTH) return 'Error: Sub-orchestrators are off for this run; give every task the role "worker".';
   if (withinPaths && tasks.length > MAX_SUBORCH_CHILDREN) return `Error: Delegate at most ${MAX_SUBORCH_CHILDREN} tasks.`;
   if (subs > MAX_SUBORCHESTRATORS) return `Error: At most ${MAX_SUBORCHESTRATORS} tasks can be sub-orchestrators.`;
   const owned: { id: string; path: string }[] = [];

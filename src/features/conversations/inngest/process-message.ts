@@ -90,6 +90,7 @@ import {
   PLAN_MODE,
   PLAN_MODE_PROMPT,
   PLAN_MODE_TOOLS,
+  SWARM_MODE,
 } from '../plan-mode';
 import { swarmRun } from './lib/swarm-run';
 
@@ -548,7 +549,11 @@ export const processMessage = inngest.createFunction(
     // base, project instructions, skill index and integrations, then the project tree, forced
     // skills and plan mode.
     // Conversation goes in messages (see onStart).
-    const swarm = swarmRun({ ...(event.data as MessageEvent), internalKey });
+    // Read at run start: SWARM_PLATFORM_MAX_DEPTH is a Convex env var (ADR 0013).
+    const platformMaxDepth = mode === SWARM_MODE
+      ? (await step.run("swarm-settings", () => convex.query(api.swarm.getSwarmSettings, {}))).platformMaxDepth
+      : undefined;
+    const swarm = swarmRun({ ...(event.data as MessageEvent), internalKey, platformMaxDepth });
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
       buildProjectInstructionsSection(projectInstructions),

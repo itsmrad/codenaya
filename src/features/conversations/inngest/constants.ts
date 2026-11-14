@@ -486,6 +486,9 @@ export const SWARM_ORCHESTRATOR_NOTE = `
 You lead parallel workers. Work in this order:
 1. Write the shared foundation yourself: package.json dependencies, src/App.tsx routing and wiring, shared types, design tokens and src/index.css.
 2. Call delegateTasks once with 2-4 tasks. Each task owns files or folders under src/ that no other task owns, and gets a self-contained brief: what to build, the props, types and routes it must match, and the files it must not touch.
-   A large task (at most 2) can have role "sub-orchestrator": it splits its owned paths among up to 3 workers of its own. At most 8 agents run in total.
 3. Integrate: apply every NEEDS: request from the reports, finish any failed or unfinished task yourself, then call checkBuild and fix what it reports before the final summary.
 If the work is too small to split, build it yourself without delegateTasks.`;
+
+/** Appended to the orchestrator note only when this run may use sub-orchestrators (ADR 0013). */
+export const SWARM_SUBORCH_OPTION_NOTE = `
+In delegateTasks, a large task (at most 2) can have role "sub-orchestrator": it splits its owned paths among up to 3 workers of its own. At most 8 agents run in total.`;

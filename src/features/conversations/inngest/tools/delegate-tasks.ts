@@ -21,6 +21,8 @@ interface DelegateTasksToolOptions {
   parent?: { taskId: string; ownedPaths: string[]; depth: number };
   /** Collects the paths its workers wrote, for the sub-orchestrator's own report. */
   writtenPaths?: string[];
+  /** How deep this run's swarm may go (see `validatePlan`); Convex enforces it too. */
+  maxDepth?: number;
 }
 
 /** How long a task may queue and run before it counts as failed: a sub-orchestrator waits on its workers too. */
@@ -52,9 +54,10 @@ const taskReport = (task: Task, settled: PromiseSettledResult<SwarmWorkerResult>
  * gets it too (`parent`), for 2-3 workers inside its own paths (depth 2).
  */
 export const createDelegateTasksTool = ({
-  internalKey, projectId, messageId, ownerId, model, parent, writtenPaths,
+  internalKey, projectId, messageId, ownerId, model, parent, writtenPaths, maxDepth = MAX_SWARM_DEPTH,
 }: DelegateTasksToolOptions) => {
   const depth = parent?.depth ?? 0;
+  const subOrchestrators = !parent && maxDepth >= MAX_SWARM_DEPTH;
   // Rebuilt on every replay: handlers re-run in order, so the first valid call sets it again.
   let delegated = false;
   return createTool({
@@ -63,12 +66,12 @@ export const createDelegateTasksTool = ({
       "Run 2-4 tasks in parallel, each by a worker that writes only its owned paths (files, or folders ending in \"/\", under src/, disjoint between tasks). " +
       "Shared files (package.json, src/App.tsx, src/main.tsx, src/index.css, configs) stay yours. Call it once, after writing the shared foundation. " +
       "Returns each task's report: done, unfinished or failed, the files it wrote, and its NEEDS: requests." +
-      (parent ? "" : " A task with role \"sub-orchestrator\" (at most 2) splits its own paths among up to 3 workers."),
+      (subOrchestrators ? " A task with role \"sub-orchestrator\" (at most 2) splits its own paths among up to 3 workers." : ""),
     parameters: swarmPlanSchema,
     handler: async (input, { step }) => {
       if (delegated) return "Error: already delegated, integrate now.";
       if (depth >= MAX_SWARM_DEPTH) return "Error: Workers cannot delegate; build it yourself.";
-      const plan = validatePlan(input, { withinPaths: parent?.ownedPaths });
+      const plan = validatePlan(input, { withinPaths: parent?.ownedPaths, maxDepth });
       if (typeof plan === "string") return plan;
       if (!step) throw new Error("delegateTasks runs only inside an Inngest function");
       delegated = true;
@@ -84,6 +87,7 @@ export const createDelegateTasksTool = ({
             internalKey,
             messageId,
             projectId,
+            byok: Boolean(model.keyId),
             tasks: plan.tasks.map((task) => {
               const role = task.role ?? "worker";
               const { id: modelId, label } = role === "sub-orchestrator" ? sub : worker;
@@ -100,11 +104,14 @@ export const createDelegateTasksTool = ({
             }),
           });
         } catch (error) {
-          if (getAppError(error)?.code === "LIMIT_EXCEEDED") return null;
+          const code = getAppError(error)?.code;
+          if (code === "LIMIT_EXCEEDED" || code === "CONFLICT") return code;
           throw error;
         }
       });
-      if (!agentTaskIds) return `Error: The swarm already runs ${MAX_SWARM_AGENTS} agents; build these tasks yourself.`;
+      if (agentTaskIds === "LIMIT_EXCEEDED") return `Error: The swarm already runs ${MAX_SWARM_AGENTS} agents; build these tasks yourself.`;
+      // One platform swarm per owner at a time (ADR 0013).
+      if (agentTaskIds === "CONFLICT") return "Error: another swarm is already running for this account; build this one yourself.";
 
       // Created up front, so two workers never race to create the same folder. Owned paths are
       // canonical (no trailing "/"), so each one's parent: the path itself has a single owner.

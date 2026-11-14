@@ -1,22 +1,47 @@
 import { v } from "convex/values";
 
 import type { Id } from "./_generated/dataModel";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { mergeMessageSteps } from "./messageSteps";
 import { getOwnedProject } from "./projects";
 import schema, { agentTaskInputValidator, agentTaskStatusValidator, messageStepValidator } from "./schema";
-import { MAX_SWARM_AGENTS } from "./swarm";
+import { MAX_SWARM_AGENTS, platformMaxDepth } from "./swarm";
 
-/** Replays return the original rows without resetting their instructions or state. */
+/** Whether another of the owner's platform swarms has queued or running tasks under a running message. */
+const otherPlatformSwarmRunning = async (ctx: QueryCtx, ownerId: string, messageId: Id<"messages">) => {
+  const checked = new Set<Id<"messages">>([messageId]);
+  for (const status of ["queued", "running"] as const) {
+    // Newest first: a task left running under a cancelled message is older than any swarm started since.
+    // shortcut: those stale rows are never cleaned up; finish them on cancel if they ever crowd this window.
+    const rows = await ctx.db.query("agentTasks")
+      .withIndex("by_ownerId_and_platform_and_status", (q) =>
+        q.eq("ownerId", ownerId).eq("platform", true).eq("status", status))
+      .order("desc")
+      .take(2 * MAX_SWARM_AGENTS);
+    for (const row of rows) {
+      if (checked.has(row.messageId)) continue;
+      checked.add(row.messageId);
+      if ((await ctx.db.get("messages", row.messageId))?.status === "processing") return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Replays return the original rows without resetting their instructions or state.
+ * A platform run (`byok` unset) gets sub-orchestrators only when SWARM_PLATFORM_MAX_DEPTH
+ * allows them, and fans out only while no other platform swarm of the owner's runs.
+ */
 export const createTasks = mutation({
   args: {
     internalKey: v.string(),
     messageId: v.id("messages"),
     projectId: v.id("projects"),
     tasks: v.array(agentTaskInputValidator),
+    byok: v.optional(v.boolean()),
   },
   returns: v.array(v.id("agentTasks")),
   handler: async (ctx, args) => {
@@ -28,6 +53,10 @@ export const createTasks = mutation({
     }
     if (message.role !== "assistant" || message.mode !== "swarm") {
       throw appError("INVALID_ARGUMENT", "Only a swarm reply can have tasks");
+    }
+    const platform = args.byok !== true;
+    if (platform && platformMaxDepth() < 2 && args.tasks.some((task) => task.role === "sub-orchestrator")) {
+      throw appError("INVALID_ARGUMENT", "Sub-orchestrators are off for platform models");
     }
     const existing = await ctx.db.query("agentTasks")
       .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
@@ -45,10 +74,16 @@ export const createTasks = mutation({
       if (count >= MAX_SWARM_AGENTS) {
         throw appError("LIMIT_EXCEEDED", "Too many swarm agents");
       }
+      // Checked once, before the first new row: a replay of created rows never trips it.
+      if (platform && count === existing.length && await otherPlatformSwarmRunning(ctx, project.ownerId, args.messageId)) {
+        throw appError("CONFLICT", "Another swarm is already running for this account");
+      }
       ids.push(await ctx.db.insert("agentTasks", {
         ...task,
         messageId: args.messageId,
         projectId: args.projectId,
+        ownerId: project.ownerId,
+        platform,
         status: "queued",
         steps: [],
         updatedAt: Date.now(),
@@ -130,6 +165,18 @@ export const finishTask = mutation({
       endedAt: now,
       updatedAt: now,
     });
+    // A failed sub-orchestrator's workers can't report to anyone.
+    if (args.status === "error" && task.role === "sub-orchestrator") {
+      const children = await ctx.db.query("agentTasks")
+        .withIndex("by_message", (q) => q.eq("messageId", task.messageId))
+        .take(MAX_SWARM_AGENTS);
+      for (const child of children) {
+        if (child.parentTaskId !== task.taskId || child.status === "done" || child.status === "error") continue;
+        await ctx.db.patch("agentTasks", child._id, {
+          status: "error", error: "Parent sub-orchestrator failed.", startedAt: child.startedAt ?? now, endedAt: now, updatedAt: now,
+        });
+      }
+    }
     return null;
   },
 });

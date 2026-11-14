@@ -4,6 +4,7 @@ import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { api } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { deleteProjectBatch, CASCADE_BATCH_SIZE } from "./projectCascade";
 import schema from "./schema";
 import { MAX_SWARM_AGENTS } from "./swarm";
@@ -86,6 +87,64 @@ describe("agentTasks", () => {
       await expect(create(t, parent)).rejects.toMatchObject({ data: { code: "INVALID_ARGUMENT" } });
     }
     expect(await get(t, parent.messageId)).toEqual([]);
+  });
+
+  test("a platform run gets sub-orchestrators only when SWARM_PLATFORM_MAX_DEPTH=2; BYOK always", async () => {
+    const t = setup();
+    const parent = await seedMessage(t);
+    const sub = { ...task("big"), role: "sub-orchestrator" as const };
+    await expect(create(t, parent, [sub])).rejects.toMatchObject({ data: { code: "INVALID_ARGUMENT" } });
+    await expect(t.query(api.swarm.getSwarmSettings, {})).resolves.toEqual({ platformMaxDepth: 1 });
+    const [byok] = await t.mutation(api.agentTasks.createTasks, { internalKey: INTERNAL_KEY, ...parent, tasks: [sub], byok: true });
+    vi.stubEnv("SWARM_PLATFORM_MAX_DEPTH", "2");
+    await expect(t.query(api.swarm.getSwarmSettings, {})).resolves.toEqual({ platformMaxDepth: 2 });
+    const [platform] = await create(t, parent, [{ ...sub, taskId: "big-2" }]);
+    expect((await get(t, parent.messageId)).map(({ _id, platform: p, ownerId }) => ({ _id, p, ownerId }))).toEqual([
+      { _id: byok, p: false, ownerId: ALICE }, { _id: platform, p: true, ownerId: ALICE },
+    ]);
+  });
+
+  test("one platform swarm per owner fans out at a time; BYOK and finished runs don't count", async () => {
+    const t = setup();
+    const running = (ctx: Parameters<Parameters<TestConvex["run"]>[0]>[0], messageId: Id<"messages">) =>
+      ctx.db.patch("messages", messageId, { status: "processing" });
+    const first = await seedMessage(t);
+    const second = await seedMessage(t);
+    await t.run((ctx) => running(ctx, first.messageId).then(() => running(ctx, second.messageId)));
+    const [firstTask] = await create(t, first);
+    await expect(create(t, second)).rejects.toMatchObject({ data: { code: "CONFLICT" } });
+    // The first swarm's own later calls (a sub-orchestrator's workers) and replays still go through.
+    await create(t, first, [task(), task("more")]);
+    // BYOK is bounded by its step caps instead; another owner is unaffected.
+    await t.mutation(api.agentTasks.createTasks, { internalKey: INTERNAL_KEY, ...second, tasks: [task("byok")], byok: true });
+    const bob = await seedMessage(t, BOB);
+    await t.run((ctx) => running(ctx, bob.messageId));
+    await create(t, bob);
+    // Rows left running under a cancelled message don't block the next swarm.
+    await t.run((ctx) => ctx.db.patch("messages", first.messageId, { status: "cancelled" }));
+    await create(t, second);
+    await t.run((ctx) => running(ctx, first.messageId));
+    await t.mutation(api.agentTasks.finishTask, { internalKey: INTERNAL_KEY, agentTaskId: firstTask, status: "done" });
+    await expect(create(t, first, [task("late")])).rejects.toMatchObject({ data: { code: "CONFLICT" } });
+  });
+
+  test("a failed sub-orchestrator fails its unfinished workers with it", async () => {
+    const t = setup();
+    const parent = await seedMessage(t);
+    vi.stubEnv("SWARM_PLATFORM_MAX_DEPTH", "2");
+    const [subId] = await create(t, parent, [{ ...task("big"), role: "sub-orchestrator" as const }, task("other")]);
+    const child = (id: string) => ({ ...task(`big/${id}`), parentTaskId: "big" });
+    const [doneId] = await create(t, parent, [child("a"), child("b"), child("c")]);
+    await t.mutation(api.agentTasks.finishTask, { internalKey: INTERNAL_KEY, agentTaskId: doneId, status: "done", summary: "ok" });
+    vi.setSystemTime(3000);
+    await t.mutation(api.agentTasks.finishTask, { internalKey: INTERNAL_KEY, agentTaskId: subId, status: "error", error: "Failed" });
+    expect((await get(t, parent.messageId)).map(({ taskId, status, error, endedAt }) => ({ taskId, status, error, endedAt }))).toEqual([
+      { taskId: "big", status: "error", error: "Failed", endedAt: 3000 },
+      { taskId: "other", status: "queued", error: undefined, endedAt: undefined },
+      { taskId: "big/a", status: "done", error: undefined, endedAt: 1000 },
+      { taskId: "big/b", status: "error", error: "Parent sub-orchestrator failed.", endedAt: 3000 },
+      { taskId: "big/c", status: "error", error: "Parent sub-orchestrator failed.", endedAt: 3000 },
+    ]);
   });
 
   test("a finished task keeps its steps, and finishing an unstarted one sets startedAt", async () => {
