@@ -41,7 +41,7 @@ const LayoutSketch = ({ panes }: { panes: number[] }) => (
 );
 
 export const WorkspaceSettings = () => {
-  const { mode, loaded } = useWorkspaceMode();
+  const { mode, loaded, failed } = useWorkspaceMode();
   const setWorkspaceMode = useSetWorkspaceMode();
 
   const onValueChange = (value: string) => {
@@ -58,7 +58,12 @@ export const WorkspaceSettings = () => {
           Pick the layout projects open in. In Chat-first you can still open the code for one visit.
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        {failed && (
+          <p role="status" className="text-sm text-muted-foreground">
+            The workspace mode can&apos;t be loaded right now. Try again later.
+          </p>
+        )}
         <RadioGroup
           aria-label="Workspace mode"
           value={mode}

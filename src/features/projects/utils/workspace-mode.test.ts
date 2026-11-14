@@ -4,6 +4,7 @@ import {
   activeViewFor,
   cacheWorkspaceMode,
   loadCachedWorkspaceMode,
+  resolveWorkspaceMode,
   visibleViews,
 } from "./workspace-mode";
 
@@ -29,6 +30,13 @@ describe("workspace mode (#524)", () => {
     expect(activeViewFor("chat", "ide", false)).toBe("editor");
     expect(activeViewFor("chat", "chat", false)).toBe("preview");
     expect(activeViewFor("chat", "chat", true)).toBe("chat");
+  });
+
+  it("uses the device copy while loading or when the read fails", () => {
+    expect(resolveWorkspaceMode("chat", "ide")).toBe("chat");
+    expect(resolveWorkspaceMode(undefined, "chat")).toBe("chat");
+    // A backend without the query yet must not take the page down.
+    expect(resolveWorkspaceMode(new Error("Could not find public function"), "ide")).toBe("ide");
   });
 
   it("caches the mode on the device and defaults to ide", () => {

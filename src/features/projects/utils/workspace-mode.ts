@@ -27,6 +27,12 @@ export const activeViewFor = (view: IdeView, mode: WorkspaceMode, isCompact: boo
   return view === "chat" ? views[0] : "preview";
 };
 
+/** The saved mode; while loading or after a failed read, the device's copy. */
+export const resolveWorkspaceMode = (
+  saved: WorkspaceMode | Error | undefined,
+  cached: WorkspaceMode,
+): WorkspaceMode => (saved === undefined || saved instanceof Error ? cached : saved);
+
 // Device copy of the account setting, so a project opens in the right layout
 // before the Convex query resolves.
 const WORKSPACE_MODE_KEY = "codenaya:workspace-mode";
