@@ -25,14 +25,20 @@ import {
   atLiveSandboxCap,
   createProjectSandbox,
   projectFilesSchema,
+  stopSandboxCommands,
   writeProjectFiles,
 } from "@/features/sandbox-preview/server/project-sandbox";
 import { recordSandboxRunning } from "@/features/sandbox-preview/server/record-sandbox-running";
 import {
   forgetSandbox,
+  getOwnedSandbox,
   rememberSandbox,
 } from "@/features/sandbox-preview/server/sandbox-registry";
 import { debounceSerial } from "@/features/sandbox-preview/server/debounce-serial";
+import {
+  boundedTimeout,
+  streamBudget,
+} from "@/features/sandbox-preview/server/stream-budget";
 import { RESTART_VITE_COMMAND } from "@/features/sandbox-preview/server/restart-vite";
 import {
   missingReferencedFiles,
@@ -71,8 +77,16 @@ import type { Id } from "../../../../convex/_generated/dataModel";
  *   { "type": "phase",  "phase": BootPhase, "at": <epoch ms> }
  *   { "type": "output", "data": "..." }
  *   { "type": "ready",  "sandboxId": "...", "previewUrl": "..." }
+ *   { "type": "resume", "sandboxId": "..." }
  *   { "type": "error",  "message": "...", "code": SandboxErrorKind }
+ *
+ * The stream ends itself before Vercel's limit (#492). After `ready` it just
+ * closes and the preview keeps running. Before `ready` it sends `resume`, and
+ * the client boots again on that sandbox by posting it as `resumeSandboxId`.
  */
+
+/** Vercel Hobby's maximum; the stream ends itself before it (stream-budget.ts). */
+export const maxDuration = 300;
 
 const requestSchema = z.object({
   files: projectFilesSchema,
@@ -80,11 +94,14 @@ const requestSchema = z.object({
     .object({ installCommand: z.string().optional(), devCommand: z.string().optional() })
     .optional(),
   projectId: z.string().optional(),
+  /** A sandbox this user's earlier boot ran out of time on (#492). */
+  resumeSandboxId: z.string().optional(),
 });
 
 const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour (E2B free plan max)
 /** A package.json sync waits this long for more edits before re-installing. */
 const REINSTALL_DEBOUNCE_MS = 2000;
+const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Environment variables that force dev servers to bind to 0.0.0.0
@@ -113,6 +130,7 @@ const PORT_PATTERNS = [
 ];
 
 export async function POST(request: Request) {
+  const budget = streamBudget(Date.now());
   const { userId, unauthorized } = await requireUserId();
 
   if (unauthorized) {
@@ -144,7 +162,7 @@ export async function POST(request: Request) {
     return invalid;
   }
 
-  const { files, settings } = body;
+  const { files, settings, resumeSandboxId } = body;
   const projectId = body.projectId as Id<"projects"> | undefined;
 
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
@@ -170,7 +188,8 @@ export async function POST(request: Request) {
     }
   }
 
-  if (await atLiveSandboxCap(e2bApiKey, userId)) {
+  // A resumed boot reuses a sandbox the cap already counts.
+  if (!resumeSandboxId && (await atLiveSandboxCap(e2bApiKey, userId))) {
     return Response.json(
       {
         error:
@@ -275,10 +294,10 @@ export async function POST(request: Request) {
       let sandbox: Sandbox | null = null;
       const installCmd = settings?.installCommand || DEFAULT_INSTALL_COMMAND;
 
-      const runInstall = (target: Sandbox) =>
+      const runInstall = (target: Sandbox, timeoutMs: number) =>
         target.commands.run(installCmd, {
           cwd: WORK_DIR,
-          timeoutMs: 5 * 60 * 1000,
+          timeoutMs,
           // Install may run postinstall scripts or a build that needs config.
           envs: toProcessEnv(envEntries),
           onStdout: (data) => send({ type: "output", data }),
@@ -292,7 +311,11 @@ export async function POST(request: Request) {
         if (!sandbox) return;
         send({ type: "output", data: `\npackage.json changed.\n$ ${installCmd}\n` });
         try {
-          const result = await runInstall(sandbox);
+          // May run past the stream budget, so it is bounded by the close.
+          const result = await runInstall(
+            sandbox,
+            boundedTimeout(INSTALL_TIMEOUT_MS, budget.closeLeft()),
+          );
           if (result.exitCode !== 0) {
             throw new Error(`${installCmd} failed with exit code ${result.exitCode}`);
           }
@@ -303,6 +326,9 @@ export async function POST(request: Request) {
           send({ type: "output", data: `\nError: ${message}\n` });
         }
       }, REINSTALL_DEBOUNCE_MS);
+
+      /** The sandbox outlives this stream: don't kill or forget it (#492). */
+      let handedOff = false;
 
       try {
         // Name the missing file now rather than leave Vite's overlay to (#190).
@@ -331,24 +357,31 @@ export async function POST(request: Request) {
         // --- Boot sandbox ---
         send({ type: "status", status: "booting" });
         sendPhase("create");
-        send({ type: "output", data: "Creating E2B sandbox...\n" });
 
-        sandbox = await createProjectSandbox({
-          apiKey: e2bApiKey,
-          timeoutMs: SANDBOX_TIMEOUT_MS,
-          // checkBuild finds the project's warm preview by these tags (#465).
-          metadata: projectId ? { userId, projectId } : { userId },
-          network: {
-            maskRequestHost: "localhost:${PORT}",
-          },
-        });
+        if (resumeSandboxId) {
+          send({ type: "output", data: "\nContinuing on the same sandbox...\n" });
+          sandbox = await getOwnedSandbox(resumeSandboxId, userId);
+          if (!sandbox) throw new Error("Sandbox not found");
+          await stopSandboxCommands(sandbox);
+        } else {
+          send({ type: "output", data: "Creating E2B sandbox...\n" });
+          sandbox = await createProjectSandbox({
+            apiKey: e2bApiKey,
+            timeoutMs: SANDBOX_TIMEOUT_MS,
+            // checkBuild finds the project's warm preview by these tags (#465).
+            metadata: projectId ? { userId, projectId } : { userId },
+            network: {
+              maskRequestHost: "localhost:${PORT}",
+            },
+          });
+        }
 
         // File syncs reuse this handle instead of reconnecting (#179).
         rememberSandbox(sandbox, userId, reinstall.schedule);
 
         send({
           type: "output",
-          data: `Sandbox ${sandbox.sandboxId} created.\n`,
+          data: `Sandbox ${sandbox.sandboxId} ${resumeSandboxId ? "connected" : "created"}.\n`,
         });
 
         // --- Verify Node.js is available ---
@@ -429,7 +462,10 @@ export async function POST(request: Request) {
         } else {
           send({ type: "output", data: `$ ${installCmd}\n` });
 
-          const installResult = await runInstall(sandbox);
+          const installResult = await runInstall(
+            sandbox,
+            boundedTimeout(INSTALL_TIMEOUT_MS, budget.left()),
+          );
 
           if (installResult.exitCode !== 0) {
             throw new Error(
@@ -479,7 +515,11 @@ export async function POST(request: Request) {
         // to polling common ports
         send({ type: "output", data: "\nWaiting for dev server...\n" });
 
-        const localPort = await waitForServerPort(sandbox, () => detectedPort);
+        const localPort = await waitForServerPort(
+          sandbox,
+          () => detectedPort,
+          Math.min(60_000, budget.left()),
+        );
 
         if (!localPort) {
           throw new Error(
@@ -509,21 +549,39 @@ export async function POST(request: Request) {
           previewUrl,
         });
 
-        // Keep the NDJSON stream alive indefinitely until the client disconnects!
-        // This ensures the E2B sandbox isn't prematurely garbage collected,
-        // and allows us to stream continuous logs from the dev server to the UI.
+        // Keep streaming dev server logs until the client disconnects, which
+        // kills the sandbox, or the budget runs out, which leaves it running.
         if (request.signal.aborted) {
           // If already aborted, short-circuit and throw so finally kills the sandbox
           throw new Error("Client aborted request");
         }
 
-        await new Promise((resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, Math.max(0, budget.left()));
           request.signal.addEventListener("abort", () => {
+            clearTimeout(timer);
             reject(new Error("Client aborted request"));
           });
         });
 
+        // Out of time. Later package.json syncs install through PATCH, and a
+        // reinstall already due finishes here first.
+        handedOff = true;
+        rememberSandbox(sandbox, userId);
+        await reinstall.flush();
+        send({
+          type: "output",
+          data: "\nLog stream closed to stay within the server time limit. The preview keeps running.\n",
+        });
       } catch (error) {
+        // Out of time, not broken: the client boots again on this sandbox.
+        if (sandbox && !handedOff && !request.signal.aborted && budget.left() <= 0) {
+          handedOff = true;
+          rememberSandbox(sandbox, userId);
+          send({ type: "resume", sandboxId: sandbox.sandboxId });
+          return;
+        }
+
         const message =
           error instanceof Error ? error.message : "Unknown error";
 
@@ -547,7 +605,7 @@ export async function POST(request: Request) {
         }
       } finally {
         reinstall.cancel();
-        if (sandbox) {
+        if (sandbox && !handedOff) {
           forgetSandbox(sandbox.sandboxId);
         }
 

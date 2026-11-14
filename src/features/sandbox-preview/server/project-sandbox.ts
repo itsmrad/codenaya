@@ -67,3 +67,12 @@ export const writeProjectFiles = async (
     { requestTimeoutMs: timeLeft?.() },
   );
 };
+
+/**
+ * Stops every command an earlier boot left running (install, dev server,
+ * proxy), so booting again on the same sandbox doesn't race it (#492).
+ */
+export const stopSandboxCommands = async (sandbox: Sandbox) => {
+  const running = await sandbox.commands.list();
+  await Promise.all(running.map((command) => sandbox.commands.kill(command.pid)));
+};

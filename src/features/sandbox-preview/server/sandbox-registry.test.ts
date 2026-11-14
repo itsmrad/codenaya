@@ -83,4 +83,16 @@ describe("sandbox registry", () => {
     expect(requestReinstall("sbx_1")).toBe(false);
     expect(requestReinstall("sbx_unknown")).toBe(false);
   });
+
+  it("stops handing reinstalls to a boot stream that has ended (#492)", async () => {
+    const sandbox = fakeSandbox("sbx_1");
+    const reinstall = vi.fn();
+    rememberSandbox(sandbox, "user_a", reinstall);
+    rememberSandbox(sandbox, "user_a");
+
+    expect(requestReinstall("sbx_1")).toBe(false);
+    expect(reinstall).not.toHaveBeenCalled();
+    expect(await getOwnedSandbox("sbx_1", "user_a")).toBe(sandbox);
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
 });

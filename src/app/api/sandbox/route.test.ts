@@ -3,7 +3,7 @@
  * touch Convex or E2B (#235).
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
@@ -160,5 +160,84 @@ describe("POST /api/sandbox tags (#465)", () => {
       expect.any(String),
       expect.objectContaining({ metadata: { userId: "user_1" } }),
     );
+  });
+});
+
+describe("POST /api/sandbox past its time budget (#492)", () => {
+  const boot = (extra: Record<string, unknown> = {}) =>
+    POST(
+      request(
+        "POST",
+        JSON.stringify({ files: [{ path: "index.html", content: "" }], ...extra }),
+      ),
+    );
+
+  const events = async (res: Response) =>
+    (await res.text())
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+  const fakeSandbox = (sandboxId: string, ownerId = "user_1") => ({
+    sandboxId,
+    getInfo: vi.fn(async () => ({ metadata: { userId: ownerId } })),
+    kill: vi.fn(),
+    commands: {
+      list: vi.fn(async () => [{ pid: 7 }, { pid: 8 }]),
+      kill: vi.fn(async () => true),
+      run: vi.fn(async () => {
+        throw new Error("stop after connect");
+      }),
+    },
+  });
+
+  beforeEach(() => {
+    mocks.sandboxList.mockReturnValue({ nextItems: async () => [] });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("hands the sandbox to the client to resume instead of failing it", async () => {
+    const startedAt = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    const sandbox = fakeSandbox("sbx_slow");
+    mocks.sandboxCreate.mockImplementation(async () => {
+      now.mockReturnValue(startedAt + 280_000);
+      return sandbox;
+    });
+
+    const sent = await events(await boot());
+
+    expect(sent).toContainEqual({ type: "resume", sandboxId: "sbx_slow" });
+    expect(sent.some((event) => event.type === "error")).toBe(false);
+    expect(sandbox.kill).not.toHaveBeenCalled();
+  });
+
+  it("resumes on the caller's sandbox without creating one or checking the cap", async () => {
+    const sandbox = fakeSandbox("sbx_resume");
+    mocks.sandboxConnect.mockResolvedValue(sandbox);
+
+    await (await boot({ resumeSandboxId: "sbx_resume" })).text();
+
+    expect(mocks.sandboxConnect).toHaveBeenCalledWith("sbx_resume");
+    expect(sandbox.commands.kill).toHaveBeenCalledWith(7);
+    expect(sandbox.commands.kill).toHaveBeenCalledWith(8);
+    expect(mocks.sandboxCreate).not.toHaveBeenCalled();
+    expect(mocks.sandboxList).not.toHaveBeenCalled();
+  });
+
+  it("refuses to resume another user's sandbox", async () => {
+    const sandbox = fakeSandbox("sbx_other", "user_2");
+    mocks.sandboxConnect.mockResolvedValue(sandbox);
+
+    const sent = await events(await boot({ resumeSandboxId: "sbx_other" }));
+
+    expect(sent).toContainEqual(
+      expect.objectContaining({ type: "error", message: "Sandbox not found" }),
+    );
+    expect(sandbox.commands.kill).not.toHaveBeenCalled();
+    expect(mocks.sandboxCreate).not.toHaveBeenCalled();
   });
 });

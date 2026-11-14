@@ -5,7 +5,7 @@
  */
 export const debounceSerial = (task: () => Promise<void>, delayMs: number) => {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let running = false;
+  let current: Promise<void> | undefined;
   let pending = false;
 
   const schedule = () => {
@@ -13,22 +13,42 @@ export const debounceSerial = (task: () => Promise<void>, delayMs: number) => {
     timer = setTimeout(run, delayMs);
   };
 
+  const cancel = () => {
+    clearTimeout(timer);
+    timer = undefined;
+  };
+
   const run = async () => {
-    if (running) {
+    timer = undefined;
+    if (current) {
       pending = true;
       return;
     }
-    running = true;
-    try {
-      await task();
-    } finally {
-      running = false;
-      if (pending) {
-        pending = false;
-        schedule();
+    current = (async () => {
+      try {
+        await task();
+      } finally {
+        current = undefined;
+        if (pending) {
+          pending = false;
+          schedule();
+        }
+      }
+    })();
+    await current;
+  };
+
+  /** Runs a scheduled task now and resolves once nothing is scheduled or running. */
+  const flush = async () => {
+    while (timer !== undefined || current) {
+      if (current) {
+        await current;
+      } else {
+        clearTimeout(timer);
+        await run();
       }
     }
   };
 
-  return { schedule, cancel: () => clearTimeout(timer) };
+  return { schedule, cancel, flush };
 };

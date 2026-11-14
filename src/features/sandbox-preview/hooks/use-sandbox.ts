@@ -20,6 +20,10 @@ import {
   classifySandboxError,
   type SandboxErrorKind,
 } from "@/features/sandbox-preview/utils/sandbox-error";
+import {
+  BOOT_OUT_OF_TIME,
+  afterBootStream,
+} from "@/features/sandbox-preview/utils/boot-stream-end";
 
 import { Id, Doc } from "../../../../convex/_generated/dataModel";
 
@@ -121,6 +125,7 @@ export const useSandbox = ({
     abortControllerRef.current = abortController;
 
     const start = async () => {
+      let ready = false;
       try {
         buildErrors.reset();
         setStatus("booting");
@@ -134,93 +139,116 @@ export const useSandbox = ({
           flatFiles.map((file) => [file.path, file.content]),
         );
 
-        const response = await fetch("/api/sandbox", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            files: flatFiles,
-            settings,
-            projectId,
-          }),
-          signal: abortController.signal,
-        });
-
-        if (!response.ok) {
-          const errorBody = await response.json().catch(() => null);
-          throw new SandboxStartError(
-            errorBody?.error || `Failed to create sandbox (${response.status})`,
-            classifySandboxError({
-              code: errorBody?.code,
-              status: response.status,
+        // A boot that runs out of server time continues on the same sandbox (#492).
+        let resumeSandboxId: string | undefined;
+        for (let resumes = 0; ; resumes++) {
+          const response = await fetch("/api/sandbox", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              files: flatFiles,
+              settings,
+              projectId,
+              resumeSandboxId,
             }),
-          );
-        }
+            signal: abortController.signal,
+          });
+          resumeSandboxId = undefined;
 
-        // Parse NDJSON stream
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error("No response stream");
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => null);
+            throw new SandboxStartError(
+              errorBody?.error || `Failed to create sandbox (${response.status})`,
+              classifySandboxError({
+                code: errorBody?.code,
+                status: response.status,
+              }),
+            );
+          }
 
-        const decoder = new TextDecoder();
-        let buffer = "";
+          // Parse NDJSON stream
+          const reader = response.body?.getReader();
+          if (!reader) throw new Error("No response stream");
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+          const decoder = new TextDecoder();
+          let buffer = "";
 
-          buffer += decoder.decode(value, { stream: true });
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-          // Process complete lines
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || ""; // Keep incomplete line in buffer
+            buffer += decoder.decode(value, { stream: true });
 
-          for (const line of lines) {
-            if (!line.trim()) continue;
+            // Process complete lines
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || ""; // Keep incomplete line in buffer
 
-            try {
-              const event = JSON.parse(line);
+            for (const line of lines) {
+              if (!line.trim()) continue;
 
-              switch (event.type) {
-                case "status":
-                  setStatus(event.status);
-                  break;
-                case "output": {
-                  setTerminalOutput((prev) => prev + event.data);
-                  if (isHmrSuccess(event.data)) {
-                    setAppError(null);
-                    buildErrors.reset();
+              try {
+                const event = JSON.parse(line);
+
+                switch (event.type) {
+                  case "status":
+                    setStatus(event.status);
+                    break;
+                  case "output": {
+                    setTerminalOutput((prev) => prev + event.data);
+                    if (isHmrSuccess(event.data)) {
+                      setAppError(null);
+                      buildErrors.reset();
+                    }
+                    const buildError = buildErrors.push(event.data);
+                    if (buildError) setAppError((prev) => mergeAppError(prev, buildError));
+                    break;
                   }
-                  const buildError = buildErrors.push(event.data);
-                  if (buildError) setAppError((prev) => mergeAppError(prev, buildError));
-                  break;
+                  case "phase":
+                    if (isBootPhase(event.phase)) {
+                      setPhase(event.phase);
+                      setBootHistory((history) => recordBootPhase(history, event.phase, event.at));
+                    }
+                    break;
+                  case "ready":
+                    ready = true;
+                    sandboxIdRef.current = event.sandboxId;
+                    setPreviewUrl(event.previewUrl);
+                    setStatus("running");
+                    break;
+                  case "resume":
+                    resumeSandboxId = event.sandboxId;
+                    // So unmount and restart still kill it between requests.
+                    sandboxIdRef.current = event.sandboxId;
+                    break;
+                  case "error":
+                    throw new SandboxStartError(
+                      event.message,
+                      classifySandboxError({ code: event.code }),
+                    );
                 }
-                case "phase":
-                  if (isBootPhase(event.phase)) {
-                    setPhase(event.phase);
-                    setBootHistory((history) => recordBootPhase(history, event.phase, event.at));
-                  }
-                  break;
-                case "ready":
-                  sandboxIdRef.current = event.sandboxId;
-                  setPreviewUrl(event.previewUrl);
-                  setStatus("running");
-                  break;
-                case "error":
-                  throw new SandboxStartError(
-                    event.message,
-                    classifySandboxError({ code: event.code }),
-                  );
+              } catch (parseError) {
+                // If it's a re-thrown error from "error" event, propagate it
+                if (parseError instanceof Error && parseError.message !== line) {
+                  throw parseError;
+                }
+                // Otherwise skip malformed JSON line
               }
-            } catch (parseError) {
-              // If it's a re-thrown error from "error" event, propagate it
-              if (parseError instanceof Error && parseError.message !== line) {
-                throw parseError;
-              }
-              // Otherwise skip malformed JSON line
             }
+          }
+
+          const next = afterBootStream({ ready, resumeSandboxId, resumes });
+          if (next === "done") return;
+          if (next === "failed") {
+            throw new SandboxStartError(BOOT_OUT_OF_TIME, "transient");
           }
         }
       } catch (error) {
         if ((error as Error).name === "AbortError") return;
+        // The log stream dropped after boot; the preview itself still runs (#492).
+        if (ready) {
+          setTerminalOutput((prev) => prev + "\nLog stream disconnected. The preview keeps running.\n");
+          return;
+        }
 
         setError(
           // fetch and stream reads reject with a bare TypeError ("Failed to
