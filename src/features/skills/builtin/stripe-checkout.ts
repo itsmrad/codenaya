@@ -58,7 +58,17 @@ Add \`"stripe"\` to dependencies. Env vars (both secret, server-only): \`STRIPE_
 import "server-only";
 import Stripe from "stripe";
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+export const STRIPE_NOT_SET_UP =
+  "Stripe isn't set up: add STRIPE_SECRET_KEY in Environment Variables.";
+
+let client: Stripe | undefined;
+
+// Created on first use, never at import: a missing key must not break \`next build\`.
+export function getStripe(): Stripe | null {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) return null;
+  return (client ??= new Stripe(key));
+}
 
 // The only things the browser may buy. Price IDs come from the Dashboard or the integration.
 export const PRICES = {
@@ -73,9 +83,11 @@ Add \`"server-only"\` to dependencies too; it makes a client import of this file
 
 \`\`\`ts
 import { NextResponse } from "next/server";
-import { PRICES, stripe, type ProductKey } from "@/lib/stripe";
+import { getStripe, PRICES, STRIPE_NOT_SET_UP, type ProductKey } from "@/lib/stripe";
 
 export async function POST(req: Request) {
+  const stripe = getStripe();
+  if (!stripe) return NextResponse.json({ error: STRIPE_NOT_SET_UP }, { status: 503 });
   const form = await req.formData();
   const product = String(form.get("product"));
   if (!Object.hasOwn(PRICES, product)) {
@@ -108,14 +120,22 @@ If you know the signed-in user, pass \`client_reference_id\` (or \`customer_emai
 \`\`\`ts
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 
 export async function POST(req: Request) {
+  const stripe = getStripe();
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!stripe || !secret) {
+    return NextResponse.json(
+      { error: "Stripe isn't set up: add STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET in Environment Variables." },
+      { status: 503 },
+    );
+  }
   const payload = await req.text(); // the raw body: parsing it first breaks the signature
   const signature = req.headers.get("stripe-signature");
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(payload, signature ?? "", process.env.STRIPE_WEBHOOK_SECRET!);
+    event = stripe.webhooks.constructEvent(payload, signature ?? "", secret);
   } catch {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
@@ -134,7 +154,7 @@ export async function POST(req: Request) {
 \`\`\`
 
 - \`fulfillOrder\` records the session id and skips ids it has already handled, then grants access or sends the goods.
-- On the thank-you page, you may look the session up server-side (\`stripe.checkout.sessions.retrieve(id)\`) to show what was bought, but fulfilment stays in the webhook.
+- On the thank-you page, you may look the session up server-side (\`getStripe()?.checkout.sessions.retrieve(id)\`) to show what was bought, but fulfilment stays in the webhook.
 - Tell the user how to get \`STRIPE_WEBHOOK_SECRET\`: locally, \`stripe listen --forward-to localhost:3000/api/stripe/webhook\` prints a \`whsec_\` secret; once deployed, add an endpoint for \`<origin>/api/stripe/webhook\` in the Dashboard (events \`checkout.session.completed\` and \`checkout.session.async_payment_succeeded\`) and use its signing secret.
 
 ## Notes for the user

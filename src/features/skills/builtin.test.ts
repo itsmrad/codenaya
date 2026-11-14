@@ -68,6 +68,10 @@ describe("built-in skills", () => {
     expect(body).toContain("await req.text()");
     expect(body).toContain('import "server-only"');
     expect(body).toContain("process.env.STRIPE_SECRET_KEY");
+    // Built lazily, so a missing key fails the request with a clear error, not `next build`.
+    expect(body).toContain("export function getStripe(): Stripe | null");
+    expect(body).not.toMatch(/export const stripe = new Stripe/);
+    expect(body).toContain("Stripe isn't set up");
     expect(body).not.toMatch(/(VITE|NEXT_PUBLIC)_STRIPE_(SECRET|WEBHOOK)/);
   });
 
@@ -80,5 +84,8 @@ describe("built-in skills", () => {
     expect(body).toContain("public/robots.txt");
     expect(body).toContain("public/sitemap.xml");
     expect(body).toContain("never invent a domain");
+    // Per-route values replace the index.html ones instead of adding duplicate tags.
+    expect(body).toContain("export function usePageMeta");
+    expect(body).not.toMatch(/<meta name="description"[^\n]*\/>\n\s*\{\/\* page content/);
   });
 });

@@ -49,21 +49,22 @@ Link-preview crawlers (chat apps, social networks) generally don't run JavaScrip
 
 (\`acme.example\` stands for the real origin; never ship it.) Edit the starter's \`index.html\` in place: change \`<head>\` and the \`lang\` attribute, keep the rest.
 
-Per-route titles and descriptions: React 19 hoists \`<title>\` and \`<meta>\` rendered anywhere into \`<head>\`, so no library is needed. Render them at the top of each page component:
+Per-route titles and descriptions: **replace** the site-wide ones from \`index.html\`, never add a second \`<title>\` or \`<meta name="description">\` (don't render those elements in components: two description tags conflict). One small hook, no library:
 
-\`\`\`tsx
-export default function PricingPage() {
-  return (
-    <>
-      <title>Pricing – Acme Notes</title>
-      <meta name="description" content="Plans for individuals and teams. Start free, upgrade any time." />
-      {/* page content */}
-    </>
-  );
+\`\`\`ts
+// src/lib/use-page-meta.ts
+import { useEffect } from "react";
+
+/** Replaces the title and description from index.html for this page. */
+export function usePageMeta(title: string, description: string) {
+  useEffect(() => {
+    document.title = title;
+    document.querySelector('meta[name="description"]')?.setAttribute("content", description);
+  }, [title, description]);
 }
 \`\`\`
 
-\`<title>\` takes a single string: write \`{\`\${name} – Acme Notes\`}\`, not mixed text and JSX. Render only one \`<title>\` at a time. Search engines that run JavaScript pick these up; share cards still use the \`index.html\` tags (per-page cards for a Vite app need prerendering, which is out of scope).
+Call it at the top of every public page, e.g. \`usePageMeta("Pricing – Acme Notes", "Plans for individuals and teams. Start free, upgrade any time.")\`, so navigating never leaves the previous page's values. Search engines that run JavaScript pick these up; share cards still use the \`index.html\` tags (per-page cards for a Vite app need prerendering, which is out of scope).
 
 ### public/robots.txt
 
@@ -137,7 +138,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
 ## Checklist (run it, then report it in Notes)
 
 1. \`<html lang>\` set; favicon linked.
-2. Site-wide \`<title>\` and meta description; per-route titles on every public page.
+2. Site-wide \`<title>\` and meta description in \`index.html\`; \`usePageMeta\` on every public page, and only one of each tag in \`<head>\`.
 3. \`og:type\`, \`og:title\`, \`og:description\`, \`og:url\`, \`og:image\` (absolute, 1200×630) and \`twitter:card\` = \`summary_large_image\`.
 4. \`robots.txt\` with the \`Sitemap:\` line; \`sitemap.xml\` lists every public route with absolute URLs.
 5. One \`h1\` per page; \`alt\` on images.
