@@ -20,7 +20,9 @@ import {
   copyProjectName,
   validateProjectName,
 } from "../src/features/projects/utils/project-name";
+import { MAX_PROJECT_INSTRUCTIONS_LENGTH } from "../src/features/projects/instructions";
 import { countProjectBuilt } from "./stats";
+import { recordProjectEvent } from "./activationEvents";
 
 /** Env vars and skill settings copied per duplicate; far above real usage. */
 const MAX_COPIED_ROWS = 500;
@@ -80,6 +82,31 @@ export const updateSettings = mutation({
   },
 });
 
+/** Sets the project's always-on agent instructions; empty text clears them (#299). */
+export const updateInstructions = mutation({
+  args: {
+    id: v.id("projects"),
+    instructions: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+    await getOwnedProject(ctx, args.id, identity.subject);
+
+    const instructions = args.instructions.trim();
+    if (instructions.length > MAX_PROJECT_INSTRUCTIONS_LENGTH) {
+      throw appError(
+        "INVALID_ARGUMENT",
+        `Instructions must be at most ${MAX_PROJECT_INSTRUCTIONS_LENGTH} characters`,
+      );
+    }
+
+    await ctx.db.patch("projects", args.id, {
+      instructions: instructions || undefined,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 export const create = mutation({
   args: {
     name: v.string(),
@@ -93,6 +120,10 @@ export const create = mutation({
       updatedAt: Date.now(),
     });
     await countProjectBuilt(ctx);
+    await recordProjectEvent(ctx, projectId, {
+      name: "project_created",
+      props: { source: "dashboard" },
+    });
 
     return projectId;
   },
@@ -162,7 +193,7 @@ export const rename = mutation({
 
 /**
  * Copies a project into a new one named "<name> (copy)": files, settings,
- * project skills with their enabled states, and public env vars. Secret env
+ * instructions, project skills with their enabled states, and public env vars. Secret env
  * vars, conversations and integrations stay with the original.
  */
 export const duplicate = mutation({
@@ -177,9 +208,14 @@ export const duplicate = mutation({
       name: copyProjectName(source.name),
       ownerId: source.ownerId,
       settings: source.settings,
+      instructions: source.instructions,
       updatedAt: Date.now(),
     });
     await countProjectBuilt(ctx);
+    await recordProjectEvent(ctx, newProjectId, {
+      name: "project_created",
+      props: { source: "duplicate" },
+    });
 
     await copyProjectFiles(ctx, source._id, newProjectId);
 
@@ -274,6 +310,28 @@ export const deleteBatch = internalMutation({
     }
   },
 });
+/**
+ * Whether a conversation's project still needs its first build: seeded and not
+ * yet built (#338), or with no files at all. Auto routing (#322) sends it to the
+ * build model. The caller checks ownership; the answer only picks a model.
+ */
+export const conversationNeedsFirstBuildForServer = query({
+  args: { internalKey: v.string(), conversationId: v.id("conversations") },
+  returns: v.boolean(),
+  handler: async (ctx, { internalKey, conversationId }) => {
+    validateInternalKey(internalKey);
+    const conversation = await ctx.db.get("conversations", conversationId);
+    const project = conversation && (await ctx.db.get("projects", conversation.projectId));
+    if (!project) return true;
+    if (project.firstBuildPending === true) return true;
+    const file = await ctx.db
+      .query("files")
+      .withIndex("by_project", (q) => q.eq("projectId", project._id))
+      .first();
+    return file === null;
+  },
+});
+
 /**
  * Ends a seeded project's first build (#338): called by the agent run that
  * wrote files and finished. Failed, cancelled, plan and Q&A runs leave it set.

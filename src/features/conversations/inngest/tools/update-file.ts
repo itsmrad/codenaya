@@ -5,29 +5,34 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
-import { getFileByAgentId } from "./get-file";
 import { checkPackageVersions } from "./package-versions";
+import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
+import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface UpdateFileToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  registry?: RegistryCheck;
 }
 
+// `fileId` is not offered to the model; it reads tool calls made before #292.
 const paramsSchema = z.object({
-  fileId: z.string().min(1, "File ID is required"),
+  path: z.string().optional(),
+  fileId: z.string().optional(),
   content: z.string(),
 });
 
 export const createUpdateFileTool = ({
   projectId,
   internalKey,
+  registry = createRegistryCheck(),
 }: UpdateFileToolOptions) => {
   return createTool({
     name: "updateFile",
-    description: "Update the content of an existing file",
+    description: "Replace the content of an existing file",
     parameters: z.object({
-      fileId: z.string().describe("The ID of the file to update"),
+      path: z.string().describe('Project-relative path of the file, like "src/App.tsx"'),
       content: z.string().describe("The new content for the file"),
     }),
     handler: async (params, { step: toolStep }) => {
@@ -36,34 +41,33 @@ export const createUpdateFileTool = ({
         return `Error: ${parsed.error.issues[0].message}`;
       }
 
-      const { fileId, content } = parsed.data;
-
-      // Validate file exists before running the step
-      const file = await getFileByAgentId(internalKey, projectId, fileId);
-
-      if (!file) {
-        return `Error: File with ID "${fileId}" not found. Use listFiles to get valid file IDs.`;
-      }
-
-      if (file.type === "folder") {
-        return `Error: "${file.name}" is a folder, not a file. You can only update file contents.`;
-      }
-
-      const { content: checkedContent, note: versionNote } = checkPackageVersions(file.name, content);
-
       try {
         return await toolStep?.run("update-file", async () => {
+          const index = indexProjectFiles(await getProjectFiles(internalKey, projectId));
+          const found = await findProjectFile(internalKey, projectId, index, parsed.data);
+          if ("error" in found) return found.error;
+          const { file, path } = found;
+
+          if (file.type === "folder") {
+            return `Error: "${path}" is a folder, not a file. You can only update file contents.`;
+          }
+
+          const { content: checkedContent, note: versionNote } = checkPackageVersions(file.name, parsed.data.content);
+          const rewriteIcons = await getIconRewriter(internalKey, projectId, [{ path, content: checkedContent }]);
+          const prepared = rewriteIcons(checkedContent, path);
+          const { content } = prepared;
           await convex.mutation(api.system.updateFile, {
             internalKey,
             projectId,
-            fileId: fileId as Id<"files">,
-            content: checkedContent,
+            fileId: file._id,
+            content,
           });
 
           return (
-            `File "${file.name}" updated successfully` +
-            syntaxErrorNote([{ name: file.name, content }]) +
-            versionNote
+            `File "${path}" updated successfully` +
+            syntaxErrorNote([{ name: path, content }]) +
+            versionNote +
+            await postWriteNote(internalKey, projectId, [file._id], registry, prepared.rewrites)
           );
         })
       } catch (error) {

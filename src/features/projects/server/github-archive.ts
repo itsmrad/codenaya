@@ -11,20 +11,23 @@ export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 export type RepoArchive = {
   folders: string[];
   files: { path: string; content: Buffer<ArrayBuffer> }[];
+  // Entries left out, such as symlinks. (Submodules arrive as empty folders.)
+  skipped: string[];
 };
 
 /**
- * Downloads the repo's default branch as one tarball and reads it in memory,
+ * Downloads the repo's default branch (or `ref`) as one tarball and reads it in memory,
  * so an import costs one GitHub API request however many files the repo has
  * (#364). Caps are checked from each entry's header before its body is read.
  */
 export async function readRepoArchive(
   owner: string,
   repo: string,
-  token: string | null
+  token: string | null,
+  ref?: string
 ): Promise<RepoArchive> {
   const res = await fetch(
-    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/tarball`,
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/tarball${ref ? `/${encodeURIComponent(ref)}` : ""}`,
     {
       headers: {
         Accept: "application/vnd.github+json",
@@ -36,7 +39,7 @@ export async function readRepoArchive(
     throw new Error(`GitHub archive download failed: ${res.status}`);
   }
 
-  const archive: RepoArchive = { folders: [], files: [] };
+  const archive: RepoArchive = { folders: [], files: [], skipped: [] };
   const reads: Promise<void>[] = [];
   let fileCount = 0;
   let totalBytes = 0;
@@ -52,7 +55,10 @@ export async function readRepoArchive(
       if (path && entry.type === "Directory") {
         archive.folders.push(path);
       }
-      // Symlinks and submodules aren't imported.
+      // Symlinks aren't imported; submodules are empty folders in the archive.
+      if (path && entry.type !== "File" && entry.type !== "Directory") {
+        archive.skipped.push(path);
+      }
       if (!path || entry.type !== "File") {
         entry.resume();
         return;
