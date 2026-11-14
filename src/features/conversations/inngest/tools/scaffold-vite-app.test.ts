@@ -6,7 +6,8 @@ const db = vi.hoisted(() => ({ rows: [] as Row[] }));
 
 vi.mock("@/lib/convex-client", () => ({
   convex: {
-    query: vi.fn(async () => db.rows),
+    // A snapshot, like the real query: later lock changes don't reach it.
+    query: vi.fn(async () => db.rows.map((row) => ({ ...row }))),
     mutation: vi.fn(
       async (_ref: unknown, args: { name?: string; parentId?: string; files?: Row[] }) => {
         const insert = (row: Omit<Row, "_id">) => {
@@ -15,7 +16,10 @@ vi.mock("@/lib/convex-client", () => ({
           return _id;
         };
         if (!args.files) return insert({ name: args.name!, type: "folder", parentId: args.parentId });
+        // Like createFiles: a write into a locked folder is refused per file, with no id.
+        const parentLocked = db.rows.find((row) => row._id === args.parentId)?.locked;
         return args.files.map((file) => {
+          if (parentLocked) return { name: file.name, fileId: "", error: `${file.name} is locked by the user.` };
           const existing = db.rows.find(
             (row) => row.name === file.name && row.parentId === args.parentId,
           );
@@ -28,6 +32,8 @@ vi.mock("@/lib/convex-client", () => ({
   },
 }));
 
+import { convex } from "@/lib/convex-client";
+import { toolResultError } from "@/features/conversations/agent-steps";
 import { missingReferencedFiles } from "@/features/sandbox-preview/utils/missing-references";
 
 import { KNOWN_GOOD_VERSIONS } from "../known-good-versions";
@@ -183,6 +189,51 @@ describe("scaffoldViteApp and locks (#307)", () => {
     expect(db.rows.find((row) => row._id === "pkg")?.content).toBe("{}");
     expect(result).not.toContain("Kept existing");
     expect(result).toMatch(/Not written, locked by the user: .*package\.json.*src\/main\.tsx/);
-    expect(written).toContain("vite.config.ts");
+  });
+});
+
+describe("scaffoldViteApp and an incomplete starter (#548)", () => {
+  const isError = (result: unknown) => toolResultError({ data: result }) !== undefined;
+
+  it("holds back the root files and reports an error when a lock blocks an entry file", async () => {
+    db.rows = [{ _id: "src", name: "src", type: "folder", locked: true }];
+
+    const result = await scaffold();
+
+    const written = paths().map((file) => file.path);
+    // package.json boots the preview and marks it ready, so it must not land without src/.
+    expect(written).not.toContain("package.json");
+    expect(written).not.toContain("vite.config.ts");
+    expect(written).toEqual([]);
+    expect(isError(result)).toBe(true);
+    expect(result).toMatch(/^Error: Incomplete scaffold/);
+    expect(result).toMatch(/Not written, locked by the user: .*src\/main\.tsx/);
+    expect(result).not.toContain("Scaffolded");
+  });
+
+  it("names writes refused by a lock taken after the snapshot as locked, not kept", async () => {
+    db.rows = [{ _id: "src", name: "src", type: "folder", locked: true }];
+    vi.mocked(convex.query).mockResolvedValueOnce([{ _id: "src", name: "src", type: "folder" }] as never);
+
+    const result = await scaffold();
+
+    expect(paths().map((file) => file.path)).not.toContain("package.json");
+    expect(result).not.toContain("Kept existing");
+    expect(isError(result)).toBe(true);
+    expect(result).toMatch(/Not written, locked by the user: .*src\/main\.tsx/);
+    expect(result).not.toMatch(/Created: .*src\/main\.tsx/);
+  });
+
+  it("still succeeds when only existing files are locked", async () => {
+    db.rows = [
+      { _id: "src", name: "src", type: "folder" },
+      { _id: "app", name: "App.tsx", type: "file", parentId: "src", content: "mine", locked: true },
+    ];
+
+    const result = await scaffold();
+
+    expect(isError(result)).toBe(false);
+    expect(paths().map((file) => file.path)).toContain("package.json");
+    expect(result).toContain("Not written, locked by the user: src/App.tsx.");
   });
 });
