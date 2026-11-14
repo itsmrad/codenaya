@@ -121,6 +121,11 @@ export function resolveModelPricing(modelId: string): ModelPricing | undefined {
       return MODEL_LIST_PRICES[key];
     }
   }
+  for (const [key, pricing] of Object.entries(MODEL_LIST_PRICES)) {
+    if (key.endsWith(`/${bare}`) || key.endsWith(`/${dotVersion}`)) {
+      return pricing;
+    }
+  }
   return undefined;
 }
 
