@@ -202,15 +202,21 @@ const installRunning = async (sandbox: Sandbox, deadline: number) =>
 
 /**
  * Polls until no install is running: true once none is, false if one still is
- * after INSTALL_WAIT_MS or near the step deadline.
+ * after INSTALL_WAIT_MS or near the step deadline. Each poll is bounded by the
+ * wait too; one that times out at its end throws, which also means a cold build.
  */
 const installFinished = async (sandbox: Sandbox, deadline: number) => {
   const waitUntil = Math.min(Date.now() + INSTALL_WAIT_MS, deadline);
-  while (await installRunning(sandbox, deadline)) {
-    if (waitUntil - Date.now() < INSTALL_POLL_MS) return false;
-    await new Promise((resolve) => setTimeout(resolve, INSTALL_POLL_MS));
+  try {
+    while (await installRunning(sandbox, waitUntil)) {
+      if (waitUntil - Date.now() < INSTALL_POLL_MS) return false;
+      await new Promise((resolve) => setTimeout(resolve, INSTALL_POLL_MS));
+    }
+    return true;
+  } catch (error) {
+    if (error instanceof OutOfTime) return false;
+    throw error;
   }
-  return true;
 };
 
 /**

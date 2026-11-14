@@ -47,7 +47,7 @@ const sandboxWith = (respond: (command: string) => Answer | undefined, processes
         if (result.exitCode !== 0) throw new CommandExitError(result);
         return result;
       }),
-      list: vi.fn<() => Promise<Proc[]>>(async () => processes),
+      list: vi.fn<(opts?: { requestTimeoutMs?: number }) => Promise<Proc[]>>(async () => processes),
     },
     kill: vi.fn(async () => {}),
 });
@@ -506,8 +506,8 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
 
     expectCold(await result, warm);
     expect(commandsOf(warm).filter((run) => !run.startsWith("rm -rf"))).toEqual([]);
-    // Polled every 2.5 s for up to 60 s.
-    expect(warm.commands.list).toHaveBeenCalledTimes(25);
+    // Polled every 2.5 s, the last one before 60 s.
+    expect(warm.commands.list).toHaveBeenCalledTimes(24);
   });
 
   it("waits for the preview's install to finish, then builds warm without a new sandbox", async () => {
@@ -524,6 +524,35 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expect((await result).split("\n")[0]).toBe(BUILD_VERIFIED);
     expect(commandsOf(warm).some((run) => run.startsWith("npx tsc"))).toBe(true);
     expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("never waits past 60 s for an install, even when the process list answers slowly", async () => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    listed({});
+    const warm = warmSandbox();
+    // Each poll answers after 9 s, or times out first like the e2b client.
+    warm.commands.list.mockImplementation(
+      (opts) =>
+        new Promise((resolve, reject) => {
+          const timeoutMs = opts?.requestTimeoutMs ?? Infinity;
+          if (timeoutMs < 9_000) setTimeout(() => reject(new TimeoutError("Request timed out")), timeoutMs);
+          else setTimeout(() => resolve([DEV_SERVER, installing("npm install")]), 9_000);
+        }),
+    );
+    const cold = fakeSandbox();
+    let coldAt = 0;
+    e2b.create.mockImplementation(async () => {
+      coldAt = Date.now();
+      return cold;
+    });
+
+    const result = warmCheck();
+    await vi.runAllTimersAsync();
+
+    expectCold(await result, warm);
+    expect(coldAt - start).toBeLessThanOrEqual(60_000);
+    expect(commandsOf(warm).some((run) => run.startsWith("mkdir"))).toBe(false);
   });
 
   it("stops waiting for an install at the step deadline", async () => {
