@@ -1,8 +1,9 @@
 # 0013. Agent swarm: an orchestrator run that delegates to parallel workers
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-11-14
-- Related: ADR 0002 (agent runtime), ADR 0011 (credit metering), RELIABILITY PR-A (build gate) and PR-B (`verifyAndFix`)
+- Related: ADR 0002 (agent runtime), ADR 0011 (credit metering), #503 (this ADR, e2e stub),
+  #504 (`agentTasks` data layer), RELIABILITY PR-A (build gate) and PR-B (`verifyAndFix`)
 
 ## Context
 
@@ -43,8 +44,8 @@ Constraints from the code:
 - **Path ownership.** Each task owns disjoint paths under `src/` (no path equals or prefixes
   another's). Shared files (package.json, lockfile, index.html, vite/ts/tailwind configs,
   components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts) are reserved
-  for the orchestrator. Worker write tools are wrapped by `guardOwnedPaths`; reads are
-  unrestricted. Deps or shared edits a worker needs go under `NEEDS:` in its report.
+  for the orchestrator. Every worker write tool, including `deleteFiles`, is wrapped by
+  `guardOwnedPaths`; workers get no rename, move or id-based tools. Reads are unrestricted. Deps or shared edits a worker needs go under `NEEDS:` in its report.
 - **Data.** A new `agentTasks` table holds each task's status, owned paths, model and live
   steps. Metering writes one `creditLedger` row per (message, task) with the task's model
   (`agentTaskId`); the parent row keeps `agentTaskId` undefined, so old rows are unchanged.
@@ -52,14 +53,21 @@ Constraints from the code:
   settle, the orchestrator continues in the same network as the integrator and ends through
   `checkBuild` and the build-check gate. There is no second verify/fix loop and no per-worker
   build: a partial tree fails static checks for sibling files.
-- **Caps** (constants in `src/features/conversations/swarm.ts`): 2-4 tasks, one
-  `delegateTasks` call per run, 4 concurrent workers per owner, `WORKER_MAX_STEPS=20`,
-  `MAX_WORKER_USD=0.50` at catalog price (BYOK is unpriced, so only the step cap applies),
-  a 12-minute `step.invoke` timeout, and the existing `MAX_AGENT_STEPS=40` for the
-  orchestrator plus integration. Workers start no sandboxes.
+- **Caps.** `MAX_SWARM_TASKS=4` lives in `convex/swarm.ts` (#504), because Convex enforces it
+  too; the worker caps live in `src/features/conversations/swarm.ts`. 2-4 tasks, one
+  `delegateTasks` call per run, `WORKER_MAX_STEPS=20`, `MAX_WORKER_USD=0.50` at catalog price
+  (BYOK is unpriced, so only the step cap applies), and a 12-minute `step.invoke` timeout.
+  Worker concurrency per owner is 8, that is 2 runs per owner × 4 tasks. The timeout counts
+  queue time, so a second concurrent swarm's workers must never queue behind the first's.
+  The orchestrator plus integration share the existing `MAX_AGENT_STEPS=40`, to be tuned after
+  evals. Workers start no sandboxes in v1.
 - **Liveness.** Each worker turn upserts the parent's `turn-heartbeat` step, so the stalled
   and lost-run timers and the reaper work unchanged. Running tasks under a cancelled or
   finished parent show as cancelled; no extra row writes.
+- **UI.** A swarm message's run block shows an agent board: the orchestrator (the parent run)
+  plus one row per `agentTasks` row from `listForMessage`, each with its role, model, task,
+  status and elapsed time, the files it touched (from its steps) and an expandable log. The
+  composer toggles Build / Plan / Swarm.
 - **e2e.** `e2e/stub-provider.ts` tells roles apart with `stubRole`: a worker's system prompt
   contains `SWARM_WORKER_MARKER` (`"[swarm-worker]"`, which `SWARM_WORKER_NOTE` must include),
   and the orchestrator is offered `delegateTasks`. Tool-call ids are random so concurrent
@@ -80,11 +88,15 @@ Constraints from the code:
 ## Consequences
 
 - A large first build can run 2-4 writers at once on one preview and one integration build.
-- Worker cost is bounded (≈$1 worst case per swarm above a single run, ≈$0.3 typical).
+- Worker cost is bounded: at most ≈$2 per swarm above a single run on platform models
+  (4 × `MAX_WORKER_USD`), ≈$0.3 typical. BYOK workers are bounded only by 4 × 20 steps.
 - The orchestrator absorbs failures, so a weak plan costs integrator turns, not a crash.
 - Workers can't see each other's work until it lands in the tree; contracts must be in the
   foundation the orchestrator writes first.
-- Follow-up S6: an optional per-worker self-check using RELIABILITY PR-B `verifyAndFix`.
+- Follow-up S6: an optional per-worker self-check in its own sandbox, started from a snapshot
+  of a foundation sandbox, using RELIABILITY PR-B `verifyAndFix`. It is behind
+  `SWARM_WORKER_SANDBOXES` (off by default), capped at 2 worker sandboxes per swarm
+  (one constant, env-overridable, until the E2B plan is confirmed), and draws on a shared
+  sandbox budget where previews always win.
   Filtered per-worker results can only be "scoped-ok" (the checks ignore sibling files);
   the integration verify is always unfiltered and stays the only "verified" signal.
-- Revisit multi-sandbox only if evals show the single integration build is the bottleneck.
