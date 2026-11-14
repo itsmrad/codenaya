@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { BUILD_CHECK_NUDGE, createBuildCheckGate, hasUncheckedWrites } from "./build-check-gate";
+import {
+  BUILD_CHECK_NUDGE,
+  BUILD_FAILED_NOTE,
+  BUILD_NOT_BUILT_NOTE,
+  BUILD_REPAIR_NUDGE,
+  BUILD_RESERVE_NUDGE,
+  BUILD_UNVERIFIED_NOTE,
+  createBuildCheckGate,
+  hasUncheckedWrites,
+  MAX_BUILD_CHECKS,
+  unverifiedBuildNote,
+} from "./build-check-gate";
+import { OUTPUT_LIMIT_ERROR } from "./lib/output-limit";
 
 const call = (name: string, data = "ok") => ({ tool: { name }, content: { data } });
 const turn = (...toolCalls: ReturnType<typeof call>[]) => ({ toolCalls });
@@ -45,6 +57,14 @@ describe("hasUncheckedWrites", () => {
     expect(hasUncheckedWrites([turn(call("updateFile")), turn(unfinished)])).toBe(false);
   });
 
+  it("is true for a check that failed again with no write since", () => {
+    expect(hasUncheckedWrites([turn(call("updateFile")), turn(call("checkBuild", "Build verified")), turn(failedCheck())])).toBe(true);
+  });
+
+  it("ignores a cut-off write that was refused", () => {
+    expect(hasUncheckedWrites([turn(call("writeFiles", OUTPUT_LIMIT_ERROR)), turn()])).toBe(false);
+  });
+
   it("is false once the check and both fix attempts are spent", () => {
     expect(
       hasUncheckedWrites([
@@ -56,18 +76,72 @@ describe("hasUncheckedWrites", () => {
   });
 });
 
+describe("unverifiedBuildNote", () => {
+  it("is undefined when nothing was written or the last check passed", () => {
+    expect(unverifiedBuildNote([turn(call("listFiles")), turn(failedCheck())])).toBeUndefined();
+    expect(unverifiedBuildNote([turn(call("createFiles"), failedCheck()), turn(call("checkBuild", "Build verified"))])).toBeUndefined();
+  });
+
+  it("names a build that still fails", () => {
+    expect(unverifiedBuildNote([turn(call("createFiles")), turn(failedCheck())])).toBe(BUILD_FAILED_NOTE);
+  });
+
+  it("names changes whose check passed without building them", () => {
+    const writes = turn(call("createFiles"));
+    const staticOnly = call("checkBuild", "Static checks passed\nNo build sandbox is configured, so the type check and build did not run.");
+    const noSandbox = call("checkBuild", "Static checks passed\nThe build sandbox could not start, so the type check and build did not run.");
+    const notVite = call("checkBuild", "Build not checked\nStatic checks passed. checkBuild only builds Vite projects, so this one was not built.");
+    const noResult = { tool: { name: "checkBuild" }, content: undefined };
+    for (const check of [staticOnly, noSandbox, notVite, noResult]) {
+      expect(unverifiedBuildNote([writes, { toolCalls: [check] }])).toBe(BUILD_NOT_BUILT_NOTE);
+      // Nothing to fix: the gate does not route back for another check.
+      expect(hasUncheckedWrites([writes, { toolCalls: [check] }, turn()])).toBe(false);
+    }
+  });
+
+  it("names changes that were never checked, or whose check could not run", () => {
+    const unfinished = call("checkBuild", "Error: The build check could not finish (Command timed out).");
+    expect(unverifiedBuildNote([turn(call("createFiles"))])).toBe(BUILD_UNVERIFIED_NOTE);
+    expect(unverifiedBuildNote([turn(call("checkBuild", "Build verified")), turn(call("editFile"))])).toBe(BUILD_UNVERIFIED_NOTE);
+    expect(unverifiedBuildNote([turn(call("createFiles")), turn(unfinished)])).toBe(BUILD_UNVERIFIED_NOTE);
+  });
+});
+
 describe("createBuildCheckGate", () => {
-  it("routes back once, with the note for that turn only", () => {
+  it("routes back with the note for that turn only", () => {
     const gate = createBuildCheckGate();
     const results = [turn(call("createFiles")), turn()];
 
     expect(gate.takeNudge()).toBeUndefined();
     expect(gate.shouldContinue(results)).toBe(true);
+    // A check turn is not a repair.
+    expect(gate.repairs).toBe(0);
     expect(gate.takeNudge()).toBe(BUILD_CHECK_NUDGE);
     expect(gate.takeNudge()).toBeUndefined();
+  });
 
-    // The agent ignored the note and wrote again: the run still ends.
-    expect(gate.shouldContinue([...results, turn(call("updateFile")), turn()])).toBe(false);
+  it("asks for a fix after a failed check, and stops after MAX_BUILD_CHECKS forced turns", () => {
+    const gate = createBuildCheckGate();
+    // The agent answers every note with text and never checks again.
+    const results = [turn(call("createFiles"), failedCheck()), turn()];
+
+    for (let attempt = 1; attempt <= MAX_BUILD_CHECKS; attempt += 1) {
+      expect(gate.shouldContinue(results)).toBe(true);
+      expect(gate.takeNudge()).toBe(BUILD_REPAIR_NUDGE);
+      expect(gate.repairs).toBe(attempt);
+    }
+    expect(gate.shouldContinue(results)).toBe(false);
+    expect(gate.takeNudge()).toBeUndefined();
+  });
+
+  it("asks once for the check when the step budget runs low", () => {
+    const gate = createBuildCheckGate();
+    gate.reserve([turn(call("listFiles"))]);
+    expect(gate.takeNudge()).toBeUndefined();
+
+    gate.reserve([turn(call("createFiles"))]);
+    expect(gate.takeNudge()).toBe(BUILD_RESERVE_NUDGE);
+    gate.reserve([turn(call("createFiles")), turn(call("updateFile"))]);
     expect(gate.takeNudge()).toBeUndefined();
   });
 
