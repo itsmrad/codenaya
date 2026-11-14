@@ -1,6 +1,6 @@
 import { Chunk } from "@codemirror/merge";
 import { Text } from "@codemirror/state";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 
 import { runWrittenPaths } from "../src/features/conversations/agent-steps";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -310,6 +310,7 @@ export async function assertNoRunningAgent(
  */
 export const restore = mutation({
   args: { checkpointId: v.id("checkpoints") },
+  returns: v.id("checkpoints"),
   handler: async (ctx, args) => {
     const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
     await assertNoRunningAgent(ctx, checkpoint.projectId, "restoring");
@@ -326,17 +327,26 @@ export const restore = mutation({
 /**
  * Deletes a file or folder from the explorer. Snapshots the project first,
  * in the same transaction, and returns the snapshot's id so the delete can
- * be undone by restoring it (#259).
+ * be undone by restoring it (#259). Null when the project is too big to
+ * snapshot: the delete still happens, just without an undo.
  */
 export const deleteFileWithUndo = mutation({
   args: { id: v.id("files") },
+  returns: v.union(v.id("checkpoints"), v.null()),
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
     const { file } = await getOwnedFile(ctx, args.id, identity.subject);
-    const undoCheckpointId = await createCheckpoint(ctx, {
-      projectId: file.projectId,
-      label: `Before deleting ${file.name}`,
-    });
+    let undoCheckpointId: Id<"checkpoints"> | null = null;
+    try {
+      undoCheckpointId = await createCheckpoint(ctx, {
+        projectId: file.projectId,
+        label: `Before deleting ${file.name}`,
+      });
+    } catch (error) {
+      // Over MAX_CHECKPOINT_FILES; thrown before anything is written.
+      const tooBig = error instanceof ConvexError && error.data?.code === "LIMIT_EXCEEDED";
+      if (!tooBig) throw error;
+    }
     await deleteFileTree(ctx, file);
     await ctx.db.patch("projects", file.projectId, { updatedAt: Date.now() });
     return undoCheckpointId;

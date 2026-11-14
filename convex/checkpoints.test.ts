@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { MAX_CHECKPOINTS_PER_PROJECT, MAX_DIFF_CHARS, MAX_DIFF_FILES, lineDelta } from "./checkpoints";
+import { MAX_CHECKPOINT_FILES, MAX_CHECKPOINTS_PER_PROJECT, MAX_DIFF_CHARS, MAX_DIFF_FILES, lineDelta } from "./checkpoints";
 import { withContents } from "./fileContents";
 import { deleteProjectBatch } from "./projectCascade";
 import schema from "./schema";
@@ -587,8 +587,22 @@ describe("undo for restore and delete", () => {
       label: "Before deleting src",
     });
 
-    await alice.mutation(api.checkpoints.restore, { checkpointId: undoId });
+    await alice.mutation(api.checkpoints.restore, { checkpointId: undoId! });
     expect(await tree(t, projectId)).toEqual(before);
+  });
+
+  test("a project too big to snapshot still deletes, just without an undo", async () => {
+    const { t, alice } = setup();
+    const { projectId, index } = await seedProject(t);
+    await t.run(async (ctx) => {
+      for (let i = 0; i < MAX_CHECKPOINT_FILES; i++) {
+        await ctx.db.insert("files", { projectId, name: `f${i}.txt`, type: "file", updatedAt: 0 });
+      }
+    });
+
+    expect(await alice.mutation(api.checkpoints.deleteFileWithUndo, { id: index })).toBeNull();
+    expect(await t.run((ctx) => ctx.db.get("files", index))).toBeNull();
+    expect(await alice.query(api.checkpoints.list, { projectId })).toEqual([]);
   });
 
   test("only the owner can delete with undo", async () => {

@@ -22,8 +22,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { convexErrorMessage } from "@/lib/convex-error";
 
-import { type Checkpoint, useRestoreCheckpoint } from "../hooks/use-checkpoints";
+import { type Checkpoint, undoAction, useRestoreCheckpoint } from "../hooks/use-checkpoints";
 
 /** Confirms, then puts the project's files back as they were before a run. */
 export const RestoreCheckpointDialog = ({
@@ -41,14 +42,12 @@ export const RestoreCheckpointDialog = ({
     restore({ checkpointId: checkpoint._id }).then(
       (undoCheckpointId) =>
         toast.success("Files restored", {
-          action: {
-            label: "Undo",
-            onClick: () =>
-              restore({ checkpointId: undoCheckpointId }).then(
-                () => toast.success("Restore undone"),
-                () => toast.error("Couldn't undo the restore"),
-              ),
-          },
+          action: undoAction(() =>
+            restore({ checkpointId: undoCheckpointId }).then(
+              () => toast.success("Restore undone"),
+              (error) => toast.error(convexErrorMessage(error, "Couldn't undo the restore")),
+            ),
+          ),
         }),
       () => toast.error("Couldn't restore the files"),
     );

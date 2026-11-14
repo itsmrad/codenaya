@@ -16,7 +16,7 @@ import {
   isOptimisticFileId,
 } from "@/features/projects/hooks/use-files";
 import { useEditor } from "@/features/editor/hooks/use-editor";
-import { useRestoreCheckpoint } from "@/features/conversations/hooks/use-checkpoints";
+import { undoAction, useRestoreCheckpoint } from "@/features/conversations/hooks/use-checkpoints";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -131,16 +131,17 @@ export const Tree = ({
     setConfirmingDelete(false);
     if (item.type === "file") closeTab(item._id);
     deleteFile({ id: item._id }).then(
+      // Null when the project is too big to snapshot: no Undo then.
       (undoCheckpointId) =>
         toast.success(`Deleted ${item.name}`, {
-          action: {
-            label: "Undo",
-            onClick: () =>
-              restore({ checkpointId: undoCheckpointId }).then(
-                () => toast.success(`Restored ${item.name}`),
-                (error) => toast.error(convexErrorMessage(error, "Couldn't undo the delete")),
-              ),
-          },
+          action: undoCheckpointId
+            ? undoAction(() =>
+                restore({ checkpointId: undoCheckpointId }).then(
+                  () => toast.success(`Restored ${item.name}`),
+                  (error) => toast.error(convexErrorMessage(error, "Couldn't undo the delete")),
+                ),
+              )
+            : undefined,
         }),
       (error) => toast.error(convexErrorMessage(error, `Couldn't delete ${item.name}`)),
     );
