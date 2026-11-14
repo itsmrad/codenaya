@@ -56,7 +56,7 @@ describe("built-in skills", () => {
     expect(body).toContain("NEVER disable RLS");
     expect(body).toContain("enable row level security");
     expect(body).toContain("(select auth.uid()) = user_id");
-    expect(body).toMatch(/NEVER put the \*\*secret key\*\*.*service_role/s);
+    expect(body).toMatch(/NEVER put the \*\*secret key\*\*[\s\S]*service_role/);
     expect(body).not.toMatch(/VITE_\w*(SECRET|SERVICE)/);
     expect(body).not.toMatch(/disable row level security|using \(true\)\s*;/i);
   });
