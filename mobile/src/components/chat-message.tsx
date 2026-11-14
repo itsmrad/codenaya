@@ -187,9 +187,9 @@ export function AssistantMessage({
   const [startedProcessing] = useState(status === "processing");
   const shown = useTypewriter(content, startedProcessing && !reduceMotion);
   const isPlan = message.mode === "plan";
+  // The run's label already reads "Codenaya · model" (or the key's provider), as on the web.
   const meta = [
-    "Codenaya",
-    message.runModel?.label,
+    message.runModel?.label ?? "Codenaya",
     message.completedAt && formatDuration(message.completedAt - message._creationTime),
   ]
     .filter(Boolean)
