@@ -220,3 +220,73 @@ describe("system bounded reads and deletes", () => {
     expect(await t.run((ctx) => ctx.db.query("files").collect())).toEqual([]);
   });
 });
+
+// #288: a prompt-created project takes its first conversation title as its name.
+describe("updateConversationTitle names a generated project", () => {
+  beforeEach(() => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", INTERNAL_KEY);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const create = (t: T, generated: boolean) =>
+    t.mutation(api.system.createProjectWithConversation, {
+      internalKey: INTERNAL_KEY,
+      projectName: "democratic-mule-coral",
+      conversationTitle: "New conversation",
+      source: "dashboard",
+      ownerId: "user_alice",
+      ...(generated ? { nameSource: "generated" as const } : {}),
+    });
+  const title = (t: T, conversationId: Awaited<ReturnType<typeof create>>["conversationId"], text: string) =>
+    t.mutation(api.system.updateConversationTitle, { internalKey: INTERNAL_KEY, conversationId, title: text });
+  const project = (t: T, projectId: Awaited<ReturnType<typeof create>>["projectId"]) =>
+    t.run((ctx) => ctx.db.get("projects", projectId));
+
+  test("renames a generated name to the title, once", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId, conversationId } = await create(t, true);
+
+    await title(t, conversationId, '"Tip Calculator UI Design."');
+    expect(await project(t, projectId)).toMatchObject({ name: "Tip Calculator UI Design" });
+    expect((await project(t, projectId))?.nameSource).toBeUndefined();
+
+    // A later conversation in the same project never renames it again.
+    const second = await t.run((ctx) =>
+      ctx.db.insert("conversations", { projectId, title: "New conversation", updatedAt: Date.now() }),
+    );
+    await title(t, second, "Something Else");
+    expect(await project(t, projectId)).toMatchObject({ name: "Tip Calculator UI Design" });
+  });
+
+  test("keeps a name the user chose before the title arrived", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId, conversationId } = await create(t, true);
+    await t.withIdentity({ subject: "user_alice" }).mutation(api.projects.rename, { id: projectId, name: "My Tips" });
+
+    await title(t, conversationId, "Tip Calculator UI Design");
+    expect(await project(t, projectId)).toMatchObject({ name: "My Tips" });
+  });
+
+  test("never renames a project without a generated name", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId, conversationId } = await create(t, false);
+
+    await title(t, conversationId, "Tip Calculator UI Design");
+    expect(await project(t, projectId)).toMatchObject({ name: "democratic-mule-coral" });
+  });
+
+  test("clamps an over-long title, and keeps the name when nothing valid is left", async () => {
+    const t = convexTest(schema, modules);
+    const long = await create(t, true);
+    await title(t, long.conversationId, `${"word ".repeat(30)}end`);
+    const renamed = await project(t, long.projectId);
+    expect(renamed!.name.length).toBeLessThanOrEqual(100);
+    expect(renamed!.name.startsWith("word word")).toBe(true);
+
+    const empty = await create(t, true);
+    await title(t, empty.conversationId, '""');
+    expect(await project(t, empty.projectId)).toMatchObject({ name: "democratic-mule-coral" });
+  });
+});
