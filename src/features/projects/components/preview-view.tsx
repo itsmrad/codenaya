@@ -20,6 +20,7 @@ import {
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
+import { OpenOnPhonePopover } from "@/features/sandbox-preview/components/open-on-phone-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
 import { logsAfterClear } from "@/features/sandbox-preview/utils/cleared-logs";
 import { PreviewBuilding } from "@/features/sandbox-preview/components/preview-building";
@@ -389,6 +390,11 @@ export const PreviewView = ({
               </Button>
             )}
           </span>
+          <OpenOnPhonePopover
+            previewUrl={previewUrl}
+            status={status}
+            activeEngine={activeEngine}
+          />
           <Button
             size="icon"
             variant="ghost"
