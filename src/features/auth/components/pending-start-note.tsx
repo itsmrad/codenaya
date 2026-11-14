@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { SparklesIcon } from "lucide-react";
 
+import { SIGN_IN_URL } from "@/features/auth/constants";
 import { peekPendingPrompt } from "@/features/projects/utils/pending-prompt";
 import { peekPendingTemplate } from "@/features/templates/utils/pending-template";
 
@@ -29,7 +30,7 @@ const subscribe = () => () => {};
 export const PendingStartNote = () => {
   const prompt = useSyncExternalStore(subscribe, peekPendingPrompt, () => null);
   const template = useSyncExternalStore(subscribe, peekPendingTemplate, () => null);
-  const after = usePathname().startsWith("/sign-in") ? "right after you log in" : "right after sign-up";
+  const after = usePathname().startsWith(SIGN_IN_URL) ? "right after you log in" : "right after sign-up";
   if (!prompt && !template) return null;
 
   return (

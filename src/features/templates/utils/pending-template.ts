@@ -29,9 +29,9 @@ export const peekPendingTemplate = (): StarterTemplate | null => {
 /** Returns the saved template at most once: reading it also clears it. */
 export const takePendingTemplate = (): StarterTemplate | null => {
   try {
-    const templateId = localStorage.getItem(PENDING_TEMPLATE_KEY);
+    const template = peekPendingTemplate();
     localStorage.removeItem(PENDING_TEMPLATE_KEY);
-    return templateId ? (getStarterTemplate(templateId) ?? null) : null;
+    return template;
   } catch {
     return null;
   }
