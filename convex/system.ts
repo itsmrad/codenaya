@@ -1019,8 +1019,9 @@ export const updateUserConnectionCredential = mutation({
     ...reconnectArgs,
     ...sealedFields,
     // Stored from the same endpoint and grant the new credential came from.
-    serverUrl: v.string(),
-    scopes: v.array(v.string()),
+    // Optional so a web build from before these args keeps working mid-rollout.
+    serverUrl: v.optional(v.string()),
+    scopes: v.optional(v.array(v.string())),
     maskedPreview: v.string(),
     tokenExpiresAt: v.optional(v.number()),
     oauthClientId: v.optional(v.string()),
@@ -1038,8 +1039,8 @@ export const updateUserConnectionCredential = mutation({
       ciphertext: args.ciphertext,
       iv: args.iv,
       authTag: args.authTag,
-      serverUrl: args.serverUrl,
-      scopes: args.scopes,
+      ...(args.serverUrl !== undefined && { serverUrl: args.serverUrl }),
+      ...(args.scopes !== undefined && { scopes: args.scopes }),
       maskedPreview: args.maskedPreview,
       tokenExpiresAt: args.tokenExpiresAt,
       oauthClientId: args.oauthClientId,

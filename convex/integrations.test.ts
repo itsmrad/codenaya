@@ -45,6 +45,25 @@ describe("reconnect credentials in place", () => {
     expect(connection?.refreshLeaseId).toBeUndefined();
     expect(await alice.run((ctx) => ctx.db.get(link._id))).toEqual(link);
   });
+
+  test("an old-style call without serverUrl/scopes keeps the stored values", async () => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
+    const { alice, id } = await setup();
+    const connectionId = await alice.run(async (ctx) => {
+      const approval = (await ctx.db.get(id))!;
+      const link = (await ctx.db.get(approval.projectConnectionId))!;
+      await ctx.db.patch(link.userConnectionId, { status: "needs_reauth", scopes: ["read"] });
+      return link.userConnectionId;
+    });
+    await alice.mutation(api.system.updateUserConnectionCredential, {
+      internalKey: "test-key", userId: ALICE, connectionId,
+      providerId: "github", authMode: "api_key", maskedPreview: "new-key",
+      kekProvider: "local", kekKeyId: "k", wrappedDek: "new-dek", ciphertext: "new-ciphertext", iv: "i", authTag: "a",
+    });
+    expect(await alice.run((ctx) => ctx.db.get(connectionId))).toMatchObject({
+      status: "active", serverUrl: "https://example.com/mcp", scopes: ["read"], ciphertext: "new-ciphertext",
+    });
+  });
 });
 
 /** A pending approval of Alice's, with `overrides` applied. */
