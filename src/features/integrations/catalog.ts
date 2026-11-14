@@ -35,6 +35,8 @@
  * not become stale advice.
  */
 
+import { POSTHOG_DESTRUCTIVE_TOOLS } from "./posthog-destructive-tools";
+
 import type {
   ProviderDefinition,
   ProviderScopeCapabilities,
@@ -322,12 +324,7 @@ const CATALOG = {
         { header: "x-posthog-read-only", value: { kind: "flag", field: "readOnly", whenTrue: "true" } },
       ],
     },
-    destructiveTools: [
-      "exec", // CLI mode can dispatch writes as well as reads.
-      "action-create", "action-update", "action-delete",
-      "dashboard-create", "dashboard-update", "dashboard-delete",
-      "survey-create", "survey-update", "survey-delete",
-    ],
+    destructiveTools: POSTHOG_DESTRUCTIVE_TOOLS,
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -347,15 +344,33 @@ const CATALOG = {
     supportsReadOnly: false,
     scope: NO_URL_SCOPING,
     destructiveTools: [
-      "send-email", "send-batch-emails", "cancel-email", "update-email", "share-email",
-      "create-broadcast", "send-broadcast", "cancel-broadcast", "duplicate-broadcast",
-      "remove-broadcast", "compose-broadcast", "update-broadcast",
-      "send-new-inbox-email", "send-inbox-draft", "reply-to-inbox-thread-email",
-      "forward-inbox-thread-email",
-      "create-domain", "update-domain", "remove-domain", "verify-domain",
-      "create-domain-claim", "verify-domain-claim",
-      "create-template", "compose-template", "update-template", "remove-template",
-      "publish-template", "duplicate-template",
+      "add-contact-to-segment", "add-inbox-thread-labels", "add-suppression",
+      "batch-add-suppressions", "batch-remove-suppressions", "cancel-broadcast",
+      "cancel-email", "compose-broadcast", "compose-template",
+      "connect-to-editor", "create-api-key", "create-automation",
+      "create-broadcast", "create-contact", "create-contact-import",
+      "create-contact-property", "create-domain", "create-domain-claim",
+      "create-inbox", "create-inbox-draft", "create-inbox-label",
+      "create-segment", "create-template", "create-topic",
+      "create-webhook", "disconnect-from-editor", "duplicate-automation",
+      "duplicate-broadcast", "duplicate-template", "forward-inbox-thread-email",
+      "manage-events", "publish-template", "remove-api-key",
+      "remove-automation", "remove-broadcast", "remove-contact",
+      "remove-contact-from-segment", "remove-contact-property", "remove-domain",
+      "remove-inbox", "remove-inbox-draft", "remove-inbox-label",
+      "remove-inbox-thread", "remove-inbox-thread-label", "remove-segment",
+      "remove-suppression", "remove-template", "remove-topic",
+      "remove-webhook", "replay-webhook-event", "reply-to-inbox-thread-email",
+      "revoke-oauth-grant", "rotate-webhook-signing-secret", "send-batch-emails",
+      "send-broadcast", "send-email", "send-event",
+      "send-inbox-draft", "send-new-inbox-email", "set-inbox-thread-labels",
+      "share-email", "update-api-key", "update-automation",
+      "update-broadcast", "update-contact", "update-contact-property",
+      "update-contact-topics", "update-domain", "update-email",
+      "update-inbox", "update-inbox-agent", "update-inbox-draft",
+      "update-inbox-label", "update-inbox-thread", "update-segment",
+      "update-template", "update-topic", "update-webhook",
+      "verify-domain", "verify-domain-claim",
     ],
     apiKey: {
       header: "Authorization",
@@ -381,17 +396,23 @@ const CATALOG = {
       headers: [],
     },
     destructiveTools: [
-      "redis_create_database", "redis_create_branch", "redis_create_backup",
-      "redis_set_daily_backup", "redis_rename_database", "redis_set_eviction",
-      "redis_set_auto_upgrade", "redis_change_plan", "redis_set_prod_pack",
-      "redis_set_budget", "redis_update_read_regions", "redis_reset_credentials",
-      "redis_delete_database", "redis_run_command",
-      "qstash_publish_message", "qstash_flow_control_manage", "qstash_manage_schedule",
-      "workflow_manage_run", "dlq_manage", "qstash_set_plan", "qstash_set_prod_pack",
-      "qstash_set_budget", "qstash_reset_token",
-      "index_create", "index_set_plan", "index_reset_credentials", "index_update",
-      "index_rename_namespace", "index_delete", "index_delete_documents",
-      "index_reset", "index_delete_namespace", "vector_upsert", "search_upsert",
+      "blob_bucket", "blob_object", "blob_upload_url",
+      "box_apikey", "box_browser", "box_config",
+      "box_env", "box_exec", "box_git",
+      "box_manage", "box_preview", "box_runs",
+      "box_schedules", "box_snapshots", "dlq_manage",
+      "index_create", "index_delete", "index_delete_documents",
+      "index_delete_namespace", "index_rename_namespace", "index_reset",
+      "index_reset_credentials", "index_set_plan", "index_update",
+      "qstash_flow_control_manage", "qstash_manage_schedule", "qstash_publish_message",
+      "qstash_reset_token", "qstash_set_budget", "qstash_set_plan",
+      "qstash_set_prod_pack", "redis_change_plan", "redis_create_backup",
+      "redis_create_branch", "redis_create_database", "redis_delete_database",
+      "redis_rename_database", "redis_reset_credentials", "redis_run_command",
+      "redis_set_auto_upgrade", "redis_set_budget", "redis_set_daily_backup",
+      "redis_set_eviction", "redis_set_prod_pack", "redis_update_read_regions",
+      "search_upsert", "submit_feedback_to_upstash_team", "vector_upsert",
+      "workflow_manage_run",
     ],
     apiKey: {
       header: "Authorization",
@@ -399,7 +420,7 @@ const CATALOG = {
       hint: "Upstash developer API key in email:API_KEY format",
     },
     notes:
-      "Select features explicitly (redis, qstash_workflow, vector_search) to narrow the tools. Omitting features uses broader vendor defaults, including other product groups. No URL-level read-only enforcement: choose read-only at OAuth consent or use a read-only developer key. Redis commands, QStash publishing and plan changes can write data or incur spend.",
+      "Select features explicitly (redis, qstash_workflow, vector_search) to narrow the tools. An explicit selection excludes omitted groups; leaving features out enables all six vendor groups. No URL-level read-only enforcement: choose read-only at OAuth consent or use a read-only developer key. Redis commands, QStash publishing and plan changes can write data or incur spend.",
   },
 
   // Endpoint, auth and exact tool names: https://www.sanity.io/docs/ai/mcp-server
@@ -441,7 +462,8 @@ const CATALOG = {
     authModes: ["oauth"],
     trustedHostnames: ["mcp.pscale.dev"],
     trustedAuthorizationServerOrigins: ["https://api.planetscale.com"],
-    supportsReadOnly: true,
+    // The Insights-only path still permits separately authorized billing writes.
+    supportsReadOnly: false,
     scope: {
       queryParams: [],
       headers: [],
@@ -452,7 +474,7 @@ const CATALOG = {
     },
     destructiveTools: ["planetscale_execute_write_query", "planetscale_update_payment_method"],
     notes:
-      "Read-only selects the Insights-only endpoint, excluding both read and write query execution. Other permissions, including billing, remain controlled by OAuth consent and write approvals. No URL-level database scoping. Postgres IP restrictions must allow the MCP server's documented egress IPs.",
+      "The read-only selection uses the Insights-only endpoint, excluding both read and write query execution. This is not server-enforced read-only: billing writes remain separately authorized by OAuth consent and gated, and unannotated tools still require approval. No URL-level database scoping. Postgres IP restrictions must allow the MCP server's documented egress IPs.",
   },
 } as const satisfies Record<string, ProviderDefinition>;
 

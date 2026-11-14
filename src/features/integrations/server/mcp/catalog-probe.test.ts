@@ -38,7 +38,7 @@ import { PROVIDERS } from "../../catalog";
 import { getSecretSealer, resetSecretSealer, secretContext } from "../crypto";
 import { probeMcpServer } from "./probe";
 import { resolveMcpServers, type ProjectLinkRecord } from "./resolve-servers";
-import { requiresApproval } from "./discover-tools";
+import { discoverTools, requiresApproval } from "./discover-tools";
 
 interface Fixture {
   id: "posthog" | "resend" | "upstash" | "sanity" | "planetscale";
@@ -79,7 +79,7 @@ const CASES: Fixture[] = [
   {
     id: "planetscale", url: "https://mcp.pscale.dev/mcp/planetscale", scope: {},
     scopedUrl: "https://mcp.pscale.dev/mcp/planetscale-insights-only",
-    scopeHeaders: {}, enforced: true,
+    scopeHeaders: {}, enforced: false,
     read: "planetscale_get_insights", write: "planetscale_execute_write_query",
   },
 ];
@@ -87,6 +87,8 @@ const CASES: Fixture[] = [
 const SECRET = "account@example.test:b2-test-credential-never-return";
 const servers: Server[] = [];
 let failure: "initialize" | "list" | undefined;
+let listedNames: readonly string[] | undefined;
+let unannotatedNames: readonly string[] = [];
 
 function startServer(fixture: Fixture) {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -96,10 +98,11 @@ function startServer(fixture: Fixture) {
   const reject = () => { throw new McpError(ErrorCode.InternalError, `HTTP 401 ${SECRET}`); };
   if (failure === "initialize") server.setRequestHandler(InitializeRequestSchema, reject);
   server.setRequestHandler(ListToolsRequestSchema, failure === "list" ? reject : async () => ({
-    tools: [{
-      name: fixture.read, description: "Mock vendor read",
-      inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true },
-    }],
+    tools: (listedNames ?? [fixture.read]).map((name) => ({
+      name, description: "Mock vendor tool",
+      inputSchema: { type: "object" as const, properties: {} },
+      annotations: unannotatedNames.includes(name) ? undefined : { readOnlyHint: true },
+    })),
   }));
   servers.push(server);
   void server.connect(serverSide);
@@ -116,6 +119,8 @@ beforeEach(() => {
   mocks.safeUrl.mockImplementation(async (url: string) => ({ ok: true, url: new URL(url) }));
   mocks.mutation.mockResolvedValue({ connectionId: "conn" });
   failure = undefined;
+  listedNames = undefined;
+  unannotatedNames = [];
 });
 
 afterEach(async () => {
@@ -162,6 +167,9 @@ describe.each(CASES)("$id SDK handshake and tools/list (no vendor network)", (fi
     // The explicit write list wins even if the provider claims a write is a read.
     expect(requiresApproval(runtime, { name: fixture.write, annotations: { readOnlyHint: true } })).toBe(true);
     expect(requiresApproval({ ...runtime, readOnlyEnforced: false }, { name: "unlisted_tool" })).toBe(true);
+    if (fixture.id === "planetscale") {
+      expect(requiresApproval(runtime, { name: "unlisted_billing_tool" })).toBe(true);
+    }
     const scopedProbe = await probeMcpServer({ url: runtime.url, headers: runtime.headers, trustedHosts: runtime.trustedHostnames });
     expect(scopedProbe.ok).toBe(true);
     expect(mocks.transport.mock.calls[1][0].toString()).toBe(fixture.scopedUrl);
@@ -234,4 +242,42 @@ it("keeps PlanetScale OAuth-only until service-token placement is verified", asy
   expect(response.status).toBe(400);
   expect(mocks.transport).not.toHaveBeenCalled();
   expect(mocks.mutation).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["posthog", ["delete-feature-flag", "create-feature-flag", "posthog-connection-forward", "exec"]],
+  ["resend", ["create-api-key", "remove-api-key", "send-event", "revoke-oauth-grant", "rotate-webhook-signing-secret"]],
+  ["upstash", ["box_exec", "blob_bucket", "box_apikey", "blob_upload_url", "box_git"]],
+  ["planetscale", ["planetscale_update_payment_method", "unlisted_billing_tool"]],
+] as const)("gates %s writes with misleading hints over SDK discovery", async (id, names) => {
+  const fixture = CASES.find((item) => item.id === id)!;
+  const provider = PROVIDERS[id];
+  const sealed = await getSecretSealer().seal(
+    JSON.stringify({ type: "oauth", accessToken: SECRET }),
+    secretContext("userConnections", "ref", "credential"),
+  );
+  const { servers: resolved } = await resolveMcpServers([{
+    connection: { _id: "conn", providerId: id, label: id, authMode: "oauth", serverUrl: fixture.url, credentialRef: "ref", ...sealed },
+    link: { _id: "link", readOnly: true, writeApproved: false, providerScope: {} },
+  }]);
+  const [runtime] = resolved;
+  mocks.createTransport = () => startServer(fixture);
+  listedNames = names;
+  unannotatedNames = ["unlisted_billing_tool"];
+  const discovered = await discoverTools(runtime);
+  expect(discovered.ok).toBe(true);
+  if (!discovered.ok) throw new Error(discovered.error);
+  for (const tool of discovered.tools) {
+    expect(tool.destructive).toBe(true);
+  }
+  expect(discovered.tools).toHaveLength(names.length);
+  for (const name of provider.destructiveTools) {
+    expect(requiresApproval(runtime, { name, annotations: { readOnlyHint: true, destructiveHint: false } })).toBe(true);
+  }
+  if (id === "planetscale") {
+    expect(runtime.readOnlyEnforced).toBe(false);
+    expect(runtime.url).toBe(fixture.scopedUrl);
+    expect(requiresApproval(runtime, { name: "unlisted_billing_tool" })).toBe(true);
+  }
+  expect(fetch).not.toHaveBeenCalled();
 });

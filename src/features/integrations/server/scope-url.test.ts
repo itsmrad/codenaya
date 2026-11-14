@@ -213,9 +213,13 @@ describe("buildScopedMcpUrl — backend services", () => {
     expect(urlFor("upstash", { readOnly: true, features: [] })).toBe(
       "https://mcp.upstash.com/mcp",
     );
+    expect(urlFor("upstash", { readOnly: true, features: ["redis"] })).toBe(
+      "https://mcp.upstash.com/mcp?features=redis",
+    );
   });
 
   it("uses PlanetScale's Insights-only endpoint without pretending to scope a database", () => {
+    expect(provider("planetscale").supportsReadOnly).toBe(false);
     expect(buildScopedMcpUrl(provider("planetscale"), {
       readOnly: true, projectRef: "ignored", features: ["ignored"],
     })).toEqual({
