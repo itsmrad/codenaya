@@ -1,6 +1,6 @@
 import type { FunctionReturnType } from "convex/server";
 
-import { buildPathIndex, normalizePath } from "@/features/conversations/agent-steps";
+import { buildPathIndex, lockedPathMessage, normalizePath } from "@/features/conversations/agent-steps";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
@@ -79,6 +79,21 @@ export const findProjectFile = async (
 };
 
 /**
+ * The error for writing `path` when the user locked it or a folder above it,
+ * or with `inside` (a rename or delete) anything under it (#307). Checked
+ * before writing so a refusal is a plain tool result; the Convex write
+ * mutations enforce the same rule.
+ */
+export const lockedPathError = (index: ProjectIndex, path: string, inside = false) => {
+  for (const [lockedPath, entry] of index.byPath) {
+    if (!entry.file?.locked && !entry.folder?.locked) continue;
+    if (lockedPath === path || path.startsWith(`${lockedPath}/`)) return lockedPathMessage(path);
+    if (inside && lockedPath.startsWith(`${path}/`)) return lockedPathMessage(lockedPath);
+  }
+  return undefined;
+};
+
+/**
  * Returns the id of the folder at `path`, creating it and any missing parents.
  * `folders` maps folder paths to ids and gains the folders it creates.
  */
@@ -123,6 +138,15 @@ export const listProjectPaths = (files: ProjectFile[]) => {
     .sort();
 };
 
+// #307: named up front so the model plans around locked paths.
+const lockedLine = (files: ProjectFile[]) => {
+  const pathOf = buildPathIndex(files);
+  const locked = files.flatMap((file) => (file.locked && pathOf(file._id)) || []).sort();
+  return locked.length > 0
+    ? [`Locked by the user, so writes to these and anything inside them are refused: ${locked.join(", ")}`]
+    : [];
+};
+
 /**
  * The system prompt's list of project files. Deterministic for the same files,
  * whatever order they come in. Past the cap, shallow paths win so the top-level
@@ -147,5 +171,6 @@ export const buildProjectTreePromptSection = (files: ProjectFile[]) => {
     'Every file and folder at the start of this run (folders end in "/"). Address files by these paths.',
     ...shown,
     ...(hidden > 0 ? [`+${hidden} more (call listFiles to see them)`] : []),
+    ...lockedLine(files),
   ].join("\n");
 };

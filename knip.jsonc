@@ -2,7 +2,9 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "ignore": [
     // Third-party agent skills, run by the agent tooling, not by the app.
-    ".agents/**"
+    ".agents/**",
+    // The Expo app, a separate package with its own dependencies.
+    "mobile/**"
   ],
   // Installed outside npm (see README), run by the package.json scripts.
   "ignoreBinaries": ["infisical"],

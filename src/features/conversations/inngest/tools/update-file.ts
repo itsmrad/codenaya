@@ -6,7 +6,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { checkPackageVersions } from "./package-versions";
-import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
+import { findProjectFile, getProjectFiles, indexProjectFiles, lockedPathError } from "./paths";
 import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { syntaxErrorNote } from "./syntax-error";
 
@@ -51,6 +51,8 @@ export const createUpdateFileTool = ({
           if (file.type === "folder") {
             return `Error: "${path}" is a folder, not a file. You can only update file contents.`;
           }
+          const locked = lockedPathError(index, path);
+          if (locked) return `Error: ${locked}`;
 
           const { content: checkedContent, note: versionNote } = checkPackageVersions(file.name, parsed.data.content);
           const rewriteIcons = await getIconRewriter(internalKey, projectId, [{ path, content: checkedContent }]);
