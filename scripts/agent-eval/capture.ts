@@ -38,7 +38,7 @@ export async function capture(page: Page, trail: Trail) {
             while ((newline = buffer.indexOf("\n")) >= 0) {
               const line = buffer.slice(0, newline);
               buffer = buffer.slice(newline + 1);
-              if (line.trim()) await (window as Window & { evalSandboxEvent: (event: unknown) => Promise<void> }).evalSandboxEvent(JSON.parse(line));
+              if (line.trim()) await (window as unknown as { evalSandboxEvent: (event: unknown) => Promise<void> }).evalSandboxEvent(JSON.parse(line));
             }
           }
         })().catch(() => { /* Navigation aborts the stream; server errors are NDJSON events. */ });

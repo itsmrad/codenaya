@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test";
 import { userConvexClient } from "../../e2e/convex-client";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { buildFlatFileList } from "../../src/features/sandbox-preview/utils/file-tree";
 import { capture, probePreview, sanitize, screenshot } from "./capture";
 import { readUsage, recordUsage, totalUsd } from "./cost";
 import type { Trail } from "./types";
@@ -99,5 +100,5 @@ export async function drive(page: Page, user: ConvexHttpClient, options: Options
 export async function finalFiles(projectId: string) {
   const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
   const files = await client.query(api.system.getProjectFilesWithUrls, { internalKey: process.env.CODENAYA_CONVEX_INTERNAL_KEY!, projectId: projectId as Id<"projects"> });
-  return files.filter((f) => f.type === "file" && typeof f.content === "string").map((f) => ({ path: f.path, content: f.content! }));
+  return buildFlatFileList(files);
 }
