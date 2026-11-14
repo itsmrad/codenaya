@@ -24,7 +24,14 @@ vi.mock("@/lib/convex-client", async () => {
   return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
 });
 
-import { BUILD_CHECK_NUDGE, BUILD_FAILED_NOTE, BUILD_NOT_BUILT_NOTE, BUILD_REPAIR_NUDGE } from "./build-check-gate";
+import {
+  BUILD_CHECK_NUDGE,
+  BUILD_FAILED_NOTE,
+  BUILD_NOT_BUILT_NOTE,
+  BUILD_REPAIR_NUDGE,
+  BUILD_RETRY_NUDGE,
+  BUILD_UNVERIFIED_NOTE,
+} from "./build-check-gate";
 import { drive, text, toolCall } from "./process-message.driver";
 
 let projectFiles: Array<{ _id: string; name: string; type: "file"; content: string }>;
@@ -170,6 +177,42 @@ describe("processMessage build-check gate", () => {
     expect(update).toMatchObject({ content: summary });
     expect(update).not.toHaveProperty("outcome");
     expect(mutationArgs("projects:completeFirstBuild")).toHaveLength(1);
+  });
+
+  it.each([
+    ["finishes verified when the retry builds", false],
+    ["ends unverified, with no third check, when the retry cannot finish either", true],
+  ])("retries a check that could not finish once: %s", async (_, retryTimesOut) => {
+    vi.stubEnv("E2B_API_KEY", "e2b_key");
+    projectFiles = VITE_FILES.map((file) => ({ ...file }));
+    // The install times out, as when the preview is still installing new packages.
+    const timeout = new Error("deadline_exceeded");
+    const run = vi.fn().mockRejectedValueOnce(timeout);
+    if (retryTimesOut) run.mockRejectedValueOnce(timeout);
+    run.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
+    mocks.createSandbox.mockResolvedValue(fakeSandbox(run));
+    const summary = "**What was built:** a script.";
+    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
+      { data: writeMain("console.log(1);\n") },
+      { data: toolCall("checkBuild") },
+      { data: text("**Notes:** The build was not verified.") },
+      { data: toolCall("checkBuild") },
+      // Repeated by the driver if the gate asked for more.
+      { data: text(summary) },
+    ]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    const requests = codingRequests(outcome.inferenceBodies);
+    expect(requests).toHaveLength(5);
+    expect(requests[3].messages.at(-1)).toEqual({ role: "user", content: BUILD_RETRY_NUDGE });
+    expect(run).toHaveBeenCalledTimes(retryTimesOut ? 2 : 3);
+    const update = mutationArgs("system:updateMessageContent").at(-1);
+    if (retryTimesOut) {
+      expect(update).toMatchObject({ content: `${summary}\n\n${BUILD_UNVERIFIED_NOTE}`, outcome: "error" });
+    } else {
+      expect(update).toMatchObject({ content: summary });
+      expect(update).not.toHaveProperty("outcome");
+    }
   });
 
   it("stops after the check budget and says the build still fails, as an error", async () => {

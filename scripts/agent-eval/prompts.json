@@ -1,0 +1,18 @@
+{
+  "booking": {
+    "prompt": "Build a booking page for a consultant named Alex Rivera, like a mini cal.com. Show a profile header, a list of 3 meeting types (15 min intro call, 30 min consultation, 60 min deep dive) with durations. Selecting one shows a month calendar where weekdays are available and weekends are disabled, then a list of time slots (9:00–17:00, every 30 min) for the picked day. Picking a slot opens a booking form (name, email, notes) with validation; on submit show a confirmation screen with the meeting details and an 'Add another booking' button. Keep bookings in localStorage so booked slots show as unavailable. Clean, modern, responsive design.",
+    "rubric": ["profile header", "3 meeting types w/ durations", "calendar with weekends disabled", "time slots", "form w/ validation", "confirmation screen", "responsive/polished", "no broken layout"]
+  },
+  "saas": {
+    "prompt": "Build a landing page for 'Flowboard', a team task-management SaaS. Include a sticky navbar, a hero with headline, subtext and two CTAs, a 6-item feature grid with icons, a pricing section with Free / Pro / Team tiers and a monthly/yearly toggle that changes prices (yearly = 20% off), an FAQ accordion, and a footer. Modern, polished, responsive.",
+    "rubric": ["sticky navbar", "hero w/ 2 CTAs", "6 features w/ icons", "3 tiers", "working monthly/yearly toggle", "FAQ accordion", "footer", "polish"]
+  },
+  "crm": {
+    "prompt": "Build a small CRM dashboard. Left sidebar navigation; a top bar with search. Main area: 4 stat cards (total contacts, open deals, won this month, revenue), a contacts table with name, company, status badge and last contact date, with search filtering and status filter, and an 'Add contact' dialog with a validated form. Data persists in localStorage and starts with 8 sample contacts. Clean, professional, responsive.",
+    "rubric": ["sidebar + top bar", "4 stat cards", "table w/ badges", "search works", "status filter", "add dialog w/ validation", "persistence", "polish"]
+  },
+  "followup": {
+    "prompt": "Add a dark mode toggle in the navbar that persists across reloads, and add a testimonials section with 3 quotes between features and pricing.",
+    "rubric": ["toggle works", "persisted", "testimonials in correct place", "turn-1 features intact"]
+  }
+}
