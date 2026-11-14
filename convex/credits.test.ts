@@ -195,6 +195,65 @@ describe("model spend limits (ADR 0012)", () => {
     expect((await spend(t, BOB)).user).toEqual({ periodStartsAt: month, spentUsd: 0.2 });
   });
 
+  test("meters each worker independently using its own model, preserving the parent row and replay safety", async () => {
+    const t = setup();
+    const workerModels = ["haiku-test", "sonnet-test"];
+    await t.run((ctx) => ctx.db.insert("platformCatalog", {
+      models: [LIMITED, ...workerModels].map((id) => catalogModel(id, { perUserUsd: 1, resets: "monthly" })),
+      defaultModelId: LIMITED, utilityModelId: LIMITED, updatedAt: 1, updatedBy: "admin",
+    }));
+    const messageId = await seedMessage(t);
+    // This existing parent row has no agentTaskId, just like pre-swarm ledger rows.
+    await record(t, messageId, { inputTokens: 100, outputTokens: 10, costUsd: 0.04 });
+    const projectId = await t.run(async (ctx) => (await ctx.db.get("messages", messageId))!.projectId);
+    const ids = await t.mutation(api.agentTasks.createTasks, {
+      internalKey: INTERNAL_KEY, messageId, projectId,
+      tasks: workerModels.map((modelId, i) => ({
+        taskId: `task-${i}`, role: "worker" as const, title: "Build", brief: "Build", ownedPaths: [],
+        modelId, model: `Worker ${i}`,
+      })),
+    });
+    const workerRecord = (i: number, costUsd: number) => t.mutation(api.credits.recordRunUsage, {
+      internalKey: INTERNAL_KEY, messageId, agentTaskId: ids[i], source: "platform",
+      inputTokens: costUsd * 1000, outputTokens: costUsd * 100, costUsd,
+    });
+    await workerRecord(0, 0.1);
+    await workerRecord(1, 0.3);
+    await workerRecord(0, 0.2);
+    await record(t, messageId, { inputTokens: 1000, outputTokens: 100, costUsd: 0.1 });
+    const rows = await t.run((ctx) => ctx.db.query("creditLedger").collect());
+    expect(rows).toHaveLength(3);
+    expect(rows.find((row) => row.agentTaskId === undefined)).toMatchObject({ model: "GPT-5.6 Luna", credits: 15, costUsd: 0.1 });
+    expect(rows.find((row) => row.agentTaskId === ids[0])).toMatchObject({ model: "Worker 0", credits: 30, costUsd: 0.2 });
+    expect(rows.find((row) => row.agentTaskId === ids[1])).toMatchObject({ model: "Worker 1", credits: 45, costUsd: 0.3 });
+    expect(await account(t)).toMatchObject({ periodUsed: 90, dayUsed: 90 });
+    const spends = await t.run((ctx) => ctx.db.query("modelSpend").collect());
+    for (const [modelId, spentUsd] of [[LIMITED, 0.1], [workerModels[0], 0.2], [workerModels[1], 0.3]] as const) {
+      expect(spends.filter((row) => row.modelId === modelId)).toMatchObject([
+        { userId: ALICE, spentUsd: expect.closeTo(spentUsd, 10) },
+        { userId: null, spentUsd: expect.closeTo(spentUsd, 10) },
+      ]);
+    }
+    vi.setSystemTime(OCT_29 + 1000);
+    await workerRecord(0, 0.2);
+    await workerRecord(0, 0.1);
+    await workerRecord(1, 0.3);
+    await record(t, messageId, { inputTokens: 1000, outputTokens: 100, costUsd: 0.1 });
+    expect(await t.run((ctx) => ctx.db.query("creditLedger").collect())).toEqual(rows);
+    expect(await t.run((ctx) => ctx.db.query("modelSpend").collect())).toEqual(spends);
+    expect(await account(t)).toMatchObject({ periodUsed: 90, dayUsed: 90 });
+
+    const otherMessage = await seedMessage(t, BOB);
+    await expect(t.mutation(api.credits.recordRunUsage, {
+      internalKey: INTERNAL_KEY, messageId: otherMessage, agentTaskId: ids[0], source: "platform",
+      inputTokens: 1, outputTokens: 1, costUsd: 1,
+    })).rejects.toMatchObject({ data: { code: "INVALID_ARGUMENT" } });
+    expect(await account(t, BOB)).toBeNull();
+    await t.run((ctx) => ctx.db.delete("agentTasks", ids[0]));
+    await expect(workerRecord(0, 0.5)).rejects.toMatchObject({ data: { code: "INVALID_ARGUMENT" } });
+    expect(await account(t)).toMatchObject({ periodUsed: 90 });
+  });
+
   test("starts a new period from zero", async () => {
     const t = setup();
     await seedCatalog(t);
