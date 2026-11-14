@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-type Row = { _id: string; name: string; type: "file" | "folder"; parentId?: string; content?: string };
+type Row = { _id: string; name: string; type: "file" | "folder"; parentId?: string; content?: string; locked?: boolean };
 
 const db = vi.hoisted(() => ({ rows: [] as Row[] }));
 
@@ -165,5 +165,24 @@ describe("scaffoldViteApp tool", () => {
     expect(boundary).toContain("return { hasError: true, error };");
     expect(boundary).toContain("if (!hasError) return this.props.children;");
     expect(tool.description).toContain("Don't add another <BrowserRouter>.");
+  });
+});
+
+describe("scaffoldViteApp and locks (#307)", () => {
+  it("names locked files as locked, not kept, and makes no folder inside a locked one", async () => {
+    db.rows = [
+      { _id: "src", name: "src", type: "folder", locked: true },
+      { _id: "pkg", name: "package.json", type: "file", content: "{}", locked: true },
+    ];
+
+    const result = await scaffold();
+
+    const written = paths().map((file) => file.path);
+    expect(written.filter((path) => path.startsWith("src/"))).toEqual([]);
+    expect(db.rows.filter((row) => row.type === "folder").map((row) => row.name)).toEqual(["src"]);
+    expect(db.rows.find((row) => row._id === "pkg")?.content).toBe("{}");
+    expect(result).not.toContain("Kept existing");
+    expect(result).toMatch(/Not written, locked by the user: .*package\.json.*src\/main\.tsx/);
+    expect(written).toContain("vite.config.ts");
   });
 });

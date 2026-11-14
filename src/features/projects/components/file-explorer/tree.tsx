@@ -39,10 +39,13 @@ export const Tree = ({
   item,
   level = 0,
   projectId,
+  lockedAbove = false,
 }: {
   item: Doc<"files">;
   level?: number;
   projectId: Id<"projects">;
+  /** A folder above this item is locked from AI edits (#307). */
+  lockedAbove?: boolean;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
@@ -188,6 +191,7 @@ export const Tree = ({
       <>
       <TreeItemWrapper
         item={item}
+        lockedAbove={lockedAbove}
         level={level}
         isActive={isActive}
         onClick={() => {
@@ -252,6 +256,7 @@ export const Tree = ({
                 key={subItem._id}
                 item={subItem}
                 level={level + 1}
+                lockedAbove={lockedAbove || item.locked === true}
                 projectId={projectId}
               />
             ))}
@@ -280,6 +285,7 @@ export const Tree = ({
                 key={subItem._id}
                 item={subItem}
                 level={level + 1}
+                lockedAbove={lockedAbove || item.locked === true}
                 projectId={projectId}
               />
             ))}
@@ -293,6 +299,7 @@ export const Tree = ({
     <>
       <TreeItemWrapper
         item={item}
+        lockedAbove={lockedAbove}
         level={level}
         onClick={() => setIsOpen((value) => !value)}
         onRename={() => setIsRenaming(true)}
@@ -311,6 +318,7 @@ export const Tree = ({
               key={subItem._id}
               item={subItem}
               level={level + 1}
+              lockedAbove={lockedAbove || item.locked === true}
               projectId={projectId}
             />
           ))}
