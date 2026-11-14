@@ -195,7 +195,7 @@ interface AssistantMessageProps {
   /** An agent run is in progress, so files can't be reverted. */
   revertDisabled?: boolean;
   /** A plan-mode reply (#120): sends the plan, as is or edited (#527), as the next build message. */
-  onBuildPlan?: (message: string) => void;
+  onBuildPlan?: (message: string) => Promise<boolean>;
   /** A stuck run (#306), on a model with a tier above it: resends on that one. */
   stuckRetry?: StuckRetry;
   /** A stuck run (#306): pre-fills a plan-mode message about the loop. */
@@ -218,6 +218,11 @@ export const AssistantMessage = ({
   const [copied, setCopied] = useState(false);
   // The plan's Markdown while the user edits it; null when not editing.
   const [planDraft, setPlanDraft] = useState<string | null>(null);
+  // Set from the first click until the build message lands, so a double
+  // click can't start two builds. Cleared only if the message wasn't sent.
+  const [buildingPlan, setBuildingPlan] = useState(false);
+  // Cancel hands focus back to "Edit plan", which mounts again.
+  const refocusEdit = useRef(false);
   const status = message.status ?? "completed";
   const steps = message.steps ?? [];
   const content = sanitizeAgentText(message.content, pathOf);
@@ -235,6 +240,11 @@ export const AssistantMessage = ({
   const isPlan = message.mode === "plan" && isPlanReply(content);
   const canBuildPlan = Boolean(isPlan && isLast && onBuildPlan);
   const editingPlan = canBuildPlan && planDraft !== null;
+  const buildPlan = async (build: string) => {
+    if (buildingPlan || !onBuildPlan) return;
+    setBuildingPlan(true);
+    if (!(await onBuildPlan(build))) setBuildingPlan(false);
+  };
   const reduceMotion = useReducedMotion();
   const shown = useTypewriter(content, startedProcessing && !reduceMotion);
 
@@ -303,8 +313,12 @@ export const AssistantMessage = ({
             <PlanEditor
               value={planDraft}
               onChange={setPlanDraft}
-              onBuild={(build) => onBuildPlan?.(build)}
-              onCancel={() => setPlanDraft(null)}
+              onBuild={buildPlan}
+              onCancel={() => {
+                refocusEdit.current = true;
+                setPlanDraft(null);
+              }}
+              building={buildingPlan}
             />
           ) : (
             <MessageResponse
@@ -330,7 +344,8 @@ export const AssistantMessage = ({
               <Button
                 type="button"
                 size="sm"
-                onClick={() => onBuildPlan?.(buildPlanMessage(message.content))}
+                disabled={buildingPlan}
+                onClick={() => buildPlan(buildPlanMessage(message.content))}
               >
                 <HammerIcon className="size-3.5" />
                 Build this plan
@@ -339,7 +354,14 @@ export const AssistantMessage = ({
                 type="button"
                 size="sm"
                 variant="outline"
+                disabled={buildingPlan}
                 onClick={() => setPlanDraft(message.content)}
+                ref={(button) => {
+                  if (button && refocusEdit.current) {
+                    refocusEdit.current = false;
+                    button.focus();
+                  }
+                }}
               >
                 <PencilIcon className="size-3.5" />
                 Edit plan

@@ -559,9 +559,9 @@ export const ConversationSidebar = ({
                   pathOf={pathOf}
                   onOpenFile={handleOpenFile}
                   onRetry={() => resend(messageIndex, message.mode)}
-                  onBuildPlan={(build) => {
+                  onBuildPlan={async (build) => {
                     setPlanMode(false);
-                    void sendMessage(build);
+                    return (await sendMessage(build)) === "sent";
                   }}
                   stuckRetry={message.stuck && stuckRetry(message, messageIndex)}
                   onDiagnose={() => {

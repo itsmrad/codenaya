@@ -191,8 +191,9 @@ test.describe.serial("plan mode", () => {
     const editor = page.getByRole("textbox", { name: "Edit plan" });
     await expect(editor).toHaveValue(PLAN);
     await editor.fill("thrown away");
-    await page.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("group", { name: "Plan editor" }).getByRole("button", { name: "Cancel" }).click();
     await expect(editor).toHaveCount(0);
+    await expect(edit).toBeFocused();
     await expect(page.locator(".task-list-item", { hasText: PLAN_ITEM }).last()).toBeVisible();
 
     // An empty plan cannot be built.

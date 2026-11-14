@@ -10,13 +10,15 @@ interface PlanEditorProps {
   onChange: (value: string) => void;
   onBuild: (message: string) => void;
   onCancel: () => void;
+  /** The build message is being sent. */
+  building?: boolean;
 }
 
 /** A plan reply's Markdown, editable before it is built (#527). */
-export const PlanEditor = ({ value, onChange, onBuild, onCancel }: PlanEditorProps) => {
+export const PlanEditor = ({ value, onChange, onBuild, onCancel, building = false }: PlanEditorProps) => {
   const message = editedPlanMessage(value);
   return (
-    <div className="flex flex-col gap-2">
+    <div role="group" aria-label="Plan editor" className="flex flex-col gap-2">
       <Textarea
         aria-label="Edit plan"
         value={value}
@@ -29,8 +31,8 @@ export const PlanEditor = ({ value, onChange, onBuild, onCancel }: PlanEditorPro
         <Button
           type="button"
           size="sm"
-          disabled={!message}
-          onClick={() => message && onBuild(message)}
+          disabled={!message || building}
+          onClick={() => message && !building && onBuild(message)}
         >
           <HammerIcon className="size-3.5" />
           Build edited plan

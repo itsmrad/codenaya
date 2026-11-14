@@ -26,8 +26,8 @@ const text = (node: ReactNode): string =>
 
 const PLAN = "### Steps\n- [ ] Add a footer";
 
-const editor = (value: string) => {
-  const props = { value, onChange: vi.fn(), onBuild: vi.fn(), onCancel: vi.fn() };
+const editor = (value: string, building = false) => {
+  const props = { value, onChange: vi.fn(), onBuild: vi.fn(), onCancel: vi.fn(), building };
   const button = (label: string) =>
     elements(PlanEditor(props)).find(
       (element) => element.type === Button && text(element.props.children).includes(label),
@@ -54,6 +54,13 @@ describe("PlanEditor", () => {
     const { props, button } = editor("an edit to throw away");
     button("Cancel").props.onClick!();
     expect(props.onCancel).toHaveBeenCalledOnce();
+    expect(props.onBuild).not.toHaveBeenCalled();
+  });
+
+  it("cannot build again while the build is being sent", () => {
+    const { props, button } = editor(PLAN, true);
+    expect(button("Build edited plan").props.disabled).toBe(true);
+    button("Build edited plan").props.onClick!();
     expect(props.onBuild).not.toHaveBeenCalled();
   });
 
