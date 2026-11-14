@@ -1,17 +1,8 @@
 diff --git a/node_modules/@inngest/agent-kit/dist/chunk-BSWKEFTT.js b/node_modules/@inngest/agent-kit/dist/chunk-BSWKEFTT.js
-index 50538d4..23d7828 100644
+index 9fe3f71..23d7828 100644
 --- a/node_modules/@inngest/agent-kit/dist/chunk-BSWKEFTT.js
 +++ b/node_modules/@inngest/agent-kit/dist/chunk-BSWKEFTT.js
-@@ -430,6 +430,8 @@ var responseParser = (input) => {
-           }
-         ];
-       }
-+      default:
-+        return acc;
-     }
-   }, []);
- };
-@@ -539,7 +541,9 @@ var responseParser2 = (input) => {
+@@ -541,7 +541,9 @@ var responseParser2 = (input) => {
              function: tool.function.name,
              // Duplicate for backward compatibility
              // Use safe parser to handle OpenAI's JSON quirks (like backticks in strings)
@@ -23,19 +14,10 @@ index 50538d4..23d7828 100644
          })
        }));
 diff --git a/node_modules/@inngest/agent-kit/dist/index.cjs b/node_modules/@inngest/agent-kit/dist/index.cjs
-index 2ecaa90..2dec904 100644
+index e73b9d2..2dec904 100644
 --- a/node_modules/@inngest/agent-kit/dist/index.cjs
 +++ b/node_modules/@inngest/agent-kit/dist/index.cjs
-@@ -1248,6 +1248,8 @@ var responseParser = (input) => {
-           }
-         ];
-       }
-+      default:
-+        return acc;
-     }
-   }, []);
- };
-@@ -1357,7 +1359,9 @@ var responseParser2 = (input) => {
+@@ -1359,7 +1359,9 @@ var responseParser2 = (input) => {
              function: tool.function.name,
              // Duplicate for backward compatibility
              // Use safe parser to handle OpenAI's JSON quirks (like backticks in strings)

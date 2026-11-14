@@ -12,8 +12,8 @@ import { AI_PROVIDERS, baseUrlFor, type AiProviderId } from "../registry";
  * 400 (`temperature` is deprecated for this model). Its response parser is
  * patched (patches/@inngest+agent-kit+*.patch) to skip `thinking` blocks it
  * would crash on; drop the patch once AgentKit handles unknown block types.
- * The same patch keeps the OpenAI parser from throwing on a tool call cut off
- * at the output limit (#493).
+ * A second patch (`+002+openai-length-cutoff`) keeps the OpenAI parser from
+ * throwing on a tool call cut off at the output limit (#493).
  */
 
 /**
