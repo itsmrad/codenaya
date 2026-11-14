@@ -75,6 +75,14 @@ export default function FileView() {
   );
 
   if (file === undefined) return <ActivityIndicator style={styles.flex} color={c.mutedForeground} />;
+  // Deleted while open (by the agent or on the website): the query returns null.
+  if (file === null) {
+    return (
+      <View style={styles.gone}>
+        <Text style={[styles.goneText, { color: c.mutedForeground }]}>This file was deleted.</Text>
+      </View>
+    );
+  }
 
   const binary = Boolean(file.storageId);
   // While editing, the local draft wins over agent updates (as on the web).
@@ -206,6 +214,8 @@ export default function FileView() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  gone: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
+  goneText: { fontSize: 14, fontFamily: font.regular },
   headerButton: { height: 48, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16 },
   headerLabel: { fontSize: 11 },
   strip: { flexDirection: "row", alignItems: "center", borderTopWidth: 1 },

@@ -10,11 +10,9 @@ import {
   PLATFORM_PROVIDER,
   type ProviderModel,
   envCatalog,
-  isPromoActive,
   keyModels,
   modelAcceptsImages,
   modelIdsFor,
-  opusRunsLeft,
   pickableModels,
   platformProviderId,
   resolveCatalogModel,
@@ -71,18 +69,18 @@ export const useAgentModel = () => {
   const keys = useQuery(api.aiProviders.list);
   const preferences = useQuery(api.aiProviders.getPreferences);
   // The models the user may pick (ADR 0010), as the web's usePlatformModels:
-  // the admin's catalog else the env provider's, promo models only with a claim.
+  // the admin's catalog else the env provider's, everyone's models only now
+  // that the GitHub promotion has ended (ADR 0009). A saved promo pick falls
+  // back to the default through isAvailable below.
   const saved = useQuery(api.platformCatalog.getForUsers);
-  const claim = useQuery(api.promoClaims.getMine);
   const catalog: PickerCatalog = saved ?? envCatalog(platformProviderId());
-  const promo = { claimed: Boolean(claim), active: isPromoActive(Date.now()), countedRunsLeft: claim ? opusRunsLeft(claim) : 0 };
-  const platformModels: ProviderModel[] = pickableModels(catalog.models, promo).map((m) => ({
+  const platformModels: ProviderModel[] = pickableModels(catalog.models).map((m) => ({
     id: m.id,
     label: m.name,
     vendor: m.vendor,
     vision: m.vision,
   }));
-  const platformLoaded = saved !== undefined && claim !== undefined;
+  const platformLoaded = saved !== undefined;
   const platformCatalog = { models: platformModels, defaultModelId: catalog.defaultModelId };
 
   const isAvailable = (choice: AgentModelChoice) => {
