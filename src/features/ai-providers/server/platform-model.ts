@@ -91,10 +91,14 @@ export function platformAgentModel(
  * AI SDK model for the editor AI routes. Editor tasks are short and
  * latency-sensitive, so they run on the catalog's utility model (`utilityModel`).
  */
-export function platformEditorModel({ provider, providerModelId }: Pick<RoutedModel, "provider" | "providerModelId">) {
+export function platformEditorModel(
+  { provider, providerModelId }: Pick<RoutedModel, "provider" | "providerModelId">,
+  thinking?: boolean,
+) {
   return buildAiSdkModel({
     provider,
     apiKey: readPlatformApiKey(provider),
     model: providerModelId,
+    thinking,
   });
 }

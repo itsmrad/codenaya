@@ -50,9 +50,12 @@ const editorModelIdFor = (provider: Doc<"aiProviderKeys">["provider"], defaultMo
 export async function resolveEditorModel({
   internalKey,
   userId,
+  thinking,
 }: {
   internalKey: string;
   userId: string;
+  /** `false` for latency-bound tasks; see `buildAiSdkModel`. */
+  thinking?: boolean;
 }): Promise<EditorModel | null> {
   // In parallel, so a platform request pays no extra round trip.
   const [byok, catalog] = await Promise.all([
@@ -65,7 +68,7 @@ export async function resolveEditorModel({
     const model = [utilityModel(catalog), resolveCatalogModel(catalog, undefined)].find((m) =>
       isPlatformConfigured(m.provider),
     );
-    return model ? { model: platformEditorModel(model) } : null;
+    return model ? { model: platformEditorModel(model, thinking) } : null;
   }
 
   const { key, modelId } = byok;
@@ -86,6 +89,7 @@ export async function resolveEditorModel({
       apiKey,
       baseUrl: key.baseUrl,
       model: editorModelIdFor(key.provider, modelId),
+      thinking,
     }),
     key: { _id: key._id, userId: key.userId, label: key.label },
   };
@@ -103,7 +107,7 @@ const keyErrorResponse = (message: string) =>
  * marks it invalid, as an agent run does. Other errors propagate.
  */
 export async function withEditorModel(
-  { userId }: { userId: string },
+  { userId, thinking }: { userId: string; thinking?: boolean },
   generate: (model: LanguageModel) => Promise<Response>,
 ): Promise<Response> {
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
@@ -113,7 +117,7 @@ export async function withEditorModel(
 
   let resolved: EditorModel | null;
   try {
-    resolved = await resolveEditorModel({ internalKey, userId });
+    resolved = await resolveEditorModel({ internalKey, userId, thinking });
   } catch (error) {
     if (error instanceof ProviderKeyError) {
       return keyErrorResponse(error.message);
