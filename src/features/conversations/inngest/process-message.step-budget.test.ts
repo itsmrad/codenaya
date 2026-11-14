@@ -200,6 +200,9 @@ describe("processMessage step budget", () => {
     expect(last?.tool_choice).toBe("none");
     expect(last?.messages.at(-1)).toEqual({ role: "user", content: STEP_BUDGET_NOTE });
     expect(JSON.stringify(last?.messages)).not.toContain(BUILD_CHECK_NUDGE);
-    expect(mutationArgs("system:updateMessageContent").at(-1)).toMatchObject({ content: summary });
+    // No sandbox here, so the check could not verify the build.
+    expect(mutationArgs("system:updateMessageContent").at(-1)).toMatchObject({
+      content: `${summary}\n\n${BUILD_UNVERIFIED_NOTE}`,
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { BUILD_CHECK_UNFINISHED, toolResultError } from "../agent-steps";
+import { BUILD_CHECK_UNFINISHED, BUILD_VERIFIED, buildCheckLabel, toolResultError } from "../agent-steps";
 import { OUTPUT_LIMIT_ERROR } from "./lib/output-limit";
 
 /**
@@ -35,7 +35,7 @@ export const BUILD_REPAIR_NUDGE =
 export const BUILD_RESERVE_NUDGE =
   "Only a few steps are left. Stop adding features: run checkBuild now, fix what it reports, then give the final summary.";
 
-// Added to the reply of a run whose changes did not end on a passing check.
+// Added to the reply of a run whose changes did not end on a verified build.
 export const BUILD_FAILED_NOTE =
   "**Build check:** The build still has errors after the fix attempts this run allows, so the preview may not work yet. Ask me to fix the build errors to try again.";
 export const BUILD_UNVERIFIED_NOTE =
@@ -51,11 +51,13 @@ export const wroteFiles = (results: ToolCalls[]) =>
 
 /**
  * What the run's writes left: whether any may have changed files, the result
- * of the latest check after them, and how many checks ran.
+ * of the latest check after them, and how many checks ran. A check that
+ * passed without building ("Static checks passed", "Build not checked") is
+ * "unverified": nothing to fix, but not a working build either.
  */
 const buildState = (results: ToolCalls[]) => {
   let wrote = false;
-  let last: "unchecked" | "passed" | "failed" | "unfinished" = "unchecked";
+  let last: "unchecked" | "passed" | "unverified" | "failed" | "unfinished" = "unchecked";
   let checks = 0;
   for (const { tool, content } of results.flatMap((result) => result.toolCalls)) {
     if (WRITE_TOOLS.has(tool.name)) {
@@ -69,7 +71,8 @@ const buildState = (results: ToolCalls[]) => {
     } else if (tool.name === "checkBuild") {
       checks += 1;
       const error = toolResultError(content);
-      last = error === undefined ? "passed" : error.startsWith(BUILD_CHECK_UNFINISHED) ? "unfinished" : "failed";
+      if (error !== undefined) last = error.startsWith(BUILD_CHECK_UNFINISHED) ? "unfinished" : "failed";
+      else last = buildCheckLabel(content) === BUILD_VERIFIED ? "passed" : "unverified";
     }
   }
   return { wrote, last, checks };
@@ -85,7 +88,7 @@ export const hasUncheckedWrites = (results: ToolCalls[]) => {
   return wrote && (last === "unchecked" || last === "failed") && checks < MAX_BUILD_CHECKS;
 };
 
-/** The note for a run whose changes did not end on a passing check, if any. */
+/** The note for a run whose changes did not end on a verified build, if any. */
 export const unverifiedBuildNote = (results: ToolCalls[]) => {
   const { wrote, last } = buildState(results);
   if (!wrote || last === "passed") return undefined;

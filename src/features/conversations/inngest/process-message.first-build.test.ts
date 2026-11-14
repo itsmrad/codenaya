@@ -2,7 +2,8 @@
  * The first-build critical path (#338) in a real `processMessage` run: the
  * title runs alongside the coding agent and is settled on every way out, a
  * starter-only project says so in the request, and only a run that wrote
- * files and verified its build ends a seeded project's first build.
+ * files and verified its build ends a seeded project's first build (the
+ * verified case is in process-message.check-build.test.ts).
  */
 
 import { getFunctionName } from "convex/server";
@@ -127,7 +128,8 @@ describe("processMessage title off the first-build path", () => {
 });
 
 describe("processMessage first build (#338)", () => {
-  it("ends a seeded project's first build when the run wrote files and checked them", async () => {
+  it("leaves the first build pending when the check could not build the app", async () => {
+    // No sandbox and no Vite project: the check passes without building.
     await drive(MODEL, [
       { data: text("Todo app") },
       { data: WRITE },
@@ -135,8 +137,12 @@ describe("processMessage first build (#338)", () => {
       { data: text("Built it.") },
     ]);
 
-    expect(called("projects:completeFirstBuild")).toEqual([
-      ["projects:completeFirstBuild", { internalKey: "ik", projectId: "p1" }],
+    expect(called("projects:completeFirstBuild")).toEqual([]);
+    expect(called("system:updateMessageContent")).toEqual([
+      [
+        "system:updateMessageContent",
+        expect.objectContaining({ content: `Built it.\n\n${BUILD_UNVERIFIED_NOTE}`, outcome: "error" }),
+      ],
     ]);
   });
 

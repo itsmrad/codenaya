@@ -140,6 +140,7 @@ export const ProjectIdView = ({
   // switches to it when the run ends, unless the user picked a tab meanwhile.
   // Phones keep the chat and get a toast (#254).
   const activeRun = useActiveRun(projectId);
+  const project = useProject(projectId);
   const files = useFiles(projectId);
   const hasPackageJson = files ? hasRootPackageJson(files) : false;
 
@@ -179,8 +180,10 @@ export const ProjectIdView = ({
   if (firstBuild && activeRun === null) {
     setFirstBuild(false);
     if (hasPackageJson && !viewPickedDuringBuild) {
+      // A seeded project whose build did not verify keeps its first build
+      // pending: its preview is not ready.
       if (isMobile) {
-        setPreviewReadyToasts((count) => count + 1);
+        if (project?.firstBuildPending !== true) setPreviewReadyToasts((count) => count + 1);
       } else {
         setSelectedView("preview");
       }
@@ -208,7 +211,6 @@ export const ProjectIdView = ({
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
   const { openIntegrations } = useProjectIntegrations();
-  const project = useProject(projectId);
   const showcaseId = useIsProjectPublished(projectId);
   const rename = useProjectRename(project);
   const [deleteOpen, setDeleteOpen] = useState(false);

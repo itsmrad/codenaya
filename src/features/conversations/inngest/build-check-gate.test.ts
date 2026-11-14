@@ -85,6 +85,19 @@ describe("unverifiedBuildNote", () => {
     expect(unverifiedBuildNote([turn(call("createFiles")), turn(failedCheck())])).toBe(BUILD_FAILED_NOTE);
   });
 
+  it("names changes whose check passed without building them", () => {
+    const writes = turn(call("createFiles"));
+    const staticOnly = call("checkBuild", "Static checks passed\nNo build sandbox is configured, so the type check and build did not run.");
+    const noSandbox = call("checkBuild", "Static checks passed\nThe build sandbox could not start, so the type check and build did not run.");
+    const notVite = call("checkBuild", "Build not checked\nStatic checks passed. checkBuild only builds Vite projects, so this one was not built.");
+    const noResult = { tool: { name: "checkBuild" }, content: undefined };
+    for (const check of [staticOnly, noSandbox, notVite, noResult]) {
+      expect(unverifiedBuildNote([writes, { toolCalls: [check] }])).toBe(BUILD_UNVERIFIED_NOTE);
+      // Nothing to fix: the gate does not route back for another check.
+      expect(hasUncheckedWrites([writes, { toolCalls: [check] }, turn()])).toBe(false);
+    }
+  });
+
   it("names changes that were never checked, or whose check could not run", () => {
     const unfinished = call("checkBuild", "Error: The build check could not finish (Command timed out).");
     expect(unverifiedBuildNote([turn(call("createFiles"))])).toBe(BUILD_UNVERIFIED_NOTE);

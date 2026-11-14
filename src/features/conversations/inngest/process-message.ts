@@ -939,8 +939,17 @@ export const processMessage = inngest.createFunction(
 
     await settleRun("record-usage-final");
 
-    // Changes that did not end on a passing check are not a working build.
+    // Changes that did not end on a verified build are not a working build.
     const buildNote = unverifiedBuildNote(result.state.results);
+
+    // The first run that wrote files and verified its build ends a seeded
+    // project's first build (#338). Before the message completes, so the
+    // client sees the flag cleared by the time the run is no longer active.
+    if (!buildNote && wroteFiles(result.state.results)) {
+      await step.run("complete-first-build", async () => {
+        await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
+      });
+    }
 
     // Update the assistant message with the response (this also sets status to completed)
     await step.run("update-assistant-message", async () => {
@@ -951,14 +960,6 @@ export const processMessage = inngest.createFunction(
         ...(stuck ? { stuck } : buildNote ? { outcome: "error" as const } : {}),
       })
     });
-
-    // The first run that wrote files and verified its build ends a seeded
-    // project's first build (#338).
-    if (!buildNote && wroteFiles(result.state.results)) {
-      await step.run("complete-first-build", async () => {
-        await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
-      });
-    }
 
     return { success: true, messageId, conversationId };
   }

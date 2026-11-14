@@ -24,7 +24,7 @@ vi.mock("@/lib/convex-client", async () => {
   return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
 });
 
-import { BUILD_CHECK_NUDGE, BUILD_FAILED_NOTE, BUILD_REPAIR_NUDGE } from "./build-check-gate";
+import { BUILD_CHECK_NUDGE, BUILD_FAILED_NOTE, BUILD_REPAIR_NUDGE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
 import { drive, text, toolCall } from "./process-message.driver";
 
 let projectFiles: Array<{ _id: string; name: string; type: "file"; content: string }>;
@@ -48,6 +48,18 @@ interface ChatBody {
   messages: Array<{ role: string; content: unknown }>;
   tools?: Array<{ function: { name: string } }>;
 }
+
+const VITE_FILES = [
+  { _id: "v1", name: "package.json", type: "file" as const, content: "{}" },
+  { _id: "v2", name: "vite.config.ts", type: "file" as const, content: "export default {};\n" },
+  { _id: "v3", name: "tsconfig.app.json", type: "file" as const, content: "{}" },
+];
+
+const fakeSandbox = (run: unknown) => ({
+  files: { makeDir: vi.fn(async () => true), write: vi.fn(async () => ({})) },
+  commands: { run },
+  kill: vi.fn(async () => {}),
+});
 
 const BROKEN = 'import { start } from "./missing";\nstart();\n';
 
@@ -79,7 +91,11 @@ beforeEach(() => {
   mocks.mutation.mockImplementation(async (ref, args) => {
     if (getFunctionName(ref) !== "system:createFiles") return null;
     const { files } = args as { files: Array<{ name: string; content: string }> };
-    projectFiles = files.map(({ name, content }) => ({ _id: "f1", name, type: "file" as const, content }));
+    const written = new Set(files.map(({ name }) => name));
+    projectFiles = [
+      ...projectFiles.filter(({ name }) => !written.has(name)),
+      ...files.map(({ name, content }) => ({ _id: "f1", name, type: "file" as const, content })),
+    ];
     return files.map(({ name }) => ({ name, fileId: "f1" }));
   });
 });
@@ -112,6 +128,10 @@ describe("processMessage build-check gate", () => {
   });
 
   it("does not end on a failed check: the fix turn repairs it and the run finishes verified", async () => {
+    vi.stubEnv("E2B_API_KEY", "e2b_key");
+    projectFiles = VITE_FILES.map((file) => ({ ...file }));
+    const run = vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    mocks.createSandbox.mockResolvedValue(fakeSandbox(run));
     const summary = "**What was built:** a script.";
     const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
       { data: writeMain(BROKEN) },
@@ -129,6 +149,12 @@ describe("processMessage build-check gate", () => {
     expect(requests[3].messages.at(-1)).toEqual({ role: "user", content: BUILD_REPAIR_NUDGE });
     expect(JSON.stringify(requests[4].messages)).not.toContain(BUILD_REPAIR_NUDGE);
 
+    // The static failure stops before the sandbox; the fixed tree installs and builds.
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(recordedSteps().filter((step) => step.tool === "checkBuild").at(-1)).toMatchObject({
+      status: "done",
+      text: "Build verified",
+    });
     expect(recordedSteps().find((step) => step.id === "build-repair-1")).toMatchObject({
       kind: "thinking",
       text: expect.stringContaining("attempt 1 of 3"),
@@ -169,11 +195,12 @@ describe("processMessage build-check gate", () => {
     expect(mutationArgs("projects:completeFirstBuild")).toEqual([]);
   });
 
-  it("ends without an extra turn when the agent checked after its last write", async () => {
+  it("ends without an extra turn when the agent checked after its last write, but not as verified without a build", async () => {
+    const summary = "**What was built:** a script.";
     const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
       { data: writeMain("console.log(1);\n") },
       { data: toolCall("checkBuild") },
-      { data: text("**What was built:** a script.") },
+      { data: text(summary) },
     ]);
 
     expect(outcome.finalType).toBe("function-resolved");
@@ -183,6 +210,30 @@ describe("processMessage build-check gate", () => {
       status: "done",
       text: "Build not checked",
     });
+    // Not a Vite project, so nothing was built: the reply says so.
+    expect(mutationArgs("system:updateMessageContent").at(-1)).toMatchObject({
+      content: `${summary}\n\n${BUILD_UNVERIFIED_NOTE}`,
+      outcome: "error",
+    });
+    expect(mutationArgs("projects:completeFirstBuild")).toEqual([]);
+  });
+
+  it("does not count static checks alone as verified when no sandbox is configured", async () => {
+    projectFiles = VITE_FILES.map((file) => ({ ...file }));
+    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
+      { data: writeMain("console.log(1);\n") },
+      { data: toolCall("checkBuild") },
+      { data: text("**What was built:** a script.") },
+    ]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(codingRequests(outcome.inferenceBodies)).toHaveLength(3);
+    expect(recordedSteps().filter((step) => step.tool === "checkBuild").at(-1)).toMatchObject({
+      status: "done",
+      text: "Static checks passed",
+    });
+    expect(mutationArgs("system:updateMessageContent").at(-1)).toMatchObject({ outcome: "error" });
+    expect(mutationArgs("projects:completeFirstBuild")).toEqual([]);
   });
 
   it("sends the known cause and fix with a matched build error and records the recipe on the step", async () => {
@@ -205,11 +256,7 @@ describe("processMessage build-check gate", () => {
       .fn()
       .mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" })
       .mockRejectedValueOnce(new CommandExitError(build));
-    mocks.createSandbox.mockResolvedValue({
-      files: { makeDir: vi.fn(async () => true), write: vi.fn(async () => ({})) },
-      commands: { run },
-      kill: vi.fn(async () => {}),
-    });
+    mocks.createSandbox.mockResolvedValue(fakeSandbox(run));
 
     const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
       { data: toolCall("checkBuild") },
