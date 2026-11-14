@@ -78,6 +78,10 @@ describe("failLostMessageRuns", () => {
       error: "Interrupted",
       endedAt: START + 2 * MINUTE,
     });
+    // The lost run counts as a failed one in the activation events (#339).
+    expect(await t.run((ctx) => ctx.db.query("activationEvents").collect())).toMatchObject([
+      { name: "run_finished", userId: "user_alice", props: { outcome: "error", firstBuild: true } },
+    ]);
   });
 
   test("leaves a run that recorded progress recently", async () => {

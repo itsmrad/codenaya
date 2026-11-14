@@ -5,12 +5,14 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface CreateFilesToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  registry?: RegistryCheck;
 }
 
 const paramsSchema = z.object({
@@ -28,6 +30,7 @@ const paramsSchema = z.object({
 export const createCreateFilesTool = ({
   projectId,
   internalKey,
+  registry = createRegistryCheck(),
 }: CreateFilesToolOptions) => {
   return createTool({
     name: "createFiles",
@@ -59,7 +62,7 @@ export const createCreateFilesTool = ({
         file,
         ...checkPackageVersions(file.name, file.content),
       }));
-      const files = checked.map(({ file, content }) => ({ ...file, content }));
+      const checkedFiles = checked.map(({ file, content }) => ({ ...file, content }));
 
       try {
         return await toolStep?.run("create-files", async () => {
@@ -84,6 +87,10 @@ export const createCreateFilesTool = ({
             }
           }
 
+          const rewriteIcons = await getIconRewriter(internalKey, projectId,
+            resolvedParentId ? [] : checkedFiles.map((file) => ({ path: file.name, content: file.content })));
+          const prepared = checkedFiles.map((file) => ({ ...file, ...rewriteIcons(file.content, file.name) }));
+          const files = prepared.map(({ name, content }) => ({ name, content }));
           const results = await convex.mutation(api.system.createFiles, {
             internalKey,
             projectId,
@@ -108,7 +115,9 @@ export const createCreateFilesTool = ({
             checked
               .filter(({ file }) => created.some((r) => r.name === file.name))
               .map(({ note }) => note)
-              .join("")
+              .join("") +
+            await postWriteNote(internalKey, projectId, created.flatMap((r) => r.fileId ? [r.fileId] : []), registry,
+              prepared.filter((f) => created.some((r) => r.name === f.name)).flatMap((f) => f.rewrites))
           );
         });
       } catch (error) {

@@ -8,7 +8,6 @@ import { useForm } from "@tanstack/react-form";
 import {
   EyeIcon,
   EyeOffIcon,
-  KeyRoundIcon,
   LockIcon,
   PencilIcon,
   Trash2Icon,
@@ -32,7 +31,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
@@ -61,8 +59,13 @@ const formSchema = z.object({
  * sealed server-side by `/api/env-vars`, mirroring the agent's `setEnvVar` tool,
  * and are never sent back to the browser — only their masked preview is shown.
  */
-export const EnvVarsDialog = ({ projectId }: { projectId: Id<"projects"> }) => {
-  const [open, setOpen] = useState(false);
+interface EnvVarsDialogProps {
+  projectId: Id<"projects">;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogProps) => {
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
 
   const envVars = useEnvVars(open ? projectId : undefined);
@@ -117,27 +120,17 @@ export const EnvVarsDialog = ({ projectId }: { projectId: Id<"projects"> }) => {
     }
   };
 
+  // Opened from the preview toolbar or the command palette, so reset on close.
   const handleOpenChange = (isOpen: boolean) => {
-    if (isOpen) {
+    if (!isOpen) {
       form.reset();
       setRevealed(new Set());
     }
-    setOpen(isOpen);
+    onOpenChange(isOpen);
   };
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-8 rounded-md hover:bg-muted"
-          title="Environment variables"
-          aria-label="Environment variables"
-        >
-          <KeyRoundIcon className="size-4" />
-        </Button>
-      </DialogTrigger>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Environment Variables</DialogTitle>

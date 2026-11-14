@@ -12,6 +12,8 @@ import {
 } from "@/features/integrations/credential-guard";
 import { PUBLIC_KEY_PREFIXES, isPublicByConvention } from "@/features/integrations/env-keys";
 
+import { scanSupabaseSql } from "./supabase-exposure";
+
 export type ScanSeverity = "high" | "medium";
 
 export interface ScanFinding {
@@ -49,7 +51,14 @@ const PRIVATE_KEY = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
 const TEMPLATED_PASSWORD = /^[$<{%*[]/;
 const ENV_FILE = /(?:^|\/)\.env(?:\.[\w.-]+)?$/;
 /** `.env.example`, `config.sample`: meant to be shared, so only real-looking keys count. */
-const EXAMPLE_FILE = /\.(?:example|sample)$/i;
+const EXAMPLE_FILE = /\.(?:example|sample|template|dist)$/i;
+const ENV_FILE_KEY = /^\s*(?:export\s+)?([A-Za-z_]\w*)\s*=/gm;
+
+/** A `.env` holding only public-prefixed keys exposes nothing the bundle doesn't already ship. */
+const envFileSeverity = (content: string): ScanSeverity =>
+  [...content.matchAll(ENV_FILE_KEY)].every(([, key]) => isPublicByConvention(key))
+    ? "medium"
+    : "high";
 
 const RULE_LABELS: Record<string, string> = {
   "stored-secret": "Value of a stored secret env var",
@@ -60,10 +69,36 @@ const RULE_LABELS: Record<string, string> = {
   "dsn-password": "Password in a connection string",
   "env-file": "Environment file included in the export",
   "sk-api-key": "Hard-coded API key (sk-…)",
+  "supabase-no-rls": "Supabase table without row level security: anyone with the public key can read and change every row",
+  "supabase-open-policy": "Supabase policy that lets everyone through (using true)",
 };
 
 export const describeRule = (rule: string) =>
   RULE_LABELS[rule] ?? `Hard-coded ${rule} credential`;
+
+/** Groups the dialog and the fix message, each with its plain-English fix. */
+export const SCAN_CATEGORIES = [
+  {
+    id: "secrets",
+    title: "Exposed secrets",
+    fix:
+      "Move each secret into a server-side environment variable (never one with a " +
+      "public prefix such as VITE_ or NEXT_PUBLIC_) and remove it from the code.",
+  },
+  {
+    id: "supabase",
+    title: "Supabase data exposure",
+    fix:
+      "Enable row level security on every Supabase table, give each one policies that " +
+      "only allow a user their own rows (for example auth.uid() = user_id), and keep " +
+      "the service role key in server code only.",
+  },
+] as const;
+
+const SUPABASE_RULES = new Set(["service-role-in-client", "supabase-no-rls", "supabase-open-policy"]);
+
+export const ruleCategory = (rule: string): (typeof SCAN_CATEGORIES)[number]["id"] =>
+  SUPABASE_RULES.has(rule) ? "supabase" : "secrets";
 
 /** Supabase anon keys are JWTs meant for the browser; RLS protects the data. */
 const isSupabaseAnonJwt = (token: string) => {
@@ -116,7 +151,7 @@ export function scanProject(
     const inClientSource = CLIENT_SOURCE.test(path);
     const isExample = EXAMPLE_FILE.test(path);
     if (ENV_FILE.test(path) && !isExample) {
-      add({ file: path, line: null, rule: "env-file", severity: "high" });
+      add({ file: path, line: null, rule: "env-file", severity: envFileSeverity(content) });
     }
 
     content.split("\n").forEach((text, index) => {
@@ -142,6 +177,8 @@ export function scanProject(
     });
   }
 
+  scanSupabaseSql(files).forEach(add);
+
   for (const { key, value } of envVars) {
     if (!isPublicByConvention(key)) continue;
     if (SECRET_NAME.test(key) || credentialRules(value).length > 0) {
@@ -157,11 +194,16 @@ export function scanProject(
 /** The chat message "Ask agent to fix" sends: locations and rules, no values. */
 export const fixRequestMessage = (findings: readonly ScanFinding[]) =>
   [
-    "The pre-export security scan found possible secrets or exposed data. " +
-      "Move each secret into a server-side environment variable (never one with a " +
-      "public prefix such as VITE_ or NEXT_PUBLIC_) and remove it from the code:",
-    // `KEY: rule` would trip the chat credential guard's labeled-secret rule.
-    ...findings.map(
-      (f) => `- ${f.line === null ? f.file : `${f.file}:${f.line}`} (${f.rule})`,
-    ),
+    "The pre-export security scan found possible secrets or exposed data.",
+    ...SCAN_CATEGORIES.flatMap(({ id, fix }) => {
+      const inCategory = findings.filter((f) => ruleCategory(f.rule) === id);
+      if (inCategory.length === 0) return [];
+      return [
+        `${fix} Fix these:`,
+        // `KEY: rule` would trip the chat credential guard's labeled-secret rule.
+        ...inCategory.map(
+          (f) => `- ${f.line === null ? f.file : `${f.file}:${f.line}`} (${f.rule})`,
+        ),
+      ];
+    }),
   ].join("\n");
