@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { BUILD_CHECK_NUDGE, createBuildCheckGate, hasUncheckedWrites } from "./build-check-gate";
+import {
+  BUILD_CHECK_NUDGE,
+  BUILD_FAILED_NOTE,
+  BUILD_REPAIR_NUDGE,
+  BUILD_RESERVE_NUDGE,
+  BUILD_UNVERIFIED_NOTE,
+  createBuildCheckGate,
+  hasUncheckedWrites,
+  MAX_BUILD_CHECKS,
+  unverifiedBuildNote,
+} from "./build-check-gate";
+import { OUTPUT_LIMIT_ERROR } from "./lib/output-limit";
 
 const call = (name: string, data = "ok") => ({ tool: { name }, content: { data } });
 const turn = (...toolCalls: ReturnType<typeof call>[]) => ({ toolCalls });
@@ -45,6 +56,14 @@ describe("hasUncheckedWrites", () => {
     expect(hasUncheckedWrites([turn(call("updateFile")), turn(unfinished)])).toBe(false);
   });
 
+  it("is true for a check that failed again with no write since", () => {
+    expect(hasUncheckedWrites([turn(call("updateFile")), turn(call("checkBuild", "Build verified")), turn(failedCheck())])).toBe(true);
+  });
+
+  it("ignores a cut-off write that was refused", () => {
+    expect(hasUncheckedWrites([turn(call("writeFiles", OUTPUT_LIMIT_ERROR)), turn()])).toBe(false);
+  });
+
   it("is false once the check and both fix attempts are spent", () => {
     expect(
       hasUncheckedWrites([
@@ -56,18 +75,57 @@ describe("hasUncheckedWrites", () => {
   });
 });
 
+describe("unverifiedBuildNote", () => {
+  it("is undefined when nothing was written or the last check passed", () => {
+    expect(unverifiedBuildNote([turn(call("listFiles")), turn(failedCheck())])).toBeUndefined();
+    expect(unverifiedBuildNote([turn(call("createFiles"), failedCheck()), turn(call("checkBuild", "Build verified"))])).toBeUndefined();
+  });
+
+  it("names a build that still fails", () => {
+    expect(unverifiedBuildNote([turn(call("createFiles")), turn(failedCheck())])).toBe(BUILD_FAILED_NOTE);
+  });
+
+  it("names changes that were never checked, or whose check could not run", () => {
+    const unfinished = call("checkBuild", "Error: The build check could not finish (Command timed out).");
+    expect(unverifiedBuildNote([turn(call("createFiles"))])).toBe(BUILD_UNVERIFIED_NOTE);
+    expect(unverifiedBuildNote([turn(call("checkBuild", "Build verified")), turn(call("editFile"))])).toBe(BUILD_UNVERIFIED_NOTE);
+    expect(unverifiedBuildNote([turn(call("createFiles")), turn(unfinished)])).toBe(BUILD_UNVERIFIED_NOTE);
+  });
+});
+
 describe("createBuildCheckGate", () => {
-  it("routes back once, with the note for that turn only", () => {
+  it("routes back with the note for that turn only", () => {
     const gate = createBuildCheckGate();
     const results = [turn(call("createFiles")), turn()];
 
     expect(gate.takeNudge()).toBeUndefined();
     expect(gate.shouldContinue(results)).toBe(true);
+    expect(gate.forced).toBe(1);
     expect(gate.takeNudge()).toBe(BUILD_CHECK_NUDGE);
     expect(gate.takeNudge()).toBeUndefined();
+  });
 
-    // The agent ignored the note and wrote again: the run still ends.
-    expect(gate.shouldContinue([...results, turn(call("updateFile")), turn()])).toBe(false);
+  it("asks for a fix after a failed check, and stops after MAX_BUILD_CHECKS forced turns", () => {
+    const gate = createBuildCheckGate();
+    // The agent answers every note with text and never checks again.
+    const results = [turn(call("createFiles"), failedCheck()), turn()];
+
+    for (let attempt = 1; attempt <= MAX_BUILD_CHECKS; attempt += 1) {
+      expect(gate.shouldContinue(results)).toBe(true);
+      expect(gate.takeNudge()).toBe(BUILD_REPAIR_NUDGE);
+    }
+    expect(gate.shouldContinue(results)).toBe(false);
+    expect(gate.takeNudge()).toBeUndefined();
+  });
+
+  it("asks once for the check when the step budget runs low", () => {
+    const gate = createBuildCheckGate();
+    gate.reserve([turn(call("listFiles"))]);
+    expect(gate.takeNudge()).toBeUndefined();
+
+    gate.reserve([turn(call("createFiles"))]);
+    expect(gate.takeNudge()).toBe(BUILD_RESERVE_NUDGE);
+    gate.reserve([turn(call("createFiles")), turn(call("updateFile"))]);
     expect(gate.takeNudge()).toBeUndefined();
   });
 

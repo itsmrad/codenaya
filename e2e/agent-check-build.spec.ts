@@ -110,7 +110,7 @@ test.describe.serial("agent checkBuild", () => {
     await expect(runBlock).toHaveAttribute("aria-expanded", "true");
   };
 
-  test("a run that ends without checking is routed back once and shows the failed check", async () => {
+  test("a run that ends without checking is routed back, shows the failed check, and says the build still fails", async () => {
     test.setTimeout(180_000);
     const errors = collectConsoleErrors(page);
     script = {
@@ -121,7 +121,7 @@ test.describe.serial("agent checkBuild", () => {
           files: [{ name: "main.ts", content: 'import { start } from "./missing";\nstart();\n' }],
         },
       },
-      // Answers the gate's note, and only that.
+      // Answers the gate's first note, and not the fix notes after it.
       followUp: (request) => {
         const last = request.messages.at(-1);
         return last?.role === "user" && String(last.content).includes("Run checkBuild")
@@ -138,11 +138,12 @@ test.describe.serial("agent checkBuild", () => {
 
     await expect(page.getByText("Checked build")).toBeVisible();
     await expect(page.getByText(/Static checks failed/)).toBeVisible();
+    await expect(page.getByText(/The build still has errors after the fix attempts/)).toBeVisible();
 
-    // createFiles, the first reply, the routed-back turn's checkBuild, the
-    // final reply: one extra turn, no more.
+    // createFiles, the first reply, the routed-back turn's checkBuild, then a
+    // reply to it and to each fix note: three forced turns, no more.
     const coding = stub.requests.slice(before).filter((request) => request.tools?.length);
-    expect(coding).toHaveLength(4);
+    expect(coding).toHaveLength(6);
     expect(coding.filter(calledCheckBuild)).toHaveLength(1);
     expect(errors.filter((error) => !error.includes("webcontainer-api.io"))).toEqual([]);
   });

@@ -23,7 +23,7 @@ vi.mock("./constants", async (importOriginal) => ({
   MAX_AGENT_STEPS: 4,
 }));
 
-import { BUILD_CHECK_NUDGE } from "./build-check-gate";
+import { BUILD_CHECK_NUDGE, BUILD_RESERVE_NUDGE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
 import { MAX_AGENT_STEPS, STEP_BUDGET_NOTE } from "./constants";
 import { drive, text, toolCall } from "./process-message.driver";
 
@@ -119,7 +119,7 @@ describe("processMessage step budget", () => {
     expect(mutationArgs("system:updateMessageContent").at(-1)).toMatchObject({ content: summary });
   });
 
-  it("keeps a summary given on the last step instead of routing back for checkBuild", async () => {
+  it("keeps a summary given on the last step, saying the changes were not checked", async () => {
     const summary = "**What was built:** a cleanup.";
     const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
       ...Array.from({ length: MAX_AGENT_STEPS - 2 }, () => ({
@@ -130,7 +130,26 @@ describe("processMessage step budget", () => {
 
     expect(outcome.finalType).toBe("function-resolved");
     expect(codingRequests(outcome.inferenceBodies)).toHaveLength(MAX_AGENT_STEPS - 1);
-    expect(mutationArgs("system:updateMessageContent").at(-1)).toMatchObject({ content: summary });
+    expect(mutationArgs("system:updateMessageContent").at(-1)).toMatchObject({
+      content: `${summary}\n\n${BUILD_UNVERIFIED_NOTE}`,
+      outcome: "error",
+    });
+    expect(mutationArgs("projects:completeFirstBuild")).toEqual([]);
+  });
+
+  it("asks once for the build check when the steps left are the reserve", async () => {
+    // At this budget every step is inside the reserve.
+    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
+      ...Array.from({ length: MAX_AGENT_STEPS - 1 }, () => ({
+        data: toolCall("deleteFiles", { fileIds: ["f1"] }),
+      })),
+      { data: text("**What was built:** a cleanup.") },
+    ]);
+
+    const requests = codingRequests(outcome.inferenceBodies);
+    expect(requests[0].messages.at(-1)).not.toEqual({ role: "user", content: BUILD_RESERVE_NUDGE });
+    expect(requests[1].messages.at(-1)).toEqual({ role: "user", content: BUILD_RESERVE_NUDGE });
+    expect(JSON.stringify(requests.slice(2))).not.toContain(BUILD_RESERVE_NUDGE);
   });
 
   it("drops tool calls a provider makes on the last step anyway, and keeps its text", async () => {

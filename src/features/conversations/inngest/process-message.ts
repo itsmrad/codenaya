@@ -29,7 +29,14 @@ import { createSetEnvVarTool } from './tools/set-env-var';
 import { createLoadSkillTool } from './tools/load-skill';
 import { createScaffoldViteAppTool } from './tools/scaffold-vite-app';
 import { createCheckBuildTool } from './tools/check-build';
-import { createBuildCheckGate, wroteFiles } from './build-check-gate';
+import {
+  BUILD_CHECK_RESERVE_STEPS,
+  BUILD_REPAIR_NUDGE,
+  createBuildCheckGate,
+  MAX_BUILD_CHECKS,
+  unverifiedBuildNote,
+  wroteFiles,
+} from './build-check-gate';
 import { STUCK_FALLBACK_REPLY, createLoopGuard, stuckNote } from './loop-detector';
 import type { AgentModelChoice } from '../agent-models';
 import {
@@ -699,6 +706,16 @@ export const processMessage = inngest.createFunction(
             agent.name === SUMMARY_AGENT_NAME
               ? summaryNote
               : takeCutOffNote() ?? buildCheckGate.takeNudge() ?? loopGuard.takeHint();
+          if (nudge === BUILD_REPAIR_NUDGE) {
+            const attempt = buildCheckGate.forced;
+            await recordSteps("record-build-repair", () => [{
+              id: `build-repair-${attempt}`,
+              kind: "thinking" as const,
+              text: `The build check failed, so the agent is fixing it (attempt ${attempt} of ${MAX_BUILD_CHECKS}).`,
+              status: "done" as const,
+              startedAt: Date.now(),
+            }], false);
+          }
           // AgentKit sends prompt ([system, request]) before history (this
           // run's turns), so earlier conversation turns go between the two.
           // Relies on network calls using maxIter: 0; direct agent.run with maxIter > 1 would prepend history each pass.
@@ -858,7 +875,10 @@ export const processMessage = inngest.createFunction(
             ? codingAgent
             : undefined;
         }
-        return lastStep || loopGuard.check(results) ? summaryAgent : codingAgent;
+        if (lastStep || loopGuard.check(results)) return summaryAgent;
+        // Keep the last turns for checking and fixing the build, not more writes.
+        if (callCount >= MAX_AGENT_STEPS - 1 - BUILD_CHECK_RESERVE_STEPS) buildCheckGate.reserve(results);
+        return codingAgent;
       }
     });
 
@@ -919,18 +939,22 @@ export const processMessage = inngest.createFunction(
 
     await settleRun("record-usage-final");
 
+    // Changes that did not end on a passing check are not a working build.
+    const buildNote = unverifiedBuildNote(result.state.results);
+
     // Update the assistant message with the response (this also sets status to completed)
     await step.run("update-assistant-message", async () => {
       await convex.mutation(api.system.updateMessageContent, {
         internalKey,
         messageId,
-        content: assistantResponse,
-        ...(stuck ? { stuck } : {}),
+        content: buildNote && !stuck ? `${assistantResponse}\n\n${buildNote}` : assistantResponse,
+        ...(stuck ? { stuck } : buildNote ? { outcome: "error" as const } : {}),
       })
     });
 
-    // The first run that wrote files ends a seeded project's first build (#338).
-    if (wroteFiles(result.state.results)) {
+    // The first run that wrote files and verified its build ends a seeded
+    // project's first build (#338).
+    if (!buildNote && wroteFiles(result.state.results)) {
       await step.run("complete-first-build", async () => {
         await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
       });

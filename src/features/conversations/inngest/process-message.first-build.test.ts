@@ -2,7 +2,7 @@
  * The first-build critical path (#338) in a real `processMessage` run: the
  * title runs alongside the coding agent and is settled on every way out, a
  * starter-only project says so in the request, and only a run that wrote
- * files ends a seeded project's first build.
+ * files and verified its build ends a seeded project's first build.
  */
 
 import { getFunctionName } from "convex/server";
@@ -19,6 +19,7 @@ vi.mock("@/lib/convex-client", async () => {
 });
 
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
+import { BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
 import { STARTER_IN_PLACE_NOTE } from "./constants";
 import { drive, text, toolCall } from "./process-message.driver";
 import { VITE_REACT_STARTER } from "./vite-starter";
@@ -31,6 +32,7 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectById": () => ({ ownerId: "user_1" }),
   "system:getProjectMcpConnections": () => [],
   "system:getProjectFiles": () => projectFiles,
+  "system:getProjectFilesWithUrls": () => projectFiles,
   "system:getProjectSkills": () => [],
 };
 
@@ -58,6 +60,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "ik");
   vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
+  // No sandbox: checkBuild runs its static checks only.
+  vi.stubEnv("E2B_API_KEY", "");
   vi.spyOn(console, "error").mockImplementation(() => {});
   mocks.query.mockImplementation(async (ref) => QUERIES[getFunctionName(ref)]?.());
   mocks.mutation.mockImplementation(async (ref, args) =>
@@ -123,11 +127,29 @@ describe("processMessage title off the first-build path", () => {
 });
 
 describe("processMessage first build (#338)", () => {
-  it("ends a seeded project's first build when the run wrote files", async () => {
-    await drive(MODEL, [{ data: text("Todo app") }, { data: WRITE }, { data: text("Built it.") }]);
+  it("ends a seeded project's first build when the run wrote files and checked them", async () => {
+    await drive(MODEL, [
+      { data: text("Todo app") },
+      { data: WRITE },
+      { data: toolCall("checkBuild") },
+      { data: text("Built it.") },
+    ]);
 
     expect(called("projects:completeFirstBuild")).toEqual([
       ["projects:completeFirstBuild", { internalKey: "ik", projectId: "p1" }],
+    ]);
+  });
+
+  it("leaves the first build pending when the run's changes were never checked", async () => {
+    // The driver repeats the last reply, so every forced turn ends without a check.
+    await drive(MODEL, [{ data: text("Todo app") }, { data: WRITE }, { data: text("Built it.") }]);
+
+    expect(called("projects:completeFirstBuild")).toEqual([]);
+    expect(called("system:updateMessageContent")).toEqual([
+      [
+        "system:updateMessageContent",
+        expect.objectContaining({ content: `Built it.\n\n${BUILD_UNVERIFIED_NOTE}`, outcome: "error" }),
+      ],
     ]);
   });
 
