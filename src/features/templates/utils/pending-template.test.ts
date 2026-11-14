@@ -19,6 +19,7 @@ const memoryStorage = () => {
 describe("pending template", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("returns a saved template once, then clears it", () => {
@@ -27,7 +28,9 @@ describe("pending template", () => {
 
     savePendingTemplate("portfolio");
 
-    expect(storage.getItem(PENDING_TEMPLATE_KEY)).toBe("portfolio");
+    expect(JSON.parse(storage.getItem(PENDING_TEMPLATE_KEY)!)).toEqual({
+      templateId: "portfolio", savedAt: expect.any(Number),
+    });
     expect(takePendingTemplate()?.title).toBe("Portfolio");
     expect(takePendingTemplate()).toBeNull();
   });
@@ -57,4 +60,39 @@ describe("pending template", () => {
     expect(takePendingTemplate()?.id).toBe("landing-page");
     expect(peekPendingTemplate()).toBeNull();
   });
+  it("expires a saved template after one hour, including a non-consuming read", () => {
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-01T00:00:00Z"));
+    savePendingTemplate("portfolio");
+    vi.advanceTimersByTime(3_599_999);
+    expect(peekPendingTemplate()?.id).toBe("portfolio");
+    vi.advanceTimersByTime(2);
+    expect(peekPendingTemplate()).toBeNull();
+    expect(storage.getItem(PENDING_TEMPLATE_KEY)).toBeNull();
+    expect(takePendingTemplate()).toBeNull();
+  });
+
+  it("reads a legacy bare string once", () => {
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    storage.setItem(PENDING_TEMPLATE_KEY, "portfolio");
+    expect(peekPendingTemplate()?.id).toBe("portfolio");
+    expect(takePendingTemplate()?.id).toBe("portfolio");
+    expect(takePendingTemplate()).toBeNull();
+  });
+
+  it.each([
+    '{"templateId": 12, "savedAt": 0}',
+    '{"templateId": "portfolio"}',
+    '{"templateId": "portfolio", "savedAt": "yesterday"}',
+  ])("discards invalid timestamped data: %s", (entry) => {
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    storage.setItem(PENDING_TEMPLATE_KEY, entry);
+    expect(peekPendingTemplate()).toBeNull();
+    expect(storage.getItem(PENDING_TEMPLATE_KEY)).toBeNull();
+  });
+
 });

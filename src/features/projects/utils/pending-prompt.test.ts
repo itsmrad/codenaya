@@ -19,6 +19,7 @@ const memoryStorage = () => {
 describe("pending prompt", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("returns a saved prompt once, then clears it", () => {
@@ -27,7 +28,9 @@ describe("pending prompt", () => {
 
     savePendingPrompt("  A portfolio site  ");
 
-    expect(storage.getItem(PENDING_PROMPT_KEY)).toBe("  A portfolio site  ");
+    expect(JSON.parse(storage.getItem(PENDING_PROMPT_KEY)!)).toEqual({
+      prompt: "  A portfolio site  ", savedAt: expect.any(Number),
+    });
     expect(takePendingPrompt()).toBe("A portfolio site");
     expect(takePendingPrompt()).toBeNull();
   });
@@ -77,4 +80,39 @@ describe("pending prompt", () => {
     });
     expect(peekPendingPrompt()).toBeNull();
   });
+  it("expires a saved prompt after one hour, including a non-consuming read", () => {
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-01T00:00:00Z"));
+    savePendingPrompt("A portfolio site");
+    vi.advanceTimersByTime(3_599_999);
+    expect(peekPendingPrompt()).toBe("A portfolio site");
+    vi.advanceTimersByTime(2);
+    expect(peekPendingPrompt()).toBeNull();
+    expect(storage.getItem(PENDING_PROMPT_KEY)).toBeNull();
+    expect(takePendingPrompt()).toBeNull();
+  });
+
+  it("reads a legacy bare string once", () => {
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    storage.setItem(PENDING_PROMPT_KEY, "A portfolio site");
+    expect(peekPendingPrompt()).toBe("A portfolio site");
+    expect(takePendingPrompt()).toBe("A portfolio site");
+    expect(takePendingPrompt()).toBeNull();
+  });
+
+  it.each([
+    '{"prompt": 12, "savedAt": 0}',
+    '{"prompt": "A portfolio site"}',
+    '{"prompt": "A portfolio site", "savedAt": "yesterday"}',
+  ])("discards invalid timestamped data: %s", (entry) => {
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+    storage.setItem(PENDING_PROMPT_KEY, entry);
+    expect(peekPendingPrompt()).toBeNull();
+    expect(storage.getItem(PENDING_PROMPT_KEY)).toBeNull();
+  });
+
 });
