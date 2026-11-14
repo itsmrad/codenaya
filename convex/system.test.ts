@@ -235,6 +235,7 @@ describe("updateConversationTitle names a generated project", () => {
       internalKey: INTERNAL_KEY,
       projectName: "democratic-mule-coral",
       conversationTitle: "New conversation",
+      source: "dashboard",
       ownerId: "user_alice",
       ...(generated ? { nameSource: "generated" as const } : {}),
     });
