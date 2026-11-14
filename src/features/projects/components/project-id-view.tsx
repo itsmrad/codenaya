@@ -45,6 +45,7 @@ import { SecurityScanDialog } from "@/features/security/components/security-scan
 import { useProject } from "../hooks/use-projects";
 import { useFiles } from "../hooks/use-files";
 import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
+import { useBuildSignals } from "@/hooks/use-build-signals";
 import { hasRootPackageJson } from "@/features/sandbox-preview/utils/file-tree";
 import { useProjectRename } from "../hooks/use-project-rename";
 import { DeleteProjectDialog, ProjectActionsMenu } from "./project-actions";
@@ -228,6 +229,12 @@ export const ProjectIdView = ({
     integrations: openIntegrations,
     skills: () => setSkillsDialogOpen(true),
     "env-vars": () => setEnvVarsOpen(true),
+  });
+
+  useBuildSignals({
+    projectName: project?.name,
+    activeRun,
+    onOpenPreview: () => selectView("preview"),
   });
 
   return (
