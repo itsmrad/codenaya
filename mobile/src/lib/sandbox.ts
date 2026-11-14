@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { API_URL } from "./env";
+import { authHeaders } from "./http";
 import { BOOT_OUT_OF_TIME, type BootPhase, afterBootStream, buildFlatFileList, getChangedFiles, isBootPhase } from "./shared";
 
 export type SandboxStatus = "idle" | "booting" | "installing" | "running" | "error";
@@ -45,7 +46,7 @@ export function useSandbox({
   const call = async (path: string, method: string, body?: unknown, signal?: AbortSignal) =>
     fetch(`${API_URL}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${await getToken()}` },
+      headers: await authHeaders(getToken),
       body: body === undefined ? undefined : JSON.stringify(body),
       signal,
     });

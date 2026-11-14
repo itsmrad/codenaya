@@ -169,6 +169,7 @@ export async function GET(request: Request) {
     return fail(`Unknown provider "${flow.providerId}".`);
   }
 
+  let connectionId: string | undefined;
   let codeVerifier: string;
   let clientInformation: OAuthClientInformationFull;
   let authorizationServerMetadata: AuthorizationServerMetadata | undefined;
@@ -185,10 +186,12 @@ export async function GET(request: Request) {
       secretContext("oauthFlowStates", flow.state, "pkce"),
     );
     const parsed = JSON.parse(opened) as {
+      connectionId?: string;
       codeVerifier: string;
       clientInformation: OAuthClientInformationFull;
       authorizationServerMetadata?: AuthorizationServerMetadata;
     };
+    connectionId = parsed.connectionId;
     codeVerifier = parsed.codeVerifier;
     clientInformation = parsed.clientInformation;
     authorizationServerMetadata = parsed.authorizationServerMetadata;
@@ -196,6 +199,11 @@ export async function GET(request: Request) {
     console.error("[oauth/callback] failed to open flow state", error);
     return fail("Could not verify the authorization request.");
   }
+
+  const existing = connectionId ? await convex.query(api.system.getConnectionForReconnect, {
+    internalKey, userId, connectionId, providerId: provider.id, authMode: "oauth",
+  }) : null;
+  if (connectionId && !existing) return fail("Connection not found. Please start again.");
 
   const exchange = await completeOAuthFlow({
     provider,
@@ -215,7 +223,7 @@ export async function GET(request: Request) {
 
   const { tokens } = exchange;
 
-  const credentialRef = nanoid();
+  const credentialRef = existing?.credentialRef ?? nanoid();
 
   let sealed;
   try {
@@ -239,7 +247,16 @@ export async function GET(request: Request) {
   }
 
   try {
-    const created = await convex.mutation(api.system.createUserConnection, {
+    if (existing) {
+      await convex.mutation(api.system.updateUserConnectionCredential, {
+        internalKey, userId, connectionId: existing._id, providerId: provider.id, authMode: "oauth",
+        maskedPreview: maskCredential(tokens.access_token), tokenExpiresAt: tokenExpiryFrom(tokens),
+        oauthClientId: clientInformation.client_id, authServerUrl: flow.authServerUrl, ...sealed,
+      });
+    }
+    const created = existing
+      ? { projectConnectionId: undefined }
+      : await convex.mutation(api.system.createUserConnection, {
       internalKey,
       userId,
       projectId: flow.projectId,

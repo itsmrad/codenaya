@@ -1,5 +1,11 @@
 import { API_URL } from "./env";
 
+/** JSON headers plus the session token, left out when Clerk has none (no `Bearer null`). */
+export const authHeaders = async (getToken: () => Promise<string | null>): Promise<Record<string, string>> => {
+  const token = await getToken();
+  return { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+};
+
 /**
  * Calls a Next.js API route as the signed-in user. Native apps have no
  * cookies, so the Clerk session token goes in the Authorization header, which
@@ -12,10 +18,7 @@ export const postApi = async <T>(
 ): Promise<{ ok: boolean; status: number; data: T & { error?: string; code?: string } }> => {
   const response = await fetch(`${API_URL}${path}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${await getToken()}`,
-    },
+    headers: await authHeaders(getToken),
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => ({}));

@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/expo";
 import { useQuery } from "convex/react";
 import * as SecureStore from "expo-secure-store";
 import { useEffect, useSyncExternalStore } from "react";
@@ -24,10 +25,12 @@ type PickerCatalog = {
   defaultModelId: string;
 };
 
-const STORAGE_KEY = "codenaya.agent-model";
+// Per user, so another account signed in on this device starts from its own default.
+// The old device-wide key ("codenaya.agent-model") is ignored.
+const storageKey = (userId: string) => `codenaya.agent-model.${userId}`;
 
 // Shared across screens for the session; persisted so the pick survives restarts.
-let stored: AgentModelChoice | null | undefined;
+let stored: { userId: string; choice: AgentModelChoice | null } | undefined;
 const listeners = new Set<() => void>();
 
 const notify = () => listeners.forEach((listener) => listener());
@@ -38,10 +41,9 @@ const subscribe = (listener: () => void) => {
   };
 };
 
-const setStored = (choice: AgentModelChoice) => {
-  stored = choice;
+const setStored = (userId: string, choice: AgentModelChoice | null) => {
+  stored = { userId, choice };
   notify();
-  SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(choice)).catch(() => undefined);
 };
 
 /**
@@ -53,18 +55,20 @@ export const useAgentModel = () => {
   // Read as an external store, so a pick re-renders every screen using it.
   // (A module variable read in render is invisible to the React Compiler's
   // memoization: the chat kept showing the default model after a pick.)
-  const picked = useSyncExternalStore(subscribe, () => stored);
+  const { userId } = useAuth();
+  const current = useSyncExternalStore(subscribe, () => stored);
+  const picked = current && current.userId === userId ? current.choice : null;
   useEffect(() => {
-    if (stored !== undefined) return;
-    SecureStore.getItemAsync(STORAGE_KEY)
-      .then((raw) => {
-        stored = raw ? (JSON.parse(raw) as AgentModelChoice) : null;
-      })
-      .catch(() => {
-        stored = null;
-      })
-      .finally(notify);
-  }, []);
+    if (!userId || stored?.userId === userId) return;
+    SecureStore.getItemAsync(storageKey(userId))
+      .then((raw) => setStored(userId, raw ? (JSON.parse(raw) as AgentModelChoice) : null))
+      .catch(() => setStored(userId, null));
+  }, [userId]);
+  const setModel = (choice: AgentModelChoice) => {
+    if (!userId) return;
+    setStored(userId, choice);
+    SecureStore.setItemAsync(storageKey(userId), JSON.stringify(choice)).catch(() => undefined);
+  };
 
   const keys = useQuery(api.aiProviders.list);
   const preferences = useQuery(api.aiProviders.getPreferences);
@@ -94,7 +98,7 @@ export const useAgentModel = () => {
     ? { ...(preferences.defaultKeyId ? { keyId: preferences.defaultKeyId } : {}), modelId: preferences.defaultModelId }
     : null;
   const model =
-    [picked ?? null, preferred].find(
+    [picked, preferred].find(
       (choice): choice is AgentModelChoice => choice !== null && isAvailable(choice),
     ) ?? { modelId: resolveCatalogModel(platformCatalog, undefined).id };
 
@@ -111,5 +115,5 @@ export const useAgentModel = () => {
       .map((k) => ({ title: `${AI_PROVIDERS[k.provider].label} · ${k.label}${k.status === "invalid" ? " (invalid)" : ""}`, keyId: k._id, models: keyModels(k) })),
   ];
 
-  return { model, setModel: setStored, label, acceptsImages, groups };
+  return { model, setModel, label, acceptsImages, groups };
 };

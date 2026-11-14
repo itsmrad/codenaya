@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -8,6 +9,11 @@ import type { AddressInfo } from "node:net";
 
 export const STUB_MODEL = "stub-model";
 export const STUB_TITLE = "Stub chat title";
+/**
+ * Marks a swarm worker's system prompt. `SWARM_WORKER_NOTE` (S2) must contain
+ * this exact string so specs can tell worker requests apart.
+ */
+export const SWARM_WORKER_MARKER = "[swarm-worker]";
 
 export interface StubChatRequest {
   model: string;
@@ -36,6 +42,25 @@ interface StubOptions {
   /** The JSON object returned to a structured-output request. */
   object?: (request: StubChatRequest) => unknown;
 }
+
+/** The request's system prompt text (a worker's brief and owned paths live here). */
+export const systemPrompt = (request: StubChatRequest) =>
+  request.messages
+    .filter((message) => message.role === "system")
+    .map(({ content }) => (typeof content === "string" ? content : JSON.stringify(content)))
+    .join("\n");
+
+/**
+ * Which agent sent a tool-offering request, so a swarm spec can script each
+ * role from the existing callbacks: a worker has the marker, the orchestrator
+ * is offered `delegateTasks`, anything else is a plain coding agent.
+ */
+export const stubRole = (request: StubChatRequest) =>
+  systemPrompt(request).includes(SWARM_WORKER_MARKER)
+    ? "worker"
+    : request.tools?.some((tool) => tool.function.name === "delegateTasks")
+      ? "orchestrator"
+      : "agent";
 
 const readJson = async (request: IncomingMessage) => {
   let body = "";
@@ -78,7 +103,8 @@ export const startStubProvider = async (
       content: null,
       tool_calls: [
         {
-          id: `call_${Date.now()}`,
+          // Concurrent swarm agents can share a millisecond, so ids are random.
+          id: `call_${randomUUID()}`,
           type: "function",
           function: { name: tool.name, arguments: JSON.stringify(tool.arguments) },
         },
