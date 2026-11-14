@@ -6,6 +6,7 @@ import {
   BUILD_NOT_BUILT_NOTE,
   BUILD_REPAIR_NUDGE,
   BUILD_RESERVE_NUDGE,
+  BUILD_RETRY_NUDGE,
   BUILD_UNVERIFIED_NOTE,
   createBuildCheckGate,
   hasUncheckedWrites,
@@ -17,6 +18,7 @@ import { OUTPUT_LIMIT_ERROR } from "./lib/output-limit";
 const call = (name: string, data = "ok") => ({ tool: { name }, content: { data } });
 const turn = (...toolCalls: ReturnType<typeof call>[]) => ({ toolCalls });
 const failedCheck = () => call("checkBuild", "Error: Build failed.");
+const unfinishedCheck = () => call("checkBuild", "Error: The build check could not finish (deadline_exceeded).");
 
 describe("hasUncheckedWrites", () => {
   it("is false for a run that wrote nothing", () => {
@@ -49,7 +51,7 @@ describe("hasUncheckedWrites", () => {
     expect(hasUncheckedWrites([turn(call("scaffoldViteApp")), turn(failedCheck())])).toBe(true);
   });
 
-  it("is false after a check that could not run, which the agent reports instead", () => {
+  it("is false after a check that could not run, which only the gate retries", () => {
     const unfinished = call(
       "checkBuild",
       "Error: The build check could not finish (Command timed out). This is not an error in the project's code.",
@@ -132,6 +134,40 @@ describe("createBuildCheckGate", () => {
     }
     expect(gate.shouldContinue(results)).toBe(false);
     expect(gate.takeNudge()).toBeUndefined();
+  });
+
+  it("retries a check that could not finish once, then a verified check ends the run", () => {
+    const gate = createBuildCheckGate();
+    const timedOut = [turn(call("createFiles")), turn(unfinishedCheck()), turn()];
+
+    expect(gate.shouldContinue(timedOut)).toBe(true);
+    expect(gate.takeNudge()).toBe(BUILD_RETRY_NUDGE);
+    expect(gate.repairs).toBe(0);
+    expect(gate.shouldContinue([...timedOut, turn(call("checkBuild", "Build verified")), turn()])).toBe(false);
+    expect(unverifiedBuildNote([...timedOut, turn(call("checkBuild", "Build verified"))])).toBeUndefined();
+  });
+
+  it("does not retry a second check that could not finish", () => {
+    const gate = createBuildCheckGate();
+    const timedOut = [turn(call("createFiles")), turn(unfinishedCheck()), turn()];
+
+    expect(gate.shouldContinue(timedOut)).toBe(true);
+    gate.takeNudge();
+    const twice = [...timedOut, turn(unfinishedCheck()), turn()];
+    expect(gate.shouldContinue(twice)).toBe(false);
+    expect(gate.takeNudge()).toBeUndefined();
+    expect(unverifiedBuildNote(twice)).toBe(BUILD_UNVERIFIED_NOTE);
+  });
+
+  it("still repairs a failed check after the retry", () => {
+    const gate = createBuildCheckGate();
+    const timedOut = [turn(call("createFiles")), turn(unfinishedCheck()), turn()];
+
+    expect(gate.shouldContinue(timedOut)).toBe(true);
+    expect(gate.takeNudge()).toBe(BUILD_RETRY_NUDGE);
+    expect(gate.shouldContinue([...timedOut, turn(failedCheck()), turn()])).toBe(true);
+    expect(gate.takeNudge()).toBe(BUILD_REPAIR_NUDGE);
+    expect(gate.repairs).toBe(1);
   });
 
   it("asks once for the check when the step budget runs low", () => {
