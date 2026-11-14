@@ -1,6 +1,5 @@
 import { v } from "convex/values";
 
-import { MAX_PLATFORM_MODELS } from "../src/features/admin/platform-models";
 import { spendPeriodStart, spentInPeriod } from "../src/features/billing/model-spend";
 import { type MutationCtx, type QueryCtx, query } from "./_generated/server";
 import { requireAdmin } from "./admin";
@@ -34,18 +33,20 @@ export const getForServer = query({
   },
 });
 
-/** Site-wide spend per model as stored, for /admin. The client applies the period. */
+/** Site-wide spend of each limited catalog model as stored, for /admin. The client applies the period. */
 export const listTotalsForAdmin = query({
   args: {},
   returns: v.array(v.object({ modelId: v.string(), periodStartsAt: v.number(), spentUsd: v.number() })),
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    // Rows of removed models stay, so leave room beyond the catalog's size.
-    const rows = await ctx.db
-      .query("modelSpend")
-      .withIndex("by_userId_modelId", (q) => q.eq("userId", null))
-      .take(MAX_PLATFORM_MODELS * 4);
-    return rows.map(({ modelId, periodStartsAt, spentUsd }) => ({ modelId, periodStartsAt, spentUsd }));
+    // One indexed read per limited model (at most MAX_PLATFORM_MODELS): rows of
+    // removed models stay, so a prefix of the index could miss active ones.
+    const catalog = await ctx.db.query("platformCatalog").first();
+    const limited = (catalog?.models ?? []).filter((model) => model.spendLimit);
+    const rows = await Promise.all(limited.map((model) => spendRow(ctx, null, model.id)));
+    return rows.flatMap((row) =>
+      row ? [{ modelId: row.modelId, periodStartsAt: row.periodStartsAt, spentUsd: row.spentUsd }] : [],
+    );
   },
 });
 

@@ -114,8 +114,8 @@ export class ModelChoiceError extends Error {
   }
 }
 
-/** Refuses `model` once its per-user or site-wide spend limit is reached (ADR 0012). */
-async function refuseOverSpendLimit({
+/** Which cap of `model`'s spend limit (ADR 0012) `userId` has reached, if any. */
+async function spendLimitReached({
   internalKey,
   userId,
   model,
@@ -125,11 +125,20 @@ async function refuseOverSpendLimit({
   model: RoutedModel;
 }) {
   const limit = model.spendLimit;
-  if (!limit) return;
+  if (!limit) return null;
   const spent = await convex.query(api.modelSpend.getForServer, { internalKey, userId, modelId: model.id });
-  const refusal = spendRefusal(limit, spent, Date.now());
-  if (refusal) {
-    throw new ModelChoiceError(spendRefusalMessage(refusal, model.name, limit.resets), 402, MODEL_LIMIT_CODE);
+  return spendRefusal(limit, spent, Date.now());
+}
+
+/** Refuses `model` once its per-user or site-wide spend limit is reached (ADR 0012). */
+async function refuseOverSpendLimit(args: Parameters<typeof spendLimitReached>[0]) {
+  const refusal = await spendLimitReached(args);
+  if (refusal && args.model.spendLimit) {
+    throw new ModelChoiceError(
+      spendRefusalMessage(refusal, args.model.name, args.model.spendLimit.resets),
+      402,
+      MODEL_LIMIT_CODE,
+    );
   }
 }
 
@@ -169,7 +178,8 @@ const platformRunLabel = (model: RoutedModel) => runModelLabel({ id: model.id, l
  * pool, else the fixed routes, among routes whose provider key is set; else the
  * catalog default) before any of these checks, so the message and the run
  * record that concrete model. An image send on Auto only ever routes to a
- * vision model, and is refused when there is none.
+ * vision model, and is refused when there is none. Auto skips models at
+ * their spend limit; with none left it falls to the default, checked as usual.
  */
 export async function validateModelChoice({
   internalKey,
@@ -192,10 +202,15 @@ export async function validateModelChoice({
       convex.query(api.credits.getForServer, { internalKey, userId }),
     ]);
     const auto = modelId === AUTO_MODEL_ID;
+    const configured = catalog.models.filter((m) => isPlatformConfigured(m.provider));
+    // Auto routes around a model at its spend limit instead of refusing the send.
+    const reached = auto
+      ? await Promise.all(configured.map((m) => spendLimitReached({ internalKey, userId, model: m })))
+      : [];
     const routed =
       auto &&
       autoRouteModel(
-        catalog.models.filter((m) => isPlatformConfigured(m.provider)),
+        configured.filter((_, i) => !reached[i]),
         // Images need a vision model whatever the task, plan mode included.
         withImages ? "vision" : task,
         catalog.autoModelIds,

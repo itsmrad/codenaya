@@ -204,6 +204,25 @@ describe("model spend limits (ADR 0012)", () => {
     expect((await spend(t)).user).toEqual({ periodStartsAt: Date.UTC(2026, 10, 1), spentUsd: 0.1 });
   });
 
+  test("lists the site's spend for the catalog's limited models only, to admins", async () => {
+    const t = setup();
+    await seedCatalog(t);
+    // Removed models' rows stay; they sort before the active model in the index.
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 300; i++) {
+        await ctx.db.insert("modelSpend", { userId: null, modelId: `a-removed-${i}`, periodStartsAt: 0, spentUsd: 1 });
+      }
+    });
+    await record(t, await seedMessage(t), { inputTokens: 1, outputTokens: 1, costUsd: 0.4 });
+
+    const admin = { subject: "user_admin", email: "admin@example.com", emailVerified: true };
+    vi.stubEnv("ADMIN_EMAIL", admin.email);
+    expect(await t.withIdentity(admin).query(api.modelSpend.listTotalsForAdmin, {})).toEqual([
+      { modelId: LIMITED, periodStartsAt: Date.UTC(2026, 9, 1), spentUsd: 0.4 },
+    ]);
+    await expect(t.withIdentity({ subject: ALICE }).query(api.modelSpend.listTotalsForAdmin, {})).rejects.toThrow();
+  });
+
   test("counts nothing for a model without a limit", async () => {
     const t = setup();
     await seedCatalog(t, false);

@@ -928,7 +928,8 @@ describe("isProviderKeyRejection", () => {
 
 describe("validateModelChoice: spend limits (ADR 0012)", () => {
   const monthly = { perUserUsd: 1, totalUsd: 100, resets: "monthly" as const };
-  const now = Date.now();
+  // Pinned so the promo model case doesn't expire with the promotion.
+  const now = BEFORE_PROMO_ENDS;
   const thisMonth = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1);
   const limited = {
     ...ROUTED_SAVED,
@@ -954,7 +955,13 @@ describe("validateModelChoice: spend limits (ADR 0012)", () => {
   beforeEach(() => {
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-platform");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
     mocks.platform.mockReturnValue(limited);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("runs a limited model under both caps, and asks for that model's spend", async () => {
@@ -982,6 +989,22 @@ describe("validateModelChoice: spend limits (ADR 0012)", () => {
       code: "model_limit_reached",
       message: expect.stringContaining("Claude Opus 5.5 has reached its usage limit"),
     });
+  });
+
+  it("routes Auto around a model at its limit to the pool's next pick", async () => {
+    mocks.platform.mockReturnValue({
+      ...limited,
+      models: limited.models.map((model) =>
+        model.id === "x-ai/grok-4.7" ? { ...model, pricing: { mode: "blended", usdPerMTok: 5 } } : model,
+      ),
+      autoModelIds: ["x-ai/grok-4.7", "google/gemini-3.8-flash"],
+    });
+    const auto = () => validateModelChoice({ internalKey: "ik", userId: "user_1", model: "auto" });
+
+    answer(spent(0.5, 50));
+    expect(await auto()).toMatchObject({ modelId: "x-ai/grok-4.7" });
+    answer(spent(1, 50));
+    expect(await auto()).toMatchObject({ modelId: "google/gemini-3.8-flash", label: "Auto · Gemini 3.8 Flash" });
   });
 
   it("never reads spend for a model without a limit", async () => {
