@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createTool } from "@inngest/agent-kit";
 
 import { convex } from "@/lib/convex-client";
+import { getAppError } from "@/lib/convex-error";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
@@ -33,10 +34,13 @@ export const createScaffoldViteAppTool = ({
 
           const byDir = new Map<string, { name: string; content: string }[]>();
           const locked: string[] = [];
+          // A starter file a lock keeps out of the project: the starter is incomplete (#548).
+          let blocked = false;
           for (const file of VITE_REACT_STARTER) {
             // Skipped before any write, so no folder is made inside a locked one (#307).
             if (lockedPathError(index, file.path)) {
               locked.push(file.path);
+              blocked ||= !index.byPath.get(file.path)?.file;
               continue;
             }
             const { dir, name } = splitPath(file.path);
@@ -48,24 +52,50 @@ export const createScaffoldViteAppTool = ({
           // Root last: the preview starts booting once package.json exists, so
           // it must land with (not before) the files the starter references (#254).
           const batches = [...byDir].sort(([a], [b]) => Number(a === "") - Number(b === ""));
+          let heldBack: string[] = [];
           for (const [dir, files] of batches) {
+            if (dir === "" && blocked) {
+              heldBack = files.map((file) => file.name);
+              break;
+            }
+            let parentId;
+            try {
+              parentId = await ensureFolder(dir);
+            } catch (error) {
+              // A folder locked after the snapshot also refuses the folders inside it (#548).
+              if (getAppError(error)?.code !== "FORBIDDEN") throw error;
+              locked.push(...files.map((file) => `${dir}/${file.name}`));
+              blocked = true;
+              continue;
+            }
             const results = await convex.mutation(api.system.createFiles, {
               internalKey,
               projectId,
-              parentId: await ensureFolder(dir),
+              parentId,
               files,
             });
             for (const result of results) {
               const path = dir ? `${dir}/${result.name}` : result.name;
-              (result.error ? kept : created).push(path);
+              if (!result.error) created.push(path);
+              else if (result.fileId) kept.push(path);
+              else {
+                // Refused with no file: its folder was locked after the snapshot (#548).
+                locked.push(path);
+                blocked = true;
+              }
             }
           }
 
+          // An "Error" result, so the run doesn't count it as a finished starter (#548).
           return [
-            `Scaffolded the Vite + React starter. Created: ${created.join(", ") || "nothing"}.`,
+            blocked
+              ? `Error: Incomplete scaffold. Locks kept starter files out${heldBack.length > 0 ? `, so ${heldBack.join(", ")} were not written either and the preview won't start` : ""}. Created: ${created.join(", ") || "nothing"}.`
+              : `Scaffolded the Vite + React starter. Created: ${created.join(", ") || "nothing"}.`,
             kept.length > 0 ? `Kept existing: ${kept.join(", ")}.` : "",
             locked.length > 0 ? `Not written, locked by the user: ${locked.join(", ")}. Don't modify them.` : "",
-            "Extend package.json with editFile, keeping every package it lists: the starter's config and entry files import them.",
+            blocked
+              ? "Tell the user the Vite starter needs these paths unlocked."
+              : "Extend package.json with editFile, keeping every package it lists: the starter's config and entry files import them.",
           ]
             .filter(Boolean)
             .join("\n");
