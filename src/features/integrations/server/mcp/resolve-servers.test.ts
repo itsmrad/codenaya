@@ -89,6 +89,7 @@ describe("resolveMcpServers", () => {
     expect(server.url).toContain("project_ref=abcdefgh");
     expect(server.url).toContain("features=database%2Cdocs");
     expect(server.readOnlyEnforced).toBe(true);
+    expect(server.annotationsTrusted).toBe(true);
   });
 
   it("marks read-only enforced only where the provider enforces it", async () => {
@@ -257,6 +258,8 @@ describe("resolveMcpServers", () => {
       expect(servers[0].destructiveTools).toEqual([]);
       // A recorded read-only flag on a custom server is not enforced anywhere.
       expect(servers[0].readOnlyEnforced).toBe(false);
+      // Its tool annotations cannot classify anything as read-only.
+      expect(servers[0].annotationsTrusted).toBe(false);
     });
   });
 

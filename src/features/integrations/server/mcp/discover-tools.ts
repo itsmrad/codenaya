@@ -97,23 +97,29 @@ export function qualifyToolName(namespace: string, toolName: string): string {
  * - Listed in the catalog's `destructiveTools`: always gated. Server hints are
  *   advisory and never override the known write list.
  * - `destructiveHint: true`: always gated, even beside `readOnlyHint: true`.
- * - Otherwise ungated only when classified read-only, either by an explicit
- *   `readOnlyHint: true` or because the link uses the provider's own
- *   server-enforced read-only mode. Missing or malformed hints are gated.
+ * - Otherwise ungated only when classified read-only by a trusted source: an
+ *   explicit `readOnlyHint: true` from a catalog provider, or a link in the
+ *   provider's own server-enforced read-only mode. Missing or malformed hints
+ *   are gated.
  *
- * Custom servers take the same rule with an empty list. Their `readOnlyHint` is
- * honoured because the server that declares it also executes the call: a false
- * hint gives it nothing it lacked, while the gate still stops the model from
- * running unannotated or declared writes unreviewed. A hint flipped after
- * approval is caught by the fingerprint (see `fingerprintTool`).
+ * Custom servers are untrusted, so their `readOnlyHint` is ignored (as the MCP
+ * spec advises) and every tool on them is gated: a server, or a prompt injection
+ * through one, must not be able to label a write read-only and skip review. A
+ * catalog hint flipped after approval is caught by the fingerprint (see
+ * `fingerprintTool`); a tool first seen on a later run is withheld as drift.
  */
 export function requiresApproval(
-  server: Pick<ResolvedMcpServer, "destructiveTools" | "readOnlyEnforced">,
+  server: Pick<
+    ResolvedMcpServer,
+    "destructiveTools" | "readOnlyEnforced" | "annotationsTrusted"
+  >,
   tool: McpToolDefinition,
 ): boolean {
   if (server.destructiveTools.includes(tool.name)) return true;
   if (tool.annotations?.destructiveHint === true) return true;
-  return !(isAnnotatedReadOnly(tool) || server.readOnlyEnforced === true);
+  const trustedReadOnly =
+    server.annotationsTrusted === true && isAnnotatedReadOnly(tool);
+  return !(trustedReadOnly || server.readOnlyEnforced === true);
 }
 
 /**
