@@ -4,10 +4,14 @@ import type { Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import {
   aiProviderValidator,
+  githubSyncValidator,
   messageStepValidator,
+  projectSourceValidator,
+  stuckRunValidator,
   runModelValidator,
 } from "./schema";
-import { createCheckpoint } from "./checkpoints";
+import { MAX_CHECKPOINT_FILES, createCheckpoint } from "./checkpoints";
+import { runsSince, syncedAt } from "./githubSync";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import {
@@ -33,6 +37,12 @@ import {
 } from "./fileContents";
 import { resolveProjectSkills } from "./skills";
 import { countProjectBuilt } from "./stats";
+import {
+  recordPackageJsonReady,
+  recordProjectEvent,
+  recordRunFinished,
+  recordRunStarted,
+} from "./activationEvents";
 import { MAX_ENV_VARS } from "./envVars";
 import { MAX_PROJECT_CONNECTIONS } from "./integrations";
 
@@ -102,6 +112,9 @@ export const createMessage = mutation({
       ...(args.images?.length ? { images: args.images } : {}),
       ...(args.mode ? { mode: args.mode } : {}),
     });
+    if (args.role === "assistant" && args.status === "processing") {
+      await recordRunStarted(ctx, args.projectId);
+    }
 
     // Update conversation's updatedAt
     await ctx.db.patch("conversations", args.conversationId, {
@@ -117,14 +130,24 @@ export const updateMessageContent = mutation({
     internalKey: v.string(),
     messageId: v.id("messages"),
     content: v.string(),
+    /** Set when the content is a failure reply, so the run counts as an error (#339). */
+    outcome: v.optional(v.literal("error")),
+    stuck: v.optional(stuckRunValidator),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    // A run the loop guard stopped (#452) did not succeed either.
+    await recordRunFinished(
+      ctx,
+      await ctx.db.get("messages", args.messageId),
+      args.outcome ?? (args.stuck ? "error" : "ok"),
+    );
     await ctx.db.patch("messages", args.messageId, {
       content: args.content,
       status: "completed" as const,
       completedAt: Date.now(),
+      ...(args.stuck ? { stuck: args.stuck } : {}),
     });
   },
 });
@@ -178,6 +201,13 @@ export const updateMessageStatus = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    if (args.status !== "processing") {
+      await recordRunFinished(
+        ctx,
+        await ctx.db.get("messages", args.messageId),
+        args.status === "cancelled" ? "cancelled" : "ok",
+      );
+    }
     await ctx.db.patch("messages", args.messageId, {
       status: args.status,
       completedAt: args.status === "processing" ? undefined : Date.now(),
@@ -368,6 +398,7 @@ export const createFile = mutation({
       updatedAt: Date.now(),
     });
     await insertFileContent(ctx, fileId, args.projectId, args.content);
+    await recordPackageJsonReady(ctx, args);
 
     return fileId;
   },
@@ -417,6 +448,7 @@ export const createFiles = mutation({
         updatedAt: Date.now(),
       });
       await insertFileContent(ctx, fileId, args.projectId, file.content);
+      await recordPackageJsonReady(ctx, { ...args, name: file.name });
 
       results.push({ name: file.name, fileId });
     }
@@ -613,6 +645,7 @@ export const updateExportStatus = mutation({
       )
     ),
     repoUrl: v.optional(v.string()),
+    error: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -620,8 +653,103 @@ export const updateExportStatus = mutation({
     await ctx.db.patch("projects", args.projectId, {
       exportStatus: args.status,
       exportRepoUrl: args.repoUrl,
+      exportError: args.error,
+      // A cancel or a new sync ends a running pull's right to write (#343).
+      activePullCheckpointId: undefined,
       updatedAt: Date.now(),
     });
+    if (args.status === "completed") {
+      await recordProjectEvent(
+        ctx,
+        args.projectId,
+        { name: "first_publish_or_export", props: { kind: "export" } },
+        { once: true },
+      );
+    }
+  },
+});
+
+/** Links the project to its GitHub repo or moves its sync point (#343). */
+export const setGithubSync = mutation({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    githubSync: githubSyncValidator,
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    await ctx.db.patch("projects", args.projectId, { githubSync: args.githubSync });
+  },
+});
+
+/**
+ * What a GitHub push commits (#343): the agent runs since the last sync, each
+ * with its prompt, its summary and the checkpoint taken just before it.
+ */
+export const getGithubPushPlan = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const project = await ctx.db.get("projects", args.projectId);
+    if (!project?.githubSync) return null;
+
+    const { runs, more } = await runsSince(ctx, project._id, syncedAt(project.githubSync));
+    return {
+      githubSync: project.githubSync,
+      // The next sync point, on Convex's clock like `_creationTime`. A cached
+      // result is still right: a newer run would have invalidated it.
+      planAt: Date.now(),
+      more,
+      runs: await Promise.all(
+        runs.map(async (run) => {
+          const checkpoint = await ctx.db
+            .query("checkpoints")
+            .withIndex("by_message", (q) => q.eq("messageId", run._id))
+            .first();
+          return {
+            messageId: run._id,
+            createdAt: run._creationTime,
+            prompt: checkpoint?.label ?? "",
+            summary: run.content,
+            checkpointId: checkpoint?._id ?? null,
+          };
+        }),
+      ),
+    };
+  },
+});
+
+/** A checkpoint's files with their paths, binary ones with a download URL. */
+export const getCheckpointFilesWithUrls = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    checkpointId: v.id("checkpoints"),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const checkpoint = await ctx.db.get("checkpoints", args.checkpointId);
+    if (!checkpoint || checkpoint.projectId !== args.projectId) {
+      throw new Error("Checkpoint not found");
+    }
+    const rows = await ctx.db
+      .query("checkpointFiles")
+      .withIndex("by_checkpoint_and_path", (q) => q.eq("checkpointId", checkpoint._id))
+      .take(MAX_CHECKPOINT_FILES);
+    return await Promise.all(
+      rows.map(async ({ path, type, content, storageId }) => ({
+        path,
+        type,
+        content,
+        storageId,
+        storageUrl: storageId ? await ctx.storage.getUrl(storageId) : null,
+      })),
+    );
   },
 });
 
@@ -666,6 +794,10 @@ export const createProject = mutation({
       importStatus: "importing",
     });
     await countProjectBuilt(ctx);
+    await recordProjectEvent(ctx, projectId, {
+      name: "project_created",
+      props: { source: "import" },
+    });
 
     return projectId;
   },
@@ -677,6 +809,8 @@ export const createProjectWithConversation = mutation({
     projectName: v.string(),
     conversationTitle: v.string(),
     ownerId: v.string(),
+    source: projectSourceValidator,
+    firstBuildPending: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -687,8 +821,13 @@ export const createProjectWithConversation = mutation({
       name: args.projectName,
       ownerId: args.ownerId,
       updatedAt: now,
+      ...(args.firstBuildPending ? { firstBuildPending: true } : {}),
     });
     await countProjectBuilt(ctx);
+    await recordProjectEvent(ctx, projectId, {
+      name: "project_created",
+      props: { source: args.source },
+    });
 
     const conversationId = await ctx.db.insert("conversations", {
       projectId,

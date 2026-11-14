@@ -78,11 +78,44 @@ describe("undeclaredPackages", () => {
   it("names a package a config imports after package.json dropped it", () => {
     const files = starter().map((file) =>
       file.path === "package.json"
-        ? { ...file, content: file.content.replace(/\s*"tailwindcss-animate": "[^"]+",?/, "") }
+        ? { ...file, content: file.content.replace(/\s*"@tailwindcss\/vite": "[^"]+",?/, "") }
         : file,
     );
     expect(undeclaredPackages(files)).toEqual([
-      "tailwindcss-animate (imported by tailwind.config.ts)",
+      "@tailwindcss/vite (imported by vite.config.ts)",
+    ]);
+  });
+
+  it("names a package the starter's CSS imports after package.json dropped it (#331)", () => {
+    const files = starter().map((file) =>
+      file.path === "package.json"
+        ? { ...file, content: file.content.replace(/\s*"tw-animate-css": "[^"]+",?/, "") }
+        : file,
+    );
+    expect(undeclaredPackages(files)).toEqual(["tw-animate-css (imported by src/index.css)"]);
+  });
+
+  it("reads CSS @import and @plugin, skipping local files, URLs and public/", () => {
+    const files = withPackageJson({ devDependencies: { tailwindcss: "^4" } }, [
+      {
+        path: "src/styles/app.css",
+        content: [
+          '@import "tailwindcss";',
+          '@import "theme.css";',
+          '@import "./tokens.css";',
+          '@import url("https://fonts.googleapis.com/css2?family=Inter");',
+          '@import url("@fontsource/inter/400.css");',
+          '@plugin "@tailwindcss/typography";',
+          '/* @import "commented-out"; */',
+        ].join("\n"),
+      },
+      { path: "src/styles/theme.css", content: "" },
+      { path: "src/styles/tokens.css", content: "" },
+      { path: "public/a.css", content: '@import "b.css";' },
+    ]);
+    expect(undeclaredPackages(files)).toEqual([
+      "@fontsource/inter (imported by src/styles/app.css)",
+      "@tailwindcss/typography (imported by src/styles/app.css)",
     ]);
   });
 

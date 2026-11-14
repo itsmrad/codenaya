@@ -29,9 +29,13 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
-import { useProject } from "../hooks/use-projects";
-import { GITHUB_NOT_LINKED } from "../constants";
+import { useSecurityGate } from "@/features/security/hooks/use-security-gate";
+import { SecurityScanDialog } from "@/features/security/components/security-scan-dialog";
+
+import { useProject, useUnpushedRuns } from "../hooks/use-projects";
+import { GITHUB_NOT_LINKED, GITHUB_SYNC_BRANCH, GITHUB_SYNC_CONFLICT } from "../constants";
 import { GithubNotLinkedAlert } from "./github-not-linked-alert";
+import { PullConflictDialog } from "./pull-conflict-dialog";
 import { DownloadZipButton } from "./download-zip-button";
 
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -58,6 +62,8 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
   const project = useProject(projectId);
   const [open, setOpen] = React.useState(false);
   const [githubNotLinked, setGithubNotLinked] = React.useState(false);
+  // Why the last pull needs a choice: local changes, or pushed ones not merged yet.
+  const [pullConflict, setPullConflict] = React.useState<"changed" | "unmerged" | null>(null);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
@@ -66,8 +72,11 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
     setOpen(nextOpen);
   };
 
+  const gate = useSecurityGate(projectId);
   const exportStatus = project?.exportStatus;
   const exportRepoUrl = project?.exportRepoUrl;
+  const githubSync = project?.githubSync;
+  const unpushed = useUnpushedRuns(projectId);
 
   const form = useForm({
     defaultValues: {
@@ -78,32 +87,72 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
     validators: {
       onSubmit: formSchema,
     },
-    onSubmit: async ({ value }) => {
-      setGithubNotLinked(false);
-      try {
-        await ky
-          .post("/api/github/export", {
-            json: {
-              projectId,
-              repoName: value.repoName,
-              visibility: value.visibility,
-              description: value.description || undefined,
-            },
-          })
-
-        toast.success("Export started...");
-      } catch (error) {
-        if (error instanceof HTTPError) {
-          const body = await error.response.json<{ error: string; code?: string }>();
-          if (body.code === GITHUB_NOT_LINKED) {
-            setGithubNotLinked(true);
-            return;
-          }
-        }
-        toast.error("Unable to export repository");
-      }
-    },
+    onSubmit: ({ value }) => gate.guard(() => startExport(value)),
   });
+
+  const startJob = async (
+    url: string,
+    json: object,
+    messages: { started: string; failed: string }
+  ) => {
+    setGithubNotLinked(false);
+    try {
+      const result = await ky.post(url, { json }).json<{ upToDate?: boolean }>();
+
+      toast.success(result.upToDate ? "Already up to date" : messages.started);
+    } catch (error) {
+      if (error instanceof HTTPError) {
+        // A proxy or a crash can answer with HTML.
+        const body = await error.response
+          .json<{ error?: string; code?: string; unmerged?: boolean }>()
+          .catch(() => null);
+        if (body?.code === GITHUB_NOT_LINKED) {
+          setGithubNotLinked(true);
+          return;
+        }
+        if (body?.code === GITHUB_SYNC_CONFLICT) {
+          setPullConflict(body.unmerged ? "unmerged" : "changed");
+          return;
+        }
+        if (body?.error) {
+          toast.error(body.error);
+          return;
+        }
+      }
+      toast.error(messages.failed);
+    }
+  };
+
+  const startExport = (value: z.infer<typeof formSchema>) =>
+    startJob(
+      "/api/github/export",
+      {
+        projectId,
+        repoName: value.repoName,
+        visibility: value.visibility,
+        description: value.description || undefined,
+      },
+      { started: "Export started...", failed: "Unable to export repository" }
+    );
+
+  const startPush = () =>
+    startJob(
+      "/api/github/push",
+      { projectId },
+      { started: "Push started...", failed: "Unable to push changes" }
+    );
+
+  const startPull = (overwrite?: boolean) =>
+    startJob(
+      "/api/github/pull",
+      { projectId, overwrite },
+      { started: "Pull started...", failed: "Unable to pull changes" }
+    );
+
+  const submitLabel = (isSubmitting: boolean) => {
+    if (gate.checking) return "Checking for secrets...";
+    return isSubmitting ? "Creating..." : "Create Repository";
+  };
 
   const handleCancelExport = async () => {
     await ky.post("/api/github/export/cancel", {
@@ -124,7 +173,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
         <div className="flex flex-col items-center gap-3">
           <LoaderIcon className="size-6 animate-spin text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
-            Exporting to GitHub...
+            {githubSync ? "Syncing with GitHub..." : "Exporting to GitHub..."}
           </p>
           <Button
             size="sm"
@@ -138,7 +187,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
       );
     }
 
-    if (exportStatus === "completed" && exportRepoUrl) {
+    if (exportStatus === "completed" && exportRepoUrl && !githubSync) {
       return (
         <div className="flex flex-col items-center gap-3">
           <CheckCircle2Icon className="size-6 text-emerald-500" />
@@ -170,9 +219,11 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
       return (
         <div className="flex flex-col items-center gap-3">
           <XCircleIcon className="size-6 text-rose-500" />
-          <p className="text-sm font-medium">Unable to export</p>
+          <p className="text-sm font-medium">
+            {githubSync ? "Unable to sync" : "Unable to export"}
+          </p>
           <p className="text-xs text-muted-foreground text-center">
-            Something went wrong. Please try again.
+            {project?.exportError ?? "Something went wrong. Please try again."}
           </p>
           <Button
             size="sm"
@@ -182,6 +233,78 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
           >
             Retry
           </Button>
+        </div>
+      );
+    }
+
+    if (githubSync) {
+      const repoUrl = `https://github.com/${githubSync.repo}`;
+      return (
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <h4 className="font-medium text-sm">Sync with GitHub</h4>
+            <p className="text-xs text-muted-foreground break-all">
+              Linked to{" "}
+              <span className="font-medium text-foreground">{githubSync.repo}</span>{" "}
+              ({githubSync.branch})
+            </p>
+          </div>
+          {exportStatus === "cancelled" && (
+            <p className="text-xs text-muted-foreground">
+              Sync cancelled. If a pull had started changing files, restore its
+              &ldquo;Before pull&rdquo; checkpoint from the history.
+            </p>
+          )}
+          {githubSync.syncBranchSha && (
+            <p className="text-xs text-muted-foreground">
+              {githubSync.branch} changed on GitHub, so your changes are on the{" "}
+              <span className="font-medium text-foreground">{GITHUB_SYNC_BRANCH}</span> branch.{" "}
+              <Link
+                href={`${repoUrl}/compare/${githubSync.branch}...${GITHUB_SYNC_BRANCH}?expand=1`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                Open a pull request
+              </Link>
+            </p>
+          )}
+          {unpushed && (
+            <p className="text-xs text-muted-foreground">
+              {unpushed.running
+                ? "An agent run is in progress. Push once it finishes."
+                : unpushed.count === 0
+                ? "No agent runs to push. Manual edits are pushed too."
+                : `${unpushed.count}${unpushed.more ? "+" : ""} agent ${unpushed.count === 1 && !unpushed.more ? "run" : "runs"} not pushed yet.`}
+            </p>
+          )}
+          {githubNotLinked && <GithubNotLinkedAlert />}
+          <div className="flex flex-col w-full gap-2">
+            <Button
+              size="sm"
+              className="w-full"
+              disabled={gate.checking || !unpushed || unpushed.running}
+              onClick={() => gate.guard(startPush)}
+            >
+              {gate.checking ? "Checking for secrets..." : "Push changes"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              // A running agent would write over the pulled files.
+              disabled={!unpushed || unpushed.running}
+              onClick={() => startPull()}
+            >
+              Pull from GitHub
+            </Button>
+            <Button size="sm" variant="outline" className="w-full" asChild>
+              <Link href={repoUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLinkIcon className="size-4 mr-1" />
+                View on GitHub
+              </Link>
+            </Button>
+          </div>
         </div>
       );
     }
@@ -292,7 +415,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
                 className="w-full"
                 disabled={!canSubmit || isSubmitting}
               >
-                {isSubmitting ? "Creating..." : "Create Repository"}
+                {submitLabel(isSubmitting)}
               </Button>
             )}
           </form.Subscribe>
@@ -314,25 +437,50 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
     return <FaGithub className="size-3.5" />;
   };
 
+  const hasUnpushed = !!unpushed && unpushed.count > 0;
+  const triggerLabel = hasUnpushed ? "Export (unpushed changes)" : "Export";
+
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label="Export"
-          title="Export"
-          className="flex items-center gap-1.5 h-8 px-2 @3xl:px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
+          aria-label={triggerLabel}
+          title={triggerLabel}
+          className="relative flex items-center gap-1.5 h-8 px-2 @3xl:px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
         >
           {getStatusIcon()}
           <span className="hidden @3xl:inline">Export</span>
+          {hasUnpushed && (
+            <span aria-hidden className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" />
+          )}
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-80" align="start">
         {renderContent()}
+        <SecurityScanDialog pending={gate.pending} onDismiss={gate.dismiss} />
         <div className="mt-4 border-t pt-4">
           <DownloadZipButton projectId={projectId} />
         </div>
       </PopoverContent>
+      {githubSync && (
+        <PullConflictDialog
+          branch={githubSync.branch}
+          open={pullConflict !== null}
+          unmerged={pullConflict === "unmerged"}
+          onOpenChange={(open) => !open && setPullConflict(null)}
+          // Reopened: the dialog's click closed the popover, which shows the
+          // progress and the secret scan.
+          onOverwrite={() => {
+            setOpen(true);
+            void startPull(true);
+          }}
+          onKeepLocal={() => {
+            setOpen(true);
+            gate.guard(startPush);
+          }}
+        />
+      )}
     </Popover>
   );
 };
