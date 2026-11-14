@@ -38,8 +38,12 @@ export const debounceSerial = (task: () => Promise<void>, delayMs: number) => {
     await current;
   };
 
-  /** Runs a scheduled task now and resolves once nothing is scheduled or running. */
-  const flush = async () => {
+  /**
+   * Runs a scheduled task now and resolves once nothing is scheduled or
+   * running. `onDrained` runs in the same tick the queue is found empty, so
+   * nothing can be scheduled between the two.
+   */
+  const flush = async (onDrained?: () => void) => {
     while (timer !== undefined || current) {
       if (current) {
         await current;
@@ -48,6 +52,7 @@ export const debounceSerial = (task: () => Promise<void>, delayMs: number) => {
         await run();
       }
     }
+    onDrained?.();
   };
 
   return { schedule, cancel, flush };

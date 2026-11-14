@@ -31,7 +31,15 @@ import {
   checkRateLimit,
   resetRateLimits,
 } from "@/lib/rate-limit";
-import { MAX_LIVE_SANDBOXES } from "@/features/sandbox-preview/server/project-sandbox";
+import {
+  DEFAULT_INSTALL_COMMAND,
+  MAX_LIVE_SANDBOXES,
+} from "@/features/sandbox-preview/server/project-sandbox";
+import { RESTART_VITE_COMMAND } from "@/features/sandbox-preview/server/restart-vite";
+import {
+  forgetSandbox,
+  requestReinstall,
+} from "@/features/sandbox-preview/server/sandbox-registry";
 import { PATCH } from "./[sandboxId]/route";
 
 const params = { params: Promise.resolve({ sandboxId: "sbx_1" }) };
@@ -239,5 +247,134 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
     );
     expect(sandbox.commands.kill).not.toHaveBeenCalled();
     expect(mocks.sandboxCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/sandbox after ready (#492)", () => {
+  /** A sandbox that boots a static site to ready; installs wait on `finishInstall`. */
+  const bootableSandbox = (sandboxId: string) => {
+    const installs: Array<() => void> = [];
+    let installing = 0;
+    const stats = { maxConcurrentInstalls: 0, restartsWhileInstalling: 0 };
+    const run = vi.fn(async (cmd: string) => {
+      if (cmd === "node --version") return { exitCode: 0, stdout: "v22.12.0\n", stderr: "" };
+      if (cmd.startsWith("curl")) return { exitCode: 0, stdout: "200", stderr: "" };
+      if (cmd === RESTART_VITE_COMMAND && installing > 0) stats.restartsWhileInstalling++;
+      if (cmd === DEFAULT_INSTALL_COMMAND) {
+        installing++;
+        stats.maxConcurrentInstalls = Math.max(stats.maxConcurrentInstalls, installing);
+        await new Promise<void>((resolve) => installs.push(resolve));
+        installing--;
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const sandbox = {
+      sandboxId,
+      kill: vi.fn(),
+      getHost: () => "4000-sbx.e2b.app",
+      files: { makeDir: vi.fn(), write: vi.fn() },
+      commands: { run },
+    };
+    const finishInstall = () => installs.shift()?.();
+    return { sandbox, stats, run, finishInstall, pendingInstalls: () => installs.length };
+  };
+
+  const installRuns = (run: ReturnType<typeof vi.fn>) =>
+    run.mock.calls.filter(([cmd]) => cmd === DEFAULT_INSTALL_COMMAND).length;
+
+  /** Reads NDJSON events until `type` arrives. */
+  const readUntil = async (reader: ReadableStreamDefaultReader<Uint8Array>, type: string) => {
+    const decoder = new TextDecoder();
+    let text = "";
+    while (!text.includes(`"type":"${type}"`)) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error(`stream ended before ${type}`);
+      text += decoder.decode(value, { stream: true });
+    }
+  };
+
+  const drain = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+    while (!(await reader.read()).done) {
+      // Read to the end.
+    }
+  };
+
+  /** Lets pending promise callbacks and zero-delay work run. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  const bootToReady = async (sandboxId: string) => {
+    const boot = bootableSandbox(sandboxId);
+    mocks.sandboxCreate.mockResolvedValue(boot.sandbox);
+    const client = new AbortController();
+    const res = await POST(
+      new Request("http://localhost/api/sandbox", {
+        method: "POST",
+        body: JSON.stringify({ files: [{ path: "index.html", content: "" }] }),
+        signal: client.signal,
+      }),
+    );
+    const reader = res.body!.getReader();
+    await readUntil(reader, "ready");
+    return { ...boot, client, reader };
+  };
+
+  const syncPackageJson = (sandboxId: string) =>
+    PATCH(
+      request(
+        "PATCH",
+        JSON.stringify({ files: [{ path: "package.json", content: "{}" }] }),
+      ),
+      { params: Promise.resolve({ sandboxId }) },
+    );
+
+  beforeEach(() => {
+    mocks.sandboxList.mockReturnValue({ nextItems: async () => [] });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("ok")));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    forgetSandbox("sbx_ready_abort");
+    forgetSandbox("sbx_ready_overlap");
+  });
+
+  it("keeps the sandbox running when the client disconnects, and stops routing reinstalls to the stream", async () => {
+    const { sandbox, client, reader } = await bootToReady("sbx_ready_abort");
+
+    client.abort();
+    await drain(reader);
+
+    expect(sandbox.kill).not.toHaveBeenCalled();
+    expect(requestReinstall("sbx_ready_abort")).toBe(false);
+  });
+
+  it("does not start a PATCH install while the stream's reinstall is still running", async () => {
+    const { sandbox, stats, run, finishInstall, pendingInstalls, client, reader } =
+      await bootToReady("sbx_ready_overlap");
+
+    // A package.json sync queues a reinstall on the stream, then the client leaves.
+    expect(requestReinstall("sbx_ready_overlap")).toBe(true);
+    client.abort();
+    await settle();
+    expect(pendingInstalls()).toBe(1);
+
+    // A sync during the handoff still goes through the serial queue.
+    const patch = syncPackageJson("sbx_ready_overlap");
+    await settle();
+    expect(installRuns(run)).toBe(1);
+
+    finishInstall();
+    await settle();
+    expect(installRuns(run)).toBe(2);
+    expect((await patch).status).toBe(200);
+    finishInstall();
+    await drain(reader);
+
+    expect(stats.maxConcurrentInstalls).toBe(1);
+    expect(stats.restartsWhileInstalling).toBe(0);
+    expect(sandbox.kill).not.toHaveBeenCalled();
+
+    // Drained, so later syncs install through PATCH.
+    expect(requestReinstall("sbx_ready_overlap")).toBe(false);
   });
 });

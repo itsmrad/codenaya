@@ -549,26 +549,29 @@ export async function POST(request: Request) {
           previewUrl,
         });
 
-        // Keep streaming dev server logs until the client disconnects, which
-        // kills the sandbox, or the budget runs out, which leaves it running.
+        // The client gave up before it could know the sandbox, so nothing else
+        // would kill it.
         if (request.signal.aborted) {
           // If already aborted, short-circuit and throw so finally kills the sandbox
           throw new Error("Client aborted request");
         }
 
-        await new Promise<void>((resolve, reject) => {
+        // Keep streaming dev server logs until the client disconnects or the
+        // budget runs out. Either way the sandbox keeps running: the client
+        // has its id and kills it with DELETE when the preview closes (#492).
+        await new Promise<void>((resolve) => {
           const timer = setTimeout(resolve, Math.max(0, budget.left()));
           request.signal.addEventListener("abort", () => {
             clearTimeout(timer);
-            reject(new Error("Client aborted request"));
+            resolve();
           });
         });
 
-        // Out of time. Later package.json syncs install through PATCH, and a
-        // reinstall already due finishes here first.
+        // Syncs keep going through the serial queue until it drains, so a
+        // PATCH install can't overlap one from here. Then they install through PATCH.
         handedOff = true;
-        rememberSandbox(sandbox, userId);
-        await reinstall.flush();
+        const booted = sandbox;
+        await reinstall.flush(() => rememberSandbox(booted, userId));
         send({
           type: "output",
           data: "\nLog stream closed to stay within the server time limit. The preview keeps running.\n",

@@ -109,4 +109,32 @@ describe("debounceSerial", () => {
     await flush();
     expect(task).not.toHaveBeenCalled();
   });
+
+  it("calls onDrained only after a run scheduled during the flush has finished", async () => {
+    const order: string[] = [];
+    let finish = () => {};
+    const task = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = () => {
+            order.push("ran");
+            resolve();
+          };
+        }),
+    );
+    const { schedule, flush } = debounceSerial(task, 100);
+
+    schedule();
+    const flushing = flush(() => order.push("drained"));
+    await vi.advanceTimersByTimeAsync(0);
+    schedule();
+
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order).toEqual(["ran"]);
+
+    finish();
+    await flushing;
+    expect(order).toEqual(["ran", "ran", "drained"]);
+  });
 });
