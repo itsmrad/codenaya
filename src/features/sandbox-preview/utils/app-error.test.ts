@@ -99,6 +99,9 @@ describe("detectBuildError", () => {
         ),
       ).toBeNull();
       expect(detectBuildError(`npm error code EAI_AGAIN\nError: ${install} failed with exit code 1\n`)).toBeNull();
+      // The registry failing is not the app's dependencies either.
+      expect(detectBuildError(`npm error code E503\nError: ${install} failed with exit code 1\n`)).toBeNull();
+      expect(detectBuildError(`npm error socket hang up\nError: ${install} failed with exit code 1\n`)).toBeNull();
     });
 
     it("ignores other lines that mention an exit code", () => {
