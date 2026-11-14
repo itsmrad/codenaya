@@ -14,6 +14,7 @@ type ClerkUserEvent =
       name?: string;
       imageUrl?: string;
       updatedAt: number;
+      createdAt?: number;
     }
   | { kind: "delete"; clerkUserId: string }
   | { kind: "ignore" };
@@ -59,6 +60,7 @@ function parseClerkUserEvent(payload: unknown): ClerkUserEvent | null {
     name: optionalString(fullName) ?? optionalString(user.username),
     imageUrl: optionalString(user.image_url),
     updatedAt: user.updated_at,
+    createdAt: typeof user.created_at === "number" ? user.created_at : undefined,
   };
 }
 
@@ -109,6 +111,7 @@ http.route({
         name: event.name,
         imageUrl: event.imageUrl,
         updatedAt: event.updatedAt,
+        createdAt: event.createdAt,
       });
     } else if (event.kind === "delete") {
       await ctx.runMutation(internal.users.markDeleted, {

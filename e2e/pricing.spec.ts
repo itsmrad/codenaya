@@ -27,7 +27,6 @@ test.describe("pricing page (signed out)", () => {
     await pro.getByRole("button", { name: "Notify me when Pro launches" }).click();
     await expect(pro.getByRole("textbox", { name: "Email address" })).toBeVisible();
     await expect(pro.getByRole("button", { name: "Notify me", exact: true })).toBeEnabled();
-    await expect(page.getByRole("link", { name: "How BYOK works" })).toHaveAttribute("href", "/docs#byok");
 
     await page.waitForLoadState("networkidle");
     expect(errors).toEqual([]);

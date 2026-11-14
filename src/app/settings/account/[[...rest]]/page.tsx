@@ -19,7 +19,9 @@ const appearance = {
       width: "100%",
       maxWidth: "none",
       border: "1px solid var(--border)",
-      borderRadius: "calc(var(--radius) + 4px)",
+      // rounded-md, like the other settings cards.
+      borderRadius: "calc(var(--radius) - 2px)",
+      height: "auto",
       boxShadow: "none",
     },
     scrollBox: { borderRadius: "inherit", boxShadow: "none" },

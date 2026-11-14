@@ -9,7 +9,7 @@ interface Ripple {
 }
 
 // Inputs you type into; checkboxes, buttons, etc. count as interactive instead.
-const TEXT_INPUT = `input:not(${["checkbox", "radio", "submit", "button", "range", "file", "color", "reset", "image"]
+export const TEXT_INPUT = `input:not(${["checkbox", "radio", "submit", "button", "range", "file", "color", "reset", "image"]
   .map((type) => `[type='${type}']`)
   .join(", ")})`;
 
@@ -29,14 +29,14 @@ const DOT_CLASS: Record<Mode, string> = {
   idle: "size-2 shadow-[0_0_8px_color-mix(in_oklab,var(--brand)_60%,transparent)]",
 };
 
-const checkPointerEnabled = () => {
+export const checkPointerEnabled = () => {
   if (typeof window === "undefined") return false;
   const isFinePointer = window.matchMedia("(pointer: fine)").matches;
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   return isFinePointer && !prefersReducedMotion;
 };
 
-const subscribePointer = (callback: () => void) => {
+export const subscribePointer = (callback: () => void) => {
   if (typeof window === "undefined") return () => {};
   const m1 = window.matchMedia("(pointer: fine)");
   const m2 = window.matchMedia("(prefers-reduced-motion: reduce)");

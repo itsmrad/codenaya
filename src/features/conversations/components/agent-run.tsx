@@ -7,6 +7,7 @@ import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import {
   BookOpenIcon,
+  SearchIcon,
   BrainIcon,
   CheckCircle2Icon,
   ChevronRightIcon,
@@ -44,6 +45,7 @@ import {
   STALLED_RUN_MS,
   fixedBuildErrors,
   lastRunActivity,
+  runWaitHint,
   runWrittenPaths,
 } from "../agent-steps";
 import { useRunChanges } from "../hooks/use-checkpoints";
@@ -59,12 +61,15 @@ interface ToolMeta {
 }
 
 const TOOL_META: Record<string, ToolMeta> = {
+  searchFiles: { icon: SearchIcon, running: "Searching for", done: "Searched for" },
   readFiles: { icon: FileTextIcon, running: "Reading", done: "Read", mergeable: true },
   listFiles: { icon: FolderTreeIcon, running: "Listing files", done: "Listed files", mergeable: true },
+  writeFiles: { icon: FilePlus2Icon, running: "Writing", done: "Wrote" },
   createFiles: { icon: FilePlus2Icon, running: "Creating", done: "Created" },
   createFolder: { icon: FolderPlusIcon, running: "Creating folder", done: "Created folder" },
   scaffoldViteApp: { icon: FolderPlusIcon, running: "Scaffolding Vite app", done: "Scaffolded Vite app" },
   updateFile: { icon: FilePenIcon, running: "Editing", done: "Edited" },
+  editFile: { icon: FilePenIcon, running: "Editing", done: "Edited" },
   renameFile: { icon: FileSymlinkIcon, running: "Renaming", done: "Renamed" },
   deleteFiles: { icon: FileX2Icon, running: "Deleting", done: "Deleted" },
   scrapeUrls: { icon: GlobeIcon, running: "Fetching", done: "Fetched" },
@@ -163,7 +168,7 @@ const FileChip = ({ path, onOpen, label = false }: FileChipProps) => {
 const CHIP_LIMIT = 6;
 
 /** Tools whose targets are not project files: their chips never open. */
-const NON_FILE_TOOLS = new Set(["scrapeUrls", "setEnvVar", "loadSkill", "checkBuild"]);
+const NON_FILE_TOOLS = new Set(["searchFiles", "scrapeUrls", "setEnvVar", "loadSkill", "checkBuild"]);
 
 const isFileTool = (tool = "") => !NON_FILE_TOOLS.has(tool) && !tool.includes("__");
 
@@ -538,6 +543,7 @@ export const AgentRun = ({
     startedLive && "animate-in fade-in-0 duration-300 motion-reduce:animate-none";
 
   const liveLabel = liveStepLabel(steps);
+  const hint = live ? runWaitHint({ startedAt, steps, now }) : undefined;
 
   const summary = [
     `${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`,
@@ -621,6 +627,21 @@ export const AgentRun = ({
           </>
         )}
       </CollapsibleTrigger>
+      {/* A quiet run says so honestly instead of looking frozen (#478). The
+          live region stays mounted while the run is live, so screen readers
+          announce the hint when it appears. */}
+      {live && (
+        <p
+          role="status"
+          className={cn(
+            hint
+              ? "border-t border-border px-3 py-2 text-xs text-muted-foreground animate-in fade-in-0 duration-300 motion-reduce:animate-none"
+              : "sr-only",
+          )}
+        >
+          {hint}
+        </p>
+      )}
       {rows.length > 0 && (
         <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
           <div className="border-t border-border px-1.5 py-1.5">

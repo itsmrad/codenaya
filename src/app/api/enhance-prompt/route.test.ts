@@ -100,7 +100,7 @@ describe("POST /api/enhance-prompt", () => {
     expect(prompt).toContain(`Data: ${SPEC.data}`);
 
     const { model, prompt: sent } = mocks.generateObject.mock.calls[0][0];
-    expect(model.modelId).toBe("openai/gpt-5.4-mini");
+    expect(model.modelId).toBe("anthropic/claude-haiku-5.5");
     expect(model.provider).toBe("openai.chat");
     expect(sent).toContain("todo app");
   });

@@ -79,7 +79,8 @@ function subscribe(listener: () => void) {
   };
 }
 
-function setModel(model: AgentModelChoice) {
+/** Saves the browser's pick; signed-out pickers (the landing page) call it directly. */
+export function setModel(model: AgentModelChoice) {
   currentModel = model;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(model));
@@ -108,18 +109,18 @@ function isAvailable(
   return Boolean(key && modelIdsFor(key).includes(choice.modelId));
 }
 
+/** The model picked in this browser, if any, without the signed-in lookups. */
+export const useStoredAgentModel = () =>
+  // Server render has no storage; the client re-renders with the saved value.
+  useSyncExternalStore(subscribe, readModel, () => null);
+
 /**
  * The agent model for the next run: the one picked in this browser (persisted
  * to localStorage), else the user's default from Settings → AI providers, else
  * the platform default. A pick whose key was deleted falls through.
  */
 export function useAgentModel() {
-  const stored = useSyncExternalStore(
-    subscribe,
-    readModel,
-    // Server render has no storage; the client re-renders with the saved value.
-    () => null,
-  );
+  const stored = useStoredAgentModel();
   const keys = useAiProviderKeys();
   const preferences = useAiPreferences();
   const platform = usePlatformModels();

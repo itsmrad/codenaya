@@ -58,20 +58,20 @@ export const SectionNav = ({ label, items }: { label: string; items: SectionNavI
   return (
     <>
       <nav aria-label={label} className="hidden lg:block w-48 shrink-0">
-        <ul className="space-y-1">
+        <ul className="border-l border-border">
           {items.map(({ href, label, icon: Icon }) => (
             <li key={href}>
               <Link
                 href={href}
                 aria-current={href === activeHref ? "page" : undefined}
                 className={cn(
-                  "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  "-ml-px flex items-center gap-2.5 border-l-2 px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.14em] transition-colors",
                   href === activeHref
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                    ? "border-brand bg-brand/[0.05] text-foreground"
+                    : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
                 )}
               >
-                <Icon aria-hidden="true" className="size-4" />
+                <Icon aria-hidden="true" className={cn("size-3.5", href === activeHref && "text-brand")} />
                 {label}
               </Link>
             </li>

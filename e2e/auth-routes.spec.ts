@@ -34,7 +34,11 @@ test.describe("auth routes", () => {
       test(`redirects a signed-out project visit to the branded sign-in page on ${viewport.name} (${viewport.width}px, ${colorScheme})`, async ({ page }) => {
         await page.setViewportSize(viewport);
         await page.addInitScript(
-          (theme) => localStorage.setItem("theme", theme),
+          // The sign-in page keeps the public pages' own theme (landing-theme.tsx).
+          (theme) => {
+            localStorage.setItem("theme", theme);
+            localStorage.setItem("codenaya-landing-theme", theme);
+          },
           colorScheme,
         );
         const errors = collectConsoleErrors(page);

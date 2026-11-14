@@ -26,13 +26,15 @@ export type RoutedModel = Pick<
   CatalogModel,
   "id" | "name" | "vendor" | "vision" | "provider" | "providerModelId" | "access" | "hidden"
 > &
-  Partial<Pick<CatalogModel, "pricing">>;
+  Partial<Pick<CatalogModel, "pricing" | "spendLimit">>;
 
 /** The catalog the server routes platform runs with (`platformCatalog.getForServer`). */
 export interface RoutedCatalog {
   models: readonly RoutedModel[];
   defaultModelId: string;
   utilityModelId: string;
+  /** The admin's Auto pool (#322); unset on the env catalog. */
+  autoModelIds?: readonly string[];
 }
 
 let warnedInvalid = false;

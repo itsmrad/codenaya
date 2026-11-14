@@ -1,3 +1,4 @@
+import { getFunctionName } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -19,11 +20,13 @@ vi.mock("./sealed-key", () => ({ openProviderKey: mocks.openProviderKey }));
 vi.mock("node:dns/promises", () => ({ lookup: mocks.lookup }));
 
 import { DEFAULT_AGENT_MODEL_ID } from "@/features/conversations/agent-models";
+import { AUTO_NO_VISION_MESSAGE } from "@/features/ai-providers/auto-route";
 import { PROMO_ENDS_AT, PROMO_REFUSAL_MESSAGES } from "@/features/promotions/github-promo";
 
 import {
   ModelChoiceError,
   ProviderKeyError,
+  isAutoChoice,
   isProviderKeyRejection,
   requireModelChoice,
   resolveRunModel,
@@ -146,7 +149,7 @@ describe("validateModelChoice (API route)", () => {
     });
     expect(await validate(undefined)).toMatchObject({ modelId: DEFAULT_AGENT_MODEL_ID });
     // Users can't pick the env catalog's hidden utility model.
-    expect(await validate("openai/gpt-5.4-mini")).toMatchObject({ modelId: DEFAULT_AGENT_MODEL_ID });
+    expect(await validate("anthropic/claude-haiku-5.5")).toMatchObject({ modelId: DEFAULT_AGENT_MODEL_ID });
     expect(mocks.query).not.toHaveBeenCalled();
   });
 
@@ -334,6 +337,169 @@ describe("validateModelChoice (API route)", () => {
     });
     expect(rejected?.status).toBe(403);
     expect(await rejected?.json()).toEqual({ error: "AI provider key not found" });
+  });
+});
+
+describe("validateModelChoice: Auto (#322)", () => {
+  const auto = (task?: Parameters<typeof validateModelChoice>[0]["task"], withImages = false) =>
+    validateModelChoice({ internalKey: "ik", userId: "user_1", model: "auto", task, withImages });
+
+  it("runs each task on its route model, labelled as Auto's pick", async () => {
+    expect(await auto("edit")).toEqual({
+      modelId: "openai/gpt-6-luna",
+      label: "Auto · GPT-6 Luna",
+      provider: "openrouter",
+    });
+    for (const task of ["plan", "build", "fix"] as const) {
+      expect(await auto(task)).toMatchObject({ modelId: "anthropic/claude-sonnet-5.5" });
+    }
+    expect(await auto("vision", true)).toMatchObject({ modelId: "anthropic/claude-sonnet-5.5" });
+    // No task (a new project's first prompt) is a build.
+    expect(await auto()).toMatchObject({ label: "Auto · Claude Sonnet 5.5" });
+  });
+
+  it("is a platform choice only: a key's 'auto' model is refused as before", async () => {
+    expect(isAutoChoice("auto")).toBe(true);
+    expect(isAutoChoice({ modelId: "auto" })).toBe(true);
+    expect(isAutoChoice({ keyId: "key_1", modelId: "auto" })).toBe(false);
+    expect(isAutoChoice("openai/gpt-6-luna")).toBe(false);
+
+    mocks.query.mockResolvedValue(openAiKey);
+    await expect(
+      validateModelChoice({ internalKey: "ik", userId: "user_1", model: { keyId: "key_1", modelId: "auto" } }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("never routes to a promo model, and needs no claim", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-platform");
+    mocks.platform.mockReturnValue(ROUTED_SAVED);
+
+    // Sonnet is promo-only here, and no other build route is listed: the default runs.
+    expect(await auto("build")).toEqual({
+      modelId: "google/gemini-3.8-flash",
+      label: "Auto · Gemini 3.8 Flash",
+      provider: "openrouter",
+    });
+    // `toEqual` above: no `promoKind`, so the send takes no promo run.
+    expect(await auto("edit")).toMatchObject({ modelId: "google/gemini-3.8-flash" });
+  });
+
+  it("skips route models whose provider has no key instead of refusing", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    mocks.platform.mockReturnValue({
+      ...ROUTED_SAVED,
+      models: [
+        ...OPUS_FOR_EVERYONE.models.map((model) => ({ ...model, access: "everyone" })),
+        catalogModel("openai/gpt-6.1-sol", "GPT-6.1 Sol"),
+      ],
+    });
+
+    expect(await auto("plan")).toMatchObject({ modelId: "openai/gpt-6.1-sol", label: "Auto · GPT-6.1 Sol" });
+  });
+
+  it("routes images only to a vision route model, refusing when there is none", async () => {
+    mocks.platform.mockReturnValue({
+      models: [
+        catalogModel("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5", { vision: false }),
+        catalogModel("google/gemini-3.8-flash", "Gemini 3.8 Flash"),
+      ],
+      defaultModelId: "anthropic/claude-sonnet-5.5",
+      utilityModelId: "anthropic/claude-sonnet-5.5",
+    });
+    // Plan mode with images still needs a vision model.
+    expect(await auto("plan", true)).toMatchObject({ modelId: "google/gemini-3.8-flash" });
+
+    mocks.platform.mockReturnValue({
+      models: [catalogModel("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5", { vision: false })],
+      defaultModelId: "anthropic/claude-sonnet-5.5",
+      utilityModelId: "anthropic/claude-sonnet-5.5",
+    });
+    await expect(auto("vision", true)).rejects.toMatchObject({
+      message: AUTO_NO_VISION_MESSAGE,
+      status: 400,
+      code: "auto_no_vision_model",
+    });
+  });
+
+  describe("with an admin pool", () => {
+    const POOLED = {
+      models: [
+        catalogModel("cheap", "Cheap", { vision: false, pricing: { mode: "blended", usdPerMTok: 0.5 } }),
+        catalogModel("seer", "Seer", { pricing: { mode: "blended", usdPerMTok: 3 } }),
+        catalogModel("smart", "Smart", {
+          vision: false,
+          pricing: { mode: "split", inputUsdPerMTok: 4, outputUsdPerMTok: 20 },
+        }),
+        catalogModel("keyless", "Keyless", { provider: "anthropic", vision: false, pricing: { mode: "blended", usdPerMTok: 50 } }),
+        catalogModel("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5", { pricing: { mode: "blended", usdPerMTok: 99 } }),
+      ],
+      defaultModelId: "anthropic/claude-sonnet-5.5",
+      utilityModelId: "cheap",
+      autoModelIds: ["cheap", "seer", "smart", "keyless", "removed"],
+    };
+
+    beforeEach(() => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "");
+      mocks.platform.mockReturnValue(POOLED);
+    });
+
+    it("runs builds, plans and fixes on its most capable model, edits on its cheapest", async () => {
+      for (const task of ["plan", "build", "fix"] as const) {
+        // Keyless costs more but has no provider key; the catalog default is outside the pool.
+        expect(await auto(task)).toEqual({ modelId: "smart", label: "Auto · Smart", provider: "openrouter" });
+      }
+      expect(await auto("edit")).toMatchObject({ modelId: "cheap" });
+    });
+
+    it("sends images only to its vision models, whatever the task", async () => {
+      expect(await auto("vision", true)).toMatchObject({ modelId: "seer" });
+      expect(await auto("edit", true)).toMatchObject({ modelId: "seer" });
+    });
+
+    it("refuses images when it has no vision model, never using one outside it", async () => {
+      mocks.platform.mockReturnValue({ ...POOLED, autoModelIds: ["cheap", "smart"] });
+
+      await expect(auto("vision", true)).rejects.toMatchObject({ message: AUTO_NO_VISION_MESSAGE, status: 400 });
+      expect(await auto("build")).toMatchObject({ modelId: "smart" });
+    });
+
+    it.each([
+      ["hidden", { hidden: true }],
+      ["promo", { access: "promo_unlimited" }],
+      ["keyless", { provider: "anthropic" }],
+    ])("refuses images when its only vision member is %s, never leaving the pool", async (_, gate) => {
+      mocks.platform.mockReturnValue({
+        ...POOLED,
+        models: [...POOLED.models, catalogModel("google/gemini-3.8-flash", "Gemini 3.8 Flash"), catalogModel("only", "Only", gate)],
+        autoModelIds: ["only"],
+      });
+
+      await expect(auto("vision", true)).rejects.toMatchObject({
+        message: AUTO_NO_VISION_MESSAGE,
+        status: 400,
+        code: "auto_no_vision_model",
+      });
+      // Text sends fall back to the fixed routes, so Auto keeps working.
+      expect(await auto("build")).toMatchObject({ modelId: "anthropic/claude-sonnet-5.5" });
+    });
+
+    it("keeps the fixed routes when it's empty or only lists models it can't use", async () => {
+      for (const autoModelIds of [[], ["removed", "keyless"]]) {
+        mocks.platform.mockReturnValue({ ...POOLED, autoModelIds });
+        expect(await auto("build")).toMatchObject({ modelId: "anthropic/claude-sonnet-5.5" });
+      }
+    });
+  });
+
+  it("is refused like any platform model once credits are spent", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(BEFORE_PROMO_ENDS);
+    vi.stubEnv("CREDIT_LIMITS_ENFORCED", "true");
+    const day = new Date(BEFORE_PROMO_ENDS).setUTCHours(0, 0, 0, 0);
+    mocks.account.mockReturnValue({ plan: "free", periodStartsAt: day, periodUsed: 60, dayStartsAt: day, dayUsed: 60 });
+
+    await expect(auto("edit")).rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
+    vi.useRealTimers();
   });
 });
 
@@ -696,7 +862,7 @@ describe("resolveRunModel (agent run)", () => {
       authKey: SECRET,
     });
     expect(target(run.coding()).url).toContain("api.openai.com");
-    expect(target(run.title(0)).id).toBe("gpt-5.4-mini");
+    expect(target(run.title(0)).id).toBe("gpt-6-luna");
   });
 
   it("uses a custom endpoint's base URL and first model for titles", async () => {
@@ -757,5 +923,105 @@ describe("isProviderKeyRejection", () => {
     undefined,
   ])("leaves %o to the normal failure path", (error) => {
     expect(isProviderKeyRejection(error)).toBe(false);
+  });
+});
+
+describe("validateModelChoice: spend limits (ADR 0012)", () => {
+  const monthly = { perUserUsd: 1, totalUsd: 100, resets: "monthly" as const };
+  // Pinned so the promo model case doesn't expire with the promotion.
+  const now = BEFORE_PROMO_ENDS;
+  const thisMonth = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1);
+  const limited = {
+    ...ROUTED_SAVED,
+    models: ROUTED_SAVED.models.map((model) =>
+      model.id === "x-ai/grok-4.7" || model.id === "anthropic/claude-opus-5.5"
+        ? { ...model, spendLimit: monthly }
+        : model,
+    ),
+  };
+  const spent = (user: number, total: number) => ({
+    user: { periodStartsAt: thisMonth, spentUsd: user },
+    total: { periodStartsAt: thisMonth, spentUsd: total },
+  });
+  const answer = (spend: ReturnType<typeof spent>) =>
+    mocks.query.mockImplementation(async (ref) => {
+      const name = getFunctionName(ref);
+      if (name === "modelSpend:getForServer") return spend;
+      if (name === "promoClaims:getForServer") return { opusRunsUsed: 0 };
+      return null;
+    });
+  const validate = (model: string) => validateModelChoice({ internalKey: "ik", userId: "user_1", model });
+
+  beforeEach(() => {
+    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-platform");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    mocks.platform.mockReturnValue(limited);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("runs a limited model under both caps, and asks for that model's spend", async () => {
+    answer(spent(0.5, 50));
+    expect(await validate("x-ai/grok-4.7")).toMatchObject({ modelId: "x-ai/grok-4.7" });
+    expect(mocks.query).toHaveBeenCalledWith(expect.anything(), {
+      internalKey: "ik",
+      userId: "user_1",
+      modelId: "x-ai/grok-4.7",
+    });
+  });
+
+  it("refuses with 402 model_limit_reached at the user's cap", async () => {
+    answer(spent(1, 50));
+    await expect(validate("x-ai/grok-4.7")).rejects.toMatchObject({
+      status: 402,
+      code: "model_limit_reached",
+      message: expect.stringContaining("your Grok 4.7 allowance this month"),
+    });
+  });
+
+  it("refuses a promo model at the site-wide cap, claim or not", async () => {
+    answer(spent(0, 100));
+    await expect(validate("anthropic/claude-opus-5.5")).rejects.toMatchObject({
+      code: "model_limit_reached",
+      message: expect.stringContaining("Claude Opus 5.5 has reached its usage limit"),
+    });
+  });
+
+  it("routes Auto around a model at its limit to the pool's next pick", async () => {
+    mocks.platform.mockReturnValue({
+      ...limited,
+      models: limited.models.map((model) =>
+        model.id === "x-ai/grok-4.7" ? { ...model, pricing: { mode: "blended", usdPerMTok: 5 } } : model,
+      ),
+      autoModelIds: ["x-ai/grok-4.7", "google/gemini-3.8-flash"],
+    });
+    const auto = () => validateModelChoice({ internalKey: "ik", userId: "user_1", model: "auto" });
+
+    answer(spent(0.5, 50));
+    expect(await auto()).toMatchObject({ modelId: "x-ai/grok-4.7" });
+    answer(spent(1, 50));
+    expect(await auto()).toMatchObject({ modelId: "google/gemini-3.8-flash", label: "Auto · Gemini 3.8 Flash" });
+  });
+
+  it("refuses an Auto image send with 402 when its only vision model is at its limit", async () => {
+    mocks.platform.mockReturnValue({ ...limited, autoModelIds: ["x-ai/grok-4.7"] });
+    answer(spent(1, 50));
+    await expect(
+      validateModelChoice({ internalKey: "ik", userId: "user_1", model: "auto", withImages: true }),
+    ).rejects.toMatchObject({
+      status: 402,
+      code: "model_limit_reached",
+      message: expect.stringContaining("your Grok 4.7 allowance this month"),
+    });
+  });
+
+  it("never reads spend for a model without a limit", async () => {
+    answer(spent(1_000, 1_000));
+    await validate("google/gemini-3.8-flash");
+    expect(mocks.query.mock.calls.map(([ref]) => getFunctionName(ref))).not.toContain("modelSpend:getForServer");
   });
 });

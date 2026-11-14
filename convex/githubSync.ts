@@ -1,0 +1,184 @@
+import { v } from "convex/values";
+
+import type { Doc, Id } from "./_generated/dataModel";
+import { mutation, query, type QueryCtx } from "./_generated/server";
+import { verifyAuth } from "./auth";
+import {
+  MAX_CHECKPOINTS_PER_PROJECT,
+  applyTree,
+  assertNoRunningAgent,
+  createCheckpoint,
+  runningAgent,
+} from "./checkpoints";
+import { appError } from "./errors";
+import { validateInternalKey } from "./internalKey";
+import { getOwnedProject } from "./projects";
+
+/**
+ * GitHub sync (#343): a push turns the agent runs since the last sync into
+ * commits, one per run. More runs than this can't all still have the
+ * checkpoint their tree comes from, so the push falls back to one commit.
+ */
+export const MAX_PUSH_RUNS = MAX_CHECKPOINTS_PER_PROJECT;
+
+/** When the commits the next push builds on were made. */
+export const syncedAt = (sync: NonNullable<Doc<"projects">["githubSync"]>) =>
+  sync.syncBranchAt ?? sync.lastSyncedAt;
+
+/**
+ * Finished agent runs that may have written files since `since`, oldest
+ * first, at most MAX_PUSH_RUNS. Plan-mode replies wrote nothing. `more` is set
+ * when there are runs past those.
+ */
+export async function runsSince(
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  since: number,
+) {
+  const finished = (status: "completed" | "cancelled") =>
+    ctx.db
+      .query("messages")
+      .withIndex("by_project_status", (q) =>
+        q.eq("projectId", projectId).eq("status", status).gt("_creationTime", since),
+      )
+      .take(MAX_PUSH_RUNS + 1);
+  const batches = [await finished("completed"), await finished("cancelled")];
+  const runs = batches
+    .flat()
+    .filter((message) => message.role === "assistant" && message.mode !== "plan")
+    .sort((a, b) => a._creationTime - b._creationTime);
+  return {
+    runs: runs.slice(0, MAX_PUSH_RUNS),
+    more: runs.length > MAX_PUSH_RUNS || batches.some((batch) => batch.length > MAX_PUSH_RUNS),
+  };
+}
+
+/**
+ * Runs not pushed yet, for the export button's dot, and whether one is still
+ * running (its edits would land in a later run's commit). Null when not linked.
+ */
+export const unpushedRuns = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+    const project = await getOwnedProject(ctx, args.projectId, identity.subject);
+    if (!project.githubSync) return null;
+    const { runs, more } = await runsSince(ctx, project._id, syncedAt(project.githubSync));
+    const running = await ctx.db
+      .query("messages")
+      .withIndex("by_project_status", (q) =>
+        q.eq("projectId", project._id).eq("status", "processing"),
+      )
+      .first();
+    return { count: runs.length, more, running: running !== null };
+  },
+});
+
+const treeEntryValidator = v.object({
+  path: v.string(),
+  type: v.union(v.literal("file"), v.literal("folder")),
+  content: v.optional(v.string()),
+  storageId: v.optional(v.id("_storage")),
+});
+
+/** "Before pull" (#343): a checkpoint with no run, so the pull can be undone. */
+export const createPullCheckpoint = mutation({
+  args: { internalKey: v.string(), projectId: v.id("projects"), label: v.string() },
+  returns: v.id("checkpoints"),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    await assertNoRunningAgent(ctx, args.projectId, "pulling");
+    const checkpointId = await createCheckpoint(ctx, { projectId: args.projectId, label: args.label });
+    await ctx.db.patch("projects", args.projectId, { activePullCheckpointId: checkpointId });
+    return checkpointId;
+  },
+});
+
+/** Whether an agent run is in progress, so the pull route can refuse up front (#343). */
+export const isAgentRunning = query({
+  args: { internalKey: v.string(), projectId: v.id("projects") },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    return (await runningAgent(ctx, args.projectId)) !== null;
+  },
+});
+
+const RESTORE_HINT = 'Restore the "Before pull" checkpoint from the history if needed, then pull again.';
+
+/**
+ * A pull writes only while the project is as its "Before pull" checkpoint
+ * left it (#343): still the active pull (no cancel or newer sync since), no
+ * run since, none running. A retry after a
+ * backoff would otherwise write GitHub's tree over a finished run that no
+ * checkpoint holds. Runs are checked themselves, not their checkpoints, which
+ * are best effort.
+ */
+async function assertPullCanWrite(
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  checkpointId: Id<"checkpoints">,
+) {
+  const project = await ctx.db.get("projects", projectId);
+  if (project?.activePullCheckpointId !== checkpointId) {
+    throw appError("CONFLICT", `The pull was cancelled or replaced by another sync. ${RESTORE_HINT}`);
+  }
+  const checkpoint = await ctx.db.get("checkpoints", checkpointId);
+  const since = checkpoint && (await runsSince(ctx, projectId, checkpoint._creationTime));
+  if (
+    !since ||
+    since.runs.length > 0 ||
+    since.more ||
+    (await runningAgent(ctx, projectId))
+  ) {
+    throw appError("CONFLICT", `The project changed during the pull. ${RESTORE_HINT}`);
+  }
+}
+
+/**
+ * One batch of a pull (#343): writes these files over the project's. With
+ * `tree` (the whole pulled tree, sent once before the batches), it first
+ * deletes every path the tree doesn't have, so the batches never push the
+ * project over the file cap.
+ */
+export const applyPulledFiles = mutation({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    // The pull's "Before pull" checkpoint.
+    checkpointId: v.id("checkpoints"),
+    entries: v.array(treeEntryValidator),
+    tree: v.optional(v.array(v.object({ path: v.string(), type: treeEntryValidator.fields.type }))),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    await assertPullCanWrite(ctx, args.projectId, args.checkpointId);
+    const keep = args.tree && new Map(args.tree.map(({ path, type }) => [path, type]));
+    await applyTree(ctx, args.projectId, args.entries, keep);
+    return null;
+  },
+});
+
+/** Ends a pull (#343): moves the sync point to the pulled commit, so later pushes build on it. */
+export const finishPull = mutation({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    checkpointId: v.id("checkpoints"),
+    sha: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const project = await ctx.db.get("projects", args.projectId);
+    if (!project?.githubSync) throw new Error("Project is not linked to a GitHub repository");
+    await assertPullCanWrite(ctx, args.projectId, args.checkpointId);
+    const { repo, branch } = project.githubSync;
+    await ctx.db.patch("projects", args.projectId, {
+      githubSync: { repo, branch, lastSyncedSha: args.sha, lastSyncedAt: Date.now() },
+      activePullCheckpointId: undefined,
+    });
+    return null;
+  },
+});

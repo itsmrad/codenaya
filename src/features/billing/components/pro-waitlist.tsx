@@ -21,7 +21,7 @@ export const ProWaitlist = () => {
 
   if (status === "joined") {
     return (
-      <p role="status" className="flex w-full items-center justify-center gap-2 text-sm text-foreground">
+      <p role="status" className="flex h-10 w-full items-center justify-center gap-2 text-sm text-foreground">
         <Check className="size-4 text-brand" aria-hidden />
         We&apos;ll email you when Pro is available.
       </p>
@@ -31,7 +31,7 @@ export const ProWaitlist = () => {
   if (status === "idle") {
     return (
       <Button
-        className="w-full"
+        className="h-10 w-full rounded-md"
         variant="outline"
         onClick={() => {
           setEmail(user?.primaryEmailAddress?.emailAddress ?? "");
@@ -72,12 +72,13 @@ export const ProWaitlist = () => {
           autoComplete="email"
           aria-label="Email address"
           placeholder="you@example.com"
+          className="h-10"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           aria-invalid={status === "error"}
           aria-describedby={status === "error" ? "pro-waitlist-error" : undefined}
         />
-        <Button type="submit" disabled={status === "sending"}>
+        <Button type="submit" className="h-10 rounded-md" disabled={status === "sending"}>
           {status === "sending" ? "Saving…" : "Notify me"}
         </Button>
       </div>

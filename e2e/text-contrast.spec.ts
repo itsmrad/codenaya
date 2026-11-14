@@ -30,7 +30,11 @@ const revealAll = async (page: Page) => {
 for (const theme of ["dark", "light"] as const) {
   test.describe(`text contrast, ${theme} theme`, () => {
     test.beforeEach(async ({ page }) => {
-      await page.addInitScript((value) => localStorage.setItem("theme", value), theme);
+      // Public pages keep their own theme (landing-theme.tsx), apart from the app's.
+      await page.addInitScript((value) => {
+        localStorage.setItem("theme", value);
+        localStorage.setItem("codenaya-landing-theme", value);
+      }, theme);
     });
 
     test("landing page", async ({ page }) => {

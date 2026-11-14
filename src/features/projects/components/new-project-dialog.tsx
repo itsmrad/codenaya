@@ -32,7 +32,7 @@ export const NewProjectDialog = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent 
         showCloseButton={false}
-        className="sm:max-w-lg p-0"
+        className="grid-cols-[minmax(0,1fr)] sm:max-w-xl p-0"
       >
         <DialogHeader className="gap-1 px-4 pt-4 text-left">
           <DialogTitle className="text-sm font-medium">

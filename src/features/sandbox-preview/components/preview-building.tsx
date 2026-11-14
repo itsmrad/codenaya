@@ -6,10 +6,7 @@ import { CodenayaLogo } from "@/components/codenaya-logo";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { liveStepLabel } from "@/features/conversations/components/agent-run";
-import type { AgentStep } from "@/features/conversations/agent-steps";
-import { getFilePath } from "@/features/sandbox-preview/utils/file-tree";
-
-import { Doc } from "../../../../convex/_generated/dataModel";
+import { type AgentStep, writtenFilePaths } from "@/features/conversations/agent-steps";
 
 /** Newest files shown before the rest collapse into "+N more". */
 const FILE_LIMIT = 8;
@@ -18,18 +15,10 @@ const FILE_LIMIT = 8;
  * Shown in place of the preview while the agent writes a new project's first
  * build, so the sandbox doesn't boot against a half-written project.
  */
-export const PreviewBuilding = ({
-  steps,
-  files,
-}: {
-  steps: AgentStep[];
-  files: Doc<"files">[];
-}) => {
-  const filesMap = new Map(files.map((file) => [file._id, file]));
-  const paths = files
-    .filter((file) => file.type === "file")
-    .sort((a, b) => b._creationTime - a._creationTime)
-    .map((file) => getFilePath(file, filesMap));
+export const PreviewBuilding = ({ steps }: { steps: AgentStep[] }) => {
+  // What this run wrote, not every project file: a new project already holds
+  // the seeded starter, which isn't progress (#478).
+  const paths = writtenFilePaths(steps);
   const more = paths.length - FILE_LIMIT;
 
   return (
@@ -39,9 +28,21 @@ export const PreviewBuilding = ({
       className="size-full overflow-y-auto bg-background p-4"
     >
       <div className="mx-auto flex min-h-full max-w-sm flex-col items-center justify-center gap-4 text-center">
-        <div className="relative grid size-16 place-items-center rounded-2xl border border-border/70 bg-card shadow-xl shadow-brand/5">
-          <span className="absolute inset-0 animate-ping rounded-2xl bg-brand/20 motion-reduce:animate-none opacity-60" />
-          <CodenayaLogo size={36} blinking={true} decorative />
+        {/* A soft glow breathes behind the tile while an arc circles its edge (#478). */}
+        <div className="relative grid size-16 place-items-center">
+          <span
+            aria-hidden
+            className="absolute inset-0 animate-build-glow rounded-2xl bg-brand/30 blur-xl motion-reduce:hidden"
+          />
+          <span
+            aria-hidden
+            className="absolute -inset-[1.5px] overflow-hidden rounded-[17.5px] motion-reduce:hidden"
+          >
+            <span className="absolute -inset-1/2 animate-[spin_2.8s_linear_infinite] bg-[conic-gradient(transparent_0deg,transparent_250deg,var(--brand)_360deg)]" />
+          </span>
+          <div className="relative grid size-16 place-items-center rounded-2xl border border-border/70 bg-card shadow-xl shadow-brand/5">
+            <CodenayaLogo size={36} blinking={true} decorative />
+          </div>
         </div>
         <div className="flex flex-col items-center gap-1">
           <p className="text-sm font-medium text-foreground">Building your app</p>
@@ -77,7 +78,7 @@ export const PreviewBuilding = ({
         </ul>
 
         <p className="text-xs text-muted-foreground">
-          Preview starts when the first build finishes
+          The preview appears as soon as your app starts
         </p>
       </div>
     </div>

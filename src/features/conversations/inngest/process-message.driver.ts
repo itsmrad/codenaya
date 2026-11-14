@@ -85,7 +85,7 @@ export async function drive(
     inferenceResolvedAt,
   });
 
-  for (let request = 0, requestedRunStep: string | undefined; request < 100; request += 1) {
+  for (let request = 0, requestedRunStep: string | undefined; request < 300; request += 1) {
     if (cancelWhen?.()) {
       return outcome("cancelled");
     }
