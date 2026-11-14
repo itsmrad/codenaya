@@ -64,8 +64,20 @@ test.describe("E2B preview hot reload", () => {
       return Date.now() - startedAt;
     };
 
+    // A transient sync failure must retry even if no further file edit arrives.
+    let syncAttempts = 0;
+    const syncRoute = "**/api/sandbox/*";
+    await page.route(syncRoute, async (route) => {
+      if (route.request().method() === "PATCH" && ++syncAttempts === 1) {
+        await route.fulfill({ status: 503, json: { error: "Temporary sync failure" } });
+      } else {
+        await route.continue();
+      }
+    });
     // The first edit also pays for `next dev` compiling the PATCH route.
     const firstEditMs = await editAndWait("After edit");
+    expect(syncAttempts).toBeGreaterThanOrEqual(2);
+    await page.unroute(syncRoute);
     const editMs = await editAndWait("Second edit");
     await page.screenshot({ path: testInfo.outputPath("after-edit.png") });
     testInfo.annotations.push({
