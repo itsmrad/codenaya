@@ -26,6 +26,9 @@ export const hitOutputLimit = (raw?: string): boolean => {
 
 const BATCH_ADVICE = `Write at most ${WRITE_BATCH_FILES} files, about ${WRITE_BATCH_LINES} lines in all, per turn, and change existing files with editFile.`;
 
+/** Extra turns a run gives replies cut off before any tool call, text or not. */
+export const MAX_CUT_OFF_RETRIES = 2;
+
 /** The result of a tool call that was cut off, in the "Error..." form the run block shows. */
 export const OUTPUT_LIMIT_ERROR = `Error: Your reply hit the output limit and was cut off, so this call did not run and nothing was changed. Redo it in smaller pieces. ${BATCH_ADVICE}`;
 

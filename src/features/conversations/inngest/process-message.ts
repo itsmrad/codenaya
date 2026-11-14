@@ -78,6 +78,7 @@ import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
 import { trimFileHistory } from "./lib/trim-file-history";
 import {
+  MAX_CUT_OFF_RETRIES,
   OUTPUT_LIMIT_NOTE,
   hitOutputLimit,
   markCutOffCalls,
@@ -665,6 +666,7 @@ export const processMessage = inngest.createFunction(
     // Set when a reply hit the output limit before any tool call (#493); its
     // cut-off tool calls are refused by `refuseCutOffCalls` instead.
     let cutOffNote = false;
+    let cutOffRetries = 0;
     const takeCutOffNote = () => {
       const note = cutOffNote ? OUTPUT_LIMIT_NOTE : undefined;
       cutOffNote = false;
@@ -840,6 +842,13 @@ export const processMessage = inngest.createFunction(
 
         // A stuck run has had its summary turn.
         if (loopGuard.stuck) return undefined;
+
+        // A reply cut off before any tool call is unfinished even when it has
+        // text: give it another turn with the note, a bounded number of times.
+        if (cutOffNote && !lastStep && cutOffRetries < MAX_CUT_OFF_RETRIES) {
+          cutOffRetries += 1;
+          return codingAgent;
+        }
 
         // Stop routing to this agent if there's a final text response without
         // tool calls, unless files changed since the last passing build check

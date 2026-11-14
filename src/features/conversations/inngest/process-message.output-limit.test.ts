@@ -10,15 +10,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   mutation: vi.fn(),
+  openProviderKey: vi.fn(),
+  testConnection: vi.fn(),
 }));
 
 vi.mock("@/lib/convex-client", async () => {
   const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
   return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
 });
+// The Anthropic case runs on a user's key; only the unsealing is faked.
+vi.mock("@/features/ai-providers/server/sealed-key", () => ({
+  openProviderKey: mocks.openProviderKey,
+}));
+vi.mock("@/features/ai-providers/server/test-connection", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  testConnection: mocks.testConnection,
+}));
 
 import { TURN_HEARTBEAT_ID } from "../agent-steps";
-import { OUTPUT_LIMIT_ERROR, OUTPUT_LIMIT_NOTE } from "./lib/output-limit";
+import { MAX_CUT_OFF_RETRIES, OUTPUT_LIMIT_ERROR, OUTPUT_LIMIT_NOTE } from "./lib/output-limit";
 import { drive, text } from "./process-message.driver";
 
 const QUERIES: Record<string, () => unknown> = {
@@ -29,6 +39,13 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectFiles": () => [],
   "system:getProjectFilesWithUrls": () => [],
   "system:getProjectSkills": () => [],
+  "system:getAiProviderKeyForRun": () => ({
+    _id: "key_1",
+    userId: "user_1",
+    provider: "anthropic",
+    label: "Work key",
+    status: "active",
+  }),
 };
 
 interface ChatBody {
@@ -36,8 +53,8 @@ interface ChatBody {
   tools?: unknown[];
 }
 
-const codingRequests = (bodies: unknown[]) =>
-  (bodies as ChatBody[]).filter((body) => body.messages[0]?.role === "system" && body.tools);
+// The title request has no tools; Anthropic sends the system prompt outside messages.
+const codingRequests = (bodies: unknown[]) => (bodies as ChatBody[]).filter((body) => body.tools);
 
 const mutationArgs = (name: string) =>
   mocks.mutation.mock.calls
@@ -54,6 +71,13 @@ const cutOff = (message: Record<string, unknown>) => ({
   data: { choices: [{ message: { role: "assistant", ...message }, finish_reason: "length" }] },
 });
 
+/** An Anthropic reply with one text block. */
+const claude = (text: string, stop_reason: string) => ({
+  data: { role: "assistant", content: [{ type: "text", text }], stop_reason },
+});
+
+const PARTIAL = "Here is the plan. First I will write the layout, then the";
+
 beforeEach(() => {
   vi.resetAllMocks();
   vi.unstubAllGlobals();
@@ -65,6 +89,8 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
   mocks.query.mockImplementation(async (ref) => QUERIES[getFunctionName(ref)]?.());
   mocks.mutation.mockResolvedValue(null);
+  mocks.openProviderKey.mockResolvedValue("sk-ant-user");
+  mocks.testConnection.mockResolvedValue({ ok: true });
 });
 
 describe("processMessage when a reply hits the output limit", () => {
@@ -112,6 +138,35 @@ describe("processMessage when a reply hits the output limit", () => {
     expect(requests).toHaveLength(2);
     expect(requests[1].messages.at(-1)).toEqual({ role: "user", content: OUTPUT_LIMIT_NOTE });
     expect(JSON.stringify(requests[0])).not.toContain(OUTPUT_LIMIT_NOTE);
+  });
+
+  // A cut-off reply with text must not read as the final answer (#493 review).
+  it.each([
+    ["OpenAI-style (finish_reason length)", { modelId: "x-ai/grok-4.7" }, cutOff({ content: PARTIAL }), { data: text("Done.") }],
+    [
+      "Anthropic (stop_reason max_tokens)",
+      { keyId: "key_1", modelId: "claude-sonnet-5-5" },
+      claude(PARTIAL, "max_tokens"),
+      claude("Done.", "end_turn"),
+    ],
+  ])("gives a cut-off text reply another turn with the note: %s", async (_, model, partial, done) => {
+    const outcome = await drive(model, [partial, done]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    const requests = codingRequests(outcome.inferenceBodies);
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[1].messages.at(-1))).toContain(OUTPUT_LIMIT_NOTE);
+    expect(mutationArgs("system:updateMessageContent").at(-1)).toMatchObject({ content: "Done." });
+  });
+
+  it("stops retrying after MAX_CUT_OFF_RETRIES cut-off replies", async () => {
+    const outcome = await drive(
+      { modelId: "x-ai/grok-4.7" },
+      Array.from({ length: MAX_CUT_OFF_RETRIES + 1 }, () => cutOff({ content: PARTIAL })),
+    );
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(codingRequests(outcome.inferenceBodies)).toHaveLength(MAX_CUT_OFF_RETRIES + 1);
   });
 
   it("records one heartbeat step per turn start, under one id", async () => {
