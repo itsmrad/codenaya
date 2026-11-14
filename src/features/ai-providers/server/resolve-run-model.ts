@@ -8,6 +8,7 @@ import {
   type RunSource,
   creditRefusal,
 } from "@/features/billing/credits";
+import { MODEL_LIMIT_CODE, spendRefusal, spendRefusalMessage } from "@/features/billing/model-spend";
 import { PLANS } from "@/features/billing/plans";
 import type { AgentModelChoice } from "@/features/conversations/agent-models";
 
@@ -113,6 +114,34 @@ export class ModelChoiceError extends Error {
   }
 }
 
+/** Which cap of `model`'s spend limit (ADR 0012) `userId` has reached, if any. */
+async function spendLimitReached({
+  internalKey,
+  userId,
+  model,
+}: {
+  internalKey: string;
+  userId: string;
+  model: RoutedModel;
+}) {
+  const limit = model.spendLimit;
+  if (!limit) return null;
+  const spent = await convex.query(api.modelSpend.getForServer, { internalKey, userId, modelId: model.id });
+  return spendRefusal(limit, spent, Date.now());
+}
+
+/** Refuses `model` once its per-user or site-wide spend limit is reached (ADR 0012). */
+async function refuseOverSpendLimit(args: Parameters<typeof spendLimitReached>[0]) {
+  const refusal = await spendLimitReached(args);
+  if (refusal && args.model.spendLimit) {
+    throw new ModelChoiceError(
+      spendRefusalMessage(refusal, args.model.name, args.model.spendLimit.resets),
+      402,
+      MODEL_LIMIT_CODE,
+    );
+  }
+}
+
 const toChoice = (input: ModelChoiceInput): AgentModelChoice =>
   typeof input === "object" ? input : { modelId: input ?? "" };
 
@@ -143,12 +172,15 @@ const platformRunLabel = (model: RoutedModel) => runModelLabel({ id: model.id, l
  * changes nothing; `promoKind` tells `takePromoRun` which run to take once the
  * send is known to go. Any other platform model needs credits left (ADR 0011);
  * a run that starts with some may end past zero, and the next send is refused.
+ * A model with a spend limit (ADR 0012), promo or not, needs room under it.
  *
  * Auto (#322) becomes the `task`'s route model (`autoRouteModel`: the admin's
  * pool, else the fixed routes, among routes whose provider key is set; else the
  * catalog default) before any of these checks, so the message and the run
  * record that concrete model. An image send on Auto only ever routes to a
- * vision model, and is refused when there is none.
+ * vision model, and is refused when there is none. Auto skips models at
+ * their spend limit; with none left it falls to the default, checked as usual,
+ * and an image send whose vision models are all at their limit gets the 402.
  */
 export async function validateModelChoice({
   internalKey,
@@ -171,15 +203,23 @@ export async function validateModelChoice({
       convex.query(api.credits.getForServer, { internalKey, userId }),
     ]);
     const auto = modelId === AUTO_MODEL_ID;
+    const configured = catalog.models.filter((m) => isPlatformConfigured(m.provider));
+    // Auto routes around a model at its spend limit instead of refusing the send.
+    const reached = auto
+      ? await Promise.all(configured.map((m) => spendLimitReached({ internalKey, userId, model: m })))
+      : [];
     const routed =
       auto &&
       autoRouteModel(
-        catalog.models.filter((m) => isPlatformConfigured(m.provider)),
+        configured.filter((_, i) => !reached[i]),
         // Images need a vision model whatever the task, plan mode included.
         withImages ? "vision" : task,
         catalog.autoModelIds,
       );
     if (auto && withImages && !routed) {
+      // A vision model Auto would pick but for its spend limit gets that limit's refusal.
+      const capped = autoRouteModel(configured, "vision", catalog.autoModelIds);
+      if (capped) await refuseOverSpendLimit({ internalKey, userId, model: capped });
       throw new ModelChoiceError(AUTO_NO_VISION_MESSAGE, 400, "auto_no_vision_model");
     }
     const model = routed || resolveCatalogModel(catalog, modelId);
@@ -198,6 +238,9 @@ export async function validateModelChoice({
       if (refusal) {
         throw promoRefused(refusal);
       }
+    }
+    await refuseOverSpendLimit({ internalKey, userId, model });
+    if (promoKind) {
       return { ...choice, promoKind };
     }
     // Usage is always recorded; the cap only applies once billing is live (#105).
