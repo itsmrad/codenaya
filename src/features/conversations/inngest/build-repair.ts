@@ -49,7 +49,10 @@ const REPAIR_SANDBOX_TIMEOUT_MS = 10 * 60_000;
 const INSTALL_TIMEOUT_MS = 240_000;
 const UPLOAD_TIMEOUT_MS = 10_000;
 
-/** The project from Convex, in a new sandbox: returns its id. Uploads too, so imports of them resolve. */
+/**
+ * The project from Convex, in a new sandbox: returns its id, or null for a
+ * project the check does not build. Uploads too, so imports of them resolve.
+ */
 const provision = async (apiKey: string, { projectId, internalKey }: Pick<VerifyAndFixOptions, "projectId" | "internalKey">) => {
   const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
   const pathOf = buildPathIndex(rows);
@@ -61,6 +64,9 @@ const provision = async (apiKey: string, { projectId, internalKey }: Pick<Verify
     if (typeof row.content === "string") files.push({ path, content: row.content });
     else if (row.storageUrl) uploads.push({ path, url: row.storageUrl });
   }
+  // checkProjectBuild's test: any other project could never verify, so a repair would only spend.
+  const paths = [...files, ...uploads].map(({ path }) => path);
+  if (!paths.includes("package.json") || !paths.some((path) => /^vite\.config\.[cm]?[jt]s$/.test(path))) return null;
   const sandbox = await createProjectSandbox({
     apiKey,
     timeoutMs: REPAIR_SANDBOX_TIMEOUT_MS,

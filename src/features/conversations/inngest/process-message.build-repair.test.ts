@@ -272,6 +272,19 @@ describe("processMessage repair after the run", () => {
     expect(mutationArgs("system:updateMessageContent")).toHaveLength(1);
   });
 
+  it("does not start a sandbox for a project the check cannot build, even after a failed check", async () => {
+    projectFiles = [];
+
+    await drive({ modelId: "x-ai/grok-4.7" }, FAILED_RUN);
+
+    expect(mocks.createSandbox).not.toHaveBeenCalled();
+    expect(mocks.verifyAndFix).not.toHaveBeenCalled();
+    expect(mutationArgs("system:updateMessageContent").at(-1)).toMatchObject({
+      content: `${NOTES}\n\n${BUILD_FAILED_NOTE}`,
+      outcome: "error",
+    });
+  });
+
   it("stops a cancelled run before the repair", async () => {
     const outcome = await drive({ modelId: "x-ai/grok-4.7" }, FAILED_RUN, "Build it", {}, {
       cancelWhen: () => mocks.createSandbox.mock.calls.length > 0,
