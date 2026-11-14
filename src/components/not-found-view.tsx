@@ -12,6 +12,8 @@ type NotFoundViewProps = {
   label?: string;
   /** The page header. Defaults to the app bar, as the in-app "Project not found" needs. */
   header?: ReactNode;
+  /** Shown under "Back to home": the site-wide 404's next steps (#253). */
+  children?: ReactNode;
 };
 
 export const NotFoundView = ({
@@ -19,6 +21,7 @@ export const NotFoundView = ({
   description,
   label = "Error 404",
   header = <AppNavbar />,
+  children,
 }: NotFoundViewProps) => {
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -41,6 +44,7 @@ export const NotFoundView = ({
           >
             <Link href="/">Back to home</Link>
           </Button>
+          {children}
         </div>
       </main>
     </div>

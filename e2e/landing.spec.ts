@@ -111,6 +111,22 @@ test.describe("landing social proof", () => {
     expect(await cards.count()).toBeLessThanOrEqual(6);
   });
 
+  // #253: at tablet width the strip shows full rows, never a lone card.
+  test("leaves no orphan card in the strip at 768px", async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.goto("/");
+
+    const community = page.getByRole("region", { name: "Built with Codenaya" });
+    await expect(community).toBeVisible({ timeout: 30_000 });
+    const cards = community.locator('a[href^="/showcase/"]:visible');
+    const tops = await cards.evaluateAll((links) => links.map((link) => Math.round(link.getBoundingClientRect().top)));
+    test.skip(tops.length < 2, "Needs at least two showcase entries");
+
+    const perRow = new Map<number, number>();
+    for (const top of tops) perRow.set(top, (perRow.get(top) ?? 0) + 1);
+    expect([...perRow.values()].every((count) => count >= 2)).toBe(true);
+  });
+
   test("shows the demo's finished run for reduced motion", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");

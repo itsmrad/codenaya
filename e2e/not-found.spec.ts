@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { PENDING_PROMPT_KEY } from "../src/features/projects/utils/pending-prompt";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 
@@ -40,6 +41,25 @@ test.describe("not-found page", () => {
       await expect(page).toHaveURL("/");
     });
   }
+
+  // #253: a stale link offers somewhere to go, or a way to start building.
+  test("offers next steps and a prompt composer", async ({ page }) => {
+    await page.goto("/this-page-does-not-exist");
+
+    const suggested = page.getByRole("navigation", { name: "Suggested pages" });
+    for (const [name, href] of [["Showcase", "/showcase"], ["Docs", "/docs"], ["Pricing", "/pricing"]]) {
+      await expect(suggested.getByRole("link", { name })).toHaveAttribute("href", href);
+    }
+
+    const composer = page.getByRole("textbox", { name: "Describe what you want to build" });
+    await composer.fill("A habit tracker with streaks");
+    await composer.press("Enter");
+    // Same path as the landing composer: sign in, keeping the prompt.
+    await expect(page).toHaveURL(/\/sign-in/);
+    expect(await page.evaluate((key) => localStorage.getItem(key), PENDING_PROMPT_KEY)).toBe(
+      "A habit tracker with streaks",
+    );
+  });
 
   test("shows a friendly state for a missing project", async ({ page }) => {
     test.skip(
