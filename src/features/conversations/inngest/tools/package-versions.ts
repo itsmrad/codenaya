@@ -1,8 +1,21 @@
-import { intersects, minVersion, validRange } from "semver";
+import { intersects, minVersion, Range, validRange } from "semver";
 
 import { KNOWN_GOOD_VERSIONS } from "../known-good-versions";
 
 const DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
+
+const allowsNewerMajor = (range: string, knownMajor: number) =>
+  new Range(range).set.some((comparators) => {
+    // npm opts into prereleases explicitly; ordinary bounds like <7.0.0 exclude them.
+    const includePrerelease = comparators.some(({ semver }) =>
+      semver.major > knownMajor && semver.prerelease.length > 0,
+    );
+    return intersects(
+      comparators.map((comparator) => comparator.value).join(" "),
+      `>=${knownMajor + 1}.0.0${includePrerelease ? "-0" : ""}`,
+      { includePrerelease },
+    );
+  });
 
 /**
  * Checks a package.json the agent wrote against the known-good manifest (#331).
@@ -38,7 +51,7 @@ export const checkPackageVersions = (
       if (/[:/]/.test(range)) continue;
       const knownMajor = minVersion(known)!.major;
       // Compare the whole range, including upper bounds and wildcard alternatives (#466).
-      if (!validRange(range) || intersects(range, `>=${knownMajor + 1}.0.0`)) {
+      if (!validRange(range) || allowsNewerMajor(range, knownMajor)) {
         (deps as Record<string, string>)[name] = known;
         pinned.push(`${name} "${range}" → "${known}"`);
       } else if (!intersects(range, `${knownMajor}.x`)) {
