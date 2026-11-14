@@ -124,7 +124,7 @@ describe("swarmWorker", () => {
     const summary = "Unfinished (step or cost cap): Listed files; the page is unfinished.";
     expect(outcome.data).toMatchObject({ status: "unfinished", summary });
     expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ status: "done", summary })]);
-  });
+  }, 20_000); // 20 replayed turns: ~2 s alone, past the 5 s default under the full suite
 
   it("hands off to the summary agent once its usage crosses the cost cap", async () => {
     mocks.catalog.mockReturnValue({
