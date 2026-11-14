@@ -104,6 +104,14 @@ describe("detectBuildError", () => {
       expect(detectBuildError(`npm error socket hang up\nError: ${install} failed with exit code 1\n`)).toBeNull();
     });
 
+    it("reads an install failure after the app's own network errors", () => {
+      const chunk =
+        "Error: socket hang up\n    at connResetException (node:internal/errors:720:14)\n" +
+        "[vite] http proxy error: /api\nError: connect ECONNREFUSED 127.0.0.1:3001\n" +
+        `npm error code ERESOLVE\nError: ${install} failed with exit code 1\n`;
+      expect(detectBuildError(chunk)).toMatchObject({ file: "package.json", message: expect.stringContaining("(ERESOLVE)") });
+    });
+
     it("ignores other lines that mention an exit code", () => {
       expect(detectBuildError("Error: Command failed with exit code 1: vite build\n")).toBeNull();
       expect(detectBuildError("Error: exit status 1\n")).toBeNull();

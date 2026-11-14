@@ -25,9 +25,10 @@ const LOG_PREFIX =
 const INSTALL_FAILED = /^Error: (.+ failed with exit code \d+)$/;
 const NPM_ERROR_CODE = /npm (?:ERR!|error) code (\S+)/g;
 // npm couldn't reach the registry, or it failed (5xx): the sandbox's network
-// or the registry, not the app's dependencies. Also used by checkBuild.
+// or the registry, not the app's dependencies. Also used by checkBuild. Only
+// npm's own lines, so the app's earlier output can't hide a real failure.
 export const NETWORK_FAILURE =
-  /\b(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|E5\d\d)\b|npm (?:ERR!|error) network|socket hang up/;
+  /^\s*npm (?:ERR!|error) (?:network\b|.*?(?:\b(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|E5\d\d)\b|socket hang up))/m;
 const HMR_SUCCESS = /\[vite\].*\b(?:hmr update|page reload)\b/;
 // The sandbox's project root (WORK_DIR); paths read better relative to it.
 const WORK_DIR_PREFIX = /\/home\/user\/app\//g;
