@@ -170,9 +170,19 @@ export const PreviewView = ({
   }, []);
 
   // Reset cleared offset if output was cleared or restarted
-  const effectiveClearedOffset = shouldResetClearedOffset(terminalOutput.length, clearedOffset)
-    ? 0
-    : clearedOffset;
+  const resetClearedOffset = shouldResetClearedOffset(
+    terminalOutput.length,
+    clearedOffset,
+  );
+  if (resetClearedOffset) {
+    setClearedOffset(0);
+  }
+  const effectiveClearedOffset = resetClearedOffset ? 0 : clearedOffset;
+
+  const handleRestart = useCallback(() => {
+    setClearedOffset(0);
+    restart();
+  }, [restart]);
 
   const handleCopyLogs = useCallback(async () => {
     if (!terminalRef.current) return;
@@ -198,9 +208,9 @@ export const PreviewView = ({
   // yet; boot once more against the finished build.
   const wasFirstBuild = useRef(firstBuild);
   useEffect(() => {
-    if (wasFirstBuild.current && !firstBuild && status === "error") restart();
+    if (wasFirstBuild.current && !firstBuild && status === "error") handleRestart();
     wasFirstBuild.current = firstBuild;
-  }, [firstBuild, status, restart]);
+  }, [firstBuild, status, handleRestart]);
 
   // The iframe's latest load, so first_preview_shown waits until it is visible.
   const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
@@ -236,7 +246,7 @@ export const PreviewView = ({
       previewUrl={previewUrl}
       refreshKey={refreshKey}
       device={device}
-      restart={restart}
+      restart={handleRestart}
       errorKind={errorKind}
       onUseWebContainer={() => switchEngine("webcontainer")}
       agentWorking={Boolean(activeRun)}
@@ -322,7 +332,7 @@ export const PreviewView = ({
             variant="ghost"
             className="size-8 rounded-md hover:bg-muted"
             disabled={isLoading}
-            onClick={restart}
+            onClick={handleRestart}
             title={`Restart ${activeEngine}`}
             aria-label={`Restart ${activeEngine}`}
           >
@@ -447,7 +457,7 @@ export const PreviewView = ({
             <PreviewSettingsPopover
               projectId={projectId}
               initialValues={project?.settings}
-              onSave={restart}
+              onSave={handleRestart}
             />
           </div>
         </div>
