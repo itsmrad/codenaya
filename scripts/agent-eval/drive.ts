@@ -6,10 +6,10 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { buildFlatFileList } from "../../src/features/sandbox-preview/utils/file-tree";
 import { capture, probePreview, sanitize, screenshot } from "./capture";
-import { readUsage, recordUsage, totalUsd } from "./cost";
+import { MODELS, readUsage, recordUsage, totalUsd } from "./cost";
 import type { Trail } from "./types";
 
-type Options = { id: string; model: string; prompt: string; maxUsd: number; directory: string; projectId?: Id<"projects"> };
+type Options = { id: string; model: string; prompt: string; maxUsd: number; directory: string; projectId?: Id<"projects">; title?: string };
 
 export async function post(page: Page, path: string, data: unknown) {
   const response = await page.request.post(path, { data, timeout: 60_000 });
@@ -32,7 +32,7 @@ async function observe(page: Page, user: ConvexHttpClient, options: Options, tra
     const usage = (await readUsage()).filter((r) => ids.has(r.messageId));
     if (trail.usage.some((r) => !usage.some((next) => next.messageId === r.messageId))) throw new Error("Active run fell outside the 200-row metering window");
     trail.usage = usage;
-    await recordUsage(trail.id, trail.usage);
+    await recordUsage(trail.id, trail.usage, MODELS[options.model].provider);
   };
   while (Date.now() < deadline) {
     user = await userConvexClient(page); // Clerk JWTs expire during long builds.
@@ -81,6 +81,8 @@ export async function drive(page: Page, user: ConvexHttpClient, options: Options
     } else {
       const result = await post(page, "/api/projects/create-with-prompt", { prompt: options.prompt, model: options.model });
       trail.projectId = result.projectId;
+      // A chosen name is never replaced by the generated title (#288).
+      if (options.title) await (await userConvexClient(page)).mutation(api.projects.rename, { id: result.projectId, name: options.title });
     }
     await page.goto(`/projects/${trail.projectId}`);
     await page.getByRole("tab", { name: "Preview", exact: true }).click({ timeout: 60_000 });
@@ -93,6 +95,7 @@ export async function drive(page: Page, user: ConvexHttpClient, options: Options
       // Stop through the app path before ending observation, including failures.
       try { await post(page, "/api/messages/cancel", { projectId: trail.projectId }); }
       catch (error) { trail.error = `${trail.error ?? ""}; cleanup cancel: ${String(error)}`; }
+      await page.goto("about:blank"); // So the project page cannot boot a new sandbox after these stop.
       for (const id of new Set(trail.sandboxEvents.map((e) => e.sandboxId).filter(Boolean))) {
         const result = await page.request.delete(`/api/sandbox/${id}`);
         if (!result.ok() && result.status() !== 404) trail.error = `${trail.error ?? ""}; sandbox cleanup HTTP ${result.status()}`;

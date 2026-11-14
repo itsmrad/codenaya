@@ -79,11 +79,13 @@ const frontendApiHost = () => {
   return Buffer.from(encoded, "base64").toString().replace(/\$$/, "");
 };
 
+/** Existing users with this email address; never creates one. */
+export const findUsers = (email: string) =>
+  clerkApi<Array<{ id: string }>>(`/users?email_address=${encodeURIComponent(email)}`);
+
 /** Finds this run's e2e test user (or `email`), creating it on first use. */
 export const ensureTestUser = async (email = E2E_EMAIL) => {
-  const existing = await clerkApi<Array<{ id: string }>>(
-    `/users?email_address=${encodeURIComponent(email)}`,
-  );
+  const existing = await findUsers(email);
   return (
     existing[0] ??
     (await clerkApi<{ id: string }>("/users", {
