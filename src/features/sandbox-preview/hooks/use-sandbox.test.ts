@@ -45,7 +45,7 @@ import { useSandbox as runSandboxHook } from "./use-sandbox";
 
 const file = (content: string): Doc<"files"> => ({
   _id: "app" as Id<"files">, _creationTime: 1, projectId: "project" as Id<"projects">,
-  name: "App.tsx", type: "file", content,
+  name: "App.tsx", type: "file", content, updatedAt: 1,
 });
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
