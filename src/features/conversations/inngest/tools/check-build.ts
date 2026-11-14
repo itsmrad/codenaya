@@ -50,6 +50,9 @@ const CHECK_TIMEOUT_MS = 120_000;
 const STEP_BUDGET_MS = 240_000;
 /** A cold fallback with less time left than this could not finish a build. */
 const MIN_COLD_BUILD_MS = 60_000;
+/** How long a check waits for the preview's install to finish before building cold. */
+const INSTALL_WAIT_MS = 60_000;
+const INSTALL_POLL_MS = 2_500;
 /** Copying the preview's node_modules; seconds for the starter. */
 const COPY_TIMEOUT_MS = 30_000;
 const CREATE_TIMEOUT_MS = 30_000;
@@ -198,6 +201,19 @@ const installRunning = async (sandbox: Sandbox, deadline: number) =>
   );
 
 /**
+ * Polls until no install is running: true once none is, false if one still is
+ * after INSTALL_WAIT_MS or near the step deadline.
+ */
+const installFinished = async (sandbox: Sandbox, deadline: number) => {
+  const waitUntil = Math.min(Date.now() + INSTALL_WAIT_MS, deadline);
+  while (await installRunning(sandbox, deadline)) {
+    if (waitUntil - Date.now() < INSTALL_POLL_MS) return false;
+    await new Promise((resolve) => setTimeout(resolve, INSTALL_POLL_MS));
+  }
+  return true;
+};
+
+/**
  * What an install changes, and any `.env` the preview was given (it can outlive
  * the project's variables). Read before and after the copy: a difference means
  * an install ran in between, which the process list alone can miss.
@@ -212,9 +228,9 @@ const previewState = async (sandbox: Sandbox, deadline: number) =>
 
 /**
  * The owner's running preview sandbox for this project, connected, when it has
- * time left and no install running. The query filters by the tags the preview
- * route sets; they are checked again here because they decide whose sandbox
- * this runs in.
+ * time left and no install running (waiting a bounded time for one to finish).
+ * The query filters by the tags the preview route sets; they are checked again
+ * here because they decide whose sandbox this runs in.
  */
 const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPreview, deadline: number) => {
   const running = await Sandbox.list({
@@ -236,7 +252,7 @@ const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPr
     timeoutMs: WARM_MIN_TIME_LEFT_MS,
     requestTimeoutMs: within(deadline, SHORT_CALL_MS),
   });
-  return (await installRunning(sandbox, deadline)) ? null : sandbox;
+  return (await installFinished(sandbox, deadline)) ? sandbox : null;
 };
 
 /**
@@ -297,8 +313,9 @@ type CheckOptions = {
   sandbox?: Sandbox;
   /**
    * With `sandbox`: the project's directory there, copied into the check first
-   * (without node_modules, .git, dist and .env files), so files `files` leaves
-   * out, such as uploads, are built too. `files` is then written over the copy.
+   * (without node_modules, .git, the top-level dist and .env files), so files
+   * `files` leaves out, such as uploads, are built too. `files` is then
+   * written over the copy.
    */
   sourceDir?: string;
   /** The project's secret values, redacted from whatever the check returns. */
@@ -354,8 +371,9 @@ export const checkProjectBuild = async ({
     try {
       if (sourceDir) {
         const timeoutMs = within(job.deadline, COPY_TIMEOUT_MS);
+        // Anchored like the snapshot's skip list: a nested dist, such as public/dist, is project files.
         await suppliedSandbox.commands.run(
-          `mkdir -p ${dir} && tar -C '${sourceDir}' --exclude=node_modules --exclude=.git --exclude=dist ` +
+          `mkdir -p ${dir} && tar -C '${sourceDir}' --exclude=node_modules --exclude=.git --exclude=./dist ` +
             `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
           { timeoutMs, requestTimeoutMs: timeoutMs },
         );

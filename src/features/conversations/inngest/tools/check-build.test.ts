@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const e2b = vi.hoisted(() => ({ create: vi.fn(), list: vi.fn(), connect: vi.fn() }));
 const mocks = vi.hoisted(() => ({ query: vi.fn(), resolveEnv: vi.fn() }));
@@ -160,7 +160,7 @@ describe("checkProjectBuild", () => {
     expect(e2b.connect).not.toHaveBeenCalled();
   });
 
-  it("first copies sourceDir into the check directory, without node_modules or .env files", async () => {
+  it("first copies sourceDir into the check directory, without node_modules, .env files or the top-level dist", async () => {
     const sandbox = sandboxWith(() => undefined);
     const files = starter();
     await checkProjectBuild({
@@ -173,7 +173,7 @@ describe("checkProjectBuild", () => {
     const [copy, install] = sandbox.commands.run.mock.calls.map(([command]) => command);
     const dir = (sandbox.commands.run.mock.calls[1][1] as { cwd: string }).cwd;
     expect(copy).toBe(
-      `mkdir -p ${dir} && tar -C '/home/user/app' --exclude=node_modules --exclude=.git --exclude=dist ` +
+      `mkdir -p ${dir} && tar -C '/home/user/app' --exclude=node_modules --exclude=.git --exclude=./dist ` +
         `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
     );
     expect(install).toMatch(/^npm install/);
@@ -349,6 +349,9 @@ const DEV_SERVER: Proc = { cmd: "/bin/bash", args: ["-l", "-c", "npm run dev -- 
 const installing = (command: string): Proc => ({ cmd: "/bin/bash", args: ["-l", "-c", command] });
 
 describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   const warmCheck = (files = starter(), secrets?: string[]) => {
     return checkProjectBuild({
       files,
@@ -492,13 +495,58 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     "pnpm add zod",
     "yarn install",
     "bun i",
-  ])("uses a new sandbox while the preview runs `%s`, and leaves the preview alone", async (command) => {
+  ])("uses a new sandbox when the preview still runs `%s` after the wait, and leaves the preview alone", async (command) => {
+    vi.useFakeTimers();
     listed({});
     const warm = warmSandbox(undefined, [DEV_SERVER, installing(command)]);
     fakeSandbox();
 
-    expectCold(await warmCheck(), warm);
+    const result = warmCheck();
+    await vi.runAllTimersAsync();
+
+    expectCold(await result, warm);
     expect(commandsOf(warm).filter((run) => !run.startsWith("rm -rf"))).toEqual([]);
+    // Polled every 2.5 s for up to 60 s.
+    expect(warm.commands.list).toHaveBeenCalledTimes(25);
+  });
+
+  it("waits for the preview's install to finish, then builds warm without a new sandbox", async () => {
+    vi.useFakeTimers();
+    listed({});
+    const warm = warmSandbox();
+    const npmInstall = [DEV_SERVER, installing("npm install --prefer-offline --no-audit --no-fund")];
+    warm.commands.list.mockResolvedValueOnce(npmInstall).mockResolvedValueOnce(npmInstall).mockResolvedValueOnce(npmInstall);
+    fakeSandbox();
+
+    const result = warmCheck();
+    await vi.runAllTimersAsync();
+
+    expect((await result).split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(commandsOf(warm).some((run) => run.startsWith("npx tsc"))).toBe(true);
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("stops waiting for an install at the step deadline", async () => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    e2b.list.mockReturnValue({
+      nextItems: async () => {
+        vi.setSystemTime(start + 200_000);
+        return [{ sandboxId: "sbx_warm_0", metadata: { userId: "user_1", projectId: "proj_1" }, endAt: new Date(start + 3_600_000) }];
+      },
+    });
+    const warm = warmSandbox(undefined, [DEV_SERVER, installing("npm install")]);
+    fakeSandbox();
+
+    const result = warmCheck();
+    await vi.runAllTimersAsync();
+
+    // Too little left for a cold build after the wait, so none starts.
+    expect(await result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expect(warm.commands.list.mock.calls.length).toBeGreaterThan(1);
+    expect(Date.now()).toBeLessThanOrEqual(start + 240_000);
+    expect(commandsOf(warm).some((run) => run.startsWith("mkdir"))).toBe(false);
+    expect(e2b.create).not.toHaveBeenCalled();
   });
 
   it("uses a new sandbox when an install starts between discovery and the copy", async () => {
