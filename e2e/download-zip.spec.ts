@@ -7,7 +7,7 @@ import JSZip from "jszip";
 import { api } from "../convex/_generated/api";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
-import { userConvexClient } from "./convex-client";
+import { cleanupProject, userConvexClient } from "./convex-client";
 
 const PROJECT_NAME = "e2e-download-zip";
 const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
@@ -29,7 +29,7 @@ const seedProject = async (page: Page) => {
 
   const system = new ConvexHttpClient(convexUrl!);
   const key = internalKey!;
-  await system.mutation(api.system.cleanup, { internalKey: key, projectId });
+  await cleanupProject(system, key, projectId);
 
   await system.mutation(api.system.createFile, {
     internalKey: key,
