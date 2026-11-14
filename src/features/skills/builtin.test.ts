@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { detectCredential } from "@/features/integrations/credential-guard";
+
 import { BUILTIN_SKILLS } from "./builtin";
 import { BUILTIN_SKILL_NAMES } from "./builtin/names";
 import { validateSkill } from "./limits";
@@ -15,6 +17,13 @@ describe("built-in skills", () => {
     "%s passes the skill limits",
     (_name, skill) => {
       expect(validateSkill(skill)).toBeNull();
+    },
+  );
+
+  it.each(BUILTIN_SKILLS.map((skill) => [skill.name, skill] as const))(
+    "%s contains no credential-shaped values",
+    (_name, skill) => {
+      expect(detectCredential(skill.body).matchedRules).toEqual([]);
     },
   );
 
@@ -36,5 +45,40 @@ describe("built-in skills", () => {
 
     expect(findSkills.body).not.toMatch(/npx|skills (find|add|init)/);
     expect(findSkills.body).toContain("Settings → Skills");
+  });
+
+  const bodyOf = (name: string) =>
+    BUILTIN_SKILLS.find((skill) => skill.name === name)?.body ?? "";
+
+  it("supabase-auth-db keeps RLS on and the secret key out of the app", () => {
+    const body = bodyOf("supabase-auth-db");
+
+    expect(body).toContain("NEVER disable RLS");
+    expect(body).toContain("enable row level security");
+    expect(body).toContain("(select auth.uid()) = user_id");
+    expect(body).toMatch(/NEVER put the \*\*secret key\*\*.*service_role/s);
+    expect(body).not.toMatch(/VITE_\w*(SECRET|SERVICE)/);
+    expect(body).not.toMatch(/disable row level security|using \(true\)\s*;/i);
+  });
+
+  it("stripe-checkout keeps secrets server-side and verifies webhooks", () => {
+    const body = bodyOf("stripe-checkout");
+
+    expect(body).toContain("stripe.webhooks.constructEvent");
+    expect(body).toContain("await req.text()");
+    expect(body).toContain('import "server-only"');
+    expect(body).toContain("process.env.STRIPE_SECRET_KEY");
+    expect(body).not.toMatch(/(VITE|NEXT_PUBLIC)_STRIPE_(SECRET|WEBHOOK)/);
+  });
+
+  it("seo-and-share-cards covers share cards, robots and the sitemap", () => {
+    const body = bodyOf("seo-and-share-cards");
+
+    for (const tag of ["og:title", "og:image", "twitter:card", "summary_large_image"]) {
+      expect(body).toContain(tag);
+    }
+    expect(body).toContain("public/robots.txt");
+    expect(body).toContain("public/sitemap.xml");
+    expect(body).toContain("never invent a domain");
   });
 });
