@@ -14,12 +14,21 @@ export const savePendingPrompt = (prompt: string) => {
   }
 };
 
+/** The saved prompt, left in place: the auth pages show it before sign-up (#252). */
+export const peekPendingPrompt = (): string | null => {
+  try {
+    return localStorage.getItem(PENDING_PROMPT_KEY)?.trim() || null;
+  } catch {
+    return null;
+  }
+};
+
 /** Returns the saved prompt at most once: reading it also clears it. */
 export const takePendingPrompt = (): string | null => {
   try {
-    const prompt = localStorage.getItem(PENDING_PROMPT_KEY);
+    const prompt = peekPendingPrompt();
     localStorage.removeItem(PENDING_PROMPT_KEY);
-    return prompt?.trim() || null;
+    return prompt;
   } catch {
     return null;
   }

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   PENDING_PROMPT_KEY,
+  peekPendingPrompt,
   savePendingPrompt,
   takePendingPrompt,
 } from "./pending-prompt";
@@ -54,5 +55,26 @@ describe("pending prompt", () => {
 
     expect(() => savePendingPrompt("todo app")).not.toThrow();
     expect(takePendingPrompt()).toBeNull();
+  });
+
+  // #252: the auth pages show the prompt without consuming it.
+  it("peeks at the prompt without clearing it, so the dashboard still gets it", () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    expect(peekPendingPrompt()).toBeNull();
+
+    savePendingPrompt("  A habit tracker  ");
+    expect(peekPendingPrompt()).toBe("A habit tracker");
+    expect(peekPendingPrompt()).toBe("A habit tracker");
+    expect(takePendingPrompt()).toBe("A habit tracker");
+    expect(peekPendingPrompt()).toBeNull();
+  });
+
+  it("peeks at nothing when storage is unavailable", () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+    });
+    expect(peekPendingPrompt()).toBeNull();
   });
 });

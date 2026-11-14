@@ -35,6 +35,29 @@ test.describe("landing hero prompt", () => {
     expect(errors).toEqual([]);
   });
 
+  // #252: the auth pages show what will start, without consuming it.
+  test("the auth pages show the pending prompt as text and leave it for the dashboard", async ({ page }) => {
+    const prompt = 'A <script>alert("x")</script> recipe app';
+    await page.goto("/");
+    await submitHeroPrompt(page, prompt);
+    await expect(page).toHaveURL(/\/sign-in/);
+
+    const note = page.getByRole("status").filter({ hasText: "Your prompt will start building right after you log in" });
+    await expect(note).toBeVisible();
+    await expect(note).toContainText(prompt);
+    expect(await pendingPrompt(page)).toBe(prompt);
+
+    await page.goto("/sign-up");
+    await expect(page.getByRole("status").filter({ hasText: "right after sign-up" })).toBeVisible();
+  });
+
+  test("the auth pages show no prompt block without a pending prompt", async ({ page }) => {
+    await page.goto("/sign-in");
+    await page.evaluate((key) => localStorage.removeItem(key), PENDING_PROMPT_KEY);
+    await page.reload();
+    await expect(page.getByText("Your prompt will start building")).toHaveCount(0);
+  });
+
   test("a model picked signed out is kept with the prompt", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await page.goto("/");

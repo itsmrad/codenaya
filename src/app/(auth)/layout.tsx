@@ -3,6 +3,7 @@ import { Check } from "lucide-react";
 import { PublicShell } from "@/components/landing/public-shell";
 import { Reveal } from "@/components/landing/reveal";
 import { GridCross } from "@/components/landing/section-header";
+import { PendingStartNote } from "@/features/auth/components/pending-start-note";
 
 const POINTS = [
   "Unlimited runs on your own AI key",
@@ -48,7 +49,10 @@ const AuthLayout = ({ children }: { children: React.ReactNode }) => {
             className="pointer-events-none absolute inset-0 bg-[radial-gradient(var(--color-foreground)_1px,transparent_1px)] [background-size:18px_18px] opacity-[0.1] [mask-image:radial-gradient(ellipse_60%_60%_at_50%_50%,black,transparent)]"
           />
           <GridCross className="-top-[5px] -left-[5px] max-lg:hidden" />
-          <Reveal className="relative z-10">{children}</Reveal>
+          <Reveal className="relative z-10 flex flex-col items-center gap-4">
+            <PendingStartNote />
+            {children}
+          </Reveal>
         </div>
       </div>
     </PublicShell>
