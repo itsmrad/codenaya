@@ -1,10 +1,8 @@
+import { intersects, minVersion, validRange } from "semver";
+
 import { KNOWN_GOOD_VERSIONS } from "../known-good-versions";
 
 const DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
-
-/** The major each `||` alternative starts with, plus hyphen-range endpoints. */
-const majors = (range: string) =>
-  [...range.matchAll(/(?:^|\|\||\s+-)\s*[\^~>=<v\s]*(\d+)/g)].map((match) => Number(match[1]));
 
 /**
  * Checks a package.json the agent wrote against the known-good manifest (#331).
@@ -38,15 +36,12 @@ export const checkPackageVersions = (
       const known: string = KNOWN_GOOD_VERSIONS[name as keyof typeof KNOWN_GOOD_VERSIONS];
       // Protocols (workspace:, npm:, file:, git URLs) aren't registry ranges.
       if (/[:/]/.test(range)) continue;
-      const knownMajor = majors(known)[0];
-      const rangeMajors = majors(range);
-      const unbounded = range.split("||").some((alternative) =>
-        alternative.trim().startsWith(">") && !alternative.includes("<"),
-      );
-      if (rangeMajors.length === 0 || Math.max(...rangeMajors) > knownMajor || unbounded) {
+      const knownMajor = minVersion(known)!.major;
+      // Compare the whole range, including upper bounds and wildcard alternatives (#466).
+      if (!validRange(range) || intersects(range, `>=${knownMajor + 1}.0.0`)) {
         (deps as Record<string, string>)[name] = known;
         pinned.push(`${name} "${range}" → "${known}"`);
-      } else if (!rangeMajors.includes(knownMajor)) {
+      } else if (!intersects(range, `${knownMajor}.x`)) {
         warned.push(`${name} "${range}" (known-good: "${known}")`);
       }
     }

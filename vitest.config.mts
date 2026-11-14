@@ -19,7 +19,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "convex/**/*.test.ts", "scripts/agent-eval/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "convex/**/*.test.ts", "scripts/agent-eval/**/*.test.ts", "scripts/*.test.ts"],
     // Convex codegen output and Next build artifacts contain no tests.
     exclude: ["node_modules/**", ".next/**", "convex/_generated/**"],
     server: { deps: { inline: ["convex-test"] } },

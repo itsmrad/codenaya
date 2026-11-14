@@ -42,7 +42,7 @@ describe("checkPackageVersions", () => {
     expect(note).not.toContain("Version check");
   });
 
-  it.each(["^6 || ^7", ">=6.0.0", "6.x || 7.x", "6.0.0 - 8.0.0", "^5 || ^7", ">6.0.0"])(
+  it.each(["^6 || ^7", ">=6.0.0", "6.x || 7.x", "6.0.0 - 8.0.0", "^5 || ^7", ">6.0.0", ">=6 <8", ">=6 <=7.0.0", "^6 || *", "^6 || x"])(
     "rewrites vite %s because it can install a newer major",
     (range) => {
       const { content, note } = checkPackageVersions("package.json", pkg({}, { vite: range }));
@@ -50,6 +50,14 @@ describe("checkPackageVersions", () => {
       expect(JSON.parse(content).devDependencies.vite).toBe(KNOWN_GOOD_VERSIONS.vite);
       expect(note).toContain(`vite "${range}" → "${KNOWN_GOOD_VERSIONS.vite}"`);
       expect(note).not.toContain("Version check");
+    },
+  );
+
+  it.each(["^6", ">=6 <7", ">=6 <7.0.0", ">=6 <=6.9.0", "6.0.0 - 6.9.0"])(
+    "keeps bounded vite %s unchanged",
+    (range) => {
+      const original = pkg({}, { vite: range });
+      expect(checkPackageVersions("package.json", original)).toEqual({ content: original, note: "" });
     },
   );
 
