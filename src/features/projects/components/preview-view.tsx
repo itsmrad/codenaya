@@ -21,6 +21,7 @@ import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
+import { logsAfterClear } from "@/features/sandbox-preview/utils/cleared-logs";
 import { PreviewBuilding } from "@/features/sandbox-preview/components/preview-building";
 import { liveStepLabel } from "@/features/conversations/components/agent-run";
 import { CodenayaLogo } from "@/components/codenaya-logo";
@@ -88,6 +89,8 @@ export const PreviewView = ({
   const project = useProject(projectId);
   const files = useFilesWithContent(projectId);
   const [terminalChoice, setTerminalChoice] = usePreviewTerminal();
+  // The output when Clear was pressed; kept here so it outlives Hide logs (#480).
+  const [clearedLogs, setClearedLogs] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [device, setDevice] = usePreviewDevice();
   
@@ -125,6 +128,9 @@ export const PreviewView = ({
 
   const activeInstance = activeEngine === "sandbox" ? sandbox : webcontainer;
   const { status, previewUrl, error, restart, terminalOutput } = activeInstance;
+  // A restart empties the output; forget the clear so the new run shows in
+  // full even when it repeats the cleared lines (#480).
+  if (clearedLogs && !terminalOutput.startsWith(clearedLogs)) setClearedLogs("");
   const errorKind = activeEngine === "sandbox" ? sandbox.errorKind : null;
   // WebContainer has no phase events: booting covers creating it and writing
   // the files, installing covers the install and starting the dev server.
@@ -440,7 +446,8 @@ export const PreviewView = ({
                 >
                   <div className="h-9 flex items-center pl-4 pr-1.5 text-xs font-medium gap-2 text-muted-foreground border-b border-border/50 shrink-0 bg-muted/20">
                     <TerminalSquareIcon className="size-4" />
-                    Terminal
+                    {/* Read-only output, so it isn't called a terminal (#480). */}
+                    Logs
                     <PreviewStatusBadge status={status} />
                     <Button
                       size="sm"
@@ -453,7 +460,10 @@ export const PreviewView = ({
                       <ChevronDownIcon className="size-3.5" />
                     </Button>
                   </div>
-                  <PreviewTerminal output={terminalOutput} />
+                  <PreviewTerminal
+                    output={logsAfterClear(terminalOutput, clearedLogs)}
+                    onClear={() => setClearedLogs(terminalOutput)}
+                  />
                 </motion.div>
               </div>
             </Allotment.Pane>
