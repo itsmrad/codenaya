@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 
 import { type CatalogDraft, useCatalogDraft } from "../hooks/use-catalog-draft";
+import { AutoPoolCard } from "./auto-pool-card";
 import { CatalogCard } from "./catalog-card";
 import type { ProviderOption } from "./provider-picker";
 
@@ -121,6 +122,7 @@ export const ModelsTab = ({
         keyedProviders={providers.filter((p) => p.keyConfigured)}
         fallbackProviderLabel={fallbackProviderLabel}
       />
+      <AutoPoolCard draft={draft} />
       {draft.isDirty && <SaveBar draft={draft} />}
       <RiskyPricesDialog draft={draft} />
     </>

@@ -31,13 +31,26 @@ export const syntaxError = (fileName: string, content: string): string | null =>
   return `${line + 1}:${character + 1} ${message}`;
 };
 
-/** The note a write tool appends when files it wrote don't parse. */
+/** Starts the note below; its entries are `name line:col message`, joined by "; ". */
+export const SYNTAX_ERRORS_NOTE =
+  "Syntax errors (the content was saved; fix it with editFile before finishing): ";
+
+/**
+ * The note a write tool appends when files it wrote don't parse. Never throws:
+ * it runs after the write, which must not come back as an error.
+ */
 export const syntaxErrorNote = (files: { name: string; content: string }[]) => {
   const errors = files.flatMap((file) => {
-    const error = syntaxError(file.name, file.content);
-    return error ? [`${file.name} ${error}`] : [];
+    try {
+      const error = syntaxError(file.name, file.content);
+      return error ? [`${file.name} ${error}`] : [];
+    } catch (error) {
+      // TypeScript itself can throw, e.g. "Debug Failure" on a .d.ts file.
+      console.error(`[syntax-error] could not check ${file.name}:`, error);
+      return [];
+    }
   });
   return errors.length > 0
-    ? `\nSyntax errors (the content was saved; fix it with updateFile before finishing): ${errors.join("; ")}`
+    ? `\n${SYNTAX_ERRORS_NOTE}${errors.join("; ")}`
     : "";
 };

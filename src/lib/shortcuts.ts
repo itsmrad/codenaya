@@ -14,15 +14,18 @@ export interface Shortcut {
   scope: ShortcutScope;
 }
 
-export const SHORTCUT_SCOPES = ["General", "Dashboard", "Chat", "Editor"] as const;
+export const SHORTCUT_SCOPES = ["General", "Dashboard", "IDE", "Chat", "Editor"] as const;
 export type ShortcutScope = (typeof SHORTCUT_SCOPES)[number];
 
 export const SHORTCUTS: Shortcut[] = [
   { label: "Keyboard shortcuts", keys: [["?"], ["mod", "/"]], scope: "General" },
+  { label: "Command palette", keys: [["mod", "k"], ["mod", "shift", "p"]], scope: "General" },
 
-  { label: "Find a project", keys: [["mod", "k"]], scope: "Dashboard" },
   { label: "New project", keys: [["mod", "j"]], scope: "Dashboard" },
   { label: "Import from GitHub", keys: [["mod", "i"]], scope: "Dashboard" },
+
+  { label: "Command palette, outside the editor", keys: [["mod", "k"]], scope: "IDE" },
+  { label: "Command palette, in the editor too", keys: [["mod", "shift", "p"]], scope: "IDE" },
 
   { label: "Send message", keys: [["enter"]], scope: "Chat" },
   { label: "New line", keys: [["shift", "enter"]], scope: "Chat" },
@@ -64,4 +67,20 @@ export const isShortcutSheetKey = (event: KeyboardEvent): boolean => {
     !event.ctrlKey &&
     !isTypingTarget(event.target)
   );
+};
+
+/** True inside the CodeMirror editor, where Cmd/Ctrl+K is quick edit (#140). */
+const isInCodeEditor = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement && target.closest(".cm-editor") !== null;
+
+/**
+ * Cmd/Ctrl+K outside the code editor, or Cmd/Ctrl+Shift+P anywhere. Only ⌘
+ * counts on Mac, so Ctrl+K stays the text fields' native kill-line there.
+ */
+export const isCommandPaletteKey = (event: KeyboardEvent, isMac: boolean): boolean => {
+  const mod = isMac ? event.metaKey : event.ctrlKey;
+  if (event.defaultPrevented || event.altKey || !mod) return false;
+  const key = event.key.toLowerCase();
+  if (event.shiftKey) return key === "p";
+  return key === "k" && !isInCodeEditor(event.target);
 };

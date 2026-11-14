@@ -146,7 +146,7 @@ npx convex env set --prod NAME value   # production deployment
 2. **Convex env.** On the production deployment, set `CLERK_JWT_ISSUER_DOMAIN` (the production Clerk instance), `CLERK_WEBHOOK_SECRET` (step 4) and `CODENAYA_CONVEX_INTERNAL_KEY` (same value as the host).
 3. **Convex deploy + backfill.** Deploy functions and schema with `npx convex deploy --cmd 'npm run build'` (needs `CONVEX_DEPLOY_KEY`; keep `npm run build` as plain `next build`). After the first deploy, backfill the landing-page project counter once: `npx convex run --prod stats:backfillProjectsBuilt '{}'`.
 4. **Clerk webhook.** In the production Clerk instance, add a webhook to `https://<prod-deployment>.convex.site/clerk-users-webhook` with events `user.created`, `user.updated`, `user.deleted`; put its signing secret in Convex as `CLERK_WEBHOOK_SECRET`. Enable "Delete account" under User & authentication > Account settings.
-5. **E2B template.** Run `npm run e2b:template` with the production `E2B_API_KEY`, then set `E2B_TEMPLATE=codenaya-node22` on the host. Without it previews use the `base` image, whose Node is too old for Vite 7.
+5. **E2B template.** Run `npm run e2b:template` with the production `E2B_API_KEY` and optional `E2B_TEMPLATE` (build default: `codenaya-node22`), then set the same template name in `E2B_TEMPLATE` on the host. Without it previews use the `base` image, whose Node is too old for Vite 7.
 6. **Inngest Cloud.** Set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` on the host, leave `INNGEST_DEV` unset, and sync the app at `https://<your-domain>/api/inngest` (the Inngest Vercel integration does both automatically).
 
 ### Running e2e tests

@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { EMPTY_CHAT_TITLE } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
@@ -21,7 +22,7 @@ const PLAN_ITEM = "Add a todo list page";
 const PLAN = `A simple todo app.\n\n### Steps\n- [ ] ${PLAN_ITEM}\n- [ ] Keep todos in local state`;
 const BUILD_REPLY = "Built the todo app";
 const ADDED_FILE = "todo-app.tsx";
-const WRITE_TOOLS = ["createFiles", "updateFile", "deleteFiles", "renameFile", "createFolder"];
+const WRITE_TOOLS = ["writeFiles", "createFiles", "updateFile", "deleteFiles", "renameFile", "createFolder"];
 
 const toolsOf = (request: StubChatRequest) =>
   (request.tools ?? []).map((tool) => tool.function.name);
@@ -94,7 +95,7 @@ test.describe.serial("plan mode", () => {
     // The dev-tools badge covers the composer's bottom-left corner.
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     await page.getByRole("button", { name: "New conversation" }).click();
-    await expect(page.getByText("What do you want to build?")).toBeVisible();
+    await expect(page.getByText(EMPTY_CHAT_TITLE)).toBeVisible();
 
     const trigger = page.getByRole("combobox", { name: "Agent model" });
     await trigger.click();
@@ -128,6 +129,7 @@ test.describe.serial("plan mode", () => {
     expect(await fileNames()).toEqual([]);
     const planRequest = stub.requests.find((request) => request.tools?.length)!;
     expect(toolsOf(planRequest)).toContain("listFiles");
+    expect(toolsOf(planRequest)).toContain("searchFiles");
     for (const tool of WRITE_TOOLS) expect(toolsOf(planRequest)).not.toContain(tool);
 
     // Building sends the plan as a build message, which writes files.
