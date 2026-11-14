@@ -101,7 +101,7 @@ test.describe("first build preview", () => {
       const stillBuilding = page.getByRole("status", { name: "Still building" });
       await expect(iframe).toBeVisible({ timeout: 30_000 });
       await expect(building).toBeHidden();
-      await expect(stillBuilding).toContainText("Creating App.tsx");
+      await expect(stillBuilding).toContainText("Editing index.css");
       for (const [name, width, height] of [["phone", 375, 812], ["tablet", 768, 1024]] as const) {
         await page.setViewportSize({ width, height });
         await expect(stillBuilding).toBeVisible();
