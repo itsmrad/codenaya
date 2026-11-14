@@ -30,6 +30,7 @@ vi.mock("e2b", () => ({
   },
   AuthenticationError: class extends Error {},
   RateLimitError: class extends Error {},
+  TimeoutError: class extends Error {},
   CommandExitError: class extends Error {
     constructor(
       readonly result: { exitCode: number; stdout?: string; stderr: string; error: string },
@@ -48,7 +49,8 @@ vi.mock("e2b", () => ({
   },
 }));
 
-import { CommandExitError } from "e2b";
+import { CommandExitError, TimeoutError } from "e2b";
+import { readInstallFailure } from "@/features/sandbox-preview/utils/app-error";
 import { POST } from "./route";
 import {
   SANDBOX_CREATE_RATE_LIMIT,
@@ -608,4 +610,44 @@ describe("PATCH /api/sandbox/[sandboxId] install failure (#497)", () => {
     expect(mocks.sandboxConnect).toHaveBeenCalledTimes(1);
     forgetSandbox("sbx_patch");
   });
+});
+
+describe("PATCH reinstall timeout", () => {
+  it.each([undefined, "ERESOLVE", "ETIMEDOUT", "ECONNRESET"])(
+    "hands off a timeout with npm code %s without leaking output or losing its classification",
+    async (code) => {
+      const secret = "synthetic-private-install-output";
+      const run = vi.fn(async (_command: string, options: { onStderr?: (chunk: string) => void }) => {
+        options.onStderr?.(`npm error ${secret}\nnpm error co`);
+        options.onStderr?.(code ? `de ${code}\n` : "ntent\n");
+        throw new TimeoutError(secret);
+      });
+      mocks.sandboxConnect.mockResolvedValue({
+        sandboxId: "sbx_timeout",
+        getInfo: async () => ({ metadata: { userId: "user_1" } }),
+        files: { write: vi.fn() },
+        commands: { run },
+      });
+      const sync = () => PATCH(
+        request("PATCH", JSON.stringify({ files: [{ path: "package.json", content: "{}" }] })),
+        { params: Promise.resolve({ sandboxId: "sbx_timeout" }) },
+      );
+      try {
+        const response = await sync();
+        const text = await response.text();
+        expect(response.status).toBe(200);
+        expect(text).not.toContain(secret);
+        const body = JSON.parse(text);
+        expect(body).toEqual({ success: true, synced: 1, installFailed: { exitCode: 124, ...(code ? { code } : {}) } });
+        const failure = readInstallFailure(body, "npm install");
+        if (code === "ETIMEDOUT" || code === "ECONNRESET") expect(failure?.error).toBeNull();
+        else expect(failure?.error).toMatchObject({ kind: "build", file: "package.json" });
+        expect(run).toHaveBeenCalledTimes(1);
+        await sync();
+        expect(mocks.sandboxConnect).toHaveBeenCalledTimes(1);
+      } finally {
+        forgetSandbox("sbx_timeout");
+      }
+    },
+  );
 });

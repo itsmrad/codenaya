@@ -73,7 +73,7 @@ export const createDelegateTasksTool = ({ internalKey, projectId, messageId, own
             title: task.title,
             brief: task.brief,
             ownedPaths: task.ownedPaths,
-            modelId: codingModel.modelId,
+            modelId: codingModel.id,
             model: codingModel.label,
           })),
         });
