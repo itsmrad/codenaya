@@ -32,6 +32,8 @@ export const BUILD_CHECK_NUDGE =
   "Files changed since the last build check. Run checkBuild, then give the complete final summary again.";
 export const BUILD_REPAIR_NUDGE =
   "The last build check failed. Fix the errors it reported, run checkBuild again, then give the complete final summary again.";
+export const BUILD_RETRY_NUDGE =
+  "The last build check could not finish, most likely because the preview was still installing packages. Run checkBuild again now without changing files, then give the complete final summary again.";
 export const BUILD_RESERVE_NUDGE =
   "Only a few steps are left. Stop adding features: run checkBuild now, fix what it reports, then give the final summary.";
 
@@ -87,7 +89,7 @@ const buildState = (results: ToolCalls[]) => {
  */
 export const hasUncheckedWrites = (results: ToolCalls[]) => {
   const { wrote, last, checks } = buildState(results);
-  // A check that could not run is not retried: the agent reports it instead.
+  // A check that could not run is retried at most once, by the gate below.
   return wrote && (last === "unchecked" || last === "failed") && checks < MAX_BUILD_CHECKS;
 };
 
@@ -101,21 +103,27 @@ export const unverifiedBuildNote = (results: ToolCalls[]) => {
 
 /**
  * Per run: `shouldContinue` on a text-only turn routes back to the agent at
- * most MAX_BUILD_CHECKS times, `reserve` asks once for the check near the
+ * most MAX_BUILD_CHECKS times, once of them to retry a check that could not
+ * finish (the preview's install is usually done by then, so the retry builds
+ * in the warm sandbox), `reserve` asks once for the check near the
  * step budget's end, and `takeNudge` hands the next turn its note.
  */
 export const createBuildCheckGate = () => {
   let forced = 0;
   let repairs = 0;
   let reserved = false;
+  let retried = false;
   let nudge: string | undefined;
   return {
     shouldContinue(results: ToolCalls[]) {
-      if (forced >= MAX_BUILD_CHECKS || !hasUncheckedWrites(results)) return false;
+      if (forced >= MAX_BUILD_CHECKS) return false;
+      const { wrote, last, checks } = buildState(results);
+      const retry = !retried && wrote && last === "unfinished" && checks < MAX_BUILD_CHECKS;
+      if (!retry && !hasUncheckedWrites(results)) return false;
       forced += 1;
-      const failed = buildState(results).last === "failed";
-      if (failed) repairs += 1;
-      nudge = failed ? BUILD_REPAIR_NUDGE : BUILD_CHECK_NUDGE;
+      if (retry) retried = true;
+      if (last === "failed") repairs += 1;
+      nudge = retry ? BUILD_RETRY_NUDGE : last === "failed" ? BUILD_REPAIR_NUDGE : BUILD_CHECK_NUDGE;
       return true;
     },
     reserve(results: ToolCalls[]) {
