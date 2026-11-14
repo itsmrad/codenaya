@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getFunctionName } from "convex/server";
+import { ConvexError } from "convex/values";
 import { toolResultError } from "../../agent-steps";
 import { hasUncheckedWrites } from "../build-check-gate";
 
@@ -22,6 +23,7 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
 import { createCreateFilesTool } from "./create-files";
 import { createDeleteFilesTool } from "./delete-files";
+import { createCreateFolderTool } from "./create-folder";
 import { createListFilesTool } from "./list-files";
 import { buildProjectTreePromptSection, MAX_PROMPT_TREE_ENTRIES, type ProjectFile } from "./paths";
 import { createReadFilesTool } from "./read-files";
@@ -589,6 +591,21 @@ describe("locked paths (#307)", () => {
     );
     expect(result).toBe(`Wrote 1 file(s). Created: ok.ts. Failed: ${lockMessage("src/new/x.ts")}, ${lockMessage("src/App.tsx")}.`);
     expect(mutationNames()).toEqual(["system:createFiles"]);
+  });
+
+  it("createFiles reports the mutation's per-file lock refusal by name", async () => {
+    mocks.mutation.mockResolvedValueOnce([{ name: "x.ts", fileId: "", error: lockMessage("src/x.ts") }]);
+    expect(
+      await createCreateFilesTool(opts).handler({ parentId: "src", files: [{ name: "x.ts", content: "x" }] }, ctx),
+    ).toBe(`Created 0 file(s). Failed: x.ts (${lockMessage("src/x.ts")})`);
+  });
+
+  it("createFolder returns a lock refusal as a plain result, so Inngest doesn't retry it", async () => {
+    mocks.mutation.mockRejectedValueOnce(new ConvexError({ code: "FORBIDDEN", message: lockMessage("src/x") }));
+    expect(await createCreateFolderTool(opts).handler({ name: "x", parentId: "src" }, ctx)).toBe(
+      `Error: ${lockMessage("src/x")}`,
+    );
+    await expect(step.run.mock.results[0].value).resolves.toBe(`Error: ${lockMessage("src/x")}`);
   });
 
   it("names locked paths in the prompt so the model plans around them", () => {
