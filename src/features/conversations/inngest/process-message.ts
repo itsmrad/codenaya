@@ -33,9 +33,11 @@ import {
   BUILD_CHECK_RESERVE_STEPS,
   BUILD_REPAIR_NUDGE,
   createBuildCheckGate,
+  needsBuildRepair,
   unverifiedBuildNote,
   wroteFiles,
 } from './build-check-gate';
+import { repairBuild, repairOutcome } from './build-repair';
 import { STUCK_FALLBACK_REPLY, createLoopGuard, stuckNote } from './loop-detector';
 import type { AgentModelChoice } from '../agent-models';
 import {
@@ -936,15 +938,35 @@ export const processMessage = inngest.createFunction(
           : textMessage.content.map((c) => c.text).join("");
     }
 
+    // Changes that ended on a failed or missing check get a repair here, before
+    // the run completes, so it needs no open tab. Its model calls are metered
+    // like the run's; cancelling the run stops it between steps.
+    const repair = !stuck && needsBuildRepair(result.state.results)
+      ? await repairBuild({
+          projectId,
+          internalKey,
+          runId,
+          model: codingModel,
+          step: (id, fn) => step.run(id, fn),
+          onResponse: (raw) => recordUsage(raw, runModel.metering.coding),
+          recordSteps: async (build) => {
+            await recordSteps("record-repair-steps", build, false);
+          },
+        })
+      : null;
+
     await settleRun("record-usage-final");
 
     // Changes that did not end on a verified build are not a working build.
-    const buildNote = unverifiedBuildNote(result.state.results);
+    const noteBefore = unverifiedBuildNote(result.state.results);
+    const { verified, note: buildNote } = repair
+      ? repairOutcome(repair, noteBefore)
+      : { verified: !noteBefore, note: noteBefore };
 
     // The first run that wrote files and verified its build ends a seeded
     // project's first build (#338). Before the message completes, so the
     // client sees the flag cleared by the time the run is no longer active.
-    if (!buildNote && wroteFiles(result.state.results)) {
+    if (verified && wroteFiles(result.state.results)) {
       await step.run("complete-first-build", async () => {
         await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
       });
@@ -956,7 +978,7 @@ export const processMessage = inngest.createFunction(
         internalKey,
         messageId,
         content: buildNote && !stuck ? `${assistantResponse}\n\n${buildNote}` : assistantResponse,
-        ...(stuck ? { stuck } : buildNote ? { outcome: "error" as const } : {}),
+        ...(stuck ? { stuck } : verified ? {} : { outcome: "error" as const }),
       })
     });
 
