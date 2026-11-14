@@ -58,7 +58,7 @@ const REPAIR_MAX_STEPS = 8;
 const MAX_TEXT_BYTES = 1_000_000;
 const MAX_SNAPSHOT_FILES = 2_000;
 const SHORT_CALL_MS = 10_000;
-/** Never read into a check or shown to the model, like the preview's `.env` on the warm path. */
+/** Never read into a check or copied into the sandbox, like the preview's `.env` on the warm path. */
 const SKIPPED_DIRS = new Set(["node_modules", ".git", "dist"]);
 const isEnvFile = (path: string) => /(^|\/)\.env(\.|$)/.test(path);
 const readable = (path: string) =>
