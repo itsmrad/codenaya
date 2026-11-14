@@ -148,6 +148,86 @@ export const autoFixTarget = (
     ? errorId
     : null;
 
+/**
+ * Fixes, without a click, the error the run that just ended left (#491).
+ * Armed when a run ends, for `windowMs`; disarmed by the next run, and by any
+ * file change after the run ended, which is the user's edit, not the run's. An
+ * error must stay eligible for `delayMs`, so the run's last syncs can clear it.
+ * Call `update` on every change, `dispose` on unmount.
+ */
+export const createAutoFixer = ({
+  delayMs,
+  windowMs,
+  max,
+}: {
+  delayMs: number;
+  windowMs: number;
+  max: number;
+}) => {
+  const sent: string[] = [];
+  // The latest `update`'s, so the fix sent is built from the error shown then.
+  let fix: (errorId: string) => void = () => {};
+  let wasRunActive = false;
+  // The files when the last run ended; null when not armed.
+  let armedFiles: unknown = null;
+  let windowTimer: ReturnType<typeof setTimeout> | undefined;
+  let fixTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingId: string | null = null;
+
+  const schedule = (target: string | null) => {
+    if (target === pendingId) return;
+    clearTimeout(fixTimer);
+    pendingId = target;
+    if (target === null) return;
+    fixTimer = setTimeout(() => {
+      pendingId = null;
+      sent.push(target);
+      fix(target);
+    }, delayMs);
+  };
+  const disarm = () => {
+    armedFiles = null;
+    clearTimeout(windowTimer);
+    schedule(null);
+  };
+
+  return {
+    update: ({
+      errorId,
+      runActive,
+      chatBusy,
+      files,
+      fix: latestFix,
+    }: {
+      /** The shown error that may still be fixed, or null. */
+      errorId: string | null;
+      runActive: boolean;
+      chatBusy: boolean;
+      files: unknown;
+      fix: (errorId: string) => void;
+    }) => {
+      fix = latestFix;
+      if (runActive !== wasRunActive) {
+        wasRunActive = runActive;
+        disarm();
+        if (!runActive) {
+          armedFiles = files ?? null;
+          windowTimer = setTimeout(disarm, windowMs);
+        }
+      } else if (armedFiles !== null && files !== armedFiles) {
+        disarm();
+      }
+      schedule(
+        armedFiles === null ? null : autoFixTarget(errorId, { runActive, chatBusy, sent, max }),
+      );
+    },
+    dispose: () => {
+      clearTimeout(windowTimer);
+      schedule(null);
+    },
+  };
+};
+
 /** Fix runs sent for the error that was active last. */
 export interface FixAttempts {
   errorId: string | null;

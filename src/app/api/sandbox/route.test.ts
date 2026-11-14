@@ -12,10 +12,15 @@ const mocks = vi.hoisted(() => ({
   sandboxConnect: vi.fn(),
   sandboxList: vi.fn(),
   sandboxKill: vi.fn(),
+  resolveProjectEnv: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/convex-client", () => ({ convex: { query: mocks.query } }));
+vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  resolveProjectEnv: mocks.resolveProjectEnv,
+}));
 vi.mock("e2b", () => ({
   Sandbox: {
     create: mocks.sandboxCreate,
@@ -477,13 +482,17 @@ describe("POST /api/sandbox replaces the project's earlier preview (#492)", () =
 });
 
 describe("POST /api/sandbox install failure (#491)", () => {
-  it("reports a non-zero npm install as an install failure, not E2B's exit status", async () => {
+  const SECRET = "sk_live_synthetic_0123456789";
+
+  /** A sandbox whose install prints `stderr` and exits 1, as E2B reports it. */
+  const failingInstall = (stderr: string) => {
     mocks.sandboxList.mockReturnValue({ nextItems: async () => [] });
-    const run = vi.fn(async (command: string) => {
+    const run = vi.fn(async (command: string, opts?: { onStderr?: (data: string) => void }) => {
       if (command === "node --version") return { exitCode: 0, stdout: "v22.0.0\n", stderr: "" };
+      opts?.onStderr?.(stderr);
       throw new (CommandExitError as unknown as new (result: object) => Error)({
         exitCode: 1,
-        stderr: "npm error code ERESOLVE",
+        stderr,
         error: "exit status 1",
       });
     });
@@ -493,11 +502,37 @@ describe("POST /api/sandbox install failure (#491)", () => {
       files: { makeDir: vi.fn(), write: vi.fn() },
       kill: vi.fn(),
     });
-    const files = [{ path: "package.json", content: '{"scripts":{"dev":"vite"}}' }];
+  };
+  const files = [{ path: "package.json", content: '{"scripts":{"dev":"vite"}}' }];
+
+  it("reports a non-zero npm install as an install failure, not E2B's exit status", async () => {
+    failingInstall("npm error code ERESOLVE\n");
 
     const body = await (await POST(request("POST", JSON.stringify({ files })))).text();
 
-    expect(body).toContain("failed with exit code 1\\nnpm error code ERESOLVE");
+    expect(body).toContain("npm error code ERESOLVE");
+    expect(body).toContain("failed with exit code 1");
     expect(body).not.toContain("exit status 1");
+  });
+
+  it("never sends an injected secret the install printed, in output or the error event", async () => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
+    mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : [],
+    );
+    mocks.resolveProjectEnv.mockResolvedValue({
+      publicEntries: [],
+      secretEntries: [{ key: "API_KEY", value: SECRET }],
+      failedKeys: [],
+    });
+    failingInstall(`postinstall: API_KEY=${SECRET}\n`);
+
+    const body = await (
+      await POST(request("POST", JSON.stringify({ files, projectId: "proj_1" })))
+    ).text();
+
+    expect(body).toContain('"type":"error"');
+    expect(body).toContain("[redacted]");
+    expect(body).not.toContain(SECRET);
   });
 });

@@ -481,11 +481,10 @@ export async function POST(request: Request) {
             boundedTimeout(INSTALL_TIMEOUT_MS, budget.left()),
           );
 
+          // Not the stderr: it was already streamed through the redactor, and
+          // the error event's message is not redacted (#491).
           if (installResult.exitCode !== 0) {
-            throw new Error(
-              `${installCmd} failed with exit code ${installResult.exitCode}\n` +
-                installResult.stderr
-            );
+            throw new Error(`${installCmd} failed with exit code ${installResult.exitCode}`);
           }
 
           send({ type: "output", data: "\nDependencies installed.\n\n" });

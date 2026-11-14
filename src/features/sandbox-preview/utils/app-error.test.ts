@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NOTHING_TO_PREVIEW } from "./boot-plan";
 import {
@@ -8,6 +8,7 @@ import {
   buildFixPrompt,
   createBuildErrorDetector,
   codeBlock,
+  createAutoFixer,
   detectBuildError,
   isAppStartFailure,
   isHmrSuccess,
@@ -292,5 +293,137 @@ describe("createBuildErrorDetector", () => {
 
     detector.push(chunk);
     expect(detector.push("x".repeat(10_000))).toBeNull();
+  });
+});
+
+describe("createAutoFixer (#491)", () => {
+  const files = ["run's files"];
+  const fix = vi.fn();
+  let fixer: ReturnType<typeof createAutoFixer>;
+  const state = { errorId: null as string | null, runActive: false, chatBusy: false, files: files as unknown };
+  const update = (next: Partial<typeof state>) => {
+    Object.assign(state, next);
+    fixer.update({ ...state, fix });
+  };
+  /** A run that starts, then ends with `errorId` shown. */
+  const runEnds = (errorId: string | null = "a") => {
+    update({ runActive: true });
+    update({ runActive: false, errorId });
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fix.mockReset();
+    Object.assign(state, { errorId: null, runActive: false, chatBusy: false, files });
+    fixer = createAutoFixer({ delayMs: 3000, windowMs: 120_000, max: 2 });
+    update({});
+  });
+  afterEach(() => {
+    fixer.dispose();
+    vi.useRealTimers();
+  });
+
+  it("fixes the error a run left once it has stayed shown for the delay", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(2999);
+    expect(fix).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(fix).toHaveBeenCalledExactlyOnceWith("a");
+  });
+
+  it("does nothing on a page load with an error already shown", () => {
+    update({ errorId: "a" });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+  });
+
+  it("drops the pending fix when the error clears or changes before the delay", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(2000);
+    update({ errorId: null });
+    vi.advanceTimersByTime(5000);
+    expect(fix).not.toHaveBeenCalled();
+
+    update({ errorId: "b" });
+    vi.advanceTimersByTime(2000);
+    update({ errorId: "c" });
+    vi.advanceTimersByTime(3000);
+    expect(fix).toHaveBeenCalledExactlyOnceWith("c");
+  });
+
+  it("disarms on a file edit after the run ended: the user's typo is left alone", () => {
+    runEnds(null);
+    update({ files: ["user edit"] });
+    update({ errorId: "typo" });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+  });
+
+  it("disarms on an edit while a fix is pending", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(1000);
+    update({ files: ["user edit"] });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+  });
+
+  it("counts files the run itself wrote as the run's, not an edit", () => {
+    update({ runActive: true });
+    update({ runActive: false, errorId: "a", files: ["written by the run"] });
+    vi.advanceTimersByTime(3000);
+    expect(fix).toHaveBeenCalledWith("a");
+  });
+
+  it("disarms once the window after the run is over", () => {
+    runEnds(null);
+    vi.advanceTimersByTime(120_000);
+    update({ errorId: "late" });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+  });
+
+  it("waits while a run is active and while the chat is busy", () => {
+    update({ runActive: true, errorId: "a" });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+
+    update({ runActive: false, chatBusy: true });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+
+    update({ chatBusy: false });
+    vi.advanceTimersByTime(3000);
+    expect(fix).toHaveBeenCalledExactlyOnceWith("a");
+  });
+
+  it("cancels a pending fix when the user clicks Fix first", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(1000);
+    // The manual fix is queued: the chat is busy, then its run starts.
+    update({ chatBusy: true });
+    update({ chatBusy: false, runActive: true });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+  });
+
+  it("fixes each error once and at most max per session, across runs", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(3000);
+    runEnds("a"); // the fix run ended and the error is still there
+    vi.advanceTimersByTime(3000);
+    expect(fix).toHaveBeenCalledTimes(1);
+
+    runEnds("b");
+    vi.advanceTimersByTime(3000);
+    runEnds("c");
+    vi.advanceTimersByTime(3000);
+    expect(fix.mock.calls).toEqual([["a"], ["b"]]);
+  });
+
+  it("sends nothing after dispose", () => {
+    runEnds("a");
+    fixer.dispose();
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
   });
 });

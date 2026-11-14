@@ -45,9 +45,9 @@ import type { BootHistory, BootPhase } from "@/features/sandbox-preview/utils/bo
 import { NOTHING_TO_PREVIEW } from "@/features/sandbox-preview/utils/boot-plan";
 import {
   appErrorKey,
-  autoFixTarget,
   bannerError,
   buildFixPrompt,
+  createAutoFixer,
   isAppStartFailure,
   mergeAppError,
   trackFixAttempts,
@@ -90,7 +90,7 @@ const WAITING_FOR_BUILD = "Waiting for the first build...";
 const AUTO_FIX_DELAY_MS = 3000;
 /**
  * How long after a run its errors are fixed without a click: long enough for
- * a reinstall to fail, short enough to leave the user's own edits alone.
+ * a reinstall to fail. A file edit after the run ends disarms it sooner.
  */
 const AUTO_FIX_WINDOW_MS = 2 * 60_000;
 
@@ -250,40 +250,26 @@ export const PreviewView = ({
     firstBuildRunning: firstBuild && activeRun !== null,
   });
 
-  // An error a run left is fixed without a click once the run is over (#491).
+  // An error the run left is fixed without a click once it is over (#491).
   const runActive = Boolean(activeRun);
-  const [prevRunActive, setPrevRunActive] = useState(runActive);
-  const [autoFixArmed, setAutoFixArmed] = useState(false);
-  if (runActive !== prevRunActive) {
-    setPrevRunActive(runActive);
-    setAutoFixArmed(!runActive);
-  }
-  useEffect(() => {
-    if (!autoFixArmed) return;
-    const timer = setTimeout(() => setAutoFixArmed(false), AUTO_FIX_WINDOW_MS);
-    return () => clearTimeout(timer);
-  }, [autoFixArmed]);
   const [autoFixedIds, setAutoFixedIds] = useState<string[]>([]);
-  const autoFixId = autoFixTarget(shownError && canFix && autoFixArmed ? appErrorId : null, {
-    runActive: activeRun !== null,
-    chatBusy: chatBlock !== null,
-    sent: autoFixedIds,
-    max: MAX_FIX_ATTEMPTS,
-  });
-  // Read when the timer fires: log lines re-create the error, and so the fix.
-  const fixAppErrorRef = useRef(fixAppError);
+  const [autoFixer] = useState(() =>
+    createAutoFixer({ delayMs: AUTO_FIX_DELAY_MS, windowMs: AUTO_FIX_WINDOW_MS, max: MAX_FIX_ATTEMPTS }),
+  );
+  useEffect(() => () => autoFixer.dispose(), [autoFixer]);
   useEffect(() => {
-    fixAppErrorRef.current = fixAppError;
-  }, [fixAppError]);
-  useEffect(() => {
-    if (!autoFixId) return;
-    // The run's last edits are still syncing; they clear an error they fixed.
-    const timer = setTimeout(() => {
-      setAutoFixedIds((ids) => [...ids, autoFixId]);
-      fixAppErrorRef.current();
-    }, AUTO_FIX_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [autoFixId]);
+    autoFixer.update({
+      errorId: shownError && canFix ? appErrorId : null,
+      // A loading run counts as none, so a page load doesn't look like a run ending.
+      runActive,
+      chatBusy: chatBlock !== null,
+      files,
+      fix: (errorId) => {
+        setAutoFixedIds((ids) => [...ids, errorId]);
+        fixAppError();
+      },
+    });
+  }, [autoFixer, shownError, canFix, appErrorId, runActive, chatBlock, files, fixAppError]);
 
   const errorBanner =
     shownError && appErrorId ? (
