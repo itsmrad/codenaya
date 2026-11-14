@@ -17,7 +17,6 @@ import {
 } from "./paths";
 import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { checkPackageVersions } from "./package-versions";
-import { jsonArg } from "./json-arg";
 import { syntaxErrorNote } from "./syntax-error";
 import { WRITE_BATCH_FILES, WRITE_BATCH_LINES } from "../constants";
 
@@ -28,14 +27,12 @@ interface WriteFilesToolOptions {
 }
 
 const paramsSchema = z.object({
-  files: jsonArg(
-    z
-      .array(z.object({
-        path: z.string({ error: 'Each file needs a "path" string, like "src/App.tsx"' }),
-        content: z.string({ error: 'Each file needs a "content" string with the complete file content' }),
-      }))
-      .min(1, "Provide at least one file to write"),
-  ),
+  files: z
+    .array(z.object({
+      path: z.string({ error: 'Each file needs a "path" string, like "src/App.tsx"' }),
+      content: z.string({ error: 'Each file needs a "content" string with the complete file content' }),
+    }))
+    .min(1, "Provide at least one file to write"),
 });
 
 export const createWriteFilesTool = ({ projectId, internalKey, registry = createRegistryCheck() }: WriteFilesToolOptions) => {

@@ -29,6 +29,7 @@ import { createRenameFileTool } from "./rename-file";
 import { createEditFileTool } from "./edit-file";
 import { createUpdateFileTool } from "./update-file";
 import { createWriteFilesTool } from "./write-files";
+import { decodeJsonArgs } from "../lib/json-args";
 import { rewriteIcons } from "@/features/sandbox-preview/utils/project-checks";
 
 // Runs the step body inline, so a throw inside step.run propagates like it
@@ -114,7 +115,7 @@ describe("path resolution", () => {
   });
 
   it("reads paths sent as a JSON string like an array", async () => {
-    const result = (await createReadFilesTool(opts).handler({ paths: '["src/App.tsx"]' } as never, ctx)) as string;
+    const result = (await decodeJsonArgs(createReadFilesTool(opts)).handler({ paths: '["src/App.tsx"]' } as never, ctx)) as string;
     expect(JSON.parse(result)).toEqual([{ path: "src/App.tsx", content: "app" }]);
   });
 
@@ -263,7 +264,7 @@ describe("writeFiles tool", () => {
   it("writes files sent as a JSON string like an array", async () => {
     db.rows = [];
     const files = JSON.stringify([{ path: "src/x.ts", content: "x" }]);
-    expect(await createWriteFilesTool(opts).handler({ files } as never, ctx)).toBe("Wrote 1 file(s). Created: src/x.ts.");
+    expect(await decodeJsonArgs(createWriteFilesTool(opts)).handler({ files } as never, ctx)).toBe("Wrote 1 file(s). Created: src/x.ts.");
   });
 
   it("names the missing content field instead of a bare type error", async () => {

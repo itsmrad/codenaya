@@ -13,6 +13,7 @@ vi.mock("@/lib/convex-client", () => ({
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { hasUncheckedWrites } from "../build-check-gate";
 import { applyEdits, createEditFileTool } from "./edit-file";
+import { decodeJsonArgs } from "../lib/json-args";
 import { KNOWN_GOOD_VERSIONS } from "../known-good-versions";
 
 const step = { run: vi.fn(async (_id: string, fn: () => unknown) => fn()) };
@@ -201,8 +202,11 @@ describe("editFile tool", () => {
     expect(step.run).not.toHaveBeenCalled();
   });
 
+  const decodedEdit = (edits: unknown) =>
+    decodeJsonArgs(createEditFileTool({ projectId, internalKey })).handler({ path: "src/App.tsx", edits } as never, ctx);
+
   it("applies edits sent as a JSON string like an array (Haiku 5.5)", async () => {
-    expect(await edit(JSON.stringify([{ oldText: "b = 2", newText: "b = 3" }]))).toMatch(
+    expect(await decodedEdit(JSON.stringify([{ oldText: "b = 2", newText: "b = 3" }]))).toMatch(
       /^File "src\/App.tsx" edited successfully/,
     );
     expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
@@ -211,7 +215,7 @@ describe("editFile tool", () => {
   });
 
   it.each(["not json", '"[]"', "42"])("still rejects a string that isn't a JSON array (%j)", async (edits) => {
-    expect(await edit(edits)).toBe("Error: Invalid input: expected array, received string");
+    expect(await decodedEdit(edits)).toBe("Error: Invalid input: expected array, received string");
     expect(step.run).not.toHaveBeenCalled();
   });
 

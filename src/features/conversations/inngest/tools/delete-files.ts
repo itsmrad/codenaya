@@ -5,7 +5,6 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
-import { jsonArg } from "./json-arg";
 import { findProjectFile, getProjectFiles, indexProjectFiles, lockedPathError } from "./paths";
 
 interface DeleteFilesToolOptions {
@@ -16,7 +15,7 @@ interface DeleteFilesToolOptions {
 // `fileIds` is not offered to the model; it reads tool calls made before #292.
 const paramsSchema = z
   .object({
-    paths: jsonArg(z.array(z.string())).optional(),
+    paths: z.array(z.string()).optional(),
     fileIds: z.array(z.string()).optional(),
   })
   .refine(({ paths, fileIds }) => (paths ?? fileIds ?? []).length > 0, "Provide at least one path");

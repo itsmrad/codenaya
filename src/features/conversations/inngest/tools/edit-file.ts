@@ -6,7 +6,6 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
-import { jsonArg } from "./json-arg";
 import { checkPackageVersions } from "./package-versions";
 import { findProjectFile, getProjectFiles, indexProjectFiles, lockedPathError } from "./paths";
 import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
@@ -31,7 +30,7 @@ type Edit = z.infer<typeof editSchema>;
 
 const paramsSchema = z.object({
   path: z.string(),
-  edits: jsonArg(z.array(editSchema).min(1, "Provide at least one edit")),
+  edits: z.array(editSchema).min(1, "Provide at least one edit"),
 });
 
 const toLf = (text: string) => text.replace(/\r\n/g, "\n");
