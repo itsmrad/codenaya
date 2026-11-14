@@ -1059,4 +1059,17 @@ describe("resolveWorkerModel (swarm worker)", () => {
     mocks.query.mockResolvedValue(customKey);
     expect(target((await resolve({ keyId: "key_2", modelId: "llama-4-scout" })).coding()).id).toBe("llama-4-scout");
   });
+
+  it("runs sub-orchestrators on Sonnet, platform and BYOK alike", async () => {
+    const resolveSub = (choice: { keyId?: string; modelId: string }) =>
+      resolveWorkerModel({ internalKey: "ik", projectId: "p1" as never, choice, role: "sub-orchestrator" });
+    mocks.platform.mockReturnValue({
+      ...ROUTED_SAVED,
+      models: [...ROUTED_SAVED.models, catalogModel("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5", { hidden: true })],
+    });
+    expect(target((await resolveSub({ modelId: "x-ai/grok-4.7" })).coding()).id).toBe("anthropic/claude-sonnet-5.5");
+
+    mocks.query.mockResolvedValue({ ...openAiKey, provider: "anthropic" });
+    expect(target((await resolveSub({ keyId: "key_1", modelId: "claude-opus-5-5" })).coding()).id).toBe("claude-sonnet-5-5");
+  });
 });

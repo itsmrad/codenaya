@@ -30,6 +30,8 @@ export const agentTaskInputValidator = v.object({
   ownedPaths: v.array(v.string()),
   modelId: v.string(),
   model: v.string(),
+  /** A sub-orchestrator's worker: its parent's taskId (its own is `<parent>/<child>`). */
+  parentTaskId: v.optional(v.string()),
 });
 
 export const agentTaskStatusValidator = v.union(

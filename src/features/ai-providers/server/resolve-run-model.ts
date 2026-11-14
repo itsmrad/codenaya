@@ -390,8 +390,13 @@ type AgentKitModel = ReturnType<typeof buildAgentKitModel>;
 /** Swarm workers' model, the first one a route offers (platform catalog id, then OpenRouter's). */
 export const SWARM_WORKER_MODEL_IDS = ["claude-haiku-5-5", "anthropic/claude-haiku-5.5"];
 
-/** `resolveRunModel` for a swarm worker (see its `worker` flag). */
-export const resolveWorkerModel = (args: Parameters<typeof resolveRunModel>[0]) => resolveRunModel(args, true);
+/** Swarm sub-orchestrators' model, picked the same way. */
+export const SWARM_SUBORCH_MODEL_IDS = ["claude-sonnet-5-5", "anthropic/claude-sonnet-5.5"];
+
+/** `resolveRunModel` for a swarm task, on its role's model (see its `workerModelIds`). */
+export const resolveWorkerModel = ({ role, ...args }: Parameters<typeof resolveRunModel>[0] & {
+  role?: "worker" | "sub-orchestrator";
+}) => resolveRunModel(args, role === "sub-orchestrator" ? SWARM_SUBORCH_MODEL_IDS : SWARM_WORKER_MODEL_IDS);
 
 export interface RunModel {
   /** Set for runs on the user's own key. Holds no key material. */
@@ -430,8 +435,8 @@ export interface RunModel {
  * invalid, no longer offers the model, or its custom endpoint no longer passes
  * the SSRF guard.
  * Call it in the function body, never inside `step.run`.
- * `worker`: a swarm worker's run, on the first of `SWARM_WORKER_MODEL_IDS` the
- * route offers (hidden catalog entries included), else on the run's model.
+ * `workerModelIds`: a swarm task's run, on the first of them the route offers
+ * (hidden catalog entries included), else on the run's model.
  */
 export async function resolveRunModel({
   internalKey,
@@ -441,16 +446,14 @@ export async function resolveRunModel({
   internalKey: string;
   projectId: Id<"projects">;
   choice: AgentModelChoice;
-}, worker = false): Promise<RunModel> {
+}, workerModelIds: readonly string[] = []): Promise<RunModel> {
   if (!choice.keyId) {
     // Re-read, not taken from the event: the admin may have re-routed, hidden
     // or removed the model since the route checked it.
     const catalog = await platformCatalog(internalKey);
     // A direct lookup: resolveCatalogModel drops hidden models, and the worker model may be a hidden utility.
-    const workerModel = worker
-      ? SWARM_WORKER_MODEL_IDS.map((id) => catalog.models.find((m) => m.id === id))
-          .find((m) => m && isPlatformConfigured(m.provider))
-      : undefined;
+    const workerModel = workerModelIds.map((id) => catalog.models.find((m) => m.id === id))
+      .find((m) => m && isPlatformConfigured(m.provider));
     const model = workerModel ?? resolveCatalogModel(catalog, choice.modelId);
     // The key can go missing between the route's check and the run (a redeploy).
     if (!isPlatformConfigured(model.provider)) {
@@ -518,7 +521,7 @@ export async function resolveRunModel({
     }
   }
 
-  const codingModelId = (worker && SWARM_WORKER_MODEL_IDS.find((id) => modelIdsFor(key).includes(id))) || choice.modelId;
+  const codingModelId = workerModelIds.find((id) => modelIdsFor(key).includes(id)) ?? choice.modelId;
   const apiKey = await openProviderKey(key);
   const build = (model: string, temperature?: number) =>
     buildAgentKitModel({

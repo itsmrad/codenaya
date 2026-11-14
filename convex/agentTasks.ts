@@ -8,7 +8,7 @@ import { validateInternalKey } from "./internalKey";
 import { mergeMessageSteps } from "./messageSteps";
 import { getOwnedProject } from "./projects";
 import schema, { agentTaskInputValidator, agentTaskStatusValidator, messageStepValidator } from "./schema";
-import { MAX_SWARM_TASKS } from "./swarm";
+import { MAX_SWARM_AGENTS } from "./swarm";
 
 /** Replays return the original rows without resetting their instructions or state. */
 export const createTasks = mutation({
@@ -31,7 +31,7 @@ export const createTasks = mutation({
     }
     const existing = await ctx.db.query("agentTasks")
       .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
-      .take(MAX_SWARM_TASKS + 1);
+      .take(MAX_SWARM_AGENTS + 1);
     let count = existing.length;
     const ids: Id<"agentTasks">[] = [];
     for (const task of args.tasks) {
@@ -42,8 +42,8 @@ export const createTasks = mutation({
         ids.push(row._id);
         continue;
       }
-      if (count >= MAX_SWARM_TASKS) {
-        throw appError("LIMIT_EXCEEDED", "Too many swarm tasks");
+      if (count >= MAX_SWARM_AGENTS) {
+        throw appError("LIMIT_EXCEEDED", "Too many swarm agents");
       }
       ids.push(await ctx.db.insert("agentTasks", {
         ...task,
@@ -86,7 +86,7 @@ export const startTask = mutation({
     parentMessageId: v.id("messages"),
     projectId: v.id("projects"),
   },
-  returns: agentTaskInputValidator.omit("role").extend({
+  returns: agentTaskInputValidator.omit("parentTaskId").extend({
     messageId: v.id("messages"),
     projectId: v.id("projects"),
     status: agentTaskStatusValidator,
@@ -103,8 +103,8 @@ export const startTask = mutation({
       status = "running";
       await ctx.db.patch("agentTasks", task._id, { status, startedAt: now, updatedAt: now });
     }
-    const { ownedPaths, brief, title, modelId, model, taskId, messageId, projectId } = task;
-    return { ownedPaths, brief, title, modelId, model, taskId, messageId, projectId, status };
+    const { role, ownedPaths, brief, title, modelId, model, taskId, messageId, projectId } = task;
+    return { role, ownedPaths, brief, title, modelId, model, taskId, messageId, projectId, status };
   },
 });
 
@@ -148,6 +148,6 @@ export const listForMessage = query({
     return await ctx.db.query("agentTasks")
       .withIndex("by_message", (q) => q.eq("messageId", messageId))
       .order("asc")
-      .take(MAX_SWARM_TASKS);
+      .take(MAX_SWARM_AGENTS);
   },
 });
