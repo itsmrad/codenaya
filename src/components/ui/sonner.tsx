@@ -29,9 +29,23 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-bg": "var(--popover)",
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
-          "--border-radius": "var(--radius)",
+          "--border-radius": "6px",
         } as React.CSSProperties
       }
+      // The site's look: a brand edge on the left (red for errors), a brand
+      // success icon, mono descriptions and action.
+      toastOptions={{
+        classNames: {
+          toast:
+            "gap-3! font-sans! shadow-[inset_2px_0_0_var(--brand),0_16px_48px_-20px_rgb(0_0_0/0.35)]!",
+          title: "text-[13px]! font-medium!",
+          description: "font-mono! text-[10px]! uppercase! tracking-[0.1em]! text-muted-foreground!",
+          success: "[&_[data-icon]]:text-brand",
+          error: "shadow-[inset_2px_0_0_var(--destructive),0_16px_48px_-20px_rgb(0_0_0/0.35)]! [&_[data-icon]]:text-destructive",
+          actionButton:
+            "rounded-sm! bg-brand! font-mono! text-[10px]! uppercase! tracking-[0.1em]! text-brand-foreground!",
+        },
+      }}
       {...props}
     />
   )

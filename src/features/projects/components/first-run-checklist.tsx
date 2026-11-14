@@ -89,7 +89,7 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
     return (
       <button
         onClick={() => setExpanded(true)}
-        className="group flex h-8 w-fit items-center gap-2 rounded-full border border-border/60 bg-card px-3 text-xs text-muted-foreground transition-colors hover:border-brand/40 hover:text-foreground"
+        className="group mx-6 my-4 flex h-8 w-fit items-center gap-2 rounded-md border border-border/60 bg-card px-3 md:mx-8 text-xs text-muted-foreground transition-colors hover:border-brand/40 hover:text-foreground"
       >
         <Progress
           aria-hidden
@@ -113,11 +113,8 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
   };
 
   return (
-    <section
-      aria-labelledby="first-run-heading"
-      className="rounded-2xl border border-border/60 bg-card p-4 sm:p-5"
-    >
-      <div className="flex items-start justify-between gap-3">
+    <section aria-labelledby="first-run-heading" className="border-b border-border">
+      <div className="flex items-start justify-between gap-3 px-6 pt-8 md:px-8">
         <div className="min-w-0">
           <h2
             id="first-run-heading"
@@ -127,8 +124,8 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
           >
             Get started with Codenaya
           </h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {doneCount} of {steps.length} done
+          <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            [ <span className="text-brand-text">{doneCount}</span> / {steps.length} ] done
           </p>
         </div>
         <button
@@ -143,57 +140,60 @@ export const FirstRunChecklist = ({ projects, onNewProject }: FirstRunChecklistP
       <Progress
         value={(doneCount / steps.length) * 100}
         aria-label="Getting started progress"
-        className="mt-3 h-1.5 bg-muted [&>[data-slot=progress-indicator]]:bg-brand"
+        className="mx-6 mt-4 mb-6 h-1 w-auto bg-muted md:mx-8 [&>[data-slot=progress-indicator]]:bg-brand"
       />
 
-      <ol className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-        {steps.map((step) => {
-          const done = progress[step.id];
-          const actionable = !done && Boolean(step.onClick || step.href);
-          const content = (
-            <>
-              {done ? (
-                <CheckCircle2Icon aria-hidden className="size-4 shrink-0 text-brand" />
-              ) : (
-                <CircleIcon aria-hidden className="size-4 shrink-0 text-muted-foreground/50" />
-              )}
-              <span className={done ? "text-muted-foreground line-through" : "text-foreground"}>
-                {step.label}
-              </span>
-              {actionable && (
-                <ChevronRightIcon
-                  aria-hidden
-                  className="ml-auto size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5"
-                />
-              )}
-            </>
-          );
-          const className =
-            "group flex h-full w-full items-center gap-2.5 rounded-xl border border-border/60 px-3 py-2.5 text-left text-xs font-medium transition-colors";
-          const interactive = `${className} hover:border-brand/40 hover:bg-brand/[0.03]`;
+      {/* Cells on shared borders: the list runs 1px past its frame, so the outer edges fall on the page's lines. */}
+      <div className="overflow-hidden border-t border-border">
+        <ol className="-mr-px -mb-px grid sm:grid-cols-2 lg:grid-cols-5">
+          {steps.map((step) => {
+            const done = progress[step.id];
+            const actionable = !done && Boolean(step.onClick || step.href);
+            const content = (
+              <>
+                {done ? (
+                  <CheckCircle2Icon aria-hidden className="size-4 shrink-0 text-brand" />
+                ) : (
+                  <CircleIcon aria-hidden className="size-4 shrink-0 text-muted-foreground/50" />
+                )}
+                <span className={done ? "text-muted-foreground line-through" : "text-foreground"}>
+                  {step.label}
+                </span>
+                {actionable && (
+                  <ChevronRightIcon
+                    aria-hidden
+                    className="ml-auto size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5"
+                  />
+                )}
+              </>
+            );
+            const className =
+              "group flex h-full w-full items-center gap-2.5 px-5 py-4 text-left text-xs font-medium transition-colors";
+            const interactive = `${className} hover:bg-brand/[0.04]`;
 
-          return (
-            <li key={step.id} data-done={done}>
-              {done ? (
-                <div className={`${className} bg-muted/30`}>
-                  {content}
-                  <span className="sr-only">(done)</span>
-                </div>
-              ) : step.onClick ? (
-                <button onClick={step.onClick} className={interactive}>
-                  {content}
-                </button>
-              ) : step.href ? (
-                <Link href={step.href} className={interactive}>
-                  {content}
-                </Link>
-              ) : (
-                <div className={className}>{content}</div>
-              )}
-            </li>
-          );
-        })}
-      </ol>
+            return (
+              <li key={step.id} data-done={done} className="spotlight border-r border-b border-border">
+                {done ? (
+                  <div className={`${className} bg-muted/30`}>
+                    {content}
+                    <span className="sr-only">(done)</span>
+                  </div>
+                ) : step.onClick ? (
+                  <button onClick={step.onClick} className={interactive}>
+                    {content}
+                  </button>
+                ) : step.href ? (
+                  <Link href={step.href} className={interactive}>
+                    {content}
+                  </Link>
+                ) : (
+                  <div className={className}>{content}</div>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </div>
     </section>
   );
 };

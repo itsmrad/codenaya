@@ -7,6 +7,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+import { cn } from "@/lib/utils";
+
 import type { PromptEnhancer } from "../hooks/use-enhance-prompt";
 
 interface EnhancePromptButtonProps {
@@ -14,6 +16,10 @@ interface EnhancePromptButtonProps {
   /** The composer's current text; the button is disabled while it is empty. */
   value: string;
   disabled?: boolean;
+  /** Replaces the default icon-button classes, e.g. to fill a toolbar cell. */
+  className?: string;
+  /** Show "Enhance" / "Undo" next to the icon. */
+  showLabel?: boolean;
 }
 
 /**
@@ -24,8 +30,12 @@ export const EnhancePromptButton = ({
   enhancer,
   value,
   disabled = false,
+  className,
+  showLabel = false,
 }: EnhancePromptButtonProps) => {
   const { enhance, undo, isEnhancing, canUndo } = enhancer;
+  const classes = cn(showLabel ? "w-auto" : "size-8", "rounded-lg", className);
+  const label = (text: string) => showLabel && <span className="max-sm:sr-only">{text}</span>;
 
   if (canUndo) {
     return (
@@ -35,9 +45,10 @@ export const EnhancePromptButton = ({
             aria-label="Undo enhance"
             onClick={undo}
             disabled={disabled}
-            className="size-8 rounded-lg"
+            className={classes}
           >
             <Undo2Icon className="size-4" />
+            {label("Undo")}
           </PromptInputButton>
         </TooltipTrigger>
         <TooltipContent>Undo enhance</TooltipContent>
@@ -53,13 +64,14 @@ export const EnhancePromptButton = ({
           aria-busy={isEnhancing}
           onClick={() => void enhance()}
           disabled={disabled || isEnhancing || !value.trim()}
-          className="size-8 rounded-lg"
+          className={classes}
         >
           {isEnhancing ? (
             <Loader2Icon className="size-4 animate-spin" />
           ) : (
             <WandSparklesIcon className="size-4" />
           )}
+          {label(isEnhancing ? "Enhancing" : "Enhance")}
         </PromptInputButton>
       </TooltipTrigger>
       <TooltipContent>Enhance prompt</TooltipContent>

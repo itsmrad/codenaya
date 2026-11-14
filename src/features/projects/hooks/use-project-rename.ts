@@ -5,7 +5,7 @@ import { Doc } from "../../../../convex/_generated/dataModel";
 import { validateProjectName } from "../utils/project-name";
 import { useRenameProject } from "./use-projects";
 
-/** Inline rename state shared by the dashboard card and the IDE top bar. */
+/** Inline rename state for the IDE top bar (the dashboard card renames in RenameProjectDialog). */
 export const useProjectRename = (project: Doc<"projects"> | undefined) => {
   const renameProject = useRenameProject();
   const [isRenaming, setIsRenaming] = useState(false);
