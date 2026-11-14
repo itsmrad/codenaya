@@ -9,7 +9,6 @@ import { revealTheme } from "@/lib/reveal-theme";
 
 import { Button } from "@/components/ui/button";
 import { CodenayaLogo } from "@/components/codenaya-logo";
-import { SiteCursor } from "@/components/ui/site-cursor";
 import { SIGN_IN_URL, SIGN_UP_URL } from "@/features/auth/constants";
 
 import { HelpMenu } from "./help-menu";
@@ -29,8 +28,6 @@ export const AppNavbar = ({ framed = false }: { framed?: boolean }) => {
 
   return (
     <>
-      {/* The public pages' cursor, here too; a sibling so the sticky header can't trap its `fixed`. */}
-      <SiteCursor />
       <header className="sticky top-0 z-50 shrink-0 border-b border-border bg-background/80 backdrop-blur-xl backdrop-saturate-150">
         <nav className={`mx-auto flex h-14 w-full items-stretch ${framed ? "max-w-[1200px] border-x border-border" : ""}`}>
           {/* Left — Brand */}

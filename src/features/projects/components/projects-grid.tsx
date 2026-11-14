@@ -120,7 +120,7 @@ export const ProjectsGrid = ({ projects, onNewProject, onImport }: ProjectsGridP
           <FolderPlusIcon className="size-6 text-brand" />
           <p className="mt-4 text-sm font-medium">Your first project will appear here</p>
           <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-            Describe an app above or pick one of the ideas. Already have code?
+            Describe an app above or start from a template below. Already have code?
           </p>
           <button
             onClick={onImport}

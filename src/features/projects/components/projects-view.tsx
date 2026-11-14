@@ -187,7 +187,7 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
                   </motion.h2>
                   <motion.p {...enter(0.2)} className="mx-auto mt-5 max-w-md text-[15px] leading-relaxed text-muted-foreground">
                     {hasNoProjects
-                      ? "Describe your first app, or start from one of these ideas."
+                      ? "Describe your first app, or start from a template below."
                       : "Describe an app and Codenaya builds it, with a live preview."}
                   </motion.p>
                 </div>
