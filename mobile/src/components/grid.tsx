@@ -248,13 +248,13 @@ export function Orbit({ active, children }: { active: boolean; children: ReactNo
   const shown = useSharedValue(0);
 
   useEffect(() => {
-    shown.value = withTiming(active ? 1 : 0, { duration: 400 });
+    shown.set(withTiming(active ? 1 : 0, { duration: 400 }));
   }, [active, shown]);
 
   // Turns only while shown, like the web's 4s loop; still for reduced motion.
   useEffect(() => {
     if (!active || reduceMotion) return;
-    angle.value = withRepeat(withTiming(angle.value + 360, { duration: 4000, easing: Easing.linear }), -1);
+    angle.set(withRepeat(withTiming(angle.get() + 360, { duration: 4000, easing: Easing.linear }), -1));
     return () => cancelAnimation(angle);
   }, [active, reduceMotion, angle]);
 
