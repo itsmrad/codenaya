@@ -185,8 +185,8 @@ export const PreviewView = ({
   // failed boot shows its error under the bar instead of hiding behind the card.
   const firstBuildRun = firstBuild && activeRun ? activeRun : null;
   const building =
-    firstBuildRun && files && status !== "error" && (status !== "running" || !previewUrl) ? (
-      <PreviewBuilding steps={firstBuildRun.steps} files={files} />
+    firstBuildRun && status !== "error" && (status !== "running" || !previewUrl) ? (
+      <PreviewBuilding steps={firstBuildRun.steps} />
     ) : null;
   const stillBuilding =
     firstBuildRun && !building ? liveStepLabel(firstBuildRun.steps) : null;

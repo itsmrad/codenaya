@@ -60,7 +60,19 @@ test.describe("first build preview", () => {
       await expect(building).toBeVisible({ timeout: 60_000 });
       await expect(building).toContainText("The preview appears as soon as your app starts");
       await expect(building).toContainText("Creating App.tsx");
-      await expect(building.getByRole("list", { name: "Files written so far" })).toContainText("index.html");
+      // #478: the list is what the run wrote, not the seeded files.
+      const written = building.getByRole("list", { name: "Files written so far" });
+      await expect(written).not.toContainText("index.html");
+      await system.mutation(api.system.upsertMessageSteps, {
+        internalKey,
+        messageId,
+        steps: [
+          { id: "create", kind: "tool", tool: "createFiles", targets: ["src/App.tsx"], status: "done", startedAt: Date.now(), endedAt: Date.now() },
+          { id: "update", kind: "tool", tool: "updateFile", targets: ["src/index.css"], status: "running", startedAt: Date.now() },
+        ],
+      });
+      await expect(written).toContainText("src/App.tsx");
+      await expect(building.locator(".animate-ping")).toHaveCount(0);
 
       for (const [name, width, height] of [["desktop", 1440, 900], ["phone", 375, 812], ["tablet", 768, 1024]] as const) {
         await page.setViewportSize({ width, height });
@@ -89,7 +101,7 @@ test.describe("first build preview", () => {
       const stillBuilding = page.getByRole("status", { name: "Still building" });
       await expect(iframe).toBeVisible({ timeout: 30_000 });
       await expect(building).toBeHidden();
-      await expect(stillBuilding).toContainText("Creating App.tsx");
+      await expect(stillBuilding).toContainText("Editing index.css");
       for (const [name, width, height] of [["phone", 375, 812], ["tablet", 768, 1024]] as const) {
         await page.setViewportSize({ width, height });
         await expect(stillBuilding).toBeVisible();

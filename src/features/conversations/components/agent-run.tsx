@@ -45,6 +45,7 @@ import {
   STALLED_RUN_MS,
   fixedBuildErrors,
   lastRunActivity,
+  runWaitHint,
   runWrittenPaths,
 } from "../agent-steps";
 import { useRunChanges } from "../hooks/use-checkpoints";
@@ -542,6 +543,7 @@ export const AgentRun = ({
     startedLive && "animate-in fade-in-0 duration-300 motion-reduce:animate-none";
 
   const liveLabel = liveStepLabel(steps);
+  const hint = live ? runWaitHint({ startedAt, steps, now }) : undefined;
 
   const summary = [
     `${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`,
@@ -625,6 +627,21 @@ export const AgentRun = ({
           </>
         )}
       </CollapsibleTrigger>
+      {/* A quiet run says so honestly instead of looking frozen (#478). The
+          live region stays mounted while the run is live, so screen readers
+          announce the hint when it appears. */}
+      {live && (
+        <p
+          role="status"
+          className={cn(
+            hint
+              ? "border-t border-border px-3 py-2 text-xs text-muted-foreground animate-in fade-in-0 duration-300 motion-reduce:animate-none"
+              : "sr-only",
+          )}
+        >
+          {hint}
+        </p>
+      )}
       {rows.length > 0 && (
         <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
           <div className="border-t border-border px-1.5 py-1.5">
