@@ -62,9 +62,10 @@ export const ProjectCard = ({ project }: { project: Doc<"projects"> }) => {
   const copyLink = async () => {
     try {
       await navigator.clipboard.writeText(new URL(href, window.location.origin).toString());
-      toast.success("Link copied");
+      // The URL is owner-only (#260): say so, so it is not mistaken for a share link.
+      toast.success("Project URL copied", { description: "Only you can open this link." });
     } catch {
-      toast.error("Couldn't copy the link");
+      toast.error("Couldn't copy the project URL");
     }
   };
 
@@ -129,7 +130,7 @@ export const ProjectCard = ({ project }: { project: Doc<"projects"> }) => {
         </DropdownMenuItem>
         <DropdownMenuItem onClick={copyLink}>
           <LinkIcon />
-          Copy link
+          Copy project URL
         </DropdownMenuItem>
       </ProjectActionsMenu>
       <DeleteProjectDialog project={project} open={deleteOpen} onOpenChange={setDeleteOpen} />
