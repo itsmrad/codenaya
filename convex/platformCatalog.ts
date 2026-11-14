@@ -9,6 +9,7 @@ import {
 } from "../src/features/admin/platform-models";
 import type { CatalogModel, ModelPricing } from "../src/features/ai-providers/catalog";
 import { AI_PROVIDERS, MAX_MODEL_ID_LENGTH } from "../src/features/ai-providers/registry";
+import { MAX_SPEND_LIMIT_USD, type SpendLimit } from "../src/features/billing/model-spend";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, mutation, query, type QueryCtx } from "./_generated/server";
 import { type Admin, type AuditChange, requireAdmin, writeAudit } from "./admin";
@@ -37,12 +38,35 @@ const catalogFields = {
   models: v.array(catalogModelValidator),
   defaultModelId: v.string(),
   utilityModelId: v.string(),
+  autoModelIds: v.optional(v.array(v.string())),
 };
 
-type Catalog = Pick<Doc<"platformCatalog">, "models" | "defaultModelId" | "utilityModelId">;
+type Catalog = Pick<Doc<"platformCatalog">, "models" | "defaultModelId" | "utilityModelId" | "autoModelIds">;
 
 /** The single catalog doc; there is at most one. */
 const getCatalog = (ctx: QueryCtx) => ctx.db.query("platformCatalog").first();
+
+const publicCatalogValidator = v.union(
+  v.object({
+    models: v.array(publicCatalogModelValidator),
+    defaultModelId: v.string(),
+    autoModelIds: v.optional(v.array(v.string())),
+  }),
+  v.null(),
+);
+
+/** The kept models for pickers, without routes or prices. */
+const toPublic = (catalog: Catalog, keep: (model: Catalog["models"][number]) => boolean) => ({
+  models: catalog.models.filter(keep).map(({ id, name, vendor, vision, contextLength, access }) => ({
+    id,
+    name,
+    vendor,
+    vision,
+    contextLength,
+    access,
+  })),
+  defaultModelId: catalog.defaultModelId,
+});
 
 const invalid = (message: string) => appError("INVALID_ARGUMENT", message);
 
@@ -82,6 +106,14 @@ function assertValidCatalog({ models, defaultModelId, utilityModelId }: Catalog)
     if (model.provider === "anthropic" && model.vision) {
       throw invalid(`${model.id} can't accept images on the Anthropic route`);
     }
+    const caps = model.spendLimit ? [model.spendLimit.perUserUsd, model.spendLimit.totalUsd] : [];
+    if (
+      model.spendLimit &&
+      (caps.every((cap) => cap === undefined) ||
+        !caps.every((cap) => cap === undefined || (Number.isFinite(cap) && cap > 0 && cap <= MAX_SPEND_LIMIT_USD)))
+    ) {
+      throw invalid(`Set at least one spend cap for ${model.id}, above $0 and at most $${MAX_SPEND_LIMIT_USD}`);
+    }
   }
   // Every user's runs may land on these, so they must be open to everyone. The
   // utility model may be hidden: a cheap model for titles that users don't pick.
@@ -103,6 +135,12 @@ const priceLabel = (pricing: ModelPricing) =>
     ? `$${pricing.usdPerMTok}/M`
     : `$${pricing.inputUsdPerMTok}/$${pricing.outputUsdPerMTok} per M`;
 
+/** "$1/user, $100 total, weekly". */
+const limitLabel = ({ perUserUsd, totalUsd, resets }: SpendLimit) =>
+  [perUserUsd !== undefined && `$${perUserUsd}/user`, totalUsd !== undefined && `$${totalUsd} total`, resets]
+    .filter(Boolean)
+    .join(", ");
+
 const route = (model: CatalogModel) => `${model.provider}:${model.providerModelId}`;
 
 /** The audited fields of a model, each as a short string. */
@@ -117,12 +155,14 @@ const MODEL_FIELDS = [
   "contextLength",
   "vision",
   "tools",
+  "spendLimit",
 ] as const;
 const ROUTE_FIELDS: readonly string[] = ["provider", "providerModelId"];
-const SUMMARIZED_FIELDS: readonly string[] = [...ROUTE_FIELDS, "pricing", "access", "hidden"];
+const SUMMARIZED_FIELDS: readonly string[] = [...ROUTE_FIELDS, "pricing", "access", "hidden", "spendLimit"];
 
 const fieldValue = (model: CatalogModel, field: (typeof MODEL_FIELDS)[number]) => {
   if (field === "pricing") return priceLabel(model.pricing);
+  if (field === "spendLimit") return model.spendLimit && limitLabel(model.spendLimit);
   return model[field] === undefined ? undefined : String(model[field]);
 };
 
@@ -161,6 +201,9 @@ function diffCatalog(before: Catalog | null, after: Catalog) {
     }
     if (changed.includes("access")) parts.push(`access ${m.id}: ${was.access} → ${m.access}`);
     if (changed.includes("hidden")) parts.push(`${m.hidden ? "hid" : "showed"} ${m.id}`);
+    if (changed.includes("spendLimit")) {
+      parts.push(`limit ${m.id}: ${fieldValue(was, "spendLimit") ?? "none"} → ${fieldValue(m, "spendLimit") ?? "none"}`);
+    }
     const edited = changed.filter((f) => !SUMMARIZED_FIELDS.includes(f));
     if (edited.length) parts.push(`edited ${m.id} (${edited.join(", ")})`);
   }
@@ -174,6 +217,12 @@ function diffCatalog(before: Catalog | null, after: Catalog) {
       parts.push(`${label} → ${after[field]}`);
     }
   }
+  const poolBefore = (before?.autoModelIds ?? []).join(", ");
+  const poolAfter = (after.autoModelIds ?? []).join(", ");
+  if (poolBefore !== poolAfter) {
+    changes.push({ field: "autoModelIds", before: poolBefore, after: poolAfter });
+    parts.push(`auto pool → ${poolAfter || "fixed routes"}`);
+  }
   return { changes, summary: parts.join("; ") || "no changes" };
 }
 
@@ -183,28 +232,30 @@ function diffCatalog(before: Catalog | null, after: Catalog) {
  */
 export const getForUsers = query({
   args: {},
-  returns: v.union(
-    v.object({ models: v.array(publicCatalogModelValidator), defaultModelId: v.string() }),
-    v.null(),
-  ),
+  returns: publicCatalogValidator,
   handler: async (ctx) => {
     await verifyAuth(ctx);
     const catalog = await getCatalog(ctx);
     return (
       catalog && {
-        models: catalog.models
-          .filter((m) => !m.hidden)
-          .map(({ id, name, vendor, vision, contextLength, access }) => ({
-            id,
-            name,
-            vendor,
-            vision,
-            contextLength,
-            access,
-          })),
-        defaultModelId: catalog.defaultModelId,
+        ...toPublic(catalog, (m) => !m.hidden),
+        // Lets the picker offer Auto when only the pool has models it routes to.
+        autoModelIds: catalog.autoModelIds,
       }
     );
+  },
+});
+
+/**
+ * The landing page's picker for signed-out visitors: only models open to
+ * everyone, since promo models need a claim. Null: no catalog saved.
+ */
+export const getForVisitors = query({
+  args: {},
+  returns: publicCatalogValidator,
+  handler: async (ctx) => {
+    const catalog = await getCatalog(ctx);
+    return catalog && toPublic(catalog, (m) => !m.hidden && m.access === "everyone");
   },
 });
 
@@ -220,6 +271,7 @@ export const getForServer = query({
         models: catalog.models,
         defaultModelId: catalog.defaultModelId,
         utilityModelId: catalog.utilityModelId,
+        autoModelIds: catalog.autoModelIds,
       }
     );
   },
@@ -240,6 +292,7 @@ export const getForAdmin = query({
         models: catalog.models,
         defaultModelId: catalog.defaultModelId,
         utilityModelId: catalog.utilityModelId,
+        autoModelIds: catalog.autoModelIds,
         updatedAt: catalog.updatedAt,
         updatedBy: catalog.updatedBy,
       }
@@ -251,7 +304,8 @@ export const getForAdmin = query({
  * Replaces the catalog. Admin token AND internal key: the route has already
  * checked step-up auth and that every route's provider key is set. A $0 price
  * or a price change over 50% is refused unless `confirmRiskyPrices`. Writes a
- * structured audit row in the same transaction.
+ * structured audit row in the same transaction. Auto pool ids (#322) that
+ * aren't catalog models are dropped.
  */
 export const save = mutation({
   args: {
@@ -265,9 +319,12 @@ export const save = mutation({
     }),
   },
   returns: v.null(),
-  handler: async (ctx, { internalKey, confirmRiskyPrices, request, ...catalog }) => {
+  handler: async (ctx, { internalKey, confirmRiskyPrices, request, autoModelIds, ...rest }) => {
     const admin = await requireAdmin(ctx);
     validateInternalKey(internalKey);
+    const ids = new Set(autoModelIds);
+    const pool = rest.models.filter((m) => ids.has(m.id)).map((m) => m.id);
+    const catalog: Catalog = { ...rest, ...(pool.length ? { autoModelIds: pool } : {}) };
     assertValidCatalog(catalog);
 
     const existing = await getCatalog(ctx);

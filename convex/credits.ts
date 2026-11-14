@@ -6,6 +6,7 @@ import { type MutationCtx, type QueryCtx, mutation, query } from "./_generated/s
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
+import { addModelSpend } from "./modelSpend";
 import { planIdValidator, runSourceValidator } from "./schema";
 
 /**
@@ -137,6 +138,12 @@ export const recordRunUsage = mutation({
     const added = credits - (row?.credits ?? 0);
     if (added > 0) {
       await chargeAccount(ctx, project.ownerId, added, now);
+    }
+    // Promo runs cost us too; the user's own key doesn't. shortcut: the run's
+    // total includes its title on the utility model, a small overcount.
+    const addedUsd = grown.costUsd - (row?.costUsd ?? 0);
+    if (source !== "byok" && addedUsd > 0 && message.runModel) {
+      await addModelSpend(ctx, project.ownerId, message.runModel.modelId, addedUsd, now);
     }
     return null;
   },

@@ -8,29 +8,16 @@ import { ArrowRight } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import { ShowcaseCard } from "@/features/showcase/components/showcase-card";
 import { useShowcaseTrending } from "@/features/showcase/hooks/use-showcase";
-import { cn } from "@/lib/utils";
+import { SectionHeader } from "./section-header";
 
-const STRIP_SIZE = 4;
-
-/**
- * How many cards the grid shows from `sm` up: only full rows (#253). Four
- * fill 2 x 2 and 4 x 1, two or three show two, and a single card stays alone.
- * Phones scroll every card sideways instead.
- */
-export const fullRowCount = (count: number) => (count >= 4 ? 4 : count >= 2 ? 2 : count);
-
-const GRID_COLUMNS: Record<number, string> = {
-  4: "sm:grid-cols-2 xl:grid-cols-4",
-  2: "sm:grid-cols-2 sm:max-w-3xl sm:mx-auto",
-  1: "sm:grid-cols-1 sm:max-w-sm sm:mx-auto",
-};
+const STRIP_SIZE = 6;
 
 /**
  * Hides its children if they throw. The strip is optional, so a failing query
  * (e.g. the frontend deployed before the Convex functions it reads) must not
  * take the landing page down with it.
  */
-class HideOnError extends Component<{ children: ReactNode }, { failed: boolean }> {
+export class HideOnError extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
 
   static getDerivedStateFromError() {
@@ -61,60 +48,42 @@ const CommunityStrip = () => {
   if (!hasProjects && !projectsBuilt) return null;
 
   return (
-    <section aria-labelledby="community-heading" className="relative py-14 md:py-20">
-      <div className="max-w-6xl mx-auto px-6 md:px-8">
-        <div className="text-center mb-12 md:mb-16">
-          <p className="text-xs uppercase tracking-[0.25em] text-brand-text font-mono mb-4">
-            Community
-          </p>
-          <h2
-            id="community-heading"
-            className="text-3xl md:text-5xl font-bold tracking-tight text-foreground"
-          >
-            Built with Codenaya
-          </h2>
-          {!!projectsBuilt && (
-            <p className="mt-4 text-muted-foreground">
-              <span className="font-mono font-semibold text-foreground tabular-nums">
-                {projectsBuilt.toLocaleString("en-US")}
-              </span>{" "}
-              {projectsBuilt === 1 ? "project" : "projects"} built
-            </p>
-          )}
-        </div>
+    <section aria-label="Built with Codenaya" className="border-b border-border">
+      <SectionHeader
+        label="Community"
+        title="Built with"
+        accent="Codenaya"
+        description={
+          [
+            projectsBuilt &&
+              `${projectsBuilt.toLocaleString("en-US")} ${projectsBuilt === 1 ? "project" : "projects"} built so far.`,
+            hasProjects && "Here are the ones people shared.",
+          ]
+            .filter(Boolean)
+            .join(" ")
+        }
+      />
 
-        {hasProjects && (
-          // Phones scroll the row sideways; wider screens show full rows only.
-          <div
-            className={cn(
-              "-mx-6 flex snap-x snap-mandatory scroll-px-6 gap-5 overflow-x-auto px-6 pb-2 sm:mx-0 sm:grid sm:overflow-visible sm:px-0 sm:pb-0",
-              GRID_COLUMNS[fullRowCount(trending.length)],
-            )}
-          >
-            {trending.map((project, index) => (
-              <div
-                key={project._id}
-                className={cn(
-                  "w-[78%] shrink-0 snap-start sm:w-auto",
-                  index >= fullRowCount(trending.length) && "sm:hidden",
-                )}
-              >
+      {hasProjects && (
+        // Per-cell lines, clipped at the outer edges, so a short last row leaves plain background.
+        <div className="overflow-hidden border-t border-border">
+          <div className="-mr-px -mb-px grid sm:grid-cols-2 lg:grid-cols-3">
+            {trending.map((project) => (
+              <div key={project._id} className="border-r border-b border-border p-4 md:p-5">
                 <ShowcaseCard project={project} href={`/showcase/${project._id}`} />
               </div>
             ))}
           </div>
-        )}
-
-        <div className="mt-8 flex justify-center">
-          <Link
-            href="/showcase"
-            className="group inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Browse the showcase
-            <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-          </Link>
         </div>
-      </div>
+      )}
+
+      <Link
+        href="/showcase"
+        className="group flex items-center justify-between border-t border-border px-6 py-5 text-sm font-medium text-foreground transition-colors hover:bg-muted/50 md:px-8"
+      >
+        Browse the showcase
+        <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+      </Link>
     </section>
   );
 };

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
@@ -8,6 +8,12 @@ import { userConvexClient } from "./convex-client";
 
 const PENDING_TEMPLATE_KEY = "codenaya:pendingTemplate";
 const TEMPLATE_CARD = /^Use the .+ template$/;
+
+const openTemplatesTab = async (page: Page) => {
+  await page.getByRole("heading", { name: "What will you build?" }).waitFor();
+  const tab = page.getByRole("tab", { name: "Templates" });
+  if (await tab.isVisible()) await tab.click();
+};
 
 test.describe("starter templates on /showcase (signed out)", () => {
   for (const width of [375, 768, 1440]) {
@@ -48,6 +54,8 @@ test.describe("starter templates on the dashboard", () => {
     await signIn(page);
     await page.goto("/");
     const errors = collectConsoleErrors(page);
+    // Users with projects find the templates in a tab; first-run users see them inline.
+    await openTemplatesTab(page);
 
     const section = page.getByRole("region", { name: "Start from a template" });
     await expect(section.getByRole("button", { name: TEMPLATE_CARD })).toHaveCount(6);

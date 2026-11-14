@@ -176,8 +176,8 @@ describe("fileContents (#412)", () => {
     for (const file of files) {
       expect(file).not.toHaveProperty("content");
       if (file.type === "folder") continue;
-      const { content } = await alice.query(api.files.getFile, { id: file._id });
-      expect(content).toBe(
+      const stored = await alice.query(api.files.getFile, { id: file._id });
+      expect(stored?.content).toBe(
         { "legacy.ts": "// legacy", "moved.ts": "// moved" }[file.name] ?? big,
       );
     }

@@ -69,8 +69,8 @@ test.describe("landing layout", () => {
     await page.goto("/");
 
     const header = await page.locator("header").boundingBox();
-    const badge = await page.getByText("AI-Powered Browser IDE").boundingBox();
-    expect(badge!.y - (header!.y + header!.height)).toBeGreaterThanOrEqual(24);
+    const heading = await page.getByRole("heading", { level: 1, name: "Build with AI." }).boundingBox();
+    expect(heading!.y - (header!.y + header!.height)).toBeGreaterThanOrEqual(24);
 
     const composer = await page
       .getByRole("textbox", { name: "Describe what you want to build" })
@@ -127,21 +127,10 @@ test.describe("landing social proof", () => {
     expect([...perRow.values()].every((count) => count >= 2)).toBe(true);
   });
 
-  test("plays the muted demo with a poster", async ({ page }) => {
-    await page.goto("/");
-
-    const video = page.locator("video");
-    await expect(video).toHaveAttribute("poster", /\S/);
-    await expect(video).toHaveAttribute("autoplay", "");
-    expect(await video.evaluate((element: HTMLVideoElement) => element.muted)).toBe(true);
-  });
-
-  test("keeps the demo paused for reduced motion", async ({ page }) => {
+  test("shows the demo's finished run for reduced motion", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
 
-    const video = page.locator("video");
-    await expect(video).toHaveAttribute("poster", /\S/);
-    expect(await video.evaluate((element: HTMLVideoElement) => element.paused)).toBe(true);
+    await expect(page.getByText("Done. Your timer is running in the preview.")).toBeVisible();
   });
 });

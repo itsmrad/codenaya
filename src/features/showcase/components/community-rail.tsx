@@ -26,35 +26,37 @@ export const CommunityRail = () => {
     <section aria-labelledby="community-heading">
       <ShowcaseDetailDialog open={detailOpen} onOpenChange={setDetailOpen} project={selected} />
 
-      <div className="mb-4 flex items-end justify-between gap-4">
+      <div className="flex items-end justify-between gap-4 px-6 pt-10 pb-6 md:px-8">
         <div>
-          <h2 id="community-heading" className="text-base font-semibold tracking-tight">
-            From the community
+          <h2 id="community-heading" className="text-3xl font-semibold tracking-[-0.035em]">
+            From the <span className="text-brand">community</span>
           </h2>
-          <p className="text-xs text-muted-foreground">Apps people built with Codenaya</p>
+          <p className="mt-1 text-sm text-muted-foreground">Apps people built with Codenaya</p>
         </div>
         <Link
           href="/showcase"
-          className="group flex shrink-0 items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          className="group flex shrink-0 items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
         >
           Browse all
           <ArrowRightIcon className="size-3.5 transition-transform group-hover:translate-x-0.5" />
         </Link>
       </div>
 
-      {/* Phones scroll the row sideways; wider screens show it as a grid. */}
-      <div className="-mx-4 flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-4">
-        {trending.map((project) => (
-          <div key={project._id} className="w-[78%] shrink-0 snap-start sm:w-auto">
-            <ShowcaseCard
-              project={project as ShowcaseProject}
-              onClick={() => {
-                setSelected(project as ShowcaseProject);
-                setDetailOpen(true);
-              }}
-            />
-          </div>
-        ))}
+      {/* Cells on shared borders: the grid runs 1px past its frame, so the outer edges fall on the page's lines. */}
+      <div className="overflow-hidden border-t border-border">
+        <div className="-mr-px -mb-px grid sm:grid-cols-2 lg:grid-cols-4">
+          {trending.map((project) => (
+            <div key={project._id} className="border-r border-b border-border p-4 md:p-5">
+              <ShowcaseCard
+                project={project as ShowcaseProject}
+                onClick={() => {
+                  setSelected(project as ShowcaseProject);
+                  setDetailOpen(true);
+                }}
+              />
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );

@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as activationEvents from "../activationEvents.js";
 import type * as admin from "../admin.js";
 import type * as aiProviders from "../aiProviders.js";
 import type * as auth from "../auth.js";
@@ -20,10 +21,12 @@ import type * as envVars from "../envVars.js";
 import type * as errors from "../errors.js";
 import type * as fileContents from "../fileContents.js";
 import type * as files from "../files.js";
+import type * as githubSync from "../githubSync.js";
 import type * as http from "../http.js";
 import type * as integrations from "../integrations.js";
 import type * as internalKey from "../internalKey.js";
 import type * as maintenance from "../maintenance.js";
+import type * as modelSpend from "../modelSpend.js";
 import type * as platformCatalog from "../platformCatalog.js";
 import type * as projectCascade from "../projectCascade.js";
 import type * as projectCopy from "../projectCopy.js";
@@ -42,6 +45,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  activationEvents: typeof activationEvents;
   admin: typeof admin;
   aiProviders: typeof aiProviders;
   auth: typeof auth;
@@ -54,10 +58,12 @@ declare const fullApi: ApiFromModules<{
   errors: typeof errors;
   fileContents: typeof fileContents;
   files: typeof files;
+  githubSync: typeof githubSync;
   http: typeof http;
   integrations: typeof integrations;
   internalKey: typeof internalKey;
   maintenance: typeof maintenance;
+  modelSpend: typeof modelSpend;
   platformCatalog: typeof platformCatalog;
   projectCascade: typeof projectCascade;
   projectCopy: typeof projectCopy;

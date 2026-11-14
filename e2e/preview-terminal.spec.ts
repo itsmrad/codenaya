@@ -68,6 +68,17 @@ test.describe("preview terminal", () => {
     await expect(terminal).toBeVisible({ timeout: 60_000 });
     await expect(strip).toHaveCount(0);
 
+    // #480: a log viewer, not a shell. Clear empties it, and stays cleared
+    // across Hide logs / Show logs.
+    await expect(page.getByText("Logs", { exact: true })).toBeVisible();
+    const rows = page.locator(".xterm-rows");
+    await expect(rows).toContainText("VITE v5.4.0");
+    await page.getByRole("button", { name: "Clear logs" }).click();
+    await expect(rows).not.toContainText("VITE v5.4.0");
+    await page.getByRole("button", { name: "Hide logs" }).click();
+    await strip.click();
+    await expect(rows).not.toContainText("VITE v5.4.0");
+
     await page.getByRole("button", { name: "Hide logs" }).click();
     await expect(strip).toBeVisible();
     await page.reload();

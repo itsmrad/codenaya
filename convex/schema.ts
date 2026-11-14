@@ -21,6 +21,23 @@ export const messageStepValidator = v.object({
   recipeIds: v.optional(v.array(v.string())),
 });
 
+/**
+ * Why a run was stopped as stuck (#306): the loop it was in, the file in the
+ * loop (by path, or by id for calls made before #292), and the repeated error
+ * with its normalised signature (for the next run).
+ */
+export const stuckRunValidator = v.object({
+  reason: v.union(
+    v.literal("repeated-error"),
+    v.literal("repeated-write"),
+    v.literal("repeated-syntax-error"),
+  ),
+  fileId: v.optional(v.string()),
+  path: v.optional(v.string()),
+  error: v.optional(v.string()),
+  signature: v.optional(v.string()),
+});
+
 export const aiProviderValidator = v.union(
   v.literal("openrouter"),
   v.literal("openai"),
@@ -78,6 +95,17 @@ export const modelAccessValidator = v.union(
 );
 
 /**
+ * A catalog model's spend caps in USD at its catalog price (ADR 0012): per
+ * user and across the site, over a period that resets on `resets`. A missing
+ * cap is no cap. See `features/billing/model-spend.ts`.
+ */
+export const spendLimitValidator = v.object({
+  perUserUsd: v.optional(v.number()),
+  totalUsd: v.optional(v.number()),
+  resets: v.union(v.literal("daily"), v.literal("weekly"), v.literal("monthly"), v.literal("never")),
+});
+
+/**
  * One model of the platform catalog and the provider route that serves it
  * (ADR 0010). `id` is stable across provider switches: users pick it,
  * preferences and messages record it. `providerModelId` is what the provider's
@@ -96,6 +124,7 @@ export const catalogModelValidator = v.object({
   pricing: modelPricingValidator,
   access: modelAccessValidator,
   hidden: v.boolean(),
+  spendLimit: v.optional(spendLimitValidator),
 });
 
 /** A credit account's plan (ADR 0011); see `PLANS` in `features/billing/plans.ts`. */
@@ -116,7 +145,86 @@ export const runModelValidator = v.object({
   provider: v.optional(platformProviderValidator),
 });
 
+/** Where a new project came from (`project_created`). */
+export const projectSourceValidator = v.union(
+  v.literal("landing"),
+  v.literal("dashboard"),
+  v.literal("template"),
+  v.literal("import"),
+  v.literal("remix"),
+  v.literal("duplicate"),
+);
+
+/**
+ * Fields every activation event has. The Clerk user id is the only identifier
+ * kept: no prompt text, file names, emails or IPs, so props carry no strings
+ * (#339; `activationEvents.test.ts` checks this).
+ */
+const activationEventFields = {
+  userId: v.string(),
+  projectId: v.optional(v.id("projects")),
+  at: v.number(),
+};
+
+const activationEventValidator = v.union(
+  v.object({ ...activationEventFields, name: v.literal("signed_up") }),
+  v.object({
+    ...activationEventFields,
+    name: v.literal("project_created"),
+    props: v.object({ source: projectSourceValidator }),
+  }),
+  v.object({
+    ...activationEventFields,
+    name: v.literal("run_started"),
+    props: v.object({ firstBuild: v.boolean() }),
+  }),
+  v.object({ ...activationEventFields, name: v.literal("first_build_started") }),
+  v.object({
+    ...activationEventFields,
+    name: v.literal("run_finished"),
+    props: v.object({
+      outcome: v.union(v.literal("ok"), v.literal("error"), v.literal("cancelled")),
+      firstBuild: v.boolean(),
+    }),
+  }),
+  v.object({ ...activationEventFields, name: v.literal("package_json_ready") }),
+  v.object({
+    ...activationEventFields,
+    name: v.literal("sandbox_running"),
+    props: v.object({ installMs: v.number(), bootMs: v.number() }),
+  }),
+  v.object({ ...activationEventFields, name: v.literal("first_preview_shown") }),
+  v.object({
+    ...activationEventFields,
+    name: v.literal("first_publish_or_export"),
+    props: v.object({ kind: v.union(v.literal("publish"), v.literal("export")) }),
+  }),
+);
+
+/** A project's link to its GitHub repo (#343). */
+export const githubSyncValidator = v.object({
+  repo: v.string(), // "owner/name"
+  branch: v.string(),
+  // The commit on `branch` that matches the project as of `lastSyncedAt`.
+  lastSyncedSha: v.string(),
+  lastSyncedAt: v.number(),
+  // Set while the remote branch has moved on: pushes go to the sync branch
+  // instead, continuing from this commit and time.
+  syncBranchSha: v.optional(v.string()),
+  syncBranchAt: v.optional(v.number()),
+});
+
 export default defineSchema({
+  /**
+   * First-party product events on the way from sign-up to a first preview
+   * (#339). Written by `convex/activationEvents.ts`, read from the dashboard
+   * with `activationEvents:report`. Deleted with the user.
+   */
+  activationEvents: defineTable(activationEventValidator)
+    .index("by_userId_and_name_and_at", ["userId", "name", "at"])
+    .index("by_projectId_and_name_and_at", ["projectId", "name", "at"])
+    .index("by_name_and_at", ["name", "at"]),
+
   /**
    * Profile mirror of a Clerk user, kept in sync by the Clerk webhook
    * (`convex/http.ts`). Ownership everywhere else stays keyed on
@@ -136,6 +244,9 @@ export default defineSchema({
 
   projects: defineTable({
     name: v.string(),
+    // "generated": a random name the first conversation title may replace
+    // (#288). Unset for user-chosen names; renaming clears it.
+    nameSource: v.optional(v.literal("generated")),
     ownerId: v.string(),
     updatedAt: v.number(),
     // Set at creation from a prompt, whose project is seeded with the starter,
@@ -158,12 +269,22 @@ export default defineSchema({
       ),
     ),
     exportRepoUrl: v.optional(v.string()),
+    // Why the last GitHub job failed, when it can say (#343).
+    exportError: v.optional(v.string()),
+    // The GitHub repo this project pushes to (#343), set by the first export.
+    githubSync: v.optional(githubSyncValidator),
+    // The "Before pull" checkpoint of the pull allowed to write files (#343).
+    // Any later sync status (a cancel, a push, another pull) clears it.
+    activePullCheckpointId: v.optional(v.id("checkpoints")),
     settings: v.optional(
       v.object({
         installCommand: v.optional(v.string()),
         devCommand: v.optional(v.string()),
       })
     ),
+    // Always-on agent instructions from the owner (#299), at most
+    // MAX_PROJECT_INSTRUCTIONS_LENGTH characters.
+    instructions: v.optional(v.string()),
     // Set when the owner deletes the project. The project is hidden at once
     // while `projects.deleteBatch` removes its data in the background.
     deletingAt: v.optional(v.number()),
@@ -213,7 +334,9 @@ export default defineSchema({
    */
   checkpoints: defineTable({
     projectId: v.id("projects"),
-    messageId: v.id("messages"),
+    // The run it was taken before. Unset for a snapshot taken before a GitHub
+    // pull (#343), a restore or a manual delete (#259).
+    messageId: v.optional(v.id("messages")),
     // The prompt that started the run, for the history list.
     label: v.string(),
     fileCount: v.number(),
@@ -266,6 +389,8 @@ export default defineSchema({
     images: v.optional(v.array(v.id("_storage"))),
     // Assistant messages only: a plan-mode reply, which wrote no files (#120).
     mode: v.optional(v.literal("plan")),
+    // Assistant messages only: the run was stopped going in circles (#306).
+    stuck: v.optional(stuckRunValidator),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"])
@@ -584,6 +709,18 @@ export default defineSchema({
     .index("by_messageId", ["messageId"])
     .index("by_userId", ["userId"]),
 
+  /**
+   * What a spend-limited catalog model cost in its current period (ADR 0012):
+   * one row per user and model, and one per model with `userId: null` for the
+   * whole site. A row from an earlier period counts as nothing spent.
+   */
+  modelSpend: defineTable({
+    userId: v.union(v.string(), v.null()),
+    modelId: v.string(),
+    periodStartsAt: v.number(),
+    spentUsd: v.number(),
+  }).index("by_userId_modelId", ["userId", "modelId"]),
+
   /** The user's default model. No `defaultKeyId` means the Codenaya platform key. */
   userAiPreferences: defineTable({
     userId: v.string(),
@@ -603,6 +740,8 @@ export default defineSchema({
     models: v.array(catalogModelValidator),
     defaultModelId: v.string(),
     utilityModelId: v.string(),
+    // The models Auto (#322) may route to; unset or empty: its fixed routes.
+    autoModelIds: v.optional(v.array(v.string())),
     updatedAt: v.number(),
     // identity.subject of the admin who saved it.
     updatedBy: v.string(),

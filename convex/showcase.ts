@@ -10,6 +10,7 @@ import { getOwnedProject } from "./projects";
 import { copyProjectFiles } from "./projectCopy";
 import { getUnclaimedStorage, releaseBlobs } from "./projectCascade";
 import { countProjectBuilt } from "./stats";
+import { recordProjectEvent } from "./activationEvents";
 
 // ─── Queries ───
 
@@ -297,6 +298,12 @@ export const publish = mutation({
     }
 
     const now = Date.now();
+    await recordProjectEvent(
+      ctx,
+      args.projectId,
+      { name: "first_publish_or_export", props: { kind: "publish" } },
+      { once: true },
+    );
 
     const rawEmail = identity.email;
     const emailLocalPart = rawEmail ? rawEmail.split("@")[0] : null;
@@ -492,6 +499,10 @@ export const importToWorkspace = mutation({
       updatedAt: now,
     });
     await countProjectBuilt(ctx);
+    await recordProjectEvent(ctx, newProjectId, {
+      name: "project_created",
+      props: { source: "remix" },
+    });
 
     await copyProjectFiles(ctx, showcaseItem.projectId, newProjectId);
 

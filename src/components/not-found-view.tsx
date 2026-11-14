@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 type NotFoundViewProps = {
   title: string;
   description: string;
+  /** The small label above the title. */
+  label?: string;
   /** The page header. Defaults to the app bar, as the in-app "Project not found" needs. */
   header?: ReactNode;
   /** Shown under "Back to home": the site-wide 404's next steps (#253). */
@@ -17,6 +19,7 @@ type NotFoundViewProps = {
 export const NotFoundView = ({
   title,
   description,
+  label = "Error 404",
   header = <AppNavbar />,
   children,
 }: NotFoundViewProps) => {
@@ -27,9 +30,9 @@ export const NotFoundView = ({
         <GridPattern />
         <div className="relative z-10 max-w-md text-center flex flex-col items-center gap-5">
           <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/60 font-mono">
-            Error 404
+            {label}
           </span>
-          <h1 className="text-4xl md:text-5xl font-bold tracking-tighter text-foreground">
+          <h1 className="text-4xl md:text-5xl font-medium tracking-[-0.03em] text-foreground">
             {title}
           </h1>
           <p className="text-base md:text-lg text-muted-foreground leading-relaxed font-light">
@@ -37,7 +40,7 @@ export const NotFoundView = ({
           </p>
           <Button
             asChild
-            className="mt-2 h-11 px-7 font-medium bg-brand text-brand-foreground hover:bg-brand/90 rounded-full"
+            className="mt-2 h-11 px-7 font-medium bg-brand text-brand-foreground hover:bg-brand/90 rounded-md"
           >
             <Link href="/">Back to home</Link>
           </Button>

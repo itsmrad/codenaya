@@ -10,6 +10,7 @@ import { detectCredential } from "@/features/integrations/credential-guard";
 import { useAgentModel } from "@/features/conversations/hooks/use-agent-model";
 import type { StarterTemplateId } from "@/features/templates/templates";
 import { INSUFFICIENT_CREDITS_CODE } from "@/features/billing/credits";
+import { MODEL_LIMIT_CODE } from "@/features/billing/model-spend";
 import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 
 const CREDENTIAL_ERROR =
@@ -18,7 +19,8 @@ const CREDENTIAL_ERROR =
 /**
  * Creates a project from a prompt (which also starts the agent on it) and
  * opens it in the IDE, using the agent model picked in the composer or chat.
- * A `templateId` seeds the project with that starter template's files first.
+ * A `templateId` seeds the project with that starter template's files first;
+ * `fromLanding` marks a prompt typed on the landing page before sign-up.
  * `createProject` resolves to true once it navigates, so callers can clear
  * their input or close a dialog.
  */
@@ -28,7 +30,11 @@ export const useCreateProjectFromPrompt = () => {
   const [agentModel] = useAgentModel();
 
   const createProject = useCallback(
-    async (prompt: string, templateId?: StarterTemplateId): Promise<boolean> => {
+    async (
+      prompt: string,
+      templateId?: StarterTemplateId,
+      fromLanding?: boolean,
+    ): Promise<boolean> => {
       const text = prompt.trim();
       if (!text) return false;
 
@@ -42,7 +48,7 @@ export const useCreateProjectFromPrompt = () => {
       try {
         const { projectId } = await ky
           .post("/api/projects/create-with-prompt", {
-            json: { prompt: text, model: agentModel, templateId },
+            json: { prompt: text, model: agentModel, templateId, fromLanding },
           })
           .json<{ projectId: Id<"projects"> }>();
 
@@ -70,6 +76,7 @@ export const useCreateProjectFromPrompt = () => {
           const refused =
             body.code === "ai_not_configured" ||
             body.code === INSUFFICIENT_CREDITS_CODE ||
+            body.code === MODEL_LIMIT_CODE ||
             isPromoRefusalCode(body.code);
           if (refused && body.error) {
             toast.error(body.error);

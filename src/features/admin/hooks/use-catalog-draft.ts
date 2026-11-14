@@ -15,6 +15,7 @@ import {
   riskyModelNames,
   toDraft,
   toSaveBody,
+  toggleAuto,
 } from "../catalog-draft";
 import type { PlatformProviderId } from "../platform-models";
 import { AdminRequestError, adminPostErrorMessage, useAdminPost } from "./use-admin-post";
@@ -77,6 +78,7 @@ export function useCatalogDraft() {
     update,
     setDefault: (defaultModelId: string) => edit((d) => ({ ...d, defaultModelId })),
     setUtility: (utilityModelId: string) => edit((d) => ({ ...d, utilityModelId })),
+    setAuto: (id: string, on: boolean) => edit((d) => toggleAuto(d, id, on)),
     discard: () => setEdited(null),
     save,
     cancelRiskySave: () => setRiskyNames(null),
