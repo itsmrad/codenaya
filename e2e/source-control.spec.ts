@@ -3,9 +3,10 @@ import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
-import { hasClerkCredentials, signIn } from "./clerk-auth";
+import { hasClerkCredentials, signIn, signInAsSpecUser } from "./clerk-auth";
 import { cleanupProject, userConvexClient } from "./convex-client";
 import { collectConsoleErrors } from "./console-errors";
+import { seedPreviewProject } from "./preview-fixtures";
 
 // Seeds snapshots directly. No agent, provider, Inngest or cloud sandbox is needed.
 test.describe("source control", () => {
@@ -116,5 +117,41 @@ test.describe("source control", () => {
     } finally {
       await cleanupProject(system, internalKey, projectId);
     }
+  });
+
+  // Chat-first hides the code (#549); the palette command opens it for the visit first.
+  test("Show source control opens the code in Chat-first mode", async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // A ready preview without E2B, as in workspace-mode.spec.ts.
+    await page.route("**/api/sandbox", (route) =>
+      route.fulfill({
+        contentType: "application/x-ndjson",
+        body: `${JSON.stringify({ type: "ready", sandboxId: "e2e-sandbox", previewUrl: "about:blank" })}\n`,
+      }),
+    );
+    await page.route("**/api/sandbox/**", (route) => route.fulfill({ json: {} }));
+    // A user of its own: the mode is account-wide and would change other specs' layout.
+    await signInAsSpecUser(page, "source-control-chat");
+    await page.goto("/settings/workspace");
+    const chatFirst = page.getByRole("radio", { name: /Chat-first/ });
+    await chatFirst.click();
+    await expect(chatFirst).toBeChecked();
+
+    const projectId = await seedPreviewProject(page, "e2e-source-control-chat");
+    await page.goto(`/projects/${projectId}`);
+    await expect(page.getByRole("button", { name: "Open code for this session" })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole("tab", { name: "Code", exact: true })).toHaveCount(0);
+
+    const palette = page.getByRole("dialog", { name: "Command palette" });
+    await expect(async () => {
+      await page.keyboard.press("Control+Shift+P");
+      await expect(palette).toBeVisible({ timeout: 1_000 });
+    }).toPass();
+    await palette.getByRole("combobox").fill("source control");
+    await palette.getByRole("option", { name: "Show source control" }).click();
+    await expect(page.getByRole("tab", { name: "Code", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "Source control", exact: true })).toHaveAttribute("aria-selected", "true");
+    await page.screenshot({ path: "test-results/source-control-chat-first.png" });
   });
 });
