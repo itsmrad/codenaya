@@ -350,6 +350,14 @@ html.lenis, html.lenis body {
 .chat-prose [data-streamdown="code-block-body"] pre {
   @apply bg-transparent;
 }
+/* After the block rules above, which otherwise beat Streamdown's layered
+   first/last-child resets and pad the reply box (#467). */
+.chat-prose > :first-child {
+  @apply mt-0;
+}
+.chat-prose > :last-child {
+  @apply mb-0;
+}
 
 /* Chat composer: raised rounded box with a soft focus ring. Unlayered so it
    overrides the shared InputGroup's utility classes. */

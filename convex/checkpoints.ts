@@ -133,6 +133,7 @@ export async function createCheckpoint(
       type: file.type,
       content: file.content,
       storageId: file.storageId,
+      locked: file.locked,
     });
   }
 
@@ -151,7 +152,7 @@ export async function createCheckpoint(
 }
 
 /** A file or folder to write, by its path from the project root. */
-export type TreeEntry = Pick<Doc<"checkpointFiles">, "path" | "type" | "content" | "storageId">;
+export type TreeEntry = Pick<Doc<"checkpointFiles">, "path" | "type" | "content" | "storageId" | "locked">;
 
 /** Whether two blobs hold the same bytes; a pull re-uploads unchanged binaries (#343). */
 async function sameBlob(ctx: MutationCtx, a?: Id<"_storage">, b?: Id<"_storage">) {
@@ -223,6 +224,7 @@ export async function applyTree(
       name: row.path.slice(slash + 1),
       type: row.type,
       storageId: row.storageId,
+      locked: row.locked,
       updatedAt: now,
     });
     if (row.content !== undefined) {
