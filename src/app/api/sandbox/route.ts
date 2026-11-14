@@ -24,6 +24,7 @@ import {
   WORK_DIR,
   atLiveSandboxCap,
   createProjectSandbox,
+  killProjectPreviews,
   projectFilesSchema,
   stopSandboxCommands,
   writeProjectFiles,
@@ -186,6 +187,12 @@ export async function POST(request: Request) {
     if (notFound) {
       return notFound;
     }
+  }
+
+  // A new boot replaces this project's earlier preview, which may be an orphan.
+  if (projectId && !resumeSandboxId) {
+    const killed = await killProjectPreviews(e2bApiKey, userId, projectId);
+    killed.forEach(forgetSandbox);
   }
 
   // A resumed boot reuses a sandbox the cap already counts.

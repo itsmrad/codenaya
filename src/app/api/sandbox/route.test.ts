@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   sandboxCreate: vi.fn(),
   sandboxConnect: vi.fn(),
   sandboxList: vi.fn(),
+  sandboxKill: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
@@ -20,6 +21,7 @@ vi.mock("e2b", () => ({
     create: mocks.sandboxCreate,
     connect: mocks.sandboxConnect,
     list: mocks.sandboxList,
+    kill: mocks.sandboxKill,
   },
   AuthenticationError: class extends Error {},
   RateLimitError: class extends Error {},
@@ -376,5 +378,88 @@ describe("POST /api/sandbox after ready (#492)", () => {
 
     // Drained, so later syncs install through PATCH.
     expect(requestReinstall("sbx_ready_overlap")).toBe(false);
+  });
+});
+
+describe("POST /api/sandbox replaces the project's earlier preview (#492)", () => {
+  type Live = { sandboxId: string; metadata: Record<string, string> };
+
+  /** Running sandboxes, filtered by metadata the way E2B's list query is. */
+  const e2b = (live: Live[]) => {
+    mocks.sandboxList.mockImplementation(
+      ({ query }: { query: { metadata: Record<string, string> } }) => ({
+        nextItems: async () =>
+          live.filter((box) =>
+            Object.entries(query.metadata).every(([key, value]) => box.metadata[key] === value),
+          ),
+      }),
+    );
+    mocks.sandboxKill.mockImplementation(async (sandboxId: string) => {
+      live.splice(live.findIndex((box) => box.sandboxId === sandboxId), 1);
+      return true;
+    });
+  };
+
+  const boot = () =>
+    POST(
+      request(
+        "POST",
+        JSON.stringify({ files: [{ path: "index.html", content: "" }], projectId: "proj_1" }),
+      ),
+    );
+
+  beforeEach(() => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
+    mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : [],
+    );
+    mocks.sandboxCreate.mockRejectedValue(new Error("stop after create"));
+  });
+
+  it("boots at the cap when one of the previews is this project's orphan", async () => {
+    e2b([
+      { sandboxId: "sbx_orphan", metadata: { userId: "user_1", projectId: "proj_1" } },
+      { sandboxId: "sbx_p2", metadata: { userId: "user_1", projectId: "proj_2" } },
+      { sandboxId: "sbx_p3", metadata: { userId: "user_1", projectId: "proj_3" } },
+    ]);
+
+    const res = await boot();
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mocks.sandboxKill).toHaveBeenCalledWith("sbx_orphan", { apiKey: "e2b-test" });
+    expect(mocks.sandboxCreate).toHaveBeenCalled();
+  });
+
+  it("leaves other projects' and other users' previews running", async () => {
+    e2b([
+      { sandboxId: "sbx_p2", metadata: { userId: "user_1", projectId: "proj_2" } },
+      { sandboxId: "sbx_other_user", metadata: { userId: "user_2", projectId: "proj_1" } },
+    ]);
+
+    await (await boot()).text();
+
+    expect(mocks.sandboxKill).not.toHaveBeenCalled();
+    expect(mocks.sandboxCreate).toHaveBeenCalled();
+  });
+
+  it("does not kill the sandbox a resumed boot continues on", async () => {
+    e2b([{ sandboxId: "sbx_resume_p1", metadata: { userId: "user_1", projectId: "proj_1" } }]);
+    mocks.sandboxConnect.mockRejectedValue(new Error("stop after connect"));
+
+    await (
+      await POST(
+        request(
+          "POST",
+          JSON.stringify({
+            files: [{ path: "index.html", content: "" }],
+            projectId: "proj_1",
+            resumeSandboxId: "sbx_resume_p1",
+          }),
+        ),
+      )
+    ).text();
+
+    expect(mocks.sandboxKill).not.toHaveBeenCalled();
   });
 });

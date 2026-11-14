@@ -47,6 +47,27 @@ export const atLiveSandboxCap = async (apiKey: string, userId: string) => {
   return running.length >= MAX_LIVE_SANDBOXES;
 };
 
+/**
+ * Kills `userId`'s running previews of `projectId`, so reopening a project
+ * replaces a preview whose tab closed without its DELETE instead of stacking
+ * on it or hitting the cap (#492). Returns the killed sandbox ids.
+ */
+// shortcut: an orphan whose project is never reopened lives until the E2B
+// timeout (SANDBOX_TIMEOUT_MS). Use a renewable lease if that ever matters.
+export const killProjectPreviews = async (
+  apiKey: string,
+  userId: string,
+  projectId: string,
+) => {
+  const running = await Sandbox.list({
+    apiKey,
+    query: { metadata: { userId, projectId }, state: ["running"] },
+    limit: MAX_LIVE_SANDBOXES,
+  }).nextItems();
+  await Promise.all(running.map(({ sandboxId }) => Sandbox.kill(sandboxId, { apiKey })));
+  return running.map(({ sandboxId }) => sandboxId);
+};
+
 export const createProjectSandbox = (
   opts: Pick<SandboxOpts, "apiKey" | "timeoutMs" | "metadata" | "network" | "requestTimeoutMs">,
 ) => Sandbox.create(SANDBOX_TEMPLATE, opts);
