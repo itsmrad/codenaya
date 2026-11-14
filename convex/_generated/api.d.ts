@@ -10,6 +10,7 @@
 
 import type * as activationEvents from "../activationEvents.js";
 import type * as admin from "../admin.js";
+import type * as agentTasks from "../agentTasks.js";
 import type * as aiProviders from "../aiProviders.js";
 import type * as auth from "../auth.js";
 import type * as chatImages from "../chatImages.js";
@@ -26,6 +27,7 @@ import type * as http from "../http.js";
 import type * as integrations from "../integrations.js";
 import type * as internalKey from "../internalKey.js";
 import type * as maintenance from "../maintenance.js";
+import type * as messageSteps from "../messageSteps.js";
 import type * as modelSpend from "../modelSpend.js";
 import type * as platformCatalog from "../platformCatalog.js";
 import type * as projectCascade from "../projectCascade.js";
@@ -35,6 +37,7 @@ import type * as promoClaims from "../promoClaims.js";
 import type * as showcase from "../showcase.js";
 import type * as skills from "../skills.js";
 import type * as stats from "../stats.js";
+import type * as swarm from "../swarm.js";
 import type * as system from "../system.js";
 import type * as users from "../users.js";
 import type * as waitlist from "../waitlist.js";
@@ -48,6 +51,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   activationEvents: typeof activationEvents;
   admin: typeof admin;
+  agentTasks: typeof agentTasks;
   aiProviders: typeof aiProviders;
   auth: typeof auth;
   chatImages: typeof chatImages;
@@ -64,6 +68,7 @@ declare const fullApi: ApiFromModules<{
   integrations: typeof integrations;
   internalKey: typeof internalKey;
   maintenance: typeof maintenance;
+  messageSteps: typeof messageSteps;
   modelSpend: typeof modelSpend;
   platformCatalog: typeof platformCatalog;
   projectCascade: typeof projectCascade;
@@ -73,6 +78,7 @@ declare const fullApi: ApiFromModules<{
   showcase: typeof showcase;
   skills: typeof skills;
   stats: typeof stats;
+  swarm: typeof swarm;
   system: typeof system;
   users: typeof users;
   waitlist: typeof waitlist;

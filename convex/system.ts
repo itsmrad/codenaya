@@ -14,6 +14,7 @@ import { MAX_CHECKPOINT_FILES, createCheckpoint } from "./checkpoints";
 import { runsSince, syncedAt } from "./githubSync";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
+import { mergeMessageSteps } from "./messageSteps";
 import {
   CASCADE_BATCH_SIZE,
   deleteRows,
@@ -46,9 +47,6 @@ import {
 import { MAX_ENV_VARS } from "./envVars";
 import { MAX_PROJECT_CONNECTIONS } from "./integrations";
 import { projectNameFromTitle } from "../src/features/projects/utils/project-name";
-
-// Keeps the steps array (and the message document) bounded on long runs.
-const MAX_MESSAGE_STEPS = 100;
 
 /** Most messages `getRecentMessages` returns as agent context (#53). */
 const MAX_RECENT_MESSAGES = 50;
@@ -86,8 +84,9 @@ export const createMessage = mutation({
     images: v.optional(v.array(v.id("_storage"))),
     // The sender, required with images: only their own uploads can be attached.
     ownerId: v.optional(v.string()),
-    mode: v.optional(v.literal("plan")),
+    mode: v.optional(v.union(v.literal("plan"), v.literal("swarm"))),
   },
+  returns: v.id("messages"),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
@@ -160,32 +159,19 @@ export const upsertMessageSteps = mutation({
     messageId: v.id("messages"),
     steps: v.array(messageStepValidator),
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
     const message = await ctx.db.get("messages", args.messageId);
     if (!message) {
-      return;
-    }
-
-    const steps = [...(message.steps ?? [])];
-    for (const incoming of args.steps) {
-      const index = steps.findIndex((step) => step.id === incoming.id);
-      if (index === -1) {
-        steps.push(incoming);
-      } else {
-        // Fields the update leaves out (e.g. targets) keep their recorded value.
-        steps[index] = {
-          ...steps[index],
-          ...incoming,
-          startedAt: steps[index].startedAt,
-        };
-      }
+      return null;
     }
 
     await ctx.db.patch("messages", args.messageId, {
-      steps: steps.slice(-MAX_MESSAGE_STEPS),
+      steps: mergeMessageSteps(message.steps ?? [], args.steps),
     });
+    return null;
   },
 });
 

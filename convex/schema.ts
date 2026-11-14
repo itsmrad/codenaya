@@ -21,6 +21,24 @@ export const messageStepValidator = v.object({
   recipeIds: v.optional(v.array(v.string())),
 });
 
+/** Stable task identity and instructions, supplied once by the orchestrator. */
+export const agentTaskInputValidator = v.object({
+  taskId: v.string(),
+  role: v.union(v.literal("worker"), v.literal("sub-orchestrator")),
+  title: v.string(),
+  brief: v.string(),
+  ownedPaths: v.array(v.string()),
+  modelId: v.string(),
+  model: v.string(),
+});
+
+export const agentTaskStatusValidator = v.union(
+  v.literal("queued"),
+  v.literal("running"),
+  v.literal("done"),
+  v.literal("error"),
+);
+
 /**
  * Why a run was stopped as stuck (#306): the loop it was in, the file in the
  * loop (by path, or by id for calls made before #292), and the repeated error
@@ -387,8 +405,8 @@ export default defineSchema({
     runModel: v.optional(runModelValidator),
     // User messages only: attached images. Bounded: see MAX_CHAT_IMAGES.
     images: v.optional(v.array(v.id("_storage"))),
-    // Assistant messages only: a plan-mode reply, which wrote no files (#120).
-    mode: v.optional(v.literal("plan")),
+    // Assistant messages only: an explicit plan or swarm run.
+    mode: v.optional(v.union(v.literal("plan"), v.literal("swarm"))),
     // Assistant messages only: the run was stopped going in circles (#306).
     stuck: v.optional(stuckRunValidator),
   })
@@ -396,6 +414,22 @@ export default defineSchema({
     .index("by_project_status", ["projectId", "status"])
     // For the lost-run sweep in maintenance.ts.
     .index("by_status", ["status"]),
+
+  /** Each swarm worker owns its live step trail, independently of the parent. */
+  agentTasks: defineTable(agentTaskInputValidator.extend({
+    messageId: v.id("messages"),
+    projectId: v.id("projects"),
+    status: agentTaskStatusValidator,
+    steps: v.array(messageStepValidator),
+    summary: v.optional(v.string()),
+    error: v.optional(v.string()),
+    startedAt: v.optional(v.number()),
+    endedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  }))
+    .index("by_message", ["messageId"])
+    .index("by_message_and_taskId", ["messageId", "taskId"])
+    .index("by_project", ["projectId"]),
 
   // Images uploaded from the chat composer: who uploaded each blob, so a
   // message can only attach its sender's own images. Deleted with the project.
@@ -698,6 +732,7 @@ export default defineSchema({
   creditLedger: defineTable({
     userId: v.string(),
     messageId: v.id("messages"),
+    agentTaskId: v.optional(v.id("agentTasks")),
     source: runSourceValidator,
     model: v.string(),
     inputTokens: v.number(),
@@ -707,6 +742,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_messageId", ["messageId"])
+    .index("by_messageId_and_agentTaskId", ["messageId", "agentTaskId"])
     .index("by_userId", ["userId"]),
 
   /**

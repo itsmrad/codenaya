@@ -195,12 +195,12 @@ describe("ownership (#354)", () => {
   });
 });
 
-describe("plan-mode messages (#120)", () => {
-  test("a plan reply keeps its mode for the chat", async () => {
+describe("explicit message modes", () => {
+  test("plan and swarm replies keep their mode for the chat", async () => {
     const { t, alice } = setup();
     const { projectId, conversationId } = await seedProject(t);
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "ik");
-    const create = (mode?: "plan") =>
+    const create = (mode?: "plan" | "swarm") =>
       t.mutation(api.system.createMessage, {
         internalKey: "ik",
         conversationId,
@@ -212,10 +212,12 @@ describe("plan-mode messages (#120)", () => {
       });
 
     const plan = await create("plan");
+    const swarm = await create("swarm");
     const build = await create();
 
     const messages = await alice.query(api.conversations.getMessages, { conversationId });
     expect(messages.find((m) => m._id === plan)?.mode).toBe("plan");
+    expect(messages.find((m) => m._id === swarm)?.mode).toBe("swarm");
     expect(messages.find((m) => m._id === build)).not.toHaveProperty("mode");
   });
 });
