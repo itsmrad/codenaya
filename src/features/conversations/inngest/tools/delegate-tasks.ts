@@ -86,7 +86,7 @@ export const createDelegateTasksTool = ({
             projectId,
             tasks: plan.tasks.map((task) => {
               const role = task.role ?? "worker";
-              const { modelId, label } = role === "sub-orchestrator" ? sub : worker;
+              const { id: modelId, label } = role === "sub-orchestrator" ? sub : worker;
               return {
                 taskId: parent ? `${parent.taskId}/${task.id}` : task.id,
                 role,
@@ -106,12 +106,13 @@ export const createDelegateTasksTool = ({
       });
       if (!agentTaskIds) return `Error: The swarm already runs ${MAX_SWARM_AGENTS} agents; build these tasks yourself.`;
 
-      // Created up front, so two workers never race to create the same folder.
+      // Created up front, so two workers never race to create the same folder. Owned paths are
+      // canonical (no trailing "/"), so each one's parent: the path itself has a single owner.
       await step.run("ensure-swarm-folders", async () => {
         const index = indexProjectFiles(await getProjectFiles(internalKey, projectId));
         const ensureFolder = folderEnsurer(internalKey, projectId, folderPaths(index));
         for (const path of plan.tasks.flatMap((task) => task.ownedPaths)) {
-          await ensureFolder(path.endsWith("/") ? path.slice(0, -1) : splitPath(path).dir);
+          await ensureFolder(splitPath(path).dir);
         }
       });
 

@@ -94,11 +94,11 @@ describe("processMessage swarm mode", () => {
       messageId: "m1",
       projectId: "p1",
       tasks: PLAN.tasks.map((task) => expect.objectContaining({
-        taskId: task.id, role: "worker", ownedPaths: task.ownedPaths, modelId: expect.any(String),
+        taskId: task.id, role: "worker", ownedPaths: task.ownedPaths.map((path) => path.replace(/\/$/, "")), modelId: expect.any(String),
       })),
     })]);
-    // Every owned folder chain exists before any worker starts (the mock's file list never gains them).
-    expect(mutationArgs("system:createFolder").map(({ name }) => name).slice(0, 3)).toEqual(["src", "pages", "components"]);
+    // Every owned path's parent folder exists before any worker starts (the mock's file list never gains them).
+    expect(mutationArgs("system:createFolder").map(({ name }) => name).slice(0, 2)).toEqual(["src", "components"]);
     expect(outcome.invocations).toEqual([
       expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_0", parentMessageId: "m1", ownerId: "user_1" }) }, timeout: "12m" }),
       expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_1" }) } }),

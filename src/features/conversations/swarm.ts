@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { MAX_SWARM_AGENTS, MAX_SWARM_TASKS } from "../../../convex/swarm";
+import { normalizePath } from "./agent-steps";
 
 export { MAX_SWARM_AGENTS, MAX_SWARM_TASKS };
 export const WORKER_MAX_STEPS = 20;
@@ -28,18 +29,24 @@ export const swarmPlanSchema = z.object({
 });
 export type SwarmPlan = z.infer<typeof swarmPlanSchema>;
 
-// Ownership is canonical and deliberately stricter than the file tools' path normalization.
-const validPath = (path: string) => path.startsWith("src/") && path === path.trim() &&
-  !path.includes("\\") && !/[\x00-\x1f]/.test(path) &&
-  path.replace(/\/$/, "").split("/").every((part) => part && part !== "." && part !== "..");
-const covers = (owned: string, path: string) => owned === path ||
-  (owned.endsWith("/") && (path.startsWith(owned) || path === owned.slice(0, -1)));
-const shared = (path: string) => SWARM_SHARED_PATHS.some((p) => covers(path, p) || covers(p, path)) ||
-  /^(?:vite|ts|tailwind)[^/]*config[^/]*$/.test(path) || /^tsconfig[^/]*\.json$/.test(path);
+/** The file tools' own normalisation, so ownership judges the path a tool acts on; only paths under src/. */
+const canonical = (raw: string) => {
+  const path = normalizePath(raw);
+  return path?.startsWith("src/") ? path : undefined;
+};
+/** `path` is `folder` itself or inside it: every path is a file or a folder. */
+const within = (folder: string, path: string) => path === folder || path.startsWith(`${folder}/`);
+// A shared file, or a folder holding one: a recursive delete would take it too.
+const shared = (path: string) => SWARM_SHARED_PATHS.some((file) => within(path, file));
 
-/** Whether a canonical file/folder path is wholly owned, including recursive deletes. */
-export const ownsPath = (ownedPaths: readonly string[], path: string): boolean =>
-  validPath(path) && !shared(path) && ownedPaths.some((owned) => validPath(owned) && covers(owned, path));
+/** Whether a write or (recursive) delete of `raw` stays inside owned paths and spares shared files. */
+export const ownsPath = (ownedPaths: readonly string[], raw: string): boolean => {
+  const path = canonical(raw);
+  return path !== undefined && !shared(path) && ownedPaths.some((owned) => {
+    const root = canonical(owned);
+    return root !== undefined && !shared(root) && within(root, path);
+  });
+};
 
 /**
  * Tool-facing validation errors let the orchestrator repair its plan.
@@ -54,18 +61,17 @@ export const validatePlan = (input: unknown, { withinPaths }: { withinPaths?: re
   if (withinPaths && subs) return "Error: Your tasks can only be workers.";
   if (withinPaths && tasks.length > MAX_SUBORCH_CHILDREN) return `Error: Delegate at most ${MAX_SUBORCH_CHILDREN} tasks.`;
   if (subs > MAX_SUBORCHESTRATORS) return `Error: At most ${MAX_SUBORCHESTRATORS} tasks can be sub-orchestrators.`;
-  for (const [i, task] of tasks.entries()) {
-    for (const path of task.ownedPaths) {
-      if (!validPath(path)) return `Error: Invalid owned path "${path}"; use canonical paths under src/.`;
-      if (shared(path)) return `Error: "${path}" includes a shared path reserved for the orchestrator.`;
-      if (withinPaths && !ownsPath(withinPaths, path)) return `Error: "${path}" is outside your owned paths.`;
-      for (const other of tasks.slice(0, i)) {
-        if (other.ownedPaths.some((p) => covers(p, path) || covers(path, p) ||
-          path.startsWith(`${p}/`) || p.startsWith(`${path}/`))) {
-          return `Error: Owned paths overlap between ${other.id} and ${task.id}.`;
-        }
-      }
+  const owned: { id: string; path: string }[] = [];
+  for (const task of tasks) {
+    for (const raw of task.ownedPaths) {
+      const path = canonical(raw);
+      if (!path) return `Error: Invalid owned path "${raw}"; use a project-relative path under src/.`;
+      if (shared(path)) return `Error: "${raw}" is or holds a shared file reserved for the orchestrator.`;
+      if (withinPaths && !ownsPath(withinPaths, path)) return `Error: "${raw}" is outside your owned paths.`;
+      const other = owned.find((o) => o.id !== task.id && (within(o.path, path) || within(path, o.path)));
+      if (other) return `Error: Owned paths overlap between ${other.id} and ${task.id}.`;
+      owned.push({ id: task.id, path });
     }
   }
-  return parsed.data;
+  return { tasks: tasks.map((task) => ({ ...task, ownedPaths: task.ownedPaths.map((raw) => canonical(raw)!) })) };
 };

@@ -195,6 +195,28 @@ describe("model spend limits (ADR 0012)", () => {
     expect((await spend(t, BOB)).user).toEqual({ periodStartsAt: month, spentUsd: 0.2 });
   });
 
+  test("charges a worker's usage to the model it actually ran when that is passed", async () => {
+    const t = setup();
+    await t.run((ctx) => ctx.db.insert("platformCatalog", {
+      models: [LIMITED, "fallback-test"].map((id) => catalogModel(id, { perUserUsd: 1, resets: "monthly" })),
+      defaultModelId: LIMITED, utilityModelId: LIMITED, updatedAt: 1, updatedBy: "admin",
+    }));
+    const messageId = await seedMessage(t);
+    const projectId = await t.run(async (ctx) => (await ctx.db.get("messages", messageId))!.projectId);
+    const [taskId] = await t.mutation(api.agentTasks.createTasks, {
+      internalKey: INTERNAL_KEY, messageId, projectId,
+      tasks: [{ taskId: "a", role: "worker" as const, title: "A", brief: "A", ownedPaths: [], modelId: LIMITED, model: "Planned" }],
+    });
+    await t.mutation(api.credits.recordRunUsage, {
+      internalKey: INTERNAL_KEY, messageId, agentTaskId: taskId, modelId: "fallback-test", model: "Fallback",
+      source: "platform", inputTokens: 1, outputTokens: 1, costUsd: 0.2,
+    });
+    const rows = await t.run((ctx) => ctx.db.query("creditLedger").collect());
+    expect(rows).toMatchObject([{ agentTaskId: taskId, model: "Fallback" }]);
+    const spends = await t.run((ctx) => ctx.db.query("modelSpend").collect());
+    expect(spends.map((row) => row.modelId)).toEqual(["fallback-test", "fallback-test"]);
+  });
+
   test("meters each worker independently using its own model, preserving the parent row and replay safety", async () => {
     const t = setup();
     const workerModels = ["haiku-test", "sonnet-test"];

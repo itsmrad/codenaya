@@ -1045,16 +1045,21 @@ describe("resolveWorkerModel (swarm worker)", () => {
     const run = await resolve({ modelId: "x-ai/grok-4.7" });
     expect(target(run.coding(0.3))).toMatchObject({ id: "anthropic/claude-haiku-5.5", authKey: "sk-or-platform" });
     expect(run.metering.coding).toEqual({ mode: "blended", usdPerMTok: 2 });
+    expect(run.codingModel.id).toBe("anthropic/claude-haiku-5.5");
   });
 
   it("runs on the run's model when the catalog has no Haiku", async () => {
     mocks.platform.mockReturnValue(ROUTED_SAVED);
-    expect(target((await resolve({ modelId: "x-ai/grok-4.7" })).coding()).id).toBe("x-ai/grok-4.7");
+    const run = await resolve({ modelId: "x-ai/grok-4.7" });
+    expect(target(run.coding()).id).toBe("x-ai/grok-4.7");
+    expect(run.codingModel.id).toBe("x-ai/grok-4.7");
   });
 
   it("runs BYOK workers on the key's Haiku, else on the run's model (a custom endpoint)", async () => {
     mocks.query.mockResolvedValue({ ...openAiKey, provider: "anthropic" });
-    expect(target((await resolve({ keyId: "key_1", modelId: "claude-opus-5-5" })).coding()).id).toBe("claude-haiku-5-5");
+    const run = await resolve({ keyId: "key_1", modelId: "claude-opus-5-5" });
+    expect(target(run.coding()).id).toBe("claude-haiku-5-5");
+    expect(run.codingModel).toEqual({ id: "claude-haiku-5-5", label: "Anthropic · Claude Haiku 5.5" });
 
     mocks.query.mockResolvedValue(customKey);
     expect(target((await resolve({ keyId: "key_2", modelId: "llama-4-scout" })).coding()).id).toBe("llama-4-scout");

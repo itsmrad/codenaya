@@ -86,13 +86,17 @@ export const recordRunUsage = mutation({
     internalKey: v.string(),
     messageId: v.id("messages"),
     agentTaskId: v.optional(v.id("agentTasks")),
+    // The model that actually ran, when it differs from the one the row names
+    // (a swarm worker falls back to its run's model).
+    modelId: v.optional(v.string()),
+    model: v.optional(v.string()),
     source: runSourceValidator,
     inputTokens: v.number(),
     outputTokens: v.number(),
     costUsd: v.number(),
   },
   returns: v.null(),
-  handler: async (ctx, { internalKey, messageId, agentTaskId, source, ...totals }) => {
+  handler: async (ctx, { internalKey, messageId, agentTaskId, modelId: ranId, model: ranLabel, source, ...totals }) => {
     validateInternalKey(internalKey);
     if (!Object.values(totals).every((n) => Number.isFinite(n) && n >= 0)) {
       throw appError("INVALID_ARGUMENT", "Usage totals must be finite and not negative");
@@ -106,8 +110,8 @@ export const recordRunUsage = mutation({
     if (agentTaskId !== undefined && (!task || task.messageId !== messageId || task.projectId !== message.projectId)) {
       throw appError("INVALID_ARGUMENT", "Task does not belong to this message");
     }
-    const modelId = task ? task.modelId : message.runModel?.modelId;
-    const model = task ? task.model : message.runModel?.label ?? "";
+    const modelId = ranId ?? (task ? task.modelId : message.runModel?.modelId);
+    const model = ranLabel ?? (task ? task.model : message.runModel?.label ?? "");
     const row = await ctx.db
       .query("creditLedger")
       .withIndex("by_messageId_and_agentTaskId", (q) =>
