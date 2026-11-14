@@ -278,6 +278,13 @@ export const ADMIN_MODELS_FETCH_RATE_LIMIT: RateLimitConfig = {
   windowMs: 60_000,
 };
 
+/** The Pro waitlist (#250) is open to signed-out visitors, so it is keyed by IP. */
+export const WAITLIST_RATE_LIMIT: RateLimitConfig = {
+  scope: "waitlist",
+  limit: 5,
+  windowMs: 10 * 60_000,
+};
+
 
 /** Standard 429 response with a `Retry-After` header. */
 export function rateLimitedResponse(result: RateLimitResult): Response {

@@ -5,6 +5,7 @@ import { Check, Minus } from "lucide-react";
 import { PublicShell } from "@/components/landing/public-shell";
 import { CountUp, Reveal } from "@/components/landing/reveal";
 import { SectionHeader } from "@/components/landing/section-header";
+import { ProWaitlist } from "@/features/billing/components/pro-waitlist";
 import {
   Accordion,
   AccordionContent,
@@ -172,9 +173,14 @@ const PricingPage = () => {
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-semibold text-foreground">{plan.name}</h2>
                   {plan.id === "pro" && (
-                    <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-[0.1em] text-muted-foreground">
-                      Coming soon
-                    </span>
+                    <>
+                      <span className="rounded bg-brand px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-[0.1em] text-brand-foreground">
+                        Best value
+                      </span>
+                      <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-[0.1em] text-muted-foreground">
+                        Coming soon
+                      </span>
+                    </>
                   )}
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{description}</p>
@@ -204,10 +210,8 @@ const PricingPage = () => {
                       <Link href={SIGN_UP_URL}>Get started</Link>
                     </Button>
                   ) : (
-                    // Checkout ships with billing (#105).
-                    <Button className="h-10 w-full rounded-md" variant="outline" disabled>
-                      Coming soon
-                    </Button>
+                    // Checkout ships with billing (#105); until then, a waitlist (#250).
+                    <ProWaitlist />
                   )}
                 </div>
               </div>
