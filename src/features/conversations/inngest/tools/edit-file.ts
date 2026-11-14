@@ -7,7 +7,7 @@ import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
 import { checkPackageVersions } from "./package-versions";
-import { findProjectFile, getProjectFiles, indexProjectFiles } from "./paths";
+import { findProjectFile, getProjectFiles, indexProjectFiles, lockedPathError } from "./paths";
 import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { syntaxErrorNote } from "./syntax-error";
 
@@ -119,6 +119,8 @@ export const createEditFileTool = ({ projectId, internalKey, registry = createRe
           if (file.type === "folder") {
             return `Error: "${path}" is a folder, not a file. You can only edit file contents.`;
           }
+          const locked = lockedPathError(index, path);
+          if (locked) return `Error: ${locked}`;
           const current = await getFileByAgentId(internalKey, projectId, file._id);
           if (typeof current?.content !== "string") {
             return `Error: "${path}" has no text content.`;

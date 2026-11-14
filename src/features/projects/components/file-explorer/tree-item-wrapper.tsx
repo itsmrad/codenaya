@@ -1,4 +1,10 @@
+import { useMutation } from "convex/react";
+import { LockIcon } from "lucide-react";
+import { toast } from "sonner";
+
 import { cn } from "@/lib/utils";
+import { convexErrorMessage } from "@/lib/convex-error";
+import { isOptimisticFileId } from "@/features/projects/hooks/use-files";
 import {
   ContextMenu,
   ContextMenuItem,
@@ -9,6 +15,7 @@ import {
 } from "@/components/ui/context-menu";
 
 import { getItemPadding } from "./constants";
+import { api } from "../../../../../convex/_generated/api";
 import { Doc } from "../../../../../convex/_generated/dataModel";
 
 export const TreeItemWrapper = ({
@@ -34,6 +41,13 @@ export const TreeItemWrapper = ({
   onCreateFile?: () => void;
   onCreateFolder?: () => void;
 }) => {
+  const setLocked = useMutation(api.files.setLocked);
+  // #307: locks stop AI edits only; the user can still edit by hand.
+  const toggleLock = () =>
+    setLocked({ id: item._id, locked: !item.locked }).catch((error) =>
+      toast.error(convexErrorMessage(error, "Couldn't change the lock")),
+    );
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -53,6 +67,9 @@ export const TreeItemWrapper = ({
           style={{ paddingLeft: getItemPadding(level, item.type === "file") }}
         >
           {children}
+          {item.locked && (
+            <LockIcon aria-label="Locked from AI edits" className="ml-auto mr-2 size-3 shrink-0 text-muted-foreground" />
+          )}
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent
@@ -91,6 +108,14 @@ export const TreeItemWrapper = ({
         >
           Delete...
         </ContextMenuItem>
+        {!isOptimisticFileId(item._id) && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={toggleLock} className="text-sm">
+              {item.locked ? "Unlock" : "Lock from AI"}
+            </ContextMenuItem>
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );
