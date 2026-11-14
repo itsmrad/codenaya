@@ -13,7 +13,7 @@ vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal)
   resolveProjectEnv: mocks.resolveEnv,
 }));
 
-import { CommandExitError, type CommandResult, TimeoutError } from "e2b";
+import { CommandExitError, type CommandResult, type Sandbox, TimeoutError } from "e2b";
 import { getFunctionName } from "convex/server";
 
 import { VITE_REACT_STARTER } from "../vite-starter";
@@ -140,6 +140,58 @@ describe("checkProjectBuild", () => {
     expect(e2b.create).not.toHaveBeenCalled();
   });
 
+  it("builds in a given sandbox's own directory, without a key, lookup, new sandbox or kill", async () => {
+    const sandbox = sandboxWith(() => undefined);
+    const files = starter();
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandbox: sandbox as unknown as Sandbox,
+    });
+
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    const commands = sandbox.commands.run.mock.calls.map(([command, opts]) => [command, (opts as { cwd?: string })?.cwd]);
+    const dir = commands[0][1]!;
+    expect(dir).toMatch(/^\/home\/user\/check-build-[\w-]+$/);
+    expect(commands.at(-1)).toEqual([`rm -rf ${dir}`, undefined]);
+    expect(sandbox.kill).not.toHaveBeenCalled();
+    expect(e2b.create).not.toHaveBeenCalled();
+    expect(e2b.list).not.toHaveBeenCalled();
+    expect(e2b.connect).not.toHaveBeenCalled();
+  });
+
+  it("first copies sourceDir into the check directory, without node_modules or .env files", async () => {
+    const sandbox = sandboxWith(() => undefined);
+    const files = starter();
+    await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandbox: sandbox as unknown as Sandbox,
+      sourceDir: "/home/user/app",
+    });
+
+    const [copy, install] = sandbox.commands.run.mock.calls.map(([command]) => command);
+    const dir = (sandbox.commands.run.mock.calls[1][1] as { cwd: string }).cwd;
+    expect(copy).toBe(
+      `mkdir -p ${dir} && tar -C '/home/user/app' --exclude=node_modules --exclude=.git --exclude=dist ` +
+        `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
+    );
+    expect(install).toMatch(/^npm install/);
+  });
+
+  it("refuses snapshot paths that would leave a given sandbox's check directory", async () => {
+    const sandbox = sandboxWith(() => undefined);
+    const files = [...starter(), { path: "../outside.ts", content: "" }];
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandbox: sandbox as unknown as Sandbox,
+    });
+
+    expect(result).toBe("Error: Static checks failed: Invalid project file path.");
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
+  });
+
   it("falls back to the static checks when the sandbox cannot start", async () => {
     e2b.create.mockRejectedValue(new Error("503 Service Unavailable"));
     const result = await check();
@@ -186,6 +238,19 @@ describe("checkProjectBuild", () => {
     const result = await check();
     expect(result).toMatch(/^Error: npm install failed/);
     expect(result).toContain("left-pad-x");
+  });
+
+  it.each([
+    "npm error code E503\nnpm error 503 Service Unavailable - GET https://registry.npmjs.org/react",
+    "npm error code ETIMEDOUT\nnpm error network request to https://registry.npmjs.org/react failed",
+    "npm error code ECONNRESET",
+    "npm error code EAI_AGAIN",
+    "npm error code ENOTFOUND",
+    "npm error socket hang up",
+  ])("reports an install the registry or network failed as unfinished, not a code error: %s", async (stderr) => {
+    fakeSandbox({ exitCode: 1, stderr });
+    const result = await check();
+    expect(result).toMatch(/^Error: The build check could not finish \(npm could not reach the package registry\)/);
   });
 
   it("adds the known cause and fix for a matched error, even past the trimmed lines", async () => {

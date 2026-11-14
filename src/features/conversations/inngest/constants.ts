@@ -46,7 +46,7 @@ EXISTING PROJECTS: follow the versions in the project's own package.json. A proj
 COMPONENTS: shadcn/ui (always — pre-configure and include all needed components)
 ICONS: lucide-react v1 (always — never use emoji as icons). It has no brand icons (Github, Twitter, Facebook, Instagram, Linkedin, Youtube): use an inline SVG or a generic icon instead
 FONTS: Geist Sans + Geist Mono (for Next.js via next/font/google) or Inter via @fontsource/inter (for Vite)
-FORM HANDLING: react-hook-form + zod (always for any form)
+FORM HANDLING: react-hook-form + zod (always for any form), validated with zodResolver from "@hookform/resolvers/zod" (in the starter). Never write your own resolver; let useForm infer its types from zodResolver(schema)
 STATE: useState/useContext for local; Zustand for cross-component/global state
 ROUTING (Vite): react-router-dom v7
 ANIMATIONS: Framer Motion for page transitions and complex UI; Tailwind transition utilities for micro-interactions
@@ -457,3 +457,12 @@ export const STEP_BUDGET_NOTE =
 
 /** Model-only stale file payload marker (#298). */
 export const FILE_HISTORY_PLACEHOLDER = "[{detail}; content omitted; re-read if needed]";
+
+/** Worker prompt note. "[swarm-worker]" is the marker the e2e model stub keys on. */
+export const SWARM_WORKER_NOTE = `
+[swarm-worker] You are a swarm worker. Implement only the assigned task and owned paths below.
+Read any project files you need. Never edit shared files, dependencies, or another worker's paths.
+Do not run a build: the orchestrator integrates and checks the complete project.
+Finish with a concise report of changes and any remaining work. Put dependency requests,
+shared edits, or integration requirements in a NEEDS: section for the orchestrator.
+`;
