@@ -1,0 +1,73 @@
+import { createTool } from "@inngest/agent-kit";
+import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+
+import { guardOwnedPaths } from "./inngest/lib/ownership-guard";
+import { ownsPath, validatePlan } from "./swarm";
+
+const task = (id: string, ownedPaths: string[]) => ({ id, title: id, brief: `Build ${id}.`, ownedPaths });
+
+describe("validatePlan", () => {
+  it("accepts 2-4 tasks owning disjoint files and folders under src/", () => {
+    const plan = { tasks: [task("nav", ["src/components/nav/"]), task("hero", ["src/components/hero.tsx"])] };
+    expect(validatePlan(plan)).toEqual(plan);
+  });
+
+  it("refuses too few or too many tasks", () => {
+    expect(validatePlan({ tasks: [task("a", ["src/a.ts"])] })).toMatch(/^Error: .*build it yourself/);
+    const five = ["a", "b", "c", "d", "e"].map((id) => task(id, [`src/${id}.ts`]));
+    expect(validatePlan({ tasks: five })).toMatch(/^Error:/);
+  });
+
+  it("refuses overlapping ownership, either way round", () => {
+    expect(validatePlan({ tasks: [task("a", ["src/ui/"]), task("b", ["src/ui/button.tsx"])] })).toMatch(/overlap/);
+    expect(validatePlan({ tasks: [task("a", ["src/ui/button.tsx"]), task("b", ["src/ui/"])] })).toMatch(/overlap/);
+    expect(validatePlan({ tasks: [task("a", ["src/ui"]), task("b", ["src/ui/x.ts"])] })).toMatch(/overlap/);
+    expect(validatePlan({ tasks: [task("a", ["src/a.ts"]), task("a", ["src/b.ts"])] })).toMatch(/unique/);
+  });
+
+  it("refuses shared, outside, absolute and parent paths", () => {
+    for (const path of ["src/App.tsx", "src/lib/", "src/index.css", "package.json", "/src/x.ts", "src/../x.ts", "public/x.png", "src//x.ts"]) {
+      expect(validatePlan({ tasks: [task("a", [path]), task("b", ["src/b.ts"])] }), path).toMatch(/^Error:/);
+    }
+  });
+});
+
+describe("ownsPath", () => {
+  it("covers owned files and everything inside owned folders, nothing else", () => {
+    const owned = ["src/pages/", "src/hooks/use-cart.ts"];
+    expect(ownsPath(owned, "src/pages/home.tsx")).toBe(true);
+    expect(ownsPath(owned, "src/pages")).toBe(true);
+    expect(ownsPath(owned, "src/hooks/use-cart.ts")).toBe(true);
+    expect(ownsPath(owned, "src/hooks/use-auth.ts")).toBe(false);
+    expect(ownsPath(owned, "src/pages-old/x.tsx")).toBe(false);
+    expect(ownsPath(owned, "src/pages/../App.tsx")).toBe(false);
+    expect(ownsPath(["src/"], "src/App.tsx")).toBe(false);
+  });
+});
+
+describe("guardOwnedPaths", () => {
+  const handler = vi.fn(async () => "ok");
+  const guard = guardOwnedPaths(["src/pages/"]);
+  const tool = (name: string) =>
+    guard(createTool({ name, description: name, parameters: z.object({}).passthrough(), handler }));
+  const call = (name: string, input: unknown) =>
+    (tool(name).handler as (input: unknown, opts: never) => Promise<string>)(input, {} as never);
+
+  it("refuses any write outside owned paths without running the tool", async () => {
+    handler.mockClear();
+    expect(await call("writeFiles", { files: [{ path: "src/pages/a.tsx" }, { path: "src/App.tsx" }] })).toMatch(/^Error: Write refused/);
+    expect(await call("editFile", { path: "src/main.tsx" })).toMatch(/^Error/);
+    expect(await call("deleteFiles", { paths: ["src/"] })).toMatch(/^Error/);
+    expect(await call("deleteFiles", { fileIds: ["f1"] })).toMatch(/^Error/);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("runs owned writes and leaves reads unrestricted", async () => {
+    handler.mockClear();
+    expect(await call("writeFiles", { files: [{ path: "src/pages/a.tsx" }] })).toBe("ok");
+    expect(await call("deleteFiles", { paths: ["src/pages/old/"] })).toBe("ok");
+    expect(await call("readFiles", { paths: ["src/App.tsx"] })).toBe("ok");
+    expect(handler).toHaveBeenCalledTimes(3);
+  });
+});

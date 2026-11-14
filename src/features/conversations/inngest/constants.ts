@@ -457,3 +457,12 @@ export const STEP_BUDGET_NOTE =
 
 /** Model-only stale file payload marker (#298). */
 export const FILE_HISTORY_PLACEHOLDER = "[{detail}; content omitted; re-read if needed]";
+
+/** Worker prompt note. "[swarm-worker]" is the marker the e2e model stub keys on. */
+export const SWARM_WORKER_NOTE = `
+[swarm-worker] You are a swarm worker. Implement only the assigned task and owned paths below.
+Read any project files you need. Never edit shared files, dependencies, or another worker's paths.
+Do not run a build: the orchestrator integrates and checks the complete project.
+Finish with a concise report of changes and any remaining work. Put dependency requests,
+shared edits, or integration requirements in a NEEDS: section for the orchestrator.
+`;

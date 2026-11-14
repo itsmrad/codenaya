@@ -30,6 +30,7 @@ import {
   isProviderKeyRejection,
   requireModelChoice,
   resolveRunModel,
+  resolveWorkerModel,
   takePromoRun,
   validateModelChoice,
 } from "./resolve-run-model";
@@ -1023,5 +1024,39 @@ describe("validateModelChoice: spend limits (ADR 0012)", () => {
     answer(spent(1_000, 1_000));
     await validate("google/gemini-3.8-flash");
     expect(mocks.query.mock.calls.map(([ref]) => getFunctionName(ref))).not.toContain("modelSpend:getForServer");
+  });
+});
+
+describe("resolveWorkerModel (swarm worker)", () => {
+  const resolve = (choice: { keyId?: string; modelId: string }) =>
+    resolveWorkerModel({ internalKey: "ik", projectId: "p1" as never, choice });
+
+  it("runs platform workers on Haiku, even a hidden utility entry, at its price", async () => {
+    mocks.platform.mockReturnValue({
+      ...ROUTED_SAVED,
+      models: [
+        ...ROUTED_SAVED.models,
+        catalogModel("anthropic/claude-haiku-5.5", "Claude Haiku 5.5", {
+          hidden: true,
+          pricing: { mode: "blended", usdPerMTok: 2 },
+        }),
+      ],
+    });
+    const run = await resolve({ modelId: "x-ai/grok-4.7" });
+    expect(target(run.coding(0.3))).toMatchObject({ id: "anthropic/claude-haiku-5.5", authKey: "sk-or-platform" });
+    expect(run.metering.coding).toEqual({ mode: "blended", usdPerMTok: 2 });
+  });
+
+  it("runs on the run's model when the catalog has no Haiku", async () => {
+    mocks.platform.mockReturnValue(ROUTED_SAVED);
+    expect(target((await resolve({ modelId: "x-ai/grok-4.7" })).coding()).id).toBe("x-ai/grok-4.7");
+  });
+
+  it("runs BYOK workers on the key's Haiku, else on the run's model (a custom endpoint)", async () => {
+    mocks.query.mockResolvedValue({ ...openAiKey, provider: "anthropic" });
+    expect(target((await resolve({ keyId: "key_1", modelId: "claude-opus-5-5" })).coding()).id).toBe("claude-haiku-5-5");
+
+    mocks.query.mockResolvedValue(customKey);
+    expect(target((await resolve({ keyId: "key_2", modelId: "llama-4-scout" })).coding()).id).toBe("llama-4-scout");
   });
 });
