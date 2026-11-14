@@ -20,6 +20,7 @@ import {
   createProjectSandbox,
   writeProjectFiles,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { NETWORK_FAILURE } from "@/features/sandbox-preview/utils/app-error";
 import { withErrorHints } from "@/features/sandbox-preview/utils/error-recipes";
 import {
   missingReferencedFiles,
@@ -166,6 +167,10 @@ const buildIn = async (sandbox: Sandbox, dir: string, { files, paths, deadline, 
 
   const install = await run(sandbox, "npm install --prefer-offline --no-audit --no-fund --loglevel=error", timeLeft(), dir);
   if (install.exitCode !== 0) {
+    // The registry or the sandbox's network, not package.json: nothing to fix.
+    if (NETWORK_FAILURE.test(`${install.stderr}\n${install.stdout}`)) {
+      return unfinished(new Error("npm could not reach the package registry"));
+    }
     return `Error: npm install failed. Fix package.json, then call checkBuild again:\n${failureOutput(install, dir, secrets)}`;
   }
 
@@ -290,6 +295,12 @@ type CheckOptions = {
    * no new sandbox, never killed. Takes precedence over `preview` and `apiKey`.
    */
   sandbox?: Sandbox;
+  /**
+   * With `sandbox`: the project's directory there, copied into the check first
+   * (without node_modules, .git, dist and .env files), so files `files` leaves
+   * out, such as uploads, are built too. `files` is then written over the copy.
+   */
+  sourceDir?: string;
   /** The project's secret values, redacted from whatever the check returns. */
   secrets?: string[];
 };
@@ -310,6 +321,7 @@ export const checkProjectBuild = async ({
   metadata,
   preview,
   sandbox: suppliedSandbox,
+  sourceDir,
   secrets = [],
 }: CheckOptions): Promise<string> => {
   const problems = [
@@ -340,6 +352,14 @@ export const checkProjectBuild = async ({
     }
     const dir = `/home/user/check-build-${randomUUID()}`;
     try {
+      if (sourceDir) {
+        const timeoutMs = within(job.deadline, COPY_TIMEOUT_MS);
+        await suppliedSandbox.commands.run(
+          `mkdir -p ${dir} && tar -C '${sourceDir}' --exclude=node_modules --exclude=.git --exclude=dist ` +
+            `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
+          { timeoutMs, requestTimeoutMs: timeoutMs },
+        );
+      }
       return await buildIn(suppliedSandbox, dir, job);
     } catch (error) {
       return unfinished(error, secrets);

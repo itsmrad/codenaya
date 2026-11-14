@@ -160,6 +160,25 @@ describe("checkProjectBuild", () => {
     expect(e2b.connect).not.toHaveBeenCalled();
   });
 
+  it("first copies sourceDir into the check directory, without node_modules or .env files", async () => {
+    const sandbox = sandboxWith(() => undefined);
+    const files = starter();
+    await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandbox: sandbox as unknown as Sandbox,
+      sourceDir: "/home/user/app",
+    });
+
+    const [copy, install] = sandbox.commands.run.mock.calls.map(([command]) => command);
+    const dir = (sandbox.commands.run.mock.calls[1][1] as { cwd: string }).cwd;
+    expect(copy).toBe(
+      `mkdir -p ${dir} && tar -C '/home/user/app' --exclude=node_modules --exclude=.git --exclude=dist ` +
+        `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
+    );
+    expect(install).toMatch(/^npm install/);
+  });
+
   it("refuses snapshot paths that would leave a given sandbox's check directory", async () => {
     const sandbox = sandboxWith(() => undefined);
     const files = [...starter(), { path: "../outside.ts", content: "" }];
@@ -219,6 +238,19 @@ describe("checkProjectBuild", () => {
     const result = await check();
     expect(result).toMatch(/^Error: npm install failed/);
     expect(result).toContain("left-pad-x");
+  });
+
+  it.each([
+    "npm error code E503\nnpm error 503 Service Unavailable - GET https://registry.npmjs.org/react",
+    "npm error code ETIMEDOUT\nnpm error network request to https://registry.npmjs.org/react failed",
+    "npm error code ECONNRESET",
+    "npm error code EAI_AGAIN",
+    "npm error code ENOTFOUND",
+    "npm error socket hang up",
+  ])("reports an install the registry or network failed as unfinished, not a code error: %s", async (stderr) => {
+    fakeSandbox({ exitCode: 1, stderr });
+    const result = await check();
+    expect(result).toMatch(/^Error: The build check could not finish \(npm could not reach the package registry\)/);
   });
 
   it("adds the known cause and fix for a matched error, even past the trimmed lines", async () => {

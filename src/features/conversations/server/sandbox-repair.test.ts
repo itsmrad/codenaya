@@ -27,8 +27,16 @@ vi.mock("@/features/conversations/inngest/tools/read-files", () => ({
 vi.mock("@/features/conversations/inngest/tools/write-files", () => ({
   createWriteFilesTool: () =>
     fakeTool("writeFiles", ({ files }: { files: Array<{ path: string; content: string }> }) => {
-      for (const { path, content } of files) convexFiles.set(path, content);
-      return `Wrote ${files.length} file(s)`;
+      // Paths under locked/ fail, as a locked file does (#307).
+      const ok = files.filter(({ path }) => !path.startsWith("locked/"));
+      const failed = files.filter(({ path }) => path.startsWith("locked/")).map(({ path }) => `${path} (locked)`);
+      for (const { path, content } of ok) convexFiles.set(path, content);
+      if (ok.length === 0) return `Error: No files written. Failed: ${failed.join(", ")}.`;
+      return [
+        `Wrote ${ok.length} file(s).`,
+        `Updated: ${ok.map(({ path }) => path).join(", ")}.`,
+        failed.length ? `Failed: ${failed.join(", ")}.` : "",
+      ].filter(Boolean).join(" ");
     }),
 }));
 vi.mock("@/features/conversations/inngest/tools/edit-file", () => ({
@@ -57,14 +65,15 @@ import { z } from "zod";
 
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { VITE_REACT_STARTER } from "../inngest/vite-starter";
-import { type RepairEvent, parseBuildErrors, verifyAndFix } from "./sandbox-repair";
+import { type RepairEvent, parseBuildErrors, repairTools, verifyAndFix } from "./sandbox-repair";
 
+/** Like the real tools: the work runs in a step with a fixed id, when there is a step. */
 function fakeTool<T>(name: string, handler: (input: T) => unknown) {
   return createTool({
     name,
     description: name,
     parameters: z.object({}).passthrough(),
-    handler: (input) => handler(input as T),
+    handler: (input, { step }) => (step ? step.run(name, async () => handler(input as T)) : handler(input as T)),
   });
 }
 
@@ -90,7 +99,7 @@ const fakeSandbox = ({
   extra = {},
 }: {
   install?: (broken: string | undefined) => Answer;
-  build?: (broken: string | undefined, dir: string) => Answer;
+  build?: (broken: string | undefined, dir: string, fs: Map<string, string>) => Answer;
   find?: () => Answer;
   extra?: Record<string, string>;
 } = {}) => {
@@ -151,9 +160,20 @@ const fakeSandbox = ({
           return answer({ exitCode: 0, stdout });
         }
         if (command.startsWith("npm install")) return answer(install(brokenIn(cwd)));
+        const copy = /tar -C '([^']+)'.* \| tar -C (\S+) -xf -$/.exec(command);
+        if (copy) {
+          const [, from, to] = copy;
+          for (const [path, content] of [...fs]) {
+            const rel = path.slice(from.length + 1);
+            if (path.startsWith(`${from}/`) && !/(^|\/)(node_modules|\.git|dist)\/|(^|\/)\.env/.test(rel)) {
+              fs.set(`${to}/${rel}`, content);
+            }
+          }
+          return answer({ exitCode: 0 });
+        }
         if (command.includes("vite build")) {
           builds.push(brokenIn(cwd));
-          return answer(build(brokenIn(cwd), cwd));
+          return answer(build(brokenIn(cwd), cwd, fs));
         }
         if (command.startsWith("rm -rf ")) {
           const dir = command.slice("rm -rf ".length);
@@ -321,10 +341,37 @@ describe("verifyAndFix", () => {
     expectSandboxKept(sandbox);
   });
 
-  it("caps maxAttempts at three", async () => {
+  it.each([10, NaN, Infinity])("caps maxAttempts %s at three", async (maxAttempts) => {
     modelReplies(...rewriteApp(1), ...rewriteApp(2), ...rewriteApp(3));
-    const { result } = await run(fakeSandbox(), { maxAttempts: 10 });
+    const { result } = await run(fakeSandbox(), { maxAttempts });
     expect(result.attempts).toBe(3);
+  });
+
+  it("builds files too large to read, from the in-sandbox copy", async () => {
+    const big = "x".repeat(1_000_001);
+    const sandbox = fakeSandbox({
+      extra: { "src/App.tsx": FIXED_APP, "src/big.json": big },
+      build: (_broken, dir, fs) =>
+        fs.get(`${dir}/src/big.json`) === big ? { exitCode: 0 } : { exitCode: 1, stderr: "Could not load src/big.json" },
+    });
+
+    const { result } = await run(sandbox);
+
+    expect(result.status).toBe("verified");
+    expect(sandbox.files.read.mock.calls.map(([path]) => path)).not.toContain(`${DIR}/src/big.json`);
+  });
+
+  it("reports an npm registry or network failure as unverified, never repairing it", async () => {
+    const sandbox = fakeSandbox({
+      install: () => ({ exitCode: 1, stderr: "npm error code E503\nnpm error 503 Service Unavailable - GET https://registry.npmjs.org/react" }),
+    });
+    const requests = modelReplies();
+
+    const { result } = await run(sandbox);
+
+    expect(result).toMatchObject({ status: "unverified", attempts: 0 });
+    expect(result.reason).toMatch(/^Error: The build check could not finish/);
+    expect(requests).toHaveLength(0);
   });
 
   it("fails a repair that changed nothing instead of checking again", async () => {
@@ -466,6 +513,58 @@ describe("verifyAndFix", () => {
       typeof target === "string" ? [target] : target.map((file) => file.path),
     );
     expect(written.filter((path) => path.endsWith(".env"))).toEqual([]);
+  });
+});
+
+describe("repairTools", () => {
+  const tools = (name: string, written: string[] = [], allowedPaths?: (path: string) => boolean) =>
+    Object.fromEntries(
+      repairTools({ projectId: "proj_1" as Id<"projects">, internalKey: "internal", name, written, allowedPaths }).map(
+        (tool) => [tool.name, tool],
+      ),
+    );
+  const call = (tool: { handler: (input: never, opts: never) => unknown }, input: object, step?: object) =>
+    tool.handler(input as never, { step } as never);
+
+  it("puts every file tool step under its worker's name, so parallel workers never share one", async () => {
+    const ids: string[] = [];
+    const step = { run: async (id: string, fn: () => Promise<unknown>) => (ids.push(id), fn()) };
+    convexFiles.clear();
+    const input = { files: [{ path: "src/a.ts", content: "a" }] };
+
+    await call(tools("run_1:task_a:repair:1").writeFiles, input, step);
+    await call(tools("run_1:task_b:repair:1").writeFiles, input, step);
+    await call(tools("run_1:task_a:repair:1").readFiles, { paths: ["src/a.ts"] }, step);
+
+    expect(ids).toEqual([
+      "run_1:task_a:repair:1:writeFiles",
+      "run_1:task_b:repair:1:writeFiles",
+      "run_1:task_a:repair:1:readFiles",
+    ]);
+  });
+
+  it("refuses write calls that name no path, such as deletes by file id", async () => {
+    convexFiles.clear();
+    convexFiles.set("src/a.ts", "a");
+    const written: string[] = [];
+
+    const result = await call(tools("w", written).deleteFiles, { fileIds: ["file_0"] });
+
+    expect(result).toBe("Error: Name the files to change by path.");
+    expect(convexFiles.has("src/a.ts")).toBe(true);
+    expect(written).toEqual([]);
+  });
+
+  it("counts only the files a partial writeFiles wrote", async () => {
+    convexFiles.clear();
+    const written: string[] = [];
+
+    const result = await call(tools("w", written).writeFiles, {
+      files: [{ path: "src/a.ts", content: "a" }, { path: "locked/b.ts", content: "b" }],
+    });
+
+    expect(result).toContain("Failed: locked/b.ts");
+    expect(written).toEqual(["src/a.ts"]);
   });
 });
 

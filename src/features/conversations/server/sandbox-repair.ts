@@ -25,10 +25,11 @@ import type { Id } from "../../../../convex/_generated/dataModel";
  * and the integration sandbox). The single-agent chat run keeps its own
  * checkBuild tool and build gate; this does not replace them.
  *
- * Each verify reads a fresh snapshot of `dir` and builds it in a directory of
- * its own (`checkProjectBuild` with `sandbox`), so writes landing meanwhile
- * never mix into a half-copied tree. The sandbox is never looked up, created
- * or killed here. A pass proves install, type check and production build
+ * Each verify reads the text files under `dir` (up to MAX_SNAPSHOT_FILES)
+ * for the static checks, then copies `dir` into a directory of its own and
+ * runs a fresh `npm install`, type check and build there
+ * (`checkProjectBuild` with `sandbox`); uploads and large files are built
+ * from that copy. The sandbox is never looked up, created or killed here. A pass proves install, type check and production build
  * only: runtime errors in the preview are not checked.
  *
  * Repairs write through the agent's own Convex file tools, so they reach the
@@ -54,7 +55,7 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 export const MAX_REPAIR_ATTEMPTS = 3;
 /** Model turns one repair may take (reads, writes, final line). */
 const REPAIR_MAX_STEPS = 8;
-/** Larger files count as present but are not copied into the check. */
+/** Larger files skip the static checks; the in-sandbox copy still builds them. */
 const MAX_TEXT_BYTES = 1_000_000;
 const MAX_SNAPSHOT_FILES = 2_000;
 const SHORT_CALL_MS = 10_000;
@@ -113,7 +114,7 @@ export type VerifyAndFixOptions = {
   agentTaskId?: string;
   /** The repair agent's model, built by the caller (`buildAgentKitModel`). */
   model: Model;
-  /** Capped at MAX_REPAIR_ATTEMPTS. */
+  /** Repairs, 1 to MAX_REPAIR_ATTEMPTS; anything else is clamped, and NaN means the maximum. */
   maxAttempts?: number;
   /** Keep the errors this worker owns; what it drops can only yield `scoped-ok`. */
   filterErrors?: (errors: BuildError[]) => BuildError[];
@@ -123,7 +124,8 @@ export type VerifyAndFixOptions = {
    * Checked before each check and repair, by the repair agent's router and by
    * its write tools. An in-flight check or model request is not interrupted:
    * cancelling waits for it, bounded by the check's 240 s budget or the
-   * model's request time. The sandbox is never killed to abort.
+   * model's request time. The sandbox is never killed to abort. It is per
+   * invocation: an Inngest replay starts with the signal it is given then.
    */
   signal?: AbortSignal;
   /** Redacted from every error, event and result. */
@@ -167,7 +169,7 @@ const snapshot = async (sandbox: Sandbox, dir: string) => {
         try {
           return { path, content: decoder.decode(bytes) };
         } catch {
-          return null; // Binary: present by path only, as uploads are in checkBuild.
+          return null; // Binary: built from the in-sandbox copy.
         }
       }),
   );
@@ -212,7 +214,7 @@ const verify = async (sandbox: Sandbox, dir: string, secrets: string[]): Promise
     const reason = `Could not read the sandbox's files (${error instanceof Error ? error.message : "unknown error"})`;
     return { status: "unverified", errors: [], paths: [], reason: redact(reason, secrets) };
   }
-  const text = await checkProjectBuild({ files: snap.files, paths: snap.paths, sandbox, secrets });
+  const text = await checkProjectBuild({ files: snap.files, paths: snap.paths, sandbox, sourceDir: dir, secrets });
   const paths = [...snap.paths];
   if (text.startsWith(BUILD_VERIFIED)) return { status: "passed", errors: [], paths };
   // Anything else that is not an error (Build not checked) or an unfinished
@@ -227,6 +229,68 @@ const REPAIR_SYSTEM =
   "You fix build errors in a Vite + TypeScript project. Read the files you need with readFiles, then fix them " +
   "with editFile (or writeFiles for a whole file). Make the smallest change that fixes the listed errors and " +
   "change nothing else. When done, reply with one line saying what you changed.";
+
+/** The paths a successful file tool call changed: all it named, except a partial writeFiles' failures. */
+const succeededPaths = (tool: string, targets: string[], result: unknown) => {
+  if (tool !== "writeFiles" || typeof result !== "string") return targets;
+  // "Wrote 2 file(s). Created: a.ts. Updated: b.ts, c.ts. Failed: d.ts (...)."
+  const listed = [...result.matchAll(/(?:Created|Updated): (.+?)\.(?=\s|$)/g)].flatMap(([, list]) => list.split(", "));
+  return targets.filter((path) => listed.includes(path));
+};
+
+/**
+ * The repair agent's tools: the chat agent's Convex file tools, with every
+ * step id under this repair's `name`. The tools' own ids are fixed
+ * ("write-files"), and Inngest numbers repeats in the order it finds them,
+ * which differs between parallel workers' replays; per-worker ids keep one
+ * worker from replaying another's memoized write. (The tools use only
+ * `step.run`.) Writes are also checked against `allowedPaths`, and the paths
+ * they changed are pushed to `written`, on replays too.
+ */
+export const repairTools = ({
+  projectId, internalKey, name, signal, allowedPaths, written,
+}: {
+  projectId: Id<"projects">;
+  internalKey: string;
+  name: string;
+  signal?: AbortSignal;
+  allowedPaths?: (path: string) => boolean;
+  written: string[];
+}): Tool.Any[] => {
+  const scoped = (tool: Tool.Any): Tool.Any => ({
+    ...tool,
+    handler: (input, opts) => {
+      const { step } = opts;
+      if (!step) return tool.handler(input, opts);
+      const run = step.run as (id: string, ...rest: unknown[]) => unknown;
+      const prefixed = (id: string, ...rest: unknown[]) => run(`${name}:${id}`, ...rest);
+      return tool.handler(input, { ...opts, step: { ...step, run: prefixed as typeof step.run } });
+    },
+  });
+  const guarded = (tool: Tool.Any): Tool.Any => {
+    const inner = scoped(tool);
+    return {
+      ...inner,
+      handler: async (input, opts) => {
+        if (signal?.aborted) return "Error: Cancelled";
+        const targets = describeToolCall({ name: tool.name, input: input as Record<string, unknown> }, () => undefined);
+        // By id (`fileIds`), a call could reach files no check below sees.
+        if (targets.length === 0) return "Error: Name the files to change by path.";
+        const outside = allowedPaths && targets.find((path) => !allowedPaths(path));
+        if (outside) return `Error: ${outside} is outside this task's files`;
+        const result = await inner.handler(input, opts);
+        if (toolResultError({ data: result }) === undefined) written.push(...succeededPaths(tool.name, targets, result));
+        return result;
+      },
+    };
+  };
+  return [
+    scoped(createReadFilesTool({ projectId, internalKey })),
+    guarded(createWriteFilesTool({ projectId, internalKey })),
+    guarded(createEditFileTool({ projectId, internalKey })),
+    guarded(createDeleteFilesTool({ projectId, internalKey })),
+  ];
+};
 
 /**
  * Runs the repair agent once on the agent's Convex file tools; returns the
@@ -246,31 +310,11 @@ const repair = async ({
   allowedPaths?: (path: string) => boolean;
 }) => {
   const written: string[] = [];
-  // Runs again on an Inngest replay, where the tool's own step returns its memoized result.
-  const guarded = (tool: Tool.Any): Tool.Any => ({
-    ...tool,
-    handler: async (input, opts) => {
-      if (signal?.aborted) return "Error: Cancelled";
-      const targets = describeToolCall({ name: tool.name, input }, () => undefined);
-      const outside = allowedPaths && targets.find((path) => !allowedPaths(path));
-      if (outside) return `Error: ${outside} is outside this task's files`;
-      const result = await tool.handler(input, opts);
-      if (toolResultError({ data: result }) === undefined) written.push(...targets);
-      return result;
-    },
-  });
   const agent = createAgent({
     name,
     system: REPAIR_SYSTEM,
     model,
-    tools: [
-      createReadFilesTool({ projectId, internalKey }),
-      ...[
-        createWriteFilesTool({ projectId, internalKey }),
-        createEditFileTool({ projectId, internalKey }),
-        createDeleteFilesTool({ projectId, internalKey }),
-      ].map(guarded),
-    ],
+    tools: repairTools({ projectId, internalKey, name, signal, allowedPaths, written }),
   });
   const network = createNetwork({
     name,
@@ -349,7 +393,9 @@ export const verifyAndFix = async ({
   step,
 }: VerifyAndFixOptions): Promise<RepairResult> => {
   const prefix = `${runId}:${agentTaskId}`;
-  const cap = Math.max(0, Math.min(maxAttempts, MAX_REPAIR_ATTEMPTS));
+  const cap = Number.isFinite(maxAttempts)
+    ? Math.min(Math.max(Math.trunc(maxAttempts), 1), MAX_REPAIR_ATTEMPTS)
+    : MAX_REPAIR_ATTEMPTS;
   const filesChanged = new Set<string>();
   let errors: BuildError[] = [];
   let attempts = 0;
