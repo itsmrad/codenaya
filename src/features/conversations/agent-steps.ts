@@ -360,6 +360,10 @@ export const turnHeartbeat = (now: number): AgentStep => ({
   endedAt: now,
 });
 
+/** The reply `processMessage` stores when a run fails. Here so the chat can tell (#257). */
+export const AGENT_FAILURE_MESSAGE =
+  "My apologies, I encountered an error while processing your request. Let me know if you need anything else!";
+
 /** Written in place of the reply when a lost run is failed. */
 export const LOST_RUN_MESSAGE =
   "The agent stopped responding before it finished, so this run was ended. Please try again.";

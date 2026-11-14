@@ -4,12 +4,10 @@ import { AI_NOT_CONFIGURED_MESSAGE } from "@/features/ai-providers/server/platfo
 import { PROMO_REFUSAL_MESSAGES } from "@/features/promotions/github-promo";
 import { DISPATCH_FAILED_MESSAGE } from "@/lib/message-processor";
 
-import { LOST_RUN_MESSAGE } from "../../agent-steps";
+import { AGENT_FAILURE_MESSAGE, LOST_RUN_MESSAGE } from "../../agent-steps";
 import { KEY_FAILURE_SUFFIX } from "@/features/ai-providers/server/resolve-run-model";
 
-/** The reply `processMessage` stores when a run fails. */
-export const AGENT_FAILURE_MESSAGE =
-  "My apologies, I encountered an error while processing your request. Let me know if you need anything else!";
+export { AGENT_FAILURE_MESSAGE };
 
 /** Stored when a run finishes without an assistant text response. */
 export const DEFAULT_REPLY_MESSAGE =

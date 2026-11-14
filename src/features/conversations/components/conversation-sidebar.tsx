@@ -7,6 +7,7 @@ import {
   ClockArrowUpIcon,
   CornerDownLeftIcon,
   HistoryIcon, 
+  ListEndIcon,
   PlusIcon,
   SquareIcon,
   XIcon,
@@ -81,6 +82,8 @@ import {
 import { type AgentModelChoice, nextTier } from "../agent-models";
 import { buildPathIndex, stuckFilePath } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
+import { followUpAction } from "../follow-up";
+import { QueuedFollowUp } from "./queued-follow-up";
 import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
 import { chatStarters } from "../chat-starters";
@@ -115,6 +118,9 @@ export const ConversationSidebar = ({
   const slashMenu = useSkillSlashMenu(projectId, input, setInput);
   const uploadImages = useUploadChatImages(projectId);
   const [planMode, setPlanMode] = useState(false);
+  // A follow-up from another project waits for that project's chat.
+  const followUp = useChatStore((state) => (state.followUp?.projectId === projectId ? state.followUp : null));
+  const setFollowUp = useChatStore((state) => state.setFollowUp);
   // A key still loading (or gone) is left to the server to check.
   const modelKeys = useAiProviderKeys();
   const platform = usePlatformModelsOrCatalog();
@@ -225,9 +231,9 @@ export const ConversationSidebar = ({
     }
   };
 
-  // Esc stops a running agent. The textarea is disabled while running, so
-  // listen on the document, but only when focus isn't elsewhere (a dialog or
-  // the editor), where Esc means something else.
+  // Esc stops a running agent, from the composer or the document, but only
+  // when focus isn't elsewhere (a dialog or the editor), where Esc means
+  // something else.
   const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!isProcessing) return;
@@ -375,6 +381,38 @@ export const ConversationSidebar = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queuedMessage, pending, isProcessing, conversations, projectId]);
 
+  // A follow-up typed during a run (#257) goes out once that run completes,
+  // after any message queued from outside the chat, leaving the draft alone.
+  // A stopped or failed run gives it back to the composer instead.
+  const followUpNext = followUp && followUpAction(followUp, conversationMessages);
+  useEffect(() => {
+    if (!followUp || followUpNext === "wait") return;
+    if (followUpNext === "drop") {
+      setFollowUp(null);
+      appendInput(followUp.text);
+      toast.info("The run didn't finish, so your queued message wasn't sent. It's back in the composer.");
+      return;
+    }
+    if (pending || isProcessing || queuedMessage || conversations === undefined) return;
+    const { text } = followUp;
+    setFollowUp(null);
+    // Like a typed message, it shows at once as pending; the send is the external effect.
+    void (async () => {
+      setPending({ text, imageUrls: [], userCount });
+      try {
+        if ((await sendMessage(text, undefined, planMode ? PLAN_MODE : undefined)) === "blocked") {
+          appendInput(text);
+        }
+      } catch {
+        toast.error("Message failed to send");
+      } finally {
+        setPending(null);
+      }
+    })();
+    // sendMessage is recreated every render; the follow-up's state is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followUp, followUpNext, pending, isProcessing, queuedMessage, conversations]);
+
   const handleSubmit = async (message: PromptInputMessage) => {
     // If processing and no new message, this is just a stop function
     if (
@@ -384,6 +422,21 @@ export const ConversationSidebar = ({
       message.files.length === 0
     ) {
       await handleCancel()
+      setInput("");
+      return;
+    }
+    // During a run, Enter queues one follow-up for when it ends (#257).
+    if (isProcessing && processingMessage && message.text) {
+      if (message.files.length > 0) {
+        toast.error("Images can't be queued. Attach them once the run ends.");
+        // PromptInput keeps its attachments when submit throws.
+        throw new Error("Images not queued");
+      }
+      if (followUp) {
+        toast.error("A message is already queued. Edit or remove it first.");
+        return;
+      }
+      setFollowUp({ projectId, text: message.text, afterMessageId: processingMessage._id });
       setInput("");
       return;
     }
@@ -605,6 +658,17 @@ export const ConversationSidebar = ({
               message list can be scrolled away from the bottom, which would
               hide the prompt exactly when it matters. */}
           <ApprovalPrompt projectId={projectId} />
+          {followUp && (
+            <QueuedFollowUp
+              text={followUp.text}
+              onEdit={() => {
+                setFollowUp(null);
+                appendInput(followUp.text);
+                panelRef.current?.querySelector("textarea")?.focus();
+              }}
+              onRemove={() => setFollowUp(null)}
+            />
+          )}
           {slashMenu.open && (
             <SkillSlashMenu
               items={slashMenu.items}
@@ -655,7 +719,7 @@ export const ConversationSidebar = ({
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={slashMenu.onKeyDown}
                 value={input}
-                disabled={isProcessing || enhancer.isEnhancing}
+                disabled={enhancer.isEnhancing}
               />
             </PromptInputBody>
             <PromptInputFooter className="h-10 px-2 py-0">
@@ -701,17 +765,22 @@ export const ConversationSidebar = ({
                       <PromptInputSubmit
                         disabled={
                           isProcessing
-                            ? false
+                            ? Boolean(input && followUp)
                             : Boolean(pending) ||
                               enhancer.isEnhancing ||
                               (!input && contexts.length === 0 && images === 0) ||
                               (images > 0 && !acceptsImages)
                         }
-                        aria-label={isProcessing ? "Stop" : "Send"}
+                        aria-label={isProcessing ? (input ? "Queue message" : "Stop") : "Send"}
                         className="size-8 rounded-lg disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
                       >
                         {/* Keyed so each swap pops the new icon in. */}
-                        {isProcessing ? (
+                        {isProcessing && input ? (
+                          <ListEndIcon
+                            key="queue"
+                            className="size-4 animate-in fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none"
+                          />
+                        ) : isProcessing ? (
                           <SquareIcon
                             key="stop"
                             className="size-3 animate-in fill-current fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none"
@@ -724,7 +793,9 @@ export const ConversationSidebar = ({
                         )}
                       </PromptInputSubmit>
                     </TooltipTrigger>
-                    <TooltipContent>{isProcessing ? "Stop (Esc)" : "Send (Enter)"}</TooltipContent>
+                    <TooltipContent>
+                      {isProcessing ? (input ? "Queue (Enter)" : "Stop (Esc)") : "Send (Enter)"}
+                    </TooltipContent>
                   </Tooltip>
                   )}
                 </WithAttachmentCount>

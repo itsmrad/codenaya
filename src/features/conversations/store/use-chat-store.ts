@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import type { FollowUp } from "../follow-up";
+
 export interface ChatContext {
   id: string;
   fileName: string;
@@ -46,6 +48,9 @@ interface ChatStore {
   unqueueMessage: (message: QueuedMessage) => void;
   /** The chat is sending a message (typed or queued); mirrored from its pending state. */
   sendPending: boolean;
+  /** The one message typed during a run, sent when it ends (#257). */
+  followUp: FollowUp | null;
+  setFollowUp: (followUp: FollowUp | null) => void;
 }
 
 export const useChatStore = create<ChatStore>()((set, get) => ({
@@ -84,6 +89,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     if (get().queuedMessage === message) set({ queuedMessage: null });
   },
   sendPending: false,
+  followUp: null,
+  setFollowUp: (followUp) => set({ followUp }),
 }));
 
 /**
