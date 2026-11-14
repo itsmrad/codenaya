@@ -1,18 +1,72 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const e2b = vi.hoisted(() => ({ create: vi.fn(), list: vi.fn(), connect: vi.fn() }));
+/** The project in Convex, by path: what the repair agent's file tools read and write. */
+const convexFiles = vi.hoisted(() => new Map<string, string>());
 
 vi.mock("e2b", async (importOriginal) => ({
   ...(await importOriginal<typeof import("e2b")>()),
   Sandbox: { create: e2b.create, list: e2b.list, connect: e2b.connect },
 }));
-vi.mock("@/lib/convex-client", () => ({ convex: { query: vi.fn() } }));
+vi.mock("@/lib/convex-client", () => ({
+  convex: {
+    // getProjectFilesWithUrls: root-level rows named by their whole path.
+    query: vi.fn(async () =>
+      [...convexFiles].map(([path, content], i) => ({ _id: `file_${i}`, name: path, type: "file", content })),
+    ),
+  },
+}));
+// The agent's Convex file tools, reduced to the in-memory project above. Their
+// own behaviour is covered by their tests; these check the repair's wiring.
+vi.mock("@/features/conversations/inngest/tools/read-files", () => ({
+  createReadFilesTool: () =>
+    fakeTool("readFiles", ({ paths }: { paths: string[] }) =>
+      paths.map((path) => ({ path, content: convexFiles.get(path) ?? "Error: not found" })),
+    ),
+}));
+vi.mock("@/features/conversations/inngest/tools/write-files", () => ({
+  createWriteFilesTool: () =>
+    fakeTool("writeFiles", ({ files }: { files: Array<{ path: string; content: string }> }) => {
+      for (const { path, content } of files) convexFiles.set(path, content);
+      return `Wrote ${files.length} file(s)`;
+    }),
+}));
+vi.mock("@/features/conversations/inngest/tools/edit-file", () => ({
+  createEditFileTool: () =>
+    fakeTool("editFile", ({ path, edits }: { path: string; edits: Array<{ oldText: string; newText: string }> }) => {
+      let content = convexFiles.get(path) ?? "";
+      for (const { oldText, newText } of edits) {
+        if (!content.includes(oldText)) return `Error: oldText not found in ${path}`;
+        content = content.replace(oldText, newText);
+      }
+      convexFiles.set(path, content);
+      return `Edited ${path}`;
+    }),
+}));
+vi.mock("@/features/conversations/inngest/tools/delete-files", () => ({
+  createDeleteFilesTool: () =>
+    fakeTool("deleteFiles", ({ paths }: { paths: string[] }) => {
+      paths.forEach((path) => convexFiles.delete(path));
+      return `Deleted ${paths.join(", ")}`;
+    }),
+}));
 
-import { openai } from "@inngest/agent-kit";
+import { createTool, openai } from "@inngest/agent-kit";
 import { CommandExitError, type Sandbox } from "e2b";
+import { z } from "zod";
 
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { VITE_REACT_STARTER } from "../inngest/vite-starter";
 import { type RepairEvent, parseBuildErrors, verifyAndFix } from "./sandbox-repair";
+
+function fakeTool<T>(name: string, handler: (input: T) => unknown) {
+  return createTool({
+    name,
+    description: name,
+    parameters: z.object({}).passthrough(),
+    handler: (input) => handler(input as T),
+  });
+}
 
 const DIR = "/home/user/app";
 const SECRET = "sk_live_supersecret123";
@@ -23,26 +77,41 @@ type Answer = { exitCode: number; stdout?: string; stderr?: string } | Error;
 
 /**
  * An in-memory sandbox: a file system shared by the project directory and the
- * check directories, and a build that fails while the checked App has BROKEN.
+ * check directories, and a build that fails on the first checked `src/` file
+ * containing BROKEN. Convex starts with the same project.
  */
 const fakeSandbox = ({
   install = () => ({ exitCode: 0 }),
-  build = (app: string, dir: string): Answer =>
-    app.includes("BROKEN")
-      ? { exitCode: 2, stderr: `${dir}/src/App.tsx(2,9): error TS2322: Type 'number' is not assignable to type 'string'.` }
+  build = (broken: string | undefined, dir: string): Answer =>
+    broken
+      ? { exitCode: 2, stderr: `${dir}/${broken}(2,9): error TS2322: Type 'number' is not assignable to type 'string'.` }
       : { exitCode: 0 },
   find,
+  extra = {},
 }: {
-  install?: (app: string) => Answer;
-  build?: (app: string, dir: string) => Answer;
+  install?: (broken: string | undefined) => Answer;
+  build?: (broken: string | undefined, dir: string) => Answer;
   find?: () => Answer;
+  extra?: Record<string, string>;
 } = {}) => {
+  const project: Record<string, string> = {
+    ...Object.fromEntries(VITE_REACT_STARTER.map((file) => [file.path, file.content])),
+    "src/App.tsx": BROKEN_APP,
+    ...extra,
+  };
+  convexFiles.clear();
   const fs = new Map<string, string>();
-  for (const file of VITE_REACT_STARTER) fs.set(`${DIR}/${file.path}`, file.content);
-  fs.set(`${DIR}/src/App.tsx`, BROKEN_APP);
+  for (const [path, content] of Object.entries(project)) {
+    convexFiles.set(path, content);
+    fs.set(`${DIR}/${path}`, content);
+  }
   fs.set(`${DIR}/.env`, `API_KEY=${SECRET}`);
   fs.set(`${DIR}/node_modules/react/index.js`, "module.exports = {}");
-  const builtApps: string[] = [];
+  const builds: Array<string | undefined> = [];
+  const brokenIn = (dir: string) =>
+    [...fs]
+      .filter(([path, content]) => path.startsWith(`${dir}/src/`) && content.includes("BROKEN"))
+      .map(([path]) => path.slice(dir.length + 1))[0];
 
   const answer = (result: Answer) => {
     if (result instanceof Error) throw result;
@@ -50,11 +119,15 @@ const fakeSandbox = ({
     if (full.exitCode !== 0) throw new CommandExitError(full);
     return full;
   };
-  const sandbox = {
+  return {
     fs,
-    builtApps,
+    builds,
     files: {
       makeDir: vi.fn(async () => true),
+      exists: vi.fn(async (path: string) => fs.has(path)),
+      remove: vi.fn(async (path: string) => {
+        fs.delete(path);
+      }),
       read: vi.fn(async (path: string, opts?: { format?: string }) => {
         const content = fs.get(path);
         if (content === undefined) throw new Error(`No such file: ${path}`);
@@ -77,11 +150,10 @@ const fakeSandbox = ({
             .join("\n");
           return answer({ exitCode: 0, stdout });
         }
-        if (command.startsWith("npm install")) return answer(install(fs.get(`${cwd}/src/App.tsx`) ?? ""));
+        if (command.startsWith("npm install")) return answer(install(brokenIn(cwd)));
         if (command.includes("vite build")) {
-          const app = fs.get(`${cwd}/src/App.tsx`) ?? "";
-          builtApps.push(app);
-          return answer(build(app, cwd));
+          builds.push(brokenIn(cwd));
+          return answer(build(brokenIn(cwd), cwd));
         }
         if (command.startsWith("rm -rf ")) {
           const dir = command.slice("rm -rf ".length);
@@ -93,7 +165,6 @@ const fakeSandbox = ({
     },
     kill: vi.fn(async () => {}),
   };
-  return sandbox;
 };
 
 const toolCall = (name: string, args: Record<string, unknown>) => ({
@@ -126,9 +197,10 @@ const model = openai({ model: "stub-haiku", apiKey: "test-key", baseUrl: "http:/
 
 const run = (sandbox: ReturnType<typeof fakeSandbox>, options: Partial<Parameters<typeof verifyAndFix>[0]> = {}) => {
   const events: RepairEvent[] = [];
-  const promise = verifyAndFix({
+  return verifyAndFix({
     sandbox: sandbox as unknown as Sandbox,
-    projectId: "proj_1",
+    projectId: "proj_1" as Id<"projects">,
+    internalKey: "internal",
     runId: "run_1",
     agentTaskId: "task_a",
     model,
@@ -137,14 +209,20 @@ const run = (sandbox: ReturnType<typeof fakeSandbox>, options: Partial<Parameter
       events.push(event);
     },
     ...options,
-  });
-  return promise.then((result) => ({ result, events }));
+  }).then((result) => ({ result, events }));
 };
 
 const fixApp = () => [
   toolCall("readFiles", { paths: ["src/App.tsx"] }),
-  toolCall("writeFile", { path: "src/App.tsx", content: FIXED_APP }),
+  toolCall("editFile", {
+    path: "src/App.tsx",
+    edits: [{ oldText: "  const x: string = 1;\n  return null; // BROKEN\n", newText: "  return null;\n" }],
+  }),
   text("Removed the wrong assignment."),
+];
+const rewriteApp = (n: number) => [
+  toolCall("writeFiles", { files: [{ path: "src/App.tsx", content: `${BROKEN_APP}// try ${n}\n` }] }),
+  text("Tried again."),
 ];
 
 /** Nothing outside the caller's sandbox was touched, and it was left running. */
@@ -159,7 +237,7 @@ const expectSandboxKept = (sandbox: ReturnType<typeof fakeSandbox>) => {
 };
 
 beforeEach(() => {
-  vi.resetAllMocks();
+  vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -177,8 +255,8 @@ describe("verifyAndFix", () => {
       kind: "build",
       sandbox: () =>
         fakeSandbox({
-          build: (app, dir) =>
-            app.includes("BROKEN") ? { exitCode: 1, stderr: `${dir}/src/App.tsx:3:3: ERROR: Unexpected "BROKEN"` } : { exitCode: 0 },
+          build: (broken, dir) =>
+            broken ? { exitCode: 1, stderr: `${dir}/${broken}:3:3: ERROR: Unexpected "BROKEN"` } : { exitCode: 0 },
         }),
       error: { file: "src/App.tsx", line: 3, kind: "build" },
     },
@@ -186,14 +264,14 @@ describe("verifyAndFix", () => {
       kind: "install",
       sandbox: () =>
         fakeSandbox({
-          install: (app) =>
-            app.includes("BROKEN")
+          install: (broken) =>
+            broken
               ? { exitCode: 1, stderr: "npm error 404 Not Found - GET https://registry.npmjs.org/nope" }
               : { exitCode: 0 },
         }),
       error: { kind: "install" },
     },
-  ])("repairs a $kind failure with the model, then re-checks the sandbox's new files", async ({ sandbox: make, error }) => {
+  ])("repairs a $kind failure in Convex, copies it into the sandbox and re-checks", async ({ sandbox: make, error }) => {
     const sandbox = make();
     const requests = modelReplies(...fixApp());
 
@@ -202,7 +280,10 @@ describe("verifyAndFix", () => {
     expect(result).toEqual({ ok: true, status: "verified", errors: [], filesChanged: ["src/App.tsx"], attempts: 1 });
     expect(requests).toHaveLength(3);
     expect(JSON.stringify(requests[0].messages)).toContain("src/App.tsx");
+    // The project the user sees has the fix, and so does the sandbox it was checked in.
+    expect(convexFiles.get("src/App.tsx")).toBe(FIXED_APP);
     expect(sandbox.fs.get(`${DIR}/src/App.tsx`)).toBe(FIXED_APP);
+    expect(sandbox.builds).toHaveLength(error.kind === "install" ? 1 : 2);
     expect(events.map(({ id, status }) => `${id} ${status}`)).toEqual([
       "run_1:task_a:verify:1 running",
       "run_1:task_a:verify:1 error",
@@ -215,13 +296,20 @@ describe("verifyAndFix", () => {
     expectSandboxKept(sandbox);
   });
 
+  it("mirrors a repair's deletes into the sandbox", async () => {
+    const sandbox = fakeSandbox({ extra: { "src/App.tsx": FIXED_APP, "src/Old.tsx": "// BROKEN" } });
+    modelReplies(toolCall("deleteFiles", { paths: ["src/Old.tsx"] }), text("Deleted the stale file."));
+
+    const { result } = await run(sandbox);
+
+    expect(result).toMatchObject({ status: "verified", filesChanged: ["src/Old.tsx"] });
+    expect(convexFiles.has("src/Old.tsx")).toBe(false);
+    expect(sandbox.fs.has(`${DIR}/src/Old.tsx`)).toBe(false);
+  });
+
   it("stops after the repair cap when the build keeps failing", async () => {
     const sandbox = fakeSandbox();
-    const attempt = (n: number) => [
-      toolCall("writeFile", { path: "src/App.tsx", content: `${BROKEN_APP}// try ${n}\n` }),
-      text("Tried again."),
-    ];
-    const requests = modelReplies(...attempt(1), ...attempt(2), ...attempt(3));
+    const requests = modelReplies(...rewriteApp(1), ...rewriteApp(2), ...rewriteApp(3));
 
     const { result } = await run(sandbox);
 
@@ -229,27 +317,20 @@ describe("verifyAndFix", () => {
     expect(result.reason).toContain("after 3 repair attempt(s)");
     expect(result.errors[0]).toMatchObject({ file: "src/App.tsx", kind: "type" });
     expect(requests).toHaveLength(6);
-    expect(sandbox.builtApps).toHaveLength(4);
+    expect(sandbox.builds).toHaveLength(4);
     expectSandboxKept(sandbox);
   });
 
   it("caps maxAttempts at three", async () => {
-    const sandbox = fakeSandbox();
-    const attempt = (n: number) => [
-      toolCall("writeFile", { path: "src/App.tsx", content: `${BROKEN_APP}// try ${n}\n` }),
-      text("Tried again."),
-    ];
-    modelReplies(...attempt(1), ...attempt(2), ...attempt(3));
-
-    const { result } = await run(sandbox, { maxAttempts: 10 });
-
+    modelReplies(...rewriteApp(1), ...rewriteApp(2), ...rewriteApp(3));
+    const { result } = await run(fakeSandbox(), { maxAttempts: 10 });
     expect(result.attempts).toBe(3);
   });
 
   it("fails a repair that changed nothing instead of checking again", async () => {
     const sandbox = fakeSandbox();
     const requests = modelReplies(
-      toolCall("writeFile", { path: "src/App.tsx", content: BROKEN_APP }),
+      toolCall("writeFiles", { files: [{ path: "src/App.tsx", content: BROKEN_APP }] }),
       text("Looks fine to me."),
     );
 
@@ -257,8 +338,31 @@ describe("verifyAndFix", () => {
 
     expect(result).toMatchObject({ ok: false, status: "failed", reason: "Repair made no changes", filesChanged: [], attempts: 1 });
     expect(requests).toHaveLength(2);
-    expect(sandbox.builtApps).toHaveLength(1);
+    expect(sandbox.builds).toHaveLength(1);
     expect(events.at(-1)).toMatchObject({ id: "run_1:task_a:repair:1", status: "error" });
+  });
+
+  it("refuses writes and deletes outside allowedPaths, applying none of them", async () => {
+    const sandbox = fakeSandbox();
+    const requests = modelReplies(
+      toolCall("writeFiles", {
+        files: [
+          { path: "src/mine/Panel.tsx", content: "export const Panel = 1;\n" },
+          { path: "src/App.tsx", content: FIXED_APP },
+        ],
+      }),
+      toolCall("deleteFiles", { paths: ["src/App.tsx"] }),
+      text("Could not fix it within my files."),
+    );
+
+    const { result } = await run(sandbox, { allowedPaths: (path) => path.startsWith("src/mine/"), maxAttempts: 1 });
+
+    expect(result).toMatchObject({ status: "failed", reason: "Repair made no changes" });
+    const toolResults = JSON.stringify(requests.slice(1).map(({ messages }) => messages.at(-1)));
+    expect(toolResults).toContain("Error: src/App.tsx is outside this task's files");
+    expect(convexFiles.get("src/App.tsx")).toBe(BROKEN_APP);
+    expect(convexFiles.has("src/mine/Panel.tsx")).toBe(false);
+    expect(sandbox.fs.get(`${DIR}/src/App.tsx`)).toBe(BROKEN_APP);
   });
 
   it.each([
@@ -278,16 +382,17 @@ describe("verifyAndFix", () => {
   });
 
   it("reports scoped-ok, never verified, when only filtered-out errors remain", async () => {
-    const sandbox = fakeSandbox();
     const requests = modelReplies();
 
-    const { result } = await run(sandbox, {
+    const { result, events } = await run(fakeSandbox(), {
       filterErrors: (errors) => errors.filter(({ file }) => file?.startsWith("src/mine/")),
     });
 
     expect(result.status).toBe("scoped-ok");
     expect(result.ok).toBe(false);
-    expect(result.errors[0]).toMatchObject({ file: "src/App.tsx" });
+    // The full build's errors are still reported.
+    expect(result.errors[0]).toMatchObject({ file: "src/App.tsx", kind: "type" });
+    expect(events.at(-1)).toMatchObject({ phase: "verify", reason: "Only filtered-out errors remain" });
     expect(requests).toHaveLength(0);
   });
 
@@ -307,47 +412,46 @@ describe("verifyAndFix", () => {
     const controller = new AbortController();
     const requests = modelReplies(() => {
       controller.abort();
-      return toolCall("writeFile", { path: "src/App.tsx", content: FIXED_APP });
+      return toolCall("writeFiles", { files: [{ path: "src/App.tsx", content: FIXED_APP }] });
     });
 
     const { result } = await run(sandbox, { signal: controller.signal });
 
     expect(result).toMatchObject({ status: "unverified", reason: "Cancelled", filesChanged: [] });
     expect(requests).toHaveLength(1);
-    expect(sandbox.fs.get(`${DIR}/src/App.tsx`)).toBe(BROKEN_APP);
+    expect(convexFiles.get("src/App.tsx")).toBe(BROKEN_APP);
     expect(sandbox.kill).not.toHaveBeenCalled();
   });
 
-  it("runs each verify as a step with a deterministic id, and replays its memoized outcome", async () => {
+  it("runs each verify and sync as a step with a deterministic id, and replays memoized outcomes", async () => {
     const memo = new Map<string, unknown>();
     const ids: string[] = [];
-    const step = async <T>(id: string, fn: () => Promise<T>) => {
+    const step = async (id: string, fn: () => Promise<unknown>) => {
       ids.push(id);
       if (!memo.has(id)) memo.set(id, JSON.parse(JSON.stringify(await fn())));
-      return memo.get(id) as T;
+      return memo.get(id);
     };
+    const expected = ["run_1:task_a:verify:1", "run_1:task_a:sync:1", "run_1:task_a:verify:2"];
 
-    const first = fakeSandbox();
     modelReplies(...fixApp());
-    const { result } = await run(first, { step });
+    const { result } = await run(fakeSandbox(), { step });
     expect(result.status).toBe("verified");
-    expect(ids).toEqual(["run_1:task_a:verify:1", "run_1:task_a:verify:2"]);
+    expect(ids).toEqual(expected);
 
-    // A replay: both verifies come from the memo, so no build runs again.
+    // A replay: every step comes from the memo, so no build runs again.
     const replay = fakeSandbox();
     modelReplies(...fixApp());
     ids.length = 0;
-    await run(replay, { step });
-    expect(ids).toEqual(["run_1:task_a:verify:1", "run_1:task_a:verify:2"]);
-    expect(replay.builtApps).toEqual([]);
+    const { result: replayed } = await run(replay, { step });
+    expect(replayed).toEqual(result);
+    expect(ids).toEqual(expected);
+    expect(replay.builds).toEqual([]);
   });
 
   it("keeps the project's secrets out of errors, events and the model's prompt", async () => {
     const sandbox = fakeSandbox({
-      build: (app, dir) =>
-        app.includes("BROKEN")
-          ? { exitCode: 2, stderr: `${dir}/src/App.tsx(2,9): error TS2322: bad value ${SECRET}` }
-          : { exitCode: 0 },
+      build: (broken, dir) =>
+        broken ? { exitCode: 2, stderr: `${dir}/${broken}(2,9): error TS2322: bad value ${SECRET}` } : { exitCode: 0 },
     });
     const requests = modelReplies(...fixApp());
 
@@ -356,27 +460,12 @@ describe("verifyAndFix", () => {
     expect(result.status).toBe("verified");
     expect(JSON.stringify({ result, events, requests })).not.toContain(SECRET);
     expect(JSON.stringify(events)).toContain("TS2322");
-    // `.env` is never read into a check or offered to the model.
+    // The sandbox's `.env` is never read into a check.
     expect(sandbox.files.read.mock.calls.map(([path]) => path)).not.toContain(`${DIR}/.env`);
     const written = sandbox.files.write.mock.calls.flatMap(([target]) =>
       typeof target === "string" ? [target] : target.map((file) => file.path),
     );
     expect(written.filter((path) => path.endsWith(".env"))).toEqual([]);
-  });
-
-  it("refuses to read or write .env and paths outside the project", async () => {
-    const sandbox = fakeSandbox();
-    const requests = modelReplies(
-      toolCall("readFiles", { paths: [".env"] }),
-      toolCall("writeFile", { path: "../escape.ts", content: "x" }),
-      text("Done."),
-    );
-
-    const { result } = await run(sandbox, { maxAttempts: 1 });
-
-    expect(result).toMatchObject({ status: "failed", reason: "Repair made no changes" });
-    expect(JSON.stringify(requests)).not.toContain(SECRET);
-    expect(sandbox.fs.has("/home/user/escape.ts")).toBe(false);
   });
 });
 

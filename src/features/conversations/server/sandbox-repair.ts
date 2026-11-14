@@ -1,10 +1,24 @@
-import { createAgent, createNetwork, createTool } from "@inngest/agent-kit";
+import { type Tool, createAgent, createNetwork } from "@inngest/agent-kit";
 import type { Sandbox } from "e2b";
-import { z } from "zod";
 
-import { BUILD_CHECK_UNFINISHED, BUILD_VERIFIED, STATIC_CHECKS_FAILED } from "@/features/conversations/agent-steps";
+import {
+  BUILD_CHECK_UNFINISHED,
+  BUILD_VERIFIED,
+  STATIC_CHECKS_FAILED,
+  buildPathIndex,
+  describeToolCall,
+  toolResultError,
+} from "@/features/conversations/agent-steps";
 import { checkProjectBuild, isSafeProjectPath, redact } from "@/features/conversations/inngest/tools/check-build";
+import { createDeleteFilesTool } from "@/features/conversations/inngest/tools/delete-files";
+import { createEditFileTool } from "@/features/conversations/inngest/tools/edit-file";
+import { createReadFilesTool } from "@/features/conversations/inngest/tools/read-files";
+import { createWriteFilesTool } from "@/features/conversations/inngest/tools/write-files";
 import { type ProjectFile, WORK_DIR } from "@/features/sandbox-preview/server/project-sandbox";
+import { convex } from "@/lib/convex-client";
+
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 
 /**
  * Build check and model repair for one caller-owned sandbox (SWARM workers
@@ -17,11 +31,17 @@ import { type ProjectFile, WORK_DIR } from "@/features/sandbox-preview/server/pr
  * or killed here. A pass proves install, type check and production build
  * only: runtime errors in the preview are not checked.
  *
+ * Repairs write through the agent's own Convex file tools, so they reach the
+ * project the user sees (and every later integration); the files they wrote
+ * are then copied from Convex into the sandbox before it is checked again.
+ *
  * Example, in an Inngest function body (not inside `step.run`, since the
- * repair agent's model calls and writes are steps of their own):
+ * repair agent's model calls and the file tools are steps of their own; the
+ * file tools write nothing outside an Inngest function):
  *
  *   const result = await verifyAndFix({
- *     sandbox, projectId, runId: event.data.runId, agentTaskId: task.id,
+ *     sandbox, projectId, internalKey, runId: event.data.runId, agentTaskId: task.id,
+ *     allowedPaths: (path) => task.paths.includes(path),
  *     model: buildAgentKitModel({ provider: "anthropic", apiKey, model: "claude-haiku-5-5" }),
  *     secrets,
  *     step: (id, fn) => step.run(id, fn),
@@ -85,7 +105,9 @@ export type VerifyAndFixOptions = {
   sandbox: Sandbox;
   /** The project's directory in the sandbox. */
   dir?: string;
-  projectId: string;
+  projectId: Id<"projects">;
+  /** For the Convex file tools the repair agent writes with. */
+  internalKey: string;
   runId: string;
   /** Tells parallel workers' step and event ids apart. */
   agentTaskId?: string;
@@ -95,9 +117,11 @@ export type VerifyAndFixOptions = {
   maxAttempts?: number;
   /** Keep the errors this worker owns; what it drops can only yield `scoped-ok`. */
   filterErrors?: (errors: BuildError[]) => BuildError[];
+  /** The paths the repair may write, edit or delete; a call naming any other is refused whole. */
+  allowedPaths?: (path: string) => boolean;
   /**
    * Checked before each check and repair, by the repair agent's router and by
-   * its write tool. An in-flight check or model request is not interrupted:
+   * its write tools. An in-flight check or model request is not interrupted:
    * cancelling waits for it, bounded by the check's 240 s budget or the
    * model's request time. The sandbox is never killed to abort.
    */
@@ -105,8 +129,12 @@ export type VerifyAndFixOptions = {
   /** Redacted from every error, event and result. */
   secrets?: string[];
   onEvent?: (event: RepairEvent) => void | Promise<void>;
-  /** Runs each verify as a durable step, `<runId>:<agentTaskId>:verify:<n>`. */
-  step?: (id: string, fn: () => Promise<CheckOutcome>) => Promise<CheckOutcome>;
+  /**
+   * Runs each verify and each copy into the sandbox as a durable step,
+   * `<runId>:<agentTaskId>:verify:<n>` and `...:sync:<n>`, e.g.
+   * `(id, fn) => step.run(id, fn)`. Results are plain JSON.
+   */
+  step?: (id: string, fn: () => Promise<unknown>) => Promise<unknown>;
 };
 
 /** The project's files under `dir`: text ones with content, all by path. */
@@ -196,61 +224,54 @@ const verify = async (sandbox: Sandbox, dir: string, secrets: string[]): Promise
 };
 
 const REPAIR_SYSTEM =
-  "You fix build errors in a Vite + TypeScript project inside a sandbox. Read the files you need with readFiles, " +
-  "then write each fixed file whole with writeFile. Make the smallest change that fixes the listed errors and change " +
-  "nothing else. When done, reply with one line saying what you changed.";
+  "You fix build errors in a Vite + TypeScript project. Read the files you need with readFiles, then fix them " +
+  "with editFile (or writeFiles for a whole file). Make the smallest change that fixes the listed errors and " +
+  "change nothing else. When done, reply with one line saying what you changed.";
 
-/** Runs the repair agent once; returns the files it changed. */
+/**
+ * Runs the repair agent once on the agent's Convex file tools; returns the
+ * paths its successful writes named. Write calls naming a path outside
+ * `allowedPaths` are refused whole, as SWARM's own guard does.
+ */
 const repair = async ({
-  sandbox, dir, model, name, errors, paths, signal,
+  projectId, internalKey, model, name, errors, paths, signal, allowedPaths,
 }: {
-  sandbox: Sandbox;
-  dir: string;
+  projectId: Id<"projects">;
+  internalKey: string;
   model: Model;
   name: string;
   errors: BuildError[];
   paths: string[];
   signal?: AbortSignal;
+  allowedPaths?: (path: string) => boolean;
 }) => {
-  const changed = new Set<string>();
-  const readFiles = createTool({
-    name: "readFiles",
-    description: 'Read project files by relative path, like "src/App.tsx".',
-    parameters: z.object({ paths: z.array(z.string()).min(1).max(20) }),
-    handler: async ({ paths: wanted }) =>
-      Promise.all(
-        wanted.map(async (path) => {
-          if (!readable(path)) return { path, error: "Not readable" };
-          const content = await sandbox.files
-            .read(`${dir}/${path}`, { requestTimeoutMs: SHORT_CALL_MS })
-            .catch(() => undefined);
-          return content === undefined ? { path, error: "Not found" } : { path, content };
-        }),
-      ),
-  });
-  const writeFile = createTool({
-    name: "writeFile",
-    description: "Write a whole project file (creates it if missing).",
-    parameters: z.object({ path: z.string(), content: z.string() }),
-    handler: async ({ path, content }, { step }) => {
+  const written: string[] = [];
+  // Runs again on an Inngest replay, where the tool's own step returns its memoized result.
+  const guarded = (tool: Tool.Any): Tool.Any => ({
+    ...tool,
+    handler: async (input, opts) => {
       if (signal?.aborted) return "Error: Cancelled";
-      if (!readable(path)) return `Error: ${path} cannot be written`;
-      const write = async () => {
-        const current = await sandbox.files
-          .read(`${dir}/${path}`, { requestTimeoutMs: SHORT_CALL_MS })
-          .catch(() => undefined);
-        if (current === content) return false;
-        await sandbox.files.write(`${dir}/${path}`, content, { requestTimeoutMs: SHORT_CALL_MS });
-        return true;
-      };
-      // A step, so a replay neither writes again nor forgets the write.
-      const wrote = step ? await step.run(`${name}:write:${path}`, write) : await write();
-      if (wrote) changed.add(path);
-      return wrote ? `Wrote ${path}` : `${path} already had this content`;
+      const targets = describeToolCall({ name: tool.name, input }, () => undefined);
+      const outside = allowedPaths && targets.find((path) => !allowedPaths(path));
+      if (outside) return `Error: ${outside} is outside this task's files`;
+      const result = await tool.handler(input, opts);
+      if (toolResultError({ data: result }) === undefined) written.push(...targets);
+      return result;
     },
   });
-
-  const agent = createAgent({ name, system: REPAIR_SYSTEM, model, tools: [readFiles, writeFile] });
+  const agent = createAgent({
+    name,
+    system: REPAIR_SYSTEM,
+    model,
+    tools: [
+      createReadFilesTool({ projectId, internalKey }),
+      ...[
+        createWriteFilesTool({ projectId, internalKey }),
+        createEditFileTool({ projectId, internalKey }),
+        createDeleteFilesTool({ projectId, internalKey }),
+      ].map(guarded),
+    ],
+  });
   const network = createNetwork({
     name,
     agents: [agent],
@@ -269,7 +290,42 @@ const repair = async ({
   await network.run(
     `The build check failed with:\n${listed.join("\n")}\n\nProject files:\n${paths.slice(0, 300).join("\n")}`,
   );
-  return [...changed];
+  return [...new Set(written)];
+};
+
+/**
+ * Copies `paths` from the project in Convex into the sandbox: written files
+ * are overwritten, deleted ones removed. Returns the paths whose sandbox copy
+ * changed. Files with no text (uploads) are left as they are.
+ */
+const mirror = async (
+  sandbox: Sandbox,
+  dir: string,
+  { projectId, internalKey }: { projectId: Id<"projects">; internalKey: string },
+  paths: string[],
+) => {
+  const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
+  const pathOf = buildPathIndex(rows);
+  const byPath = new Map(rows.map((row) => [pathOf(row._id), row]));
+  const opts = { requestTimeoutMs: SHORT_CALL_MS };
+  const changed: string[] = [];
+  for (const path of paths) {
+    if (!readable(path)) continue;
+    const row = byPath.get(path);
+    const target = `${dir}/${path}`;
+    if (!row) {
+      if (await sandbox.files.exists(target, opts)) {
+        await sandbox.files.remove(target, opts);
+        changed.push(path);
+      }
+    } else if (row.type === "file" && typeof row.content === "string") {
+      if ((await sandbox.files.read(target, opts).catch(() => undefined)) !== row.content) {
+        await sandbox.files.write(target, row.content, opts);
+        changed.push(path);
+      }
+    }
+  }
+  return changed;
 };
 
 /**
@@ -280,11 +336,13 @@ export const verifyAndFix = async ({
   sandbox,
   dir = WORK_DIR,
   projectId,
+  internalKey,
   runId,
   agentTaskId = "main",
   model,
   maxAttempts = MAX_REPAIR_ATTEMPTS,
   filterErrors,
+  allowedPaths,
   signal,
   secrets = [],
   onEvent,
@@ -296,6 +354,10 @@ export const verifyAndFix = async ({
   let errors: BuildError[] = [];
   let attempts = 0;
 
+  const durable = <T>(id: string, fn: () => Promise<T>) =>
+    step ? (step(`${prefix}:${id}`, fn) as Promise<T>) : fn();
+  const failure = (what: string, error: unknown) =>
+    redact(`${what} (${error instanceof Error ? error.message : "unknown error"})`, secrets);
   const emit = async (event: Omit<RepairEvent, "id">) => {
     await onEvent?.({ id: `${prefix}:${event.phase}:${event.attempt}`, ...event });
   };
@@ -311,8 +373,7 @@ export const verifyAndFix = async ({
   for (let attempt = 1; ; attempt++) {
     if (signal?.aborted) return result("unverified", "Cancelled");
     await emit({ phase: "verify", attempt, status: "running" });
-    const check = () => verify(sandbox, dir, secrets);
-    const outcome = await (step ? step(`${prefix}:verify:${attempt}`, check) : check());
+    const outcome = await durable(`verify:${attempt}`, () => verify(sandbox, dir, secrets));
     errors = outcome.errors;
 
     if (outcome.status === "passed") {
@@ -334,16 +395,29 @@ export const verifyAndFix = async ({
 
     attempts += 1;
     await emit({ phase: "repair", attempt, status: "running" });
-    let changed: string[];
+    let written: string[];
     try {
-      changed = await repair({
-        sandbox, dir, model, name: `${prefix}:repair:${attempt}`, errors: owned, paths: outcome.paths, signal,
+      written = await repair({
+        projectId, internalKey, model, name: `${prefix}:repair:${attempt}`,
+        errors: owned, paths: outcome.paths, signal, allowedPaths,
       });
     } catch (error) {
       console.error("[sandbox-repair] repair failed", projectId, error);
-      const reason = redact(`Repair could not run (${error instanceof Error ? error.message : "unknown error"})`, secrets);
+      const reason = failure("Repair could not run", error);
       await emit({ phase: "repair", attempt, status: "error", reason });
       return result("failed", reason);
+    }
+    let changed: string[];
+    try {
+      changed = written.length
+        ? await durable(`sync:${attempt}`, () => mirror(sandbox, dir, { projectId, internalKey }, written))
+        : [];
+    } catch (error) {
+      // The repair is in Convex; only this sandbox's copy is behind.
+      written.forEach((path) => filesChanged.add(path));
+      const reason = failure("Could not copy the repair into the sandbox", error);
+      await emit({ phase: "repair", attempt, status: "error", filesChanged: written, reason });
+      return result("unverified", reason);
     }
     changed.forEach((path) => filesChanged.add(path));
     if (signal?.aborted) {
