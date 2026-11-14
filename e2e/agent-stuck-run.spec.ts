@@ -101,7 +101,7 @@ test.describe.serial("stuck agent run", () => {
     await card.getByRole("button", { name: /Diagnose in Plan mode/ }).click();
     await expect(input).toHaveValue(/^My draft\nThe last run got stuck/);
     await expect(input).toBeFocused();
-    await expect(page.getByRole("button", { name: "Plan", exact: true, pressed: true })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "Plan", exact: true, checked: true })).toBeVisible();
     await input.fill("");
 
     const before = stub.requests.length;

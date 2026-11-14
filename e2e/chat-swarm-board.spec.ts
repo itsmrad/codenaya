@@ -27,7 +27,7 @@ test.describe("chat swarm board", () => {
 
       const board = page.getByRole("region", { name: "Swarm board" });
       await expect(board.getByText(/^Swarm · 3 workers · \d+:\d\d · 1 done$/)).toBeVisible({ timeout: 60_000 });
-      await expect(board.getByText("Delegating 3 tasks")).toBeVisible();
+      await expect(board.getByText("Delegated 3 tasks")).toBeVisible();
       const row = (title: string) => board.getByRole("button", { name: new RegExp(title) });
       await expect(row("Hero section")).toContainText("Done");
       await expect(row("Pricing table")).toContainText("Running");
@@ -77,10 +77,13 @@ test.describe("chat swarm board", () => {
       await page.getByRole("button", { name: "New conversation" }).click();
       await expect(page.getByText(EMPTY_CHAT_TITLE)).toBeVisible();
 
-      const modes = page.getByRole("group", { name: "Message mode" });
-      await modes.getByRole("button", { name: "Swarm" }).click();
-      await expect(modes.getByRole("button", { name: "Swarm" })).toHaveAttribute("aria-pressed", "true");
-      await expect(modes.getByRole("button", { name: "Build" })).toHaveAttribute("aria-pressed", "false");
+      const modes = page.getByRole("radiogroup", { name: "Message mode" });
+      await modes.getByRole("radio", { name: "Build" }).focus();
+      await page.keyboard.press("ArrowRight");
+      await expect(modes.getByRole("radio", { name: "Plan" })).toBeChecked();
+      await modes.getByRole("radio", { name: "Swarm" }).click();
+      await expect(modes.getByRole("radio", { name: "Swarm" })).toBeChecked();
+      await expect(modes.getByRole("radio", { name: "Build" })).not.toBeChecked();
 
       const input = page.getByPlaceholder("Describe a change or ask a question…");
       await input.fill("landing page");

@@ -88,7 +88,10 @@ describe("agentTasks", () => {
     await expect(get(t, parent.messageId)).rejects.toMatchObject({ data: { code: "NOT_FOUND" } });
     await expect(create(t, parent)).rejects.toMatchObject({ data: { code: "NOT_FOUND" } });
     await t.run((ctx) => ctx.db.delete("messages", parent.messageId));
-    await expect(get(t, parent.messageId)).rejects.toMatchObject({ data: { code: "NOT_FOUND" } });
+    // Deleted mid-view: an empty board, not a render error, still behind auth.
+    expect(await get(t, parent.messageId)).toEqual([]);
+    await expect(t.query(api.agentTasks.listForMessage, { messageId: parent.messageId }))
+      .rejects.toMatchObject({ data: { code: "UNAUTHENTICATED" } });
   });
 
   test("merges steps exactly like messages, retaining omitted fields and the latest 100", async () => {

@@ -1,6 +1,8 @@
+import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
 import { HammerIcon, ListChecksIcon, UsersIcon } from "lucide-react";
 
 import { PromptInputButton } from "@/components/ai-elements/prompt-input";
+import { RadioGroup } from "@/components/ui/radio-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import type { MessageMode } from "../plan-mode";
@@ -13,7 +15,7 @@ const MODES = [
   { value: "swarm", label: "Swarm", icon: UsersIcon, hint: "Build with a team of workers" },
 ] as const;
 
-/** Mutually exclusive modes; build keeps the message's mode omitted. */
+/** Mutually exclusive modes, as radios with arrow keys; build keeps the message's mode omitted. */
 export const PlanModeToggle = ({
   mode,
   onModeChange,
@@ -23,24 +25,26 @@ export const PlanModeToggle = ({
   onModeChange: (mode: ComposerMode) => void;
   disabled?: boolean;
 }) => (
-  <div role="group" aria-label="Message mode" className="flex shrink-0 items-center gap-0.5 rounded-lg border border-border p-0.5">
+  <RadioGroup
+    aria-label="Message mode"
+    value={mode}
+    onValueChange={(value) => onModeChange(value as ComposerMode)}
+    disabled={disabled}
+    orientation="horizontal"
+    className="flex shrink-0 items-center gap-0.5 rounded-lg border border-border p-0.5"
+  >
     {MODES.map(({ value, label, icon: Icon, hint }) => (
       <Tooltip key={value}>
         <TooltipTrigger asChild>
-          <PromptInputButton
-            aria-label={label}
-            aria-pressed={mode === value}
-            variant={mode === value ? "secondary" : "ghost"}
-            onClick={() => onModeChange(value)}
-            disabled={disabled}
-            className="h-7 rounded-md px-1.5"
-          >
-            <Icon className="size-3.5" />
-            <span className="hidden @[560px]:inline">{label}</span>
-          </PromptInputButton>
+          <RadioGroupPrimitive.Item value={value} aria-label={label} asChild>
+            <PromptInputButton variant={mode === value ? "secondary" : "ghost"} className="h-7 rounded-md px-1.5">
+              <Icon className="size-3.5" />
+              <span className="hidden @[560px]:inline">{label}</span>
+            </PromptInputButton>
+          </RadioGroupPrimitive.Item>
         </TooltipTrigger>
         <TooltipContent>{hint}</TooltipContent>
       </Tooltip>
     ))}
-  </div>
+  </RadioGroup>
 );

@@ -21,6 +21,11 @@ const STATUS_LABELS = {
   cancelled: "Cancelled",
 };
 
+const ROLE_LABELS = { orchestrator: "Orchestrator", worker: "Worker", "sub-orchestrator": "Sub-orchestrator" };
+
+/** The parent run's own status, as a board row. */
+const PARENT_STATUS = { processing: "running", completed: "done", cancelled: "cancelled" } as const;
+
 const SwarmRow = ({
   task, parent, now, onOpenFile, defaultOpen, children,
 }: {
@@ -37,10 +42,13 @@ const SwarmRow = ({
   const status = swarmTaskStatus(task.status, parent.status ?? "completed");
   const paths = runWrittenPaths(task.steps);
   const end = task.endedAt ?? (status === "running" ? now : parent.completedAt ?? task.updatedAt);
-  const role = task.role === "orchestrator" ? "Orchestrator" : task.role === "worker" ? "Worker" : "Sub-orchestrator";
+  const role = ROLE_LABELS[task.role];
+  const label = `${task.title}, ${STATUS_LABELS[status]}`;
   return (
     <Collapsible defaultOpen={defaultOpen} className="min-w-0 border-t border-border">
-      <CollapsibleTrigger className="group/swarm flex w-full min-w-0 items-start gap-2 p-3 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none">
+      {/* Announces status changes only; the button's name stays stable while its clock ticks. */}
+      <span aria-live="polite" className="sr-only">{label}</span>
+      <CollapsibleTrigger aria-label={`${role}: ${label}`} className="group/swarm flex w-full min-w-0 items-start gap-2 p-3 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none">
         <ChevronRightIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/swarm:rotate-90 motion-reduce:transition-none" />
         <span className="flex min-w-0 flex-1 flex-col gap-1.5">
           <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -49,7 +57,7 @@ const SwarmRow = ({
           </span>
           <span className="text-[13px] leading-5 [overflow-wrap:anywhere]">{task.title}</span>
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-            <span aria-live="polite" className={cn("inline-flex items-center gap-1", status === "error" && "text-destructive")}>
+            <span className={cn("inline-flex items-center gap-1", status === "error" && "text-destructive")}>
               <span aria-hidden className={cn("size-1.5 rounded-full bg-current", status === "running" && "animate-pulse motion-reduce:animate-none")} />
               {STATUS_LABELS[status]}
             </span>
@@ -69,7 +77,7 @@ const SwarmRow = ({
       <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
         <div className="space-y-2 bg-muted/20 px-2 pb-3 pt-1">
           {children ?? <AgentRunLog steps={task.steps} live={status === "running"} onOpenFile={onOpenFile} />}
-          {task.steps.length === 0 && <p className="px-5 text-xs text-muted-foreground">{status === "queued" ? "Waiting to start" : "No activity recorded"}</p>}
+          {task.steps.length === 0 && <p className="px-5 text-xs text-muted-foreground">{status === "queued" || status === "running" ? "Starting…" : "No activity recorded"}</p>}
           {task.summary && <p className="px-5 text-xs text-muted-foreground [overflow-wrap:anywhere]">{task.summary}</p>}
           {task.error && <p className="px-5 text-xs text-destructive [overflow-wrap:anywhere]">{task.error}</p>}
         </div>
@@ -91,7 +99,7 @@ export const SwarmBoard = ({ message, tasks, onOpenFile, children }: {
   const orchestrator = {
     taskId: "orchestrator", role: "orchestrator" as const, title: "Coordinate the build",
     model: message.runModel?.label ?? "Run model",
-    status: live ? "running" as const : message.status === "cancelled" ? "cancelled" as const : "done" as const,
+    status: PARENT_STATUS[message.status ?? "completed"],
     steps: message.steps ?? [], startedAt: message._creationTime,
     endedAt: live ? undefined : endedAt, updatedAt: endedAt,
   };
