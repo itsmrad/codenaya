@@ -85,8 +85,8 @@ export async function screenshot(page: Page, directory: string, trail: Trail) {
       trail.consoleErrors.push({ text: message.text(), url: message.location().url });
       trail.preview.errors!.push(message.text()); // A fresh load: build-time errors excluded.
     });
-    await app.goto(src, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await app.locator("#root > *, vite-error-overlay").first().waitFor({ timeout: 30_000 });
+    await app.goto(src, { waitUntil: "domcontentloaded", timeout: 90_000 }); // A loaded Mac or cold sandbox can take over 30s.
+    await app.locator("#root > *, vite-error-overlay").first().waitFor({ timeout: 90_000 }); // A loaded Mac or cold sandbox can take over 30s.
     await app.waitForTimeout(5_000);
     await app.screenshot({ path: `${directory}/app.png`, fullPage: true });
     trail.preview.screenshot = "app.png";
