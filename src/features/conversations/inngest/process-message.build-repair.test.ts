@@ -13,12 +13,18 @@ const mocks = vi.hoisted(() => ({
   createSandbox: vi.fn(),
   connectSandbox: vi.fn(),
   killSandbox: vi.fn(),
+  listSandboxes: vi.fn(),
   verifyAndFix: vi.fn(),
 }));
 
 vi.mock("e2b", async (importOriginal) => ({
   ...(await importOriginal<typeof import("e2b")>()),
-  Sandbox: { create: mocks.createSandbox, connect: mocks.connectSandbox, kill: mocks.killSandbox },
+  Sandbox: {
+    create: mocks.createSandbox,
+    connect: mocks.connectSandbox,
+    kill: mocks.killSandbox,
+    list: mocks.listSandboxes,
+  },
 }));
 
 vi.mock("@/lib/convex-client", async () => {
@@ -36,6 +42,7 @@ import { DEFAULT_INSTALL_COMMAND, WORK_DIR } from "@/features/sandbox-preview/se
 import { BUILD_FAILED_NOTE, BUILD_REPAIRED_NOTE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
 import { MAX_SERVER_REPAIRS } from "./build-repair";
 import { drive, text, toolCall } from "./process-message.driver";
+import { stopRepairSandboxes } from "./stop-repair-sandboxes";
 
 type Row = { _id: string; name: string; type: "file"; content: string };
 let projectFiles: Row[];
@@ -139,6 +146,8 @@ beforeEach(() => {
   mocks.createSandbox.mockResolvedValue(sandbox);
   mocks.connectSandbox.mockResolvedValue(sandbox);
   mocks.killSandbox.mockResolvedValue(true);
+  // The repair sandbox, found by its run's metadata.
+  mocks.listSandboxes.mockReturnValue({ nextItems: async () => [{ sandboxId: "sbx_repair" }] });
 });
 
 describe("processMessage repair after the run", () => {
@@ -162,7 +171,7 @@ describe("processMessage repair after the run", () => {
     // A new sandbox with the project, its npm cache warmed, then stopped.
     expect(mocks.createSandbox).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ apiKey: "e2b_key", metadata: { projectId: "p1", purpose: "build-repair" } }),
+      expect.objectContaining({ apiKey: "e2b_key", metadata: { projectId: "p1", runId: "run-under-test", purpose: "build-repair" } }),
     );
     const sandbox = await mocks.createSandbox.mock.results[0].value;
     expect([...sandbox.fs.keys()]).toContain(`${WORK_DIR}/main.ts`);
@@ -170,6 +179,10 @@ describe("processMessage repair after the run", () => {
       DEFAULT_INSTALL_COMMAND,
       expect.objectContaining({ cwd: WORK_DIR, timeoutMs: 240_000 }),
     );
+    expect(mocks.listSandboxes).toHaveBeenCalledWith({
+      apiKey: "e2b_key",
+      query: { metadata: { purpose: "build-repair", runId: "run-under-test" }, state: ["running"] },
+    });
     expect(mocks.killSandbox).toHaveBeenCalledWith("sbx_repair", { apiKey: "e2b_key" });
 
     // The repair's model usage goes through the run's own records.
@@ -283,6 +296,66 @@ describe("processMessage repair after the run", () => {
       content: `${NOTES}\n\n${BUILD_FAILED_NOTE}`,
       outcome: "error",
     });
+  });
+
+  it("stops a failed or cancelled run's repair sandboxes, every one its run started", async () => {
+    mocks.listSandboxes.mockReturnValue({
+      nextItems: async () => [{ sandboxId: "sbx_first_try" }, { sandboxId: "sbx_retry" }],
+    });
+
+    const outcome = await drive({}, [], "", { function_id: "codenaya-process-message", run_id: "run_7" }, {
+      fn: stopRepairSandboxes,
+      eventName: "inngest/function.cancelled",
+    });
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(mocks.listSandboxes).toHaveBeenCalledWith({
+      apiKey: "e2b_key",
+      query: { metadata: { purpose: "build-repair", runId: "run_7" }, state: ["running"] },
+    });
+    expect(mocks.killSandbox.mock.calls.map(([id]) => id)).toEqual(["sbx_first_try", "sbx_retry"]);
+  });
+
+  it("looks for no sandbox without an E2B key", async () => {
+    vi.stubEnv("E2B_API_KEY", "");
+
+    await drive({}, [], "", { run_id: "run_7" }, {
+      fn: stopRepairSandboxes,
+      eventName: "inngest/function.failed",
+    });
+
+    expect(mocks.listSandboxes).not.toHaveBeenCalled();
+  });
+
+  it("runs only for the message run's ends, and never fails itself", async () => {
+    const { triggers } = (stopRepairSandboxes as unknown as { opts: { triggers: unknown[] } }).opts;
+    const filter = "event.data.function_id == 'codenaya-process-message'";
+    expect(triggers).toEqual([
+      { event: "inngest/function.failed", if: filter },
+      { event: "inngest/function.cancelled", if: filter },
+    ]);
+
+    mocks.listSandboxes.mockImplementation(() => {
+      throw new Error("E2B down");
+    });
+    const outcome = await drive({}, [], "", { run_id: "run_7" }, {
+      fn: stopRepairSandboxes,
+      eventName: "inngest/function.failed",
+    });
+    expect(outcome.finalType).toBe("function-resolved");
+  });
+
+  it("still stops the sandbox it knows when the lookup by run fails", async () => {
+    mocks.verifyAndFix.mockImplementation(
+      scriptedRepair({ ok: true, status: "verified", errors: [], filesChanged: ["main.ts"], attempts: 1 }),
+    );
+    mocks.listSandboxes.mockImplementation(() => {
+      throw new Error("E2B down");
+    });
+
+    await drive({ modelId: "x-ai/grok-4.7" }, FAILED_RUN);
+
+    expect(mocks.killSandbox).toHaveBeenCalledWith("sbx_repair", { apiKey: "e2b_key" });
   });
 
   it("stops a cancelled run before the repair", async () => {

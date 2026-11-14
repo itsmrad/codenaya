@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+import { api } from "../convex/_generated/api";
 import { hasClerkCredentials, signInAsSpecUser } from "./clerk-auth";
+import { userConvexClient } from "./convex-client";
 import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
 
 const PROJECT_NAME = "e2e-workspace-mode";
@@ -28,8 +30,12 @@ test.describe("workspace mode", () => {
     await signInAsSpecUser(page, "workspace-mode");
     await page.goto("/settings/workspace");
     const chatFirst = page.getByRole("radio", { name: /Chat-first/ });
+    await expect(chatFirst).toBeEnabled();
     await chatFirst.click();
     await expect(chatFirst).toBeChecked();
+    // The radio shows the optimistic value at once; wait until it is saved.
+    const user = await userConvexClient(page);
+    await expect.poll(() => user.query(api.userPreferences.getWorkspaceMode, {})).toBe("chat");
 
     const projectId = await seedPreviewProject(page, PROJECT_NAME);
     await page.goto(`/projects/${projectId}`);

@@ -148,10 +148,10 @@ export const catalogModelValidator = v.object({
 /** A credit account's plan (ADR 0011); see `PLANS` in `features/billing/plans.ts`. */
 export const planIdValidator = v.union(v.literal("free"), v.literal("pro"));
 /** Who pays for a run (ADR 0011). Only "platform" runs cost credits. */
+export const runSourceValidator = v.union(v.literal("platform"), v.literal("promo"), v.literal("byok"));
+
 /** Workspace layouts (#524). Add "board" here when the agent board mode ships. */
 export const workspaceModeValidator = v.union(v.literal("ide"), v.literal("chat"));
-
-export const runSourceValidator = v.union(v.literal("platform"), v.literal("promo"), v.literal("byok"));
 
 /**
  * The model an assistant message was produced with. `keyId` is set when the
