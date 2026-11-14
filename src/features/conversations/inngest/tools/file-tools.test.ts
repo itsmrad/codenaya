@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getFunctionName } from "convex/server";
+import { ConvexError } from "convex/values";
 import { toolResultError } from "../../agent-steps";
 import { hasUncheckedWrites } from "../build-check-gate";
 
@@ -22,6 +23,7 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import { getFileByAgentId } from "./get-file";
 import { createCreateFilesTool } from "./create-files";
 import { createDeleteFilesTool } from "./delete-files";
+import { createCreateFolderTool } from "./create-folder";
 import { createListFilesTool } from "./list-files";
 import { buildProjectTreePromptSection, MAX_PROMPT_TREE_ENTRIES, type ProjectFile } from "./paths";
 import { createReadFilesTool } from "./read-files";
@@ -29,6 +31,7 @@ import { createRenameFileTool } from "./rename-file";
 import { createEditFileTool } from "./edit-file";
 import { createUpdateFileTool } from "./update-file";
 import { createWriteFilesTool } from "./write-files";
+import { decodeJsonArgs } from "../lib/json-args";
 import { rewriteIcons } from "@/features/sandbox-preview/utils/project-checks";
 
 // Runs the step body inline, so a throw inside step.run propagates like it
@@ -111,6 +114,11 @@ describe("path resolution", () => {
     expect(errors).toEqual([
       'Error: "src/Missing.tsx" not found. Use a path from the project\'s file list.',
     ]);
+  });
+
+  it("reads paths sent as a JSON string like an array", async () => {
+    const result = (await decodeJsonArgs(createReadFilesTool(opts)).handler({ paths: '["src/App.tsx"]' } as never, ctx)) as string;
+    expect(JSON.parse(result)).toEqual([{ path: "src/App.tsx", content: "app" }]);
   });
 
   it.each(["/etc/passwd", "../secrets", "src/../package.json", "src//App.tsx", ""])(
@@ -254,6 +262,19 @@ describe("writeFiles tool", () => {
 
   const write = (files: { path: string; content: string }[]) =>
     createWriteFilesTool(opts).handler({ files }, ctx) as Promise<string>;
+
+  it("writes files sent as a JSON string like an array", async () => {
+    db.rows = [];
+    const files = JSON.stringify([{ path: "src/x.ts", content: "x" }]);
+    expect(await decodeJsonArgs(createWriteFilesTool(opts)).handler({ files } as never, ctx)).toBe("Wrote 1 file(s). Created: src/x.ts.");
+  });
+
+  it("names the missing content field instead of a bare type error", async () => {
+    expect(await createWriteFilesTool(opts).handler({ files: [{ path: "src/x.ts" }] } as never, ctx)).toBe(
+      'Error: Each file needs a "content" string with the complete file content',
+    );
+    expect(mocks.mutation).not.toHaveBeenCalled();
+  });
 
   it("creates nested folders and files in one call, with no createFolder calls from the agent", async () => {
     const result = await write([
@@ -589,6 +610,21 @@ describe("locked paths (#307)", () => {
     );
     expect(result).toBe(`Wrote 1 file(s). Created: ok.ts. Failed: ${lockMessage("src/new/x.ts")}, ${lockMessage("src/App.tsx")}.`);
     expect(mutationNames()).toEqual(["system:createFiles"]);
+  });
+
+  it("createFiles reports the mutation's per-file lock refusal by name", async () => {
+    mocks.mutation.mockResolvedValueOnce([{ name: "x.ts", fileId: "", error: lockMessage("src/x.ts") }]);
+    expect(
+      await createCreateFilesTool(opts).handler({ parentId: "src", files: [{ name: "x.ts", content: "x" }] }, ctx),
+    ).toBe(`Created 0 file(s). Failed: x.ts (${lockMessage("src/x.ts")})`);
+  });
+
+  it("createFolder returns a lock refusal as a plain result, so Inngest doesn't retry it", async () => {
+    mocks.mutation.mockRejectedValueOnce(new ConvexError({ code: "FORBIDDEN", message: lockMessage("src/x") }));
+    expect(await createCreateFolderTool(opts).handler({ name: "x", parentId: "src" }, ctx)).toBe(
+      `Error: ${lockMessage("src/x")}`,
+    );
+    await expect(step.run.mock.results[0].value).resolves.toBe(`Error: ${lockMessage("src/x")}`);
   });
 
   it("names locked paths in the prompt so the model plans around them", () => {

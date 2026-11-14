@@ -6,7 +6,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 import { VITE_REACT_STARTER } from "../vite-starter";
-import { folderEnsurer, folderPaths, getProjectFiles, indexProjectFiles, splitPath } from "./paths";
+import { folderEnsurer, folderPaths, getProjectFiles, indexProjectFiles, lockedPathError, splitPath } from "./paths";
 
 interface ScaffoldViteAppToolOptions {
   projectId: Id<"projects">;
@@ -32,7 +32,13 @@ export const createScaffoldViteAppTool = ({
           const ensureFolder = folderEnsurer(internalKey, projectId, folderPaths(index));
 
           const byDir = new Map<string, { name: string; content: string }[]>();
+          const locked: string[] = [];
           for (const file of VITE_REACT_STARTER) {
+            // Skipped before any write, so no folder is made inside a locked one (#307).
+            if (lockedPathError(index, file.path)) {
+              locked.push(file.path);
+              continue;
+            }
             const { dir, name } = splitPath(file.path);
             byDir.set(dir, [...(byDir.get(dir) ?? []), { name, content: file.content }]);
           }
@@ -58,6 +64,7 @@ export const createScaffoldViteAppTool = ({
           return [
             `Scaffolded the Vite + React starter. Created: ${created.join(", ") || "nothing"}.`,
             kept.length > 0 ? `Kept existing: ${kept.join(", ")}.` : "",
+            locked.length > 0 ? `Not written, locked by the user: ${locked.join(", ")}. Don't modify them.` : "",
             "Extend package.json with editFile, keeping every package it lists: the starter's config and entry files import them.",
           ]
             .filter(Boolean)

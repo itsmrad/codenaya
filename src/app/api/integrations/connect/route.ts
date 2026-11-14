@@ -45,6 +45,7 @@ const requestSchema = z.object({
   apiKey: z.string().min(1, "API key is required"),
   label: z.string().max(80).optional(),
   projectId: z.string().optional(),
+  connectionId: z.string().optional(),
   /** Required when providerId is "custom". */
   serverUrl: z.string().url().optional(),
 });
@@ -98,12 +99,17 @@ export async function POST(request: Request) {
     return jsonError(parsed.error.issues[0]?.message ?? "Invalid request", 400);
   }
 
-  const { providerId, apiKey, label, serverUrl, projectId } = parsed.data;
+  const { providerId, apiKey, label, serverUrl, projectId, connectionId } = parsed.data;
 
   if (projectId) {
     const { notFound } = await requireOwnedProject({ internalKey, userId, projectId });
     if (notFound) return notFound;
   }
+
+  const existing = connectionId ? await convex.query(api.system.getConnectionForReconnect, {
+    internalKey, userId, connectionId, providerId, authMode: "api_key",
+  }) : null;
+  if (connectionId && !existing) return jsonError("Connection not found", 404);
 
   // ── Resolve the target endpoint and credential placement ──
 
@@ -113,14 +119,15 @@ export async function POST(request: Request) {
   let trustedHosts: readonly string[] | undefined;
 
   if (providerId === CUSTOM_PROVIDER_ID) {
-    if (!serverUrl) {
+    const targetUrl = existing?.serverUrl ?? serverUrl;
+    if (!targetUrl) {
       return jsonError("A server URL is required for a custom MCP server", 400);
     }
 
     // Custom URLs are user-supplied, so they get full DNS validation with no
     // trusted-host bypass. Checked here as well as inside the probe so an
     // invalid URL is rejected with a precise message.
-    const verdict = await assertSafeMcpUrl(serverUrl);
+    const verdict = await assertSafeMcpUrl(targetUrl);
     if (!verdict.ok) {
       return jsonError(verdict.reason, 400, { kind: "blocked" });
     }
@@ -175,7 +182,7 @@ export async function POST(request: Request) {
 
   // Generated before the insert so it can anchor the AAD in a single write; the
   // Convex `_id` is not known until afterwards. Immutable for the row's lifetime.
-  const credentialRef = nanoid();
+  const credentialRef = existing?.credentialRef ?? nanoid();
 
   let sealed;
   try {
@@ -197,7 +204,15 @@ export async function POST(request: Request) {
   }
 
   try {
-    const created = await convex.mutation(api.system.createUserConnection, {
+    if (existing) {
+      await convex.mutation(api.system.updateUserConnectionCredential, {
+        internalKey, userId, connectionId: existing._id, providerId, authMode: "api_key",
+        serverUrl: mcpUrl, scopes: [], maskedPreview: maskCredential(trimmedKey), ...sealed,
+      });
+    }
+    const created = existing
+      ? { connectionId: existing._id, projectConnectionId: undefined }
+      : await convex.mutation(api.system.createUserConnection, {
       internalKey,
       userId,
       projectId: projectId as Id<"projects"> | undefined,

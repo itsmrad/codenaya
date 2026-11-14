@@ -24,9 +24,11 @@ const LOG_PREFIX =
 // The sandbox route's line for a failed install (#491).
 const INSTALL_FAILED = /^Error: (.+ failed with exit code \d+)$/;
 const NPM_ERROR_CODE = /npm (?:ERR!|error) code (\S+)/g;
-// npm couldn't reach the registry: the sandbox's network, not the app's dependencies.
-const NETWORK_FAILURE =
-  /\b(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ENETUNREACH)\b|npm (?:ERR!|error) network/;
+// npm couldn't reach the registry, or it failed (5xx): the sandbox's network
+// or the registry, not the app's dependencies. Also used by checkBuild. Only
+// npm's own lines, so the app's earlier output can't hide a real failure.
+export const NETWORK_FAILURE =
+  /^\s*npm (?:ERR!|error) (?:network\b|.*?(?:\b(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|E5\d\d)\b|socket hang up))/m;
 const HMR_SUCCESS = /\[vite\].*\b(?:hmr update|page reload)\b/;
 // The sandbox's project root (WORK_DIR); paths read better relative to it.
 const WORK_DIR_PREFIX = /\/home\/user\/app\//g;
@@ -183,16 +185,21 @@ export const autoFixTarget = (
  * Armed when a run ends, for `windowMs`; disarmed by the next run, and by any
  * file change after the run ended, which is the user's edit, not the run's. An
  * error must stay eligible for `delayMs`, so the run's last syncs can clear it.
+ * `onFixingChange` says when a fix is pending, or sent and its run not over
+ * (plus `delayMs` to settle) (#305); a sent fix that starts no run stops
+ * counting after `windowMs`.
  * Call `update` on every change, `dispose` on unmount.
  */
 export const createAutoFixer = ({
   delayMs,
   windowMs,
   max,
+  onFixingChange = () => {},
 }: {
   delayMs: number;
   windowMs: number;
   max: number;
+  onFixingChange?: (fixing: boolean) => void;
 }) => {
   const sent: string[] = [];
   // The latest `update`'s, so the fix sent is built from the error shown then.
@@ -202,7 +209,21 @@ export const createAutoFixer = ({
   let armedFiles: unknown = null;
   let windowTimer: ReturnType<typeof setTimeout> | undefined;
   let fixTimer: ReturnType<typeof setTimeout> | undefined;
+  let sentTimer: ReturnType<typeof setTimeout> | undefined;
   let pendingId: string | null = null;
+  // A fix was sent and the run it starts hasn't ended.
+  let awaitingRun = false;
+  let fixing = false;
+  const report = () => {
+    const next = pendingId !== null || awaitingRun;
+    if (next === fixing) return;
+    fixing = next;
+    onFixingChange(fixing);
+  };
+  const stopAwaiting = () => {
+    awaitingRun = false;
+    report();
+  };
 
   const schedule = (target: string | null) => {
     if (target === pendingId) return;
@@ -211,8 +232,11 @@ export const createAutoFixer = ({
     if (target === null) return;
     fixTimer = setTimeout(() => {
       pendingId = null;
+      awaitingRun = true;
       sent.push(target);
       fix(target);
+      sentTimer = setTimeout(stopAwaiting, windowMs);
+      report();
     }, delayMs);
   };
   const disarm = () => {
@@ -240,9 +264,17 @@ export const createAutoFixer = ({
       if (runActive !== wasRunActive) {
         wasRunActive = runActive;
         disarm();
+        clearTimeout(sentTimer);
         if (!runActive) {
+          // The fix run's last syncs get the same delay to clear its error.
+          if (awaitingRun) {
+            sentTimer = setTimeout(stopAwaiting, delayMs);
+          }
           armedFiles = files ?? null;
-          windowTimer = setTimeout(disarm, windowMs);
+          windowTimer = setTimeout(() => {
+            disarm();
+            report();
+          }, windowMs);
         }
       } else if (armedFiles !== null && files !== armedFiles) {
         disarm();
@@ -250,9 +282,11 @@ export const createAutoFixer = ({
       schedule(
         armedFiles === null ? null : autoFixTarget(errorId, { runActive, chatBusy, sent, max }),
       );
+      report();
     },
     dispose: () => {
       clearTimeout(windowTimer);
+      clearTimeout(sentTimer);
       schedule(null);
     },
   };

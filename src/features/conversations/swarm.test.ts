@@ -8,9 +8,11 @@ import { ownsPath, validatePlan } from "./swarm";
 const task = (id: string, ownedPaths: string[]) => ({ id, title: id, brief: `Build ${id}.`, ownedPaths });
 
 describe("validatePlan", () => {
-  it("accepts 2-4 tasks owning disjoint files and folders under src/", () => {
-    const plan = { tasks: [task("nav", ["src/components/nav/"]), task("hero", ["src/components/hero.tsx"])] };
-    expect(validatePlan(plan)).toEqual(plan);
+  it("accepts 2-4 tasks owning disjoint files and folders under src/, normalised", () => {
+    const plan = { tasks: [task("nav", ["src/components/nav/"]), task("hero", ["./src/components/hero.tsx"])] };
+    expect(validatePlan(plan)).toEqual({
+      tasks: [task("nav", ["src/components/nav"]), task("hero", ["src/components/hero.tsx"])],
+    });
   });
 
   it("refuses too few or too many tasks", () => {
@@ -23,11 +25,12 @@ describe("validatePlan", () => {
     expect(validatePlan({ tasks: [task("a", ["src/ui/"]), task("b", ["src/ui/button.tsx"])] })).toMatch(/overlap/);
     expect(validatePlan({ tasks: [task("a", ["src/ui/button.tsx"]), task("b", ["src/ui/"])] })).toMatch(/overlap/);
     expect(validatePlan({ tasks: [task("a", ["src/ui"]), task("b", ["src/ui/x.ts"])] })).toMatch(/overlap/);
+    expect(validatePlan({ tasks: [task("a", ["src/components"]), task("b", ["src/components/"])] })).toMatch(/overlap/);
     expect(validatePlan({ tasks: [task("a", ["src/a.ts"]), task("a", ["src/b.ts"])] })).toMatch(/unique/);
   });
 
-  it("refuses shared, outside, absolute and parent paths", () => {
-    for (const path of ["src/App.tsx", "src/lib/", "src/index.css", "package.json", "/src/x.ts", "src/../x.ts", "public/x.png", "src//x.ts"]) {
+  it("refuses shared files, folders holding one, and outside, absolute or parent paths", () => {
+    for (const path of ["src/App.tsx", "src/lib", "src/lib/", "src", "src/", "src/index.css", "package.json", "/src/x.ts", "src/../x.ts", "public/x.png", "src//x.ts"]) {
       expect(validatePlan({ tasks: [task("a", [path]), task("b", ["src/b.ts"])] }), path).toMatch(/^Error:/);
     }
   });
@@ -43,6 +46,21 @@ describe("ownsPath", () => {
     expect(ownsPath(owned, "src/pages-old/x.tsx")).toBe(false);
     expect(ownsPath(owned, "src/pages/../App.tsx")).toBe(false);
     expect(ownsPath(["src/"], "src/App.tsx")).toBe(false);
+    expect(ownsPath(owned, "./src/pages/home.tsx")).toBe(true);
+  });
+
+  it("treats an owned path without a slash as a folder too", () => {
+    expect(ownsPath(["src/components"], "src/components/nav.tsx")).toBe(true);
+    expect(ownsPath(["src/components"], "src/components/")).toBe(true);
+  });
+
+  it("refuses deleting a folder that holds a shared file or isn't wholly owned", () => {
+    expect(ownsPath(["src/lib"], "src/lib")).toBe(false);
+    expect(ownsPath(["src/lib"], "src/lib/utils.ts")).toBe(false);
+    expect(ownsPath(["src/lib/format"], "src/lib")).toBe(false);
+    expect(ownsPath(["src/lib/format"], "src/lib/format/date.ts")).toBe(true);
+    expect(ownsPath(["src/components/nav.tsx"], "src/components")).toBe(false);
+    expect(ownsPath(["src/pages"], "src")).toBe(false);
   });
 });
 
@@ -59,6 +77,7 @@ describe("guardOwnedPaths", () => {
     expect(await call("writeFiles", { files: [{ path: "src/pages/a.tsx" }, { path: "src/App.tsx" }] })).toMatch(/^Error: Write refused/);
     expect(await call("editFile", { path: "src/main.tsx" })).toMatch(/^Error/);
     expect(await call("deleteFiles", { paths: ["src/"] })).toMatch(/^Error/);
+    expect(await call("deleteFiles", { paths: ["src/pages/a.tsx", "src/lib"] })).toMatch(/^Error/);
     expect(await call("deleteFiles", { fileIds: ["f1"] })).toMatch(/^Error/);
     expect(handler).not.toHaveBeenCalled();
   });

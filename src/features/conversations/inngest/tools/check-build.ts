@@ -20,6 +20,7 @@ import {
   createProjectSandbox,
   writeProjectFiles,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { NETWORK_FAILURE } from "@/features/sandbox-preview/utils/app-error";
 import { withErrorHints } from "@/features/sandbox-preview/utils/error-recipes";
 import {
   missingReferencedFiles,
@@ -49,6 +50,9 @@ const CHECK_TIMEOUT_MS = 120_000;
 const STEP_BUDGET_MS = 240_000;
 /** A cold fallback with less time left than this could not finish a build. */
 const MIN_COLD_BUILD_MS = 60_000;
+/** How long a check waits for the preview's install to finish before building cold. */
+const INSTALL_WAIT_MS = 60_000;
+const INSTALL_POLL_MS = 2_500;
 /** Copying the preview's node_modules; seconds for the starter. */
 const COPY_TIMEOUT_MS = 30_000;
 const CREATE_TIMEOUT_MS = 30_000;
@@ -113,7 +117,7 @@ const within = (deadline: number, cap: number) => {
 };
 
 /** The preview route's secret redaction, over a whole text rather than a stream. */
-const redact = (text: string, secrets: readonly string[]) => {
+export const redact = (text: string, secrets: readonly string[]) => {
   const redactor = createStreamRedactor(secrets);
   return redactor.push(text) + redactor.flush();
 };
@@ -166,6 +170,10 @@ const buildIn = async (sandbox: Sandbox, dir: string, { files, paths, deadline, 
 
   const install = await run(sandbox, "npm install --prefer-offline --no-audit --no-fund --loglevel=error", timeLeft(), dir);
   if (install.exitCode !== 0) {
+    // The registry or the sandbox's network, not package.json: nothing to fix.
+    if (NETWORK_FAILURE.test(`${install.stderr}\n${install.stdout}`)) {
+      return unfinished(new Error("npm could not reach the package registry"));
+    }
     return `Error: npm install failed. Fix package.json, then call checkBuild again:\n${failureOutput(install, dir, secrets)}`;
   }
 
@@ -193,6 +201,25 @@ const installRunning = async (sandbox: Sandbox, deadline: number) =>
   );
 
 /**
+ * Polls until no install is running: true once none is, false if one still is
+ * after INSTALL_WAIT_MS or near the step deadline. Each poll is bounded by the
+ * wait too; one that times out at its end throws, which also means a cold build.
+ */
+const installFinished = async (sandbox: Sandbox, deadline: number) => {
+  const waitUntil = Math.min(Date.now() + INSTALL_WAIT_MS, deadline);
+  try {
+    while (await installRunning(sandbox, waitUntil)) {
+      if (waitUntil - Date.now() < INSTALL_POLL_MS) return false;
+      await new Promise((resolve) => setTimeout(resolve, INSTALL_POLL_MS));
+    }
+    return true;
+  } catch (error) {
+    if (error instanceof OutOfTime) return false;
+    throw error;
+  }
+};
+
+/**
  * What an install changes, and any `.env` the preview was given (it can outlive
  * the project's variables). Read before and after the copy: a difference means
  * an install ran in between, which the process list alone can miss.
@@ -207,9 +234,9 @@ const previewState = async (sandbox: Sandbox, deadline: number) =>
 
 /**
  * The owner's running preview sandbox for this project, connected, when it has
- * time left and no install running. The query filters by the tags the preview
- * route sets; they are checked again here because they decide whose sandbox
- * this runs in.
+ * time left and no install running (waiting a bounded time for one to finish).
+ * The query filters by the tags the preview route sets; they are checked again
+ * here because they decide whose sandbox this runs in.
  */
 const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPreview, deadline: number) => {
   const running = await Sandbox.list({
@@ -231,7 +258,7 @@ const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPr
     timeoutMs: WARM_MIN_TIME_LEFT_MS,
     requestTimeoutMs: within(deadline, SHORT_CALL_MS),
   });
-  return (await installRunning(sandbox, deadline)) ? null : sandbox;
+  return (await installFinished(sandbox, deadline)) ? sandbox : null;
 };
 
 /**
@@ -274,20 +301,37 @@ const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: Bui
   }
 };
 
+/** A relative path that stays inside the directory it is joined to. */
+export const isSafeProjectPath = (path: string) =>
+  !!path && !path.startsWith("/") && !path.includes("\\") &&
+  path.split("/").every((part) => part && part !== "." && part !== "..");
+
 type CheckOptions = {
   files: ProjectFile[];
   paths: Set<string>;
   apiKey?: string;
   metadata?: Record<string, string>;
   preview?: WarmPreview;
+  /**
+   * Build in this caller-owned sandbox, in a directory of its own: no lookup,
+   * no new sandbox, never killed. Takes precedence over `preview` and `apiKey`.
+   */
+  sandbox?: Sandbox;
+  /**
+   * With `sandbox`: the project's directory there, copied into the check first
+   * (without node_modules, .git, the top-level dist and .env files), so files
+   * `files` leaves out, such as uploads, are built too. `files` is then
+   * written over the copy.
+   */
+  sourceDir?: string;
   /** The project's secret values, redacted from whatever the check returns. */
   secrets?: string[];
 };
 
 /**
  * Static checks, then `npm install`, `tsc --noEmit` and `vite build`: in the
- * owner's running preview sandbox when there is one, else in a throwaway
- * sandbox. Returns the tool result, with `secrets` redacted from the raw
+ * given `sandbox`, else the owner's running preview sandbox when there is one,
+ * else a throwaway sandbox. Returns the tool result, with `secrets` redacted from the raw
  * output before it is trimmed: a passing summary, or an "Error: ..." message
  * the agent can act on. Never throws.
  *
@@ -299,6 +343,8 @@ export const checkProjectBuild = async ({
   apiKey,
   metadata,
   preview,
+  sandbox: suppliedSandbox,
+  sourceDir,
   secrets = [],
 }: CheckOptions): Promise<string> => {
   const problems = [
@@ -308,8 +354,8 @@ export const checkProjectBuild = async ({
   ];
   if (problems.length > 0) {
     return (
-      `${STATIC_CHECKS_FAILED}:\n- ${problems.join("\n- ")}\n` +
-      "Fix these, then call checkBuild again."
+      redact(`${STATIC_CHECKS_FAILED}:\n- ${problems.join("\n- ")}\n` +
+      "Fix these, then call checkBuild again.", secrets)
     );
   }
 
@@ -321,11 +367,38 @@ export const checkProjectBuild = async ({
     return `${BUILD_NOT_CHECKED}\nStatic checks passed. checkBuild only builds Vite projects, so this one was not built.` + notes;
   }
 
+  const job: BuildJob = { files, paths, deadline: Date.now() + STEP_BUDGET_MS, secrets, notes };
+  if (suppliedSandbox) {
+    // Snapshot files must stay inside this check's directory.
+    if (!files.every(({ path }) => isSafeProjectPath(path))) {
+      return `${STATIC_CHECKS_FAILED}: Invalid project file path.`;
+    }
+    const dir = `/home/user/check-build-${randomUUID()}`;
+    try {
+      if (sourceDir) {
+        const timeoutMs = within(job.deadline, COPY_TIMEOUT_MS);
+        // Anchored like the snapshot's skip list: a nested dist, such as public/dist, is project files.
+        await suppliedSandbox.commands.run(
+          `mkdir -p ${dir} && tar -C '${sourceDir}' --exclude=node_modules --exclude=.git --exclude=./dist ` +
+            `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
+          { timeoutMs, requestTimeoutMs: timeoutMs },
+        );
+      }
+      return await buildIn(suppliedSandbox, dir, job);
+    } catch (error) {
+      return unfinished(error, secrets);
+    } finally {
+      // Never kill: the caller owns this sandbox. Only our directory goes.
+      await suppliedSandbox.commands
+        .run(`rm -rf ${dir}`, { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS })
+        .catch(() => {});
+    }
+  }
+
   if (!apiKey) {
     return notBuilt("No build sandbox is configured") + notes;
   }
 
-  const job: BuildJob = { files, paths, deadline: Date.now() + STEP_BUDGET_MS, secrets, notes };
   if (preview) {
     const warm = await checkInWarmSandbox(apiKey, preview, job);
     if (warm) return warm;

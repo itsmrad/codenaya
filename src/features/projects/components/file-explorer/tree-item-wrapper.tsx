@@ -20,6 +20,7 @@ import { Doc } from "../../../../../convex/_generated/dataModel";
 
 export const TreeItemWrapper = ({
   item,
+  lockedAbove,
   children,
   level,
   isActive,
@@ -31,6 +32,8 @@ export const TreeItemWrapper = ({
   onCreateFolder,
 }: {
   item: Doc<"files">;
+  /** Locked through a folder above it, so it can't be unlocked on its own. */
+  lockedAbove?: boolean;
   children: React.ReactNode;
   level: number;
   isActive?: boolean;
@@ -67,8 +70,11 @@ export const TreeItemWrapper = ({
           style={{ paddingLeft: getItemPadding(level, item.type === "file") }}
         >
           {children}
-          {item.locked && (
-            <LockIcon aria-label="Locked from AI edits" className="ml-auto mr-2 size-3 shrink-0 text-muted-foreground" />
+          {(item.locked || lockedAbove) && (
+            <LockIcon
+              aria-label={item.locked ? "Locked from AI edits" : "Locked from AI edits by a parent folder"}
+              className={cn("ml-auto mr-2 size-3 shrink-0 text-muted-foreground", !item.locked && "opacity-50")}
+            />
           )}
         </button>
       </ContextMenuTrigger>
@@ -111,9 +117,15 @@ export const TreeItemWrapper = ({
         {!isOptimisticFileId(item._id) && (
           <>
             <ContextMenuSeparator />
-            <ContextMenuItem onClick={toggleLock} className="text-sm">
-              {item.locked ? "Unlock" : "Lock from AI"}
-            </ContextMenuItem>
+            {lockedAbove && !item.locked ? (
+              <ContextMenuItem disabled className="text-sm">
+                Locked by a parent folder
+              </ContextMenuItem>
+            ) : (
+              <ContextMenuItem onClick={toggleLock} className="text-sm">
+                {item.locked ? "Unlock" : "Lock from AI"}
+              </ContextMenuItem>
+            )}
           </>
         )}
       </ContextMenuContent>

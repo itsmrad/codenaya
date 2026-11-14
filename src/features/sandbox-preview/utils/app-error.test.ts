@@ -99,6 +99,17 @@ describe("detectBuildError", () => {
         ),
       ).toBeNull();
       expect(detectBuildError(`npm error code EAI_AGAIN\nError: ${install} failed with exit code 1\n`)).toBeNull();
+      // The registry failing is not the app's dependencies either.
+      expect(detectBuildError(`npm error code E503\nError: ${install} failed with exit code 1\n`)).toBeNull();
+      expect(detectBuildError(`npm error socket hang up\nError: ${install} failed with exit code 1\n`)).toBeNull();
+    });
+
+    it("reads an install failure after the app's own network errors", () => {
+      const chunk =
+        "Error: socket hang up\n    at connResetException (node:internal/errors:720:14)\n" +
+        "[vite] http proxy error: /api\nError: connect ECONNREFUSED 127.0.0.1:3001\n" +
+        `npm error code ERESOLVE\nError: ${install} failed with exit code 1\n`;
+      expect(detectBuildError(chunk)).toMatchObject({ file: "package.json", message: expect.stringContaining("(ERESOLVE)") });
     });
 
     it("ignores other lines that mention an exit code", () => {
@@ -301,6 +312,8 @@ describe("createBuildErrorDetector", () => {
 describe("createAutoFixer (#491)", () => {
   const files = ["run's files"];
   const fix = vi.fn();
+  /** The last `onFixingChange` value. */
+  let fixing = false;
   let fixer: ReturnType<typeof createAutoFixer>;
   const state = { errorId: null as string | null, runActive: false, chatBusy: false, files: files as unknown };
   const update = (next: Partial<typeof state>) => {
@@ -316,8 +329,14 @@ describe("createAutoFixer (#491)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fix.mockReset();
+    fixing = false;
     Object.assign(state, { errorId: null, runActive: false, chatBusy: false, files });
-    fixer = createAutoFixer({ delayMs: 3000, windowMs: 120_000, max: 2 });
+    fixer = createAutoFixer({
+      delayMs: 3000,
+      windowMs: 120_000,
+      max: 2,
+      onFixingChange: (next) => (fixing = next),
+    });
     update({});
   });
   afterEach(() => {
@@ -420,6 +439,80 @@ describe("createAutoFixer (#491)", () => {
     runEnds("c");
     vi.advanceTimersByTime(3000);
     expect(fix.mock.calls).toEqual([["a"], ["b"]]);
+  });
+
+  // #305: the preview shows "Fixing" in place of the broken app meanwhile.
+  describe("fixing", () => {
+    it("covers the pending fix, its run and the settle after it", () => {
+      runEnds("a");
+      expect(fixing).toBe(true);
+      vi.advanceTimersByTime(3000);
+      expect(fix).toHaveBeenCalledWith("a");
+      // Queued, then the fix run.
+      update({ chatBusy: true });
+      update({ chatBusy: false, runActive: true });
+      vi.advanceTimersByTime(600_000);
+      expect(fixing).toBe(true);
+
+      // The fix worked: the error clears within the settle delay.
+      update({ runActive: false });
+      update({ errorId: null });
+      vi.advanceTimersByTime(2999);
+      expect(fixing).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(fixing).toBe(false);
+    });
+
+    it("stops when the error clears before the fix is sent", () => {
+      runEnds("a");
+      update({ errorId: null });
+      expect(fixing).toBe(false);
+      expect(fix).not.toHaveBeenCalled();
+    });
+
+    it("stops on the user's edit, so their change is theirs to see", () => {
+      runEnds("a");
+      update({ files: ["user edit"] });
+      expect(fixing).toBe(false);
+    });
+
+    it("ends once the attempts are spent, so the error shows with its actions", () => {
+      runEnds("a");
+      vi.advanceTimersByTime(3000);
+      runEnds("a"); // the fix run left the same error
+      vi.advanceTimersByTime(3000);
+      expect(fixing).toBe(false);
+      expect(fix).toHaveBeenCalledTimes(1);
+    });
+
+    it("ends when a sent fix starts no run", () => {
+      runEnds("a");
+      vi.advanceTimersByTime(3000);
+      expect(fixing).toBe(true);
+      vi.advanceTimersByTime(120_000);
+      expect(fixing).toBe(false);
+    });
+
+    it("spends nothing on errors that come and go while the run writes", () => {
+      update({ runActive: true });
+      for (const errorId of ["half-written a", null, "half-written b", null]) {
+        update({ errorId, files: [errorId] });
+        vi.advanceTimersByTime(10_000);
+      }
+      expect(fixing).toBe(false);
+      expect(fix).not.toHaveBeenCalled();
+
+      // The finished build is clean: nothing to fix, nothing covered.
+      update({ runActive: false, errorId: null });
+      vi.advanceTimersByTime(10_000);
+      expect(fixing).toBe(false);
+      expect(fix).not.toHaveBeenCalled();
+    });
+
+    it("is never on for a page load with an error already shown", () => {
+      update({ errorId: "a" });
+      expect(fixing).toBe(false);
+    });
   });
 
   it("sends nothing after dispose", () => {

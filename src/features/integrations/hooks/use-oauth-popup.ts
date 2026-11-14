@@ -158,7 +158,7 @@ const readStartError = async (error: unknown): Promise<string> => {
  */
 export const requestAuthorizationUrl = async (
   popup: Pick<Window, "close">,
-  body: { providerId: string; projectId?: string },
+  body: { providerId: string; projectId?: string; connectionId?: string },
 ): Promise<
   { ok: true; authorizationUrl: string } | { ok: false; error: string }
 > => {
@@ -200,7 +200,7 @@ export interface UseOAuthPopupResult {
   state: OAuthPopupState;
   /** Set only in the `error` state. */
   error: string | null;
-  start: (providerId: string, projectId?: string) => Promise<void>;
+  start: (providerId: string, projectId?: string, connectionId?: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -262,7 +262,7 @@ export const useOAuthPopup = (): UseOAuthPopupResult => {
   }, [teardown]);
 
   const start = React.useCallback(
-    async (providerId: string, projectId?: string) => {
+    async (providerId: string, projectId?: string, connectionId?: string) => {
       if (inFlightRef.current) return;
 
       inFlightRef.current = true;
@@ -294,6 +294,7 @@ export const useOAuthPopup = (): UseOAuthPopupResult => {
       const started = await requestAuthorizationUrl(popup, {
         providerId,
         projectId,
+        connectionId,
       });
       if (!started.ok) {
         settle("error", started.error);

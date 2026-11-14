@@ -28,7 +28,10 @@ interface WriteFilesToolOptions {
 
 const paramsSchema = z.object({
   files: z
-    .array(z.object({ path: z.string(), content: z.string() }))
+    .array(z.object({
+      path: z.string({ error: 'Each file needs a "path" string, like "src/App.tsx"' }),
+      content: z.string({ error: 'Each file needs a "content" string with the complete file content' }),
+    }))
     .min(1, "Provide at least one file to write"),
 });
 
