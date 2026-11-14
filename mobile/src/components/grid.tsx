@@ -11,7 +11,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle, Defs, LinearGradient, Path, Pattern, RadialGradient, Rect, Stop } from "react-native-svg";
+import Svg, { Circle, Defs, Path, Pattern, Rect } from "react-native-svg";
 
 import { ChevronLeft, type LucideIcon } from "@/components/icons";
 
@@ -148,7 +148,8 @@ const STATUS_GAP = 10;
 
 /**
  * Every screen's header as grid cells: back (or the screen's headerLeft), the
- * title, and the screen's headerRight, each split by a rule.
+ * title, and the screen's headerRight; back and headerRight are split off by
+ * a rule, the logo is not.
  */
 export function GridHeader({ back, options, route, navigation }: NativeStackHeaderProps) {
   const c = useColors();
@@ -161,7 +162,7 @@ export function GridHeader({ back, options, route, navigation }: NativeStackHead
     <View style={{ paddingTop: insets.top + STATUS_GAP, backgroundColor: c.background }}>
       <View style={[styles.header, { borderColor: c.border }]}>
         {options.headerLeft ? (
-          <View style={[styles.headerCell, { borderColor: c.border }]}>{options.headerLeft(item)}</View>
+          <View style={styles.headerCell}>{options.headerLeft(item)}</View>
         ) : (
           back && (
             <Pressable
@@ -184,12 +185,10 @@ export function GridHeader({ back, options, route, navigation }: NativeStackHead
   );
 }
 
-// The orbit's wedges: drawn on a square much larger than any box, so a turning
-// wedge always crosses the box's edge.
+// The orbit's conic gradient, as thin wedges on a square much larger than any
+// box, so a turning wedge always crosses the box's edge.
 const ORBIT = 800;
 const R = ORBIT / 2;
-/** The radius of each ambient light. */
-const LIGHT = 90;
 const point = (deg: number) => {
   const rad = (deg * Math.PI) / 180;
   return { x: R + R * Math.cos(rad), y: R + R * Math.sin(rad) };
@@ -199,12 +198,37 @@ const wedge = (from: number, to: number) => {
   const b = point(to);
   return `M${R} ${R}L${a.x} ${a.y}A${R} ${R} 0 0 1 ${b.x} ${b.y}Z`;
 };
+// The web's stops (globals.css .composer-orbit), as [percent, opacity, white mix].
+const STOPS: [number, number, number][] = [
+  [0, 0, 0], [10, 1, 0], [16, 1, 0.55], [30, 0, 0], [50, 0, 0], [62, 0.7, 0], [78, 0, 0], [100, 0, 0],
+];
+const SLICE = 3;
+const sample = (percent: number) => {
+  const i = STOPS.findIndex(([at]) => at >= percent);
+  const [a, oa, wa] = STOPS[Math.max(i - 1, 0)];
+  const [b, ob, wb] = STOPS[i];
+  const t = b === a ? 0 : (percent - a) / (b - a);
+  return { opacity: oa + (ob - oa) * t, white: wa + (wb - wa) * t };
+};
+/** `from` moved `amount` of the way to `to`; both #rrggbb. */
+const mix = (from: string, to: string, amount: number) => {
+  const a = parseInt(from.slice(1), 16);
+  const b = parseInt(to.slice(1), 16);
+  const ch = (shift: number) => Math.round(((a >> shift) & 255) * (1 - amount) + ((b >> shift) & 255) * amount);
+  return `#${((ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).padStart(6, "0")}`;
+};
+// Web angles start at the top and turn clockwise; SVG's start at the right.
+const SLICES = Array.from({ length: 360 / SLICE }, (_, i) => ({ from: i * SLICE - 90, ...sample(((i + 0.5) * SLICE) / 3.6) }));
+// Where the two lights sit (web's 13% and 62%), for the ambient glow.
+const LEAD = 0.13 * 360;
+const TRAIL = 0.62 * 360;
+const GLOW = 8;
 
 /**
  * The web's composer orbit (.composer-orbit): while `active`, a light circles
- * the border and its blurred copy glows around the box. RN has no conic
- * gradient or blur, so gradient wedges turn behind the content (which covers
- * all but a 1.5px ring), and two soft radial lights travel around its edge.
+ * the border and a blurred copy of it glows around the box. RN has no conic
+ * gradient or blur, so the gradient turns behind the content (which covers
+ * all but a 1.5px ring), and soft shadows follow its two lights.
  * The content should be a box with a 6px radius.
  */
 export function Orbit({ active, children }: { active: boolean; children: ReactNode }) {
@@ -212,7 +236,6 @@ export function Orbit({ active, children }: { active: boolean; children: ReactNo
   const reduceMotion = useReducedMotion();
   const angle = useSharedValue(0);
   const shown = useSharedValue(0);
-  const box = useSharedValue({ width: 0, height: 0 });
 
   useEffect(() => {
     shown.value = withTiming(active ? 1 : 0, { duration: 400 });
@@ -225,57 +248,35 @@ export function Orbit({ active, children }: { active: boolean; children: ReactNo
     return () => cancelAnimation(angle);
   }, [active, reduceMotion, angle]);
 
-  const spin = useAnimatedStyle(() => ({ opacity: shown.value * 0.85, transform: [{ rotate: `${angle.value}deg` }] }));
-  const halo = useAnimatedStyle(() => ({ opacity: shown.value * 0.35 }));
-  // Each light rides the box's edge (an ellipse through its sides) with the ring.
-  const along = (offset: number) => {
-    "worklet";
-    const t = ((angle.value + offset) * Math.PI) / 180;
-    return [
-      { translateX: (box.value.width / 2) * Math.cos(t) },
-      { translateY: (box.value.height / 2) * Math.sin(t) },
-    ];
-  };
-  const lead = useAnimatedStyle(() => ({ opacity: shown.value, transform: along(-15) }));
-  const trail = useAnimatedStyle(() => ({ opacity: shown.value * 0.55, transform: along(155) }));
-  const edge = point(0);
-  const tail = point(-70);
-  const light = (id: string) => (
-    <Svg width={LIGHT * 2} height={LIGHT * 2}>
-      <Defs>
-        <RadialGradient id={id} cx={LIGHT} cy={LIGHT} r={LIGHT} gradientUnits="userSpaceOnUse">
-          <Stop offset="0" stopColor={c.brand} stopOpacity={0.75} />
-          <Stop offset="0.45" stopColor={c.brand} stopOpacity={0.3} />
-          <Stop offset="1" stopColor={c.brand} stopOpacity={0} />
-        </RadialGradient>
-      </Defs>
-      <Circle cx={LIGHT} cy={LIGHT} r={LIGHT} fill={`url(#${id})`} />
-    </Svg>
-  );
+  const brand = c.brand;
+  const spin = useAnimatedStyle(() => ({ opacity: shown.value, transform: [{ rotate: `${angle.value}deg` }] }));
+  // The web's blurred copy at 0.55: one soft shadow under each light.
+  const glow = useAnimatedStyle(() => {
+    const offset = (deg: number) => {
+      const t = ((angle.value + deg) * Math.PI) / 180;
+      return `${(GLOW * Math.sin(t)).toFixed(1)}px ${(-GLOW * Math.cos(t)).toFixed(1)}px`;
+    };
+    return {
+      opacity: shown.value * 0.55,
+      boxShadow: `${offset(LEAD)} 22px 0px ${brand}, ${offset(TRAIL)} 22px -4px ${brand}b3`,
+    };
+  });
 
   return (
-    <View onLayout={(event) => (box.value = event.nativeEvent.layout)}>
-      <Animated.View pointerEvents="none" style={[styles.halo, { boxShadow: `0 8px 40px 4px ${c.brand}` }, halo]} />
-      <Animated.View pointerEvents="none" style={[styles.light, lead]}>
-        {light("lead")}
-      </Animated.View>
-      <Animated.View pointerEvents="none" style={[styles.light, trail]}>
-        {light("trail")}
-      </Animated.View>
+    <View>
+      <Animated.View pointerEvents="none" style={[styles.glow, glow]} />
       <View style={styles.ring}>
         <View pointerEvents="none" style={styles.center}>
           <Animated.View style={spin}>
             <Svg width={ORBIT} height={ORBIT}>
-              <Defs>
-                <LinearGradient id="orbit" gradientUnits="userSpaceOnUse" x1={tail.x} y1={tail.y} x2={edge.x} y2={edge.y}>
-                  <Stop offset="0" stopColor={c.brand} stopOpacity={0} />
-                  <Stop offset="0.75" stopColor={c.brand} />
-                  <Stop offset="1" stopColor="#ffd9c4" />
-                </LinearGradient>
-              </Defs>
-              <Path d={wedge(-70, 0)} fill="url(#orbit)" />
-              {/* The fainter second light, opposite, as on the web. */}
-              <Path d={wedge(130, 175)} fill={c.brand} fillOpacity={0.45} />
+              {/* Opaque slices, blended over the page, so their overlap leaves no seams. */}
+              {SLICES.map((slice) => (
+                <Path
+                  key={slice.from}
+                  d={wedge(slice.from, slice.from + SLICE + 0.5)}
+                  fill={mix(mix(brand, "#ffffff", slice.white), c.background, 1 - slice.opacity)}
+                />
+              ))}
             </Svg>
           </Animated.View>
         </View>
@@ -286,13 +287,12 @@ export function Orbit({ active, children }: { active: boolean; children: ReactNo
 }
 
 const styles = StyleSheet.create({
-  halo: { position: "absolute", top: 6, right: 6, bottom: 6, left: 6, borderRadius: 8 },
-  light: { position: "absolute", top: "50%", left: "50%", marginTop: -LIGHT, marginLeft: -LIGHT },
+  glow: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, borderRadius: 7.5 },
   ring: { borderRadius: 7.5, overflow: "hidden", padding: 1.5 },
   center: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center" },
   cross: { position: "absolute", zIndex: 10 },
   header: { flexDirection: "row", alignItems: "stretch", borderTopWidth: 1, borderBottomWidth: 1 },
-  headerCell: { height: 48, justifyContent: "center", paddingHorizontal: 16, borderRightWidth: 1 },
+  headerCell: { height: 48, justifyContent: "center", paddingHorizontal: 16 },
   // Unpadded: one icon centres in a square cell; a screen may lay out several cells.
   headerRight: { minWidth: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", borderLeftWidth: 1 },
   backCell: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRightWidth: 1 },
