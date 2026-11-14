@@ -65,9 +65,10 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          if git diff --name-only "$BASE_SHA" HEAD -- mobile/ | grep -q .; then
-            echo "mobile=true" >> "$GITHUB_OUTPUT"
-          fi
+          # Mobile compiles shared src/ modules and convex/ API types. Exit 1 = changed;
+          # an error (e.g. all-zeros BASE_SHA) also runs the checks rather than skipping them.
+          git diff --quiet "$BASE_SHA" HEAD -- mobile/ src/ convex/ package-lock.json \
+            || echo "mobile=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v5
         if: steps.changes.outputs.mobile == 'true'
