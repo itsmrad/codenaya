@@ -175,10 +175,11 @@ export const PreviewView = ({
 
   const isLoading = status === "booting" || status === "installing";
   // The build card covers the preview until the pre-warmed sandbox is running;
-  // then the app shows and fills in through HMR under a slim bar (#337).
+  // then the app shows and fills in through HMR under a slim bar (#337). A
+  // failed boot shows its error under the bar instead of hiding behind the card.
   const firstBuildRun = firstBuild && activeRun ? activeRun : null;
   const building =
-    firstBuildRun && files && (status !== "running" || !previewUrl) ? (
+    firstBuildRun && files && status !== "error" && (status !== "running" || !previewUrl) ? (
       <PreviewBuilding steps={firstBuildRun.steps} files={files} />
     ) : null;
   const stillBuilding =

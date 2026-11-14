@@ -164,6 +164,31 @@ test.describe("first build auto-opens the preview", () => {
     expect(errors).toEqual([]);
   });
 
+  test("a sandbox that fails mid-build shows its error under the bar (desktop)", async ({ page }) => {
+    test.setTimeout(150_000);
+    await page.route("**/api/sandbox", (route) =>
+      route.fulfill({
+        contentType: "application/x-ndjson",
+        body: `${JSON.stringify({ type: "error", message: "e2e boot failure" })}\n`,
+      }),
+    );
+    await page.route("**/api/sandbox/**", (route) => route.fulfill({ json: {} }));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+    const build = await startFirstBuild(page, "e2e-preview-auto-open-error");
+
+    try {
+      await page.goto(`/projects/${build.projectId}`);
+      await expect(page.getByRole("status", { name: "Building your app" })).toBeVisible({ timeout: 60_000 });
+      await build.writePackageJson();
+      await expect(page.getByRole("alert").filter({ hasText: "e2e boot failure" })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("status", { name: "Building your app" })).toBeHidden();
+      await expect(page.getByRole("status", { name: "Still building" })).toBeVisible();
+    } finally {
+      await build.cleanup();
+    }
+  });
+
   test("a later run on a project without a root package.json keeps the tab (desktop)", async ({ page }) => {
     test.setTimeout(150_000);
     const errors = collectConsoleErrors(page);
