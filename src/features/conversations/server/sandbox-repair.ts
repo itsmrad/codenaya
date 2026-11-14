@@ -9,6 +9,7 @@ import {
   describeToolCall,
   toolResultError,
 } from "@/features/conversations/agent-steps";
+import { decodeJsonArgs } from "@/features/conversations/inngest/lib/json-args";
 import { checkProjectBuild, isSafeProjectPath, redact } from "@/features/conversations/inngest/tools/check-build";
 import { createDeleteFilesTool } from "@/features/conversations/inngest/tools/delete-files";
 import { createEditFileTool } from "@/features/conversations/inngest/tools/edit-file";
@@ -297,7 +298,7 @@ export const repairTools = ({
     guarded(createWriteFilesTool({ projectId, internalKey })),
     guarded(createEditFileTool({ projectId, internalKey })),
     guarded(createDeleteFilesTool({ projectId, internalKey })),
-  ];
+  ].map(decodeJsonArgs);
 };
 
 /**

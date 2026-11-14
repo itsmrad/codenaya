@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { PROVIDERS } from "../../catalog";
+
 import { validateAuthorizationServer } from "./as-guard";
 
 /**
@@ -117,6 +119,27 @@ describe("same-site fallback (no catalog origins declared)", () => {
 });
 
 describe("explicit trusted origins", () => {
+  it("accepts PlanetScale's verified cross-site authorization server only with its catalog override", () => {
+    const provider = PROVIDERS.planetscale;
+    const options = {
+      mcpServerUrl: provider.mcpUrl,
+      authorizationServerUrl: "https://api.planetscale.com",
+    };
+    expect(validateAuthorizationServer(options).ok).toBe(false);
+    expect(validateAuthorizationServer({
+      ...options, trustedOrigins: provider.trustedAuthorizationServerOrigins,
+    })).toEqual({ ok: true, origin: "https://api.planetscale.com" });
+    for (const origin of [
+      "https://api.planetscale.com.attacker.test", "https://auth.planetscale.com",
+      "https://api.planetscale.com:8443", "http://api.planetscale.com",
+    ]) {
+      expect(validateAuthorizationServer({
+        ...options, authorizationServerUrl: origin,
+        trustedOrigins: provider.trustedAuthorizationServerOrigins,
+      }).ok).toBe(false);
+    }
+  });
+
   it("accepts an exactly matching origin", () => {
     const result = validateAuthorizationServer({
       mcpServerUrl: "https://api.githubcopilot.com/mcp/",

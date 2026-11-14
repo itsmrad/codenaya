@@ -150,6 +150,9 @@ export const planIdValidator = v.union(v.literal("free"), v.literal("pro"));
 /** Who pays for a run (ADR 0011). Only "platform" runs cost credits. */
 export const runSourceValidator = v.union(v.literal("platform"), v.literal("promo"), v.literal("byok"));
 
+/** Workspace layouts (#524). Add "board" here when the agent board mode ships. */
+export const workspaceModeValidator = v.union(v.literal("ide"), v.literal("chat"));
+
 /**
  * The model an assistant message was produced with. `keyId` is set when the
  * run used the user's own key (BYOK), which is what billing reads to charge no
@@ -765,6 +768,13 @@ export default defineSchema({
     userId: v.string(),
     defaultKeyId: v.optional(v.id("aiProviderKeys")),
     defaultModelId: v.string(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"]),
+
+  /** The user's workspace layout. No row means "ide", today's full layout. */
+  userWorkspacePreferences: defineTable({
+    userId: v.string(),
+    workspaceMode: workspaceModeValidator,
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
 

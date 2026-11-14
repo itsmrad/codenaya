@@ -3,19 +3,27 @@ import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
-import { hasClerkCredentials, signIn } from "./clerk-auth";
+import { ensureTestUser, hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
 import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
 
-/** Stubs the sandbox so the boot resolves at once; returns the boot request count. */
-const stubSandbox = async (page: Page) => {
+/**
+ * Stubs the sandbox so the boot resolves at once, after any `output` lines;
+ * returns the boot request count.
+ */
+const stubSandbox = async (page: Page, output: string[] = []) => {
   const counter = { boots: 0 };
   await page.route("**/api/sandbox", (route) => {
     counter.boots += 1;
     return route.fulfill({
       contentType: "application/x-ndjson",
-      body: `${JSON.stringify({ type: "ready", sandboxId: "e2e-sandbox", previewUrl: "about:blank" })}\n`,
+      body: [
+        ...output.map((data) => ({ type: "output", data })),
+        { type: "ready", sandboxId: "e2e-sandbox", previewUrl: "about:blank" },
+      ]
+        .map((event) => `${JSON.stringify(event)}\n`)
+        .join(""),
     });
   });
   // File sync and teardown of the stubbed sandbox.
@@ -61,6 +69,18 @@ const startFirstBuild = async (page: Page, name: string) => {
         name: "package.json",
         content: "{}\n",
       }),
+    /** Writes `name` as the first run, which lists it on the build card after the file lands. */
+    writeFile: async (name: string) => {
+      await system.mutation(api.system.createFile, { internalKey, projectId, name, content: `${name}\n` });
+      const now = Date.now();
+      await system.mutation(api.system.upsertMessageSteps, {
+        internalKey,
+        messageId: runs[0],
+        steps: [
+          { id: name, kind: "tool", tool: "writeFiles", targets: [name], status: "done", startedAt: now, endedAt: now },
+        ],
+      });
+    },
     cleanup: () =>
       Promise.all(
         runs.map((messageId) =>
@@ -133,6 +153,137 @@ test.describe("first build auto-opens the preview", () => {
       expect(errors).toEqual([]);
     });
   }
+
+  test("holds the boot while the first build keeps writing (#486)", async ({ page }) => {
+    test.setTimeout(150_000);
+    const sandbox = await stubSandbox(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+    const build = await startFirstBuild(page, "e2e-preview-auto-open-writing");
+
+    try {
+      // The page's time only moves when the test moves it, so slow Convex
+      // round trips can't stretch the gap between writes past the window.
+      await page.clock.install();
+      await page.goto(`/projects/${build.projectId}`);
+      const card = page.getByRole("status", { name: "Building your app" });
+      await expect(card).toBeVisible({ timeout: 60_000 });
+      await page.clock.pauseAt(Date.now() + 1_000);
+      await build.writePackageJson();
+      // Writes 1s apart, under the 2s quiet window: install would race them.
+      for (let index = 0; index < 6; index += 1) {
+        const name = `part-${index}.txt`;
+        await build.writeFile(name);
+        // Listed after the file landed: the page has the write.
+        await expect(card.getByText(name)).toBeVisible({ timeout: 30_000 });
+        await page.clock.runFor(1_000);
+      }
+      expect(sandbox.boots).toBe(0);
+      // Quiet now: it boots while the run is still going.
+      await expect
+        .poll(
+          async () => {
+            await page.clock.runFor(500);
+            return sandbox.boots;
+          },
+          { timeout: 30_000 },
+        )
+        .toBeGreaterThan(0);
+      await expect(page.getByRole("status", { name: "Still building" })).toBeVisible({ timeout: 30_000 });
+    } finally {
+      await build.cleanup();
+    }
+  });
+
+  test("covers a broken first build until its run ends, then shows Fixing (#486, #305)", async ({ page }) => {
+    test.setTimeout(180_000);
+    // The app the run leaves doesn't compile.
+    await stubSandbox(page, [
+      '[vite] Pre-transform error: Failed to resolve import "./Missing" from "src/App.jsx". Does the file exist?\n',
+    ]);
+    // Stubbed, so no agent run (or model spend) starts.
+    const sent: string[] = [];
+    await page.route("**/api/messages", (route) => {
+      sent.push((route.request().postDataJSON() as { message: string }).message);
+      return route.fulfill({ status: 200, json: {} });
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await signIn(page);
+
+    // A prompt-created project whose first build stays pending: no run here
+    // verifies a build, like an unverified one (#501), so every run reads as
+    // the first build.
+    const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY!;
+    const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+    const { projectId, conversationId } = await system.mutation(api.system.createProjectWithConversation, {
+      internalKey,
+      projectName: `e2e-preview-auto-open-fixing-${Date.now()}`,
+      conversationTitle: "Fixing",
+      ownerId: (await ensureTestUser()).id,
+      source: "dashboard",
+      firstBuildPending: true,
+    });
+    const startRun = async () => {
+      const messageId = await system.mutation(api.system.createMessage, {
+        internalKey,
+        conversationId,
+        projectId,
+        role: "assistant",
+        content: "",
+        status: "processing",
+      });
+      return () =>
+        system.mutation(api.system.updateMessageStatus, { internalKey, messageId, status: "completed" });
+    };
+
+    try {
+      const completeBuild = await startRun();
+      await page.goto(`/projects/${projectId}`);
+      const buildCard = page.getByRole("status", { name: "Building your app" });
+      const fixing = page.getByRole("status", { name: "Fixing an error" });
+      const banner = page.getByRole("alert").filter({ hasText: "Build error" });
+      await expect(buildCard).toBeVisible({ timeout: 60_000 });
+      await system.mutation(api.system.createFile, { internalKey, projectId, name: "package.json", content: "{}\n" });
+
+      // The sandbox boots mid-run and reports the half-written app's error:
+      // the card stays over it, with no banner and no fix.
+      await expect(page.getByRole("button", { name: "Refresh page" })).toBeEnabled({ timeout: 30_000 });
+      await page.waitForTimeout(5_000);
+      await expect(buildCard).toBeVisible();
+      // Covered, so out of the keyboard's and screen readers' reach.
+      await expect(page.locator('iframe[title="Preview"]')).toHaveAttribute("inert", "");
+      await expect(page.getByRole("status", { name: "Still building" })).toBeHidden();
+      await expect(banner).toHaveCount(0);
+      expect(sent).toHaveLength(0);
+
+      // The run ends with the error still there: Fixing, and one fix sent.
+      await completeBuild();
+      await expect(fixing).toBeVisible({ timeout: 30_000 });
+      await expect(buildCard).toBeHidden();
+      await expect(banner).toHaveCount(0);
+      await expect.poll(() => sent.length, { timeout: 30_000 }).toBe(1);
+      expect(sent[0]).toContain("Failed to resolve import");
+
+      // The fix run, a first build too: still Fixing, with no second fix.
+      const completeFix = await startRun();
+      await page.waitForTimeout(5_000);
+      await expect(fixing).toBeVisible();
+      await expect(banner).toHaveCount(0);
+      await completeFix();
+
+      // It left the error: the cover lifts and the banner offers the next step.
+      await expect(banner).toBeVisible({ timeout: 30_000 });
+      await expect(fixing).toBeHidden();
+      await expect(buildCard).toBeHidden();
+      await expect(banner).toContainText("Codenaya sent a fix to the agent automatically.");
+      await expect(page.locator('iframe[title="Preview"]')).not.toHaveAttribute("inert");
+      await expect(banner.getByRole("button", { name: "Fix with AI" })).toBeEnabled();
+      await page.waitForTimeout(5_000);
+      expect(sent).toHaveLength(1);
+    } finally {
+      await (await userConvexClient(page)).mutation(api.projects.remove, { id: projectId }).catch(() => {});
+    }
+  });
 
   test("keeps the tab the user picked during the first build", async ({ page }) => {
     test.setTimeout(150_000);

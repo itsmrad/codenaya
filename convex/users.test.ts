@@ -231,6 +231,11 @@ async function seedOwnedData(t: TestConvex, ownerId: string, files = 1) {
       defaultModelId: "gpt-5.6-luna",
       updatedAt: now,
     });
+    await ctx.db.insert("userWorkspacePreferences", {
+      userId: ownerId,
+      workspaceMode: "chat",
+      updatedAt: now,
+    });
     const skillId = await ctx.db.insert("skills", {
       ownerId,
       name: "my-skill",
@@ -264,6 +269,7 @@ const OWNED_TABLES = [
   "showcaseViews",
   "aiProviderKeys",
   "userAiPreferences",
+  "userWorkspacePreferences",
   "skills",
   "projectSkillSettings",
   "creditLedger",

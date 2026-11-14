@@ -88,6 +88,20 @@ describe("resolveMcpServers", () => {
     expect(server.url).toContain("read_only=true");
     expect(server.url).toContain("project_ref=abcdefgh");
     expect(server.url).toContain("features=database%2Cdocs");
+    expect(server.readOnlyEnforced).toBe(true);
+    expect(server.annotationsTrusted).toBe(true);
+  });
+
+  it("marks read-only enforced only where the provider enforces it", async () => {
+    const stripe = await makeConnection({ providerId: "stripe", serverUrl: "https://mcp.stripe.com" });
+    const supabase = await makeConnection();
+
+    const { servers } = await resolveMcpServers([
+      { link: makeLink({ readOnly: true }), connection: stripe },
+      { link: makeLink({ readOnly: false }), connection: supabase },
+    ]);
+
+    expect(servers.map((s) => s.readOnlyEnforced)).toEqual([false, false]);
   });
 
   it("attaches the credential as an Authorization header", async () => {
@@ -242,6 +256,10 @@ describe("resolveMcpServers", () => {
       expect(servers[0].url).toBe("https://mcp.internal-tool.example.com/mcp");
       expect(servers[0].trustedHostnames).toEqual([]);
       expect(servers[0].destructiveTools).toEqual([]);
+      // A recorded read-only flag on a custom server is not enforced anywhere.
+      expect(servers[0].readOnlyEnforced).toBe(false);
+      // Its tool annotations cannot classify anything as read-only.
+      expect(servers[0].annotationsTrusted).toBe(false);
     });
   });
 

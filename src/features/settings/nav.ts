@@ -1,6 +1,7 @@
 import {
   GaugeIcon,
   KeyRoundIcon,
+  LayoutPanelLeftIcon,
   PaletteIcon,
   PlugIcon,
   ScrollTextIcon,
@@ -14,6 +15,7 @@ export const ACCOUNT_SETTINGS_URL = "/settings/account";
 export const AI_PROVIDERS_SETTINGS_URL = "/settings/ai-providers";
 export const SKILLS_SETTINGS_URL = "/settings/skills";
 export const USAGE_SETTINGS_URL = "/settings/usage";
+export const WORKSPACE_SETTINGS_URL = "/settings/workspace";
 
 
 /**
@@ -27,5 +29,6 @@ export const SETTINGS_NAV: SectionNavItem[] = [
   { href: SKILLS_SETTINGS_URL, label: "Skills", icon: ScrollTextIcon },
   { href: USAGE_SETTINGS_URL, label: "Usage", icon: GaugeIcon },
   { href: "/settings/integrations", label: "Integrations", icon: PlugIcon },
+  { href: WORKSPACE_SETTINGS_URL, label: "Workspace", icon: LayoutPanelLeftIcon },
   { href: "/settings/appearance", label: "Appearance", icon: PaletteIcon },
 ];

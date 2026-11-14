@@ -262,6 +262,12 @@ async function purgeUserDataBatch(
     .take(CASCADE_BATCH_SIZE);
   if (await deleteRows(ctx, "userAiPreferences", aiPreferences)) return false;
 
+  const workspacePreferences = await ctx.db
+    .query("userWorkspacePreferences")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "userWorkspacePreferences", workspacePreferences)) return false;
+
   const aiProviderKeys = await ctx.db
     .query("aiProviderKeys")
     .withIndex("by_user", (q) => q.eq("userId", userId))
