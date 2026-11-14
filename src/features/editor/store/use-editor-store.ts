@@ -25,6 +25,11 @@ interface EditorStore {
   closeTab: (projectId: Id<"projects">, fileId: Id<"files">) => void;
   closeAllTabs: (projectId: Id<"projects">) => void;
   setActiveTab: (projectId: Id<"projects">, fileId: Id<"files">) => void;
+  restoreTabs: (
+    projectId: Id<"projects">,
+    openTabs: Id<"files">[],
+    activeTabId: Id<"files"> | null,
+  ) => void;
 };
 
 export const useEditorStore = create<EditorStore>()((set, get) => ({
@@ -115,6 +120,14 @@ export const useEditorStore = create<EditorStore>()((set, get) => ({
     const tabs = new Map(get().tabs);
     const state = tabs.get(projectId) ?? defaultTabState;
     tabs.set(projectId, { ...state, activeTabId: fileId });
+    set({ tabs });
+  },
+
+  // The tabs saved for this project (#315). Restored tabs are pinned.
+  restoreTabs: (projectId, openTabs, activeTabId) => {
+    if (openTabs.length === 0 || get().getTabState(projectId).openTabs.length > 0) return;
+    const tabs = new Map(get().tabs);
+    tabs.set(projectId, { openTabs, activeTabId, previewTabId: null });
     set({ tabs });
   },
 }));
