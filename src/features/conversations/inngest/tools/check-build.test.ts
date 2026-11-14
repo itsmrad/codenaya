@@ -1,13 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const e2b = vi.hoisted(() => ({ create: vi.fn() }));
+const e2b = vi.hoisted(() => ({ create: vi.fn(), list: vi.fn(), connect: vi.fn() }));
+const mocks = vi.hoisted(() => ({ query: vi.fn(), resolveEnv: vi.fn() }));
 
 vi.mock("e2b", async (importOriginal) => ({
   ...(await importOriginal<typeof import("e2b")>()),
-  Sandbox: { create: e2b.create },
+  Sandbox: { create: e2b.create, list: e2b.list, connect: e2b.connect },
+}));
+vi.mock("@/lib/convex-client", () => ({ convex: { query: mocks.query } }));
+vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/integrations/server/env/resolve-env")>()),
+  resolveProjectEnv: mocks.resolveEnv,
 }));
 
-import { CommandExitError, TimeoutError } from "e2b";
+import { CommandExitError, type CommandResult, TimeoutError } from "e2b";
+import { getFunctionName } from "convex/server";
 
 import { VITE_REACT_STARTER } from "../vite-starter";
 import {
@@ -15,7 +22,7 @@ import {
   BUILD_VERIFIED,
   STATIC_CHECKS_PASSED,
 } from "../../agent-steps";
-import { checkProjectBuild, trimBuildOutput } from "./check-build";
+import { checkProjectBuild, createCheckBuildTool, trimBuildOutput } from "./check-build";
 
 const starter = () => VITE_REACT_STARTER.map((file) => ({ ...file }));
 const check = (files = starter(), apiKey: string | null = "e2b_key") =>
@@ -25,26 +32,36 @@ const check = (files = starter(), apiKey: string | null = "e2b_key") =>
     apiKey: apiKey ?? undefined,
   });
 
-/** A fake sandbox whose commands answer in order: a result, or an error to throw. */
-const fakeSandbox = (...answers: Array<{ exitCode: number; stdout?: string; stderr?: string } | Error>) => {
-  const sandbox = {
+type Answer = { exitCode: number; stdout?: string; stderr?: string } | Error;
+
+type Proc = { cmd: string; args: string[] };
+
+/** A sandbox whose commands get `respond`'s answer: a result, or an error to throw. */
+const sandboxWith = (respond: (command: string) => Answer | undefined, processes: Proc[] = []) => ({
     files: { makeDir: vi.fn(async () => true), write: vi.fn(async () => ({})) },
     commands: {
-      run: vi.fn(async () => {
-        const answer = answers.shift() ?? { exitCode: 0 };
+      run: vi.fn<(command: string, opts?: object) => Promise<CommandResult>>(async (command) => {
+        const answer = respond(command) ?? { exitCode: 0 };
         if (answer instanceof Error) throw answer;
         const result = { stdout: "", stderr: "", ...answer };
         if (result.exitCode !== 0) throw new CommandExitError(result);
         return result;
       }),
+      list: vi.fn<() => Promise<Proc[]>>(async () => processes),
     },
     kill: vi.fn(async () => {}),
-  };
+});
+
+/** The throwaway sandbox a cold check creates; its commands answer in order. */
+const fakeSandbox = (...answers: Answer[]) => {
+  const sandbox = sandboxWith(() => answers.shift());
   e2b.create.mockResolvedValue(sandbox);
   return sandbox;
 };
 
 beforeEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   vi.resetAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -142,6 +159,7 @@ describe("checkProjectBuild", () => {
     expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
     expect(sandbox.files.write).toHaveBeenCalledWith(
       expect.arrayContaining([{ path: "/home/user/app/src/App.tsx", data: expect.any(String) }]),
+      { requestTimeoutMs: expect.any(Number) },
     );
     const commands = sandbox.commands.run.mock.calls.map((call) => (call as unknown[])[0]);
     expect(commands).toEqual([
@@ -188,5 +206,479 @@ describe("checkProjectBuild", () => {
     expect(result).toMatch(/^Error: The build check could not finish \(Command timed out\)/);
     expect(result).toContain("not an error in the project's code");
     expect(sandbox.kill).toHaveBeenCalledTimes(1);
+  });
+});
+
+const SECRET = "sk_live_SYNTHETIC_0123456789";
+
+describe("checkProjectBuild redaction (#465)", () => {
+  it("redacts the project's secrets from build errors", async () => {
+    fakeSandbox({ exitCode: 0 }, { exitCode: 1, stderr: `Error: connect ECONNREFUSED postgres://app:${SECRET}@db` });
+    const files = starter();
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      apiKey: "e2b_key",
+      secrets: [SECRET],
+    });
+    expect(result).toMatch(/^Error: Build failed/);
+    expect(result).toContain("postgres://app:[redacted]@db");
+    expect(result).not.toContain(SECRET);
+  });
+
+  it("redacts a multi-line secret before the 40-line cap can cut it", async () => {
+    const key = [
+      "-----BEGIN PRIVATE KEY-----",
+      "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCSYNTHETICKEYMATERIAL",
+      "-----END PRIVATE KEY-----",
+    ].join("\n");
+    const progress = Array.from({ length: 38 }, (_, i) => `transforming module ${i}`).join("\n");
+    fakeSandbox({ exitCode: 0 }, { exitCode: 1, stdout: `${progress}\n${key}\nerror during build` });
+    const files = starter();
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      apiKey: "e2b_key",
+      secrets: [key],
+    });
+    expect(result).toMatch(/^Error: Build failed/);
+    expect(result).toContain("[redacted]");
+    expect(result).not.toContain("SYNTHETICKEYMATERIAL");
+    expect(result).not.toContain("BEGIN PRIVATE KEY");
+  });
+
+  it.each([
+    ["split by a colour code", `token=sk_live_SYNTHETIC_\u001b[0m0123456789`],
+    ["printed with CRLF line endings", "-----BEGIN PRIVATE KEY-----\r\nMIIEvQSYNTHETICCRLFKEY\r\n-----END PRIVATE KEY-----"],
+  ])("redacts a secret %s, which only trimming puts back together", async (_case, printed) => {
+    const secret = printed.includes("PRIVATE")
+      ? "-----BEGIN PRIVATE KEY-----\nMIIEvQSYNTHETICCRLFKEY\n-----END PRIVATE KEY-----"
+      : SECRET;
+    fakeSandbox({ exitCode: 0 }, { exitCode: 1, stderr: printed });
+    const files = starter();
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      apiKey: "e2b_key",
+      secrets: [secret],
+    });
+    expect(result).toContain("[redacted]");
+    expect(result).not.toContain("SYNTHETIC");
+  });
+
+  it("redacts the project's secrets from an unfinished check", async () => {
+    fakeSandbox(new TimeoutError(`Command timed out: ${SECRET}`));
+    const files = starter();
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      apiKey: "e2b_key",
+      secrets: [SECRET],
+    });
+    expect(result).toMatch(/^Error: The build check could not finish/);
+    expect(result).not.toContain(SECRET);
+  });
+});
+
+const DEV_SERVER: Proc = { cmd: "/bin/bash", args: ["-l", "-c", "npm run dev -- --host"] };
+const installing = (command: string): Proc => ({ cmd: "/bin/bash", args: ["-l", "-c", command] });
+
+describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
+  const warmCheck = (files = starter(), secrets?: string[]) => {
+    return checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      apiKey: "e2b_key",
+      metadata: { projectId: "proj_1", purpose: "check-build" },
+      preview: { projectId: "proj_1", ownerId: "user_1" },
+      secrets,
+    });
+  };
+  const listed = (...infos: Array<{ metadata?: Record<string, string>; minutesLeft?: number }>) =>
+    e2b.list.mockReturnValue({
+      nextItems: async () =>
+        infos.map((info, i) => ({
+          sandboxId: `sbx_warm_${i}`,
+          metadata: info.metadata ?? { userId: "user_1", projectId: "proj_1" },
+          endAt: new Date(Date.now() + (info.minutesLeft ?? 50) * 60_000),
+        })),
+    });
+  /** The preview's sandbox, running its dev server. */
+  const warmSandbox = (respond: (command: string) => Answer | undefined = () => undefined, processes = [DEV_SERVER]) => {
+    const sandbox = sandboxWith(respond, processes);
+    e2b.connect.mockResolvedValue(sandbox);
+    return sandbox;
+  };
+  const commandsOf = (sandbox: ReturnType<typeof sandboxWith>) =>
+    sandbox.commands.run.mock.calls.map((call) => call[0]);
+  /** The cold fallback ran, and the preview was left running. */
+  const expectCold = (result: string, warm?: ReturnType<typeof sandboxWith>) => {
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(e2b.create).toHaveBeenCalledTimes(1);
+    if (warm) expect(warm.kill).not.toHaveBeenCalled();
+  };
+
+  it("builds in its own directory of the owner's running preview, without killing it or creating a sandbox", async () => {
+    listed({});
+    const warm = warmSandbox();
+    fakeSandbox();
+
+    const result = await warmCheck();
+
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(e2b.list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: { metadata: { userId: "user_1", projectId: "proj_1" }, state: ["running"] },
+      }),
+    );
+    // No longer than the time the sandbox already has left, so its timeout is unchanged.
+    expect(e2b.connect).toHaveBeenCalledWith("sbx_warm_0", {
+      apiKey: "e2b_key",
+      timeoutMs: 300_000,
+      requestTimeoutMs: 10_000,
+    });
+    const [stateBefore, copy, stateAfter, install, build, cleanup] = commandsOf(warm);
+    expect(stateBefore).toMatch(/^stat /);
+    expect(stateAfter).toBe(stateBefore);
+    const dir = copy.match(/mkdir -p (\/home\/user\/check-build-\w+) && cp -a \/home\/user\/app\/node_modules /)?.[1];
+    expect(dir).toBeDefined();
+    expect(install).toMatch(/^npm install/);
+    expect(build).toBe("npx tsc --noEmit -p tsconfig.app.json && npx vite build");
+    expect(warm.commands.run.mock.calls[3][1]).toMatchObject({ cwd: dir });
+    expect(cleanup).toBe(`rm -rf ${dir}`);
+    // Awaited and bounded, not left running in the background.
+    expect(warm.commands.run.mock.calls[5][1]).toEqual({ timeoutMs: 10_000, requestTimeoutMs: 10_000 });
+    expect(warm.files.write).toHaveBeenCalledWith(
+      expect.arrayContaining([{ path: `${dir}/src/App.tsx`, data: expect.any(String) }]),
+      { requestTimeoutMs: expect.any(Number) },
+    );
+    expect(warm.kill).not.toHaveBeenCalled();
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  /** Builds, but imports an export App.tsx lacks: an advisory finding (#333). */
+  const withAdvisory = (name: string) => [
+    ...starter(),
+    { path: "src/Extra.tsx", content: `import { ${name} } from "./App";\nexport const extra = ${name};\n` },
+  ];
+
+  it("keeps the advisory project checks on a passing build, warm and cold", async () => {
+    listed({});
+    warmSandbox();
+    const warm = await warmCheck(withAdvisory("Nope"));
+    expect(warm.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(warm).toContain("\nAdvisory project checks:\n- [export] src/Extra.tsx imports { Nope } from ./App");
+    expect(e2b.create).not.toHaveBeenCalled();
+
+    listed();
+    fakeSandbox();
+    const cold = await warmCheck(withAdvisory("Nope"));
+    expect(cold.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(cold).toContain("[export] src/Extra.tsx imports { Nope } from ./App");
+    expect(e2b.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("redacts the project's secrets from the advisory notes", async () => {
+    listed();
+    fakeSandbox();
+    const result = await warmCheck(withAdvisory("SYNTHETIC_SECRET_NAME"), ["SYNTHETIC_SECRET_NAME"]);
+    expect(result).toContain("imports { [redacted] } from ./App");
+    expect(result).not.toContain("SYNTHETIC_SECRET_NAME");
+  });
+
+  it("reports build errors from the warm sandbox with its paths made relative", async () => {
+    listed({});
+    let dir = "";
+    warmSandbox((command) => {
+      if (command.startsWith("mkdir")) dir = command.split(" ")[2];
+      return command.startsWith("npx tsc")
+        ? { exitCode: 2, stdout: `${dir}/src/App.tsx(3,7): error TS2322: Bad type.\n` }
+        : undefined;
+    });
+
+    const result = await warmCheck();
+
+    expect(result).toBe(
+      "Error: Build failed. Fix these errors, then call checkBuild again:\nsrc/App.tsx(3,7): error TS2322: Bad type.",
+    );
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["there is no running preview", () => listed()],
+    ["the listed sandbox belongs to another user", () => listed({ metadata: { userId: "user_2", projectId: "proj_1" } })],
+    ["the listed sandbox runs another project", () => listed({ metadata: { userId: "user_1", projectId: "proj_2" } })],
+    ["the preview is about to expire", () => listed({ minutesLeft: 4 })],
+  ])("uses a new sandbox when %s, without connecting", async (_case, arrange) => {
+    arrange();
+    const cold = fakeSandbox();
+
+    const result = await warmCheck();
+
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(e2b.connect).not.toHaveBeenCalled();
+    expect(cold.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "npm install --prefer-offline",
+    "npm i react-router-dom",
+    "npm ci",
+    "pnpm add zod",
+    "yarn install",
+    "bun i",
+  ])("uses a new sandbox while the preview runs `%s`, and leaves the preview alone", async (command) => {
+    listed({});
+    const warm = warmSandbox(undefined, [DEV_SERVER, installing(command)]);
+    fakeSandbox();
+
+    expectCold(await warmCheck(), warm);
+    expect(commandsOf(warm).filter((run) => !run.startsWith("rm -rf"))).toEqual([]);
+  });
+
+  it("uses a new sandbox when an install starts between discovery and the copy", async () => {
+    listed({});
+    const warm = warmSandbox();
+    warm.commands.list
+      .mockResolvedValueOnce([DEV_SERVER])
+      .mockResolvedValueOnce([DEV_SERVER, installing("npm install --prefer-offline --no-audit --no-fund")]);
+    fakeSandbox();
+
+    expectCold(await warmCheck(), warm);
+    expect(commandsOf(warm).some((run) => run.startsWith("npm install"))).toBe(false);
+    expect(commandsOf(warm).at(-1)).toMatch(/^rm -rf \/home\/user\/check-build-/);
+  });
+
+  it("uses a new sandbox when package.json or node_modules changed during the copy", async () => {
+    listed({});
+    let reads = 0;
+    const warm = warmSandbox((command) =>
+      command.startsWith("stat ")
+        ? { exitCode: 0, stdout: `node_modules 2026-11-03 10:00:0${reads++}.000000000 +0000\n` }
+        : undefined,
+    );
+    fakeSandbox();
+
+    expectCold(await warmCheck(), warm);
+    expect(commandsOf(warm).some((run) => run.startsWith("npm install"))).toBe(false);
+  });
+
+  it("uses a new sandbox when the preview has a .env, without copying", async () => {
+    listed({});
+    const warm = warmSandbox((command) =>
+      command.startsWith("stat ") ? { exitCode: 0, stdout: ".env 2026-11-03 10:00:00.000000000 +0000\n" } : undefined,
+    );
+    fakeSandbox();
+
+    expectCold(await warmCheck(), warm);
+    expect(commandsOf(warm).some((run) => run.startsWith("mkdir"))).toBe(false);
+  });
+
+  it("uses a new sandbox when connecting fails", async () => {
+    listed({});
+    e2b.connect.mockRejectedValue(new Error("502 Bad Gateway"));
+    fakeSandbox();
+
+    expectCold(await warmCheck());
+  });
+
+  it.each([
+    ["the preview has no node_modules to copy", { exitCode: 1, stderr: "cp: cannot stat '/home/user/app/node_modules'" }],
+    ["the copy times out", new TimeoutError("Command timed out")],
+  ])("uses a new sandbox when %s", async (_case, answer) => {
+    listed({});
+    const warm = warmSandbox((command) => (command.startsWith("mkdir") ? answer : undefined));
+    fakeSandbox();
+
+    expectCold(await warmCheck(), warm);
+    expect(commandsOf(warm).at(-1)).toMatch(/^rm -rf \/home\/user\/check-build-/);
+  });
+
+  it("uses a new sandbox when the preview goes away mid-check, and cleans up without killing it", async () => {
+    listed({});
+    const warm = warmSandbox((command) => (command.startsWith("npm install") ? new Error("sandbox not found") : undefined));
+    fakeSandbox();
+
+    expectCold(await warmCheck(), warm);
+  });
+
+  it("reports a timeout in the warm build as unfinished, without a second build", async () => {
+    listed({});
+    const warm = warmSandbox((command) =>
+      command.startsWith("npm install") ? new TimeoutError("Command timed out") : undefined,
+    );
+
+    const result = await warmCheck();
+
+    expect(result).toMatch(/^Error: The build check could not finish \(Command timed out\)/);
+    expect(warm.kill).not.toHaveBeenCalled();
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("does not start a new sandbox when a failed warm attempt left too little of the step budget", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    listed({});
+    warmSandbox((command) => {
+      if (!command.startsWith("npm install")) return undefined;
+      now += 200_000;
+      return new Error("sandbox not found");
+    });
+
+    const result = await warmCheck();
+
+    expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("stops with an unfinished check when slow discovery spends the step budget", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    e2b.list.mockReturnValue({
+      nextItems: async () => {
+        now += 250_000;
+        return [{ sandboxId: "sbx_warm_0", metadata: { userId: "user_1", projectId: "proj_1" }, endAt: new Date(now + 3_600_000) }];
+      },
+    });
+    fakeSandbox();
+
+    const result = await warmCheck();
+
+    expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expect(e2b.connect).not.toHaveBeenCalled();
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("never starts the install once a slow copy has spent the step budget", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    listed({});
+    const warm = warmSandbox((command) => {
+      if (command.startsWith("mkdir")) now += 245_000;
+      return undefined;
+    });
+
+    const result = await warmCheck();
+
+    expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expect(commandsOf(warm).some((run) => run.startsWith("npm install"))).toBe(false);
+    expect(warm.kill).not.toHaveBeenCalled();
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("reports a warm build that hits its 120 s cap as unfinished, without a cold build", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    listed({});
+    const warm = warmSandbox((command) => {
+      if (command.startsWith("npm install")) now += 125_000;
+      return undefined;
+    });
+
+    const result = await warmCheck();
+
+    expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expect(commandsOf(warm).some((run) => run.startsWith("npx tsc"))).toBe(false);
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("bounds each warm command by the time left in the step budget", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    listed({});
+    const warm = warmSandbox((command) => {
+      if (command.startsWith("mkdir")) now += 150_000;
+      return undefined;
+    });
+
+    await warmCheck();
+
+    const install = warm.commands.run.mock.calls.find((call) => call[0].startsWith("npm install"));
+    expect(install?.[1]).toMatchObject({ timeoutMs: 90_000 });
+  });
+});
+
+describe("checkBuild tool (#465)", () => {
+  /** Convex rows for `files`, with their folders. */
+  const rowsOf = (files: Array<{ path: string; content: string }>) => {
+    const rows: Array<Record<string, unknown>> = [];
+    const folders = new Map<string, string>();
+    for (const file of files) {
+      const parts = file.path.split("/");
+      let parentId: string | undefined;
+      for (const [i, name] of parts.slice(0, -1).entries()) {
+        const path = parts.slice(0, i + 1).join("/");
+        if (!folders.has(path)) {
+          folders.set(path, `folder_${path}`);
+          rows.push({ _id: `folder_${path}`, type: "folder", name, parentId });
+        }
+        parentId = folders.get(path);
+      }
+      rows.push({ _id: `file_${file.path}`, type: "file", name: parts.at(-1), parentId, content: file.content });
+    }
+    return rows;
+  };
+
+  const runTool = async (envVars: unknown, arrange?: () => void) => {
+    vi.stubEnv("E2B_API_KEY", "e2b_key");
+    mocks.query.mockImplementation(async (ref) =>
+      getFunctionName(ref) === "system:getEnvVarsForSandbox" ? envVars : rowsOf(starter()),
+    );
+    arrange?.();
+    const tool = createCheckBuildTool({ projectId: "proj_1" as never, internalKey: "internal", ownerId: "user_1" });
+    const step = { run: vi.fn(async (_name: string, fn: () => Promise<string>) => fn()) };
+    return tool.handler({}, { step } as unknown as Parameters<typeof tool.handler>[1]);
+  };
+
+  it("skips the warm preview and redacts the output when the project has secrets", async () => {
+    mocks.resolveEnv.mockResolvedValue({
+      publicEntries: [],
+      secretEntries: [{ key: "DATABASE_URL", value: SECRET }],
+      failedKeys: [],
+    });
+    fakeSandbox({ exitCode: 0 }, { exitCode: 1, stdout: `vite.config.ts: DATABASE_URL=${SECRET}` });
+
+    const result = await runTool([{ _id: "env_1", key: "DATABASE_URL", visibility: "secret" }]);
+
+    expect(e2b.list).not.toHaveBeenCalled();
+    expect(e2b.create).toHaveBeenCalledTimes(1);
+    expect(result).toContain("DATABASE_URL=[redacted]");
+    expect(result).not.toContain(SECRET);
+  });
+
+  it.each([
+    ["reading the variables fails", () => mocks.query.mockImplementation(async (ref) => {
+      if (getFunctionName(ref) === "system:getEnvVarsForSandbox") throw new Error("Convex unavailable");
+      return rowsOf(starter());
+    })],
+    ["the secrets cannot be opened", () => mocks.resolveEnv.mockRejectedValue(new Error("CODENAYA_LOCAL_KEK is not set"))],
+  ])("still checks, cold, when %s", async (_case, arrange) => {
+    fakeSandbox();
+
+    const result = await runTool([{ _id: "env_1", key: "DATABASE_URL", visibility: "secret" }], arrange);
+
+    expect(result?.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(e2b.list).not.toHaveBeenCalled();
+    expect(e2b.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the static-check result when the variables come back missing", async () => {
+    // As in tests whose Convex mock does not know the query (#456).
+    const result = await runTool(undefined, () => vi.stubEnv("E2B_API_KEY", ""));
+
+    expect(result?.split("\n")[0]).toBe(STATIC_CHECKS_PASSED);
+  });
+
+  it("looks for the owner's warm preview when the project has no variables", async () => {
+    e2b.list.mockReturnValue({ nextItems: async () => [] });
+    fakeSandbox();
+
+    const result = await runTool([]);
+
+    expect(result?.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(e2b.list).toHaveBeenCalledWith(
+      expect.objectContaining({ query: { metadata: { userId: "user_1", projectId: "proj_1" }, state: ["running"] } }),
+    );
+    expect(mocks.resolveEnv).not.toHaveBeenCalled();
   });
 });
