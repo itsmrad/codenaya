@@ -85,7 +85,8 @@ test.describe.serial("agent file locks", () => {
 
     await expect(page.getByRole("button", { name: new RegExp(`${SEEDED_FILE} is locked by the user`) })).toBeVisible();
 
-    // The explorer marks the locked row.
+    // The explorer marks the locked row; the run may have switched to Preview.
+    await page.getByRole("tab", { name: "Code" }).click();
     await expect(page.getByLabel("Locked from AI edits")).toBeVisible();
     await test.info().attach("explorer", { body: await page.screenshot(), contentType: "image/png" });
 
