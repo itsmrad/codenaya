@@ -45,6 +45,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type { McpApprovalGate } from "../../adapters/agentkit";
+import { PROVIDERS } from "../../catalog";
 import { buildMcpAgentTools } from "./build-agent-tools";
 import { createConvexApprovalGate } from "./convex-approval";
 import { requiresApproval } from "./discover-tools";
@@ -157,6 +158,26 @@ const approvalRows = () =>
   );
 
 const GATED = ["stripe_api_write", "send_money", "convert_currency", "setup_recipient"];
+
+describe.each(["notion", "atlassian", "gitlab", "clerk"] as const)("%s published writes", (id) => {
+  it.each([...PROVIDERS[id].destructiveTools, "unlisted_tool"])("never calls %s without approval, even with a misleading read-only hint", async (name) => {
+    // Unknown, unannotated tools are gated too; known writes must override hints.
+    served = [{
+      name, inputSchema: objectSchema,
+      annotations: name === "unlisted_tool" ? undefined : { readOnlyHint: true, destructiveHint: false },
+    }];
+    const provider = PROVIDERS[id];
+    const { invoke } = await buildTools(convexGate("denied"), resolvedServer({
+      providerId: id, namespace: id, displayName: provider.displayName,
+      url: provider.mcpUrl, trustedHostnames: provider.trustedHostnames,
+      destructiveTools: provider.destructiveTools, readOnlyEnforced: false,
+    }));
+
+    expect(await invoke(name)).toMatch(/^Not permitted: .*the user declined/);
+    expect(approvalRows()).toHaveLength(1);
+    expect(called).toEqual([]);
+  });
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
