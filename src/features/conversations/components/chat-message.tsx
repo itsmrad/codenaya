@@ -19,11 +19,13 @@ import {
 } from "@/components/ai-elements/message";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { usePreviewErrors } from "@/features/sandbox-preview/hooks/use-preview-errors";
 import { splitSlashSkills } from "@/features/skills/parse-slash";
 import { cn } from "@/lib/utils";
 
 import type { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { sanitizeAgentText, stuckFilePath } from "../agent-steps";
+import { useChatSendBlock } from "../hooks/use-queue-chat-message";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
 import { type StuckRetry, StuckRunCard } from "./stuck-run-card";
@@ -218,6 +220,8 @@ export const AssistantMessage = ({
   // crashed): after a long silence, offer a retry instead of a bare spinner.
   // The server fails such a run for good after LOST_RUN_MS.
   const stalled = useRunStalled(message);
+  const previewErrors = usePreviewErrors();
+  const fixSending = useChatSendBlock(message.projectId) !== null;
   // Seen running: the reply settles in once it completes. A reply loaded
   // already completed (history) stays still.
   const [startedProcessing] = useState(status === "processing");
@@ -255,6 +259,7 @@ export const AssistantMessage = ({
           model={message.runModel?.label}
           stalled={stalled}
           onOpenFile={onOpenFile}
+          previewErrors={isLast ? { ...previewErrors, sending: fixSending } : undefined}
           checkpointId={checkpointId}
           revertDisabled={revertDisabled}
         />

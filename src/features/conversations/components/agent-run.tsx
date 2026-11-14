@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -45,6 +46,7 @@ import {
   STALLED_RUN_MS,
   fixedBuildErrors,
   lastRunActivity,
+  previewErrorsNote,
   runWaitHint,
   runWrittenPaths,
 } from "../agent-steps";
@@ -472,6 +474,11 @@ interface AgentRunProps {
   stalled?: boolean;
   onOpenFile?: (path: string) => void;
   /**
+   * What the open preview reports, for the latest run only (#223). `sending`:
+   * a fix message is queued or in flight, so Fix waits.
+   */
+  previewErrors?: { count: number; fix: (() => void) | null; sending?: boolean };
+  /**
    * The checkpoint taken before this run, which its diff is read from (#225).
    * Null once it was pruned; undefined while checkpoints load.
    */
@@ -492,6 +499,7 @@ export const AgentRun = ({
   model,
   stalled = false,
   onOpenFile,
+  previewErrors,
   checkpointId,
   revertDisabled = false,
 }: AgentRunProps) => {
@@ -543,6 +551,8 @@ export const AgentRun = ({
     startedLive && "animate-in fade-in-0 duration-300 motion-reduce:animate-none";
 
   const liveLabel = liveStepLabel(steps);
+  // A run that ended on a broken preview doesn't get the success state.
+  const previewNote = previewErrorsNote(status, stalled, previewErrors?.count ?? 0);
   const hint = live ? runWaitHint({ startedAt, steps, now }) : undefined;
 
   const summary = [
@@ -566,67 +576,88 @@ export const AgentRun = ({
       data-run-status={live ? "running" : stalled ? "stalled" : status}
       className="@container w-full overflow-hidden rounded-xl border border-border bg-card/60"
     >
-      <CollapsibleTrigger
-        disabled={rows.length === 0}
-        className="group/run flex h-9 w-full items-center gap-2 px-3 text-left text-[13px] outline-none transition-colors duration-100 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40 disabled:cursor-default disabled:hover:bg-transparent"
-      >
-        {live ? (
-          <>
-            <LoaderGrid />
-            {reduceMotion ? (
-              <span className="min-w-0 truncate text-muted-foreground">{liveLabel}</span>
-            ) : (
-              <Shimmer as="span" duration={1.4} className="min-w-0 truncate">
-                {liveLabel}
-              </Shimmer>
-            )}
-            <span className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-              {model && (
-                <span className="hidden max-w-48 truncate @sm:inline" title={model}>
-                  {model} ·
+      <div className="flex items-center">
+        <CollapsibleTrigger
+          disabled={rows.length === 0}
+          className="group/run flex h-9 min-w-0 flex-1 items-center gap-2 px-3 text-left text-[13px] outline-none transition-colors duration-100 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40 disabled:cursor-default disabled:hover:bg-transparent"
+        >
+          {live ? (
+            <>
+              <LoaderGrid />
+              {reduceMotion ? (
+                <span className="min-w-0 truncate text-muted-foreground">{liveLabel}</span>
+              ) : (
+                <Shimmer as="span" duration={1.4} className="min-w-0 truncate">
+                  {liveLabel}
+                </Shimmer>
+              )}
+              <span className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                {model && (
+                  <span className="hidden max-w-48 truncate @sm:inline" title={model}>
+                    {model} ·
+                  </span>
+                )}
+                <span className="font-mono tabular-nums">{formatDuration(now - startedAt)}</span>
+              </span>
+            </>
+          ) : (
+            <>
+              {errors > 0 || stalled || status === "cancelled" || previewNote ? (
+                <CircleAlertIcon
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    errors > 0 || stalled || previewNote ? "text-destructive" : "text-muted-foreground",
+                    settle,
+                  )}
+                />
+              ) : (
+                <CheckCircle2Icon className={cn("size-3.5 shrink-0 text-muted-foreground", settle)} />
+              )}
+              <span className={cn("shrink-0 text-foreground/80", settle)}>
+                {stalled
+                  ? "Stopped responding"
+                  : previewNote
+                  ? "Finished"
+                  : status === "cancelled"
+                  ? `Stopped after ${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`
+                  : endedAt
+                    ? `Worked for ${formatDuration(endedAt - startedAt)}`
+                    : "Worked"}
+              </span>
+              {status !== "cancelled" && (
+                <span className={cn("min-w-0 truncate text-muted-foreground", settle)} title={summary}>
+                  · {summary}
                 </span>
               )}
-              <span className="font-mono tabular-nums">{formatDuration(now - startedAt)}</span>
-            </span>
-          </>
-        ) : (
-          <>
-            {errors > 0 || stalled || status === "cancelled" ? (
-              <CircleAlertIcon
-                className={cn(
-                  "size-3.5 shrink-0",
-                  errors > 0 || stalled ? "text-destructive" : "text-muted-foreground",
-                  settle,
-                )}
-              />
-            ) : (
-              <CheckCircle2Icon className={cn("size-3.5 shrink-0 text-muted-foreground", settle)} />
-            )}
-            <span className={cn("shrink-0 text-foreground/80", settle)}>
-              {stalled
-                ? "Stopped responding"
-                : status === "cancelled"
-                ? `Stopped after ${toolSteps.length} ${toolSteps.length === 1 ? "step" : "steps"}`
-                : endedAt
-                  ? `Worked for ${formatDuration(endedAt - startedAt)}`
-                  : "Worked"}
-            </span>
-            {status !== "cancelled" && (
-              <span className={cn("min-w-0 truncate text-muted-foreground", settle)} title={summary}>
-                · {summary}
-              </span>
-            )}
-            {/* Outside the truncating summary, so the summary is cut first and
-                the only text signal that a step failed stays visible (#264). */}
-            {errors > 0 && (
-              <span className={cn("shrink-0 text-destructive", settle)}>
-                · {errors} {errors === 1 ? "error" : "errors"}
-              </span>
-            )}
-            <ChevronRightIcon className="ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]/run:rotate-90 motion-reduce:transition-none" />
-          </>
+              {/* Outside the truncating summary, so the summary is cut first and
+                  the only text signal that a step failed stays visible (#264). */}
+              {errors > 0 && (
+                <span className={cn("shrink-0 text-destructive", settle)}>
+                  · {errors} {errors === 1 ? "error" : "errors"}
+                </span>
+              )}
+              {previewNote && (
+                <span className={cn("shrink-0 text-destructive", settle)}>· {previewNote}</span>
+              )}
+              <ChevronRightIcon className="ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]/run:rotate-90 motion-reduce:transition-none" />
+            </>
+          )}
+        </CollapsibleTrigger>
+        {/* Beside the trigger: a button can't sit inside another button. */}
+        {previewNote && previewErrors?.fix && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="mr-1.5 h-6 shrink-0 px-2 text-xs"
+            aria-label="Fix preview errors"
+            disabled={previewErrors.sending}
+            onClick={previewErrors.fix}
+          >
+            Fix
+          </Button>
         )}
-      </CollapsibleTrigger>
+      </div>
       {/* A quiet run says so honestly instead of looking frozen (#478). The
           live region stays mounted while the run is live, so screen readers
           announce the hint when it appears. */}

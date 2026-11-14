@@ -1,5 +1,5 @@
 // CSI sequences (colours, cursor moves, line clears) and OSC titles/links.
-const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+export const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
 // The output buffer grows for the whole session; the last line is in its tail.
 const TAIL_LENGTH = 4096;

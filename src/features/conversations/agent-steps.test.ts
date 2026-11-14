@@ -14,6 +14,7 @@ import {
   describeToolCall,
   fixedBuildErrors,
   lastRunActivity,
+  previewErrorsNote,
   runWaitHint,
   runWrittenPaths,
   sanitizeAgentText,
@@ -180,6 +181,20 @@ describe("lastRunActivity", () => {
         { id: "b", kind: "tool", status: "running", startedAt: 4_000 },
       ]),
     ).toBe(5_000);
+  });
+});
+
+describe("previewErrorsNote", () => {
+  it("replaces the success summary when a finished run left the preview broken", () => {
+    expect(previewErrorsNote("completed", false, 1)).toBe("preview has 1 error");
+    expect(previewErrorsNote("completed", false, 2)).toBe("preview has 2 errors");
+  });
+
+  it("leaves running, stalled, stopped and clean runs alone", () => {
+    expect(previewErrorsNote("processing", false, 1)).toBeNull();
+    expect(previewErrorsNote("completed", true, 1)).toBeNull();
+    expect(previewErrorsNote("cancelled", false, 1)).toBeNull();
+    expect(previewErrorsNote("completed", false, 0)).toBeNull();
   });
 });
 
