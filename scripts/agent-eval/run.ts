@@ -8,6 +8,7 @@ import { drive, finalFiles } from "./drive";
 import { ledgerEntries, readUsage } from "./cost";
 import { sanitize } from "./capture";
 import { score } from "./score";
+import { judge } from "./judge";
 import type { Score } from "./score";
 
 async function main() {
@@ -28,7 +29,7 @@ async function main() {
   await readUsage();
   const directory = `scripts/agent-eval/results/${new Date().toISOString().replace(/[:.]/g, "-")}`;
   await mkdir(directory, { recursive: true });
-  const scores: Score[] = [];
+  const scores: Judged[] = [];
   const { browser, page: auth, user } = await session(values["base-url"]!);
   try {
     for (const model of models) for (let run = 1; run <= count; run++) {
@@ -45,14 +46,14 @@ async function main() {
           if (name === "followup" && !saasId) throw new Error("Cannot follow up: saas did not create a project");
           const trail = await drive(page, user, { id: `${directory}/${id}`, model, prompt: prompts[name].prompt, maxUsd: cap, directory: runDirectory, projectId: name === "followup" ? saasId : undefined });
           projectId = trail.projectId as Id<"projects"> | undefined;
-          const result = score(trail, projectId ? await finalFiles(projectId) : []);
+          const result: Judged = score(trail, projectId ? await finalFiles(projectId) : []);
           result.id = id;
+          if (values.judge && trail.preview.screenshot) result.judge = await judge(trail.id, values["judge-model"]!, prompts[name].prompt, prompts[name].rubric, `${runDirectory}/${trail.preview.screenshot}`);
           scores.push(result);
           await writeFile(`${runDirectory}/score.json`, sanitize(result));
           await writeFile(`${directory}/scoreboard.md`, scoreboard(scores, values["base-url"]!));
           console.log(`${id}: completed=${result.completed}, preview=${result.preview.loaded}, tokens=${result.tokensIn}/${result.tokensOut}, $${result.usd.toFixed(6)}; ${runDirectory}`);
           if (name === "saas") saasId = projectId;
-          if (values.judge) throw new Error("Judge not implemented yet");
         } finally {
           await page.close();
           if (projectId && !values.keep && !(name === "saas" && names.includes("followup"))) await (await userConvexClient(auth)).mutation(api.projects.remove, { id: projectId });
@@ -62,8 +63,10 @@ async function main() {
   } finally { await browser.close(); }
 }
 
-function scoreboard(scores: Score[], base: string) {
-  return `# Agent evaluation\n\n| Model / prompt | Completed | Build passes | Tool errors | Calls ≈ / cap | Preview | Fixes | First preview / wall (s) | Tokens in/out | USD | Project |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n` + scores.map((s) => `| ${s.id} | ${s.completed} | ${s.checkBuild.filter((c) => c.passed).length}/${s.checkBuild.length} | ${s.toolErrorCount} | ${s.modelCallsApprox}/${s.iterationCapHit || s.capped} | ${s.preview.loaded && !s.preview.overlay} | ${s.autoFixCount} | ${s.firstPreviewMs === null ? "—" : (s.firstPreviewMs / 1000).toFixed(1)} / ${(s.wallMs / 1000).toFixed(1)} | ${s.tokensIn}/${s.tokensOut} | ${s.usd.toFixed(6)} | [open](${base}/projects/${s.projectId}) |`).join("\n") + "\n";
+type Judged = Score & { judge?: Awaited<ReturnType<typeof judge>> };
+
+function scoreboard(scores: Judged[], base: string) {
+  return `# Agent evaluation\n\n| Model / prompt | Completed | Build passes | Tool errors | Calls ≈ / cap | Preview | Fixes | First preview / wall (s) | Tokens in/out | USD | Judge | Project |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n` + scores.map((s) => `| ${s.id} | ${s.completed} | ${s.checkBuild.filter((c) => c.passed).length}/${s.checkBuild.length} | ${s.toolErrorCount} | ${s.modelCallsApprox}/${s.iterationCapHit || s.capped} | ${s.preview.loaded && !s.preview.overlay} | ${s.autoFixCount} | ${s.firstPreviewMs === null ? "—" : (s.firstPreviewMs / 1000).toFixed(1)} / ${(s.wallMs / 1000).toFixed(1)} | ${s.tokensIn}/${s.tokensOut} | ${s.usd.toFixed(6)} | ${s.judge ? `${s.judge.score}/10, ${s.judge.passed}/${s.judge.total}` : "—"} | [open](${base}/projects/${s.projectId}) |`).join("\n") + "\n";
 }
 
 main().catch((error) => { console.error(JSON.parse(sanitize({ error: String(error) })).error); process.exitCode = 1; });

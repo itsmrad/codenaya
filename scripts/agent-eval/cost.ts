@@ -33,16 +33,18 @@ export async function ledgerEntries(): Promise<Entry[]> {
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
 }
 
-export async function recordUsage(run: string, rows: Usage[]) {
+/** Upsert by `run`, so repeated polls of one message never double count. */
+export async function appendLedger(...updates: Entry[]) {
   const entries = await ledgerEntries();
-  for (const row of rows) {
-    const id = `${run}/${row.messageId}`;
-    const entry = { at: new Date().toISOString(), run: id, provider: "anthropic", model: row.model, tokens_in: row.inputTokens, tokens_out: row.outputTokens, usd: row.costUsd };
-    const index = entries.findIndex((e) => e.run === id);
+  for (const entry of updates) {
+    const index = entries.findIndex((e) => e.run === entry.run);
     if (index < 0) entries.push(entry); else entries[index] = entry;
   }
   await mkdir("scripts/agent-eval/results", { recursive: true });
   await writeFile(LEDGER, JSON.stringify(entries, null, 2));
 }
+
+export const recordUsage = (run: string, rows: Usage[]) =>
+  appendLedger(...rows.map((row) => ({ at: new Date().toISOString(), run: `${run}/${row.messageId}`, provider: "anthropic", model: row.model, tokens_in: row.inputTokens, tokens_out: row.outputTokens, usd: row.costUsd })));
 
 export const totalUsd = (rows: Usage[]) => rows.reduce((sum, r) => sum + r.costUsd, 0);
