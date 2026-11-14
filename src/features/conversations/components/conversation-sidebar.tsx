@@ -68,6 +68,7 @@ import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { PastConversationsDialog } from "./past-conversations-dialog";
 import { sendQueuedMessage, useChatStore } from "../store/use-chat-store";
 import { useAgentModel } from "../hooks/use-agent-model";
+import { useSwarmEnabled } from "../hooks/use-agent-tasks";
 import { AgentModelSelect } from "./agent-model-select";
 import { useEnhancePrompt } from "../hooks/use-enhance-prompt";
 import { EnhancePromptButton } from "./enhance-prompt-button";
@@ -113,7 +114,10 @@ export const ConversationSidebar = ({
   const enhancer = useEnhancePrompt(input, setInput);
   const slashMenu = useSkillSlashMenu(projectId, input, setInput);
   const uploadImages = useUploadChatImages(projectId);
-  const [mode, setMode] = useState<ComposerMode>("build");
+  const [chosenMode, setMode] = useState<ComposerMode>("build");
+  const swarmEnabled = useSwarmEnabled();
+  // Swarm switched off mid-draft falls back to Build.
+  const mode = chosenMode === "swarm" && !swarmEnabled ? "build" : chosenMode;
   // A key still loading (or gone) is left to the server to check.
   const modelKeys = useAiProviderKeys();
   const platform = usePlatformModelsOrCatalog();
@@ -667,6 +671,7 @@ export const ConversationSidebar = ({
                 <PlanModeToggle
                   mode={mode}
                   onModeChange={setMode}
+                  swarm={swarmEnabled}
                   disabled={isProcessing}
                 />
                 <AgentModelSelect

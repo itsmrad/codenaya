@@ -19,10 +19,13 @@ const MODES = [
 export const PlanModeToggle = ({
   mode,
   onModeChange,
+  swarm = true,
   disabled = false,
 }: {
   mode: ComposerMode;
   onModeChange: (mode: ComposerMode) => void;
+  /** Off: the Swarm option is hidden (the SWARM_ENABLED kill switch). */
+  swarm?: boolean;
   disabled?: boolean;
 }) => (
   <RadioGroup
@@ -33,7 +36,7 @@ export const PlanModeToggle = ({
     orientation="horizontal"
     className="flex shrink-0 items-center gap-0.5 rounded-lg border border-border p-0.5"
   >
-    {MODES.map(({ value, label, icon: Icon, hint }) => (
+    {MODES.filter(({ value }) => swarm || value !== "swarm").map(({ value, label, icon: Icon, hint }) => (
       <Tooltip key={value}>
         <TooltipTrigger asChild>
           <RadioGroupPrimitive.Item value={value} aria-label={label} asChild>
