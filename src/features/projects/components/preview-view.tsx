@@ -4,7 +4,10 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from "react"
 import { Allotment } from "allotment";
 import { motion, useReducedMotion } from "motion/react";
 import {
+  ArrowDownIcon,
+  CheckIcon,
   ChevronDownIcon,
+  CopyIcon,
   Loader2Icon,
   TerminalSquareIcon,
   AlertTriangleIcon,
@@ -15,12 +18,20 @@ import {
   BoxIcon,
   LockIcon,
   KeyRoundIcon,
+  Trash2Icon,
 } from "lucide-react";
 
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
-import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
+import {
+  PreviewTerminal,
+  type PreviewTerminalHandle,
+} from "@/features/sandbox-preview/components/preview-terminal";
+import {
+  sliceClearedOutput,
+  shouldResetClearedOffset,
+} from "@/features/sandbox-preview/utils/log-viewer";
 import { PreviewBuilding } from "@/features/sandbox-preview/components/preview-building";
 import { CodenayaLogo } from "@/components/codenaya-logo";
 import { PreviewBootSteps } from "@/features/sandbox-preview/components/preview-boot-steps";
@@ -146,13 +157,60 @@ export const PreviewView = ({
     if (status === "error") setErrorDismissed(true);
   };
 
+  const terminalRef = useRef<PreviewTerminalHandle>(null);
+  const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [clearedOffset, setClearedOffset] = useState(0);
+  const [isScrolledUp, setIsScrolledUp] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
+    };
+  }, []);
+
+  // Reset cleared offset if output was cleared or restarted
+  const resetClearedOffset = shouldResetClearedOffset(
+    terminalOutput.length,
+    clearedOffset,
+  );
+  if (resetClearedOffset) {
+    setClearedOffset(0);
+  }
+  const effectiveClearedOffset = resetClearedOffset ? 0 : clearedOffset;
+
+  const handleRestart = useCallback(() => {
+    setClearedOffset(0);
+    restart();
+  }, [restart]);
+
+  const handleCopyLogs = useCallback(async () => {
+    if (!terminalRef.current) return;
+    const ok = await terminalRef.current.copyLogs();
+    if (ok) {
+      setCopied(true);
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
+      copiedTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
+    }
+  }, []);
+
+  const handleClearLogs = useCallback(() => {
+    setClearedOffset(terminalOutput.length);
+    terminalRef.current?.clear();
+  }, [terminalOutput.length]);
+
+  const handleJumpToLatest = useCallback(() => {
+    terminalRef.current?.scrollToBottom();
+    setIsScrolledUp(false);
+  }, []);
+
   // A boot that started mid-build can fail on files the agent hadn't written
   // yet; boot once more against the finished build.
   const wasFirstBuild = useRef(firstBuild);
   useEffect(() => {
-    if (wasFirstBuild.current && !firstBuild && status === "error") restart();
+    if (wasFirstBuild.current && !firstBuild && status === "error") handleRestart();
     wasFirstBuild.current = firstBuild;
-  }, [firstBuild, status, restart]);
+  }, [firstBuild, status, handleRestart]);
 
   // The iframe's latest load, so first_preview_shown waits until it is visible.
   const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
@@ -188,7 +246,7 @@ export const PreviewView = ({
       previewUrl={previewUrl}
       refreshKey={refreshKey}
       device={device}
-      restart={restart}
+      restart={handleRestart}
       errorKind={errorKind}
       onUseWebContainer={() => switchEngine("webcontainer")}
       agentWorking={Boolean(activeRun)}
@@ -274,7 +332,7 @@ export const PreviewView = ({
             variant="ghost"
             className="size-8 rounded-md hover:bg-muted"
             disabled={isLoading}
-            onClick={restart}
+            onClick={handleRestart}
             title={`Restart ${activeEngine}`}
             aria-label={`Restart ${activeEngine}`}
           >
@@ -399,7 +457,7 @@ export const PreviewView = ({
             <PreviewSettingsPopover
               projectId={projectId}
               initialValues={project?.settings}
-              onSave={restart}
+              onSave={handleRestart}
             />
           </div>
         </div>
@@ -431,20 +489,61 @@ export const PreviewView = ({
                 >
                   <div className="h-9 flex items-center pl-4 pr-1.5 text-xs font-medium gap-2 text-muted-foreground border-b border-border/50 shrink-0 bg-muted/20">
                     <TerminalSquareIcon className="size-4" />
-                    Terminal
+                    Logs
                     <PreviewStatusBadge status={status} />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="ml-auto h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
-                      aria-expanded={true}
-                      onClick={toggleTerminal}
-                    >
-                      Hide logs
-                      <ChevronDownIcon className="size-3.5" />
-                    </Button>
+                    <div className="ml-auto flex items-center gap-1">
+                      {isScrolledUp && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+                          onClick={handleJumpToLatest}
+                        >
+                          <ArrowDownIcon className="size-3.5" />
+                          Jump to latest
+                        </Button>
+                      )}
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="size-7 text-muted-foreground hover:text-foreground"
+                        title="Copy logs"
+                        aria-label="Copy logs"
+                        onClick={handleCopyLogs}
+                      >
+                        {copied ? (
+                          <CheckIcon className="size-3.5 text-emerald-500" />
+                        ) : (
+                          <CopyIcon className="size-3.5" />
+                        )}
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="size-7 text-muted-foreground hover:text-foreground"
+                        title="Clear logs"
+                        aria-label="Clear logs"
+                        onClick={handleClearLogs}
+                      >
+                        <Trash2Icon className="size-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+                        aria-expanded={true}
+                        onClick={toggleTerminal}
+                      >
+                        Hide logs
+                        <ChevronDownIcon className="size-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                  <PreviewTerminal output={terminalOutput} />
+                  <PreviewTerminal
+                    ref={terminalRef}
+                    output={sliceClearedOutput(terminalOutput, effectiveClearedOffset)}
+                    onScrolledUpChange={setIsScrolledUp}
+                  />
                 </motion.div>
               </div>
             </Allotment.Pane>
