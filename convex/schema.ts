@@ -430,6 +430,10 @@ export default defineSchema({
     startedAt: v.optional(v.number()),
     endedAt: v.optional(v.number()),
     updatedAt: v.number(),
+    // Optional sandbox self-check (ADR 0013, S6): the swarm's foundation
+    // snapshot, and "running", "scoped-ok", "scoped-failed (...)" or "skipped (...)".
+    seedSnapshotId: v.optional(v.string()),
+    selfCheck: v.optional(v.string()),
   }))
     .index("by_message", ["messageId"])
     .index("by_message_and_taskId", ["messageId", "taskId"])

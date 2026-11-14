@@ -115,6 +115,7 @@ export const finishTask = mutation({
     status: v.union(v.literal("done"), v.literal("error")),
     summary: v.optional(v.string()),
     error: v.optional(v.string()),
+    selfCheck: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -126,11 +127,50 @@ export const finishTask = mutation({
       status: args.status,
       summary: args.summary,
       error: args.error,
+      ...(args.selfCheck !== undefined ? { selfCheck: args.selfCheck } : {}),
       startedAt: task.startedAt ?? now,
       endedAt: now,
       updatedAt: now,
     });
     return null;
+  },
+});
+
+/** Stores the swarm's foundation snapshot on its task rows, for the workers' self-checks. */
+export const setSeedSnapshot = mutation({
+  args: { internalKey: v.string(), messageId: v.id("messages"), snapshotId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const tasks = await ctx.db.query("agentTasks")
+      .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
+      .take(MAX_SWARM_TASKS);
+    for (const task of tasks) await ctx.db.patch("agentTasks", task._id, { seedSnapshotId: args.snapshotId });
+    return null;
+  },
+});
+
+/**
+ * Takes one of the swarm's `max` self-check slots for this task. A slot is any
+ * sibling's self-check that was not skipped. Retries keep a slot already taken.
+ */
+export const claimSelfCheck = mutation({
+  args: { internalKey: v.string(), agentTaskId: v.id("agentTasks"), max: v.number() },
+  returns: v.union(v.object({ seedSnapshotId: v.string() }), v.object({ skipped: v.string() })),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const task = await ctx.db.get("agentTasks", args.agentTaskId);
+    if (!task || task.status === "done" || task.status === "error") return { skipped: "task finished" };
+    const { seedSnapshotId } = task;
+    if (!seedSnapshotId) return { skipped: "no snapshot yet" };
+    if (task.selfCheck === "running") return { seedSnapshotId };
+    const siblings = await ctx.db.query("agentTasks")
+      .withIndex("by_message", (q) => q.eq("messageId", task.messageId))
+      .take(MAX_SWARM_TASKS);
+    const taken = siblings.filter((row) => row.selfCheck !== undefined && !row.selfCheck.startsWith("skipped")).length;
+    if (taken >= args.max) return { skipped: "swarm sandbox cap reached" };
+    await ctx.db.patch("agentTasks", task._id, { selfCheck: "running", updatedAt: Date.now() });
+    return { seedSnapshotId };
   },
 });
 

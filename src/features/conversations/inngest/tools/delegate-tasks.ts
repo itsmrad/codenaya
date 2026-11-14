@@ -7,6 +7,7 @@ import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../../agent-models";
 import { type SwarmPlan, swarmPlanSchema, validatePlan } from "../../swarm";
+import { cleanupSwarmSandboxes, seedSwarmSnapshot } from "../../swarm-sandbox";
 import { type SwarmWorkerEvent, type SwarmWorkerResult, swarmWorker } from "../swarm-worker";
 import { folderEnsurer, folderPaths, getProjectFiles, indexProjectFiles, splitPath } from "./paths";
 
@@ -32,10 +33,11 @@ const taskReport = (task: Task, settled: PromiseSettledResult<SwarmWorkerResult>
       : settled.value.summary;
     return `${head} (failed)\n${reason}\nFinish it yourself; it owned ${task.ownedPaths.join(", ")}.`;
   }
-  const { status, summary, writtenPaths } = settled.value;
+  const { status, summary, writtenPaths, selfCheck } = settled.value;
   const files = writtenPaths.length ? writtenPaths.join(", ") : "none";
+  const check = selfCheck ? `\nSelf-check (its files only, not the build): ${selfCheck}` : "";
   const finish = status === "unfinished" ? `\nFinish the rest yourself; it owned ${task.ownedPaths.join(", ")}.` : "";
-  return `${head} (${status})\nFiles written: ${files}\n${summary}${finish}`;
+  return `${head} (${status})\nFiles written: ${files}${check}\n${summary}${finish}`;
 };
 
 /**
@@ -91,6 +93,9 @@ export const createDelegateTasksTool = ({ internalKey, projectId, messageId, own
       const planOverview = `## Swarm plan\n${plan.tasks
         .map((task) => `- ${task.id} (${task.title}): ${task.ownedPaths.join(", ")}`)
         .join("\n")}`;
+      // Beside the workers (a parallel step), for their optional self-checks; null while that is off.
+      const foundation = step.run("swarm-foundation", () => seedSwarmSnapshot({ internalKey, projectId, messageId }))
+        .catch(() => null);
       const settled = await Promise.allSettled(
         plan.tasks.map((task, i) =>
           step.invoke(`run-task-${task.id}`, {
@@ -107,6 +112,8 @@ export const createDelegateTasksTool = ({ internalKey, projectId, messageId, own
           }) as Promise<SwarmWorkerResult>,
         ),
       );
+      const snapshotId = await foundation;
+      if (snapshotId) await step.run("swarm-sandbox-cleanup", () => cleanupSwarmSandboxes({ messageId, snapshotId }));
       return [
         ...plan.tasks.map((task, i) => taskReport(task, settled[i])),
         "Integrate now: apply every NEEDS: request, finish failed or unfinished tasks, then run checkBuild.",

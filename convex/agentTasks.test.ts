@@ -178,6 +178,30 @@ describe("agentTasks", () => {
     expect(await t.mutation(api.agentTasks.upsertTaskSteps, { ...valid, steps: [] })).toBeNull();
   });
 
+  test("self-check slots: snapshot first, at most max per swarm, skipped ones freed, retries keep theirs", async () => {
+    const t = setup();
+    const parent = await seedMessage(t);
+    const other = await seedMessage(t);
+    const ids = await create(t, parent, [task("a"), task("b"), task("c")]);
+    const [otherId] = await create(t, other);
+    const claim = (agentTaskId: (typeof ids)[number]) =>
+      t.mutation(api.agentTasks.claimSelfCheck, { internalKey: INTERNAL_KEY, agentTaskId, max: 2 });
+    expect(await claim(ids[0])).toEqual({ skipped: "no snapshot yet" });
+    await t.mutation(api.agentTasks.setSeedSnapshot, { internalKey: INTERNAL_KEY, messageId: parent.messageId, snapshotId: "snap" });
+    expect(await claim(ids[0])).toEqual({ seedSnapshotId: "snap" });
+    expect(await claim(ids[0])).toEqual({ seedSnapshotId: "snap" });
+    expect(await claim(ids[1])).toEqual({ seedSnapshotId: "snap" });
+    expect(await claim(ids[2])).toEqual({ skipped: "swarm sandbox cap reached" });
+    await t.mutation(api.agentTasks.finishTask, { internalKey: INTERNAL_KEY, agentTaskId: ids[1], status: "done", selfCheck: "skipped (E2B rate limit)" });
+    expect(await claim(ids[2])).toEqual({ seedSnapshotId: "snap" });
+    expect((await get(t, parent.messageId)).map((row) => row.selfCheck)).toEqual(["running", "skipped (E2B rate limit)", "running"]);
+    expect(await t.run((ctx) => ctx.db.get("agentTasks", otherId))).not.toHaveProperty("seedSnapshotId");
+    await expect(t.mutation(api.agentTasks.setSeedSnapshot, { internalKey: "wrong", messageId: parent.messageId, snapshotId: "x" }))
+      .rejects.toMatchObject({ data: { code: "UNAUTHENTICATED" } });
+    await expect(t.mutation(api.agentTasks.claimSelfCheck, { internalKey: "wrong", agentTaskId: ids[0], max: 2 }))
+      .rejects.toMatchObject({ data: { code: "UNAUTHENTICATED" } });
+  });
+
   test("startTask rejects a task from another message or project", async () => {
     const t = setup();
     const parent = await seedMessage(t);

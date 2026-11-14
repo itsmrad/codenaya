@@ -13,6 +13,7 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../agent-models";
 import { type AgentStep, runWrittenPaths, stepsFromResponse, stepsFromToolResults, turnHeartbeat } from "../agent-steps";
 import { MAX_WORKER_USD, WORKER_MAX_STEPS } from "../swarm";
+import { selfCheckStep, selfCheckWorker } from "../swarm-sandbox";
 import { CODING_AGENT_SYSTEM_PROMPT, STEP_BUDGET_NOTE, SWARM_WORKER_NOTE } from "./constants";
 import { guardOwnedPaths } from "./lib/ownership-guard";
 import { hitOutputLimit, markCutOffCalls, refuseCutOffCalls } from "./lib/output-limit";
@@ -40,6 +41,8 @@ export interface SwarmWorkerResult {
   status: "done" | "unfinished" | "error";
   summary: string;
   writtenPaths: string[];
+  /** The optional sandbox self-check's outcome: never "verified" (swarm-sandbox.ts). */
+  selfCheck?: string;
 }
 
 const SUMMARY_AGENT_NAME = "codenaya-summary";
@@ -193,10 +196,17 @@ export const swarmWorker = inngest.createFunction(
       || "The worker finished without a summary.";
     // Stored as done: what it wrote is real; the orchestrator reads the prefix.
     const summary = unfinished ? `Unfinished (step or cost cap): ${reply}` : reply;
+    const check = await selfCheckWorker({
+      step, internalKey, projectId, messageId: parentMessageId, agentTaskId, ownedPaths: task.ownedPaths,
+      model: codingModel, onEvent: (event) => recordSteps("worker-self-check", [selfCheckStep(event, Date.now())]),
+    });
     lastHeartbeat.delete(agentTaskId);
     await step.run("finish-worker", () => convex.mutation(api.agentTasks.finishTask, {
-      internalKey, agentTaskId, status: "done", summary,
+      internalKey, agentTaskId, status: "done", summary, selfCheck: check?.selfCheck,
     }));
-    return { status: unfinished ? "unfinished" : "done", summary, writtenPaths: runWrittenPaths([...recorded.values()]) };
+    const writtenPaths = [...new Set([...runWrittenPaths([...recorded.values()]), ...(check?.filesChanged ?? [])])];
+    return {
+      status: unfinished ? "unfinished" : "done", summary, writtenPaths, ...(check ? { selfCheck: check.selfCheck } : {}),
+    };
   },
 );
