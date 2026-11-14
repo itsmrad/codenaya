@@ -6,7 +6,7 @@ const config = getDefaultConfig(__dirname);
 // Web app modules that are plain TypeScript with no web-only imports (chat
 // helpers, model catalogs, promo rules, slash-skill parsing, starter templates,
 // first-run progress): the app bundles them directly instead of copying them.
-config.watchFolders = ["conversations", "ai-providers", "promotions", "integrations", "skills", "templates", "projects/utils"].map(
+config.watchFolders = ["conversations", "ai-providers", "promotions", "integrations", "skills", "templates", "projects/utils", "sandbox-preview/utils"].map(
   (feature) => path.resolve(__dirname, "../src/features", feature),
 );
 
