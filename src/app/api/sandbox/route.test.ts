@@ -535,4 +535,28 @@ describe("POST /api/sandbox install failure (#491)", () => {
     expect(body).toContain("[redacted]");
     expect(body).not.toContain(SECRET);
   });
+
+  it("sends the failed-install line before the error event, even when a multiline secret holds it back", async () => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
+    mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : [],
+    );
+    // A secret with a newline stops the redactor releasing completed lines early.
+    const pem = `-----BEGIN PRIVATE KEY-----\n${"x".repeat(200)}\n-----END PRIVATE KEY-----`;
+    mocks.resolveProjectEnv.mockResolvedValue({
+      publicEntries: [],
+      secretEntries: [{ key: "PRIVATE_KEY", value: pem }],
+      failedKeys: [],
+    });
+    failingInstall("npm error code ERESOLVE\n");
+
+    const body = await (
+      await POST(request("POST", JSON.stringify({ files, projectId: "proj_1" })))
+    ).text();
+
+    // useSandbox stops reading at the error event, so the line must come first.
+    const failedLine = body.indexOf("failed with exit code 1");
+    expect(failedLine).toBeGreaterThan(-1);
+    expect(failedLine).toBeLessThan(body.indexOf('"type":"error"'));
+  });
 });

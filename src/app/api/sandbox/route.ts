@@ -609,6 +609,8 @@ export async function POST(request: Request) {
               : "transient";
 
         send({ type: "output", data: `\nError: ${message}\n` });
+        // The client stops reading at the error event, so held-back output goes first.
+        flushRedactor();
         send({ type: "error", message, code });
 
         // Kill sandbox on error to free up the slot
