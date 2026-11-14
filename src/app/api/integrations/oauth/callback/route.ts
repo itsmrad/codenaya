@@ -250,6 +250,9 @@ export async function GET(request: Request) {
     if (existing) {
       await convex.mutation(api.system.updateUserConnectionCredential, {
         internalKey, userId, connectionId: existing._id, providerId: provider.id, authMode: "oauth",
+        // The token was issued for the catalog endpoint and scopes, so store those.
+        serverUrl: provider.mcpUrl,
+        scopes: tokens.scope ? tokens.scope.split(/\s+/).filter(Boolean) : [],
         maskedPreview: maskCredential(tokens.access_token), tokenExpiresAt: tokenExpiryFrom(tokens),
         oauthClientId: clientInformation.client_id, authServerUrl: flow.authServerUrl, ...sealed,
       });

@@ -60,7 +60,6 @@ beforeEach(() => {
     _id: "connection",
     credentialRef: "stable-ref",
     serverUrl: "https://example.com/mcp",
-    scopes: [],
   });
   mocks.mutation.mockResolvedValue(null);
   mocks.seal.mockResolvedValue(sealed);
@@ -89,6 +88,8 @@ it("replaces a key using the original encryption context and endpoint, without c
     userId: "alice",
     connectionId: "connection",
     authMode: "api_key",
+    serverUrl: "https://example.com/mcp",
+    scopes: [],
     ...sealed,
   });
 });
