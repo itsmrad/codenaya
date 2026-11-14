@@ -10,7 +10,7 @@ Use this when asked to make an app "SEO-ready", to fix how shared links look, or
 
 ## The site URL
 
-\`og:url\`, \`og:image\`, the canonical link and sitemap entries must be absolute \`https://\` URLs, so they need the site's public origin. Use the one the user gave you. If you don't know it, never invent a domain: write everything else, leave out whatever needs the origin (those tags, \`metadataBase\`, the robots.txt \`Sitemap:\` line, sitemap.xml), and in Notes ask for the URL and list where it goes.
+\`og:url\`, \`og:image\` and sitemap entries must be absolute \`https://\` URLs, so they need the site's public origin. Use the one the user gave you. If you don't know it, never invent a domain: write everything else, leave out whatever needs the origin (those tags, \`metadataBase\`, the robots.txt \`Sitemap:\` line, sitemap.xml), and in Notes ask for the URL and list where it goes.
 
 ## Share image
 
@@ -28,7 +28,6 @@ Link-preview crawlers (chat apps, social networks) generally don't run JavaScrip
   <title>Acme Notes – Notes that organize themselves</title>
   <meta name="description" content="One or two sentences, about 150 characters, saying what the app does and for whom." />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="canonical" href="https://acme.example/" />
 
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Acme Notes" />
@@ -47,7 +46,7 @@ Link-preview crawlers (chat apps, social networks) generally don't run JavaScrip
 </head>
 \`\`\`
 
-(\`acme.example\` stands for the real origin; never ship it.) Edit the starter's \`index.html\` in place: change \`<head>\` and the \`lang\` attribute, keep the rest.
+(\`acme.example\` stands for the real origin; never ship it.) Don't add a \`<link rel="canonical">\` here: every route is served this same file, so a fixed canonical would point them all at the homepage. Edit the starter's \`index.html\` in place: change \`<head>\` and the \`lang\` attribute, keep the rest.
 
 Per-route titles and descriptions: **replace** the site-wide ones from \`index.html\`, never add a second \`<title>\` or \`<meta name="description">\` (don't render those elements in components: two description tags conflict). One small hook, no library:
 
@@ -107,7 +106,7 @@ export const metadata: Metadata = {
 };
 \`\`\`
 
-and \`<html lang="en">\` in the same layout. Each page exports its own \`metadata\` (or \`generateMetadata\` for dynamic routes, never both) with \`title\` and \`description\`. \`openGraph\` is replaced, not merged, per segment, so a page that sets \`openGraph\` repeats \`images\`. A \`src/app/opengraph-image.png\` (1200×630) or \`opengraph-image.tsx\` also works for the image.
+and \`<html lang="en">\` in the same layout. Each page exports its own \`metadata\` (or \`generateMetadata\` for dynamic routes, never both) with \`title\`, \`description\` and \`openGraph: { url: "/pricing", images: OG_IMAGES }\`. Without its own \`openGraph\` a page inherits the layout's \`url: "/"\` and its card points at the homepage; and \`openGraph\` is replaced, not merged, so keep the image list in one exported \`OG_IMAGES\` constant and repeat it. A \`src/app/opengraph-image.png\` (1200×630) or \`opengraph-image.tsx\` also works for the image.
 
 \`src/app/robots.ts\` and \`src/app/sitemap.ts\` instead of static files:
 

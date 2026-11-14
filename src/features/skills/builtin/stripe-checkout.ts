@@ -153,7 +153,7 @@ export async function POST(req: Request) {
 }
 \`\`\`
 
-- \`fulfillOrder\` records the session id and skips ids it has already handled, then grants access or sends the goods.
+- \`fulfillOrder\` first claims the session id (an insert that fails if the id is already recorded, so repeated or concurrent deliveries skip it), then grants access or sends the goods. If that fails, it removes the claim and rethrows: the route returns a 500 and Stripe retries the event, which can then fulfil it.
 - On the thank-you page, you may look the session up server-side (\`getStripe()?.checkout.sessions.retrieve(id)\`) to show what was bought, but fulfilment stays in the webhook.
 - Tell the user how to get \`STRIPE_WEBHOOK_SECRET\`: locally, \`stripe listen --forward-to localhost:3000/api/stripe/webhook\` prints a \`whsec_\` secret; once deployed, add an endpoint for \`<origin>/api/stripe/webhook\` in the Dashboard (events \`checkout.session.completed\` and \`checkout.session.async_payment_succeeded\`) and use its signing secret.
 
