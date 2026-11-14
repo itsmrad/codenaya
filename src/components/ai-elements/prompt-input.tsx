@@ -36,7 +36,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DICTATION_SILENCE_MS, insertTranscript, isDictationKey } from "@/lib/dictation";
+import {
+  DICTATION_SILENCE_MS,
+  dictationErrorMessage,
+  insertTranscript,
+  isDictationKey,
+} from "@/lib/dictation";
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart } from "ai";
 import {
@@ -50,6 +55,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { nanoid } from "nanoid";
+import { toast } from "sonner";
 import {
   type ChangeEvent,
   type ChangeEventHandler,
@@ -1072,6 +1078,7 @@ interface SpeechRecognition extends EventTarget {
   lang: string;
   start(): void;
   stop(): void;
+  abort(): void;
   onstart: ((this: SpeechRecognition, ev: Event) => any) | null;
   onend: ((this: SpeechRecognition, ev: Event) => any) | null;
   onresult:
@@ -1137,9 +1144,11 @@ const getSpeechRecognition = () =>
 /**
  * Voice dictation (#301). Renders nothing where the browser has no speech
  * recognition (e.g. Firefox). Final transcripts go in at the cursor through
- * `onTranscriptionChange`, keeping typed text. Recording stops on submit,
- * when the page loses focus, and after DICTATION_SILENCE_MS without speech.
- * Alt+V (Option+V) toggles it.
+ * `onTranscriptionChange`, keeping typed text. Recording stops when the page
+ * loses focus and after DICTATION_SILENCE_MS without speech; a submit or
+ * unmount discards what is still pending, so no words land after a send.
+ * Alt+V (Option+V) toggles it in the focused composer. Errors (a blocked
+ * microphone, no speech) show a toast and are announced.
  */
 export const PromptInputSpeechButton = ({
   className,
@@ -1155,6 +1164,8 @@ export const PromptInputSpeechButton = ({
   const [isListening, setIsListening] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  // Set once a submit or unmount cancels: later results are dropped.
+  const discardRef = useRef(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const onTranscriptionRef = useRef(onTranscriptionChange);
   useEffect(() => {
@@ -1174,6 +1185,8 @@ export const PromptInputSpeechButton = ({
     recognition.interimResults = false;
     recognition.lang = navigator.language || "en-US";
 
+    discardRef.current = false;
+    let failure: string | null = null;
     let silence: ReturnType<typeof setTimeout> | undefined;
     const waitForSpeech = () => {
       clearTimeout(silence);
@@ -1185,14 +1198,19 @@ export const PromptInputSpeechButton = ({
       setAnnouncement("Dictation started");
       waitForSpeech();
     };
+    recognition.onerror = (event) => {
+      failure = dictationErrorMessage(event.error);
+      if (failure) toast.error(failure);
+    };
     // Also follows an error, such as a denied microphone.
     recognition.onend = () => {
       clearTimeout(silence);
       if (recognitionRef.current === recognition) recognitionRef.current = null;
       setIsListening(false);
-      setAnnouncement("Dictation stopped");
+      setAnnouncement(failure ?? "Dictation stopped");
     };
     recognition.onresult = (event) => {
+      if (discardRef.current) return;
       waitForSpeech();
       let transcript = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -1221,34 +1239,35 @@ export const PromptInputSpeechButton = ({
     }
   }, [textareaRef]);
 
-  // Unmounting (e.g. the composer hides while a run is processing) stops it.
-  useEffect(() => () => recognitionRef.current?.stop(), []);
+  // abort(), not stop(): stop() still delivers a last result, which would land
+  // in the box after it was sent and cleared.
+  const cancel = useCallback(() => {
+    discardRef.current = true;
+    recognitionRef.current?.abort();
+  }, []);
+
+  // Unmounting (e.g. the composer hides while a run is processing) cancels it.
+  useEffect(() => cancel, [cancel]);
 
   useEffect(() => {
     if (!isListening) return;
     const stop = () => recognitionRef.current?.stop();
     const form = buttonRef.current?.closest("form");
     window.addEventListener("blur", stop);
-    form?.addEventListener("submit", stop);
+    form?.addEventListener("submit", cancel);
     return () => {
       window.removeEventListener("blur", stop);
-      form?.removeEventListener("submit", stop);
+      form?.removeEventListener("submit", cancel);
     };
-  }, [isListening]);
+  }, [isListening, cancel]);
 
   useEffect(() => {
     if (!supported) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || !isDictationKey(event)) return;
-      // With two composers on screen (a dialog over the dashboard), the
-      // focused one answers.
-      const focusedForm = document.activeElement?.closest("form");
-      if (
-        focusedForm?.querySelector("[data-dictation]") &&
-        focusedForm !== buttonRef.current?.closest("form")
-      ) {
-        return;
-      }
+      // Only the composer with focus answers, e.g. not the dashboard's
+      // behind the new-project dialog.
+      if (!buttonRef.current?.closest("form")?.contains(document.activeElement)) return;
       event.preventDefault();
       toggleListening();
     };
@@ -1258,18 +1277,16 @@ export const PromptInputSpeechButton = ({
 
   if (!supported) return null;
 
-  const label = isListening ? "Stop dictation" : "Start dictation";
   return (
     <>
       <PromptInputButton
         ref={buttonRef}
-        data-dictation=""
-        aria-label={label}
+        aria-label="Dictate"
         aria-pressed={isListening}
-        title={`${label} (Alt+V)`}
+        title="Dictate (Alt+V)"
         className={cn(
           "relative transition-all duration-200",
-          isListening && "animate-pulse bg-accent text-accent-foreground",
+          isListening && "motion-safe:animate-pulse bg-accent text-accent-foreground",
           className
         )}
         onClick={toggleListening}

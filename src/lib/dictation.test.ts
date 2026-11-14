@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { insertTranscript, isDictationKey } from "./dictation";
+import { dictationErrorMessage, insertTranscript, isDictationKey } from "./dictation";
 
 describe("insertTranscript (#301)", () => {
   it("appends to typed text with a space, keeping what was typed", () => {
@@ -21,6 +21,18 @@ describe("insertTranscript (#301)", () => {
   it("fills an empty box and ignores empty results", () => {
     expect(insertTranscript("", "Build a todo app", 0)).toEqual({ value: "Build a todo app", caret: 16 });
     expect(insertTranscript("Keep", "  ", 4)).toEqual({ value: "Keep", caret: 4 });
+  });
+});
+
+describe("dictationErrorMessage", () => {
+  it("explains each failure and stays quiet for our own cancel", () => {
+    expect(dictationErrorMessage("not-allowed")).toMatch(/Microphone access is blocked/);
+    expect(dictationErrorMessage("service-not-allowed")).toMatch(/Microphone access is blocked/);
+    expect(dictationErrorMessage("no-speech")).toMatch(/No speech heard/);
+    expect(dictationErrorMessage("audio-capture")).toMatch(/No microphone/);
+    expect(dictationErrorMessage("network")).toMatch(/network/);
+    expect(dictationErrorMessage("bad-grammar")).toMatch(/stopped unexpectedly/);
+    expect(dictationErrorMessage("aborted")).toBeNull();
   });
 });
 

@@ -26,6 +26,28 @@ export const insertTranscript = (
   return { value: before + inserted + after, caret: before.length + inserted.length };
 };
 
+/**
+ * What to tell the user when recognition fails; null for "aborted", which is
+ * our own cancel. Codes from the Web Speech API's SpeechRecognitionErrorEvent.
+ */
+export const dictationErrorMessage = (code: string): string | null => {
+  switch (code) {
+    case "aborted":
+      return null;
+    case "not-allowed":
+    case "service-not-allowed":
+      return "Microphone access is blocked. Allow it in your browser to dictate.";
+    case "no-speech":
+      return "No speech heard, so dictation stopped.";
+    case "audio-capture":
+      return "No microphone found.";
+    case "network":
+      return "Dictation needs a network connection.";
+    default:
+      return "Dictation stopped unexpectedly.";
+  }
+};
+
 /** Alt+V (Option+V on macOS); `code`, since Option+V types "√" as its key. */
 export const isDictationKey = (
   event: Pick<KeyboardEvent, "altKey" | "ctrlKey" | "metaKey" | "shiftKey" | "code">,
