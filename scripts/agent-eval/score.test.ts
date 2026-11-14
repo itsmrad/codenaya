@@ -9,7 +9,7 @@ const fixture = (): Trail => ({
   firstPreviewAt: 5000, capped: false, consoleErrors: [], sandboxEvents: [],
   preview: { loaded: true, overlay: false },
   messages: [{ _id: "assistant" as Trail["messages"][number]["_id"], role: "assistant", status: "completed", content: "Done", runModel: { modelId: "claude-haiku-5-5", label: "Haiku" }, steps: [{ id: "build", kind: "tool", tool: "checkBuild", status: "done", text: "Build verified", startedAt: 2000 }] }],
-  usage: [{ messageId: "assistant", model: "claude-haiku-5-5", source: "platform", inputTokens: 10000, outputTokens: 2000, costUsd: 0.002 }],
+  usage: [{ messageId: "assistant", model: "Codenaya · Claude Haiku 5.5", source: "platform", inputTokens: 10000, outputTokens: 2000, costUsd: 0.002 }],
 });
 
 describe("agent evaluation", () => {

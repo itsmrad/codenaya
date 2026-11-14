@@ -1,5 +1,5 @@
 import { missingReferencedFiles, undeclaredPackages, unresolvedImports } from "../../src/features/sandbox-preview/utils/missing-references";
-import { tokenCost, totalUsd } from "./cost";
+import { totalUsd } from "./cost";
 import type { Trail } from "./types";
 
 const FAILURE = "My apologies, I encountered an error while processing your request. Let me know if you need anything else!";
@@ -25,9 +25,8 @@ export function score(trail: Trail, files: { path: string; content: string }[]) 
     autoFixOutcomes: assistants.slice(1).map((m) => ({ status: m.status, stuck: m.stuck })),
     firstPreviewMs: trail.firstPreviewAt ? trail.firstPreviewAt - trail.startedAt : null,
     wallMs: trail.endedAt - trail.startedAt, tokensIn, tokensOut, usd: totalUsd(trail.usage),
-    // Ledger is authoritative. Aggregate tokens cannot recover per-call >100K
-    // tiers or cache splits; retain this estimate for cross-checking only.
-    estimatedUsd: trail.usage.reduce((sum, r) => sum + tokenCost(r.model, r.inputTokens, r.outputTokens), 0),
+    // creditLedger.costUsd is authoritative: rows sum a run's calls, so the
+    // per-prompt >100K price tier cannot be re-derived from them.
     usageRecorded: assistants.length > 0 && assistants.every((m) => trail.usage.some((r) => r.messageId === m._id)),
   };
 }
