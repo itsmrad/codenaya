@@ -1,9 +1,11 @@
 /**
- * Runs the real `processMessage` function under Inngest's execution engine,
+ * Runs the real `processMessage` function (or `fn`, such as the swarm worker,
+ * with canned `step.invoke` results) under Inngest's execution engine,
  * replayed the way the platform does it (see step-isolation.test.ts for the
  * rationale). Test files mock Convex with `vi.mock` before importing this.
  */
 
+import type { InngestFunction } from "inngest";
 import { StepMode } from "inngest/types";
 
 import { inngest } from "@/inngest/client";
@@ -47,6 +49,8 @@ export interface Outcome {
   inferenceRequests: number[];
   /** Which invocation's result resolved each one (undefined: never). */
   inferenceResolvedAt: Array<number | undefined>;
+  /** What the function returned. */
+  data?: unknown;
 }
 
 export async function drive(
@@ -56,10 +60,14 @@ export async function drive(
   /** More event fields, such as `mode`. */
   extra: Record<string, unknown> = {},
   /** `cancelWhen`: stop between steps once it holds, like `cancelOn` (finalType "cancelled"). */
-  { cancelWhen }: { cancelWhen?: () => boolean } = {},
+  { cancelWhen, fn = processMessage, invokeResults = [] }: {
+    cancelWhen?: () => boolean;
+    fn?: InngestFunction.Any;
+    invokeResults?: unknown[];
+  } = {},
 ): Promise<Outcome> {
   const event = {
-    name: "message/sent",
+    name: fn === processMessage ? "message/sent" : "agent-task/run",
     data: {
       messageId: "m1",
       conversationId: "c1",
@@ -75,6 +83,7 @@ export async function drive(
   const inferenceBodies: unknown[] = [];
   const inferenceRequests: number[] = [];
   const assigned = new Map<string, number>();
+  let invoked = 0;
   const inferenceResolvedAt: Array<number | undefined> = [];
   const outcome = (finalType: string): Outcome => ({
     finalType,
@@ -90,7 +99,7 @@ export async function drive(
       return outcome("cancelled");
     }
     const execution = (
-      processMessage as unknown as {
+      fn as unknown as {
         createExecution: (o: { partialOptions: Record<string, unknown> }) => {
           start: () => Promise<Record<string, unknown>>;
         };
@@ -111,6 +120,7 @@ export async function drive(
 
     const result = (await execution.start()) as {
       type: string;
+      data?: unknown;
       step?: { id: string; data?: unknown; error?: unknown };
       steps?: Array<{ id: string; op?: string; opts?: { url?: string; body?: unknown } }>;
     };
@@ -141,6 +151,13 @@ export async function drive(
         requestedRunStep = planned.id;
         continue;
       }
+      const invokes = result.steps.filter((found) => found.op === "InvokeFunction");
+      for (const found of invokes) {
+        if (invoked >= invokeResults.length) throw new Error("No canned InvokeFunction result");
+        stepState[found.id] = { id: found.id, data: invokeResults[invoked++] };
+        order.push(found.id);
+      }
+      if (invokes.length) continue;
       const unexpected = result.steps.find((found) => found.op !== "AIGateway");
       if (unexpected) throw new Error(`Unexpected op ${unexpected.op}`);
 
@@ -159,7 +176,7 @@ export async function drive(
       continue;
     }
 
-    return outcome(result.type);
+    return { ...outcome(result.type), data: result.data };
   }
   throw new Error("Function did not settle");
 }
