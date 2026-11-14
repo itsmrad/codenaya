@@ -53,6 +53,8 @@ describe("agent evaluation", () => {
     expect(isGeneratedApp("App")).toBe(false);
     expect(isGeneratedApp("  \n")).toBe(false);
     expect(isGeneratedApp("Alex Rivera\nSelect a meeting type")).toBe(true);
+    expect(isGeneratedApp("Something went wrong\nCannot read properties of null\nReload")).toBe(false);
+    expect(isGeneratedApp("Alex Rivera", true)).toBe(false);
     const trail = fixture();
     trail.firstAppPaintAt = 7000;
     expect(score(trail, []).firstAppPaintMs).toBe(6000);

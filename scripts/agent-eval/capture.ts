@@ -60,8 +60,15 @@ export const isAppUrl = (url: string) => {
   try { return /\.(?:e2b\.app|e2b\.dev)$/.test(new URL(url).hostname); } catch { return false; }
 };
 
-/** The seeded starter renders a lone "App" heading (vite-starter.ts); any other text is the generated app. */
-export const isGeneratedApp = (rootText: string) => rootText.trim() !== "" && rootText.trim() !== "App";
+/**
+ * Whether the preview shows the generated app: text other than the seeded starter's lone "App" heading, and not
+ * the starter's error boundary (`role="alert"`, "Something went wrong"; vite-starter.ts). An app that renders only
+ * images or a canvas has no text, so its first paint is never recorded.
+ */
+export const isGeneratedApp = (rootText: string, errorBoundary = false) => {
+  const text = rootText.trim();
+  return !errorBoundary && text !== "" && text !== "App" && !text.startsWith("Something went wrong");
+};
 
 export async function probePreview(page: Page, trail: Trail) {
   const preview = page.frameLocator('iframe[title="Preview"]');
@@ -69,7 +76,10 @@ export async function probePreview(page: Page, trail: Trail) {
   const loaded = await preview.locator("#root > *").count() > 0;
   const overlay = await preview.locator("vite-error-overlay").count() > 0;
   if ((loaded || overlay) && !trail.firstPreviewAt) trail.firstPreviewAt = Date.now();
-  if (loaded && !trail.firstAppPaintAt && isGeneratedApp(await preview.locator("#root").innerText().catch(() => ""))) trail.firstAppPaintAt = Date.now();
+  if (loaded && !trail.firstAppPaintAt) {
+    const text = await preview.locator("#root").innerText().catch(() => "");
+    if (isGeneratedApp(text, await preview.locator('#root > [role="alert"]').count() > 0)) trail.firstAppPaintAt = Date.now();
+  }
   trail.preview.loaded = loaded;
   trail.preview.overlay = overlay;
 }
@@ -86,7 +96,7 @@ export async function screenshot(page: Page, directory: string, trail: Trail) {
       trail.preview.errors!.push(message.text()); // A fresh load: build-time errors excluded.
     });
     await app.goto(src, { waitUntil: "domcontentloaded", timeout: 90_000 }); // A loaded Mac or cold sandbox can take over 30s.
-    await app.locator("#root > *, vite-error-overlay").first().waitFor({ timeout: 90_000 }); // A loaded Mac or cold sandbox can take over 30s.
+    await app.locator("#root > *, vite-error-overlay").first().waitFor({ timeout: 90_000 });
     await app.waitForTimeout(5_000);
     await app.screenshot({ path: `${directory}/app.png`, fullPage: true });
     trail.preview.screenshot = "app.png";

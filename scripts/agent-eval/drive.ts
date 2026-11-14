@@ -84,7 +84,8 @@ export async function drive(page: Page, user: ConvexHttpClient, options: Options
     }
     await page.goto(`/projects/${trail.projectId}`);
     // userConvexClient reads the page's Clerk session, which a cold dev compile loads late.
-    await page.waitForFunction(() => (window as { Clerk?: { session?: unknown } }).Clerk?.session, undefined, { timeout: 120_000 });
+    await page.waitForFunction(() => (window as { Clerk?: { session?: unknown } }).Clerk?.session, undefined, { timeout: 120_000 })
+      .catch(() => { throw new Error("Clerk session not ready after 120s"); });
     // A chosen name is never replaced by the generated title (#288).
     if (options.title && !options.projectId) await (await userConvexClient(page)).mutation(api.projects.rename, { id: trail.projectId as Id<"projects">, name: options.title });
     await page.getByRole("tab", { name: "Preview", exact: true }).click({ timeout: 60_000 });
