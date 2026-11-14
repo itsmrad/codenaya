@@ -637,8 +637,6 @@ describe("buildScopedMcpUrl — GitLab fixed toolsets", () => {
 
 describe("buildScopedMcpUrl — undeclared list values", () => {
   it("drops GitLab toolsets outside the declared options, such as all and orbit", () => {
-    expect(buildScopedMcpUrl(PROVIDERS.gitlab, { readOnly: false, toolsets: ["all", "orbit"] }))
-      .toEqual({ url: "https://gitlab.com/api/v4/mcp", headers: {} });
     expect(buildScopedMcpUrl(PROVIDERS.gitlab, {
       readOnly: false, toolsets: ["orbit", "core", "all", "wikis"],
     }).headers).toEqual({ "X-Gitlab-Enabled-Mcp-Server-Toolsets": "core,wikis" });
@@ -649,8 +647,18 @@ describe("buildScopedMcpUrl — undeclared list values", () => {
       .toBe(urlFor("supabase", { readOnly: false, features: ["database", "docs"] }));
     expect(urlFor("neon", { readOnly: false, categories: ["all", "schema"] }))
       .toBe("https://mcp.neon.tech/mcp?category=schema");
-    expect(urlFor("supabase", { readOnly: false, features: ["everything"] }))
-      .toBe(urlFor("supabase", UNSCOPED));
+  });
+
+  it("throws rather than widening to provider defaults when no selected value is declared", () => {
+    for (const toolsets of [["bogus"], ["all", "orbit"], ["bogus", "  "]]) {
+      expect(() => buildScopedMcpUrl(PROVIDERS.gitlab, { readOnly: false, toolsets }))
+        .toThrow(/None of the selected "toolsets" are supported/);
+    }
+    expect(() => urlFor("supabase", { readOnly: false, features: ["everything"] }))
+      .toThrow(/"features"/);
+    // Empty and blank-only selections still mean "provider defaults".
+    expect(buildScopedMcpUrl(PROVIDERS.gitlab, { readOnly: false, toolsets: [] }).headers).toEqual({});
+    expect(buildScopedMcpUrl(PROVIDERS.gitlab, { readOnly: false, toolsets: ["  "] }).headers).toEqual({});
   });
 
   it("passes values through when a provider declares no options for the field", () => {
