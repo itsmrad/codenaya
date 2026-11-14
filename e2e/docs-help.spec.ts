@@ -25,6 +25,46 @@ test.describe("docs page (signed out)", () => {
     expect(errors).toEqual([]);
   });
 
+  // #251: the table of contents follows the reader, and Cmd/Ctrl+K searches.
+  test("marks the section being read in the table of contents", async ({ page }) => {
+    await page.goto("/docs", { timeout: 60_000 });
+    const toc = page.getByRole("navigation", { name: "On this page" });
+    await expect(toc.getByRole("link", { name: "Getting started" })).toHaveAttribute("aria-current", "location");
+
+    await page.getByRole("heading", { name: "Environment variables" }).scrollIntoViewIfNeeded();
+    await page.evaluate(() => document.getElementById("env-vars")!.scrollIntoView());
+    await expect(toc.getByRole("link", { name: "Environment variables" })).toHaveAttribute("aria-current", "location");
+    await expect(toc.getByRole("link", { name: "Getting started" })).not.toHaveAttribute("aria-current");
+    // The contents stays in view while reading.
+    await expect(toc.getByRole("link", { name: "Environment variables" })).toBeInViewport();
+  });
+
+  test("searches the sections with Cmd/Ctrl+K", async ({ page }) => {
+    await page.goto("/docs", { timeout: 60_000 });
+    await expect(page.getByRole("button", { name: /Search docs/ })).toBeVisible();
+    const isMac = await page.evaluate(() => /Mac|iPod|iPhone|iPad/.test(navigator.userAgent));
+    await expect(async () => {
+      await page.keyboard.press(isMac ? "Meta+k" : "Control+k");
+      await expect(page.getByRole("dialog")).toBeVisible({ timeout: 1_000 });
+    }).toPass();
+
+    await page.keyboard.type("env");
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/docs#env-vars$/);
+    await expect(page.getByRole("heading", { name: "Environment variables" })).toBeInViewport();
+  });
+
+  test("collapses the table of contents to one line on phones", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto("/docs", { timeout: 60_000 });
+    const summary = page.locator("nav[aria-label='On this page'] summary");
+    await expect(summary).toContainText("Getting started");
+    expect((await summary.boundingBox())!.height).toBeLessThanOrEqual(40);
+    await expect(page.getByRole("navigation", { name: "On this page" }).getByRole("link", { name: "Skills" })).toBeHidden();
+    await summary.click();
+    await expect(page.getByRole("navigation", { name: "On this page" }).getByRole("link", { name: "Skills" })).toBeVisible();
+  });
+
   test("has no horizontal scroll at 375px", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/docs", { timeout: 60_000 });
