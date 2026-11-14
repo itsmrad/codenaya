@@ -149,7 +149,7 @@ export const useDeleteFile = ({
   projectId: Id<"projects">;
   parentId?: Id<"files">;
 }) => {
-  return useMutation(api.files.deleteFile).withOptimisticUpdate(
+  return useMutation(api.checkpoints.deleteFileWithUndo).withOptimisticUpdate(
     (localStore, args) => {
       const existingFiles = localStore.getQuery(api.files.getFolderContents, {
         projectId,

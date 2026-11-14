@@ -1,6 +1,6 @@
 import { Chunk } from "@codemirror/merge";
 import { Text } from "@codemirror/state";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 
 import { runWrittenPaths } from "../src/features/conversations/agent-steps";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -13,7 +13,7 @@ import {
   withContents,
   writeFileContent,
 } from "./fileContents";
-import { deleteFileTree, findSibling, MAX_PROJECT_FILES } from "./files";
+import { deleteFileTree, findSibling, getOwnedFile, MAX_PROJECT_FILES } from "./files";
 import { releaseBlobs, releaseStorageIfUnreferenced } from "./projectCascade";
 import { getOwnedProject } from "./projects";
 
@@ -93,9 +93,10 @@ async function deleteCheckpoint(
 
 /**
  * Snapshots the project's files before the run that writes `messageId`, or
- * before a GitHub pull when there is no run (#343). Idempotent per message,
- * so a replayed run step doesn't snapshot its own edits. Keeps the newest
- * MAX_CHECKPOINTS_PER_PROJECT.
+ * without one, before a GitHub pull (#343), a restore or a manual delete
+ * (#259). Idempotent per message, so a replayed run step doesn't snapshot its
+ * own edits. Keeps the newest MAX_CHECKPOINTS_PER_PROJECT, never pruning
+ * `keep`.
  */
 export async function createCheckpoint(
   ctx: MutationCtx,
@@ -103,6 +104,8 @@ export async function createCheckpoint(
     projectId: Id<"projects">;
     messageId?: Id<"messages">;
     label: string;
+    /** A checkpoint the caller still needs, e.g. the one being restored. */
+    keep?: Id<"checkpoints">;
   },
 ) {
   const existing =
@@ -137,10 +140,11 @@ export async function createCheckpoint(
     .query("checkpoints")
     .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
     .order("desc")
-    // Every snapshot prunes, so at most one is over the cap.
-    .take(MAX_CHECKPOINTS_PER_PROJECT + 1);
+    // Every snapshot prunes, so at most one is over the cap, two when the
+    // previous snapshot kept a checkpoint past it.
+    .take(MAX_CHECKPOINTS_PER_PROJECT + 2);
   for (const checkpoint of stale.slice(MAX_CHECKPOINTS_PER_PROJECT)) {
-    await deleteCheckpoint(ctx, checkpoint);
+    if (checkpoint._id !== args.keep) await deleteCheckpoint(ctx, checkpoint);
   }
 
   return checkpointId;
@@ -299,12 +303,53 @@ export async function assertNoRunningAgent(
   }
 }
 
+/**
+ * Restores a checkpoint. Snapshots the current files first, in the same
+ * transaction, and returns that snapshot's id so the restore can be undone
+ * by restoring it (#259).
+ */
 export const restore = mutation({
   args: { checkpointId: v.id("checkpoints") },
+  returns: v.id("checkpoints"),
   handler: async (ctx, args) => {
     const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
     await assertNoRunningAgent(ctx, checkpoint.projectId, "restoring");
+    const undoCheckpointId = await createCheckpoint(ctx, {
+      projectId: checkpoint.projectId,
+      label: "Before restore",
+      keep: checkpoint._id,
+    });
     await restoreCheckpoint(ctx, checkpoint);
+    return undoCheckpointId;
+  },
+});
+
+/**
+ * Deletes a file or folder from the explorer. Snapshots the project first,
+ * in the same transaction, and returns the snapshot's id so the delete can
+ * be undone by restoring it (#259). Null when the project is too big to
+ * snapshot: the delete still happens, just without an undo.
+ */
+export const deleteFileWithUndo = mutation({
+  args: { id: v.id("files") },
+  returns: v.union(v.id("checkpoints"), v.null()),
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+    const { file } = await getOwnedFile(ctx, args.id, identity.subject);
+    let undoCheckpointId: Id<"checkpoints"> | null = null;
+    try {
+      undoCheckpointId = await createCheckpoint(ctx, {
+        projectId: file.projectId,
+        label: `Before deleting ${file.name}`,
+      });
+    } catch (error) {
+      // Over MAX_CHECKPOINT_FILES; thrown before anything is written.
+      const tooBig = error instanceof ConvexError && error.data?.code === "LIMIT_EXCEEDED";
+      if (!tooBig) throw error;
+    }
+    await deleteFileTree(ctx, file);
+    await ctx.db.patch("projects", file.projectId, { updatedAt: Date.now() });
+    return undoCheckpointId;
   },
 });
 

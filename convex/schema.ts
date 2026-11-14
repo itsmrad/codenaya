@@ -322,7 +322,8 @@ export default defineSchema({
    */
   checkpoints: defineTable({
     projectId: v.id("projects"),
-    // The run it was taken before; unset for a "Before pull" checkpoint (#343).
+    // The run it was taken before. Unset for a snapshot taken before a GitHub
+    // pull (#343), a restore or a manual delete (#259).
     messageId: v.optional(v.id("messages")),
     // The prompt that started the run, for the history list.
     label: v.string(),
