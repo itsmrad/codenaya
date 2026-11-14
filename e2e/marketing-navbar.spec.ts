@@ -31,7 +31,11 @@ test.describe("marketing navbar (signed out)", () => {
       test(`every public route shares the header at ${viewport.width}px (${theme})`, async ({ page }) => {
         test.setTimeout(180_000);
         await page.setViewportSize(viewport);
-        await page.addInitScript((value) => localStorage.setItem("theme", value), theme);
+        // Public pages keep their own theme (landing-theme.tsx), apart from the app's.
+        await page.addInitScript((value) => {
+          localStorage.setItem("theme", value);
+          localStorage.setItem("codenaya-landing-theme", value);
+        }, theme);
         const errors = collectConsoleErrors(page);
         const mobile = viewport.width < 768;
         let firstBar: { x: number; width: number } | undefined;

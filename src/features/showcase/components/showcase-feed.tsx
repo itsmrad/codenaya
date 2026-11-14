@@ -52,6 +52,7 @@ export const ShowcaseFeed = () => {
             <input
               type="text"
               placeholder="Search"
+              aria-label="Search showcase"
               value={showcaseSearch}
               onChange={(e) => setShowcaseSearch(e.target.value)}
               className="w-full h-8 pl-8 pr-3 rounded-lg bg-muted/30 border border-border/40 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-brand/30 focus:border-brand/40 transition-all"

@@ -35,6 +35,24 @@ test.describe("landing hero prompt", () => {
     expect(errors).toEqual([]);
   });
 
+  test("a model picked signed out is kept with the prompt", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await page.goto("/");
+
+    await page.getByRole("button", { name: /^Model:/ }).first().click();
+    await page.getByRole("listbox", { name: "Model" }).getByRole("option").last().click();
+    // useAgentModel's storage key: the dashboard reads the pick from here after sign-in.
+    const stored = () => page.evaluate(() => localStorage.getItem("codenaya:agent-model"));
+    const picked = await stored();
+    expect(JSON.parse(picked ?? "null")).toEqual({ modelId: expect.any(String) });
+
+    await submitHeroPrompt(page, "A recipe app");
+
+    await expect(page).toHaveURL(/\/sign-in/);
+    expect(await pendingPrompt(page)).toBe("A recipe app");
+    expect(await stored()).toBe(picked);
+    expect(errors).toEqual([]);
+  });
 
   test.describe("after sign-in", () => {
     test.skip(!hasClerkCredentials(), "needs CLERK_SECRET_KEY and NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");

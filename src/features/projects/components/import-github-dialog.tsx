@@ -98,7 +98,7 @@ export const ImportGithubDialog = ({
       <DialogContent showCloseButton={false} className="gap-0 overflow-hidden rounded-lg p-0 sm:max-w-lg">
         <div className="flex h-10 items-center justify-between border-b border-border bg-muted/40 pl-4 pr-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           <span className="flex items-center gap-2">
-            <span className="size-1.5 animate-pulse rounded-full bg-brand" />
+            <span className="size-1.5 motion-safe:animate-pulse rounded-full bg-brand" />
             New project
           </span>
           <DialogClose className="grid size-8 place-items-center rounded-md transition-colors hover:bg-muted hover:text-foreground">

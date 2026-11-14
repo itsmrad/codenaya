@@ -166,7 +166,7 @@ export const CommandPalette = () => {
         className="rounded-lg sm:max-w-xl [&_[cmdk-group-heading]]:font-mono [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-normal [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.14em] [&_[cmdk-item][data-selected=true]]:bg-brand/[0.07]"
       >
         <div className="flex h-10 items-center gap-2 border-b border-border bg-muted/40 px-4 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          <span className="size-1.5 animate-pulse rounded-full bg-brand" />
+          <span className="size-1.5 motion-safe:animate-pulse rounded-full bg-brand" />
           Commands
         </div>
         <CommandInput placeholder="Type a command or search..." />

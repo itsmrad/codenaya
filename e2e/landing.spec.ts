@@ -110,4 +110,11 @@ test.describe("landing social proof", () => {
     const cards = community.locator('a[href^="/showcase/"]');
     expect(await cards.count()).toBeLessThanOrEqual(6);
   });
+
+  test("shows the demo's finished run for reduced motion", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+
+    await expect(page.getByText("Done. Your timer is running in the preview.")).toBeVisible();
+  });
 });
