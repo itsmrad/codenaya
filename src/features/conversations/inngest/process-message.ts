@@ -15,6 +15,7 @@ import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { createSearchFilesTool } from './tools/search-files';
 import { createReadFilesTool } from './tools/read-files';
 import { createListFilesTool } from './tools/list-files';
+import { createRegistryCheck } from './tools/post-write-checks';
 import { createUpdateFileTool } from './tools/update-file';
 import { createEditFileTool } from './tools/edit-file';
 import { createCreateFilesTool } from './tools/create-files';
@@ -29,10 +30,12 @@ import { createLoadSkillTool } from './tools/load-skill';
 import { createScaffoldViteAppTool } from './tools/scaffold-vite-app';
 import { createCheckBuildTool } from './tools/check-build';
 import { createBuildCheckGate, wroteFiles } from './build-check-gate';
+import { STUCK_FALLBACK_REPLY, createLoopGuard, stuckNote } from './loop-detector';
 import type { AgentModelChoice } from '../agent-models';
 import {
   type RunModel,
   ProviderKeyError,
+  RUN_IMAGES_REFUSED_MESSAGE,
   isProviderKeyRejection,
   keyFailureMessage,
   resolveRunModel,
@@ -67,6 +70,7 @@ import {
   resolveSkills,
 } from '@/features/skills/server/resolve-skills';
 import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
+import { buildProjectInstructionsSection } from '@/features/projects/instructions';
 import { isStarterOnly } from './starter-only';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
@@ -137,6 +141,7 @@ export const processMessage = inngest.createFunction(
             internalKey,
             messageId,
             content: AGENT_FAILURE_MESSAGE,
+            outcome: "error",
           });
         });
       }
@@ -193,6 +198,7 @@ export const processMessage = inngest.createFunction(
           internalKey,
           messageId,
           content: error.message,
+          outcome: "error",
         });
       });
       return { success: false, messageId, conversationId };
@@ -225,6 +231,7 @@ export const processMessage = inngest.createFunction(
           content: keyFailureMessage(
             `Your ${key.label} key was rejected by the provider.`,
           ),
+          outcome: "error",
         });
       });
       return { success: false, messageId, conversationId };
@@ -294,6 +301,18 @@ export const processMessage = inngest.createFunction(
       recentMessages
         .slice(0, recentMessages.findIndex((msg) => msg._id === messageId))
         .findLast((msg) => msg.role === "user")?.imageUrls ?? [];
+    // The catalog can change between the send and this run (a queued run, a
+    // retry): never send images to a model that can't read them (#322).
+    if (imageUrls.length > 0 && !runModel.acceptsImages) {
+      await step.run("images-refused", async () => {
+        await convex.mutation(api.system.updateMessageContent, {
+          internalKey,
+          messageId,
+          content: RUN_IMAGES_REFUSED_MESSAGE,
+        });
+      });
+      return { success: false, messageId, conversationId };
+    }
     // A message can be images alone; the agents still need a request to answer.
     const request =
       imageUrls.length > 0 && !message.trim() ? IMAGE_ONLY_PROMPT : message;
@@ -327,6 +346,7 @@ export const processMessage = inngest.createFunction(
     // Project owner, needed by setEnvVar and the approval gate. Resolved from the
     // project row so those act on behalf of whoever owns the work.
     let mcpOwnerId: string | undefined;
+    let projectInstructions: string | undefined;
 
     try {
       // Fetched unconditionally: the owner is needed by setEnvVar, which is useful
@@ -336,6 +356,7 @@ export const processMessage = inngest.createFunction(
         projectId,
       });
       mcpOwnerId = project?.ownerId;
+      projectInstructions = project?.instructions;
 
       let entries = await convex.query(api.system.getProjectMcpConnections, {
         internalKey,
@@ -515,11 +536,12 @@ export const processMessage = inngest.createFunction(
     });
 
     // Most stable first, so the cacheable prefix is shared across runs (#295):
-    // base, skill index and integrations, then the project tree, forced
+    // base, project instructions, skill index and integrations, then the project tree, forced
     // skills and plan mode.
     // Conversation goes in messages (see onStart).
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
+      buildProjectInstructionsSection(projectInstructions),
       buildSkillsPromptSection(skills),
       buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
       projectTree,
@@ -601,19 +623,20 @@ export const processMessage = inngest.createFunction(
       });
     }
 
+    const registry = createRegistryCheck();
     const tools: Tool.Any[] = [
       createListFilesTool({ internalKey, projectId }),
       createReadFilesTool({ projectId, internalKey }),
       createSearchFilesTool({ projectId, internalKey }),
-      createWriteFilesTool({ projectId, internalKey }),
-      createUpdateFileTool({ projectId, internalKey }),
-      createEditFileTool({ projectId, internalKey }),
-      createCreateFilesTool({ projectId, internalKey }),
+      createWriteFilesTool({ projectId, internalKey, registry }),
+      createUpdateFileTool({ projectId, internalKey, registry }),
+      createEditFileTool({ projectId, internalKey, registry }),
+      createCreateFilesTool({ projectId, internalKey, registry }),
       createCreateFolderTool({ projectId, internalKey }),
       createScaffoldViteAppTool({ projectId, internalKey }),
       createRenameFileTool({ projectId, internalKey }),
       createDeleteFilesTool({ projectId, internalKey }),
-      createCheckBuildTool({ projectId, internalKey }),
+      createCheckBuildTool({ projectId, internalKey, ownerId: mcpOwnerId }),
       createScrapeUrlsTool(),
       ...(mcpOwnerId
         ? [createSetEnvVarTool({ projectId, ownerId: mcpOwnerId, internalKey })]
@@ -624,6 +647,13 @@ export const processMessage = inngest.createFunction(
 
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
+    // Stops a run going in circles (#306), and hints when it repeats the error
+    // the previous run got stuck on.
+    const loopGuard = createLoopGuard(
+      recentMessages
+        .slice(0, recentMessages.findIndex((msg) => msg._id === messageId))
+        .findLast((msg) => msg.role === "assistant")?.stuck?.signature,
+    );
 
     // Re-validated by resolveRunModel: the event is the boundary this function
     // trusts, and anything holding the event key can send one.
@@ -642,8 +672,12 @@ export const processMessage = inngest.createFunction(
       lifecycle: {
         onStart: ({ agent, prompt, history }) => {
           const trimmed = trimFileHistory([...earlierTurns, ...(history ?? [])]);
+          const { stuck } = loopGuard;
+          const summaryNote = stuck ? stuckNote(stuck) : STEP_BUDGET_NOTE;
           const nudge =
-            agent.name === SUMMARY_AGENT_NAME ? STEP_BUDGET_NOTE : buildCheckGate.takeNudge();
+            agent.name === SUMMARY_AGENT_NAME
+              ? summaryNote
+              : buildCheckGate.takeNudge() ?? loopGuard.takeHint();
           // AgentKit sends prompt ([system, request]) before history (this
           // run's turns), so earlier conversation turns go between the two.
           // Relies on network calls using maxIter: 0; direct agent.run with maxIter > 1 would prepend history each pass.
@@ -779,6 +813,9 @@ export const processMessage = inngest.createFunction(
         // callCount, not results: seeded history would count as steps.
         const lastStep = callCount >= MAX_AGENT_STEPS - 1;
 
+        // A stuck run has had its summary turn.
+        if (loopGuard.stuck) return undefined;
+
         // Stop routing to this agent if there's a final text response without
         // tool calls, unless files changed since the last passing build check
         // and there are steps left for it.
@@ -787,7 +824,7 @@ export const processMessage = inngest.createFunction(
             ? codingAgent
             : undefined;
         }
-        return lastStep ? summaryAgent : codingAgent;
+        return lastStep || loopGuard.check(results) ? summaryAgent : codingAgent;
       }
     });
 
@@ -836,7 +873,8 @@ export const processMessage = inngest.createFunction(
       (m) => m.type === "text" && m.role === "assistant"
     );
 
-    let assistantResponse = DEFAULT_REPLY_MESSAGE;
+    const { stuck } = loopGuard;
+    let assistantResponse = stuck ? STUCK_FALLBACK_REPLY : DEFAULT_REPLY_MESSAGE;
 
     if (textMessage?.type === "text") {
       assistantResponse =
@@ -853,6 +891,7 @@ export const processMessage = inngest.createFunction(
         internalKey,
         messageId,
         content: assistantResponse,
+        ...(stuck ? { stuck } : {}),
       })
     });
 

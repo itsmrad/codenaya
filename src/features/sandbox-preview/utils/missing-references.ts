@@ -12,9 +12,9 @@ import { posix } from "node:path";
 type ProjectFile = { path: string; content: string };
 
 /** Drops line and block comments, leaving string literals (which may contain them) intact. */
-const stripComments = (text: string) =>
+export const stripComments = (text: string) =>
   text.replace(
-    /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
+    /("(?:\\.|[^"\\\n\r])*"|'(?:\\.|[^'\\\n\r])*'|`(?:\\.|[^`\\])*`)|(?<!:)\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
     (match, string: string | undefined) => string ?? "",
   );
 
@@ -111,7 +111,11 @@ const packageName = (specifier: string): string | null => {
  * Describes each package the project's code or CSS imports but its package.json
  * doesn't declare, e.g. `@tailwindcss/vite (imported by vite.config.ts)`.
  */
-export const undeclaredPackages = (files: ProjectFile[]): string[] => {
+export const undeclaredPackages = (
+  files: ProjectFile[],
+  // All project paths, so a CSS import of an untouched sibling file isn't read as a package.
+  paths: Set<string> = new Set(files.map((file) => file.path)),
+): string[] => {
   const manifest = files.find((file) => file.path === "package.json");
   const pkg = manifest ? (parseJsonc(manifest.content) as Record<string, unknown> | null) : null;
   if (!pkg || typeof pkg !== "object") return [];
@@ -125,7 +129,6 @@ export const undeclaredPackages = (files: ProjectFile[]): string[] => {
   const nestedPackages = files
     .filter((file) => file.path.endsWith("/package.json"))
     .map((file) => file.path.slice(0, -"package.json".length));
-  const paths = new Set(files.map((file) => file.path));
   const undeclared = new Map<string, string>();
 
   for (const file of files) {
@@ -148,7 +151,7 @@ export const undeclaredPackages = (files: ProjectFile[]): string[] => {
   return [...undeclared].map(([name, path]) => `${name} (imported by ${path})`);
 };
 
-const RESOLVE_SUFFIXES = [
+export const RESOLVE_SUFFIXES = [
   "",
   ".ts",
   ".tsx",
@@ -169,7 +172,7 @@ const RESOLVE_SUFFIXES = [
  * TypeScript's bundler resolution. Null for anything else, including
  * template-literal and glob imports, which name no single file.
  */
-const localCandidates = (from: string, specifier: string): string[] | null => {
+export const localCandidates = (from: string, specifier: string): string[] | null => {
   const bare = specifier.split(/[?#]/)[0];
   if (/\$\{|\*/.test(bare)) return null;
   const targets = isLocal(bare)

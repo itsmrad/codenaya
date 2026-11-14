@@ -24,10 +24,11 @@ import { splitSlashSkills } from "@/features/skills/parse-slash";
 import { cn } from "@/lib/utils";
 
 import type { Doc, Id } from "../../../../convex/_generated/dataModel";
-import { sanitizeAgentText } from "../agent-steps";
+import { sanitizeAgentText, stuckFilePath } from "../agent-steps";
 import { useChatSendBlock } from "../hooks/use-queue-chat-message";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
+import { type StuckRetry, StuckRunCard } from "./stuck-run-card";
 
 interface UserMessageProps {
   content: string;
@@ -192,6 +193,10 @@ interface AssistantMessageProps {
   revertDisabled?: boolean;
   /** A plan-mode reply (#120): sends the plan as the next build message. */
   onBuildPlan?: () => void;
+  /** A stuck run (#306), on a model with a tier above it: resends on that one. */
+  stuckRetry?: StuckRetry;
+  /** A stuck run (#306): pre-fills a plan-mode message about the loop. */
+  onDiagnose?: () => void;
 }
 
 export const AssistantMessage = ({
@@ -202,6 +207,8 @@ export const AssistantMessage = ({
   onRetry,
   onRestore,
   onBuildPlan,
+  stuckRetry,
+  onDiagnose,
   checkpointId,
   revertDisabled,
 }: AssistantMessageProps) => {
@@ -290,6 +297,16 @@ export const AssistantMessage = ({
           >
             {shown}
           </MessageResponse>
+          {message.stuck && (
+            <StuckRunCard
+              stuck={message.stuck}
+              filePath={stuckFilePath(message.stuck, pathOf)}
+              retry={isLast ? stuckRetry : undefined}
+              onDiagnose={isLast ? onDiagnose : undefined}
+              onRestore={onRestore}
+              onOpenFile={onOpenFile}
+            />
+          )}
           {isPlan && isLast && onBuildPlan && (
             <Button
               type="button"
@@ -327,7 +344,8 @@ export const AssistantMessage = ({
                 <RotateCcwIcon className="size-3.5" />
               </MessageAction>
             )}
-            {restoreAction}
+            {/* The stuck card offers it already. */}
+            {!message.stuck && restoreAction}
           </MessageActions>
         </>
       )}

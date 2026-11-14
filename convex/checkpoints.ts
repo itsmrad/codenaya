@@ -1,6 +1,6 @@
 import { Chunk } from "@codemirror/merge";
 import { Text } from "@codemirror/state";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 
 import { runWrittenPaths } from "../src/features/conversations/agent-steps";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -13,7 +13,7 @@ import {
   withContents,
   writeFileContent,
 } from "./fileContents";
-import { deleteFileTree, findSibling, MAX_PROJECT_FILES } from "./files";
+import { deleteFileTree, findSibling, getOwnedFile, MAX_PROJECT_FILES } from "./files";
 import { releaseBlobs, releaseStorageIfUnreferenced } from "./projectCascade";
 import { getOwnedProject } from "./projects";
 
@@ -37,7 +37,7 @@ const MAX_LABEL_LENGTH = 140;
  * Largest project snapshotted, so a snapshot plus the prune of an old one fit
  * in one transaction (#212). No snapshot holds more rows than this.
  */
-const MAX_CHECKPOINT_FILES = 2000;
+export const MAX_CHECKPOINT_FILES = 2000;
 
 /** Each file of a project with its slash-separated path from the root. */
 function withPaths(files: Doc<"files">[]) {
@@ -92,22 +92,28 @@ async function deleteCheckpoint(
 }
 
 /**
- * Snapshots the project's files before the run that writes `messageId`.
- * Idempotent per message, so a replayed run step doesn't snapshot its own
- * edits. Keeps the newest MAX_CHECKPOINTS_PER_PROJECT.
+ * Snapshots the project's files before the run that writes `messageId`, or
+ * without one, before a GitHub pull (#343), a restore or a manual delete
+ * (#259). Idempotent per message, so a replayed run step doesn't snapshot its
+ * own edits. Keeps the newest MAX_CHECKPOINTS_PER_PROJECT, never pruning
+ * `keep`.
  */
 export async function createCheckpoint(
   ctx: MutationCtx,
   args: {
     projectId: Id<"projects">;
-    messageId: Id<"messages">;
+    messageId?: Id<"messages">;
     label: string;
+    /** A checkpoint the caller still needs, e.g. the one being restored. */
+    keep?: Id<"checkpoints">;
   },
 ) {
-  const existing = await ctx.db
-    .query("checkpoints")
-    .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
-    .first();
+  const existing =
+    args.messageId &&
+    (await ctx.db
+      .query("checkpoints")
+      .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
+      .first());
   if (existing) return existing._id;
 
   const files = withPaths(
@@ -134,39 +140,54 @@ export async function createCheckpoint(
     .query("checkpoints")
     .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
     .order("desc")
-    // Every snapshot prunes, so at most one is over the cap.
-    .take(MAX_CHECKPOINTS_PER_PROJECT + 1);
+    // Every snapshot prunes, so at most one is over the cap, two when the
+    // previous snapshot kept a checkpoint past it.
+    .take(MAX_CHECKPOINTS_PER_PROJECT + 2);
   for (const checkpoint of stale.slice(MAX_CHECKPOINTS_PER_PROJECT)) {
-    await deleteCheckpoint(ctx, checkpoint);
+    if (checkpoint._id !== args.keep) await deleteCheckpoint(ctx, checkpoint);
   }
 
   return checkpointId;
 }
 
-/**
- * Makes the project's files match the checkpoint in one transaction: files
- * missing from it are deleted, changed ones rewritten, missing ones recreated.
- * Files that already match keep their ids, so open editor tabs stay valid.
- */
-async function restoreCheckpoint(
-  ctx: MutationCtx,
-  checkpoint: Doc<"checkpoints">,
-) {
-  // A pre-#212 snapshot can be over the cap. Restoring part of it would delete
-  // every file outside that part, so refuse it whole.
-  const rows = await checkpointRows(ctx, checkpoint._id).take(MAX_CHECKPOINT_FILES + 1);
-  if (rows.length > MAX_CHECKPOINT_FILES) {
-    throw appError("LIMIT_EXCEEDED", "This checkpoint is too large to restore");
-  }
-  const wanted = new Map(rows.map((row) => [row.path, row]));
-  const kept = new Map<string, Doc<"files">>();
+/** A file or folder to write, by its path from the project root. */
+export type TreeEntry = Pick<Doc<"checkpointFiles">, "path" | "type" | "content" | "storageId">;
 
-  const files = await projectFiles(ctx, checkpoint.projectId);
+/** Whether two blobs hold the same bytes; a pull re-uploads unchanged binaries (#343). */
+async function sameBlob(ctx: MutationCtx, a?: Id<"_storage">, b?: Id<"_storage">) {
+  if (!a || !b) return false;
+  const [x, y] = await Promise.all([ctx.db.system.get("_storage", a), ctx.db.system.get("_storage", b)]);
+  return Boolean(x && y && x.sha256 === y.sha256);
+}
+
+/**
+ * Writes `entries` over the project's files in one transaction: changed ones
+ * are rewritten, missing ones created. A path in `keep` (default: every
+ * current one) survives only as the type it has there, and a deleted folder
+ * takes its contents with it, so passing the whole tree as `keep` makes the
+ * project match it exactly. Files that already match keep their ids, so open
+ * editor tabs stay valid.
+ */
+export async function applyTree(
+  ctx: MutationCtx,
+  projectId: Id<"projects">,
+  entries: TreeEntry[],
+  keep?: Map<string, TreeEntry["type"]>,
+) {
+  const files = await projectFiles(ctx, projectId);
   const text = new Map(
-    (await withContents(ctx, checkpoint.projectId, files)).map((file) => [file._id, file.content]),
+    (await withContents(ctx, projectId, files)).map((file) => [file._id, file.content]),
   );
-  for (const { file, path } of withPaths(files)) {
-    if (wanted.get(path)?.type === file.type) {
+  const live = withPaths(files);
+  const types = new Map(keep ?? live.map(({ file, path }) => [path, file.type]));
+  for (const entry of entries) types.set(entry.path, entry.type);
+  const removed = live
+    .filter(({ file, path }) => types.get(path) !== file.type)
+    .map(({ path }) => path);
+
+  const kept = new Map<string, Doc<"files">>();
+  for (const { file, path } of live) {
+    if (!isUnder(path, removed)) {
       kept.set(path, file);
       continue;
     }
@@ -177,23 +198,27 @@ async function restoreCheckpoint(
 
   // Parents before children, so every parent id is known when it is needed.
   const depth = (path: string) => path.split("/").length;
-  const ids = new Map<string, Id<"files">>();
+  const ids = new Map([...kept].map(([path, file]) => [path, file._id]));
   const now = Date.now();
-  for (const row of [...rows].sort((a, b) => depth(a.path) - depth(b.path))) {
+  for (const row of [...entries].sort((a, b) => depth(a.path) - depth(b.path))) {
     const existing = kept.get(row.path);
     if (existing) {
-      ids.set(row.path, existing._id);
       if (text.get(existing._id) !== row.content) {
         await writeFileContent(ctx, existing, row.content);
       }
       if (existing.storageId !== row.storageId) {
-        await ctx.db.patch("files", existing._id, { storageId: row.storageId, updatedAt: now });
+        if (await sameBlob(ctx, existing.storageId, row.storageId)) {
+          await releaseStorageIfUnreferenced(ctx, row.storageId!);
+        } else {
+          await ctx.db.patch("files", existing._id, { storageId: row.storageId, updatedAt: now });
+          if (existing.storageId) await releaseStorageIfUnreferenced(ctx, existing.storageId);
+        }
       }
       continue;
     }
     const slash = row.path.lastIndexOf("/");
     const fileId = await ctx.db.insert("files", {
-      projectId: checkpoint.projectId,
+      projectId,
       parentId: slash === -1 ? undefined : ids.get(row.path.slice(0, slash)),
       name: row.path.slice(slash + 1),
       type: row.type,
@@ -201,12 +226,26 @@ async function restoreCheckpoint(
       updatedAt: now,
     });
     if (row.content !== undefined) {
-      await insertFileContent(ctx, fileId, checkpoint.projectId, row.content);
+      await insertFileContent(ctx, fileId, projectId, row.content);
     }
     ids.set(row.path, fileId);
   }
 
-  await ctx.db.patch("projects", checkpoint.projectId, { updatedAt: now });
+  await ctx.db.patch("projects", projectId, { updatedAt: now });
+}
+
+/** Makes the project's files match the checkpoint in one transaction. */
+async function restoreCheckpoint(
+  ctx: MutationCtx,
+  checkpoint: Doc<"checkpoints">,
+) {
+  // A pre-#212 snapshot can be over the cap. Restoring part of it would delete
+  // every file outside that part, so refuse it whole.
+  const rows = await checkpointRows(ctx, checkpoint._id).take(MAX_CHECKPOINT_FILES + 1);
+  if (rows.length > MAX_CHECKPOINT_FILES) {
+    throw appError("LIMIT_EXCEEDED", "This checkpoint is too large to restore");
+  }
+  await applyTree(ctx, checkpoint.projectId, rows, new Map(rows.map((row) => [row.path, row.type])));
 }
 
 /** The project's checkpoints, newest first. Bounded by the retention cap. */
@@ -242,29 +281,75 @@ async function getOwnedCheckpoint(ctx: QueryCtx, checkpointId: Id<"checkpoints">
   return checkpoint;
 }
 
-/** A running agent would keep writing over the restored files. */
-async function assertNoRunningAgent(
-  ctx: QueryCtx,
-  projectId: Id<"projects">,
-  action: string,
-) {
-  const running = await ctx.db
+/** The project's agent run in progress, if any. */
+export const runningAgent = (ctx: QueryCtx, projectId: Id<"projects">) =>
+  ctx.db
     .query("messages")
     .withIndex("by_project_status", (q) =>
       q.eq("projectId", projectId).eq("status", "processing"),
     )
     .first();
-  if (running) {
-    throw new Error(`Stop the running agent before ${action}`);
+
+/** A running agent would keep writing over the restored files. */
+export async function assertNoRunningAgent(
+  ctx: QueryCtx,
+  projectId: Id<"projects">,
+  action: string,
+) {
+  if (await runningAgent(ctx, projectId)) {
+    // Typed, so the message survives production redaction and a pull job can
+    // tell it apart from a transient failure (#343).
+    throw appError("CONFLICT", `Stop the running agent before ${action}`);
   }
 }
 
+/**
+ * Restores a checkpoint. Snapshots the current files first, in the same
+ * transaction, and returns that snapshot's id so the restore can be undone
+ * by restoring it (#259).
+ */
 export const restore = mutation({
   args: { checkpointId: v.id("checkpoints") },
+  returns: v.id("checkpoints"),
   handler: async (ctx, args) => {
     const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
     await assertNoRunningAgent(ctx, checkpoint.projectId, "restoring");
+    const undoCheckpointId = await createCheckpoint(ctx, {
+      projectId: checkpoint.projectId,
+      label: "Before restore",
+      keep: checkpoint._id,
+    });
     await restoreCheckpoint(ctx, checkpoint);
+    return undoCheckpointId;
+  },
+});
+
+/**
+ * Deletes a file or folder from the explorer. Snapshots the project first,
+ * in the same transaction, and returns the snapshot's id so the delete can
+ * be undone by restoring it (#259). Null when the project is too big to
+ * snapshot: the delete still happens, just without an undo.
+ */
+export const deleteFileWithUndo = mutation({
+  args: { id: v.id("files") },
+  returns: v.union(v.id("checkpoints"), v.null()),
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+    const { file } = await getOwnedFile(ctx, args.id, identity.subject);
+    let undoCheckpointId: Id<"checkpoints"> | null = null;
+    try {
+      undoCheckpointId = await createCheckpoint(ctx, {
+        projectId: file.projectId,
+        label: `Before deleting ${file.name}`,
+      });
+    } catch (error) {
+      // Over MAX_CHECKPOINT_FILES; thrown before anything is written.
+      const tooBig = error instanceof ConvexError && error.data?.code === "LIMIT_EXCEEDED";
+      if (!tooBig) throw error;
+    }
+    await deleteFileTree(ctx, file);
+    await ctx.db.patch("projects", file.projectId, { updatedAt: Date.now() });
+    return undoCheckpointId;
   },
 });
 
@@ -370,8 +455,8 @@ async function liveState(ctx: QueryCtx, projectId: Id<"projects">, targets: stri
 }
 
 /** The paths the checkpoint's run wrote (a folder stands for its contents). */
-const runTargets = async (ctx: QueryCtx, checkpoint: Doc<"checkpoints">) =>
-  runWrittenPaths((await ctx.db.get("messages", checkpoint.messageId))?.steps ?? []);
+const runTargets = async (ctx: QueryCtx, { messageId }: Doc<"checkpoints">) =>
+  runWrittenPaths((messageId && (await ctx.db.get("messages", messageId)))?.steps ?? []);
 
 /**
  * The files the checkpoint's run changed, before and after it (#225), or just

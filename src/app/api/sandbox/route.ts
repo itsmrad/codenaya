@@ -27,6 +27,7 @@ import {
   projectFilesSchema,
   writeProjectFiles,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { recordSandboxRunning } from "@/features/sandbox-preview/server/record-sandbox-running";
 import {
   forgetSandbox,
   rememberSandbox,
@@ -43,7 +44,11 @@ import {
   insertBridge,
 } from "@/features/sandbox-preview/utils/preview-bridge";
 import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
-import type { BootPhase } from "@/features/sandbox-preview/utils/boot-phase";
+import {
+  recordBootPhase,
+  type BootHistory,
+  type BootPhase,
+} from "@/features/sandbox-preview/utils/boot-phase";
 import {
   NOTHING_TO_PREVIEW,
   STATIC_SERVE_COMMAND,
@@ -246,9 +251,13 @@ export async function POST(request: Request) {
         }
       };
 
-      /** Drives the preview's boot checklist (#254). */
-      const sendPhase = (phase: BootPhase) =>
-        send({ type: "phase", phase, at: Date.now() });
+      /** Drives the preview's boot checklist (#254); kept for activation events (#339). */
+      let bootHistory: BootHistory = {};
+      const sendPhase = (phase: BootPhase) => {
+        const at = Date.now();
+        bootHistory = recordBootPhase(bootHistory, phase, at);
+        send({ type: "phase", phase, at });
+      };
 
       /** Release anything the redactor is holding back. */
       const flushRedactor = () => {
@@ -327,7 +336,8 @@ export async function POST(request: Request) {
         sandbox = await createProjectSandbox({
           apiKey: e2bApiKey,
           timeoutMs: SANDBOX_TIMEOUT_MS,
-          metadata: { userId },
+          // checkBuild finds the project's warm preview by these tags (#465).
+          metadata: projectId ? { userId, projectId } : { userId },
           network: {
             maskRequestHost: "localhost:${PORT}",
           },
@@ -492,6 +502,7 @@ export async function POST(request: Request) {
         send({ type: "output", data: `\nServer ready at ${previewUrl}\n` });
         send({ type: "status", status: "running" });
         sendPhase("ready");
+        if (projectId && internalKey) void recordSandboxRunning(internalKey, projectId, bootHistory);
         send({
           type: "ready",
           sandboxId: sandbox.sandboxId,

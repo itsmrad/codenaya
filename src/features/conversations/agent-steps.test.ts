@@ -5,6 +5,9 @@ import {
   BUILD_CHECK_UNFINISHED,
   BUILD_NOT_CHECKED,
   BUILD_VERIFIED,
+  FIRST_STEP_HINT_MS,
+  SLOW_RUN_MS,
+  STALLED_RUN_MS,
   STATIC_CHECKS_FAILED,
   STATIC_CHECKS_PASSED,
   buildPathIndex,
@@ -12,9 +15,11 @@ import {
   fixedBuildErrors,
   lastRunActivity,
   previewErrorsNote,
+  runWaitHint,
   runWrittenPaths,
   sanitizeAgentText,
   toolResultError,
+  writtenFilePaths,
 } from "./agent-steps";
 
 const ID_A = "j977re57j3xkq2m8d4fz6t1vn0c5ab7e";
@@ -264,6 +269,89 @@ describe("runWrittenPaths", () => {
     // Reads stay capped; they only label the row.
     const ids = Array.from({ length: 25 }, () => ID_A);
     expect(describeToolCall({ name: "readFiles", input: { fileIds: ids } }, pathOf)).toHaveLength(20);
+  });
+});
+
+// #478: a quiet live run says so instead of looking frozen.
+describe("runWaitHint", () => {
+  const tool = (startedAt: number, endedAt?: number): AgentStep => ({
+    id: `t${startedAt}`,
+    kind: "tool",
+    tool: "writeFiles",
+    status: endedAt === undefined ? "running" : "done",
+    startedAt,
+    ...(endedAt === undefined ? {} : { endedAt }),
+  });
+
+  it("says nothing in the first seconds of a run", () => {
+    expect(runWaitHint({ startedAt: 0, steps: [], now: FIRST_STEP_HINT_MS - 1 })).toBeUndefined();
+  });
+
+  it("explains the wait once a run has had no step for a while", () => {
+    expect(runWaitHint({ startedAt: 0, steps: [], now: FIRST_STEP_HINT_MS })).toMatch(/^Planning the work/);
+  });
+
+  it("holds the planning hint off while thinking steps keep arriving", () => {
+    const thinking: AgentStep = { id: "th", kind: "thinking", status: "done", startedAt: 19_000, endedAt: 19_000 };
+    expect(runWaitHint({ startedAt: 0, steps: [thinking], now: FIRST_STEP_HINT_MS })).toBeUndefined();
+    expect(runWaitHint({ startedAt: 0, steps: [thinking], now: 19_000 + FIRST_STEP_HINT_MS })).toMatch(/^Planning the work/);
+  });
+
+  it("drops the planning hint once a tool step arrives, while the run keeps moving", () => {
+    expect(runWaitHint({ startedAt: 0, steps: [tool(30_000)], now: 40_000 })).toBeUndefined();
+  });
+
+  it("calls a run slow after a long time without progress, step or not", () => {
+    const slow = /^Taking longer than usual/;
+    expect(runWaitHint({ startedAt: 0, steps: [], now: SLOW_RUN_MS })).toMatch(slow);
+    expect(runWaitHint({ startedAt: 0, steps: [tool(1_000, 2_000)], now: 2_000 + SLOW_RUN_MS })).toMatch(slow);
+    // The 2 minutes count from the latest progress, not from the start.
+    expect(runWaitHint({ startedAt: 0, steps: [tool(1_000, 200_000)], now: 250_000 })).toBeUndefined();
+  });
+
+  it("comes before the stall, which the run row reports itself", () => {
+    expect(SLOW_RUN_MS).toBeLessThan(STALLED_RUN_MS);
+  });
+});
+
+describe("writtenFilePaths", () => {
+  const step = (tool: string, targets: string[], status: AgentStep["status"] = "done"): AgentStep => ({
+    id: `${tool}:${targets.join(",")}`,
+    kind: "tool",
+    tool,
+    targets,
+    status,
+    startedAt: 0,
+  });
+
+  it("lists the files the run wrote, newest first, each once", () => {
+    expect(
+      writtenFilePaths([
+        step("createFiles", ["src/a.tsx"]),
+        step("writeFiles", ["src/b.tsx", "src/c.tsx"]),
+        step("updateFile", ["src/a.tsx"]),
+      ]),
+    ).toEqual(["src/a.tsx", "src/c.tsx", "src/b.tsx"]);
+  });
+
+  it("counts every content-writing tool in FILE_WRITE_TOOLS, so a new one needs no change here", () => {
+    expect(writtenFilePaths([step("writeFiles", ["a.ts"]), step("createFiles", ["b.ts"]), step("updateFile", ["c.ts"])])).toEqual([
+      "c.ts",
+      "b.ts",
+      "a.ts",
+    ]);
+  });
+
+  it("leaves out reads, deletes, renames and writes that are still running or failed", () => {
+    expect(
+      writtenFilePaths([
+        step("readFiles", ["package.json"]),
+        step("deleteFiles", ["src/old.tsx"]),
+        step("renameFile", ["src/x.tsx", "y.tsx"]),
+        step("writeFiles", ["src/pending.tsx"], "running"),
+        step("writeFiles", ["src/broken.tsx"], "error"),
+      ]),
+    ).toEqual([]);
   });
 });
 

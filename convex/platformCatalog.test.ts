@@ -40,6 +40,7 @@ const save = (
   overrides: Partial<{
     defaultModelId: string;
     utilityModelId: string;
+    autoModelIds: string[];
     confirmRiskyPrices: boolean;
     internalKey: string;
   }> = {},
@@ -314,6 +315,47 @@ describe("platformCatalog reads", () => {
   });
 });
 
+describe("platformCatalog Auto pool (#322)", () => {
+  test("only the admin, with the internal key, sets the pool", async () => {
+    const base = setup();
+    for (const t of [base, base.withIdentity(OTHER)]) {
+      expect(await codeOf(save(t, [model("a")], { autoModelIds: ["a"] }))).toMatchObject({
+        code: "NOT_FOUND",
+      });
+    }
+    expect(
+      await codeOf(save(base.withIdentity(ADMIN), [model("a")], { autoModelIds: ["a"], internalKey: "guess" })),
+    ).toMatchObject({ code: "UNAUTHENTICATED" });
+    expect(await base.run((ctx) => ctx.db.query("platformCatalog").first())).toBeNull();
+  });
+
+  test("saves the pool without ids that aren't catalog models, and audits it", async () => {
+    const t = asAdmin();
+    await save(t, [model("a"), model("b")], { autoModelIds: ["b", "gone", "a", "b"] });
+    expect(await t.query(api.platformCatalog.getForAdmin, {})).toMatchObject({ autoModelIds: ["a", "b"] });
+    const [row] = await auditRows(t);
+    expect(row.summary).toContain("auto pool → a, b");
+    expect(row.changes).toContainEqual({ field: "autoModelIds", before: "", after: "a, b" });
+
+    // Dropping a pooled model drops it from the pool; an empty pool is unset.
+    await save(t, [model("a")], { autoModelIds: ["b"] });
+    const saved = await t.query(api.platformCatalog.getForAdmin, {});
+    expect(saved?.autoModelIds).toBeUndefined();
+  });
+
+  test("users and the server read the pool; the server read needs the key", async () => {
+    const t = asAdmin();
+    await save(t, [model("a"), model("b")], { autoModelIds: ["b"] });
+    expect(await t.query(api.platformCatalog.getForUsers, {})).toMatchObject({ autoModelIds: ["b"] });
+    expect(await t.query(api.platformCatalog.getForServer, { internalKey: INTERNAL_KEY })).toMatchObject({
+      autoModelIds: ["b"],
+    });
+    expect(
+      await codeOf(t.query(api.platformCatalog.getForServer, { internalKey: "nope" })),
+    ).toMatchObject({ code: "UNAUTHENTICATED" });
+  });
+});
+
 describe("platformCatalog.migrateFromProviderConfigs", () => {
   const legacy = (id: string, input: number, output: number) => ({
     id,
@@ -400,7 +442,7 @@ describe("platformCatalog.migrateFromProviderConfigs", () => {
     await t.run(async (ctx) => {
       await ctx.db.insert("platformModelConfigs", {
         provider: "anthropic",
-        models: [legacy("claude-sonnet-4-5", 3, 15), legacy("claude-haiku-4-5", 1, 5)],
+        models: [legacy("claude-sonnet-4-5", 3, 15), legacy("claude-haiku-5-5", 1, 5)],
         defaultModelId: "claude-sonnet-4-5",
         updatedAt: 1,
         updatedBy: ADMIN.subject,
@@ -411,7 +453,7 @@ describe("platformCatalog.migrateFromProviderConfigs", () => {
       fallbackProvider: "anthropic",
     });
     const catalog = await t.query(api.platformCatalog.getForAdmin, {});
-    expect(catalog?.utilityModelId).toBe("claude-haiku-4-5");
+    expect(catalog?.utilityModelId).toBe("claude-haiku-5-5");
     expect(catalog?.models.some((m) => m.vision)).toBe(false);
   });
 

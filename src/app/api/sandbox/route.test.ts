@@ -124,3 +124,41 @@ describe("POST /api/sandbox cost caps (#242)", () => {
     expect(mocks.sandboxCreate).toHaveBeenCalled();
   });
 });
+
+describe("POST /api/sandbox tags (#465)", () => {
+  const boot = (projectId?: string) =>
+    POST(
+      request(
+        "POST",
+        JSON.stringify({ files: [{ path: "index.html", content: "" }], projectId }),
+      ),
+    );
+
+  beforeEach(() => {
+    mocks.sandboxList.mockReturnValue({ nextItems: async () => [] });
+    mocks.sandboxCreate.mockRejectedValue(new Error("stop after create"));
+  });
+
+  it("tags a project's preview with its owner and project, so checkBuild can find it", async () => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
+    mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : [],
+    );
+
+    await (await boot("proj_1")).text();
+
+    expect(mocks.sandboxCreate).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ metadata: { userId: "user_1", projectId: "proj_1" } }),
+    );
+  });
+
+  it("tags a preview without a project with its owner only", async () => {
+    await (await boot()).text();
+
+    expect(mocks.sandboxCreate).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ metadata: { userId: "user_1" } }),
+    );
+  });
+});
