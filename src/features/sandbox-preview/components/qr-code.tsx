@@ -1,6 +1,6 @@
-\"use client\";
+"use client";
 
-import * as React from \"react\";
+import * as React from "react";
 
 // ============================================================================
 // ISO/IEC 18004 Compliant Pure TypeScript QR Code Generator
@@ -25,7 +25,7 @@ function gExp(n: number): number {
 }
 
 function gLog(n: number): number {
-  if (n === 0) throw new Error(\"GF(256): log(0)\");
+  if (n === 0) throw new Error("GF(256): log(0)");
   return GF_LOG[n];
 }
 
@@ -91,6 +91,126 @@ function bchFormatInfo(data: number): number {
     }
   }
   return ((data << 10) | d) ^ 0x5412;
+}
+
+function bchVersionInfo(version: number): number {
+  let d = version << 12;
+  const g18 = 0x1f25;
+  for (let i = 17; i >= 12; i--) {
+    if ((d >> i) & 1) {
+      d ^= g18 << (i - 12);
+    }
+  }
+  return (version << 12) | d;
+}
+
+function applyMaskBit(mask: number, r: number, c: number): boolean {
+  switch (mask) {
+    case 0:
+      return (r + c) % 2 === 0;
+    case 1:
+      return r % 2 === 0;
+    case 2:
+      return c % 3 === 0;
+    case 3:
+      return (r + c) % 3 === 0;
+    case 4:
+      return (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0;
+    case 5:
+      return ((r * c) % 2) + ((r * c) % 3) === 0;
+    case 6:
+      return (((r * c) % 2) + ((r * c) % 3)) % 2 === 0;
+    case 7:
+      return (((r + c) % 2) + ((r * c) % 3)) % 2 === 0;
+    default:
+      return false;
+  }
+}
+
+function scoreMatrix(mat: boolean[][]): number {
+  const size = mat.length;
+  let penalty = 0;
+
+  // N1: 5 or more consecutive modules of the same color in rows and columns
+  for (let r = 0; r < size; r++) {
+    let rowRun = 1;
+    let colRun = 1;
+    for (let i = 1; i < size; i++) {
+      if (mat[r][i] === mat[r][i - 1]) {
+        rowRun++;
+      } else {
+        if (rowRun >= 5) penalty += 3 + (rowRun - 5);
+        rowRun = 1;
+      }
+      if (mat[i][r] === mat[i - 1][r]) {
+        colRun++;
+      } else {
+        if (colRun >= 5) penalty += 3 + (colRun - 5);
+        colRun = 1;
+      }
+    }
+    if (rowRun >= 5) penalty += 3 + (rowRun - 5);
+    if (colRun >= 5) penalty += 3 + (colRun - 5);
+  }
+
+  // N2: 2x2 blocks of the same color
+  for (let r = 0; r < size - 1; r++) {
+    for (let c = 0; c < size - 1; c++) {
+      const v = mat[r][c];
+      if (v === mat[r][c + 1] && v === mat[r + 1][c] && v === mat[r + 1][c + 1]) {
+        penalty += 3;
+      }
+    }
+  }
+
+  // N3: 1:1:3:1:1 finder-like pattern preceded or followed by 4 light modules
+  const matchesN3 = (get: (idx: number) => boolean): boolean => {
+    const p1 =
+      get(0) &&
+      !get(1) &&
+      get(2) &&
+      get(3) &&
+      get(4) &&
+      !get(5) &&
+      get(6) &&
+      !get(7) &&
+      !get(8) &&
+      !get(9) &&
+      !get(10);
+    const p2 =
+      !get(0) &&
+      !get(1) &&
+      !get(2) &&
+      !get(3) &&
+      get(4) &&
+      !get(5) &&
+      get(6) &&
+      get(7) &&
+      get(8) &&
+      !get(9) &&
+      get(10);
+    return p1 || p2;
+  };
+  for (let i = 0; i < size; i++) {
+    for (let j = 0; j <= size - 11; j++) {
+      if (matchesN3((k) => mat[i][j + k])) penalty += 40;
+      if (matchesN3((k) => mat[j + k][i])) penalty += 40;
+    }
+  }
+
+  // N4: balance of dark modules around 50%
+  let dark = 0;
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      if (mat[r][c]) dark++;
+    }
+  }
+  const percent = (dark * 100) / (size * size);
+  const prev5 = Math.floor(percent / 5) * 5;
+  const next5 = Math.ceil(percent / 5) * 5;
+  penalty += Math.min(Math.abs(prev5 - 50) / 5, Math.abs(next5 - 50) / 5) * 10;
+
+  return penalty;
 }
 
 interface QRVersionSpec {
@@ -270,30 +390,38 @@ function generateQRMatrix(text: string): boolean[][] {
   // 4.4 Dark module
   setMod(size - 8, 8, true);
 
-  // 4.5 Format information (Level L = 01, Mask 000 = 000 => (1 << 3) | 0 = 8)
-  const fmt = bchFormatInfo(8);
-  for (let i = 0; i < 15; i++) {
-    const bit = ((fmt >> i) & 1) === 1;
-    // Vertical placement around top-left & bottom-left
-    if (i < 6) {
-      setMod(i, 8, bit);
-    } else if (i < 8) {
-      setMod(i + 1, 8, bit);
-    } else {
-      setMod(size - 15 + i, 8, bit);
-    }
-
-    // Horizontal placement around top-left & top-right
-    if (i < 8) {
-      setMod(8, size - 1 - i, bit);
-    } else if (i < 9) {
-      setMod(8, 15 - i, bit);
-    } else {
-      setMod(8, 14 - i, bit);
+  // 4.5 Version information (for Version >= 7) BEFORE data placement so modules are marked isFunc
+  if (version >= 7) {
+    const verInfo = bchVersionInfo(version);
+    for (let i = 0; i < 18; i++) {
+      const bit = ((verInfo >> i) & 1) === 1;
+      const r = Math.floor(i / 3);
+      const c = size - 11 + (i % 3);
+      setMod(r, c, bit);
+      setMod(c, r, bit);
     }
   }
 
-  // 5. Place Data and EC bits in 2-column zigzag with Mask 000 ((row + col) % 2 === 0)
+  // 4.6 Format information helper (Level L = 01 => (1 << 3) | mask)
+  const writeFormatInfo = (target: boolean[][], mask: number, markFunc: boolean) => {
+    const fmt = bchFormatInfo((1 << 3) | mask);
+    for (let i = 0; i < 15; i++) {
+      const bit = ((fmt >> i) & 1) === 1;
+      // Vertical placement around top-left & bottom-left
+      const vr = i < 6 ? i : i < 8 ? i + 1 : size - 15 + i;
+      target[vr][8] = bit;
+      if (markFunc) isFunc[vr][8] = true;
+
+      // Horizontal placement around top-left & top-right
+      const hc = i < 8 ? size - 1 - i : i < 9 ? 15 - i : 14 - i;
+      target[8][hc] = bit;
+      if (markFunc) isFunc[8][hc] = true;
+    }
+  };
+  // Reserve format info modules as function modules before data placement
+  writeFormatInfo(matrix, 0, true);
+
+  // 5. Place Data and EC bits in 2-column zigzag (unmasked base matrix)
   const allBits: number[] = [];
   for (const byte of finalCodewords) {
     for (let i = 7; i >= 0; i--) {
@@ -315,12 +443,8 @@ function generateQRMatrix(text: string): boolean[][] {
     for (const r of rows) {
       for (const c of cols) {
         if (!isFunc[r][c]) {
-          let b = bitIdx < allBits.length ? allBits[bitIdx] : 0;
+          const b = bitIdx < allBits.length ? allBits[bitIdx] : 0;
           bitIdx++;
-          // Apply Mask 000: (r + c) % 2 === 0
-          if ((r + c) % 2 === 0) {
-            b ^= 1;
-          }
           matrix[r][c] = b === 1;
         }
       }
@@ -329,7 +453,28 @@ function generateQRMatrix(text: string): boolean[][] {
     right -= 2;
   }
 
-  return matrix;
+  // 6. Select optimal mask pattern (0..7) minimizing ISO/IEC 18004 penalty score
+  let bestScore = Infinity;
+  let bestMatrix = matrix;
+
+  for (let mask = 0; mask < 8; mask++) {
+    const candidate = matrix.map((row) => [...row]);
+    writeFormatInfo(candidate, mask, false);
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        if (!isFunc[r][c] && applyMaskBit(mask, r, c)) {
+          candidate[r][c] = !candidate[r][c];
+        }
+      }
+    }
+    const score = scoreMatrix(candidate);
+    if (score < bestScore) {
+      bestScore = score;
+      bestMatrix = candidate;
+    }
+  }
+
+  return bestMatrix;
 }
 
 export interface QRCodeProps extends React.SVGProps<SVGSVGElement> {
@@ -350,6 +495,19 @@ export const QRCode = ({
   const matrixSize = matrix.length;
   const viewBoxSize = matrixSize + margin * 2;
 
+  const path = React.useMemo(() => {
+    if (matrixSize === 0) return "";
+    let d = "";
+    for (let r = 0; r < matrixSize; r++) {
+      for (let c = 0; c < matrixSize; c++) {
+        if (matrix[r][c]) {
+          d += `M${c + margin},${r + margin}h1v1h-1z `;
+        }
+      }
+    }
+    return d;
+  }, [matrix, matrixSize, margin]);
+
   if (matrixSize === 0) {
     return (
       <div
@@ -361,31 +519,19 @@ export const QRCode = ({
     );
   }
 
-  const path = React.useMemo(() => {
-    let d = \"\";
-    for (let r = 0; r < matrixSize; r++) {
-      for (let c = 0; c < matrixSize; c++) {
-        if (matrix[r][c]) {
-          d += `M${c + margin},${r + margin}h1v1h-1z `;
-        }
-      }
-    }
-    return d;
-  }, [matrix, matrixSize, margin]);
-
   return (
     <svg
       viewBox={`0 0 ${viewBoxSize} ${viewBoxSize}`}
       width={size}
       height={size}
       className={className}
-      shapeRendering=\"crispEdges\"
+      shapeRendering="crispEdges"
       aria-label={`QR code for ${value}`}
-      role=\"img\"
+      role="img"
       {...props}
     >
-      <rect width={viewBoxSize} height={viewBoxSize} fill=\"white\" />
-      <path d={path} fill=\"black\" />
+      <rect width={viewBoxSize} height={viewBoxSize} fill="white" />
+      <path d={path} fill="black" />
     </svg>
   );
 };
