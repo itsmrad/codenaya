@@ -14,6 +14,8 @@ import {
   isHmrSuccess,
   logTail,
   mergeAppError,
+  overlayError,
+  readInstallFailure,
   trackFixAttempts,
 } from "./app-error";
 
@@ -425,5 +427,60 @@ describe("createAutoFixer (#491)", () => {
     fixer.dispose();
     vi.advanceTimersByTime(10_000);
     expect(fix).not.toHaveBeenCalled();
+  });
+});
+
+describe("readInstallFailure (#497)", () => {
+  const output =
+    "npm error code ERESOLVE\nnpm error ERESOLVE unable to resolve dependency tree\n" +
+    "Error: npm install failed with exit code 1\n";
+
+  it("turns a sync's failed reinstall into a package.json build error", () => {
+    expect(readInstallFailure({ success: true, installFailed: { exitCode: 1, output } })).toEqual({
+      output,
+      error: {
+        kind: "build",
+        message: "npm install failed with exit code 1 (ERESOLVE)",
+        file: "package.json",
+      },
+    });
+  });
+
+  it("shows the output but no error for a network failure", () => {
+    const network = "npm error code ETIMEDOUT\nError: npm install failed with exit code 1\n";
+    expect(readInstallFailure({ installFailed: { exitCode: 1, output: network } })).toEqual({
+      output: network,
+      error: null,
+    });
+  });
+
+  it("is null for a sync that installed nothing, or a malformed body", () => {
+    for (const body of [{ success: true, synced: 1 }, { installFailed: { output: 1 } }, null, "x"]) {
+      expect(readInstallFailure(body)).toBeNull();
+    }
+  });
+});
+
+describe("overlayError (#497)", () => {
+  it("reads the file and line relative to the project", () => {
+    expect(
+      overlayError(
+        '[plugin:vite:import-analysis] Failed to resolve import "./x" from "src/App.tsx".',
+        "/home/user/app/src/App.tsx:3:20",
+      ),
+    ).toEqual({
+      kind: "build",
+      message: '[plugin:vite:import-analysis] Failed to resolve import "./x" from "src/App.tsx".',
+      file: "src/App.tsx",
+      line: 3,
+    });
+  });
+
+  it("keeps a location without a line as the file, and none as none", () => {
+    expect(overlayError("Boom", "/home/user/app/src/main.tsx")).toMatchObject({
+      file: "src/main.tsx",
+      line: undefined,
+    });
+    expect(overlayError("Boom")).toEqual({ kind: "build", message: "Boom", file: undefined, line: undefined });
   });
 });

@@ -14,6 +14,7 @@ import {
   createBuildErrorDetector,
   isHmrSuccess,
   mergeAppError,
+  readInstallFailure,
   type AppError,
 } from "@/features/sandbox-preview/utils/app-error";
 import {
@@ -314,6 +315,15 @@ export const useSandbox = ({
             }),
           })
         )
+        // After the boot stream ends, a failed reinstall reaches only this (#497).
+        .then(async (response) => {
+          const failure = readInstallFailure(await response.json().catch(() => null));
+          // Not after a restart: that sandbox is gone.
+          if (!failure || sandboxIdRef.current !== sandboxId) return;
+          setTerminalOutput((prev) => `${prev}\npackage.json changed.\n${failure.output}`);
+          const { error } = failure;
+          if (error) setAppError((prev) => mergeAppError(prev, error));
+        })
         .catch(() => {
           // Non-critical — file sync failure shouldn't crash the preview
         })

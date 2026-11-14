@@ -1,3 +1,4 @@
+import { CommandExitError } from "e2b";
 import { z } from "zod";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 import { parseJsonBody } from "@/lib/parse-json-body";
@@ -11,6 +12,11 @@ import {
   requestReinstall,
 } from "@/features/sandbox-preview/server/sandbox-registry";
 import { RESTART_VITE_COMMAND } from "@/features/sandbox-preview/server/restart-vite";
+import {
+  installFailure,
+  sandboxSecretValues,
+  type InstallFailure,
+} from "@/features/sandbox-preview/server/install-failure";
 import {
   boundedTimeout,
   streamBudget,
@@ -88,6 +94,8 @@ export async function POST(request: Request, { params }: RouteParams) {
  * Syncs file changes to a running sandbox for hot-reload.
  * Accepts an array of { path, content } objects. A changed package.json
  * re-runs the install so dependencies added after the boot are there (#254).
+ * A failed install answers `installFailed` with a redacted output tail, so the
+ * preview can show it after the boot stream has ended (#497).
  */
 export async function PATCH(request: Request, { params }: RouteParams) {
   const budget = streamBudget(Date.now());
@@ -127,18 +135,30 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     // The instance that booted the sandbox installs through the boot stream,
     // where the output reaches the terminal. Any other instance, or any sync
     // after that stream has ended (#492), installs here.
+    let installFailed: InstallFailure | undefined;
     if (
       files.some((file) => file.path === "package.json") &&
       !requestReinstall(sandboxId)
     ) {
-      await sandbox.commands.run(installCommand || DEFAULT_INSTALL_COMMAND, {
-        cwd: WORK_DIR,
-        timeoutMs: boundedTimeout(5 * 60 * 1000, budget.left()),
-      });
-      await sandbox.commands.run(RESTART_VITE_COMMAND, { cwd: WORK_DIR });
+      const command = installCommand || DEFAULT_INSTALL_COMMAND;
+      const result = await sandbox.commands
+        .run(command, {
+          cwd: WORK_DIR,
+          timeoutMs: boundedTimeout(5 * 60 * 1000, budget.left()),
+        })
+        .catch((error: unknown) => {
+          // A non-zero exit is the app's failure, not a dead sandbox (#491).
+          if (error instanceof CommandExitError) return error;
+          throw error;
+        });
+      if (result.exitCode !== 0) {
+        installFailed = installFailure(result, command, await sandboxSecretValues(sandbox));
+      } else {
+        await sandbox.commands.run(RESTART_VITE_COMMAND, { cwd: WORK_DIR });
+      }
     }
 
-    return Response.json({ success: true, synced: files.length });
+    return Response.json({ success: true, synced: files.length, installFailed });
   } catch (error) {
     // The cached handle may belong to a sandbox that has since died.
     forgetSandbox(sandboxId);
