@@ -31,21 +31,26 @@ const subscribeReducedMotion = (callback: () => void) => {
   };
 };
 
-function hexToRgb(hex: string): [number, number, number] {
-  const clean = hex.replace("#", "").trim();
-  if (clean.length === 3) {
+const DEFAULT_BRAND_RGBA: [number, number, number, number] = [232, 130, 79, 1];
+
+function hexToRgba(hex: string): [number, number, number, number] {
+  const trimmed = hex.trim();
+  const clean = trimmed.startsWith("#") ? trimmed.slice(1) : trimmed;
+  if (!/^(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(clean)) {
+    return [...DEFAULT_BRAND_RGBA];
+  }
+  if (clean.length === 3 || clean.length === 4) {
     const r = parseInt(clean[0] + clean[0], 16);
     const g = parseInt(clean[1] + clean[1], 16);
     const b = parseInt(clean[2] + clean[2], 16);
-    return [isNaN(r) ? 232 : r, isNaN(g) ? 130 : g, isNaN(b) ? 79 : b];
+    const a = clean.length === 4 ? parseInt(clean[3] + clean[3], 16) / 255 : 1;
+    return [r, g, b, a];
   }
-  if (clean.length >= 6) {
-    const r = parseInt(clean.slice(0, 2), 16);
-    const g = parseInt(clean.slice(2, 4), 16);
-    const b = parseInt(clean.slice(4, 6), 16);
-    return [isNaN(r) ? 232 : r, isNaN(g) ? 130 : g, isNaN(b) ? 79 : b];
-  }
-  return [232, 130, 79];
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  const a = clean.length === 8 ? parseInt(clean.slice(6, 8), 16) / 255 : 1;
+  return [r, g, b, a];
 }
 
 /**
@@ -89,15 +94,15 @@ export const AnimatedDotGrid = ({
     let lastTime = performance.now();
 
     // Read --brand token dynamically (Issue #417)
-    let brandRgb = [232, 130, 79];
+    let brandRgba: [number, number, number, number] = [...DEFAULT_BRAND_RGBA];
     const updateBrandColor = () => {
       try {
         const rawBrand = getComputedStyle(canvas).getPropertyValue("--brand").trim();
         if (rawBrand) {
-          brandRgb = hexToRgb(rawBrand);
+          brandRgba = hexToRgba(rawBrand);
         }
       } catch {
-        brandRgb = [232, 130, 79];
+        brandRgba = [...DEFAULT_BRAND_RGBA];
       }
     };
     updateBrandColor();
@@ -256,7 +261,7 @@ export const AnimatedDotGrid = ({
         }
       }
 
-      const [brR, brG, brB] = brandRgb;
+      const [brR, brG, brB, brA] = brandRgba;
 
       // Render grid points
       for (let c = 0; c < cols; c++) {
@@ -308,10 +313,10 @@ export const AnimatedDotGrid = ({
 
           if (isHead) {
             ctx.fillStyle = isAccent
-              ? `rgba(${brR}, ${brG}, ${brB}, ${alpha})`
+              ? `rgba(${brR}, ${brG}, ${brB}, ${alpha * brA})`
               : `rgba(255, 255, 255, ${alpha})`;
           } else if (isAccent) {
-            ctx.fillStyle = `rgba(${brR}, ${brG}, ${brB}, ${alpha})`;
+            ctx.fillStyle = `rgba(${brR}, ${brG}, ${brB}, ${alpha * brA})`;
           } else {
             ctx.fillStyle = `rgba(240, 236, 230, ${alpha})`;
           }
