@@ -25,6 +25,7 @@ const ImportContent = async ({ searchParams }: ImportPageProps) => {
     return (
       <NotFoundView
         header={<MarketingNavbar />}
+        label="Import"
         title="Can't open that repository"
         description="This link doesn't point to a GitHub repository. It should look like /import?repo=owner/repo."
       />

@@ -1,48 +1,61 @@
-import { CheckIcon } from "lucide-react";
+import { Check } from "lucide-react";
 
-import { MarketingNavbar } from "@/components/marketing-navbar";
-import { GridPattern } from "@/components/landing/grid-pattern";
+import { PublicShell } from "@/components/landing/public-shell";
+import { Reveal } from "@/components/landing/reveal";
+import { GridCross } from "@/components/landing/section-header";
 import { PendingStartNote } from "@/features/auth/components/pending-start-note";
-import { AGENT_MODELS } from "@/features/conversations/agent-models";
 
-/** Why sign up, beside the card on wide screens (#252). */
-const BENEFITS = [
-  "Unlimited runs on your own AI key (BYOK)",
-  `${AGENT_MODELS.length} models, including Claude, GPT and Gemini`,
-  "Import from GitHub, push back, or download a ZIP",
+const POINTS = [
+  "Unlimited runs on your own AI key",
+  "Your app runs in a cloud sandbox, nothing to install",
+  "Export to GitHub or download a ZIP anytime",
 ];
 
+/** Sign in and sign up: a short pitch beside the Clerk card, on the landing grid. */
 const AuthLayout = ({ children }: { children: React.ReactNode }) => {
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <MarketingNavbar />
-      <main className="relative flex-1 flex items-center justify-center overflow-hidden px-4 py-12">
-        <GridPattern />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_40%,rgba(232,130,79,0.08),transparent_70%)] dark:bg-[radial-gradient(ellipse_60%_50%_at_50%_40%,rgba(232,130,79,0.12),transparent_70%)]" />
-        <div className="relative z-10 grid w-full max-w-5xl items-center gap-12 lg:grid-cols-[auto_1fr]">
-          <div className="flex flex-col items-center gap-4">
-            <p className="text-center text-sm text-muted-foreground lg:hidden">
-              Build apps with AI, right in your browser.
+    <PublicShell>
+      <div className="grid border-b border-border lg:min-h-[calc(100vh-8rem)] lg:grid-cols-[1fr_1.1fr]">
+        <div className="relative hidden flex-col justify-between border-r border-border lg:flex">
+          <div className="flex h-11 items-center gap-3 border-b border-border px-8 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+            <span aria-hidden className="h-3.5 w-0.5 bg-brand" />[ Codenaya ]
+          </div>
+          <Reveal className="px-8 py-16">
+            <p className="text-5xl font-medium leading-[1.04] tracking-[-0.03em] text-foreground">
+              Build with AI.
+              <br />
+              Ship from your <span className="text-brand">browser.</span>
             </p>
+            <p className="mt-5 max-w-md text-lg leading-relaxed text-muted-foreground">
+              A browser IDE with an AI agent that writes your code and runs it in a live preview.
+            </p>
+          </Reveal>
+          <ul className="border-t border-border">
+            {POINTS.map((point, i) => (
+              <li key={point} className="border-b border-border last:border-b-0">
+                <Reveal delay={0.15 + i * 0.08} className="flex items-center gap-3 px-8 py-4 text-sm text-foreground">
+                  <Check className="size-4 shrink-0 text-muted-foreground" />
+                  {point}
+                </Reveal>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="relative flex items-center justify-center overflow-hidden px-4 py-16">
+          {/* Dotted field behind the card */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(var(--color-foreground)_1px,transparent_1px)] [background-size:18px_18px] opacity-[0.1] [mask-image:radial-gradient(ellipse_60%_60%_at_50%_50%,black,transparent)]"
+          />
+          <GridCross className="-top-[5px] -left-[5px] max-lg:hidden" />
+          <Reveal className="relative z-10 flex flex-col items-center gap-4">
             <PendingStartNote />
             {children}
-          </div>
-          <aside aria-label="Why Codenaya" className="hidden lg:flex flex-col gap-6">
-            <h2 className="text-3xl font-bold tracking-tighter text-foreground">
-              Build apps with AI, right in your browser.
-            </h2>
-            <ul className="flex flex-col gap-3 text-base text-muted-foreground">
-              {BENEFITS.map((benefit) => (
-                <li key={benefit} className="flex items-start gap-2.5">
-                  <CheckIcon aria-hidden className="mt-1 size-4 shrink-0 text-brand" />
-                  {benefit}
-                </li>
-              ))}
-            </ul>
-          </aside>
+          </Reveal>
         </div>
-      </main>
-    </div>
+      </div>
+    </PublicShell>
   );
 };
 

@@ -26,9 +26,8 @@ const Bar = ({ className, style }: { className?: string; style?: CSSProperties }
 );
 
 /** Skeleton "pages" so covers look like different kinds of apps. */
-const LAYOUTS = [
-  // Landing page
-  () => (
+const LAYOUTS = {
+  landing: () => (
     <div className="flex flex-col items-center gap-1.5 px-[10%] pt-[8%]">
       <div className="h-2.5 w-3/5 rounded-full bg-foreground/20" />
       <Bar className="w-2/5" />
@@ -40,8 +39,7 @@ const LAYOUTS = [
       </div>
     </div>
   ),
-  // Dashboard
-  () => (
+  dashboard: () => (
     <div className="flex h-full gap-2 p-2">
       <div className="flex w-1/5 flex-col gap-1.5 pt-1">
         <Bar className="w-full bg-[var(--cover-accent)] opacity-70" />
@@ -69,8 +67,7 @@ const LAYOUTS = [
       </div>
     </div>
   ),
-  // List / app
-  () => (
+  list: () => (
     <div className="flex flex-col gap-1.5 px-[8%] pt-[7%]">
       <div className="mb-1 flex items-center justify-between">
         <div className="h-2.5 w-1/3 rounded-full bg-foreground/20" />
@@ -84,11 +81,16 @@ const LAYOUTS = [
       ))}
     </div>
   ),
-];
+};
+
+type CoverLayout = keyof typeof LAYOUTS;
+const LAYOUT_NAMES = Object.keys(LAYOUTS) as CoverLayout[];
 
 interface ProjectCoverProps {
   /** Stable id the cover is derived from. */
   seed: string;
+  /** A fixed layout, e.g. a template's; otherwise one is picked from the seed. */
+  layout?: CoverLayout;
   className?: string;
 }
 
@@ -98,10 +100,10 @@ interface ProjectCoverProps {
  * few app-like layouts. Deterministic, so the same project always looks the
  * same.
  */
-export const ProjectCover = ({ seed, className }: ProjectCoverProps) => {
+export const ProjectCover = ({ seed, layout, className }: ProjectCoverProps) => {
   const hash = hashSeed(seed);
   const hue = hash % 360;
-  const Layout = LAYOUTS[(hash >>> 9) % LAYOUTS.length];
+  const Layout = LAYOUTS[layout ?? LAYOUT_NAMES[(hash >>> 9) % LAYOUT_NAMES.length]];
 
   return (
     <div

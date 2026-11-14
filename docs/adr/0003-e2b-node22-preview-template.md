@@ -17,7 +17,7 @@ E2B's `base` image ships Node 20.9. Vite 7 needs `^20.19 || >=22.12` (it calls
 ## Decision
 
 - `e2b/build-template.mts` (`npm run e2b:template`) builds the official Node 22 LTS
-  image into an E2B template named `codenaya-node22`. E2B gives it the same `user`
+  image into an E2B template named by `E2B_TEMPLATE` (default: `codenaya-node22`). E2B gives it the same `user`
   account and `/home/user` home that the route expects.
 - The host sets `E2B_TEMPLATE=codenaya-node22`. The route reads it per environment and
   falls back to `base` when it's unset.

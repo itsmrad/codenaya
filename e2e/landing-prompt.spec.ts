@@ -22,64 +22,59 @@ const submitHeroPrompt = async (page: Page, prompt: string) => {
 };
 
 test.describe("landing hero prompt", () => {
-  test("a signed-out prompt is kept and routes to sign-up on mobile", async ({ page }) => {
+  test("a signed-out prompt is kept and routes to sign-in on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     const errors = collectConsoleErrors(page);
     await page.goto("/");
 
     await submitHeroPrompt(page, "A recipe app");
 
-    await expect(page).toHaveURL(/\/sign-up/);
+    await expect(page).toHaveURL(/\/sign-in/);
     expect(await pendingPrompt(page)).toBe("A recipe app");
     await page.waitForLoadState("networkidle");
     expect(errors).toEqual([]);
   });
 
-  // #252: the auth page shows what will start, without consuming it.
-  test("the sign-up page shows the pending prompt as text and leaves it for the dashboard", async ({ page }) => {
+  // #252: the auth pages show what will start, without consuming it.
+  test("the auth pages show the pending prompt as text and leave it for the dashboard", async ({ page }) => {
+    const prompt = 'A <script>alert("x")</script> recipe app';
     await page.goto("/");
-    await submitHeroPrompt(page, 'A <script>alert("x")</script> recipe app');
-    await expect(page).toHaveURL(/\/sign-up/);
+    await submitHeroPrompt(page, prompt);
+    await expect(page).toHaveURL(/\/sign-in/);
 
-    const note = page.getByRole("status").filter({ hasText: "Your prompt will start building right after sign-up" });
+    const note = page.getByRole("status").filter({ hasText: "Your prompt will start building right after you log in" });
     await expect(note).toBeVisible();
-    await expect(note).toContainText('A <script>alert("x")</script> recipe app');
-    expect(await pendingPrompt(page)).toBe('A <script>alert("x")</script> recipe app');
+    await expect(note).toContainText(prompt);
+    expect(await pendingPrompt(page)).toBe(prompt);
 
-    await page.goto("/sign-in");
-    await expect(page.getByRole("status").filter({ hasText: "right after you log in" })).toBeVisible();
+    await page.goto("/sign-up");
+    await expect(page.getByRole("status").filter({ hasText: "right after sign-up" })).toBeVisible();
   });
 
   test("the auth pages show no prompt block without a pending prompt", async ({ page }) => {
-    await page.goto("/sign-up");
+    await page.goto("/sign-in");
     await page.evaluate((key) => localStorage.removeItem(key), PENDING_PROMPT_KEY);
     await page.reload();
     await expect(page.getByText("Your prompt will start building")).toHaveCount(0);
   });
 
-  test("the auth pages add a side panel on wide screens only, without overflow", async ({ page }) => {
-    for (const [width, height, panel] of [[1440, 900, true], [1024, 800, true], [768, 1024, false], [375, 812, false]] as const) {
-      await page.setViewportSize({ width, height });
-      await page.goto("/sign-up");
-      const aside = page.getByRole("complementary", { name: "Why Codenaya" });
-      if (panel) await expect(aside).toBeVisible();
-      else await expect(aside).toBeHidden();
-      const overflow = await page.evaluate(
-        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      );
-      expect(overflow, `horizontal overflow at ${width}px`).toBe(0);
-    }
-  });
-
-  test("a starter chip fills the hero prompt without leaving the page", async ({ page }) => {
+  test("a model picked signed out is kept with the prompt", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
     await page.goto("/");
 
-    await page.getByRole("button", { name: "Portfolio", exact: true }).first().click();
+    await page.getByRole("button", { name: /^Model:/ }).first().click();
+    await page.getByRole("listbox", { name: "Model" }).getByRole("option").last().click();
+    // useAgentModel's storage key: the dashboard reads the pick from here after sign-in.
+    const stored = () => page.evaluate(() => localStorage.getItem("codenaya:agent-model"));
+    const picked = await stored();
+    expect(JSON.parse(picked ?? "null")).toEqual({ modelId: expect.any(String) });
 
-    await expect(
-      page.getByRole("textbox", { name: "Describe what you want to build" }).first(),
-    ).toHaveValue(/Portfolio/);
-    await expect(page).toHaveURL("/");
+    await submitHeroPrompt(page, "A recipe app");
+
+    await expect(page).toHaveURL(/\/sign-in/);
+    expect(await pendingPrompt(page)).toBe("A recipe app");
+    expect(await stored()).toBe(picked);
+    expect(errors).toEqual([]);
   });
 
   test.describe("after sign-in", () => {
@@ -89,7 +84,7 @@ test.describe("landing hero prompt", () => {
       test.setTimeout(120_000);
       await page.goto("/");
       await submitHeroPrompt(page, SMOKE_PROMPT);
-      await expect(page).toHaveURL(/\/sign-up/);
+      await expect(page).toHaveURL(/\/sign-in/);
 
       await signIn(page);
       await page.goto("/");

@@ -100,7 +100,8 @@ export async function POST(request: Request) {
       .replace("{nextLines}", nextLines ?? "")
       .replace("{lineNumber}", lineNumber.toString());
 
-    return await withEditorModel({ userId }, async (model) => {
+    // Ghost text is only useful if it lands in about a second (#320).
+    return await withEditorModel({ userId, thinking: false }, async (model) => {
       const { object } = await generateObject({
         model,
         output: "object",

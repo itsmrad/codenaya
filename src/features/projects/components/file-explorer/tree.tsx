@@ -16,6 +16,17 @@ import {
   isOptimisticFileId,
 } from "@/features/projects/hooks/use-files";
 import { useEditor } from "@/features/editor/hooks/use-editor";
+import { undoAction, useRestoreCheckpoint } from "@/features/conversations/hooks/use-checkpoints";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 import { getItemPadding } from "./constants";
 import { LoadingRow } from "./loading-row";
@@ -36,6 +47,7 @@ export const Tree = ({
   const [isOpen, setIsOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [creating, setCreating] = useState<"file" | "folder" | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const renameFile = useRenameFile({
     projectId,
@@ -45,6 +57,7 @@ export const Tree = ({
     projectId,
     parentId: item.parentId,
   });
+  const restore = useRestoreCheckpoint();
   const createFile = useCreateFile();
   const createFolder = useCreateFolder();
 
@@ -112,6 +125,49 @@ export const Tree = ({
     setCreating(type);
   };
 
+  // #259: confirm first, and offer Undo, which restores the snapshot the
+  // delete took.
+  const handleDelete = () => {
+    setConfirmingDelete(false);
+    if (item.type === "file") closeTab(item._id);
+    deleteFile({ id: item._id }).then(
+      // Null when the project is too big to snapshot: no Undo then.
+      (undoCheckpointId) =>
+        toast.success(`Deleted ${item.name}`, {
+          action: undoCheckpointId
+            ? undoAction(() =>
+                restore({ checkpointId: undoCheckpointId }).then(
+                  () => toast.success(`Restored ${item.name}`),
+                  (error) => toast.error(convexErrorMessage(error, "Couldn't undo the delete")),
+                ),
+              )
+            : undefined,
+        }),
+      (error) => toast.error(convexErrorMessage(error, `Couldn't delete ${item.name}`)),
+    );
+  };
+
+  const deleteDialog = (
+    <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {item.type === "folder"
+              ? `Delete "${item.name}" and everything in it?`
+              : `Delete "${item.name}"?`}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            You can undo this right after, or restore it from Version history.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
   if (item.type === "file") {
     const fileName = item.name;
     const isActive = activeTabId === item._id;
@@ -129,6 +185,7 @@ export const Tree = ({
     }
 
     return (
+      <>
       <TreeItemWrapper
         item={item}
         level={level}
@@ -144,14 +201,13 @@ export const Tree = ({
           }
         }}
         onRename={() => setIsRenaming(true)}
-        onDelete={() => {
-          closeTab(item._id);
-          deleteFile({ id: item._id })
-        }}
+        onDelete={() => setConfirmingDelete(true)}
       >
         <FileIcon fileName={fileName} autoAssign className="size-4" />
         <span className="truncate text-sm">{fileName}</span>
       </TreeItemWrapper>
+      {deleteDialog}
+      </>
     )
   }
 
@@ -240,14 +296,13 @@ export const Tree = ({
         level={level}
         onClick={() => setIsOpen((value) => !value)}
         onRename={() => setIsRenaming(true)}
-        onDelete={() => {
-          deleteFile({ id: item._id })
-        }}
+        onDelete={() => setConfirmingDelete(true)}
         onCreateFile={() => startCreating("file")}
         onCreateFolder={() => startCreating("folder")}
       >
         {folderRender}
       </TreeItemWrapper>
+      {deleteDialog}
       {isOpen && (
         <>
           {folderContents === undefined && <LoadingRow level={level + 1} />}

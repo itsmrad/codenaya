@@ -232,6 +232,9 @@ export default defineSchema({
 
   projects: defineTable({
     name: v.string(),
+    // "generated": a random name the first conversation title may replace
+    // (#288). Unset for user-chosen names; renaming clears it.
+    nameSource: v.optional(v.literal("generated")),
     ownerId: v.string(),
     updatedAt: v.number(),
     // Set at creation from a prompt, whose project is seeded with the starter,
@@ -319,7 +322,8 @@ export default defineSchema({
    */
   checkpoints: defineTable({
     projectId: v.id("projects"),
-    // The run it was taken before; unset for a "Before pull" checkpoint (#343).
+    // The run it was taken before. Unset for a snapshot taken before a GitHub
+    // pull (#343), a restore or a manual delete (#259).
     messageId: v.optional(v.id("messages")),
     // The prompt that started the run, for the history list.
     label: v.string(),

@@ -1,5 +1,7 @@
 "use client";
 
+import { MotionConfig } from "motion/react";
+
 import { ConvexReactClient } from "convex/react";
 import { ClerkProvider, useAuth } from "@clerk/nextjs";
 import { shadcn } from "@clerk/ui/themes";
@@ -12,6 +14,7 @@ import {
 } from "@/features/auth/constants";
 import { useEnsureCurrentUser } from "@/features/auth/hooks/use-ensure-current-user";
 
+import { SpotlightTracker } from "./spotlight";
 import { ThemeProvider } from "./theme-provider";
 
 const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
@@ -35,6 +38,18 @@ const clerkAppearance = {
   },
 };
 
+// Clerk's own subtitles ("Welcome back! Please sign in to continue") replaced
+// with plain, specific lines.
+const clerkLocalization = {
+  signIn: { start: { subtitle: "Use GitHub, Google or your email" } },
+  signUp: {
+    start: {
+      subtitle: "Start free with 300 credits a month",
+      subtitleCombined: "Start free with 300 credits a month",
+    },
+  },
+};
+
 const EnsureCurrentUser = () => {
   useEnsureCurrentUser();
   return null;
@@ -44,6 +59,7 @@ export const Providers = ({ children }: { children: React.ReactNode }) => {
   return (
     <ClerkProvider
       appearance={clerkAppearance}
+      localization={clerkLocalization}
       signInUrl={SIGN_IN_URL}
       signUpUrl={SIGN_UP_URL}
       signInFallbackRedirectUrl={AFTER_AUTH_URL}
@@ -53,11 +69,12 @@ export const Providers = ({ children }: { children: React.ReactNode }) => {
         <EnsureCurrentUser />
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
+          defaultTheme="light"
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <SpotlightTracker />
+          <MotionConfig reducedMotion="user">{children}</MotionConfig>
         </ThemeProvider>
       </ConvexProviderWithClerk>
     </ClerkProvider>

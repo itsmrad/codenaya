@@ -86,7 +86,7 @@ test.describe("showcase feed pagination", () => {
     const errors = collectConsoleErrors(page);
     await page.goto("/showcase");
 
-    await page.getByPlaceholder("Search showcase...").fill(RUN_ID);
+    await page.getByRole("textbox", { name: "Search showcase" }).fill(RUN_ID);
     await expect(cards(page)).toHaveCount(12);
     await expect(cards(page).locator("h3").filter({ hasNotText: RUN_ID })).toHaveCount(0);
     await page.getByRole("button", { name: "Load more" }).click();

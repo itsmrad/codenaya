@@ -20,9 +20,13 @@ import {
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
+import { OpenOnPhonePopover } from "@/features/sandbox-preview/components/open-on-phone-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
+import { logsAfterClear } from "@/features/sandbox-preview/utils/cleared-logs";
 import { PreviewBuilding } from "@/features/sandbox-preview/components/preview-building";
+import { liveStepLabel } from "@/features/conversations/components/agent-run";
 import { CodenayaLogo } from "@/components/codenaya-logo";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import { PreviewBootSteps } from "@/features/sandbox-preview/components/preview-boot-steps";
 import {
   PreviewStatusBadge,
@@ -86,6 +90,8 @@ export const PreviewView = ({
   const project = useProject(projectId);
   const files = useFilesWithContent(projectId);
   const [terminalChoice, setTerminalChoice] = usePreviewTerminal();
+  // The output when Clear was pressed; kept here so it outlives Hide logs (#480).
+  const [clearedLogs, setClearedLogs] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [device, setDevice] = usePreviewDevice();
   
@@ -123,6 +129,9 @@ export const PreviewView = ({
 
   const activeInstance = activeEngine === "sandbox" ? sandbox : webcontainer;
   const { status, previewUrl, error, restart, terminalOutput } = activeInstance;
+  // A restart empties the output; forget the clear so the new run shows in
+  // full even when it repeats the cleared lines (#480).
+  if (clearedLogs && !terminalOutput.startsWith(clearedLogs)) setClearedLogs("");
   const errorKind = activeEngine === "sandbox" ? sandbox.errorKind : null;
   // WebContainer has no phase events: booting covers creating it and writing
   // the files, installing covers the install and starting the dev server.
@@ -172,10 +181,16 @@ export const PreviewView = ({
   }, [activeEngine, pathname, searchParams]);
 
   const isLoading = status === "booting" || status === "installing";
+  // The build card covers the preview until the pre-warmed sandbox is running;
+  // then the app shows and fills in through HMR under a slim bar (#337). A
+  // failed boot shows its error under the bar instead of hiding behind the card.
+  const firstBuildRun = firstBuild && activeRun ? activeRun : null;
   const building =
-    firstBuild && activeRun && files ? (
-      <PreviewBuilding steps={activeRun.steps} files={files} />
+    firstBuildRun && status !== "error" && (status !== "running" || !previewUrl) ? (
+      <PreviewBuilding steps={firstBuildRun.steps} />
     ) : null;
+  const stillBuilding =
+    firstBuildRun && !building ? liveStepLabel(firstBuildRun.steps) : null;
   const content = (
     <PreviewContent
       onPreviewLoad={handlePreviewLoad}
@@ -193,6 +208,7 @@ export const PreviewView = ({
       onUseWebContainer={() => switchEngine("webcontainer")}
       agentWorking={Boolean(activeRun)}
       building={building}
+      stillBuilding={stillBuilding}
     />
   );
 
@@ -374,6 +390,11 @@ export const PreviewView = ({
               </Button>
             )}
           </span>
+          <OpenOnPhonePopover
+            previewUrl={previewUrl}
+            status={status}
+            activeEngine={activeEngine}
+          />
           <Button
             size="icon"
             variant="ghost"
@@ -431,7 +452,8 @@ export const PreviewView = ({
                 >
                   <div className="h-9 flex items-center pl-4 pr-1.5 text-xs font-medium gap-2 text-muted-foreground border-b border-border/50 shrink-0 bg-muted/20">
                     <TerminalSquareIcon className="size-4" />
-                    Terminal
+                    {/* Read-only output, so it isn't called a terminal (#480). */}
+                    Logs
                     <PreviewStatusBadge status={status} />
                     <Button
                       size="sm"
@@ -444,7 +466,10 @@ export const PreviewView = ({
                       <ChevronDownIcon className="size-3.5" />
                     </Button>
                   </div>
-                  <PreviewTerminal output={terminalOutput} />
+                  <PreviewTerminal
+                    output={logsAfterClear(terminalOutput, clearedLogs)}
+                    onClear={() => setClearedLogs(terminalOutput)}
+                  />
                 </motion.div>
               </div>
             </Allotment.Pane>
@@ -487,6 +512,7 @@ const PreviewContent = ({
   onUseWebContainer,
   agentWorking,
   building,
+  stillBuilding,
 }: {
   onPreviewLoad: () => void;
   error: string | null | undefined;
@@ -505,6 +531,8 @@ const PreviewContent = ({
   agentWorking?: boolean;
   /** The first-build placeholder, shown over the engine until the run ends. */
   building: ReactNode;
+  /** The first build's current step, while the agent writes into a running preview. */
+  stillBuilding: string | null;
 }) => (
   <div className="size-full rounded-xl overflow-hidden relative isolate">
     <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-border/50 pointer-events-none z-50" />
@@ -512,8 +540,23 @@ const PreviewContent = ({
     {/* Laid over the engine so a pre-warmed preview loads underneath it. */}
     {building && <div className="absolute inset-0 z-10">{building}</div>}
 
-    {/* Hidden under the first build: PreviewBuilding already says the same. */}
-    {agentWorking && !building && (
+    {stillBuilding && (
+      <div
+        role="status"
+        aria-label="Still building"
+        className="pointer-events-none absolute inset-x-0 top-0 z-40 flex h-8 items-center gap-2 border-b border-brand/30 bg-card/95 px-3 text-xs backdrop-blur-md motion-safe:animate-in fade-in-0 slide-in-from-top-1 duration-200"
+      >
+        <CodenayaLogo size={14} blinking={true} decorative />
+        <span className="shrink-0 font-medium text-foreground">Still building</span>
+        <span aria-hidden="true" className="text-muted-foreground">·</span>
+        <Shimmer as="span" className="min-w-0 truncate">
+          {stillBuilding}
+        </Shimmer>
+      </div>
+    )}
+
+    {/* Hidden under the first build: PreviewBuilding and the bar already say the same. */}
+    {agentWorking && !building && !stillBuilding && (
       <div role="status" className="pointer-events-none absolute top-3 right-3 z-40 flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-card/95 backdrop-blur-md border border-brand/30 shadow-lg text-xs font-medium text-foreground motion-safe:animate-in fade-in-0 duration-200">
         <span className="relative flex size-2">
           <span className="motion-safe:animate-ping absolute inline-flex h-full w-full rounded-full bg-brand opacity-75" />

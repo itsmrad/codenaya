@@ -10,6 +10,15 @@ import { peekPendingTemplate } from "@/features/templates/utils/pending-template
 /** Longest prompt shown in full; the rest is in the tooltip. */
 export const PROMPT_PREVIEW_LENGTH = 140;
 
+/** Cuts by code points, not UTF-16 units, so an emoji is never split in half. */
+export const previewPrompt = (prompt: string) => {
+  const chars = Array.from(prompt);
+  return chars.length > PROMPT_PREVIEW_LENGTH
+    ? `${chars.slice(0, PROMPT_PREVIEW_LENGTH).join("").trimEnd()}…`
+    : prompt;
+};
+
+// Nothing on the auth pages changes the pending prompt, so there is nothing to subscribe to.
 const subscribe = () => () => {};
 
 /**
@@ -23,22 +32,17 @@ export const PendingStartNote = () => {
   const after = usePathname().startsWith("/sign-in") ? "right after you log in" : "right after sign-up";
   if (!prompt && !template) return null;
 
-  const shown =
-    prompt && prompt.length > PROMPT_PREVIEW_LENGTH
-      ? `${prompt.slice(0, PROMPT_PREVIEW_LENGTH).trimEnd()}…`
-      : prompt;
-
   return (
     <div
       role="status"
-      className="w-full max-w-[25rem] rounded-xl border border-brand/30 bg-brand/5 px-4 py-3 text-sm"
+      className="w-full max-w-[25rem] rounded-md border border-border bg-card px-4 py-3 text-sm shadow-sm"
     >
       <p className="flex items-center gap-1.5 font-medium text-foreground">
         <SparklesIcon aria-hidden className="size-3.5 text-brand" />
         {prompt ? `Your prompt will start building ${after}:` : `Your template opens ${after}:`}
       </p>
       <p title={prompt ?? undefined} className="mt-1 text-muted-foreground break-words">
-        {prompt ? shown : template!.title}
+        {prompt ? previewPrompt(prompt) : template!.title}
       </p>
     </div>
   );

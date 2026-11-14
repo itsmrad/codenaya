@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { MarketingNavbar } from "@/components/marketing-navbar";
-import { LandingFooter } from "@/components/landing/footer";
+import { ArrowRight, BookOpen, FolderGit2, KeyRound, MonitorPlay } from "lucide-react";
+
+import { PublicShell } from "@/components/landing/public-shell";
+import { Reveal } from "@/components/landing/reveal";
+import { SectionHeader } from "@/components/landing/section-header";
 import { PROSE_CLASS_NAME } from "@/components/legal-page";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { formatCredits, PLANS } from "@/features/billing/plans";
@@ -12,6 +15,8 @@ import { AI_PROVIDERS_SETTINGS_URL, SKILLS_SETTINGS_URL } from "@/features/setti
 import { REPORT_ISSUE_URL } from "@/lib/site";
 import { SHORTCUTS, SHORTCUT_SCOPES, formatShortcutKey } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
+
+import { DocsNav } from "./docs-nav";
 
 export const metadata: Metadata = {
   title: "Docs — Codenaya",
@@ -22,11 +27,21 @@ export const metadata: Metadata = {
 const { free, pro } = PLANS;
 
 const Section = ({ id, title, children }: { id: string; title: string; children: ReactNode }) => (
-  <section id={id} aria-labelledby={`${id}-heading`} className="scroll-mt-24 flex flex-col gap-3">
-    <h2 id={`${id}-heading`}>{title}</h2>
-    {children}
+  <section id={id} aria-labelledby={`${id}-heading`} className="scroll-mt-24">
+    <Reveal className="flex flex-col gap-3">
+      <h2 id={`${id}-heading`}>{title}</h2>
+      {children}
+    </Reveal>
   </section>
 );
+
+/** The most-read topics, as cards above the full docs. Not headings, so the section titles stay unique. */
+const QUICK_START = [
+  { id: "getting-started", icon: BookOpen, label: "Getting started", body: "Describe an app and watch the agent build it." },
+  { id: "preview", icon: MonitorPlay, label: "Live preview", body: "Run your app in a cloud sandbox with a terminal." },
+  { id: "github", icon: FolderGit2, label: "GitHub & ZIP", body: "Import a repo, export a new one, or download a ZIP." },
+  { id: "byok", icon: KeyRound, label: "Your own key", body: "Unlimited runs on your OpenRouter, OpenAI or Anthropic key." },
+];
 
 const SECTIONS: { id: string; title: string; content: ReactNode }[] = [
   {
@@ -269,46 +284,61 @@ const SECTIONS: { id: string; title: string; content: ReactNode }[] = [
 // Public: one page with anchors, so every topic is a link away from the Help menu.
 const DocsPage = () => {
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <MarketingNavbar />
-      <main className="flex-1 mx-auto w-full max-w-5xl px-4 py-10 md:px-8 md:py-16">
-        <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-foreground">Docs</h1>
-        <p className="mt-2 text-sm md:text-base text-muted-foreground">
-          Everything you need to build, preview and ship with Codenaya.
-        </p>
-
-        <div className="mt-10 grid gap-10 md:grid-cols-[11rem_1fr]">
-          <nav aria-label="On this page" className="md:sticky md:top-24 md:self-start">
-            <h2 className="mb-3 text-xs font-medium uppercase tracking-[0.15em] text-foreground">
-              On this page
-            </h2>
-            <ul className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground md:flex-col">
-              {SECTIONS.map(({ id, title }) => (
-                <li key={id}>
-                  <a href={`#${id}`} className="hover:text-foreground transition-colors">
-                    {title}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </nav>
-
-          <div
-            className={cn(
-              "min-w-0 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:text-[0.9em] [&_code]:text-foreground",
-              PROSE_CLASS_NAME,
-            )}
-          >
-            {SECTIONS.map(({ id, title, content }) => (
-              <Section key={id} id={id} title={title}>
-                {content}
-              </Section>
-            ))}
-          </div>
+    <PublicShell>
+      <section className="border-b border-border">
+        <SectionHeader
+          as="h1"
+          label="Docs"
+          title="Docs"
+          description="Everything you need to build, preview and ship with Codenaya."
+        />
+        <div className="grid grid-cols-1 border-t border-border sm:grid-cols-2 lg:grid-cols-4">
+          {QUICK_START.map(({ id, icon: Icon, label, body }, i) => (
+            <Reveal
+              key={id}
+              delay={i * 0.08}
+              className="spotlight border-border max-sm:not-last:border-b sm:max-lg:odd:border-r sm:max-lg:[&:nth-child(-n+2)]:border-b lg:not-last:border-r"
+            >
+              <a
+                href={`#${id}`}
+                className="group flex h-full flex-col gap-3 p-6 transition-colors hover:bg-muted/50 md:p-8"
+              >
+                <span className="flex items-center justify-between">
+                  <Icon
+                    strokeWidth={1.5}
+                    className="size-6 text-muted-foreground transition-colors group-hover:text-foreground"
+                  />
+                  <span aria-hidden className="font-mono text-[11px] text-muted-foreground">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                </span>
+                <span className="font-semibold text-foreground">{label}</span>
+                <span className="text-sm leading-relaxed text-muted-foreground">{body}</span>
+                <ArrowRight className="mt-auto size-4 text-muted-foreground transition-transform group-hover:translate-x-1 group-hover:text-foreground" />
+              </a>
+            </Reveal>
+          ))}
         </div>
-      </main>
-      <LandingFooter />
-    </div>
+      </section>
+
+      <div className="grid border-b border-border md:grid-cols-[15rem_1fr]">
+        <div className="border-border p-6 max-md:border-b md:border-r md:p-8">
+          <DocsNav sections={SECTIONS.map(({ id, title }) => ({ id, title }))} />
+        </div>
+        <div
+          className={cn(
+            "min-w-0 px-6 py-10 md:px-12 md:py-14 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:text-[0.9em] [&_code]:text-foreground [&_h2]:text-2xl! [&_h2]:tracking-[-0.02em]",
+            PROSE_CLASS_NAME,
+          )}
+        >
+          {SECTIONS.map(({ id, title, content }) => (
+            <Section key={id} id={id} title={title}>
+              {content}
+            </Section>
+          ))}
+        </div>
+      </div>
+    </PublicShell>
   );
 };
 

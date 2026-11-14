@@ -15,6 +15,22 @@ export const useRestoreCheckpoint = () => {
   return useMutation(api.checkpoints.restore);
 };
 
+/**
+ * A toast's Undo action that runs `undo` once however often it's clicked:
+ * sonner keeps the button clickable through its exit animation (#259).
+ */
+export const undoAction = (undo: () => void) => {
+  let done = false;
+  return {
+    label: "Undo",
+    onClick: () => {
+      if (done) return;
+      done = true;
+      undo();
+    },
+  };
+};
+
 export type RunChange = NonNullable<FunctionReturnType<typeof api.checkpoints.listChanges>>[number];
 
 /**

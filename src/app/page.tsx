@@ -24,11 +24,10 @@ const HomeContent = async ({ searchParams }: HomeProps) => {
 
   return (
     <ConvexAuthBoundary>
-      <div className="h-screen flex flex-col overflow-hidden">
-        <AppNavbar />
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <ProjectsView linkedRepo={typeof repo === "string" ? parseGithubRepo(repo) : null} />
-        </div>
+      {/* The page itself scrolls, like the public pages, under a sticky navbar. */}
+      <div className="flex min-h-screen flex-col">
+        <AppNavbar framed />
+        <ProjectsView linkedRepo={typeof repo === "string" ? parseGithubRepo(repo) : null} />
       </div>
     </ConvexAuthBoundary>
   );

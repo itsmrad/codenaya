@@ -65,7 +65,7 @@ describe("resolveEditorModel", () => {
     });
     expect(resolved?.key).toBeUndefined();
     expect(resolved?.model).toEqual({
-      byok: { provider: "openrouter", apiKey: "sk-or-platform", model: "openai/gpt-5.4-mini" },
+      byok: { provider: "openrouter", apiKey: "sk-or-platform", model: "anthropic/claude-haiku-5.5" },
     });
     expect(mocks.openProviderKey).not.toHaveBeenCalled();
   });
@@ -133,7 +133,7 @@ describe("resolveEditorModel", () => {
         provider: "anthropic",
         apiKey: SECRET,
         baseUrl: undefined,
-        model: "claude-haiku-4-5",
+        model: "claude-haiku-5-5",
       },
     });
     expect(resolved?.key).toEqual({ _id: "key_1", userId: "user_1", label: "Work key" });
@@ -187,8 +187,19 @@ describe("withEditorModel", () => {
 
     expect(response.status).toBe(200);
     expect(generate).toHaveBeenCalledWith({
-      byok: expect.objectContaining({ provider: "anthropic", model: "claude-haiku-4-5" }),
+      byok: expect.objectContaining({ provider: "anthropic", model: "claude-haiku-5-5" }),
     });
+  });
+
+  it("passes thinking: false through to the model, platform or key", async () => {
+    const generate = vi.fn(async () => Response.json({ suggestion: "x" }));
+
+    mocks.query.mockResolvedValue({ key: anthropicKey, modelId: "claude-opus-5-5" });
+    await withEditorModel({ userId: "user_1", thinking: false }, generate);
+    mocks.query.mockResolvedValue(null);
+    await withEditorModel({ userId: "user_1", thinking: false }, generate);
+
+    expect(mocks.buildAiSdkModel.mock.calls.map(([target]) => target.thinking)).toEqual([false, false]);
   });
 
   it("answers 503 when AI is not configured", async () => {

@@ -55,7 +55,7 @@ export const assertProjectFolder = async (
 };
 
 /** The caller's file and its project, which must not be mid-deletion (#212). */
-const getOwnedFile = async (
+export const getOwnedFile = async (
   ctx: QueryCtx,
   id: Id<"files">,
   ownerId: string
@@ -177,7 +177,10 @@ export const getFile = query({
   args: { id: v.id("files") },
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
-    const { file } = await getOwnedFile(ctx, args.id, identity.subject);
+    const file = await ctx.db.get("files", args.id);
+    // Editor tabs outlive their files: a deleted file closes its tab, not the page.
+    if (!file) return null;
+    await getOwnedProject(ctx, file.projectId, identity.subject);
 
     return { ...file, content: await readFileContent(ctx, file) };
   },
@@ -195,7 +198,10 @@ export const getFilePath = query({
   args: { id: v.id("files") },
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
-    const { project } = await getOwnedFile(ctx, args.id, identity.subject);
+    const target = await ctx.db.get("files", args.id);
+    // Same as getFile: the breadcrumbs may read a file deleted while it's open.
+    if (!target) return [];
+    const project = await getOwnedProject(ctx, target.projectId, identity.subject);
 
     const path: { _id: string; name: string }[] = [];
     let currentId: Id<"files"> | undefined = args.id;
