@@ -108,6 +108,9 @@ describe("processMessage swarm mode", () => {
     expect(report).toContain("## pages: Pages (done)\nFiles written: src/pages/home.tsx");
     expect(report).toContain("NEEDS: add react-router-dom");
     expect(report).toContain("## nav: Navigation (done)");
+    // The run block counts one target per task.
+    const recorded = mutationArgs("system:upsertMessageSteps").flatMap(({ steps }) => steps as Array<{ tool?: string; targets?: string[] }>);
+    expect(recorded.find((step) => step.tool === "delegateTasks")?.targets).toEqual(["Pages", "Navigation"]);
     // Worker writes count as the run's writes (#338).
     expect(mutationArgs("projects:completeFirstBuild")).toHaveLength(1);
   });
