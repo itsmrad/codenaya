@@ -62,15 +62,17 @@ export async function drive(
   /** More event fields, such as `mode`. */
   extra: Record<string, unknown> = {},
   /** `cancelWhen`: stop between steps once it holds, like `cancelOn` (finalType "cancelled"). */
-  { cancelWhen, fn = processMessage, invokeResults = [] }: {
+  { cancelWhen, fn = processMessage, eventName, invokeResults = [] }: {
     cancelWhen?: () => boolean;
     fn?: InngestFunction.Any;
+    /** The triggering event's name, for an `fn` not triggered by `agent-task/run`. */
+    eventName?: string;
     /** Each `step.invoke`'s result in order; an Error fails that invoke. */
     invokeResults?: unknown[];
   } = {},
 ): Promise<Outcome> {
   const event = {
-    name: fn === processMessage ? "message/sent" : "agent-task/run",
+    name: eventName ?? (fn === processMessage ? "message/sent" : "agent-task/run"),
     data: {
       messageId: "m1",
       conversationId: "c1",

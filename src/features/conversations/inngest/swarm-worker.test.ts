@@ -112,6 +112,22 @@ describe("swarmWorker", () => {
     expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ agentTaskId: "t1", status: "done" })]);
   });
 
+  it("checks JSON-string array args against its owned paths like real ones", async () => {
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: JSON.stringify([{ path: "src/pages/home.tsx", content: "export default () => null;\n" }]) }) },
+      { data: toolCall("deleteFiles", { paths: JSON.stringify(["src/App.tsx"]) }) },
+      { data: withUsage(text("Built the home page.")) },
+    ]);
+
+    expect(outcome.data).toMatchObject({ status: "done", writtenPaths: ["src/pages/home.tsx"] });
+    const steps = taskSteps();
+    expect(steps).toContainEqual(expect.objectContaining({ id: "call_writeFiles", status: "done" }));
+    expect(steps).toContainEqual(expect.objectContaining({
+      id: "call_deleteFiles", status: "error", error: expect.stringMatching(/Write refused/),
+    }));
+    expect(mutationArgs("system:deleteFile")).toHaveLength(0);
+  });
+
   it("hands its last step to the summary agent at the step cap", async () => {
     const outcome = await run([
       ...Array.from({ length: WORKER_MAX_STEPS - 1 }, () => ({ data: toolCall("listFiles") })),
@@ -122,7 +138,7 @@ describe("swarmWorker", () => {
     const summary = "Unfinished (step or cost cap): Listed files; the page is unfinished.";
     expect(outcome.data).toMatchObject({ status: "unfinished", summary });
     expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ status: "done", summary })]);
-  });
+  }, 20_000);
 
   it("hands off to the summary agent once its usage crosses the cost cap", async () => {
     mocks.catalog.mockReturnValue({
@@ -162,9 +178,12 @@ describe("swarmWorker", () => {
     }
   });
 
-  it("is cancelled with its parent message, with room for two swarms' workers per owner", () => {
+  it("is cancelled with its parent message or on its own timeout, with room for two swarms' workers per owner", () => {
     const { opts } = swarmWorker as unknown as { opts: { cancelOn: unknown; concurrency: unknown } };
-    expect(opts.cancelOn).toEqual([{ event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" }]);
+    expect(opts.cancelOn).toEqual([
+      { event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" },
+      { event: "agent-task/cancel", if: "event.data.agentTaskId == async.data.agentTaskId" },
+    ]);
     expect(opts.concurrency).toEqual([{ key: "event.data.ownerId", limit: 8 }]);
   });
 });

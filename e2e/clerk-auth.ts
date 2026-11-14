@@ -79,11 +79,13 @@ const frontendApiHost = () => {
   return Buffer.from(encoded, "base64").toString().replace(/\$$/, "");
 };
 
+/** Existing users with this email address; never creates one. */
+export const findUsers = (email: string) =>
+  clerkApi<Array<{ id: string }>>(`/users?email_address=${encodeURIComponent(email)}`);
+
 /** Finds this run's e2e test user (or `email`), creating it on first use. */
 export const ensureTestUser = async (email = E2E_EMAIL) => {
-  const existing = await clerkApi<Array<{ id: string }>>(
-    `/users?email_address=${encodeURIComponent(email)}`,
-  );
+  const existing = await findUsers(email);
   return (
     existing[0] ??
     (await clerkApi<{ id: string }>("/users", {
@@ -96,6 +98,9 @@ export const ensureTestUser = async (email = E2E_EMAIL) => {
   );
 };
 
+export const revokeSession = (sessionId: string) =>
+  clerkApi(`/sessions/${sessionId}/revoke`, { method: "POST" });
+
 /** Revokes the user's sessions left behind by earlier runs. */
 export const revokeStaleSessions = async (userId: string) => {
   const sessions = await clerkApi<Array<{ id: string; last_active_at: number }>>(
@@ -104,7 +109,7 @@ export const revokeStaleSessions = async (userId: string) => {
   const staleBefore = Date.now() - STALE_SESSION_MS;
   for (const session of sessions) {
     if (session.last_active_at < staleBefore) {
-      await clerkApi(`/sessions/${session.id}/revoke`, { method: "POST" });
+      await revokeSession(session.id);
     }
   }
 };
@@ -125,7 +130,7 @@ export const addTestingToken = async (page: Page) => {
 const waitForClerk = (page: Page) =>
   page.waitForFunction(() => (window as ClerkWindow).Clerk?.loaded);
 
-/** Starts a new session for `userId` with a one-time sign-in ticket. */
+/** Starts a new session for `userId` with a one-time sign-in ticket; returns its id. */
 export const signInWithTicket = async (page: Page, userId: string) => {
   const { token: ticket } = await clerkApi<{ token: string }>(
     "/sign_in_tokens",
@@ -137,15 +142,17 @@ export const signInWithTicket = async (page: Page, userId: string) => {
 
   await page.goto("/");
   await waitForClerk(page);
-  await page.evaluate(async (signInTicket) => {
+  const sessionId = await page.evaluate(async (signInTicket) => {
     const clerk = (window as ClerkWindow).Clerk!;
     const result = await clerk.client.signIn.create({
       strategy: "ticket",
       ticket: signInTicket,
     });
     await clerk.setActive({ session: result.createdSessionId });
+    return result.createdSessionId!;
   }, ticket);
   await page.waitForFunction(() => Boolean((window as ClerkWindow).Clerk?.user));
+  return sessionId;
 };
 
 /**

@@ -1,0 +1,62 @@
+name: Starter manifest registry check
+
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: manifest-registry
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Check live registry
+        id: registry
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          node scripts/check-known-good-versions.mjs | tee manifest-registry-report.txt
+      - name: Open or update the failure issue
+        if: steps.registry.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='Starter manifest registry check failed'
+          {
+            echo '<!-- manifest-registry-check -->'
+            echo "Latest run: $RUN_URL"
+            echo
+            echo 'React peers must overlap the manifest React range; Node engines must accept the template floor 22.0.0.'
+            echo 'Exact deployed E2B and WebContainer versions remain unverified (#466).'
+            echo
+            echo '```text'
+            cat manifest-registry-report.txt
+            echo '```'
+          } > manifest-registry-issue.md
+          issue=$(gh issue list --state all --search "$title in:title" --limit 100 --json number,title \
+            --jq '.[] | select(.title == "Starter manifest registry check failed") | .number' | head -n 1)
+          if [ -n "$issue" ]; then
+            gh issue edit "$issue" --body-file manifest-registry-issue.md
+            gh issue reopen "$issue"
+          else
+            gh issue create --title "$title" --body-file manifest-registry-issue.md
+          fi
+      - name: Fail on registry incompatibility
+        if: steps.registry.outcome == 'failure'
+        run: exit 1

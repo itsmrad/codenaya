@@ -90,6 +90,11 @@ Constraints from the code:
 - A large first build can run 2-4 writers at once on one preview and one integration build.
 - Worker cost is bounded: at most ≈$2 per swarm above a single run on platform models
   (4 × `MAX_WORKER_USD`), ≈$0.3 typical. BYOK workers are bounded only by 4 × 20 steps.
+- Credits are checked once, at the send, so a swarm can overshoot the balance by ≈$2
+  (4 × `MAX_WORKER_USD`) on platform models. Accepted. Kill switch: the Convex env var
+  `SWARM_ENABLED` (on by default; "false", "0" or "off" turns it off). The send routes refuse
+  swarm mode with a clear error, a swarm run that starts while it is off runs as a normal build,
+  and the UI hides the toggle (`api.swarm.isEnabled`).
 - The orchestrator absorbs failures, so a weak plan costs integrator turns, not a crash.
 - Workers can't see each other's work until it lands in the tree; contracts must be in the
   foundation the orchestrator writes first.

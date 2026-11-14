@@ -316,6 +316,35 @@ describe("verifyAndFix", () => {
     expectSandboxKept(sandbox);
   });
 
+  it("connects a lazy sandbox only to check or sync, and reports each repair response", async () => {
+    const sandbox = fakeSandbox();
+    modelReplies(...fixApp());
+    const connect = vi.fn(async () => sandbox as unknown as Sandbox);
+    const responses: Array<string | undefined> = [];
+
+    const { result } = await run(sandbox, {
+      sandbox: connect,
+      onResponse: async (raw) => {
+        responses.push(raw);
+      },
+    });
+
+    expect(result).toMatchObject({ status: "verified", attempts: 1 });
+    // verify:1, sync:1, verify:2
+    expect(connect).toHaveBeenCalledTimes(3);
+    expect(responses).toHaveLength(3);
+    expect(JSON.parse(responses[0] ?? "{}")).toHaveProperty("choices");
+  });
+
+  it("reports a sandbox it cannot connect to as unverified, without repairing", async () => {
+    const requests = modelReplies();
+
+    const { result } = await run(fakeSandbox(), { sandbox: async () => Promise.reject(new Error("sandbox gone")) });
+
+    expect(result).toMatchObject({ status: "unverified", attempts: 0, reason: expect.stringContaining("sandbox gone") });
+    expect(requests).toHaveLength(0);
+  });
+
   it("mirrors a repair's deletes into the sandbox", async () => {
     const sandbox = fakeSandbox({ extra: { "src/App.tsx": FIXED_APP, "src/Old.tsx": "// BROKEN" } });
     modelReplies(toolCall("deleteFiles", { paths: ["src/Old.tsx"] }), text("Deleted the stale file."));
@@ -553,6 +582,19 @@ describe("repairTools", () => {
     expect(result).toBe("Error: Name the files to change by path.");
     expect(convexFiles.has("src/a.ts")).toBe(true);
     expect(written).toEqual([]);
+  });
+
+  it("checks JSON-string arrays against allowedPaths like real ones", async () => {
+    convexFiles.clear();
+    convexFiles.set("src/App.tsx", "app");
+    const written: string[] = [];
+    const scoped = tools("w", written, (path) => path.startsWith("src/mine/"));
+
+    expect(await call(scoped.deleteFiles, { paths: '["src/App.tsx"]' })).toBe("Error: src/App.tsx is outside this task's files");
+    expect(convexFiles.has("src/App.tsx")).toBe(true);
+    const files = JSON.stringify([{ path: "src/mine/a.ts", content: "a" }]);
+    expect(await call(scoped.writeFiles, { files })).toBe("Wrote 1 file(s). Updated: src/mine/a.ts.");
+    expect(written).toEqual(["src/mine/a.ts"]);
   });
 
   it("counts only the files a partial writeFiles wrote", async () => {

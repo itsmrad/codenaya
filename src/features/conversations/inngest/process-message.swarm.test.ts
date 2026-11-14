@@ -17,17 +17,23 @@ vi.mock("@/lib/convex-client", async () => {
   return { convex: { query: withEnvPlatform(mocks.query), mutation: mocks.mutation } };
 });
 
+import { inngest } from "@/inngest/client";
+import { BUILD_NOT_BUILT_NOTE } from "./build-check-gate";
 import { drive, text, toolCall } from "./process-message.driver";
+
+let swarmEnabled: boolean;
+let projectFiles: Array<Record<string, unknown>>;
 
 const QUERIES: Record<string, () => unknown> = {
   "system:getConversationById": () => ({ title: "Existing chat" }),
   "system:getRecentMessages": () => [],
   "system:getProjectById": () => ({ ownerId: "user_1" }),
   "system:getProjectMcpConnections": () => [],
-  "system:getProjectFiles": () => [],
+  "system:getProjectFiles": () => projectFiles,
   "system:getProjectFilesWithUrls": () => [],
   "system:getEnvVarsForSandbox": () => [],
   "system:getProjectSkills": () => [],
+  "swarm:isEnabled": () => swarmEnabled,
 };
 
 const MUTATIONS: Record<string, (args: Record<string, unknown>) => unknown> = {
@@ -44,7 +50,7 @@ const PLAN = {
 };
 const DONE = { status: "done", summary: "Built the pages.\nNEEDS: add react-router-dom", writtenPaths: ["src/pages/home.tsx"] };
 const NAV_DONE = { status: "done", summary: "Built the nav.", writtenPaths: ["src/components/nav.tsx"] };
-const writeApp = toolCall("writeFiles", { files: [{ path: "src/App.tsx", content: "export default () => null;\n" }] });
+const TIMED_OUT = new Error("Timed out waiting for the invoked function");
 
 interface ChatBody {
   messages: Array<{ role: string; content: unknown }>;
@@ -72,15 +78,17 @@ beforeEach(() => {
   vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
   vi.stubEnv("E2B_API_KEY", "");
   vi.spyOn(console, "error").mockImplementation(() => {});
+  swarmEnabled = true;
+  projectFiles = [];
+  vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
   mocks.query.mockImplementation(async (ref) => QUERIES[getFunctionName(ref)]?.());
   mocks.mutation.mockImplementation(async (ref, args) => MUTATIONS[getFunctionName(ref)]?.(args) ?? null);
 });
 
 describe("processMessage swarm mode", () => {
-  it("delegates once, integrates the reports, checks the build and completes", async () => {
+  it("delegates once, checks the build and completes on the workers' writes alone", async () => {
     const outcome = await swarm([
       { data: toolCall("delegateTasks", PLAN) },
-      { data: writeApp },
       { data: toolCall("checkBuild") },
       { data: text("**What was built:** a site.") },
     ], [DONE, NAV_DONE]);
@@ -93,12 +101,13 @@ describe("processMessage swarm mode", () => {
     expect(mutationArgs("agentTasks:createTasks")).toEqual([expect.objectContaining({
       messageId: "m1",
       projectId: "p1",
-      tasks: PLAN.tasks.map((task) => expect.objectContaining({
-        taskId: task.id, role: "worker", ownedPaths: task.ownedPaths, modelId: expect.any(String),
-      })),
+      tasks: [
+        expect.objectContaining({ taskId: "pages", role: "worker", ownedPaths: ["src/pages"], modelId: expect.any(String) }),
+        expect.objectContaining({ taskId: "nav", role: "worker", ownedPaths: ["src/components/nav.tsx"] }),
+      ],
     })]);
-    // Every owned folder chain exists before any worker starts (the mock's file list never gains them).
-    expect(mutationArgs("system:createFolder").map(({ name }) => name).slice(0, 3)).toEqual(["src", "pages", "components"]);
+    // Each owned path's parent folders exist before any worker starts; the path itself is its owner's.
+    expect(mutationArgs("system:createFolder").map(({ name }) => name)).toEqual(["src", "components"]);
     expect(outcome.invocations).toEqual([
       expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_0", parentMessageId: "m1", ownerId: "user_1" }) }, timeout: "12m" }),
       expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_1" }) } }),
@@ -111,8 +120,9 @@ describe("processMessage swarm mode", () => {
     // The run block counts one target per task.
     const recorded = mutationArgs("system:upsertMessageSteps").flatMap(({ steps }) => steps as Array<{ tool?: string; targets?: string[] }>);
     expect(recorded.find((step) => step.tool === "delegateTasks")?.targets).toEqual(["Pages", "Navigation"]);
-    // Worker writes count as the run's writes (#338).
-    expect(mutationArgs("projects:completeFirstBuild")).toHaveLength(1);
+    // Worker writes are the run's writes: with no sandbox to build in, the reply says it's unverified.
+    expect(mutationArgs("system:createFiles")).toEqual([]);
+    expect(String(mutationArgs("system:updateMessageContent").at(-1)?.content)).toContain(BUILD_NOT_BUILT_NOTE);
   });
 
   it("returns an invalid plan as an Error to re-plan, then runs the valid one", async () => {
@@ -143,13 +153,13 @@ describe("processMessage swarm mode", () => {
     expect(outcome.invocations).toHaveLength(2);
   });
 
-  it("reports a failed worker so the integrator writes its files", async () => {
+  it("reports a timed-out worker as failed, stops it, and the integrator writes its files", async () => {
     const outcome = await swarm([
       { data: toolCall("delegateTasks", PLAN) },
       { data: toolCall("writeFiles", { files: [{ path: "src/components/nav.tsx", content: "export const Nav = () => null;\n" }] }) },
       { data: toolCall("checkBuild") },
       { data: text("Done.") },
-    ], [DONE, new Error("Timed out waiting for the invoked function")]);
+    ], [DONE, TIMED_OUT]);
 
     expect(outcome.finalType).toBe("function-resolved");
     const [report, write] = toolResults(outcome.inferenceBodies);
@@ -158,6 +168,48 @@ describe("processMessage swarm mode", () => {
     // The integrator's writes are not ownership-guarded.
     expect(write).not.toMatch(/^Error/);
     expect(mutationArgs("system:createFiles")).toHaveLength(1);
+    // It would keep writing after the integration build otherwise; its cancel skips onFailure.
+    expect(inngest.send).toHaveBeenCalledWith([{ name: "agent-task/cancel", data: { agentTaskId: "task_1" } }]);
+    expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ agentTaskId: "task_1", status: "error" })]);
+  });
+
+  it("returns an Error, not a write, when no worker wrote anything", async () => {
+    const outcome = await swarm([
+      { data: toolCall("delegateTasks", PLAN) },
+      { data: toolCall("checkBuild") },
+      { data: text("Nothing was built.") },
+    ], [{ status: "error", summary: "The task no longer exists.", writtenPaths: [] }, TIMED_OUT]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    const [report] = toolResults(outcome.inferenceBodies);
+    expect(report).toMatch(/^Error: No worker wrote any files; build these tasks yourself\./);
+    expect(report).toContain("## pages: Pages (failed)\nThe task no longer exists.");
+    // Not a write: no build note, and a swarm that wrote nothing completes no first build (#338).
+    expect(String(mutationArgs("system:updateMessageContent").at(-1)?.content)).toBe("Nothing was built.");
+    expect(mutationArgs("projects:completeFirstBuild")).toEqual([]);
+  });
+
+  it("refuses a plan under a user-locked folder before creating tasks, so the model can re-plan", async () => {
+    projectFiles = [{ _id: "d1", name: "src", type: "folder", locked: true }];
+    const outcome = await swarm([
+      { data: toolCall("delegateTasks", PLAN) },
+      { data: text("src is locked, so I left it alone.") },
+    ], []);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(toolResults(outcome.inferenceBodies)[0]).toMatch(/^Error: src\/pages is locked by the user\..* Re-plan without it\.$/);
+    expect(mutationArgs("system:createFolder")).toEqual([]);
+    expect(mutationArgs("agentTasks:createTasks")).toEqual([]);
+    expect(outcome.invocations).toEqual([]);
+  });
+
+  it("runs as a normal build when the kill switch turned swarm off after the send", async () => {
+    swarmEnabled = false;
+    const outcome = await swarm([{ data: text("Hi.") }], []);
+
+    const [first] = codingRequests(outcome.inferenceBodies);
+    expect(first.tools?.map((tool) => tool.function.name)).not.toContain("delegateTasks");
+    expect(String(first.messages[0].content)).not.toContain("## Swarm mode");
   });
 
   it("stops when cancelled during delegation, before any worker result", async () => {

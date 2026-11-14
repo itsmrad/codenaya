@@ -1,6 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, type ReactNode, type RefObject } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useRef,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { Allotment } from "allotment";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -93,6 +101,12 @@ const AUTO_FIX_DELAY_MS = 3000;
  * a reinstall to fail. A file edit after the run ends disarms it sooner.
  */
 const AUTO_FIX_WINDOW_MS = 2 * 60_000;
+/**
+ * How long a first build's files must stay unchanged before its sandbox boots
+ * (#486): the sandbox route's reinstall debounce, so install and the dev
+ * server don't start against a burst of writes. The run's end boots it anyway.
+ */
+const FIRST_BOOT_QUIET_MS = 2000;
 
 /** What the collapsed terminal shows until the engine writes its first line. */
 const stripPlaceholder = (building: boolean, isLoading: boolean) => {
@@ -130,13 +144,25 @@ export const PreviewView = ({
   const engineParam = searchParams.get("engine") as PreviewEngine | null;
   const activeEngine = engineParam === "webcontainer" ? "webcontainer" : "sandbox";
 
-  // During the first build the E2B sandbox boots as soon as package.json
-  // exists, so it is warm when the run ends: later files reach it through the
-  // file sync, and a changed package.json re-runs the install (#254).
-  // WebContainer doesn't re-install, so it still waits for the run to end.
+  // During the first build the E2B sandbox boots once package.json exists and
+  // the files have gone quiet (#486), so it is warm when the run ends: later
+  // files reach it through the file sync, and a changed package.json re-runs
+  // the install (#254). WebContainer doesn't re-install, so it still waits for
+  // the run to end.
   const activeRun = useActiveRun(projectId);
   const hasPackageJson = files ? hasRootPackageJson(files) : false;
-  const holdSandbox = activeRun === undefined || (firstBuild && !hasPackageJson);
+  // Latched: holding a booted sandbox again would kill it, e.g. when a later
+  // run reads as a first build too.
+  const [bootReleased, setBootReleased] = useState(false);
+  if (!bootReleased && activeRun !== undefined && !firstBuild) setBootReleased(true);
+  useEffect(() => {
+    if (bootReleased || !firstBuild || !hasPackageJson) return;
+    // Restarted by every files update.
+    const timer = setTimeout(() => setBootReleased(true), FIRST_BOOT_QUIET_MS);
+    return () => clearTimeout(timer);
+  }, [files, bootReleased, firstBuild, hasPackageJson]);
+  const holdSandbox =
+    activeRun === undefined || (firstBuild && (!hasPackageJson || !bootReleased));
   const holdWebContainer = activeRun === undefined || firstBuild;
 
   const sandbox = useSandbox({
@@ -254,11 +280,19 @@ export const PreviewView = ({
   // An error the run left is fixed without a click once it is over (#491).
   const runActive = Boolean(activeRun);
   const [autoFixedIds, setAutoFixedIds] = useState<string[]>([]);
+  // A fix is pending or its run is working: "Fixing" covers the broken app (#305).
+  const [autoFixing, setAutoFixing] = useState(false);
   const [autoFixer] = useState(() =>
-    createAutoFixer({ delayMs: AUTO_FIX_DELAY_MS, windowMs: AUTO_FIX_WINDOW_MS, max: MAX_FIX_ATTEMPTS }),
+    createAutoFixer({
+      delayMs: AUTO_FIX_DELAY_MS,
+      windowMs: AUTO_FIX_WINDOW_MS,
+      max: MAX_FIX_ATTEMPTS,
+      onFixingChange: setAutoFixing,
+    }),
   );
   useEffect(() => () => autoFixer.dispose(), [autoFixer]);
-  useEffect(() => {
+  // Before paint, so the error a run left never flashes before "Fixing" covers it.
+  useLayoutEffect(() => {
     autoFixer.update({
       errorId: shownError && canFix ? appErrorId : null,
       // A loading run counts as none, so a page load doesn't look like a run ending.
@@ -273,7 +307,7 @@ export const PreviewView = ({
   }, [autoFixer, shownError, canFix, appErrorId, runActive, chatBlock, files, fixAppError]);
 
   const errorBanner =
-    shownError && appErrorId ? (
+    shownError && appErrorId && !autoFixing ? (
       <PreviewErrorBanner
         error={shownError}
         attempts={attempts}
@@ -331,15 +365,25 @@ export const PreviewView = ({
 
   const isLoading = status === "booting" || status === "installing";
   // The build card covers the preview until the pre-warmed sandbox is running;
-  // then the app shows and fills in through HMR under a slim bar (#337). A
-  // failed boot shows its error under the bar instead of hiding behind the card.
+  // then the app shows and fills in through HMR under a slim bar (#337). Once
+  // the half-written app breaks, the card covers it again until the run ends,
+  // so its errors neither show nor flicker as files land (#486). A failed boot
+  // shows its error under the bar instead of hiding behind the card.
   const firstBuildRun = firstBuild && activeRun ? activeRun : null;
+  const [brokenDuringBuild, setBrokenDuringBuild] = useState(false);
+  if (brokenDuringBuild && !firstBuildRun) setBrokenDuringBuild(false);
+  if (!brokenDuringBuild && firstBuildRun && appError) setBrokenDuringBuild(true);
   const building =
-    firstBuildRun && status !== "error" && (status !== "running" || !previewUrl) ? (
+    firstBuildRun &&
+    status !== "error" &&
+    (status !== "running" || !previewUrl || brokenDuringBuild) ? (
       <PreviewBuilding steps={firstBuildRun.steps} />
     ) : null;
   const stillBuilding =
-    firstBuildRun && !building ? liveStepLabel(firstBuildRun.steps) : null;
+    firstBuildRun && !building && !autoFixing ? liveStepLabel(firstBuildRun.steps) : null;
+  // Over the build card too: a fix run on a first build still pending (#501).
+  // The app stays mounted underneath, so its bridge still reports errors.
+  const cover = autoFixing ? <PreviewBuilding steps={activeRun?.steps ?? []} fixing /> : building;
   const content = (
     <PreviewContent
       onPreviewLoad={handlePreviewLoad}
@@ -358,7 +402,7 @@ export const PreviewView = ({
       errorKind={errorKind}
       onUseWebContainer={() => switchEngine("webcontainer")}
       agentWorking={Boolean(activeRun)}
-      building={building}
+      building={cover}
       stillBuilding={stillBuilding}
     />
   );
@@ -685,7 +729,7 @@ const PreviewContent = ({
   onUseWebContainer: () => void;
   /** Any message is processing: planning, chatting or writing code. */
   agentWorking?: boolean;
-  /** The first-build placeholder, shown over the engine until the run ends. */
+  /** The first-build or fixing placeholder, shown over the engine. */
   building: ReactNode;
   /** The first build's current step, while the agent writes into a running preview. */
   stillBuilding: string | null;
@@ -771,6 +815,9 @@ const PreviewContent = ({
           style={{ width: PREVIEW_DEVICE_WIDTHS[device] ?? undefined }}
           data-framed={device !== "desktop"}
           title="Preview"
+          // Covered: out of reach of keyboard and screen readers, but still
+          // mounted so its bridge reports errors.
+          inert={Boolean(building)}
           onLoad={onPreviewLoad}
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
           allow="cross-origin-isolated"

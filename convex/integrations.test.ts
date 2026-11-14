@@ -29,6 +29,7 @@ describe("reconnect credentials in place", () => {
     const args = {
       internalKey: "test-key", userId: ALICE, connectionId: link.userConnectionId,
       providerId: "github", authMode: "api_key" as const, maskedPreview: "new-key",
+      serverUrl: "https://example.com/mcp-v2", scopes: [],
       kekProvider: "local", kekKeyId: "k", wrappedDek: "new-dek", ciphertext: "new-ciphertext", iv: "i", authTag: "a",
     };
     await expect(alice.mutation(api.system.updateUserConnectionCredential, { ...args, userId: "user_bob" }))
@@ -37,10 +38,31 @@ describe("reconnect credentials in place", () => {
       .rejects.toMatchObject({ data: { code: "NOT_FOUND" } });
     await alice.mutation(api.system.updateUserConnectionCredential, args);
     const connection = await alice.run((ctx) => ctx.db.get(link.userConnectionId));
-    expect(connection).toMatchObject({ status: "active", credentialRef: "ref", scopes: ["read"], ciphertext: "new-ciphertext" });
+    expect(connection).toMatchObject({
+      status: "active", credentialRef: "ref", serverUrl: "https://example.com/mcp-v2", scopes: [], ciphertext: "new-ciphertext",
+    });
     expect(connection?.statusMessage).toBeUndefined();
     expect(connection?.refreshLeaseId).toBeUndefined();
     expect(await alice.run((ctx) => ctx.db.get(link._id))).toEqual(link);
+  });
+
+  test("an old-style call without serverUrl/scopes keeps the stored values", async () => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
+    const { alice, id } = await setup();
+    const connectionId = await alice.run(async (ctx) => {
+      const approval = (await ctx.db.get(id))!;
+      const link = (await ctx.db.get(approval.projectConnectionId))!;
+      await ctx.db.patch(link.userConnectionId, { status: "needs_reauth", scopes: ["read"] });
+      return link.userConnectionId;
+    });
+    await alice.mutation(api.system.updateUserConnectionCredential, {
+      internalKey: "test-key", userId: ALICE, connectionId,
+      providerId: "github", authMode: "api_key", maskedPreview: "new-key",
+      kekProvider: "local", kekKeyId: "k", wrappedDek: "new-dek", ciphertext: "new-ciphertext", iv: "i", authTag: "a",
+    });
+    expect(await alice.run((ctx) => ctx.db.get(connectionId))).toMatchObject({
+      status: "active", serverUrl: "https://example.com/mcp", scopes: ["read"], ciphertext: "new-ciphertext",
+    });
   });
 });
 
@@ -201,7 +223,7 @@ test("reconnect metadata is owner-checked and never exposes sealed credentials",
   });
   const args = { internalKey: "test-key", userId: ALICE, connectionId, providerId: "github", authMode: "api_key" as const };
   expect(await alice.query(api.system.getConnectionForReconnect, args)).toEqual({
-    _id: connectionId, credentialRef: "ref", serverUrl: "https://example.com/mcp", scopes: [],
+    _id: connectionId, credentialRef: "ref", serverUrl: "https://example.com/mcp",
   });
   expect(await alice.query(api.system.getConnectionForReconnect, { ...args, userId: "user_bob" })).toBeNull();
   expect(await alice.query(api.system.getConnectionForReconnect, { ...args, connectionId: "malformed" })).toBeNull();

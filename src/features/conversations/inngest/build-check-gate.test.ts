@@ -11,6 +11,7 @@ import {
   createBuildCheckGate,
   hasUncheckedWrites,
   MAX_BUILD_CHECKS,
+  needsBuildRepair,
   unverifiedBuildNote,
 } from "./build-check-gate";
 import { OUTPUT_LIMIT_ERROR } from "./lib/output-limit";
@@ -19,6 +20,19 @@ const call = (name: string, data = "ok") => ({ tool: { name }, content: { data }
 const turn = (...toolCalls: ReturnType<typeof call>[]) => ({ toolCalls });
 const failedCheck = () => call("checkBuild", "Error: Build failed.");
 const unfinishedCheck = () => call("checkBuild", "Error: The build check could not finish (deadline_exceeded).");
+
+describe("needsBuildRepair", () => {
+  it("is true only for writes that ended on a failed check or none", () => {
+    const verified = call("checkBuild", "Build verified\nDependencies installed.");
+    const notBuilt = call("checkBuild", "Build not checked\nStatic checks passed.");
+    expect(needsBuildRepair([turn(call("createFiles"), failedCheck())])).toBe(true);
+    expect(needsBuildRepair([turn(call("createFiles"))])).toBe(true);
+    expect(needsBuildRepair([turn(call("createFiles"), verified)])).toBe(false);
+    expect(needsBuildRepair([turn(call("createFiles"), notBuilt)])).toBe(false);
+    expect(needsBuildRepair([turn(call("createFiles"), unfinishedCheck())])).toBe(false);
+    expect(needsBuildRepair([turn(call("readFiles"), failedCheck())])).toBe(false);
+  });
+});
 
 describe("hasUncheckedWrites", () => {
   it("is false for a run that wrote nothing", () => {

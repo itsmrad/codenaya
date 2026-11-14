@@ -7,6 +7,15 @@ import type { Usage } from "./types";
 const exec = promisify(execFile);
 export const LEDGER = "scripts/agent-eval/results/ledger.json";
 
+/** Models the harness runs: title label, ledger provider and default per-run cap ($). */
+export const MODELS: Record<string, { label: string; provider: "anthropic" | "openrouter"; cap: number }> = {
+  "claude-haiku-5-5": { label: "Haiku 5.5", provider: "anthropic", cap: 0.75 },
+  "claude-sonnet-5-5": { label: "Sonnet 5.5", provider: "anthropic", cap: 2 },
+  "claude-opus-5-5": { label: "Opus 5.5", provider: "anthropic", cap: 3 },
+  "openai/gpt-6-luna": { label: "GPT-6 Luna", provider: "openrouter", cap: 1 },
+  "google/gemini-4-hydrogen": { label: "Gemini 4 Hydrogen", provider: "openrouter", cap: 1 },
+};
+
 export function tokenCost(model: string, input: number, output: number, cacheRead = 0, cacheWrite = 0) {
   const rate = model === "claude-haiku-5-5" ? (input > 100_000 ? [0.5, 2.5, 0.05] : [0.1, 0.5, 0.01])
     : model === "claude-sonnet-5-5" ? [2, 10, 0.1]
@@ -48,7 +57,7 @@ export async function appendLedger(...updates: Entry[]) {
   await writeFile(LEDGER, JSON.stringify(entries, null, 2));
 }
 
-export const recordUsage = (run: string, rows: Usage[]) =>
-  appendLedger(...rows.map((row) => ({ at: new Date().toISOString(), run: `${run}/${row.messageId}`, provider: "anthropic", model: row.model, tokens_in: row.inputTokens, tokens_out: row.outputTokens, usd: row.costUsd })));
+export const recordUsage = (run: string, rows: Usage[], provider: string) =>
+  appendLedger(...rows.map((row) => ({ at: new Date().toISOString(), run: `${run}/${row.messageId}`, provider, model: row.model, tokens_in: row.inputTokens, tokens_out: row.outputTokens, usd: row.costUsd })));
 
 export const totalUsd = (rows: Usage[]) => rows.reduce((sum, r) => sum + r.costUsd, 0);

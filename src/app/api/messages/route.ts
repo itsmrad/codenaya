@@ -24,6 +24,7 @@ import {
 } from "@/lib/message-processor";
 import { MAX_CHAT_IMAGES } from "@/features/conversations/chat-images";
 import { PLAN_MODE, SWARM_MODE } from "@/features/conversations/plan-mode";
+import { swarmOffResponse } from "@/features/conversations/server/swarm-off";
 import { requireOwnedConversation } from "@/features/projects/server/require-owned-project";
 
 import { api } from "../../../../convex/_generated/api";
@@ -79,6 +80,11 @@ export async function POST(request: Request) {
       },
       { status: 422 },
     );
+  }
+
+  const swarmOff = await swarmOffResponse(mode);
+  if (swarmOff) {
+    return swarmOff;
   }
 
   // Auto (#322) routes by task, which needs one more read: alongside the

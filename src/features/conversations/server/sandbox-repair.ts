@@ -9,6 +9,7 @@ import {
   describeToolCall,
   toolResultError,
 } from "@/features/conversations/agent-steps";
+import { decodeJsonArgs } from "@/features/conversations/inngest/lib/json-args";
 import { checkProjectBuild, isSafeProjectPath, redact } from "@/features/conversations/inngest/tools/check-build";
 import { createDeleteFilesTool } from "@/features/conversations/inngest/tools/delete-files";
 import { createEditFileTool } from "@/features/conversations/inngest/tools/edit-file";
@@ -21,9 +22,10 @@ import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
 /**
- * Build check and model repair for one caller-owned sandbox (SWARM workers
- * and the integration sandbox). The single-agent chat run keeps its own
- * checkBuild tool and build gate; this does not replace them.
+ * Build check and model repair for one caller-owned sandbox (SWARM workers,
+ * the integration sandbox, and a chat run whose own build gate ended on a
+ * failed check: `inngest/build-repair.ts`). The chat run keeps its checkBuild
+ * tool and build gate; this runs only after them.
  *
  * Each verify reads the text files under `dir` (up to MAX_SNAPSHOT_FILES)
  * for the static checks, then copies `dir` into a directory of its own and
@@ -102,8 +104,11 @@ type CheckOutcome = { status: "passed" | "failed" | "unverified"; errors: BuildE
 type Model = NonNullable<Parameters<typeof createAgent>[0]["model"]>;
 
 export type VerifyAndFixOptions = {
-  /** Caller-owned and left running. */
-  sandbox: Sandbox;
+  /**
+   * Caller-owned and left running. A function is called only inside a verify
+   * or sync, so replays of memoized steps never connect to it.
+   */
+  sandbox: Sandbox | (() => Promise<Sandbox>);
   /** The project's directory in the sandbox. */
   dir?: string;
   projectId: Id<"projects">;
@@ -131,6 +136,8 @@ export type VerifyAndFixOptions = {
   /** Redacted from every error, event and result. */
   secrets?: string[];
   onEvent?: (event: RepairEvent) => void | Promise<void>;
+  /** Called with each of the repair agent's model responses, e.g. to meter its usage. */
+  onResponse?: (raw: string | undefined) => Promise<void>;
   /**
    * Runs each verify and each copy into the sandbox as a durable step,
    * `<runId>:<agentTaskId>:verify:<n>` and `...:sync:<n>`, e.g.
@@ -206,9 +213,11 @@ export const parseBuildErrors = (text: string): BuildError[] => {
     : [{ message: body.join("\n") || head, kind: install ? "install" : "build" }];
 };
 
-const verify = async (sandbox: Sandbox, dir: string, secrets: string[]): Promise<CheckOutcome> => {
+const verify = async (connect: () => Promise<Sandbox>, dir: string, secrets: string[]): Promise<CheckOutcome> => {
+  let sandbox;
   let snap;
   try {
+    sandbox = await connect();
     snap = await snapshot(sandbox, dir);
   } catch (error) {
     const reason = `Could not read the sandbox's files (${error instanceof Error ? error.message : "unknown error"})`;
@@ -289,7 +298,7 @@ export const repairTools = ({
     guarded(createWriteFilesTool({ projectId, internalKey })),
     guarded(createEditFileTool({ projectId, internalKey })),
     guarded(createDeleteFilesTool({ projectId, internalKey })),
-  ];
+  ].map(decodeJsonArgs);
 };
 
 /**
@@ -298,7 +307,7 @@ export const repairTools = ({
  * `allowedPaths` are refused whole, as SWARM's own guard does.
  */
 const repair = async ({
-  projectId, internalKey, model, name, errors, paths, signal, allowedPaths,
+  projectId, internalKey, model, name, errors, paths, signal, allowedPaths, onResponse,
 }: {
   projectId: Id<"projects">;
   internalKey: string;
@@ -308,6 +317,7 @@ const repair = async ({
   paths: string[];
   signal?: AbortSignal;
   allowedPaths?: (path: string) => boolean;
+  onResponse?: (raw: string | undefined) => Promise<void>;
 }) => {
   const written: string[] = [];
   const agent = createAgent({
@@ -315,6 +325,12 @@ const repair = async ({
     system: REPAIR_SYSTEM,
     model,
     tools: repairTools({ projectId, internalKey, name, signal, allowedPaths, written }),
+    lifecycle: {
+      onResponse: async ({ result }) => {
+        await onResponse?.(result.raw);
+        return result;
+      },
+    },
   });
   const network = createNetwork({
     name,
@@ -390,8 +406,10 @@ export const verifyAndFix = async ({
   signal,
   secrets = [],
   onEvent,
+  onResponse,
   step,
 }: VerifyAndFixOptions): Promise<RepairResult> => {
+  const connect = typeof sandbox === "function" ? sandbox : async () => sandbox;
   const prefix = `${runId}:${agentTaskId}`;
   const cap = Number.isFinite(maxAttempts)
     ? Math.min(Math.max(Math.trunc(maxAttempts), 1), MAX_REPAIR_ATTEMPTS)
@@ -419,7 +437,7 @@ export const verifyAndFix = async ({
   for (let attempt = 1; ; attempt++) {
     if (signal?.aborted) return result("unverified", "Cancelled");
     await emit({ phase: "verify", attempt, status: "running" });
-    const outcome = await durable(`verify:${attempt}`, () => verify(sandbox, dir, secrets));
+    const outcome = await durable(`verify:${attempt}`, () => verify(connect, dir, secrets));
     errors = outcome.errors;
 
     if (outcome.status === "passed") {
@@ -445,7 +463,7 @@ export const verifyAndFix = async ({
     try {
       written = await repair({
         projectId, internalKey, model, name: `${prefix}:repair:${attempt}`,
-        errors: owned, paths: outcome.paths, signal, allowedPaths,
+        errors: owned, paths: outcome.paths, signal, allowedPaths, onResponse,
       });
     } catch (error) {
       console.error("[sandbox-repair] repair failed", projectId, error);
@@ -456,7 +474,7 @@ export const verifyAndFix = async ({
     let changed: string[];
     try {
       changed = written.length
-        ? await durable(`sync:${attempt}`, () => mirror(sandbox, dir, { projectId, internalKey }, written))
+        ? await durable(`sync:${attempt}`, async () => mirror(await connect(), dir, { projectId, internalKey }, written))
         : [];
     } catch (error) {
       // The repair is in Convex; only this sandbox's copy is behind.

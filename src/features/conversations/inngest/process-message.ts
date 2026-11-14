@@ -33,9 +33,11 @@ import {
   BUILD_CHECK_RESERVE_STEPS,
   BUILD_REPAIR_NUDGE,
   createBuildCheckGate,
+  needsBuildRepair,
   unverifiedBuildNote,
   wroteFiles,
 } from './build-check-gate';
+import { repairBuild, repairOutcome } from './build-repair';
 import { STUCK_FALLBACK_REPLY, createLoopGuard, stuckNote } from './loop-detector';
 import type { AgentModelChoice } from '../agent-models';
 import {
@@ -90,6 +92,7 @@ import {
   markCutOffCalls,
   refuseCutOffCalls,
 } from './lib/output-limit';
+import { decodeJsonArgs, decodeToolCalls } from './lib/json-args';
 import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
   type MessageMode,
@@ -554,7 +557,7 @@ export const processMessage = inngest.createFunction(
     // base, project instructions, skill index and integrations, then the project tree, forced
     // skills and plan mode.
     // Conversation goes in messages (see onStart).
-    const swarm = swarmRun({ ...(event.data as MessageEvent), internalKey });
+    const swarm = await swarmRun({ ...(event.data as MessageEvent), internalKey, step });
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
       buildProjectInstructionsSection(projectInstructions),
@@ -661,7 +664,7 @@ export const processMessage = inngest.createFunction(
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
       ...swarm.tools,
-    ].map(refuseCutOffCalls);
+    ].map(refuseCutOffCalls).map(decodeJsonArgs);
 
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
@@ -733,6 +736,7 @@ export const processMessage = inngest.createFunction(
           };
         },
         onResponse: async ({ agent, result, network }) => {
+          decodeToolCalls(result.output);
           await recordUsage(result.raw, runModel.metering.coding);
           // The last step must not write without a build check left to run;
           // this holds when a provider ignores tool_choice "none".
@@ -940,15 +944,35 @@ export const processMessage = inngest.createFunction(
           : textMessage.content.map((c) => c.text).join("");
     }
 
+    // Changes that ended on a failed or missing check get a repair here, before
+    // the run completes, so it needs no open tab. Its model calls are metered
+    // like the run's; cancelling the run stops it between steps.
+    const repair = !stuck && needsBuildRepair(result.state.results)
+      ? await repairBuild({
+          projectId,
+          internalKey,
+          runId,
+          model: codingModel,
+          step: (id, fn) => step.run(id, fn),
+          onResponse: (raw) => recordUsage(raw, runModel.metering.coding),
+          recordSteps: async (build) => {
+            await recordSteps("record-repair-steps", build, false);
+          },
+        })
+      : null;
+
     await settleRun("record-usage-final");
 
     // Changes that did not end on a verified build are not a working build.
-    const buildNote = unverifiedBuildNote(result.state.results);
+    const noteBefore = unverifiedBuildNote(result.state.results);
+    const { verified, note: buildNote } = repair
+      ? repairOutcome(repair, noteBefore)
+      : { verified: !noteBefore, note: noteBefore };
 
     // The first run that wrote files and verified its build ends a seeded
     // project's first build (#338). Before the message completes, so the
     // client sees the flag cleared by the time the run is no longer active.
-    if (!buildNote && wroteFiles(result.state.results)) {
+    if (verified && wroteFiles(result.state.results)) {
       await step.run("complete-first-build", async () => {
         await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
       });
@@ -960,7 +984,7 @@ export const processMessage = inngest.createFunction(
         internalKey,
         messageId,
         content: buildNote && !stuck ? `${assistantResponse}\n\n${buildNote}` : assistantResponse,
-        ...(stuck ? { stuck } : buildNote ? { outcome: "error" as const } : {}),
+        ...(stuck ? { stuck } : verified ? {} : { outcome: "error" as const }),
       })
     });
 

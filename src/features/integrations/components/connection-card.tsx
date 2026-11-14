@@ -182,7 +182,14 @@ export const ConnectionCard = ({ connection }: ConnectionCardProps) => {
           ))}
         </div>
         {connection.status !== "active" && (
-          <Button size="sm" variant="outline" onClick={() => setReconnectOpen(true)}>Reconnect</Button>
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label={`Reconnect ${connection.label} connection`}
+            onClick={() => setReconnectOpen(true)}
+          >
+            Reconnect
+          </Button>
         )}
       </div>
 
