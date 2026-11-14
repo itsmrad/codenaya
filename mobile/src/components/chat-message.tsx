@@ -1,8 +1,8 @@
 import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
 import { type ReactNode, useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
-import { useMarkdown } from "react-native-marked";
+import { type ImageStyle, Pressable, StyleSheet, Text, type TextStyle, View, useColorScheme } from "react-native";
+import { Renderer, useMarkdown } from "react-native-marked";
 import Animated, { useReducedMotion } from "react-native-reanimated";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
@@ -87,10 +87,24 @@ const useTypewriter = (text: string, animate: boolean) => {
   return animate ? text.slice(0, shown) : text;
 };
 
+const isWebUrl = (href: string) => /^https?:\/\//i.test(href);
+
+/** Agent output is untrusted: only http(s) links open; other schemes render as plain text. */
+class WebLinksRenderer extends Renderer {
+  link(children: string | ReactNode[], href: string, styles?: TextStyle, title?: string) {
+    return isWebUrl(href) ? super.link(children, href, styles, title) : this.text(children, styles);
+  }
+  linkImage(href: string, imageUrl: string, alt?: string, style?: ImageStyle, title?: string) {
+    return isWebUrl(href) ? super.linkImage(href, imageUrl, alt, style, title) : this.image(imageUrl, alt, style, title);
+  }
+}
+
 function Reply({ content }: { content: string }) {
   const c = useColors();
   const scheme = useColorScheme();
+  const [renderer] = useState(() => new WebLinksRenderer());
   const elements = useMarkdown(content, {
+    renderer,
     colorScheme: scheme === "light" ? "light" : "dark",
     theme: { colors: { text: c.foreground, link: c.brandText, code: c.muted, border: c.border } },
     styles: {

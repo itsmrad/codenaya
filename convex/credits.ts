@@ -85,13 +85,14 @@ export const recordRunUsage = mutation({
   args: {
     internalKey: v.string(),
     messageId: v.id("messages"),
+    agentTaskId: v.optional(v.id("agentTasks")),
     source: runSourceValidator,
     inputTokens: v.number(),
     outputTokens: v.number(),
     costUsd: v.number(),
   },
   returns: v.null(),
-  handler: async (ctx, { internalKey, messageId, source, ...totals }) => {
+  handler: async (ctx, { internalKey, messageId, agentTaskId, source, ...totals }) => {
     validateInternalKey(internalKey);
     if (!Object.values(totals).every((n) => Number.isFinite(n) && n >= 0)) {
       throw appError("INVALID_ARGUMENT", "Usage totals must be finite and not negative");
@@ -101,9 +102,17 @@ export const recordRunUsage = mutation({
     // The project was deleted mid-run: nobody left to charge.
     if (!message || !project) return null;
 
+    const task = agentTaskId === undefined ? null : await ctx.db.get("agentTasks", agentTaskId);
+    if (agentTaskId !== undefined && (!task || task.messageId !== messageId || task.projectId !== message.projectId)) {
+      throw appError("INVALID_ARGUMENT", "Task does not belong to this message");
+    }
+    const modelId = task ? task.modelId : message.runModel?.modelId;
+    const model = task ? task.model : message.runModel?.label ?? "";
     const row = await ctx.db
       .query("creditLedger")
-      .withIndex("by_messageId", (q) => q.eq("messageId", messageId))
+      .withIndex("by_messageId_and_agentTaskId", (q) =>
+        q.eq("messageId", messageId).eq("agentTaskId", agentTaskId),
+      )
       .unique();
     if (
       row &&
@@ -130,8 +139,9 @@ export const recordRunUsage = mutation({
       await ctx.db.insert("creditLedger", {
         userId: project.ownerId,
         messageId,
+        agentTaskId,
         source,
-        model: message.runModel?.label ?? "",
+        model,
         ...fields,
       });
     }
@@ -142,8 +152,8 @@ export const recordRunUsage = mutation({
     // Promo runs cost us too; the user's own key doesn't. shortcut: the run's
     // total includes its title on the utility model, a small overcount.
     const addedUsd = grown.costUsd - (row?.costUsd ?? 0);
-    if (source !== "byok" && addedUsd > 0 && message.runModel) {
-      await addModelSpend(ctx, project.ownerId, message.runModel.modelId, addedUsd, now);
+    if (source !== "byok" && addedUsd > 0 && modelId) {
+      await addModelSpend(ctx, project.ownerId, modelId, addedUsd, now);
     }
     return null;
   },

@@ -187,6 +187,12 @@ export async function deleteProjectBatch(
     .take(CASCADE_BATCH_SIZE);
   if (await deleteRows(ctx, "checkpoints", checkpoints)) return false;
 
+  const agentTasks = await ctx.db
+    .query("agentTasks")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "agentTasks", agentTasks)) return false;
+
   const messages = await ctx.db
     .query("messages")
     .withIndex("by_project_status", (q) => q.eq("projectId", projectId))

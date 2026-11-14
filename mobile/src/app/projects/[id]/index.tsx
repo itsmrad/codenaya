@@ -58,7 +58,7 @@ import { font, useColors } from "@/lib/theme";
 /** Same title the web gives a new conversation (DEFAULT_CONVERSATION_TITLE). */
 const NEW_CONVERSATION_TITLE = "New conversation";
 
-type MessageMode = typeof PLAN_MODE | undefined;
+type MessageMode = typeof PLAN_MODE | "swarm" | undefined;
 
 const TABS: { key: Tab; label: string; Icon: LucideIcon }[] = [
   { key: "chat", label: "Chat", Icon: MessageSquare },
