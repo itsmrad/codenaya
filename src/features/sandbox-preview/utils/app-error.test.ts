@@ -181,6 +181,14 @@ describe("createBuildErrorDetector", () => {
     "  Plugin: vite:import-analysis\n" +
     "  File: /home/user/app/src/App.jsx:1:20\n";
 
+  it("takes the file from the error, not from older output in the tail", () => {
+    const detector = createBuildErrorDetector();
+    detector.push("[postcss] /home/user/app/src/old.css:9:1: a deprecated rule (warning)\n");
+    expect(
+      detector.push('[vite] Pre-transform error: Failed to resolve import "./Missing" from "src/App.jsx".\n'),
+    ).toMatchObject({ file: "src/App.jsx", line: undefined });
+  });
+
   it("reads an error the stream split across chunks", () => {
     const css =
       "[plugin:vite:css] [postcss] /home/user/app/src/index.css:5:1: The `border-border` class does not exist.\n";

@@ -44,8 +44,10 @@ export const detectBuildError = (chunk: string): AppError | null => {
   const next = lines[index + 1]?.trim();
   if (message.endsWith(":") && next) message = `${message} ${next}`;
 
+  // From the error on: the detector's tail can hold older lines with other paths.
+  const fromError = lines.slice(index).join("\n");
   for (const pattern of FILE_PATTERNS) {
-    const match = text.match(pattern);
+    const match = fromError.match(pattern);
     if (match) {
       return {
         kind: "build",
