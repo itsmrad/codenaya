@@ -1,42 +1,46 @@
-import { ListChecksIcon } from "lucide-react";
+import { HammerIcon, ListChecksIcon, UsersIcon } from "lucide-react";
 
 import { PromptInputButton } from "@/components/ai-elements/prompt-input";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-interface PlanModeToggleProps {
-  pressed: boolean;
-  onPressedChange: (pressed: boolean) => void;
-  disabled?: boolean;
-}
+import type { MessageMode } from "../plan-mode";
 
-/** Composer footer toggle: while on, messages ask for a plan, not a build (#120). */
+export type ComposerMode = "build" | MessageMode;
+
+const MODES = [
+  { value: "build", label: "Build", icon: HammerIcon, hint: "Build with one agent" },
+  { value: "plan", label: "Plan", icon: ListChecksIcon, hint: "Plan before building" },
+  { value: "swarm", label: "Swarm", icon: UsersIcon, hint: "Build with a team of workers" },
+] as const;
+
+/** Mutually exclusive modes; build keeps the message's mode omitted. */
 export const PlanModeToggle = ({
-  pressed,
-  onPressedChange,
+  mode,
+  onModeChange,
   disabled = false,
-}: PlanModeToggleProps) => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <PromptInputButton
-        aria-label="Plan"
-        aria-pressed={pressed}
-        variant={pressed ? "secondary" : "ghost"}
-        onClick={() => onPressedChange(!pressed)}
-        disabled={disabled}
-        className={cn("h-8 shrink-0 rounded-lg px-2", pressed && "text-foreground")}
-      >
-        <ListChecksIcon className="size-4" />
-        {/* Icon only in a narrow panel, so the model name keeps its room. */}
-        <span className="hidden @[480px]:inline">Plan</span>
-      </PromptInputButton>
-    </TooltipTrigger>
-    <TooltipContent>
-      {pressed ? "Plan mode: the agent plans, nothing is built" : "Plan before building"}
-    </TooltipContent>
-  </Tooltip>
+}: {
+  mode: ComposerMode;
+  onModeChange: (mode: ComposerMode) => void;
+  disabled?: boolean;
+}) => (
+  <div role="group" aria-label="Message mode" className="flex shrink-0 items-center gap-0.5 rounded-lg border border-border p-0.5">
+    {MODES.map(({ value, label, icon: Icon, hint }) => (
+      <Tooltip key={value}>
+        <TooltipTrigger asChild>
+          <PromptInputButton
+            aria-label={label}
+            aria-pressed={mode === value}
+            variant={mode === value ? "secondary" : "ghost"}
+            onClick={() => onModeChange(value)}
+            disabled={disabled}
+            className="h-7 rounded-md px-1.5"
+          >
+            <Icon className="size-3.5" />
+            <span className="hidden @[560px]:inline">{label}</span>
+          </PromptInputButton>
+        </TooltipTrigger>
+        <TooltipContent>{hint}</TooltipContent>
+      </Tooltip>
+    ))}
+  </div>
 );
