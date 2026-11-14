@@ -104,3 +104,55 @@ describe("buildAiSdkModel on Anthropic", () => {
     },
   );
 });
+
+describe("buildAiSdkModel with thinking: false", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const OPENROUTER_REPLY = {
+    id: "gen_1",
+    object: "chat.completion",
+    created: 0,
+    model: "m",
+    choices: [{ index: 0, message: { role: "assistant", content: '{"suggestion":"x"}' }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+  };
+  const THINKING_OFF_BODY = { openrouter: { enabled: false }, anthropic: { type: "disabled" } };
+  const ANTHROPIC_REPLY = {
+    id: "msg_1",
+    type: "message",
+    role: "assistant",
+    model: "m",
+    content: [{ type: "text", text: '{"suggestion":"x"}' }],
+    stop_reason: "end_turn",
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+
+  // Haiku 5.5 thinks by default; ghost text can't wait for it (#320).
+  it.each([
+    ["openrouter", "anthropic/claude-haiku-5.5", false, true],
+    ["openrouter", "anthropic/claude-haiku-5.5", undefined, false],
+    ["openrouter", "openai/gpt-6-luna", false, false],
+    ["anthropic", "claude-haiku-5-5", false, true],
+    ["anthropic", "claude-sonnet-5-5", false, false],
+  ] as const)("%s %s, thinking %s: turned off %s", async (provider, model, thinking, turnedOff) => {
+    const reply = provider === "openrouter" ? OPENROUTER_REPLY : ANTHROPIC_REPLY;
+    const fetchMock = vi.fn(async () => Response.json(reply));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { object } = await generateObject({
+      model: buildAiSdkModel({ provider, apiKey: "key", model, thinking }),
+      output: "object",
+      schema: z.object({ suggestion: z.string() }),
+      prompt: "Suggest",
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(object).toEqual({ suggestion: "x" });
+    expect(provider === "openrouter" ? body.reasoning : body.thinking).toEqual(
+      turnedOff ? THINKING_OFF_BODY[provider] : undefined,
+    );
+  });
+});

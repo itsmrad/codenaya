@@ -191,6 +191,17 @@ describe("withEditorModel", () => {
     });
   });
 
+  it("passes thinking: false through to the model, platform or key", async () => {
+    const generate = vi.fn(async () => Response.json({ suggestion: "x" }));
+
+    mocks.query.mockResolvedValue({ key: anthropicKey, modelId: "claude-opus-5-5" });
+    await withEditorModel({ userId: "user_1", thinking: false }, generate);
+    mocks.query.mockResolvedValue(null);
+    await withEditorModel({ userId: "user_1", thinking: false }, generate);
+
+    expect(mocks.buildAiSdkModel.mock.calls.map(([target]) => target.thinking)).toEqual([false, false]);
+  });
+
   it("answers 503 when AI is not configured", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "");
     mocks.query.mockResolvedValue(null);
