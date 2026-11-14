@@ -40,6 +40,7 @@ test.describe("source control", () => {
       await user.mutation(api.checkpoints.deleteFileWithUndo, { id: deleted });
 
       await page.goto(`/projects/${projectId}`);
+      await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
       await page.getByRole("tab", { name: "Code", exact: true }).click();
       const filesTab = page.getByRole("tab", { name: "Files", exact: true });
       const sourceTab = page.getByRole("tab", { name: "Source control", exact: true });
@@ -53,23 +54,32 @@ test.describe("source control", () => {
       await expect(pane).toContainText("No linked repository");
       await expect(pane).toContainText("checkpoints, without per-run commit SHAs");
 
+      // Phone and desktop layouts remount the IDE (chat tab, Files view); reopen the panel.
+      const showPane = async (width: number) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.getByRole("tab", { name: "Code", exact: true }).click();
+        await sourceTab.click();
+        await expect(list.getByRole("button")).toHaveCount(3);
+      };
       for (const theme of ["light", "dark"]) {
         await setTheme(page, theme);
         for (const width of [1440, 375]) {
-          await page.setViewportSize({ width, height: 900 });
-          await expect(pane).toBeVisible();
+          await showPane(width);
           expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
           await page.screenshot({ path: `test-results/source-control-${theme}-${width}.png` });
         }
       }
-      await page.setViewportSize({ width: 1440, height: 900 });
-      await list.getByRole("button", { name: /edited.ts/ }).click();
       const dialog = page.getByRole("dialog", { name: "Project changes", exact: true });
-      await expect(dialog.locator(".cm-content")).toContainText("version = 2");
-      await expect(dialog.locator(".cm-deletedChunk")).toContainText("version = 1");
-      for (const width of [1440, 375]) {
-        await page.setViewportSize({ width, height: 900 });
+      for (const width of [375, 1440]) {
+        await showPane(width);
+        await list.getByRole("button", { name: /edited.ts/ }).click();
+        await expect(dialog.locator(".cm-content")).toContainText("version = 2");
+        await expect(dialog.locator(".cm-deletedChunk")).toContainText("version = 1");
         await page.screenshot({ path: `test-results/source-control-diff-${width}.png` });
+        if (width === 375) {
+          await page.keyboard.press("Escape");
+          await expect(dialog).toBeHidden();
+        }
       }
       await dialog.getByRole("button", { name: "Discard file changes" }).click();
       const confirm = page.getByRole("alertdialog");
@@ -79,10 +89,11 @@ test.describe("source control", () => {
       await dialog.getByRole("button", { name: "Discard file changes" }).click();
       await confirm.getByRole("button", { name: "Revert", exact: true }).click();
       await expect.poll(async () => (await user.query(api.files.getFile, { id: edited }))?.content).toBe("export const version = 1;\n");
+      await expect(confirm).toBeHidden();
       await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
       await expect(list.getByRole("button")).toHaveText([/added.ts/, /deleted.ts/]);
 
-      await page.setViewportSize({ width: 1440, height: 900 });
       const history = pane.getByRole("list", { name: "Checkpoint history", exact: true });
       await history.getByRole("button", { name: "Compare to current" }).first().click();
       await expect(pane.getByRole("combobox")).toContainText("Before deleting deleted.ts");
@@ -92,8 +103,12 @@ test.describe("source control", () => {
       await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
 
       await filesTab.click();
-      await page.keyboard.press("ControlOrMeta+Shift+P");
       const palette = page.getByRole("dialog", { name: "Command palette" });
+      await expect(async () => {
+        // "Desktop Chrome" sends a Windows user agent, so the app expects Ctrl on every host.
+        await page.keyboard.press("Control+Shift+P");
+        await expect(palette).toBeVisible({ timeout: 1_000 });
+      }).toPass();
       await palette.getByRole("combobox").fill("source control");
       await palette.getByRole("option", { name: "Show source control" }).click();
       await expect(sourceTab).toHaveAttribute("aria-selected", "true");
