@@ -10,7 +10,7 @@ describe("provider catalog display metadata", () => {
     expect(provider.description.trim()).not.toBe("");
     expect(provider.description.length).toBeLessThanOrEqual(90);
     expect(provider.category.trim()).not.toBe("");
-    expect(provider.logo).toMatch(/^\/integrations\/[a-z0-9-]+\.svg$/);
+    expect(provider.logo).toBe(`/integrations/${provider.id}.svg`);
     const svg = readFileSync(resolve("public", provider.logo.slice(1)), "utf8");
     expect(svg).toContain("<svg");
     expect(svg).toContain("<path");
@@ -27,7 +27,9 @@ describe("provider catalog filters", () => {
   it("matches names, capabilities and categories without case sensitivity", () => {
     expect(filterProviders("  GITHUB  ").map(({ id }) => id)).toEqual(["github"]);
     expect(filterProviders("stack traces").map(({ id }) => id)).toEqual(["sentry"]);
-    expect(filterProviders("DATABASE").map(({ id }) => id)).toEqual(["supabase", "neon", "prisma"]);
+    expect(filterProviders("DATABASE").map(({ id }) => id)).toEqual([
+      "supabase", "neon", "prisma", "upstash", "planetscale", "notion",
+    ]);
   });
 
   it("intersects search and category filters", () => {

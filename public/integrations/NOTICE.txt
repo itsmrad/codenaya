@@ -1,6 +1,7 @@
 Provider logo sources
 
-Supabase, Neon, GitHub, Stripe, Prisma, Sentry, Cloudflare and Linear SVGs:
+Supabase, Neon, GitHub, Stripe, Prisma, Sentry, Cloudflare, Linear, PostHog,
+Resend, Upstash, Sanity, PlanetScale, Notion, Atlassian, GitLab and Clerk SVGs:
 https://github.com/simple-icons/simple-icons/tree/develop/icons
 Simple Icons is distributed under CC0 1.0 Universal:
 https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md

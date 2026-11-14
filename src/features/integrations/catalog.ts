@@ -337,6 +337,9 @@ const CATALOG = {
   posthog: {
     id: "posthog",
     displayName: "PostHog",
+    description: "Explore product analytics, feature flags, experiments, and dashboards.",
+    category: "Analytics",
+    logo: "/integrations/posthog.svg",
     mcpUrl: "https://mcp.posthog.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.posthog.com"],
@@ -364,6 +367,9 @@ const CATALOG = {
   resend: {
     id: "resend",
     displayName: "Resend",
+    description: "Send email and manage domains, contacts, and broadcasts.",
+    category: "Communication",
+    logo: "/integrations/resend.svg",
     mcpUrl: "https://mcp.resend.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.resend.com"],
@@ -411,6 +417,9 @@ const CATALOG = {
   upstash: {
     id: "upstash",
     displayName: "Upstash",
+    description: "Manage Redis, QStash workflows, and Vector or Search resources.",
+    category: "Database",
+    logo: "/integrations/upstash.svg",
     mcpUrl: "https://mcp.upstash.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.upstash.com"],
@@ -453,6 +462,9 @@ const CATALOG = {
   sanity: {
     id: "sanity",
     displayName: "Sanity",
+    description: "Query and edit content, manage releases, and configure projects.",
+    category: "Content",
+    logo: "/integrations/sanity.svg",
     mcpUrl: "https://mcp.sanity.io",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.sanity.io"],
@@ -484,6 +496,9 @@ const CATALOG = {
   planetscale: {
     id: "planetscale",
     displayName: "PlanetScale",
+    description: "Inspect database schema and Insights, and run permitted queries.",
+    category: "Database",
+    logo: "/integrations/planetscale.svg",
     mcpUrl: "https://mcp.pscale.dev/mcp/planetscale",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.pscale.dev"],
@@ -506,6 +521,9 @@ const CATALOG = {
   notion: {
     id: "notion",
     displayName: "Notion",
+    description: "Search and manage Notion pages and databases.",
+    category: "Productivity",
+    logo: "/integrations/notion.svg",
     mcpUrl: "https://mcp.notion.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.notion.com"],
@@ -558,6 +576,9 @@ const CATALOG = {
   atlassian: {
     id: "atlassian",
     displayName: "Atlassian (Jira / Confluence)",
+    description: "Search and manage Jira work items and Confluence pages.",
+    category: "Productivity",
+    logo: "/integrations/atlassian.svg",
     mcpUrl: "https://mcp.atlassian.com/v2/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.atlassian.com"],
@@ -689,6 +710,9 @@ const CATALOG = {
   gitlab: {
     id: "gitlab",
     displayName: "GitLab",
+    description: "Work with GitLab repositories, merge requests, and CI.",
+    category: "Dev tools",
+    logo: "/integrations/gitlab.svg",
     mcpUrl: "https://gitlab.com/api/v4/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["gitlab.com"],
@@ -752,6 +776,9 @@ const CATALOG = {
   clerk: {
     id: "clerk",
     displayName: "Clerk",
+    description: "Manage Clerk applications, users, and authentication settings.",
+    category: "Authentication",
+    logo: "/integrations/clerk.svg",
     mcpUrl: "https://mcp.clerk.com/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.clerk.com"],
