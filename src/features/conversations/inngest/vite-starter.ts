@@ -23,13 +23,16 @@ const PACKAGE_JSON = json({
   },
   dependencies: pinnedVersions([
     "@fontsource/inter",
+    "@hookform/resolvers",
     "class-variance-authority",
     "clsx",
     "lucide-react",
     "react",
     "react-dom",
+    "react-hook-form",
     "react-router-dom",
     "tailwind-merge",
+    "zod",
   ]),
   devDependencies: pinnedVersions([
     "@tailwindcss/vite",
@@ -53,6 +56,19 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+  // Pre-bundle the starter's libraries on the first pass: a dependency found later
+  // re-optimizes mid-load, and the page briefly runs two React copies ("Invalid hook call").
+  optimizeDeps: {
+    include: [
+      "@hookform/resolvers/zod",
+      "class-variance-authority",
+      "clsx",
+      "lucide-react",
+      "react-hook-form",
+      "tailwind-merge",
+      "zod",
+    ],
+  },
 });
 `;
 
