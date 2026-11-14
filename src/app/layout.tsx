@@ -96,7 +96,9 @@ export default function RootLayout({
             <CommandPalette />
           </Providers>
         </Suspense>
-        <Analytics />
+        {/* Outside production it loads a cross-origin debug script that the
+            webcontainer COEP blocks, flaking console-error checks. */}
+        {process.env.NODE_ENV === "production" && <Analytics />}
       </body>
     </html>
   );
