@@ -1,5 +1,4 @@
 /* eslint-disable react-hooks/refs */
-/* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
@@ -37,6 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { DICTATION_SILENCE_MS, insertTranscript, isDictationKey } from "@/lib/dictation";
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart } from "ai";
 import {
@@ -71,6 +71,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 // ============================================================================
@@ -1126,102 +1127,160 @@ export type PromptInputSpeechButtonProps = ComponentProps<
   onTranscriptionChange?: (text: string) => void;
 };
 
+const noopSubscribe = () => () => {};
+
+const getSpeechRecognition = () =>
+  typeof window === "undefined"
+    ? undefined
+    : (window.SpeechRecognition ?? window.webkitSpeechRecognition);
+
+/**
+ * Voice dictation (#301). Renders nothing where the browser has no speech
+ * recognition (e.g. Firefox). Final transcripts go in at the cursor through
+ * `onTranscriptionChange`, keeping typed text. Recording stops on submit,
+ * when the page loses focus, and after DICTATION_SILENCE_MS without speech.
+ * Alt+V (Option+V) toggles it.
+ */
 export const PromptInputSpeechButton = ({
   className,
   textareaRef,
   onTranscriptionChange,
   ...props
 }: PromptInputSpeechButtonProps) => {
-  const [isListening, setIsListening] = useState(false);
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(
-    null
+  const supported = useSyncExternalStore(
+    noopSubscribe,
+    () => Boolean(getSpeechRecognition()),
+    () => false
   );
+  const [isListening, setIsListening] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const onTranscriptionRef = useRef(onTranscriptionChange);
   useEffect(() => {
-    if (
-      typeof window !== "undefined" &&
-      ("SpeechRecognition" in window || "webkitSpeechRecognition" in window)
-    ) {
-      const SpeechRecognition =
-        window.SpeechRecognition || window.webkitSpeechRecognition;
-      const speechRecognition = new SpeechRecognition();
-
-      speechRecognition.continuous = true;
-      speechRecognition.interimResults = true;
-      speechRecognition.lang = "en-US";
-
-      speechRecognition.onstart = () => {
-        setIsListening(true);
-      };
-
-      speechRecognition.onend = () => {
-        setIsListening(false);
-      };
-
-      speechRecognition.onresult = (event) => {
-        let finalTranscript = "";
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const result = event.results[i];
-          if (result.isFinal) {
-            finalTranscript += result[0]?.transcript ?? "";
-          }
-        }
-
-        if (finalTranscript && textareaRef?.current) {
-          const textarea = textareaRef.current;
-          const currentValue = textarea.value;
-          const newValue =
-            currentValue + (currentValue ? " " : "") + finalTranscript;
-
-          textarea.value = newValue;
-          textarea.dispatchEvent(new Event("input", { bubbles: true }));
-          onTranscriptionChange?.(newValue);
-        }
-      };
-
-      speechRecognition.onerror = (event) => {
-        console.error("Speech recognition error:", event.error);
-        setIsListening(false);
-      };
-
-      recognitionRef.current = speechRecognition;
-      setRecognition(speechRecognition);
-    }
-
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-    };
-  }, [textareaRef, onTranscriptionChange]);
+    onTranscriptionRef.current = onTranscriptionChange;
+  });
 
   const toggleListening = useCallback(() => {
-    if (!recognition) {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
       return;
     }
+    const Recognition = getSpeechRecognition();
+    if (!Recognition) return;
 
-    if (isListening) {
-      recognition.stop();
-    } else {
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = navigator.language || "en-US";
+
+    let silence: ReturnType<typeof setTimeout> | undefined;
+    const waitForSpeech = () => {
+      clearTimeout(silence);
+      silence = setTimeout(() => recognition.stop(), DICTATION_SILENCE_MS);
+    };
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setAnnouncement("Dictation started");
+      waitForSpeech();
+    };
+    // Also follows an error, such as a denied microphone.
+    recognition.onend = () => {
+      clearTimeout(silence);
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
+      setIsListening(false);
+      setAnnouncement("Dictation stopped");
+    };
+    recognition.onresult = (event) => {
+      waitForSpeech();
+      let transcript = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) transcript += result[0]?.transcript ?? "";
+      }
+      const textarea =
+        textareaRef?.current ?? buttonRef.current?.closest("form")?.querySelector("textarea");
+      if (!transcript.trim() || !textarea) return;
+
+      const next = insertTranscript(
+        textarea.value,
+        transcript,
+        textarea.selectionStart,
+        textarea.selectionEnd
+      );
+      onTranscriptionRef.current?.(next.value);
+      requestAnimationFrame(() => textarea.setSelectionRange(next.caret, next.caret));
+    };
+
+    recognitionRef.current = recognition;
+    try {
       recognition.start();
+    } catch {
+      recognitionRef.current = null;
     }
-  }, [recognition, isListening]);
+  }, [textareaRef]);
 
+  // Unmounting (e.g. the composer hides while a run is processing) stops it.
+  useEffect(() => () => recognitionRef.current?.stop(), []);
+
+  useEffect(() => {
+    if (!isListening) return;
+    const stop = () => recognitionRef.current?.stop();
+    const form = buttonRef.current?.closest("form");
+    window.addEventListener("blur", stop);
+    form?.addEventListener("submit", stop);
+    return () => {
+      window.removeEventListener("blur", stop);
+      form?.removeEventListener("submit", stop);
+    };
+  }, [isListening]);
+
+  useEffect(() => {
+    if (!supported) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !isDictationKey(event)) return;
+      // With two composers on screen (a dialog over the dashboard), the
+      // focused one answers.
+      const focusedForm = document.activeElement?.closest("form");
+      if (
+        focusedForm?.querySelector("[data-dictation]") &&
+        focusedForm !== buttonRef.current?.closest("form")
+      ) {
+        return;
+      }
+      event.preventDefault();
+      toggleListening();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [supported, toggleListening]);
+
+  if (!supported) return null;
+
+  const label = isListening ? "Stop dictation" : "Start dictation";
   return (
-    <PromptInputButton
-      className={cn(
-        "relative transition-all duration-200",
-        isListening && "animate-pulse bg-accent text-accent-foreground",
-        className
-      )}
-      disabled={!recognition}
-      onClick={toggleListening}
-      {...props}
-    >
-      <MicIcon className="size-4" />
-    </PromptInputButton>
+    <>
+      <PromptInputButton
+        ref={buttonRef}
+        data-dictation=""
+        aria-label={label}
+        aria-pressed={isListening}
+        title={`${label} (Alt+V)`}
+        className={cn(
+          "relative transition-all duration-200",
+          isListening && "animate-pulse bg-accent text-accent-foreground",
+          className
+        )}
+        onClick={toggleListening}
+        {...props}
+      >
+        <MicIcon className="size-4" />
+      </PromptInputButton>
+      <span className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </span>
+    </>
   );
 };
 
