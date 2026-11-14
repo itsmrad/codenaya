@@ -65,6 +65,7 @@ export default defineConfig({
       "clsx",
       "lucide-react",
       "react-hook-form",
+      "react-router-dom",
       "tailwind-merge",
       "zod",
     ],
