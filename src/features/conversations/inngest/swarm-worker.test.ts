@@ -88,7 +88,14 @@ describe("swarmWorker", () => {
     }));
     expect(mutationArgs("system:updateFile")).toHaveLength(0);
 
-    const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: string }> }>;
+    const [request] = outcome.inferenceBodies as Array<{
+      messages: Array<{ content: string }>;
+      tools: Array<{ function: { name: string } }>;
+    }>;
+    // Path-based tools only: no rename, move, id-based writes, build, env or MCP.
+    expect(request.tools.map((tool) => tool.function.name).sort()).toEqual(
+      ["deleteFiles", "editFile", "listFiles", "readFiles", "searchFiles", "writeFiles"],
+    );
     expect(request.messages[0].content).toContain("[swarm-worker]");
     expect(request.messages[0].content).toContain("Owned paths: src/pages/");
     expect(request.messages.at(-1)?.content).toBe(TASK.brief);
@@ -151,9 +158,9 @@ describe("swarmWorker", () => {
     }
   });
 
-  it("is cancelled with its parent message and shares an owner's concurrency", () => {
+  it("is cancelled with its parent message, with room for two swarms' workers per owner", () => {
     const { opts } = swarmWorker as unknown as { opts: { cancelOn: unknown; concurrency: unknown } };
     expect(opts.cancelOn).toEqual([{ event: "message/cancel", if: "event.data.messageId == async.data.parentMessageId" }]);
-    expect(opts.concurrency).toEqual([{ key: "event.data.ownerId", limit: 4 }]);
+    expect(opts.concurrency).toEqual([{ key: "event.data.ownerId", limit: 8 }]);
   });
 });

@@ -8,6 +8,7 @@ import { resolveWorkerModel } from "@/features/ai-providers/server/resolve-run-m
 import { withoutToolCalls } from "@/features/ai-providers/server/agentkit-model";
 import { costUsd, usageOfResponse } from "@/features/billing/credits";
 import { api } from "../../../../convex/_generated/api";
+import { MAX_SWARM_TASKS } from "../../../../convex/swarm";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../agent-models";
 import { type AgentStep, runWrittenPaths, stepsFromResponse, stepsFromToolResults, turnHeartbeat } from "../agent-steps";
@@ -51,7 +52,8 @@ const SUMMARY_AGENT_NAME = "codenaya-summary";
 export const swarmWorker = inngest.createFunction(
   {
     id: "swarm-worker",
-    concurrency: [{ key: "event.data.ownerId", limit: 4 }],
+    // Room for every worker of processMessage's 2 runs per owner: step.invoke's timeout counts queue time.
+    concurrency: [{ key: "event.data.ownerId", limit: 2 * MAX_SWARM_TASKS }],
     cancelOn: [{ event: "message/cancel", if: "event.data.messageId == async.data.parentMessageId" }],
     triggers: [{ event: "agent-task/run" }],
     onFailure: async ({ event, step }) => {
