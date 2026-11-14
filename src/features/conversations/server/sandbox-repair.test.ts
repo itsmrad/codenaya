@@ -584,6 +584,19 @@ describe("repairTools", () => {
     expect(written).toEqual([]);
   });
 
+  it("checks JSON-string arrays against allowedPaths like real ones", async () => {
+    convexFiles.clear();
+    convexFiles.set("src/App.tsx", "app");
+    const written: string[] = [];
+    const scoped = tools("w", written, (path) => path.startsWith("src/mine/"));
+
+    expect(await call(scoped.deleteFiles, { paths: '["src/App.tsx"]' })).toBe("Error: src/App.tsx is outside this task's files");
+    expect(convexFiles.has("src/App.tsx")).toBe(true);
+    const files = JSON.stringify([{ path: "src/mine/a.ts", content: "a" }]);
+    expect(await call(scoped.writeFiles, { files })).toBe("Wrote 1 file(s). Updated: src/mine/a.ts.");
+    expect(written).toEqual(["src/mine/a.ts"]);
+  });
+
   it("counts only the files a partial writeFiles wrote", async () => {
     convexFiles.clear();
     const written: string[] = [];

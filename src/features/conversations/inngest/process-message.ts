@@ -92,6 +92,7 @@ import {
   markCutOffCalls,
   refuseCutOffCalls,
 } from './lib/output-limit';
+import { decodeJsonArgs, decodeToolCalls } from './lib/json-args';
 import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
   type MessageMode,
@@ -659,7 +660,7 @@ export const processMessage = inngest.createFunction(
         : []),
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
-    ].map(refuseCutOffCalls);
+    ].map(refuseCutOffCalls).map(decodeJsonArgs);
 
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
@@ -731,6 +732,7 @@ export const processMessage = inngest.createFunction(
           };
         },
         onResponse: async ({ agent, result, network }) => {
+          decodeToolCalls(result.output);
           await recordUsage(result.raw, runModel.metering.coding);
           // The last step must not write without a build check left to run;
           // this holds when a provider ignores tool_choice "none".
