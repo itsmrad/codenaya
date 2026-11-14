@@ -398,6 +398,8 @@ export interface RunModel {
   key?: Pick<Doc<"aiProviderKeys">, "_id" | "userId" | "label">;
   /** The coding agent's model. */
   coding: (temperature?: number) => AgentKitModel;
+  /** Its id and "provider · model" label, as metered (a worker's may differ from the choice). */
+  codingModel: { id: string; label: string };
   /** The conversation title model, on the same provider. */
   title: (temperature?: number) => AgentKitModel;
   /**
@@ -468,6 +470,7 @@ export async function resolveRunModel({
     const title = isPlatformConfigured(utility.provider) ? utility : model;
     return {
       coding: (temperature) => platformAgentModel(model.provider, model.providerModelId, temperature),
+      codingModel: { id: model.id, label: platformRunLabel(model) },
       title: (temperature) => platformAgentModel(title.provider, title.providerModelId, temperature),
       acceptsImages: model.vision && model.id === choice.modelId,
       metering: {
@@ -530,6 +533,7 @@ export async function resolveRunModel({
   return {
     key: { _id: key._id, userId: key.userId, label: key.label },
     coding: (temperature) => build(codingModelId, temperature),
+    codingModel: { id: codingModelId, label: runModelLabel(codingModelId, key) },
     title: (temperature) => build(titleModel, temperature),
     acceptsImages: modelAcceptsImages(choice.modelId, key),
     metering: { source: "byok" },

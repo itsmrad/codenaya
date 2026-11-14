@@ -44,6 +44,12 @@ export interface SwarmWorkerResult {
 
 const SUMMARY_AGENT_NAME = "codenaya-summary";
 
+/** At most one parent heartbeat write per worker this often; far under STALLED_RUN_MS. */
+export const WORKER_HEARTBEAT_MS = 20_000;
+// Per task, across this instance's requests (a closure resets every request).
+// ponytail: a cold instance beats once more; the write is idempotent.
+const lastHeartbeat = new Map<string, number>();
+
 /**
  * One swarm task on its own model and step budget, invoked by the orchestrator
  * with `step.invoke`. Writes only the task's owned paths and runs no build:
@@ -54,7 +60,9 @@ export const swarmWorker = inngest.createFunction(
     id: "swarm-worker",
     // Room for every worker of processMessage's 2 runs per owner: step.invoke's timeout counts queue time.
     concurrency: [{ key: "event.data.ownerId", limit: 2 * MAX_SWARM_TASKS }],
-    cancelOn: [{ event: "message/cancel", if: "event.data.messageId == async.data.parentMessageId" }],
+    // `event` is this run's trigger, `async` the cancel event. A cancel skips
+    // onFailure; the board shows the task cancelled from its parent message.
+    cancelOn: [{ event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" }],
     triggers: [{ event: "agent-task/run" }],
     onFailure: async ({ event, step }) => {
       const { agentTaskId } = event.data.event.data as SwarmWorkerEvent;
@@ -91,13 +99,16 @@ export const swarmWorker = inngest.createFunction(
       buildProjectTreePromptSection(await getProjectFiles(internalKey, projectId)));
 
     const recorded = new Map<string, AgentStep>();
-    // Also beats the parent's heartbeat, so the stalled-run reaper sees the orchestrator alive.
+    // Also beats the parent's heartbeat (throttled), so the stalled-run reaper sees the orchestrator alive.
     const recordSteps = async (id: string, steps: AgentStep[]) => {
       for (const row of steps) recorded.set(row.id, { ...recorded.get(row.id), ...row });
       await step.run(id, async () => {
         if (steps.length) await convex.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId, steps });
+        const now = Date.now();
+        if (now - (lastHeartbeat.get(agentTaskId) ?? 0) < WORKER_HEARTBEAT_MS) return;
+        lastHeartbeat.set(agentTaskId, now);
         await convex.mutation(api.system.upsertMessageSteps, {
-          internalKey, messageId: parentMessageId, steps: [turnHeartbeat(Date.now())],
+          internalKey, messageId: parentMessageId, steps: [turnHeartbeat(now)],
         });
       });
     };
@@ -135,7 +146,8 @@ export const swarmWorker = inngest.createFunction(
           await step.run(`worker-usage-${turn}`, async () => {
             try {
               await convex.mutation(api.credits.recordRunUsage, {
-                internalKey, messageId: parentMessageId, agentTaskId, source: runModel.metering.source, ...totals,
+                internalKey, messageId: parentMessageId, agentTaskId, source: runModel.metering.source,
+                modelId: runModel.codingModel.id, model: runModel.codingModel.label, ...totals,
               });
             } catch (error) {
               console.error("[credits] failed to record worker usage", error);
@@ -176,9 +188,12 @@ export const swarmWorker = inngest.createFunction(
     });
 
     const result = await network.run(task.brief);
-    const summary = result.state.results.at(-1)?.output.flatMap((m) => m.type === "text" && m.role === "assistant"
+    const reply = result.state.results.at(-1)?.output.flatMap((m) => m.type === "text" && m.role === "assistant"
       ? [typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("")] : []).join("\n").trim()
       || "The worker finished without a summary.";
+    // Stored as done: what it wrote is real; the orchestrator reads the prefix.
+    const summary = unfinished ? `Unfinished (step or cost cap): ${reply}` : reply;
+    lastHeartbeat.delete(agentTaskId);
     await step.run("finish-worker", () => convex.mutation(api.agentTasks.finishTask, {
       internalKey, agentTaskId, status: "done", summary,
     }));

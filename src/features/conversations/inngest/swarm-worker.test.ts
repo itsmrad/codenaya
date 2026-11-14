@@ -103,10 +103,12 @@ describe("swarmWorker", () => {
     expect(mutationArgs("agentTasks:startTask")[0]).toMatchObject({ agentTaskId: "t1", parentMessageId: "m1", projectId: "p1" });
     expect(mutationArgs("credits:recordRunUsage").at(-1)).toMatchObject({
       messageId: "m1", agentTaskId: "t1", source: "platform", inputTokens: 1_000, outputTokens: 1_000,
+      modelId: "anthropic/claude-haiku-5.5", model: "Codenaya · anthropic/claude-haiku-5.5",
     });
-    expect(mutationArgs("system:upsertMessageSteps")).toContainEqual(expect.objectContaining({
+    // Three turns in well under WORKER_HEARTBEAT_MS: one parent write.
+    expect(mutationArgs("system:upsertMessageSteps")).toEqual([expect.objectContaining({
       messageId: "m1", steps: [expect.objectContaining({ id: TURN_HEARTBEAT_ID })],
-    }));
+    })]);
     expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ agentTaskId: "t1", status: "done" })]);
   });
 
@@ -117,7 +119,9 @@ describe("swarmWorker", () => {
     ]);
 
     expect(outcome.inferenceBodies).toHaveLength(WORKER_MAX_STEPS);
-    expect(outcome.data).toMatchObject({ status: "unfinished", summary: "Listed files; the page is unfinished." });
+    const summary = "Unfinished (step or cost cap): Listed files; the page is unfinished.";
+    expect(outcome.data).toMatchObject({ status: "unfinished", summary });
+    expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ status: "done", summary })]);
   });
 
   it("hands off to the summary agent once its usage crosses the cost cap", async () => {
@@ -160,7 +164,7 @@ describe("swarmWorker", () => {
 
   it("is cancelled with its parent message, with room for two swarms' workers per owner", () => {
     const { opts } = swarmWorker as unknown as { opts: { cancelOn: unknown; concurrency: unknown } };
-    expect(opts.cancelOn).toEqual([{ event: "message/cancel", if: "event.data.messageId == async.data.parentMessageId" }]);
+    expect(opts.cancelOn).toEqual([{ event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" }]);
     expect(opts.concurrency).toEqual([{ key: "event.data.ownerId", limit: 8 }]);
   });
 });
