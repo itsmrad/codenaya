@@ -280,6 +280,13 @@ async function purgeUserDataBatch(
     .take(CASCADE_BATCH_SIZE);
   if (await deleteRows(ctx, "creditAccounts", creditAccounts)) return false;
 
+  // The site-wide rows (`userId: null`) stay: they're everyone's spend.
+  const modelSpend = await ctx.db
+    .query("modelSpend")
+    .withIndex("by_userId_modelId", (q) => q.eq("userId", userId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "modelSpend", modelSpend)) return false;
+
   const activationEvents = await ctx.db
     .query("activationEvents")
     .withIndex("by_userId_and_name_and_at", (q) => q.eq("userId", userId))
