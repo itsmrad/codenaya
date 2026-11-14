@@ -1,12 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { NOTHING_TO_PREVIEW } from "./boot-plan";
 import {
   appErrorKey,
+  autoFixTarget,
   bannerError,
   buildFixPrompt,
   createBuildErrorDetector,
   codeBlock,
+  createAutoFixer,
   detectBuildError,
+  isAppStartFailure,
   isHmrSuccess,
   logTail,
   mergeAppError,
@@ -60,6 +64,47 @@ describe("detectBuildError", () => {
     ).toMatchObject({ file: "src/App.tsx", line: 3 });
   });
 
+  describe("npm install failures (#491)", () => {
+    const install = "npm install --prefer-offline --no-audit --no-fund";
+
+    it("reads the sandbox route's install line as a build error on package.json", () => {
+      const output =
+        `$ ${install}\n` +
+        "npm error code ERESOLVE\n" +
+        "npm error ERESOLVE unable to resolve dependency tree\n" +
+        `\nError: ${install} failed with exit code 1\n` +
+        "npm error code ERESOLVE\n";
+      expect(detectBuildError(output)).toEqual({
+        kind: "build",
+        message: `${install} failed with exit code 1 (ERESOLVE)`,
+        file: "package.json",
+      });
+    });
+
+    it("reads a reinstall failure without an npm code", () => {
+      expect(detectBuildError(`\npackage.json changed.\n$ pnpm install\n\nError: pnpm install failed with exit code 1\n`)).toEqual({
+        kind: "build",
+        message: "pnpm install failed with exit code 1",
+        file: "package.json",
+      });
+    });
+
+    it("leaves a network failure to the start error", () => {
+      expect(
+        detectBuildError(
+          "npm error code ETIMEDOUT\nnpm error network request to https://registry.npmjs.org/react failed\n" +
+            `Error: ${install} failed with exit code 1\n`,
+        ),
+      ).toBeNull();
+      expect(detectBuildError(`npm error code EAI_AGAIN\nError: ${install} failed with exit code 1\n`)).toBeNull();
+    });
+
+    it("ignores other lines that mention an exit code", () => {
+      expect(detectBuildError("Error: Command failed with exit code 1: vite build\n")).toBeNull();
+      expect(detectBuildError("Error: exit status 1\n")).toBeNull();
+    });
+  });
+
   it("ignores ordinary output", () => {
     expect(detectBuildError("  VITE v6.0.0  ready in 312 ms\n  ➜  Local:   http://localhost:5173/\n")).toBeNull();
     expect(detectBuildError("[vite] hmr update /src/App.jsx\n")).toBeNull();
@@ -107,6 +152,15 @@ describe("buildFixPrompt", () => {
     expect(prompt).not.toContain("line 9\n");
   });
 
+  it("appends the known cause and fix for a recognised error (#334)", () => {
+    const prompt = buildFixPrompt(
+      { kind: "build", message: "npm install failed with exit code 1 (ERESOLVE)", file: "package.json" },
+      "npm error code ERESOLVE\n",
+    );
+    expect(prompt).toContain("Likely cause (npm-eresolve):");
+    expect(prompt).toContain("Known fix:");
+  });
+
   it("leaves out sections it has nothing for", () => {
     expect(buildFixPrompt({ kind: "build", message: "boom" }, "")).toBe(
       "The preview shows a build error. Find the cause and fix it.\n\nError:\n```\nboom\n```",
@@ -152,6 +206,36 @@ describe("bannerError", () => {
     expect(bannerError(error, { ...shown, dismissedId: appErrorKey(error) })).toBeNull();
     expect(bannerError(error, { ...shown, previewReady: false })).toBeNull();
     expect(bannerError(null, shown)).toBeNull();
+  });
+});
+
+describe("isAppStartFailure", () => {
+  it("is a failed start the app's code can fix", () => {
+    expect(isAppStartFailure("transient", "npm install failed with exit code 1")).toBe(true);
+  });
+
+  it("is not a sandbox setup failure, or a project with nothing to preview", () => {
+    expect(isAppStartFailure("config", "E2B_API_KEY is not set")).toBe(false);
+    expect(isAppStartFailure("rate_limit", "Sandbox limit reached")).toBe(false);
+    expect(isAppStartFailure("transient", NOTHING_TO_PREVIEW)).toBe(false);
+    expect(isAppStartFailure(null, null)).toBe(false);
+  });
+});
+
+describe("autoFixTarget (#491)", () => {
+  const idle = { runActive: false, chatBusy: false, sent: [] as string[], max: 2 };
+
+  it("fixes the shown error once the run is over and the chat is free", () => {
+    expect(autoFixTarget("a", idle)).toBe("a");
+    expect(autoFixTarget("a", { ...idle, runActive: true })).toBeNull();
+    expect(autoFixTarget("a", { ...idle, chatBusy: true })).toBeNull();
+    expect(autoFixTarget(null, idle)).toBeNull();
+  });
+
+  it("fixes each error once, and at most max per session", () => {
+    expect(autoFixTarget("a", { ...idle, sent: ["a"] })).toBeNull();
+    expect(autoFixTarget("b", { ...idle, sent: ["a"] })).toBe("b");
+    expect(autoFixTarget("c", { ...idle, sent: ["a", "b"] })).toBeNull();
   });
 });
 
@@ -209,5 +293,137 @@ describe("createBuildErrorDetector", () => {
 
     detector.push(chunk);
     expect(detector.push("x".repeat(10_000))).toBeNull();
+  });
+});
+
+describe("createAutoFixer (#491)", () => {
+  const files = ["run's files"];
+  const fix = vi.fn();
+  let fixer: ReturnType<typeof createAutoFixer>;
+  const state = { errorId: null as string | null, runActive: false, chatBusy: false, files: files as unknown };
+  const update = (next: Partial<typeof state>) => {
+    Object.assign(state, next);
+    fixer.update({ ...state, fix });
+  };
+  /** A run that starts, then ends with `errorId` shown. */
+  const runEnds = (errorId: string | null = "a") => {
+    update({ runActive: true });
+    update({ runActive: false, errorId });
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fix.mockReset();
+    Object.assign(state, { errorId: null, runActive: false, chatBusy: false, files });
+    fixer = createAutoFixer({ delayMs: 3000, windowMs: 120_000, max: 2 });
+    update({});
+  });
+  afterEach(() => {
+    fixer.dispose();
+    vi.useRealTimers();
+  });
+
+  it("fixes the error a run left once it has stayed shown for the delay", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(2999);
+    expect(fix).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(fix).toHaveBeenCalledExactlyOnceWith("a");
+  });
+
+  it("does nothing on a page load with an error already shown", () => {
+    update({ errorId: "a" });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+  });
+
+  it("drops the pending fix when the error clears or changes before the delay", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(2000);
+    update({ errorId: null });
+    vi.advanceTimersByTime(5000);
+    expect(fix).not.toHaveBeenCalled();
+
+    update({ errorId: "b" });
+    vi.advanceTimersByTime(2000);
+    update({ errorId: "c" });
+    vi.advanceTimersByTime(3000);
+    expect(fix).toHaveBeenCalledExactlyOnceWith("c");
+  });
+
+  it("disarms on a file edit after the run ended: the user's typo is left alone", () => {
+    runEnds(null);
+    update({ files: ["user edit"] });
+    update({ errorId: "typo" });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+  });
+
+  it("disarms on an edit while a fix is pending", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(1000);
+    update({ files: ["user edit"] });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+  });
+
+  it("counts files the run itself wrote as the run's, not an edit", () => {
+    update({ runActive: true });
+    update({ runActive: false, errorId: "a", files: ["written by the run"] });
+    vi.advanceTimersByTime(3000);
+    expect(fix).toHaveBeenCalledWith("a");
+  });
+
+  it("disarms once the window after the run is over", () => {
+    runEnds(null);
+    vi.advanceTimersByTime(120_000);
+    update({ errorId: "late" });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+  });
+
+  it("waits while a run is active and while the chat is busy", () => {
+    update({ runActive: true, errorId: "a" });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+
+    update({ runActive: false, chatBusy: true });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+
+    update({ chatBusy: false });
+    vi.advanceTimersByTime(3000);
+    expect(fix).toHaveBeenCalledExactlyOnceWith("a");
+  });
+
+  it("cancels a pending fix when the user clicks Fix first", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(1000);
+    // The manual fix is queued: the chat is busy, then its run starts.
+    update({ chatBusy: true });
+    update({ chatBusy: false, runActive: true });
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
+  });
+
+  it("fixes each error once and at most max per session, across runs", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(3000);
+    runEnds("a"); // the fix run ended and the error is still there
+    vi.advanceTimersByTime(3000);
+    expect(fix).toHaveBeenCalledTimes(1);
+
+    runEnds("b");
+    vi.advanceTimersByTime(3000);
+    runEnds("c");
+    vi.advanceTimersByTime(3000);
+    expect(fix.mock.calls).toEqual([["a"], ["b"]]);
+  });
+
+  it("sends nothing after dispose", () => {
+    runEnds("a");
+    fixer.dispose();
+    vi.advanceTimersByTime(10_000);
+    expect(fix).not.toHaveBeenCalled();
   });
 });
