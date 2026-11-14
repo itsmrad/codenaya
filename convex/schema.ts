@@ -745,7 +745,6 @@ export default defineSchema({
     credits: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_messageId", ["messageId"])
     .index("by_messageId_and_agentTaskId", ["messageId", "agentTaskId"])
     .index("by_userId", ["userId"]),
 
