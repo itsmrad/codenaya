@@ -39,18 +39,19 @@ export function SourceControlPane({ project, projectId, disabled }: {
     <section aria-label="Source control" className="min-h-0 flex-1 overflow-y-auto text-xs">
       <div className="space-y-2 border-b p-3">
         <div className="flex items-center gap-2 font-medium"><GitBranchIcon aria-hidden="true" className="size-4 text-brand-text" />GitHub sync</div>
-        {sync ? <p className="break-all font-mono">{sync.repo} · {sync.syncBranchSha ? GITHUB_SYNC_BRANCH : sync.branch}</p> : <p className="text-muted-foreground">No linked repository. Connect GitHub through Export.</p>}
+        {project === undefined ? <p role="status" className="text-muted-foreground">Loading repository…</p>
+          : sync ? <p className="break-all font-mono">{sync.repo} · {sync.syncBranchSha ? GITHUB_SYNC_BRANCH : sync.branch}</p>
+          : <p className="text-muted-foreground">No linked repository. Connect GitHub through Export.</p>}
         <details>
           <summary className="cursor-pointer text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Sync details</summary>
-        {project === undefined ? note("Loading repository…") : sync ? (
+        {sync && (
           <>
-            <p className="break-all font-mono">{sync.repo}</p>
             <p className="break-all text-muted-foreground">Branch <span className="font-mono text-foreground">{sync.branch}</span></p>
             {sync.syncBranchSha && <p className="text-brand-text">Push branch: {GITHUB_SYNC_BRANCH} · linked branch has moved</p>}
             <p className="text-muted-foreground">Last sync <span className="font-mono">{(sync.syncBranchSha ?? sync.lastSyncedSha).slice(0, 7)}</span> · {formatDistanceToNow(sync.syncBranchAt ?? sync.lastSyncedAt, { addSuffix: true })}</p>
             <p role="status" className="text-muted-foreground">{unpushed instanceof Error ? "Couldn't load pending runs." : unpushed === undefined ? "Loading pending runs…" : unpushed ? `${unpushed.count}${unpushed.more ? "+" : ""} finished runs since sync${unpushed.running ? " · agent running" : ""}` : "No sync information."}</p>
           </>
-        ) : <p className="text-muted-foreground">No linked repository. Connect GitHub through Export.</p>}
+        )}
         <p className="mt-2 leading-relaxed text-muted-foreground">Push and pull in Export. Finished agent runs become GitHub commits on push; older runs may share one summary commit. This history shows checkpoints, without per-run commit SHAs or local Git branches.</p>
         </details>
       </div>
