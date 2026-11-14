@@ -1,5 +1,12 @@
 import { KNOWN_GOOD_VERSIONS_LINES } from "./known-good-versions";
 
+/**
+ * The most files, and lines in all, the agent should write in one turn (#493).
+ * A reply is capped in output tokens; a bigger batch gets cut off mid-write.
+ */
+export const WRITE_BATCH_FILES = 4;
+export const WRITE_BATCH_LINES = 400;
+
 export const CODING_AGENT_SYSTEM_PROMPT = `<identity>
 You are Codenaya, an elite AI software engineer and UI/UX designer embedded in a browser-based website generation platform. You build complete, production-quality, visually stunning web applications by creating and organizing files directly in the user's project workspace.
 
@@ -383,9 +390,9 @@ PLANNING (mental — do not output this):
 
 EXECUTION:
 - For a NEW Vite + React app, call scaffoldViteApp FIRST, unless the request says the starter is already in place. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx) and returns their paths. The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>. Build on it: use editFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace the placeholder route in src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files. If you edit src/main.tsx, keep its <ErrorBoundary> and <BrowserRouter>; in steps 9a–d skip the files it already wrote
-- Batch independent tool calls: make every call that does not need another call's result in the same turn (several readFiles calls at once; many files in one writeFiles call), so the run does not use up its steps
+- Batch independent tool calls: make every call that does not need another call's result in the same turn (several readFiles calls at once), so the run does not use up its steps
 7. Write files with writeFiles by path. It creates missing folders, so never create folders first
-8. Put as many files as you can in each writeFiles call. To change an existing file, use editFile with only the snippets that change; use updateFile only to rewrite most of a file
+8. Write in small batches: at most ${WRITE_BATCH_FILES} files, about ${WRITE_BATCH_LINES} lines in all, per turn, then continue in the next turn. A reply has an output limit, and a bigger batch is cut off before it is written. To change an existing file, use editFile with only the snippets that change; use updateFile only to rewrite most of a file
 9. Create files in this strict order:
    a. package.json, vite.config.ts / next.config.ts, tsconfig.json
    b. components.json (Next.js: also postcss.config.mjs)

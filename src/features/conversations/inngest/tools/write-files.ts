@@ -17,6 +17,7 @@ import {
 import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
+import { WRITE_BATCH_FILES, WRITE_BATCH_LINES } from "../constants";
 
 interface WriteFilesToolOptions {
   projectId: Id<"projects">;
@@ -34,7 +35,7 @@ export const createWriteFilesTool = ({ projectId, internalKey, registry = create
   return createTool({
     name: "writeFiles",
     description:
-      "Create or overwrite files by path. Missing parent folders are created, so write a whole feature in one call: files in any folders, new or existing.",
+      `Create or overwrite files by path. Missing parent folders are created, so files can be in any folders, new or existing. Keep each call small, at most ${WRITE_BATCH_FILES} files and about ${WRITE_BATCH_LINES} lines in all: a bigger call is cut off at the output limit and nothing is written.`,
     parameters: z.object({
       files: z
         .array(
