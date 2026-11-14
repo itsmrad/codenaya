@@ -3,7 +3,7 @@ import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
-import { userConvexClient } from "./convex-client";
+import { cleanupProject, userConvexClient } from "./convex-client";
 
 export const hasPreviewFixtureEnv = () =>
   Boolean(process.env.CODENAYA_CONVEX_INTERNAL_KEY && process.env.NEXT_PUBLIC_CONVEX_URL);
@@ -18,7 +18,7 @@ export const seedPreviewProject = async (page: Page, name: string) => {
   const projectId = existing?._id ?? (await user.mutation(api.projects.create, { name }));
 
   const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-  await system.mutation(api.system.cleanup, { internalKey, projectId });
+  await cleanupProject(system, internalKey, projectId);
   await system.mutation(api.system.createFile, {
     internalKey,
     projectId,

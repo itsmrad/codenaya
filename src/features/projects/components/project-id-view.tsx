@@ -118,9 +118,11 @@ export const ProjectIdView = ({
   // A run is writing the first build when the project was seeded and no run
   // has written files yet, or when it starts before package.json exists.
   // Seeded projects have package.json from creation, so it can't tell (#338).
-  // The preview mounts (hidden) once package.json lands so the sandbox boots
-  // during the run, and the IDE switches to it when the run ends, unless the
-  // user picked a tab meanwhile. Phones keep the chat and get a toast (#254).
+  // Desktops open on the preview, which shows the build and then the app as
+  // soon as its sandbox runs (#337). Elsewhere the preview mounts (hidden) once
+  // package.json lands so the sandbox boots during the run, and the IDE
+  // switches to it when the run ends, unless the user picked a tab meanwhile.
+  // Phones keep the chat and get a toast (#254).
   const activeRun = useActiveRun(projectId);
   const files = useFiles(projectId);
   const hasPackageJson = files ? hasRootPackageJson(files) : false;
@@ -130,6 +132,12 @@ export const ProjectIdView = ({
   if (!firstBuild && activeRun && (activeRun.firstBuild || (files && !hasPackageJson))) {
     setFirstBuild(true);
     setViewPickedDuringBuild(false);
+    // Only in place of the empty editor: a project without a root package.json
+    // reads as a first build on every run, and a picked tab must stay.
+    if (!isCompact && selectedView === "chat") {
+      setSelectedView("preview");
+      setPreviewOpened(true);
+    }
   }
   if (firstBuild && hasPackageJson && !previewOpened) setPreviewOpened(true);
   if (firstBuild && activeRun === null) {

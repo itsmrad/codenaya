@@ -5,7 +5,7 @@ import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
-import { userConvexClient } from "./convex-client";
+import { cleanupProject, userConvexClient } from "./convex-client";
 import { STUB_MODEL, startStubProvider } from "./stub-provider";
 
 const PROJECT_NAME = "e2e-editor-ai";
@@ -30,7 +30,7 @@ const seedProject = async (page: Page) => {
     existing?._id ?? (await user.mutation(api.projects.create, { name: PROJECT_NAME }));
 
   const system = new ConvexHttpClient(convexUrl!);
-  await system.mutation(api.system.cleanup, { internalKey: internalKey!, projectId });
+  await cleanupProject(system, internalKey!, projectId);
   await system.mutation(api.system.createFile, {
     internalKey: internalKey!,
     projectId,
