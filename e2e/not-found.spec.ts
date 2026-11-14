@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { PENDING_PROMPT_KEY } from "../src/features/projects/utils/pending-prompt";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 
@@ -53,7 +54,11 @@ test.describe("not-found page", () => {
     const composer = page.getByRole("textbox", { name: "Describe what you want to build" });
     await composer.fill("A habit tracker with streaks");
     await composer.press("Enter");
-    await expect(page).toHaveURL(/\/sign-up/);
+    // Same path as the landing composer: sign in, keeping the prompt.
+    await expect(page).toHaveURL(/\/sign-in/);
+    expect(await page.evaluate((key) => localStorage.getItem(key), PENDING_PROMPT_KEY)).toBe(
+      "A habit tracker with streaks",
+    );
   });
 
   test("shows a friendly state for a missing project", async ({ page }) => {

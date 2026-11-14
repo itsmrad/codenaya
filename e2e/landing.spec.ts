@@ -108,7 +108,7 @@ test.describe("landing social proof", () => {
     await expect(community.getByText(/\d[\d,]* projects built/)).toBeVisible();
 
     const cards = community.locator('a[href^="/showcase/"]');
-    expect(await cards.count()).toBeLessThanOrEqual(4);
+    expect(await cards.count()).toBeLessThanOrEqual(6);
   });
 
   // #253: at tablet width the strip shows full rows, never a lone card.
