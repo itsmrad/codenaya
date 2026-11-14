@@ -157,6 +157,12 @@ export interface ApiKeyPlacement {
 export interface ProviderDefinition {
   readonly id: string;
   readonly displayName: string;
+  /** Concise, user-facing capability summary for the catalog. */
+  readonly description: string;
+  /** Browsing category, shared by Settings and the IDE. */
+  readonly category: string;
+  /** Local SVG asset path under /integrations/. */
+  readonly logo: string;
   /** Default (unscoped) MCP endpoint. */
   readonly mcpUrl: string;
   readonly authModes: readonly IntegrationAuthMode[];
