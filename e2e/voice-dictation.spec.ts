@@ -89,6 +89,8 @@ test.describe("voice dictation", () => {
 
     const composer = page.getByPlaceholder("Describe a change or ask a question…");
     await expect(composer).toBeVisible({ timeout: 60_000 });
+    // The dev-tools badge covers the bottom-left corner, over the tool row.
+    await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     await page.getByRole("button", { name: "Start dictation" }).click();
     await page.evaluate(() => (window as DictationWindow).__speak?.("Make the header sticky"));
     await expect(composer).toHaveValue("Make the header sticky");

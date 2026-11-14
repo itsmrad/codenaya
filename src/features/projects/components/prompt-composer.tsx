@@ -209,7 +209,7 @@ export const PromptComposer = ({
                 <PromptInputSpeechButton
                   textareaRef={textareaRef}
                   onTranscriptionChange={setInput}
-                  className={cn(TOOL, "h-full w-auto rounded-none [&_svg]:size-3.5")}
+                  className={cn(TOOL, "h-full w-auto rounded-none has-[>svg]:px-3 [&_svg]:size-3.5")}
                 />
               )}
               {tools}
