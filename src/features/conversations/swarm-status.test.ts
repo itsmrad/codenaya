@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type SwarmTask, swarmElapsed, swarmHeader, swarmTaskStatus } from "./swarm";
+import { type SwarmTask, swarmElapsed, swarmHeader, swarmTaskStatus } from "./swarm-status";
 
 describe("swarmTaskStatus", () => {
   it.each(["completed", "cancelled"] as const)("cancels unfinished tasks under a %s parent", (parent) => {

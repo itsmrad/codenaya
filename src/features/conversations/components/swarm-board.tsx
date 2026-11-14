@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 import type { Doc } from "../../../../convex/_generated/dataModel";
 import { runWrittenPaths } from "../agent-steps";
-import { type SwarmTask, swarmElapsed, swarmHeader, swarmTaskStatus } from "../swarm";
+import { type SwarmTask, swarmElapsed, swarmHeader, swarmTaskStatus } from "../swarm-status";
 import { AgentRunLog } from "./agent-run";
 
 const STATUS_LABELS = {
