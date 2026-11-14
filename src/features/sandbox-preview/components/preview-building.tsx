@@ -13,9 +13,11 @@ const FILE_LIMIT = 8;
 
 /**
  * Shown in place of the preview while the agent writes a new project's first
- * build, so the sandbox doesn't boot against a half-written project.
+ * build, so the sandbox doesn't boot against a half-written project. With
+ * `fixing`, it covers a broken app while its automatic fix runs (#305).
  */
-export const PreviewBuilding = ({ steps }: { steps: AgentStep[] }) => {
+export const PreviewBuilding = ({ steps, fixing = false }: { steps: AgentStep[]; fixing?: boolean }) => {
+  const title = fixing ? "Fixing an error" : "Building your app";
   // What this run wrote, not every project file: a new project already holds
   // the seeded starter, which isn't progress (#478).
   const paths = writtenFilePaths(steps);
@@ -24,7 +26,7 @@ export const PreviewBuilding = ({ steps }: { steps: AgentStep[] }) => {
   return (
     <div
       role="status"
-      aria-label="Building your app"
+      aria-label={title}
       className="size-full overflow-y-auto bg-background p-4"
     >
       <div className="mx-auto flex min-h-full max-w-sm flex-col items-center justify-center gap-4 text-center">
@@ -45,7 +47,7 @@ export const PreviewBuilding = ({ steps }: { steps: AgentStep[] }) => {
           </div>
         </div>
         <div className="flex flex-col items-center gap-1">
-          <p className="text-sm font-medium text-foreground">Building your app</p>
+          <p className="text-sm font-medium text-foreground">{title}</p>
           <Shimmer as="span" className="max-w-full truncate text-xs">
             {liveStepLabel(steps)}
           </Shimmer>
@@ -78,7 +80,9 @@ export const PreviewBuilding = ({ steps }: { steps: AgentStep[] }) => {
         </ul>
 
         <p className="text-xs text-muted-foreground">
-          The preview appears as soon as your app starts
+          {fixing
+            ? "The preview comes back once the fix is in"
+            : "The preview appears as soon as your app starts"}
         </p>
       </div>
     </div>
