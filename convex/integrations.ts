@@ -176,6 +176,50 @@ const providerScopeValidator = v.object({
   projectSlug: v.optional(v.string()),
 });
 
+export const listConnectionProjects = query({
+  args: { connectionId: v.id("userConnections") },
+  returns: v.array(
+    v.object({
+      projectId: v.id("projects"),
+      name: v.string(),
+      readOnly: v.boolean(),
+      enabled: v.boolean(),
+      providerScope: providerScopeValidator,
+      allowedTools: v.optional(v.array(v.string())),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+    await assertConnectionOwner(ctx, args.connectionId, identity.subject);
+    const links = await ctx.db
+      .query("projectConnections")
+      .withIndex("by_userConnection", (q) =>
+        q.eq("userConnectionId", args.connectionId),
+      )
+      .take(MAX_PROJECT_CONNECTIONS);
+    const projects = [];
+    for (const link of links) {
+      const project = await ctx.db.get("projects", link.projectId);
+      if (
+        !project ||
+        project.deletingAt ||
+        project.ownerId !== identity.subject ||
+        link.ownerId !== identity.subject
+      )
+        continue;
+      projects.push({
+        projectId: project._id,
+        name: project.name,
+        readOnly: link.readOnly,
+        enabled: link.enabled,
+        providerScope: link.providerScope,
+        allowedTools: link.allowedTools,
+      });
+    }
+    return projects;
+  },
+});
+
 /** Attach one of the user's connections to one of their projects. */
 export const linkConnectionToProject = mutation({
   args: {
