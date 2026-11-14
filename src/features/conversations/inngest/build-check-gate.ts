@@ -45,6 +45,9 @@ export const BUILD_UNVERIFIED_NOTE =
 // Another check would not build it either (no build sandbox, or not a Vite project).
 export const BUILD_NOT_BUILT_NOTE =
   "**Build check:** Static checks passed, but the app could not be built here, so it has not been verified. Check the preview before relying on it.";
+// The run ended on a failed or missing check, and the repair after it passed.
+export const BUILD_REPAIRED_NOTE =
+  "**Build check:** The build had errors after these changes, so they were fixed automatically; the type check and production build now pass.";
 
 type ToolCalls = { toolCalls: Array<{ tool: { name: string }; content: unknown }> };
 
@@ -91,6 +94,16 @@ export const hasUncheckedWrites = (results: ToolCalls[]) => {
   const { wrote, last, checks } = buildState(results);
   // A check that could not run is retried at most once, by the gate below.
   return wrote && (last === "unchecked" || last === "failed") && checks < MAX_BUILD_CHECKS;
+};
+
+/**
+ * Whether the run's writes ended on a failed check, or on none (the step
+ * budget ran out): a repair after the run may still fix and verify them.
+ * Not for checks that could not build or finish; another would not either.
+ */
+export const needsBuildRepair = (results: ToolCalls[]) => {
+  const { wrote, last } = buildState(results);
+  return wrote && (last === "failed" || last === "unchecked");
 };
 
 /** The note for a run whose changes did not end on a verified build, if any. */
