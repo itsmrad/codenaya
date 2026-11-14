@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
 import { internalMutation } from "./_generated/server";
+import { recordRunFinished } from "./activationEvents";
 import {
   LOST_RUN_MESSAGE,
   LOST_RUN_MS,
@@ -222,6 +223,7 @@ export const failLostMessageRuns = internalMutation({
       const lastActivity = lastRunActivity(message._creationTime, steps);
       if (now - lastActivity < LOST_RUN_MS) continue;
 
+      await recordRunFinished(ctx, message, "error");
       await ctx.db.patch("messages", message._id, {
         content: LOST_RUN_MESSAGE,
         status: "completed" as const,

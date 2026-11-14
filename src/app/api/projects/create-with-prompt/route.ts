@@ -35,6 +35,8 @@ const requestSchema = z.object({
   model: modelChoiceSchema,
   /** Seeds the project with a starter template's files first (#119). */
   templateId: z.enum(STARTER_TEMPLATE_IDS).optional(),
+  /** A prompt typed on the landing page before sign-up, for activation events (#339). */
+  fromLanding: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
@@ -64,7 +66,7 @@ export async function POST(request: Request) {
     return invalid;
   }
 
-  const { prompt, model, templateId } = data;
+  const { prompt, model, templateId, fromLanding } = data;
   const template = templateId ? getStarterTemplate(templateId) : undefined;
 
   if (detectCredential(prompt).detected) {
@@ -112,6 +114,7 @@ export async function POST(request: Request) {
         projectName,
         conversationTitle: DEFAULT_CONVERSATION_TITLE,
         ownerId: userId,
+        source: template ? "template" : fromLanding ? "landing" : "dashboard",
         // Seeded below, so package.json can't mark the first build (#338).
         firstBuildPending: true,
       },
