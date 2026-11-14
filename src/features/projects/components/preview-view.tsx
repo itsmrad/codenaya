@@ -169,11 +169,10 @@ export const PreviewView = ({
     };
   }, []);
 
-  useEffect(() => {
-    if (shouldResetClearedOffset(terminalOutput.length, clearedOffset)) {
-      setClearedOffset(0);
-    }
-  }, [terminalOutput.length, clearedOffset]);
+  // Reset cleared offset if output was cleared or restarted
+  const effectiveClearedOffset = shouldResetClearedOffset(terminalOutput.length, clearedOffset)
+    ? 0
+    : clearedOffset;
 
   const handleCopyLogs = useCallback(async () => {
     if (!terminalRef.current) return;
@@ -532,7 +531,7 @@ export const PreviewView = ({
                   </div>
                   <PreviewTerminal
                     ref={terminalRef}
-                    output={sliceClearedOutput(terminalOutput, clearedOffset)}
+                    output={sliceClearedOutput(terminalOutput, effectiveClearedOffset)}
                     onScrolledUpChange={setIsScrolledUp}
                   />
                 </motion.div>
