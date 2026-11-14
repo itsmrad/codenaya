@@ -148,7 +148,7 @@ describe("validateModelChoice (API route)", () => {
     });
     expect(await validate(undefined)).toMatchObject({ modelId: DEFAULT_AGENT_MODEL_ID });
     // Users can't pick the env catalog's hidden utility model.
-    expect(await validate("openai/gpt-5.4-mini")).toMatchObject({ modelId: DEFAULT_AGENT_MODEL_ID });
+    expect(await validate("anthropic/claude-haiku-5.5")).toMatchObject({ modelId: DEFAULT_AGENT_MODEL_ID });
     expect(mocks.query).not.toHaveBeenCalled();
   });
 
