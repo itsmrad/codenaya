@@ -26,6 +26,7 @@ export function score(trail: Trail, files: { path: string; content: string }[]) 
     autoFixCount: trail.messages.filter((m) => m.role === "user" && m.content.startsWith("The preview shows a")).length,
     autoFixOutcomes: assistants.slice(1).map((m) => ({ status: m.status, stuck: m.stuck })),
     firstPreviewMs: trail.firstPreviewAt ? trail.firstPreviewAt - trail.startedAt : null,
+    firstAppPaintMs: trail.firstAppPaintAt ? trail.firstAppPaintAt - trail.startedAt : null,
     wallMs: trail.endedAt - trail.startedAt, tokensIn, tokensOut, usd: totalUsd(trail.usage),
     // creditLedger.costUsd is authoritative: rows sum a run's calls, so the
     // per-prompt >100K price tier cannot be re-derived from them.

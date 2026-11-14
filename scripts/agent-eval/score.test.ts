@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { tokenCost } from "./cost";
 import { score } from "./score";
-import { isRuntimeError, sanitize } from "./capture";
+import { isGeneratedApp, isRuntimeError, sanitize } from "./capture";
 import { assertDevTarget } from "./guard";
 import { ADMIN_TITLE, deleteAfterScoring, projectTitle } from "./projects";
 import type { Trail } from "./types";
@@ -48,6 +48,14 @@ describe("agent evaluation", () => {
     expect(score(trail, []).previewOk).toBe(false);
     expect(isRuntimeError("Uncaught ReferenceError: x is not defined")).toBe(true);
     expect(isRuntimeError("Failed to load resource: 404")).toBe(false);
+  });
+  it("tells the generated app's first paint from the starter's", () => {
+    expect(isGeneratedApp("App")).toBe(false);
+    expect(isGeneratedApp("  \n")).toBe(false);
+    expect(isGeneratedApp("Alex Rivera\nSelect a meeting type")).toBe(true);
+    const trail = fixture();
+    trail.firstAppPaintAt = 7000;
+    expect(score(trail, []).firstAppPaintMs).toBe(6000);
   });
   it("prices tiers and cache usage; rejects unknown models and invalid usage", () => {
     expect(tokenCost("claude-haiku-5-5", 10000, 2000)).toBe(0.002);

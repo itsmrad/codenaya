@@ -60,12 +60,16 @@ export const isAppUrl = (url: string) => {
   try { return /\.(?:e2b\.app|e2b\.dev)$/.test(new URL(url).hostname); } catch { return false; }
 };
 
+/** The seeded starter renders a lone "App" heading (vite-starter.ts); any other text is the generated app. */
+export const isGeneratedApp = (rootText: string) => rootText.trim() !== "" && rootText.trim() !== "App";
+
 export async function probePreview(page: Page, trail: Trail) {
   const preview = page.frameLocator('iframe[title="Preview"]');
   if (await page.locator('iframe[title="Preview"]').count() === 0) return;
   const loaded = await preview.locator("#root > *").count() > 0;
   const overlay = await preview.locator("vite-error-overlay").count() > 0;
   if ((loaded || overlay) && !trail.firstPreviewAt) trail.firstPreviewAt = Date.now();
+  if (loaded && !trail.firstAppPaintAt && isGeneratedApp(await preview.locator("#root").innerText().catch(() => ""))) trail.firstAppPaintAt = Date.now();
   trail.preview.loaded = loaded;
   trail.preview.overlay = overlay;
 }
