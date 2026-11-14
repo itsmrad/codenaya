@@ -82,6 +82,25 @@ describe("readPreviewMessage", () => {
     }
   });
 
+  it("accepts a build error from Vite's overlay", () => {
+    const build = {
+      source: PREVIEW_MESSAGE_SOURCE,
+      version: 1,
+      kind: "build",
+      message: "[plugin:vite:react-babel] Unexpected token (3:4)",
+      file: "/home/user/app/src/App.tsx:3:4",
+    };
+    expect(readPreviewMessage({ ...event, data: build }, frame, previewUrl)).toEqual({
+      kind: "build",
+      message: build.message,
+      file: "src/App.tsx",
+      line: 3,
+    });
+    expect(
+      readPreviewMessage({ ...event, data: { ...build, kind: "other" } }, frame, previewUrl),
+    ).toBeNull();
+  });
+
   it("truncates long text", () => {
     const long = "a".repeat(10_000);
     const error = readPreviewMessage({ ...event, data: { ...data, message: long, stack: long } }, frame, previewUrl);
@@ -218,6 +237,87 @@ describe("installPreviewBridge", () => {
     install(win, PREVIEW_MESSAGE_SOURCE, 1, 2048);
     expect(win.addEventListener).not.toHaveBeenCalled();
     expect(win.console.error).toBe(original);
+  });
+
+  describe("Vite's error overlay (#497)", () => {
+    /** A Vite overlay element as `ErrorOverlay` builds it, open shadow root and all. */
+    const overlay = (parts: Record<string, string>) => ({
+      nodeName: "VITE-ERROR-OVERLAY",
+      shadowRoot: {
+        querySelector: (selector: string) =>
+          selector in parts ? { textContent: parts[selector] } : null,
+      },
+    });
+    const compileError = overlay({
+      ".plugin": "[plugin:vite:import-analysis]",
+      ".message-body": '  Failed to resolve import "./Missing" from "src/App.tsx".  ',
+      ".file": "/home/user/app/src/App.tsx:2:19",
+    });
+
+    const setupDom = (readyState: string, existing: unknown = null) => {
+      const posted: Array<Record<string, unknown>> = [];
+      const documentListeners: Record<string, () => void> = {};
+      const observers: Array<{ callback: (records: unknown[]) => void; target: unknown }> = [];
+      const body = { querySelector: () => existing };
+      const win = {
+        parent: { postMessage: (message: Record<string, unknown>) => posted.push(message) },
+        addEventListener: vi.fn(),
+        console: { error: vi.fn() },
+        setTimeout,
+        document: {
+          readyState,
+          body,
+          addEventListener: (type: string, listener: () => void) => (documentListeners[type] = listener),
+        },
+        MutationObserver: class {
+          constructor(readonly callback: (records: unknown[]) => void) {}
+          observe(target: unknown) {
+            observers.push({ callback: this.callback, target });
+          }
+        },
+      };
+      install(win as unknown as typeof window, PREVIEW_MESSAGE_SOURCE, 1, 2048);
+      const append = (...nodes: unknown[]) =>
+        observers.forEach(({ callback }) => callback([{ addedNodes: nodes }]));
+      return { posted, documentListeners, observers, body, append };
+    };
+
+    it("reports an overlay appended to <body> as a build error", () => {
+      const { posted, observers, body, append } = setupDom("complete");
+
+      expect(observers).toEqual([expect.objectContaining({ target: body })]);
+      append({ nodeName: "DIV" }, compileError);
+
+      expect(posted).toEqual([
+        {
+          source: PREVIEW_MESSAGE_SOURCE,
+          version: 1,
+          kind: "build",
+          message: '[plugin:vite:import-analysis] Failed to resolve import "./Missing" from "src/App.tsx".',
+          file: "/home/user/app/src/App.tsx:2:19",
+        },
+      ]);
+    });
+
+    it("waits for <body> while the page loads, then reads an overlay already there", () => {
+      const { posted, observers, documentListeners } = setupDom("loading", compileError);
+
+      expect(observers).toHaveLength(0);
+      documentListeners.DOMContentLoaded();
+      expect(observers).toHaveLength(1);
+      expect(posted).toEqual([expect.objectContaining({ kind: "build" })]);
+    });
+
+    it("ignores an overlay without a message, and never throws on a broken one", () => {
+      const { posted, append } = setupDom("complete");
+      const broken = {
+        nodeName: "VITE-ERROR-OVERLAY",
+        shadowRoot: { querySelector: () => { throw new Error("detached"); } },
+      };
+
+      expect(() => append(overlay({ ".file": "src/App.tsx" }), broken, null)).not.toThrow();
+      expect(posted).toHaveLength(0);
+    });
   });
 
   it("is what the injected script runs", () => {

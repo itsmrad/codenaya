@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { MAX_ERROR_TEXT, type AppError } from "./app-error";
+import { MAX_ERROR_TEXT, overlayError, type AppError } from "./app-error";
 
 export const PREVIEW_MESSAGE_SOURCE = "codenaya-preview";
 /** Bump when the message shape changes; select-to-edit (#227) extends this protocol. */
@@ -11,9 +11,10 @@ type ErrorLike = { message?: unknown; stack?: unknown } | null | undefined;
 /**
  * Runs inside the previewed app and reports its errors to the IDE: uncaught
  * errors and rejections, and errors an error boundary caught, which React
- * reports only to console.error, after "The above error occurred…" (#335). The
- * preview is cross-origin, so this is the only way they leave the iframe. It
- * runs from its source, so it must stay self-contained, and it must never
+ * reports only to console.error, after "The above error occurred…" (#335), and
+ * compile errors shown in Vite's error overlay (#497). The preview is
+ * cross-origin, so this is the only way they leave the iframe. It runs from its
+ * source, so it must stay self-contained, and it must never
  * break the app: every report is guarded and the app's console.error always runs.
  */
 export function installPreviewBridge(
@@ -24,6 +25,23 @@ export function installPreviewBridge(
 ): void {
   if (win.parent === win) return;
   let lastPosted = "";
+  const post = (kind: string, message: string, detail?: string) => {
+    // One error can arrive twice in the same task (window error and its log).
+    // Only then: the IDE clears the banner on every edit and needs a repeat
+    // after the edit to show the error again.
+    const key = kind + "\n" + message + "\n" + (detail || "");
+    if (key === lastPosted) return;
+    lastPosted = key;
+    win.setTimeout(() => {
+      lastPosted = "";
+    }, 0);
+    win.parent.postMessage(
+      kind === "build"
+        ? { source, version, kind, message, file: detail }
+        : { source, version, kind, message, stack: detail },
+      "*",
+    );
+  };
   const report = (error: unknown, fallback: unknown) => {
     try {
       const found = error as ErrorLike;
@@ -31,20 +49,50 @@ export function installPreviewBridge(
       const stack = found && found.stack ? String(found.stack).slice(0, maxText) : undefined;
       // A benign browser notice, not an app error; nothing to fix.
       if (/^ResizeObserver loop/.test(message)) return;
-      // One error can arrive twice in the same task (window error and its log).
-      // Only then: the IDE clears the banner on every edit and needs a repeat
-      // after the edit to show the error again.
-      const key = message + "\n" + (stack || "");
-      if (key === lastPosted) return;
-      lastPosted = key;
-      win.setTimeout(() => {
-        lastPosted = "";
-      }, 0);
-      win.parent.postMessage({ source, version, kind: "runtime", message, stack }, "*");
+      post("runtime", message, stack);
     } catch {
       // A hostile error object must not break the app.
     }
   };
+
+  // Vite appends a new overlay to <body> for each compile error. Its shadow
+  // root is open, and it fills it in before appending.
+  const reportOverlay = (node: unknown) => {
+    try {
+      const overlay = node as Element;
+      if (!overlay || overlay.nodeName !== "VITE-ERROR-OVERLAY" || !overlay.shadowRoot) return;
+      const root = overlay.shadowRoot;
+      const text = (selector: string) => {
+        const found = root.querySelector(selector);
+        return found && found.textContent ? found.textContent.trim() : "";
+      };
+      const plugin = text(".plugin");
+      const message = ((plugin ? plugin + " " : "") + text(".message-body")).slice(0, maxText);
+      if (message) post("build", message, text(".file").slice(0, maxText) || undefined);
+    } catch {
+      // Same as above: reporting never gets in the app's way.
+    }
+  };
+  const watchOverlays = () => {
+    try {
+      const body = win.document.body;
+      if (!body) return;
+      reportOverlay(body.querySelector("vite-error-overlay"));
+      new win.MutationObserver((records) => {
+        for (let r = 0; r < records.length; r++) {
+          const added = records[r].addedNodes;
+          for (let i = 0; i < added.length; i++) reportOverlay(added[i]);
+        }
+      }).observe(body, { childList: true });
+    } catch {
+      // No DOM to watch; runtime errors are still reported.
+    }
+  };
+  if (win.document && win.document.readyState === "loading") {
+    win.document.addEventListener("DOMContentLoaded", watchOverlays);
+  } else {
+    watchOverlays();
+  }
   win.addEventListener("error", (event) => report(event.error, event.message || "Script error"));
   win.addEventListener("unhandledrejection", (event) => report(event.reason, event.reason));
 
@@ -101,16 +149,19 @@ export function insertBridge(html: string, bridge: string): string {
 
 export const injectPreviewBridge = (html: string) => insertBridge(html, PREVIEW_BRIDGE_SCRIPT);
 
-const runtimeMessage = z.object({
+const envelope = {
   source: z.literal(PREVIEW_MESSAGE_SOURCE),
   version: z.literal(PREVIEW_PROTOCOL_VERSION),
-  kind: z.literal("runtime"),
   message: z.string(),
-  stack: z.string().optional(),
-});
+};
+// A new kind, not a new shape: older bridges still send runtime messages only.
+const previewMessage = z.discriminatedUnion("kind", [
+  z.object({ ...envelope, kind: z.literal("runtime"), stack: z.string().optional() }),
+  z.object({ ...envelope, kind: z.literal("build"), file: z.string().optional() }),
+]);
 
 /**
- * The runtime error a preview message reports, or null. Only the preview
+ * The error a preview message reports, or null. Only the preview
  * iframe's own window on the preview's origin is trusted; anything else on
  * the page can post messages too.
  */
@@ -125,8 +176,9 @@ export const readPreviewMessage = (
   } catch {
     return null;
   }
-  const parsed = runtimeMessage.safeParse(event.data);
+  const parsed = previewMessage.safeParse(event.data);
   if (!parsed.success) return null;
+  if (parsed.data.kind === "build") return overlayError(parsed.data.message, parsed.data.file);
   return {
     kind: "runtime",
     message: parsed.data.message.slice(0, MAX_ERROR_TEXT) || "Uncaught error",

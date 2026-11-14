@@ -31,11 +31,16 @@ vi.mock("e2b", () => ({
   AuthenticationError: class extends Error {},
   RateLimitError: class extends Error {},
   CommandExitError: class extends Error {
-    constructor(readonly result: { exitCode: number; stderr: string; error: string }) {
+    constructor(
+      readonly result: { exitCode: number; stdout?: string; stderr: string; error: string },
+    ) {
       super(result.error);
     }
     get exitCode() {
       return this.result.exitCode;
+    }
+    get stdout() {
+      return this.result.stdout ?? "";
     }
     get stderr() {
       return this.result.stderr;
@@ -558,5 +563,49 @@ describe("POST /api/sandbox install failure (#491)", () => {
     const failedLine = body.indexOf("failed with exit code 1");
     expect(failedLine).toBeGreaterThan(-1);
     expect(failedLine).toBeLessThan(body.indexOf('"type":"error"'));
+  });
+});
+
+describe("PATCH /api/sandbox/[sandboxId] install failure (#497)", () => {
+  const SECRET = "sk_live_synthetic_0123456789";
+
+  it("answers with the exit code and npm code only, keeps the sandbox and skips the restart", async () => {
+    const run = vi.fn(async (command: string) => {
+      if (command === RESTART_VITE_COMMAND) return { exitCode: 0, stdout: "", stderr: "" };
+      throw new (CommandExitError as unknown as new (result: object) => Error)({
+        exitCode: 1,
+        stdout: `postinstall: API_KEY=${SECRET}\n`,
+        stderr: `npm error code ERESOLVE\nnpm error ${SECRET}\n`,
+        error: "exit status 1",
+      });
+    });
+    mocks.sandboxConnect.mockResolvedValue({
+      sandboxId: "sbx_patch",
+      getInfo: async () => ({ metadata: { userId: "user_1" } }),
+      files: { write: vi.fn() },
+      commands: { run },
+    });
+    const sync = () =>
+      PATCH(
+        request("PATCH", JSON.stringify({ files: [{ path: "package.json", content: "{}" }] })),
+        { params: Promise.resolve({ sandboxId: "sbx_patch" }) },
+      );
+
+    const response = await sync();
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).not.toContain(SECRET);
+    expect(JSON.parse(text)).toEqual({
+      success: true,
+      synced: 1,
+      installFailed: { exitCode: 1, code: "ERESOLVE" },
+    });
+    expect(run).not.toHaveBeenCalledWith(RESTART_VITE_COMMAND, expect.anything());
+
+    // The handle stays cached: the next sync doesn't connect again.
+    await sync();
+    expect(mocks.sandboxConnect).toHaveBeenCalledTimes(1);
+    forgetSandbox("sbx_patch");
   });
 });

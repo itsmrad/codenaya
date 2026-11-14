@@ -175,7 +175,8 @@ export const PreviewView = ({
   const reduceMotion = useReducedMotion();
 
   // The app's own errors (#223): compile errors from the sandbox's dev server,
-  // runtime errors posted by the bridge script injected into the preview.
+  // and runtime errors and Vite overlay errors (#497) posted by the bridge
+  // script injected into the preview.
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [runtimeError, setRuntimeError] = useState<AppError | null>(null);
   useEffect(() => {
