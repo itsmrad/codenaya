@@ -26,7 +26,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
 import { BUILD_FAILED_NOTE, BUILD_REPAIRED_NOTE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
-import { isSafeProjectPath } from "./tools/check-build";
+import { isSafeProjectPath, isViteProject } from "./tools/check-build";
 
 /**
  * The chat run's build repair after its own turns: when the run's changes
@@ -40,7 +40,7 @@ import { isSafeProjectPath } from "./tools/check-build";
 
 /** Repairs after the first check, each followed by a fresh check. */
 export const MAX_SERVER_REPAIRS = 2;
-/** Renewed by each connect; E2B reaps it after this if the kill is lost (a cancelled run). */
+/** Renewed by each connect; E2B reaps it after this if every kill is lost. */
 const REPAIR_SANDBOX_TIMEOUT_MS = 10 * 60_000;
 /**
  * The warm-up install's own budget. Each check installs again, from scratch,
@@ -48,12 +48,32 @@ const REPAIR_SANDBOX_TIMEOUT_MS = 10 * 60_000;
  */
 const INSTALL_TIMEOUT_MS = 240_000;
 const UPLOAD_TIMEOUT_MS = 10_000;
+/** Sandbox metadata, with the run's id, so the run's sandboxes can be found to stop. */
+const REPAIR_PURPOSE = "build-repair";
+
+/**
+ * Stops every repair sandbox `runId` started: a retried provisioning step can
+ * have started more than one. Also run when the run fails or is cancelled
+ * (`stop-repair-sandboxes.ts`), which skips the run's own kill step.
+ */
+export const killRepairSandboxes = async (runId: string) => {
+  const apiKey = process.env.E2B_API_KEY?.trim();
+  if (!apiKey) return;
+  const running = await Sandbox.list({
+    apiKey,
+    query: { metadata: { purpose: REPAIR_PURPOSE, runId }, state: ["running"] },
+  }).nextItems();
+  await Promise.all(running.map(({ sandboxId }) => Sandbox.kill(sandboxId, { apiKey })));
+};
 
 /**
  * The project from Convex, in a new sandbox: returns its id, or null for a
  * project the check does not build. Uploads too, so imports of them resolve.
  */
-const provision = async (apiKey: string, { projectId, internalKey }: Pick<VerifyAndFixOptions, "projectId" | "internalKey">) => {
+const provision = async (
+  apiKey: string,
+  { projectId, internalKey, runId }: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId">,
+) => {
   const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
   const pathOf = buildPathIndex(rows);
   const files: ProjectFile[] = [];
@@ -64,13 +84,12 @@ const provision = async (apiKey: string, { projectId, internalKey }: Pick<Verify
     if (typeof row.content === "string") files.push({ path, content: row.content });
     else if (row.storageUrl) uploads.push({ path, url: row.storageUrl });
   }
-  // checkProjectBuild's test: any other project could never verify, so a repair would only spend.
-  const paths = [...files, ...uploads].map(({ path }) => path);
-  if (!paths.includes("package.json") || !paths.some((path) => /^vite\.config\.[cm]?[jt]s$/.test(path))) return null;
+  // Any other project could never verify, so a repair would only spend.
+  if (!isViteProject([...files, ...uploads].map(({ path }) => path))) return null;
   const sandbox = await createProjectSandbox({
     apiKey,
     timeoutMs: REPAIR_SANDBOX_TIMEOUT_MS,
-    metadata: { projectId, purpose: "build-repair" },
+    metadata: { projectId, runId, purpose: REPAIR_PURPOSE },
   });
   try {
     await writeProjectFiles(sandbox, files);
@@ -185,7 +204,7 @@ export const repairBuild = async ({
   });
 
   await step("kill-repair-sandbox", async () => {
-    await Sandbox.kill(sandboxId, { apiKey }).catch((error) => {
+    await killRepairSandboxes(options.runId).catch((error) => {
       console.error("[build-repair] could not stop the repair sandbox", error);
     });
     return null;

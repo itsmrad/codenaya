@@ -301,6 +301,12 @@ const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: Bui
   }
 };
 
+/** Whether checkBuild builds a project with these paths: only Vite ones. */
+export const isViteProject = (paths: Iterable<string>) => {
+  const all = [...paths];
+  return all.includes("package.json") && all.some((path) => /^vite\.config\.[cm]?[jt]s$/.test(path));
+};
+
 /** A relative path that stays inside the directory it is joined to. */
 export const isSafeProjectPath = (path: string) =>
   !!path && !path.startsWith("/") && !path.includes("\\") &&
@@ -361,9 +367,7 @@ export const checkProjectBuild = async ({
 
   const advisory = projectChecks(files, paths, undefined, { references: false });
   const notes = advisory.length ? redact(`\nAdvisory project checks:\n- ${advisory.map((f) => `[${f.checkId}] ${f.message}`).join("\n- ")}`, secrets) : "";
-  const isVite =
-    paths.has("package.json") && [...paths].some((path) => /^vite\.config\.[cm]?[jt]s$/.test(path));
-  if (!isVite) {
+  if (!isViteProject(paths)) {
     return `${BUILD_NOT_CHECKED}\nStatic checks passed. checkBuild only builds Vite projects, so this one was not built.` + notes;
   }
 
