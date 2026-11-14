@@ -41,8 +41,8 @@ const mutated = (name: string) =>
   mocks.mutation.mock.calls.filter(([ref]) => getFunctionName(ref) === name).map(([, args]) => args);
 
 const step = { run: vi.fn(async (_id: string, fn: () => Promise<unknown>) => fn()) };
-const selfCheck = () => selfCheckWorker({
-  step, ...ids, agentTaskId: "t1" as Id<"agentTasks">, ownedPaths, model: {} as VerifyAndFixOptions["model"],
+const selfCheck = (invokedAt = Date.now()) => selfCheckWorker({
+  step, ...ids, agentTaskId: "t1" as Id<"agentTasks">, ownedPaths, invokedAt, model: {} as VerifyAndFixOptions["model"],
   onEvent: async () => {},
 });
 
@@ -141,6 +141,16 @@ describe("swarm sandboxes", () => {
     }
     expect(e2b.create).not.toHaveBeenCalled();
     expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
+  it("skips with under 4 min of the worker's timeout left, and fits the repairs to what is left", async () => {
+    const minutesAgo = (minutes: number) => Date.now() - minutes * 60_000;
+    expect(await selfCheck(minutesAgo(8.5))).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
+    for (const fn of Object.values(e2b)) expect(fn).not.toHaveBeenCalled();
+    expect(mocks.mutation).not.toHaveBeenCalled();
+    e2b.create.mockResolvedValue(fakeSandbox());
+    await selfCheck(minutesAgo(4.5));
+    expect(mocks.verifyAndFix.mock.calls[0][0]).toMatchObject({ maxAttempts: 1 });
   });
 
   it("skips on an E2B rate limit", async () => {

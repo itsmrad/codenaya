@@ -204,6 +204,8 @@ export const swarmWorker = inngest.createFunction(
     const summary = unfinished ? `Unfinished (step or cost cap): ${reply}` : reply;
     const check = await selfCheckWorker({
       step, internalKey, projectId, messageId: parentMessageId, agentTaskId, ownedPaths: task.ownedPaths,
+      // step.invoke's timeout runs from this event; read only inside a memoized step.
+      invokedAt: event.ts ?? Date.now(),
       model: codingModel, onEvent: (event) => recordSteps("worker-self-check", [selfCheckStep(event, Date.now())]),
     });
     lastHeartbeat.delete(agentTaskId);

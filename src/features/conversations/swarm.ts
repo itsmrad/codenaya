@@ -6,6 +6,8 @@ import { normalizePath } from "./agent-steps";
 export { MAX_SWARM_TASKS };
 export const WORKER_MAX_STEPS = 20;
 export const MAX_WORKER_USD = 0.50;
+/** How long a worker may queue and run before it counts as failed (step.invoke's timeout). */
+export const WORKER_TIMEOUT_MS = 12 * 60_000;
 export const SWARM_SHARED_PATHS = [
   "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
   "index.html", "components.json", "src/main.tsx", "src/App.tsx", "src/index.css", "src/lib/utils.ts",

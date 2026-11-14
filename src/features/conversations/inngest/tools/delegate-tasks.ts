@@ -7,7 +7,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../../agent-models";
-import { type SwarmPlan, swarmPlanSchema, validatePlan } from "../../swarm";
+import { type SwarmPlan, WORKER_TIMEOUT_MS, swarmPlanSchema, validatePlan } from "../../swarm";
 import { cleanupSwarmSandboxes, seedSwarmSnapshot } from "../../swarm-sandbox";
 import { type SwarmWorkerEvent, type SwarmWorkerResult, swarmWorker } from "../swarm-worker";
 import { folderEnsurer, folderPaths, getProjectFiles, indexProjectFiles, lockedPathError, splitPath } from "./paths";
@@ -19,9 +19,6 @@ interface DelegateTasksToolOptions {
   ownerId: string;
   model: AgentModelChoice;
 }
-
-/** How long a worker may queue and run before it counts as failed. */
-const WORKER_TIMEOUT = "12m";
 
 type Task = SwarmPlan["tasks"][number];
 
@@ -113,7 +110,7 @@ export const createDelegateTasksTool = ({ internalKey, projectId, messageId, own
               model,
               planOverview,
             } satisfies SwarmWorkerEvent,
-            timeout: WORKER_TIMEOUT,
+            timeout: WORKER_TIMEOUT_MS,
           }) as Promise<SwarmWorkerResult>,
         ),
       );

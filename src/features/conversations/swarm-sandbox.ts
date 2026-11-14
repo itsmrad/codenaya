@@ -19,7 +19,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { type AgentStep, buildPathIndex } from "./agent-steps";
-import { ownsPath } from "./swarm";
+import { WORKER_TIMEOUT_MS, ownsPath } from "./swarm";
 
 /**
  * Optional per-worker self-check (ADR 0013, S6): a foundation sandbox is
@@ -36,7 +36,9 @@ const SWARM_TEAM_BUDGET = 4;
 const DEFAULT_MAX_WORKER_SANDBOXES = 2;
 const FOUNDATION_TIMEOUT_MS = 5 * 60_000;
 /** E2B kills a worker's sandbox after this even if the stop step is lost or the run cancelled. */
-const WORKER_TIMEOUT_MS = 10 * 60_000;
+const WORKER_SANDBOX_TIMEOUT_MS = 10 * 60_000;
+/** One check plus one repair at worst (the check's 240 s budget and the model's turns). */
+const CHECK_ROUND_MS = 4 * 60_000;
 /** Inside the foundation step's ~240 s, with room for create, write and snapshot. */
 const INSTALL_TIMEOUT_MS = 150_000;
 const CALL_TIMEOUT_MS = 30_000;
@@ -145,18 +147,25 @@ export const cleanupSwarmSandboxes = async ({ messageId, snapshotId }: { message
   }
 };
 
-type StartResult = { sandboxId: string } | { skipped: string } | { off: true };
+type StartResult = { sandboxId: string; maxAttempts: number } | { skipped: string } | { off: true };
 
 /**
  * Claims one of the swarm's self-check slots and starts a sandbox from the
  * foundation snapshot with the project's current files. Run inside a step.
  */
 const startWorkerSandbox = async ({
-  internalKey, projectId, messageId, agentTaskId,
-}: { internalKey: string; projectId: Id<"projects">; messageId: Id<"messages">; agentTaskId: Id<"agentTasks"> },
-): Promise<StartResult> => {
+  internalKey, projectId, messageId, agentTaskId, invokedAt,
+}: {
+  internalKey: string; projectId: Id<"projects">; messageId: Id<"messages">; agentTaskId: Id<"agentTasks">;
+  invokedAt: number;
+}): Promise<StartResult> => {
   const apiKey = e2bKey();
   if (!apiKey) return { off: true };
+  // The worker's writes are already in Convex: never let the check run it past its timeout.
+  const rounds = Math.floor((invokedAt + WORKER_TIMEOUT_MS - Date.now()) / CHECK_ROUND_MS);
+  if (rounds < 1) return { skipped: "time budget" };
+  // shortcut: verifyAndFix always allows one repair, so with 4-8 min left a slow one can still overrun.
+  const maxAttempts = Math.min(SELF_CHECK_ATTEMPTS, Math.max(1, rounds - 1));
   let sandbox: Sandbox | undefined;
   try {
     const budget = await overBudget(apiKey);
@@ -166,11 +175,11 @@ const startWorkerSandbox = async ({
     });
     if (claim.skipped !== undefined) return { skipped: claim.skipped };
     sandbox = await createSwarmSandbox(
-      apiKey, claim.seedSnapshotId, { projectId, messageId, purpose: "swarm-worker" }, WORKER_TIMEOUT_MS,
+      apiKey, claim.seedSnapshotId, { projectId, messageId, purpose: "swarm-worker" }, WORKER_SANDBOX_TIMEOUT_MS,
     );
     // shortcut: files deleted since the snapshot stay in the sandbox; rare within one swarm.
     await writeProjectFiles(sandbox, await projectTextFiles(internalKey, projectId));
-    return { sandboxId: sandbox.sandboxId };
+    return { sandboxId: sandbox.sandboxId, maxAttempts };
   } catch (error) {
     await sandbox?.kill().catch(() => {});
     return { skipped: skipReason(error) };
@@ -224,7 +233,7 @@ type Step = { run: (id: string, fn: () => Promise<unknown>) => Promise<unknown> 
  * budget allows it.
  */
 export const selfCheckWorker = async ({
-  step, internalKey, projectId, messageId, agentTaskId, ownedPaths, model, onEvent,
+  step, internalKey, projectId, messageId, agentTaskId, ownedPaths, invokedAt, model, onEvent,
 }: {
   step: Step;
   internalKey: string;
@@ -232,11 +241,13 @@ export const selfCheckWorker = async ({
   messageId: Id<"messages">;
   agentTaskId: Id<"agentTasks">;
   ownedPaths: string[];
+  /** When step.invoke started the worker's WORKER_TIMEOUT_MS. */
+  invokedAt: number;
   model: VerifyAndFixOptions["model"];
   onEvent: (event: RepairEvent) => Promise<void>;
 }): Promise<SelfCheck | null> => {
   const started = (await step.run("self-check-start", () =>
-    startWorkerSandbox({ internalKey, projectId, messageId, agentTaskId }))) as StartResult;
+    startWorkerSandbox({ internalKey, projectId, messageId, agentTaskId, invokedAt }))) as StartResult;
   if ("off" in started) return null;
   if ("skipped" in started) return { selfCheck: `skipped (${started.skipped})`, filesChanged: [] };
 
@@ -248,7 +259,7 @@ export const selfCheckWorker = async ({
     runId: messageId,
     agentTaskId,
     model,
-    maxAttempts: SELF_CHECK_ATTEMPTS,
+    maxAttempts: started.maxAttempts,
     filterErrors: ownedErrors(ownedPaths),
     allowedPaths: owns,
     onEvent,
