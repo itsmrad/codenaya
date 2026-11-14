@@ -207,7 +207,7 @@ export async function POST(request: Request) {
     if (existing) {
       await convex.mutation(api.system.updateUserConnectionCredential, {
         internalKey, userId, connectionId: existing._id, providerId, authMode: "api_key",
-        maskedPreview: maskCredential(trimmedKey), ...sealed,
+        serverUrl: mcpUrl, scopes: [], maskedPreview: maskCredential(trimmedKey), ...sealed,
       });
     }
     const created = existing

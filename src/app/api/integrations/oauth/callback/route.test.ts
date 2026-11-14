@@ -99,7 +99,9 @@ describe("OAuth reconnect callback", () => {
     expect(mocks.seal.mock.calls[0][1]).toContain("stable-ref");
     const calls = mocks.mutation.mock.calls.map(([ref, args]) => [getFunctionName(ref), args]);
     expect(calls.map(([name]) => name)).toEqual(["system:deleteOauthFlowState", "system:updateUserConnectionCredential"]);
-    expect(calls[1][1]).toMatchObject({ connectionId: "connection", userId: "alice", authMode: "oauth" });
+    expect(calls[1][1]).toMatchObject({
+      connectionId: "connection", userId: "alice", authMode: "oauth", serverUrl: "https://mcp.supabase.com/mcp", scopes: [],
+    });
   });
 
   it("does not exchange tokens when the reconnect target was deleted or changed owner", async () => {

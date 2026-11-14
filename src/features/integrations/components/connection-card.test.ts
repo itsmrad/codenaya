@@ -20,6 +20,7 @@ const connection: ConnectionSummary = {
 it.each(["needs_reauth", "revoked", "error"] as const)("offers reconnect for %s", (status) => {
   const html = renderToStaticMarkup(createElement(ConnectionCard, { connection: { ...connection, status } }));
   expect(html).toContain(">Reconnect</button>");
+  expect(html).toContain('aria-label="Reconnect My connection connection"');
 });
 
 it("shows linked project scope and last-used time on an active connection", () => {

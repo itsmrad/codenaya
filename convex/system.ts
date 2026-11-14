@@ -999,7 +999,6 @@ export const getConnectionForReconnect = query({
       _id: v.id("userConnections"),
       credentialRef: v.string(),
       serverUrl: v.string(),
-      scopes: v.array(v.string()),
     }),
   ),
   handler: async (ctx, args) => {
@@ -1010,7 +1009,6 @@ export const getConnectionForReconnect = query({
           _id: connection._id,
           credentialRef: connection.credentialRef,
           serverUrl: connection.serverUrl,
-          scopes: connection.scopes,
         }
       : null;
   },
@@ -1020,6 +1018,9 @@ export const updateUserConnectionCredential = mutation({
   args: {
     ...reconnectArgs,
     ...sealedFields,
+    // Stored from the same endpoint and grant the new credential came from.
+    serverUrl: v.string(),
+    scopes: v.array(v.string()),
     maskedPreview: v.string(),
     tokenExpiresAt: v.optional(v.number()),
     oauthClientId: v.optional(v.string()),
@@ -1037,6 +1038,8 @@ export const updateUserConnectionCredential = mutation({
       ciphertext: args.ciphertext,
       iv: args.iv,
       authTag: args.authTag,
+      serverUrl: args.serverUrl,
+      scopes: args.scopes,
       maskedPreview: args.maskedPreview,
       tokenExpiresAt: args.tokenExpiresAt,
       oauthClientId: args.oauthClientId,
@@ -1670,10 +1673,14 @@ export const recordMcpToolCall = mutation({
     if (!args.projectConnectionId || (args.status !== "ok" && args.status !== "error")) return;
     const link = await ctx.db.get("projectConnections", args.projectConnectionId);
     if (link?.projectId !== project._id) return;
-    const connection = await projectOwnerConnectionOrNull(ctx, project._id, link.userConnectionId);
+    // shortcut: reads the connection on every ok/error call, so a concurrent write to it
+    // (refresh, reconnect) can OCC-retry this audit mutation; move lastUsedAt to its own
+    // table if swarm-scale tool calls make that contention show up.
+    const connection = await ctx.db.get("userConnections", link.userConnectionId);
+    if (connection?.userId !== project.ownerId) return;
     const now = Date.now();
     // Throttled so a busy run doesn't rewrite the connection on every call.
-    if (connection && now - (connection.lastUsedAt ?? 0) >= LAST_USED_THROTTLE_MS) {
+    if (now - (connection.lastUsedAt ?? 0) >= LAST_USED_THROTTLE_MS) {
       await ctx.db.patch("userConnections", connection._id, { lastUsedAt: now });
     }
   },
