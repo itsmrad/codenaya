@@ -571,7 +571,11 @@ describe("projects.get card status (#318)", () => {
     const bobs = await insertProject(BOB, "bobs");
 
     await t.run(async (ctx) => {
-      const entry = (projectId: Id<"projects">, ownerId: string, status: "published" | "removed") =>
+      const entry = (
+        projectId: Id<"projects">,
+        ownerId: string,
+        status: "published" | "unlisted" | "removed",
+      ) =>
         ctx.db.insert("showcaseProjects", {
           projectId,
           ownerId,
@@ -591,6 +595,8 @@ describe("projects.get card status (#318)", () => {
         });
       await entry(live, ALICE, "published");
       await entry(quiet, ALICE, "removed");
+      // Unlisted entries are off every public page, so not "Published".
+      await entry(broken, ALICE, "unlisted");
       await entry(bobs, BOB, "published");
 
       const started = (projectId: Id<"projects">, userId: string, at: number) =>

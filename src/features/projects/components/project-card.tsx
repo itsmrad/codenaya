@@ -27,7 +27,7 @@ const base =
   "flex items-center gap-1.5 rounded-full border border-border/60 bg-background/85 px-2 py-0.5 text-[11px] font-medium backdrop-blur-sm";
 
 const RUN_BADGES: Record<LastRunStatus, { label: string; dot: string; text?: string }> = {
-  running: { label: "Running", dot: "animate-pulse bg-brand" },
+  running: { label: "Running", dot: "animate-pulse motion-reduce:animate-none bg-brand" },
   failed: { label: "Run failed", dot: "bg-destructive", text: "text-destructive" },
   done: { label: "Done", dot: "bg-emerald-500", text: "text-muted-foreground" },
 };
@@ -43,7 +43,6 @@ const RunBadge = ({ status }: { status: LastRunStatus }) => {
 };
 
 const StatusBadge = ({ project }: { project: Doc<"projects"> }) => {
-
   if (project.importStatus === "importing") {
     return (
       <span className={base}>

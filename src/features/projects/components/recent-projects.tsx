@@ -5,13 +5,14 @@ import { ArrowRightIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { Doc } from "../../../../convex/_generated/dataModel";
+import type { ProjectCardStatus } from "../utils/project-status";
 import { ProjectCard } from "./project-card";
 import { CELL, SORTS } from "./projects-grid";
 
 const RECENT_COUNT = 4;
 
 interface RecentProjectsProps {
-  projects: Doc<"projects">[] | undefined;
+  projects: (Doc<"projects"> & ProjectCardStatus)[] | undefined;
   onViewAll: () => void;
 }
 
