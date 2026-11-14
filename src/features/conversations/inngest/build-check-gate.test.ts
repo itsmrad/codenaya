@@ -170,6 +170,45 @@ describe("createBuildCheckGate", () => {
     expect(gate.repairs).toBe(1);
   });
 
+  it("does not retry an unfinished check once the check budget is spent", () => {
+    const spent = [
+      turn(call("createFiles"), failedCheck()),
+      turn(call("updateFile"), failedCheck()),
+      turn(call("updateFile"), unfinishedCheck()),
+      turn(),
+    ];
+    const gate = createBuildCheckGate();
+    expect(gate.shouldContinue(spent)).toBe(false);
+    expect(gate.takeNudge()).toBeUndefined();
+  });
+
+  it("does not retry an unfinished check once the forced turns are spent", () => {
+    const gate = createBuildCheckGate();
+    // The agent answers every note with text and never checks.
+    const unchecked = [turn(call("createFiles")), turn()];
+    for (let attempt = 1; attempt <= MAX_BUILD_CHECKS; attempt += 1) {
+      expect(gate.shouldContinue(unchecked)).toBe(true);
+      gate.takeNudge();
+    }
+    expect(gate.shouldContinue([turn(call("createFiles")), turn(unfinishedCheck()), turn()])).toBe(false);
+    expect(gate.takeNudge()).toBeUndefined();
+  });
+
+  it("leaves an unfinished check to the retry, not the step-budget reminder", () => {
+    const gate = createBuildCheckGate();
+    const timedOut = [turn(call("createFiles")), turn(unfinishedCheck())];
+    gate.reserve(timedOut);
+    expect(gate.takeNudge()).toBeUndefined();
+
+    expect(gate.shouldContinue([...timedOut, turn()])).toBe(true);
+    expect(gate.takeNudge()).toBe(BUILD_RETRY_NUDGE);
+    // The retry does not use up the reminder: a later write still gets it, once.
+    gate.reserve([...timedOut, turn(call("updateFile"))]);
+    expect(gate.takeNudge()).toBe(BUILD_RESERVE_NUDGE);
+    gate.reserve([...timedOut, turn(call("updateFile")), turn(call("updateFile"))]);
+    expect(gate.takeNudge()).toBeUndefined();
+  });
+
   it("asks once for the check when the step budget runs low", () => {
     const gate = createBuildCheckGate();
     gate.reserve([turn(call("listFiles"))]);
