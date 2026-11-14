@@ -149,6 +149,42 @@ describe("credits.getMine", () => {
   });
 });
 
+describe("credits.getRunCredits", () => {
+  test("sums the run's rows for its owner only", async () => {
+    const t = setup();
+    const messageId = await seedMessage(t);
+    const getRunCredits = (subject: string) =>
+      t.withIdentity({ subject }).query(api.credits.getRunCredits, { messageId });
+
+    expect(await getRunCredits(ALICE)).toBeNull();
+    await record(t, messageId, { inputTokens: 1000, outputTokens: 100, costUsd: 0.04 }); // 6 credits
+    const agentTaskId = await t.run(async (ctx) =>
+      ctx.db.insert("agentTasks", {
+        messageId,
+        projectId: (await ctx.db.get("messages", messageId))!.projectId,
+        taskId: "t1",
+        role: "worker",
+        title: "Worker",
+        brief: "Do it",
+        ownedPaths: [],
+        modelId: "gpt-5.6-luna",
+        model: "GPT-5.6 Luna",
+        status: "running",
+        steps: [],
+        updatedAt: 1,
+      }),
+    );
+    await t.mutation(api.credits.recordRunUsage, {
+      internalKey: INTERNAL_KEY, messageId, agentTaskId, source: "platform",
+      inputTokens: 10, outputTokens: 10, costUsd: 0.02, // 3 credits
+    });
+
+    expect(await getRunCredits(ALICE)).toBe(9);
+    expect(await getRunCredits(BOB)).toBeNull();
+    await expect(t.query(api.credits.getRunCredits, { messageId })).rejects.toThrow();
+  });
+});
+
 describe("model spend limits (ADR 0012)", () => {
   const LIMITED = "gpt-5.6-luna"; // the seeded messages' runModel
   const catalogModel = (id: string, spendLimit?: { perUserUsd?: number; totalUsd?: number; resets: "monthly" }) => ({
