@@ -26,21 +26,26 @@ async function observe(page: Page, user: ConvexHttpClient, options: Options, tra
   if (!conversationId) throw new Error("Created project has no conversation");
   const deadline = Date.now() + 20 * 60_000;
   let idleSince = 0;
-  while (Date.now() < deadline) {
-    user = await userConvexClient(page); // Clerk JWTs expire during long builds.
-    const all = await user.query(api.conversations.getMessages, { conversationId });
-    trail.messages = all.filter((m) => m._creationTime >= trail.startedAt);
-    const assistants = trail.messages.filter((m) => m.role === "assistant");
+  let cancelledAt = 0;
+  const syncUsage = async (assistants: Trail["messages"]) => {
     const ids = new Set(assistants.map((m) => String(m._id)));
     const usage = (await readUsage()).filter((r) => ids.has(r.messageId));
     if (trail.usage.some((r) => !usage.some((next) => next.messageId === r.messageId))) throw new Error("Active run fell outside the 200-row metering window");
     trail.usage = usage;
     await recordUsage(trail.id, trail.usage);
+  };
+  while (Date.now() < deadline) {
+    user = await userConvexClient(page); // Clerk JWTs expire during long builds.
+    const all = await user.query(api.conversations.getMessages, { conversationId });
+    trail.messages = all.filter((m) => m._creationTime >= trail.startedAt);
+    const assistants = trail.messages.filter((m) => m.role === "assistant");
+    await syncUsage(assistants);
     for (const message of assistants) {
       if (message.runModel && (message.runModel.modelId !== options.model || message.runModel.keyId)) throw new Error(`runModel mismatch: requested platform ${options.model}, got ${message.runModel.modelId}`);
     }
-    if (totalUsd(trail.usage) >= options.maxUsd) {
+    if (!trail.capped && totalUsd(trail.usage) >= options.maxUsd) {
       trail.capped = true;
+      cancelledAt = Date.now();
       await post(page, "/api/messages/cancel", { projectId });
     }
     await probePreview(page, trail);
@@ -50,12 +55,14 @@ async function observe(page: Page, user: ConvexHttpClient, options: Options, tra
       idleSince ||= Date.now();
       // 130s covers the 2-minute auto-fix window plus its 3s debounce.
       if (trail.capped || Date.now() - idleSince >= 130_000) {
+        await syncUsage(assistants); // Spend recorded between this poll's read and going idle.
         if (assistants.some((m) => !m.runModel)) throw new Error("Missing runModel on assistant message");
         if (assistants.some((m) => !trail.usage.some((r) => r.messageId === m._id))) throw new Error("Missing creditLedger row for completed run");
         return;
       }
     } else idleSince = 0;
-    if (trail.capped) throw new Error("Cancelled run did not become idle");
+    // A cancelled run still finishes its in-flight model call; let that spend land.
+    if (trail.capped && Date.now() - cancelledAt > 60_000) throw new Error("Cancelled run did not become idle within 60s");
     await page.waitForTimeout(10_000);
   }
   throw new Error("Run timed out after 20 minutes");

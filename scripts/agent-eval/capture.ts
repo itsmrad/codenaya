@@ -8,7 +8,7 @@ export function sanitize(value: unknown): string {
     if (/KEY|TOKEN|SECRET|PASSWORD|KEK/.test(name) && secret && secret.length >= 8) text = text.split(secret).join("[REDACTED]");
   }
   return text.replace(/(?:Bearer\s+)?eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[REDACTED]")
-    .replace(/(https?:[^\s"\\?]+)\?[^\s"\\]+/g, "$1?[REDACTED]");
+    .replace(/((?:https?|wss?):[^\s"\\?]+)\?[^\s"\\]+/g, "$1?[REDACTED]");
 }
 
 export async function capture(page: Page, trail: Trail) {

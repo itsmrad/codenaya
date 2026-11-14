@@ -11,6 +11,7 @@ const verdictSchema = z.object({
 
 /** Judge a full-page app screenshot against the prompt's rubric. */
 export async function judge(run: string, model: string, prompt: string, rubric: string[], screenshotPath: string) {
+  // No temperature: Haiku 5.5 rejects non-default values. A fixed prompt and schema keep verdicts stable.
   const { object, usage } = await generateObject({
     model: createAnthropic()(model),
     schema: verdictSchema,

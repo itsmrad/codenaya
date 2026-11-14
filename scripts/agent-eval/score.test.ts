@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { tokenCost } from "./cost";
 import { score } from "./score";
 import { isRuntimeError, sanitize } from "./capture";
+import { assertDevTarget } from "./guard";
 import type { Trail } from "./types";
 
 const fixture = (): Trail => ({
@@ -55,9 +56,26 @@ describe("agent evaluation", () => {
     expect(() => tokenCost("unknown", 0, 0)).toThrow();
     expect(() => tokenCost("claude-haiku-5-5", -1, 0)).toThrow();
   });
+  it("refuses anything but dev Clerk, the dev Convex deployment and a local app", () => {
+    const dev = { NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_x", CLERK_SECRET_KEY: "sk_test_x", NEXT_PUBLIC_CONVEX_URL: "https://outgoing-buffalo-802.convex.cloud" };
+    expect(() => assertDevTarget(dev, "http://localhost:3213")).not.toThrow();
+    expect(() => assertDevTarget(dev, "http://127.0.0.1:3213")).not.toThrow();
+    for (const [env, url] of [
+      [{ ...dev, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_live_x" }, "http://localhost:3213"],
+      [{ ...dev, CLERK_SECRET_KEY: "sk_live_x" }, "http://localhost:3213"],
+      [{ ...dev, NEXT_PUBLIC_CONVEX_URL: "https://prod-deployment-123.convex.cloud" }, "http://localhost:3213"],
+      [{ ...dev, NEXT_PUBLIC_CONVEX_URL: "https://evil.example/outgoing-buffalo-802" }, "http://localhost:3213"],
+      [{ ...dev, NEXT_PUBLIC_CONVEX_URL: undefined }, "http://localhost:3213"],
+      [dev, "https://codenaya.app"],
+      [dev, "http://localhost.evil.example"],
+    ] as const) expect(() => assertDevTarget(env, url)).toThrow(/Refusing/);
+  });
   it("redacts credentials and signed URLs from persisted diagnostics", () => {
     process.env.EVAL_TEST_SECRET = "secret-for-eval-test";
-    try { expect(sanitize({ error: "secret-for-eval-test https://test.e2b.app/?token=abc" })).not.toContain("secret-for-eval-test"); }
+    try {
+      const text = sanitize({ error: "secret-for-eval-test https://test.e2b.app/?token=abc wss://4000-x.e2b.app/?token=hmr" });
+      for (const leaked of ["secret-for-eval-test", "token=abc", "token=hmr"]) expect(text).not.toContain(leaked);
+    }
     finally { delete process.env.EVAL_TEST_SECRET; }
   });
 });

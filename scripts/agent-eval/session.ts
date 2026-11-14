@@ -1,8 +1,10 @@
 import { chromium } from "@playwright/test";
 import { addTestingToken, ensureTestUser, revokeStaleSessions, signInWithTicket } from "../../e2e/clerk-auth";
 import { userConvexClient } from "../../e2e/convex-client";
+import { assertDevTarget } from "./guard";
 
 export async function session(baseURL: string) {
+  assertDevTarget(process.env, baseURL);
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 900 } });

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { convexDeployment, DEV_DEPLOYMENT } from "./guard";
 import type { Usage } from "./types";
 
 const exec = promisify(execFile);
@@ -17,8 +18,11 @@ export function tokenCost(model: string, input: number, output: number, cacheRea
 
 /** Read-only CLI: never emit its raw output (it includes other users' rows). */
 export async function readUsage(): Promise<Usage[]> {
+  // Name the deployment, so the CLI's own configured target can never be read instead.
+  const deployment = convexDeployment(process.env);
+  if (deployment !== DEV_DEPLOYMENT) throw new Error(`Metering only reads ${DEV_DEPLOYMENT}`);
   try {
-    const { stdout } = await exec(process.execPath, ["node_modules/convex/bin/main.js", "data", "creditLedger", "--limit", "200", "--format", "json"], { timeout: 20_000, maxBuffer: 4_000_000 });
+    const { stdout } = await exec(process.execPath, ["node_modules/convex/bin/main.js", "data", "creditLedger", "--deployment", deployment, "--limit", "200", "--format", "json"], { timeout: 20_000, maxBuffer: 4_000_000 });
     const rows: Usage[] = JSON.parse(stdout);
     if (!Array.isArray(rows)) throw new Error("Not an array");
     return rows;

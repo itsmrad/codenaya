@@ -4,6 +4,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { userConvexClient } from "../../e2e/convex-client";
 import { session } from "./session";
+import { assertDevTarget } from "./guard";
 import { drive, finalFiles } from "./drive";
 import { ledgerEntries, readUsage } from "./cost";
 import { sanitize } from "./capture";
@@ -14,6 +15,7 @@ import type { Score } from "./score";
 async function main() {
   const { values } = parseArgs({ options: { models: { type: "string", default: "claude-haiku-5-5" }, prompts: { type: "string", default: "booking,saas,crm" }, runs: { type: "string", default: "1" }, "max-usd": { type: "string" }, "budget-usd": { type: "string", default: "2" }, "base-url": { type: "string", default: "http://localhost:3213" }, judge: { type: "boolean", default: false }, "judge-model": { type: "string", default: "claude-haiku-5-5" }, keep: { type: "boolean", default: false } } });
   if (process.env.CI) throw new Error("Live agent evaluation never runs in CI");
+  assertDevTarget(process.env, values["base-url"]!);
   for (const name of ["NEXT_PUBLIC_CONVEX_URL", "CODENAYA_CONVEX_INTERNAL_KEY", "CLERK_SECRET_KEY", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "E2B_API_KEY"]) {
     if (!process.env[name]) throw new Error(`Missing ${name}: run with Infisical dev`);
   }
@@ -24,7 +26,8 @@ async function main() {
   const budget = Number(values["budget-usd"]);
   if (!Number.isInteger(count) || count < 1 || !Number.isFinite(budget) || budget <= 0) throw new Error("--runs must be positive integer; --budget-usd positive finite");
   if (names.some((n) => !prompts[n]) || (names.includes("followup") && !names.includes("saas"))) throw new Error("Unknown prompt, or followup without saas");
-  if (models.some((m) => !["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"].includes(m))) throw new Error("No verified metering prices for requested model");
+  if ([...models, values["judge-model"]!].some((m) => !["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"].includes(m))) throw new Error("No verified metering prices for requested model or judge model");
+  if (values.judge && !process.env.ANTHROPIC_API_KEY) throw new Error("Missing ANTHROPIC_API_KEY for --judge: run with Infisical dev");
   if (values["max-usd"] && (!Number.isFinite(Number(values["max-usd"])) || Number(values["max-usd"]) <= 0)) throw new Error("--max-usd must be positive finite");
   await readUsage();
   const directory = `scripts/agent-eval/results/${new Date().toISOString().replace(/[:.]/g, "-")}`;
