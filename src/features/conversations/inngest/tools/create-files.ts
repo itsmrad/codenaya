@@ -5,12 +5,14 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
 
 interface CreateFilesToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  registry?: RegistryCheck;
 }
 
 const paramsSchema = z.object({
@@ -28,11 +30,12 @@ const paramsSchema = z.object({
 export const createCreateFilesTool = ({
   projectId,
   internalKey,
+  registry = createRegistryCheck(),
 }: CreateFilesToolOptions) => {
   return createTool({
     name: "createFiles",
     description:
-      "Create multiple files at once in the same folder. Use this to batch create files that share the same parent folder. More efficient than creating files one by one.",
+      "Legacy: prefer writeFiles, which takes paths. Create multiple files at once in the same folder. Use this to batch create files that share the same parent folder. More efficient than creating files one by one.",
     parameters: z.object({
       parentId: z
         .string()
@@ -59,7 +62,7 @@ export const createCreateFilesTool = ({
         file,
         ...checkPackageVersions(file.name, file.content),
       }));
-      const files = checked.map(({ file, content }) => ({ ...file, content }));
+      const checkedFiles = checked.map(({ file, content }) => ({ ...file, content }));
 
       try {
         return await toolStep?.run("create-files", async () => {
@@ -74,16 +77,20 @@ export const createCreateFilesTool = ({
                 fileId: resolvedParentId,
               });
               if (!parentFolder) {
-                return `Error: Parent folder with ID "${parentId}" not found. Use listFiles to get valid folder IDs.`;
+                return `Error: Parent folder not found. Prefer writeFiles, which takes paths.`;
               }
               if (parentFolder.type !== "folder") {
                 return `Error: "${parentFolder.name}" is a file, not a folder. Use a folder ID as parentId.`;
               }
             } catch {
-              return `Error: Invalid parentId "${parentId}". Use listFiles to get valid folder IDs, or use empty string for root level.`;
+              return `Error: Invalid parentId. Prefer writeFiles, which takes paths.`;
             }
           }
 
+          const rewriteIcons = await getIconRewriter(internalKey, projectId,
+            resolvedParentId ? [] : checkedFiles.map((file) => ({ path: file.name, content: file.content })));
+          const prepared = checkedFiles.map((file) => ({ ...file, ...rewriteIcons(file.content, file.name) }));
+          const files = prepared.map(({ name, content }) => ({ name, content }));
           const results = await convex.mutation(api.system.createFiles, {
             internalKey,
             projectId,
@@ -108,7 +115,9 @@ export const createCreateFilesTool = ({
             checked
               .filter(({ file }) => created.some((r) => r.name === file.name))
               .map(({ note }) => note)
-              .join("")
+              .join("") +
+            await postWriteNote(internalKey, projectId, created.flatMap((r) => r.fileId ? [r.fileId] : []), registry,
+              prepared.filter((f) => created.some((r) => r.name === f.name)).flatMap((f) => f.rewrites))
           );
         });
       } catch (error) {

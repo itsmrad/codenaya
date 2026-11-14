@@ -13,10 +13,10 @@ import { Id } from "../../../../convex/_generated/dataModel";
 
 // ponytail: fixed caps, well inside Convex's 16 MiB args/writes and 4,096
 // queries per mutation (createFiles runs one sibling lookup per file).
-const MAX_BATCH_FILES = 100;
+export const MAX_BATCH_FILES = 100;
 const MAX_BATCH_BYTES = 4 * 1024 * 1024;
 // A Convex document is capped at 1 MiB; a bigger file would fail its batch.
-const MAX_TEXT_FILE_BYTES = 900 * 1024;
+export const MAX_TEXT_FILE_BYTES = 900 * 1024;
 
 interface ImportGithubRepoEvent {
   owner: string;
@@ -107,17 +107,7 @@ export const importGithubRepo = inngest.createFunction(
           const parentId = parentPath ? folderIdMap[parentPath] : undefined;
 
           if (isBinary) {
-            const uploadUrl = await convex.mutation(
-              api.system.generateUploadUrl,
-              { internalKey }
-            );
-
-            const { storageId } = await ky
-              .post(uploadUrl, {
-                headers: { "Content-Type": "application/octet-stream" },
-                body: buffer,
-              })
-              .json<{ storageId: Id<"_storage"> }>();
+            const storageId = await uploadBlob(internalKey, buffer);
 
             await convex.mutation(api.system.createBinaryFile, {
               internalKey,
@@ -165,12 +155,24 @@ export const importGithubRepo = inngest.createFunction(
   }
 );
 
+/** Stores a binary file's bytes in Convex storage. */
+export async function uploadBlob(internalKey: string, body: Buffer<ArrayBuffer>) {
+  const uploadUrl = await convex.mutation(api.system.generateUploadUrl, { internalKey });
+  const { storageId } = await ky
+    .post(uploadUrl, {
+      headers: { "Content-Type": "application/octet-stream" },
+      body,
+    })
+    .json<{ storageId: Id<"_storage"> }>();
+  return storageId;
+}
+
 /** Cuts a folder's files into batches within MAX_BATCH_FILES and MAX_BATCH_BYTES. */
-function chunkFiles<T extends { content: string }>(files: T[]) {
+export function chunkFiles<T extends { content?: string }>(files: T[]) {
   const batches: T[][] = [];
   let bytes = 0;
   for (const file of files) {
-    const size = Buffer.byteLength(file.content);
+    const size = Buffer.byteLength(file.content ?? "");
     const batch = batches.at(-1);
     if (batch && batch.length < MAX_BATCH_FILES && bytes + size <= MAX_BATCH_BYTES) {
       batch.push(file);

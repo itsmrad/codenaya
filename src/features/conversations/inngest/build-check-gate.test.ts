@@ -15,6 +15,19 @@ describe("hasUncheckedWrites", () => {
     expect(hasUncheckedWrites([turn(call("createFiles")), turn()])).toBe(true);
   });
 
+  it("ignores failed single-mutation writes, returned or thrown", () => {
+    const thrown = { tool: { name: "renameFile" }, content: { error: { message: "boom" } } };
+    expect(hasUncheckedWrites([turn(call("editFile", "Error: oldText #1 matched 0 times")), turn()])).toBe(false);
+    expect(hasUncheckedWrites([turn(call("updateFile", "Error: \"src\" is a folder")), turn()])).toBe(false);
+    expect(hasUncheckedWrites([{ toolCalls: [thrown] }, turn()])).toBe(false);
+  });
+
+  it("counts failed multi-mutation writes, which may have written some files first", () => {
+    // writeFiles wrote a.ts, then b.ts threw.
+    expect(hasUncheckedWrites([turn(call("writeFiles", "Error writing files: fetch failed")), turn()])).toBe(true);
+    expect(hasUncheckedWrites([turn(call("deleteFiles", "Error deleting files: fetch failed")), turn()])).toBe(true);
+  });
+
   it("is false once a check passes after the last write", () => {
     expect(hasUncheckedWrites([turn(call("updateFile")), turn(call("checkBuild", "Build verified"))])).toBe(false);
   });

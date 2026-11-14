@@ -15,7 +15,7 @@ test.describe("first build preview", () => {
     "Needs CLERK_SECRET_KEY, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, NEXT_PUBLIC_CONVEX_URL and CODENAYA_CONVEX_INTERNAL_KEY",
   );
 
-  test("shows the build while the agent writes the first files, then boots", async ({ page }, testInfo) => {
+  test("shows the build card until the sandbox runs, then the live preview under a bar", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     const errors = collectConsoleErrors(page);
     let sandboxRequests = 0;
@@ -58,11 +58,11 @@ test.describe("first build preview", () => {
       await page.goto(`/projects/${projectId}?view=preview`);
       const building = page.getByRole("status", { name: "Building your app" });
       await expect(building).toBeVisible({ timeout: 60_000 });
-      await expect(building).toContainText("Preview starts when the first build finishes");
+      await expect(building).toContainText("The preview appears as soon as your app starts");
       await expect(building).toContainText("Creating App.tsx");
       await expect(building.getByRole("list", { name: "Files written so far" })).toContainText("index.html");
 
-      for (const [name, width, height] of [["phone", 375, 812], ["tablet", 768, 1024], ["desktop", 1440, 900]] as const) {
+      for (const [name, width, height] of [["desktop", 1440, 900], ["phone", 375, 812], ["tablet", 768, 1024]] as const) {
         await page.setViewportSize({ width, height });
         await expect(building).toBeVisible();
         await page.screenshot({ path: testInfo.outputPath(`building-${name}.png`) });
@@ -71,21 +71,35 @@ test.describe("first build preview", () => {
       // No package.json, nothing to boot yet.
       expect(sandboxRequests).toBe(0);
 
-      // package.json boots the sandbox under the build card while the run is still writing.
+      // package.json boots the sandbox while the run is still writing. The stub is
+      // running at once, so the card gives way to the app under the bar (#337).
+      // Crossing the 1024px breakpoint remounts the IDE, which then can't tell a
+      // first build once package.json exists. End the card checks in the compact
+      // layout so that remount finishes before writing package.json;
+      // preview-auto-open.spec.ts checks the bar on desktop.
+      await page.setViewportSize({ width: 375, height: 812 });
       await system.mutation(api.system.createFile, {
         internalKey,
         projectId,
         name: "package.json",
         content: "{}\n",
       });
-      await expect(building).toContainText("package.json");
       await expect.poll(() => sandboxRequests, { timeout: 30_000 }).toBeGreaterThan(0);
-      await expect(building).toBeVisible();
+      const iframe = page.locator('iframe[title="Preview"]');
+      const stillBuilding = page.getByRole("status", { name: "Still building" });
+      await expect(iframe).toBeVisible({ timeout: 30_000 });
+      await expect(building).toBeHidden();
+      await expect(stillBuilding).toContainText("Creating App.tsx");
+      for (const [name, width, height] of [["phone", 375, 812], ["tablet", 768, 1024]] as const) {
+        await page.setViewportSize({ width, height });
+        await expect(stillBuilding).toBeVisible();
+        await page.screenshot({ path: testInfo.outputPath(`still-building-${name}.png`) });
+      }
 
       await system.mutation(api.system.updateMessageStatus, { internalKey, messageId, status: "completed" });
-      await expect(page.locator('iframe[title="Preview"]')).toBeVisible({ timeout: 30_000 });
-      await expect(building).toBeHidden();
-      await page.screenshot({ path: testInfo.outputPath("booted-desktop.png") });
+      await expect(stillBuilding).toBeHidden({ timeout: 30_000 });
+      await expect(iframe).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("booted-tablet.png") });
     } finally {
       await system.mutation(api.system.updateMessageStatus, { internalKey, messageId, status: "cancelled" });
     }

@@ -2,10 +2,31 @@ import type { Infer } from "convex/values";
 
 import { recipeIdsIn } from "../sandbox-preview/utils/error-recipes";
 
-import type { messageStepValidator } from "../../../convex/schema";
+import type { messageStepValidator, stuckRunValidator } from "../../../convex/schema";
 
 /** One recorded row of an agent run (see `messageStepValidator`). */
 export type AgentStep = Infer<typeof messageStepValidator>;
+
+/** Why a run was stopped as stuck (#306, see `stuckRunValidator`). */
+export type StuckRun = Infer<typeof stuckRunValidator>;
+
+// Loop thresholds (#306), applied by `inngest/loop-detector.ts`.
+export const MAX_SAME_ERROR = 3;
+export const MAX_SAME_FILE_WRITES = 4;
+export const MAX_SAME_SYNTAX_ERROR = 3;
+
+/** The path of the file a stuck run looped on: recorded by path, or by id before #292. */
+export const stuckFilePath = (
+  { fileId, path }: StuckRun,
+  pathOf?: (fileId: string) => string | undefined,
+) => path ?? (fileId ? pathOf?.(fileId) : undefined);
+
+/** What each loop looks like, for the agent's stop note and the hand-off card. */
+export const STUCK_REASONS: Record<StuckRun["reason"], string> = {
+  "repeated-error": `the same error came back ${MAX_SAME_ERROR} times`,
+  "repeated-write": `the same file was rewritten ${MAX_SAME_FILE_WRITES} times without fixing it`,
+  "repeated-syntax-error": `the same file failed to parse ${MAX_SAME_SYNTAX_ERROR} times`,
+};
 
 /** The slice of an AgentKit tool call this module reads. */
 export interface ToolCallInput {
@@ -37,6 +58,19 @@ export const buildPathIndex = (files: PathIndexFile[]) => {
     return path;
   };
   return (id: string) => pathOf(id);
+};
+
+/**
+ * A project-relative path without a leading "./" or trailing "/", or undefined
+ * when it is absolute or has empty, "." or ".." segments (#292).
+ */
+export const normalizePath = (raw: string) => {
+  const path = raw.trim().replace(/^\.\//, "").replace(/\/$/, "");
+  if (raw.trim().startsWith("/")) return undefined;
+  const segments = path.split("/");
+  return segments.some((segment) => segment === "" || segment === "." || segment === "..")
+    ? undefined
+    : path;
 };
 
 const MAX_TARGETS = 20;
@@ -74,21 +108,35 @@ export const describeToolCall = (
   const { name, input } = call;
   const paths = (ids: string[]) =>
     ids.map(pathOf).filter((path): path is string => Boolean(path));
+  const named = (raw: string[]) =>
+    raw.map(normalizePath).filter((path): path is string => Boolean(path));
 
   let targets: string[];
   switch (name) {
+    case "searchFiles":
+      targets = str(input.pattern) ? [str(input.pattern)] : [];
+      break;
+    // Path inputs since #292; `fileId(s)` in calls recorded before it.
     case "readFiles":
     case "deleteFiles":
-      targets = paths(strings(input.fileIds));
+      targets = Array.isArray(input.paths) ? named(strings(input.paths)) : paths(strings(input.fileIds));
       break;
     case "updateFile":
-      targets = paths([str(input.fileId)]);
+    case "editFile":
+      targets = "path" in input ? named([str(input.path)]) : paths([str(input.fileId)]);
       break;
     case "renameFile": {
-      const from = pathOf(str(input.fileId));
+      const from = "path" in input ? named([str(input.path)])[0] : pathOf(str(input.fileId));
       targets = from ? [from, str(input.newName)] : [];
       break;
     }
+    case "writeFiles":
+      targets = named(
+        (Array.isArray(input.files) ? input.files : []).map((file) =>
+          str((file as Record<string, unknown>)?.path),
+        ),
+      );
+      break;
     case "createFiles": {
       const parent = pathOf(str(input.parentId));
       const files = Array.isArray(input.files) ? input.files : [];
@@ -122,8 +170,10 @@ export const describeToolCall = (
 
 /** Tools whose finished calls change project files ("N files changed"). */
 export const FILE_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "writeFiles",
   "createFiles",
   "updateFile",
+  "editFile",
   "renameFile",
   "deleteFiles",
 ]);
