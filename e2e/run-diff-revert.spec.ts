@@ -109,23 +109,38 @@ test.describe.serial("run diff", () => {
 
     // The summary carries the line counts; the strip opens the diff.
     await expect(page.getByText(/2 files changed \+2 −1/)).toBeVisible();
-    await page.getByRole("button", { name: /Review changes/ }).click();
     const dialog = page.getByRole("dialog", { name: "Changes in this run" });
     const list = dialog.getByRole("list", { name: "Changed files" });
+    const openSeededDiff = async (width = 1280) => {
+      await page.getByRole("button", { name: /Review changes/ }).click();
+      // Below the sm breakpoint (640px) the file list is a select.
+      if (width < 640) {
+        await dialog.getByRole("combobox", { name: "Changed file" }).click();
+        await page.getByRole("option", { name: SEEDED_FILE }).click();
+      } else {
+        await list.getByRole("button", { name: /seeded\.ts/ }).click();
+      }
+      await expect(dialog.locator(".cm-deletedChunk")).toContainText("seeded = 1");
+    };
+    await openSeededDiff();
     await expect(list.getByRole("button")).toHaveText([/added-by-agent\.ts/, /seeded\.ts/]);
-
-    await list.getByRole("button", { name: /seeded\.ts/ }).click();
     await expect(dialog.locator(".cm-content")).toContainText("seeded = 2");
-    await expect(dialog.locator(".cm-deletedChunk")).toContainText("seeded = 1");
 
+    let compact = false;
     for (const theme of ["dark", "light"] as const) {
       await switchTheme(page, theme);
       for (const width of [375, 768, 1440]) {
         await page.setViewportSize({ width, height: 860 });
+        // Crossing the 1024px layout breakpoint remounts the chat, which closes the dialog.
+        if (compact !== width < 1024) {
+          compact = width < 1024;
+          await expect(dialog).toBeHidden();
+          if (compact) await page.getByRole("tab", { name: "Chat" }).click();
+          await openSeededDiff(width);
+        }
         await page.screenshot({ path: `test-results/run-diff-${theme}-${width}.png` });
       }
     }
-    await page.setViewportSize({ width: 1440, height: 860 });
 
     await dialog.getByRole("button", { name: "Revert this file" }).click();
     const confirm = page.getByRole("alertdialog");

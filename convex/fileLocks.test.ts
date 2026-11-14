@@ -87,6 +87,14 @@ describe("agent writes refuse locked paths (#307)", () => {
       .rejects.toEqual(locked("app/header.tsx"));
   });
 
+  test("an uploaded binary can't be created inside a locked folder", async () => {
+    const { t, scope, libId } = await setup();
+    const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["png"])));
+
+    await expect(t.mutation(api.system.createBinaryFile, { ...scope, parentId: libId, name: "logo.png", storageId }))
+      .rejects.toEqual(locked("src/lib/logo.png"));
+  });
+
   test("unlocking lets the agent write again", async () => {
     const { t, alice, scope, headerId } = await setup();
 
@@ -103,6 +111,27 @@ describe("files.setLocked", () => {
     await expect(
       t.withIdentity({ subject: "user_bob" }).mutation(api.files.setLocked, { id: footerId, locked: true }),
     ).rejects.toThrow();
+  });
+
+  test("signed out, nothing can be locked", async () => {
+    const { t, footerId } = await setup();
+    await expect(t.mutation(api.files.setLocked, { id: footerId, locked: true })).rejects.toThrow();
+    expect(await t.run(async (ctx) => (await ctx.db.get(footerId))!.locked ?? false)).toBe(false);
+  });
+
+  test("restore keeps the current lock of files that still exist", async () => {
+    const { t, alice, projectId, headerId, footerId } = await setup();
+    const checkpointId = await t.run(async (ctx) => {
+      const { createCheckpoint } = await import("./checkpoints");
+      return createCheckpoint(ctx, { projectId, label: "before" });
+    });
+    await alice.mutation(api.files.setLocked, { id: headerId, locked: false });
+    await alice.mutation(api.files.setLocked, { id: footerId, locked: true });
+
+    await alice.mutation(api.checkpoints.restore, { checkpointId });
+
+    const lockOf = (id: Id<"files">) => t.run(async (ctx) => (await ctx.db.get(id))!.locked ?? false);
+    expect([await lockOf(headerId), await lockOf(footerId)]).toEqual([false, true]);
   });
 
   test("the lock survives duplicate and checkpoint restore", async () => {

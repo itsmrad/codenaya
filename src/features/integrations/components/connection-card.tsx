@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { Trash2Icon } from "lucide-react";
@@ -23,8 +24,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { ConnectApiKeyForm } from "./connect-api-key-form";
 import { getProvider } from "../catalog";
-import { useDeleteUserConnection } from "../hooks/use-integrations";
+import { useConnectionProjects, useDeleteUserConnection } from "../hooks/use-integrations";
 import { Id } from "../../../../convex/_generated/dataModel";
 
 /**
@@ -83,6 +87,8 @@ interface ConnectionCardProps {
 
 export const ConnectionCard = ({ connection }: ConnectionCardProps) => {
   const deleteConnection = useDeleteUserConnection();
+  const projects = useConnectionProjects(connection._id);
+  const [reconnectOpen, setReconnectOpen] = React.useState(false);
 
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
@@ -161,7 +167,41 @@ export const ConnectionCard = ({ connection }: ConnectionCardProps) => {
             {formatDistanceToNow(connection.createdAt, { addSuffix: true })}
           </span>
         </div>
+        <p className="text-[11px] text-muted-foreground">
+          {connection.lastUsedAt === undefined ? "Not used yet" : `Last used ${formatDistanceToNow(connection.lastUsedAt, { addSuffix: true })}`}
+        </p>
+        <div className="text-[11px] text-muted-foreground space-y-1">
+          <p>Projects{projects?.length === 0 ? ": None. Link from a project's Integrations dialog." : ":"}</p>
+          {projects?.map((project) => (
+            <p key={project.projectId} className="break-words">
+              <Link className="underline" href={`/projects/${project.projectId}`}>{project.name}</Link>
+              {" — "}{project.readOnly ? "Read-only" : "Read-write"}{!project.enabled && " (disabled)"}
+              {Object.entries(project.providerScope).map(([key, value]) => ` · ${key}: ${Array.isArray(value) ? value.join(", ") : value}`).join("")}
+              {project.allowedTools && ` · Tools: ${project.allowedTools.join(", ")}`}
+            </p>
+          ))}
+        </div>
+        {connection.status !== "active" && (
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label={`Reconnect ${connection.label} connection`}
+            onClick={() => setReconnectOpen(true)}
+          >
+            Reconnect
+          </Button>
+        )}
       </div>
+
+      <Dialog open={reconnectOpen} onOpenChange={setReconnectOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reconnect {connection.label}</DialogTitle>
+            <DialogDescription>Your project links and scopes will be kept.</DialogDescription>
+          </DialogHeader>
+          <ConnectApiKeyForm providerId={connection.providerId} connection={connection} onConnected={() => setReconnectOpen(false)} />
+        </DialogContent>
+      </Dialog>
 
       <button
         type="button"

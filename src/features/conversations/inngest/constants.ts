@@ -46,7 +46,7 @@ EXISTING PROJECTS: follow the versions in the project's own package.json. A proj
 COMPONENTS: shadcn/ui (always — pre-configure and include all needed components)
 ICONS: lucide-react v1 (always — never use emoji as icons). It has no brand icons (Github, Twitter, Facebook, Instagram, Linkedin, Youtube): use an inline SVG or a generic icon instead
 FONTS: Geist Sans + Geist Mono (for Next.js via next/font/google) or Inter via @fontsource/inter (for Vite)
-FORM HANDLING: react-hook-form + zod (always for any form)
+FORM HANDLING: react-hook-form + zod (always for any form), validated with zodResolver from "@hookform/resolvers/zod" (in the starter). Never write your own resolver; let useForm infer its types from zodResolver(schema)
 STATE: useState/useContext for local; Zustand for cross-component/global state
 ROUTING (Vite): react-router-dom v7
 ANIMATIONS: Framer Motion for page transitions and complex UI; Tailwind transition utilities for micro-interactions

@@ -15,6 +15,7 @@ import {
   MAX_SUBORCH_USD, MAX_SWARM_AGENTS, MAX_SWARM_DEPTH, MAX_WORKER_USD, SUBORCH_MAX_STEPS, WORKER_MAX_STEPS,
 } from "../swarm";
 import { CODING_AGENT_SYSTEM_PROMPT, STEP_BUDGET_NOTE, SWARM_SUBORCH_NOTE, SWARM_WORKER_NOTE } from "./constants";
+import { decodeJsonArgs, decodeToolCalls } from "./lib/json-args";
 import { guardOwnedPaths } from "./lib/ownership-guard";
 import { hitOutputLimit, markCutOffCalls, refuseCutOffCalls } from "./lib/output-limit";
 import { trimFileHistory } from "./lib/trim-file-history";
@@ -67,7 +68,11 @@ export const swarmWorker = inngest.createFunction(
     concurrency: [{ key: "event.data.ownerId", limit: 2 * MAX_SWARM_AGENTS }],
     // `event` is this run's trigger, `async` the cancel event. A cancel skips
     // onFailure; the board shows the task cancelled from its parent message.
-    cancelOn: [{ event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" }],
+    // `agent-task/cancel`: the orchestrator stops a worker whose step.invoke timed out.
+    cancelOn: [
+      { event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" },
+      { event: "agent-task/cancel", if: "event.data.agentTaskId == async.data.agentTaskId" },
+    ],
     triggers: [{ event: "agent-task/run" }],
     onFailure: async ({ event, step }) => {
       const { agentTaskId } = event.data.event.data as SwarmWorkerEvent;
@@ -143,7 +148,7 @@ export const swarmWorker = inngest.createFunction(
           internalKey, projectId, messageId: parentMessageId, ownerId, model,
           parent: { taskId: task.taskId, ownedPaths: task.ownedPaths, depth }, writtenPaths: childWrites,
         })] : []),
-      ].map(refuseCutOffCalls),
+      ].map(refuseCutOffCalls).map(decodeJsonArgs),
       lifecycle: {
         onStart: async ({ agent, prompt, history }) => {
           await recordSteps("worker-turn-start", []);
@@ -151,6 +156,7 @@ export const swarmWorker = inngest.createFunction(
           return { prompt, history: [...trimFileHistory(history ?? []), ...note], stop: false };
         },
         onResponse: async ({ agent, result }) => {
+          decodeToolCalls(result.output);
           turn += 1;
           const tokens = usageOfResponse(result.raw);
           usage.inputTokens += tokens.inputTokens;

@@ -14,7 +14,8 @@ const write = (id: string, tool: string, targets: string[], status: AgentStep["s
   startedAt: 0,
 });
 
-const render = (steps: AgentStep[]) => renderToStaticMarkup(createElement(PreviewBuilding, { steps }));
+const render = (steps: AgentStep[], fixing?: boolean) =>
+  renderToStaticMarkup(createElement(PreviewBuilding, { steps, fixing }));
 
 // #478: the building screen shows real progress, with a calm animation.
 describe("PreviewBuilding", () => {
@@ -46,5 +47,12 @@ describe("PreviewBuilding", () => {
     expect(html).toContain("animate-build-glow");
     expect(html).toContain("animate-[spin_2.8s_linear_infinite]");
     expect(html.match(/motion-reduce:hidden/g)).toHaveLength(2);
+  });
+
+  it("says it is fixing, not building, while an automatic fix runs (#305)", () => {
+    const html = render([write("a", "editFile", ["src/App.tsx"], "running")], true);
+    expect(html).toContain('aria-label="Fixing an error"');
+    expect(html).toContain("The preview comes back once the fix is in");
+    expect(html).not.toContain("Building your app");
   });
 });

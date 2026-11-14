@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const e2b = vi.hoisted(() => ({ create: vi.fn(), list: vi.fn(), connect: vi.fn() }));
 const mocks = vi.hoisted(() => ({ query: vi.fn(), resolveEnv: vi.fn() }));
@@ -13,7 +13,7 @@ vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal)
   resolveProjectEnv: mocks.resolveEnv,
 }));
 
-import { CommandExitError, type CommandResult, TimeoutError } from "e2b";
+import { CommandExitError, type CommandResult, type Sandbox, TimeoutError } from "e2b";
 import { getFunctionName } from "convex/server";
 
 import { VITE_REACT_STARTER } from "../vite-starter";
@@ -47,7 +47,7 @@ const sandboxWith = (respond: (command: string) => Answer | undefined, processes
         if (result.exitCode !== 0) throw new CommandExitError(result);
         return result;
       }),
-      list: vi.fn<() => Promise<Proc[]>>(async () => processes),
+      list: vi.fn<(opts?: { requestTimeoutMs?: number }) => Promise<Proc[]>>(async () => processes),
     },
     kill: vi.fn(async () => {}),
 });
@@ -140,6 +140,58 @@ describe("checkProjectBuild", () => {
     expect(e2b.create).not.toHaveBeenCalled();
   });
 
+  it("builds in a given sandbox's own directory, without a key, lookup, new sandbox or kill", async () => {
+    const sandbox = sandboxWith(() => undefined);
+    const files = starter();
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandbox: sandbox as unknown as Sandbox,
+    });
+
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    const commands = sandbox.commands.run.mock.calls.map(([command, opts]) => [command, (opts as { cwd?: string })?.cwd]);
+    const dir = commands[0][1]!;
+    expect(dir).toMatch(/^\/home\/user\/check-build-[\w-]+$/);
+    expect(commands.at(-1)).toEqual([`rm -rf ${dir}`, undefined]);
+    expect(sandbox.kill).not.toHaveBeenCalled();
+    expect(e2b.create).not.toHaveBeenCalled();
+    expect(e2b.list).not.toHaveBeenCalled();
+    expect(e2b.connect).not.toHaveBeenCalled();
+  });
+
+  it("first copies sourceDir into the check directory, without node_modules, .env files or the top-level dist", async () => {
+    const sandbox = sandboxWith(() => undefined);
+    const files = starter();
+    await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandbox: sandbox as unknown as Sandbox,
+      sourceDir: "/home/user/app",
+    });
+
+    const [copy, install] = sandbox.commands.run.mock.calls.map(([command]) => command);
+    const dir = (sandbox.commands.run.mock.calls[1][1] as { cwd: string }).cwd;
+    expect(copy).toBe(
+      `mkdir -p ${dir} && tar -C '/home/user/app' --exclude=node_modules --exclude=.git --exclude=./dist ` +
+        `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
+    );
+    expect(install).toMatch(/^npm install/);
+  });
+
+  it("refuses snapshot paths that would leave a given sandbox's check directory", async () => {
+    const sandbox = sandboxWith(() => undefined);
+    const files = [...starter(), { path: "../outside.ts", content: "" }];
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandbox: sandbox as unknown as Sandbox,
+    });
+
+    expect(result).toBe("Error: Static checks failed: Invalid project file path.");
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
+  });
+
   it("falls back to the static checks when the sandbox cannot start", async () => {
     e2b.create.mockRejectedValue(new Error("503 Service Unavailable"));
     const result = await check();
@@ -186,6 +238,19 @@ describe("checkProjectBuild", () => {
     const result = await check();
     expect(result).toMatch(/^Error: npm install failed/);
     expect(result).toContain("left-pad-x");
+  });
+
+  it.each([
+    "npm error code E503\nnpm error 503 Service Unavailable - GET https://registry.npmjs.org/react",
+    "npm error code ETIMEDOUT\nnpm error network request to https://registry.npmjs.org/react failed",
+    "npm error code ECONNRESET",
+    "npm error code EAI_AGAIN",
+    "npm error code ENOTFOUND",
+    "npm error socket hang up",
+  ])("reports an install the registry or network failed as unfinished, not a code error: %s", async (stderr) => {
+    fakeSandbox({ exitCode: 1, stderr });
+    const result = await check();
+    expect(result).toMatch(/^Error: The build check could not finish \(npm could not reach the package registry\)/);
   });
 
   it("adds the known cause and fix for a matched error, even past the trimmed lines", async () => {
@@ -284,6 +349,9 @@ const DEV_SERVER: Proc = { cmd: "/bin/bash", args: ["-l", "-c", "npm run dev -- 
 const installing = (command: string): Proc => ({ cmd: "/bin/bash", args: ["-l", "-c", command] });
 
 describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   const warmCheck = (files = starter(), secrets?: string[]) => {
     return checkProjectBuild({
       files,
@@ -427,13 +495,87 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     "pnpm add zod",
     "yarn install",
     "bun i",
-  ])("uses a new sandbox while the preview runs `%s`, and leaves the preview alone", async (command) => {
+  ])("uses a new sandbox when the preview still runs `%s` after the wait, and leaves the preview alone", async (command) => {
+    vi.useFakeTimers();
     listed({});
     const warm = warmSandbox(undefined, [DEV_SERVER, installing(command)]);
     fakeSandbox();
 
-    expectCold(await warmCheck(), warm);
+    const result = warmCheck();
+    await vi.runAllTimersAsync();
+
+    expectCold(await result, warm);
     expect(commandsOf(warm).filter((run) => !run.startsWith("rm -rf"))).toEqual([]);
+    // Polled every 2.5 s, the last one before 60 s.
+    expect(warm.commands.list).toHaveBeenCalledTimes(24);
+  });
+
+  it("waits for the preview's install to finish, then builds warm without a new sandbox", async () => {
+    vi.useFakeTimers();
+    listed({});
+    const warm = warmSandbox();
+    const npmInstall = [DEV_SERVER, installing("npm install --prefer-offline --no-audit --no-fund")];
+    warm.commands.list.mockResolvedValueOnce(npmInstall).mockResolvedValueOnce(npmInstall).mockResolvedValueOnce(npmInstall);
+    fakeSandbox();
+
+    const result = warmCheck();
+    await vi.runAllTimersAsync();
+
+    expect((await result).split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(commandsOf(warm).some((run) => run.startsWith("npx tsc"))).toBe(true);
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("never waits past 60 s for an install, even when the process list answers slowly", async () => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    listed({});
+    const warm = warmSandbox();
+    // Each poll answers after 9 s, or times out first like the e2b client.
+    warm.commands.list.mockImplementation(
+      (opts) =>
+        new Promise((resolve, reject) => {
+          const timeoutMs = opts?.requestTimeoutMs ?? Infinity;
+          if (timeoutMs < 9_000) setTimeout(() => reject(new TimeoutError("Request timed out")), timeoutMs);
+          else setTimeout(() => resolve([DEV_SERVER, installing("npm install")]), 9_000);
+        }),
+    );
+    const cold = fakeSandbox();
+    let coldAt = 0;
+    e2b.create.mockImplementation(async () => {
+      coldAt = Date.now();
+      return cold;
+    });
+
+    const result = warmCheck();
+    await vi.runAllTimersAsync();
+
+    expectCold(await result, warm);
+    expect(coldAt - start).toBeLessThanOrEqual(60_000);
+    expect(commandsOf(warm).some((run) => run.startsWith("mkdir"))).toBe(false);
+  });
+
+  it("stops waiting for an install at the step deadline", async () => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    e2b.list.mockReturnValue({
+      nextItems: async () => {
+        vi.setSystemTime(start + 200_000);
+        return [{ sandboxId: "sbx_warm_0", metadata: { userId: "user_1", projectId: "proj_1" }, endAt: new Date(start + 3_600_000) }];
+      },
+    });
+    const warm = warmSandbox(undefined, [DEV_SERVER, installing("npm install")]);
+    fakeSandbox();
+
+    const result = warmCheck();
+    await vi.runAllTimersAsync();
+
+    // Too little left for a cold build after the wait, so none starts.
+    expect(await result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expect(warm.commands.list.mock.calls.length).toBeGreaterThan(1);
+    expect(Date.now()).toBeLessThanOrEqual(start + 240_000);
+    expect(commandsOf(warm).some((run) => run.startsWith("mkdir"))).toBe(false);
+    expect(e2b.create).not.toHaveBeenCalled();
   });
 
   it("uses a new sandbox when an install starts between discovery and the copy", async () => {

@@ -29,7 +29,7 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
-import { useProjectCommands } from "@/lib/command-palette";
+import { useCommandPalette, useProjectCommands } from "@/lib/command-palette";
 import {
   Tooltip,
   TooltipContent,
@@ -201,7 +201,10 @@ export const ConversationSidebar = ({
 
   const handleOpenFile = (path: string) => {
     const fileId = idOfPath.get(path);
-    if (fileId) openFile(fileId, { pinned: true });
+    if (!fileId) return;
+    openFile(fileId, { pinned: true });
+    // The workspace may be on Preview (a run switches to it) or, below desktop, on Chat.
+    useCommandPalette.getState().commands["show-code"]?.();
   };
 
   // Check if any message is currently processing. A stalled run doesn't

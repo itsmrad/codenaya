@@ -147,7 +147,8 @@ const SECTIONS: { id: string; title: string; content: ReactNode }[] = [
         <p>
           Integrations give the agent access to services such as Supabase, Neon, Stripe, GitHub,
           Sentry, Cloudflare and Linear. Connect them from <strong>Integrations</strong> in the
-          project bar or in Settings, and choose which projects can use each connection.
+          project bar or in Settings. To choose which projects can use a connection,
+          open each project’s <strong>Integrations</strong> dialog and link it there.
         </p>
         <p>
           Before the agent runs an action that changes or deletes data in a connected service, it

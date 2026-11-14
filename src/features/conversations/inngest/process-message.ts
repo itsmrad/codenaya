@@ -29,7 +29,15 @@ import { createSetEnvVarTool } from './tools/set-env-var';
 import { createLoadSkillTool } from './tools/load-skill';
 import { createScaffoldViteAppTool } from './tools/scaffold-vite-app';
 import { createCheckBuildTool } from './tools/check-build';
-import { createBuildCheckGate, wroteFiles } from './build-check-gate';
+import {
+  BUILD_CHECK_RESERVE_STEPS,
+  BUILD_REPAIR_NUDGE,
+  createBuildCheckGate,
+  needsBuildRepair,
+  unverifiedBuildNote,
+  wroteFiles,
+} from './build-check-gate';
+import { repairBuild, repairOutcome } from './build-repair';
 import { STUCK_FALLBACK_REPLY, createLoopGuard, stuckNote } from './loop-detector';
 import type { AgentModelChoice } from '../agent-models';
 import {
@@ -84,13 +92,13 @@ import {
   markCutOffCalls,
   refuseCutOffCalls,
 } from './lib/output-limit';
+import { decodeJsonArgs, decodeToolCalls } from './lib/json-args';
 import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
   type MessageMode,
   PLAN_MODE,
   PLAN_MODE_PROMPT,
   PLAN_MODE_TOOLS,
-  SWARM_MODE,
 } from '../plan-mode';
 import { swarmRun } from './lib/swarm-run';
 
@@ -549,11 +557,7 @@ export const processMessage = inngest.createFunction(
     // base, project instructions, skill index and integrations, then the project tree, forced
     // skills and plan mode.
     // Conversation goes in messages (see onStart).
-    // Read at run start: SWARM_PLATFORM_MAX_DEPTH is a Convex env var (ADR 0013).
-    const platformMaxDepth = mode === SWARM_MODE
-      ? (await step.run("swarm-settings", () => convex.query(api.swarm.getSwarmSettings, {}))).platformMaxDepth
-      : undefined;
-    const swarm = swarmRun({ ...(event.data as MessageEvent), internalKey, platformMaxDepth });
+    const swarm = await swarmRun({ ...(event.data as MessageEvent), internalKey, step });
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
       buildProjectInstructionsSection(projectInstructions),
@@ -660,7 +664,7 @@ export const processMessage = inngest.createFunction(
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
       ...swarm.tools,
-    ].map(refuseCutOffCalls);
+    ].map(refuseCutOffCalls).map(decodeJsonArgs);
 
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
@@ -708,6 +712,16 @@ export const processMessage = inngest.createFunction(
             agent.name === SUMMARY_AGENT_NAME
               ? summaryNote
               : takeCutOffNote() ?? buildCheckGate.takeNudge() ?? loopGuard.takeHint();
+          if (nudge === BUILD_REPAIR_NUDGE) {
+            const attempt = buildCheckGate.repairs;
+            await recordSteps("record-build-repair", () => [{
+              id: `build-repair-${attempt}`,
+              kind: "thinking" as const,
+              text: `The build check failed, so the agent is fixing it (attempt ${attempt}).`,
+              status: "done" as const,
+              startedAt: Date.now(),
+            }], false);
+          }
           // AgentKit sends prompt ([system, request]) before history (this
           // run's turns), so earlier conversation turns go between the two.
           // Relies on network calls using maxIter: 0; direct agent.run with maxIter > 1 would prepend history each pass.
@@ -722,6 +736,7 @@ export const processMessage = inngest.createFunction(
           };
         },
         onResponse: async ({ agent, result, network }) => {
+          decodeToolCalls(result.output);
           await recordUsage(result.raw, runModel.metering.coding);
           // The last step must not write without a build check left to run;
           // this holds when a provider ignores tool_choice "none".
@@ -867,7 +882,10 @@ export const processMessage = inngest.createFunction(
             ? codingAgent
             : undefined;
         }
-        return lastStep || loopGuard.check(results) ? summaryAgent : codingAgent;
+        if (lastStep || loopGuard.check(results)) return summaryAgent;
+        // Keep the last turns for checking and fixing the build, not more writes.
+        if (callCount >= MAX_AGENT_STEPS - 1 - BUILD_CHECK_RESERVE_STEPS) buildCheckGate.reserve(results);
+        return codingAgent;
       }
     });
 
@@ -926,24 +944,49 @@ export const processMessage = inngest.createFunction(
           : textMessage.content.map((c) => c.text).join("");
     }
 
+    // Changes that ended on a failed or missing check get a repair here, before
+    // the run completes, so it needs no open tab. Its model calls are metered
+    // like the run's; cancelling the run stops it between steps.
+    const repair = !stuck && needsBuildRepair(result.state.results)
+      ? await repairBuild({
+          projectId,
+          internalKey,
+          runId,
+          model: codingModel,
+          step: (id, fn) => step.run(id, fn),
+          onResponse: (raw) => recordUsage(raw, runModel.metering.coding),
+          recordSteps: async (build) => {
+            await recordSteps("record-repair-steps", build, false);
+          },
+        })
+      : null;
+
     await settleRun("record-usage-final");
+
+    // Changes that did not end on a verified build are not a working build.
+    const noteBefore = unverifiedBuildNote(result.state.results);
+    const { verified, note: buildNote } = repair
+      ? repairOutcome(repair, noteBefore)
+      : { verified: !noteBefore, note: noteBefore };
+
+    // The first run that wrote files and verified its build ends a seeded
+    // project's first build (#338). Before the message completes, so the
+    // client sees the flag cleared by the time the run is no longer active.
+    if (verified && wroteFiles(result.state.results)) {
+      await step.run("complete-first-build", async () => {
+        await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
+      });
+    }
 
     // Update the assistant message with the response (this also sets status to completed)
     await step.run("update-assistant-message", async () => {
       await convex.mutation(api.system.updateMessageContent, {
         internalKey,
         messageId,
-        content: assistantResponse,
-        ...(stuck ? { stuck } : {}),
+        content: buildNote && !stuck ? `${assistantResponse}\n\n${buildNote}` : assistantResponse,
+        ...(stuck ? { stuck } : verified ? {} : { outcome: "error" as const }),
       })
     });
-
-    // The first run that wrote files ends a seeded project's first build (#338).
-    if (wroteFiles(result.state.results)) {
-      await step.run("complete-first-build", async () => {
-        await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
-      });
-    }
 
     return { success: true, messageId, conversationId };
   }

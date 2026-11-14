@@ -13,7 +13,8 @@
 		"test:watch": "vitest",
 		"test:e2e": "playwright test",
 		"e2b:template": "node e2b/build-template.mts",
-		"postinstall": "patch-package"
+		"postinstall": "patch-package",
+		"eval:agent": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/agent-eval/register.mjs scripts/agent-eval/run.ts"
 	},
 	"overrides": {
 		"postcss": ">=8.5.23 <9",
@@ -120,6 +121,7 @@
 		"react": "19.2.3",
 		"react-dom": "19.2.3",
 		"react-icons": "^5.5.0",
+		"semver": "^6.3.1",
 		"sonner": "^2.0.7",
 		"streamdown": "2.4.0",
 		"svix": "^2.7.0",
@@ -139,6 +141,7 @@
 		"@types/node": "^20",
 		"@types/react": "^19",
 		"@types/react-dom": "^19",
+		"@types/semver": "^6.2.7",
 		"convex-test": "^0.0.54",
 		"eslint": "^9",
 		"eslint-config-next": "16.2.2",

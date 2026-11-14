@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-type Row = { _id: string; name: string; type: "file" | "folder"; parentId?: string; content?: string };
+type Row = { _id: string; name: string; type: "file" | "folder"; parentId?: string; content?: string; locked?: boolean };
 
 const db = vi.hoisted(() => ({ rows: [] as Row[] }));
 
@@ -122,6 +122,26 @@ describe("scaffoldViteApp tool", () => {
     }
   });
 
+  it("ships the form stack and pre-bundles only its own libraries", () => {
+    const read = (path: string) => VITE_REACT_STARTER.find((file) => file.path === path)!.content;
+    const { dependencies } = JSON.parse(read("package.json"));
+
+    // The agent hand-wrote a zod resolver when @hookform/resolvers was missing.
+    expect(dependencies).toMatchObject({
+      "react-hook-form": KNOWN_GOOD_VERSIONS["react-hook-form"],
+      "@hookform/resolvers": KNOWN_GOOD_VERSIONS["@hookform/resolvers"],
+      zod: KNOWN_GOOD_VERSIONS.zod,
+    });
+    const include = read("vite.config.ts").match(/include: \[([^\]]*)\]/)![1];
+    const packages = [...include.matchAll(/"([^"]+)"/g)].map(([, id]) => id);
+    expect(packages).toContain("@hookform/resolvers/zod");
+    // An id that isn't installed only makes Vite warn, so every one must be a dependency.
+    for (const id of packages) {
+      const name = id.startsWith("@") ? id.split("/").slice(0, 2).join("/") : id.split("/")[0];
+      expect(dependencies, id).toHaveProperty([name]);
+    }
+  });
+
   it("mounts an error boundary and a router around App (#335)", () => {
     const tool = createScaffoldViteAppTool({ projectId: "p" as never, internalKey: "k" });
     const read = (path: string) => VITE_REACT_STARTER.find((file) => file.path === path)!.content;
@@ -145,5 +165,24 @@ describe("scaffoldViteApp tool", () => {
     expect(boundary).toContain("return { hasError: true, error };");
     expect(boundary).toContain("if (!hasError) return this.props.children;");
     expect(tool.description).toContain("Don't add another <BrowserRouter>.");
+  });
+});
+
+describe("scaffoldViteApp and locks (#307)", () => {
+  it("names locked files as locked, not kept, and makes no folder inside a locked one", async () => {
+    db.rows = [
+      { _id: "src", name: "src", type: "folder", locked: true },
+      { _id: "pkg", name: "package.json", type: "file", content: "{}", locked: true },
+    ];
+
+    const result = await scaffold();
+
+    const written = paths().map((file) => file.path);
+    expect(written.filter((path) => path.startsWith("src/"))).toEqual([]);
+    expect(db.rows.filter((row) => row.type === "folder").map((row) => row.name)).toEqual(["src"]);
+    expect(db.rows.find((row) => row._id === "pkg")?.content).toBe("{}");
+    expect(result).not.toContain("Kept existing");
+    expect(result).toMatch(/Not written, locked by the user: .*package\.json.*src\/main\.tsx/);
+    expect(written).toContain("vite.config.ts");
   });
 });

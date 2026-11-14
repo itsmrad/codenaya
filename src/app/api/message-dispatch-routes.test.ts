@@ -34,6 +34,7 @@ import {
   resetRateLimits,
 } from "@/lib/rate-limit";
 import { PROMO_ENDS_AT } from "@/features/promotions/github-promo";
+import { SWARM_OFF_ERROR } from "@/features/conversations/server/swarm-off";
 
 const post = (body: unknown) =>
   new Request("http://localhost/api", {
@@ -100,12 +101,29 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody, rate
   });
 
   it("runs a swarm reply in swarm mode, and refuses an unknown mode", async () => {
+    // The kill switch's read comes first; it is on.
+    mocks.query.mockReset()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce({ _id: "c1", projectId: "p1" })
+      .mockResolvedValueOnce([]);
     expect((await call(undefined, undefined, "swarm")).status).toBe(200);
+    expect(getFunctionName(mocks.query.mock.calls[0][0])).toBe("swarm:isEnabled");
     expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ role: "assistant", mode: "swarm" }));
     expect(mocks.inngestSend.mock.calls[0][0].data).toMatchObject({ mode: "swarm" });
 
     expect((await call(undefined, undefined, "hive")).status).toBe(400);
     expect(mocks.inngestSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a swarm send with a clear error while the kill switch is off, creating nothing", async () => {
+    mocks.query.mockReset().mockResolvedValueOnce(false);
+
+    const res = await call(undefined, undefined, "swarm");
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: SWARM_OFF_ERROR, code: "swarm_disabled" });
+    expect(mocks.mutation).not.toHaveBeenCalled();
+    expect(mocks.inngestSend).not.toHaveBeenCalled();
   });
 
   it("answers 503 ai_not_configured without the platform key, creating nothing", async () => {

@@ -94,10 +94,10 @@ describe("agentTasks", () => {
     const parent = await seedMessage(t);
     const sub = { ...task("big"), role: "sub-orchestrator" as const };
     await expect(create(t, parent, [sub])).rejects.toMatchObject({ data: { code: "INVALID_ARGUMENT" } });
-    await expect(t.query(api.swarm.getSwarmSettings, {})).resolves.toEqual({ platformMaxDepth: 1 });
+    await expect(t.query(api.swarm.getSwarmSettings, {})).resolves.toEqual({ enabled: true, platformMaxDepth: 1 });
     const [byok] = await t.mutation(api.agentTasks.createTasks, { internalKey: INTERNAL_KEY, ...parent, tasks: [sub], byok: true });
     vi.stubEnv("SWARM_PLATFORM_MAX_DEPTH", "2");
-    await expect(t.query(api.swarm.getSwarmSettings, {})).resolves.toEqual({ platformMaxDepth: 2 });
+    await expect(t.query(api.swarm.getSwarmSettings, {})).resolves.toEqual({ enabled: true, platformMaxDepth: 2 });
     const [platform] = await create(t, parent, [{ ...sub, taskId: "big-2" }]);
     expect((await get(t, parent.messageId)).map(({ _id, platform: p, ownerId }) => ({ _id, p, ownerId }))).toEqual([
       { _id: byok, p: false, ownerId: ALICE }, { _id: platform, p: true, ownerId: ALICE },
