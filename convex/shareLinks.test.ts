@@ -206,4 +206,57 @@ describe("share links (#260)", () => {
     expect(copied.names.sort()).toEqual([".env.example", "config", "dir", "index.ts", "logo.png", "nested", "src"]);
     expect(copied.contents.join()).not.toMatch(/SECRET_IN_(\.env(\.local)?|prod\.env)=/);
   });
+
+  test("keys and credential files are hidden from the share and not copied by Remix or a showcase import", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    const secrets = ["server.pem", "id_rsa.pub", ".npmrc", "gcp-service-account.json"];
+    const { secretIds, showcaseId } = await t.run(async (ctx) => {
+      const now = Date.now();
+      const keys = await ctx.db.insert("files", { projectId, name: "keys", type: "folder", updatedAt: now });
+      const secretIds: Id<"files">[] = [];
+      for (const name of secrets) {
+        const id = await ctx.db.insert("files", { projectId, parentId: keys, name, type: "file", updatedAt: now });
+        await ctx.db.insert("fileContents", { fileId: id, projectId, content: "SECRET" });
+        secretIds.push(id);
+      }
+      const showcaseId = await ctx.db.insert("showcaseProjects", {
+        projectId,
+        ownerId: ALICE,
+        ownerName: "Alice",
+        title: "Todo",
+        description: "",
+        techStack: [],
+        designStyle: [],
+        category: "tool",
+        upvotes: 0,
+        downvotes: 0,
+        viewCount: 0,
+        importCount: 0,
+        status: "published",
+        publishedAt: now,
+        updatedAt: now,
+      });
+      return { secretIds, showcaseId };
+    });
+    const token = await alice(t).action(api.projects.createShareLink, { projectId });
+
+    const names = (await t.query(api.projects.getShared, { token }))!.files.map((f) => f.name);
+    expect(names).toContain("keys");
+    for (const name of secrets) expect(names).not.toContain(name);
+    for (const fileId of secretIds) {
+      expect(await t.query(api.projects.getSharedFile, { token, fileId })).toBeNull();
+    }
+
+    const remixed = await bob(t).mutation(api.projects.remixShared, { token });
+    const imported = await bob(t).mutation(api.showcase.importToWorkspace, { showcaseProjectId: showcaseId });
+    for (const newId of [remixed, imported]) {
+      const copied = await t.run(async (ctx) =>
+        (await ctx.db.query("files").withIndex("by_project", (q) => q.eq("projectId", newId)).collect()).map(
+          (f) => f.name,
+        ),
+      );
+      expect(copied.sort()).toEqual(["index.ts", "keys", "logo.png", "src"]);
+    }
+  });
 });

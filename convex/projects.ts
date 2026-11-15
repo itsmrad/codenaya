@@ -17,7 +17,7 @@ import { deleteProjectBatch } from "./projectCascade";
 import { copyProjectFiles, remixProject } from "./projectCopy";
 import { getProjectFile, MAX_PROJECT_FILES } from "./files";
 import { readFileContent } from "./fileContents";
-import { isSecretEnvFile } from "./envFiles";
+import { isSecretFile } from "./secretFiles";
 import { userSkillKey } from "../src/features/skills/types";
 import { MAX_PROJECT_SKILLS } from "../src/features/skills/limits";
 import {
@@ -261,7 +261,8 @@ export const duplicate = mutation({
       props: { source: "duplicate" },
     });
 
-    await copyProjectFiles(ctx, source._id, newProjectId);
+    // The owner's own copy: secret files stay, like their other files.
+    await copyProjectFiles(ctx, source._id, newProjectId, { keepSecretFiles: true });
 
     // Project skills get new ids, so their settings keys are remapped.
     const skillKeyMap = new Map<string, string>();
@@ -366,8 +367,8 @@ export const setShareToken = internalMutation({
   },
 });
 
-/** Dotenv files (#260 review): left out of a share's tree, file reads and Remix, as if they didn't exist. */
-const hiddenFromShare = (file: Doc<"files">) => file.type === "file" && isSecretEnvFile(file.name);
+/** Secret files (#260 review): left out of a share's tree and file reads, as if they didn't exist. */
+const hiddenFromShare = (file: Doc<"files">) => file.type === "file" && isSecretFile(file.name);
 
 /** Turns the share link off: the old URL stops working, and a new link gets a new token. */
 export const revokeShareLink = mutation({
@@ -384,7 +385,7 @@ export const revokeShareLink = mutation({
 /**
  * Public: what a share link shows signed out (#260), or null for an unknown or
  * revoked token. Only the name, the owner's display name and the file tree:
- * never env vars, dotenv files, chat, integrations, settings or storage ids. The `returns`
+ * never env vars, secret files (keys, dotenv, credentials), chat, integrations, settings or storage ids. The `returns`
  * validator rejects any other field.
  */
 export const getShared = query({
@@ -452,13 +453,7 @@ export const remixShared = mutation({
     const identity = await verifyAuth(ctx);
     const project = await getSharedProject(ctx, args.token);
     if (!project) throw appError("NOT_FOUND", "Project not found");
-    return await remixProject(
-      ctx,
-      project._id,
-      identity.subject,
-      `${project.name} (imported)`,
-      hiddenFromShare,
-    );
+    return await remixProject(ctx, project._id, identity.subject, `${project.name} (imported)`);
   },
 });
 

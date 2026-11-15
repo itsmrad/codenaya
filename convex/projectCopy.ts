@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Id } from "./_generated/dataModel";
 import {
   internalAction,
   internalMutation,
@@ -11,6 +11,7 @@ import {
 import { appError } from "./errors";
 import { insertFileContent, withContents } from "./fileContents";
 import { releaseStorageIfUnreferenced } from "./projectCascade";
+import { isSecretFile } from "./secretFiles";
 import { countProjectBuilt } from "./stats";
 import { recordProjectEvent } from "./activationEvents";
 
@@ -23,8 +24,9 @@ import { recordProjectEvent } from "./activationEvents";
 export const MAX_COPY_FILES = 5000;
 
 /**
- * Inserts a copy of every file and folder of `sourceId` into `targetId`
- * (except those `exclude` matches), keeping the tree shape. Binary files share the source's storage blob until
+ * Inserts a copy of every file and folder of `sourceId` into `targetId`,
+ * keeping the tree shape. Secret files (`isSecretFile`) are skipped unless
+ * `keepSecretFiles`: only the owner's own duplicate keeps them. Binary files share the source's storage blob until
  * `copyBlobs` gives each copy its own. Blob deletes are reference-checked
  * (`releaseStorageIfUnreferenced`), so deleting either side meanwhile, or a
  * `copyBlobs` run that never finishes, can't remove a blob the other uses.
@@ -33,7 +35,7 @@ export async function copyProjectFiles(
   ctx: MutationCtx,
   sourceId: Id<"projects">,
   targetId: Id<"projects">,
-  exclude?: (file: Doc<"files">) => boolean,
+  { keepSecretFiles = false }: { keepSecretFiles?: boolean } = {},
 ) {
   const allFiles = await ctx.db
     .query("files")
@@ -47,7 +49,9 @@ export async function copyProjectFiles(
     );
   }
 
-  const sourceFiles = exclude ? allFiles.filter((file) => !exclude(file)) : allFiles;
+  const sourceFiles = keepSecretFiles
+    ? allFiles
+    : allFiles.filter((file) => !(file.type === "file" && isSecretFile(file.name)));
   const now = Date.now();
   const idMap = new Map<Id<"files">, Id<"files">>();
   const binaryFileIds: Id<"files">[] = [];
@@ -93,7 +97,7 @@ export async function copyProjectFiles(
 
 /**
  * A Remix: a new project for `ownerId` holding a copy of `sourceId`'s files
- * only. Shared by showcase imports and share links (#260); the caller checks
+ * only, without secret files. Shared by showcase imports and share links (#260); the caller checks
  * the source may be copied.
  */
 export async function remixProject(
@@ -101,7 +105,6 @@ export async function remixProject(
   sourceId: Id<"projects">,
   ownerId: string,
   name: string,
-  exclude?: (file: Doc<"files">) => boolean,
 ) {
   const newProjectId = await ctx.db.insert("projects", {
     name,
@@ -113,7 +116,7 @@ export async function remixProject(
     name: "project_created",
     props: { source: "remix" },
   });
-  await copyProjectFiles(ctx, sourceId, newProjectId, exclude);
+  await copyProjectFiles(ctx, sourceId, newProjectId);
   return newProjectId;
 }
 
