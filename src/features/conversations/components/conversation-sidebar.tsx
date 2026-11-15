@@ -91,6 +91,7 @@ import { QueuedFollowUp } from "./queued-follow-up";
 import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
 import { chatStarters } from "../chat-starters";
+import { shouldEscapeCancelRun } from "../escape-cancel";
 import { type Checkpoint, useCheckpoints } from "../hooks/use-checkpoints";
 import {
   CheckpointHistoryDialog,
@@ -252,7 +253,7 @@ export const ConversationSidebar = ({
       const active = document.activeElement;
       const inPanel =
         !active || active === document.body || panelRef.current?.contains(active);
-      if (event.key === "Escape" && !event.defaultPrevented && inPanel) {
+      if (inPanel && shouldEscapeCancelRun(event)) {
         void handleCancel();
       }
     };
