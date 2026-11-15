@@ -1,0 +1,52 @@
+import type { Sandbox } from "e2b";
+
+/**
+ * Set on the dev server's E2B process to its own command line, so any server
+ * instance can find it in `commands.list()` and start it again the same way.
+ */
+export const DEV_COMMAND_ENV = "CODENAYA_DEV_COMMAND";
+
+/**
+ * SIGKILLs `pid` and every process under it, root first. E2B's `commands.kill`
+ * signals only the `bash -l -c` wrapper (envd `sysSignal`), which would leave
+ * npm and Vite serving. Children are found by `PPid:` in /proc, which needs no
+ * procps and no CONFIG_PROC_CHILDREN.
+ */
+export const killTreeCommand = (pid: number) =>
+  `kids() { grep -l "^PPid:[[:space:]]*$1$" /proc/[0-9]*/status 2>/dev/null | cut -d/ -f3; }; ` +
+  `tree() { echo "$1"; for c in $(kids "$1"); do tree "$c"; done; }; ` +
+  `kill -9 $(tree ${Math.trunc(pid)}) 2>/dev/null; true`;
+
+interface DevOutput {
+  onStdout?: (data: string) => void;
+  onStderr?: (data: string) => void;
+}
+
+/**
+ * Runs `install` with the dev server stopped, then starts it once with the same
+ * command and env, also after a failed install. A Vite serving while npm
+ * rewrites node_modules re-optimizes mid-load, and the page runs two copies of
+ * React ("Invalid hook call", #486). The page's Vite client polls until the
+ * server is back, then reloads.
+ */
+export const installWithDevServerStopped = async <T>(
+  sandbox: Sandbox,
+  install: () => Promise<T>,
+  output: DevOutput = {},
+): Promise<T> => {
+  const dev = (await sandbox.commands.list()).find((command) => command.envs?.[DEV_COMMAND_ENV]);
+  if (dev) await sandbox.commands.run(killTreeCommand(dev.pid));
+  try {
+    return await install();
+  } finally {
+    if (dev) {
+      await sandbox.commands.run(dev.envs[DEV_COMMAND_ENV], {
+        cwd: dev.cwd,
+        envs: dev.envs,
+        background: true,
+        timeoutMs: 0, // Like the boot's: E2B would kill it after 60s.
+        ...output,
+      });
+    }
+  }
+};

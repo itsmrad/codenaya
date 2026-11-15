@@ -21,6 +21,11 @@ vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal)
   ...(await importOriginal<object>()),
   resolveProjectEnv: mocks.resolveProjectEnv,
 }));
+// Real timers: a short debounce keeps the install tests fast.
+vi.mock("@/features/sandbox-preview/server/debounce-serial", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  REINSTALL_DEBOUNCE_MS: 10,
+}));
 vi.mock("e2b", () => ({
   Sandbox: {
     create: mocks.sandboxCreate,
@@ -61,7 +66,10 @@ import {
   DEFAULT_INSTALL_COMMAND,
   MAX_LIVE_SANDBOXES,
 } from "@/features/sandbox-preview/server/project-sandbox";
-import { RESTART_VITE_COMMAND } from "@/features/sandbox-preview/server/restart-vite";
+import {
+  DEV_COMMAND_ENV,
+  killTreeCommand,
+} from "@/features/sandbox-preview/server/dev-server";
 import {
   forgetSandbox,
   requestReinstall,
@@ -281,12 +289,19 @@ describe("POST /api/sandbox after ready (#492)", () => {
   const bootableSandbox = (sandboxId: string) => {
     const installs: Array<() => void> = [];
     let installing = 0;
-    const stats = { maxConcurrentInstalls: 0, restartsWhileInstalling: 0 };
-    const run = vi.fn(async (cmd: string) => {
+    let devServer: { pid: number; envs: Record<string, string> } | null = null;
+    const stats = { maxConcurrentInstalls: 0, devStarts: 0, startsWhileInstalling: 0, installsWhileServing: 0 };
+    const run = vi.fn(async (cmd: string, options?: { envs?: Record<string, string> }) => {
       if (cmd === "node --version") return { exitCode: 0, stdout: "v22.12.0\n", stderr: "" };
       if (cmd.startsWith("curl")) return { exitCode: 0, stdout: "200", stderr: "" };
-      if (cmd === RESTART_VITE_COMMAND && installing > 0) stats.restartsWhileInstalling++;
+      if (options?.envs?.[DEV_COMMAND_ENV]) {
+        stats.devStarts++;
+        if (installing > 0) stats.startsWhileInstalling++;
+        devServer = { pid: 40 + stats.devStarts, envs: options.envs };
+      }
+      if (devServer && cmd === killTreeCommand(devServer.pid)) devServer = null;
       if (cmd === DEFAULT_INSTALL_COMMAND) {
+        if (devServer) stats.installsWhileServing++;
         installing++;
         stats.maxConcurrentInstalls = Math.max(stats.maxConcurrentInstalls, installing);
         await new Promise<void>((resolve) => installs.push(resolve));
@@ -299,7 +314,13 @@ describe("POST /api/sandbox after ready (#492)", () => {
       kill: vi.fn(),
       getHost: () => "4000-sbx.e2b.app",
       files: { makeDir: vi.fn(), write: vi.fn() },
-      commands: { run },
+      commands: {
+        run,
+        list: vi.fn(async () =>
+          // The proxy and others run too; only the dev server carries the marker.
+          [{ pid: 7, cmd: "/bin/bash", args: [], envs: {} }, ...(devServer ? [{ ...devServer, cmd: "/bin/bash", args: [], cwd: "/home/user/app" }] : [])],
+        ),
+      },
     };
     const finishInstall = () => installs.shift()?.();
     return { sandbox, stats, run, finishInstall, pendingInstalls: () => installs.length };
@@ -362,6 +383,35 @@ describe("POST /api/sandbox after ready (#492)", () => {
     vi.unstubAllGlobals();
     forgetSandbox("sbx_ready_abort");
     forgetSandbox("sbx_ready_overlap");
+    forgetSandbox("sbx_ready_burst");
+  });
+
+  it("installs a burst of package.json syncs once, with the dev server stopped, and starts it once after (#486)", async () => {
+    const { sandbox, stats, run, finishInstall, pendingInstalls, client, reader } =
+      await bootToReady("sbx_ready_burst");
+    const bootStart = run.mock.calls.find(([, options]) => options?.envs?.[DEV_COMMAND_ENV]);
+
+    for (let i = 0; i < 3; i++) requestReinstall("sbx_ready_burst");
+    await settle();
+    expect(pendingInstalls()).toBe(1);
+    expect(stats.installsWhileServing).toBe(0);
+    // Only the marked dev server is stopped, never the proxy (pid 7).
+    expect(run).toHaveBeenCalledWith(killTreeCommand(41));
+    expect(run).not.toHaveBeenCalledWith(killTreeCommand(7));
+
+    finishInstall();
+    await settle();
+    expect(installRuns(run)).toBe(1);
+    expect(stats.devStarts).toBe(2);
+    expect(stats.startsWhileInstalling).toBe(0);
+    // Started again with the boot's command, env and directory.
+    const restart = run.mock.calls.filter(([, options]) => options?.envs?.[DEV_COMMAND_ENV])[1];
+    expect(restart[0]).toBe(bootStart![0]);
+    expect(restart[1]).toMatchObject({ envs: bootStart![1]!.envs, cwd: "/home/user/app", background: true, timeoutMs: 0 });
+
+    client.abort();
+    await drain(reader);
+    expect(sandbox.kill).not.toHaveBeenCalled();
   });
 
   it("keeps the sandbox running when the client disconnects, and stops routing reinstalls to the stream", async () => {
@@ -397,7 +447,10 @@ describe("POST /api/sandbox after ready (#492)", () => {
     await drain(reader);
 
     expect(stats.maxConcurrentInstalls).toBe(1);
-    expect(stats.restartsWhileInstalling).toBe(0);
+    expect(stats.installsWhileServing).toBe(0);
+    expect(stats.startsWhileInstalling).toBe(0);
+    // The boot's start, then one per install.
+    expect(stats.devStarts).toBe(3);
     expect(sandbox.kill).not.toHaveBeenCalled();
 
     // Drained, so later syncs install through PATCH.
@@ -571,9 +624,8 @@ describe("POST /api/sandbox install failure (#491)", () => {
 describe("PATCH /api/sandbox/[sandboxId] install failure (#497)", () => {
   const SECRET = "sk_live_synthetic_0123456789";
 
-  it("answers with the exit code and npm code only, keeps the sandbox and skips the restart", async () => {
-    const run = vi.fn(async (command: string) => {
-      if (command === RESTART_VITE_COMMAND) return { exitCode: 0, stdout: "", stderr: "" };
+  it("answers with the exit code and npm code only, and keeps the sandbox", async () => {
+    const run = vi.fn(async () => {
       throw new (CommandExitError as unknown as new (result: object) => Error)({
         exitCode: 1,
         stdout: `postinstall: API_KEY=${SECRET}\n`,
@@ -585,7 +637,7 @@ describe("PATCH /api/sandbox/[sandboxId] install failure (#497)", () => {
       sandboxId: "sbx_patch",
       getInfo: async () => ({ metadata: { userId: "user_1" } }),
       files: { write: vi.fn() },
-      commands: { run },
+      commands: { run, list: vi.fn(async () => []) },
     });
     const sync = () =>
       PATCH(
@@ -603,7 +655,6 @@ describe("PATCH /api/sandbox/[sandboxId] install failure (#497)", () => {
       synced: 1,
       installFailed: { exitCode: 1, code: "ERESOLVE" },
     });
-    expect(run).not.toHaveBeenCalledWith(RESTART_VITE_COMMAND, expect.anything());
 
     // The handle stays cached: the next sync doesn't connect again.
     await sync();
@@ -626,7 +677,7 @@ describe("PATCH reinstall timeout", () => {
         sandboxId: "sbx_timeout",
         getInfo: async () => ({ metadata: { userId: "user_1" } }),
         files: { write: vi.fn() },
-        commands: { run },
+        commands: { run, list: vi.fn(async () => []) },
       });
       const sync = () => PATCH(
         request("PATCH", JSON.stringify({ files: [{ path: "package.json", content: "{}" }] })),
@@ -650,4 +701,52 @@ describe("PATCH reinstall timeout", () => {
       }
     },
   );
+});
+
+describe("PATCH /api/sandbox/[sandboxId] package.json burst (#486)", () => {
+  it("installs once for overlapping syncs, with the dev server stopped, and starts it once after", async () => {
+    const devEnvs = { [DEV_COMMAND_ENV]: "npm run dev -- --host", API_KEY: "k" };
+    let serving = true;
+    const order: string[] = [];
+    const run = vi.fn(async (command: string, options?: { envs?: Record<string, string> }) => {
+      if (command === killTreeCommand(9)) serving = false;
+      if (options?.envs?.[DEV_COMMAND_ENV]) serving = true;
+      order.push(command === DEFAULT_INSTALL_COMMAND ? `install:${serving ? "serving" : "stopped"}` : command);
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    mocks.sandboxConnect.mockResolvedValue({
+      sandboxId: "sbx_burst",
+      getInfo: async () => ({ metadata: { userId: "user_1" } }),
+      files: { write: vi.fn() },
+      commands: {
+        run,
+        list: vi.fn(async () => [
+          { pid: 3, cmd: "/bin/bash", args: [], envs: {} },
+          { pid: 9, cmd: "/bin/bash", args: [], envs: devEnvs, cwd: "/home/user/app" },
+        ]),
+      },
+    });
+    const sync = () =>
+      PATCH(
+        request("PATCH", JSON.stringify({ files: [{ path: "package.json", content: "{}" }] })),
+        { params: Promise.resolve({ sandboxId: "sbx_burst" }) },
+      );
+
+    try {
+      const responses = await Promise.all([sync(), sync(), sync()]);
+
+      for (const response of responses) {
+        expect(await response.json()).toEqual({ success: true, synced: 1 });
+      }
+      expect(order).toEqual([killTreeCommand(9), "install:stopped", "npm run dev -- --host"]);
+      expect(run).toHaveBeenLastCalledWith("npm run dev -- --host", {
+        cwd: "/home/user/app",
+        envs: devEnvs,
+        background: true,
+        timeoutMs: 0,
+      });
+    } finally {
+      forgetSandbox("sbx_burst");
+    }
+  });
 });
