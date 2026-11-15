@@ -6,6 +6,10 @@ import { normalizePath } from "./agent-steps";
 export { MAX_SWARM_AGENTS, MAX_SWARM_TASKS };
 export const WORKER_MAX_STEPS = 20;
 export const MAX_WORKER_USD = 0.50;
+/** How long a worker may queue and run before it counts as failed (step.invoke's timeout). */
+export const WORKER_TIMEOUT_MS = 12 * 60_000;
+export const CHILD_WORKER_TIMEOUT_MS = 10 * 60_000;
+export const SUBORCH_TIMEOUT_MS = 25 * 60_000;
 /** A sub-orchestrator splits its owned paths among up to 3 workers of its own (depth 2). */
 export const MAX_SUBORCHESTRATORS = 2;
 export const MAX_SUBORCH_CHILDREN = 3;

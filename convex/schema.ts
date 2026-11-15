@@ -435,6 +435,10 @@ export default defineSchema({
     startedAt: v.optional(v.number()),
     endedAt: v.optional(v.number()),
     updatedAt: v.number(),
+    // Optional sandbox self-check (ADR 0013, S6): the swarm's foundation
+    // snapshot, and "running", "scoped-ok", "scoped-failed (...)" or "skipped (...)".
+    seedSnapshotId: v.optional(v.string()),
+    selfCheck: v.optional(v.string()),
     // The project's owner, and whether the run is on platform models: one platform swarm per owner.
     // Unset on rows created before ADR 0013's per-owner limit.
     ownerId: v.optional(v.string()),

@@ -8,7 +8,11 @@ import { getAppError } from "@/lib/convex-error";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../../agent-models";
-import { MAX_SWARM_AGENTS, MAX_SWARM_DEPTH, type SwarmPlan, swarmPlanSchema, validatePlan } from "../../swarm";
+import {
+  CHILD_WORKER_TIMEOUT_MS, MAX_SWARM_AGENTS, MAX_SWARM_DEPTH, SUBORCH_TIMEOUT_MS, type SwarmPlan,
+  WORKER_TIMEOUT_MS, swarmPlanSchema, validatePlan,
+} from "../../swarm";
+import { cleanupSwarmSandboxes, seedSwarmSnapshot } from "../../swarm-sandbox";
 import { type SwarmWorkerEvent, type SwarmWorkerResult, swarmWorker } from "../swarm-worker";
 import { folderEnsurer, folderPaths, getProjectFiles, indexProjectFiles, lockedPathError, splitPath } from "./paths";
 
@@ -26,11 +30,6 @@ interface DelegateTasksToolOptions {
   maxDepth?: number;
 }
 
-/** How long a task may queue and run before it counts as failed: a sub-orchestrator waits on its workers too. */
-const WORKER_TIMEOUT = "12m";
-const SUBORCH_TIMEOUT = "25m";
-const CHILD_TIMEOUT = "10m";
-
 type Task = SwarmPlan["tasks"][number];
 
 /** One task's section of the tool result, for the orchestrator to integrate. */
@@ -42,10 +41,11 @@ const taskReport = (task: Task, settled: PromiseSettledResult<SwarmWorkerResult>
       : settled.value.summary;
     return `${head} (failed)\n${reason}\nFinish it yourself; it owned ${task.ownedPaths.join(", ")}.`;
   }
-  const { status, summary, writtenPaths } = settled.value;
+  const { status, summary, writtenPaths, selfCheck } = settled.value;
   const files = writtenPaths.length ? writtenPaths.join(", ") : "none";
+  const check = selfCheck ? `\nSelf-check (its files only, not the build): ${selfCheck}` : "";
   const finish = status === "unfinished" ? `\nFinish the rest yourself; it owned ${task.ownedPaths.join(", ")}.` : "";
-  return `${head} (${status})\nFiles written: ${files}\n${summary}${finish}`;
+  return `${head} (${status})\nFiles written: ${files}${check}\n${summary}${finish}`;
 };
 
 /**
@@ -132,6 +132,9 @@ export const createDelegateTasksTool = ({
       const planOverview = `## Swarm plan\n${plan.tasks
         .map((task) => `- ${task.id} (${task.title}): ${task.ownedPaths.join(", ")}`)
         .join("\n")}`;
+      // Beside the workers (a parallel step), for their optional self-checks; null while that is off.
+      const foundation = parent ? Promise.resolve(null)
+        : step.run("swarm-foundation", () => seedSwarmSnapshot({ internalKey, projectId, messageId })).catch(() => null);
       const settled = await Promise.allSettled(
         plan.tasks.map((task, i) =>
           step.invoke(`run-task-${task.id}`, {
@@ -146,7 +149,7 @@ export const createDelegateTasksTool = ({
               planOverview,
               depth: depth + 1,
             } satisfies SwarmWorkerEvent,
-            timeout: parent ? CHILD_TIMEOUT : task.role === "sub-orchestrator" ? SUBORCH_TIMEOUT : WORKER_TIMEOUT,
+            timeout: parent ? CHILD_WORKER_TIMEOUT_MS : task.role === "sub-orchestrator" ? SUBORCH_TIMEOUT_MS : WORKER_TIMEOUT_MS,
           }) as Promise<SwarmWorkerResult>,
         ),
       );
@@ -163,6 +166,9 @@ export const createDelegateTasksTool = ({
           })));
         });
       }
+
+      const snapshotId = await foundation;
+      if (snapshotId) await step.run("swarm-sandbox-cleanup", () => cleanupSwarmSandboxes({ messageId, snapshotId }));
 
       const reports = [
         ...plan.tasks.map((task, i) => taskReport(task, settled[i])),

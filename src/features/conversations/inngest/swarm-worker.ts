@@ -12,8 +12,10 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../agent-models";
 import { type AgentStep, runWrittenPaths, stepsFromResponse, stepsFromToolResults, turnHeartbeat } from "../agent-steps";
 import {
-  MAX_SUBORCH_USD, MAX_SWARM_AGENTS, MAX_SWARM_DEPTH, MAX_WORKER_USD, SUBORCH_MAX_STEPS, WORKER_MAX_STEPS,
+  CHILD_WORKER_TIMEOUT_MS, MAX_SUBORCH_USD, MAX_SWARM_AGENTS, MAX_SWARM_DEPTH, MAX_WORKER_USD,
+  SUBORCH_MAX_STEPS, SUBORCH_TIMEOUT_MS, WORKER_MAX_STEPS, WORKER_TIMEOUT_MS,
 } from "../swarm";
+import { selfCheckStep, selfCheckWorker } from "../swarm-sandbox";
 import { CODING_AGENT_SYSTEM_PROMPT, STEP_BUDGET_NOTE, SWARM_SUBORCH_NOTE, SWARM_WORKER_NOTE } from "./constants";
 import { decodeJsonArgs, decodeToolCalls } from "./lib/json-args";
 import { guardOwnedPaths } from "./lib/ownership-guard";
@@ -46,6 +48,8 @@ export interface SwarmWorkerResult {
   status: "done" | "unfinished" | "error";
   summary: string;
   writtenPaths: string[];
+  /** The optional sandbox self-check's outcome: never "verified" (swarm-sandbox.ts). */
+  selfCheck?: string;
 }
 
 const SUMMARY_AGENT_NAME = "codenaya-summary";
@@ -135,6 +139,23 @@ export const swarmWorker = inngest.createFunction(
     const subOrchestrator = task.role === "sub-orchestrator" && depth < MAX_SWARM_DEPTH;
     const maxSteps = subOrchestrator ? SUBORCH_MAX_STEPS : WORKER_MAX_STEPS;
     const maxUsd = subOrchestrator ? MAX_SUBORCH_USD : MAX_WORKER_USD;
+    const recordUsage = async (raw: string | undefined, id: string) => {
+      const tokens = usageOfResponse(raw);
+      usage.inputTokens += tokens.inputTokens;
+      usage.outputTokens += tokens.outputTokens;
+      usage.costUsd += runModel.metering.coding ? costUsd(runModel.metering.coding, tokens) : 0;
+      const totals = { ...usage };
+      await step.run(id, async () => {
+        try {
+          await convex.mutation(api.credits.recordRunUsage, {
+            internalKey, messageId: parentMessageId, agentTaskId, source: runModel.metering.source,
+            modelId: runModel.codingModel.id, model: runModel.codingModel.label, ...totals,
+          });
+        } catch (error) {
+          console.error("[credits] failed to record worker usage", error);
+        }
+      });
+    };
     // Rebuilt on replay with the memoized invoke results, like `recorded`.
     const childWrites: string[] = [];
     const agentOptions: Parameters<typeof createAgent>[0] = {
@@ -160,21 +181,7 @@ export const swarmWorker = inngest.createFunction(
         onResponse: async ({ agent, result }) => {
           decodeToolCalls(result.output);
           turn += 1;
-          const tokens = usageOfResponse(result.raw);
-          usage.inputTokens += tokens.inputTokens;
-          usage.outputTokens += tokens.outputTokens;
-          usage.costUsd += runModel.metering.coding ? costUsd(runModel.metering.coding, tokens) : 0;
-          const totals = { ...usage };
-          await step.run(`worker-usage-${turn}`, async () => {
-            try {
-              await convex.mutation(api.credits.recordRunUsage, {
-                internalKey, messageId: parentMessageId, agentTaskId, source: runModel.metering.source,
-                modelId: runModel.codingModel.id, model: runModel.codingModel.label, ...totals,
-              });
-            } catch (error) {
-              console.error("[credits] failed to record worker usage", error);
-            }
-          });
+          await recordUsage(result.raw, `worker-usage-${turn}`);
           if (agent.name === SUMMARY_AGENT_NAME) result.output = result.output.filter((m) => m.type !== "tool_call");
           await recordSteps("worker-response", stepsFromResponse(result, turn, Date.now()));
           cutOff = hitOutputLimit(result.raw);
@@ -215,11 +222,28 @@ export const swarmWorker = inngest.createFunction(
       || "The worker finished without a summary.";
     // Stored as done: what it wrote is real; the orchestrator reads the prefix.
     const summary = unfinished ? `Unfinished (step or cost cap): ${reply}` : reply;
+    const repairBudget = new AbortController();
+    if (usage.costUsd >= maxUsd) repairBudget.abort();
+    let repairTurn = 0;
+    const check = await selfCheckWorker({
+      step, internalKey, projectId, messageId: parentMessageId, agentTaskId, ownedPaths: task.ownedPaths,
+      // step.invoke's timeout runs from this event; read only inside a memoized step.
+      invokedAt: event.ts ?? Date.now(),
+      timeoutMs: depth >= MAX_SWARM_DEPTH ? CHILD_WORKER_TIMEOUT_MS : subOrchestrator ? SUBORCH_TIMEOUT_MS : WORKER_TIMEOUT_MS,
+      model: codingModel, onEvent: (event) => recordSteps("worker-self-check", [selfCheckStep(event, Date.now())]),
+      signal: repairBudget.signal,
+      onResponse: async (raw) => {
+        await recordUsage(raw, `worker-self-check-usage-${++repairTurn}`);
+        if (usage.costUsd >= maxUsd) repairBudget.abort();
+      },
+    });
     lastHeartbeat.delete(agentTaskId);
     await step.run("finish-worker", () => convex.mutation(api.agentTasks.finishTask, {
-      internalKey, agentTaskId, status: "done", summary,
+      internalKey, agentTaskId, status: "done", summary, selfCheck: check?.selfCheck,
     }));
-    const writtenPaths = [...new Set([...childWrites, ...runWrittenPaths([...recorded.values()])])];
-    return { status: unfinished ? "unfinished" : "done", summary, writtenPaths };
+    const writtenPaths = [...new Set([...childWrites, ...runWrittenPaths([...recorded.values()]), ...(check?.filesChanged ?? [])])];
+    return {
+      status: unfinished ? "unfinished" : "done", summary, writtenPaths, ...(check ? { selfCheck: check.selfCheck } : {}),
+    };
   },
 );
