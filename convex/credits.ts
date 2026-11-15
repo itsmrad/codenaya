@@ -8,6 +8,7 @@ import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { addModelSpend } from "./modelSpend";
 import { planIdValidator, runSourceValidator } from "./schema";
+import { MAX_SWARM_TASKS } from "./swarm";
 
 /**
  * Credit metering (ADR 0011). The send routes read the account to refuse a
@@ -49,6 +50,25 @@ export const getMine = query({
   handler: async (ctx) => {
     const identity = await verifyAuth(ctx);
     return accountView(await accountFor(ctx, identity.subject));
+  },
+});
+
+/**
+ * Credits the caller was charged for one run (#526): its own row plus one per
+ * swarm worker. Null when nothing was recorded for them, e.g. another user's run.
+ */
+export const getRunCredits = query({
+  args: { messageId: v.id("messages") },
+  returns: v.union(v.number(), v.null()),
+  handler: async (ctx, { messageId }) => {
+    const identity = await verifyAuth(ctx);
+    const rows = await ctx.db
+      .query("creditLedger")
+      .withIndex("by_messageId_and_agentTaskId", (q) => q.eq("messageId", messageId))
+      .take(MAX_SWARM_TASKS + 1);
+    // The row's userId is the project owner, so this is the ownership check.
+    const owned = rows.filter((row) => row.userId === identity.subject);
+    return owned.length === 0 ? null : owned.reduce((sum, row) => sum + row.credits, 0);
   },
 });
 

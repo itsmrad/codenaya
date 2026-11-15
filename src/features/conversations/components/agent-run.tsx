@@ -53,6 +53,7 @@ import {
 } from "../agent-steps";
 import { useRunChanges } from "../hooks/use-checkpoints";
 import { LineDelta, RunDiffDialog, totalDelta } from "./run-diff-dialog";
+import { RunCost } from "./run-cost";
 import { LoaderGrid } from "./run-loader";
 
 interface ToolMeta {
@@ -488,6 +489,8 @@ interface AgentRunProps {
   checkpointId?: Id<"checkpoints"> | null;
   /** An agent run is in progress, so files can't be reverted. */
   revertDisabled?: boolean;
+  /** The run's message, for its cost once it finishes (#526). */
+  messageId?: Id<"messages">;
 }
 
 /**
@@ -505,6 +508,7 @@ export const AgentRun = ({
   previewErrors,
   checkpointId,
   revertDisabled = false,
+  messageId,
 }: AgentRunProps) => {
   const live = status === "processing" && !stalled;
   const [open, setOpen] = useState(live);
@@ -632,6 +636,7 @@ export const AgentRun = ({
                   · {summary}
                 </span>
               )}
+              {messageId && status !== "processing" && <RunCost messageId={messageId} />}
               {/* Outside the truncating summary, so the summary is cut first and
                   the only text signal that a step failed stays visible (#264). */}
               {errors > 0 && (
