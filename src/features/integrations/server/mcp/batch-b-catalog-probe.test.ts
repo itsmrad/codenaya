@@ -125,4 +125,3 @@ describe.each(CASES)("$id batch B (no vendor network)", (fixture) => {
     expect(mocks.register).not.toHaveBeenCalled();
   });
 });
-
