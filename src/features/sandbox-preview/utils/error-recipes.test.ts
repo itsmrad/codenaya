@@ -69,6 +69,17 @@ describe("ERROR_RECIPES", () => {
     expect(explainError(fixture).map((match) => match.recipeId)).toEqual([id]);
   });
 
+  it("reads React's null hook dispatcher as two Reacts, not missing data (#486)", () => {
+    // What the preview reported when a late Vite re-optimize split React.
+    const nullDispatcher =
+      "Cannot read properties of null (reading 'useCallback')\n    at exports.useCallback (https://4000-abc.e2b.app/node_modules/.vite/deps/chunk-XG5U26FK.js?v=5c8992cf:929:35)";
+    expect(explainError(nullDispatcher).map((match) => match.recipeId)).toEqual(["invalid-hook-call"]);
+    expect(explainError("Cannot read properties of null (reading 'useState')")[0].recipeId).toBe("invalid-hook-call");
+    expect(explainError("Cannot read properties of null (reading 'username')")[0].recipeId).toBe(
+      "read-property-of-undefined",
+    );
+  });
+
   it.each(TSC_FIXTURES)("%s matches the tsc wording, and no other recipe does: %s", (id, fixture) => {
     expect(explainError(fixture).map((match) => match.recipeId)).toEqual([id]);
   });

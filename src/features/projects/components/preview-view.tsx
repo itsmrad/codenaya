@@ -208,7 +208,10 @@ export const PreviewView = ({
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const reported = readPreviewMessage(event, iframeRef.current?.contentWindow, previewUrl);
-      if (reported) setRuntimeError((prev) => mergeAppError(prev, reported));
+      if (!reported) return;
+      // A new document, e.g. Vite's own reload after re-optimizing (#486): its errors are reported anew.
+      if (reported.kind === "page") setRuntimeError(null);
+      else setRuntimeError((prev) => mergeAppError(prev, reported));
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -342,9 +345,12 @@ export const PreviewView = ({
     const firstBuildEnded = wasFirstBuild.current && !firstBuild;
     const fixRunEnded = wasRunActive.current && !runActive && appStartFailed && buildError;
     if (status === "error" && (firstBuildEnded || fixRunEnded)) restart();
+    // A first build's runtime error may be from mid-build HMR (#486): reload once
+    // against the finished files before the auto-fix; the bridge reports it again if real.
+    else if (firstBuildEnded && runtimeError) setRefreshKey((key) => key + 1);
     wasFirstBuild.current = firstBuild;
     wasRunActive.current = runActive;
-  }, [firstBuild, runActive, appStartFailed, buildError, status, restart]);
+  }, [firstBuild, runActive, appStartFailed, buildError, runtimeError, status, restart]);
 
   // The iframe's latest load, so first_preview_shown waits until it is visible.
   const [loadedPreview, setLoadedPreview] = useState<string | null>(null);

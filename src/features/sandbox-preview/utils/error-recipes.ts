@@ -23,6 +23,9 @@ export interface ErrorExplanation {
   fix: string;
 }
 
+// React's null hook dispatcher: "Cannot read properties of null (reading 'useState')".
+const HOOK_READ = String.raw`\(reading 'use(?:State|Reducer|Effect|LayoutEffect|InsertionEffect|Callback|Memo|Ref|Context|Id|SyncExternalStore|Transition|DeferredValue|ImperativeHandle)'\)`;
+
 export const ERROR_RECIPES: readonly ErrorRecipe[] = [
   {
     id: "unresolved-import",
@@ -71,9 +74,9 @@ export const ERROR_RECIPES: readonly ErrorRecipe[] = [
   },
   {
     id: "invalid-hook-call",
-    match: /Invalid hook call/i,
-    cause: "A hook is called outside a function component or custom hook, or two copies of React are installed.",
-    fix: "Only call hooks inside components or `use*` functions; keep react and react-dom on the same version in package.json.",
+    match: new RegExp(`Invalid hook call|of null ${HOOK_READ}`, "i"),
+    cause: "A hook is called outside a function component or custom hook, or the page runs two copies of React; a null dispatcher inside node_modules/.vite/deps usually means Vite pre-bundled a package it found only after the page loaded.",
+    fix: 'Only call hooks inside components or `use*` functions; keep react and react-dom on the same version in package.json and keep `resolve.dedupe: ["react", "react-dom"]` in vite.config.ts. Vite restarts itself when vite.config.ts changes, so never ask the user to restart the preview or delete node_modules/.vite.',
   },
   {
     id: "npm-eresolve",
@@ -95,7 +98,7 @@ export const ERROR_RECIPES: readonly ErrorRecipe[] = [
   },
   {
     id: "read-property-of-undefined",
-    match: /Cannot read propert(?:y|ies) of (?:undefined|null)/i,
+    match: new RegExp(`Cannot read propert(?:y|ies) of (?:undefined|null(?! ${HOOK_READ}))`, "i"),
     cause: "Code reads a field of a value that is not there yet: data still loading, a wrong response shape, or a missing prop.",
     fix: "Give the state a safe initial value (e.g. `[]`), guard with optional chaining or a loading state, and check the data's real shape.",
   },
