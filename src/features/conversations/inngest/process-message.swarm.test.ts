@@ -25,7 +25,8 @@ import { mergeMessageSteps } from "../../../../convex/messageSteps";
 import type { AgentStep } from "../agent-steps";
 import { swarmHeader, swarmSoloReason } from "../swarm-status";
 import { BUILD_NOT_BUILT_NOTE } from "./build-check-gate";
-import { SWARM_DELEGATE_NUDGE } from "./constants";
+import { SWARM_DELEGATE_NUDGE, SWARM_ORCHESTRATOR_NOTE } from "./constants";
+import { FOUNDATION_MAX_STEPS } from "../swarm";
 import { drive, text, toolCall } from "./process-message.driver";
 
 let swarmEnabled: boolean;
@@ -390,6 +391,31 @@ describe("processMessage swarm mode", () => {
     ] });
     const PAGE = toolCall("writeFiles", { files: [{ path: "src/pages/menu.tsx", content: `export default () => <main>${"x".repeat(300)}</main>;\n` }] });
     const OVERLAP = { tasks: [PLAN.tasks[0], { ...PLAN.tasks[1], ownedPaths: ["src/pages/nav.tsx"] }] };
+
+    it("caps the foundation at 5 steps, then forces delegation", async () => {
+      expect(FOUNDATION_MAX_STEPS).toBe(5);
+      const outcome = await swarm([
+        ...Array.from({ length: 5 }, () => ({ data: FOUNDATION })),
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE]);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      const requests = codingRequests(outcome.inferenceBodies);
+      expect(JSON.stringify(requests.slice(0, 5))).not.toContain(SWARM_DELEGATE_NUDGE);
+      expect(JSON.stringify(requests[5].messages)).toContain(SWARM_DELEGATE_NUDGE);
+      expect(forcedRequests(outcome.inferenceBodies)).toEqual([{ type: "function", function: { name: "delegateTasks" } }]);
+      expect(outcome.invocations).toHaveLength(2);
+    });
+
+    it("requests a minimal foundation and balanced page tasks", () => {
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("minimal shared foundation");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("at most 240 characters");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("No page content or sitemap/robots/favicon extras");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("at most 2 pages");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("UI primitives/layout may be their own small task");
+    });
 
     it("refuses a page write before delegation, then forces delegateTasks, which runs the workers", async () => {
       const outcome = await swarm([
