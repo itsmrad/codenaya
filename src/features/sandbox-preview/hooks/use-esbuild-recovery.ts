@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { AppError } from "../utils/app-error";
 import type { Framework } from "../utils/framework";
 import {
+  ESBUILD_RECOVERY_COOLDOWN_MS,
+  MAX_ESBUILD_RECOVERIES,
   isEsbuildServiceFailure,
   nextEsbuildRecovery,
   type EsbuildRecoveryAttempts,
@@ -27,7 +29,14 @@ export const useEsbuildRecovery = ({ sandboxId, framework, error, recover }: {
       if (cancelled) return;
       const previous = attempts.current?.sandboxId === sandboxId ? attempts.current.state : undefined;
       const next = nextEsbuildRecovery(previous, Date.now());
-      if (!next) { setRecovering(false); return; }
+      if (!next) {
+        setRecovering(false);
+        // Inside the cooldown, try again once it ends; the attempt cap still stops this.
+        if (previous && previous.attempts < MAX_ESBUILD_RECOVERIES) {
+          timer = setTimeout(attempt, ESBUILD_RECOVERY_COOLDOWN_MS - (Date.now() - previous.lastAttemptAt));
+        }
+        return;
+      }
       attempts.current = { sandboxId, state: next };
       setRecovering(true);
       try {
