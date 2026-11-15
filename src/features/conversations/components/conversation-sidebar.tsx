@@ -52,6 +52,8 @@ import { MODEL_LIMIT_CODE } from "@/features/billing/model-spend";
 import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 import { useFiles } from "@/features/projects/hooks/use-files";
+import { MakeItMineCard } from "@/features/templates/components/make-it-mine-card";
+import { BRAND_FILE } from "@/features/templates/make-it-mine";
 import { useProject } from "@/features/projects/hooks/use-projects";
 import {
   SkillSlashMenu,
@@ -600,7 +602,14 @@ export const ConversationSidebar = ({
           <ChatEmptyState
             starters={starters}
             onSelect={(prompt) => void handleSubmit({ text: prompt, files: [] })}
-          />
+          >
+            {idOfPath.has(BRAND_FILE) && (
+              <MakeItMineCard
+                idOfPath={idOfPath}
+                onDescribe={(prompt) => void handleSubmit({ text: prompt, files: [] })}
+              />
+            )}
+          </ChatEmptyState>
         ) : (
         <Conversation className="flex-1">
           <ConversationContent className="gap-6 px-4 py-4 pb-12">

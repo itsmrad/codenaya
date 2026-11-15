@@ -35,7 +35,7 @@ import { api } from "../../../../../convex/_generated/api";
 const requestSchema = z.object({
   prompt: promptText.min(1),
   model: modelChoiceSchema,
-  /** Seeds the project with a starter template's files first (#119). */
+  /** Seeds the project with a starter template's files first (#119); an instant one gets no run (#362). */
   templateId: z.enum(STARTER_TEMPLATE_IDS).optional(),
   /** A prompt typed on the landing page before sign-up, for activation events (#339). */
   fromLanding: z.boolean().optional(),
@@ -97,6 +97,19 @@ export async function POST(request: Request) {
 
   if (rejected) {
     return rejected;
+  }
+
+  // An instant template is a finished app (#362): seed its source, no run.
+  if (template?.instant) {
+    const { projectId } = await convex.mutation(api.system.createProjectWithConversation, {
+      internalKey,
+      projectName: template.id,
+      conversationTitle: DEFAULT_CONVERSATION_TITLE,
+      ownerId: userId,
+      source: "template",
+    });
+    await seedTemplateFiles({ internalKey, projectId, template });
+    return NextResponse.json({ projectId });
   }
 
   // Before anything is created (ADR 0009).

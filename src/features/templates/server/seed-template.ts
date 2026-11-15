@@ -6,10 +6,11 @@ import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starte
 
 import { getTemplateSeedFiles, planSeedTree } from "../seed-files";
 import type { StarterTemplate } from "../templates";
+import { readTemplateSource } from "./template-source";
 
 /**
- * Writes a template's seed files into a new, empty project, or the plain Vite
- * starter without one, so package.json exists before the first run and the
+ * Writes a template's seed files (an instant template's full source, #362)
+ * into a new, empty project, or the plain Vite starter without one, so package.json exists before the first run and the
  * preview can start booting at once (#338).
  *
  * Best effort, never throws: a project left partly seeded still has its run,
@@ -25,8 +26,9 @@ export const seedTemplateFiles = async ({
   projectId: Id<"projects">;
   template?: StarterTemplate;
 }) => {
+  const source = template?.instant ? await readTemplateSource(template.id) : [];
   const { folders, filesByFolder } = planSeedTree(
-    template ? getTemplateSeedFiles(template) : [...VITE_REACT_STARTER],
+    template ? getTemplateSeedFiles(template, source) : [...VITE_REACT_STARTER],
   );
   const folderIds = new Map<string, Id<"files">>();
   const batches = [...filesByFolder].sort(([a], [b]) => Number(a === "") - Number(b === ""));

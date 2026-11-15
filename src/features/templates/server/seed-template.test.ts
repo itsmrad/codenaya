@@ -10,6 +10,7 @@ import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starte
 import { getTemplateSeedFiles } from "../seed-files";
 import { STARTER_TEMPLATES } from "../templates";
 import { seedTemplateFiles } from "./seed-template";
+import { readTemplateSource } from "./template-source";
 
 describe("seedTemplateFiles", () => {
   it("creates each folder under its parent, then writes every seed file into its folder", async () => {
@@ -33,7 +34,11 @@ describe("seedTemplateFiles", () => {
     expect(calls.findIndex(([name]) => name === "system:createFiles")).toBe(folders.length);
 
     const written = batches.flatMap(([, a]) => a.files.map((f: { name: string }) => [a.parentId, f.name]));
-    expect(written).toHaveLength(getTemplateSeedFiles(template).length);
+    // An instant template writes its full source (#362).
+    expect(template.instant).toBe(true);
+    const source = await readTemplateSource(template.id);
+    expect(written).toHaveLength(getTemplateSeedFiles(template, source).length);
+    expect(written).toContainEqual(["id:src", "brand.ts"]);
     expect(written).toContainEqual([undefined, "package.json"]);
     expect(written).toContainEqual(["id:src", "App.tsx"]);
     expect(batches.every(([, a]) => a.internalKey === "key" && a.projectId === "p1")).toBe(true);
