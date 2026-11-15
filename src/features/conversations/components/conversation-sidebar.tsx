@@ -32,6 +32,7 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
 import { InputGroupButton } from "@/components/ui/input-group";
+import { isComposerPlanKey } from "@/lib/shortcuts";
 import { useCommandPalette, useProjectCommands } from "@/lib/command-palette";
 import {
   Tooltip,
@@ -848,8 +849,8 @@ export const ConversationSidebar = ({
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(event) => {
                   if (
-                    event.code === "KeyM" && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey &&
-                    !event.defaultPrevented && !event.nativeEvent.isComposing && !isProcessing && mode !== "swarm"
+                    isComposerPlanKey(event.nativeEvent, event.currentTarget) &&
+                    !event.defaultPrevented && !isProcessing && !enhancer.isEnhancing && mode !== "swarm"
                   ) {
                     event.preventDefault();
                     setMode((current) => current === "plan" ? "build" : "plan");

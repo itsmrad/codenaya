@@ -27,6 +27,31 @@ test.describe("dashboard prompt composer", () => {
       name: "Describe what you want to build",
     });
 
+    const main = page.getByRole("main");
+    const plan = main.getByRole("radio", { name: "Ask / Plan", exact: true });
+    const build = main.getByRole("radio", { name: "Build", exact: true });
+    const modeStatus = main.getByRole("status", { name: "Message mode" });
+    await expect(modeStatus).toHaveAttribute("aria-live", "polite");
+    await expect(modeStatus).toHaveText("Build mode on");
+    await composer.press("Alt+m");
+    await expect(plan).toBeChecked();
+    await expect(modeStatus).toHaveText("Plan mode on");
+    await expect(composer).toBeFocused();
+    for (const draft of ["", SMOKE_PROMPT]) {
+      await composer.fill(draft);
+      await composer.press("Shift+Tab");
+      await expect(composer).not.toBeFocused();
+      expect(await composer.evaluate((textarea) => {
+        const previousControl = document.activeElement;
+        return previousControl !== null && previousControl !== document.body &&
+          Boolean(textarea.compareDocumentPosition(previousControl) & Node.DOCUMENT_POSITION_PRECEDING);
+      })).toBe(true);
+      await expect(plan).toBeChecked();
+      await expect(modeStatus).toHaveText("Plan mode on");
+    }
+    await composer.press("Alt+m");
+    await expect(build).toBeChecked();
+    await expect(modeStatus).toHaveText("Build mode on");
     await composer.fill(SMOKE_PROMPT);
     await composer.press("Enter");
 
