@@ -95,7 +95,7 @@ export const AgentModelSelect = ({
               triggerClassName,
             )}
           >
-            <PromptInputSelectValue className="min-w-0" />
+            <PromptInputSelectValue />
           </PromptInputSelectTrigger>
         </TooltipTrigger>
         <TooltipContent>
@@ -116,6 +116,7 @@ export const AgentModelSelect = ({
               className={TAGGED_ITEM}
             >
               {icon(model.vendor)}
+              {/* Its own span, so the trigger truncates the name instead of wrapping it to one word. */}
               <span className="truncate">{model.name}</span>
             </PromptInputSelectItem>
           ))}
