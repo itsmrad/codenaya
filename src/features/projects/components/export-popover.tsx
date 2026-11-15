@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
+import { useProjectCommands } from "@/lib/command-palette";
 import { useSecurityGate } from "@/features/security/hooks/use-security-gate";
 import { SecurityScanDialog } from "@/features/security/components/security-scan-dialog";
 
@@ -78,6 +79,8 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
   const exportRepoUrl = project?.exportRepoUrl;
   const githubSync = project?.githubSync;
   const unpushed = useUnpushedRuns(projectId);
+  // Also opened from the chat's first-build card (#341), until the first export.
+  useProjectCommands({ "export-github": exportStatus === "completed" ? null : () => setOpen(true) });
 
   const form = useForm({
     defaultValues: {

@@ -108,6 +108,7 @@ import {
   PLAN_MODE_TOOLS,
   SWARM_MODE,
 } from '../plan-mode';
+import { splitSuggestions } from '../suggestions';
 import { SWARM_DELEGATE_AGENT_NAME, swarmRequest, swarmRun } from './lib/swarm-run';
 
 interface MessageEvent {
@@ -1028,19 +1029,27 @@ export const processMessage = inngest.createFunction(
     // The first run that wrote files and verified its build ends a seeded
     // project's first build (#338). Before the message completes, so the
     // client sees the flag cleared by the time the run is no longer active.
-    if (verified && wroteFiles(result.state.results)) {
-      await step.run("complete-first-build", async () => {
-        await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
-      });
-    }
+    // The run that ends it gets the one-time publish / export card (#341).
+    const firstBuild =
+      verified &&
+      wroteFiles(result.state.results) &&
+      (await step.run("complete-first-build", () =>
+        convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId }),
+      ));
+
+    // Follow-up chips (#256) come out of the reply; the raw block is never shown.
+    const { content, suggestions } = splitSuggestions(assistantResponse);
+    const reply = content || DEFAULT_REPLY_MESSAGE;
 
     // Update the assistant message with the response (this also sets status to completed)
     await step.run("update-assistant-message", async () => {
       await convex.mutation(api.system.updateMessageContent, {
         internalKey,
         messageId,
-        content: buildNote && !stuck ? `${assistantResponse}\n\n${buildNote}` : assistantResponse,
+        content: buildNote && !stuck ? `${reply}\n\n${buildNote}` : reply,
         ...(stuck ? { stuck } : verified || creditStopped ? {} : { outcome: "error" as const }),
+        ...(suggestions.length ? { suggestions } : {}),
+        ...(firstBuild ? { firstBuild: true } : {}),
       })
     });
 
