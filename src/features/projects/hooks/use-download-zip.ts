@@ -36,7 +36,7 @@ export const useDownloadZip = (projectId: Id<"projects">) => {
       const blob = await zip.generateAsync({ type: "blob" });
       downloadBlob(blob, getZipFileName(project?.name ?? ""));
     } catch {
-      toast.error("Unable to download ZIP");
+      toast.error("Couldn't download the ZIP", { description: "Your files are unchanged. Try again." });
     } finally {
       setIsDownloading(false);
     }
