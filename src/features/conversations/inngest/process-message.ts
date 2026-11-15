@@ -230,7 +230,9 @@ export const processMessage = inngest.createFunction(
 
     const creditLimit = await step.run("get-run-credit-limit", () =>
       runCreditLimit(internalKey, projectId, runModel.metering.source));
-    const outOfCredits = () => creditLimit !== null && creditsForCost(usage.costUsd) >= creditLimit;
+    // Rebuilt from sequential coding turns only: the parallel title may finish at any router call.
+    let codingCostUsd = 0;
+    const outOfCredits = () => creditLimit !== null && creditsForCost(codingCostUsd) >= creditLimit;
     let creditStopped = false;
 
     const runKey = runModel.key;
@@ -312,7 +314,9 @@ export const processMessage = inngest.createFunction(
       const tokens = usageOfResponse(raw);
       usage.inputTokens += tokens.inputTokens;
       usage.outputTokens += tokens.outputTokens;
-      usage.costUsd += pricing ? costUsd(pricing, tokens) : 0;
+      const cost = pricing ? costUsd(pricing, tokens) : 0;
+      usage.costUsd += cost;
+      if (id !== "record-usage-title") codingCostUsd += cost;
       await sendUsage(id);
     };
 
@@ -889,7 +893,7 @@ export const processMessage = inngest.createFunction(
         if (lastResult?.agentName === SUMMARY_AGENT_NAME) return undefined;
         if (outOfCredits()) {
           creditStopped = true;
-          return summaryAgent;
+          return hasTextResponse && !hasToolCalls ? undefined : summaryAgent;
         }
 
         // callCount, not results: seeded history would count as steps.
@@ -981,8 +985,10 @@ export const processMessage = inngest.createFunction(
     // Changes that ended on a failed or missing check get a repair here, before
     // the run completes, so it needs no open tab. Its model calls are metered
     // like the run's; cancelling the run stops it between steps.
+    const repairNeeded = !stuck && needsBuildRepair(result.state.results);
+    if (repairNeeded && outOfCredits()) creditStopped = true;
     const repairBudget = new AbortController();
-    const repair = !stuck && !outOfCredits() && needsBuildRepair(result.state.results)
+    const repair = repairNeeded && !outOfCredits()
       ? await repairBuild({
           projectId,
           internalKey,

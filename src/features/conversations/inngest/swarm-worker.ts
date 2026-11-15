@@ -111,6 +111,7 @@ export const swarmWorker = inngest.createFunction(
 
     // Model closures can hold decrypted BYOK keys: resolve in the body, never in a step.
     const runModel = await resolveWorkerModel({ internalKey, projectId, choice: model, role: task.role });
+    // shortcut: each worker snapshots the full balance, so a swarm can overshoot ~9x; add shared reservations to bound aggregate spend.
     const creditLimit = await step.run("get-worker-credit-limit", () =>
       runCreditLimit(internalKey, projectId, runModel.metering.source));
     const outOfCredits = () => creditLimit !== null && creditsForCost(usage.costUsd) >= creditLimit;
@@ -212,13 +213,14 @@ export const swarmWorker = inngest.createFunction(
       router: ({ network, callCount }) => {
         const last = network.state.results.at(-1);
         if (last?.agentName === SUMMARY_AGENT_NAME) return undefined;
+        const hasCalls = last?.output.some((m) => m.type === "tool_call");
+        const hasText = last?.output.some((m) => m.type === "text" && m.role === "assistant");
         if (outOfCredits()) {
           creditStopped = true;
+          if (hasText && !hasCalls) return undefined;
           unfinished = true;
           return summaryAgent;
         }
-        const hasCalls = last?.output.some((m) => m.type === "tool_call");
-        const hasText = last?.output.some((m) => m.type === "text" && m.role === "assistant");
         if (last && hasText && !hasCalls && !cutOff) return undefined;
         // BYOK is unpriced, so only the step cap bounds it.
         if (callCount >= maxSteps - 1 || usage.costUsd >= maxUsd) {

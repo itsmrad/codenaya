@@ -28,7 +28,7 @@ import {
   autoRouteModel,
   autoRunLabel,
 } from "../auto-route";
-import { type ModelPricing, promoKindOf } from "../catalog";
+import { type ModelPricing, pickableModels, promoKindOf } from "../catalog";
 import {
   type PlatformProviderId,
   type RoutedModel,
@@ -224,7 +224,7 @@ export async function validateModelChoice({
     ) : undefined;
     // Text Auto already falls back outside an unusable pool. Keep that fallback affordable too.
     if (auto && !routed && !withImages && configured.some((m) => !affordable(m))) {
-      const pickable = eligible.filter((m) => !m.hidden && !promoKindOf(m.access));
+      const pickable = pickableModels(eligible);
       routed = pickable.find((m) => m.id === catalog.defaultModelId) ?? pickable[0];
     }
     if (auto && !routed) {

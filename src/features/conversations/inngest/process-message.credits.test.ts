@@ -138,6 +138,32 @@ describe("processMessage credit limit", () => {
     expect(mocks.account).toHaveBeenCalledTimes(2); // explicit fixture read plus one durable snapshot
   });
 
+  it("keeps the real final answer when its text-only turn crosses the limit", async () => {
+    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
+      { data: withUsage("The real final answer.", 2_000, 2_000) }, // 6 credits, balance 3
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(1);
+    const reply = mocks.mutation.mock.calls.find(([ref]) => getFunctionName(ref) === "system:updateMessageContent")?.[1];
+    expect(reply.content).toContain("The real final answer.");
+    expect(reply.outcome).not.toBe("error");
+  });
+
+  it.each([false, true])("excludes title cost from routing even when its completion is held: %s", async (held) => {
+    mocks.query.mockImplementation(async (ref) => QUERIES[getFunctionName(ref)]?.());
+    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
+      { data: withUsage("Expensive title", 100_000, 100_000), held }, // $0.20 on mini exceeds the balance
+      { data: { ...toolCall("listFiles"), usage: { prompt_tokens: 100, completion_tokens: 100 } } },
+      { data: withUsage("The real final answer.", 100, 100) }, // coding total $0.004 stays below it
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(3); // title plus two coding turns, no summary
+    expect(JSON.stringify(outcome.inferenceBodies)).not.toContain("ran out of credits");
+    const reply = mocks.mutation.mock.calls.find(([ref]) => getFunctionName(ref) === "system:updateMessageContent")?.[1];
+    expect(reply.content).toBe("The real final answer.");
+    expect(usageRecords().at(-1).costUsd).toBeCloseTo(0.204, 10); // settlement still bills the title
+  });
+
   it.each(["promo", "unenforced"])("leaves %s runs uncapped", async (kind) => {
     if (kind === "promo") mocks.catalog.mockReturnValue({ ...CATALOG, models: CATALOG.models.map((m) => ({ ...m, access: "promo_unlimited" })) });
     else vi.stubEnv("CREDIT_LIMITS_ENFORCED", "");
