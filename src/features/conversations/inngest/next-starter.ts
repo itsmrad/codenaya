@@ -4,7 +4,7 @@ import { VITE_STARTER_UI } from "./vite-starter-ui";
 
 /** Only explicit framework names select Next; ordinary phrases like "next step" do not. */
 export const wantsNextJs = (prompt: string): boolean =>
-  /\b(?:next\.js|nextjs|next\s+15|app\s+router)\b/i.test(prompt);
+  /\b(?:next(?:\.js|\s+js|js)|next\s+15\s+app|app\s+router)\b/i.test(prompt);
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 

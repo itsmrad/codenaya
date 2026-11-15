@@ -448,6 +448,9 @@ export const STARTER_IN_PLACE_NOTE =
 export const NEXT_STARTER_IN_PLACE_NOTE =
   '(This project already has the Next.js 15 App Router starter and nothing else: package.json, next.config.ts, tsconfig.json, next-env.d.ts, postcss.config.mjs, components.json, src/app/layout.tsx, src/app/page.tsx, src/app/globals.css, src/app/error.tsx, src/lib/utils.ts and the common src/components/ui/ components, including the mounted Sonner toaster. Import these components; do not rewrite them. Do NOT call scaffoldViteApp or start with listFiles. First write a runnable src/app/page.tsx for the request, keeping layout.tsx. Use next/link and next/navigation, no react-router-dom; add "use client" to interactive components. Never add vite.config.ts, index.html or src/main.tsx. Build on this selected framework even if the request does not name Next.js.)';
 
+export const NEXT_STARTER_RECOVERY_NOTE =
+  '(The original user prompt requests Next.js 15 App Router, but its starter is incomplete or missing. Restore missing Next starter files, including package.json, next.config.ts, tsconfig.json, next-env.d.ts, postcss.config.mjs, src/app/layout.tsx and src/app/globals.css. Then make the first runnable implementation src/app/page.tsx for the actual request, preserving any existing layout and user code. Use next/link and next/navigation, no react-router-dom, and add "use client" to interactive components. Never add vite.config.ts, index.html or src/main.tsx; do NOT call scaffoldViteApp. Keep the app runnable between writes and complete the normal final checkBuild, fix and verification workflow.)';
+
 export const NEXT_FIRST_BUILD_APP_NOTE = `
 
 ## First build: show the user's app early

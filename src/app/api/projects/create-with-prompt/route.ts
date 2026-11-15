@@ -159,7 +159,7 @@ export async function POST(request: Request) {
       },
     );
 
-    // Never throws: a failed seed leaves the agent to scaffold, as before.
+    // Never throws: a failed seed leaves the agent to restore the requested starter.
     await seedTemplateFiles({
       internalKey,
       projectId,

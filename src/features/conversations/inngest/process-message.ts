@@ -10,6 +10,7 @@ import {
   FIRST_BUILD_APP_NOTE,
   NEXT_FIRST_BUILD_APP_NOTE,
   NEXT_STARTER_IN_PLACE_NOTE,
+  NEXT_STARTER_RECOVERY_NOTE,
   MAX_AGENT_STEPS,
   STARTER_IN_PLACE_NOTE,
   STEP_BUDGET_NOTE,
@@ -88,6 +89,7 @@ import { buildSkillsPromptSection, buildSupabaseHintSection } from '@/features/s
 import { buildProjectInstructionsSection } from '@/features/projects/instructions';
 import type { ProjectTheme } from '@/features/projects/theme';
 import { starterFramework } from './starter-only';
+import { wantsNextJs } from './next-starter';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
@@ -594,6 +596,13 @@ export const processMessage = inngest.createFunction(
         await convex.query(api.system.getProjectFiles, { internalKey, projectId }),
       ),
     );
+    // A failed seed must not turn an explicit Next request into a Vite app on retry.
+    const nextApp = starter === "next" || (starter === null && wantsNextJs(
+      recentMessages.find((msg) => msg.role === "user")?.content ?? message,
+    ));
+    const firstBuildNote = nextApp
+      ? (starter === "next" ? NEXT_FIRST_BUILD_APP_NOTE : NEXT_STARTER_RECOVERY_NOTE)
+      : FIRST_BUILD_APP_NOTE;
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
       buildProjectInstructionsSection(projectInstructions, projectNotes, projectTheme),
@@ -604,12 +613,14 @@ export const processMessage = inngest.createFunction(
       buildSkillsPromptSection([], forced, unavailable),
       planMode ? PLAN_MODE_PROMPT : "",
       swarm.promptNote,
-      soloFirstBuild ? (starter === "next" ? NEXT_FIRST_BUILD_APP_NOTE : FIRST_BUILD_APP_NOTE) : "",
+      soloFirstBuild ? firstBuildNote : "",
     ].join("");
 
     // A project seeded with the starter says so in the request, not the
     // system prompt, so the first turn builds on it (#338).
-    const starterNote = starter === "next" ? NEXT_STARTER_IN_PLACE_NOTE : STARTER_IN_PLACE_NOTE;
+    const starterNote = starter
+      ? (starter === "next" ? NEXT_STARTER_IN_PLACE_NOTE : STARTER_IN_PLACE_NOTE)
+      : (nextApp ? NEXT_STARTER_RECOVERY_NOTE : "");
 
 
     // Display only: mirrors the agent's tool calls onto the assistant message
@@ -687,7 +698,7 @@ export const processMessage = inngest.createFunction(
       createEditFileTool({ projectId, internalKey, registry }),
       createCreateFilesTool({ projectId, internalKey, registry }),
       createCreateFolderTool({ projectId, internalKey }),
-      ...(starter === "next" ? [] : [createScaffoldViteAppTool({ projectId, internalKey })]),
+      ...(nextApp ? [] : [createScaffoldViteAppTool({ projectId, internalKey })]),
       createRenameFileTool({ projectId, internalKey }),
       createDeleteFilesTool({ projectId, internalKey }),
       createCheckBuildTool({ projectId, internalKey, ownerId: mcpOwnerId }),
@@ -972,7 +983,7 @@ export const processMessage = inngest.createFunction(
     let result;
     try {
       result = await network.run(
-        starter ? `${request}\n\n${starterNote}` : request,
+        starterNote ? `${request}\n\n${starterNote}` : request,
       );
     } catch (error) {
       await settleRun("record-usage-on-error");

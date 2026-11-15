@@ -55,11 +55,11 @@ describe("Next App Router starter", () => {
 });
 
 describe("wantsNextJs", () => {
-  it.each(["Use Next.js", "build with NEXTJS", "a next 15 app", "Use the App Router", "(Next.js) dashboard", "Next.js 15 App Router"])("recognises %s", (prompt) => {
+  it.each(["Use Next.js", "build with NEXTJS", "Use Next JS", "a next 15 app", "next 15 App Router", "Use the App Router", "(Next.js) dashboard", "Next.js 15 App Router"])("recognises %s", (prompt) => {
     expect(wantsNextJs(prompt)).toBe(true);
   });
 
-  it.each(["Build a dashboard", "Use Vite", "what is the next step?", "next steps", "next 150", "mynextjsapp", "app routers", "next.jsx", ""])("keeps Vite for %s", (prompt) => {
+  it.each(["Build a dashboard", "Use Vite", "what is the next step?", "next steps", "next 15 items", "next 15 minutes", "the next 15 days", "next 15", "next 150", "mynextjsapp", "app routers", "next.jsx", ""])("keeps Vite for %s", (prompt) => {
     expect(wantsNextJs(prompt)).toBe(false);
   });
 });

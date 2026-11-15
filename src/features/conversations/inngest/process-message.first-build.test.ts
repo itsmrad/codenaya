@@ -21,17 +21,18 @@ vi.mock("@/lib/convex-client", async () => {
 
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { BUILD_NOT_BUILT_NOTE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
-import { FIRST_BUILD_APP_NOTE, NEXT_FIRST_BUILD_APP_NOTE, NEXT_STARTER_IN_PLACE_NOTE, STARTER_IN_PLACE_NOTE } from "./constants";
+import { FIRST_BUILD_APP_NOTE, NEXT_FIRST_BUILD_APP_NOTE, NEXT_STARTER_IN_PLACE_NOTE, NEXT_STARTER_RECOVERY_NOTE, STARTER_IN_PLACE_NOTE } from "./constants";
 import { NEXT_APP_STARTER } from "./next-starter";
 import { drive, text, toolCall } from "./process-message.driver";
 import { VITE_REACT_STARTER } from "./vite-starter";
 
 let projectFiles: unknown[];
 let needsFirstBuild: boolean;
+let recentMessages: Array<{ _id: string; role: "user" | "assistant"; content: string }>;
 
 const QUERIES: Record<string, () => unknown> = {
   "system:getConversationById": () => ({ title: DEFAULT_CONVERSATION_TITLE }),
-  "system:getRecentMessages": () => [],
+  "system:getRecentMessages": () => recentMessages,
   "system:getProjectById": () => ({ ownerId: "user_1" }),
   "system:getProjectMcpConnections": () => [],
   "system:getProjectFiles": () => projectFiles,
@@ -75,6 +76,7 @@ beforeEach(() => {
       : null,
   );
   projectFiles = [];
+  recentMessages = [];
   needsFirstBuild = false;
 });
 
@@ -133,6 +135,39 @@ describe("processMessage title off the first-build path", () => {
 });
 
 describe("processMessage first build (#338)", () => {
+  it.each(["empty", "partial"])("keeps an explicit Next request on Next when the seed is %s", async (kind) => {
+    needsFirstBuild = true;
+    projectFiles = kind === "partial"
+      ? [{ _id: "layout", name: "src/app/layout.tsx", type: "file" }]
+      : [];
+    const outcome = await drive(MODEL, [{ data: text("Todo app") }, { data: text("Built it.") }], "Build a Next JS todo app");
+    const { system, user } = codingRequest(outcome.inferenceBodies);
+    expect(system).toContain(JSON.stringify(NEXT_STARTER_RECOVERY_NOTE).slice(1, -1));
+    expect(system).not.toContain(JSON.stringify(FIRST_BUILD_APP_NOTE).slice(1, -1));
+    expect(user).toContain(JSON.stringify(NEXT_STARTER_RECOVERY_NOTE).slice(1, -1));
+    expect(user).not.toContain(JSON.stringify(NEXT_STARTER_IN_PLACE_NOTE).slice(1, -1));
+    const coding = (outcome.inferenceBodies as ChatBody[]).find((body) => body.tools)!;
+    expect(coding.tools?.map((tool) => tool.function.name)).not.toContain("scaffoldViteApp");
+    expect(coding.tools?.map((tool) => tool.function.name)).toContain("writeFiles");
+  });
+
+  it("preserves the original Next request when retrying a failed seed with continue", async () => {
+    needsFirstBuild = true;
+    recentMessages = [
+      { _id: "u1", role: "user", content: "Build a Next.js todo app" },
+      { _id: "a1", role: "assistant", content: "" },
+      { _id: "u2", role: "user", content: "Continue" },
+      { _id: "m1", role: "assistant", content: "" },
+    ];
+    const outcome = await drive(MODEL, [{ data: text("Todo app") }, { data: text("Built it.") }], "Continue");
+    const { system, user } = codingRequest(outcome.inferenceBodies);
+    expect(system).toContain(JSON.stringify(NEXT_STARTER_RECOVERY_NOTE).slice(1, -1));
+    expect(system).not.toContain(JSON.stringify(FIRST_BUILD_APP_NOTE).slice(1, -1));
+    expect(user).toContain(JSON.stringify(NEXT_STARTER_RECOVERY_NOTE).slice(1, -1));
+    const coding = (outcome.inferenceBodies as ChatBody[]).find((body) => body.tools)!;
+    expect(coding.tools?.map((tool) => tool.function.name)).not.toContain("scaffoldViteApp");
+  });
+
   it("uses Next first-build guidance and does not offer the Vite scaffold for a Next starter", async () => {
     needsFirstBuild = true;
     projectFiles = NEXT_APP_STARTER.map(({ path }) => ({ _id: `id:${path}`, name: path, type: "file" }));
