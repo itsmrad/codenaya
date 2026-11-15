@@ -162,6 +162,22 @@ describe("processMessage first build (#338)", () => {
       .not.toContain(JSON.stringify(FIRST_BUILD_APP_NOTE).slice(1, -1));
   });
 
+  it("adds early App guidance when swarm was requested but the kill switch is off", async () => {
+    needsFirstBuild = true;
+    mocks.query.mockImplementation(async (ref) => {
+      const name = getFunctionName(ref);
+      if (name === "swarm:getSwarmSettings") return { enabled: false, platformMaxDepth: 1 };
+      return QUERIES[name]?.();
+    });
+
+    const outcome = await drive(
+      MODEL, [{ data: text("Todo app") }, { data: text("Built it.") }], "todo app", { mode: "swarm" },
+    );
+
+    expect(codingRequest(outcome.inferenceBodies).system)
+      .toContain(JSON.stringify(FIRST_BUILD_APP_NOTE).slice(1, -1));
+  });
+
   it("leaves the first build pending when the check could not build the app", async () => {
     // No sandbox and no Vite project: the check passes without building.
     await drive(MODEL, [
