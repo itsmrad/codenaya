@@ -19,7 +19,7 @@ interface DelegateTasksToolOptions {
   ownerId: string;
   model: AgentModelChoice;
   /** A sub-orchestrator's call (depth 1): its task, whose owned paths its workers split. */
-  parent?: { taskId: string; ownedPaths: string[]; depth: number };
+  parent?: { taskId: string; agentTaskId: Id<"agentTasks">; ownedPaths: string[]; depth: number };
   /** Collects the paths its workers wrote, for the sub-orchestrator's own report. */
   writtenPaths?: string[];
   /** How deep this run's swarm may go (see `validatePlan`); Convex enforces it too. */
@@ -139,6 +139,7 @@ export const createDelegateTasksTool = ({
             data: {
               parentMessageId: messageId,
               agentTaskId: agentTaskIds[i],
+              ...(parent ? { parentAgentTaskId: parent.agentTaskId } : {}),
               projectId,
               ownerId,
               model,

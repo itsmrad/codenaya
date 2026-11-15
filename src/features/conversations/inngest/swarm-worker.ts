@@ -33,6 +33,7 @@ import { createWriteFilesTool } from "./tools/write-files";
 export interface SwarmWorkerEvent {
   parentMessageId: Id<"messages">;
   agentTaskId: Id<"agentTasks">;
+  parentAgentTaskId?: Id<"agentTasks">;
   projectId: Id<"projects">;
   ownerId: string;
   model: AgentModelChoice;
@@ -72,6 +73,7 @@ export const swarmWorker = inngest.createFunction(
     cancelOn: [
       { event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" },
       { event: "agent-task/cancel", if: "event.data.agentTaskId == async.data.agentTaskId" },
+      { event: "agent-task/cancel", if: "event.data.parentAgentTaskId == async.data.agentTaskId" },
     ],
     triggers: [{ event: "agent-task/run" }],
     onFailure: async ({ event, step }) => {
@@ -146,7 +148,7 @@ export const swarmWorker = inngest.createFunction(
           .map(guardOwnedPaths(task.ownedPaths)),
         ...(subOrchestrator ? [createDelegateTasksTool({
           internalKey, projectId, messageId: parentMessageId, ownerId, model,
-          parent: { taskId: task.taskId, ownedPaths: task.ownedPaths, depth }, writtenPaths: childWrites,
+          parent: { taskId: task.taskId, agentTaskId, ownedPaths: task.ownedPaths, depth }, writtenPaths: childWrites,
         })] : []),
       ].map(refuseCutOffCalls).map(decodeJsonArgs),
       lifecycle: {
