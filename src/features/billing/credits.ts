@@ -127,23 +127,35 @@ export function creditStanding(plan: Plan, usage: CreditUsage | null, now: numbe
 /** Why a platform run can't start: the month's grant or today's cap is spent. */
 export type CreditRefusal = "month_used_up" | "day_used_up";
 
+/**
+ * Roughly one agent step: the system prompt and project context in, a reply
+ * out (#643; a 13-step build averaged ~26k in, ~1.4k out per step).
+ */
+export const MIN_RUN_USAGE: TokenUsage = { inputTokens: 30_000, outputTokens: 2_000 };
+
+/** Credits a platform run needs to start: one step at `pricing`, else 1. */
+export const minRunCredits = (pricing: ModelPricing | undefined) =>
+  Math.max(1, pricing ? creditsForCost(costUsd(pricing, MIN_RUN_USAGE)) : 1);
+
+/** Refuses when the month or today has fewer than `minCredits` left (#643). */
 export function creditRefusal(
   plan: Plan,
   usage: CreditUsage | null,
   now: number,
+  minCredits = 1,
 ): CreditRefusal | null {
   const { monthLeft, dayLeft } = creditStanding(plan, usage, now);
-  if (monthLeft === 0) return "month_used_up";
-  if (dayLeft === 0) return "day_used_up";
+  if (monthLeft < minCredits) return "month_used_up";
+  if (dayLeft !== null && dayLeft < minCredits) return "day_used_up";
   return null;
 }
 
 /** The send routes' answer, with `code: "insufficient_credits"`. */
 export const CREDIT_REFUSAL_MESSAGES: Record<CreditRefusal, string> = {
   month_used_up:
-    "You've used this month's free credits. Add your own key in Settings → AI providers for unlimited runs.",
+    "You don't have enough of this month's free credits left for this model. Pick a cheaper model, or add your own key in Settings → AI providers for unlimited runs.",
   day_used_up:
-    "You've used today's free credits. They reset at midnight UTC, or add your own key in Settings → AI providers for unlimited runs.",
+    "You don't have enough of today's free credits left for this model. They reset at midnight UTC, or pick a cheaper model or add your own key in Settings → AI providers for unlimited runs.",
 };
 
 export const INSUFFICIENT_CREDITS_CODE = "insufficient_credits";
