@@ -57,7 +57,8 @@ export const swarmHeader = (tasks: SwarmTask[], startedAt: number, endedAt: numb
   if (solo && tasks.length === 0) return `Swarm · Built solo: ${solo} · ${swarmElapsed(startedAt, endedAt)}`;
   if (tasks.length === 0) {
     const completed = steps.filter((step) => step.kind === "tool" && step.status !== "running").length;
-    // Steps are tool rows, not model calls (one reply can write several files), so they never count against the foundation budget.
+    // The foundation budget (FOUNDATION_MAX_STEPS) counts model calls, in swarm-run's forceDelegation. One reply can write
+    // several files, so tool rows are shown as plain progress and never as n/budget.
     const planning = steps.some((step) => step.tool === "delegateTasks");
     return `Swarm · ${planning ? "Planning tasks…" : `Setting up shared files · ${completed} ${completed === 1 ? "step" : "steps"} done`} · ${swarmElapsed(startedAt, endedAt)}`;
   }
