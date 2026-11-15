@@ -49,7 +49,7 @@ import {
   isPortOpen,
   type DevStart,
 } from "@/features/sandbox-preview/server/dev-server";
-import { rewriteProxyHeaders } from "@/features/sandbox-preview/server/preview-proxy";
+import { rewriteProxyHeaders, shouldInjectBridge } from "@/features/sandbox-preview/server/preview-proxy";
 import { appendHostFlag, detectFrameworkFromFiles } from "@/features/sandbox-preview/utils/dev-command";
 import {
   missingReferencedFiles,
@@ -770,6 +770,7 @@ const PROXY_PORT = parseInt(process.env.PROXY_PORT || "${proxyPort}", 10);
 const BRIDGE = ${JSON.stringify(PREVIEW_BRIDGE_SCRIPT)};
 const insertBridge = ${String(insertBridge)};
 const rewriteProxyHeaders = ${String(rewriteProxyHeaders)};
+const shouldInjectBridge = ${String(shouldInjectBridge)};
 
 const server = http.createServer((req, res) => {
   const options = {
@@ -784,10 +785,7 @@ const server = http.createServer((req, res) => {
 
   const proxyReq = http.request(options, (proxyRes) => {
     const headers = { ...proxyRes.headers };
-    const isPage =
-      req.method === 'GET' &&
-      String(headers['content-type'] || '').includes('text/html') &&
-      !headers['content-encoding'];
+    const isPage = shouldInjectBridge(req.method, proxyRes.statusCode, headers);
     if (!isPage) {
       res.writeHead(proxyRes.statusCode, headers);
       proxyRes.pipe(res, { end: true });

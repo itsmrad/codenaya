@@ -5,6 +5,7 @@ import {
   useEffect,
   useLayoutEffect,
   useCallback,
+  useMemo,
   useRef,
   type ReactNode,
   type RefObject,
@@ -104,6 +105,7 @@ import { cn } from "@/lib/utils";
 import { useProject, useRecordFirstPreviewShown } from "../hooks/use-projects";
 import { useFilesWithContent } from "../hooks/use-files";
 import { isPreviewOnScreen, markPreviewOpened } from "../utils/first-run";
+import { previewEngineUrl } from "../utils/preview-engine";
 import { useActiveRun } from "@/features/conversations/hooks/use-conversations";
 import {
   useChatSendBlock,
@@ -173,8 +175,13 @@ export const PreviewView = ({
   
   // URL dictates isolation mode via next.config.ts conditional headers
   const engineParam = searchParams.get("engine") as PreviewEngine | null;
-  const isNext = detectFrameworkFromFiles(files ? buildFlatFileList(files) : [], project?.settings?.devCommand) === "next";
-  const activeEngine = !isNext && engineParam === "webcontainer" ? "webcontainer" : "sandbox";
+  const requestedEngine = engineParam === "webcontainer" ? "webcontainer" : "sandbox";
+  const isNext = useMemo(
+    () => detectFrameworkFromFiles(files ? buildFlatFileList(files) : [], project?.settings?.devCommand) === "next",
+    [files, project?.settings?.devCommand],
+  );
+  const activeEngine = isNext ? "sandbox" : requestedEngine;
+  const needsSandboxReload = isNext && requestedEngine === "webcontainer";
 
   // During the first build the E2B sandbox boots once package.json exists and
   // the files have gone quiet (#486), so it is warm when the run ends: later
@@ -199,7 +206,7 @@ export const PreviewView = ({
 
   const sandbox = useSandbox({
     files,
-    enabled: activeEngine === "sandbox" && !holdSandbox,
+    enabled: activeEngine === "sandbox" && !holdSandbox && !needsSandboxReload,
     projectId,
     settings: project?.settings,
   });
@@ -460,18 +467,20 @@ export const PreviewView = ({
     return () => clearTimeout(timer);
   }, [hookError]);
 
-  // Only ever called from a user action. WebContainer needs the COOP/COEP headers
+  // WebContainer needs the COOP/COEP headers
   // next.config.ts sets for `?engine=webcontainer`, so switching is a full page
   // load; doing it automatically on a sandbox error turned config errors into a
   // silent reload with no explanation.
   const switchEngine = useCallback((newEngine: PreviewEngine) => {
     if (isNext && newEngine === "webcontainer") return;
-    if (newEngine === activeEngine) return;
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("engine", newEngine);
-    params.set("view", "preview");
-    window.location.href = `${pathname}?${params.toString()}`;
-  }, [activeEngine, isNext, pathname, searchParams]);
+    if (newEngine === requestedEngine) return;
+    window.location.href = previewEngineUrl(pathname, searchParams.toString(), newEngine);
+  }, [requestedEngine, isNext, pathname, searchParams]);
+  // A Next project opened with the browser-engine URL must drop its COEP
+  // headers before the E2B iframe can load; a client-side replace keeps them.
+  useEffect(() => {
+    if (needsSandboxReload) window.location.replace(previewEngineUrl(pathname, searchParams.toString(), "sandbox"));
+  }, [needsSandboxReload, pathname, searchParams]);
 
   const isLoading = status === "booting" || status === "installing";
   // The build card covers the preview until the pre-warmed sandbox is running;
