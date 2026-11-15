@@ -16,6 +16,6 @@ describe("next.config security headers", () => {
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "strict-origin-when-cross-origin",
     });
-    expect(headers["Permissions-Policy"]).toContain("camera=()");
+    expect(headers["Permissions-Policy"]).toBe("camera=(), microphone=(self), geolocation=()");
   });
 });

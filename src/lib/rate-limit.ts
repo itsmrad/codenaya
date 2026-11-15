@@ -200,6 +200,16 @@ export const ENHANCE_PROMPT_RATE_LIMIT: RateLimitConfig = {
 };
 
 /**
+ * Each dictation is one transcription billed to us. Twenty a minute is far
+ * above someone dictating prompts while stopping a scripted loop.
+ */
+export const TRANSCRIBE_RATE_LIMIT: RateLimitConfig = {
+  scope: "transcribe",
+  limit: 20,
+  windowMs: 60_000,
+};
+
+/**
  * Inline suggestions fire 300ms after typing pauses, so steady typing makes a
  * request every second or so. Two a second sustained is above any human typist
  * while stopping a scripted loop on our (or the user's) key.
