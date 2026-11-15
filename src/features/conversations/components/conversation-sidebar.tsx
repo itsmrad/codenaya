@@ -52,6 +52,8 @@ import { MODEL_LIMIT_CODE } from "@/features/billing/model-spend";
 import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 import { useFiles } from "@/features/projects/hooks/use-files";
+import { MakeItMineCard } from "@/features/templates/components/make-it-mine-card";
+import { BRAND_FILE } from "@/features/templates/make-it-mine";
 import { useProject } from "@/features/projects/hooks/use-projects";
 import {
   SkillSlashMenu,
@@ -79,7 +81,6 @@ import { EnhancePromptButton } from "./enhance-prompt-button";
 import { type ComposerMode, PlanModeToggle } from "./plan-mode-toggle";
 import {
   type MessageMode,
-  buildPlanMessage,
   diagnoseStuckMessage,
 } from "../plan-mode";
 import { type AgentModelChoice, nextTier } from "../agent-models";
@@ -572,7 +573,7 @@ export const ConversationSidebar = ({
         checkpoint={restoreTarget}
         onOpenChange={(open) => !open && setRestoreTarget(null)}
       />
-      <div ref={panelRef} className="@container flex flex-col h-full bg-sidebar">
+      <div ref={panelRef} data-testid="chat-panel" className="@container flex flex-col h-full bg-sidebar">
         <div className="h-8.75 flex items-center justify-between border-b">
           <div className="text-sm font-medium truncate pl-3">
             {activeConversation?.title ?? DEFAULT_CONVERSATION_TITLE}
@@ -611,7 +612,14 @@ export const ConversationSidebar = ({
           <ChatEmptyState
             starters={starters}
             onSelect={(prompt) => void handleSubmit({ text: prompt, files: [] })}
-          />
+          >
+            {idOfPath.has(BRAND_FILE) && (
+              <MakeItMineCard
+                idOfPath={idOfPath}
+                onDescribe={(prompt) => void handleSubmit({ text: prompt, files: [] })}
+              />
+            )}
+          </ChatEmptyState>
         ) : (
         <Conversation className="flex-1">
           <ConversationContent className="gap-6 px-4 py-4 pb-12">
@@ -634,9 +642,9 @@ export const ConversationSidebar = ({
                   pathOf={pathOf}
                   onOpenFile={handleOpenFile}
                   onRetry={() => resend(messageIndex, message.mode)}
-                  onBuildPlan={() => {
+                  onBuildPlan={async (build) => {
                     setMode("build");
-                    void sendMessage(buildPlanMessage(message.content));
+                    return (await sendMessage(build)) === "sent";
                   }}
                   stuckRetry={message.stuck && stuckRetry(message, messageIndex)}
                   onDiagnose={() => {
@@ -751,10 +759,9 @@ export const ConversationSidebar = ({
                 disabled={enhancer.isEnhancing}
               />
             </PromptInputBody>
-            <PromptInputFooter className="h-10 px-2 py-0">
-              {/* The tools shrink (the model name truncates) so a narrow
-                  panel never pushes the send button out of view. */}
-              <PromptInputTools className="min-w-0">
+            <PromptInputFooter className="min-h-10 px-2 py-1">
+              {/* Truncate the model name, and wrap tools when even their icons do not fit. */}
+              <PromptInputTools className="min-w-0 flex-1 flex-wrap">
                 <ComposerAttachButton disabled={isProcessing} />
                 {!isProcessing && <PromptInputSpeechButton onTranscriptionChange={setInput} />}
                 <EnhancePromptButton
@@ -769,14 +776,15 @@ export const ConversationSidebar = ({
                   disabled={isProcessing}
                 />
                 <AgentModelSelect
+                  triggerClassName="w-0 min-w-16 flex-1"
                   value={agentModel}
                   onValueChange={setAgentModel}
                   disabled={isProcessing}
                 />
               </PromptInputTools>
               <div className="flex shrink-0 items-center gap-2">
-                {/* Only once even the longest model name (max-w-44) fits beside it (#217). */}
-                <span className="hidden items-center gap-1 text-[11px] text-muted-foreground @[560px]:inline-flex">
+                {/* Leave room for the picker when the mode labels appear. */}
+                <span className="hidden items-center gap-1 text-[11px] text-muted-foreground @[640px]:inline-flex">
                   <kbd className="inline-flex h-4 items-center rounded border px-1 font-sans">
                     <CornerDownLeftIcon className="size-2.5" />
                     <span className="sr-only">Enter</span>

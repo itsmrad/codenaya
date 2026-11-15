@@ -31,12 +31,17 @@ export default function App() {
 `;
 
 /**
- * The starting point every template's agent run builds on: the same starter
- * `scaffoldViteApp` writes and the agent's system prompt describes (#328),
- * named after the template, with a placeholder page showing its title.
+ * The same starter `scaffoldViteApp` writes and the agent's system prompt
+ * describes (#328), named after the template. An instant template's `source`
+ * files (#362) replace or add to it; without one, `src/App.tsx` is a
+ * placeholder page showing the title, for the agent run to build on.
  */
-export const getTemplateSeedFiles = (template: StarterTemplate): SeedFile[] =>
-  VITE_REACT_STARTER.map(({ path, content }) => {
+export const getTemplateSeedFiles = (
+  template: StarterTemplate,
+  source: SeedFile[] = [],
+): SeedFile[] => {
+  const sourcePaths = new Set(source.map((file) => file.path));
+  const starter = VITE_REACT_STARTER.filter(({ path }) => !sourcePaths.has(path)).map(({ path, content }) => {
     if (path === "package.json") {
       return { path, content: json({ ...JSON.parse(content), name: template.id }) };
     }
@@ -47,6 +52,8 @@ export const getTemplateSeedFiles = (template: StarterTemplate): SeedFile[] =>
     if (path === "src/App.tsx") return { path, content: appTsx(template) };
     return { path, content };
   });
+  return [...starter, ...source];
+};
 
 /**
  * Splits seed files into the folders to create (parents first) and the files

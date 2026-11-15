@@ -39,6 +39,17 @@ describe("SwarmBoard", () => {
     expect(html).toContain("focus-visible:ring-ring");
   });
 
+  it.each(["queued", "running"] as const)("ticks a %s worker's clock from updatedAt before startedAt is written", (status) => {
+    const html = board([{ ...worker(), status, updatedAt: 0 }]);
+    // The orchestrator row shows its own clock, so the worker's makes two.
+    expect(html.split('<span class="font-mono tabular-nums">0:01</span>')).toHaveLength(3);
+    expect(html).toContain("0 files touched");
+  });
+
+  it("shows no clock for a finished worker that never recorded a start", () => {
+    expect(board([{ ...worker(), updatedAt: 0 }]).split('<span class="font-mono tabular-nums">0:01</span>')).toHaveLength(2);
+  });
+
   it("leaves legacy workers without a self-check badge", () => {
     expect(board([worker()])).not.toContain("Self-check");
   });

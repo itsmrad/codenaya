@@ -116,7 +116,8 @@ export const AgentModelSelect = ({
               className={TAGGED_ITEM}
             >
               {icon(model.vendor)}
-              {model.name}
+              {/* Its own span, so the trigger truncates the name instead of wrapping it to one word. */}
+              <span className="truncate">{model.name}</span>
             </PromptInputSelectItem>
           ))}
         </SelectGroup>
@@ -131,7 +132,7 @@ export const AgentModelSelect = ({
                 className={TAGGED_ITEM}
               >
                 {icon(key.provider)}
-                {model.label}
+                <span className="truncate">{model.label}</span>
               </PromptInputSelectItem>
             ))}
           </SelectGroup>

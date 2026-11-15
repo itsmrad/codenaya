@@ -35,6 +35,10 @@
  * not become stale advice.
  */
 
+import {
+  CONTENTFUL_DESTRUCTIVE_TOOLS,
+  CONTENTFUL_READ_TOOLS,
+} from "./contentful-tools";
 import { POSTHOG_DESTRUCTIVE_TOOLS } from "./posthog-destructive-tools";
 import { POSTHOG_READ_TOOLS } from "./posthog-read-tools";
 
@@ -48,6 +52,52 @@ const NO_URL_SCOPING: ProviderScopeCapabilities = {
   queryParams: [],
   headers: [],
 };
+
+/**
+ * Region-independent parts of the Amplitude entries. The US and EU hosts serve
+ * the same tools; each region is its own entry with its own trusted hostname.
+ *
+ * Full inventory: https://amplitude.com/docs/amplitude-ai/amplitude-mcp#available-tools-and-capabilities
+ * (reviewed 2026-11-15). Action-dispatching tools that can create, edit, share,
+ * sync or delete are gated, as is `run_amp`, which proxies the Developer API.
+ * Ad-hoc queries, chart data, natural-language taxonomy search, user profiles,
+ * session replays, feedback comments, agent transcripts and results, Wave,
+ * and warehouse connections are neither listed write nor read, so they stay gated.
+ */
+const AMPLITUDE_SHARED = {
+  description: "Query product analytics and manage charts, dashboards, cohorts, and experiments.",
+  category: "Analytics",
+  authModes: ["oauth"],
+  supportsReadOnly: false,
+  scope: NO_URL_SCOPING,
+  destructiveTools: [
+    "manage_amp_context", "use_amplitude_chart_monitors", "render_amplitude_chart",
+    "use_amp_dashboards", "use_amp_notebooks", "use_amp_comments", "share_amp_entities",
+    "manage_amp_entities", "use_amplitude_cohorts", "use_amp_experiments", "use_amp_flags",
+    "use_amplitude_metrics", "manage_amp_events", "manage_amp_properties", "manage_amp_branches",
+    "manage_wave_opportunities", "manage_wave_product_areas", "manage_wave_verification_artifacts",
+    "use_amp_ai_visibility", "run_amp",
+  ],
+  readOnlyTools: [
+    "get_amp_taxonomy", "get_amplitude_context", "get_from_url", "get_group_types",
+    "get_transformations", "search_amp_entities",
+  ],
+  notes:
+    "Acts as the signed-in Amplitude user; writes also need the Use MCP (write) role action. Org admins can block MCP under Settings > Content Access. Use the entry matching your data region. No URL-level read-only mode.",
+} as const;
+
+/** Region-independent parts of the Contentful entries; same tools on both hosts. */
+const CONTENTFUL_SHARED = {
+  description: "Search, edit, and publish entries, assets, content types, and releases.",
+  category: "Content",
+  authModes: ["oauth"],
+  supportsReadOnly: false,
+  scope: NO_URL_SCOPING,
+  destructiveTools: CONTENTFUL_DESTRUCTIVE_TOOLS,
+  readOnlyTools: CONTENTFUL_READ_TOOLS,
+  notes:
+    "Needs the Contentful MCP app installed in each space and environment; its configuration chooses the allowed tool categories and read-only or read/write per environment. Pick spaces and environments at every sign-in; environment aliases are not supported. Use the entry matching your organization's region.",
+} as const;
 
 /**
  * Freeze the registry all the way down.
@@ -192,7 +242,11 @@ const CATALOG = {
     category: "Dev tools",
     logo: "/integrations/github.svg",
     mcpUrl: "https://api.githubcopilot.com/mcp/",
-    authModes: ["oauth", "api_key"],
+    // PAT only for now. OAuth cannot complete: the authorization server is
+    // github.com, which the as-guard rejects as cross-site, and GitHub has no
+    // dynamic client registration. Re-add "oauth" with a pre-registered
+    // client (#539) and `trustedAuthorizationServerOrigins`.
+    authModes: ["api_key"],
     trustedHostnames: ["api.githubcopilot.com"],
     supportsReadOnly: true,
     scope: {
@@ -1034,6 +1088,410 @@ const CATALOG = {
     ],
     notes:
       "Acts as your Clerk Dashboard account in the selected workspace. No URL-level read-only mode; production-instance creation cannot be undone.",
+  },
+
+  exa: {
+    id: "exa",
+    displayName: "Exa",
+    description: "Search the web, read pages, and run multi-step research.",
+    category: "Search",
+    logo: "/integrations/exa.svg",
+    mcpUrl: "https://mcp.exa.ai/mcp",
+    authModes: ["oauth", "api_key"],
+    trustedHostnames: ["mcp.exa.ai"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full published inventory: https://docs.exa.ai/reference/exa-mcp#available-tools
+    // agent_run is usage-billed, so it is gated as spend.
+    destructiveTools: ["agent_run"],
+    // Public-web reads from the inventory above. web_search_advanced_exa stays
+    // gated: summaries, subpage crawling and up to 100 results bill crawl and LLM spend in one call.
+    readOnlyTools: ["web_search_exa", "web_fetch_exa"],
+    apiKey: {
+      header: "x-api-key",
+      valuePrefix: "",
+      hint: "Exa API key",
+    },
+    notes:
+      "Search and fetch only read the public web; agent_run is usage-billed and always needs approval. Note that " +
+      "this server also answers unauthenticated and invalid-credential requests on its keyless tier (rate-limited, " +
+      "no agent_run), so a successful connection probe does not prove the key or token is valid — it only proves " +
+      "the server is reachable. No URL-level read-only mode.",
+  },
+
+  tavily: {
+    id: "tavily",
+    displayName: "Tavily",
+    description: "Search, extract, crawl, and map the web for current sources.",
+    category: "Search",
+    logo: "/integrations/tavily.svg",
+    mcpUrl: "https://mcp.tavily.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.tavily.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full published inventory: https://docs.tavily.com/documentation/mcp#what-you-get
+    // Every tool reads the public web; tavily_research is a long multi-source run, gated as spend.
+    destructiveTools: ["tavily_research"],
+    // Public-web reads from the inventory above. tavily_crawl runs a billed multi-page job, so it stays gated.
+    readOnlyTools: ["tavily_search", "tavily_extract", "tavily_map"],
+    notes:
+      "OAuth only here; Tavily's documented key option puts the key in the MCP URL query string. Connecting with OAuth uses the account's mcp_auth_default API key, which Tavily creates if it does not exist. All tools consume Tavily credits. No URL-level read-only mode.",
+  },
+
+  firecrawl: {
+    id: "firecrawl",
+    displayName: "Firecrawl",
+    description: "Scrape, crawl, and search the web, or operate a live page.",
+    category: "Search",
+    logo: "/integrations/firecrawl.svg",
+    mcpUrl: "https://mcp.firecrawl.dev/v2/mcp-oauth",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.firecrawl.dev"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full published inventory: https://docs.firecrawl.dev/mcp-server/tools and
+    // https://github.com/firecrawl/firecrawl-mcp-server#available-tools, plus the
+    // deprecated but still-registered firecrawl_extract. Billed enrichment, jobs
+    // and extraction calls are gated as spend despite their readOnlyHint.
+    destructiveTools: [
+      "firecrawl_interact",
+      "firecrawl_interact_stop",
+      "firecrawl_agent",
+      "firecrawl_monitor_create",
+      "firecrawl_monitor_update",
+      "firecrawl_monitor_run",
+      "firecrawl_monitor_delete",
+      "firecrawl_feedback",
+      "firecrawl_search_feedback",
+      "alexandria_library_read",
+      "people_company_search",
+      "people_company_enrich",
+      "jobs_search",
+      "firecrawl_extract",
+    ],
+    // Reads from the inventory above. Left gated: firecrawl_scrape (billed per
+    // call, incl. Alexandria runs), firecrawl_crawl (starts a billed job),
+    // firecrawl_parse (returns a signed upload target), monitor list/get
+    // (webhook configuration) and firecrawl_credit_usage (per-key billing).
+    // firecrawl_search is also gated: with scrapeOptions each result bills as an uncapped scrape.
+    readOnlyTools: [
+      "firecrawl_map", "firecrawl_check_crawl_status",
+      "firecrawl_agent_status", "firecrawl_developer_search", "firecrawl_gov_search",
+      "firecrawl_research_search_papers", "firecrawl_research_related_papers",
+      "firecrawl_research_read_paper", "firecrawl_research_inspect_paper",
+      "firecrawl_find_tools", "alexandria_library_search",
+      "firecrawl_monitor_checks", "firecrawl_monitor_check",
+    ],
+    notes:
+      "OAuth endpoint only; API-key connections use a different endpoint and are not offered yet. Interact can click and submit forms on live sites, and monitors can send webhooks or email, so both are gated. Scrape with Alexandria provider calls is billed per call but cannot be gated by name. No URL-level read-only mode.",
+  },
+
+  huggingface: {
+    id: "huggingface",
+    displayName: "Hugging Face",
+    description: "Explore models, datasets, Spaces, and papers, and run Hub jobs.",
+    category: "AI",
+    logo: "/integrations/huggingface.svg",
+    mcpUrl: "https://huggingface.co/mcp",
+    authModes: ["oauth", "api_key"],
+    trustedHostnames: ["huggingface.co"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Built-in inventory: https://github.com/huggingface/hf-mcp-server/blob/main/packages/mcp/src/tool-ids.ts
+    // hf_jobs and the sandbox tools mix read and write operations, so each is gated as a whole.
+    destructiveTools: [
+      "create_repo",
+      "hf_fs_write",
+      "hf_jobs",
+      "hf_sandbox",
+      "hf_sandbox_exec",
+      "hf_sandbox_fs",
+      "dynamic_space",
+    ],
+    // Hub reads from the inventory above. hf_whoami is left gated because it
+    // describes the connected credential and its permissions.
+    readOnlyTools: ["hub_repo_search", "hub_repo_details", "hf_fs"],
+    apiKey: {
+      header: "Authorization",
+      valuePrefix: "Bearer ",
+      hint: "Hugging Face access token (hf_...)",
+    },
+    notes:
+      "The advertised tools follow the account's MCP settings on huggingface.co. Jobs and sandboxes run billed compute. Space tools added in those settings are labelled destructive by the server and so require approval. Prefer a fine-grained, read-only token. No URL-level read-only mode.",
+  },
+
+  webflow: {
+    id: "webflow",
+    displayName: "Webflow",
+    description: "Build pages, manage CMS content, and publish Webflow sites.",
+    category: "Content",
+    logo: "/integrations/webflow.svg",
+    mcpUrl: "https://mcp.webflow.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.webflow.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Every tool tagged "write" in the full inventory (each tool fronts several
+    // actions, so one write action gates the whole tool), plus get_more_tools,
+    // which requests capabilities beyond the loaded set, and ask_webflow_ai,
+    // which is AI-backed and may spend:
+    // https://developers.webflow.com/mcp/tools/data-tools
+    // https://developers.webflow.com/mcp/tools/designer-tools
+    // https://developers.webflow.com/mcp/tools/utility-tools
+    destructiveTools: [
+      "data_agent_instructions_tool",
+      "data_apps_tool",
+      "data_assets_tool",
+      "data_campaigns_tool",
+      "data_cms_tool",
+      "data_comments_tool",
+      "data_component_builder",
+      "data_component_props_tool",
+      "data_component_tool",
+      "data_component_variants_tool",
+      "data_element_builder",
+      "data_element_settings_tool",
+      "data_element_tool",
+      "data_enterprise_tool",
+      "data_fonts_tool",
+      "data_forms_tool",
+      "data_interactions_tool",
+      "data_localization_tool",
+      "data_members_tool",
+      "data_pages_tool",
+      "data_scripts_tool",
+      "data_sitemap_tool",
+      "data_sites_tool",
+      "data_style_tool",
+      "data_variable_tool",
+      "data_webhook_tool",
+      "data_whtml_builder",
+      "asset_tool",
+      "designer_tool",
+      "get_more_tools",
+      "ask_webflow_ai",
+    ],
+    // Tools tagged read-only in the same references.
+    readOnlyTools: [
+      "data_aeo_tool", "data_analyze_tool", "data_optimize_tool",
+      "element_snapshot_tool", "get_asset_preview", "webflow_guide_tool",
+    ],
+    notes:
+      "Each authorization covers one workspace. Element snapshots, image uploads, and reading or changing the Designer selection, page, mode, branch, canvas or breakpoints need the Webflow Designer open with the MCP Bridge App connected. No URL-level read-only mode.",
+  },
+
+  netlify: {
+    id: "netlify",
+    displayName: "Netlify",
+    description: "Create projects, deploy sites, and manage Netlify project settings.",
+    category: "Hosting",
+    logo: "/integrations/netlify.svg",
+    mcpUrl: "https://mcp.netlify.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.netlify.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Docs publish no tool table; names come from the official server source
+    // (https://github.com/netlify/netlify-mcp, src/tools). The default surface
+    // groups operations into netlify-<domain>-services-{reader,updater}
+    // dispatchers; the per-operation names are its ?verbose=true surface. The
+    // team reader returns team environment variables, and request logs can hold
+    // printed secrets, so those readers are gated too.
+    destructiveTools: [
+      "netlify-deploy-services-updater",
+      "netlify-project-services-updater",
+      "netlify-extension-services-updater",
+      "netlify-feedback-services-updater",
+      "netlify-team-services-reader",
+      "netlify-deploy-site",
+      "netlify-project-update-visitor-access-controls",
+      "netlify-project-update-forms",
+      "netlify-project-manage-form-submissions",
+      "netlify-project-update-project-name",
+      "netlify-project-manage-env-vars",
+      "netlify-project-create-new-project",
+      "netlify-extension-change-extension-installation",
+      "netlify-submit-feedback",
+      "netlify-team-get-team-env-vars",
+      "netlify-observability-services-reader",
+      "netlify-observability-get-request-logs",
+      "netlify-observability-get-request-detail",
+    ],
+    // Per-operation reads annotated read-only in the same source, plus the
+    // standalone deploy card and coding-context tools. The grouped readers are
+    // dispatchers and stay unlisted.
+    readOnlyTools: [
+      "netlify-open-deployments", "netlify-refresh-deployments", "get-netlify-coding-context",
+      "netlify-user-get-user", "netlify-deploy-get-deploy", "netlify-deploy-get-deploy-for-site",
+      "netlify-project-get-project", "netlify-project-get-projects",
+      "netlify-project-get-forms-for-project", "netlify-extension-get-extensions",
+      "netlify-extension-get-full-extension-details", "netlify-get-database-setup-steps",
+    ],
+    notes:
+      "OAuth only; the personal access token fallback applies to the local server, not this hosted endpoint. Renaming a project releases its old netlify.app subdomain. No URL-level read-only mode.",
+  },
+
+  railway: {
+    id: "railway",
+    displayName: "Railway",
+    description: "Create projects, redeploy services, and manage Railway feature flags.",
+    category: "Hosting",
+    logo: "/integrations/railway.svg",
+    mcpUrl: "https://mcp.railway.com",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.railway.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Hosted-server inventory: https://docs.railway.com/ai/mcp-server#available-mcp-tools
+    // railway-agent and the cloud-agent task tools act on the user's behalf;
+    // starting a cloud agent is billed. Agents hold CLI credentials, so their
+    // results and transcripts are gated as well.
+    destructiveTools: [
+      "create-project",
+      "set-feature-flag",
+      "delete-feature-flag",
+      "redeploy",
+      "accept-deploy",
+      "railway-agent",
+      "run-cloud-agent-task",
+      "respond-cloud-agent-task",
+      "cancel-cloud-agent-task",
+      "check-cloud-agent-task",
+      "get-cloud-agent-transcript",
+    ],
+    // Task lists, results and transcripts carry agent output and stay gated.
+    readOnlyTools: [
+      "whoami", "list-projects", "list-services", "list-feature-flags",
+      "get-feature-flag", "list-cloud-agent-models",
+    ],
+    // The resource's 401 challenge and protected-resource metadata both name
+    // this scope; without it the token cannot reach any workspace.
+    oauthScopes: ["workspace:member"],
+    notes:
+      "OAuth as a user; project tokens are not accepted. You choose the workspaces and projects at consent. Cloud agent tasks are billed. No URL-level read-only mode.",
+  },
+
+  // Regions: https://amplitude.com/docs/amplitude-ai/amplitude-mcp#regions
+  amplitude: {
+    ...AMPLITUDE_SHARED,
+    id: "amplitude",
+    displayName: "Amplitude (US)",
+    logo: "/integrations/amplitude.svg",
+    mcpUrl: "https://mcp.amplitude.com/mcp",
+    trustedHostnames: ["mcp.amplitude.com"],
+  },
+
+  "amplitude-eu": {
+    ...AMPLITUDE_SHARED,
+    id: "amplitude-eu",
+    displayName: "Amplitude (EU)",
+    logo: "/integrations/amplitude-eu.svg",
+    mcpUrl: "https://mcp.eu.amplitude.com/mcp",
+    trustedHostnames: ["mcp.eu.amplitude.com"],
+    // Pinned so a same-site US authorization server is never accepted for EU data.
+    trustedAuthorizationServerOrigins: ["https://mcp.eu.amplitude.com"],
+  },
+
+  // https://docs.mixpanel.com/docs/mcp. US only: the EU host's protected-resource
+  // metadata nominates the US authorization server while its docs require
+  // eu.mixpanel.com sign-in, so an EU entry is deferred until that is resolved.
+  mixpanel: {
+    id: "mixpanel",
+    displayName: "Mixpanel (US)",
+    description: "Run product analytics queries and manage boards, Lexicon, cohorts, and flags.",
+    category: "Analytics",
+    logo: "/integrations/mixpanel.svg",
+    mcpUrl: "https://mcp.mixpanel.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.mixpanel.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full table at https://docs.mixpanel.com/docs/mcp#available-tools (reviewed 2026-11-15).
+    destructiveTools: [
+      "Create-Dashboard", "Update-Dashboard", "Duplicate-Dashboard", "Delete-Dashboard",
+      "Edit-Event", "Edit-Property", "Bulk-Edit-Events", "Bulk-Edit-Properties",
+      "Create-Tag", "Rename-Tag", "Delete-Tag", "Dismiss-Issues", "Update-Business-Context",
+      "Dismiss-Duplicate-Group", "Merge-Group", "Create-Tracking-Plan", "Update-Tracking-Plan",
+      "Delete-Tracking-Plan", "Create-Custom-Property", "Update-Custom-Property",
+      "Create-Cohort", "Update-Cohort", "Delete-Cohort", "Create-Lookup-Table",
+      "Update-Lookup-Table", "Create-Metric", "Update-Metric", "Create-Experiment",
+      "Update-Experiment", "Create-Feature-Flag", "Update-Feature-Flag",
+    ],
+    // Queries (Run-Query, Get-Report and Get-Experiment results, Display-Query) count against Query API
+    // limits; property values, lookup-table rows, replays and the audit log can carry
+    // user PII; health checks, pre-launch checks, prior-experiment and duplicate
+    // searches are analyses. All of those stay gated, as do Get-Dashboard and Get-Issues,
+    // which may return report results or sample values, until a live tools/list check.
+    readOnlyTools: [
+      "Describe-Cohort-Schema", "Get-Business-Context", "Get-Cohort", "Get-Custom-Property",
+      "Get-Events", "Get-Experiment-Results-Interpretation-Guidance",
+      "Get-Experiment-Setup-Guidance", "Get-Feature-Flag", "Get-Feature-Flag-Lifecycle-Guidance",
+      "Get-Feature-Flag-Setup-Guidance", "Get-Lexicon-URL", "Get-Metric",
+      "Get-Projects", "Get-Query-Schema", "Get-Tracking-Plan", "List-Cohorts", "List-Dashboards",
+      "List-Experiments", "List-Feature-Flags", "List-Metrics", "List-Organizations",
+      "List-Properties", "List-Tracking-Plans", "Search-Entities",
+    ],
+    // Mandatory plus documented optional scopes, minus user_details (only gated tools need it):
+    // https://docs.mixpanel.com/docs/mcp#required-oauth-scopes
+    oauthScopes: [
+      "projects", "analysis", "events", "insights", "segmentation", "retention", "data:read",
+      "funnels", "flows", "data_definitions", "dashboard_reports", "bookmarks", "business_context",
+    ],
+    notes:
+      "An org admin must enable MCP in Settings > Org > AI Settings first (on by default for free and growth accounts created after August 1, 2026; changes take up to 15 minutes). US data region only. No URL-level read-only mode.",
+  },
+
+  // Regions: https://www.contentful.com/developers/docs/tools/mcp-server/#choose-your-region-global-vs-eu
+  contentful: {
+    ...CONTENTFUL_SHARED,
+    id: "contentful",
+    displayName: "Contentful",
+    logo: "/integrations/contentful.svg",
+    mcpUrl: "https://mcp.contentful.com/mcp",
+    trustedHostnames: ["mcp.contentful.com"],
+  },
+
+  "contentful-eu": {
+    ...CONTENTFUL_SHARED,
+    id: "contentful-eu",
+    displayName: "Contentful (EU)",
+    logo: "/integrations/contentful-eu.svg",
+    mcpUrl: "https://mcp.eu.contentful.com/mcp",
+    trustedHostnames: ["mcp.eu.contentful.com"],
+    // Pinned so a same-site US authorization server is never accepted for EU data.
+    trustedAuthorizationServerOrigins: ["https://mcp.eu.contentful.com"],
+  },
+  // Public documentation inventories verified with unauthenticated MCP on 2026-11-15.
+  // Official sources and live verification details: docs/INTEGRATIONS.md.
+  "microsoft-learn": {
+    id: "microsoft-learn",
+    displayName: "Microsoft Learn",
+    description: "Search Microsoft documentation, code samples and full documentation pages.",
+    category: "Docs",
+    logo: "/integrations/microsoft-learn.svg",
+    mcpUrl: "https://learn.microsoft.com/api/mcp",
+    authModes: ["none"],
+    trustedHostnames: ["learn.microsoft.com"],
+    supportsReadOnly: true,
+    scope: { queryParams: [], headers: [] },
+    destructiveTools: [],
+    readOnlyTools: ["microsoft_docs_search", "microsoft_docs_fetch", "microsoft_code_sample_search"],
+  },
+
+  "cloudflare-docs": {
+    id: "cloudflare-docs",
+    displayName: "Cloudflare Docs",
+    description: "Search Cloudflare documentation and read the Pages migration guide.",
+    category: "Docs",
+    logo: "/integrations/cloudflare-docs.svg",
+    mcpUrl: "https://docs.mcp.cloudflare.com/mcp",
+    authModes: ["none"],
+    trustedHostnames: ["docs.mcp.cloudflare.com"],
+    supportsReadOnly: true,
+    scope: { queryParams: [], headers: [] },
+    destructiveTools: [],
+    readOnlyTools: ["search_cloudflare_documentation", "migrate_pages_to_workers_guide"],
   },
 } as const satisfies Record<string, ProviderDefinition>;
 

@@ -4,7 +4,9 @@
     // Third-party agent skills, run by the agent tooling, not by the app.
     ".agents/**",
     // The Expo app, a separate package with its own dependencies.
-    "mobile/**"
+    "mobile/**",
+    // Instant template apps (#362), seeded into user projects, not imported here.
+    "templates/**"
   ],
   // Installed outside npm (see README), run by the package.json scripts.
   "ignoreBinaries": ["infisical"],

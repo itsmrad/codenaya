@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { diagnoseStuckMessage, isPlanReply } from "./plan-mode";
+import { buildPlanMessage, diagnoseStuckMessage, editedPlanMessage, isPlanReply } from "./plan-mode";
 
 describe("diagnoseStuckMessage", () => {
   it("names the loop, the error with its known cause, and the file", () => {
@@ -50,5 +50,18 @@ describe("isPlanReply", () => {
       isPlanReply("`useAuth` has a few steps.\n\n### How the steps work\n- [ ] not a plan section"),
     ).toBe(false);
     expect(isPlanReply("Steps\n- [ ] a bare word is not a section title")).toBe(false);
+  });
+});
+
+describe("editedPlanMessage", () => {
+  it("builds the edited plan, trimmed, the way an accepted plan is built", () => {
+    expect(editedPlanMessage("\n### Steps\n- [ ] Add a footer\n\n")).toBe(
+      buildPlanMessage("### Steps\n- [ ] Add a footer"),
+    );
+  });
+
+  it("has nothing to build for an empty plan", () => {
+    expect(editedPlanMessage("")).toBeNull();
+    expect(editedPlanMessage("  \n ")).toBeNull();
   });
 });

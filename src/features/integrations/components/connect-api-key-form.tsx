@@ -63,9 +63,9 @@ interface ConnectSuccess {
 /** Number of discovered tools listed back to the user on success. */
 const TOOL_PREVIEW_COUNT = 6;
 
-const buildSchema = (isCustom: boolean) =>
+const buildSchema = (isCustom: boolean, noAuth = false) =>
   z.object({
-    apiKey: z.string().min(1, "An API key is required"),
+    apiKey: noAuth ? z.string() : z.string().min(1, "An API key is required"),
     label: z.string().max(80, "Label is too long"),
     serverUrl: isCustom
       ? z
@@ -249,7 +249,7 @@ const OAuthConnectPanel = ({
 };
 
 interface ConnectApiKeyFormProps {
-  connection?: { _id: Id<"userConnections">; authMode: "oauth" | "api_key"; label: string; serverUrl: string };
+  connection?: { _id: Id<"userConnections">; authMode: "oauth" | "api_key" | "none"; label: string; serverUrl: string };
   providerId: string;
   projectId?: Id<"projects">;
   /** Called after a connection is created, so the parent can reset its flow. */
@@ -269,6 +269,7 @@ export const ConnectApiKeyForm = ({
     ? "Custom MCP server"
     : provider?.displayName ?? providerId;
 
+  const noAuth = provider?.authModes.includes("none") === true;
   const oauthAvailable = connection ? connection.authMode === "oauth" : provider ? supportsOAuth(provider.authModes) : false;
   // Custom servers are always key-based; catalog providers say so themselves.
   const apiKeyAvailable = connection ? connection.authMode === "api_key" : isCustom
@@ -292,7 +293,7 @@ export const ConnectApiKeyForm = ({
       serverUrl: connection?.serverUrl ?? "",
     },
     validators: {
-      onSubmit: buildSchema(isCustom),
+      onSubmit: buildSchema(isCustom, noAuth),
     },
     onSubmit: async ({ value }) => {
       try {
@@ -301,7 +302,7 @@ export const ConnectApiKeyForm = ({
             json: {
               providerId,
               connectionId: connection?._id,
-              apiKey: value.apiKey,
+              apiKey: noAuth ? undefined : value.apiKey,
               label: value.label.trim() || undefined,
               serverUrl: isCustom ? value.serverUrl.trim() : undefined,
               projectId,
@@ -395,6 +396,21 @@ export const ConnectApiKeyForm = ({
         >
           Add another connection
         </Button>
+      </div>
+    );
+  }
+
+  if (noAuth) {
+    return (
+      <div className="space-y-3">
+        <p className="text-xs text-muted-foreground">No sign-in. Connect to verify the public documentation tools.</p>
+        <form.Subscribe selector={(state) => state.isSubmitting}>
+          {(isSubmitting) => (
+            <Button size="sm" disabled={isSubmitting} onClick={() => void form.handleSubmit()}>
+              {isSubmitting ? "Verifying..." : `Connect ${displayName}`}
+            </Button>
+          )}
+        </form.Subscribe>
       </div>
     );
   }

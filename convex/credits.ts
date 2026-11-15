@@ -182,3 +182,26 @@ export const recordRunUsage = mutation({
     return null;
   },
 });
+
+/**
+ * Charges `userId` for one dictation transcribed on the platform key
+ * (`/api/transcribe`). The route calls it once per request, after the provider
+ * answered. shortcut: no ledger row, since the ledger is per run, and no
+ * `addModelSpend`, so dictation is missing from usage history and from the
+ * admin's site spend; add both if dictation spend starts to matter.
+ */
+export const recordTranscriptionUsage = mutation({
+  args: { internalKey: v.string(), userId: v.string(), costUsd: v.number() },
+  returns: v.null(),
+  handler: async (ctx, { internalKey, userId, costUsd }) => {
+    validateInternalKey(internalKey);
+    if (!Number.isFinite(costUsd) || costUsd < 0) {
+      throw appError("INVALID_ARGUMENT", "Cost must be finite and not negative");
+    }
+    const credits = creditsForCost(costUsd);
+    if (credits > 0) {
+      await chargeAccount(ctx, userId, credits, Date.now());
+    }
+    return null;
+  },
+});

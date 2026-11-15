@@ -153,6 +153,7 @@ const callErrors = (call: Call, pathOfId: Map<string, string>) => {
 /** The first loop in the run's tool calls, or null while it makes progress. */
 export const detectLoop = (results: ToolResults[]): StuckRun | null => {
   const errors = new Map<string, number>();
+  const editArrayErrors = new Map<string, number>();
   const syntax = new Map<string, number>();
   // Per file: rewrites made after a failure, and whether one followed its last write.
   // A rewrite replaces the whole file, so rewrites alone are normal for hub files.
@@ -171,6 +172,7 @@ export const detectLoop = (results: ToolResults[]): StuckRun | null => {
     const written = writtenFiles(call, pathOfId);
     // The file an error is about, when the call wrote just one.
     const file = written.length === 1 ? written[0].ref : {};
+    const editPath = call.name === "editFile" ? normalizePath(str(call.input.path)) : undefined;
 
     const error = toolResultError(call.content);
     if (error) {
@@ -178,11 +180,16 @@ export const detectLoop = (results: ToolResults[]): StuckRun | null => {
       if (call.name === "checkBuild" && error.startsWith(BUILD_CHECK_UNFINISHED)) continue;
       markFailed();
       const signature = errorSignature(error);
-      if (bump(errors, signature) >= MAX_SAME_ERROR) {
+      // This validation error names no file; unrelated edits must not accumulate it (#686).
+      const count = editPath && error === "Error: Invalid input: expected array, received string"
+        ? bump(editArrayErrors, editPath)
+        : bump(errors, signature);
+      if (count >= MAX_SAME_ERROR) {
         return { reason: "repeated-error", error, signature, ...file };
       }
       continue;
     }
+    if (editPath) editArrayErrors.delete(editPath);
     const passed = call.name === "checkBuild" ? buildCheckLabel(call.content) : undefined;
     if (passed) {
       // Any pass ends the rewrite counts, so runs without a sandbox keep going;
@@ -191,6 +198,7 @@ export const detectLoop = (results: ToolResults[]): StuckRun | null => {
       if (passed === BUILD_VERIFIED) {
         syntax.clear();
         errors.clear();
+        editArrayErrors.clear();
       }
       continue;
     }
