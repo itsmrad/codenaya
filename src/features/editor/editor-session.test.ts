@@ -1,7 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { ConvexError } from "convex/values";
 
-import { EditorSession } from "./editor-session";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { clearProjectSessions, EditorSession, getProjectSessions, hasOpenConflict } from "./editor-session";
 
 afterEach(() => vi.useRealTimers());
 
@@ -128,4 +129,24 @@ test("an unresolved conflict still retains the local document if it is undone to
   session.receive("next agent");
   expect(session.getSnapshot()).toMatchObject({ content: "old", conflict: true });
   session.reload();
+});
+
+test("each project keeps its own sessions until it is left, and reports open conflicts (#604)", () => {
+  const a = "projectA" as Id<"projects">;
+  const b = "projectB" as Id<"projects">;
+  const session = new EditorSession("base", vi.fn());
+  getProjectSessions(a).set("file" as Id<"files">, session);
+
+  expect(getProjectSessions(a).get("file" as Id<"files">)).toBe(session);
+  expect(getProjectSessions(b).size).toBe(0);
+  expect(hasOpenConflict()).toBe(false);
+
+  session.edit("mine");
+  session.receive("theirs");
+  expect(hasOpenConflict()).toBe(true);
+
+  clearProjectSessions(a);
+  expect(getProjectSessions(a).size).toBe(0);
+  expect(hasOpenConflict()).toBe(false);
+  clearProjectSessions(b);
 });
