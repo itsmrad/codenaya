@@ -37,6 +37,13 @@ export const swarmElapsed = (startedAt: number, endedAt: number) => {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 };
 
+/**
+ * Where a row's clock starts. startedAt is written when the worker's first Inngest step runs, so a
+ * queued row falls back to updatedAt (the creation time: nothing patches the row before startTask) and ticks with the header.
+ */
+export const swarmRowStart = (task: Pick<SwarmTask, "startedAt" | "updatedAt">, status: string) =>
+  task.startedAt ?? (status === "queued" || status === "running" ? task.updatedAt : undefined);
+
 /** The step a solo swarm run records with the classifier's reason ("Building solo: <reason>"). */
 export const SWARM_SOLO_STEP_ID = "swarm-solo";
 
