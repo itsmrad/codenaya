@@ -5,7 +5,7 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { nanoid } from "nanoid";
 
-import { getProvider } from "@/features/integrations/catalog";
+import { getProvider, resolveProviderMcpUrl } from "@/features/integrations/catalog";
 import { maskCredential } from "@/features/integrations/env-keys";
 import {
   getSecretSealer,
@@ -251,7 +251,7 @@ export async function GET(request: Request) {
       await convex.mutation(api.system.updateUserConnectionCredential, {
         internalKey, userId, connectionId: existing._id, providerId: provider.id, authMode: "oauth",
         // The token was issued for the catalog endpoint and scopes, so store those.
-        serverUrl: provider.mcpUrl,
+        serverUrl: resolveProviderMcpUrl(provider, "oauth"),
         scopes: tokens.scope ? tokens.scope.split(/\s+/).filter(Boolean) : [],
         maskedPreview: maskCredential(tokens.access_token), tokenExpiresAt: tokenExpiryFrom(tokens),
         oauthClientId: clientInformation.client_id, authServerUrl: flow.authServerUrl, ...sealed,
@@ -266,7 +266,7 @@ export async function GET(request: Request) {
       providerId: provider.id,
       label: provider.displayName,
       authMode: "oauth",
-      serverUrl: provider.mcpUrl,
+      serverUrl: resolveProviderMcpUrl(provider, "oauth"),
       credentialRef,
       maskedPreview: maskCredential(tokens.access_token),
       scopes: tokens.scope ? tokens.scope.split(/\s+/).filter(Boolean) : [],

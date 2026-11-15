@@ -1,7 +1,7 @@
 import { requireUserId } from "@/features/auth/server/require-user-id";
 import { z } from "zod";
 
-import { getProvider, hasPreRegisteredClient } from "@/features/integrations/catalog";
+import { getProvider, resolveProviderMcpUrl, hasPreRegisteredClient } from "@/features/integrations/catalog";
 import {
   getSecretSealer,
   secretContext,
@@ -272,7 +272,7 @@ export async function POST(request: Request) {
       userId,
       projectId: parsed.data.projectId as Id<"projects"> | undefined,
       providerId: provider.id,
-      serverUrl: provider.mcpUrl,
+      serverUrl: resolveProviderMcpUrl(provider, "oauth"),
       redirectUri,
       authServerUrl: start.authorizationServerUrl,
       issuer: start.issuer,
