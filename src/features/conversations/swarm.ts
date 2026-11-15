@@ -30,6 +30,8 @@ export const MAX_SWARM_DEPTH = 2;
 export const SWARM_SHARED_PATHS = [
   "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
   "index.html", "components.json", "src/main.tsx", "src/App.tsx", "src/index.css", "src/lib/utils.ts",
+  // The home route stays with the orchestrator, like App.tsx; workers own nested routes or home components.
+  "src/app/layout.tsx", "src/app/globals.css", "src/app/page.tsx", "src/app/providers.tsx", "src/middleware.ts",
 ] as const;
 
 export const swarmPlanSchema = z.object({
@@ -60,7 +62,7 @@ const shared = (path: string) => SWARM_SHARED_PATHS.some((file) => within(path, 
 
 /** Before delegation the orchestrator writes only the foundation: these folders, shared files and root files. */
 const FOUNDATION_FOLDERS = ["src/lib", "src/types", "src/styles", "src/theme"];
-/** A file this short is a page stub (`export default () => null;`) that keeps App.tsx's imports resolving. */
+/** A file this short is a page stub for App.tsx imports or an App Router route. */
 export const FOUNDATION_PLACEHOLDER_MAX_CHARS = 240;
 
 /** Whether the orchestrator may write `raw` before delegateTasks: configs, shared files, lib/types/styles/theme. */
