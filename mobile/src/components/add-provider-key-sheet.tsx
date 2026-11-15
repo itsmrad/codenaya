@@ -138,6 +138,8 @@ export function AddProviderKeySheet({ visible, onClose }: { visible: boolean; on
           onChangeText={setApiKey}
           placeholder="Paste your API key"
           secureTextEntry
+          autoComplete="off"
+          textContentType="none"
         />
         <Field
           label="Label (optional)"

@@ -44,7 +44,7 @@ function KeySheet({ providerKey, onClose }: { providerKey: ProviderKey | undefin
       // The new status and test time arrive through the live list query.
       const { ok, data } = await postApi(`/api/ai-providers/${providerKey._id}/test`, {}, getToken);
       if (ok) toast.success(`${providerKey.label} is working`);
-      else toast.error(data.error ?? "Something went wrong. Please try again.");
+      else toast.error(data.error ?? "Couldn't test the key. Try again.");
     } catch {
       toast.error("Couldn't reach Codenaya. Is the server running?");
     } finally {

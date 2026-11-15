@@ -197,14 +197,15 @@ export default function ProjectChat() {
   }, [projectId]);
 
   const stop = async () => {
-    await postApi("/api/messages/cancel", { projectId }, getToken).catch(() => undefined);
+    const failed = () => toast.error("Couldn't stop the run. Try again.");
+    await postApi("/api/messages/cancel", { projectId }, getToken).then(({ ok }) => !ok && failed(), failed);
   };
 
   const newConversation = async () => {
     try {
       setSelectedId(await createConversation({ projectId, title: NEW_CONVERSATION_TITLE }));
     } catch {
-      toast.error("Unable to create new conversation");
+      toast.error("Couldn't create a new conversation. Try again.");
     }
   };
 
@@ -218,7 +219,7 @@ export default function ProjectChat() {
     if (!confirmed) return;
     restoreCheckpoint({ checkpointId: checkpoint._id }).then(
       () => toast.success("Files restored"),
-      () => toast.error("Couldn't restore the files"),
+      () => toast.error("Couldn't restore the files. Your current files are unchanged."),
     );
   };
 
@@ -413,7 +414,9 @@ export default function ProjectChat() {
           icon={<Download size={16} color={c.foreground} />}
           onPress={() => {
             setSheet(undefined);
-            shareProjectZip(convex, projectId, project.name).catch(() => toast.error("Couldn't create the ZIP"));
+            shareProjectZip(convex, projectId, project.name).catch(() =>
+              toast.error("Couldn't create the ZIP. Try again."),
+            );
           }}
         />
         <SheetRow

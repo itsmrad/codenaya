@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 
-import { getProvider } from "../catalog";
+import { getProvider, offeredAuthModes } from "../catalog";
 import {
   useOAuthPopup,
   type OAuthPopupState,
@@ -270,7 +270,7 @@ export const ConnectApiKeyForm = ({
     : provider?.displayName ?? providerId;
 
   const noAuth = provider?.authModes.includes("none") === true;
-  const oauthAvailable = connection ? connection.authMode === "oauth" : provider ? supportsOAuth(provider.authModes) : false;
+  const oauthAvailable = connection ? connection.authMode === "oauth" : provider ? supportsOAuth(offeredAuthModes(provider)) : false;
   // Custom servers are always key-based; catalog providers say so themselves.
   const apiKeyAvailable = connection ? connection.authMode === "api_key" : isCustom
     ? true

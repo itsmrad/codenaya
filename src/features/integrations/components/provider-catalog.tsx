@@ -6,7 +6,7 @@ import { EyeIcon, SearchIcon, ServerCogIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { filterProviders, listProviders } from "../catalog";
+import { filterProviders, listProviders, offeredAuthModes } from "../catalog";
 import type { IntegrationAuthMode } from "../types";
 
 /**
@@ -100,7 +100,7 @@ export const ProviderCatalog = ({
                   </span>
                   <span id={`${catalogId}-${provider.id}-description`} className="text-xs leading-relaxed text-muted-foreground">{provider.description}</span>
                   <span className="mt-auto flex w-full flex-wrap items-center justify-between gap-2 pt-1">
-                    <span id={`${catalogId}-${provider.id}-auth`} className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{authModeLabel(provider.authModes)}</span>
+                    <span id={`${catalogId}-${provider.id}-auth`} className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{authModeLabel(offeredAuthModes(provider))}</span>
                     {provider.supportsReadOnly && (
                       <span id={`${catalogId}-${provider.id}-read-only`} className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                         <EyeIcon aria-hidden="true" className="size-2.5" /> Read-only capable

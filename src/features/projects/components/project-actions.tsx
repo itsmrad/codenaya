@@ -166,7 +166,10 @@ export const DeleteProjectDialog = ({
           </span>
         </div>
         <AlertDialogHeader className="px-6 py-6 text-left sm:text-left">
-          <AlertDialogTitle className="truncate text-2xl font-semibold tracking-[-0.03em]">
+          <AlertDialogTitle
+            title={`Delete “${project.name}”?`}
+            className="text-2xl font-semibold tracking-[-0.03em] [overflow-wrap:anywhere]"
+          >
             Delete <span className="text-destructive">“{project.name}”</span>?
           </AlertDialogTitle>
           <AlertDialogDescription className="text-[15px]">

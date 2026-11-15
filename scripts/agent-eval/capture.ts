@@ -50,11 +50,25 @@ export async function capture(page: Page, trail: Trail) {
   });
 }
 
-// E2B's proxy refuses Vite's HMR websocket while the app itself runs fine.
-const HMR_NOISE = [/^WebSocket connection to 'wss:\/\/[^']*' failed/, /^\[vite\] failed to connect to websocket/];
+// E2B's proxy refuses the dev server's HMR websocket (Vite's or Next's) while the app itself runs fine.
+const HMR_NOISE = [
+  /^WebSocket connection to 'wss:\/\/[^']*' failed/, /^\[vite\] failed to connect to websocket/,
+  /^WebSocket connection to '[^']*\/_next\/webpack-hmr[^']*' failed/, /^\[(?:HMR|Fast Refresh)\] /,
+];
 export const isHmrNoise = (text: string) => HMR_NOISE.some((pattern) => pattern.test(text));
 /** Uncaught render errors, which leave an error boundary instead of the app. */
 export const isRuntimeError = (text: string) => /\b(?:TypeError|ReferenceError)\b|Cannot read properties of/.test(text);
+
+/**
+ * The rendered app: Vite mounts into #root; Next's App Router renders into <body>, which also holds its scripts,
+ * route announcer, dev overlay host and hidden streaming chunks. `:has` keeps Vite pages scoped to #root.
+ */
+const NEXT_BODY = "body:not(:has(#root))";
+const APP_ROOT = `#root, ${NEXT_BODY}`;
+const APP_CONTENT = `#root > *, ${NEXT_BODY} > :not(script, style, link, template, noscript, [hidden], nextjs-portal, next-route-announcer)`;
+const ERROR_BOUNDARY = `#root > [role="alert"], ${NEXT_BODY} > [role="alert"]`;
+/** Next 15 mounts nextjs-portal for its dev-tools indicator too, so only an open error dialog or issue badge counts. */
+const ERROR_OVERLAY = "vite-error-overlay, nextjs-portal [data-nextjs-dialog], nextjs-portal [data-issues]";
 
 export const isAppUrl = (url: string) => {
   try { return /\.(?:e2b\.app|e2b\.dev)$/.test(new URL(url).hostname); } catch { return false; }
@@ -62,7 +76,7 @@ export const isAppUrl = (url: string) => {
 
 /**
  * Whether the preview shows the generated app: text other than the seeded starter's lone "App" heading, and not
- * the starter's error boundary (`role="alert"`, "Something went wrong"; vite-starter.ts). An app that renders only
+ * the starter's error boundary (`role="alert"`, "Something went wrong"; the Vite and Next starters share it). An app that renders only
  * images or a canvas has no text, so its first paint is never recorded.
  */
 export const isGeneratedApp = (rootText: string, errorBoundary = false) => {
@@ -73,12 +87,12 @@ export const isGeneratedApp = (rootText: string, errorBoundary = false) => {
 export async function probePreview(page: Page, trail: Trail) {
   const preview = page.frameLocator('iframe[title="Preview"]');
   if (await page.locator('iframe[title="Preview"]').count() === 0) return;
-  const loaded = await preview.locator("#root > *").count() > 0;
-  const overlay = await preview.locator("vite-error-overlay").count() > 0;
+  const loaded = await preview.locator(APP_CONTENT).count() > 0;
+  const overlay = await preview.locator(ERROR_OVERLAY).count() > 0;
   if ((loaded || overlay) && !trail.firstPreviewAt) trail.firstPreviewAt = Date.now();
   if (loaded && !trail.firstAppPaintAt) {
-    const text = await preview.locator("#root").innerText().catch(() => "");
-    if (isGeneratedApp(text, await preview.locator('#root > [role="alert"]').count() > 0)) trail.firstAppPaintAt = Date.now();
+    const text = await preview.locator(APP_ROOT).first().innerText().catch(() => "");
+    if (isGeneratedApp(text, await preview.locator(ERROR_BOUNDARY).count() > 0)) trail.firstAppPaintAt = Date.now();
   }
   trail.preview.loaded = loaded;
   trail.preview.overlay = overlay;
@@ -105,7 +119,7 @@ export async function screenshot(page: Page, directory: string, trail: Trail, ro
     });
     for (const route of routes) {
       await app.goto(routeUrl(src, route), { waitUntil: "domcontentloaded", timeout: 90_000 }); // A loaded Mac or cold sandbox can take over 30s.
-      await app.locator("#root > *, vite-error-overlay").first().waitFor({ timeout: 90_000 });
+      await app.locator(`${APP_CONTENT}, ${ERROR_OVERLAY}`).first().waitFor({ timeout: 90_000 });
       await app.waitForTimeout(route === routes[0] ? 5_000 : 2_000);
       // Capped, so an infinite-scroll page cannot keep growing under the loop.
       for (let y = 0; y < Math.min(20_000, await app.evaluate(() => document.documentElement.scrollHeight)); y += 600) {

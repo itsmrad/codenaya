@@ -153,6 +153,13 @@ export interface ApiKeyPlacement {
   readonly hint?: string;
 }
 
+/** Environment variable names for a pre-registered OAuth client. */
+export interface PreRegisteredOAuthClient {
+  readonly clientIdEnv: string;
+  /** Server-only. Never read in client code, logged or returned. */
+  readonly clientSecretEnv: string;
+}
+
 /** A curated, operator-controlled MCP provider. */
 export interface ProviderDefinition {
   readonly id: string;
@@ -208,6 +215,13 @@ export interface ProviderDefinition {
   readonly trustedAuthorizationServerOrigins?: readonly string[];
   /** OAuth scopes to request. Omitted means "whatever the server defaults to". */
   readonly oauthScopes?: readonly string[];
+  /**
+   * A confidential OAuth client registered by the operator, for authorization
+   * servers without dynamic client registration. Names the server environment
+   * variables holding the credentials, never the values. When either variable
+   * is unset, OAuth is not offered for this provider.
+   */
+  readonly preRegisteredClient?: PreRegisteredOAuthClient;
   /** Operator-facing caveats worth surfacing in the UI or in review. */
   readonly notes?: string;
 }

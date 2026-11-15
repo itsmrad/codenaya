@@ -6,6 +6,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { Button, Field, Segmented } from "@/components/form";
 import { CheckCircle2, ExternalLink, Lock, Globe, XCircle } from "@/components/icons";
+import { toast } from "@/components/dialogs";
 import { Sheet } from "@/components/sheet";
 import { GITHUB_NOT_LINKED, alertGithubNotLinked } from "@/lib/github";
 import { postApi } from "@/lib/http";
@@ -72,8 +73,12 @@ export function GithubExportSheet({
     }
   };
 
-  const cancel = () => post("/api/github/export/cancel", { projectId }).catch(() => undefined);
-  const reset = () => post("/api/github/export/reset", { projectId }).catch(() => undefined);
+  const run = (path: string, failure: string) => {
+    const failed = () => toast.error(failure);
+    return post(path, { projectId }).then(({ ok }) => !ok && failed(), failed);
+  };
+  const cancel = () => run("/api/github/export/cancel", "Couldn't cancel the export. Try again.");
+  const reset = () => run("/api/github/export/reset", "Couldn't reset the export. Try again.");
 
   const status = project.exportStatus;
   let content;
@@ -112,7 +117,9 @@ export function GithubExportSheet({
       <View style={styles.state}>
         <XCircle size={24} color={c.destructive} />
         <Text style={[styles.heading, { color: c.foreground }]}>Unable to export</Text>
-        <Text style={[styles.muted, { color: c.mutedForeground }]}>Something went wrong. Please try again.</Text>
+        <Text style={[styles.muted, { color: c.mutedForeground }]}>
+          {project.exportError ?? "Something went wrong. Please try again."}
+        </Text>
         <Button label="Retry" variant="outline" onPress={reset} />
       </View>
     );

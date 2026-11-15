@@ -81,6 +81,7 @@ export const ProjectSkillsPanel = ({
   const [pendingDelete, setPendingDelete] =
     useState<ProjectSkillSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [togglingAll, setTogglingAll] = useState(false);
 
   if (skills === undefined) {
     return (
@@ -111,7 +112,9 @@ export const ProjectSkillsPanel = ({
   // Library switches only: project skills keep their own state. Convex runs a
   // client's mutations in order, so these don't contend with each other.
   const toggleAllLibrary = async () => {
+    if (togglingAll) return;
     const enabled = !allLibraryEnabled;
+    setTogglingAll(true);
     try {
       await Promise.all(
         librarySkills
@@ -121,7 +124,14 @@ export const ProjectSkillsPanel = ({
           ),
       );
     } catch (error) {
-      toast.error(convexErrorMessage(error, "Unable to update skills"));
+      toast.error(
+        convexErrorMessage(
+          error,
+          `Couldn't ${enabled ? "enable" : "disable"} every library skill. Some may have changed; check the switches and try again.`,
+        ),
+      );
+    } finally {
+      setTogglingAll(false);
     }
   };
 
@@ -263,9 +273,19 @@ export const ProjectSkillsPanel = ({
               size="sm"
               variant="outline"
               className="h-7 text-xs"
+              disabled={togglingAll}
               onClick={toggleAllLibrary}
             >
-              {allLibraryEnabled ? "Disable all" : "Enable all"}
+              {togglingAll ? (
+                <>
+                  <Spinner className="size-3" />
+                  Updating...
+                </>
+              ) : allLibraryEnabled ? (
+                "Disable all"
+              ) : (
+                "Enable all"
+              )}
             </Button>
           </div>
         </div>

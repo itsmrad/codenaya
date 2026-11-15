@@ -43,6 +43,7 @@ import { POSTHOG_DESTRUCTIVE_TOOLS } from "./posthog-destructive-tools";
 import { POSTHOG_READ_TOOLS } from "./posthog-read-tools";
 
 import type {
+  IntegrationAuthMode,
   ProviderDefinition,
   ProviderScopeCapabilities,
 } from "./types";
@@ -242,12 +243,20 @@ const CATALOG = {
     category: "Dev tools",
     logo: "/integrations/github.svg",
     mcpUrl: "https://api.githubcopilot.com/mcp/",
-    // PAT only for now. OAuth cannot complete: the authorization server is
-    // github.com, which the as-guard rejects as cross-site, and GitHub has no
-    // dynamic client registration. Re-add "oauth" with a pre-registered
-    // client (#539) and `trustedAuthorizationServerOrigins`.
-    authModes: ["api_key"],
+    // GitHub has no dynamic client registration, so OAuth needs an operator-
+    // registered OAuth app (#539) and is hidden until both env vars are set.
+    // Its authorization server (https://github.com/login/oauth, verified
+    // 2026-11-15) is cross-site with the MCP host, hence the trusted origin.
+    authModes: ["oauth", "api_key"],
     trustedHostnames: ["api.githubcopilot.com"],
+    trustedAuthorizationServerOrigins: ["https://github.com"],
+    preRegisteredClient: {
+      clientIdEnv: "GITHUB_OAUTH_CLIENT_ID",
+      clientSecretEnv: "GITHUB_OAUTH_CLIENT_SECRET",
+    },
+    // OAuth apps have no read-only repository scope; the read-only header and
+    // the approval gate narrow what the agent can do with it.
+    oauthScopes: ["repo", "read:org"],
     supportsReadOnly: true,
     scope: {
       // Header scopes leave the URL unchanged; the builder returns both.
@@ -1527,6 +1536,43 @@ export function getProvider(
 /** Every catalog provider, in declaration order. */
 export function listProviders(): readonly ProviderDefinition[] {
   return PROVIDER_IDS.map((id) => PROVIDERS[id]);
+}
+
+type Env = Readonly<Record<string, string | undefined>>;
+
+/** Whether both of a provider's pre-registered client variables are set. */
+export function hasPreRegisteredClient(
+  provider: ProviderDefinition,
+  env: Env = process.env,
+): boolean {
+  const client = provider.preRegisteredClient;
+  return Boolean(client && env[client.clientIdEnv] && env[client.clientSecretEnv]);
+}
+
+/**
+ * Comma-joined ids of providers whose pre-registered client is configured.
+ * `next.config.ts` inlines it at build time so client components can hide
+ * OAuth; it carries provider ids only, never credentials.
+ */
+export function preRegisteredOAuthProviderIds(env: Env): string {
+  return listProviders()
+    .filter((provider) => hasPreRegisteredClient(provider, env))
+    .map(({ id }) => id)
+    .join(",");
+}
+
+/**
+ * Auth modes the UI should offer: OAuth drops out for a provider whose
+ * pre-registered client is not configured on this deployment.
+ */
+export function offeredAuthModes(
+  provider: ProviderDefinition,
+  configuredIds: string = process.env.CODENAYA_PREREGISTERED_OAUTH_PROVIDERS ?? "",
+): readonly IntegrationAuthMode[] {
+  if (!provider.preRegisteredClient || configuredIds.split(",").includes(provider.id)) {
+    return provider.authModes;
+  }
+  return provider.authModes.filter((mode) => mode !== "oauth");
 }
 
 /** Search display metadata only; category and query filters intersect. */

@@ -132,10 +132,12 @@ export const Tree = ({
   // delete took.
   const handleDelete = () => {
     setConfirmingDelete(false);
-    if (item.type === "file") closeTab(item._id);
     deleteFile({ id: item._id }).then(
       // Null when the project is too big to snapshot: no Undo then.
-      (undoCheckpointId) =>
+      (undoCheckpointId) => {
+        // Close the tab only once the file is really gone, so a failed delete
+        // doesn't leave the user without the tab of a file that still exists.
+        if (item.type === "file") closeTab(item._id);
         toast.success(`Deleted ${item.name}`, {
           action: undoCheckpointId
             ? undoAction(() =>
@@ -145,7 +147,8 @@ export const Tree = ({
                 ),
               )
             : undefined,
-        }),
+        });
+      },
       (error) => toast.error(convexErrorMessage(error, `Couldn't delete ${item.name}`)),
     );
   };
@@ -208,7 +211,7 @@ export const Tree = ({
         onDelete={() => setConfirmingDelete(true)}
       >
         <FileIcon fileName={fileName} autoAssign className="size-4" />
-        <span className="truncate text-sm">{fileName}</span>
+        <span className="truncate text-sm" title={fileName}>{fileName}</span>
       </TreeItemWrapper>
       {deleteDialog}
       </>
@@ -228,7 +231,7 @@ export const Tree = ({
         />
         <FolderIcon folderName={folderName} className="size-4" />
       </div>
-      <span className="truncate text-sm">{folderName}</span>
+      <span className="truncate text-sm" title={folderName}>{folderName}</span>
     </>
   )
 
