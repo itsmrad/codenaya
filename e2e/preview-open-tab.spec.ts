@@ -69,7 +69,7 @@ test.describe("preview open in new tab", () => {
       await expect(refresh).toBeDisabled();
       await page.getByRole("button", { name: "Refresh options", exact: true }).click();
       await expect(page.getByRole("menuitem", { name: "Restart sandbox", exact: true })).toBeDisabled();
-      await expect(page.getByRole("menuitemradio", { name: "Sandbox", exact: true })).toHaveAttribute("aria-checked", "true");
+      await expect(page.getByRole("menuitemradio", { name: "Cloud sandbox", exact: true })).toHaveAttribute("aria-checked", "true");
       await page.keyboard.press("Escape");
 
       markReady();

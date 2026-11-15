@@ -596,7 +596,7 @@ export const PreviewView = ({
                     aria-label={`Restart ${activeEngine}`}
                   >
                     <RefreshCwIcon />
-                    Restart sandbox
+                    Restart {activeEngine}
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
@@ -606,7 +606,6 @@ export const PreviewView = ({
                     value="sandbox"
                     onSelect={() => switchEngine("sandbox")}
                     title="Use high-fidelity E2B Sandbox"
-                    aria-label="Sandbox"
                   >
                     <ServerIcon />
                     Cloud sandbox
@@ -615,7 +614,6 @@ export const PreviewView = ({
                     value="webcontainer"
                     onSelect={() => switchEngine("webcontainer")}
                     title="Use in-browser WebContainers"
-                    aria-label="WebContainer"
                   >
                     <BoxIcon />
                     In-browser (WebContainer)

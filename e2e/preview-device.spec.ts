@@ -32,8 +32,8 @@ test.describe("preview device toggle", () => {
     await expect(page.getByRole("button", { name: "WebContainer", exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Refresh options", exact: true }).click();
     await expect(page.getByRole("menuitem", { name: /^Restart / })).toBeVisible();
-    await expect(page.getByRole("menuitemradio", { name: "Sandbox", exact: true })).toHaveText("Cloud sandbox");
-    await expect(page.getByRole("menuitemradio", { name: "WebContainer", exact: true })).toHaveText("In-browser (WebContainer)");
+    await expect(page.getByRole("menuitemradio", { name: "Cloud sandbox", exact: true })).toHaveText("Cloud sandbox");
+    await expect(page.getByRole("menuitemradio", { name: "In-browser (WebContainer)", exact: true })).toHaveText("In-browser (WebContainer)");
     await page.keyboard.press("Escape");
 
     const mobile = page.getByRole("button", { name: "Mobile (375px)" });

@@ -126,8 +126,8 @@ test.describe("IDE polish", () => {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(`/projects/${projectId}?engine=sandbox&view=preview&menuTest=keep`);
       await page.getByRole("button", { name: "Refresh options", exact: true }).click();
-      const cloud = page.getByRole("menuitemradio", { name: "Sandbox", exact: true });
-      const browser = page.getByRole("menuitemradio", { name: "WebContainer", exact: true });
+      const cloud = page.getByRole("menuitemradio", { name: "Cloud sandbox", exact: true });
+      const browser = page.getByRole("menuitemradio", { name: "In-browser (WebContainer)", exact: true });
       await expect(cloud).toHaveAttribute("title", "Use high-fidelity E2B Sandbox");
       await expect(cloud).toHaveAttribute("aria-checked", "true");
       await expect(browser).toHaveAttribute("title", "Use in-browser WebContainers");
@@ -141,6 +141,7 @@ test.describe("IDE polish", () => {
       await page.getByRole("button", { name: "Refresh options", exact: true }).click();
       await expect(browser).toHaveAttribute("aria-checked", "true");
       await expect(page.getByRole("menuitem", { name: "Restart webcontainer", exact: true })).toHaveAttribute("title", "Restart webcontainer");
+      await expect(page.getByRole("menuitem", { name: "Restart webcontainer", exact: true })).toHaveText("Restart webcontainer");
       await cloud.click();
       await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?engine=sandbox&view=preview&menuTest=keep$`));
     }
