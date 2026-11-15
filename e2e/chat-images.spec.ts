@@ -109,7 +109,9 @@ test.describe.serial("chat image attachments", () => {
     const input = page.getByPlaceholder("Describe a change or ask a question…");
     await input.fill(draft);
     await page.getByLabel("Upload files").setInputFiles(PNG);
-    await expect(page.getByRole("img", { name: PNG.name })).toBeVisible();
+    // Scoped to the chips: a chip's hover-card preview (a portal) repeats the image.
+    const chip = page.getByTestId("composer-attachments").getByRole("img", { name: PNG.name });
+    await expect(chip).toBeVisible();
 
     // Any platform model the picker lists that the catalog (what the composer reads) marks as text-only.
     const models: readonly PublicCatalogModel[] =
@@ -133,9 +135,11 @@ test.describe.serial("chat image attachments", () => {
     const switchTo = alert.getByRole("button", { name: /^Switch to / });
     const target = (await switchTo.textContent())!.replace("Switch to ", "");
     await switchTo.click();
+    // The alert collapses under the pointer, which would leave it over the chip.
+    await page.mouse.move(0, 0);
     await expect(page.getByRole("combobox", { name: "Agent model" })).toHaveText(target);
     await expect(page.getByText("can't read images")).toHaveCount(0);
-    await expect(page.getByRole("img", { name: PNG.name })).toBeVisible();
+    await expect(chip).toBeVisible();
     await expect(input).toHaveValue(draft);
     await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
 

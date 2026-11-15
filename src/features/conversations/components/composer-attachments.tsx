@@ -62,7 +62,7 @@ export const ComposerImages = ({
 
   return (
     <div className="w-full">
-      <PromptInputAttachments className="p-2 pb-0">
+      <PromptInputAttachments className="p-2 pb-0" data-testid="composer-attachments">
         {(file) => <PromptInputAttachment data={file} />}
       </PromptInputAttachments>
       {!acceptsImages && (
