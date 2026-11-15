@@ -224,7 +224,9 @@ const SECTIONS: { id: string; title: string; content: ReactNode }[] = [
         </p>
         <p>
           Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_PUBLISHABLE_KEY</code> (the
-          publishable or anon key from your Supabase project) under{" "}
+          publishable or anon key from your Supabase project; in Next.js apps use{" "}
+          <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>)
+          under{" "}
           <a href="#env-vars">Environment variables</a>. Never use the secret or{" "}
           <code>service_role</code> key in the app. The agent writes the table setup as SQL: run it
           in the Supabase SQL editor, or connect the Supabase{" "}
