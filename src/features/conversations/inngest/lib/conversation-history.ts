@@ -1,15 +1,8 @@
 import type { TextMessage } from "@inngest/agent-kit";
 
-import { AI_NOT_CONFIGURED_MESSAGE } from "@/features/ai-providers/server/platform-model";
-import { PROMO_REFUSAL_MESSAGES } from "@/features/promotions/github-promo";
-import { DISPATCH_FAILED_MESSAGE } from "@/lib/message-processor";
+import { AGENT_FAILURE_MESSAGE, isFailedRunReply } from "../../failed-run-reply";
 
-import { LOST_RUN_MESSAGE } from "../../agent-steps";
-import { KEY_FAILURE_SUFFIX } from "@/features/ai-providers/server/resolve-run-model";
-
-/** The reply `processMessage` stores when a run fails. */
-export const AGENT_FAILURE_MESSAGE =
-  "My apologies, I encountered an error while processing your request. Let me know if you need anything else!";
+export { AGENT_FAILURE_MESSAGE };
 
 /** Stored when a run finishes without an assistant text response. */
 export const DEFAULT_REPLY_MESSAGE =
@@ -25,14 +18,6 @@ interface StoredMessage {
   content: string;
   status?: "processing" | "completed" | "cancelled";
 }
-
-const isFailedRunReply = (content: string) =>
-  content === AGENT_FAILURE_MESSAGE ||
-  content === LOST_RUN_MESSAGE ||
-  content === AI_NOT_CONFIGURED_MESSAGE ||
-  Object.values(PROMO_REFUSAL_MESSAGES).includes(content) ||
-  content === DISPATCH_FAILED_MESSAGE ||
-  content.endsWith(KEY_FAILURE_SUFFIX);
 
 const usableReply = ({ role, status, content }: StoredMessage) =>
   role === "assistant" &&
