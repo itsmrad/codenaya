@@ -1,6 +1,5 @@
 import ky, { HTTPError } from "ky";
 import { toast } from "sonner";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { 
   ArrowBigUpIcon,
@@ -41,7 +40,6 @@ import {
 } from "@/components/ui/tooltip";
 import { ApprovalPrompt } from "@/features/integrations/components/approval-prompt";
 import { useProjectIntegrations } from "@/features/integrations/components/project-integrations-context";
-import { integrationLink } from "@/features/integrations/integration-link";
 import {
   useAiProviderKeys,
   usePlatformModelsOrCatalog,
@@ -117,14 +115,13 @@ export const ConversationSidebar = ({
   projectId,
 }: ConversationSidebarProps) => {
   const { openIntegrations } = useProjectIntegrations();
-  const router = useRouter();
   // A next-step chip's IDE action; false when this page doesn't offer it, so
   // the chip fills the composer instead.
   const runSuggestionAction = (action: SuggestionAction) => {
     if (action.kind === "connect") {
-      router.replace(integrationLink(action.providerId, projectId), { scroll: false });
-      // shortcut: opens the dialog without the provider picked until the
-      // ?integrations= handling lands (CONNECTORS); then drop this call.
+      // shortcut: opens the dialog without the provider picked; use
+      // CONNECTORS' integrationLink once its ?integrations= handling lands,
+      // keeping the other query params (engine).
       openIntegrations();
       return true;
     }

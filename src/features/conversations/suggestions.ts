@@ -1,3 +1,5 @@
+import { getProvider } from "@/features/integrations/catalog";
+
 /**
  * Next steps a build reply ends with (#256), in a `<suggestions>` block of one
  * per line. They become chips under the reply; the block itself is never
@@ -30,14 +32,17 @@ export type SuggestionAction = { kind: "connect"; providerId: string } | { kind:
 const ACTION_TAG = /^\[(?:connect:([a-z0-9-]+)|(publish|env-vars))\]\s*/i;
 
 /**
- * A chip's label, and the action its tag names. An untagged line, or a tag
- * with no label, is a prompt chip.
+ * A chip's label, and the action its tag names. An untagged line, a tag with
+ * no label, or a connect tag for an id not in the catalog is a prompt chip.
  */
 export const parseSuggestion = (line: string): { label: string; action: SuggestionAction | null } => {
   const match = line.match(ACTION_TAG);
   const label = line.slice(match?.[0].length ?? 0).trim();
   if (!match || !label) return { label: line, action: null };
   const [, providerId, kind] = match;
-  if (providerId) return { label, action: { kind: "connect", providerId: providerId.toLowerCase() } };
+  if (providerId) {
+    const id = providerId.toLowerCase();
+    return { label, action: getProvider(id) ? { kind: "connect", providerId: id } : null };
+  }
   return { label, action: { kind: kind.toLowerCase() as "publish" | "env-vars" } };
 };

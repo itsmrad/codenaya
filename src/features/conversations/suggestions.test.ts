@@ -56,6 +56,9 @@ describe("parseSuggestion", () => {
   it("treats an unknown or empty tag as plain text", () => {
     expect(parseSuggestion("[deploy] Ship it")).toEqual({ label: "[deploy] Ship it", action: null });
     expect(parseSuggestion("[publish]")).toEqual({ label: "[publish]", action: null });
+    // Vercel is deliberately not in the catalog; "constructor" is a prototype key.
+    expect(parseSuggestion("[connect:vercel] Connect Vercel")).toEqual({ label: "Connect Vercel", action: null });
+    expect(parseSuggestion("[connect:constructor] Connect it")).toEqual({ label: "Connect it", action: null });
   });
 
   it("parses the chips out of a reply in the new template", () => {

@@ -60,9 +60,9 @@ describe("withSetupAnswers", () => {
     );
   });
 
-  test("folds service choices in, Decide later as a placeholder note", () => {
+  test("folds service choices in, Decide later as not chosen", () => {
     expect(withSetupAnswers("pizzeria site", { data: "Supabase", hosting: DECIDE_LATER })).toBe(
-      "pizzeria site\n\nDecisions from setup:\n- Data storage: Supabase\n- Hosting: decide later (leave a clear placeholder)",
+      "pizzeria site\n\nDecisions from setup:\n- Data storage: Supabase\n- Hosting: not chosen yet; don't wire a provider",
     );
   });
 

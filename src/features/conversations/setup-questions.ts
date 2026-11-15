@@ -109,7 +109,7 @@ const TOPICS = new Map([...SETUP_QUESTIONS, ...NEEDS].map(({ id, topic }) => [id
 const decisionLines = (answers: SetupAnswers) =>
   [...TOPICS]
     .filter(([id]) => answers[id])
-    .map(([id, topic]) => `- ${topic}: ${answers[id] === DECIDE_LATER ? "decide later (leave a clear placeholder)" : answers[id]}`);
+    .map(([id, topic]) => `- ${topic}: ${answers[id] === DECIDE_LATER ? "not chosen yet; don't wire a provider" : answers[id]}`);
 
 const HEADING = "Decisions from setup";
 
