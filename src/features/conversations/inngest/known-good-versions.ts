@@ -51,7 +51,7 @@ export const KNOWN_GOOD_VERSIONS = {
   "@tanstack/react-query": "^5.0.0",
   "@supabase/supabase-js": "^2.0.0",
   // Next.js apps.
-  next: "^15.5.0",
+  next: "^16.4.0",
   "@tailwindcss/postcss": "^4.3.0",
   postcss: "^8.5.23",
 } as const satisfies Record<string, string>;

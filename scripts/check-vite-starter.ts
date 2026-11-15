@@ -36,7 +36,8 @@ try {
     run(join(directory, "node_modules/.bin/vite"), ["build"]);
   }
 
-  const assets = join(directory, next ? ".next/static/css" : "dist/assets");
+  // Turbopack (Next 16) writes CSS chunks next to the JS ones.
+  const assets = join(directory, next ? ".next/static/chunks" : "dist/assets");
   const css = readdirSync(assets).filter((name) => name.endsWith(".css"))
     .map((name) => readFileSync(join(assets, name), "utf8")).join("\n");
   // These utilities cover the primitives' semantic colors, v4 opacity and animations.
