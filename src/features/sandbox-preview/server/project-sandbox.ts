@@ -18,10 +18,17 @@ export const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || "base";
 export const WORK_DIR = "/home/user/app";
 
 /**
- * Install unless the project overrides it. --prefer-offline uses the npm cache
- * the E2B template warms with the starter's dependencies (#338).
+ * `npm install` from the npm cache the E2B template warms with the starter's
+ * dependencies (#338), retried once online: --prefer-offline trusts a cached
+ * packument older than a newly published version, and fails ETARGET on it.
  */
-export const DEFAULT_INSTALL_COMMAND = "npm install --prefer-offline --no-audit --no-fund";
+// shortcut: retries on any install failure, not only ETARGET; a real failure
+// runs twice. Match npm's error code first if that cost ever shows.
+export const offlineFirstInstall = (flags: string) =>
+  `npm install --prefer-offline ${flags} || npm install ${flags}`;
+
+/** Install unless the project overrides it. */
+export const DEFAULT_INSTALL_COMMAND = offlineFirstInstall("--no-audit --no-fund");
 
 export type ProjectFile = { path: string; content: string };
 

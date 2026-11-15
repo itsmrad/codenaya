@@ -18,6 +18,7 @@ import {
   type ProjectFile,
   WORK_DIR,
   createProjectSandbox,
+  offlineFirstInstall,
   writeProjectFiles,
 } from "@/features/sandbox-preview/server/project-sandbox";
 import { NETWORK_FAILURE } from "@/features/sandbox-preview/utils/app-error";
@@ -219,7 +220,7 @@ const buildIn = async (
 
   await writeProjectFiles(sandbox, files, dir, timeLeft);
 
-  const install = await run(sandbox, "npm install --prefer-offline --no-audit --no-fund --loglevel=error", timeLeft(), dir);
+  const install = await run(sandbox, offlineFirstInstall("--no-audit --no-fund --loglevel=error"), timeLeft(), dir);
   if (install.exitCode !== 0) {
     // The registry or the sandbox's network, not package.json: nothing to fix.
     if (NETWORK_FAILURE.test(`${install.stderr}\n${install.stdout}`)) {
