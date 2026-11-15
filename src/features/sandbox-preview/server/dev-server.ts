@@ -61,21 +61,58 @@ export const installWithDevServerStopped = async <T>(
   output: DevOutput = {},
   fallback?: DevStart,
 ): Promise<T> => {
-  const running = (await sandbox.commands.list()).filter((command) => command.envs?.[DEV_COMMAND_ENV]);
-  for (const dev of running) await sandbox.commands.run(killTreeCommand(dev.pid));
-  const [dev] = running;
-  const start = dev ? { command: dev.envs[DEV_COMMAND_ENV], envs: dev.envs, cwd: dev.cwd } : fallback;
+  const [dev] = await stopDevServers(sandbox);
+  const start = dev ? devStartOf(dev) : fallback;
   try {
     return await install();
   } finally {
-    if (start) {
-      await sandbox.commands.run(start.command, {
-        cwd: start.cwd,
-        envs: start.envs,
-        background: true,
-        timeoutMs: 0, // Like the boot's: E2B would kill it after 60s.
-        ...output,
-      });
-    }
+    if (start) await startDevServer(sandbox, start, output);
   }
 };
+
+/** Set on the preview proxy's process to the dev server port it forwards to. */
+export const PROXY_TARGET_ENV = "TARGET_PORT";
+
+/** The preview's dev server: the port its proxy forwards to, and how to start it again. */
+export type PreviewDevServer = { port: number; start: DevStart };
+
+/** This sandbox's preview dev server, or null when it has no marked dev server and proxy. */
+export const findPreviewDevServer = async (sandbox: Sandbox, requestTimeoutMs?: number) => {
+  const running = await sandbox.commands.list({ requestTimeoutMs });
+  const port = Number(running.find((command) => command.envs?.[PROXY_TARGET_ENV])?.envs[PROXY_TARGET_ENV]);
+  const dev = running.find((command) => command.envs?.[DEV_COMMAND_ENV]);
+  return port && dev ? { port, start: devStartOf(dev) } : null;
+};
+
+/**
+ * Starts the dev server again, after stopping what is left of it, when its port no
+ * longer answers. A `next build` beside `next dev` in E2B's default 1 GiB sandbox
+ * can get the server OOM-killed while its `next dev` parent stays listed, and the
+ * preview then answers 502. True when it restarted.
+ */
+export const restartDevServerIfDown = async (sandbox: Sandbox, { port, start }: PreviewDevServer) => {
+  if (await isPortOpen(sandbox, port)) return false;
+  await stopDevServers(sandbox);
+  await startDevServer(sandbox, start);
+  return true;
+};
+
+type ListedCommand = Awaited<ReturnType<Sandbox["commands"]["list"]>>[number];
+
+const devStartOf = (dev: ListedCommand): DevStart => ({ command: dev.envs[DEV_COMMAND_ENV], envs: dev.envs, cwd: dev.cwd });
+
+/** Stops every marked dev server: a resumed boot or another instance can leave two. Returns them. */
+const stopDevServers = async (sandbox: Sandbox) => {
+  const running = (await sandbox.commands.list()).filter((command) => command.envs?.[DEV_COMMAND_ENV]);
+  for (const dev of running) await sandbox.commands.run(killTreeCommand(dev.pid));
+  return running;
+};
+
+const startDevServer = (sandbox: Sandbox, start: DevStart, output: DevOutput = {}) =>
+  sandbox.commands.run(start.command, {
+    cwd: start.cwd,
+    envs: start.envs,
+    background: true,
+    timeoutMs: 0, // Like the boot's: E2B would kill it after 60s.
+    ...output,
+  });

@@ -16,6 +16,8 @@ vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal)
 import { CommandExitError, type CommandResult, type Sandbox, SandboxError, TimeoutError } from "e2b";
 import { getFunctionName } from "convex/server";
 
+import { DEV_COMMAND_ENV, PROXY_TARGET_ENV, killTreeCommand } from "@/features/sandbox-preview/server/dev-server";
+
 import { VITE_REACT_STARTER } from "../vite-starter";
 import {
   BUILD_NOT_CHECKED,
@@ -41,7 +43,7 @@ const unfinishedLogs = () =>
 
 type Answer = { exitCode: number; stdout?: string; stderr?: string } | Error;
 
-type Proc = { cmd: string; args: string[] };
+type Proc = { cmd: string; args: string[]; pid?: number; envs?: Record<string, string>; cwd?: string };
 
 /** A sandbox whose commands get `respond`'s answer: a result, or an error to throw. */
 const sandboxWith = (respond: (command: string) => Answer | undefined, processes: Proc[] = []) => ({
@@ -584,6 +586,42 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     );
     expect(warm.kill).not.toHaveBeenCalled();
     expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  describe("the preview's dev server after a warm Next.js build", () => {
+    const dev: Proc = { ...DEV_SERVER, pid: 12, envs: { [DEV_COMMAND_ENV]: "npm run dev -- --hostname 0.0.0.0" }, cwd: "/home/user/app" };
+    const proxy: Proc = { cmd: "/bin/bash", args: ["-l", "-c", "node /home/user/e2b-proxy.js"], pid: 5, envs: { [PROXY_TARGET_ENV]: "3000" } };
+    const afterBuild = (warm: ReturnType<typeof sandboxWith>) => {
+      const commands = commandsOf(warm);
+      return commands.slice(commands.indexOf("NEXT_TELEMETRY_DISABLED=1 npx next build") + 1);
+    };
+
+    it("starts the dev server again, the same way, when the build took its port down", async () => {
+      listed({});
+      const warm = warmSandbox(undefined, [dev, proxy]);
+
+      const result = await warmCheck(nextApp());
+
+      expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+      const [cleanup, probe, kill, start] = afterBuild(warm);
+      expect(cleanup).toMatch(/^rm -rf \/home\/user\/check-build-/);
+      expect(probe).toContain("port:3000");
+      expect(kill).toBe(killTreeCommand(12));
+      expect(start).toBe("npm run dev -- --hostname 0.0.0.0");
+      expect(warm.commands.run.mock.calls.at(-1)?.[1]).toEqual({ cwd: "/home/user/app", envs: dev.envs, background: true, timeoutMs: 0 });
+      expect(warm.kill).not.toHaveBeenCalled();
+      expect(e2b.create).not.toHaveBeenCalled();
+    });
+
+    it("leaves a dev server whose port still answers alone", async () => {
+      listed({});
+      const warm = warmSandbox((command) => (command.includes('require("net")') ? { exitCode: 0, stdout: "open\n" } : undefined), [dev, proxy]);
+
+      const result = await warmCheck(nextApp());
+
+      expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect(afterBuild(warm)).toEqual([expect.stringMatching(/^rm -rf /), expect.stringContaining("port:3000")]);
+    });
   });
 
   /** Builds, but imports an export App.tsx lacks: an advisory finding (#333). */
