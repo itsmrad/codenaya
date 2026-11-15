@@ -42,6 +42,7 @@ import { Switch } from "@/components/ui/switch";
 import { convexErrorMessage } from "@/lib/convex-error";
 import { SKILLS_SETTINGS_URL } from "@/features/settings/nav";
 import { ProjectInstructionsForm } from "@/features/projects/components/project-instructions-form";
+import { ProjectNotesList } from "@/features/projects/components/project-notes";
 
 import type { ProjectSkillSummary } from "../types";
 import {
@@ -332,6 +333,7 @@ export const ProjectSkillsDialog = ({
       {open && (
         <>
           <ProjectInstructionsForm projectId={projectId} />
+          <ProjectNotesList projectId={projectId} />
           <ProjectSkillsPanel projectId={projectId} />
         </>
       )}

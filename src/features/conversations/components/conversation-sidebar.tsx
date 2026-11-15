@@ -101,6 +101,9 @@ import {
   WithAttachmentCount,
 } from "./composer-attachments";
 import { useUploadChatImages } from "../hooks/use-chat-images";
+import { useProjectNotes } from "@/features/projects/hooks/use-project-notes";
+import { type NoteDraft, ProjectNoteDialog } from "@/features/projects/components/project-notes";
+import { looksLikeLastingPreference } from "@/features/projects/notes";
 import {
   CHAT_IMAGE_TYPES,
   MAX_CHAT_IMAGES,
@@ -120,6 +123,10 @@ export const ConversationSidebar = ({
   const enhancer = useEnhancePrompt(input, setInput);
   const slashMenu = useSkillSlashMenu(projectId, input, setInput);
   const uploadImages = useUploadChatImages(projectId);
+  // null: an older backend without notes, so the actions stay hidden (#630).
+  const notes = useProjectNotes(projectId);
+  const [noteDraft, setNoteDraft] = useState<NoteDraft | null>(null);
+  const [dismissedProposalId, setDismissedProposalId] = useState<string | null>(null);
   const [chosenMode, setMode] = useState<ComposerMode>("build");
   const swarmEnabled = useSwarmEnabled();
   // Swarm switched off mid-draft falls back to Build.
@@ -613,6 +620,24 @@ export const ConversationSidebar = ({
                   skillNames={slashMenu.skillNames}
                   // The saved copy of the pending message replaces it in place.
                   animate={Boolean(history && !history.messageIds.has(message._id)) && !pending}
+                  onRemember={
+                    notes
+                      ? () => {
+                          setNoteDraft({ text: message.content.trim() });
+                          setDismissedProposalId(message._id);
+                        }
+                      : undefined
+                  }
+                  onDismissProposal={
+                    notes &&
+                    messageIndex === conversationMessages.length - 2 &&
+                    (conversationMessages[messageIndex + 1].status ?? "completed") === "completed" &&
+                    dismissedProposalId !== message._id &&
+                    looksLikeLastingPreference(message.content) &&
+                    !notes.some((note) => note.text === message.content.trim())
+                      ? () => setDismissedProposalId(message._id)
+                      : undefined
+                  }
                 />
               ) : (
                 <AssistantMessage
@@ -661,6 +686,7 @@ export const ConversationSidebar = ({
           />
         </Conversation>
         )}
+        <ProjectNoteDialog projectId={projectId} draft={noteDraft} onDraftChange={setNoteDraft} />
         <div className="chat-composer relative px-3 pb-[max(12px,env(safe-area-inset-bottom))]">
           {/* Sits directly above the composer rather than inside the
               transcript: the agent is blocked waiting on this answer, and the

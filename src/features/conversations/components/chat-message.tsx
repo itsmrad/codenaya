@@ -5,6 +5,7 @@ import { useReducedMotion } from "motion/react";
 import {
   BookOpenIcon,
   CheckIcon,
+  BookmarkPlusIcon,
   CopyIcon,
   HammerIcon,
   ListChecksIcon,
@@ -41,6 +42,10 @@ interface UserMessageProps {
   skillNames?: ReadonlySet<string>;
   /** Sent while the conversation was open (not history): fades up on mount. */
   animate?: boolean;
+  /** Opens "Remember for this project" with this text (#630); hidden when unset. */
+  onRemember?: () => void;
+  /** Proposes saving this message as a note; set only when it reads like a lasting preference. */
+  onDismissProposal?: () => void;
 }
 
 export const UserMessage = ({
@@ -48,6 +53,8 @@ export const UserMessage = ({
   imageUrls = [],
   skillNames,
   animate = false,
+  onRemember,
+  onDismissProposal,
 }: UserMessageProps) => {
   const textRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -74,7 +81,7 @@ export const UserMessage = ({
     // wrap instead of widening the bubble past the panel.
     <div
       className={cn(
-        "ml-auto flex min-w-0 max-w-[90%] flex-col items-end @sm:max-w-[85%]",
+        "group/user ml-auto flex min-w-0 max-w-[90%] flex-col items-end @sm:max-w-[85%]",
         fadeUp && "animate-fade-up motion-reduce:animate-none",
       )}
     >
@@ -142,6 +149,30 @@ export const UserMessage = ({
         >
           {expanded ? "Show less" : "Show more"}
         </button>
+      )}
+      {onRemember && onDismissProposal && (
+        <div className="mt-1.5 flex flex-wrap items-center justify-end gap-1 text-xs text-muted-foreground">
+          <span>Remember this for the project?</span>
+          <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={onRemember}>
+            Remember
+          </Button>
+          <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={onDismissProposal}>
+            Not now
+          </Button>
+        </div>
+      )}
+      {onRemember && !onDismissProposal && (
+        <MessageActions className="mt-0.5 opacity-0 transition-opacity duration-100 group-hover/user:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+          <MessageAction
+            size="icon-sm"
+            label="Remember for this project"
+            tooltip="Remember for this project"
+            onClick={onRemember}
+            className="size-7 text-muted-foreground hover:text-foreground"
+          >
+            <BookmarkPlusIcon className="size-3.5" />
+          </MessageAction>
+        </MessageActions>
       )}
     </div>
   );
