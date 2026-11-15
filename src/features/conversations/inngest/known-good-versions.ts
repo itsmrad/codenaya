@@ -54,6 +54,9 @@ export const KNOWN_GOOD_VERSIONS = {
   next: "^16.4.0",
   "@tailwindcss/postcss": "^4.3.0",
   postcss: "^8.5.23",
+  // TanStack Start apps (Start needs Node 22.12+ and Vite 8).
+  "@tanstack/react-start": "^1.169.0",
+  "@tanstack/react-router": "^1.170.0",
 } as const satisfies Record<string, string>;
 
 export type KnownGoodPackage = keyof typeof KNOWN_GOOD_VERSIONS;

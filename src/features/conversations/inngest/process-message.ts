@@ -7,12 +7,8 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../convex/_generated/api";
 import {
   CODING_AGENT_SYSTEM_PROMPT,
-  FIRST_BUILD_APP_NOTE,
-  NEXT_FIRST_BUILD_APP_NOTE,
-  NEXT_STARTER_IN_PLACE_NOTE,
-  NEXT_STARTER_RECOVERY_NOTE,
   MAX_AGENT_STEPS,
-  STARTER_IN_PLACE_NOTE,
+  STARTER_NOTES,
   STEP_BUDGET_NOTE,
   OUT_OF_CREDITS_NOTE,
   OUT_OF_CREDITS_REPLY,
@@ -88,8 +84,7 @@ import {
 import { buildSkillsPromptSection, buildSupabaseHintSection } from '@/features/skills/server/prompt';
 import { buildProjectInstructionsSection } from '@/features/projects/instructions';
 import type { ProjectTheme } from '@/features/projects/theme';
-import { starterFramework } from './starter-only';
-import { wantsNextJs } from './next-starter';
+import { promptFramework, starterFramework } from './starter-only';
 import { detectFramework } from '@/features/sandbox-preview/utils/framework';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
@@ -603,14 +598,10 @@ export const processMessage = inngest.createFunction(
       });
       return { starter: starterFramework(files), framework: detectFramework(paths) };
     });
-    // A failed seed must not turn an explicit Next request into a Vite app on retry.
-    const recoverNext = starter === null && framework === null && wantsNextJs(
-      recentMessages.find((msg) => msg.role === "user")?.content ?? message,
-    );
-    const nextApp = starter === "next" || framework === "next" || recoverNext;
-    const firstBuildNote = nextApp
-      ? (recoverNext ? NEXT_STARTER_RECOVERY_NOTE : NEXT_FIRST_BUILD_APP_NOTE)
-      : FIRST_BUILD_APP_NOTE;
+    // A failed seed must not turn an explicit Next or Start request into a Vite app on retry.
+    const app = starter ?? framework ?? promptFramework(recentMessages.find((msg) => msg.role === "user")?.content ?? message);
+    const recoveryNote = starter === null && framework === null ? STARTER_NOTES[app].recovery : undefined;
+    const firstBuildNote = recoveryNote ?? STARTER_NOTES[app].firstBuild;
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
       buildProjectInstructionsSection(projectInstructions, projectNotes, projectTheme),
@@ -626,9 +617,7 @@ export const processMessage = inngest.createFunction(
 
     // A project seeded with the starter says so in the request, not the
     // system prompt, so the first turn builds on it (#338).
-    const starterNote = starter
-      ? (starter === "next" ? NEXT_STARTER_IN_PLACE_NOTE : STARTER_IN_PLACE_NOTE)
-      : (recoverNext ? NEXT_STARTER_RECOVERY_NOTE : "");
+    const starterNote = starter ? STARTER_NOTES[starter].inPlace : (recoveryNote ?? "");
 
 
     // Display only: mirrors the agent's tool calls onto the assistant message
@@ -706,7 +695,7 @@ export const processMessage = inngest.createFunction(
       createEditFileTool({ projectId, internalKey, registry }),
       createCreateFilesTool({ projectId, internalKey, registry }),
       createCreateFolderTool({ projectId, internalKey }),
-      ...(nextApp ? [] : [createScaffoldViteAppTool({ projectId, internalKey })]),
+      ...(app === "vite" ? [createScaffoldViteAppTool({ projectId, internalKey })] : []),
       createRenameFileTool({ projectId, internalKey }),
       createDeleteFilesTool({ projectId, internalKey }),
       createCheckBuildTool({ projectId, internalKey, ownerId: mcpOwnerId }),
