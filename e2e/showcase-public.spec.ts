@@ -67,7 +67,7 @@ test.describe("public showcase (signed out)", () => {
 
     await expect(page).toHaveURL(/\/sign-up\?redirect_url=/);
     const intent = await page.evaluate((key) => localStorage.getItem(key), PENDING_REMIX_KEY);
-    expect(JSON.parse(intent!)).toEqual({ kind: "remix", showcaseId: project!._id });
+    expect(JSON.parse(intent!)).toEqual({ kind: "remix", source: `/showcase/${project!._id}` });
   });
 
   test("an unknown id shows the not-found page", async ({ page }) => {
