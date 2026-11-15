@@ -196,6 +196,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
         await waitForReinstall(sandboxId);
       } else {
         const command = installCommand || DEFAULT_INSTALL_COMMAND;
+        let failed: InstallFailure | undefined;
         installFailed = await installAfterBurst(sandboxId, async () =>
           installWithDevServerStopped(sandbox, async () => {
             // Retain only the safe npm code for a timeout; output and exception
@@ -220,9 +221,13 @@ export async function PATCH(request: Request, { params }: RouteParams) {
                 if (error instanceof TimeoutError) return null;
                 throw error;
               });
-            if (!result) return timeoutFailure;
-            return result.exitCode !== 0 ? installFailure(result) : undefined;
-          }, {}, fallbackDevStart(files, devCommand, WORK_DIR, await proxyTargetPort(sandbox))),
+            failed = !result ? timeoutFailure : result.exitCode !== 0 ? installFailure(result) : undefined;
+            return failed;
+          }, {}, fallbackDevStart(files, devCommand, WORK_DIR, await proxyTargetPort(sandbox))).catch((error: unknown) => {
+            // The failed install is the primary error: the client offers its fix, then the next sync starts the server.
+            if (failed && error instanceof DevServerStartError) return failed;
+            throw error;
+          }),
         );
       }
     }

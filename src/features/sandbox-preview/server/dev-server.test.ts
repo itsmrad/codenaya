@@ -145,8 +145,10 @@ describe("installWithDevServerStopped (#486)", () => {
   it("does not start a second dev server when another instance started one during the install", async () => {
     const { sandbox, run } = fakeSandbox([]);
     vi.mocked(sandbox.commands.list).mockResolvedValueOnce([]).mockResolvedValue([{ ...dev, cmd: "/bin/bash", args: [] }] as never);
+    run.mockResolvedValue({ stdout: "open\n" });
     await installWithDevServerStopped(sandbox, async () => undefined, {}, { command: "npm run dev", envs: dev.envs, readyPort: 5173 });
-    expect(run).not.toHaveBeenCalled();
+    // No second start, but its readiness is still awaited.
+    expect(run.mock.calls.map(([command]) => command)).toEqual([expect.stringContaining("port:5173")]);
   });
 
   it("does not expose process errors from a failed fallback start", async () => {

@@ -813,6 +813,30 @@ describe("PATCH /api/sandbox/[sandboxId] package.json burst (#486)", () => {
 });
 
 describe("PATCH missing dev server (#774)", () => {
+  it("returns a failed install, not a 503, when the restart after it fails too", async () => {
+    const run = vi.fn(async (_command: string, options?: { background?: boolean }) => {
+      if (options?.background) throw new Error("private start output");
+      throw new (CommandExitError as unknown as new (result: object) => Error)({
+        exitCode: 1, stdout: "", stderr: "npm error code ERESOLVE\n", error: "exit status 1",
+      });
+    });
+    mocks.sandboxConnect.mockResolvedValue({
+      sandboxId: "sbx_install_and_start_fail",
+      getHost: () => "4000-sbx.e2b.app",
+      getInfo: async () => ({ metadata: { userId: "user_1" } }),
+      files: { write: vi.fn() },
+      commands: { run, list: vi.fn(async () => []) },
+    });
+    try {
+      const response = await PATCH(request("PATCH", JSON.stringify({ files: [{ path: "package.json", content: "{}" }] })),
+        { params: Promise.resolve({ sandboxId: "sbx_install_and_start_fail" }) });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ success: true, synced: 1, installFailed: { exitCode: 1, code: "ERESOLVE" } });
+    } finally {
+      forgetSandbox("sbx_install_and_start_fail");
+    }
+  });
+
   it.each([false, true])("starts a missing server after install and surfaces start failure (%s)", async (startFails) => {
     const run = vi.fn(async (command: string, options?: { background?: boolean }) => {
       if (options?.background && startFails) throw new Error("private start output");

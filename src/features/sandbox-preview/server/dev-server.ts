@@ -131,6 +131,7 @@ export const installWithDevServerStopped = async <T>(
     // Another instance may have started one during this install: narrows that race, a lock would close it.
     const startedElsewhere = !dev && start && (await sandbox.commands.list()).some((command) => command.envs?.[DEV_COMMAND_ENV]);
     if (start && !startedElsewhere) await startDevServer(sandbox, start, output);
+    else if (start?.readyPort) await waitForDevServer(sandbox, start.readyPort);
   }
 };
 
