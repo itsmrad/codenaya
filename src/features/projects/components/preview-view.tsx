@@ -62,6 +62,7 @@ import {
   type AppError,
   type FixAttempts,
 } from "@/features/sandbox-preview/utils/app-error";
+import { hookReloadDelay, isHookError } from "@/features/sandbox-preview/utils/hook-reload";
 import { readPreviewMessage } from "@/features/sandbox-preview/utils/preview-bridge";
 import {
   MAX_FIX_ATTEMPTS,
@@ -356,6 +357,29 @@ export const PreviewView = ({
   const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
   const previewKey = `${projectId}:${previewUrl}:${refreshKey}`;
   const handlePreviewLoad = useCallback(() => setLoadedPreview(previewKey), [previewKey]);
+
+  // A hook error right after a late dependency made Vite re-optimize (#486) is two
+  // React copies in a stale page; a reload heals it. Vite's own reload gets a moment
+  // first, any other reload counts as this one, and a bug that survives falls to the auto-fix.
+  const lastReloadAt = useRef(0);
+  const hookReloads = useRef(0);
+  useEffect(() => {
+    lastReloadAt.current = Date.now();
+  }, [refreshKey]);
+  useEffect(() => {
+    if (runActive) hookReloads.current = 0;
+  }, [runActive]);
+  const hookError = isHookError(runtimeError);
+  useEffect(() => {
+    if (!hookError) return;
+    const delay = hookReloadDelay(hookReloads.current, lastReloadAt.current, Date.now());
+    if (delay === null) return;
+    const timer = setTimeout(() => {
+      hookReloads.current += 1;
+      setRefreshKey((key) => key + 1);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [hookError]);
 
   // Only ever called from a user action. WebContainer needs the COOP/COEP headers
   // next.config.ts sets for `?engine=webcontainer`, so switching is a full page
