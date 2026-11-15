@@ -15,7 +15,7 @@
   "tools": [
     {
       "name": "delegateTasks",
-      "description": "Run 2-4 tasks in parallel, each by a worker that writes only its owned paths. ownedPaths must be files or folders under src/ or public/ (e.g. src/pages/Home.tsx, src/components/gallery, public), disjoint between tasks. Root config and the shared files (index.html, package.json, src/App.tsx, src/main.tsx, src/index.css, configs) are yours: write them before delegating. Call it once, after writing the shared foundation. Returns each task's report: done, unfinished or failed, the files it wrote, and its NEEDS: requests. A task with role \"sub-orchestrator\" (at most 2) splits its own paths among up to 3 workers.",
+      "description": "Run 2-4 tasks in parallel, each by a worker that writes only its owned paths. ownedPaths must be files or folders under src/ or public/ (e.g. src/pages/Home.tsx, src/components/gallery, public), disjoint between tasks. Root config and the shared files (index.html, package.json, configs; Vite: src/App.tsx, src/main.tsx, src/index.css; Next.js: src/app/layout.tsx, src/app/globals.css, src/app/page.tsx, src/app/providers.tsx, src/middleware.ts) are yours: write them before delegating. Call it once, after writing the shared foundation. Returns each task's report: done, unfinished or failed, the files it wrote, and its NEEDS: requests. A task with role \"sub-orchestrator\" (at most 2) splits its own paths among up to 3 workers.",
       "input_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

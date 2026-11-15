@@ -18,6 +18,8 @@ import {
   PromptInputTools,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { readProjectFramework, writeProjectFramework, type FrameworkChoice, type ProjectFramework } from "../utils/project-framework";
 import { AgentModelSelect } from "@/features/conversations/components/agent-model-select";
 import { EnhancePromptButton } from "@/features/conversations/components/enhance-prompt-button";
 import { type ComposerMode, PlanModeToggle } from "@/features/conversations/components/plan-mode-toggle";
@@ -111,7 +113,7 @@ const TOOL = cn(
 
 interface PromptComposerProps {
   /** Resolves to true when the prompt was accepted; the box is then cleared. */
-  onSubmit: (prompt: string, mode: ComposerMode) => Promise<boolean>;
+  onSubmit: (prompt: string, mode: ComposerMode, framework?: ProjectFramework) => Promise<boolean>;
   isSubmitting?: boolean;
   /** Show the agent model chip (shares the chat's saved choice). */
   showModelSelect?: boolean;
@@ -138,6 +140,11 @@ export const PromptComposer = ({
   autoFocus,
   className,
 }: PromptComposerProps) => {
+  const [framework, setFramework] = useState<FrameworkChoice>("auto");
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFramework(readProjectFramework());
+  }, []);
   const [input, setInput] = useState("");
   const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -152,7 +159,7 @@ export const PromptComposer = ({
 
   const handleSubmit = async (message: PromptInputMessage) => {
     if (!message.text.trim() || isBusy) return;
-    if (await onSubmit(message.text, mode)) setInput("");
+    if (await onSubmit(message.text, mode, framework === "auto" ? undefined : framework)) setInput("");
   };
 
   const fill = (prompt: string) => {
@@ -199,6 +206,26 @@ export const PromptComposer = ({
               autoFocus={autoFocus}
             />
           </PromptInputBody>
+
+          <div className="flex h-9 items-center border-t border-border">
+            <Select value={framework} onValueChange={(value) => {
+              const next = value === "next" || value === "vite" ? value : "auto";
+              setFramework(next);
+              writeProjectFramework(next);
+            }} disabled={isBusy}>
+              <SelectTrigger size="sm" aria-label="Framework" data-testid="prompt-composer-framework" className={cn(TOOL, "h-full rounded-none border-y-0 border-l-0 shadow-none")}>
+                <span className="@max-[640px]:sr-only">Framework</span>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className={MODEL_MENU}>
+                <SelectGroup>
+                  <SelectItem value="auto">Auto</SelectItem>
+                  <SelectItem value="vite">Vite (React)</SelectItem>
+                  <SelectItem value="next">Next.js</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
 
           {/* Toolbar of cells; p-0! beats the addon's own padding so every cell centres. */}
           <PromptInputFooter className="h-11 items-stretch gap-0 border-t border-border p-0!">

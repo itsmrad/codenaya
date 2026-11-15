@@ -21,6 +21,7 @@ import { INSUFFICIENT_CREDITS_CODE } from "@/features/billing/credits";
 import { MODEL_LIMIT_CODE } from "@/features/billing/model-spend";
 import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 
+import type { ProjectFramework } from "../utils/project-framework";
 import { clearPendingPrompt } from "../utils/pending-prompt";
 import { useUpdateProjectInstructions } from "./use-projects";
 
@@ -34,11 +35,13 @@ export const createWithPromptBody = (
   templateId?: StarterTemplateId,
   fromLanding?: boolean,
   mode?: ComposerMode,
+  framework?: ProjectFramework,
 ) => ({
   prompt,
   model,
   templateId,
   fromLanding,
+  ...(framework ? { framework } : {}),
   ...(mode && mode !== "build" ? { mode } : {}),
 });
 
@@ -47,7 +50,8 @@ export const createWithPromptBody = (
  * opens it in the IDE, using the agent model picked in the composer or chat.
  * A `templateId` seeds the project with that starter template's files first;
  * `fromLanding` marks a prompt typed on the landing page before sign-up;
- * `mode` starts the first run in Ask / Plan or Swarm mode.
+ * `mode` starts the first run in Ask / Plan or Swarm mode;
+ * `framework` overrides prompt detection when picked in the new-project composer.
  * `createProject` resolves to true once it navigates, so callers can clear
  * their input or close a dialog.
  */
@@ -64,6 +68,7 @@ export const useCreateProjectFromPrompt = () => {
       templateId?: StarterTemplateId,
       fromLanding?: boolean,
       mode?: ComposerMode,
+      framework?: ProjectFramework,
     ): Promise<boolean> => {
       if (submitting.current) return false;
       const text = prompt.trim();
@@ -88,7 +93,7 @@ export const useCreateProjectFromPrompt = () => {
 
         const { projectId } = await ky
           .post("/api/projects/create-with-prompt", {
-            json: createWithPromptBody(withSetupAnswers(text, answers), agentModel, templateId, fromLanding, mode),
+            json: createWithPromptBody(withSetupAnswers(text, answers), agentModel, templateId, fromLanding, mode, framework),
           })
           .json<{ projectId: Id<"projects"> }>();
 

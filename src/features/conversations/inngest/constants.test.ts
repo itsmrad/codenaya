@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CODING_AGENT_SYSTEM_PROMPT,
   STARTER_IN_PLACE_NOTE,
+  SWARM_ORCHESTRATOR_NOTE,
   SWARM_SUBORCH_NOTE,
   SWARM_WORKER_NOTE,
 } from "./constants";
@@ -44,6 +45,27 @@ describe("coding agent integration instructions", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain('import { toast } from "sonner"');
     expect(STARTER_IN_PLACE_NOTE).toContain("Import these components; do not rewrite them");
     expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/useToast\(\)|write them all|ALL shadcn component source files|Write the actual component source/);
+  });
+
+  it("reuses Next.js starter components and keeps a single Toaster in the root layout", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("The Vite and Next.js starters already include components.json");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Vite in src/main.tsx, Next.js in src/app/layout.tsx");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("already installed for the Vite and Next.js starters' shipped components");
+  });
+
+  it("keeps Next.js API secrets in authenticated server handlers or actions", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("route handlers (src/app/api/**/route.ts) or server actions");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("server-only env vars without a NEXT_PUBLIC_ prefix");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("authenticate and authorize each request");
+  });
+
+  it("describes both swarm foundations and leaves route content to workers or integration", () => {
+    expect(SWARM_ORCHESTRATOR_NOTE).toContain("For Vite, routing is src/App.tsx");
+    expect(SWARM_ORCHESTRATOR_NOTE).toContain("routing is the file system");
+    expect(SWARM_ORCHESTRATOR_NOTE).toContain("set up src/app/layout.tsx, and new routes use");
+    expect(SWARM_ORCHESTRATOR_NOTE).toContain("src/app/<route>/page.tsx stubs (export default function Page(){return null})");
+    expect(SWARM_ORCHESTRATOR_NOTE).toContain("Existing files are never stubbed");
+    expect(SWARM_ORCHESTRATOR_NOTE).toContain("delegate home content as a component and wire it in during integration");
   });
 
   it("treats runtime MCP state as authoritative over generated project files", () => {

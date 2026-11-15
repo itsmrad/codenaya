@@ -2,7 +2,7 @@ import { createTool } from "@inngest/agent-kit";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { guardOwnedPaths } from "./inngest/lib/ownership-guard";
+import { guardFoundation, guardOwnedPaths } from "./inngest/lib/ownership-guard";
 import { MAX_BRIEF_CHARS, MAX_ORIGINAL_PROMPT_CHARS, capOriginalPrompt, classifySwarmPrompt, isFoundationPath, ownsPath, swarmPlanSchema, validatePlan } from "./swarm";
 
 const task = (id: string, ownedPaths: string[]) => ({ id, title: id, brief: `Build ${id}.`, ownedPaths });
@@ -91,6 +91,20 @@ describe("validatePlan", () => {
     for (const path of ["src/App.tsx", "src/lib", "src/lib/", "src", "src/", "src/index.css", "package.json", "index.html", "/src/x.ts", "src/../x.ts", "public/../index.html", "/public/x.png", "src//x.ts"]) {
       expect(validatePlan({ tasks: [task("a", [path]), task("b", ["src/b.ts"])] }), path).toMatch(/^Error:/);
     }
+  });
+
+  it.each(["src/app/layout.tsx", "src/app/globals.css", "src/app/page.tsx", "src/app/providers.tsx", "src/middleware.ts", "src/app", "src/app/"])(
+    "keeps shared Next.js path %s with the orchestrator", (path) => {
+      expect(validatePlan({ tasks: [task("home", [path]), task("about", ["src/app/about"])] })).toMatch(/^Error:/);
+      expect(ownsPath(["src/app"], path)).toBe(false);
+      expect(isFoundationPath(path)).toBe(!["src/app", "src/app/"].includes(path));
+    });
+
+  it("delegates disjoint App Router routes and home content components", () => {
+    const tasks = [task("about", ["src/app/about"]), task("home", ["src/components/home.tsx"])];
+    expect(validatePlan({ tasks })).toEqual({ tasks });
+    expect(ownsPath(["src/app/about"], "src/app/about/page.tsx")).toBe(true);
+    expect(ownsPath(["src/app/about"], "src/app/contact/page.tsx")).toBe(false);
   });
 });
 
@@ -200,6 +214,30 @@ describe("guardOwnedPaths", () => {
   });
 });
 
+describe("App Router foundation placeholders", () => {
+  const path = "src/app/about/page.tsx";
+  const stub = "export default function Page(){return null}";
+
+  it.each([
+    { content: stub, existingPath: null, allowed: true },
+    { content: stub, existingPath: path, allowed: false },
+    { content: "x".repeat(241), existingPath: null, allowed: false },
+  ])("guards a new route stub: $allowed, existing $existingPath", async ({ content, existingPath, allowed }) => {
+    const handler = vi.fn(async () => "ok");
+    const guard = guardFoundation(() => false, async () => existingPath);
+    const tool = guard(createTool({ name: "writeFiles", description: "write", parameters: z.object({}).passthrough(), handler }));
+    const result = await (tool.handler as (input: unknown, opts: never) => Promise<string>)({ files: [{ path, content }] }, {} as never);
+
+    if (allowed) {
+      expect(result).toBe("ok");
+      expect(handler).toHaveBeenCalledOnce();
+    } else {
+      expect(result).toMatch(/^Error: Swarm mode:/);
+      expect(handler).not.toHaveBeenCalled();
+    }
+  });
+});
+
 describe("classifySwarmPrompt", () => {
   it.each([
     "Build a pizzeria site with home, menu, about and contact pages",
@@ -234,7 +272,7 @@ describe("classifySwarmPrompt", () => {
 describe("isFoundationPath", () => {
   it.each(["package.json", "vite.config.ts", "src/App.tsx", "src/main.tsx", "src/index.css", "src/lib/api.ts", "src/types/menu.ts", "src/types.ts", "src/vite-env.d.ts", "src/styles/tokens.css", "src/theme/colors.ts"])(
     "lets the orchestrator write %s before delegation", (path) => expect(isFoundationPath(path)).toBe(true));
-  it.each(["src/pages/menu.tsx", "src/components/nav.tsx", "src/data/site.ts", "src", "src/lib"])(
+  it.each(["src/pages/menu.tsx", "src/app/about/page.tsx", "src/app/api/todos/route.ts", "src/components/nav.tsx", "src/data/site.ts", "src", "src/lib"])(
     "keeps %s for a worker", (path) => expect(isFoundationPath(path)).toBe(false));
 });
 

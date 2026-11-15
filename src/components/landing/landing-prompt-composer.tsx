@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 
 import { SIGN_IN_URL } from "@/features/auth/constants";
+import type { ProjectFramework } from "@/features/projects/utils/project-framework";
 import type { ComposerMode } from "@/features/conversations/components/plan-mode-toggle";
 import { PromptComposer } from "@/features/projects/components/prompt-composer";
 import { savePendingPrompt } from "@/features/projects/utils/pending-prompt";
@@ -18,8 +19,8 @@ import { LandingModelPicker } from "./landing-model-picker";
 export const LandingPromptComposer = ({ className }: { className?: string }) => {
   const router = useRouter();
 
-  const handleSubmit = async (prompt: string, mode: ComposerMode) => {
-    savePendingPrompt(prompt, mode === "build" ? undefined : mode);
+  const handleSubmit = async (prompt: string, mode: ComposerMode, framework?: ProjectFramework) => {
+    savePendingPrompt(prompt, mode === "build" ? undefined : mode, framework);
     router.push(SIGN_IN_URL);
     return true;
   };
