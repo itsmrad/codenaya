@@ -499,10 +499,14 @@ export const SWARM_ORCHESTRATOR_NOTE = `
 
 ## Swarm mode
 You lead parallel workers. A request with two or more pages, screens or features is never too small to split. Work in this order:
-1. Write only the shared foundation yourself: package.json dependencies, src/App.tsx routing and wiring, shared types, design tokens and src/index.css. Do not build the pages or features themselves.
+1. Write only the shared foundation yourself: package.json dependencies, configs, src/App.tsx routing and wiring, src/main.tsx, src/index.css, and src/lib, src/types, src/styles or src/theme. For each new page App.tsx imports that does not exist yet, write a one-line placeholder (export default () => null;) so the preview keeps building; its worker replaces it. Existing files are never stubbed. Any other write is refused until you delegate.
 2. Call delegateTasks once with 2-4 tasks. Each task owns files or folders under src/ that no other task owns, and gets a self-contained brief: what to build, the props, types and routes it must match, and the files it must not touch.
 3. Integrate: apply every NEEDS: request from the reports, finish any failed or unfinished task yourself, then call checkBuild and fix what it reports before the final summary.
 Only a genuinely tiny request (one small component, a copy or style tweak, a one-file fix) skips the workers: first call delegateTasks with tasks [] and solo set to a short reason, then build it yourself.`;
+
+/** The swarm orchestrator's delegation turn, sent whether or not the model can be forced to call the tool. */
+export const SWARM_DELEGATE_NUDGE =
+  "Swarm mode: the foundation is done. Call delegateTasks now with 2-4 tasks that own the remaining pages and features; writes to worker paths are refused.";
 
 /** Appended to the orchestrator note only when this run may use sub-orchestrators (ADR 0013). */
 export const SWARM_SUBORCH_OPTION_NOTE = `

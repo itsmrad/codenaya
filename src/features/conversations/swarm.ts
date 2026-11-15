@@ -50,6 +50,48 @@ const within = (folder: string, path: string) => path === folder || path.startsW
 // A shared file, or a folder holding one: a recursive delete would take it too.
 const shared = (path: string) => SWARM_SHARED_PATHS.some((file) => within(path, file));
 
+/** Before delegation the orchestrator writes only the foundation: these folders, shared files and root files. */
+const FOUNDATION_FOLDERS = ["src/lib", "src/types", "src/styles", "src/theme"];
+/** A file this short is a page stub (`export default () => null;`) that keeps App.tsx's imports resolving. */
+export const FOUNDATION_PLACEHOLDER_MAX_CHARS = 240;
+
+/** Whether the orchestrator may write `raw` before delegateTasks: configs, shared files, lib/types/styles/theme. */
+export const isFoundationPath = (raw: string): boolean => {
+  const path = normalizePath(raw);
+  if (!path) return false;
+  if (path !== "src" && !path.startsWith("src/")) return true;
+  return (SWARM_SHARED_PATHS as readonly string[]).includes(path) || /^src\/[^/]+\.d\.ts$/.test(path)
+    || path === "src/types.ts" || FOUNDATION_FOLDERS.some((folder) => path.startsWith(`${folder}/`));
+};
+
+// Pages, screens and features a request can name; two distinct ones make it worth splitting.
+const FEATURE_RE = /\b(home|landing|menu|about|contact|reservation|booking|gallery|pricing|service|blog|faq|team|career|testimonial|dashboard|login|sign-?up|register|profile|setting|cart|checkout|product|catalog|order|customer|deal|lead|pipeline|calendar|appointment|schedule|report|analytics|inbox|admin|portfolio|shop|event|location|dentist|confirmation|payment|invoice)s?\b/g;
+const COUNTED_RE = /\bmulti-?page\b|\b(?:\d+|two|three|four|five|six|several|multiple)[- ](?:page|screen|section)s?\b/;
+const EDIT_RE = /^(?:please\s+)?(?:change|fix|rename|update|tweak|adjust|move|remove|delete|replace|make the|set|increase|decrease|align|center|add an?)\b/;
+// An edit names pages in passing ("a contact form on the home page"): it splits only when it adds pages.
+const MULTI_PAGE_RE = /\b(?:pages|screens)\b|\b(?:page|screen)\s*(?:,|and\b|&|\+)/;
+const EDIT_MAX_CHARS = 120;
+const LONG_REQUEST_CHARS = 300;
+
+/**
+ * Whether a swarm request is split among workers, decided before the run so it is
+ * deterministic: two or more named pages or features (in an edit, only with several
+ * pages: "a menu page and a contact page"), or a counted "N pages", is delegated; a short
+ * edit stays solo; a long request is delegated.
+ */
+export const classifySwarmPrompt = (prompt: string): { delegate: boolean; reason: string } => {
+  const text = prompt.trim().toLowerCase();
+  const edit = EDIT_RE.test(text) && text.length <= EDIT_MAX_CHARS;
+  const features = [...new Set([...text.matchAll(FEATURE_RE)].map((match) => match[1]))];
+  if (features.length >= 2 && (!edit || MULTI_PAGE_RE.test(text))) {
+    return { delegate: true, reason: `it names ${features.length} pages or features (${features.join(", ")})` };
+  }
+  if (COUNTED_RE.test(text)) return { delegate: true, reason: "it asks for several pages" };
+  if (edit) return { delegate: false, reason: "a small edit" };
+  if (text.length >= LONG_REQUEST_CHARS) return { delegate: true, reason: "a long build request" };
+  return { delegate: false, reason: "a short request with no separate pages or features" };
+};
+
 /** Whether a write or (recursive) delete of `raw` stays inside owned paths and spares shared files. */
 export const ownsPath = (ownedPaths: readonly string[], raw: string): boolean => {
   const path = canonical(raw);

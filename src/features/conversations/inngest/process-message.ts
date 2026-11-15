@@ -11,6 +11,7 @@ import {
   MAX_AGENT_STEPS,
   STARTER_IN_PLACE_NOTE,
   STEP_BUDGET_NOTE,
+  SWARM_DELEGATE_NUDGE,
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { createSearchFilesTool } from './tools/search-files';
@@ -49,7 +50,7 @@ import {
   keyFailureMessage,
   resolveRunModel,
 } from '@/features/ai-providers/server/resolve-run-model';
-import { withoutToolCalls } from '@/features/ai-providers/server/agentkit-model';
+import { forceToolCall, withoutToolCalls } from '@/features/ai-providers/server/agentkit-model';
 import type { ModelPricing } from '@/features/ai-providers/catalog';
 import { costUsd, usageOfResponse } from '@/features/billing/credits';
 import {
@@ -102,7 +103,7 @@ import {
   PLAN_MODE_TOOLS,
   SWARM_MODE,
 } from '../plan-mode';
-import { swarmRun } from './lib/swarm-run';
+import { SWARM_DELEGATE_AGENT_NAME, swarmRequest, swarmRun } from './lib/swarm-run';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -559,7 +560,7 @@ export const processMessage = inngest.createFunction(
     // base, project instructions, skill index and integrations, then the project tree, forced
     // skills and plan mode.
     // Conversation goes in messages (see onStart).
-    const swarm = await swarmRun({ ...(event.data as MessageEvent), internalKey, step });
+    const swarm = await swarmRun({ ...(event.data as MessageEvent), request: swarmRequest(earlierTurns, request), internalKey, step });
     const soloFirstBuild = !planMode && mode !== SWARM_MODE && await step.run(
       "check-first-build",
       () => convex.query(api.projects.conversationNeedsFirstBuildForServer, { internalKey, conversationId }),
@@ -672,7 +673,7 @@ export const processMessage = inngest.createFunction(
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
       ...swarm.tools,
-    ].map(refuseCutOffCalls).map(decodeJsonArgs);
+    ].map(swarm.guard).map(refuseCutOffCalls).map(decodeJsonArgs);
 
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
@@ -719,7 +720,9 @@ export const processMessage = inngest.createFunction(
           const nudge =
             agent.name === SUMMARY_AGENT_NAME
               ? summaryNote
-              : takeCutOffNote() ?? buildCheckGate.takeNudge() ?? loopGuard.takeHint();
+              : agent.name === SWARM_DELEGATE_AGENT_NAME
+                ? SWARM_DELEGATE_NUDGE
+                : takeCutOffNote() ?? buildCheckGate.takeNudge() ?? loopGuard.takeHint();
           if (nudge === BUILD_REPAIR_NUDGE) {
             const attempt = buildCheckGate.repairs;
             await recordSteps("record-build-repair", () => [{
@@ -854,10 +857,16 @@ export const processMessage = inngest.createFunction(
       name: SUMMARY_AGENT_NAME,
       model: withoutToolCalls(codingModel),
     });
+    // Swarm mode's forced turn: the same agent, made to call delegateTasks.
+    const delegateAgent = swarm.catchDelegation(createAgent({
+      ...agentOptions,
+      name: SWARM_DELEGATE_AGENT_NAME,
+      model: forceToolCall(codingModel, "delegateTasks"),
+    }));
 
     const network = createNetwork({
       name: "codenaya-network",
-      agents: [codingAgent, summaryAgent],
+      agents: [codingAgent, summaryAgent, delegateAgent],
       maxIter: MAX_AGENT_STEPS,
       router: ({ network, callCount }) => {
         const { results } = network.state;
@@ -881,6 +890,9 @@ export const processMessage = inngest.createFunction(
           cutOffRetries += 1;
           return codingAgent;
         }
+
+        // A split swarm run delegates once its foundation is written (see swarmRun).
+        if (!lastStep && swarm.forceDelegation(results, callCount)) return delegateAgent;
 
         // Stop routing to this agent if there's a final text response without
         // tool calls, unless files changed since the last passing build check

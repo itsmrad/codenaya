@@ -37,10 +37,17 @@ export const swarmElapsed = (startedAt: number, endedAt: number) => {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 };
 
-/** Why a finished swarm ran no workers: its solo reason, the refusal its delegateTasks call got, or neither. */
+/** The step a solo swarm run records with the classifier's reason ("Building solo: <reason>"). */
+export const SWARM_SOLO_STEP_ID = "swarm-solo";
+
+/**
+ * Why a finished swarm ran no workers: the classifier's solo reason, the refusal its
+ * last delegateTasks call got, that call's own solo reason, or neither.
+ */
 export const swarmSoloReason = (steps: AgentStep[]) => {
+  const solo = steps.find((step) => step.id === SWARM_SOLO_STEP_ID)?.text?.replace(/^Building solo:\s*/, "");
   const call = steps.findLast((step) => step.tool === "delegateTasks");
-  return call?.error?.replace(/^error:\s*/i, "") || call?.targets?.[0] || "the orchestrator did not delegate";
+  return solo || call?.error?.replace(/^error:\s*/i, "") || call?.targets?.[0] || "the orchestrator did not delegate";
 };
 
 /** `solo`: a finished run's `swarmSoloReason`, shown in place of the counts when it ran no workers. */
