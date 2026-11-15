@@ -41,6 +41,9 @@ test.describe("chat run block", () => {
       const changed = doneRun.locator('[data-slot="changed-files"]');
       await expect(changed.getByRole("button")).toHaveText(["pricing.css", "index.html"]);
 
+      await expect(page.getByRole("status", { name: "Run outcome: Unverified", exact: true })).toBeVisible();
+      await expect(liveRun.getByRole("status", { name: /Run outcome:/ })).toHaveCount(0);
+
       // Expanded: the thinking row reports its duration and the skill chip
       // is a plain label, not a file link.
       await doneRun.getByRole("button", { name: /Worked for/ }).click();

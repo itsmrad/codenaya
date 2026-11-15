@@ -474,9 +474,17 @@ export const stepsFromToolResults = (
   pathOf: (id: string) => string | undefined = () => undefined,
 ): AgentStep[] => results.map(({ tool, content }) => {
   const error = toolResultError(content, pathOf);
+  const data = (content as { data?: unknown } | null)?.data;
+  // A partial batch still wrote files, but its failures must survive in the run record.
+  const partialWriteError = tool.name === "writeFiles" && typeof data === "string"
+    ? data.match(/(?:^| )Failed: .+/)?.[0].trim()
+    : undefined;
+  const recordedError = error ?? (partialWriteError
+    ? sanitizeAgentText(partialWriteError, pathOf).slice(0, MAX_ERROR)
+    : undefined);
   const label = !error && tool.name === "checkBuild" ? buildCheckLabel(content) : undefined;
   const recipeIds = toolResultRecipeIds(content);
   return { id: tool.id, kind: "tool", tool: tool.name, status: error ? "error" : "done",
-    ...(error ? { error } : {}), ...(label ? { text: label } : {}),
+    ...(recordedError ? { error: recordedError } : {}), ...(label ? { text: label } : {}),
     ...(recipeIds.length ? { recipeIds } : {}), startedAt: now, endedAt: now };
 });
