@@ -735,3 +735,18 @@ it("defers PayPal until its documented endpoint path matches the live server (#5
   expect(getTrustedHostnames()).not.toContain("mcp.paypal.com");
   expect(getTrustedHostnames()).not.toContain("mcp.sandbox.paypal.com");
 });
+
+it("scopes the selected auth-mode endpoint before adding project restrictions", () => {
+  const definition: ProviderDefinition = {
+    ...provider("supabase"),
+    urlByAuthMode: { api_key: "https://mcp.supabase.com/key-mcp" },
+  };
+  expect(buildScopedMcpUrl(definition, { readOnly: true, projectRef: "project" }, "api_key")).toEqual({
+    url: "https://mcp.supabase.com/key-mcp?read_only=true&project_ref=project",
+    headers: {},
+  });
+  expect(buildScopedMcpUrl(definition, { readOnly: true, projectRef: "project" }, "oauth")).toEqual({
+    url: "https://mcp.supabase.com/mcp?read_only=true&project_ref=project",
+    headers: {},
+  });
+});

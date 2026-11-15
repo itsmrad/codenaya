@@ -51,7 +51,7 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { nanoid } from "nanoid";
 
-import { hasPreRegisteredClient } from "../../catalog";
+import { hasPreRegisteredClient, resolveProviderMcpUrl } from "../../catalog";
 import type { ProviderDefinition } from "../../types";
 import { createGuardedFetch } from "../mcp/guarded-fetch";
 import { validateAuthorizationServer } from "./as-guard";
@@ -194,7 +194,7 @@ export async function startOAuthFlow(
 
   let serverInfo;
   try {
-    serverInfo = await discoverOAuthServerInfo(provider.mcpUrl, { fetchFn });
+    serverInfo = await discoverOAuthServerInfo(resolveProviderMcpUrl(provider, "oauth"), { fetchFn });
   } catch (error) {
     return {
       ok: false,
@@ -207,7 +207,7 @@ export async function startOAuthFlow(
   // The critical gate: the MCP server told us where to send the user, and we do
   // not take its word for it.
   const asVerdict = validateAuthorizationServer({
-    mcpServerUrl: provider.mcpUrl,
+    mcpServerUrl: resolveProviderMcpUrl(provider, "oauth"),
     authorizationServerUrl: serverInfo.authorizationServerUrl,
     trustedOrigins: provider.trustedAuthorizationServerOrigins,
     providerDisplayName: provider.displayName,
@@ -260,7 +260,7 @@ export async function startOAuthFlow(
         state,
         // RFC 8707 resource indicator. Binds the issued token to this MCP
         // server so it cannot be replayed against a different resource.
-        resource: new URL(provider.mcpUrl),
+        resource: new URL(resolveProviderMcpUrl(provider, "oauth")),
       },
     );
   } catch (error) {
@@ -344,7 +344,7 @@ export async function completeOAuthFlow(
   // re-checking costs nothing and means a tampered row cannot redirect the token
   // request somewhere else.
   const asVerdict = validateAuthorizationServer({
-    mcpServerUrl: provider.mcpUrl,
+    mcpServerUrl: resolveProviderMcpUrl(provider, "oauth"),
     authorizationServerUrl,
     trustedOrigins: provider.trustedAuthorizationServerOrigins,
     providerDisplayName: provider.displayName,
@@ -364,7 +364,7 @@ export async function completeOAuthFlow(
       authorizationCode,
       codeVerifier,
       redirectUri,
-      resource: new URL(provider.mcpUrl),
+      resource: new URL(resolveProviderMcpUrl(provider, "oauth")),
       fetchFn,
     });
 
@@ -403,7 +403,7 @@ export async function refreshOAuthTokens(
   } = options;
 
   const asVerdict = validateAuthorizationServer({
-    mcpServerUrl: provider.mcpUrl,
+    mcpServerUrl: resolveProviderMcpUrl(provider, "oauth"),
     authorizationServerUrl,
     trustedOrigins: provider.trustedAuthorizationServerOrigins,
     providerDisplayName: provider.displayName,
@@ -421,7 +421,7 @@ export async function refreshOAuthTokens(
       metadata: authorizationServerMetadata,
       clientInformation: client.clientInformation,
       refreshToken,
-      resource: new URL(provider.mcpUrl),
+      resource: new URL(resolveProviderMcpUrl(provider, "oauth")),
       fetchFn: createGuardedFetch({
         trustedHosts: provider.trustedHostnames,
       }),

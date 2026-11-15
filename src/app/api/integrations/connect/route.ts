@@ -2,7 +2,7 @@ import { requireUserId } from "@/features/auth/server/require-user-id";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
-import { getProvider } from "@/features/integrations/catalog";
+import { getProvider, resolveProviderMcpUrl } from "@/features/integrations/catalog";
 import { maskCredential } from "@/features/integrations/env-keys";
 import {
   getSecretSealer,
@@ -158,7 +158,7 @@ export async function POST(request: Request) {
       );
     }
 
-    mcpUrl = provider.mcpUrl;
+    mcpUrl = resolveProviderMcpUrl(provider, noAuth ? "none" : "api_key");
     placement = provider.apiKey ?? DEFAULT_API_KEY_PLACEMENT;
     displayName = provider.displayName;
     trustedHosts = provider.trustedHostnames;
