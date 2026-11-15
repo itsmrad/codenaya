@@ -6,13 +6,14 @@ import type { Id } from "../convex/_generated/dataModel";
 import { ensureTestUser, hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
+import { injectPreviewBridge } from "../src/features/sandbox-preview/utils/preview-bridge";
 import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
 
 /**
  * Stubs the sandbox so the boot resolves at once, after any `output` lines;
  * returns the boot request count.
  */
-const stubSandbox = async (page: Page, output: string[] = []) => {
+const stubSandbox = async (page: Page, output: string[] = [], previewUrl = "about:blank") => {
   const counter = { boots: 0 };
   await page.route("**/api/sandbox", (route) => {
     counter.boots += 1;
@@ -20,7 +21,7 @@ const stubSandbox = async (page: Page, output: string[] = []) => {
       contentType: "application/x-ndjson",
       body: [
         ...output.map((data) => ({ type: "output", data })),
-        { type: "ready", sandboxId: "e2e-sandbox", previewUrl: "about:blank" },
+        { type: "ready", sandboxId: "e2e-sandbox", previewUrl },
       ]
         .map((event) => `${JSON.stringify(event)}\n`)
         .join(""),
@@ -284,6 +285,67 @@ test.describe("first build auto-opens the preview", () => {
       await (await userConvexClient(page)).mutation(api.projects.remove, { id: projectId }).catch(() => {});
     }
   });
+
+  for (const healed of [true, false]) {
+    test(`reloads a first build's runtime error once before any fix (${healed ? "gone" : "still there"}, #486)`, async ({ page }) => {
+      test.setTimeout(180_000);
+      await signIn(page);
+      // Same origin as the IDE, so the bridge's messages pass the origin check.
+      const previewUrl = new URL("/__e2e-486-preview", page.url()).href;
+      let broken = true;
+      let loads = 0;
+      await page.route(previewUrl, (route) => {
+        loads += 1;
+        // Like the e2b proxy: the bridge goes first, then the app, which throws
+        // while it runs two React copies.
+        const app = broken ? "<script>throw new Error('Two Reacts')</script>" : "";
+        return route.fulfill({
+          contentType: "text/html",
+          body: injectPreviewBridge(`<html><head></head><body><h1>App</h1>${app}</body></html>`),
+        });
+      });
+      await stubSandbox(page, [], previewUrl);
+      // Stubbed, so no agent run (or model spend) starts.
+      const sent: string[] = [];
+      await page.route("**/api/messages", (route) => {
+        sent.push((route.request().postDataJSON() as { message: string }).message);
+        return route.fulfill({ status: 200, json: {} });
+      });
+      await page.setViewportSize({ width: 1440, height: 900 });
+      const build = await startFirstBuild(page, `e2e-preview-486-reload-${healed}`);
+
+      try {
+        await page.goto(`/projects/${build.projectId}`);
+        await expect(page.getByRole("status", { name: "Building your app" })).toBeVisible({ timeout: 60_000 });
+        await build.writePackageJson();
+        // The boot's load and its startup refresh, both broken: the card covers them.
+        await expect.poll(() => loads, { timeout: 30_000 }).toBe(2);
+        await page.waitForTimeout(1_000);
+        expect(loads).toBe(2);
+        await expect(page.getByRole("status", { name: "Building your app" })).toBeVisible();
+
+        broken = !healed;
+        await build.run.complete();
+        // One reload against the finished files, before the auto-fix.
+        await expect.poll(() => loads, { timeout: 10_000 }).toBe(3);
+        if (healed) {
+          await expect(page.frameLocator('iframe[title="Preview"]').getByRole("heading")).toHaveText("App");
+          await page.waitForTimeout(6_000);
+          expect(sent).toHaveLength(0);
+          await expect(page.getByRole("alert").filter({ hasText: "Two Reacts" })).toHaveCount(0);
+        } else {
+          // Reported again by the new page: still fixed, once.
+          await expect.poll(() => sent.length, { timeout: 30_000 }).toBe(1);
+          expect(sent[0]).toContain("Two Reacts");
+        }
+        // No reload loop.
+        await page.waitForTimeout(5_000);
+        expect(loads).toBe(3);
+      } finally {
+        await build.cleanup();
+      }
+    });
+  }
 
   test("keeps the tab the user picked during the first build", async ({ page }) => {
     test.setTimeout(150_000);
