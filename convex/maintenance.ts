@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalMutation } from "./_generated/server";
 import { recordRunFinished } from "./activationEvents";
+import { closeOpenTasks } from "./agentTasks";
 import {
   LOST_RUN_MESSAGE,
   LOST_RUN_MS,
@@ -234,6 +235,7 @@ export const failLostMessageRuns = internalMutation({
             : step,
         ),
       });
+      await closeOpenTasks(ctx, message._id);
       failed += 1;
     }
 

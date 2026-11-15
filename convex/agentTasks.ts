@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 
 import type { Id } from "./_generated/dataModel";
-import { mutation, query, type QueryCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
@@ -15,7 +15,6 @@ const otherPlatformSwarmRunning = async (ctx: QueryCtx, ownerId: string, message
   const checked = new Set<Id<"messages">>([messageId]);
   for (const status of ["queued", "running"] as const) {
     // Newest first: a task left running under a cancelled message is older than any swarm started since.
-    // shortcut: those stale rows are never cleaned up; finish them on cancel if they ever crowd this window.
     const rows = await ctx.db.query("agentTasks")
       .withIndex("by_ownerId_and_platform_and_status", (q) =>
         q.eq("ownerId", ownerId).eq("platform", true).eq("status", status))
@@ -28,6 +27,22 @@ const otherPlatformSwarmRunning = async (ctx: QueryCtx, ownerId: string, message
     }
   }
   return false;
+};
+
+export const RUN_ENDED_TASK_ERROR = "The run ended before this worker finished.";
+
+/** Fails a message's queued or running tasks once its run has ended, so none stays "running" on the board (#649). */
+export const closeOpenTasks = async (ctx: MutationCtx, messageId: Id<"messages">) => {
+  const tasks = await ctx.db.query("agentTasks")
+    .withIndex("by_message", (q) => q.eq("messageId", messageId))
+    .take(MAX_SWARM_AGENTS);
+  const now = Date.now();
+  for (const task of tasks) {
+    if (task.status === "done" || task.status === "error") continue;
+    await ctx.db.patch("agentTasks", task._id, {
+      status: "error", error: RUN_ENDED_TASK_ERROR, startedAt: task.startedAt ?? now, endedAt: now, updatedAt: now,
+    });
+  }
 };
 
 /**
