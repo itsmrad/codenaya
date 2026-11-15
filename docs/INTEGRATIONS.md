@@ -8,8 +8,13 @@ and injected into the preview, so generated apps can be genuinely full-stack.
 
 ## Required environment variables
 
+These settings apply to the connection modes that need them. The
+[public documentation providers](#public-documentation-providers-no-sign-in)
+in the catalog do not need a credential store or an OAuth callback. Custom MCP
+servers still use their supported authenticated connection modes.
+
 ```bash
-# Master key for the credential store. REQUIRED before any connection can be made.
+# Master key for credential-bearing connections when using the local KEK provider.
 # Generate with: openssl rand -base64 32
 CODENAYA_LOCAL_KEK=
 
