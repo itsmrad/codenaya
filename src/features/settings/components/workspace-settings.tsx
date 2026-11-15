@@ -30,6 +30,12 @@ const MODES: { value: WorkspaceMode; label: string; description: string; panes: 
     description: "Chat, code editor, files and preview.",
     panes: [2, 1, 3],
   },
+  {
+    value: "board",
+    label: "Agent board",
+    description: "Opens on the board of swarm tasks, with chat and preview a click away.",
+    panes: [2, 3, 2],
+  },
 ];
 
 const LayoutSketch = ({ panes }: { panes: number[] }) => (
@@ -41,7 +47,9 @@ const LayoutSketch = ({ panes }: { panes: number[] }) => (
 );
 
 export const WorkspaceSettings = () => {
-  const { mode, loaded, failed } = useWorkspaceMode();
+  const { mode, loaded, failed, swarmEnabled } = useWorkspaceMode();
+  // The board is a swarm view (#525): hidden while the switch is off or loading.
+  const modes = swarmEnabled ? MODES : MODES.filter(({ value }) => value !== "board");
   const setWorkspaceMode = useSetWorkspaceMode();
 
   const onValueChange = (value: string) => {
@@ -69,9 +77,9 @@ export const WorkspaceSettings = () => {
           value={mode}
           disabled={!loaded}
           onValueChange={onValueChange}
-          className="grid-cols-1 sm:grid-cols-2"
+          className={cn("grid-cols-1", modes.length === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2")}
         >
-          {MODES.map(({ value, label, description, panes }) => (
+          {modes.map(({ value, label, description, panes }) => (
             <Label
               key={value}
               htmlFor={`workspace-mode-${value}`}

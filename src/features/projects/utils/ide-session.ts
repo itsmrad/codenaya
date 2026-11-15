@@ -4,7 +4,7 @@
  * there. Storage can be unavailable, so every access is best-effort, like
  * the pending prompt in this folder.
  */
-export type IdeView = "chat" | "editor" | "preview";
+export type IdeView = "chat" | "board" | "editor" | "preview";
 
 export interface IdeSession {
   view: IdeView;
@@ -12,7 +12,7 @@ export interface IdeSession {
   activeTabId: string | null;
 }
 
-const IDE_VIEWS: readonly string[] = ["chat", "editor", "preview"];
+const IDE_VIEWS: readonly string[] = ["chat", "board", "editor", "preview"];
 
 export const ideSessionKey = (projectId: string) => `codenaya:ide:${projectId}`;
 

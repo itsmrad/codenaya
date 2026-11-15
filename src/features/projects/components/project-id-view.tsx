@@ -13,6 +13,7 @@ import {
   DownloadIcon,
   EyeIcon,
   HistoryIcon,
+  LayoutGridIcon,
   LoaderIcon,
   MessageSquareIcon,
   MoreHorizontalIcon,
@@ -35,6 +36,7 @@ import { HelpMenu } from "@/components/help-menu";
 import { UserMenu } from "@/components/user-menu";
 import { useIsCompact, useIsMobile } from "@/hooks/use-mobile";
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
+import { ProjectSwarmBoard } from "@/features/conversations/components/project-swarm-board";
 import { EditorView } from "@/features/editor/components/editor-view";
 import { useEditorLeaveGuard } from "@/features/editor/hooks/use-editor-leave-guard";
 import { useEditorStore } from "@/features/editor/store/use-editor-store";
@@ -84,7 +86,7 @@ import {
   restorableTabs,
   saveIdeSession,
 } from "../utils/ide-session";
-import { activeViewFor, visibleViews } from "../utils/workspace-mode";
+import { activeViewFor, buildMayOpenPreview, visibleViews } from "../utils/workspace-mode";
 import { useWorkspaceMode } from "@/features/settings/hooks/use-workspace-mode";
 
 const MIN_SIDEBAR_WIDTH = 200;
@@ -96,6 +98,7 @@ const noopSubscribe = () => () => {};
 
 const VIEW_TABS = [
   { view: "chat", label: "Chat", icon: MessageSquareIcon },
+  { view: "board", label: "Board", icon: LayoutGridIcon },
   { view: "editor", label: "Code", icon: CodeIcon },
   { view: "preview", label: "Preview", icon: EyeIcon },
 ] as const;
@@ -150,12 +153,13 @@ export const ProjectIdView = ({
     () => null,
   );
   const [pickedView, setSelectedView] = useState<IdeView | null>(openOnPreview ? "preview" : null);
-  const selectedView: IdeView = pickedView ?? savedView ?? "chat";
-  // Chat-first hides the code (#524); "Open code for this session" shows the
-  // IDE for this visit without changing the setting.
+  // Chat-first and the agent board hide the code (#524, #525); "Open code for
+  // this session" shows the IDE for this visit without changing the setting.
   const { mode: accountMode } = useWorkspaceMode();
   const [codeOpened, setCodeOpened] = useState(false);
   const mode = codeOpened ? "ide" : accountMode;
+  // Board mode opens on the board, phones and tablets included.
+  const selectedView: IdeView = pickedView ?? savedView ?? (mode === "board" ? "board" : "chat");
   const viewTabs = VIEW_TABS.filter(({ view }) => visibleViews(mode, isCompact).includes(view));
   const activeView = activeViewFor(selectedView, mode, isCompact);
   // The preview boots a cloud sandbox or WebContainer as soon as it mounts, so
@@ -171,7 +175,9 @@ export const ProjectIdView = ({
   // soon as its sandbox runs (#337). Elsewhere the preview mounts (hidden) once
   // package.json lands so the sandbox boots during the run, and the IDE
   // switches to it when the run ends, unless the user picked a tab meanwhile.
-  // Phones keep the chat and get a toast (#254).
+  // Phones keep the chat and get a toast (#254). Board mode keeps the board:
+  // the preview still mounts, but never takes the active view (#525).
+  const buildOpensPreview = buildMayOpenPreview(mode);
   const activeRun = useActiveRun(projectId);
   const project = useProject(projectId);
   const files = useFiles(projectId);
@@ -192,7 +198,7 @@ export const ProjectIdView = ({
   }, [files, projectId, restoreTabs]);
   // Chat-first keeps the picked view rather than its Preview fallback, so a
   // saved Code view reopens after switching back to the IDE.
-  const sessionView = mode === "chat" ? selectedView : activeView;
+  const sessionView = mode !== "ide" ? selectedView : activeView;
   useEffect(() => {
     // Not before the restore, or the empty starting tabs would overwrite the saved ones.
     if (!tabsRestored.current) return;
@@ -207,7 +213,7 @@ export const ProjectIdView = ({
     // Only in place of the empty editor: a project without a root package.json
     // reads as a first build on every run, and a picked tab must stay. A view
     // restored from the last visit (#315) is not a pick, so the build wins.
-    if (!isCompact && (pickedView ?? "chat") === "chat") {
+    if (buildOpensPreview && !isCompact && (pickedView ?? "chat") === "chat") {
       setSelectedView("preview");
       setPreviewOpened(true);
     }
@@ -220,7 +226,7 @@ export const ProjectIdView = ({
       // pending: its preview is not ready.
       if (isMobile) {
         if (project?.firstBuildPending !== true) setPreviewReadyToasts((count) => count + 1);
-      } else {
+      } else if (buildOpensPreview) {
         setSelectedView("preview");
       }
     }
@@ -276,7 +282,7 @@ export const ProjectIdView = ({
 
   useProjectCommands({
     "show-code": mode === "ide" ? () => selectView("editor") : null,
-    "open-code-session": mode === "chat" ? openCode : null,
+    "open-code-session": mode !== "ide" ? openCode : null,
     // Chat mode opens the code session first; the explorer lives there.
     "source-control": () => { openCode(); setExplorerView("source-control"); },
     "show-preview": () => selectView("preview"),
@@ -433,7 +439,7 @@ export const ProjectIdView = ({
 
         {/* Desktop actions keep their existing layout. */}
         <div className="hidden @3xl:flex items-center gap-1.5 shrink-0">
-          {mode === "chat" && (
+          {mode !== "ide" && (
             <button
               onClick={openCode}
               aria-label="Open code for this session"
@@ -548,7 +554,7 @@ export const ProjectIdView = ({
                     trigger={<Button variant="ghost" className="h-11 justify-start"><SettingsIcon aria-hidden="true" /> Project actions</Button>}
                   />
                 )}
-                {mode === "chat" && (
+                {mode !== "ide" && (
                   <Button variant="ghost" className="h-11 justify-start" onClick={() => closeForAction(openCode)}>
                     <CodeIcon aria-hidden="true" /> Open code for this session
                   </Button>
@@ -618,6 +624,16 @@ export const ProjectIdView = ({
             </Allotment.Pane>
           </Allotment>
         </div>
+        )}
+        {mode === "board" && (
+          <div
+            className={cn(
+              "absolute inset-0 flex flex-col",
+              activeView !== "board" && "invisible"
+            )}
+          >
+            <ProjectSwarmBoard projectId={projectId} />
+          </div>
         )}
         <div
           className={cn(
