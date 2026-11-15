@@ -143,7 +143,9 @@ function Customers() {
       .sort((a, b) => a[sortBy].localeCompare(b[sortBy]));
   }, [customers, query, sortBy]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const rows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  // Deletes and edits can shrink the list under the current page.
+  const currentPage = Math.min(page, pageCount - 1);
+  const rows = filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
 
   const save = (draft: Draft) => {
     setCustomers((list) =>
@@ -273,17 +275,19 @@ function Customers() {
       <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
         <span>{filtered.length} customers</span>
         <div className="flex items-center gap-2">
-          <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="rounded-md border px-3 py-1 disabled:opacity-50">
+          <button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)} className="rounded-md border px-3 py-1 disabled:opacity-50">
             Previous
           </button>
-          <span>{page + 1} / {pageCount}</span>
-          <button type="button" disabled={page + 1 >= pageCount} onClick={() => setPage(page + 1)} className="rounded-md border px-3 py-1 disabled:opacity-50">
+          <span>{currentPage + 1} / {pageCount}</span>
+          <button type="button" disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)} className="rounded-md border px-3 py-1 disabled:opacity-50">
             Next
           </button>
         </div>
       </div>
       {editing && (
         <CustomerDialog
+          // Each edit starts from its own customer's draft.
+          key={editing === "new" ? "new" : editing.id}
           initial={editing === "new" ? EMPTY_DRAFT : editing}
           onSave={save}
           onClose={() => setEditing(null)}

@@ -37,6 +37,12 @@ describe("applyBrandOrNull", () => {
     expect(applyBrandOrNull(files, { name: "  " })).toEqual(files);
   });
 
+  it("keeps a name with replacement patterns literal", async () => {
+    const next = applyBrandOrNull(await brandFilesOf(INSTANT[0]), { name: "$& $1" })!;
+    expect(next[BRAND_FILE]).toContain('export const BRAND_NAME = "$& $1";');
+    expect(next["index.html"]).toContain("<title>$& $1</title>");
+  });
+
   it("applies the name alone and leaves the colours", async () => {
     const files = await brandFilesOf(INSTANT[0]);
     const next = applyBrandOrNull(files, { name: "Acme" })!;

@@ -41,10 +41,10 @@ export const applyBrandOrNull = (
   const trimmed = name?.trim();
   return {
     "index.html": trimmed
-      ? files["index.html"].replace(TITLE, `<title>${escapeHtml(trimmed)}</title>`)
+      ? files["index.html"].replace(TITLE, () => `<title>${escapeHtml(trimmed)}</title>`)
       : files["index.html"],
     [BRAND_FILE]: trimmed
-      ? files[BRAND_FILE].replace(BRAND_NAME, `export const BRAND_NAME = ${JSON.stringify(trimmed)};`)
+      ? files[BRAND_FILE].replace(BRAND_NAME, () => `export const BRAND_NAME = ${JSON.stringify(trimmed)};`)
       : files[BRAND_FILE],
     "src/index.css": color
       ? css

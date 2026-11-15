@@ -56,6 +56,7 @@ export const MakeItMineCard = ({ idOfPath, onDescribe }: MakeItMineCardProps) =>
       setSaving(true);
       try {
         // One at a time, so a CONFLICT stops before the next file is written.
+        // shortcut: earlier files stay written on a conflict; move to one mutation if users hit it.
         for (const path of BRAND_FILES) {
           if (next[path] === files[path]) continue;
           await updateFile({ id: current[path]!._id, content: next[path], expectedContent: files[path] });
@@ -113,7 +114,7 @@ export const MakeItMineCard = ({ idOfPath, onDescribe }: MakeItMineCardProps) =>
             maxLength={200}
           />
         </div>
-        <Button type="submit" size="sm" disabled={saving || !(name.trim() || color || description.trim())}>
+        <Button type="submit" size="sm" disabled={saving || !(html && brand && css) || !(name.trim() || color || description.trim())}>
           Apply
         </Button>
       </form>

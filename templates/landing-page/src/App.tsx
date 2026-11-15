@@ -108,7 +108,7 @@ function SignUp() {
       <h2 className="text-3xl font-semibold tracking-tight">Get started with {BRAND_NAME}</h2>
       <p className="mt-2 text-muted-foreground">Join the newsletter for product news and tips.</p>
       {status === "done" ? (
-        <p className="mt-6 font-medium text-primary">Thanks! Check your inbox.</p>
+        <p className="mt-6 font-medium text-primary">Thanks for signing up! (Demo form: no email is sent yet.)</p>
       ) : (
         <form onSubmit={submit} noValidate className="mx-auto mt-6 flex max-w-md flex-col gap-2 sm:flex-row">
           <label htmlFor="email" className="sr-only">Email</label>
