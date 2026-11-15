@@ -148,6 +148,8 @@ describe("coding agent prompt consistency (#293)", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Content is visible by default");
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Never animate above-the-fold content");
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain('reducedMotion="user"');
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("reveals may only translate");
     expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/initial=\{\{\s*opacity:\s*0/);
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/hidden:\s*\{[^}]*opacity:\s*0/);
   });
 });

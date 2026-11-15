@@ -272,15 +272,11 @@ COMPONENT AESTHETICS:
 
 MICRO-ANIMATIONS & INTERACTIONS:
 - All interactive elements must have transition duration 150ms–300ms: transition-all duration-200 ease-out
-- Content is visible by default: the initial render is the final, visible state. Never start content at opacity 0 or hide it until JS runs, because screenshots, link previews, no-JS and reduced-motion users would see blank sections
+- Content is visible by default: the initial render is the final, visible state. Never animate opacity from 0 for content; reveals may only translate, because screenshots, link previews, no-JS and reduced-motion users must never see blank sections
 - Never animate above-the-fold content (nav, hero, first section) in from hidden
-- Scroll reveals are progressive enhancement: hide-then-show only after mount, when IntersectionObserver exists and reduced motion is off. Copy this pattern:
-  const reveal = { hidden: { opacity: 0, y: 16 }, shown: { opacity: 1, y: 0, transition: { duration: 0.3, ease: "easeOut" } } };
+- Scroll reveals are translate-only. Copy this pattern:
+  const reveal = { hidden: { y: 16 }, shown: { y: 0, transition: { duration: 0.3, ease: "easeOut" } } };
   function Reveal({ children }: { children: ReactNode }) {
-    const reduce = useReducedMotion();
-    const [ready, setReady] = useState(false);
-    useEffect(() => setReady(!reduce && "IntersectionObserver" in window), [reduce]);
-    if (!ready) return <div>{children}</div>;
     return <motion.div variants={reveal} initial="hidden" whileInView="shown" viewport={{ once: true }}>{children}</motion.div>;
   }
 - Stagger list items by 30–50ms inside a Reveal: use staggerChildren in Framer Motion variants for lists, cards, and grid items
