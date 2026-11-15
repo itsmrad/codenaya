@@ -1,13 +1,23 @@
 import { expect, test, type Locator } from "@playwright/test";
 
 import { hasClerkCredentials, signIn } from "./clerk-auth";
-import { listProviders } from "../src/features/integrations/catalog";
+import { collectConsoleErrors } from "./console-errors";
+import { getProvider, listProviders } from "../src/features/integrations/catalog";
 
+const desktop = { width: 1440, height: 900 };
 const viewports = [
   { width: 375, height: 812 },
   { width: 768, height: 1024 },
-  { width: 1440, height: 900 },
+  desktop,
 ];
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A provider's tile in a catalog; its name says Connect, or Manage once connected. */
+const providerTile = (scope: Locator, displayName: string) =>
+  scope
+    .getByRole("list", { name: "Integration providers" })
+    .getByRole("button", { name: new RegExp(`^(Connect|Manage) ${escapeRegExp(displayName)}$`) });
 
 async function checkCategoryRow(catalog: Locator) {
   const categories = catalog.getByRole("group", { name: "Integration categories" });
@@ -99,4 +109,92 @@ test.describe("integration catalog", () => {
       });
     }
   }
+
+  test("Settings ?connect= opens that provider; unknown ids show the plain catalog", async ({ page }) => {
+    await page.setViewportSize(desktop);
+    const errors = collectConsoleErrors(page);
+    await page.route("**/api/integrations/**", (route) => route.abort());
+    await signIn(page);
+    const dialog = page.getByRole("dialog", { name: "Integrations", exact: true });
+
+    await page.goto("/settings/integrations?connect=supabase");
+    await expect(dialog.getByRole("heading", { name: /^(Add|Manage) Supabase$/ })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    // Closing drops the param, so a reload doesn't reopen the dialog.
+    await expect(page).toHaveURL(/\/settings\/integrations$/);
+
+    await page.goto("/settings/integrations?connect=not-a-provider");
+    const providers = page.getByRole("region", { name: "Browse integrations" }).getByRole("list", { name: "Integration providers" });
+    await expect(providers.getByRole("listitem")).toHaveCount(listProviders().length);
+    // Connections load only after hydration, when a valid id would have opened the dialog.
+    await expect(page.getByText("Loading connections...")).toHaveCount(0);
+    await expect(dialog).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("No-sign-in provider connects without credentials", async ({ page }) => {
+    await page.setViewportSize(desktop);
+    const provider = getProvider("microsoft-learn")!;
+    const connectBodies: unknown[] = [];
+    await page.route("**/api/integrations/**", (route) => route.abort());
+    // Registered last, so it wins over the abort above.
+    await page.route("**/api/integrations/connect", (route) => {
+      connectBodies.push(route.request().postDataJSON());
+      return route.fulfill({
+        json: {
+          ok: true,
+          connectionId: "e2e-connection",
+          linkedToProject: false,
+          provider: { id: provider.id, displayName: provider.displayName },
+          toolCount: 2,
+          truncated: false,
+          tools: [{ name: "docs_search" }, { name: "docs_fetch" }],
+        },
+      });
+    });
+    await signIn(page);
+    await page.goto("/settings/integrations");
+    await expect(page.getByText("Loading connections...")).toHaveCount(0);
+
+    const tile = providerTile(page.getByRole("region", { name: "Browse integrations" }), provider.displayName);
+    await expect(tile.getByText("No sign-in", { exact: true })).toBeVisible();
+    await tile.click();
+
+    const dialog = page.getByRole("dialog", { name: "Integrations", exact: true });
+    const heading = dialog.getByRole("heading", { name: new RegExp(`^(Add|Manage) ${escapeRegExp(provider.displayName)}$`) });
+    await expect(heading).toBeVisible();
+    // A connection left by an earlier run opens Manage; start a new one from there.
+    if ((await heading.textContent())?.startsWith("Manage")) {
+      await dialog.getByRole("button", { name: "Add another connection" }).click();
+    }
+    await expect(dialog.getByText("No sign-in. Connect to verify the public documentation tools.")).toBeVisible();
+    await expect(dialog.getByLabel("API key")).toHaveCount(0);
+    await expect(dialog.getByLabel("Server URL")).toHaveCount(0);
+
+    await dialog.getByRole("button", { name: `Connect ${provider.displayName}`, exact: true }).click();
+    await expect(dialog.getByText(`${provider.displayName} connected — 2 tools available`)).toBeVisible();
+    expect(connectBodies).toEqual([{ providerId: provider.id }]);
+  });
+
+  test("Read-only capable badge follows supportsReadOnly", async ({ page }) => {
+    await page.setViewportSize(desktop);
+    const readOnly = listProviders().find((provider) => provider.supportsReadOnly);
+    const readWrite = listProviders().find((provider) => !provider.supportsReadOnly);
+    expect(readOnly, "catalog has a read-only capable provider").toBeDefined();
+    expect(readWrite, "catalog has a provider without read-only").toBeDefined();
+    await page.route("**/api/integrations/**", (route) => route.abort());
+    await signIn(page);
+    await page.goto("/settings/integrations");
+    const catalog = page.getByRole("region", { name: "Browse integrations" });
+
+    const readOnlyTile = providerTile(catalog, readOnly!.displayName);
+    await expect(readOnlyTile.getByText("Read-only capable", { exact: true })).toBeVisible();
+    await expect(readOnlyTile).toHaveAccessibleDescription(/Read-only capable/);
+
+    const readWriteTile = providerTile(catalog, readWrite!.displayName);
+    await expect(readWriteTile).toBeVisible();
+    await expect(readWriteTile.getByText("Read-only capable", { exact: true })).toHaveCount(0);
+    await expect(readWriteTile).not.toHaveAccessibleDescription(/Read-only capable/);
+  });
 });
