@@ -690,7 +690,7 @@ describe("PATCH /api/sandbox/[sandboxId] install failure (#497)", () => {
   it("answers with the exit code and npm code only, and keeps the sandbox", async () => {
     const run = vi.fn(async (command: string, options?: { background?: boolean }) => {
       if (options?.background) return {};
-      if (command.startsWith("node -e ")) return { exitCode: 0, stdout: "open", stderr: "" };
+      if (command.startsWith("node -e ") || command === READ_DEV_PGID_COMMAND) return { exitCode: 0, stdout: "open", stderr: "" };
       throw new (CommandExitError as unknown as new (result: object) => Error)({
         exitCode: 1,
         stdout: `postinstall: API_KEY=${SECRET}\n`,
@@ -736,7 +736,7 @@ describe("PATCH reinstall timeout", () => {
       const secret = "synthetic-private-install-output";
       const run = vi.fn(async (command: string, options: { onStderr?: (chunk: string) => void; background?: boolean }) => {
         if (options.background) return {};
-        if (command.startsWith("node -e ")) return { exitCode: 0, stdout: "open", stderr: "" };
+        if (command.startsWith("node -e ") || command === READ_DEV_PGID_COMMAND) return { exitCode: 0, stdout: "open", stderr: "" };
         options.onStderr?.(`npm error ${secret}\nnpm error co`);
         options.onStderr?.(code ? `de ${code}\n` : "ntent\n");
         throw new TimeoutError(secret);
@@ -762,7 +762,7 @@ describe("PATCH reinstall timeout", () => {
         const failure = readInstallFailure(body, "npm install");
         if (code === "ETIMEDOUT" || code === "ECONNRESET") expect(failure?.error).toBeNull();
         else expect(failure?.error).toMatchObject({ kind: "build", file: "package.json" });
-        expect(run.mock.calls.filter(([command]) => !command.startsWith("node -e "))).toHaveLength(2);
+        expect(run.mock.calls.filter(([command]) => !command.startsWith("node -e ") && command !== READ_DEV_PGID_COMMAND)).toHaveLength(2);
         await sync();
         expect(mocks.sandboxConnect).toHaveBeenCalledTimes(1);
       } finally {
@@ -827,8 +827,9 @@ describe("PATCH /api/sandbox/[sandboxId] package.json burst (#486)", () => {
 
 describe("PATCH missing dev server (#774)", () => {
   it("returns a failed install, not a 503, when the restart after it fails too", async () => {
-    const run = vi.fn(async (_command: string, options?: { background?: boolean }) => {
+    const run = vi.fn(async (command: string, options?: { background?: boolean }) => {
       if (options?.background) throw new Error("private start output");
+      if (command.startsWith("node -e ") || command === READ_DEV_PGID_COMMAND) return { exitCode: 0, stdout: "", stderr: "" };
       throw new (CommandExitError as unknown as new (result: object) => Error)({
         exitCode: 1, stdout: "", stderr: "npm error code ERESOLVE\n", error: "exit status 1",
       });
@@ -868,7 +869,9 @@ describe("PATCH missing dev server (#774)", () => {
         files: [{ path: "package.json", content: "{}" }], devCommand: "vite --port 5173",
       })), { params: Promise.resolve({ sandboxId: "sbx_missing_dev" }) });
       const commands = run.mock.calls.map(([command]) => command);
-      expect(commands.slice(0, 2)).toEqual([DEFAULT_INSTALL_COMMAND, "vite --port 5173 --host 0.0.0.0"]);
+      // The group record read and orphan sweep run first; the server starts in its own group.
+      expect(commands.slice(0, 4)).toEqual([READ_DEV_PGID_COMMAND, killProjectNodesCommand("/home/user/app"), DEFAULT_INSTALL_COMMAND, DEV_START_COMMAND]);
+      expect(run.mock.calls[3][1]).toMatchObject({ envs: { [DEV_COMMAND_ENV]: "vite --port 5173 --host 0.0.0.0" } });
       expect(response.status).toBe(startFails ? 503 : 200);
       const body = await response.json();
       if (startFails) {
@@ -877,7 +880,7 @@ describe("PATCH missing dev server (#774)", () => {
       } else {
         expect(body).toEqual({ success: true, synced: 1 });
         // Ready once Vite's port listens.
-        expect(commands[2]).toContain("port:5173");
+        expect(commands[4]).toContain("port:5173");
       }
     } finally {
       forgetSandbox("sbx_missing_dev");
