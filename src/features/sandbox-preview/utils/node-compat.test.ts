@@ -31,9 +31,20 @@ describe("nodeIncompatibility", () => {
     expect(nodeIncompatibility("v20.9.0", pkg("latest"))).toContain("Vite 7+");
   });
 
+  it("flags TanStack Start below Node 22.12, even where Vite 7 runs", () => {
+    const start = JSON.stringify({ dependencies: { "@tanstack/react-start": "^1.169.0" }, devDependencies: { vite: "^8.0.0" } });
+    for (const node of ["v20.19.0", "v22.11.0", "v20.9.0"]) {
+      const message = nodeIncompatibility(node, start);
+      expect(message).toContain("TanStack Start, which needs Node 22.12+");
+      expect(message).not.toContain("Vite 6");
+    }
+    for (const node of ["v22.12.0", "v24.1.0"]) expect(nodeIncompatibility(node, start)).toBeNull();
+  });
+
   it("stays out of the way when it can't tell", () => {
     expect(nodeIncompatibility("v20.9.0", undefined)).toBeNull();
     expect(nodeIncompatibility("v20.9.0", "{ not json")).toBeNull();
+    expect(nodeIncompatibility("v20.9.0", "null")).toBeNull();
     expect(nodeIncompatibility("v20.9.0", JSON.stringify({ dependencies: {} }))).toBeNull();
     expect(nodeIncompatibility("garbage", pkg("^7.0.0"))).toBeNull();
   });

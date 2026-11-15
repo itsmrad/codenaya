@@ -199,6 +199,8 @@ const notBuilt = (reason: string) =>
  */
 export const buildCommand = (framework: Framework, paths: Set<string>) => {
   if (framework === "next") return "NEXT_TELEMETRY_DISABLED=1 npx next build";
+  // shortcut: TanStack Start builds like Vite here, so tsc runs before the build generates
+  // src/routeTree.gen.ts and .output/.tanstack aren't excluded; T4 gives Start `vite build` then tsc.
   const tsconfig = ["tsconfig.app.json", "tsconfig.json"].find((path) => paths.has(path));
   return [tsconfig && `npx tsc --noEmit -p ${tsconfig}`, "npx vite build"].filter(Boolean).join(" && ");
 };
