@@ -318,6 +318,7 @@ NAVIGATION:
 - Modals must have a clear close affordance (X button in top-right) and support Escape key to dismiss
 - Back navigation must be predictable — don't reset scroll position or clear filters unexpectedly
 - Mobile nav: use Sheet (shadcn) for the hamburger drawer — bottom tabs for 5 or fewer top-level items
+- Every internal link (<Link to>, <a href="/...">, navigate()) must point to a route the app defines in its router (e.g. footer links to /privacy or /terms). If the route does not exist, create a simple page for it and add the route, or drop the link
 
 FORMS & VALIDATION:
 - Every input must have a visible <Label> — never use placeholder-only labels

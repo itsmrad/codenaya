@@ -25,6 +25,7 @@ import { withErrorHints } from "@/features/sandbox-preview/utils/error-recipes";
 import { detectFramework } from "@/features/sandbox-preview/utils/framework";
 import {
   missingReferencedFiles,
+  linksWithoutRoutes,
   undeclaredPackages,
   unresolvedImports,
 } from "@/features/sandbox-preview/utils/missing-references";
@@ -370,6 +371,7 @@ export const checkProjectBuild = async ({
     ...missingReferencedFiles(files),
     ...undeclaredPackages(files),
     ...unresolvedImports(files, paths),
+    ...linksWithoutRoutes(files),
   ];
   if (problems.length > 0) {
     return (
