@@ -20,6 +20,29 @@ import { recordProjectEvent } from "./activationEvents";
  * duplication (`projects.duplicate`) and Remix (`remixProject`).
  */
 
+/** Most projects a user may create per hour through the copy entry points. */
+const COPIES_PER_HOUR = 20;
+
+/**
+ * Refuses a copy once the user has made `COPIES_PER_HOUR` projects in the last
+ * hour. Counts the user's recent projects, so it needs no extra table;
+ * shortcut: it also counts plain creates, and deleting a project frees a slot.
+ */
+export async function assertCanCopy(ctx: MutationCtx, ownerId: string) {
+  const recent = await ctx.db
+    .query("projects")
+    .withIndex("by_owner", (q) =>
+      q.eq("ownerId", ownerId).gt("_creationTime", Date.now() - 60 * 60 * 1000),
+    )
+    .take(COPIES_PER_HOUR);
+  if (recent.length >= COPIES_PER_HOUR) {
+    throw appError(
+      "LIMIT_EXCEEDED",
+      `You can create up to ${COPIES_PER_HOUR} projects per hour. Try again later.`,
+    );
+  }
+}
+
 /** Largest file tree copied in one transaction. */
 export const MAX_COPY_FILES = 5000;
 
@@ -106,6 +129,7 @@ export async function remixProject(
   ownerId: string,
   name: string,
 ) {
+  await assertCanCopy(ctx, ownerId);
   const newProjectId = await ctx.db.insert("projects", {
     name,
     ownerId,

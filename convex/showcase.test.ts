@@ -527,6 +527,19 @@ describe("showcase.importToWorkspace", () => {
     await expect(importAs(t, "user_bob", id)).rejects.toThrow("Project not found");
     expect(await importCountOf(t, id)).toBe(0);
   });
+
+  test("refuses imports past the hourly project limit", async () => {
+    const t = convexTest(schema, modules);
+    const [id] = await seed(t, [{ title: "Todo", publishedAt: 1 }]);
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 20; i++) {
+        await ctx.db.insert("projects", { name: `p${i}`, ownerId: "user_bob", updatedAt: 0 });
+      }
+    });
+
+    await expect(importAs(t, "user_bob", id)).rejects.toThrow("per hour");
+    expect(await importCountOf(t, id)).toBe(0);
+  });
 });
 
 // A client-supplied limit is clamped to 1-50 (#212).

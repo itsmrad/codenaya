@@ -14,7 +14,7 @@ import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { deleteProjectBatch } from "./projectCascade";
-import { copyProjectFiles, remixProject } from "./projectCopy";
+import { assertCanCopy, copyProjectFiles, remixProject } from "./projectCopy";
 import { getProjectFile, MAX_PROJECT_FILES } from "./files";
 import { readFileContent } from "./fileContents";
 import { isSecretFile } from "./secretFiles";
@@ -271,6 +271,7 @@ export const duplicate = mutation({
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
     const source = await getOwnedProject(ctx, args.id, identity.subject);
+    await assertCanCopy(ctx, identity.subject);
 
     const newProjectId = await ctx.db.insert("projects", {
       name: copyProjectName(source.name),

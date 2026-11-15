@@ -462,6 +462,20 @@ describe("POST /clerk-users-webhook", () => {
     expect(tombstone.name).toBeUndefined();
   });
 
+  test("user.deleted hides share links at once, before the purge runs", async () => {
+    vi.useFakeTimers(); // keeps the scheduled purge from running
+    const t = setup();
+    const { projectId } = await seedOwnedData(t, ALICE);
+    const token = "a".repeat(32);
+    await t.run((ctx) => ctx.db.patch("projects", projectId, { shareToken: token }));
+    expect(await t.query(api.projects.getShared, { token })).not.toBeNull();
+
+    await t.fetch("/clerk-users-webhook", signedRequest(deletedEvent(ALICE)));
+
+    expect(await t.query(api.projects.getShared, { token })).toBeNull();
+    expect((await t.run((ctx) => ctx.db.get("projects", projectId)))?.deletingAt).toBeTypeOf("number");
+  });
+
   test("user.deleted for a user with no row still purges their data", async () => {
     vi.useFakeTimers();
     const t = setup();
