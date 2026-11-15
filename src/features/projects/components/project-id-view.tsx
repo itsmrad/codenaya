@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Allotment } from "allotment";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -224,6 +224,11 @@ export const ProjectIdView = ({
     setSelectedView(view);
     if (firstBuild) setViewPickedDuringBuild(true);
   };
+  const onElementPicked = useCallback(() => {
+    if (!isCompact) return;
+    setSelectedView("chat");
+    if (firstBuild) setViewPickedDuringBuild(true);
+  }, [isCompact, firstBuild]);
   const [explorerView, setExplorerView] = useState("files");
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
@@ -525,7 +530,7 @@ export const ProjectIdView = ({
               projectId={projectId}
               firstBuild={firstBuild}
               visible={activeView === "preview"}
-              onElementPicked={() => { if (isCompact) selectView("chat"); }}
+              onElementPicked={onElementPicked}
               onOpenEnvVars={() => setEnvVarsOpen(true)}
             />
           )}

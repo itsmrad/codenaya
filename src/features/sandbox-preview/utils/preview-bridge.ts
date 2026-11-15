@@ -27,6 +27,17 @@ export function installPreviewBridge(
   // A new document: errors the last one reported are gone. Vite reloads the
   // page itself after re-optimizing dependencies or restarting (#486).
   win.parent.postMessage({ source, version, kind: "page", message: "" }, "*");
+  let parentOrigin = "";
+  try {
+    // Known limitation: without ancestorOrigins (Firefox), a full-page navigation
+    // inside the preview makes document.referrer the preview's own origin, so the
+    // parent's commands no longer match and Select stops working. It fails closed
+    // on purpose: an unverifiable embedding origin is never trusted.
+    parentOrigin = win.location.ancestorOrigins?.[0] || new URL(win.document.referrer).origin;
+    if (parentOrigin === "null") parentOrigin = "";
+  } catch {
+    // Without a known embedding origin, Select mode stays unavailable.
+  }
   let selecting = false;
   let outline: HTMLDivElement | null = null;
   const stopSelecting = () => {
@@ -36,7 +47,8 @@ export function installPreviewBridge(
   };
   win.addEventListener("message", (event) => {
     try {
-      if (event.source !== win.parent || event.data?.source !== source || event.data?.version !== version) return;
+      if (!parentOrigin || event.origin !== parentOrigin || event.source !== win.parent ||
+        event.data?.source !== source || event.data?.version !== version) return;
       if (event.data.kind === "select:on") selecting = true;
       if (event.data.kind === "select:off") stopSelecting();
     } catch {
@@ -58,13 +70,12 @@ export function installPreviewBridge(
       // Best-effort hover decoration on an untrusted page.
     }
   }, true);
-  win.addEventListener("click", (event) => {
+  const pick = (event: MouseEvent | KeyboardEvent, target: EventTarget | null) => {
     try {
-      if (!selecting || !(event.target instanceof win.Element)) return;
+      if (!selecting || !(target instanceof win.Element)) return;
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      const target = event.target;
       const rect = target.getBoundingClientRect();
       const path: string[] = [];
       let node: Element | null = target;
@@ -84,18 +95,27 @@ export function installPreviewBridge(
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
       };
       stopSelecting();
-      win.parent.postMessage({ source, version, kind: "select:picked", element }, "*");
+      win.parent.postMessage({ source, version, kind: "select:picked", element }, parentOrigin);
     } catch {
       // Reading hostile page data must never break the app.
     }
-  }, true);
+  };
+  win.addEventListener("click", (event) => pick(event, event.target), true);
   win.addEventListener("keydown", (event) => {
     try {
-      if (!selecting || event.key !== "Escape") return;
+      if (!selecting) return;
+      if (event.key === "Enter" || event.key === " ") {
+        // Nothing focused: leave the page's own Enter/Space handling alone.
+        const active = win.document.activeElement;
+        if (!active || active === win.document.body || active === win.document.documentElement) return;
+        pick(event, active);
+        return;
+      }
+      if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
       stopSelecting();
-      win.parent.postMessage({ source, version, kind: "select:off" }, "*");
+      win.parent.postMessage({ source, version, kind: "select:off" }, parentOrigin);
     } catch {
       // Leaving Select mode is best effort.
     }
