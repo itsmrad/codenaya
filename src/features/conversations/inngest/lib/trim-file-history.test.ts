@@ -156,7 +156,8 @@ describe("trimFileHistory", () => {
     const trimmed = trimFileHistory([
       ...turn(99, "editFile", { path: "a.ts", edits: [{ oldText: payload, newText: payload }] }), ...long(),
     ]);
-    const edits = trimmed[0].type === "tool_call" ? trimmed[0].tools[0].input.edits : undefined;
+    const edits = (trimmed[0].type === "tool_call" ? trimmed[0].tools[0].input.edits : undefined) as
+      Array<{ oldText: string; newText: string }>;
     expect(edits).toEqual([{ oldText: expect.stringMatching(stub(`edits to a.ts, ${HASH}`)), newText: expect.any(String) }]);
     expect(edits[0].newText).toBe(edits[0].oldText);
   });

@@ -469,6 +469,23 @@ describe("verifyAndFix", () => {
       ]);
     });
 
+    it("hands a repair whose model call fails to the fallback, without checking again", async () => {
+      const sandbox = fakeSandbox();
+      const requests = modelReplies(() => {
+        throw new Error("cheap model unavailable");
+      }, ...fixApp());
+
+      const { result, events } = await run(sandbox, { maxAttempts: 3, fallback: { model: main, after: 2 } });
+
+      expect(result).toMatchObject({ status: "verified", attempts: 2, filesChanged: ["src/App.tsx"] });
+      expect(modelsOf(requests)).toEqual(["stub-haiku", "stub-main", "stub-main", "stub-main"]);
+      expect(sandbox.builds).toHaveLength(2);
+      expect(events.filter(({ id }) => id === "run_1:task_a:repair:1").at(-1)).toMatchObject({
+        status: "error",
+        reason: expect.stringContaining("Repair could not run"),
+      });
+    });
+
     it("fails once the fallback's own repair changes nothing", async () => {
       const unchanged = () => [
         toolCall("writeFiles", { files: [{ path: "src/App.tsx", content: BROKEN_APP }] }),

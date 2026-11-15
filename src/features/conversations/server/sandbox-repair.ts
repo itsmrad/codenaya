@@ -137,7 +137,7 @@ export type VerifyAndFixOptions = {
   model: Model;
   /**
    * Escalation, e.g. a cheap `model` first and the run's own model last: once
-   * `after` repairs on `model` have run, or one changed nothing, the
+   * `after` repairs on `model` have run, or one changed nothing or threw, the
    * remaining repairs use `fallback.model`.
    */
   fallback?: { model: Model; after: number };
@@ -360,7 +360,7 @@ export const repairTools = ({
  * `allowedPaths` are refused whole, as SWARM's own guard does.
  */
 const repair = async ({
-  projectId, internalKey, model, name, errors, paths, framework, sources = [], signal, allowedPaths, onResponse,
+  projectId, internalKey, model, name, errors, paths, framework, sources = [], signal, allowedPaths, onResponse, written,
 }: {
   projectId: Id<"projects">;
   internalKey: string;
@@ -373,8 +373,9 @@ const repair = async ({
   signal?: AbortSignal;
   allowedPaths?: (path: string) => boolean;
   onResponse?: (raw: string | undefined) => Promise<void>;
+  /** The caller's: holds what was written even when the repair throws. */
+  written: string[];
 }) => {
-  const written: string[] = [];
   const agent = createAgent({
     name,
     system: repairSystem(framework),
@@ -530,19 +531,26 @@ export const verifyAndFix = async ({
     const canEscalate = fallback !== undefined && !onFallback;
     attempts += 1;
     await emit({ phase: "repair", attempt, status: "running" });
+    const wrote: string[] = [];
     let written: string[];
+    // Set when a repair that could escalate threw: the fallback takes over.
+    let crashed: string | undefined;
     try {
       written = await repair({
         projectId, internalKey, model: escalation?.model ?? model, name: `${prefix}:repair:${attempt}`,
         errors: owned, paths: outcome.paths, framework: outcome.framework, sources: outcome.sources,
-        signal, allowedPaths, onResponse: onResponse && ((raw) => onResponse(raw, onFallback)),
+        signal, allowedPaths, onResponse: onResponse && ((raw) => onResponse(raw, onFallback)), written: wrote,
       });
     } catch (error) {
       console.error("[sandbox-repair] repair failed", projectId, error);
       const reason = failure("Repair could not run", error);
-      await emit({ phase: "repair", attempt, status: "error", reason });
-      // Not escalated: writes it made before failing may not be in the sandbox.
-      return result("failed", reason);
+      if (!canEscalate) {
+        await emit({ phase: "repair", attempt, status: "error", reason });
+        return result("failed", reason);
+      }
+      // What it wrote before the error is in Convex: copied into the sandbox below.
+      written = [...new Set(wrote)];
+      crashed = reason;
     }
     let changed: string[];
     try {
@@ -560,6 +568,13 @@ export const verifyAndFix = async ({
     if (signal?.aborted) {
       await emit({ phase: "repair", attempt, status: "error", filesChanged: changed, reason: "Cancelled" });
       return result("unverified", "Cancelled");
+    }
+    if (crashed) {
+      await emit({ phase: "repair", attempt, status: "error", reason: crashed, ...(changed.length ? { filesChanged: changed } : {}) });
+      escalated = true;
+      // Checked again only when its writes changed the sandbox.
+      if (changed.length === 0) checked = outcome;
+      continue;
     }
     if (changed.length === 0) {
       await emit({ phase: "repair", attempt, status: "error", reason: "Repair made no changes" });
