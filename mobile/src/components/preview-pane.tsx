@@ -187,7 +187,7 @@ function StripButton({
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   // No gap: it would sit inside each cell's rule and push its icon off centre.
-  strip: { height: 40, flexDirection: "row", alignItems: "center", paddingLeft: 16, borderBottomWidth: 1 },
+  strip: { height: 44, flexDirection: "row", alignItems: "center", paddingLeft: 16, borderBottomWidth: 1 },
   dot: { width: 6, height: 6, borderRadius: 3, marginRight: 10 },
   cell: { width: 44, alignSelf: "stretch", alignItems: "center", justifyContent: "center", borderLeftWidth: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24 },
