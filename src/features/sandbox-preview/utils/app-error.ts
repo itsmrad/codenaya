@@ -33,7 +33,7 @@ const NPM_ERROR_CODE = /npm (?:ERR!|error) code (\S+)/g;
 // npm's own lines, so the app's earlier output can't hide a real failure.
 export const NETWORK_FAILURE =
   /^\s*npm (?:ERR!|error) (?:network\b|.*?(?:\b(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|E5\d\d)\b|socket hang up))/m;
-const HMR_SUCCESS = /\[vite\].*\b(?:hmr update|page reload)\b/;
+const HMR_SUCCESS = /\[vite\].*\b(?:hmr update|page reload)\b|^\s*✓ Compiled\b/m;
 // The sandbox's project root (WORK_DIR); paths read better relative to it.
 const WORK_DIR_PREFIX = /\/home\/user\/app\//g;
 
@@ -74,8 +74,9 @@ export const detectBuildError = (chunk: string): AppError | null => {
   const next = lines[index + 1]?.replace(NEXT_LOG_PREFIX, "").trim();
   if (NEXT_LOCATION.test(message)) {
     // A streamed location alone is not enough to start an auto-fix.
-    if (!next) return null;
-    message = next;
+    const detail = lines.slice(index + 1).find((line) => line.trim())?.replace(NEXT_LOG_PREFIX, "").trim();
+    if (!detail) return null;
+    message = detail;
   } else if ((message.endsWith(":") || message === "Unhandled Runtime Error") && next) {
     message = `${message} ${next}`;
   }
@@ -136,6 +137,7 @@ export const createBuildErrorDetector = () => {
   let tail = "";
   return {
     push: (chunk: string) => {
+      if (isHmrSuccess(chunk)) tail = "";
       tail = (tail + chunk).slice(-BUILD_LOG_TAIL);
       return detectBuildError(tail);
     },
@@ -145,7 +147,7 @@ export const createBuildErrorDetector = () => {
   };
 };
 
-/** Vite applied an update: an earlier compile error may be gone. */
+/** Vite applied an update or Next.js compiled: an earlier error may be gone. */
 export const isHmrSuccess = (chunk: string) => HMR_SUCCESS.test(clean(chunk));
 
 /** Same error, same banner. The line is left out: it moves as the code is edited. */
