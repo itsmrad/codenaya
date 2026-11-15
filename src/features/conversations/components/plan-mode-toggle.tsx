@@ -14,7 +14,7 @@ interface PlanModeToggleProps {
   disabled?: boolean;
 }
 
-/** Composer footer toggle: while on, messages ask for a plan, not a build (#120). */
+/** Composer footer toggle: while on, messages get an answer or a plan, not a build (#120, #311). */
 export const PlanModeToggle = ({
   pressed,
   onPressedChange,
@@ -23,7 +23,7 @@ export const PlanModeToggle = ({
   <Tooltip>
     <TooltipTrigger asChild>
       <PromptInputButton
-        aria-label="Plan"
+        aria-label="Ask / Plan"
         aria-pressed={pressed}
         variant={pressed ? "secondary" : "ghost"}
         onClick={() => onPressedChange(!pressed)}
@@ -32,11 +32,11 @@ export const PlanModeToggle = ({
       >
         <ListChecksIcon className="size-4" />
         {/* Icon only in a narrow panel, so the model name keeps its room. */}
-        <span className="hidden @[480px]:inline">Plan</span>
+        <span className="hidden @[480px]:inline">Ask / Plan</span>
       </PromptInputButton>
     </TooltipTrigger>
     <TooltipContent>
-      {pressed ? "Plan mode: the agent plans, nothing is built" : "Plan before building"}
+      Read-only: answers questions or plans, never changes files
     </TooltipContent>
   </Tooltip>
 );
