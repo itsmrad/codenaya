@@ -71,6 +71,7 @@ import { PastConversationsDialog } from "./past-conversations-dialog";
 import { sendQueuedMessage, useChatStore } from "../store/use-chat-store";
 import { useAgentModel } from "../hooks/use-agent-model";
 import { AgentModelSelect } from "./agent-model-select";
+import { LowCreditsNotice } from "./low-credits-notice";
 import { useEnhancePrompt } from "../hooks/use-enhance-prompt";
 import { EnhancePromptButton } from "./enhance-prompt-button";
 import { PlanModeToggle } from "./plan-mode-toggle";
@@ -668,6 +669,8 @@ export const ConversationSidebar = ({
               onRemove={() => setFollowUp(activeConversationId, null)}
             />
           )}
+          {/* Runs on the user's own key don't use credits. */}
+          {!agentModel.keyId && <LowCreditsNotice />}
           {slashMenu.open && (
             <SkillSlashMenu
               items={slashMenu.items}

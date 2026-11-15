@@ -611,3 +611,100 @@ describe("undo for restore and delete", () => {
     await expect(bob.mutation(api.checkpoints.deleteFileWithUndo, { id: src })).rejects.toThrow();
   });
 });
+
+
+describe("project comparison", () => {
+  beforeEach(() => vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", INTERNAL_KEY));
+  afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
+
+  async function seedComparison() {
+    const context = setup();
+    const seeded = await seedProject(context.t);
+    const { projectId, conversationId } = seeded;
+    const messageId = await addRun(context.t, projectId, conversationId);
+    const checkpointId = await snapshot(context.t, projectId, messageId);
+    return { ...context, ...seeded, messageId, checkpointId, scope: "project" as const };
+  }
+
+  test("includes manual A/M/D outside run-written paths, across newer snapshots, and reverts each", async () => {
+    const { t, alice, projectId, index, main, checkpointId, scope } = await seedComparison();
+    const before = await tree(t, projectId);
+    await alice.mutation(api.files.updateFile, { id: index, content: "manual edit" });
+    await alice.mutation(api.files.createFile, { projectId, name: "manual.ts", content: "" });
+    // A delete creates a newer non-run checkpoint; project scope must still use live state.
+    await alice.mutation(api.checkpoints.deleteFileWithUndo, { id: main });
+    expect(await alice.query(api.checkpoints.listChanges, { checkpointId })).toEqual([]);
+    expect((await alice.query(api.checkpoints.listChanges, { checkpointId, scope }))?.map(({ path, status }) => [path, status])).toEqual([
+      ["index.html", "modified"], ["manual.ts", "added"], ["src/main.ts", "deleted"],
+    ]);
+    expect(await alice.query(api.checkpoints.fileDiff, { checkpointId, scope, path: "index.html" })).toMatchObject({ before: "<h1>v1</h1>", after: "manual edit" });
+    for (const path of ["index.html", "manual.ts", "src/main.ts"]) {
+      await alice.mutation(api.checkpoints.revertFile, { checkpointId, scope, path });
+    }
+    expect(await tree(t, projectId)).toEqual(before);
+    expect(await alice.query(api.checkpoints.listChanges, { checkpointId, scope })).toEqual([]);
+  });
+
+  test("ignores folders, reports renames as D+A, and withholds binary/oversize text", async () => {
+    const { t, alice, projectId, main, checkpointId, scope } = await seedComparison();
+    await alice.mutation(api.files.createFolder, { projectId, name: "empty" });
+    await alice.mutation(api.files.renameFile, { id: main, newName: "renamed.ts" });
+    const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["image"])));
+    await t.mutation(api.system.createBinaryFile, { internalKey: INTERNAL_KEY, projectId, name: "image.png", storageId });
+    await alice.mutation(api.files.createFile, { projectId, name: "huge.txt", content: "x".repeat(MAX_DIFF_CHARS + 1) });
+    const changes = await alice.query(api.checkpoints.listChanges, { checkpointId, scope });
+    expect(changes?.map(({ path }) => path)).toEqual(["huge.txt", "image.png", "src/main.ts", "src/renamed.ts"]);
+    for (const path of ["huge.txt", "image.png"]) {
+      const diff = await alice.query(api.checkpoints.fileDiff, { checkpointId, scope, path });
+      expect(diff).not.toHaveProperty("before");
+      expect(diff).not.toHaveProperty("after");
+    }
+    await alice.mutation(api.checkpoints.revertFile, { checkpointId, scope, path: "image.png" });
+    expect((await tree(t, projectId))["image.png"]).toBeUndefined();
+  });
+
+  test("refuses oversized scans whole, but single-file diff/discard stay available", async () => {
+    const { t, alice, projectId, index, checkpointId, scope } = await seedComparison();
+    await alice.mutation(api.files.updateFile, { id: index, content: "changed" });
+    await t.run(async (ctx) => {
+      for (let i = 0; i < MAX_DIFF_FILES; i++) {
+        await ctx.db.insert("files", { projectId, name: `extra-${i}`, type: "file", content: "", updatedAt: Date.now() });
+      }
+    });
+    expect(await alice.query(api.checkpoints.listChanges, { checkpointId, scope })).toBeNull();
+    expect(await alice.query(api.checkpoints.fileDiff, { checkpointId, scope, path: "index.html" })).toMatchObject({ after: "changed" });
+    await alice.mutation(api.checkpoints.revertFile, { checkpointId, scope, path: "index.html" });
+    expect(await alice.query(api.checkpoints.fileDiff, { checkpointId, scope, path: "index.html" })).toBeNull();
+    await t.run(async (ctx) => {
+      for (let i = 0; i < MAX_DIFF_FILES; i++) {
+        await ctx.db.insert("checkpointFiles", { checkpointId, projectId, path: `old-${i}`, type: "file", content: "" });
+      }
+    });
+    expect(await alice.query(api.checkpoints.listChanges, { checkpointId, scope })).toBeNull();
+  });
+
+  test("refuses a comparison past the text byte budget", async () => {
+    const { t, alice, projectId, checkpointId, scope } = await seedComparison();
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 8; i++) {
+        const fileId = await ctx.db.insert("files", { projectId, name: `large-${i}`, type: "file", updatedAt: Date.now() });
+        await ctx.db.insert("fileContents", { fileId, projectId, content: "x".repeat(600_000) });
+      }
+    });
+    expect(await alice.query(api.checkpoints.listChanges, { checkpointId, scope })).toBeNull();
+  });
+
+  test("enforces ownership, signed-in access, running-agent refusal and valid paths", async () => {
+    const { t, alice, bob, projectId, conversationId, checkpointId, scope } = await seedComparison();
+    const args = { checkpointId, scope, path: "index.html" };
+    for (const user of [bob, t]) {
+      await expect(user.query(api.checkpoints.listChanges, { checkpointId, scope })).rejects.toThrow(/Unauthorized/);
+      await expect(user.query(api.checkpoints.fileDiff, args)).rejects.toThrow(/Unauthorized/);
+      await expect(user.mutation(api.checkpoints.revertFile, args)).rejects.toThrow(/Unauthorized/);
+    }
+    await expect(alice.query(api.checkpoints.fileDiff, { ...args, path: "../secret" })).rejects.toMatchObject({ data: { code: "INVALID_ARGUMENT" } });
+    await expect(alice.mutation(api.checkpoints.revertFile, { ...args, path: "a//b" })).rejects.toMatchObject({ data: { code: "INVALID_ARGUMENT" } });
+    await t.run((ctx) => ctx.db.insert("messages", { projectId, conversationId, role: "assistant", content: "", status: "processing" }));
+    await expect(alice.mutation(api.checkpoints.revertFile, args)).rejects.toMatchObject({ data: { code: "CONFLICT" } });
+  });
+});

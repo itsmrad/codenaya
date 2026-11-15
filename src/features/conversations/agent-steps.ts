@@ -165,6 +165,11 @@ export const describeToolCall = (
     case "loadSkill":
       targets = str(input.name) ? [str(input.name)] : [];
       break;
+    // One per swarm task: the board counts them ("Delegating N tasks").
+    case "delegateTasks":
+      targets = (Array.isArray(input.tasks) ? input.tasks : [])
+        .map((task) => str((task as Record<string, unknown>)?.title)).filter(Boolean);
+      break;
     default:
       // MCP tools are namespaced `provider__tool`.
       targets = name.includes("__") ? [name.slice(name.indexOf("__") + 2)] : [];
