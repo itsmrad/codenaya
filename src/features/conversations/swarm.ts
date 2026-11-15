@@ -29,7 +29,9 @@ export const swarmPlanSchema = z.object({
     brief: z.string().trim().min(1).max(2000),
     ownedPaths: z.array(z.string()).min(1),
     role: z.enum(["worker", "sub-orchestrator"]).optional(),
-  })).min(2, "build it yourself").max(MAX_SWARM_TASKS),
+  })).min(2, "Delegate 2-4 tasks, or pass tasks [] with solo set to why this is too tiny to split").max(MAX_SWARM_TASKS),
+  solo: z.string().trim().min(1).max(200).optional()
+    .describe("Only for a genuinely tiny request, with tasks []: why you build it yourself. The swarm board shows it."),
 });
 export type SwarmPlan = z.infer<typeof swarmPlanSchema>;
 

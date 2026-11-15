@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { type SwarmTask, swarmElapsed, swarmHeader, swarmTaskStatus } from "./swarm-status";
+import type { AgentStep } from "./agent-steps";
+import { type SwarmTask, swarmElapsed, swarmHeader, swarmSoloReason, swarmTaskStatus } from "./swarm-status";
 
 describe("swarmTaskStatus", () => {
   it.each(["completed", "cancelled"] as const)("cancels unfinished tasks under a %s parent", (parent) => {
@@ -29,6 +30,17 @@ describe("swarm header", () => {
     expect(swarmHeader([], 0, 0)).toBe("Swarm · 0 workers · 0:00 · 0 done");
     expect(swarmHeader([task("queued"), task("error", "sub-orchestrator")], 0, 59000))
       .toBe("Swarm · 1 worker · 0:59 · 0 done");
+  });
+
+  it("says a finished run built solo, and why, instead of zero workers", () => {
+    const call = (fields: Partial<AgentStep>): AgentStep => ({ id: "c", kind: "tool", tool: "delegateTasks", status: "done", startedAt: 0, ...fields });
+    expect(swarmSoloReason([call({ targets: ["one-line fix"] })])).toBe("one-line fix");
+    expect(swarmSoloReason([call({ status: "error", error: "Error: another swarm is already running for this account; build this one yourself." })]))
+      .toBe("another swarm is already running for this account; build this one yourself.");
+    expect(swarmSoloReason([])).toBe("the orchestrator did not delegate");
+    expect(swarmHeader([], 0, 229000, "one-line fix")).toBe("Swarm · Built solo: one-line fix · 3:49");
+    // Workers ran: the counts stay.
+    expect(swarmHeader([task("done")], 0, 0, "ignored")).toBe("Swarm · 1 worker · 0:00 · 1 done");
   });
 
   it("clamps a future start and pads seconds across minute boundaries", () => {
