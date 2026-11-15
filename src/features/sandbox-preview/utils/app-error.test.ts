@@ -18,6 +18,10 @@ import {
   readInstallFailure,
   trackFixAttempts,
 } from "./app-error";
+import {
+  VITE8_DEV_SYNTAX_ERROR,
+  VITE8_DEV_UNRESOLVED_IMPORT,
+} from "../../conversations/inngest/tools/vite-build-output.fixture";
 
 describe("detectBuildError", () => {
   it("reads Vite's unresolved import with its file and line", () => {
@@ -57,6 +61,24 @@ describe("detectBuildError", () => {
       message: 'X [ERROR] Transform failed with 1 error: src/App.tsx:5:2: ERROR: Expected ";" but found "x"',
       file: "src/App.tsx",
       line: 5,
+    });
+  });
+
+  it("reads Vite 8's Oxc parse error from its code frame, past the blank line after the header", () => {
+    expect(detectBuildError(VITE8_DEV_SYNTAX_ERROR)).toEqual({
+      kind: "build",
+      message: "Transform failed with 1 error: [PARSE_ERROR] Unexpected token",
+      file: "src/App.tsx",
+      line: 2,
+    });
+  });
+
+  it("reads Vite 8's unresolved import, which keeps the Vite 6 shape", () => {
+    expect(detectBuildError(VITE8_DEV_UNRESOLVED_IMPORT)).toEqual({
+      kind: "build",
+      message: 'Failed to resolve import "./components/Missing" from "src/App.tsx". Does the file exist?',
+      file: "src/App.tsx",
+      line: 1,
     });
   });
 

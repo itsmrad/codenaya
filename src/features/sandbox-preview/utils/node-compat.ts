@@ -1,8 +1,8 @@
 /**
- * Vite 7 calls `crypto.hash`, which needs Node ^20.19 || >=22.12. On an older
- * Node it crashes at startup with a stack trace that doesn't name the cause,
- * so the sandbox checks before installing anything (#178). TanStack Start
- * needs Node >=22.12 whatever its Vite range says.
+ * Vite 7+ (the starter is on Vite 8) calls `crypto.hash`, which needs Node
+ * ^20.19 || >=22.12. On an older Node it crashes at startup with a stack trace
+ * that doesn't name the cause, so the sandbox checks before installing anything (#178).
+ * TanStack Start needs Node >=22.12 whatever its Vite range says.
  */
 
 const parseNode = (version: string) => {
@@ -57,6 +57,7 @@ export const nodeIncompatibility = (
   return (
     `This project uses Vite ${Number.isFinite(vite) ? vite : "7+"}, which needs ` +
     `Node 20.19+ or 22.12+, ${sandbox}. ` +
-    `Ask the agent to switch to Vite 6 (with @vitejs/plugin-react 4), or ${template}.`
+    `Set E2B_TEMPLATE to the Node 22 template (npm run e2b:template), or ask ` +
+    `the agent to move this project to Vite 6 (with @vitejs/plugin-react 4).`
   );
 };

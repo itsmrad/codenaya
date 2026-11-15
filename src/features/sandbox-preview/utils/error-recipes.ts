@@ -29,8 +29,8 @@ const HOOK_READ = String.raw`\(reading 'use(?:State|Reducer|Effect|LayoutEffect|
 export const ERROR_RECIPES: readonly ErrorRecipe[] = [
   {
     id: "unresolved-import",
-    // Vite, tsc (TS2307), and Next.js.
-    match: /failed to resolve import|Cannot find module '[^']+' or its corresponding type declarations|Module not found: Can't resolve/i,
+    // Vite (Rolldown: UNRESOLVED_IMPORT), tsc (TS2307), and Next.js.
+    match: /failed to resolve import|\bUNRESOLVED_IMPORT\b|Cannot find module '[^']+' or its corresponding type declarations|Module not found: Can't resolve/i,
     cause: "An import points to a file that does not exist (wrong path or letter case) or to a package missing from package.json.",
     fix: "Correct the import path or create the missing file; for a package, add it to package.json dependencies.",
   },

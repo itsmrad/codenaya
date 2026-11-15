@@ -351,7 +351,7 @@ ${KNOWN_GOOD_VERSIONS_LINES}
   framer-motion (if any animation is used),
   zustand (if cross-component state is needed)
 - Add @types/* dev packages for all non-typed libraries
-- For Vite: @vitejs/plugin-react goes in devDependencies. Never use Vite 7+ or @vitejs/plugin-react 5+: they need Node 20.19+ and crash in the preview sandbox
+- For Vite: @vitejs/plugin-react goes in devDependencies. New apps use Vite 8 with @vitejs/plugin-react 6 (the ranges above). An existing app on Vite 6 keeps Vite 6 with @vitejs/plugin-react 4: never mix majors or upgrade it unasked
 - For Vite: the "@/..." imports only resolve if vite.config.ts defines the alias. Always include it:
   import { fileURLToPath, URL } from "node:url"
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } }

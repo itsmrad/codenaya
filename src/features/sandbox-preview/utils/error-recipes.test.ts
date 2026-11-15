@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { VITE8_BUILD_UNRESOLVED_IMPORT } from "../../conversations/inngest/tools/vite-build-output.fixture";
 import { ERROR_RECIPES, explainError, recipeIdsIn, withErrorHints } from "./error-recipes";
 
 /** Error text as Vite, tsc, npm, React and the browser print it, one per recipe. */
@@ -89,6 +90,10 @@ describe("ERROR_RECIPES", () => {
 
   it.each(TSC_FIXTURES)("%s matches the tsc wording, and no other recipe does: %s", (id, fixture) => {
     expect(explainError(fixture).map((match) => match.recipeId)).toEqual([id]);
+  });
+
+  it("matches Vite 8's Rolldown unresolved import", () => {
+    expect(explainError(VITE8_BUILD_UNRESOLVED_IMPORT).map((match) => match.recipeId)).toEqual(["unresolved-import"]);
   });
 
   it("matches the Tailwind v4 wording of an unknown @apply class", () => {

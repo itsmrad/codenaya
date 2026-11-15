@@ -43,13 +43,13 @@ describe("checkKnownGoodVersions", () => {
       return [
         { version: "19.2.0", peerDependencies: { react: "^18 || ^19" }, engines: { node: ">=20" } },
         { version: "19.2.1", peerDependencies: { react: "^18" } },
-        { version: "19.2.2", engines: { node: ">=22.12" } },
-        { version: "19.2.3", engines: { node: ">=22.12" } },
+        { version: "19.2.2", engines: { node: ">=22.22" } },
+        { version: "19.2.3", engines: { node: ">=22.22" } },
       ];
     });
     expect(result.failures).toHaveLength(2);
     expect(result.failures.join("\n")).toContain('"react":"^18"');
-    expect(result.failures.join("\n")).toContain('"node":">=22.12"');
+    expect(result.failures.join("\n")).toContain('"node":">=22.22"');
   });
 
   it("ignores historical incompatible releases when the latest matching release works", () => {

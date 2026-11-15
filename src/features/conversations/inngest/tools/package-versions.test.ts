@@ -31,21 +31,21 @@ describe("checkPackageVersions", () => {
   it("rewrites a newer major than the manifest's, since nobody has checked it runs", () => {
     const { content, note } = checkPackageVersions(
       "package.json",
-      pkg({ "react-router": "^8.0.0" }, { vite: "^7.1.0" }),
+      pkg({ "react-router": "^8.0.0" }, { vite: "^9.1.0" }),
     );
     const written = JSON.parse(content);
 
     expect(written.dependencies["react-router"]).toBe(KNOWN_GOOD_VERSIONS["react-router"]);
     expect(written.devDependencies.vite).toBe(KNOWN_GOOD_VERSIONS.vite);
     expect(note).toContain(`react-router "^8.0.0" → "${KNOWN_GOOD_VERSIONS["react-router"]}"`);
-    expect(note).toContain(`vite "^7.1.0" → "${KNOWN_GOOD_VERSIONS.vite}"`);
+    expect(note).toContain(`vite "^9.1.0" → "${KNOWN_GOOD_VERSIONS.vite}"`);
     expect(note).not.toContain("Version check");
   });
 
   it.each([
-    "^6 || ^7", ">=6.0.0", "6.x || 7.x", "6.0.0 - 8.0.0", "^5 || ^7", ">6.0.0",
-    ">=6 <8", ">=6 <=7.0.0", "^6 || *", "^6 || x",
-    "7.0.0-beta.0", "6.0.0 || 7.0.0-beta.0",
+    "^8 || ^9", ">=8.0.0", "8.x || 9.x", "8.0.0 - 10.0.0", "^7 || ^9", ">8.0.0",
+    ">=8 <10", ">=8 <=9.0.0", "^8 || *", "^8 || x",
+    "9.0.0-beta.0", "8.0.0 || 9.0.0-beta.0",
   ])(
     "rewrites vite %s because it can install a newer major",
     (range) => {
@@ -57,7 +57,7 @@ describe("checkPackageVersions", () => {
     },
   );
 
-  it.each(["^6", ">=6 <7", ">=6 <7.0.0", ">=6 <7.0.0-0", ">=6 <=6.9.0", "6.0.0 - 6.9.0"])(
+  it.each(["^8", ">=8 <9", ">=8 <9.0.0", ">=8 <9.0.0-0", ">=8 <=8.9.0", "8.0.0 - 8.9.0"])(
     "keeps bounded vite %s unchanged",
     (range) => {
       const original = pkg({}, { vite: range });
