@@ -22,7 +22,7 @@ import {
   BUILD_VERIFIED,
   STATIC_CHECKS_PASSED,
 } from "../../agent-steps";
-import { buildCommand, checkProjectBuild, createCheckBuildTool, trimBuildOutput } from "./check-build";
+import { buildCommand, checkProjectBuild, createCheckBuildTool, trimBuildOutput, warmSlow } from "./check-build";
 import { NEXT_MODULE_NOT_FOUND, NEXT_PRERENDER_ERROR, NEXT_TYPE_ERROR } from "./next-build-output.fixture";
 
 const starter = () => VITE_REACT_STARTER.map((file) => ({ ...file }));
@@ -68,6 +68,7 @@ const fakeSandbox = (...answers: Answer[]) => {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  warmSlow.clear();
   vi.unstubAllEnvs();
   vi.resetAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -882,17 +883,76 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expectCold(await warmCheck(), warm);
   });
 
-  it("reports a timeout in the warm build as unfinished, without a second build", async () => {
+  const slowInstall = (command: string) =>
+    command.startsWith("npm install") ? new TimeoutError("Command timed out") : undefined;
+
+  it("builds in a new sandbox when the warm build times out and the step budget allows it", async () => {
     listed({});
-    const warm = warmSandbox((command) =>
-      command.startsWith("npm install") ? new TimeoutError("Command timed out") : undefined,
-    );
+    const warm = warmSandbox(slowInstall);
+    fakeSandbox();
+
+    expectCold(await warmCheck(), warm);
+  });
+
+  it("reports the timeout as unfinished when too little of the step budget is left for a new sandbox", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    listed({});
+    const warm = warmSandbox((command) => {
+      if (!command.startsWith("npm install")) return undefined;
+      now += 185_000;
+      return new TimeoutError("Command timed out");
+    });
+
+    const result = await warmCheck();
+
+    expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expect(warm.kill).not.toHaveBeenCalled();
+    expect(e2b.create).not.toHaveBeenCalled();
+    expect(unfinishedLogs()).toEqual([
+      {
+        path: "warm-then-before-cold",
+        elapsedMs: 185_000,
+        budgetLeftMs: 55_000,
+        error: "OutOfTime",
+        reason: "The check ran out of time",
+      },
+    ]);
+  });
+
+  it("skips the warm preview on the retry after a warm timeout, until the entry expires", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    listed({});
+    const warm = warmSandbox(slowInstall);
+    fakeSandbox();
+    expectCold(await warmCheck(), warm);
+
+    e2b.create.mockClear();
+    e2b.connect.mockClear();
+    now += 9 * 60_000;
+    fakeSandbox();
+    expectCold(await warmCheck(), warm);
+    expect(e2b.connect).not.toHaveBeenCalled();
+
+    e2b.create.mockClear();
+    now += 2 * 60_000;
+    fakeSandbox();
+    expectCold(await warmCheck(), warm);
+    expect(e2b.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports one unfinished check when the new sandbox also times out, without another build", async () => {
+    listed({});
+    warmSandbox(slowInstall);
+    const cold = fakeSandbox(new TimeoutError("Command timed out"));
 
     const result = await warmCheck();
 
     expect(result).toMatch(/^Error: The build check could not finish \(Command timed out\)/);
-    expect(warm.kill).not.toHaveBeenCalled();
-    expect(e2b.create).not.toHaveBeenCalled();
+    expect(e2b.create).toHaveBeenCalledTimes(1);
+    expect(cold.kill).toHaveBeenCalledTimes(1);
+    expect(unfinishedLogs().map((log) => log.path)).toEqual(["warm-then-cold"]);
   });
 
   it("kills the timed-out build's own processes before removing its directory, never the dev server", async () => {
@@ -901,6 +961,7 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
       command.startsWith("npm install") ? new TimeoutError("Command timed out") : undefined,
     );
 
+    fakeSandbox();
     await warmCheck();
 
     const runs = commandsOf(warm);
@@ -914,8 +975,9 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expect(warm.kill).not.toHaveBeenCalled();
   });
 
-  it("still reports the timeout and cleans up when killing the build's processes fails", async () => {
+  it("still tries a new sandbox and cleans up when killing the build's processes fails", async () => {
     listed({});
+    fakeSandbox();
     const warm = warmSandbox((command) => {
       if (command.startsWith("npm install")) return new TimeoutError("Command timed out");
       return command.includes("kill -9") ? new Error("sandbox gone") : undefined;
@@ -923,9 +985,9 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
 
     const result = await warmCheck();
 
-    expect(result).toMatch(/^Error: The build check could not finish \(Command timed out\)/);
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
     expect(commandsOf(warm).some((run) => run.startsWith("rm -rf "))).toBe(true);
-    expect(e2b.create).not.toHaveBeenCalled();
+    expect(e2b.create).toHaveBeenCalledTimes(1);
   });
 
   it("kills nothing when the warm build finishes or fails", async () => {
@@ -935,30 +997,6 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     await warmCheck();
 
     expect(commandsOf(warm).some((run) => run.includes("kill -9"))).toBe(false);
-  });
-
-  it("logs a warm unfinished check with its sandbox, elapsed time and the budget left", async () => {
-    let now = 1_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
-    listed({});
-    const warm = warmSandbox((command) => {
-      if (command.startsWith("npm install")) now += 125_000;
-      return undefined;
-    });
-    Object.assign(warm, { sandboxId: "sbx_warm_0" });
-
-    await warmCheck();
-
-    expect(unfinishedLogs()).toEqual([
-      {
-        path: "warm",
-        elapsedMs: 125_000,
-        budgetLeftMs: 115_000,
-        sandboxId: "sbx_warm_0",
-        error: "OutOfTime",
-        reason: "The check ran out of time",
-      },
-    ]);
   });
 
   it("does not start a new sandbox when a failed warm attempt left too little of the step budget", async () => {
@@ -1012,7 +1050,7 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expect(e2b.create).not.toHaveBeenCalled();
   });
 
-  it("reports a warm build that hits its 120 s cap as unfinished, without a cold build", async () => {
+  it("builds in a new sandbox when the warm build hits its 120 s cap with budget left", async () => {
     let now = 1_000_000;
     vi.spyOn(Date, "now").mockImplementation(() => now);
     listed({});
@@ -1021,11 +1059,11 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
       return undefined;
     });
 
+    fakeSandbox();
     const result = await warmCheck();
 
-    expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expectCold(result, warm);
     expect(commandsOf(warm).some((run) => run.startsWith("npx tsc"))).toBe(false);
-    expect(e2b.create).not.toHaveBeenCalled();
   });
 
   it("bounds each warm command by the time left in the step budget", async () => {

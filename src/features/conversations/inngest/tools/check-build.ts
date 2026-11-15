@@ -166,7 +166,9 @@ const failureOutput = (result: CommandResult, dir: string, secrets: readonly str
 };
 
 /** Where an unfinished check stopped; "step" is a failure outside any build path. */
-type Where = { path: "warm" | "cold" | "given" | "before-cold" | "step"; deadline?: number; sandbox?: Sandbox | null };
+type Where = {
+  path: "warm" | "cold" | "given" | "before-cold" | "warm-then-cold" | "warm-then-before-cold" | "step";
+  deadline?: number; sandbox?: Sandbox | null };
 
 /** A timeout or a sandbox failure, not a problem in the project's code. */
 const unfinished = (error: unknown, secrets: readonly string[] = [], { path, deadline, sandbox }: Where = { path: "step" }) => {
@@ -234,6 +236,29 @@ const buildIn = async (
   }
 
   return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.` + notes;
+};
+
+/** How long a project's check skips its warm preview after the warm build timed out. */
+const WARM_SLOW_TTL_MS = 10 * 60_000;
+const WARM_SLOW_MAX = 200;
+/**
+ * Projects whose warm build timed out, and when. The gate's retry is a new step that
+ * would find the same slow preview, so it goes straight to a new sandbox.
+ * shortcut: per server instance, so a retry on another instance tries warm once more.
+ */
+/** Exported so tests can reset it. */
+export const warmSlow = new Map<string, number>();
+
+const warmWasSlow = (projectId: string) => {
+  const at = warmSlow.get(projectId);
+  if (at !== undefined && Date.now() - at >= WARM_SLOW_TTL_MS) warmSlow.delete(projectId);
+  return warmSlow.has(projectId);
+};
+
+const markWarmSlow = (projectId: string) => {
+  warmSlow.delete(projectId);
+  warmSlow.set(projectId, Date.now());
+  if (warmSlow.size > WARM_SLOW_MAX) warmSlow.delete(warmSlow.keys().next().value!);
 };
 
 /** The project whose running preview a check may build in, and its owner. */
@@ -362,13 +387,14 @@ const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: Bui
     building = true;
     return await buildIn(sandbox, dir, job, "warm");
   } catch (error) {
-    const where: Where = { path: "warm", deadline: job.deadline, sandbox };
-    if (error instanceof OutOfTime) return unfinished(error, [], where);
-    // A slow build would time out in a new sandbox too.
-    if (building && error instanceof TimeoutError) {
+    // A slow warm build may be the preview's own load (leftovers, the dev server), so a new sandbox gets a try.
+    if (building && (error instanceof TimeoutError || error instanceof OutOfTime)) {
       if (sandbox) await killBuildProcesses(sandbox, dir);
-      return unfinished(error, job.secrets, where);
+      markWarmSlow(preview.projectId);
+      console.error("[check-build] warm build timed out, trying a new sandbox", sandbox?.sandboxId, error);
+      return null;
     }
+    if (error instanceof OutOfTime) return unfinished(error, [], { path: "warm", deadline: job.deadline, sandbox });
     console.error("[check-build] warm sandbox unavailable, starting a new one", error);
     return null;
   } finally {
@@ -490,10 +516,16 @@ export const checkProjectBuild = async ({
   }
 
   if (preview) {
-    const warm = await checkInWarmSandbox(apiKey, preview, job);
-    if (warm) return warm;
-    if (job.deadline - Date.now() < MIN_COLD_BUILD_MS) return unfinished(new OutOfTime(), [], { path: "before-cold", deadline: job.deadline });
+    if (!warmWasSlow(preview.projectId)) {
+      const warm = await checkInWarmSandbox(apiKey, preview, job);
+      if (warm) return warm;
+    }
+    if (job.deadline - Date.now() < MIN_COLD_BUILD_MS) {
+      const path = warmWasSlow(preview.projectId) ? "warm-then-before-cold" : "before-cold";
+      return unfinished(new OutOfTime(), [], { path, deadline: job.deadline });
+    }
   }
+  const afterSlowWarm = !!preview && warmWasSlow(preview.projectId);
 
   let sandbox: Sandbox;
   try {
@@ -511,7 +543,7 @@ export const checkProjectBuild = async ({
   try {
     return await buildIn(sandbox, WORK_DIR, job, "cold");
   } catch (error) {
-    return unfinished(error, secrets, { path: "cold", deadline: job.deadline, sandbox });
+    return unfinished(error, secrets, { path: afterSlowWarm ? "warm-then-cold" : "cold", deadline: job.deadline, sandbox });
   } finally {
     await sandbox.kill().catch(() => {});
   }
