@@ -132,8 +132,9 @@ export const validatePlan = (
   const owned: { id: string; path: string }[] = [];
   for (const task of tasks) {
     for (const raw of task.ownedPaths) {
-      const path = canonical(raw);
-      if (!path) return `Error: Invalid owned path "${raw}"; use a project-relative path under src/.`;
+      const path = normalizePath(raw);
+      if (!path || path === "src") return `Error: Invalid owned path "${raw}"; use a project-relative path under src/.`;
+      if (!path.startsWith("src/")) return `Error: Owned path "${raw}" is outside src/. Tasks own only paths under src/; write public/ and other root files yourself before delegating, or drop it from ownedPaths, then call delegateTasks again.`;
       if (shared(path)) return `Error: "${raw}" is or holds a shared file reserved for the orchestrator.`;
       if (withinPaths && !ownsPath(withinPaths, path)) return `Error: "${raw}" is outside your owned paths.`;
       const other = owned.find((o) => o.id !== task.id && (within(o.path, path) || within(path, o.path)));
