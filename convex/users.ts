@@ -163,9 +163,10 @@ export const markDeleted = internalMutation({
 });
 
 /**
- * Marks one page of a user's projects as being deleted (`deletingAt`), so
- * their share links stop working before the batched purge reaches them.
- * Idempotent. Returns the cursor of the next page, or null when done.
+ * Marks one page of a user's projects as being deleted (`deletingAt`) and
+ * unpublishes their showcase entries (status "removed", like
+ * `showcase.unpublish`), so share links and the public feed stop showing them
+ * before the batched purge reaches them. Idempotent. Returns the cursor of the next page, or null when done.
  */
 async function hideProjects(
   ctx: MutationCtx,
@@ -180,6 +181,17 @@ async function hideProjects(
   for (const project of page.page) {
     if (project.deletingAt === undefined) {
       await ctx.db.patch("projects", project._id, { deletingAt: now });
+    }
+    for (const status of ["published", "unlisted"] as const) {
+      const entry = await ctx.db
+        .query("showcaseProjects")
+        .withIndex("by_projectId_and_status", (q) =>
+          q.eq("projectId", project._id).eq("status", status),
+        )
+        .first();
+      if (entry) {
+        await ctx.db.patch("showcaseProjects", entry._id, { status: "removed", updatedAt: now });
+      }
     }
   }
   return page.isDone ? null : page.continueCursor;

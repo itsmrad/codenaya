@@ -4,8 +4,9 @@ import { convexTest } from "convex-test";
 import { Webhook } from "svix";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { CASCADE_BATCH_SIZE } from "./projectCascade";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -474,6 +475,38 @@ describe("POST /clerk-users-webhook", () => {
 
     expect(await t.query(api.projects.getShared, { token })).toBeNull();
     expect((await t.run((ctx) => ctx.db.get("projects", projectId)))?.deletingAt).toBeTypeOf("number");
+  });
+
+  test("the purge hides every project before it deletes any, across pages", async () => {
+    vi.useFakeTimers(); // each scheduled step is run by hand below
+    const t = setup();
+    const count = CASCADE_BATCH_SIZE + 1;
+    await t.run(async (ctx) => {
+      for (let i = 0; i < count; i++) {
+        await ctx.db.insert("projects", { name: `p${i}`, ownerId: ALICE, updatedAt: 0 });
+      }
+    });
+    const hidden = () =>
+      t.run(async (ctx) => {
+        const rows = await ctx.db.query("projects").collect();
+        return { total: rows.length, hidden: rows.filter((p) => p.deletingAt !== undefined).length };
+      });
+
+    await t.fetch("/clerk-users-webhook", signedRequest(deletedEvent(ALICE)));
+    // The webhook hid the first page only; the last project is still visible.
+    expect(await hidden()).toEqual({ total: count, hidden: CASCADE_BATCH_SIZE });
+
+    // Next scheduled step (carries the cursor): hides the rest, deletes nothing.
+    const [step] = await t.run(async (ctx) =>
+      (await ctx.db.system.query("_scheduled_functions").collect()).filter(
+        (job) => job.state.kind === "pending",
+      ),
+    );
+    await t.mutation(internal.users.purgeUserData, step.args[0]);
+    expect(await hidden()).toEqual({ total: count, hidden: count });
+
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect((await hidden()).total).toBe(0);
   });
 
   test("user.deleted for a user with no row still purges their data", async () => {

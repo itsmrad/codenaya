@@ -501,6 +501,32 @@ describe("showcase.isProjectPublished", () => {
   });
 });
 
+test("a published entry of a user whose deletion started leaves every public read", async () => {
+  vi.useFakeTimers(); // keeps the scheduled purge from running
+  try {
+    const t = convexTest(schema, modules);
+    const [id] = await seed(t, [{ title: "Weather", publishedAt: 1, featured: true }]);
+    const reads = async () => {
+      const list = await t.query(api.showcase.list, { paginationOpts: page(10) });
+      const search = await t.query(api.showcase.search, { query: "weather", paginationOpts: page(10) });
+      return [
+        list.page.length,
+        search.page.length,
+        (await t.query(api.showcase.getById, { id })) ? 1 : 0,
+        (await t.query(api.showcase.getTrending, {})).length,
+        (await t.query(api.showcase.getFeatured, {})).length,
+      ];
+    };
+    expect(await reads()).toEqual([1, 1, 1, 1, 1]);
+
+    await t.mutation(internal.users.markDeleted, { clerkUserId: "user_alice" });
+
+    expect(await reads()).toEqual([0, 0, 0, 0, 0]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 describe("showcase.importToWorkspace", () => {
   const importAs = (t: T, subject: string, showcaseProjectId: Id<"showcaseProjects">) =>
     t.withIdentity({ subject }).mutation(api.showcase.importToWorkspace, { showcaseProjectId });

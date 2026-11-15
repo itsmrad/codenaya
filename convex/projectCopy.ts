@@ -25,8 +25,14 @@ const COPIES_PER_HOUR = 20;
 
 /**
  * Refuses a copy once the user has made `COPIES_PER_HOUR` projects in the last
- * hour. Counts the user's recent projects, so it needs no extra table;
- * shortcut: it also counts plain creates, and deleting a project frees a slot.
+ * hour. Counts the user's recent projects, so it needs no extra table.
+ *
+ * shortcut: a soft limiter, upgrade to a real rate limiter if abused.
+ * - Deleting a project frees a slot only once its batched delete has run
+ *   (`deletingAt` rows still count), and copy-then-delete churn can still
+ *   exceed the cap over time.
+ * - Other create paths (`projects.create`) are not gated, but their projects
+ *   are counted.
  */
 export async function assertCanCopy(ctx: MutationCtx, ownerId: string) {
   const recent = await ctx.db
