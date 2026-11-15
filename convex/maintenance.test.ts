@@ -53,9 +53,9 @@ describe("failLostMessageRuns", () => {
   }
 
   test.each([
-    { age: LOST_RUN_MS - 1, scanned: 0, status: "processing" },
-    { age: LOST_RUN_MS, scanned: 1, status: "completed" },
-  ])("only scans runs old enough to be lost (age $age)", async ({ age, scanned, status }) => {
+    { name: "does not scan a young run", age: LOST_RUN_MS - 1, scanned: 0, status: "processing" },
+    { name: "scans and fails a lost run", age: LOST_RUN_MS + 1, scanned: 1, status: "completed" },
+  ])("$name", async ({ age, scanned, status }) => {
     const t = setup();
     const messageId = await seedMessage(t, { status: "processing" });
 
