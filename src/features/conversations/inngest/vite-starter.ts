@@ -447,7 +447,10 @@ export const VITE_REACT_STARTER: ReadonlyArray<{ path: string; content: string }
  * at worst Vite re-optimizes once, and a main.tsx without <Toaster /> is named.
  */
 export const PRE_UI_STARTER: Readonly<Record<string, string>> = {
-  "vite.config.ts": VITE_CONFIG.replace(/^ {6}"(@radix-ui\/[^"]+|sonner)",\n/gm, ""),
+  "vite.config.ts": VITE_CONFIG.replace(/^ {6}"(@radix-ui\/[^"]+|sonner)",\n/gm, "").replace(
+    /resolve: \{\n {4}(alias: .*),\n {4}\/\/ One React.*\n {4}dedupe: .*\n {2}\},/,
+    "resolve: { $1 },",
+  ),
   "src/main.tsx": MAIN_TSX.replace('import { Toaster } from "./components/ui/sonner";\n', "").replace(
     "        <Toaster />\n",
     "",
