@@ -36,6 +36,7 @@
  */
 
 import { POSTHOG_DESTRUCTIVE_TOOLS } from "./posthog-destructive-tools";
+import { POSTHOG_READ_TOOLS } from "./posthog-read-tools";
 
 import type {
   ProviderDefinition,
@@ -109,6 +110,16 @@ const CATALOG = {
       "deploy_edge_function",
       "update_storage_config",
     ],
+    // Reads annotated read-only in supabase-community/supabase-mcp src/tools.
+    readOnlyTools: [
+      "generate_typescript_types", "get_advisors", "get_cost", "get_edge_function", "get_logs",
+      "get_notebook", "get_organization", "get_project", "get_project_url",
+      "get_storage_config", "list_branches", "list_edge_functions",
+      "list_extensions", "list_migrations", "list_notebooks", "list_organizations",
+      "list_projects", "list_storage_buckets", "list_tables", "query_logs", "search_docs",
+      // Returns publishable (anon) keys, which are public by design.
+      "get_publishable_keys",
+    ],
   },
 
   neon: {
@@ -157,6 +168,21 @@ const CATALOG = {
       "reset_from_parent",
       "provision_neon_auth",
     ],
+    // Reads from the neondatabase/mcp-server-neon README tool list; generated Management API tools stay gated.
+    readOnlyTools: [
+      "compare_database_schema", "count_projects", "describe_branch", "describe_project",
+      "describe_table_schema", "fetch", "get_branch_consumption", "get_database_tables",
+      "get_doc", "get_function", "get_neon_auth_config", "get_postgres_endpoint",
+      "get_project_consumption", "get_realtime", "get_snapshot_schedule", "get_storage",
+      "get_trigger", "inspect_database", "list_auth_oauth_providers",
+      "list_auth_trusted_domains", "list_branch_computes", "list_branches", "list_functions",
+      "list_functions_custom_domains", "list_incidents", "list_log_field_values",
+      "list_log_fields", "list_organizations", "list_postgres_endpoints", "list_projects",
+      "list_slow_queries", "list_snapshots", "list_storage_buckets", "list_storage_objects",
+      "list_triggers", "query_logs", "query_loki_logs", "search", "search_docs",
+      // List output never includes client_secret (zNeonAuthOAuthClient in @neon/tools); only create returns it.
+      "list_auth_oauth_clients",
+    ],
   },
 
   github: {
@@ -186,6 +212,26 @@ const CATALOG = {
       "delete_repository",
       "push_files",
     ],
+    // Reads annotated read-only in github/github-mcp-server pkg/github/__toolsnaps__.
+    readOnlyTools: [
+      "actions_get", "actions_list", "custom_properties_read", "find_duplicate",
+      "get_code_quality_finding", "get_code_scanning_alert", "get_commit",
+      "get_dependabot_alert", "get_discussion", "get_discussion_comments", "get_file_blame",
+      "get_file_contents", "get_gist", "get_global_security_advisory", "get_job_logs",
+      "get_label", "get_latest_release", "get_me", "get_notification_details",
+      "get_release_by_tag", "get_repository_tree", "get_tag",
+      "get_team_members", "get_teams", "issue_artifact_read", "issue_dependency_read",
+      "issue_read", "list_branches", "list_code_scanning_alerts", "list_commits",
+      "list_dependabot_alerts", "list_discussion_categories", "list_discussions", "list_gists",
+      "list_global_security_advisories", "list_issue_fields", "list_issue_types", "list_issues",
+      "list_label", "list_notifications", "list_org_repository_security_advisories",
+      "list_pull_requests", "list_releases", "list_repository_collaborators",
+      "list_repository_security_advisories",
+      "list_starred_repositories", "list_tags", "projects_get", "projects_list",
+      "pull_request_read", "repository_ruleset_read", "search_code", "search_commits",
+      "search_issues", "search_orgs", "search_pull_requests", "search_repositories",
+      "search_users", "ui_get",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -205,6 +251,11 @@ const CATALOG = {
     supportsReadOnly: false,
     scope: NO_URL_SCOPING,
     destructiveTools: ["stripe_api_write", "create_refund"],
+    // Reads from https://docs.stripe.com/mcp#tools. stripe_api_read dispatches any GET method, so it stays gated.
+    readOnlyTools: [
+      "get_balance_summary", "get_stripe_account_info", "search_stripe_documentation",
+      "stripe_api_details", "stripe_api_search",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -227,6 +278,10 @@ const CATALOG = {
     supportsReadOnly: false,
     scope: NO_URL_SCOPING,
     destructiveTools: [],
+    // Both tools from the upstash/context7 README; documentation lookup only.
+    readOnlyTools: [
+      "query-docs", "resolve-library-id",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -259,6 +314,14 @@ const CATALOG = {
       "delete_object_store_bucket",
       "delete_object_store_bucket_key",
     ],
+    // Reads from https://www.prisma.io/docs/ai/mcp-tools.
+    readOnlyTools: [
+      "fetch_workspace_details", "get_prisma_composer_topology",
+      "get_prisma_compute_deployment_logs", "introspect_database_schema",
+      "list_object_store_buckets", "list_prisma_compute_apps", "list_prisma_compute_builds",
+      "list_prisma_compute_deployments", "list_prisma_postgres_backups",
+      "list_prisma_postgres_databases", "search_prisma_documentation",
+    ],
   },
 
   sentry: {
@@ -280,6 +343,25 @@ const CATALOG = {
       path: { kind: "segments", segments: ["orgSlug", "projectSlug"] },
     },
     destructiveTools: ["update_issue", "create_project", "update_project_settings"],
+    // Reads from getsentry/sentry-mcp packages/mcp-core/src/toolDefinitions.json.
+    readOnlyTools: [
+      "find_alert_rules", "find_dashboards", "find_dropped_events",
+      "find_metric_monitors", "find_monitors", "find_organizations", "find_projects",
+      "find_releases", "find_teams", "find_uptime_monitors", "get_agent_conversation_details",
+      "get_ai_conversation_details", "get_alert_options", "get_alert_rule",
+      "get_dashboard_details", "get_doc", "get_event_attachment", "get_event_stacktrace",
+      "get_issue_activity", "get_issue_breadcrumbs", "get_issue_details",
+      "get_issue_tag_values", "get_issue_user_reports", "get_latest_base_snapshot",
+      "get_metric_monitor_details", "get_monitor_details", "get_profile", "get_profile_details",
+      "get_release_details", "get_replay_details", "get_sentry_mcp_info", "get_sentry_resource",
+      "get_snapshot", "get_snapshot_image", "get_span_details", "get_trace_details",
+      "get_uptime_monitor_details", "search_agent_conversations", "search_ai_conversations",
+      "search_docs", "search_errors", "search_events", "search_issue_events", "search_issues",
+      "search_logs", "search_metrics", "search_profiles", "search_replays", "search_traces",
+      "whoami",
+      // Returns DSNs, client keys that are public by design.
+      "find_dsns",
+    ],
   },
 
   cloudflare: {
@@ -297,6 +379,10 @@ const CATALOG = {
     // Cloudflare API, so it has to be treated as destructive even though its
     // name says nothing about mutation.
     destructiveTools: ["execute"],
+    // From the cloudflare/mcp README. `search` runs agent-written code, so it stays gated.
+    readOnlyTools: [
+      "docs", "whoami",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -354,6 +440,7 @@ const CATALOG = {
       ],
     },
     destructiveTools: POSTHOG_DESTRUCTIVE_TOOLS,
+    readOnlyTools: POSTHOG_READ_TOOLS,
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -404,6 +491,24 @@ const CATALOG = {
       "update-template", "update-topic", "update-webhook",
       "verify-domain", "verify-domain-claim",
     ],
+    // Reads annotated read-only in resend/resend-mcp src/tools, except get-webhook, which returns the signing secret.
+    readOnlyTools: [
+      "get-automation", "get-automation-runs", "get-broadcast", "get-contact",
+      "get-contact-import", "get-contact-property", "get-domain", "get-domain-claim",
+      "get-email", "get-email-metrics", "get-inbox", "get-inbox-agent", "get-inbox-draft",
+      "get-inbox-thread", "get-inbox-thread-email", "get-log", "get-received-email",
+      "get-received-email-attachment", "get-segment", "get-sent-email-attachment",
+      "get-suppression", "get-template", "get-tiptap-json-content", "get-topic", "get-usage",
+      "get-webhook-event", "list-api-keys", "list-broadcast-clicked-links",
+      "list-broadcast-recipients", "list-broadcasts", "list-contact-imports",
+      "list-contact-properties", "list-contact-segments", "list-contact-topics",
+      "list-contacts", "list-domains", "list-emails", "list-inbox-drafts", "list-inbox-labels",
+      "list-inbox-thread-emails", "list-inbox-threads", "list-inboxes", "list-logs",
+      "list-oauth-grants", "list-received-email-attachments", "list-received-emails",
+      "list-segments", "list-sent-email-attachments", "list-suppressions", "list-templates",
+      "list-topics", "list-webhook-event-attempts", "list-webhook-events", "list-webhooks",
+      "search-inbox-threads",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -449,6 +554,15 @@ const CATALOG = {
       "search_upsert", "submit_feedback_to_upstash_team", "vector_upsert",
       "workflow_manage_run",
     ],
+    // Tools marked read at https://upstash.com/docs/agent-resources/mcp, except those that can return credentials.
+    readOnlyTools: [
+      "blob_download_url", "box_account", "box_logs", "box_metrics", "console_redis_keys",
+      "console_redis_value", "dlq_list", "index_fetch", "index_get_stats", "index_info",
+      "index_list", "index_list_namespaces", "index_range", "logs_list",
+      "qstash_flow_control_get", "qstash_get_stats", "qstash_list_schedules",
+      "redis_get_insights", "redis_get_stats", "redis_get_traffic", "redis_list_backups",
+      "redis_list_databases", "search_query", "vector_query",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -483,6 +597,16 @@ const CATALOG = {
       "media_library_discard_drafts", "media_library_link_assets",
       "generate_image", "transform_image", "run_sanity_cli",
     ],
+    // Reads from https://www.sanity.io/docs/ai/mcp-server.
+    readOnlyTools: [
+      "assets_upload_status", "cors_origins_list", "documents_validate", "get_document",
+      "get_project_studios", "get_sanity_rules", "get_schema", "list_datasets",
+      "list_embeddings_indices", "list_organizations", "list_projects", "list_releases",
+      "list_sanity_rules", "list_workspace_schemas", "media_library_get_document",
+      "media_library_get_schema", "media_library_list", "media_library_list_asset_references",
+      "media_library_query_documents", "query_documents", "read_docs", "schema_type_get",
+      "search_docs", "semantic_search", "usage_history_get", "usage_snapshot_get",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -514,6 +638,21 @@ const CATALOG = {
       },
     },
     destructiveTools: ["planetscale_execute_write_query", "planetscale_update_payment_method"],
+    // Reads from https://planetscale.com/docs/mcp-server. planetscale_execute_read_query runs SQL, so it stays gated.
+    readOnlyTools: [
+      "planetscale_get_branch", "planetscale_get_branch_metrics",
+      "planetscale_get_branch_schema", "planetscale_get_database", "planetscale_get_insights",
+      "planetscale_get_invoice_line_items", "planetscale_get_organization",
+      "planetscale_get_organization_billing_payment_method",
+      "planetscale_get_payment_method_setup", "planetscale_get_postgres_logs",
+      "planetscale_get_query_tag", "planetscale_list_branches",
+      "planetscale_list_cluster_size_skus", "planetscale_list_databases",
+      "planetscale_list_invoices", "planetscale_list_organizations",
+      "planetscale_list_query_error_executions", "planetscale_list_query_error_patterns",
+      "planetscale_list_query_tag_summaries", "planetscale_list_query_tags",
+      "planetscale_list_regions_for_organization", "planetscale_list_schema_recommendations",
+      "planetscale_search_documentation",
+    ],
     notes:
       "The read-only selection uses the Insights-only endpoint, excluding both read and write query execution. This is not server-enforced read-only: billing writes remain separately authorized by OAuth consent and gated, and unannotated tools still require approval. No URL-level database scoping. Postgres IP restrictions must allow the MCP server's documented egress IPs.",
   },
@@ -563,6 +702,23 @@ const CATALOG = {
       "notion-update-page",
       "notion-update-view",
       "notion-upload-skill",
+    ],
+    // Reads from the inventory above.
+    readOnlyTools: [
+      "notion-ai-search", "notion-calendar-list-calendar-resources",
+      "notion-calendar-list-calendars", "notion-calendar-list-contacts",
+      "notion-calendar-list-coworkers-events", "notion-calendar-list-events",
+      "notion-connector-search", "notion-download-attachment", "notion-download-skill",
+      "notion-fetch", "notion-get-async-task", "notion-get-comments",
+      "notion-get-enabled-skills", "notion-get-file-download-urls", "notion-get-groups",
+      "notion-get-self", "notion-get-session-status", "notion-get-suggested-edit",
+      "notion-get-teams", "notion-get-tool-access", "notion-get-users",
+      "notion-get-version-changes", "notion-list-favorite-pages", "notion-list-page-backlinks",
+      "notion-list-private-pages", "notion-list-recent-pages", "notion-list-session-events",
+      "notion-list-shared-pages", "notion-memory-search", "notion-query-data-sources",
+      "notion-query-meeting-notes", "notion-query-multiple-data-sources",
+      "notion-query-sessions", "notion-read-session-event", "notion-search",
+      "notion-search-agents", "notion-search-sessions", "notion-view-version",
     ],
     apiKey: {
       header: "Authorization",
@@ -703,6 +859,57 @@ const CATALOG = {
       "queryInsightsSql",
       "queryInsightsAi",
     ],
+    // read_* and search_* groups from the inventory above, minus credit-consuming Enriched tools and exports.
+    readOnlyTools: [
+      "atlassianUserInfo", "describeJiraAlignItemType", "diffConfluenceContentVersions",
+      "discover", "downloadConfluenceAttachment", "downloadJiraIssueAttachment",
+      "getAccessibleAtlassianResources", "getAssetsObject", "getAssetsObjectSchema",
+      "getAssetsObjectType", "getAssetsObjectsById", "getAssetsServiceObjectsById",
+      "getBitbucketRepoBranch", "getBitbucketRepoCommit", "getBitbucketRepoCommitReport",
+      "getBitbucketRepoCommitReportAnnotations", "getBitbucketRepoDefaultReviewers",
+      "getBitbucketRepoDeployment", "getBitbucketRepoEnvironment",
+      "getBitbucketRepoFileContent", "getBitbucketRepoPipeline", "getBitbucketRepoPipelineStep",
+      "getBitbucketRepoPipelineStepLog", "getBitbucketRepoPullRequest",
+      "getBitbucketRepoPullRequestDiff", "getBitbucketRepository", "getBitbucketWorkspace",
+      "getCapacityPlanAllocations", "getConfluenceAttachment", "getConfluenceComment",
+      "getConfluenceContent", "getConfluenceContentPermissions",
+      "getConfluenceContentRestrictionState", "getConfluenceContentSuggestions",
+      "getConfluenceContentVersion", "getConfluenceMauiApp", "getConfluencePersonalSpace",
+      "getConfluencePublicLinkStatus", "getConfluenceReactions", "getConfluenceSpace",
+      "getConfluenceSpaceInstructions", "getConfluenceTask", "getConfluenceTemplate",
+      "getContentFormatGuide", "getFocusArea", "getFocusAreaCustomFields", "getFocusAreaTypes",
+      "getGoal", "getGoalTypes", "getGoalUpdate", "getInsightsResource",
+      "getInsightsResourceLineage", "getJiraAlignItem", "getJiraAlignTerminology",
+      "getJiraBoardConfig", "getJiraBoardIssueData", "getJiraBoardSprintData",
+      "getJiraCurrentUser", "getJiraEntityProperty", "getJiraIssue",
+      "getJiraIssueTypeMetaWithFields", "getJiraProjectVersionRelatedWork",
+      "getJiraProjectVersions", "getJiraUser", "getJsmAgentAvailability", "getJsmOpsAlerts",
+      "getJsmOpsScheduleInfo", "getJsmOpsTeamInfo", "getJsmRequest",
+      "getJsmRequestActionMetadata", "getJsmRequestCreationOptions",
+      "getJsmRequestResolverPlans", "getJsmRequestTypeFields", "getLoomObjectsContent",
+      "getLoomVideoDownloadUrl", "getProject", "getProjectUpdate", "getTalentFields",
+      "getTalentGroupMetrics", "getTalentPosition", "getTalentPositionsByEntity",
+      "getTalentUser", "getTeam", "listAssetsObjectSchemas", "listAssetsObjectTypeAttributes",
+      "listBitbucketRepoCommitReports", "listBitbucketRepoDeployments",
+      "listBitbucketRepoEnvironments", "listBitbucketRepoPipelineSteps",
+      "listBitbucketRepoPipelines", "listBitbucketRepoPullRequestComments",
+      "listBitbucketRepoPullRequestTasks", "listBitbucketRepoPullRequests",
+      "listBitbucketRepositories", "listBitbucketWorkspaces", "listConfluenceAttachments",
+      "listConfluenceComments", "listConfluenceContent", "listConfluenceContentVersions",
+      "listConfluenceSpaces", "listConfluenceTasks", "listConfluenceTemplates",
+      "listJiraAlignItems", "listJiraBoardSprints", "listJiraBoards", "listJiraDashboards",
+      "listJiraFilters", "listJiraIssueAssignableUsers", "listJiraIssueChangelogs",
+      "listJiraIssueComments", "listJiraIssueLinkTypes", "listJiraIssueRemoteIssueLinks",
+      "listJiraIssueTransitions", "listJiraIssueWorklogs", "listJiraProjectComponents",
+      "listJiraProjectIssueTypesMetadata", "listJiraProjects", "listJiraStatuses",
+      "listLoomObjectFolders", "listLoomObjects", "lookupJiraAccountId",
+      "queryAssetsObjectSchemaAttributes", "queryAssetsObjectTypes", "queryAssetsObjects",
+      "queryAssetsObjectsUsingAql", "queryAssetsReferenceTypes",
+      "resolveConfluenceContentMacros", "searchAssetsObjects",
+      "searchCapacityPlanNonProjectWork", "searchConfluence", "searchFocusAreas", "searchGoals",
+      "searchInsightsResources", "searchJiraIssuesUsingJql", "searchJsmRequests",
+      "searchProjects", "searchTalentPositions", "searchTalentSkillTaxonomy", "searchTeams",
+    ],
     notes:
       "Search and other enriched tools may consume Rovo credits. OAuth only here; Atlassian's admin API-token setting applies to token authentication, which this connector does not offer. No URL-level read-only mode.",
   },
@@ -764,6 +971,21 @@ const CATALOG = {
       "save_vulnerability",
       "attach_scan_profile",
     ],
+    // Reads from the inventory above, including documented aliases.
+    readOnlyTools: [
+      "get_artifact_file", "get_commit", "get_duo_session", "get_duo_workflow_status",
+      "get_issue", "get_job", "get_job_log", "get_mcp_server_version", "get_merge_request",
+      "get_merge_request_commits", "get_merge_request_conflicts", "get_merge_request_diffs",
+      "get_merge_request_notes", "get_merge_request_pipelines", "get_pages_content",
+      "get_pipeline", "get_pipeline_jobs", "get_project", "get_repository_file",
+      "get_saved_view_work_items", "get_user", "get_vulnerability", "get_work_item",
+      "get_work_item_types", "get_workitem_notes", "list_branches", "list_commits",
+      "list_duo_agents_and_flows", "list_duo_sessions", "list_groups", "list_merge_requests",
+      "list_pipeline_schedules", "list_pipelines", "list_project_members", "list_projects",
+      "list_releases", "list_repository_tree", "list_tags", "list_todos", "list_user_events",
+      "list_vulnerabilities", "list_wiki_pages", "list_work_item_saved_views",
+      "list_work_items", "search", "search_labels",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -798,6 +1020,17 @@ const CATALOG = {
       "configure_mcp_server",
       "check_mcp_server",
       "submit_feedback",
+    ],
+    // Reads from the inventory above.
+    readOnlyTools: [
+      "clerk_sdk_snippet", "get_domain_status", "get_instance_config",
+      "get_instance_config_schema", "list_application_feedback",
+      "list_clerk_sdk_snippets", "list_domains", "list_organization_memberships",
+      "list_organizations", "list_user_organization_memberships", "list_users", "whoami",
+      // Returns publishable keys only, which are public by design; never secret keys.
+      "list_applications",
+      // Returns publishable keys only, which are public by design; never secret keys.
+      "get_application",
     ],
     notes:
       "Acts as your Clerk Dashboard account in the selected workspace. No URL-level read-only mode; production-instance creation cannot be undone.",
