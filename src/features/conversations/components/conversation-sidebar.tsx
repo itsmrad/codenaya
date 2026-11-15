@@ -81,7 +81,6 @@ import { EnhancePromptButton } from "./enhance-prompt-button";
 import { type ComposerMode, PlanModeToggle } from "./plan-mode-toggle";
 import {
   type MessageMode,
-  buildPlanMessage,
   diagnoseStuckMessage,
 } from "../plan-mode";
 import { type AgentModelChoice, nextTier } from "../agent-models";
@@ -631,9 +630,9 @@ export const ConversationSidebar = ({
                   pathOf={pathOf}
                   onOpenFile={handleOpenFile}
                   onRetry={() => resend(messageIndex, message.mode)}
-                  onBuildPlan={() => {
+                  onBuildPlan={async (build) => {
                     setMode("build");
-                    void sendMessage(buildPlanMessage(message.content));
+                    return (await sendMessage(build)) === "sent";
                   }}
                   stuckRetry={message.stuck && stuckRetry(message, messageIndex)}
                   onDiagnose={() => {
