@@ -65,8 +65,15 @@ test.describe("chat: Esc twice stops a run", () => {
       const cancel = page.waitForRequest((request) => request.url().includes("/api/messages/cancel"));
       await page.keyboard.press("Escape");
       expect((await cancel).postDataJSON()).toEqual({ projectId: project, source: "esc" });
-      await expect(page.locator('[data-run-status="cancelled"]')).toBeVisible();
-      await expect(page.getByText("Stopped after 0 steps")).toBeVisible();
+      // A run with no steps has no run card once cancelled: the message shows
+      // only its "Request cancelled" line and the composer is idle again.
+      await expect(page.getByText("Request cancelled", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(page.locator("[data-run-status]")).toHaveCount(0);
+      await expect(page.getByText("Press Esc again to stop")).toBeHidden();
+      await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeHidden();
+      await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible();
       expect(cancels).toHaveLength(1);
     } finally {
       await system
