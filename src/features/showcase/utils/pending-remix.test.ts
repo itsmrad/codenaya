@@ -18,17 +18,17 @@ describe("pending remix", () => {
     vi.unstubAllGlobals();
   });
 
-  it("stores a remix intent and returns its showcase id once", () => {
+  it("stores a remix intent and returns its source path once", () => {
     const storage = memoryStorage();
     vi.stubGlobal("localStorage", storage);
 
-    savePendingRemix("abc123");
+    savePendingRemix("/showcase/abc123");
 
     expect(JSON.parse(storage.getItem(PENDING_INTENT_KEY)!)).toEqual({
       kind: "remix",
-      showcaseId: "abc123",
+      source: "/showcase/abc123",
     });
-    expect(takePendingRemix()).toBe("abc123");
+    expect(takePendingRemix()).toBe("/showcase/abc123");
     expect(takePendingRemix()).toBeNull();
   });
 

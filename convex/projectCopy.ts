@@ -11,11 +11,12 @@ import {
 import { appError } from "./errors";
 import { insertFileContent, withContents } from "./fileContents";
 import { releaseStorageIfUnreferenced } from "./projectCascade";
+import { countProjectBuilt } from "./stats";
+import { recordProjectEvent } from "./activationEvents";
 
 /**
  * Copies a project's file tree into another project. Shared by project
- * duplication (`projects.duplicate`) and showcase imports
- * (`showcase.importToWorkspace`).
+ * duplication (`projects.duplicate`) and Remix (`remixProject`).
  */
 
 /** Largest file tree copied in one transaction. */
@@ -86,6 +87,31 @@ export async function copyProjectFiles(
       fileIds: binaryFileIds,
     });
   }
+}
+
+/**
+ * A Remix: a new project for `ownerId` holding a copy of `sourceId`'s files
+ * only. Shared by showcase imports and share links (#260); the caller checks
+ * the source may be copied.
+ */
+export async function remixProject(
+  ctx: MutationCtx,
+  sourceId: Id<"projects">,
+  ownerId: string,
+  name: string,
+) {
+  const newProjectId = await ctx.db.insert("projects", {
+    name,
+    ownerId,
+    updatedAt: Date.now(),
+  });
+  await countProjectBuilt(ctx);
+  await recordProjectEvent(ctx, newProjectId, {
+    name: "project_created",
+    props: { source: "remix" },
+  });
+  await copyProjectFiles(ctx, sourceId, newProjectId);
+  return newProjectId;
 }
 
 /** Files handled per query and per mutation in `copyBlobs`. */

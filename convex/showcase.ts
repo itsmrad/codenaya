@@ -7,9 +7,8 @@ import { internalMutation, mutation, query, type QueryCtx } from "./_generated/s
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { getOwnedProject } from "./projects";
-import { copyProjectFiles } from "./projectCopy";
+import { remixProject } from "./projectCopy";
 import { getUnclaimedStorage, releaseBlobs } from "./projectCascade";
-import { countProjectBuilt } from "./stats";
 import { recordProjectEvent } from "./activationEvents";
 
 // ─── Queries ───
@@ -492,19 +491,13 @@ export const importToWorkspace = mutation({
       throw appError("NOT_FOUND", "Project not found");
     }
 
+    const newProjectId = await remixProject(
+      ctx,
+      showcaseItem.projectId,
+      identity.subject,
+      `${showcaseItem.title} (imported)`,
+    );
     const now = Date.now();
-    const newProjectId = await ctx.db.insert("projects", {
-      name: `${showcaseItem.title} (imported)`,
-      ownerId: identity.subject,
-      updatedAt: now,
-    });
-    await countProjectBuilt(ctx);
-    await recordProjectEvent(ctx, newProjectId, {
-      name: "project_created",
-      props: { source: "remix" },
-    });
-
-    await copyProjectFiles(ctx, showcaseItem.projectId, newProjectId);
 
     // One import per user counts, like votes and views, so re-importing can't
     // rig the "Most imported" sort (#239).
