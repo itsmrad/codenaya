@@ -69,8 +69,14 @@ describe("forceToolCall", () => {
   const routed = (model: string) => buildAgentKitModel({ provider: "openrouter", apiKey: "sk-or", model });
 
   it("decides per route: Claude thinks by default and only Haiku can turn it off", () => {
-    expect(toolForcing(routed("x-ai/grok-4.7"))).toBe("force");
     expect(toolForcing(buildAgentKitModel({ provider: "openai", apiKey: "k", model: "gpt-6.1" }))).toBe("force");
+    expect(toolForcing(buildAgentKitModel({ provider: "openai", apiKey: "k", model: "o5-mini" }))).toBe("force");
+    expect(toolForcing(buildAgentKitModel({ provider: "groq", apiKey: "k", model: "openai/gpt-oss-120b" }))).toBe("force");
+    // Not an OpenAI-family model on an official host: OpenRouter, a custom endpoint even at openrouter.ai, other models.
+    expect(toolForcing(routed("x-ai/grok-4.7"))).toBe("auto");
+    expect(toolForcing(routed("openai/gpt-6.1"))).toBe("auto");
+    expect(toolForcing(buildAgentKitModel({ provider: "groq", apiKey: "k", model: "llama-4-70b" }))).toBe("auto");
+    expect(toolForcing(buildAgentKitModel({ provider: "custom", apiKey: "k", baseUrl: "https://openrouter.ai/api/v1", model: "x-ai/grok-4.7" }))).toBe("auto");
     expect(toolForcing(routed("anthropic/claude-opus-5.5"))).toBe("auto");
     expect(toolForcing(anthropicKey("claude-opus-5-5"))).toBe("auto");
     expect(toolForcing(routed("anthropic/claude-haiku-5.5"))).toBe("force-thinking-off");
@@ -78,9 +84,10 @@ describe("forceToolCall", () => {
     expect(toolForcing(buildAgentKitModel({ provider: "custom", apiKey: "k", baseUrl: "https://llm.example.com/v1", model: "m" }))).toBe("auto");
   });
 
-  it("forces the tool on an OpenAI-compatible route", () => {
-    expect(requestBody(forceToolCall(routed("x-ai/grok-4.7"), "listFiles")))
+  it("forces the tool for an OpenAI model on its official host, and leaves other routes on auto", () => {
+    expect(requestBody(forceToolCall(buildAgentKitModel({ provider: "openai", apiKey: "k", model: "gpt-6.1" }), "listFiles")))
       .toMatchObject({ tool_choice: { type: "function", function: { name: "listFiles" } } });
+    expect(requestBody(forceToolCall(routed("x-ai/grok-4.7"), "listFiles"))).toMatchObject({ tool_choice: "auto" });
   });
 
   it("turns thinking off where it forces a Claude model", () => {

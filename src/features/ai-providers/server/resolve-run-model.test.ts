@@ -624,6 +624,33 @@ describe("validateModelChoice: credits (ADR 0011)", () => {
     vi.useRealTimers();
   });
 
+  it.each([false, true])("Auto picks an affordable model before the gate (images: %s)", async (withImages) => {
+    mocks.account.mockReturnValue({ ...spentToday, dayUsed: 55 }); // 5 left
+    mocks.platform.mockReturnValue({
+      models: [
+        catalogModel("expensive", "Expensive", { pricing: { mode: "blended", usdPerMTok: 10 } }),
+        catalogModel("cheap", "Cheap"),
+      ],
+      defaultModelId: "expensive", utilityModelId: "cheap", autoModelIds: ["expensive", "cheap"],
+    });
+    expect(await validateModelChoice({ internalKey: "ik", userId: "user_1", model: "auto", task: "build", withImages }))
+      .toMatchObject({ modelId: "cheap", label: "Auto · Cheap" });
+    // A direct choice still gets its own minimum, and turning enforcement off restores Auto's pick.
+    await expect(validate("expensive")).rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
+    vi.stubEnv("CREDIT_LIMITS_ENFORCED", "");
+    expect(await validate("auto")).toMatchObject({ modelId: "expensive" });
+  });
+
+  it.each([false, true])("Auto refuses only when no candidate fits (images: %s)", async (withImages) => {
+    mocks.account.mockReturnValue({ ...spentToday, dayUsed: 56 }); // 4 left; cheapest needs 5
+    mocks.platform.mockReturnValue({
+      models: [catalogModel("expensive", "Expensive", { pricing: { mode: "blended", usdPerMTok: 10 } }), catalogModel("cheap", "Cheap")],
+      defaultModelId: "expensive", utilityModelId: "cheap", autoModelIds: ["expensive", "cheap"],
+    });
+    await expect(validateModelChoice({ internalKey: "ik", userId: "user_1", model: "auto", withImages }))
+      .rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
+  });
+
   it("lets a spent account run while credit limits aren't enforced", async () => {
     vi.stubEnv("CREDIT_LIMITS_ENFORCED", "");
     mocks.account.mockReturnValue({ ...spentToday, periodUsed: 300 });

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { filterProviders, listProviders } from "./catalog";
+import { filterProviders, getProvider, listProviders } from "./catalog";
 
 describe("provider catalog display metadata", () => {
   it.each(listProviders())("has complete display metadata and a local logo for $id", (provider) => {
@@ -16,6 +16,10 @@ describe("provider catalog display metadata", () => {
     expect(svg).toContain("<path");
     expect(svg).not.toMatch(/<script|<foreignObject|https?:\/\/(?!www\.w3\.org)/i);
   });
+});
+
+it("offers GitHub by PAT only until a pre-registered OAuth client exists (#539)", () => {
+  expect(getProvider("github")?.authModes).toEqual(["api_key"]);
 });
 
 describe("provider catalog filters", () => {
