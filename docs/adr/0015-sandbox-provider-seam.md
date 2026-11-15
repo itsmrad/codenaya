@@ -85,3 +85,22 @@ registry before it gets an adapter.
   (`e2e/preview-e2b-*`) are the first run against the real service.
 - A new vendor means a new adapter, an image build script and per-vendor e2e secrets.
   Each vendor also becomes a subprocessor for the `.env` secrets written into its sandboxes.
+
+## PR3a status / selection and failover
+
+PR3a adds request-time env parsing, pure selection, process-local cooldowns and
+list/count fanout helpers under `provider/`, without changing any call sites.
+PR3b wires these after PR1b and PR2. Selection prefers the last live provider only
+when enabled, configured and healthy; empty fallbacks keep a single candidate.
+Config/auth and rate/quota failures cool down immediately for ten minutes; other
+create failures count as transient across boots, cooling down after two consecutive
+failures. Success or cooldown expiry resets the counter. There is no same-provider
+create retry (an ambiguous failure may already have created a sandbox), and at most
+one failover per boot. The original first error is rethrown unchanged if creation
+fails. An injected notice callback exposes the switch for future terminal wiring.
+Fanout includes enabled providers even during create cooldowns, carries provider ids
+for cleanup routing, and propagates list errors so a cap cannot undercount silently.
+Use the existing seam's `maxSessionMs` to cap lifetime at one hour.
+
+TODO (privacy): update the subprocessor list BEFORE any non-E2B adapter ships;
+the privacy page currently names E2B.

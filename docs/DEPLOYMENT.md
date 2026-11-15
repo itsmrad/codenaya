@@ -9,3 +9,15 @@ Production setup for the Next.js host, Convex, Clerk, E2B and Inngest. Variable 
 5. **E2B template.** Run `npm run e2b:template` with the production `E2B_API_KEY` and optional `E2B_TEMPLATE` (build default: `codenaya-node22`), then set the same template name in `E2B_TEMPLATE` on the host. Without it previews use the `base` image, whose Node is too old for Vite 7. The template also warms the npm cache for the Next.js starter (ADR 0014); rebuild it when either starter's package.json changes.
 6. **Inngest Cloud.** Set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` on the host, leave `INNGEST_DEV` unset, and sync the app at `https://<your-domain>/api/inngest` (the Inngest Vercel integration does both automatically).
 
+
+## Sandbox provider selection (PR3a groundwork)
+
+`SANDBOX_PROVIDER` defaults to `e2b`; `SANDBOX_PROVIDER_FALLBACKS` is an
+ordered comma list, empty by default. Only `e2b` is supported today. Providers
+without their key (`E2B_API_KEY`) are skipped. Unknown ids are ignored with a
+warning that never includes environment values. These helpers are **not wired**
+into boot, cap or cleanup paths until PR3b; setting these variables has no effect yet.
+Session lifetime is bounded by one hour and the provider's `maxSessionMs`.
+
+TODO (privacy): update the subprocessor list BEFORE shipping any non-E2B adapter;
+the privacy page currently names E2B, and sandbox env secrets reach the provider.
