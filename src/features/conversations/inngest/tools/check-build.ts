@@ -22,6 +22,7 @@ import {
 } from "@/features/sandbox-preview/server/project-sandbox";
 import { NETWORK_FAILURE } from "@/features/sandbox-preview/utils/app-error";
 import { withErrorHints } from "@/features/sandbox-preview/utils/error-recipes";
+import { detectFramework } from "@/features/sandbox-preview/utils/framework";
 import {
   missingReferencedFiles,
   undeclaredPackages,
@@ -317,10 +318,7 @@ const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: Bui
 };
 
 /** Whether checkBuild builds a project with these paths: only Vite ones. */
-export const isViteProject = (paths: Iterable<string>) => {
-  const all = [...paths];
-  return all.includes("package.json") && all.some((path) => /^vite\.config\.[cm]?[jt]s$/.test(path));
-};
+export const isViteProject = (paths: Iterable<string>) => detectFramework(paths) === "vite";
 
 /** A relative path that stays inside the directory it is joined to. */
 export const isSafeProjectPath = (path: string) =>
