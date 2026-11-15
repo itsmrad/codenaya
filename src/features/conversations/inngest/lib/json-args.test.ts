@@ -1,5 +1,6 @@
 import type { Tool } from "@inngest/agent-kit";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import { decodeJsonArgs } from "./json-args";
 import { trimFileHistory, type HistoryMessage } from "./trim-file-history";
@@ -51,13 +52,34 @@ describe("decodeJsonArgs", () => {
     expect(write.files).toEqual(files);
   });
 
-  it("warns once per call with the shape, not the content, of an arg it can't decode", () => {
+  it.each([false, true])("decodes XML-style keys with raw control chars: %s", (rawControlChars) => {
+    const edits = [
+      { oldText: "  --accent: var(--red);\n\t", newText: "  --accent: var(--blue);\n\t" },
+      { oldText: "  --muted: var(--gray);", newText: "  --muted: var(--slate);" },
+    ];
+    let text = JSON.stringify(edits).replace(/"(oldText|newText)":"/g, '"$1">');
+    if (rawControlChars) text = text.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+    const input = { edits: text };
+    call(fake("editFile").tool, input);
+    expect(input.edits).toEqual(edits);
+  });
+
+  it('preserves "> inside properly quoted string values', () => {
+    const edits = [{ oldText: '<a title="old">', newText: '<a title="new">' }];
+    const input = { edits: JSON.stringify(edits) };
+    call(fake("editFile").tool, input);
+    expect(input.edits).toEqual(edits);
+  });
+
+  it("warns once across equal replay inputs and leaves undecodable args invalid", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { tool } = fake("editFile");
     const input = { edits: '[{"oldText": secret}]' };
     call(tool, input);
     call(tool, input);
+    call(tool, { ...input });
     expect(input.edits).toBe('[{"oldText": secret}]');
+    expect(z.array(z.object({ oldText: z.string(), newText: z.string() })).safeParse(input.edits).success).toBe(false);
     expect(warn).toHaveBeenCalledTimes(1);
     const logged = String(warn.mock.calls[0]?.[0]);
     expect(logged).toContain("editFile.edits");

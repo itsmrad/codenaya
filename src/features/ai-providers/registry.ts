@@ -198,6 +198,7 @@ interface PickerKey {
   baseUrl?: string;
   modelIds?: readonly string[];
   maskedPreview: string;
+  fingerprint?: string;
   status: "active" | "invalid";
 }
 
@@ -222,20 +223,24 @@ export function keyGroupLabel(key: Pick<PickerKey, "provider" | "label" | "maske
 /**
  * The keys a picker lists, one group each: active keys, plus the selected key
  * even if since marked invalid. A key that repeats another's whole route
- * (provider, endpoint, label, masked secret, models) is the same key added
- * twice, so it is listed once, keeping the selected one. Keys that differ in
- * any of those are distinct routes and all stay.
+ * (provider, endpoint, label, secret, models) is the same key added twice, so
+ * it is listed once, keeping the selected one. Keys that differ in any of
+ * those are distinct routes and all stay. The secret is compared by
+ * fingerprint when both keys have one, else by masked preview (#614).
  */
 export function pickerKeys<K extends PickerKey>(keys: readonly K[], selectedKeyId?: string): K[] {
   const route = (key: K) =>
-    JSON.stringify([key.provider, key.baseUrl ?? "", key.label.trim(), key.maskedPreview, modelIdsFor(key)]);
+    JSON.stringify([key.provider, key.baseUrl ?? "", key.label.trim(), modelIdsFor(key)]);
+  const sameKey = (a: K, b: K) =>
+    route(a) === route(b) &&
+    (a.fingerprint && b.fingerprint ? a.fingerprint === b.fingerprint : a.maskedPreview === b.maskedPreview);
   const shown = keys.filter((key) => key.status === "active" || key._id === selectedKeyId);
   const selected = shown.find((key) => key._id === selectedKeyId);
-  const seen = new Set(selected ? [route(selected)] : []);
+  const kept: K[] = selected ? [selected] : [];
   return shown.filter((key) => {
     if (key === selected) return true;
-    if (seen.has(route(key))) return false;
-    seen.add(route(key));
+    if (kept.some((other) => sameKey(other, key))) return false;
+    kept.push(key);
     return true;
   });
 }

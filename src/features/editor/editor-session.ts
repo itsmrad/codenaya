@@ -1,4 +1,5 @@
 import { convexErrorMessage, getAppError } from "@/lib/convex-error";
+import type { Id } from "../../../convex/_generated/dataModel";
 
 const DEBOUNCE_MS = 1500;
 
@@ -112,3 +113,17 @@ export class EditorSession {
     void this.save();
   };
 }
+
+const projectSessions = new Map<Id<"projects">, Map<Id<"files">, EditorSession>>();
+
+/** A project's drafts outlive EditorView remounts (mode switch, breakpoint) until the project is left (#604). */
+export const getProjectSessions = (projectId: Id<"projects">) => {
+  let sessions = projectSessions.get(projectId);
+  if (!sessions) projectSessions.set(projectId, sessions = new Map());
+  return sessions;
+};
+
+export const clearProjectSessions = (projectId: Id<"projects">) => { projectSessions.delete(projectId); };
+
+export const hasOpenConflict = () =>
+  [...projectSessions.values()].some((sessions) => [...sessions.values()].some((session) => session.getSnapshot().conflict));
