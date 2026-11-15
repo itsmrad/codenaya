@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { listProviders } from "../src/features/integrations/catalog";
@@ -8,6 +8,22 @@ const viewports = [
   { width: 768, height: 1024 },
   { width: 1440, height: 900 },
 ];
+
+async function checkCategoryRow(catalog: Locator) {
+  const categories = catalog.getByRole("group", { name: "Integration categories" });
+  const chips = categories.getByRole("button");
+  expect(await chips.evaluateAll((buttons) => new Set(buttons.map((button) => button.getBoundingClientRect().top)).size)).toBe(1);
+  const last = chips.last();
+  await last.focus();
+  await last.press("Enter");
+  await expect(last).toHaveAttribute("aria-pressed", "true");
+  await expect(last).toBeInViewport({ ratio: 1 });
+  const all = categories.getByRole("button", { name: "All", exact: true });
+  await all.focus();
+  await all.press("Enter");
+  await expect(all).toHaveAttribute("aria-pressed", "true");
+  await expect(all).toBeInViewport({ ratio: 1 });
+}
 
 // Browsing never submits a credential or calls a real MCP provider.
 test.describe("integration catalog", () => {
@@ -29,6 +45,8 @@ test.describe("integration catalog", () => {
           await logo.scrollIntoViewIfNeeded();
           await expect.poll(() => logo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
         }
+        await expect(providers.getByText("Read-only capable", { exact: true })).toHaveCount(listProviders().filter((provider) => provider.supportsReadOnly).length);
+        await checkCategoryRow(catalog);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         await page.screenshot({ path: testInfo.outputPath(`settings-${viewport.width}-${theme}.png`), fullPage: true });
       });
@@ -50,6 +68,13 @@ test.describe("integration catalog", () => {
         const dialog = page.getByRole("dialog", { name: "Integrations", exact: true });
         const providers = dialog.getByRole("list", { name: "Integration providers" });
         await expect(providers.getByRole("listitem")).toHaveCount(listProviders().length);
+        const connections = dialog.getByRole("button", { name: /^Project and account connections/ });
+        if (await connections.count()) {
+          await expect(connections).toHaveAttribute("aria-expanded", "true");
+          await expect(dialog.getByRole("region", { name: "Project connections" })).toBeVisible();
+        }
+        await checkCategoryRow(dialog);
+        await providers.getByRole("listitem").first().scrollIntoViewIfNeeded();
         await expect(providers.getByRole("listitem").first()).toBeInViewport({ ratio: 1 });
         await expect(dialog.getByText("Nothing to link yet")).toHaveCount(0);
         await expect(dialog.getByText("No connections yet")).toHaveCount(0);
