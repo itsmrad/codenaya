@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
   internalAction,
   internalMutation,
@@ -23,8 +23,8 @@ import { recordProjectEvent } from "./activationEvents";
 export const MAX_COPY_FILES = 5000;
 
 /**
- * Inserts a copy of every file and folder of `sourceId` into `targetId`,
- * keeping the tree shape. Binary files share the source's storage blob until
+ * Inserts a copy of every file and folder of `sourceId` into `targetId`
+ * (except those `exclude` matches), keeping the tree shape. Binary files share the source's storage blob until
  * `copyBlobs` gives each copy its own. Blob deletes are reference-checked
  * (`releaseStorageIfUnreferenced`), so deleting either side meanwhile, or a
  * `copyBlobs` run that never finishes, can't remove a blob the other uses.
@@ -33,19 +33,21 @@ export async function copyProjectFiles(
   ctx: MutationCtx,
   sourceId: Id<"projects">,
   targetId: Id<"projects">,
+  exclude?: (file: Doc<"files">) => boolean,
 ) {
-  const sourceFiles = await ctx.db
+  const allFiles = await ctx.db
     .query("files")
     .withIndex("by_project", (q) => q.eq("projectId", sourceId))
     .take(MAX_COPY_FILES + 1);
 
-  if (sourceFiles.length > MAX_COPY_FILES) {
+  if (allFiles.length > MAX_COPY_FILES) {
     throw appError(
       "LIMIT_EXCEEDED",
       `Projects with more than ${MAX_COPY_FILES} files can't be copied`,
     );
   }
 
+  const sourceFiles = exclude ? allFiles.filter((file) => !exclude(file)) : allFiles;
   const now = Date.now();
   const idMap = new Map<Id<"files">, Id<"files">>();
   const binaryFileIds: Id<"files">[] = [];
@@ -99,6 +101,7 @@ export async function remixProject(
   sourceId: Id<"projects">,
   ownerId: string,
   name: string,
+  exclude?: (file: Doc<"files">) => boolean,
 ) {
   const newProjectId = await ctx.db.insert("projects", {
     name,
@@ -110,7 +113,7 @@ export async function remixProject(
     name: "project_created",
     props: { source: "remix" },
   });
-  await copyProjectFiles(ctx, sourceId, newProjectId);
+  await copyProjectFiles(ctx, sourceId, newProjectId, exclude);
   return newProjectId;
 }
 

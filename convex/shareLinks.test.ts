@@ -4,6 +4,7 @@ import { convexTest } from "convex-test";
 import { describe, expect, test } from "vitest";
 
 import { api } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -158,5 +159,51 @@ describe("share links (#260)", () => {
 
     await alice(t).mutation(api.projects.revokeShareLink, { projectId });
     await expect(bob(t).mutation(api.projects.remixShared, { token })).rejects.toThrow("Project not found");
+  });
+
+  test("dotenv files at any depth are hidden from the share and not remixed; examples stay", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    const ids = await t.run(async (ctx) => {
+      const now = Date.now();
+      const file = async (name: string, parentId?: Id<"files">) => {
+        const id = await ctx.db.insert("files", { projectId, parentId, name, type: "file", updatedAt: now });
+        await ctx.db.insert("fileContents", { fileId: id, projectId, content: `SECRET_IN_${name}=1` });
+        return id;
+      };
+      const folder = (name: string, parentId?: Id<"files">) =>
+        ctx.db.insert("files", { projectId, parentId, name, type: "folder", updatedAt: now });
+      const nested = await folder("nested");
+      const dir = await folder("dir", nested);
+      const config = await folder("config");
+      return {
+        excluded: [await file(".env"), await file(".env.local", dir), await file("prod.env", config)],
+        example: await file(".env.example"),
+      };
+    });
+    const token = await alice(t).action(api.projects.createShareLink, { projectId });
+
+    const shared = await t.query(api.projects.getShared, { token });
+    const names = shared!.files.map((f) => f.name);
+    expect(names).toContain(".env.example");
+    for (const name of [".env", ".env.local", "prod.env"]) expect(names).not.toContain(name);
+    for (const fileId of ids.excluded) {
+      expect(await t.query(api.projects.getSharedFile, { token, fileId })).toBeNull();
+    }
+    expect(await t.query(api.projects.getSharedFile, { token, fileId: ids.example })).toEqual({
+      content: "SECRET_IN_.env.example=1",
+    });
+
+    const newId = await bob(t).mutation(api.projects.remixShared, { token });
+    const copied = await t.run(async (ctx) => ({
+      names: (await ctx.db.query("files").withIndex("by_project", (q) => q.eq("projectId", newId)).collect()).map(
+        (f) => f.name,
+      ),
+      contents: (
+        await ctx.db.query("fileContents").withIndex("by_project", (q) => q.eq("projectId", newId)).collect()
+      ).map((row) => row.content),
+    }));
+    expect(copied.names.sort()).toEqual([".env.example", "config", "dir", "index.ts", "logo.png", "nested", "src"]);
+    expect(copied.contents.join()).not.toMatch(/SECRET_IN_(\.env(\.local)?|prod\.env)=/);
   });
 });

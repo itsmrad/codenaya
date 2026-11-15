@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
   action,
   internalMutation,
@@ -17,6 +17,7 @@ import { deleteProjectBatch } from "./projectCascade";
 import { copyProjectFiles, remixProject } from "./projectCopy";
 import { getProjectFile, MAX_PROJECT_FILES } from "./files";
 import { readFileContent } from "./fileContents";
+import { isSecretEnvFile } from "./envFiles";
 import { userSkillKey } from "../src/features/skills/types";
 import { MAX_PROJECT_SKILLS } from "../src/features/skills/limits";
 import {
@@ -365,6 +366,9 @@ export const setShareToken = internalMutation({
   },
 });
 
+/** Dotenv files (#260 review): left out of a share's tree, file reads and Remix, as if they didn't exist. */
+const hiddenFromShare = (file: Doc<"files">) => file.type === "file" && isSecretEnvFile(file.name);
+
 /** Turns the share link off: the old URL stops working, and a new link gets a new token. */
 export const revokeShareLink = mutation({
   args: { projectId: v.id("projects") },
@@ -380,7 +384,7 @@ export const revokeShareLink = mutation({
 /**
  * Public: what a share link shows signed out (#260), or null for an unknown or
  * revoked token. Only the name, the owner's display name and the file tree:
- * never env vars, chat, integrations, settings or storage ids. The `returns`
+ * never env vars, dotenv files, chat, integrations, settings or storage ids. The `returns`
  * validator rejects any other field.
  */
 export const getShared = query({
@@ -417,7 +421,7 @@ export const getShared = query({
     return {
       name: project.name,
       ownerName: owner?.name || "Anonymous",
-      files: files.map((file) => ({
+      files: files.filter((file) => !hiddenFromShare(file)).map((file) => ({
         _id: file._id,
         parentId: file.parentId ?? null,
         name: file.name,
@@ -435,7 +439,7 @@ export const getSharedFile = query({
   handler: async (ctx, args) => {
     const project = await getSharedProject(ctx, args.token);
     const file = project && (await getProjectFile(ctx, project._id, args.fileId));
-    if (!file || file.type !== "file") return null;
+    if (!file || file.type !== "file" || hiddenFromShare(file)) return null;
     return { content: file.storageId ? null : ((await readFileContent(ctx, file)) ?? "") };
   },
 });
@@ -448,7 +452,13 @@ export const remixShared = mutation({
     const identity = await verifyAuth(ctx);
     const project = await getSharedProject(ctx, args.token);
     if (!project) throw appError("NOT_FOUND", "Project not found");
-    return await remixProject(ctx, project._id, identity.subject, `${project.name} (imported)`);
+    return await remixProject(
+      ctx,
+      project._id,
+      identity.subject,
+      `${project.name} (imported)`,
+      hiddenFromShare,
+    );
   },
 });
 
