@@ -40,7 +40,13 @@ export class EditorSession {
     this.remote = content;
     if (this.inFlight && content === this.savingContent) return;
     this.snapshot = { ...this.snapshot };
-    if (!this.snapshot.conflict && this.snapshot.content === this.base) {
+    if (content === this.snapshot.content) {
+      // The server already holds the draft, e.g. a save that errored after it landed (#605).
+      this.base = content;
+      this.snapshot.conflict = false;
+      this.snapshot.error = null;
+      this.cancel();
+    } else if (!this.snapshot.conflict && this.snapshot.content === this.base) {
       this.base = content;
       this.snapshot.content = content;
     } else {
@@ -116,7 +122,7 @@ export class EditorSession {
 
 const projectSessions = new Map<Id<"projects">, Map<Id<"files">, EditorSession>>();
 
-/** A project's drafts outlive EditorView remounts (mode switch, breakpoint) until the project is left (#604). */
+/** A project's drafts outlive EditorView remounts and route changes until another project opens (#604, #618). */
 export const getProjectSessions = (projectId: Id<"projects">) => {
   let sessions = projectSessions.get(projectId);
   if (!sessions) projectSessions.set(projectId, sessions = new Map());
@@ -125,5 +131,10 @@ export const getProjectSessions = (projectId: Id<"projects">) => {
 
 export const clearProjectSessions = (projectId: Id<"projects">) => { projectSessions.delete(projectId); };
 
-export const hasOpenConflict = () =>
-  [...projectSessions.values()].some((sessions) => [...sessions.values()].some((session) => session.getSnapshot().conflict));
+/** Keeps only this project's drafts, so memory holds one project at most. */
+export const retainProjectSessions = (projectId: Id<"projects">) => {
+  for (const id of projectSessions.keys()) if (id !== projectId) projectSessions.delete(id);
+};
+
+export const hasOpenConflict = (projectId: Id<"projects">) =>
+  [...projectSessions.get(projectId)?.values() ?? []].some((session) => session.getSnapshot().conflict);
