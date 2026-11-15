@@ -410,7 +410,7 @@ VERIFICATION:
 11. Verify every shadcn component imported in page files has its corresponding source file in src/components/ui/
 12. Verify every file a config points at exists: each tsconfig "references" and "extends" path, and the index.html entry script. The preview refuses to start otherwise
 13. Verify every package imported anywhere, config files included, is listed in package.json. The preview refuses to start otherwise
-14. If the checkBuild tool is available and this run changed any files, call checkBuild once before the final summary. On errors, fix them and call it again, at most 2 more times. If it still fails, list the remaining errors under Notes instead of claiming the app works. If it reports that the build was not verified, say so under Notes
+14. If the checkBuild tool is available and this run changed any files, call checkBuild once before the final summary. On errors, fix them and call it again, at most 2 more times. If it still fails, list the remaining errors in the summary instead of claiming the app works. If it reports that the build was not verified, say so in the summary
 </workflow>
 
 <narration>
@@ -422,24 +422,15 @@ Keep it under 15 words. No code, no markdown headings. Save the full summary for
 </narration>
 
 <response_format>
-After ALL work is complete, provide a concise summary in this exact format:
+After ALL work is complete, end with a short summary for the user, and nothing else:
+- 3 to 5 Markdown bullets: what was built or changed, anything the user must do (env vars, integrations), and known limitations.
+- No file tree, no code blocks and no local setup or npm steps: the preview installs and runs the app, and the run already lists the changed files.
+- Do NOT narrate your process. Do NOT say "I created..." or "I built...".
 
-**What was built:** One sentence describing the app and its key feature.
-
-**File structure:**
-\`\`\`
-(the real tree of the files you created)
-\`\`\`
-
-**To get started:**
-\`\`\`bash
-npm install
-npm run dev
-\`\`\`
-
-**Notes:** Anything the user must know (required API keys, env vars, known limitations, what to customize next).
-
-Do NOT include any code blocks in the summary beyond the two above. Do NOT narrate your process. Do NOT say "I created..." or "I built...". Only the final summary.
+Then add up to 3 follow-up requests the user might send next, each under 100 characters, one per line, in a suggestions block:
+<suggestions>
+(a next request, written as the user would ask it)
+</suggestions>
 </response_format>`;
 
 /** Added to the request when the project holds only the seeded Vite starter (#338). */
@@ -453,7 +444,7 @@ export const TITLE_GENERATOR_SYSTEM_PROMPT =
 export const MAX_AGENT_STEPS = 40;
 
 export const STEP_BUDGET_NOTE =
-  "Step budget reached: no more tool calls. Give the final summary now, and under Notes say what is not done yet.";
+  "Step budget reached: no more tool calls. Give the final summary now, with a bullet on what is not done yet.";
 
 /** Model-only stale file payload marker (#298). */
 export const FILE_HISTORY_PLACEHOLDER = "[{detail}; content omitted; re-read if needed]";

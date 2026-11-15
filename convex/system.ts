@@ -137,6 +137,8 @@ export const updateMessageContent = mutation({
     /** Set when the content is a failure reply, so the run counts as an error (#339). */
     outcome: v.optional(v.literal("error")),
     stuck: v.optional(stuckRunValidator),
+    /** Follow-up prompts parsed out of the reply (#256). */
+    suggestions: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -152,6 +154,10 @@ export const updateMessageContent = mutation({
       status: "completed" as const,
       completedAt: Date.now(),
       ...(args.stuck ? { stuck: args.stuck } : {}),
+      // Bounded as in the schema, whatever the caller sends.
+      ...(args.suggestions?.length
+        ? { suggestions: args.suggestions.slice(0, 3).map((s) => s.slice(0, 100)) }
+        : {}),
     });
   },
 });

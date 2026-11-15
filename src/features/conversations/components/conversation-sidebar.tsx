@@ -564,6 +564,10 @@ export const ConversationSidebar = ({
                     return (await sendMessage(build)) === "sent";
                   }}
                   stuckRetry={message.stuck && stuckRetry(message, messageIndex)}
+                  onSuggestion={(prompt) => {
+                    setInput(prompt);
+                    requestAnimationFrame(() => panelRef.current?.querySelector("textarea")?.focus());
+                  }}
                   onDiagnose={() => {
                     if (!message.stuck) return;
                     setPlanMode(true);
