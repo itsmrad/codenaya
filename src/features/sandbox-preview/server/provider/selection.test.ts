@@ -104,24 +104,63 @@ describe("create failover", () => {
   it("resets consecutive failures on success and bounds create lifetime", async () => {
     const primary = { ...fakeProvider(), maxSessionMs: 900_000 };
     const cooldown = createProviderCooldown();
-    cooldown.failed("e2b", new Error("transient"));
+    cooldown.failed("e2b", new SandboxTimeoutError("transient"));
     await createWithFailover(opts, { providers: [primary], cooldown });
     expect(primary.create).toHaveBeenLastCalledWith({ ...opts, timeoutMs: 900_000 });
-    expect(cooldown.failed("e2b", new Error("transient"))).toBe(false);
+    expect(cooldown.failed("e2b", new SandboxTimeoutError("transient"))).toBe(false);
     await createWithFailover({ ...opts, timeoutMs: 1_000 }, { providers: [primary], cooldown });
     expect(primary.create).toHaveBeenLastCalledWith({ ...opts, timeoutMs: 1_000 });
   });
 
-  it.each([SandboxConfigError, SandboxRateLimitError, SandboxTimeoutError, Error])("preserves the first %s instance when fallback also fails; never tries a third", async (ErrorKind) => {
+  it.each([SandboxConfigError, SandboxRateLimitError, SandboxTimeoutError])("preserves the first %s instance when fallback also fails; never tries a third", async (ErrorKind) => {
     const providers = [fakeProvider(), fakeProvider(second), fakeProvider(third)];
     const error = new ErrorKind("first");
     const cooldown = createProviderCooldown();
-    cooldown.failed("e2b", new Error("previous transient"));
+    cooldown.failed("e2b", new SandboxTimeoutError("previous transient"));
     vi.mocked(providers[0].create).mockRejectedValue(error);
     vi.mocked(providers[1].create).mockRejectedValue(new SandboxRateLimitError("second"));
     await expect(createWithFailover(opts, { providers, cooldown })).rejects.toBe(error);
     expect(providers[1].create).toHaveBeenCalledTimes(1);
     expect(providers[2].create).not.toHaveBeenCalled();
+  });
+
+  it("permanent errors neither cool nor prevent the next healthy create", async () => {
+    const primary = fakeProvider();
+    const fallback = fakeProvider(second);
+    const cooldown = createProviderCooldown();
+    const error = new Error("invalid image");
+    vi.mocked(primary.create).mockRejectedValueOnce(error).mockRejectedValueOnce(error);
+    const deps = { providers: [primary, fallback], cooldown };
+    await expect(createWithFailover(opts, deps)).rejects.toBe(error);
+    await expect(createWithFailover(opts, deps)).rejects.toBe(error);
+    expect(cooldown.isCoolingDown("e2b")).toBe(false);
+    expect(fallback.create).not.toHaveBeenCalled();
+    await expect(createWithFailover(opts, deps)).resolves.toBe(sandbox);
+    expect(primary.create).toHaveBeenCalledTimes(3);
+  });
+
+  it("permanent errors preserve a prior transient failure without adding one", () => {
+    const cooldown = createProviderCooldown();
+    expect(cooldown.failed("e2b", new SandboxTimeoutError())).toBe(false);
+    expect(cooldown.failed("e2b", new Error("invalid request"))).toBe(false);
+    expect(cooldown.isCoolingDown("e2b")).toBe(false);
+    expect(cooldown.failed("e2b", new SandboxTimeoutError())).toBe(true);
+  });
+
+  it.each([false, true])("throwing notices cannot block fallback (fallback fails: %s)", async (fails) => {
+    const primary = fakeProvider();
+    const fallback = fakeProvider(second);
+    const firstError = new SandboxRateLimitError("first");
+    vi.mocked(primary.create).mockRejectedValue(firstError);
+    if (fails) vi.mocked(fallback.create).mockRejectedValue(new SandboxConfigError("second"));
+    const onNotice = vi.fn(() => { throw new Error("notice secret"); });
+    const result = createWithFailover(opts, {
+      providers: [primary, fallback], cooldown: createProviderCooldown(), onNotice,
+    });
+    if (fails) await expect(result).rejects.toBe(firstError);
+    else await expect(result).resolves.toBe(sandbox);
+    expect(onNotice).toHaveBeenCalledTimes(1);
+    expect(fallback.create).toHaveBeenCalledTimes(1);
   });
 
   it("empty fallbacks make one create attempt and preserve today's error", async () => {

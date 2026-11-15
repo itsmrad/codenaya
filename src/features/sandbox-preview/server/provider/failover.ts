@@ -2,7 +2,7 @@ import { sandboxTimeoutMs } from "./config";
 import type { CooldownView } from "./select";
 import {
   type CreateOptions, type ProviderId, type SandboxProvider,
-  SandboxConfigError, SandboxRateLimitError,
+  SandboxConfigError, SandboxRateLimitError, SandboxTimeoutError,
 } from "./types";
 
 const COOLDOWN_MS = 10 * 60 * 1000;
@@ -21,6 +21,9 @@ export function createProviderCooldown(now: () => number = Date.now) {
     ...view,
     succeeded(id: ProviderId) { states.delete(id); },
     failed(id: ProviderId, error: unknown): boolean {
+      // Only typed timeouts are known transient failures today. Permanent/unknown
+      // errors leave outage evidence intact; only success or expiry resets it.
+      if (!(error instanceof SandboxTimeoutError || error instanceof SandboxConfigError || error instanceof SandboxRateLimitError)) return false;
       view.isCoolingDown(id);
       const failures = (states.get(id)?.failures ?? 0) + 1;
       const cool = error instanceof SandboxConfigError || error instanceof SandboxRateLimitError || failures >= 2;
@@ -34,7 +37,7 @@ export type ProviderCooldown = ReturnType<typeof createProviderCooldown>;
 
 /**
  * Candidates are already selected/ordered. Never retry an ambiguous create in the
- * same boot: other create failures count as transient across consecutive boots.
+ * same boot: typed timeout failures count as transient across consecutive boots.
  */
 export async function createWithFailover(opts: CreateOptions, deps: {
   providers: readonly SandboxProvider[];
@@ -54,7 +57,11 @@ export async function createWithFailover(opts: CreateOptions, deps: {
       const cool = deps.cooldown.failed(provider.id, error);
       if (!cool || index === candidates.length - 1) throw firstError;
     }
-    deps.onNotice?.(`${provider.id.toUpperCase()} unavailable, continuing on ${candidates[index + 1].id}...`);
+    try {
+      deps.onNotice?.(`${provider.id.toUpperCase()} unavailable, continuing on ${candidates[index + 1].id}...`);
+    } catch {
+      // Terminal notices are best-effort and must never block failover or leak secrets.
+    }
   }
   throw firstError;
 }
