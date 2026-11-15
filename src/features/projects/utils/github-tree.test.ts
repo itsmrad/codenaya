@@ -30,19 +30,26 @@ describe("splitPath", () => {
     expect(splitPath("README.md")).toEqual({ name: "README.md", parentPath: "" });
   });
 
-  // Pins current (wrong) behaviour; flip when #671 is fixed.
-  it("falls back to the root when an imported file's parent folder is missing", () => {
-    const folderIdMap: Record<string, Id<"files">> = {
-      src: "src-id" as Id<"files">,
-    };
+  it("creates a missing parent folder and preserves the imported file's path", () => {
+    const folderIdMap: Record<string, Id<"files">> = {};
+    const folders = planFolderCreation(["src"], ["src/missing/page.tsx"]).map(
+      ({ path, name, parentPath }) => {
+        const folder = file(path, name, folderIdMap[parentPath]);
+        folderIdMap[path] = folder._id;
+        return folder;
+      },
+    );
     const { name, parentPath } = splitPath("src/missing/page.tsx");
-    // Mirror the importer's parent lookup: a missing folder does not fall back to src.
     const parentId = parentPath ? folderIdMap[parentPath] : undefined;
     const imported = file("page-id", name, parentId);
 
     expect(parentPath).toBe("src/missing");
-    expect(parentId).toBeUndefined();
-    expect(buildFilePaths([imported])).toEqual({ "page.tsx": imported });
+    expect(parentId).toBe(folderIdMap["src/missing"]);
+    expect(buildFilePaths([...folders, imported])).toEqual({
+      src: folders[0],
+      "src/missing": folders[1],
+      "src/missing/page.tsx": imported,
+    });
   });
 });
 
