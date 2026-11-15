@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   costUsd,
   creditRefusal,
+  creditRefusalMessage,
   creditStanding,
   creditsForCost,
   currentUsage,
+  estimateRunCredits,
   usageOfResponse,
 } from "./credits";
 import { PLANS } from "./plans";
@@ -80,5 +82,22 @@ describe("standing", () => {
     expect(creditRefusal(PLANS.free, { ...usage, periodUsed: 300, dayUsed: 60 }, OCT_29)).toBe("month_used_up");
     // Yesterday's cap doesn't carry over.
     expect(creditRefusal(PLANS.free, { ...usage, dayUsed: 60 }, Date.UTC(2026, 9, 30, 1))).toBeNull();
+  });
+
+  it("blocks a pricey build before it starts when too few credits remain (#643)", () => {
+    const sevenLeft = { ...usage, periodUsed: 120, dayUsed: 53 };
+    const sonnetBuildCredits = estimateRunCredits("anthropic/claude-sonnet-5.5", "build");
+    expect(sonnetBuildCredits).toBe(32);
+    expect(estimateRunCredits("anthropic/claude-haiku-5.5", "edit")).toBeLessThanOrEqual(7);
+
+    expect(creditRefusal(PLANS.free, sevenLeft, OCT_29, sonnetBuildCredits)).toBe("day_used_up");
+    expect(creditRefusal(PLANS.free, null, OCT_29, sonnetBuildCredits)).toBeNull();
+    expect(
+      creditRefusalMessage("day_used_up", {
+        left: 7,
+        requiredCredits: sonnetBuildCredits,
+        modelName: "Claude Sonnet 5.5",
+      }),
+    ).toContain("7 credits left today");
   });
 });

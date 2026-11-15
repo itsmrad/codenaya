@@ -679,7 +679,7 @@ export const ConversationSidebar = ({
             />
           )}
           {/* Runs on the user's own key don't use credits. */}
-          {!agentModel.keyId && <LowCreditsNotice />}
+          {!agentModel.keyId && <LowCreditsNotice modelId={agentModel.modelId} task={mode === "plan" ? "plan" : "edit"} />}
           {slashMenu.open && (
             <SkillSlashMenu
               items={slashMenu.items}

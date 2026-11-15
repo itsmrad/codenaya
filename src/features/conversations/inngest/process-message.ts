@@ -50,7 +50,13 @@ import {
 } from '@/features/ai-providers/server/resolve-run-model';
 import { withoutToolCalls } from '@/features/ai-providers/server/agentkit-model';
 import type { ModelPricing } from '@/features/ai-providers/catalog';
-import { costUsd, usageOfResponse } from '@/features/billing/credits';
+import {
+  costUsd,
+  creditStanding,
+  creditsForCost,
+  usageOfResponse,
+} from '@/features/billing/credits';
+import { PLANS } from '@/features/billing/plans';
 import {
   type AgentStep,
   buildCheckLabel,
@@ -519,6 +525,28 @@ export const processMessage = inngest.createFunction(
       });
     }
 
+    let creditBudget: number | null = null;
+    if (
+      process.env.CREDIT_LIMITS_ENFORCED === "true" &&
+      runModel.metering.source === "platform" &&
+      mcpOwnerId
+    ) {
+      const creditOwnerId = mcpOwnerId;
+      creditBudget = await step.run("get-credit-budget", async () => {
+        try {
+          const account = await convex.query(api.credits.getForServer, {
+            internalKey,
+            userId: creditOwnerId,
+          });
+          return creditStanding(PLANS[account?.plan ?? "free"], account, Date.now()).left;
+        } catch {
+          return null;
+        }
+      });
+    }
+    const isCreditLimitReached = () =>
+      creditBudget !== null && creditsForCost(usage.costUsd) >= creditBudget;
+
     // ─── Skills ───
     //
     // Only names and descriptions go in the prompt; loadSkill hands the agent a
@@ -868,9 +896,11 @@ export const processMessage = inngest.createFunction(
         // A stuck run has had its summary turn.
         if (loopGuard.stuck) return undefined;
 
+        const creditLimitReached = isCreditLimitReached();
+
         // A reply cut off before any tool call is unfinished even when it has
         // text: give it another turn with the note, a bounded number of times.
-        if (cutOffNote && !lastStep && cutOffRetries < MAX_CUT_OFF_RETRIES) {
+        if (cutOffNote && !lastStep && !creditLimitReached && cutOffRetries < MAX_CUT_OFF_RETRIES) {
           cutOffRetries += 1;
           return codingAgent;
         }
@@ -879,11 +909,11 @@ export const processMessage = inngest.createFunction(
         // tool calls, unless files changed since the last passing build check
         // and there are steps left for it.
         if (hasTextResponse && !hasToolCalls) {
-          return !lastStep && buildCheckGate.shouldContinue(results)
+          return !lastStep && !creditLimitReached && buildCheckGate.shouldContinue(results)
             ? codingAgent
             : undefined;
         }
-        if (lastStep || loopGuard.check(results)) return summaryAgent;
+        if (lastStep || creditLimitReached || loopGuard.check(results)) return summaryAgent;
         // Keep the last turns for checking and fixing the build, not more writes.
         if (callCount >= MAX_AGENT_STEPS - 1 - BUILD_CHECK_RESERVE_STEPS) buildCheckGate.reserve(results);
         return codingAgent;
@@ -948,7 +978,7 @@ export const processMessage = inngest.createFunction(
     // Changes that ended on a failed or missing check get a repair here, before
     // the run completes, so it needs no open tab. Its model calls are metered
     // like the run's; cancelling the run stops it between steps.
-    const repair = !stuck && needsBuildRepair(result.state.results)
+    const repair = !stuck && !isCreditLimitReached() && needsBuildRepair(result.state.results)
       ? await repairBuild({
           projectId,
           internalKey,

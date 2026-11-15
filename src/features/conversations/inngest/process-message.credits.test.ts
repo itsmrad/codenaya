@@ -104,4 +104,33 @@ describe("processMessage credit metering", () => {
 
     expect(outcome.finalType).toBe("function-resolved");
   });
+
+  it("stops cleanly via summary without continuing tool steps once the credit limit is reached (#643)", async () => {
+    vi.stubEnv("CREDIT_LIMITS_ENFORCED", "true");
+    mocks.query.mockImplementation(async (ref) => {
+      const name = getFunctionName(ref);
+      if (name === "credits:getForServer") {
+        const now = Date.now();
+        const date = new Date(now);
+        return {
+          plan: "free",
+          periodStartsAt: Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1),
+          periodUsed: 53,
+          dayStartsAt: Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+          dayUsed: 53, // 7 credits left
+        };
+      }
+      return QUERIES[name]?.();
+    });
+
+    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
+      { data: withUsage("Build app", 1, 1) }, // title
+      { data: { ...withUsage("", 5_000, 1_000), toolCalls: [{ id: "tc1", name: "listFiles", args: {} }] } }, // $0.06 = 9 credits >= 7 budget
+      { data: withUsage("Stopped at your credit limit.", 100, 20) }, // summaryAgent forced next
+    ]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    // Only title + 1 tool step + summary step ran (stopped cleanly instead of burning further turns).
+    expect(usageRecords()).toHaveLength(4);
+  });
 });

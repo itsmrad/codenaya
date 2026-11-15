@@ -661,6 +661,32 @@ describe("validateModelChoice: credits (ADR 0011)", () => {
     mocks.account.mockReturnValue({ ...spentToday, dayStartsAt: startOfDay - 24 * 60 * 60 * 1000 });
     expect(await validate("x-ai/grok-4.7")).toMatchObject({ modelId: "x-ai/grok-4.7" });
   });
+
+  it("refuses a ~$1 Sonnet build when a free user only has ~7 credits left (#643)", async () => {
+    mocks.platform.mockReturnValue({
+      ...ROUTED_SAVED,
+      models: [
+        catalogModel("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5", {
+          provider: "anthropic",
+          providerModelId: "claude-sonnet-5-5",
+          pricing: { mode: "split", inputUsdPerMTok: 3, outputUsdPerMTok: 15 },
+        }),
+      ],
+    });
+    mocks.account.mockReturnValue({ ...spentToday, periodUsed: 53, dayUsed: 53 });
+
+    const { rejected } = await requireModelChoice({
+      internalKey: "ik",
+      userId: "user_1",
+      model: "anthropic/claude-sonnet-5.5",
+      task: "build",
+    });
+    expect(rejected?.status).toBe(402);
+    expect(await rejected?.json()).toMatchObject({
+      code: "insufficient_credits",
+      error: expect.stringContaining("7 credits left today"),
+    });
+  });
 });
 
 describe("takePromoRun (send routes, ADR 0009)", () => {

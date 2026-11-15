@@ -20,6 +20,7 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { AgentModelSelect } from "@/features/conversations/components/agent-model-select";
 import { EnhancePromptButton } from "@/features/conversations/components/enhance-prompt-button";
+import { LowCreditsNotice } from "@/features/conversations/components/low-credits-notice";
 import { type ComposerMode, PlanModeToggle } from "@/features/conversations/components/plan-mode-toggle";
 import { useAgentModel } from "@/features/conversations/hooks/use-agent-model";
 import { useSwarmEnabled } from "@/features/conversations/hooks/use-agent-tasks";
@@ -92,6 +93,13 @@ const ComposerModelSelect = ({ disabled }: { disabled: boolean }) => {
       />
     </div>
   );
+};
+
+/** Signed-in credit notice under the dashboard composer; skipped when logged out or on BYOK (#643). */
+const ComposerLowCreditsNotice = ({ task }: { task: "plan" | "build" }) => {
+  const [agentModel] = useAgentModel();
+  if (agentModel.keyId) return null;
+  return <LowCreditsNotice modelId={agentModel.modelId} task={task} />;
 };
 
 /** The model list in the menu look (menu-chrome): mono group labels, brand highlight. */
@@ -270,6 +278,9 @@ export const PromptComposer = ({
           </PromptInputFooter>
         </PromptInput>
       </div>
+      {showEnhance && showModelSelect && (
+        <ComposerLowCreditsNotice task={mode === "plan" ? "plan" : "build"} />
+      )}
     </div>
   );
 };

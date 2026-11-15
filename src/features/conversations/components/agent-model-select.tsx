@@ -22,7 +22,9 @@ import {
   pickerKeys,
   runModelLabel,
 } from "@/features/ai-providers/registry";
+import { AUTO_MODEL_ID } from "@/features/ai-providers/auto-route";
 import { resolveCatalogModel } from "@/features/ai-providers/platform";
+import { estimateRunCredits } from "@/features/billing/credits";
 import {
   fromChoiceValue,
   toChoiceValue,
@@ -112,7 +114,7 @@ export const AgentModelSelect = ({
             <PromptInputSelectItem
               key={model.id}
               value={toChoiceValue({ modelId: model.id })}
-              data-tag={model.vendor}
+              data-tag={model.id === AUTO_MODEL_ID ? model.vendor : `${model.vendor} · ~${estimateRunCredits(model.id, "build")} cr`}
               className={TAGGED_ITEM}
             >
               {icon(model.vendor)}
