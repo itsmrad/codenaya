@@ -190,6 +190,19 @@ The same mechanism serves any catalog provider without dynamic registration. Giv
 the entry `preRegisteredClient: { clientIdEnv, clientSecretEnv }` (variable names
 only) and, if its authorization server is cross-site, `trustedAuthorizationServerOrigins`.
 
+## Client-access prerequisites (Figma, Slack, Square)
+
+These three hosted servers admit only clients the vendor has approved. They are
+not in the catalog, and Connect is not offered, until the product owner completes
+the steps below and this section is updated to say admission is verified. Checked
+2026-11-15. Do not file the vendor applications from this repository.
+
+| Provider | Requirement (paraphrase) | Owner steps and decision |
+| --- | --- | --- |
+| Figma | Only clients listed in the [Figma MCP catalog](https://www.figma.com/mcp-catalog) can connect to the remote server. A developer connecting a new MCP client joins the [waitlist](https://form.asana.com/?k=kBG-ejRQTdY8x_H6a4vM3Q&d=10497086658021). [Remote server installation](https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/), checked 2026-11-15. | The product owner joins the waitlist and waits to be listed. **Not offered: needs vendor catalog admission.** |
+| Square | Square maintains an allowlist of MCP clients against malicious client registration, and asks to request an addition in the [developer forum](https://developer.squareup.com/forums/c/mcp/14). Remote instances only access production resources; sandbox is a local server. [Square MCP](https://developer.squareup.com/docs/mcp), checked 2026-11-15. | The product owner requests allowlisting. **Not offered: needs vendor allowlisting.** Remote Connect would be production-only. |
+| Slack | The client must be a registered Slack app with a fixed app id. Only directory-published apps or internal apps may use MCP; unlisted apps are prohibited. No dynamic client registration; OAuth is confidential (`client_id` and `client_secret`). Workspace admins approve the app. [Slack MCP server](https://docs.slack.dev/ai/mcp-server), checked 2026-11-15. | Confidential pre-registered client support is merged ([#539](https://github.com/itsmrad/codenaya/issues/539)). Still required: the product owner publishes a Marketplace app, or creates an internal app (that app serves only its own workspace), then sets the pre-registered client variables. **Not offered: needs a directory-published or internal Slack app.** |
+
 ## Community catalog (unreviewed)
 
 Below the vetted providers, the catalog shows a **Community** section: up to 500 of the
