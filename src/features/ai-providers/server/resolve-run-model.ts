@@ -7,6 +7,7 @@ import {
   INSUFFICIENT_CREDITS_CODE,
   type RunSource,
   creditRefusal,
+  minRunCredits,
 } from "@/features/billing/credits";
 import { MODEL_LIMIT_CODE, spendRefusal, spendRefusalMessage } from "@/features/billing/model-spend";
 import { PLANS } from "@/features/billing/plans";
@@ -247,7 +248,7 @@ export async function validateModelChoice({
     // Usage is always recorded; the cap only applies once billing is live (#105).
     const refusal =
       process.env.CREDIT_LIMITS_ENFORCED === "true" &&
-      creditRefusal(PLANS[account?.plan ?? "free"], account, Date.now());
+      creditRefusal(PLANS[account?.plan ?? "free"], account, Date.now(), minRunCredits(model.pricing));
     if (refusal) {
       throw new ModelChoiceError(CREDIT_REFUSAL_MESSAGES[refusal], 402, INSUFFICIENT_CREDITS_CODE);
     }

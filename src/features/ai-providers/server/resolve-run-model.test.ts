@@ -657,6 +657,22 @@ describe("validateModelChoice: credits (ADR 0011)", () => {
     expect(await validate({ keyId: "key_1", modelId: "gpt-5.6-luna" })).toMatchObject({ keyId: "key_1" });
   });
 
+  it("refuses a run the credits left can't cover, and lets one through that they can (#643)", async () => {
+    // One step on Sonnet 5.5's price is 12 credits.
+    const priced = { pricing: { mode: "split", inputUsdPerMTok: 2, outputUsdPerMTok: 10 } };
+    mocks.platform.mockReturnValue({ ...ROUTED_SAVED, models: [catalogModel("x-ai/grok-4.7", "Grok 4.7", priced)] });
+
+    mocks.account.mockReturnValue({ ...spentToday, dayUsed: 53 });
+    await expect(validate("x-ai/grok-4.7")).rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
+
+    mocks.account.mockReturnValue({ ...spentToday, dayUsed: 48 });
+    expect(await validate("x-ai/grok-4.7")).toMatchObject({ modelId: "x-ai/grok-4.7" });
+
+    mocks.account.mockReturnValue({ ...spentToday, dayUsed: 53 });
+    mocks.query.mockResolvedValue(openAiKey);
+    expect(await validate({ keyId: "key_1", modelId: "gpt-5.6-luna" })).toMatchObject({ keyId: "key_1" });
+  });
+
   it("lets yesterday's spent cap run again", async () => {
     mocks.account.mockReturnValue({ ...spentToday, dayStartsAt: startOfDay - 24 * 60 * 60 * 1000 });
     expect(await validate("x-ai/grok-4.7")).toMatchObject({ modelId: "x-ai/grok-4.7" });
