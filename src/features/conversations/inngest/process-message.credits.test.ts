@@ -138,6 +138,21 @@ describe("processMessage credit limit", () => {
     expect(mocks.account).toHaveBeenCalledTimes(2); // explicit fixture read plus one durable snapshot
   });
 
+  it("keeps the credits note when the reply ends inside an unclosed suggestions block", async () => {
+    const account = mocks.account();
+    mocks.account.mockReturnValue({ ...account, dayUsed: 57 });
+    const inference = { ...toolCall("listFiles"), usage: { prompt_tokens: 1_000, completion_tokens: 1_000 } };
+    await drive({ modelId: "x-ai/grok-4.7" }, [
+      { data: inference },
+      { data: text("Listed files.\n\n<suggestions>\nAdd a footer") },
+    ]);
+    const reply = mocks.mutation.mock.calls.find(([ref]) => getFunctionName(ref) === "system:updateMessageContent")?.[1];
+    expect(reply.content).toContain("Listed files.");
+    expect(reply.content).toContain("ran out of credits");
+    expect(reply.content).not.toContain("<suggestions>");
+    expect(reply.suggestions).toEqual(["Add a footer"]);
+  });
+
   it("keeps the real final answer when its text-only turn crosses the limit", async () => {
     const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
       { data: withUsage("The real final answer.", 2_000, 2_000) }, // 6 credits, balance 3
