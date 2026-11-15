@@ -41,8 +41,8 @@ const mutated = (name: string) =>
   mocks.mutation.mock.calls.filter(([ref]) => getFunctionName(ref) === name).map(([, args]) => args);
 
 const step = { run: vi.fn(async (_id: string, fn: () => Promise<unknown>) => fn()) };
-const selfCheck = (invokedAt = Date.now()) => selfCheckWorker({
-  step, ...ids, agentTaskId: "t1" as Id<"agentTasks">, ownedPaths, invokedAt, model: {} as VerifyAndFixOptions["model"],
+const selfCheck = (invokedAt = Date.now(), timeoutMs?: number) => selfCheckWorker({
+  step, ...ids, agentTaskId: "t1" as Id<"agentTasks">, ownedPaths, invokedAt, timeoutMs, model: {} as VerifyAndFixOptions["model"],
   onEvent: async () => {},
 });
 
@@ -120,12 +120,14 @@ describe("swarm sandboxes", () => {
     expect(e2b.kill).toHaveBeenCalledWith("sbx", { apiKey: "e2b_key" });
   });
 
-  it("asks for a slot under the per-swarm cap (2, env-overridable) and skips when none is left", async () => {
+  it("asks for a slot under the per-swarm cap (at most 2) and skips when none is left", async () => {
     mocks.mutation.mockResolvedValue({ skipped: "swarm sandbox cap reached" });
     expect(await selfCheck()).toEqual({ selfCheck: "skipped (swarm sandbox cap reached)", filesChanged: [] });
     vi.stubEnv("SWARM_MAX_WORKER_SANDBOXES", "1");
     await selfCheck();
-    expect(mutated("agentTasks:claimSelfCheck").map((args) => args.max)).toEqual([2, 1]);
+    vi.stubEnv("SWARM_MAX_WORKER_SANDBOXES", "99");
+    await selfCheck();
+    expect(mutated("agentTasks:claimSelfCheck").map((args) => args.max)).toEqual([2, 1, 2]);
     expect(e2b.create).not.toHaveBeenCalled();
     expect(mocks.verifyAndFix).not.toHaveBeenCalled();
   });
@@ -146,11 +148,14 @@ describe("swarm sandboxes", () => {
   it("skips with under 4 min of the worker's timeout left, and fits the repairs to what is left", async () => {
     const minutesAgo = (minutes: number) => Date.now() - minutes * 60_000;
     expect(await selfCheck(minutesAgo(8.5))).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
+    expect(await selfCheck(minutesAgo(6.5), 10 * 60_000)).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
     for (const fn of Object.values(e2b)) expect(fn).not.toHaveBeenCalled();
     expect(mocks.mutation).not.toHaveBeenCalled();
     e2b.create.mockResolvedValue(fakeSandbox());
     await selfCheck(minutesAgo(4.5));
     expect(mocks.verifyAndFix.mock.calls[0][0]).toMatchObject({ maxAttempts: 1 });
+    await selfCheck(minutesAgo(13), 25 * 60_000);
+    expect(mocks.verifyAndFix.mock.calls[1][0]).toMatchObject({ maxAttempts: 2 });
   });
 
   it("skips on an E2B rate limit", async () => {

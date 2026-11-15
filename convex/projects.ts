@@ -23,6 +23,7 @@ import {
 import { MAX_PROJECT_INSTRUCTIONS_LENGTH } from "../src/features/projects/instructions";
 import { countProjectBuilt } from "./stats";
 import { recordProjectEvent } from "./activationEvents";
+import { lastRunStatuses } from "../src/features/projects/utils/project-status";
 
 /** Env vars and skill settings copied per duplicate; far above real usage. */
 const MAX_COPIED_ROWS = 500;
@@ -32,6 +33,8 @@ const MAX_PROJECTS_LISTED = 500;
 
 /** Most projects `getPartial` returns, whatever the client asks for (#212). */
 const MAX_PARTIAL_PROJECTS = 50;
+/** Newest run events read per user for card status (#318); runs older than these get none. */
+const MAX_RUN_EVENTS = 200;
 
 /**
  * The caller's project. Projects being deleted count as gone, so they can't
@@ -145,17 +148,54 @@ export const getPartial = query({
   },
 });
 
+/**
+ * The user's projects, each with optional `published` and `lastRun` for its
+ * dashboard card (#318). Both come from a fixed number of reads per user, not
+ * per project.
+ */
 export const get = query({
   args: {},
   handler: async (ctx) => {
     const identity = await verifyAuth(ctx);
+    const userId = identity.subject;
 
-    return await ctx.db
+    const projects = await ctx.db
       .query("projects")
-      .withIndex("by_owner", (q) => q.eq("ownerId", identity.subject))
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .order("desc")
       .filter((q) => q.eq(q.field("deletingAt"), undefined))
       .take(MAX_PROJECTS_LISTED);
+
+    // shortcut: reads whole showcase rows, so a view of a published project
+    // re-runs its owner's list; add a by_owner_and_status index if that shows up.
+    const showcase = await ctx.db
+      .query("showcaseProjects")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .take(MAX_PROJECTS_LISTED);
+    const published = new Set<string>(
+      showcase.filter((entry) => entry.status !== "removed").map((entry) => entry.projectId),
+    );
+
+    const runEvents = (name: "run_started" | "run_finished") =>
+      ctx.db
+        .query("activationEvents")
+        .withIndex("by_userId_and_name_and_at", (q) => q.eq("userId", userId).eq("name", name))
+        .order("desc")
+        .take(MAX_RUN_EVENTS);
+    const started = await runEvents("run_started");
+    const finished = (await runEvents("run_finished")).flatMap((event) =>
+      event.name === "run_finished"
+        ? [{ projectId: event.projectId, at: event.at, outcome: event.props.outcome }]
+        : [],
+    );
+    const lastRun = lastRunStatuses(started, finished);
+
+    // Unset rather than false/absent values, so older clients see the same docs.
+    return projects.map((project) => ({
+      ...project,
+      published: published.has(project._id) || undefined,
+      lastRun: lastRun.get(project._id),
+    }));
   },
 });
 

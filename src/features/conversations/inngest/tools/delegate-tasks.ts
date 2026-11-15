@@ -3,11 +3,15 @@ import { createTool } from "@inngest/agent-kit";
 import { resolveWorkerModel } from "@/features/ai-providers/server/resolve-run-model";
 import { inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
+import { getAppError } from "@/lib/convex-error";
 
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../../agent-models";
-import { type SwarmPlan, WORKER_TIMEOUT_MS, swarmPlanSchema, validatePlan } from "../../swarm";
+import {
+  CHILD_WORKER_TIMEOUT_MS, MAX_SWARM_AGENTS, MAX_SWARM_DEPTH, SUBORCH_TIMEOUT_MS, type SwarmPlan,
+  WORKER_TIMEOUT_MS, swarmPlanSchema, validatePlan,
+} from "../../swarm";
 import { cleanupSwarmSandboxes, seedSwarmSnapshot } from "../../swarm-sandbox";
 import { type SwarmWorkerEvent, type SwarmWorkerResult, swarmWorker } from "../swarm-worker";
 import { folderEnsurer, folderPaths, getProjectFiles, indexProjectFiles, lockedPathError, splitPath } from "./paths";
@@ -18,6 +22,12 @@ interface DelegateTasksToolOptions {
   messageId: Id<"messages">;
   ownerId: string;
   model: AgentModelChoice;
+  /** A sub-orchestrator's call (depth 1): its task, whose owned paths its workers split. */
+  parent?: { taskId: string; ownedPaths: string[]; depth: number };
+  /** Collects the paths its workers wrote, for the sub-orchestrator's own report. */
+  writtenPaths?: string[];
+  /** How deep this run's swarm may go (see `validatePlan`); Convex enforces it too. */
+  maxDepth?: number;
 }
 
 type Task = SwarmPlan["tasks"][number];
@@ -41,9 +51,14 @@ const taskReport = (task: Task, settled: PromiseSettledResult<SwarmWorkerResult>
 /**
  * Swarm mode's orchestrator tool: runs 2-4 tasks with disjoint owned paths as
  * parallel swarm-worker functions and returns their reports. Once per run; the
- * orchestrator then integrates and checks the build itself.
+ * orchestrator then integrates and checks the build itself. A sub-orchestrator
+ * gets it too (`parent`), for 2-3 workers inside its own paths (depth 2).
  */
-export const createDelegateTasksTool = ({ internalKey, projectId, messageId, ownerId, model }: DelegateTasksToolOptions) => {
+export const createDelegateTasksTool = ({
+  internalKey, projectId, messageId, ownerId, model, parent, writtenPaths, maxDepth = MAX_SWARM_DEPTH,
+}: DelegateTasksToolOptions) => {
+  const depth = parent?.depth ?? 0;
+  const subOrchestrators = !parent && maxDepth >= MAX_SWARM_DEPTH;
   // Rebuilt on every replay: handlers re-run in order, so the first valid call sets it again.
   let delegated = false;
   return createTool({
@@ -51,11 +66,13 @@ export const createDelegateTasksTool = ({ internalKey, projectId, messageId, own
     description:
       "Run 2-4 tasks in parallel, each by a worker that writes only its owned paths (files or folders under src/, disjoint between tasks). " +
       "Shared files (package.json, src/App.tsx, src/main.tsx, src/index.css, configs) stay yours. Call it once, after writing the shared foundation. " +
-      "Returns each task's report: done, unfinished or failed, the files it wrote, and its NEEDS: requests.",
+      "Returns each task's report: done, unfinished or failed, the files it wrote, and its NEEDS: requests." +
+      (subOrchestrators ? " A task with role \"sub-orchestrator\" (at most 2) splits its own paths among up to 3 workers." : ""),
     parameters: swarmPlanSchema,
     handler: async (input, { step }) => {
       if (delegated) return "Error: already delegated, integrate now.";
-      const plan = validatePlan(input);
+      if (depth >= MAX_SWARM_DEPTH) return "Error: Workers cannot delegate; build it yourself.";
+      const plan = validatePlan(input, { withinPaths: parent?.ownedPaths, maxDepth });
       if (typeof plan === "string") return plan;
       if (!step) throw new Error("delegateTasks runs only inside an Inngest function");
 
@@ -73,31 +90,51 @@ export const createDelegateTasksTool = ({ internalKey, projectId, messageId, own
       if (lockError) return `Error: ${lockError} Re-plan without it.`;
       delegated = true;
 
-      // Only the model's id and label leave this step, never the model or its key.
+      // Only the models' ids and labels leave these steps, never a model or its key.
       const workerModel = await step.run("resolve-worker-model", async () =>
         (await resolveWorkerModel({ internalKey, projectId, choice: model })).codingModel);
-      const agentTaskIds = await step.run("create-agent-tasks", () =>
-        convex.mutation(api.agentTasks.createTasks, {
-          internalKey,
-          messageId,
-          projectId,
-          tasks: plan.tasks.map((task) => ({
-            taskId: task.id,
-            role: "worker" as const,
-            title: task.title,
-            brief: task.brief,
-            ownedPaths: task.ownedPaths,
-            modelId: workerModel.id,
-            model: workerModel.label,
-          })),
-        }));
+      const subModel = plan.tasks.some((task) => task.role === "sub-orchestrator")
+        ? await step.run("resolve-suborch-model", async () =>
+          (await resolveWorkerModel({ internalKey, projectId, choice: model, role: "sub-orchestrator" })).codingModel)
+        : workerModel;
+      const agentTaskIds = await step.run("create-agent-tasks", async () => {
+        try {
+          return await convex.mutation(api.agentTasks.createTasks, {
+            internalKey,
+            messageId,
+            projectId,
+            byok: Boolean(model.keyId),
+            tasks: plan.tasks.map((task) => {
+              const role = task.role ?? "worker";
+              const { id: modelId, label } = role === "sub-orchestrator" ? subModel : workerModel;
+              return {
+                taskId: parent ? `${parent.taskId}/${task.id}` : task.id,
+                role,
+                title: task.title,
+                brief: task.brief,
+                ownedPaths: task.ownedPaths,
+                modelId,
+                model: label,
+                ...(parent ? { parentTaskId: parent.taskId } : {}),
+              };
+            }),
+          });
+        } catch (error) {
+          const code = getAppError(error)?.code;
+          if (code === "LIMIT_EXCEEDED" || code === "CONFLICT") return code;
+          throw error;
+        }
+      });
+      if (agentTaskIds === "LIMIT_EXCEEDED") return `Error: The swarm already runs ${MAX_SWARM_AGENTS} agents; build these tasks yourself.`;
+      // One platform swarm per owner at a time (ADR 0013).
+      if (agentTaskIds === "CONFLICT") return "Error: another swarm is already running for this account; build this one yourself.";
 
       const planOverview = `## Swarm plan\n${plan.tasks
         .map((task) => `- ${task.id} (${task.title}): ${task.ownedPaths.join(", ")}`)
         .join("\n")}`;
       // Beside the workers (a parallel step), for their optional self-checks; null while that is off.
-      const foundation = step.run("swarm-foundation", () => seedSwarmSnapshot({ internalKey, projectId, messageId }))
-        .catch(() => null);
+      const foundation = parent ? Promise.resolve(null)
+        : step.run("swarm-foundation", () => seedSwarmSnapshot({ internalKey, projectId, messageId })).catch(() => null);
       const settled = await Promise.allSettled(
         plan.tasks.map((task, i) =>
           step.invoke(`run-task-${task.id}`, {
@@ -109,11 +146,13 @@ export const createDelegateTasksTool = ({ internalKey, projectId, messageId, own
               ownerId,
               model,
               planOverview,
+              depth: depth + 1,
             } satisfies SwarmWorkerEvent,
-            timeout: WORKER_TIMEOUT_MS,
+            timeout: parent ? CHILD_WORKER_TIMEOUT_MS : task.role === "sub-orchestrator" ? SUBORCH_TIMEOUT_MS : WORKER_TIMEOUT_MS,
           }) as Promise<SwarmWorkerResult>,
         ),
       );
+      for (const result of settled) if (result.status === "fulfilled") writtenPaths?.push(...result.value.writtenPaths);
 
       // A timed-out worker keeps running: stop it so it can't write after the integration build.
       const failed = agentTaskIds.filter((_, i) => settled[i].status === "rejected");
@@ -132,7 +171,9 @@ export const createDelegateTasksTool = ({ internalKey, projectId, messageId, own
 
       const reports = [
         ...plan.tasks.map((task, i) => taskReport(task, settled[i])),
-        "Integrate now: apply every NEEDS: request, finish failed or unfinished tasks, then run checkBuild.",
+        parent
+          ? "Integrate now: apply the NEEDS: requests inside your owned paths, finish failed or unfinished tasks, and pass the rest on in your own NEEDS:."
+          : "Integrate now: apply every NEEDS: request, finish failed or unfinished tasks, then run checkBuild.",
       ].join("\n\n");
       // An error result is not a write, so a swarm that wrote nothing can't complete a first build (#338).
       // shortcut: a timed-out worker's partial writes are unknown here; the integrator rewrites its task.

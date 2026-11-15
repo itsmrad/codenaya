@@ -35,6 +35,8 @@ import {
 } from "@/components/ui/tooltip";
 
 import { FileExplorer } from "./file-explorer";
+import { SourceControlPane } from "./source-control-pane";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { PreviewView } from "./preview-view";
 import { ExportPopover } from "./export-popover";
@@ -219,6 +221,7 @@ export const ProjectIdView = ({
     setSelectedView(view);
     if (firstBuild) setViewPickedDuringBuild(true);
   };
+  const [explorerView, setExplorerView] = useState("files");
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
   const { openIntegrations } = useProjectIntegrations();
@@ -238,6 +241,8 @@ export const ProjectIdView = ({
   useProjectCommands({
     "show-code": mode === "ide" ? () => selectView("editor") : null,
     "open-code-session": mode === "chat" ? openCode : null,
+    // Chat mode opens the code session first; the explorer lives there.
+    "source-control": () => { openCode(); setExplorerView("source-control"); },
     "show-preview": () => selectView("preview"),
     // Desktops toggle the side panel (ProjectIdLayout); here the chat is a tab.
     "toggle-chat": isCompact
@@ -480,7 +485,18 @@ export const ProjectIdView = ({
             >
               <div className={cn("h-full box-border", isMobile ? "pb-1" : "pr-1")}>
                 <div className="h-full rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)] overflow-hidden flex flex-col">
-                  <FileExplorer projectId={projectId} />
+                  <Tabs value={explorerView} onValueChange={setExplorerView} className="min-h-0 flex-1 gap-0">
+                    <TabsList aria-label="Explorer views" className="m-1 h-8 w-auto shrink-0">
+                      <TabsTrigger value="files" className="text-xs">Files</TabsTrigger>
+                      <TabsTrigger value="source-control" className="text-xs">Source control</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="files" className="flex min-h-0 flex-col border-t">
+                      <FileExplorer projectId={projectId} />
+                    </TabsContent>
+                    <TabsContent value="source-control" className="flex min-h-0 flex-col border-t">
+                      {activeView === "editor" && <SourceControlPane projectId={projectId} project={project} disabled={activeRun !== null} />}
+                    </TabsContent>
+                  </Tabs>
                 </div>
               </div>
             </Allotment.Pane>
