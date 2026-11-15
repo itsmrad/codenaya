@@ -40,7 +40,7 @@ vi.mock("./projects-grid", () => ({ ProjectsGrid: "div" }));
 vi.mock("./recent-projects", () => ({ RecentProjects: "div" }));
 
 import { ProjectsView } from "./projects-view";
-import { peekPendingPrompt, savePendingPrompt } from "../utils/pending-prompt";
+import { PENDING_PROMPT_KEY, peekPendingPrompt, savePendingPrompt } from "../utils/pending-prompt";
 
 const render = () => {
   harness.render();
@@ -81,5 +81,26 @@ describe("landing prompt resume effect", () => {
     expect(harness.create).toHaveBeenLastCalledWith("A portfolio site", undefined, true, "plan");
     render()();
     expect(harness.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops a stale draft when a template wins, so no second project is created", async () => {
+    savePendingPrompt("A portfolio site");
+    harness.template.mockReturnValue({ id: "blog", prompt: "A blog" });
+    render()();
+    expect(harness.create).toHaveBeenCalledExactlyOnceWith("A blog", "blog");
+    expect(localStorage.getItem(PENDING_PROMPT_KEY)).toBeNull();
+    expect(peekPendingPrompt()).toBeNull();
+  });
+
+  it("shows no Retry toast once a refusal has dropped the draft", async () => {
+    savePendingPrompt("A portfolio site");
+    harness.create.mockImplementationOnce(async () => {
+      localStorage.removeItem(PENDING_PROMPT_KEY); // As a credential refusal does.
+      return false;
+    });
+    render()();
+    await vi.waitFor(() => expect(harness.create).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(harness.toast).not.toHaveBeenCalled();
   });
 });

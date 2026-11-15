@@ -20,7 +20,7 @@ import { LabelBar, SectionHeader } from "@/components/landing/section-header";
 import { useProjects } from "../hooks/use-projects";
 import { useDashboardTab } from "../hooks/use-dashboard-tab";
 import { useCreateProjectFromPrompt } from "../hooks/use-create-project-from-prompt";
-import { resumePendingPrompt } from "../utils/pending-prompt";
+import { clearPendingPrompt, peekPendingPrompt, resumePendingPrompt } from "../utils/pending-prompt";
 import { takePendingImport } from "../utils/pending-import";
 import { githubRepoUrl, parseGithubRepo } from "../utils/github-repo";
 import type { DashboardTab } from "../utils/dashboard-tab";
@@ -73,6 +73,8 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
     didResume.current = true;
     const pendingTemplate = takePendingTemplate();
     if (pendingTemplate) {
+      // The template wins; a stale landing draft must not create a second project later.
+      clearPendingPrompt();
       void createProject(pendingTemplate.prompt, pendingTemplate.id);
       return;
     }
@@ -80,7 +82,8 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
       const created = await resumePendingPrompt((pending) =>
         createProjectRef.current(pending.prompt, undefined, true, pending.mode),
       );
-      if (created === false) {
+      // A refusal that drops the draft (credentials) leaves nothing to retry.
+      if (created === false && peekPendingPrompt() !== null) {
         toast.error("Your prompt is saved. Try creating the project again.", {
           id: "pending-prompt-retry",
           duration: Infinity,

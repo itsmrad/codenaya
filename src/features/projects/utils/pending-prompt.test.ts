@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   PENDING_PROMPT_KEY,
+  clearPendingPrompt,
   peekPendingPrompt,
   resumePendingPrompt,
   savePendingPrompt,
@@ -104,5 +105,14 @@ describe("pending prompt", () => {
     expect(() => savePendingPrompt("A todo app")).not.toThrow();
     expect(peekPendingPrompt()).toBeNull();
     expect(await resumePendingPrompt(vi.fn())).toBeNull();
+  });
+
+  it("clears the draft, and tolerates unavailable storage", () => {
+    savePendingPrompt("A todo app");
+    clearPendingPrompt();
+    expect(peekPendingPrompt()).toBeNull();
+    const blocked = () => { throw new Error("blocked"); };
+    vi.stubGlobal("localStorage", { removeItem: blocked });
+    expect(() => clearPendingPrompt()).not.toThrow();
   });
 });

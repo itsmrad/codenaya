@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HTTPError } from "ky";
 
+import { peekPendingPrompt, savePendingPrompt } from "../utils/pending-prompt";
 import { createWithPromptBody, useCreateProjectFromPrompt } from "./use-create-project-from-prompt";
 
 const model = { modelId: "x-ai/grok-4.7" };
@@ -98,5 +99,50 @@ describe("createProject failure contract and submission lock", () => {
     const { createProject } = useCreateProjectFromPrompt();
     expect(await createProject("A blog")).toBe(true);
     expect(mocks.push).toHaveBeenCalledWith("/projects/project-1");
+  });
+
+  describe("credential refusals and the saved landing draft", () => {
+    const secret = "Use this key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789";
+    const refusal = () => new HTTPError(
+      new Response(JSON.stringify({ code: "credential_detected", error: "No credentials" }), { status: 400 }),
+      new Request("https://example.test"),
+      {} as never,
+    );
+
+    beforeEach(() => {
+      const store = new Map<string, string>();
+      vi.stubGlobal("localStorage", {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, value),
+        removeItem: (key: string) => void store.delete(key),
+      });
+      savePendingPrompt(secret);
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("drops the draft on a client-side refusal only from the landing page", async () => {
+      const { createProject } = useCreateProjectFromPrompt();
+      expect(await createProject(secret)).toBe(false);
+      expect(peekPendingPrompt()).not.toBeNull();
+      expect(await createProject(secret, undefined, true)).toBe(false);
+      expect(peekPendingPrompt()).toBeNull();
+      expect(mocks.post).not.toHaveBeenCalled();
+    });
+
+    it("drops the draft on a server-side refusal only from the landing page", async () => {
+      mocks.post.mockReturnValue({ json: async () => { throw refusal(); } });
+      const { createProject } = useCreateProjectFromPrompt();
+      expect(await createProject("A blog")).toBe(false);
+      expect(peekPendingPrompt()).not.toBeNull();
+      expect(await createProject("A blog", undefined, true)).toBe(false);
+      expect(peekPendingPrompt()).toBeNull();
+    });
+
+    it("keeps the draft for other failures", async () => {
+      mocks.post.mockReturnValue({ json: async () => { throw new Error("offline"); } });
+      const { createProject } = useCreateProjectFromPrompt();
+      expect(await createProject("A blog", undefined, true)).toBe(false);
+      expect(peekPendingPrompt()).not.toBeNull();
+    });
   });
 });

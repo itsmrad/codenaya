@@ -28,6 +28,15 @@ export const savePendingPrompt = (prompt: string, mode?: MessageMode) => {
   }
 };
 
+/** Drops the saved prompt, for a draft that can never be created as written. */
+export const clearPendingPrompt = () => {
+  try {
+    localStorage.removeItem(PENDING_PROMPT_KEY);
+  } catch {
+    // Best-effort, like every other storage access.
+  }
+};
+
 const parse = (raw: string | null): PendingPrompt | null => {
   if (!raw) return null;
   let saved: PendingPrompt = { prompt: raw };
