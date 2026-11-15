@@ -201,7 +201,8 @@ export const unresolvedImports = (
     if (!SOURCE_FILE.test(file.path) || file.path.endsWith(".d.ts")) continue;
     for (const [, specifier] of stripComments(file.content).matchAll(IMPORT_SPECIFIER)) {
       const candidates = localCandidates(file.path, specifier);
-      if (!candidates) continue;
+      // The TanStack router plugin writes routeTree.gen.ts on the first dev or build run.
+      if (!candidates || /(?:^|\/)routeTree\.gen(?:\.[jt]s)?$/.test(candidates[0])) continue;
       const found = candidates.some((candidate) =>
         RESOLVE_SUFFIXES.some((suffix) => paths.has(candidate + suffix)),
       );

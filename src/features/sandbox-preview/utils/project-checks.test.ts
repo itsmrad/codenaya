@@ -49,6 +49,14 @@ describe("project checks", () => {
     const findings = projectChecks([pkg({ next: "15", tailwindcss: "4" }), file("a.ts", 'import x from "./missing"; import y from "missing";'), file("a.css", "@tailwind base;")]);
     expect(findings.map((f) => f.checkId)).toEqual(["package"]);
   });
+  it("accepts a TanStack Start app's ?url import and generated route tree", () => {
+    expect(projectChecks([
+      pkg({ "@tanstack/react-start": "^1.169.5", "@tanstack/react-router": "^1.170.46" }),
+      file("src/router.tsx", 'import { createRouter } from "@tanstack/react-router";\nimport { routeTree } from "./routeTree.gen";'),
+      file("src/routes/__root.tsx", 'import appCss from "../styles/app.css?url";'),
+      file("src/styles/app.css", ":root {}"),
+    ])).toEqual([]);
+  });
   it("bounds work and handles malformed manifests without throwing", () => {
     expect(projectChecks([file("package.json", "{")])).toEqual([]);
     expect(projectChecks([file("big.ts", "x".repeat(100_001))])).toEqual([]);
