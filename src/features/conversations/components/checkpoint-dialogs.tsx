@@ -29,7 +29,41 @@ import { convexErrorMessage } from "@/lib/convex-error";
 
 import type { Id } from "../../../../convex/_generated/dataModel";
 
-import { type Checkpoint, undoAction, useForkFromCheckpoint, useRestoreCheckpoint } from "../hooks/use-checkpoints";
+import { type Checkpoint, undoAction, useForkFromCheckpoint, useRestoreCheckpoint, useRunChanges } from "../hooks/use-checkpoints";
+import { restorePlan } from "../restore-plan";
+
+/** What a restore will do to the files, from the live-vs-checkpoint comparison (#363). */
+const RestorePlan = ({ checkpointId }: { checkpointId: Id<"checkpoints"> }) => {
+  const changes = useRunChanges(checkpointId, "project");
+  if (changes === undefined) {
+    return <p role="status" className="text-sm text-muted-foreground">Checking what will change…</p>;
+  }
+  // Null: too many files to compare; an Error: the query failed. Restore still works.
+  if (changes === null || changes instanceof Error) return null;
+  const { changed, removed, recreated } = restorePlan(changes);
+  if (changes.length === 0) {
+    return <p className="text-sm text-muted-foreground">No files differ from this checkpoint.</p>;
+  }
+  const groups = [
+    ["Changed back", changed],
+    ["Removed (created since)", removed],
+    ["Brought back (deleted since)", recreated],
+  ] as const;
+  return (
+    <div className="max-h-48 space-y-2 overflow-y-auto text-sm">
+      {groups.map(([title, paths]) =>
+        paths.length === 0 ? null : (
+          <div key={title}>
+            <p className="font-medium">{title} ({paths.length})</p>
+            <ul className="font-mono text-xs text-muted-foreground">
+              {paths.map((path) => <li key={path} className="truncate" title={path}>{path}</li>)}
+            </ul>
+          </div>
+        ),
+      )}
+    </div>
+  );
+};
 
 /** Shared by history and the run action row; a fork is safe during an active run. */
 export const ForkCheckpointButton = ({ checkpointId }: { checkpointId: Id<"checkpoints"> }) => {
@@ -100,9 +134,10 @@ export const RestoreCheckpointDialog = ({
             The project&apos;s files go back to how they were{" "}
             {checkpoint &&
               formatDistanceToNow(checkpoint._creationTime, { addSuffix: true })}
-            . Changes made since then are replaced.
+            . Changes made since then are replaced, including manual edits.
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {checkpoint && <RestorePlan checkpointId={checkpoint._id} />}
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction onClick={handleRestore}>Restore</AlertDialogAction>
