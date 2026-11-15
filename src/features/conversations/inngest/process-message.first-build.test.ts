@@ -135,6 +135,43 @@ describe("processMessage title off the first-build path", () => {
 });
 
 describe("processMessage first build (#338)", () => {
+  it.each(["Build a Next.js todo app", "Build a todo app"])("keeps a modified Next app on its framework without recovery guidance (original prompt: %s)", async (originalPrompt) => {
+    projectFiles = [
+      { _id: "pkg", name: "package.json", type: "file" },
+      { _id: "config", name: "next.config.ts", type: "file" },
+      { _id: "src", name: "src", type: "folder" },
+      { _id: "app", name: "app", type: "folder", parentId: "src" },
+      { _id: "page", name: "page.tsx", type: "file", parentId: "app" },
+      { _id: "search", name: "search.tsx", type: "file", parentId: "app" },
+    ];
+    recentMessages = [
+      { _id: "u1", role: "user", content: originalPrompt },
+      { _id: "a1", role: "assistant", content: "Built it." },
+      { _id: "u2", role: "user", content: "Add search" },
+      { _id: "m1", role: "assistant", content: "" },
+    ];
+    const outcome = await drive(MODEL, [{ data: text("Todo app") }, { data: text("Built it.") }], "Add search");
+    const { system, user } = codingRequest(outcome.inferenceBodies);
+    for (const note of [NEXT_STARTER_RECOVERY_NOTE, NEXT_STARTER_IN_PLACE_NOTE, STARTER_IN_PLACE_NOTE]) {
+      expect(user).not.toContain(JSON.stringify(note).slice(1, -1));
+    }
+    expect(system).not.toContain(JSON.stringify(NEXT_STARTER_RECOVERY_NOTE).slice(1, -1));
+    const coding = (outcome.inferenceBodies as ChatBody[]).find((body) => body.tools)!;
+    expect(coding.tools?.map((tool) => tool.function.name)).not.toContain("scaffoldViteApp");
+  });
+
+  it("keeps Vite starter guidance and tools even when the original prompt named Next", async () => {
+    needsFirstBuild = true;
+    projectFiles = VITE_REACT_STARTER.map(({ path }) => ({ _id: `id:${path}`, name: path, type: "file" }));
+    const outcome = await drive(MODEL, [{ data: text("Todo app") }, { data: text("Built it.") }], "Build a Next.js todo app");
+    const { system, user } = codingRequest(outcome.inferenceBodies);
+    expect(system).toContain(JSON.stringify(FIRST_BUILD_APP_NOTE).slice(1, -1));
+    expect(user).toContain(JSON.stringify(STARTER_IN_PLACE_NOTE).slice(1, -1));
+    expect(user).not.toContain(JSON.stringify(NEXT_STARTER_RECOVERY_NOTE).slice(1, -1));
+    const coding = (outcome.inferenceBodies as ChatBody[]).find((body) => body.tools)!;
+    expect(coding.tools?.map((tool) => tool.function.name)).toContain("scaffoldViteApp");
+  });
+
   it.each(["empty", "partial"])("keeps an explicit Next request on Next when the seed is %s", async (kind) => {
     needsFirstBuild = true;
     projectFiles = kind === "partial"

@@ -90,6 +90,7 @@ import { buildProjectInstructionsSection } from '@/features/projects/instruction
 import type { ProjectTheme } from '@/features/projects/theme';
 import { starterFramework } from './starter-only';
 import { wantsNextJs } from './next-starter';
+import { detectFramework } from '@/features/sandbox-preview/utils/framework';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
@@ -590,18 +591,23 @@ export const processMessage = inngest.createFunction(
       "check-first-build",
       () => convex.query(api.projects.conversationNeedsFirstBuildForServer, { internalKey, conversationId }),
     );
-    // Identify the seeded framework before selecting first-build guidance and tools.
-    const starter = await step.run("check-starter-framework", async () =>
-      starterFramework(
-        await convex.query(api.system.getProjectFiles, { internalKey, projectId }),
-      ),
-    );
+    // A modified app still has a framework even when it no longer matches a starter.
+    const { starter, framework } = await step.run("check-project-framework", async () => {
+      const files = await convex.query(api.system.getProjectFiles, { internalKey, projectId });
+      const pathOf = buildPathIndex(files);
+      const paths = files.filter((file) => file.type === "file").flatMap((file) => {
+        const path = pathOf(file._id);
+        return path ? [path] : [];
+      });
+      return { starter: starterFramework(files), framework: detectFramework(paths) };
+    });
     // A failed seed must not turn an explicit Next request into a Vite app on retry.
-    const nextApp = starter === "next" || (starter === null && wantsNextJs(
+    const recoverNext = starter === null && framework === null && wantsNextJs(
       recentMessages.find((msg) => msg.role === "user")?.content ?? message,
-    ));
+    );
+    const nextApp = starter === "next" || framework === "next" || recoverNext;
     const firstBuildNote = nextApp
-      ? (starter === "next" ? NEXT_FIRST_BUILD_APP_NOTE : NEXT_STARTER_RECOVERY_NOTE)
+      ? (recoverNext ? NEXT_STARTER_RECOVERY_NOTE : NEXT_FIRST_BUILD_APP_NOTE)
       : FIRST_BUILD_APP_NOTE;
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
@@ -620,7 +626,7 @@ export const processMessage = inngest.createFunction(
     // system prompt, so the first turn builds on it (#338).
     const starterNote = starter
       ? (starter === "next" ? NEXT_STARTER_IN_PLACE_NOTE : STARTER_IN_PLACE_NOTE)
-      : (nextApp ? NEXT_STARTER_RECOVERY_NOTE : "");
+      : (recoverNext ? NEXT_STARTER_RECOVERY_NOTE : "");
 
 
     // Display only: mirrors the agent's tool calls onto the assistant message
