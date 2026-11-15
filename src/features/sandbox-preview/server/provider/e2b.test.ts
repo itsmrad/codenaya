@@ -42,7 +42,7 @@ import { SandboxConfigError, SandboxRateLimitError, SandboxTimeoutError } from "
 
 const fakeE2bSandbox = () => ({
   sandboxId: "sbx1",
-  commands: { run: vi.fn() },
+  commands: { run: vi.fn(), list: vi.fn(), kill: vi.fn() },
   files: { write: vi.fn(), read: vi.fn() },
   getHost: vi.fn((port: number) => `${port}-sbx1.e2b.app`),
   getInfo: vi.fn(),
@@ -162,6 +162,23 @@ describe("E2B provider", () => {
       expect(e2b.commands.run).toHaveBeenCalledWith("npm run dev", { envs: { A: "1" }, background: true, timeoutMs: 0 });
     });
 
+    it("lists and kills envd's commands, and leaves out absent options as a direct call does", async () => {
+      const { e2b, sandbox } = await connect();
+      const command = { pid: 7, cmd: "/bin/bash", args: ["-l", "-c", "npm run dev"], envs: { A: "1" }, cwd: "/app" };
+      e2b.commands.list.mockResolvedValue([command]);
+      e2b.commands.kill.mockResolvedValue(true);
+      e2b.commands.run.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
+
+      expect(await sandbox.listCommands!()).toEqual([command]);
+      expect(e2b.commands.list).toHaveBeenCalledWith();
+      await sandbox.listCommands!({ requestTimeoutMs: 5 });
+      expect(e2b.commands.list).toHaveBeenLastCalledWith({ requestTimeoutMs: 5 });
+      expect(await sandbox.killCommand!(7, { requestTimeoutMs: 5 })).toBe(true);
+      expect(e2b.commands.kill).toHaveBeenCalledWith(7, { requestTimeoutMs: 5 });
+      await sandbox.run("true");
+      expect(e2b.commands.run).toHaveBeenCalledWith("true");
+    });
+
     it("writes files in one batch and skips an empty one", async () => {
       const { e2b, sandbox } = await connect();
       const files = [{ path: "/app/a.ts", data: "a" }, { path: "/app/b/c.ts", data: "c" }];
@@ -170,7 +187,7 @@ describe("E2B provider", () => {
       await sandbox.writeFiles([]);
 
       expect(e2b.files.write).toHaveBeenCalledTimes(1);
-      expect(e2b.files.write).toHaveBeenCalledWith(files, undefined);
+      expect(e2b.files.write).toHaveBeenCalledWith(files);
     });
 
     it("reads text and bytes, builds the preview URL and returns info", async () => {

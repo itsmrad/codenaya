@@ -268,7 +268,7 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
 
     await (await boot({ resumeSandboxId: "sbx_resume" })).text();
 
-    expect(mocks.sandboxConnect).toHaveBeenCalledWith("sbx_resume");
+    expect(mocks.sandboxConnect).toHaveBeenCalledWith("sbx_resume", { apiKey: "e2b-test" });
     expect(sandbox.commands.run.mock.calls).toEqual([
       [killTreeCommand(7), { timeoutMs: 10_000 }],
       [killTreeCommand(8), { timeoutMs: 10_000 }],

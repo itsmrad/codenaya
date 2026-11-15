@@ -43,6 +43,16 @@ export interface ListedSandbox extends SandboxInfo {
   id: string;
 }
 
+/** A command started with `run` or `start` that is still running. */
+export interface SandboxCommand {
+  pid: number;
+  cmd: string;
+  args: string[];
+  /** The envs it was started with, not its whole environment. */
+  envs: Record<string, string>;
+  cwd?: string;
+}
+
 export interface Sandbox {
   readonly provider: ProviderId;
   /** The provider's own id; the public id is `toPublicSandboxId(provider, id)`. */
@@ -62,6 +72,10 @@ export interface Sandbox {
   previewUrl(port: number): Promise<string>;
   info(opts?: RequestOptions): Promise<SandboxInfo>;
   kill(opts?: RequestOptions): Promise<void>;
+  /** The provider's own command list; without one, `listCommands` in helpers.ts reads /proc. */
+  listCommands?(opts?: RequestOptions): Promise<SandboxCommand[]>;
+  /** Signals one listed command's root process, without its children; for when `run` fails. */
+  killCommand?(pid: number, opts?: RequestOptions): Promise<boolean>;
 }
 
 export interface CreateOptions extends RequestOptions {

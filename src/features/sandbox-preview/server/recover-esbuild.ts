@@ -1,5 +1,6 @@
-import type { Sandbox } from "e2b";
 import { DEV_COMMAND_ENV, killTreeCommand } from "./dev-server";
+import { listCommands } from "./provider/helpers";
+import type { Sandbox } from "./provider/types";
 import { nextEsbuildRecovery, type EsbuildRecoveryAttempts, type EsbuildRecoveryStatus } from "../utils/esbuild-recovery";
 
 interface Recovery extends EsbuildRecoveryAttempts {
@@ -21,35 +22,30 @@ export const recoverEsbuild = async (sandbox: Sandbox): Promise<EsbuildRecoveryS
   for (const [id, state] of recoveries) {
     if (!state.pending && state.expiresAt <= now) recoveries.delete(id);
   }
-  const previous = recoveries.get(sandbox.sandboxId);
+  const previous = recoveries.get(sandbox.id);
   if (previous?.pending) return "busy";
   const next = nextEsbuildRecovery(previous, now);
   if (!next || (recoveries.size >= 10_000 && !previous)) return "limited";
-  // Reserve synchronously, before commands.list() yields to a duplicate request.
+  // Reserve synchronously, before listCommands() yields to a duplicate request.
   const state = { ...next, pending: true, expiresAt: previous?.expiresAt ?? now + 60 * 60_000 };
-  recoveries.set(sandbox.sandboxId, state);
+  recoveries.set(sandbox.id, state);
   let attempted = false;
   try {
-    const commands = await sandbox.commands.list();
+    const commands = await listCommands(sandbox);
     if (commands.some((command) => INSTALLING.test([command.cmd, ...command.args].join(" ")))) return "busy";
     const running = commands.filter((command) => command.envs?.[DEV_COMMAND_ENV]);
     const [dev] = running;
     if (!dev) return "unavailable"; // #774 owns starting a missing dev command after installs.
     attempted = true;
-    for (const command of running) await sandbox.commands.run(killTreeCommand(command.pid));
-    await sandbox.commands.run(dev.envs[DEV_COMMAND_ENV], {
-      cwd: dev.cwd,
-      envs: dev.envs,
-      background: true,
-      timeoutMs: 0,
-    });
+    for (const command of running) await sandbox.run(killTreeCommand(command.pid));
+    await sandbox.start(dev.envs[DEV_COMMAND_ENV], { cwd: dev.cwd, envs: dev.envs });
     return "restarted";
   } finally {
     state.pending = false;
     // Waiting for an install does not spend a recovery attempt.
     if (!attempted) {
-      if (previous) recoveries.set(sandbox.sandboxId, previous);
-      else recoveries.delete(sandbox.sandboxId);
+      if (previous) recoveries.set(sandbox.id, previous);
+      else recoveries.delete(sandbox.id);
     }
   }
 };

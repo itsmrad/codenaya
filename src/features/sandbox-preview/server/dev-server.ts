@@ -1,9 +1,16 @@
-import type { Sandbox } from "e2b";
+import type { Sandbox as E2bSandbox } from "e2b";
 import { appendHostFlag, detectFrameworkFromFiles } from "../utils/dev-command";
+import { fromE2bSandbox } from "./provider/e2b";
+import { listCommands } from "./provider/helpers";
+import type { Sandbox, SandboxCommand } from "./provider/types";
+
+/** check-build still passes the raw E2B handle to the two helpers it uses. */
+// shortcut: PR2b drops this once check-build passes the seam's Sandbox.
+const asSeam = (sandbox: Sandbox | E2bSandbox): Sandbox => ("commands" in sandbox ? fromE2bSandbox(sandbox) : sandbox);
 
 /**
- * Set on the dev server's E2B process to its own command line, so any server
- * instance can find it in `commands.list()` and start it again the same way.
+ * Set on the dev server's process to its own command line, so any server
+ * instance can find it in `listCommands()` and start it again the same way.
  */
 export const DEV_COMMAND_ENV = "CODENAYA_DEV_COMMAND";
 
@@ -13,7 +20,7 @@ export const PROXY_SCRIPT_PATH = "/home/user/e2b-proxy.js";
 /** The port the boot's proxy forwards to: exact even for a custom server.port. */
 export const proxyTargetPort = async (sandbox: Sandbox): Promise<number | undefined> => {
   try {
-    const script = await sandbox.files.read(PROXY_SCRIPT_PATH);
+    const script = await sandbox.readFile(PROXY_SCRIPT_PATH, "text");
     return Number(/TARGET_PORT \|\| "(\d+)"/.exec(script)?.[1]) || undefined;
   } catch {
     // No proxy yet, or an older sandbox: the framework default below applies.
@@ -83,7 +90,7 @@ export const fallbackDevStart = (
 /** A listening socket is ready even while Next compiles its first HTTP response. */
 export const isPortOpen = async (sandbox: Sandbox, port: number): Promise<boolean> => {
   try {
-    const result = await sandbox.commands.run(
+    const result = await sandbox.run(
       `node -e 'const socket=require("net").connect({host:"localhost",port:${port}});` +
         `socket.setTimeout(1500);socket.once("connect",()=>{console.log("open");socket.destroy()});` +
         `socket.once("timeout",()=>socket.destroy());socket.once("error",()=>{});'`,
@@ -129,7 +136,7 @@ export const installWithDevServerStopped = async <T>(
     return await install();
   } finally {
     // Another instance may have started one during this install: narrows that race, a lock would close it.
-    const startedElsewhere = !dev && start && (await sandbox.commands.list()).some((command) => command.envs?.[DEV_COMMAND_ENV]);
+    const startedElsewhere = !dev && start && (await listCommands(sandbox)).some((command) => command.envs?.[DEV_COMMAND_ENV]);
     if (start && !startedElsewhere) await startDevServer(sandbox, start, output);
     else if (start?.readyPort) await waitForDevServer(sandbox, start.readyPort);
   }
@@ -142,8 +149,8 @@ export const PROXY_TARGET_ENV = "TARGET_PORT";
 export type PreviewDevServer = { port: number; start: DevStart };
 
 /** This sandbox's preview dev server, or null when it has no marked dev server and proxy. */
-export const findPreviewDevServer = async (sandbox: Sandbox, requestTimeoutMs?: number) => {
-  const running = await sandbox.commands.list({ requestTimeoutMs });
+export const findPreviewDevServer = async (sandbox: Sandbox | E2bSandbox, requestTimeoutMs?: number) => {
+  const running = await listCommands(asSeam(sandbox), { requestTimeoutMs });
   const port = Number(running.find((command) => command.envs?.[PROXY_TARGET_ENV])?.envs[PROXY_TARGET_ENV]);
   const dev = running.find((command) => command.envs?.[DEV_COMMAND_ENV]);
   return port && dev ? { port, start: devStartOf(dev) } : null;
@@ -162,42 +169,35 @@ const PORT_PROBE_GAP_MS = 500;
  * preview then answers 502. Left alone while an install runs: that has it stopped
  * on purpose and starts it after. Each call is bounded by `timeoutMs`. True when it restarted.
  */
-export const restartDevServerIfDown = async (sandbox: Sandbox, { port, start }: PreviewDevServer, timeoutMs: number) => {
+export const restartDevServerIfDown = async (raw: Sandbox | E2bSandbox, { port, start }: PreviewDevServer, timeoutMs: number) => {
+  const sandbox = asSeam(raw);
   for (let probe = 0; probe < PORT_PROBES; probe++) {
     if (probe) await new Promise((resolve) => setTimeout(resolve, PORT_PROBE_GAP_MS));
     if (await isPortOpen(sandbox, port)) return false;
   }
   const bounds = { timeoutMs, requestTimeoutMs: timeoutMs };
-  const running = await sandbox.commands.list({ requestTimeoutMs: timeoutMs });
+  const running = await listCommands(sandbox, { requestTimeoutMs: timeoutMs });
   if (running.some((command) => INSTALLING.test([command.cmd, ...command.args].join(" ")))) return false;
   for (const dev of running.filter((command) => command.envs?.[DEV_COMMAND_ENV])) {
-    await sandbox.commands.run(killTreeCommand(dev.pid), bounds);
+    await sandbox.run(killTreeCommand(dev.pid), bounds);
   }
   await startDevServer(sandbox, start, { requestTimeoutMs: timeoutMs });
   return true;
 };
 
-type ListedCommand = Awaited<ReturnType<Sandbox["commands"]["list"]>>[number];
-
-const devStartOf = (dev: ListedCommand): DevStart => ({ command: dev.envs[DEV_COMMAND_ENV], envs: dev.envs, cwd: dev.cwd });
+const devStartOf = (dev: SandboxCommand): DevStart => ({ command: dev.envs[DEV_COMMAND_ENV], envs: dev.envs, cwd: dev.cwd });
 
 /** Stops every marked dev server: a resumed boot or another instance can leave two. Returns them. */
 const stopDevServers = async (sandbox: Sandbox) => {
-  const running = (await sandbox.commands.list()).filter((command) => command.envs?.[DEV_COMMAND_ENV]);
-  for (const dev of running) await sandbox.commands.run(killTreeCommand(dev.pid));
+  const running = (await listCommands(sandbox)).filter((command) => command.envs?.[DEV_COMMAND_ENV]);
+  for (const dev of running) await sandbox.run(killTreeCommand(dev.pid));
   return running;
 };
 
 /** Waits for `readyPort` when given; any failure is the safe DevServerStartError. */
 const startDevServer = async (sandbox: Sandbox, start: DevStart, output: DevOutput & { requestTimeoutMs?: number } = {}) => {
   try {
-    await sandbox.commands.run(start.command, {
-      cwd: start.cwd,
-      envs: start.envs,
-      background: true,
-      timeoutMs: 0, // Like the boot's: E2B would kill it after 60s.
-      ...output,
-    });
+    await sandbox.start(start.command, { cwd: start.cwd, envs: start.envs, ...output });
     if (start.readyPort) await waitForDevServer(sandbox, start.readyPort);
   } catch {
     // Process errors can include project env values; expose only our safe message.

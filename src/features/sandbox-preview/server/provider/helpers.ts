@@ -1,5 +1,5 @@
 import { killTreeCommand } from "../dev-server";
-import type { RequestOptions, Sandbox } from "./types";
+import type { RequestOptions, RunOptions, Sandbox } from "./types";
 
 /**
  * Helpers every provider gets for free: they need only `run`, so an adapter
@@ -52,6 +52,15 @@ export const parseProcesses = (stdout: string): SandboxProcess[] =>
 export const listProcesses = async (sandbox: Sandbox, opts: RequestOptions = {}) =>
   parseProcesses((await sandbox.run(LIST_PROCESSES, { ...opts, timeoutMs: 10_000 })).stdout);
 
+/**
+ * The commands running in the sandbox. Without the provider's own list, every
+ * process from /proc stands in: children too, each with its whole inherited
+ * environment, so a restart from it passes more envs than the start did.
+ */
+// shortcut: no adapter lacks listCommands yet; keep only tree roots when one does.
+export const listCommands = (sandbox: Sandbox, opts?: RequestOptions) =>
+  sandbox.listCommands ? sandbox.listCommands(opts) : listProcesses(sandbox, opts);
+
 /** SIGKILLs `pid` and everything under it (see killTreeCommand). */
 export const killTree = (sandbox: Sandbox, pid: number, opts: RequestOptions & { timeoutMs?: number } = {}) =>
   sandbox.run(killTreeCommand(pid), opts);
@@ -62,4 +71,11 @@ export const exists = async (sandbox: Sandbox, path: string, opts: RequestOption
 export const remove = async (sandbox: Sandbox, path: string, opts: RequestOptions = {}) => {
   const result = await sandbox.run(`rm -rf -- ${quote(path)}`, opts);
   if (result.exitCode !== 0) throw new Error(`Could not remove ${path}: ${result.stderr.trim()}`);
+};
+
+/** `run`, but a non-zero exit throws, with E2B's own `commands.run` message ("exit status N"). */
+export const runOrThrow = async (sandbox: Sandbox, command: string, opts?: RunOptions) => {
+  const result = await sandbox.run(command, opts);
+  if (result.exitCode !== 0) throw new Error(`exit status ${result.exitCode}`);
+  return result;
 };

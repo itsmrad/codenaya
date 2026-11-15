@@ -104,3 +104,30 @@ Use the existing seam's `maxSessionMs` to cap lifetime at one hour.
 
 TODO (privacy): update the subprocessor list BEFORE any non-E2B adapter ships;
 the privacy page currently names E2B.
+
+## PR1b status
+
+The preview server paths now go through the seam:
+- `project-sandbox.ts` (the per-user cap, the project kill, and stopping a resumed boot's commands)
+- both sandbox routes
+- `sandbox-registry.ts`
+- `dev-server.ts` and `recover-esbuild.ts`
+
+`getOwnedSandbox` parses the client's id with `parsePublicSandboxIdOrNull`. It returns
+null for a malformed id or an unknown prefix, without connecting. Otherwise it connects
+through `getProvider(prefix)` and still checks `info().metadata.userId`. E2B ids stay
+unprefixed in responses until PR3b.
+
+Two optional `Sandbox` methods were added, both kept as they behave today:
+- **`listCommands`** (E2B: `commands.list`) returns envd-started command roots with the
+  envs exactly as passed at start. The dev server marker (`CODENAYA_DEV_COMMAND`)
+  and its restart rely on that, so a restart passes the same envs it was started with.
+  A provider without it falls back to the `/proc` view from `listProcesses`. That view
+  includes children and each process's whole inherited environment, so a restart from
+  it would pass more envs than the start did. No adapter uses the fallback yet.
+- **`killCommand`** (E2B: `commands.kill`) is only the fallback when the kill-tree
+  `run` itself fails while stopping a resumed boot's commands (#486).
+
+`findPreviewDevServer` and `restartDevServerIfDown` still accept the raw E2B handle that
+`check-build.ts` passes; PR2b drops that shim and `e2bHandleOf`. `createProjectSandbox`,
+`writeProjectFiles` and `SANDBOX_TEMPLATE` stay until the agent paths stop importing them.
