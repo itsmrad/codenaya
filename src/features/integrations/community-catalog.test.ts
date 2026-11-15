@@ -35,8 +35,9 @@ const entrySchema = z.object({
 const servers = catalogJson as CommunityServer[];
 
 describe("community-catalog.json", () => {
-  it("holds at least 500 valid entries", () => {
-    expect(servers.length).toBeGreaterThanOrEqual(500);
+  it("holds a nonempty top-500 selection after vetted-provider exclusions", () => {
+    expect(servers.length).toBeGreaterThan(0);
+    expect(servers.length).toBeLessThanOrEqual(500);
     for (const entry of servers) expect(entrySchema.safeParse(entry), entry.id).toMatchObject({ success: true });
   });
 
@@ -49,6 +50,13 @@ describe("community-catalog.json", () => {
   it("is sorted by stars, then id, so regeneration diffs stay readable", () => {
     const sorted = [...servers].sort((a, b) => b.stars - a.stars || a.id.localeCompare(b.id));
     expect(servers.map((entry) => entry.id)).toEqual(sorted.map((entry) => entry.id));
+  });
+
+  it("omits remote hosts already offered by vetted providers", () => {
+    const trusted = new Set(Object.values(PROVIDERS).flatMap((provider) => [...provider.trustedHostnames]));
+    for (const entry of servers) {
+      if (entry.remoteUrl) expect(trusted.has(new URL(entry.remoteUrl).hostname), entry.id).toBe(false);
+    }
   });
 
   it("offers remote endpoints only with an http or sse transport", () => {

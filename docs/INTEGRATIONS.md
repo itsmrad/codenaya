@@ -192,7 +192,7 @@ only) and, if its authorization server is cross-site, `trustedAuthorizationServe
 
 ## Community catalog (unreviewed)
 
-Below the vetted providers, the catalog shows a **Community** section: the 500
+Below the vetted providers, the catalog shows a **Community** section: up to 500 of the
 most-starred servers from the public
 [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) list
 (MIT, attributed in `THIRD_PARTY_NOTICES.md`). It is labelled "not reviewed",
@@ -203,7 +203,10 @@ and nothing in it is trusted.
 - **Remote vs local.** An entry gets a `remoteUrl` (and `http`/`sse` transport)
   only from the official MCP registry (its server list, `remotes[]`), matched to
   its GitHub repo. The registry publisher must be the repo's GitHub owner
-  (`io.github.<owner>/…`) or own the domain the remote is served on. URLs are
+  (`io.github.<owner>/…`) or own an owner-named registrable domain the remote
+  is served on (recognised single-label suffixes only; other domain vouches fail
+  closed). Shared hosting/proxy domains cannot vouch. Entries matching vetted
+  providers’ trusted hosts are omitted in favour of the vetted entry. URLs are
   never scraped from READMEs. Everything else is `stdio` and shows
   "Needs local runtime (coming with #545)", disabled.
 - **Auth** is `api-key` when the registry remote declares headers, `oauth` when

@@ -22,6 +22,8 @@ import {
   parseGithubUrl,
   parseReadme,
   publisherVouches,
+  readTrustedHostnames,
+  isVettedRemote,
   slugify,
   termMatcher,
 } from "./parse-readme.mjs";
@@ -130,14 +132,14 @@ const usableRemote = (remote) => {
 };
 
 /** Registry servers indexed by GitHub repo key; the repo owner's own entry first. */
-function indexRegistry(servers) {
+function indexRegistry(servers, requireVouch = true) {
   const byRepo = new Map();
   for (const server of servers) {
     const repo = parseGithubUrl(server.repository.url);
     const remote = server.remotes.filter(usableRemote).sort((a, b) => (a.type === "sse") - (b.type === "sse"))[0];
     if (!repo || !remote) continue;
     const vouch = publisherVouches(server.name, repo, remote.url);
-    if (!vouch) continue;
+    if (requireVouch && !vouch) continue;
     const candidate = {
       name: server.name,
       subfolder: (server.repository.subfolder ?? "").replace(/^\/|\/$/g, ""),
@@ -213,7 +215,6 @@ async function main() {
   const terms = parseExcludeTerms(readFileSync(values["exclude-file"], "utf8"));
   const limit = Number(values.limit);
   const maxAgeMs = Number(values["cache-hours"]) * 3_600_000;
-  const starsAsOf = new Date().toISOString().slice(0, 10);
 
   const parsed = parseReadme(values.readme ? readFileSync(values.readme, "utf8") : fetchReadme());
   const stats = { parsed: parsed.length, nonGithub: 0, duplicate: 0, excluded: 0, dead: 0, missing: 0 };
@@ -233,6 +234,7 @@ async function main() {
   stats.excluded = dropped;
 
   const stars = await fetchStars([...new Set(kept.map((entry) => entry.repo.key))], maxAgeMs);
+  const starsAsOf = new Date(stars.fetchedAt).toISOString().slice(0, 10);
   const canonical = new Set();
   const alive = kept.filter((entry) => {
     const info = stars.repos[entry.repo.key];
@@ -246,12 +248,25 @@ async function main() {
     return true;
   });
 
-  const byRepo = indexRegistry(await fetchRegistry(maxAgeMs));
+  const registry = await fetchRegistry(maxAgeMs);
+  const byRepo = indexRegistry(registry);
+  const trustedHostnames = readTrustedHostnames(readFileSync(resolve(HERE, "../../src/features/integrations/catalog.ts"), "utf8"));
+  // Identify vetted duplicates even when their domain vouch fails the stricter rule.
+  const vettedByRepo = indexRegistry(registry.map((server) => ({
+    ...server, remotes: server.remotes.filter((remote) => usableRemote(remote) && isVettedRemote(remote.url, trustedHostnames)),
+  })), false);
+  stats.vetted = 0;
   const used = new Set();
   const ranked = alive
     .map((entry) => ({ entry, stars: stars.repos[entry.repo.key].stars }))
     .sort((a, b) => b.stars - a.stars || a.entry.name.localeCompare(b.entry.name))
     .slice(0, limit)
+    .filter(({ entry }) => {
+      const renamed = { ...entry.repo, key: stars.repos[entry.repo.key].nameWithOwner.toLowerCase() };
+      const duplicate = matchRemote(vettedByRepo, renamed) ?? matchRemote(vettedByRepo, entry.repo);
+      if (duplicate) stats.vetted++;
+      return !duplicate;
+    })
     .map(({ entry, stars: count }) => {
       const renamed = { ...entry.repo, key: stars.repos[entry.repo.key].nameWithOwner.toLowerCase() };
       const match = matchRemote(byRepo, renamed) ?? matchRemote(byRepo, entry.repo);

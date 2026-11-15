@@ -161,17 +161,37 @@ export function applyExclusions(entries, terms) {
   return { kept, dropped: entries.length - kept.length };
 }
 
-/**
- * Whether a registry publisher is accountable for this repo or remote. The
- * registry verifies `io.github.<user>/…` names against GitHub and reverse-DNS
- * names (`com.example/…`) against that domain, but any publisher may *claim*
- * any repository URL. So a remote is only taken from the repo's GitHub owner
- * ("owner"), or from the owner of the domain it is served on ("domain").
- */
+/** Shared hosting cannot establish that a repo publisher owns a remote. */
+const HOSTING_DOMAINS = ["smithery.ai", "glama.ai", "github.io", "workers.dev", "pages.dev", "vercel.app", "netlify.app"];
+// Fail closed for unrecognised/multi-label suffixes; no guessed eTLD+1 parsing.
+const OWNER_DOMAIN_SUFFIXES = new Set(["com", "org", "net", "io", "dev", "app", "ai", "tech", "cloud", "tools", "software"]);
+
+/** Domain vouches require an exact owner-named domain, not a proxy's namespace. */
 export function publisherVouches(serverName, repo, remoteUrl) {
   const namespace = serverName.toLowerCase().split("/")[0];
+  const host = new URL(remoteUrl).hostname.toLowerCase();
+  if (HOSTING_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`))) return null;
   if (namespace === `io.github.${repo.owner.toLowerCase()}`) return "owner";
   const domain = namespace.split(".").reverse().join(".");
-  const host = new URL(remoteUrl).hostname.toLowerCase();
-  return domain.includes(".") && (host === domain || host.endsWith(`.${domain}`)) ? "domain" : null;
+  const labels = domain.split(".");
+  return labels.length === 2 && labels[0] === repo.owner.toLowerCase()
+    && OWNER_DOMAIN_SUFFIXES.has(labels[1])
+    && (host === domain || host.endsWith(`.${domain}`)) ? "domain" : null;
+}
+
+/** Read literal trusted-host arrays from the vetted catalog without importing app code. */
+export function readTrustedHostnames(source) {
+  const arrays = [...source.matchAll(/trustedHostnames:\s*\[([^\]]*)\]/g)];
+  if (!arrays.length) throw new Error("No trustedHostnames found in vetted catalog");
+  return new Set(arrays.flatMap((match) => {
+    const values = [...match[1].matchAll(/"([^"\n]+)"/g)].map((value) => value[1].toLowerCase());
+    if (!values.length || match[1].replace(/"[^"\n]+"|[,\s]/g, "")) {
+      throw new Error("Expected literal trustedHostnames in vetted catalog");
+    }
+    return values;
+  }));
+}
+
+export function isVettedRemote(remoteUrl, trustedHostnames) {
+  return !!remoteUrl && trustedHostnames.has(new URL(remoteUrl).hostname.toLowerCase());
 }

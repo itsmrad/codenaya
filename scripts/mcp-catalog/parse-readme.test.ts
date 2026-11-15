@@ -8,6 +8,8 @@ import {
   parseGithubUrl,
   parseReadme,
   publisherVouches,
+  readTrustedHostnames,
+  isVettedRemote,
 } from "./parse-readme.mjs";
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
@@ -93,5 +95,34 @@ describe("publisherVouches", () => {
   it("rejects a third party claiming someone else's repo", () => {
     expect(publisherVouches("io.github.mallory/hub", repo, "https://evil.example/mcp")).toBeNull();
     expect(publisherVouches("com.mallory/hub", repo, "https://mcp.acme.com/mcp")).toBeNull();
+  });
+});
+
+
+describe("remote trust boundaries", () => {
+  const repo = { owner: "acme" };
+
+  it("rejects hosting aggregators, including an owner namespace", () => {
+    expect(publisherVouches("ai.smithery/hub", repo, "https://server.smithery.ai/acme/mcp")).toBeNull();
+    expect(publisherVouches("io.github.acme/hub", repo, "https://server.smithery.ai/acme/mcp")).toBeNull();
+  });
+
+  it("requires the publisher domain to match the repo owner", () => {
+    expect(publisherVouches("com.mallory/hub", repo, "https://mcp.mallory.com/mcp")).toBeNull();
+    expect(publisherVouches("com.acme/hub", repo, "https://mcp.acme.com/mcp")).toBe("domain");
+    expect(publisherVouches("uk.co/hub", { owner: "co" }, "https://unrelated.co.uk/mcp")).toBeNull();
+    expect(publisherVouches("com.acme/hub", repo, "https://acme.com.evil.example/mcp")).toBeNull();
+  });
+
+  it("filters exact vetted hosts read from catalog source", () => {
+    const source = readFileSync(new URL("../../src/features/integrations/catalog.ts", import.meta.url), "utf8");
+    const trusted = readTrustedHostnames(source);
+    expect(trusted.size).toBeGreaterThan(0);
+    for (const host of trusted) {
+      expect(isVettedRemote(`https://${host}/mcp`, trusted)).toBe(true);
+      expect(isVettedRemote(`https://${host}.evil.example/mcp`, trusted)).toBe(false);
+    }
+    expect(isVettedRemote(undefined, trusted)).toBe(false);
+    expect(() => readTrustedHostnames("trustedHostnames: [variable]")).toThrow();
   });
 });
