@@ -11,5 +11,5 @@ export type Trail = {
   messages: Message[]; tasks: Task[]; usage: Usage[]; sandboxEvents: SandboxEvent[];
   consoleErrors: { text: string; url: string }[];
   capped: boolean; error?: string;
-  preview: { loaded: boolean; overlay: boolean; screenshot?: string; errors?: string[] };
+  preview: { loaded: boolean; overlay: boolean; screenshot?: string; screenshots?: { route: string; file: string }[]; errors?: string[] };
 };

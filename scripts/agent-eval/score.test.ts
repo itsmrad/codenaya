@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { tokenCost } from "./cost";
 import { score } from "./score";
-import { isGeneratedApp, isRuntimeError, sanitize } from "./capture";
+import { isGeneratedApp, isRuntimeError, routeUrl, sanitize, screenshotFile } from "./capture";
 import { assertDevTarget } from "./guard";
 import { ADMIN_TITLE, deleteAfterScoring, projectTitle } from "./projects";
 import type { Trail } from "./types";
@@ -101,6 +101,10 @@ describe("agent evaluation", () => {
     expect(result).toMatchObject({ mode: "swarm", messageMs: 6000, swarm: { tasksPlanned: 2, workers: 3, failed: 1, unfinished: 1, maxDepth: 2, integratorTurns: 2 } });
     expect(result.swarm!.selfChecks.map((c) => c.selfCheck)).toEqual(["ok", "skipped", "failed"]);
     expect(score(fixture(), []).swarm).toBeNull();
+  });
+  it("names one screenshot per route and keeps the sandbox host and query", () => {
+    expect(["/", "/menu", "/location/hours/"].map(screenshotFile)).toEqual(["app.png", "app-menu.png", "app-location-hours.png"]);
+    expect(routeUrl("https://5173-abc.e2b.app/?t=1", "/menu")).toBe("https://5173-abc.e2b.app/menu?t=1");
   });
   it("names projects from a title template and rejects invalid names", () => {
     expect(projectTitle(ADMIN_TITLE, "booking", "claude-haiku-5-5")).toBe("Night build — booking — single Haiku 5.5");

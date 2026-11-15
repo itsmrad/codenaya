@@ -21,7 +21,7 @@ async function main() {
   for (const name of ["NEXT_PUBLIC_CONVEX_URL", "CODENAYA_CONVEX_INTERNAL_KEY", "CLERK_SECRET_KEY", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "E2B_API_KEY"]) {
     if (!process.env[name]) throw new Error(`Missing ${name}: run with Infisical dev`);
   }
-  const prompts: Record<string, { prompt: string; rubric: string[] }> = JSON.parse(await readFile("scripts/agent-eval/prompts.json", "utf8"));
+  const prompts: Record<string, { prompt: string; rubric: string[]; routes?: string[] }> = JSON.parse(await readFile("scripts/agent-eval/prompts.json", "utf8"));
   const models = values.models!.split(",");
   const names = values.prompts!.split(",");
   const count = Number(values.runs);
@@ -56,11 +56,11 @@ async function main() {
         try {
           const cap = Math.min(remaining, Number(values["max-usd"] ?? MODELS[model].cap));
           if (name === "followup" && !saasId) throw new Error("Cannot follow up: saas did not create a project");
-          const trail = await drive(page, user, { id: `${directory}/${id}`, model, mode, prompt: prompts[name].prompt, maxUsd: cap, directory: runDirectory, projectId: name === "followup" ? saasId : undefined, title: titleTemplate && projectTitle(titleTemplate, name, model, mode) });
+          const trail = await drive(page, user, { id: `${directory}/${id}`, model, mode, prompt: prompts[name].prompt, maxUsd: cap, directory: runDirectory, projectId: name === "followup" ? saasId : undefined, title: titleTemplate && projectTitle(titleTemplate, name, model, mode), routes: prompts[name].routes });
           projectId = trail.projectId as Id<"projects"> | undefined;
           const result: Judged = score(trail, projectId ? await finalFiles(projectId) : []);
           result.id = id;
-          if (values.judge && trail.preview.screenshot) result.judge = await judge(trail.id, values["judge-model"]!, prompts[name].prompt, prompts[name].rubric, `${runDirectory}/${trail.preview.screenshot}`);
+          if (values.judge && trail.preview.screenshots?.length) result.judge = await judge(trail.id, values["judge-model"]!, prompts[name].prompt, prompts[name].rubric, trail.preview.screenshots.map((s) => ({ route: s.route, path: `${runDirectory}/${s.file}` })));
           scores.push(result);
           await writeFile(`${runDirectory}/score.json`, sanitize(result));
           scored = true;

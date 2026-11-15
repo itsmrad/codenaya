@@ -10,7 +10,7 @@ import { capture, probePreview, sanitize, screenshot } from "./capture";
 import { MODELS, readUsage, recordUsage, totalUsd } from "./cost";
 import type { Mode, Trail } from "./types";
 
-type Options = { id: string; model: string; mode: Mode; prompt: string; maxUsd: number; directory: string; projectId?: Id<"projects">; title?: string };
+type Options = { id: string; model: string; mode: Mode; prompt: string; maxUsd: number; directory: string; projectId?: Id<"projects">; title?: string; routes?: string[] };
 
 export async function post(page: Page, path: string, data: unknown) {
   const response = await page.request.post(path, { data, timeout: 60_000 });
@@ -93,7 +93,7 @@ export async function drive(page: Page, user: ConvexHttpClient, options: Options
     if (options.title && !options.projectId) await (await userConvexClient(page)).mutation(api.projects.rename, { id: trail.projectId as Id<"projects">, name: options.title });
     await page.getByRole("tab", { name: "Preview", exact: true }).click({ timeout: 60_000 });
     await observe(page, user, options, trail);
-    if (trail.preview.loaded || trail.preview.overlay) await screenshot(page, options.directory, trail);
+    if (trail.preview.loaded || trail.preview.overlay) await screenshot(page, options.directory, trail, options.routes);
   } catch (error) {
     trail.error = error instanceof Error ? error.message : String(error);
   } finally {
