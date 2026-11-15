@@ -17,6 +17,7 @@ import {
   classifyEnvKey,
   isValidEnvKey,
 } from "@/features/integrations/env-keys";
+import { publicValueSecretRule } from "@/features/integrations/credential-guard";
 import {
   useDeleteEnvVar,
   useEnvVars,
@@ -81,6 +82,10 @@ export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogPr
       const key = value.key.trim();
       try {
         if (classifyEnvKey(key) === "public") {
+          if (publicValueSecretRule(value.value)) {
+            toast.error(`This looks like a secret key. ${key} would be published in the browser bundle; use a name without a public prefix.`);
+            return;
+          }
           await setPublicEnvVar({ projectId, key, value: value.value });
         } else {
           await ky.post("/api/env-vars", {
