@@ -2,7 +2,8 @@ Provider logo sources
 
 Supabase, Neon, GitHub, Stripe, Prisma, Sentry, Cloudflare, Linear, PostHog,
 Resend, Upstash, Sanity, PlanetScale, Notion, Atlassian, GitLab, Clerk, Hugging
-Face, Webflow, Netlify and Railway SVGs:
+Face, Webflow, Netlify, Railway, Mixpanel, Contentful and Contentful EU (a copy of
+contentful.svg) SVGs:
 https://github.com/simple-icons/simple-icons/tree/develop/icons
 Simple Icons is distributed under CC0 1.0 Universal:
 https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md
@@ -10,6 +11,10 @@ https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md
 Exa, Tavily and Firecrawl SVGs: original single-letter monograms made for this
 project (they are not the vendors' logos), dedicated to the public domain under
 CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+
+Amplitude and Amplitude EU SVGs: a generic bar-chart glyph drawn for this project,
+not the Amplitude logo (Simple Icons does not carry it). Dedicated to the public
+domain under CC0 1.0 Universal.
 
 Context7 SVG: https://github.com/upstash/context7/blob/master/public/context7-icon.svg
 The MIT License (MIT)

@@ -35,6 +35,10 @@
  * not become stale advice.
  */
 
+import {
+  CONTENTFUL_DESTRUCTIVE_TOOLS,
+  CONTENTFUL_READ_TOOLS,
+} from "./contentful-tools";
 import { POSTHOG_DESTRUCTIVE_TOOLS } from "./posthog-destructive-tools";
 import { POSTHOG_READ_TOOLS } from "./posthog-read-tools";
 
@@ -48,6 +52,52 @@ const NO_URL_SCOPING: ProviderScopeCapabilities = {
   queryParams: [],
   headers: [],
 };
+
+/**
+ * Region-independent parts of the Amplitude entries. The US and EU hosts serve
+ * the same tools; each region is its own entry with its own trusted hostname.
+ *
+ * Full inventory: https://amplitude.com/docs/amplitude-ai/amplitude-mcp#available-tools-and-capabilities
+ * (reviewed 2026-11-15). Action-dispatching tools that can create, edit, share,
+ * sync or delete are gated, as is `run_amp`, which proxies the Developer API.
+ * Ad-hoc queries, chart data, natural-language taxonomy search, user profiles,
+ * session replays, feedback comments, agent transcripts and results, Wave,
+ * and warehouse connections are neither listed write nor read, so they stay gated.
+ */
+const AMPLITUDE_SHARED = {
+  description: "Query product analytics and manage charts, dashboards, cohorts, and experiments.",
+  category: "Analytics",
+  authModes: ["oauth"],
+  supportsReadOnly: false,
+  scope: NO_URL_SCOPING,
+  destructiveTools: [
+    "manage_amp_context", "use_amplitude_chart_monitors", "render_amplitude_chart",
+    "use_amp_dashboards", "use_amp_notebooks", "use_amp_comments", "share_amp_entities",
+    "manage_amp_entities", "use_amplitude_cohorts", "use_amp_experiments", "use_amp_flags",
+    "use_amplitude_metrics", "manage_amp_events", "manage_amp_properties", "manage_amp_branches",
+    "manage_wave_opportunities", "manage_wave_product_areas", "manage_wave_verification_artifacts",
+    "use_amp_ai_visibility", "run_amp",
+  ],
+  readOnlyTools: [
+    "get_amp_taxonomy", "get_amplitude_context", "get_from_url", "get_group_types",
+    "get_transformations", "search_amp_entities",
+  ],
+  notes:
+    "Acts as the signed-in Amplitude user; writes also need the Use MCP (write) role action. Org admins can block MCP under Settings > Content Access. Use the entry matching your data region. No URL-level read-only mode.",
+} as const;
+
+/** Region-independent parts of the Contentful entries; same tools on both hosts. */
+const CONTENTFUL_SHARED = {
+  description: "Search, edit, and publish entries, assets, content types, and releases.",
+  category: "Content",
+  authModes: ["oauth"],
+  supportsReadOnly: false,
+  scope: NO_URL_SCOPING,
+  destructiveTools: CONTENTFUL_DESTRUCTIVE_TOOLS,
+  readOnlyTools: CONTENTFUL_READ_TOOLS,
+  notes:
+    "Needs the Contentful MCP app installed in each space and environment; its configuration chooses the allowed tool categories and read-only or read/write per environment. Pick spaces and environments at every sign-in; environment aliases are not supported. Use the entry matching your organization's region.",
+} as const;
 
 /**
  * Freeze the registry all the way down.
@@ -1316,6 +1366,92 @@ const CATALOG = {
     oauthScopes: ["workspace:member"],
     notes:
       "OAuth as a user; project tokens are not accepted. You choose the workspaces and projects at consent. Cloud agent tasks are billed. No URL-level read-only mode.",
+  },
+
+  // Regions: https://amplitude.com/docs/amplitude-ai/amplitude-mcp#regions
+  amplitude: {
+    ...AMPLITUDE_SHARED,
+    id: "amplitude",
+    displayName: "Amplitude (US)",
+    logo: "/integrations/amplitude.svg",
+    mcpUrl: "https://mcp.amplitude.com/mcp",
+    trustedHostnames: ["mcp.amplitude.com"],
+  },
+
+  "amplitude-eu": {
+    ...AMPLITUDE_SHARED,
+    id: "amplitude-eu",
+    displayName: "Amplitude (EU)",
+    logo: "/integrations/amplitude-eu.svg",
+    mcpUrl: "https://mcp.eu.amplitude.com/mcp",
+    trustedHostnames: ["mcp.eu.amplitude.com"],
+  },
+
+  // https://docs.mixpanel.com/docs/mcp. US only: the EU host's protected-resource
+  // metadata nominates the US authorization server while its docs require
+  // eu.mixpanel.com sign-in, so an EU entry is deferred until that is resolved.
+  mixpanel: {
+    id: "mixpanel",
+    displayName: "Mixpanel (US)",
+    description: "Run product analytics queries and manage boards, Lexicon, cohorts, and flags.",
+    category: "Analytics",
+    logo: "/integrations/mixpanel.svg",
+    mcpUrl: "https://mcp.mixpanel.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.mixpanel.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full table at https://docs.mixpanel.com/docs/mcp#available-tools (reviewed 2026-11-15).
+    destructiveTools: [
+      "Create-Dashboard", "Update-Dashboard", "Duplicate-Dashboard", "Delete-Dashboard",
+      "Edit-Event", "Edit-Property", "Bulk-Edit-Events", "Bulk-Edit-Properties",
+      "Create-Tag", "Rename-Tag", "Delete-Tag", "Dismiss-Issues", "Update-Business-Context",
+      "Dismiss-Duplicate-Group", "Merge-Group", "Create-Tracking-Plan", "Update-Tracking-Plan",
+      "Delete-Tracking-Plan", "Create-Custom-Property", "Update-Custom-Property",
+      "Create-Cohort", "Update-Cohort", "Delete-Cohort", "Create-Lookup-Table",
+      "Update-Lookup-Table", "Create-Metric", "Update-Metric", "Create-Experiment",
+      "Update-Experiment", "Create-Feature-Flag", "Update-Feature-Flag",
+    ],
+    // Queries (Run-Query, Get-Report and Get-Experiment results, Display-Query) count against Query API
+    // limits; property values, lookup-table rows, replays and the audit log can carry
+    // user PII; health checks, pre-launch checks, prior-experiment and duplicate
+    // searches are analyses. All of those stay gated.
+    readOnlyTools: [
+      "Describe-Cohort-Schema", "Get-Business-Context", "Get-Cohort", "Get-Custom-Property",
+      "Get-Dashboard", "Get-Events", "Get-Experiment-Results-Interpretation-Guidance",
+      "Get-Experiment-Setup-Guidance", "Get-Feature-Flag", "Get-Feature-Flag-Lifecycle-Guidance",
+      "Get-Feature-Flag-Setup-Guidance", "Get-Issues", "Get-Lexicon-URL", "Get-Metric",
+      "Get-Projects", "Get-Query-Schema", "Get-Tracking-Plan", "List-Cohorts", "List-Dashboards",
+      "List-Experiments", "List-Feature-Flags", "List-Metrics", "List-Organizations",
+      "List-Properties", "List-Tracking-Plans", "Search-Entities",
+    ],
+    // Mandatory plus documented optional scopes: https://docs.mixpanel.com/docs/mcp#required-oauth-scopes
+    oauthScopes: [
+      "projects", "analysis", "events", "insights", "segmentation", "retention", "data:read",
+      "funnels", "flows", "data_definitions", "dashboard_reports", "bookmarks", "user_details",
+      "business_context",
+    ],
+    notes:
+      "An org admin must enable MCP in Settings > Org > AI Settings first (on by default for free and growth accounts created after August 1, 2026; changes take up to 15 minutes). US data region only. No URL-level read-only mode.",
+  },
+
+  // Regions: https://www.contentful.com/developers/docs/tools/mcp-server/#choose-your-region-global-vs-eu
+  contentful: {
+    ...CONTENTFUL_SHARED,
+    id: "contentful",
+    displayName: "Contentful",
+    logo: "/integrations/contentful.svg",
+    mcpUrl: "https://mcp.contentful.com/mcp",
+    trustedHostnames: ["mcp.contentful.com"],
+  },
+
+  "contentful-eu": {
+    ...CONTENTFUL_SHARED,
+    id: "contentful-eu",
+    displayName: "Contentful (EU)",
+    logo: "/integrations/contentful-eu.svg",
+    mcpUrl: "https://mcp.eu.contentful.com/mcp",
+    trustedHostnames: ["mcp.eu.contentful.com"],
   },
 } as const satisfies Record<string, ProviderDefinition>;
 
