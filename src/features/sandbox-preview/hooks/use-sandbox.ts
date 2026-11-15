@@ -26,6 +26,8 @@ import {
   afterBootStream,
 } from "@/features/sandbox-preview/utils/boot-stream-end";
 
+import { detectFrameworkFromFiles } from "@/features/sandbox-preview/utils/dev-command";
+
 import { Id, Doc } from "../../../../convex/_generated/dataModel";
 
 const NETWORK_ERROR_MESSAGE =
@@ -95,6 +97,7 @@ export const useSandbox = ({
   const syncPromiseRef = useRef<Promise<void>>(Promise.resolve());
   /** Path → content the sandbox already has, so a sync only sends real edits. */
   const syncedContentRef = useRef(new Map<string, string>());
+  const bootFrameworkRef = useRef<ReturnType<typeof detectFrameworkFromFiles>>(null);
 
   /**
    * Kill the current sandbox. Uses fetch with keepalive for reliability
@@ -136,6 +139,7 @@ export const useSandbox = ({
         setBootHistory({});
 
         const flatFiles = buildFlatFileList(files);
+        bootFrameworkRef.current = detectFrameworkFromFiles(flatFiles);
         syncedContentRef.current = new Map(
           flatFiles.map((file) => [file.path, file.content]),
         );
@@ -278,6 +282,30 @@ export const useSandbox = ({
     settings?.installCommand,
   ]);
 
+  // Restart: kill existing sandbox and trigger a fresh boot
+  const restart = useCallback(() => {
+    const sandboxId = sandboxIdRef.current;
+    if (sandboxId) {
+      killSandbox(sandboxId);
+      sandboxIdRef.current = null;
+    }
+
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+
+    hasStartedRef.current = false;
+    setStatus("idle");
+    setPreviewUrl(null);
+    setError(null);
+    setErrorKind(null);
+    setAppError(null);
+    buildErrors.reset();
+    setTerminalOutput("");
+    setPhase(null);
+    setBootHistory({});
+    setRestartKey((k) => k + 1);
+  }, [killSandbox, buildErrors]);
+
   // Sync file changes to the running sandbox (hot-reload)
   useEffect(() => {
     const sandboxId = sandboxIdRef.current;
@@ -294,10 +322,15 @@ export const useSandbox = ({
       // mistake an unacknowledged write for content the sandbox already has.
       syncPromiseRef.current = syncPromiseRef.current.then(async () => {
         if (cancelled || !isCurrent()) return;
-        const changedFiles = getChangedFiles(
-          buildFlatFileList(files),
-          syncedContentRef.current,
-        );
+        const flatFiles = buildFlatFileList(files);
+        const framework = detectFrameworkFromFiles(flatFiles);
+        // Reinstall copies the old dev command/env and leaves the proxy on its
+        // original port. Reuse Restart so both are recomputed for the new app.
+        if (framework && framework !== bootFrameworkRef.current) {
+          restart();
+          return;
+        }
+        const changedFiles = getChangedFiles(flatFiles, syncedContentRef.current);
         if (changedFiles.length === 0) return;
 
         // The dev server reports the error again if this edit doesn't fix it.
@@ -352,7 +385,7 @@ export const useSandbox = ({
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [enabled, files, status, settings?.installCommand, buildErrors]);
+  }, [enabled, files, status, settings?.installCommand, buildErrors, restart]);
 
   // Cleanup sandbox on unmount or when disabled
   useEffect(() => {
@@ -400,30 +433,6 @@ export const useSandbox = ({
       hasStartedRef.current = false;
     };
   }, [killSandbox]);
-
-  // Restart: kill existing sandbox and trigger a fresh boot
-  const restart = useCallback(() => {
-    const sandboxId = sandboxIdRef.current;
-    if (sandboxId) {
-      killSandbox(sandboxId);
-      sandboxIdRef.current = null;
-    }
-
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-
-    hasStartedRef.current = false;
-    setStatus("idle");
-    setPreviewUrl(null);
-    setError(null);
-    setErrorKind(null);
-    setAppError(null);
-    buildErrors.reset();
-    setTerminalOutput("");
-    setPhase(null);
-    setBootHistory({});
-    setRestartKey((k) => k + 1);
-  }, [killSandbox, buildErrors]);
 
   return {
     status,
