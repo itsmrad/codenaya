@@ -25,6 +25,12 @@ describe("coding agent integration instructions", () => {
     );
   });
 
+  it("requires internal links to point at routes the app defines", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "Every internal link (<Link to>, <a href=\"/...\">, navigate()) must point to a route the app defines",
+    );
+  });
+
   it("requires remote provisioning to be applied and verified", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       "Creating or editing a migration file does not change the remote database",

@@ -24,6 +24,7 @@ import { NETWORK_FAILURE } from "@/features/sandbox-preview/utils/app-error";
 import { withErrorHints } from "@/features/sandbox-preview/utils/error-recipes";
 import {
   missingReferencedFiles,
+  linksWithoutRoutes,
   undeclaredPackages,
   unresolvedImports,
 } from "@/features/sandbox-preview/utils/missing-references";
@@ -372,6 +373,7 @@ export const checkProjectBuild = async ({
     ...missingReferencedFiles(files),
     ...undeclaredPackages(files),
     ...unresolvedImports(files, paths),
+    ...linksWithoutRoutes(files),
   ];
   if (problems.length > 0) {
     return (
