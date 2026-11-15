@@ -17,7 +17,7 @@ test.describe("landing page", () => {
       await page.goto("/");
 
       await expect(
-        page.getByRole("heading", { level: 1, name: "Your key. Your AI model.", exact: true }),
+        page.getByRole("heading", { level: 1, name: "Build with AI." }),
       ).toBeVisible();
       await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
       await expect(page.getByText("[ BYOK: no credits used ]", { exact: true })).toBeVisible();
@@ -71,7 +71,7 @@ test.describe("landing layout", () => {
     await page.goto("/");
 
     const header = await page.locator("header").boundingBox();
-    const heading = await page.getByRole("heading", { level: 1, name: "Your key. Your AI model.", exact: true }).boundingBox();
+    const heading = await page.getByRole("heading", { level: 1, name: "Build with AI." }).boundingBox();
     expect(heading!.y - (header!.y + header!.height)).toBeGreaterThanOrEqual(24);
 
     const composer = await page

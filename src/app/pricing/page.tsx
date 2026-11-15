@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 export const metadata: Metadata = {
   title: "Pricing — Codenaya",
   description:
-    "Start free with 300 credits a month, or go Pro for 2,000. Bring your own key for unlimited runs on any plan.",
+    "Start free, or go Pro for more credits. Bring your own key for unlimited runs on any plan.",
 };
 
 const { free, pro } = PLANS;

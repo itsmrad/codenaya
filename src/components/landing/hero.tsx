@@ -18,7 +18,7 @@ const CHIPS = ["BYOK: no credits used", "Choose your model", "GitHub import + ex
 const NAMED_PROVIDERS = AI_PROVIDER_IDS.filter((id) => id !== "custom").length;
 
 const STATS = [
-  { value: 300, suffix: "", caption: "Free credits every month" },
+  { value: 0, suffix: "", caption: "Credits used by runs on your own key" },
   { value: NAMED_PROVIDERS, suffix: "+", caption: "Key providers, plus any OpenAI-compatible endpoint" },
 ];
 
@@ -50,9 +50,9 @@ export const LandingHero = () => {
             {...enter(0.2)}
             className="mt-7 text-[2.75rem] font-medium leading-[1.04] tracking-[-0.03em] text-foreground sm:text-6xl lg:text-[5.25rem]"
           >
-            Your key.
+            Build with AI.
             <br />
-            Your AI <span className="text-brand">model</span>.
+            Ship from your <span className="text-brand">browser</span>.
           </motion.h1>
 
           <motion.p {...enter(0.3)} className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">

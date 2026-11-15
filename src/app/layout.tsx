@@ -32,7 +32,7 @@ const nerdMono = IBM_Plex_Mono({
   weight: ["400", "500", "600", "700"],
 });
 
-const title = "Codenaya — Your key. Your AI model.";
+const title = "Codenaya — AI-Powered Browser IDE";
 const description = "Bring your own key on any plan and choose your AI model. Import from GitHub, preview live, then export or download a ZIP. BYOK runs use no credits.";
 
 // Absolute base for Open Graph / Twitter image URLs.
@@ -46,7 +46,7 @@ const ogImage = {
   url: "/og.png",
   width: 1200,
   height: 630,
-  alt: "Codenaya — Your key. Your AI model.",
+  alt: "Codenaya — Build with AI. Ship from your browser.",
 };
 
 export const metadata: Metadata = {
