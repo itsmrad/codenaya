@@ -1,4 +1,5 @@
-import type { ProjectFramework } from "./project-framework";
+import { isProjectFramework, type ProjectFramework } from "./project-framework";
+import { readPendingStart, savePendingStart } from "@/lib/pending-intent";
 import { PLAN_MODE, SWARM_MODE, type MessageMode } from "@/features/conversations/plan-mode";
 
 /**
@@ -20,10 +21,10 @@ let draftRevision = 0;
 
 const isMode = (value: unknown): value is MessageMode => value === PLAN_MODE || value === SWARM_MODE;
 
-/** Keep legacy plain prompts; drafts with a mode or framework are stored as JSON. */
+/** Keep the mode with the draft; a re-save (a failed retry) renews its one-hour window. */
 export const savePendingPrompt = (prompt: string, mode?: MessageMode, framework?: ProjectFramework) => {
   try {
-    localStorage.setItem(PENDING_PROMPT_KEY, mode || framework ? JSON.stringify({ prompt, mode, framework }) : prompt);
+    savePendingStart(PENDING_PROMPT_KEY, prompt, { mode, framework });
     draftRevision++;
   } catch {
     // Without storage the prompt is simply not resumed.
@@ -39,33 +40,48 @@ export const clearPendingPrompt = () => {
   }
 };
 
-const parse = (raw: string | null): PendingPrompt | null => {
-  if (!raw) return null;
-  let saved: PendingPrompt = { prompt: raw };
+/** A pre-envelope entry is a bare prompt, or the JSON {prompt, mode, framework} older builds wrote. */
+const unwrapLegacy = (raw: string) => {
   try {
-    const value: unknown = JSON.parse(raw);
-    if (value && typeof value === "object" && typeof (value as PendingPrompt).prompt === "string") {
-      const { prompt, mode, framework } = value as PendingPrompt;
-      saved = { prompt, ...(isMode(mode) ? { mode } : {}), ...(framework === "vite" || framework === "next" || framework === "tanstack-start" ? { framework } : {}) };
+    const old: unknown = JSON.parse(raw);
+    if (old && typeof old === "object" && typeof (old as PendingPrompt).prompt === "string") {
+      const { prompt, mode, framework } = old as PendingPrompt;
+      return { value: prompt, mode: isMode(mode) ? mode : undefined, framework: isProjectFramework(framework) ? framework : undefined };
     }
   } catch {
     // A plain prompt.
   }
-  const prompt = saved.prompt.trim();
-  return prompt ? { ...saved, prompt } : null;
+  return { value: raw };
 };
 
-/** The saved prompt, left in place: the auth pages show it before sign-up (#252). */
-export const peekPendingPrompt = (): string | null => {
+/** The full saved draft, without consuming or renewing it. */
+export const peekPendingPromptDraft = (): PendingPrompt | null => {
   try {
-    return parse(localStorage.getItem(PENDING_PROMPT_KEY))?.prompt ?? null;
+    const saved = readPendingStart(PENDING_PROMPT_KEY, unwrapLegacy);
+    const prompt = saved?.value.trim();
+    if (!saved || !prompt) return null;
+    return {
+      prompt,
+      ...(isMode(saved.mode) ? { mode: saved.mode } : {}),
+      ...(isProjectFramework(saved.framework) ? { framework: saved.framework } : {}),
+    };
   } catch {
     return null;
   }
 };
 
+/** The auth pages show the saved prompt before sign-up (#252). */
+export const peekPendingPrompt = (): string | null => peekPendingPromptDraft()?.prompt ?? null;
+
 // Shared across effect replays and dashboard remounts while a request is pending.
 let isResuming = false;
+// Bumped on a user change: a resume of the previous user can't release the next user's lock or draft.
+let resumeEpoch = 0;
+
+export const resetPendingPromptResume = () => {
+  resumeEpoch++;
+  isResuming = false;
+};
 
 /** Keep the draft until creation succeeds; null means there was nothing to attempt. */
 export const resumePendingPrompt = async (
@@ -74,20 +90,23 @@ export const resumePendingPrompt = async (
   if (isResuming) return null;
   let raw: string | null;
   try {
+    // Migrate/validate before capturing the envelope for the concurrency check.
+    if (!readPendingStart(PENDING_PROMPT_KEY, unwrapLegacy)) return null;
     raw = localStorage.getItem(PENDING_PROMPT_KEY);
   } catch {
     return null;
   }
-  const pending = parse(raw);
+  const pending = peekPendingPromptDraft();
   if (!pending) return null;
 
   const revision = draftRevision;
+  const epoch = resumeEpoch;
   isResuming = true;
   try {
     if (!(await create(pending))) return false;
     try {
       // A draft saved during the request belongs to a later submission.
-      if (draftRevision === revision && localStorage.getItem(PENDING_PROMPT_KEY) === raw) {
+      if (draftRevision === revision && epoch === resumeEpoch && localStorage.getItem(PENDING_PROMPT_KEY) === raw) {
         localStorage.removeItem(PENDING_PROMPT_KEY);
       }
     } catch {
@@ -97,6 +116,6 @@ export const resumePendingPrompt = async (
   } catch {
     return false;
   } finally {
-    isResuming = false;
+    if (epoch === resumeEpoch) isResuming = false;
   }
 };

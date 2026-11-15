@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { MotionConfig, motion } from "motion/react";
 import { GitBranch, Search } from "lucide-react";
@@ -8,6 +8,7 @@ import { GitBranch, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCommandPalette } from "@/lib/command-palette";
 import { useIsMac } from "@/lib/hooks/use-is-mac";
+import { Spinner } from "@/components/ui/spinner";
 import { Kbd } from "@/components/ui/kbd";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CommunityRail } from "@/features/showcase/components/community-rail";
@@ -20,7 +21,11 @@ import { LabelBar, SectionHeader } from "@/components/landing/section-header";
 import { useProjects } from "../hooks/use-projects";
 import { useDashboardTab } from "../hooks/use-dashboard-tab";
 import { useCreateProjectFromPrompt } from "../hooks/use-create-project-from-prompt";
-import { clearPendingPrompt, peekPendingPrompt, resumePendingPrompt } from "../utils/pending-prompt";
+import { clearPendingPrompt, peekPendingPrompt, peekPendingPromptDraft, resumePendingPrompt, savePendingPrompt } from "../utils/pending-prompt";
+import {
+  PENDING_RETRY_TOAST_ID, getProjectGeneration, getProjectHandoff, isCurrentProjectGeneration, getServerProjectGeneration, getServerProjectHandoff,
+  runProjectHandoff, subscribeProjectHandoff,
+} from "../utils/project-handoff";
 import { takePendingImport } from "../utils/pending-import";
 import { githubRepoUrl, parseGithubRepo } from "../utils/github-repo";
 import type { DashboardTab } from "../utils/dashboard-tab";
@@ -65,34 +70,51 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
   const [tab, setTab] = useDashboardTab();
   const tabsRef = useRef<HTMLDivElement>(null);
 
+  // Start behind a neutral shell even on the server: storage is only readable after mount.
+  const handoff = useSyncExternalStore(subscribeProjectHandoff, getProjectHandoff, getServerProjectHandoff);
+  const generation = useSyncExternalStore(subscribeProjectHandoff, getProjectGeneration, getServerProjectGeneration);
   const didResume = useRef(false);
   const createProjectRef = useRef(createProject);
   useEffect(() => {
     createProjectRef.current = createProject;
     if (didResume.current) return;
     didResume.current = true;
+    // An attempt in flight, or a failed one already recovered into the composer, is never auto-retried.
+    const { phase, draft: recovered } = getProjectHandoff();
+    if (phase === "creating" || (phase === "idle" && recovered)) return;
     const pendingTemplate = takePendingTemplate();
     if (pendingTemplate) {
       // The template wins; a stale landing draft must not create a second project later.
       clearPendingPrompt();
-      void createProject(pendingTemplate.prompt, pendingTemplate.id);
+      void runProjectHandoff(
+        { prompt: pendingTemplate.prompt, templateId: pendingTemplate.id, framework: pendingTemplate.framework },
+        () => createProjectRef.current(pendingTemplate.prompt, pendingTemplate.id, true, undefined, pendingTemplate.framework),
+      );
       return;
     }
     const resume = async () => {
-      const created = await resumePendingPrompt((pending) =>
-        createProjectRef.current(pending.prompt, undefined, true, pending.mode, pending.framework),
+      const draft = peekPendingPromptDraft();
+      if (!draft) return;
+      const started = getProjectGeneration();
+      const created = await runProjectHandoff(draft, async () =>
+        await resumePendingPrompt((pending) =>
+          createProjectRef.current(pending.prompt, undefined, true, pending.mode, pending.framework),
+        ) === true,
+        peekPendingPromptDraft,
       );
       // A refusal that drops the draft (credentials) leaves nothing to retry.
-      if (created === false && peekPendingPrompt() !== null) {
+      if (!created && isCurrentProjectGeneration(started) && peekPendingPrompt() !== null) {
         toast.error("Your prompt is saved. Try creating the project again.", {
-          id: "pending-prompt-retry",
+          id: PENDING_RETRY_TOAST_ID,
           duration: Infinity,
           action: { label: "Retry", onClick: () => void resume() },
         });
       }
     };
     void resume();
-  }, [createProject]);
+  }, [createProject, generation]);
+  // Activity hides the dashboard without unmounting it: effects re-run on reshow, refs survive.
+  useEffect(() => () => { didResume.current = false; }, [generation]);
 
   // A repo from an "Open in Codenaya" link kept across sign-up, when the
   // visitor didn't come back through /import. Always taken, so it can't
@@ -125,6 +147,24 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  if (handoff.phase !== "idle") {
+    return (
+      <main className="flex flex-1 items-center justify-center bg-background px-6 py-20">
+        <div role="status" className="w-full max-w-xl text-center">
+          <Spinner aria-hidden className="mx-auto mb-6 size-6 text-brand" />
+          <h1 className="text-2xl font-medium tracking-tight text-foreground">
+            {handoff.draft?.prompt ? "Starting your build" : "Loading projects…"}
+          </h1>
+          {handoff.draft?.prompt && (
+            <p className="mt-4 line-clamp-4 whitespace-pre-wrap break-words text-muted-foreground">
+              {handoff.draft?.prompt}
+            </p>
+          )}
+        </div>
+      </main>
+    );
+  }
 
   const checklist = (
     <FirstRunChecklist
@@ -215,7 +255,25 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
 
                 <motion.div {...enter(0.28)} className={cn("mt-9", !hasNoProjects && "max-sm:mt-6")}>
                   <PromptComposer
-                    onSubmit={(prompt, mode, framework) => createProject(prompt, undefined, false, mode, framework)}
+                    key={generation}
+                    initialPrompt={handoff.draft?.prompt}
+                    initialMode={handoff.draft?.mode}
+                    initialFramework={handoff.draft?.framework}
+                    onSubmit={(prompt, mode, framework) => {
+                      // An unedited template prompt still creates from its template.
+                      const templateId = handoff.draft?.prompt === prompt ? handoff.draft?.templateId : undefined;
+                      const draft = { prompt, mode: mode === "build" ? undefined : mode, framework, templateId };
+                      const hadPending = peekPendingPrompt() !== null;
+                      return runProjectHandoff(draft, async () => {
+                        if (hadPending) {
+                          savePendingPrompt(prompt, draft.mode, framework);
+                          return await resumePendingPrompt((pending) =>
+                            createProject(pending.prompt, undefined, true, pending.mode, pending.framework),
+                          ) === true;
+                        }
+                        return createProject(prompt, templateId, false, mode, framework);
+                      }, () => hadPending ? peekPendingPromptDraft() : draft);
+                    }}
                     isSubmitting={isSubmitting}
                   />
                   <div className={cn("mt-5 flex items-center justify-center gap-4 text-xs text-muted-foreground", !hasNoProjects && "max-sm:mt-4")}>

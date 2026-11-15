@@ -13,13 +13,7 @@ const SMOKE_PROMPT = "e2e landing smoke: reply OK and change nothing.";
 const pendingPrompt = (page: Page) =>
   page.evaluate((key) => {
     const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    try {
-      const draft = JSON.parse(raw);
-      return typeof draft?.prompt === "string" ? draft.prompt : raw;
-    } catch {
-      return raw;
-    }
+    return raw ? JSON.parse(raw).value as string : null;
   }, PENDING_PROMPT_KEY);
 
 /** Types a prompt into the landing hero and submits it. */
@@ -96,15 +90,42 @@ test.describe("landing hero prompt", () => {
   test.describe("after sign-in", () => {
     test.skip(!hasClerkCredentials(), "needs CLERK_SECRET_KEY and NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
 
+    test("an expired pending prompt never creates a project", async ({ page }) => {
+      await signIn(page);
+      await page.goto("/");
+      await page.evaluate((key) => localStorage.setItem(key, JSON.stringify({
+        value: "An abandoned app", savedAt: Date.now() - 60 * 60 * 1000 - 1,
+      })), PENDING_PROMPT_KEY);
+      const requests: string[] = [];
+      await page.route("**/api/projects/create-with-prompt", async (route) => {
+        requests.push(route.request().url());
+        await route.abort();
+      });
+      await page.reload();
+      await expect(page.getByTestId("prompt-composer")).toBeVisible();
+      expect(await pendingPrompt(page)).toBeNull();
+      expect(requests).toEqual([]);
+    });
+
     test("the dashboard creates the pending project and opens it", async ({ page }) => {
       test.setTimeout(120_000);
       await page.goto("/");
       await submitHeroPrompt(page, SMOKE_PROMPT);
       await expect(page).toHaveURL(/\/sign-in/);
 
-      await signIn(page);
-      await page.goto("/");
+      let release!: () => void;
+      const ready = new Promise<void>((resolve) => { release = resolve; });
+      await page.route("**/api/projects/create-with-prompt", async (route) => {
+        await ready;
+        await route.continue();
+      });
+      await signIn(page); // The helper navigates to the dashboard.
 
+      await expect(page.getByRole("heading", { name: "Starting your build" })).toBeVisible();
+      await expect(page.getByRole("status")).toContainText(SMOKE_PROMPT);
+      await expect(page.getByTestId("prompt-composer")).toHaveCount(0);
+      await expect(page.getByRole("heading", { name: "Start from a template" })).toHaveCount(0);
+      release();
       await expect(page).toHaveURL(/\/projects\/[a-z0-9]+$/, { timeout: 30_000 });
       await expect(page.getByText(SMOKE_PROMPT)).toBeVisible({ timeout: 30_000 });
       expect(await pendingPrompt(page)).toBeNull();
