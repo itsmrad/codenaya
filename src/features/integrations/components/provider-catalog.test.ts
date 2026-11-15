@@ -5,6 +5,10 @@ import { expect, it } from "vitest";
 import { listVisibleProviders } from "../catalog";
 import { ProviderCatalog } from "./provider-catalog";
 
+// renderToStaticMarkup escapes these characters, e.g. "Weights & Biases".
+const ENTITIES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" };
+const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (char) => ENTITIES[char] ?? char);
+
 it("shows all providers with capabilities, local logos and keyboard filters", () => {
   const html = renderToStaticMarkup(createElement(ProviderCatalog, { onSelect: () => {} }));
   expect(html).toContain('type="search"');
@@ -12,8 +16,7 @@ it("shows all providers with capabilities, local logos and keyboard filters", ()
   expect(html).toContain('aria-label="Integration categories"');
   expect(html).toContain('aria-pressed="true"');
   for (const provider of listVisibleProviders()) {
-    // Static markup escapes "&" (e.g. "Weights & Biases").
-    expect(html).toContain(`aria-label="Connect ${provider.displayName.replaceAll("&", "&amp;")}"`);
+    expect(html).toContain(`aria-label="Connect ${escapeHtml(provider.displayName)}"`);
     expect(html).toContain(provider.description);
     expect(html).toContain(`src="${provider.logo}"`);
   }
