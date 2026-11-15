@@ -96,7 +96,7 @@ describe("catalog", () => {
     ["clerk", 12, ["put_instance_config", "check_domain_dns", "set_oauth_provider_credentials", "configure_mcp_server", "check_mcp_server", "submit_feedback"]],
     ["exa", 1, ["agent_run"]],
     ["tavily", 1, ["tavily_research"]],
-    ["firecrawl", 11, ["firecrawl_interact", "firecrawl_agent", "firecrawl_monitor_create", "firecrawl_monitor_delete", "alexandria_library_read", "people_company_enrich"]],
+    ["firecrawl", 14, ["firecrawl_interact", "firecrawl_agent", "firecrawl_monitor_create", "firecrawl_monitor_delete", "alexandria_library_read", "people_company_search", "people_company_enrich", "jobs_search", "firecrawl_extract"]],
     ["huggingface", 7, ["create_repo", "hf_fs_write", "hf_jobs", "hf_sandbox", "hf_sandbox_exec", "hf_sandbox_fs", "dynamic_space"]],
   ] as const)("retains the audited %s write inventory, including indirect and configuration writes", (id, count, sensitive) => {
     const tools = PROVIDERS[id].destructiveTools;

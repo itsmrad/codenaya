@@ -1077,7 +1077,7 @@ const CATALOG = {
     // Every tool reads the public web; tavily_research is a long multi-source run, gated as spend.
     destructiveTools: ["tavily_research"],
     notes:
-      "OAuth only here; Tavily's documented key option puts the key in the MCP URL query string. All tools consume Tavily credits. No URL-level read-only mode.",
+      "OAuth only here; Tavily's documented key option puts the key in the MCP URL query string. Connecting with OAuth uses the account's mcp_auth_default API key, which Tavily creates if it does not exist. All tools consume Tavily credits. No URL-level read-only mode.",
   },
 
   firecrawl: {
@@ -1092,7 +1092,9 @@ const CATALOG = {
     supportsReadOnly: false,
     scope: NO_URL_SCOPING,
     // Full published inventory: https://docs.firecrawl.dev/mcp-server/tools and
-    // https://github.com/firecrawl/firecrawl-mcp-server#available-tools
+    // https://github.com/firecrawl/firecrawl-mcp-server#available-tools, plus the
+    // deprecated but still-registered firecrawl_extract. Billed enrichment, jobs
+    // and extraction calls are gated as spend despite their readOnlyHint.
     destructiveTools: [
       "firecrawl_interact",
       "firecrawl_interact_stop",
@@ -1104,7 +1106,10 @@ const CATALOG = {
       "firecrawl_feedback",
       "firecrawl_search_feedback",
       "alexandria_library_read",
+      "people_company_search",
       "people_company_enrich",
+      "jobs_search",
+      "firecrawl_extract",
     ],
     notes:
       "OAuth endpoint only; API-key connections use a different endpoint and are not offered yet. Interact can click and submit forms on live sites, and monitors can send webhooks or email, so both are gated. Scrape with Alexandria provider calls is billed per call but cannot be gated by name. No URL-level read-only mode.",
