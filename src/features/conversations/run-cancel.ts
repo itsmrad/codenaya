@@ -9,6 +9,9 @@ export type CancelSource = "esc" | "button";
  */
 export const STOP_GRACE_MS = 1500;
 
+/** How long after a first Esc a second one stops the run. */
+export const ESC_CONFIRM_MS = 2000;
+
 /**
  * An open dialog, popover, menu or select (Radix marks each with its role and
  * `data-state="open"`). Esc belongs to it, not to the run.
@@ -29,6 +32,29 @@ export const shouldEscapeCancelRun = (
   !event.defaultPrevented &&
   !event.repeat &&
   !root.querySelector(OPEN_OVERLAY);
+
+/**
+ * Esc stops a run only when pressed twice within `ESC_CONFIRM_MS`: one stray
+ * Esc stopped a first build after 0 steps (#608). Returns "confirm" for a first
+ * press (ask for the second), "stop" for the second, null when Esc isn't the
+ * run's (see `shouldEscapeCancelRun`). Make one per run.
+ */
+export const escapeToStop = () => {
+  let firstPressAt = -Infinity;
+  return (
+    event: KeyboardEvent,
+    now = Date.now(),
+    root?: Parameters<typeof shouldEscapeCancelRun>[1],
+  ): "confirm" | "stop" | null => {
+    if (!shouldEscapeCancelRun(event, root)) return null;
+    if (now - firstPressAt < ESC_CONFIRM_MS) {
+      firstPressAt = -Infinity;
+      return "stop";
+    }
+    firstPressAt = now;
+    return "confirm";
+  };
+};
 
 /** Stops the project's run unless it's a too-early Stop; resolves to whether it asked. */
 export const cancelRun = async (

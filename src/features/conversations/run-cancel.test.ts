@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { cancelRun, OPEN_OVERLAY, shouldEscapeCancelRun, STOP_GRACE_MS } from "./run-cancel";
+import {
+  cancelRun,
+  ESC_CONFIRM_MS,
+  escapeToStop,
+  OPEN_OVERLAY,
+  shouldEscapeCancelRun,
+  STOP_GRACE_MS,
+} from "./run-cancel";
 
 const kyPost = vi.hoisted(() => vi.fn());
 vi.mock("ky", () => ({ default: { post: kyPost } }));
@@ -29,6 +36,43 @@ describe("shouldEscapeCancelRun", () => {
 
   it("ignores other keys", () => {
     expect(shouldEscapeCancelRun(esc({ key: "Enter" }), page(false))).toBe(false);
+  });
+});
+
+describe("escapeToStop", () => {
+  it("asks for a second Esc before stopping (#608: one Esc stopped a first build)", () => {
+    const press = escapeToStop();
+    expect(press(esc(), 1_000, page(false))).toBe("confirm");
+    expect(press(esc(), 1_000 + ESC_CONFIRM_MS - 1, page(false))).toBe("stop");
+  });
+
+  it("treats an Esc after the window as a new first press", () => {
+    const press = escapeToStop();
+    expect(press(esc(), 1_000, page(false))).toBe("confirm");
+    expect(press(esc(), 1_000 + ESC_CONFIRM_MS, page(false))).toBe("confirm");
+    expect(press(esc(), 1_000 + ESC_CONFIRM_MS + 500, page(false))).toBe("stop");
+  });
+
+  it("starts over after a stop", () => {
+    const press = escapeToStop();
+    press(esc(), 1_000, page(false));
+    expect(press(esc(), 1_100, page(false))).toBe("stop");
+    expect(press(esc(), 1_200, page(false))).toBe("confirm");
+  });
+
+  it("never counts a held key or an Esc that closes an overlay as the second press", () => {
+    const press = escapeToStop();
+    expect(press(esc(), 1_000, page(false))).toBe("confirm");
+    expect(press(esc({ repeat: true }), 1_100, page(false))).toBeNull();
+    expect(press(esc(), 1_200, page(true))).toBeNull();
+    expect(press(esc({ defaultPrevented: true }), 1_300, page(false))).toBeNull();
+    expect(press(esc(), 1_400, page(false))).toBe("stop");
+  });
+
+  it("never counts an Esc that closes an overlay as the first press", () => {
+    const press = escapeToStop();
+    expect(press(esc(), 1_000, page(true))).toBeNull();
+    expect(press(esc(), 1_100, page(false))).toBe("confirm");
   });
 });
 
