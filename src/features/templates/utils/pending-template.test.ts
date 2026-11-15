@@ -19,6 +19,7 @@ const memoryStorage = () => {
 describe("pending template", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("returns a saved template once, then clears it", () => {
@@ -27,8 +28,35 @@ describe("pending template", () => {
 
     savePendingTemplate("portfolio");
 
-    expect(storage.getItem(PENDING_TEMPLATE_KEY)).toBe("portfolio");
+    expect(JSON.parse(storage.getItem(PENDING_TEMPLATE_KEY)!)).toEqual({ value: "portfolio", savedAt: expect.any(Number) });
     expect(takePendingTemplate()?.title).toBe("Portfolio");
+    expect(takePendingTemplate()).toBeNull();
+  });
+
+  it("keeps the chosen framework in the envelope and returns it once", () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    savePendingTemplate("blog", "next");
+    expect(JSON.parse(localStorage.getItem(PENDING_TEMPLATE_KEY)!)).toEqual({ value: "blog", savedAt: expect.any(Number), framework: "next" });
+    expect(takePendingTemplate()?.framework).toBe("next");
+    expect(takePendingTemplate()).toBeNull();
+  });
+
+  it("drops a template older than an hour, including after peeking", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("localStorage", memoryStorage());
+    savePendingTemplate("blog");
+    vi.advanceTimersByTime(60 * 60 * 1000);
+    expect(peekPendingTemplate()?.id).toBe("blog");
+    vi.advanceTimersByTime(1);
+    expect(takePendingTemplate()).toBeNull();
+    expect(localStorage.getItem(PENDING_TEMPLATE_KEY)).toBeNull();
+  });
+
+  it("reads a legacy template once", () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    localStorage.setItem(PENDING_TEMPLATE_KEY, "blog");
+    expect(peekPendingTemplate()?.id).toBe("blog");
+    expect(takePendingTemplate()?.id).toBe("blog");
     expect(takePendingTemplate()).toBeNull();
   });
 

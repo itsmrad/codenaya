@@ -23,6 +23,7 @@ import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 
 import type { ProjectFramework } from "../utils/project-framework";
 import { clearPendingPrompt } from "../utils/pending-prompt";
+import { getProjectGeneration, isCurrentProjectGeneration } from "../utils/project-handoff";
 import { useUpdateProjectInstructions } from "./use-projects";
 
 const CREDENTIAL_ERROR =
@@ -71,6 +72,12 @@ export const useCreateProjectFromPrompt = () => {
       framework?: ProjectFramework,
     ): Promise<boolean> => {
       if (submitting.current) return false;
+      // After a user change this call belongs to the previous user: it must not navigate, toast or clear drafts.
+      const generation = getProjectGeneration();
+      const stale = () => !isCurrentProjectGeneration(generation);
+      const toastError = (message: string) => {
+        if (!stale()) toast.error(message);
+      };
       const text = prompt.trim();
       if (!text) return false;
 
@@ -105,6 +112,7 @@ export const useCreateProjectFromPrompt = () => {
           );
         }
 
+        if (stale()) return false;
         toast.success("Project created");
         router.push(`/projects/${projectId}`);
         return true;
@@ -116,11 +124,13 @@ export const useCreateProjectFromPrompt = () => {
           // The project was created but its agent run could not start: open it
           // anyway, where the failed reply offers a retry.
           if (body.code === "dispatch_failed" && body.projectId) {
+            if (stale()) return false;
             toast.error("Project created, but the agent couldn't start. Retry from the chat.");
             router.push(`/projects/${body.projectId}`);
             return true;
           }
           if (body.code === "credential_detected") {
+            if (stale()) return false;
             if (fromLanding) clearPendingPrompt();
             toast.error(body.error ?? CREDENTIAL_ERROR);
             return false;
@@ -134,11 +144,11 @@ export const useCreateProjectFromPrompt = () => {
             body.code === MODEL_LIMIT_CODE ||
             isPromoRefusalCode(body.code);
           if (refused && body.error) {
-            toast.error(body.error);
+            toastError(body.error);
             return false;
           }
         }
-        toast.error("Unable to create project");
+        toastError("Unable to create project");
         return false;
       } finally {
         submitting.current = false;

@@ -47,7 +47,7 @@ test.describe("starter templates on /showcase (signed out)", () => {
     await page.getByRole("button", { name: "Use the Blog template" }).click();
 
     await expect(page).toHaveURL(/\/sign-up/);
-    expect(await page.evaluate((key) => localStorage.getItem(key), PENDING_TEMPLATE_KEY)).toBe(
+    expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!).value, PENDING_TEMPLATE_KEY)).toBe(
       "blog",
     );
   });

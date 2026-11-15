@@ -1,4 +1,7 @@
 export type ProjectFramework = "vite" | "next" | "tanstack-start";
+export const isProjectFramework = (value: unknown): value is ProjectFramework =>
+  value === "vite" || value === "next" || value === "tanstack-start";
+
 /** "auto" sends no framework, so the server detects it from the prompt. */
 export type FrameworkChoice = "auto" | ProjectFramework;
 
