@@ -91,6 +91,7 @@ import { QueuedFollowUp } from "./queued-follow-up";
 import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
 import { chatStarters } from "../chat-starters";
+import { type CancelSource, cancelRun, ESC_CONFIRM_MS, escapeToStop } from "../run-cancel";
 import { type Checkpoint, useCheckpoints } from "../hooks/use-checkpoints";
 import {
   CheckpointHistoryDialog,
@@ -108,6 +109,9 @@ import {
   MAX_CHAT_IMAGE_BYTES,
 } from "../chat-images";
 import { visionSwitchTarget } from "../vision-switch";
+
+// One "Press Esc again" hint at a time.
+const ESC_TOAST_ID = "esc-to-stop";
 
 interface ConversationSidebarProps {
   projectId: Id<"projects">;
@@ -232,32 +236,45 @@ export const ConversationSidebar = ({
   const stalled = useRunStalled(processingMessage);
   const isProcessing = Boolean(processingMessage) && !stalled;
 
-  const handleCancel = async () => {
+  // When Send last turned into Stop, for the Stop grace period.
+  const processingSinceRef = useRef(0);
+  useEffect(() => {
+    if (isProcessing) processingSinceRef.current = Date.now();
+  }, [isProcessing]);
+
+  const handleCancel = async (source: CancelSource) => {
     try {
-      await ky.post("/api/messages/cancel", {
-        json: { projectId },
-      });
+      await cancelRun(projectId, source, processingSinceRef.current);
     } catch {
       toast.error("Unable to cancel request");
     }
   };
 
-  // Esc stops a running agent, from the composer or the document, but only
-  // when focus isn't elsewhere (a dialog or the editor), where Esc means
+  // Esc twice stops a running agent, from the composer or the document, but
+  // only when focus isn't elsewhere (a dialog or the editor), where Esc means
   // something else.
   const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!isProcessing) return;
+    const pressEscape = escapeToStop();
     const onKeyDown = (event: KeyboardEvent) => {
       const active = document.activeElement;
       const inPanel =
         !active || active === document.body || panelRef.current?.contains(active);
-      if (event.key === "Escape" && !event.defaultPrevented && inPanel) {
-        void handleCancel();
+      if (!inPanel) return;
+      const press = pressEscape(event);
+      if (press === "confirm") {
+        toast("Press Esc again to stop", { id: ESC_TOAST_ID, duration: ESC_CONFIRM_MS });
+      } else if (press === "stop") {
+        toast.dismiss(ESC_TOAST_ID);
+        void handleCancel("esc");
       }
     };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      toast.dismiss(ESC_TOAST_ID);
+    };
     // handleCancel only depends on projectId.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isProcessing, projectId]);
@@ -801,13 +818,13 @@ export const ConversationSidebar = ({
                         variant="default"
                         size="icon-sm"
                         aria-label="Stop"
-                        onClick={() => void handleCancel()}
+                        onClick={() => void handleCancel("button")}
                         className="size-8 rounded-lg"
                       >
                         <SquareIcon className="size-3 animate-in fill-current fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none" />
                       </InputGroupButton>
                     </TooltipTrigger>
-                    <TooltipContent>Stop (Esc)</TooltipContent>
+                    <TooltipContent>Stop (Esc twice)</TooltipContent>
                   </Tooltip>
                 )}
                 {(!isProcessing || input) && (
