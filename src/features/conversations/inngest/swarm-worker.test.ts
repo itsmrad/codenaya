@@ -185,6 +185,7 @@ describe("swarmWorker", () => {
     expect(opts.cancelOn).toEqual([
       { event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" },
       { event: "agent-task/cancel", if: "event.data.agentTaskId == async.data.agentTaskId" },
+      { event: "agent-task/cancel", if: "event.data.parentAgentTaskId == async.data.agentTaskId" },
     ]);
     expect(opts.concurrency).toEqual([{ key: "event.data.ownerId", limit: 16 }]);
   });
@@ -239,10 +240,10 @@ describe("swarmWorker as a sub-orchestrator", () => {
         expect.objectContaining({ taskId: "shop/list", parentTaskId: "shop", role: "worker" }),
       ],
     })]);
-    // Children carry the message id, so one message/cancel stops every depth.
+    // Children carry both parent ids, so message and sub-orchestrator cancellation reach them.
     expect(outcome.invocations).toEqual([
-      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_0", parentMessageId: "m1", ownerId: "user_1", depth: 2 }) }, timeout: "10m" }),
-      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_1", depth: 2 }) }, timeout: "10m" }),
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_0", parentAgentTaskId: "t1", parentMessageId: "m1", ownerId: "user_1", depth: 2 }) }, timeout: "10m" }),
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_1", parentAgentTaskId: "t1", depth: 2 }) }, timeout: "10m" }),
     ]);
     expect(outcome.data).toMatchObject({
       status: "done",
@@ -289,20 +290,22 @@ describe("swarmWorker as a sub-orchestrator", () => {
   it("refuses a depth-2 delegateTasks call", async () => {
     const tool = createDelegateTasksTool({
       internalKey: "ik", projectId: "p1" as never, messageId: "m1" as never, ownerId: "user_1", model: { modelId: "x" },
-      parent: { taskId: "shop/cart", ownedPaths: ["src/shop/cart/"], depth: 2 },
+      parent: { taskId: "shop/cart", agentTaskId: "child_0" as never, ownedPaths: ["src/shop/cart/"], depth: 2 },
     });
     expect(await tool.handler(CHILDREN as never, {} as never)).toMatch(/^Error: Workers cannot delegate/);
   });
 });
 
-describe("message/cancel", () => {
+describe("swarm cancellation", () => {
   // The CEL `a == b` of cancelOn, with `event` the run's trigger and `async` the cancel event.
-  const cancels = (data: Record<string, unknown>, cancel: Record<string, unknown>) => {
-    const { opts } = swarmWorker as unknown as { opts: { cancelOn: Array<{ if: string }> } };
+  const cancels = (data: Record<string, unknown>, cancel: Record<string, unknown>, event = "message/cancel") => {
+    const { opts } = swarmWorker as unknown as { opts: { cancelOn: Array<{ event: string; if: string }> } };
     const value = (path: string) => path.split(".").slice(1)
       .reduce<unknown>((o, key) => (o as Record<string, unknown>)?.[key], { event: { data }, async: { data: cancel } }[path.split(".")[0]]);
-    const [left, right] = opts.cancelOn[0].if.split(" == ").map(value);
-    return left !== undefined && left === right;
+    return opts.cancelOn.some((rule) => {
+      const [left, right] = rule.if.split(" == ").map(value);
+      return rule.event === event && left !== undefined && left === right;
+    });
   };
 
   it("matches a top-level task and a sub-orchestrator's child alike, and no other message", () => {
@@ -311,5 +314,15 @@ describe("message/cancel", () => {
     expect(cancels(top, { messageId: "m1" })).toBe(true);
     expect(cancels(child, { messageId: "m1" })).toBe(true);
     expect(cancels(child, { messageId: "m2" })).toBe(false);
+  });
+
+  it("cancels a sub-orchestrator and its children without stopping sibling tasks", () => {
+    const cancel = { agentTaskId: "t1" };
+    const child = { parentMessageId: "m1", agentTaskId: "child_0", parentAgentTaskId: "t1", depth: 2 };
+    expect(cancels({ agentTaskId: "t1" }, cancel, "agent-task/cancel")).toBe(true);
+    expect(cancels(child, cancel, "agent-task/cancel")).toBe(true);
+    expect(cancels({ ...child, agentTaskId: "child_1" }, cancel, "agent-task/cancel")).toBe(true);
+    expect(cancels({ agentTaskId: "t2" }, cancel, "agent-task/cancel")).toBe(false);
+    expect(cancels({ ...child, parentAgentTaskId: "t2" }, cancel, "agent-task/cancel")).toBe(false);
   });
 });

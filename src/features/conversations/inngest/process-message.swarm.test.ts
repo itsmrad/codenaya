@@ -184,9 +184,9 @@ describe("processMessage swarm mode", () => {
     expect(outcome.invocations).toHaveLength(2);
   });
 
-  it("reports a timed-out worker as failed, stops it, and the integrator writes its files", async () => {
+  it.each(["worker", "sub-orchestrator"])("reports a timed-out %s as failed, stops it, and the integrator writes its files", async (role) => {
     const outcome = await swarm([
-      { data: toolCall("delegateTasks", PLAN) },
+      { data: toolCall("delegateTasks", { tasks: [PLAN.tasks[0], { ...PLAN.tasks[1], role }] }) },
       { data: toolCall("writeFiles", { files: [{ path: "src/components/nav.tsx", content: "export const Nav = () => null;\n" }] }) },
       { data: toolCall("checkBuild") },
       { data: text("Done.") },
