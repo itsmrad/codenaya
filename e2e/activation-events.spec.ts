@@ -23,12 +23,20 @@ import { STUB_MODEL, startStubProvider } from "./stub-provider";
 
 const STUB_REPLY = "Listed the files";
 
-/** The sandbox boot resolves at once, on a blank page. */
+/**
+ * The sandbox boot resolves at once, on a served page. Not `about:blank`: its
+ * load fires synchronously on insert, before React can see it, so the preview
+ * never counts as loaded.
+ */
 const stubSandbox = async (page: Page) => {
+  const previewUrl = new URL("/__e2e-activation-preview", page.url()).href;
+  await page.route(previewUrl, (route) =>
+    route.fulfill({ contentType: "text/html", body: "<h1>Hello</h1>" }),
+  );
   await page.route("**/api/sandbox", (route) =>
     route.fulfill({
       contentType: "application/x-ndjson",
-      body: `${JSON.stringify({ type: "ready", sandboxId: "e2e-sandbox", previewUrl: "about:blank" })}\n`,
+      body: `${JSON.stringify({ type: "ready", sandboxId: "e2e-sandbox", previewUrl })}\n`,
     }),
   );
   // File sync and teardown of the stubbed sandbox.
@@ -113,6 +121,9 @@ test.describe.serial("activation events", () => {
     await page.goto(`/projects/${projectId}`);
     await page.getByRole("tab", { name: "Preview" }).click();
     await expect(page.locator('iframe[title="Preview"]')).toBeVisible({ timeout: 60_000 });
+    await expect(
+      page.frameLocator('iframe[title="Preview"]').getByRole("heading", { name: "Hello" }),
+    ).toBeVisible({ timeout: 30_000 });
     await expect.poll(eventNames, { timeout: 30_000 }).toContain("first_preview_shown");
 
     const events = await system.query(api.system.getActivationEvents, { internalKey, projectId });
