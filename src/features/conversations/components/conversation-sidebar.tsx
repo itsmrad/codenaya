@@ -86,6 +86,7 @@ import {
 import { type AgentModelChoice, nextTier } from "../agent-models";
 import { buildPathIndex, stuckFilePath } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
+import { parseSuggestion, type SuggestionAction } from "../suggestions";
 import { composerSubmitAction, followUpAction } from "../follow-up";
 import { QueuedFollowUp } from "./queued-follow-up";
 import { useRunStalled } from "./agent-run";
@@ -131,6 +132,20 @@ export const ConversationSidebar = ({
 }: ConversationSidebarProps) => {
   const { openIntegrations } = useProjectIntegrations();
   const { input, setInput, appendInput, contexts, removeContext, clearContexts, elements, removeElement, clearElements } = useChatStore();
+  // A next-step chip's IDE action; false when this page doesn't offer it, so
+  // the chip fills the composer instead.
+  const runSuggestionAction = (action: SuggestionAction) => {
+    if (action.kind === "connect") {
+      // shortcut: opens the dialog without the provider picked; use
+      // CONNECTORS' integrationLink once its ?integrations= handling lands,
+      // keeping the other query params (engine).
+      openIntegrations();
+      return true;
+    }
+    const run = useCommandPalette.getState().commands[action.kind];
+    run?.();
+    return Boolean(run);
+  };
   const [agentModel, setAgentModel] = useAgentModel();
   const enhancer = useEnhancePrompt(input, setInput);
   const slashMenu = useSkillSlashMenu(projectId, input, setInput);
@@ -707,8 +722,10 @@ export const ConversationSidebar = ({
                     return (await sendMessage(build)) === "sent";
                   }}
                   stuckRetry={message.stuck && stuckRetry(message, messageIndex)}
-                  onSuggestion={(prompt) => {
-                    setInput(prompt);
+                  onSuggestion={(line) => {
+                    const { label, action } = parseSuggestion(line);
+                    if (action && runSuggestionAction(action)) return;
+                    setInput(label);
                     requestAnimationFrame(() => panelRef.current?.querySelector("textarea")?.focus());
                   }}
                   onDiagnose={() => {

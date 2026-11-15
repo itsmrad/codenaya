@@ -428,15 +428,21 @@ Keep it under 15 words. No code, no markdown headings. Save the full summary for
 </narration>
 
 <response_format>
-After ALL work is complete, end with a short summary for the user, and nothing else:
-- 3 to 5 Markdown bullets: what was built or changed, anything the user must do (env vars, integrations), and known limitations.
-- When this run built the app for the first time, the first bullet says it is running in the preview.
-- No file tree, no code blocks and no local setup or npm steps: the preview installs and runs the app, and the run already lists the changed files.
-- Do NOT narrate your process. Do NOT say "I created..." or "I built...".
+When you reply to the user after ALL work is complete, write like a senior developer handing work to a client: short, plain, and nothing else. Use these Markdown sections:
+**What I built**: 2 to 4 bullets on what was built or changed. When this run built the app for the first time, the first bullet says it is running in the preview. If the build check failed or did not verify, say so here.
+**Placeholders to replace**: only when the app has any. One concrete bullet each: the form's destination email, the domain, stock photos, sample prices, names or text.
+**Recommended next steps**: 2 to 4 bullets, most useful first, such as connecting a service the app needs (payments, database, email), publishing, or the next feature.
+- No file tree, no code blocks, no long setup guide unless the user asked for one, and no install, dev-server or other local steps: the platform installs and runs the app, and the run already lists the changed files.
+- Do NOT narrate your process.
 
-Then add up to 3 follow-up requests the user might send next, each under 100 characters, one per line, in a suggestions block:
+Then repeat the recommended next steps as one-click chips, one per line, each under 100 characters, in a suggestions block. Start a line with a tag when the step is one of these actions:
+[connect:<integration id>] opens that integration's connect dialog, e.g. [connect:supabase], [connect:resend], [connect:posthog]
+[publish] opens Publish
+[env-vars] opens the environment variables, e.g. for the form's destination email
+Write any other step as the request the user would send next:
 <suggestions>
-(a next request, written as the user would ask it)
+[connect:supabase] Connect Supabase to save form entries
+Add a gallery page with my own photos
 </suggestions>
 </response_format>`;
 
@@ -472,7 +478,7 @@ Read any project files you need. Never edit shared files, dependencies, or anoth
 Do not run a build: the orchestrator integrates and checks the complete project.
 Finish with a concise report of changes and any remaining work. Put dependency requests,
 shared edits, or integration requirements in a NEEDS: section for the orchestrator.
-The report is for the orchestrator, not the user: no suggestions block.
+Your reply goes to the orchestrator, not the user: no next steps, suggestions or action chips.
 `;
 
 /** A sub-orchestrator is a worker to the e2e stub too, so it keeps the "[swarm-worker]" marker. */
@@ -485,7 +491,7 @@ NEEDS: requests that fall inside your owned paths and finish failed or unfinishe
 Do not run a build: the orchestrator integrates and checks the complete project.
 Finish with a concise report of changes and any remaining work. Put dependency requests,
 shared edits, or integration requirements in a NEEDS: section for the orchestrator.
-The report is for the orchestrator, not the user: no suggestions block.
+Your reply goes to the orchestrator, not the user: no next steps, suggestions or action chips.
 `;
 
 /** Swarm-mode orchestrator note; the e2e model stub keys on the delegateTasks tool. */

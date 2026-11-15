@@ -35,7 +35,7 @@ vi.mock("@/features/conversations/hooks/use-agent-model", () => ({ useAgentModel
 vi.mock("./use-projects", () => ({ useUpdateProjectInstructions: () => vi.fn() }));
 vi.mock("@/features/conversations/components/setup-questions-dialog", () => ({ askSetupQuestions: () => mocks.ask() }));
 vi.mock("@/features/conversations/setup-questions", () => ({
-  shouldAskSetupQuestions: () => true,
+  setupQuestionsFor: () => [{ id: "q" }],
   withSetupAnswers: (text: string) => text,
   withSetupDecisions: () => undefined,
 }));

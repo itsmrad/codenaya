@@ -132,7 +132,11 @@ describe("swarmWorker", () => {
       expect.objectContaining({ status: "done", summary: "Built the home page." }),
     ]);
     const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: string }> }>;
-    expect(request.messages[0].content).toContain("no suggestions block");
+    // Its reply goes to the orchestrator: the NEEDS: report, not the user voice or chips.
+    expect(request.messages[0].content).toContain("in a NEEDS: section for the orchestrator");
+    expect(request.messages[0].content).toContain(
+      "Your reply goes to the orchestrator, not the user: no next steps, suggestions or action chips.",
+    );
   });
 
   it("checks JSON-string array args against its owned paths like real ones", async () => {

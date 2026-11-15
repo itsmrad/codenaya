@@ -7,9 +7,9 @@ import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
 
 const DETAILED_PROMPT =
-  "Build a habit tracker for small teams with a weekly dashboard, streaks per person, email reminders and a minimal black and white look";
+  "Build a habit tracker for small teams with a weekly dashboard, streaks per person and a minimal black and white look";
 
-// #344: a short first prompt gets up to 3 chip questions; Skip costs nothing.
+// #344: a short first prompt, or one that implies services, gets up to 4 chip questions; Skip costs nothing.
 test.describe("setup questions before the first build", () => {
   test.skip(!hasClerkCredentials(), "Needs CLERK_SECRET_KEY and NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
 
@@ -53,10 +53,10 @@ test.describe("setup questions before the first build", () => {
       expect((await user.query(api.projects.getById, { id: projectId })).instructions).toBeUndefined();
 
       // Skip does the same in one click.
-      await submit("a CRM");
+      await submit("a habit tracker");
       await questions.getByRole("button", { name: "Skip, just build" }).click();
       await opened(page);
-      expect(prompts[2]).toBe("a CRM");
+      expect(prompts[2]).toBe("a habit tracker");
 
       // The chips fit 375px and work from the keyboard.
       await submit("a habit tracker");
