@@ -102,6 +102,7 @@ export const stopSandboxCommands = async (sandbox: Sandbox) => {
       await sandbox.commands.run(killTreeCommand(command.pid));
     } catch {
       // Best-effort cleanup must not prevent a resumed boot (#486).
+      await sandbox.commands.kill(command.pid).catch(() => {});
     }
   }));
 };

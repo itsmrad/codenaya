@@ -257,8 +257,9 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
     expect(sandbox.kill).not.toHaveBeenCalled();
   });
 
-  it("continues resuming on the caller's sandbox even if tree cleanup fails, without creating one or checking the cap", async () => {
+  it.each([false, true])("continues resuming after tree cleanup fails (wrapper kill fails: %s), without creating one or checking the cap", async (killFails) => {
     const sandbox = fakeSandbox("sbx_resume");
+    if (killFails) sandbox.commands.kill.mockRejectedValue(new Error("wrapper kill failed"));
     mocks.sandboxConnect.mockResolvedValue(sandbox);
 
     await (await boot({ resumeSandboxId: "sbx_resume" })).text();
@@ -269,7 +270,7 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
       [killTreeCommand(8)],
       ["node --version", { timeoutMs: 10_000 }],
     ]);
-    expect(sandbox.commands.kill).not.toHaveBeenCalled();
+    expect(sandbox.commands.kill.mock.calls).toEqual([[7], [8]]);
     expect(mocks.sandboxCreate).not.toHaveBeenCalled();
     expect(mocks.sandboxList).not.toHaveBeenCalled();
   });
