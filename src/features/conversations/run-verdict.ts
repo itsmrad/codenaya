@@ -7,6 +7,7 @@ import {
   fixedBuildErrors,
   runWrittenPaths,
 } from "./agent-steps";
+import { isFailedRunReply } from "./failed-run-reply";
 
 export const RUN_VERDICT_LABELS = {
   verified: "Verified",
@@ -16,6 +17,7 @@ export const RUN_VERDICT_LABELS = {
 } as const;
 
 interface Run {
+  content?: string;
   status?: "processing" | "completed" | "cancelled";
   mode?: "plan" | "swarm";
   steps?: AgentStep[];
@@ -23,8 +25,10 @@ interface Run {
 }
 
 /** Completed build replies only; missing status is a completed legacy reply. */
-export const runVerdict = ({ status = "completed", mode, steps = [], stuck }: Run): keyof typeof RUN_VERDICT_LABELS | null => {
+export const runVerdict = ({ status = "completed", content = "", mode, steps, stuck }: Run): keyof typeof RUN_VERDICT_LABELS | null => {
   if (status !== "completed" || mode) return null;
+  if (isFailedRunReply(content)) return "errors";
+  if (!steps) return null;
   const tools = steps.filter((step) => step.kind === "tool");
   const pending = new Set<string>();
   let lastWrite = -1;
@@ -39,8 +43,9 @@ export const runVerdict = ({ status = "completed", mode, steps = [], stuck }: Ru
     const keys = writes && step.targets?.length
       ? step.targets
       : [`${step.tool}:${JSON.stringify(step.targets ?? [])}`];
-    if (step.status === "error") keys.forEach((key) => pending.add(key));
-    if (step.status === "done") {
+    // shortcut: partial batches lack per-path results; require every target to be rewritten until per-path results are recorded.
+    if (step.status === "error" || step.error) keys.forEach((key) => pending.add(key));
+    else if (step.status === "done") {
       keys.forEach((key) => pending.delete(key));
     }
   }

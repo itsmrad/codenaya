@@ -7,7 +7,10 @@ import {
   BUILD_VERIFIED,
   STATIC_CHECKS_FAILED,
   STATIC_CHECKS_PASSED,
+  LOST_RUN_MESSAGE,
+  stepsFromToolResults,
 } from "./agent-steps";
+import { AGENT_FAILURE_MESSAGE } from "./failed-run-reply";
 import { runVerdict } from "./run-verdict";
 
 const write = (status: AgentStep["status"] = "done", targets = ["src/App.tsx"]): AgentStep => ({
@@ -33,10 +36,34 @@ describe("runVerdict", () => {
     expect(verdict(write(), check("done", BUILD_VERIFIED), check("done", STATIC_CHECKS_PASSED))).toBe("unverified");
   });
 
-  it("reports no changes even if a check passed, including legacy replies", () => {
+  it("reports no changes only when recorded steps establish it", () => {
     expect(verdict()).toBe("no-changes");
     expect(verdict(check("done", BUILD_VERIFIED))).toBe("no-changes");
-    expect(runVerdict({})).toBe("no-changes");
+    expect(runVerdict({})).toBeNull();
+    expect(runVerdict({ steps: undefined })).toBeNull();
+  });
+
+  it("prioritizes failed replies over earlier successful writes and checks", () => {
+    for (const content of [AGENT_FAILURE_MESSAGE, LOST_RUN_MESSAGE]) {
+      expect(runVerdict({
+        status: "completed", content, steps: [write(), check("done", BUILD_VERIFIED)],
+      })).toBe("errors");
+      expect(runVerdict({ content })).toBe("errors");
+    }
+  });
+
+  it("preserves partial batch failures through tool-result recording", () => {
+    const [result] = stepsFromToolResults([{
+      type: "tool_result", role: "tool_result", stop_reason: "tool",
+      tool: { type: "tool", id: "batch", name: "writeFiles", input: {} },
+      content: { data: "Wrote 1 file(s). Created: a.ts. Failed: b.ts (locked)." },
+    }], 1);
+    const batch = { ...result, targets: ["a.ts", "b.ts"] };
+    expect(batch.status).toBe("done");
+    expect(batch.error).toContain("Failed: b.ts");
+    expect(verdict(batch, check("done", BUILD_VERIFIED))).toBe("errors");
+    expect(verdict(batch, write("done", ["a.ts", "b.ts"]), check("done", BUILD_VERIFIED))).toBe("verified");
+    expect(verdict({ ...write(), tool: "writeFiles", error: "Failed: b.ts (locked)." }, check("done", BUILD_VERIFIED))).toBe("errors");
   });
 
   it("counts deletions, renames and every target in a batch as changes", () => {
@@ -81,7 +108,7 @@ describe("runVerdict", () => {
 
   it("hides verdicts for active, cancelled, plan and swarm runs", () => {
     for (const status of ["processing", "cancelled"] as const) {
-      expect(runVerdict({ status, steps: [write()] })).toBeNull();
+      expect(runVerdict({ status, steps: [write(), check("done", BUILD_VERIFIED)] })).toBeNull();
     }
     for (const mode of ["plan", "swarm"] as const) {
       expect(runVerdict({ mode, steps: [write()] })).toBeNull();
