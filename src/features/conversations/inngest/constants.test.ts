@@ -112,7 +112,9 @@ describe("coding agent integration instructions", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       `"@vitejs/plugin-react": "${KNOWN_GOOD_VERSIONS["@vitejs/plugin-react"]}"`,
     );
-    expect(KNOWN_GOOD_VERSIONS.vite).toMatch(/^\^6\./);
+    expect(KNOWN_GOOD_VERSIONS.vite).toMatch(/^\^8\./);
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("New apps use Vite 8 with @vitejs/plugin-react 6");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("Never use Vite 7+");
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       'resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } }',
     );

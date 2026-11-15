@@ -73,6 +73,11 @@ import {
   NEXT_TYPE_ERROR,
 } from "../inngest/tools/next-build-output.fixture";
 import { START_BUILD_ERROR, START_TYPE_ERROR } from "../inngest/tools/start-build-output.fixture";
+import {
+  VITE8_BUILD_JSX_ERROR,
+  VITE8_BUILD_SYNTAX_ERROR,
+  VITE8_BUILD_UNRESOLVED_IMPORT,
+} from "../inngest/tools/vite-build-output.fixture";
 
 /** Like the real tools: the work runs in a step with a fixed id, when there is a step. */
 function fakeTool<T>(name: string, handler: (input: T) => unknown) {
@@ -741,6 +746,15 @@ describe("parseBuildErrors", () => {
   const nextFailure = ({ stdout, stderr }: { stdout: string; stderr: string }) =>
     "Error: Build failed. Fix these errors, then call checkBuild again:\n" +
     trimBuildOutput(`${stderr}\n${stdout}`, "/home/user/app", "next");
+
+  it.each([
+    [VITE8_BUILD_UNRESOLVED_IMPORT, 1, "[UNRESOLVED_IMPORT] Could not resolve './components/Missing' in src/App.tsx"],
+    [VITE8_BUILD_SYNTAX_ERROR, 2, "[builtin:vite-transform] Unexpected token"],
+    [VITE8_BUILD_JSX_ERROR, 2, "[builtin:vite-transform] Expected corresponding JSX closing tag for 'h1'."],
+  ])("reads a Vite 8 build error from its code frame (line %#)", (output, line, message) => {
+    const text = "Error: Build failed. Fix these errors, then call checkBuild again:\n" + trimBuildOutput(output, "/home/user/app");
+    expect(parseBuildErrors(text)).toEqual([{ file: "src/App.tsx", line, message, kind: "build" }]);
+  });
 
   it("reads a Next.js type error from its location line and the message after it", () => {
     expect(parseBuildErrors(nextFailure(NEXT_TYPE_ERROR))).toEqual([

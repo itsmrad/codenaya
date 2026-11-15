@@ -28,14 +28,14 @@ export const KNOWN_GOOD_VERSIONS = {
   "@types/node": "^22.10.0",
   "@types/react": "^19.2.0",
   "@types/react-dom": "^19.2.0",
-  // Vite 7 and plugin-react 5 need Node 20.19+ (node-compat.ts).
-  // #466: e2b/build-template.mts selects Node 22 (base fallback: 20.9 per ADR 0003);
-  // WebContainer boot pins no Node version. Defer Vite 7 until both runtimes are verified.
-  "@vitejs/plugin-react": "^4.3.4",
+  // Vite 8 and plugin-react 6 need Node 20.19+ or 22.12+ (node-compat.ts); the
+  // E2B template's node:22 has it. TypeScript stays on 5.x: typescript-eslint
+  // supports <6.1, and TS 7 has no JS API.
+  "@vitejs/plugin-react": "^6.3.0",
   tailwindcss: "^4.3.0",
   "tw-animate-css": "^1.4.0",
-  typescript: "~5.6.3",
-  vite: "^6.0.0",
+  typescript: "~5.9.3",
+  vite: "^8.3.0",
   // Add-ons the prompt names.
   "react-router-dom": "^7.18.0",
   "react-router": "^7.18.0",

@@ -6,7 +6,6 @@
  * as-is; the agent extends it instead of reinventing the config.
  */
 
-import { pinnedVersions } from "./known-good-versions";
 import { VITE_STARTER_UI } from "./vite-starter-ui";
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
@@ -22,40 +21,42 @@ const PACKAGE_JSON = json({
     preview: "vite preview",
     lint: "eslint src",
   },
-  dependencies: pinnedVersions([
-    "@fontsource/inter",
-    "@hookform/resolvers",
-    "@radix-ui/react-avatar",
-    "@radix-ui/react-dialog",
-    "@radix-ui/react-dropdown-menu",
-    "@radix-ui/react-label",
-    "@radix-ui/react-select",
-    "@radix-ui/react-separator",
-    "@radix-ui/react-slot",
-    "@radix-ui/react-tabs",
-    "@radix-ui/react-tooltip",
-    "sonner",
-    "class-variance-authority",
-    "clsx",
-    "lucide-react",
-    "react",
-    "react-dom",
-    "react-hook-form",
-    "react-router-dom",
-    "tailwind-merge",
-    "zod",
-  ]),
-  devDependencies: pinnedVersions([
-    "@tailwindcss/vite",
-    "@types/node",
-    "@types/react",
-    "@types/react-dom",
-    "@vitejs/plugin-react",
-    "tailwindcss",
-    "tw-animate-css",
-    "typescript",
-    "vite",
-  ]),
+  // Exact versions, newest within the known-good majors (npm view, 2026-11-15): a
+  // range resolves today's newest, which an older cached packument may lack (ETARGET).
+  dependencies: {
+    "@fontsource/inter": "5.3.0",
+    "@hookform/resolvers": "7.0.6",
+    "@radix-ui/react-avatar": "1.3.1",
+    "@radix-ui/react-dialog": "1.3.1",
+    "@radix-ui/react-dropdown-menu": "2.2.1",
+    "@radix-ui/react-label": "2.1.17",
+    "@radix-ui/react-select": "2.4.1",
+    "@radix-ui/react-separator": "1.2.0",
+    "@radix-ui/react-slot": "1.5.0",
+    "@radix-ui/react-tabs": "1.2.1",
+    "@radix-ui/react-tooltip": "1.4.1",
+    sonner: "2.0.8",
+    "class-variance-authority": "0.7.1",
+    clsx: "2.1.1",
+    "lucide-react": "1.73.0",
+    react: "19.3.1",
+    "react-dom": "19.3.1",
+    "react-hook-form": "7.92.0",
+    "react-router-dom": "7.18.5",
+    "tailwind-merge": "3.7.0",
+    zod: "4.6.7",
+  },
+  devDependencies: {
+    "@tailwindcss/vite": "4.3.5",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    tailwindcss: "4.3.5",
+    "tw-animate-css": "1.4.0",
+    typescript: "5.9.3",
+    vite: "8.3.8",
+  },
 });
 
 const VITE_CONFIG = `import { fileURLToPath, URL } from "node:url";

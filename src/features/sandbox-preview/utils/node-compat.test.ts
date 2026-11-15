@@ -10,6 +10,11 @@ describe("nodeIncompatibility", () => {
     const message = nodeIncompatibility("v20.9.0\n", pkg("^7.1.0"));
     expect(message).toContain("Vite 7");
     expect(message).toContain("Node v20.9.0");
+    expect(message).toContain("Set E2B_TEMPLATE to the Node 22 template");
+  });
+
+  it("flags the starter's Vite 8 on Node 20.9", () => {
+    expect(nodeIncompatibility("v20.9.0", pkg("8.3.8"))).toContain("Vite 8");
   });
 
   it("allows Vite 7 on the Node versions it supports", () => {
