@@ -83,4 +83,18 @@ describe("setEnvVar tool", () => {
     expect(await setEnvVar("DATABASE_URL")).toMatch(/fetch failed/);
     expect(step.run).toHaveBeenCalledTimes(1);
   });
+
+  it("returns a readable error for invalid args instead of throwing (#616)", async () => {
+    const tool = createSetEnvVarTool({
+      projectId: "project_a" as Id<"projects">,
+      ownerId: "user_a",
+      internalKey: "key",
+    });
+
+    const result = await tool.handler({ key: null, value: "x" } as never, ctx);
+
+    expect(result).toMatch(/^Error: /);
+    expect(step.run).not.toHaveBeenCalled();
+    expect(mocks.mutation).not.toHaveBeenCalled();
+  });
 });
