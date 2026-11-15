@@ -109,7 +109,7 @@ describe("provider catalog filters", () => {
     expect(filterProviders("  GITHUB  ").map(({ id }) => id)).toEqual(["github"]);
     expect(filterProviders("stack traces").map(({ id }) => id)).toEqual(["sentry"]);
     expect(filterProviders("DATABASE").map(({ id }) => id)).toEqual([
-      "supabase", "neon", "prisma", "upstash", "planetscale", "notion",
+      "supabase", "neon", "prisma", "upstash", "planetscale", "notion", "airtable",
     ]);
   });
 
