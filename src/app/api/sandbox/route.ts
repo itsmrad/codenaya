@@ -45,6 +45,7 @@ import {
 } from "@/features/sandbox-preview/server/stream-budget";
 import {
   DEV_COMMAND_ENV,
+  PROXY_TARGET_ENV,
   installWithDevServerStopped,
   isPortOpen,
   type DevStart,
@@ -858,6 +859,8 @@ server.listen(PROXY_PORT, '0.0.0.0', () => {
   
   await sandbox.commands.run("node /home/user/e2b-proxy.js", {
     background: true,
+    // Also listed with the process, so checkBuild can tell whether the dev server is still up.
+    envs: { [PROXY_TARGET_ENV]: String(targetPort) },
     timeoutMs: 0, // Prevent E2B from killing the proxy after the default 60s timeout
   });
 

@@ -20,6 +20,12 @@ import {
   createProjectSandbox,
   writeProjectFiles,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import {
+  INSTALLING,
+  type PreviewDevServer,
+  findPreviewDevServer,
+  restartDevServerIfDown,
+} from "@/features/sandbox-preview/server/dev-server";
 import { NETWORK_FAILURE } from "@/features/sandbox-preview/utils/app-error";
 import { withErrorHints } from "@/features/sandbox-preview/utils/error-recipes";
 import { type Framework, detectFramework } from "@/features/sandbox-preview/utils/framework";
@@ -264,10 +270,10 @@ const markWarmSlow = (projectId: string) => {
 /** The project whose running preview a check may build in, and its owner. */
 type WarmPreview = { projectId: string; ownerId: string };
 
-/** An install the preview (or another check) is running; copying node_modules now could catch it half-written. */
-const INSTALLING = /\b(?:npm|pnpm|yarn|bun)\b.*\s(?:install|i|add|ci)(?:\s|$)/;
-
-/** A request timeout is inconclusive while the preview is busy installing. */
+/**
+ * An install the preview (or another check) runs: copying node_modules now could catch it half-written.
+ * A request timeout is inconclusive while the preview is busy installing.
+ */
 const installRunning = async (sandbox: Sandbox, deadline: number) => {
   const requestTimeoutMs = within(deadline, SHORT_CALL_MS);
   const started = Date.now();
@@ -365,12 +371,14 @@ const killBuildProcesses = (sandbox: Sandbox, dir: string) =>
  * The check in the project's warm preview sandbox, or null to use a new one.
  * It builds in its own directory with a copy of the preview's node_modules, so
  * the dev server, its HMR and its installed packages are left alone, and the
- * preview's `.env` is not read, as on the cold path. Never kills the sandbox.
+ * preview's `.env` is not read, as on the cold path. Never kills the sandbox,
+ * and starts the preview's dev server again if the build took it down.
  */
 const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: BuildJob): Promise<string | null> => {
   const dir = `/home/user/check-build-${randomUUID().slice(0, 8)}`;
   let sandbox: Sandbox | null = null;
   let building = false;
+  let devServer: PreviewDevServer | null = null;
   try {
     sandbox = await connectWarmSandbox(apiKey, preview, job.deadline);
     if (!sandbox) return null;
@@ -384,6 +392,8 @@ const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: Bui
       return null;
     }
 
+    // Not finding it only skips the restart below; the build still runs warm.
+    devServer = await findPreviewDevServer(sandbox, within(job.deadline, SHORT_CALL_MS)).catch(() => null);
     building = true;
     return await buildIn(sandbox, dir, job, "warm");
   } catch (error) {
@@ -398,11 +408,18 @@ const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: Bui
     console.error("[check-build] warm sandbox unavailable, starting a new one", error);
     return null;
   } finally {
-    // Never kill: this is the user's live preview. Bounded, best effort, and
-    // inside the margin STEP_BUDGET_MS leaves.
+    // Never kill: this is the user's live preview. Each call is bounded by
+    // SHORT_CALL_MS, best effort, and inside the margin STEP_BUDGET_MS leaves.
     await sandbox
       ?.commands.run(`rm -rf ${dir}`, { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS })
       .catch(() => {});
+    if (sandbox && devServer) {
+      const restarted = await restartDevServerIfDown(sandbox, devServer, SHORT_CALL_MS).catch((error) => {
+        console.error("[check-build] could not check the preview's dev server", sandbox?.sandboxId, error);
+        return false;
+      });
+      if (restarted) console.warn("[check-build] the warm build took the preview's dev server down; restarted it", sandbox.sandboxId);
+    }
   }
 };
 
