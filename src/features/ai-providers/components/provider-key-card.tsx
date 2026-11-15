@@ -98,7 +98,9 @@ export const ProviderKeyCard = ({ providerKey }: ProviderKeyCardProps) => {
       {/* Wide enough that the actions wrap below the details on phones. */}
       <ItemContent className="min-w-56">
         <ItemTitle className="w-full min-w-0">
-          <span className="truncate">{label}</span>
+          <span className="truncate" title={label}>
+            {label}
+          </span>
           <Badge className={badge.className}>{badge.label}</Badge>
         </ItemTitle>
         <ItemDescription className="flex flex-wrap gap-x-2 gap-y-0.5">
@@ -115,7 +117,10 @@ export const ProviderKeyCard = ({ providerKey }: ProviderKeyCardProps) => {
           )}
         </ItemDescription>
         {providerKey.baseUrl && (
-          <ItemDescription className="truncate font-mono text-xs">
+          <ItemDescription
+            className="truncate font-mono text-xs"
+            title={providerKey.baseUrl}
+          >
             {providerKey.baseUrl}
           </ItemDescription>
         )}
@@ -132,6 +137,7 @@ export const ProviderKeyCard = ({ providerKey }: ProviderKeyCardProps) => {
         <Button
           size="sm"
           variant="outline"
+          aria-label={`Test ${label}`}
           onClick={() => void handleTest()}
           disabled={testing}
         >
