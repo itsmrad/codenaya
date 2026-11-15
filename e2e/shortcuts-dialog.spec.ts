@@ -29,6 +29,7 @@ test.describe("keyboard shortcut sheet", () => {
     await openWith(page, "?");
     await expect(sheet(page).getByText("New project")).toBeVisible();
     await expect(sheet(page).getByText("Quick edit the selection")).toBeVisible();
+    await expect(sheet(page).getByText("Toggle Ask / Plan mode")).toBeVisible();
 
     await page.keyboard.press("Escape");
     await expect(sheet(page)).toBeHidden();

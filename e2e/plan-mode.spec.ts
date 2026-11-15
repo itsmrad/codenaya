@@ -117,10 +117,20 @@ test.describe.serial("plan mode", () => {
     await expect(trigger).toHaveText(STUB_MODEL);
 
     const planToggle = page.getByRole("radio", { name: "Ask / Plan", exact: true });
+    const input = page.getByPlaceholder("Describe a change or ask a question…");
+    const buildToggle = page.getByRole("radio", { name: "Build", exact: true });
+    await expect(buildToggle).toBeChecked();
+    await input.press("Shift+Tab");
+    await expect(planToggle).toBeChecked();
+    await expect(input).toBeFocused();
+    await input.press("Shift+Tab");
+    await expect(buildToggle).toBeChecked();
+    await expect(input).toBeFocused();
+    await input.press("Tab");
+    await expect(input).not.toBeFocused();
     await planToggle.click();
     await expect(planToggle).toBeChecked();
 
-    const input = page.getByPlaceholder("Describe a change or ask a question…");
     await input.fill("todo app");
     await input.press("Enter");
 

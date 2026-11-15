@@ -844,7 +844,14 @@ export const ConversationSidebar = ({
                 placeholder="Describe a change or ask a question…"
                 className="min-h-11 px-3 pt-3 pb-1 text-sm/6 placeholder:text-muted-foreground/70"
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={slashMenu.onKeyDown}
+                onKeyDown={(event) => {
+                  if (event.key === "Tab" && event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && !isProcessing) {
+                    event.preventDefault();
+                    setMode((current) => current === "plan" ? "build" : "plan");
+                    return;
+                  }
+                  slashMenu.onKeyDown(event);
+                }}
                 value={input}
                 disabled={enhancer.isEnhancing}
               />

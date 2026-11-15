@@ -29,6 +29,7 @@ export const SHORTCUTS: Shortcut[] = [
 
   { label: "Send message", keys: [["enter"]], scope: "Chat" },
   { label: "New line", keys: [["shift", "enter"]], scope: "Chat" },
+  { label: "Toggle Ask / Plan mode", keys: [["shift", "tab"]], scope: "Chat" },
   { label: "Stop the agent", keys: [["esc"]], scope: "Chat" },
   { label: "Start or stop dictation", keys: [["alt", "v"]], scope: "Chat" },
 

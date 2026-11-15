@@ -12,7 +12,7 @@ export type ComposerMode = "build" | MessageMode;
 
 const MODES = [
   { value: "build", label: "Build", short: "Build", icon: HammerIcon, hint: "Build with one agent" },
-  { value: "plan", label: "Ask / Plan", short: "Plan", icon: ListChecksIcon, hint: "Read-only: answers questions or plans, never changes files" },
+  { value: "plan", label: "Ask / Plan", short: "Plan", icon: ListChecksIcon, hint: "Read-only: answers questions or plans, never changes files (Shift+Tab in chat composer)" },
   { value: "swarm", label: "Swarm", short: "Swarm", icon: UsersIcon, hint: "Build with a team of workers" },
 ] as const;
 
