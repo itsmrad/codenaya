@@ -21,7 +21,8 @@ vi.mock("@/lib/convex-client", async () => {
 
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { BUILD_NOT_BUILT_NOTE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
-import { FIRST_BUILD_APP_NOTE, STARTER_IN_PLACE_NOTE } from "./constants";
+import { FIRST_BUILD_APP_NOTE, NEXT_FIRST_BUILD_APP_NOTE, NEXT_STARTER_IN_PLACE_NOTE, STARTER_IN_PLACE_NOTE } from "./constants";
+import { NEXT_APP_STARTER } from "./next-starter";
 import { drive, text, toolCall } from "./process-message.driver";
 import { VITE_REACT_STARTER } from "./vite-starter";
 
@@ -42,7 +43,7 @@ const QUERIES: Record<string, () => unknown> = {
 
 interface ChatBody {
   messages: Array<{ role: string; content: unknown }>;
-  tools?: unknown[];
+  tools?: Array<{ function: { name: string } }>;
 }
 
 const codingRequest = (bodies: unknown[]) => {
@@ -132,6 +133,20 @@ describe("processMessage title off the first-build path", () => {
 });
 
 describe("processMessage first build (#338)", () => {
+  it("uses Next first-build guidance and does not offer the Vite scaffold for a Next starter", async () => {
+    needsFirstBuild = true;
+    projectFiles = NEXT_APP_STARTER.map(({ path }) => ({ _id: `id:${path}`, name: path, type: "file" }));
+    const outcome = await drive(MODEL, [{ data: text("Todo app") }, { data: text("Built it.") }]);
+    const { system, user } = codingRequest(outcome.inferenceBodies);
+    expect(system).toContain(JSON.stringify(NEXT_FIRST_BUILD_APP_NOTE).slice(1, -1));
+    expect(system).not.toContain(JSON.stringify(FIRST_BUILD_APP_NOTE).slice(1, -1));
+    expect(user).toContain(JSON.stringify(NEXT_STARTER_IN_PLACE_NOTE).slice(1, -1));
+    expect(user).not.toContain(JSON.stringify(STARTER_IN_PLACE_NOTE).slice(1, -1));
+    const coding = (outcome.inferenceBodies as ChatBody[]).find((body) => body.tools)!;
+    expect(coding.tools?.map((tool) => tool.function.name)).not.toContain("scaffoldViteApp");
+    expect(coding.tools?.map((tool) => tool.function.name)).toContain("writeFiles");
+  });
+
   it.each(["seeded", "empty"])("adds early App guidance for a %s solo first build", async (kind) => {
     needsFirstBuild = true;
     projectFiles = kind === "seeded"
