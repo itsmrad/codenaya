@@ -16,6 +16,9 @@ export const CREDENTIAL_TOKEN_PATTERNS: ReadonlyArray<{
   { label: "supabase-pat", pattern: /\bsbp_[A-Za-z0-9]{20,}\b/g },
   { label: "supabase-secret", pattern: /\bsb_secret_[A-Za-z0-9_-]{16,}\b/g },
   { label: "openai", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
+  { label: "resend", pattern: /\bre_[A-Za-z0-9]{8}_[A-Za-z0-9]{20,}\b/g },
+  { label: "posthog-personal", pattern: /\bphx_[A-Za-z0-9]{20,}\b/g },
+  { label: "sentry-token", pattern: /\bsntr[ysu]_[A-Za-z0-9_=+/-]{20,}/g },
   { label: "slack", pattern: /\bxox[abposr]-[A-Za-z0-9-]{10,}\b/g },
   { label: "google", pattern: /\bAIza[A-Za-z0-9_-]{30,}\b/g },
   { label: "aws", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g },
@@ -86,4 +89,38 @@ export function detectCredential(text: string): CredentialDetection {
     detected: matchedRules.size > 0,
     matchedRules: [...matchedRules].sort(),
   };
+}
+
+/**
+ * Token formats that are public by design and may sit under a public prefix:
+ * Google (Firebase) web keys, and JWTs such as Supabase anon keys. A Supabase
+ * service-role JWT is caught separately, by its claim.
+ */
+const PUBLIC_BY_DESIGN_RULES = new Set(["google", "jwt", "bearer"]);
+
+const JWT_PAYLOAD = /^eyJ[A-Za-z0-9_-]+\.([A-Za-z0-9_-]+)\.[A-Za-z0-9_-]+$/;
+
+function isServiceRoleJwt(value: string): boolean {
+  const payload = JWT_PAYLOAD.exec(value)?.[1];
+  if (!payload) return false;
+  try {
+    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))).role === "service_role";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The rule a value breaks if stored under a public (bundled) env var name, or
+ * `undefined` when it is fine to publish. Only known secret formats count, so
+ * URLs, publishable keys and DSNs without a password pass.
+ */
+export function publicValueSecretRule(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (isServiceRoleJwt(trimmed)) return "supabase-service-role";
+  const dsn = new RegExp(DSN_PASSWORD_PATTERN.source, DSN_PASSWORD_PATTERN.flags);
+  if (dsn.test(trimmed)) return "dsn-password";
+  return CREDENTIAL_TOKEN_PATTERNS.find(({ label, pattern }) =>
+    !PUBLIC_BY_DESIGN_RULES.has(label) && new RegExp(pattern.source, pattern.flags).test(trimmed),
+  )?.label;
 }

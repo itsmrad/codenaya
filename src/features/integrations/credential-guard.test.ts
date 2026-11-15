@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { detectCredential } from "./credential-guard";
+import { detectCredential, publicValueSecretRule } from "./credential-guard";
 
 const fake = (...parts: string[]) => parts.join("");
 
@@ -56,5 +56,32 @@ describe("chat credential guard", () => {
 
     expect(result.matchedRules).toContain("supabase-pat");
     expect(JSON.stringify(result)).not.toContain(secret);
+  });
+});
+
+describe("public env var values", () => {
+  const jwt = (payload: string) => fake("eyJhbGciOiJIUzI1NiJ9", ".", payload, ".", "abcdefghijklmnop");
+
+  it.each([
+    ["stripe", fake("sk", "_live_", "0123456789abcdefghij")],
+    ["stripe", fake("sk", "_test_", "0123456789abcdefghij")], // Clerk secret keys share this shape
+    ["supabase-secret", fake("sb", "_secret_", "0123456789abcdefghij")],
+    ["supabase-service-role", jwt("eyJyb2xlIjoic2VydmljZV9yb2xlIn0")],
+    ["resend", fake("re", "_abcd1234_", "0123456789abcdefghijklmn")],
+    ["posthog-personal", fake("phx", "_", "0123456789abcdefghijklmn")],
+    ["sentry-token", fake("sntrys", "_", "0123456789abcdefghijklmn")],
+    ["dsn-password", "postgresql://admin:verysecretpassword@db.example.com/app"],
+  ])("refuses a %s value", (rule, value) => {
+    expect(publicValueSecretRule(value)).toBe(rule);
+  });
+
+  it.each([
+    ["Supabase anon JWT", jwt("eyJyb2xlIjoiYW5vbiJ9")],
+    ["Stripe publishable key", fake("pk", "_live_", "0123456789abcdefghij")],
+    ["Firebase web key", fake("AIza", "0123456789abcdefghijklmnopqrstuvwx")],
+    ["Sentry DSN", "https://abc123@o0.ingest.sentry.io/0"],
+    ["URL", "https://xyz.supabase.co"],
+  ])("allows a %s", (_name, value) => {
+    expect(publicValueSecretRule(value)).toBeUndefined();
   });
 });

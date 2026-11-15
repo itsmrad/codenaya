@@ -58,6 +58,15 @@ describe("setEnvVar tool", () => {
     expect(step.run).toHaveBeenCalledTimes(1);
   });
 
+  it("refuses a known secret format under a public prefix, without starting a step", async () => {
+    const result = await setEnvVar("NEXT_PUBLIC_STRIPE_KEY", ["sk", "_live_", "0123456789abcdefghij"].join(""));
+
+    expect(result).toMatch(/^Error: not stored\. .*\(stripe\)/);
+    expect(result).not.toContain("0123456789abcdefghij");
+    expect(step.run).not.toHaveBeenCalled();
+    expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
   it("tells the model to read env vars per framework and never from browser code (#330)", async () => {
     vi.stubEnv("CODENAYA_LOCAL_KEK", randomBytes(32).toString("base64"));
     mocks.mutation.mockResolvedValue(null);

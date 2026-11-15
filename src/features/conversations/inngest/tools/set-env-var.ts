@@ -3,6 +3,7 @@ import { createTool } from "@inngest/agent-kit";
 import { nanoid } from "nanoid";
 
 import { classifyEnvKey, isValidEnvKey, maskSecret } from "@/features/integrations/env-keys";
+import { publicValueSecretRule } from "@/features/integrations/credential-guard";
 import {
   getSecretSealer,
   secretContext,
@@ -79,6 +80,16 @@ export const createSetEnvVarTool = ({
       }
 
       const visibility = classifyEnvKey(trimmedKey);
+
+      // A public value is bundled into browser code, so refuse known secret formats.
+      const secretRule = visibility === "public" ? publicValueSecretRule(value) : undefined;
+      if (secretRule) {
+        return (
+          `Error: not stored. The value for ${trimmedKey} looks like a secret (${secretRule}), and ` +
+          `public variables are published in the browser bundle. Store it under a name without ` +
+          `a public prefix (e.g. STRIPE_SECRET_KEY) and read it only from server code.`
+        );
+      }
 
       const run = async () => {
         if (visibility === "public") {
