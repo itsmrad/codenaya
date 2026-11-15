@@ -38,14 +38,20 @@ export const PlanModeToggle = ({
   >
     {MODES.filter(({ value }) => swarm || value !== "swarm").map(({ value, label, icon: Icon, hint }) => (
       <Tooltip key={value}>
-        <TooltipTrigger asChild>
-          <RadioGroupPrimitive.Item value={value} aria-label={label} asChild>
+        <RadioGroupPrimitive.Item
+          value={value}
+          aria-label={label}
+          // Radix defers arrow focus; keyup can clear its check-on-focus flag first.
+          onFocus={() => { if (mode !== value) onModeChange(value); }}
+          asChild
+        >
+          <TooltipTrigger asChild>
             <PromptInputButton variant={mode === value ? "secondary" : "ghost"} className="h-7 rounded-md px-1.5">
               <Icon className="size-3.5" />
               <span className="hidden @[560px]:inline">{label}</span>
             </PromptInputButton>
-          </RadioGroupPrimitive.Item>
-        </TooltipTrigger>
+          </TooltipTrigger>
+        </RadioGroupPrimitive.Item>
         <TooltipContent>{hint}</TooltipContent>
       </Tooltip>
     ))}
