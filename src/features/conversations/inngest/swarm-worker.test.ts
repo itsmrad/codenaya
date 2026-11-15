@@ -12,6 +12,12 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   mutation: vi.fn(),
   catalog: vi.fn(),
+  selfCheckWorker: vi.fn(),
+}));
+
+vi.mock("../swarm-sandbox", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../swarm-sandbox")>()),
+  selfCheckWorker: mocks.selfCheckWorker,
 }));
 
 vi.mock("@/lib/convex-client", async () => {
@@ -23,6 +29,7 @@ import { TURN_HEARTBEAT_ID } from "../agent-steps";
 import { WORKER_MAX_STEPS } from "../swarm";
 import { drive, text, toolCall } from "./process-message.driver";
 import { swarmWorker } from "./swarm-worker";
+import { createDelegateTasksTool } from "./tools/delegate-tasks";
 
 const TASK = {
   taskId: "pages",
@@ -42,13 +49,14 @@ const MUTATIONS: Record<string, (args: Record<string, unknown>) => unknown> = {
   "system:createFiles": ({ files }) => (files as { name: string }[]).map(({ name }) => ({ name, fileId: `f_${name}` })),
 };
 
-const run = (inferences: Parameters<typeof drive>[1]) =>
+const run = (inferences: Parameters<typeof drive>[1], extra: Record<string, unknown> = {}, invokeResults: unknown[] = []) =>
   drive({ modelId: "x-ai/grok-4.7" }, inferences, "", {
     parentMessageId: "m1",
     agentTaskId: "t1",
     ownerId: "user_1",
     planOverview: "## Plan\n- pages: home page\n- nav: navigation",
-  }, { fn: swarmWorker });
+    ...extra,
+  }, { fn: swarmWorker, invokeResults });
 
 const mutationArgs = (name: string) =>
   mocks.mutation.mock.calls.filter(([ref]) => getFunctionName(ref) === name).map(([, args]) => args);
@@ -138,7 +146,7 @@ describe("swarmWorker", () => {
     const summary = "Unfinished (step or cost cap): Listed files; the page is unfinished.";
     expect(outcome.data).toMatchObject({ status: "unfinished", summary });
     expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ status: "done", summary })]);
-  });
+  }, 20_000); // 20 replayed turns: ~2 s alone, past the 5 s default under the full suite
 
   it("hands off to the summary agent once its usage crosses the cost cap", async () => {
     mocks.catalog.mockReturnValue({
@@ -178,9 +186,184 @@ describe("swarmWorker", () => {
     }
   });
 
-  it("is cancelled with its parent message, with room for two swarms' workers per owner", () => {
+  it.each(["worker", "sub-orchestrator"])("meters %s repair turns cumulatively in separate durable steps and stops at its cost cap", async (role) => {
+    MUTATIONS["agentTasks:startTask"] = () => ({ ...TASK, role });
+    const modelId = role === "worker" ? "anthropic/claude-haiku-5.5" : "anthropic/claude-sonnet-5.5";
+    mocks.catalog.mockReturnValue({
+      models: [modelId, "x-ai/grok-4.7"].map((id) => ({
+        id, name: id, vendor: "a", provider: "openrouter", providerModelId: id, vision: false, tools: "reported",
+        pricing: { mode: "blended", usdPerMTok: 100 }, access: "everyone", hidden: id === modelId,
+      })),
+      defaultModelId: "x-ai/grok-4.7", utilityModelId: "x-ai/grok-4.7",
+    });
+    mocks.selfCheckWorker.mockImplementation(async ({ onResponse, signal }) => {
+      expect(signal.aborted).toBe(false);
+      await onResponse(JSON.stringify({ usage: { prompt_tokens: 500, completion_tokens: 500 } }));
+      expect(signal.aborted).toBe(false);
+      await onResponse(JSON.stringify({ usage: { prompt_tokens: 10_000, completion_tokens: 10_000 } }));
+      expect(signal.aborted).toBe(true);
+      return { selfCheck: "skipped (cost budget)", filesChanged: [] };
+    });
+    try {
+      const outcome = await run([{ data: withUsage(text("Built the page.")) }]);
+      expect(outcome.finalType).toBe("function-resolved");
+      const records = mutationArgs("credits:recordRunUsage");
+      expect(records).toHaveLength(3);
+      expect(records[0]).toMatchObject({ inputTokens: 1_000, outputTokens: 1_000, costUsd: 0.2 });
+      expect(records[1]).toMatchObject({ inputTokens: 1_500, outputTokens: 1_500 });
+      expect(records[1].costUsd).toBeCloseTo(0.3, 10);
+      expect(records[2]).toMatchObject({
+        messageId: "m1", agentTaskId: "t1", source: "platform", modelId,
+        inputTokens: 11_500, outputTokens: 11_500, costUsd: 2.3,
+      });
+    } finally {
+      MUTATIONS["agentTasks:startTask"] = () => TASK;
+    }
+  });
+
+  it("is cancelled with its parent message or on its own timeout, with room for two swarms' agents per owner", () => {
     const { opts } = swarmWorker as unknown as { opts: { cancelOn: unknown; concurrency: unknown } };
-    expect(opts.cancelOn).toEqual([{ event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" }]);
-    expect(opts.concurrency).toEqual([{ key: "event.data.ownerId", limit: 8 }]);
+    expect(opts.cancelOn).toEqual([
+      { event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" },
+      { event: "agent-task/cancel", if: "event.data.agentTaskId == async.data.agentTaskId" },
+      { event: "agent-task/cancel", if: "event.data.parentAgentTaskId == async.data.agentTaskId" },
+    ]);
+    expect(opts.concurrency).toEqual([{ key: "event.data.ownerId", limit: 16 }]);
+  });
+});
+
+describe("swarmWorker as a sub-orchestrator", () => {
+  const SUB = { ...TASK, taskId: "shop", title: "Shop", brief: "Build the shop.", ownedPaths: ["src/shop/"], role: "sub-orchestrator" };
+  const CHILDREN = {
+    tasks: [
+      { id: "cart", title: "Cart", brief: "Build the cart.", ownedPaths: ["src/shop/cart/"] },
+      { id: "list", title: "List", brief: "Build the product list.", ownedPaths: ["src/shop/list.tsx"] },
+    ],
+  };
+  const CART = { status: "done", summary: "Built the cart.", writtenPaths: ["src/shop/cart/cart.tsx"] };
+  const LIST = { status: "done", summary: "Built the list.", writtenPaths: ["src/shop/list.tsx"] };
+  const PRICED = (id: string, usdPerMTok: number) => ({
+    id, name: id, vendor: "a", provider: "openrouter", providerModelId: id, vision: false, tools: "reported",
+    pricing: { mode: "blended", usdPerMTok }, access: "everyone", hidden: id !== "x-ai/grok-4.7",
+  });
+
+  beforeEach(() => {
+    MUTATIONS["agentTasks:startTask"] = () => SUB;
+    MUTATIONS["agentTasks:createTasks"] = ({ tasks }) => (tasks as unknown[]).map((_, i) => `child_${i}`);
+    mocks.catalog.mockReturnValue({
+      models: [PRICED("anthropic/claude-haiku-5.5", 2), PRICED("anthropic/claude-sonnet-5.5", 10), PRICED("x-ai/grok-4.7", 1)],
+      defaultModelId: "x-ai/grok-4.7",
+      utilityModelId: "x-ai/grok-4.7",
+    });
+    return () => {
+      MUTATIONS["agentTasks:startTask"] = () => TASK;
+      delete MUTATIONS["agentTasks:createTasks"];
+    };
+  });
+
+  it("delegates inside its paths to depth-2 workers, integrates, and is billed at Sonnet", async () => {
+    const outcome = await run([
+      { data: withUsage(toolCall("delegateTasks", CHILDREN)) }, // 2,000 tokens at Sonnet's $10/MTok
+      { data: toolCall("writeFiles", { files: [{ path: "src/shop/index.tsx", content: "export {};\n" }] }) },
+      { data: text("Built the shop.") },
+    ], {}, [CART, LIST]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: string }>; tools: Array<{ function: { name: string } }> }>;
+    expect(request.tools.map((tool) => tool.function.name)).toContain("delegateTasks");
+    expect(request.messages[0].content).toContain("[swarm-worker]");
+    expect(request.messages[0].content).toContain("[swarm-suborchestrator]");
+
+    expect(mutationArgs("agentTasks:createTasks")).toEqual([expect.objectContaining({
+      messageId: "m1",
+      tasks: [
+        expect.objectContaining({ taskId: "shop/cart", parentTaskId: "shop", role: "worker", modelId: "anthropic/claude-haiku-5.5" }),
+        expect.objectContaining({ taskId: "shop/list", parentTaskId: "shop", role: "worker" }),
+      ],
+    })]);
+    // Children carry both parent ids, so message and sub-orchestrator cancellation reach them.
+    expect(outcome.invocations).toEqual([
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_0", parentAgentTaskId: "t1", parentMessageId: "m1", ownerId: "user_1", depth: 2 }) }, timeout: "10m" }),
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_1", parentAgentTaskId: "t1", depth: 2 }) }, timeout: "10m" }),
+    ]);
+    expect(outcome.data).toMatchObject({
+      status: "done",
+      writtenPaths: ["src/shop/cart/cart.tsx", "src/shop/list.tsx", "src/shop/index.tsx"],
+    });
+    // Its own ledger row, at the sub-orchestrator's (Sonnet) price.
+    expect(mutationArgs("credits:recordRunUsage")[0]).toMatchObject({ agentTaskId: "t1", messageId: "m1", modelId: "anthropic/claude-sonnet-5.5" });
+    expect(mutationArgs("credits:recordRunUsage")[0].costUsd).toBeCloseTo(0.02, 10);
+  });
+
+  it("refuses children outside its paths and overlapping siblings", async () => {
+    const outcome = await run([
+      { data: toolCall("delegateTasks", { tasks: [CHILDREN.tasks[0], { ...CHILDREN.tasks[1], ownedPaths: ["src/pages/list.tsx"] }] }) },
+      { data: toolCall("delegateTasks", { tasks: [CHILDREN.tasks[0], { ...CHILDREN.tasks[1], ownedPaths: ["src/shop/cart/x.tsx"] }] }) },
+      { data: text("Built it myself.") },
+    ]);
+
+    const tool = (outcome.inferenceBodies.at(-1) as { messages: Array<{ role: string; content: string }> }).messages
+      .filter((m) => m.role === "tool").map((m) => String((JSON.parse(m.content) as { data: unknown }).data));
+    expect(tool[0]).toMatch(/outside your owned paths/);
+    expect(tool[1]).toMatch(/overlap/);
+    expect(outcome.invocations).toEqual([]);
+  });
+
+  it("builds it itself when the swarm is at its agent limit", async () => {
+    MUTATIONS["agentTasks:createTasks"] = () => {
+      throw new ConvexError({ code: "LIMIT_EXCEEDED", message: "Too many swarm agents" });
+    };
+    const outcome = await run([{ data: toolCall("delegateTasks", CHILDREN) }, { data: text("Built it myself.") }]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(JSON.stringify(outcome.inferenceBodies.at(-1))).toContain("already runs 8 agents");
+    expect(outcome.invocations).toEqual([]);
+  });
+
+  it("offers no delegateTasks at depth 2", async () => {
+    const outcome = await run([{ data: text("Done.") }], { depth: 2 });
+
+    const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: string }>; tools: Array<{ function: { name: string } }> }>;
+    expect(request.tools.map((tool) => tool.function.name)).not.toContain("delegateTasks");
+    expect(request.messages[0].content).not.toContain("[swarm-suborchestrator]");
+  });
+
+  it("refuses a depth-2 delegateTasks call", async () => {
+    const tool = createDelegateTasksTool({
+      internalKey: "ik", projectId: "p1" as never, messageId: "m1" as never, ownerId: "user_1", model: { modelId: "x" },
+      parent: { taskId: "shop/cart", agentTaskId: "child_0" as never, ownedPaths: ["src/shop/cart/"], depth: 2 },
+    });
+    expect(await tool.handler(CHILDREN as never, {} as never)).toMatch(/^Error: Workers cannot delegate/);
+  });
+});
+
+describe("swarm cancellation", () => {
+  // The CEL `a == b` of cancelOn, with `event` the run's trigger and `async` the cancel event.
+  const cancels = (data: Record<string, unknown>, cancel: Record<string, unknown>, event = "message/cancel") => {
+    const { opts } = swarmWorker as unknown as { opts: { cancelOn: Array<{ event: string; if: string }> } };
+    const value = (path: string) => path.split(".").slice(1)
+      .reduce<unknown>((o, key) => (o as Record<string, unknown>)?.[key], { event: { data }, async: { data: cancel } }[path.split(".")[0]]);
+    return opts.cancelOn.some((rule) => {
+      const [left, right] = rule.if.split(" == ").map(value);
+      return rule.event === event && left !== undefined && left === right;
+    });
+  };
+
+  it("matches a top-level task and a sub-orchestrator's child alike, and no other message", () => {
+    const top = { parentMessageId: "m1", agentTaskId: "t1", depth: 1 };
+    const child = { parentMessageId: "m1", agentTaskId: "child_0", depth: 2 };
+    expect(cancels(top, { messageId: "m1" })).toBe(true);
+    expect(cancels(child, { messageId: "m1" })).toBe(true);
+    expect(cancels(child, { messageId: "m2" })).toBe(false);
+  });
+
+  it("cancels a sub-orchestrator and its children without stopping sibling tasks", () => {
+    const cancel = { agentTaskId: "t1" };
+    const child = { parentMessageId: "m1", agentTaskId: "child_0", parentAgentTaskId: "t1", depth: 2 };
+    expect(cancels({ agentTaskId: "t1" }, cancel, "agent-task/cancel")).toBe(true);
+    expect(cancels(child, cancel, "agent-task/cancel")).toBe(true);
+    expect(cancels({ ...child, agentTaskId: "child_1" }, cancel, "agent-task/cancel")).toBe(true);
+    expect(cancels({ agentTaskId: "t2" }, cancel, "agent-task/cancel")).toBe(false);
+    expect(cancels({ ...child, parentAgentTaskId: "t2" }, cancel, "agent-task/cancel")).toBe(false);
   });
 });

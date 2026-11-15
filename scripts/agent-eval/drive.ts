@@ -81,10 +81,13 @@ export async function drive(page: Page, user: ConvexHttpClient, options: Options
     } else {
       const result = await post(page, "/api/projects/create-with-prompt", { prompt: options.prompt, model: options.model });
       trail.projectId = result.projectId;
-      // A chosen name is never replaced by the generated title (#288).
-      if (options.title) await (await userConvexClient(page)).mutation(api.projects.rename, { id: result.projectId, name: options.title });
     }
     await page.goto(`/projects/${trail.projectId}`);
+    // userConvexClient reads the page's Clerk session, which a cold dev compile loads late.
+    await page.waitForFunction(() => (window as { Clerk?: { session?: unknown } }).Clerk?.session, undefined, { timeout: 120_000 })
+      .catch(() => { throw new Error("Clerk session not ready after 120s"); });
+    // A chosen name is never replaced by the generated title (#288).
+    if (options.title && !options.projectId) await (await userConvexClient(page)).mutation(api.projects.rename, { id: trail.projectId as Id<"projects">, name: options.title });
     await page.getByRole("tab", { name: "Preview", exact: true }).click({ timeout: 60_000 });
     await observe(page, user, options, trail);
     if (trail.preview.loaded || trail.preview.overlay) await screenshot(page, options.directory, trail);

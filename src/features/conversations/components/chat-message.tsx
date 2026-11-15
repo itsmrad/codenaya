@@ -284,6 +284,7 @@ export const AssistantMessage = ({
           previewErrors={isLast ? { ...previewErrors, sending: fixSending } : undefined}
           checkpointId={checkpointId}
           revertDisabled={revertDisabled}
+          messageId={message._id}
         />
       )}
       {stalled && isLast && onRetry && (

@@ -17,7 +17,7 @@ interface ProcessMessageDispatchInput {
   message: string;
   /** Validated model choice; omitted means the platform default. */
   model?: AgentModelChoice;
-  /** Plan mode (#120): no write tools; omitted means build. */
+  /** Plan mode (#120): no write tools. Swarm: an orchestrator with parallel workers. Omitted means build. */
   mode?: MessageMode;
 }
 

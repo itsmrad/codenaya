@@ -39,6 +39,18 @@ Constraints from the code:
   parent's `message/cancel`). Results are collected with `Promise.allSettled`; a failed or
   unfinished worker is reported in the tool result, and the orchestrator finishes its
   files. No automatic re-dispatch.
+- **Sub-orchestrators (depth 2).** A task with role `"sub-orchestrator"` (at most 2 per plan) runs on
+  Sonnet 5.5 and calls `delegateTasks` once to split its own owned paths among 2-3 workers;
+  their rows carry `parentTaskId`. `MAX_SWARM_AGENTS=8` caps the rows on one message. Platform
+  swarms get them only when the Convex env var `SWARM_PLATFORM_MAX_DEPTH` is `"2"` (default 1;
+  read by the `swarm.getSwarmSettings` query), checked by `validatePlan` and again by
+  `createTasks` (its `byok` arg; absent means platform). BYOK swarms always have depth 2. A
+  failed sub-orchestrator fails its unfinished workers.
+- **One platform swarm per owner.** `createTasks` is a serializable Convex mutation, so it
+  refuses a platform fan-out (`CONFLICT`) while another of the owner's platform swarms has
+  queued or running tasks under a `processing` message (`agentTasks.ownerId`/`platform`); the
+  orchestrator is told to build alone. No Inngest concurrency key: queued workers would burn
+  their `step.invoke` timeout. BYOK is unchanged.
 - **The Convex file tree is the merge point, and the single preview stays.** Workers write
   the same tree the orchestrator does. Nothing is copied or merged.
 - **Path ownership.** Each task owns disjoint paths under `src/` (no path equals or prefixes
@@ -57,7 +69,7 @@ Constraints from the code:
   too; the worker caps live in `src/features/conversations/swarm.ts`. 2-4 tasks, one
   `delegateTasks` call per run, `WORKER_MAX_STEPS=20`, `MAX_WORKER_USD=0.50` at catalog price
   (BYOK is unpriced, so only the step cap applies), and a 12-minute `step.invoke` timeout.
-  Worker concurrency per owner is 8, that is 2 runs per owner × 4 tasks. The timeout counts
+  Worker concurrency per owner is 16, that is 2 runs per owner × `MAX_SWARM_AGENTS`. The timeout counts
   queue time, so a second concurrent swarm's workers must never queue behind the first's.
   The orchestrator plus integration share the existing `MAX_AGENT_STEPS=40`, to be tuned after
   evals. Workers start no sandboxes in v1.
@@ -88,8 +100,16 @@ Constraints from the code:
 ## Consequences
 
 - A large first build can run 2-4 writers at once on one preview and one integration build.
-- Worker cost is bounded: at most ≈$2 per swarm above a single run on platform models
-  (4 × `MAX_WORKER_USD`), ≈$0.3 typical. BYOK workers are bounded only by 4 × 20 steps.
+- Worker cost above a single run, at catalog price, worst case per swarm: depth 1 on
+  platform models ≈$2 (4 × `MAX_WORKER_USD`), ≈$0.3 typical; depth 2 ≈$6
+  (2 × `MAX_SUBORCH_USD` $1.50 + 6 × $0.50), only when `SWARM_PLATFORM_MAX_DEPTH=2`.
+  Platform swarms run at most 1 at a time per owner. BYOK is unpriced and bounded only by the
+  step caps (20 per worker, 30 per sub-orchestrator).
+- Credits are checked once, at the send, so a swarm can overshoot the balance by its worst
+  case above (≈$2, or ≈$6 at depth 2) on platform models. Accepted. Kill switch: the Convex env var
+  `SWARM_ENABLED` (on by default; "false", "0" or "off" turns it off). The send routes refuse
+  swarm mode with a clear error, a swarm run that starts while it is off runs as a normal build,
+  and the UI hides the toggle (`api.swarm.isEnabled`).
 - The orchestrator absorbs failures, so a weak plan costs integrator turns, not a crash.
 - Workers can't see each other's work until it lands in the tree; contracts must be in the
   foundation the orchestrator writes first.

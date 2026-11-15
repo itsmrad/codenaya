@@ -9,6 +9,8 @@ import {
 } from "@/lib/rate-limit";
 
 import { DEFAULT_CONVERSATION_TITLE } from "@/features/conversations/constants";
+import { SWARM_MODE } from "@/features/conversations/plan-mode";
+import { swarmOffResponse } from "@/features/conversations/server/swarm-off";
 import {
   modelChoiceSchema,
   requireModelChoice,
@@ -37,6 +39,8 @@ const requestSchema = z.object({
   templateId: z.enum(STARTER_TEMPLATE_IDS).optional(),
   /** A prompt typed on the landing page before sign-up, for activation events (#339). */
   fromLanding: z.boolean().optional(),
+  /** Swarm mode, as in the messages route; omitted means build. */
+  mode: z.literal(SWARM_MODE).optional(),
 });
 
 export async function POST(request: Request) {
@@ -66,7 +70,7 @@ export async function POST(request: Request) {
     return invalid;
   }
 
-  const { prompt, model, templateId, fromLanding } = data;
+  const { prompt, model, templateId, fromLanding, mode } = data;
   const template = templateId ? getStarterTemplate(templateId) : undefined;
 
   if (detectCredential(prompt).detected) {
@@ -78,6 +82,11 @@ export async function POST(request: Request) {
       },
       { status: 422 },
     );
+  }
+
+  const swarmOff = await swarmOffResponse(mode);
+  if (swarmOff) {
+    return swarmOff;
   }
 
   const { runModel, promoKind, rejected } = await requireModelChoice({
@@ -145,6 +154,7 @@ export async function POST(request: Request) {
         content: "",
         status: "processing",
         runModel,
+        mode,
       },
     );
 
@@ -157,6 +167,7 @@ export async function POST(request: Request) {
       ownerId: userId,
       message: prompt,
       model: runModel,
+      mode,
     });
 
     // The project exists either way: return its id so the client can open it

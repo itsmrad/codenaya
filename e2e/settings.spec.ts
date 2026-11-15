@@ -89,6 +89,11 @@ test.describe("settings", () => {
             content: page.getByRole("heading", { level: 1, name: "Skills" }),
           },
           {
+            path: "/settings/usage",
+            // The month bar is there before the first metered run too (#526).
+            content: page.getByRole("progressbar", { name: "This month: credits left" }),
+          },
+          {
             path: "/settings/integrations",
             content: page.getByRole("heading", { level: 1, name: "Integrations" }),
           },
