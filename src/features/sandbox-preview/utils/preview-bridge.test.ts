@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { AppError } from "./app-error";
 import {
   PREVIEW_BRIDGE_SCRIPT,
   PREVIEW_MESSAGE_SOURCE,
@@ -112,7 +113,7 @@ describe("readPreviewMessage", () => {
 
   it("truncates long text", () => {
     const long = "a".repeat(10_000);
-    const error = readPreviewMessage({ ...event, data: { ...data, message: long, stack: long } }, frame, previewUrl);
+    const error = readPreviewMessage({ ...event, data: { ...data, message: long, stack: long } }, frame, previewUrl) as AppError;
     expect(error?.message).toHaveLength(2048);
     expect(error?.stack).toHaveLength(2048);
   });
