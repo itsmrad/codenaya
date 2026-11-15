@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { Allotment } from "allotment";
 
 import { useIsCompact } from "@/hooks/use-mobile";
+import { cn } from "@/lib/utils";
 import { useProjectCommands } from "@/lib/command-palette";
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
 import { ProjectIntegrationsProvider } from "@/features/integrations/components/project-integrations-context";
@@ -38,9 +39,8 @@ export const ProjectIdLayout = ({
     <ProjectIntegrationsProvider projectId={projectId}>
       <div className="w-full h-dvh flex flex-col bg-background">
         <div className="flex-1 p-2 min-h-0 flex overflow-hidden">
-        {isCompact ? (
-          <div className="flex-1 min-w-0 flex flex-col relative">{children}</div>
-        ) : (
+        {/* One tree at every width: swapping it for a plain div below the compact
+            breakpoint remounted the project view, and its preview booted a new sandbox (#777). */}
         <Allotment
           className="flex-1"
           defaultSizes={[
@@ -50,24 +50,24 @@ export const ProjectIdLayout = ({
         >
           <Allotment.Pane
             snap
-            visible={!isChatHidden}
+            visible={!isCompact && !isChatHidden}
             minSize={MIN_SIDEBAR_WIDTH}
             maxSize={MAX_SIDEBAR_WIDTH}
             preferredSize={DEFAULT_CONVERSATION_SIDEBAR_WIDTH}
           >
             <div className="h-full pr-1 box-border">
               <div className="h-full rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)] flex flex-col overflow-hidden relative">
-                <ConversationSidebar projectId={projectId} />
+                {/* Compact widths show the chat as a tab inside ProjectIdView instead. */}
+                {!isCompact && <ConversationSidebar projectId={projectId} />}
               </div>
             </div>
           </Allotment.Pane>
           <Allotment.Pane>
-            <div className="h-full pl-1 box-border flex flex-col relative overflow-hidden">
+            <div className={cn("h-full box-border flex flex-col relative overflow-hidden", !isCompact && "pl-1")}>
               {children}
             </div>
           </Allotment.Pane>
         </Allotment>
-        )}
         </div>
       </div>
     </ProjectIntegrationsProvider>
