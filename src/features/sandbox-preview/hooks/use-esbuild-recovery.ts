@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AppError } from "../utils/app-error";
+import type { Framework } from "../utils/framework";
 import {
   isEsbuildServiceFailure,
   nextEsbuildRecovery,
@@ -8,12 +9,13 @@ import {
 } from "../utils/esbuild-recovery";
 
 /** Infrastructure recovery never queues an AI repair or changes its timing (#776). */
-export const useEsbuildRecovery = ({ sandboxId, error, recover }: {
+export const useEsbuildRecovery = ({ sandboxId, framework, error, recover }: {
   sandboxId: string | null;
+  framework: Framework | null;
   error: AppError | null;
   recover: () => Promise<EsbuildRecoveryStatus>;
 }) => {
-  const serviceFailed = sandboxId !== null && isEsbuildServiceFailure(error);
+  const serviceFailed = sandboxId !== null && isEsbuildServiceFailure(error, framework);
   const [recovering, setRecovering] = useState(false);
   const attempts = useRef<{ sandboxId: string; state: EsbuildRecoveryAttempts } | null>(null);
   useEffect(() => {

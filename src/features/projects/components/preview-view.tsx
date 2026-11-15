@@ -177,10 +177,11 @@ export const PreviewView = ({
   // URL dictates isolation mode via next.config.ts conditional headers
   const engineParam = searchParams.get("engine") as PreviewEngine | null;
   const requestedEngine = engineParam === "webcontainer" ? "webcontainer" : "sandbox";
-  const isNext = useMemo(
-    () => detectFrameworkFromFiles(files ? buildFlatFileList(files) : [], project?.settings?.devCommand) === "next",
+  const framework = useMemo(
+    () => detectFrameworkFromFiles(files ? buildFlatFileList(files) : [], project?.settings?.devCommand),
     [files, project?.settings?.devCommand],
   );
+  const isNext = framework === "next";
   const activeEngine = isNext ? "sandbox" : requestedEngine;
   const needsSandboxReload = isNext && requestedEngine === "webcontainer";
 
@@ -294,6 +295,7 @@ export const PreviewView = ({
   const appError = buildError ?? runtimeError;
   const { serviceFailed, recovering: recoveringEsbuild } = useEsbuildRecovery({
     sandboxId: activeEngine === "sandbox" && status === "running" ? sandbox.sandboxId : null,
+    framework,
     error: appError,
     recover: sandbox.recoverDevServer,
   });

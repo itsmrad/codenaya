@@ -26,6 +26,13 @@ describe("recoverEsbuild (#776)", () => {
     expect(run).toHaveBeenCalledTimes(3);
   });
 
+  it("restarts a Next dev server with its own marked command, not a Vite one", async () => {
+    const next = { ...dev, envs: { [DEV_COMMAND_ENV]: "npm run dev -- -H 0.0.0.0", HOSTNAME: "0.0.0.0" } };
+    const { sandbox, run } = fakeSandbox([next]);
+    expect(await recoverEsbuild(sandbox)).toBe("restarted");
+    expect(run).toHaveBeenLastCalledWith(next.envs[DEV_COMMAND_ENV], { cwd: next.cwd, envs: next.envs, background: true, timeoutMs: 0 });
+  });
+
   it("does nothing during an install and does not spend its attempt", async () => {
     const { sandbox, run, list } = fakeSandbox([dev, { ...dev, pid: 5, cmd: "npm", args: ["install"], envs: {} }]);
     expect(await recoverEsbuild(sandbox)).toBe("busy");

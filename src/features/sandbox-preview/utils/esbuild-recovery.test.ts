@@ -8,17 +8,24 @@ describe("esbuild service recovery (#776)", () => {
     "The service was stopped",
     "write EPIPE",
   ])("recognizes the build error: %s", (message) => {
-    expect(isEsbuildServiceFailure({ kind: "build", message })).toBe(true);
+    expect(isEsbuildServiceFailure({ kind: "build", message }, "vite")).toBe(true);
   });
 
   it("recognizes an esbuild stack but leaves app and network failures alone", () => {
-    expect(isEsbuildServiceFailure({ kind: "runtime", message: "write EPIPE", stack: "esbuild/lib/main.js:718" })).toBe(true);
+    expect(isEsbuildServiceFailure({ kind: "runtime", message: "write EPIPE", stack: "esbuild/lib/main.js:718" }, "vite")).toBe(true);
     for (const error of [
       null,
       { kind: "runtime" as const, message: "write EPIPE" },
       { kind: "build" as const, message: "Failed to resolve import './Missing'" },
       { kind: "build" as const, message: "npm error code ERESOLVE" },
-    ]) expect(isEsbuildServiceFailure(error)).toBe(false);
+    ]) expect(isEsbuildServiceFailure(error, "vite")).toBe(false);
+  });
+
+  it("only recovers a Vite project: Next and unknown frameworks never restart", () => {
+    const error = { kind: "build" as const, message: "The service is no longer running: write EPIPE", stack: "esbuild/lib/main.js" };
+    expect(isEsbuildServiceFailure(error, "vite")).toBe(true);
+    expect(isEsbuildServiceFailure(error, "next")).toBe(false);
+    expect(isEsbuildServiceFailure(error, null)).toBe(false);
   });
 
   it("allows one attempt per two minutes and at most three, including failures", () => {
