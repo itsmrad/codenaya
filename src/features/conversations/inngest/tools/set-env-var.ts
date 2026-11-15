@@ -43,6 +43,11 @@ interface SetEnvVarToolOptions {
   internalKey: string;
 }
 
+const paramsSchema = z.object({
+  key: z.string().min(1, "Variable name is required"),
+  value: z.string(),
+});
+
 export const createSetEnvVarTool = ({
   projectId,
   ownerId,
@@ -69,7 +74,13 @@ export const createSetEnvVarTool = ({
         ),
       value: z.string().describe("The value to store."),
     }),
-    handler: async ({ key, value }, { step }) => {
+    handler: async (params, { step }) => {
+      const parsed = paramsSchema.safeParse(params);
+      if (!parsed.success) {
+        return `Error: ${parsed.error.issues[0].message}`;
+      }
+
+      const { key, value } = parsed.data;
       const trimmedKey = key.trim();
 
       if (!isValidEnvKey(trimmedKey)) {
