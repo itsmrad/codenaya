@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 
+import { publicValueSecretRule } from "../src/features/integrations/credential-guard";
 import {
   PUBLIC_KEY_PREFIXES,
   assertValidEnvKey,
@@ -178,6 +179,7 @@ export const setPublicEnvVar = mutation({
     key: v.string(),
     value: v.string(),
   },
+  returns: v.id("projectEnvVars"),
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
     await getOwnedProject(ctx, args.projectId, identity.subject);
@@ -190,6 +192,14 @@ export const setPublicEnvVar = mutation({
         `"${key}" is not a recognised public variable name. Public variables must ` +
           `start with one of: ${PUBLIC_KEY_PREFIXES.join(", ")}. ` +
           `Store anything else as a secret instead.`,
+      );
+    }
+
+    if (publicValueSecretRule(args.value)) {
+      throw appError(
+        "INVALID_ARGUMENT",
+        "This looks like a secret key and would be published in the browser bundle. " +
+          "Use a name without a public prefix and store it as a secret instead.",
       );
     }
 
