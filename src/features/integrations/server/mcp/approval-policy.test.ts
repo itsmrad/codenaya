@@ -167,7 +167,7 @@ const approvalRows = () =>
 
 const GATED = ["stripe_api_write", "send_money", "convert_currency", "setup_recipient"];
 
-describe.each(["notion", "atlassian", "gitlab", "clerk"] as const)("%s published writes", (id) => {
+describe.each(["notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface"] as const)("%s published writes", (id) => {
   it.each([...PROVIDERS[id].destructiveTools, "unlisted_tool"])("never calls %s without approval, even with a misleading read-only hint", async (name) => {
     // Unknown, unannotated tools are gated too; known writes must override hints.
     served = [{
@@ -508,6 +508,11 @@ describe("known reads exclude tools that return secrets", () => {
     ["prisma", "list_prisma_postgres_connection_strings"],
     ["neon", "get_connection_string"],
     ["neon", "get_realtime_secret"],
+    ["firecrawl", "firecrawl_parse"],
+    ["firecrawl", "firecrawl_monitor_get"],
+    ["firecrawl", "firecrawl_monitor_list"],
+    ["firecrawl", "firecrawl_credit_usage"],
+    ["huggingface", "hf_whoami"],
   ] as const)("%s does not list %s", (id, name) => {
     expect(PROVIDERS[id].readOnlyTools ?? []).not.toContain(name);
     expect(requiresApproval(

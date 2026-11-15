@@ -1,10 +1,15 @@
 Provider logo sources
 
 Supabase, Neon, GitHub, Stripe, Prisma, Sentry, Cloudflare, Linear, PostHog,
-Resend, Upstash, Sanity, PlanetScale, Notion, Atlassian, GitLab and Clerk SVGs:
+Resend, Upstash, Sanity, PlanetScale, Notion, Atlassian, GitLab, Clerk and
+Hugging Face SVGs:
 https://github.com/simple-icons/simple-icons/tree/develop/icons
 Simple Icons is distributed under CC0 1.0 Universal:
 https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md
+
+Exa, Tavily and Firecrawl SVGs: original single-letter monograms made for this
+project (they are not the vendors' logos), dedicated to the public domain under
+CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
 
 Context7 SVG: https://github.com/upstash/context7/blob/master/public/context7-icon.svg
 The MIT License (MIT)

@@ -1035,6 +1035,137 @@ const CATALOG = {
     notes:
       "Acts as your Clerk Dashboard account in the selected workspace. No URL-level read-only mode; production-instance creation cannot be undone.",
   },
+
+  exa: {
+    id: "exa",
+    displayName: "Exa",
+    description: "Search the web, read pages, and run multi-step research.",
+    category: "Search",
+    logo: "/integrations/exa.svg",
+    mcpUrl: "https://mcp.exa.ai/mcp",
+    authModes: ["oauth", "api_key"],
+    trustedHostnames: ["mcp.exa.ai"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full published inventory: https://docs.exa.ai/reference/exa-mcp#available-tools
+    // agent_run is usage-billed, so it is gated as spend.
+    destructiveTools: ["agent_run"],
+    // Public-web reads from the inventory above. web_search_advanced_exa stays
+    // gated: summaries, subpage crawling and up to 100 results bill crawl and LLM spend in one call.
+    readOnlyTools: ["web_search_exa", "web_fetch_exa"],
+    apiKey: {
+      header: "x-api-key",
+      valuePrefix: "",
+      hint: "Exa API key",
+    },
+    notes:
+      "Search and fetch only read the public web; agent_run is usage-billed and always needs approval. Note that " +
+      "this server also answers unauthenticated and invalid-credential requests on its keyless tier (rate-limited, " +
+      "no agent_run), so a successful connection probe does not prove the key or token is valid — it only proves " +
+      "the server is reachable. No URL-level read-only mode.",
+  },
+
+  tavily: {
+    id: "tavily",
+    displayName: "Tavily",
+    description: "Search, extract, crawl, and map the web for current sources.",
+    category: "Search",
+    logo: "/integrations/tavily.svg",
+    mcpUrl: "https://mcp.tavily.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.tavily.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full published inventory: https://docs.tavily.com/documentation/mcp#what-you-get
+    // Every tool reads the public web; tavily_research is a long multi-source run, gated as spend.
+    destructiveTools: ["tavily_research"],
+    // Public-web reads from the inventory above. tavily_crawl runs a billed multi-page job, so it stays gated.
+    readOnlyTools: ["tavily_search", "tavily_extract", "tavily_map"],
+    notes:
+      "OAuth only here; Tavily's documented key option puts the key in the MCP URL query string. Connecting with OAuth uses the account's mcp_auth_default API key, which Tavily creates if it does not exist. All tools consume Tavily credits. No URL-level read-only mode.",
+  },
+
+  firecrawl: {
+    id: "firecrawl",
+    displayName: "Firecrawl",
+    description: "Scrape, crawl, and search the web, or operate a live page.",
+    category: "Search",
+    logo: "/integrations/firecrawl.svg",
+    mcpUrl: "https://mcp.firecrawl.dev/v2/mcp-oauth",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.firecrawl.dev"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full published inventory: https://docs.firecrawl.dev/mcp-server/tools and
+    // https://github.com/firecrawl/firecrawl-mcp-server#available-tools, plus the
+    // deprecated but still-registered firecrawl_extract. Billed enrichment, jobs
+    // and extraction calls are gated as spend despite their readOnlyHint.
+    destructiveTools: [
+      "firecrawl_interact",
+      "firecrawl_interact_stop",
+      "firecrawl_agent",
+      "firecrawl_monitor_create",
+      "firecrawl_monitor_update",
+      "firecrawl_monitor_run",
+      "firecrawl_monitor_delete",
+      "firecrawl_feedback",
+      "firecrawl_search_feedback",
+      "alexandria_library_read",
+      "people_company_search",
+      "people_company_enrich",
+      "jobs_search",
+      "firecrawl_extract",
+    ],
+    // Reads from the inventory above. Left gated: firecrawl_scrape (billed per
+    // call, incl. Alexandria runs), firecrawl_crawl (starts a billed job),
+    // firecrawl_parse (returns a signed upload target), monitor list/get
+    // (webhook configuration) and firecrawl_credit_usage (per-key billing).
+    // firecrawl_search is also gated: with scrapeOptions each result bills as an uncapped scrape.
+    readOnlyTools: [
+      "firecrawl_map", "firecrawl_check_crawl_status",
+      "firecrawl_agent_status", "firecrawl_developer_search", "firecrawl_gov_search",
+      "firecrawl_research_search_papers", "firecrawl_research_related_papers",
+      "firecrawl_research_read_paper", "firecrawl_research_inspect_paper",
+      "firecrawl_find_tools", "alexandria_library_search",
+      "firecrawl_monitor_checks", "firecrawl_monitor_check",
+    ],
+    notes:
+      "OAuth endpoint only; API-key connections use a different endpoint and are not offered yet. Interact can click and submit forms on live sites, and monitors can send webhooks or email, so both are gated. Scrape with Alexandria provider calls is billed per call but cannot be gated by name. No URL-level read-only mode.",
+  },
+
+  huggingface: {
+    id: "huggingface",
+    displayName: "Hugging Face",
+    description: "Explore models, datasets, Spaces, and papers, and run Hub jobs.",
+    category: "AI",
+    logo: "/integrations/huggingface.svg",
+    mcpUrl: "https://huggingface.co/mcp",
+    authModes: ["oauth", "api_key"],
+    trustedHostnames: ["huggingface.co"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Built-in inventory: https://github.com/huggingface/hf-mcp-server/blob/main/packages/mcp/src/tool-ids.ts
+    // hf_jobs and the sandbox tools mix read and write operations, so each is gated as a whole.
+    destructiveTools: [
+      "create_repo",
+      "hf_fs_write",
+      "hf_jobs",
+      "hf_sandbox",
+      "hf_sandbox_exec",
+      "hf_sandbox_fs",
+      "dynamic_space",
+    ],
+    // Hub reads from the inventory above. hf_whoami is left gated because it
+    // describes the connected credential and its permissions.
+    readOnlyTools: ["hub_repo_search", "hub_repo_details", "hf_fs"],
+    apiKey: {
+      header: "Authorization",
+      valuePrefix: "Bearer ",
+      hint: "Hugging Face access token (hf_...)",
+    },
+    notes:
+      "The advertised tools follow the account's MCP settings on huggingface.co. Jobs and sandboxes run billed compute. Space tools added in those settings are labelled destructive by the server and so require approval. Prefer a fine-grained, read-only token. No URL-level read-only mode.",
+  },
 } as const satisfies Record<string, ProviderDefinition>;
 
 /** Catalog provider identifiers, derived from the registry itself. */
