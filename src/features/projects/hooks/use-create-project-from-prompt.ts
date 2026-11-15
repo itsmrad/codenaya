@@ -8,6 +8,8 @@ import { useRouter } from "next/navigation";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { useAgentModel } from "@/features/conversations/hooks/use-agent-model";
+import type { AgentModelChoice } from "@/features/conversations/agent-models";
+import type { ComposerMode } from "@/features/conversations/components/plan-mode-toggle";
 import type { StarterTemplateId } from "@/features/templates/templates";
 import { INSUFFICIENT_CREDITS_CODE } from "@/features/billing/credits";
 import { MODEL_LIMIT_CODE } from "@/features/billing/model-spend";
@@ -16,11 +18,27 @@ import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 const CREDENTIAL_ERROR =
   "Remove credentials from the prompt. Create the project first, then add the MCP connection through Integrations.";
 
+/** The create-with-prompt body; build omits the mode, as the chat composer does. */
+export const createWithPromptBody = (
+  prompt: string,
+  model: AgentModelChoice,
+  templateId?: StarterTemplateId,
+  fromLanding?: boolean,
+  mode?: ComposerMode,
+) => ({
+  prompt,
+  model,
+  templateId,
+  fromLanding,
+  ...(mode && mode !== "build" ? { mode } : {}),
+});
+
 /**
  * Creates a project from a prompt (which also starts the agent on it) and
  * opens it in the IDE, using the agent model picked in the composer or chat.
  * A `templateId` seeds the project with that starter template's files first;
- * `fromLanding` marks a prompt typed on the landing page before sign-up.
+ * `fromLanding` marks a prompt typed on the landing page before sign-up;
+ * `mode` starts the first run in Ask / Plan or Swarm mode.
  * `createProject` resolves to true once it navigates, so callers can clear
  * their input or close a dialog.
  */
@@ -34,6 +52,7 @@ export const useCreateProjectFromPrompt = () => {
       prompt: string,
       templateId?: StarterTemplateId,
       fromLanding?: boolean,
+      mode?: ComposerMode,
     ): Promise<boolean> => {
       const text = prompt.trim();
       if (!text) return false;
@@ -48,7 +67,7 @@ export const useCreateProjectFromPrompt = () => {
       try {
         const { projectId } = await ky
           .post("/api/projects/create-with-prompt", {
-            json: { prompt: text, model: agentModel, templateId, fromLanding },
+            json: createWithPromptBody(text, agentModel, templateId, fromLanding, mode),
           })
           .json<{ projectId: Id<"projects"> }>();
 
@@ -71,10 +90,11 @@ export const useCreateProjectFromPrompt = () => {
             toast.error(body.error ?? CREDENTIAL_ERROR);
             return false;
           }
-          // Platform AI has no key, a promo model can't run, or credits ran out;
-          // nothing was created.
+          // Platform AI has no key, a promo model can't run, credits ran out,
+          // or Swarm is switched off; nothing was created.
           const refused =
             body.code === "ai_not_configured" ||
+            body.code === "swarm_disabled" ||
             body.code === INSUFFICIENT_CREDITS_CODE ||
             body.code === MODEL_LIMIT_CODE ||
             isPromoRefusalCode(body.code);

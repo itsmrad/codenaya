@@ -115,6 +115,12 @@ describe.each(routes)("POST /api/$name", ({ call, successBody, failureBody, rate
     expect(mocks.inngestSend).toHaveBeenCalledTimes(1);
   });
 
+  it("runs an Ask / Plan reply in plan mode", async () => {
+    expect((await call(undefined, undefined, "plan")).status).toBe(200);
+    expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ role: "assistant", mode: "plan" }));
+    expect(mocks.inngestSend.mock.calls[0][0].data).toMatchObject({ mode: "plan" });
+  });
+
   it("refuses a swarm send with a clear error while the kill switch is off, creating nothing", async () => {
     mocks.query.mockReset().mockResolvedValueOnce(false);
 

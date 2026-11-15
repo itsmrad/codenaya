@@ -20,7 +20,9 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { AgentModelSelect } from "@/features/conversations/components/agent-model-select";
 import { EnhancePromptButton } from "@/features/conversations/components/enhance-prompt-button";
+import { type ComposerMode, PlanModeToggle } from "@/features/conversations/components/plan-mode-toggle";
 import { useAgentModel } from "@/features/conversations/hooks/use-agent-model";
+import { useSwarmEnabled } from "@/features/conversations/hooks/use-agent-tasks";
 import { useEnhancePrompt } from "@/features/conversations/hooks/use-enhance-prompt";
 import { GridCross } from "@/components/landing/section-header";
 import { MENU_CONTENT, MenuHeader } from "@/components/menu-chrome";
@@ -108,7 +110,7 @@ const TOOL = cn(
 
 interface PromptComposerProps {
   /** Resolves to true when the prompt was accepted; the box is then cleared. */
-  onSubmit: (prompt: string) => Promise<boolean>;
+  onSubmit: (prompt: string, mode: ComposerMode) => Promise<boolean>;
   isSubmitting?: boolean;
   /** Show the agent model chip (shares the chat's saved choice). */
   showModelSelect?: boolean;
@@ -122,7 +124,7 @@ interface PromptComposerProps {
 
 /**
  * The "describe what to build" box, as a window on the page grid: a mono label
- * strip, the prompt, and a toolbar of cells (Enhance, the model; then a
+ * strip, the prompt, and a toolbar of cells (Enhance, the mode, the model; then a
  * character count, Clear and Build). Used by the dashboard hero, the new-project dialog and the
  * landing page.
  */
@@ -142,10 +144,14 @@ export const PromptComposer = ({
   const isBusy = isSubmitting || enhancer.isEnhancing;
   const reduceMotion = useReducedMotion();
   const placeholder = useTypedPlaceholder(!reduceMotion && !input && !isFocused);
+  const [chosenMode, setMode] = useState<ComposerMode>("build");
+  const swarmEnabled = useSwarmEnabled();
+  // Swarm switched off mid-draft falls back to Build, as in the chat.
+  const mode = chosenMode === "swarm" && !swarmEnabled ? "build" : chosenMode;
 
   const handleSubmit = async (message: PromptInputMessage) => {
     if (!message.text.trim() || isBusy) return;
-    if (await onSubmit(message.text)) setInput("");
+    if (await onSubmit(message.text, mode)) setInput("");
   };
 
   const fill = (prompt: string) => {
@@ -156,7 +162,8 @@ export const PromptComposer = ({
   return (
     // A window on the page grid: `+` marks on its corners, a mono label strip,
     // the prompt, and a toolbar of cells ending in the Build cell.
-    <div className={cn("group/composer relative isolate w-full text-left", className)}>
+    // @container: the mode toggle shows its labels once the box is wide enough.
+    <div className={cn("group/composer @container relative isolate w-full text-left", className)}>
       <GridCross className="-top-[5px] -left-[5px]" />
       <GridCross className="-top-[5px] -right-[5px]" />
       <GridCross className="-bottom-[5px] -left-[5px]" />
@@ -212,6 +219,15 @@ export const PromptComposer = ({
                   className={cn(TOOL, "h-full w-auto rounded-none has-[>svg]:px-3 [&_svg]:size-3.5")}
                 />
               )}
+              {/* The chat's mode radios; Swarm only while the kill switch is on. */}
+              <div className={cn(CELL, "border-r px-2")}>
+                <PlanModeToggle
+                  mode={mode}
+                  onModeChange={setMode}
+                  swarm={swarmEnabled}
+                  disabled={isSubmitting}
+                />
+              </div>
               {tools}
               {showModelSelect && <ComposerModelSelect disabled={isSubmitting} />}
             </PromptInputTools>

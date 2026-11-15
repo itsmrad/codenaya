@@ -28,8 +28,37 @@ describe("pending prompt", () => {
     savePendingPrompt("  A portfolio site  ");
 
     expect(storage.getItem(PENDING_PROMPT_KEY)).toBe("  A portfolio site  ");
-    expect(takePendingPrompt()).toBe("A portfolio site");
+    expect(takePendingPrompt()).toEqual({ prompt: "A portfolio site" });
     expect(takePendingPrompt()).toBeNull();
+  });
+
+  it("round-trips the mode, keeping a build prompt a plain string", () => {
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+
+    savePendingPrompt(" A kanban board ", "swarm");
+    expect(peekPendingPrompt()).toBe("A kanban board");
+    expect(takePendingPrompt()).toEqual({ prompt: "A kanban board", mode: "swarm" });
+
+    savePendingPrompt("A blog", "plan");
+    expect(takePendingPrompt()).toEqual({ prompt: "A blog", mode: "plan" });
+
+    savePendingPrompt("A blog");
+    expect(storage.getItem(PENDING_PROMPT_KEY)).toBe("A blog");
+  });
+
+  it("still reads a plain prompt saved before modes, and JSON-looking prompts", () => {
+    const storage = memoryStorage();
+    vi.stubGlobal("localStorage", storage);
+
+    storage.setItem(PENDING_PROMPT_KEY, "  An old todo app ");
+    expect(takePendingPrompt()).toEqual({ prompt: "An old todo app" });
+
+    storage.setItem(PENDING_PROMPT_KEY, '{"title": "not a saved prompt"}');
+    expect(takePendingPrompt()).toEqual({ prompt: '{"title": "not a saved prompt"}' });
+
+    storage.setItem(PENDING_PROMPT_KEY, JSON.stringify({ prompt: "A shop", mode: "hive" }));
+    expect(takePendingPrompt()).toEqual({ prompt: "A shop" });
   });
 
   it("treats a blank prompt as nothing to resume", () => {
@@ -65,7 +94,7 @@ describe("pending prompt", () => {
     savePendingPrompt("  A habit tracker  ");
     expect(peekPendingPrompt()).toBe("A habit tracker");
     expect(peekPendingPrompt()).toBe("A habit tracker");
-    expect(takePendingPrompt()).toBe("A habit tracker");
+    expect(takePendingPrompt()).toEqual({ prompt: "A habit tracker" });
     expect(peekPendingPrompt()).toBeNull();
   });
 
