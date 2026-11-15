@@ -151,7 +151,7 @@ beforeEach(() => {
 });
 
 describe("processMessage repair after the run", () => {
-  it("repairs a run that ended on a failed check with the run's model, metered, and ends verified", async () => {
+  it("repairs a run that ended on a failed check on the utility model, then the run's, metered, and ends verified", async () => {
     mocks.verifyAndFix.mockImplementation(
       scriptedRepair({ ok: true, status: "verified", errors: [], filesChanged: ["main.ts"], attempts: 1 }),
     );
@@ -164,8 +164,10 @@ describe("processMessage repair after the run", () => {
       projectId: "p1",
       internalKey: "ik",
       runId: "run-under-test",
-      maxAttempts: MAX_SERVER_REPAIRS,
-      model: { options: { model: "x-ai/grok-4.7" } },
+      // The utility model's repairs first; the run's own model takes over after them.
+      maxAttempts: MAX_SERVER_REPAIRS + 1,
+      model: { options: { model: "anthropic/claude-haiku-5.5" } },
+      fallback: { model: { options: { model: "x-ai/grok-4.7" } }, after: MAX_SERVER_REPAIRS },
     });
 
     // A new sandbox with the project, its npm cache warmed, then stopped.

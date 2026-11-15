@@ -997,16 +997,22 @@ export const processMessage = inngest.createFunction(
     const repairNeeded = !stuck && needsBuildRepair(result.state.results);
     if (repairNeeded && outOfCredits()) creditStopped = true;
     const repairBudget = new AbortController();
+    // The repair sees only the errors and the files they name, not the chat,
+    // so the utility (title) model runs it, and the run's model takes over if
+    // that fails. When the utility model is the run's model, there is no fallback.
+    const modelName = (model: typeof codingModel) => ((model.options ?? {}) as { model?: string }).model;
+    const utility = repairNeeded ? runModel.title(0.3) : undefined;
+    const cheapRepair = utility && modelName(utility) !== modelName(codingModel) ? utility : undefined;
     const repair = repairNeeded && !outOfCredits()
       ? await repairBuild({
           projectId,
           internalKey,
           runId,
-          model: codingModel,
+          ...(cheapRepair ? { model: cheapRepair, fallbackModel: codingModel } : { model: codingModel }),
           step: (id, fn) => step.run(id, fn),
           signal: repairBudget.signal,
-          onResponse: async (raw) => {
-            await recordUsage(raw, runModel.metering.coding);
+          onResponse: async (raw, onFallback) => {
+            await recordUsage(raw, cheapRepair && !onFallback ? runModel.metering.title : runModel.metering.coding);
             if (outOfCredits()) {
               creditStopped = true;
               repairBudget.abort();

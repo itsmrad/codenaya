@@ -409,6 +409,80 @@ describe("verifyAndFix", () => {
     expect(requests).toHaveLength(0);
   });
 
+  describe("with a fallback model", () => {
+    const main = openai({ model: "stub-main", apiKey: "test-key", baseUrl: "http://model.test/v1/" });
+    const modelsOf = (requests: unknown[]) => (requests as Array<{ model: string }>).map((request) => request.model);
+
+    it("repairs on the cheap model first, with the failing file in its prompt, then escalates", async () => {
+      const sandbox = fakeSandbox();
+      const requests = modelReplies(...rewriteApp(1), ...rewriteApp(2), ...fixApp());
+      const onFallback: boolean[] = [];
+
+      const { result } = await run(sandbox, {
+        maxAttempts: 3,
+        fallback: { model: main, after: 2 },
+        onResponse: async (_raw, fallback) => {
+          onFallback.push(fallback);
+        },
+      });
+
+      expect(result).toMatchObject({ ok: true, status: "verified", attempts: 3, filesChanged: ["src/App.tsx"] });
+      expect(modelsOf(requests)).toEqual(["stub-haiku", "stub-haiku", "stub-haiku", "stub-haiku", "stub-main", "stub-main", "stub-main"]);
+      expect(onFallback).toEqual([false, false, false, false, true, true, true]);
+      // Only the errors and the files they name: the prompt shows the file, so no read is needed first.
+      const prompt = JSON.stringify(requests[0].messages);
+      expect(prompt).toContain("Current content of files the errors name");
+      expect(prompt).toContain("return null; // BROKEN");
+    });
+
+    it("stays on the cheap model when it fixes the build", async () => {
+      const requests = modelReplies(...fixApp());
+
+      const { result } = await run(fakeSandbox(), { maxAttempts: 3, fallback: { model: main, after: 2 } });
+
+      expect(result).toMatchObject({ status: "verified", attempts: 1 });
+      expect(modelsOf(requests)).toEqual(["stub-haiku", "stub-haiku", "stub-haiku"]);
+    });
+
+    it("hands a repair that changed nothing to the fallback at once, without checking again", async () => {
+      const sandbox = fakeSandbox();
+      const requests = modelReplies(
+        toolCall("writeFiles", { files: [{ path: "src/App.tsx", content: BROKEN_APP }] }),
+        text("Looks fine to me."),
+        ...fixApp(),
+      );
+
+      const { result, events } = await run(sandbox, { maxAttempts: 3, fallback: { model: main, after: 2 } });
+
+      expect(result).toMatchObject({ status: "verified", attempts: 2, filesChanged: ["src/App.tsx"] });
+      expect(modelsOf(requests)).toEqual(["stub-haiku", "stub-haiku", "stub-main", "stub-main", "stub-main"]);
+      expect(sandbox.builds).toHaveLength(2);
+      expect(events.map(({ id, status }) => `${id} ${status}`)).toEqual([
+        "run_1:task_a:verify:1 running",
+        "run_1:task_a:verify:1 error",
+        "run_1:task_a:repair:1 running",
+        "run_1:task_a:repair:1 error",
+        "run_1:task_a:repair:2 running",
+        "run_1:task_a:repair:2 done",
+        "run_1:task_a:verify:3 running",
+        "run_1:task_a:verify:3 done",
+      ]);
+    });
+
+    it("fails once the fallback's own repair changes nothing", async () => {
+      const unchanged = () => [
+        toolCall("writeFiles", { files: [{ path: "src/App.tsx", content: BROKEN_APP }] }),
+        text("Looks fine to me."),
+      ];
+      const requests = modelReplies(...unchanged(), ...unchanged());
+
+      const { result } = await run(fakeSandbox(), { maxAttempts: 3, fallback: { model: main, after: 2 } });
+
+      expect(result).toMatchObject({ ok: false, status: "failed", reason: "Repair made no changes", attempts: 2 });
+      expect(modelsOf(requests)).toEqual(["stub-haiku", "stub-haiku", "stub-main", "stub-main"]);
+    });
+  });
+
   it("fails a repair that changed nothing instead of checking again", async () => {
     const sandbox = fakeSandbox();
     const requests = modelReplies(
