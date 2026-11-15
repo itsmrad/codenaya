@@ -25,7 +25,7 @@ import { mergeMessageSteps } from "../../../../convex/messageSteps";
 import type { AgentStep } from "../agent-steps";
 import { swarmHeader, swarmSoloReason } from "../swarm-status";
 import { BUILD_NOT_BUILT_NOTE } from "./build-check-gate";
-import { SWARM_DELEGATE_NUDGE, SWARM_ORCHESTRATOR_NOTE } from "./constants";
+import { SWARM_DELEGATE_NUDGE, SWARM_ORCHESTRATOR_NOTE, WRITE_BATCH_FILES } from "./constants";
 import { FOUNDATION_MAX_STEPS } from "../constants";
 import { drive, text, toolCall } from "./process-message.driver";
 
@@ -392,10 +392,10 @@ describe("processMessage swarm mode", () => {
     const PAGE = toolCall("writeFiles", { files: [{ path: "src/pages/menu.tsx", content: `export default () => <main>${"x".repeat(300)}</main>;\n` }] });
     const OVERLAP = { tasks: [PLAN.tasks[0], { ...PLAN.tasks[1], ownedPaths: ["src/pages/nav.tsx"] }] };
 
-    it("caps the foundation at 5 steps, then routes delegation with a nudge", async () => {
-      expect(FOUNDATION_MAX_STEPS).toBe(5);
+    it("caps the foundation at 2 steps, then routes delegation with a nudge", async () => {
+      expect(FOUNDATION_MAX_STEPS).toBe(2);
       const outcome = await swarm([
-        ...Array.from({ length: 5 }, () => ({ data: FOUNDATION })),
+        ...Array.from({ length: 2 }, () => ({ data: FOUNDATION })),
         { data: toolCall("delegateTasks", PLAN) },
         { data: toolCall("checkBuild") },
         { data: text("Done.") },
@@ -403,24 +403,27 @@ describe("processMessage swarm mode", () => {
 
       expect(outcome.finalType).toBe("function-resolved");
       const requests = codingRequests(outcome.inferenceBodies);
-      expect(requests).toHaveLength(8);
-      expect(JSON.stringify(requests.slice(0, 5))).not.toContain(SWARM_DELEGATE_NUDGE);
-      expect(forcedRequests(outcome.inferenceBodies)).toEqual([requests[5]]);
-      expect(requests[5].messages.at(-1)).toEqual({ role: "user", content: SWARM_DELEGATE_NUDGE });
-      expect(requests[5].tools?.map((tool) => tool.function.name)).toContain("delegateTasks");
+      expect(requests).toHaveLength(5);
+      expect(JSON.stringify(requests.slice(0, 2))).not.toContain(SWARM_DELEGATE_NUDGE);
+      expect(forcedRequests(outcome.inferenceBodies)).toEqual([requests[2]]);
+      expect(requests[2].messages.at(-1)).toEqual({ role: "user", content: SWARM_DELEGATE_NUDGE });
+      expect(requests[2].tools?.map((tool) => tool.function.name)).toContain("delegateTasks");
       // OpenRouter Grok is nudged, not forced via tool_choice (see toolForcing).
-      expect(requests[5]).toMatchObject({ model: "x-ai/grok-4.7", tool_choice: "auto" });
-      expect(outcome.inferenceUrls[outcome.inferenceBodies.indexOf(requests[5])])
+      expect(requests[2]).toMatchObject({ model: "x-ai/grok-4.7", tool_choice: "auto" });
+      expect(outcome.inferenceUrls[outcome.inferenceBodies.indexOf(requests[2])])
         .toBe("https://openrouter.ai/api/v1/chat/completions");
       expect(outcome.invocations).toHaveLength(2);
     });
 
     it("requests a minimal foundation and balanced page tasks", () => {
-      expect(SWARM_ORCHESTRATOR_NOTE).toContain("minimal shared foundation");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain(`single writeFiles call of at most ${WRITE_BATCH_FILES} files`);
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("Do NOT write data, copy, or page content");
       expect(SWARM_ORCHESTRATOR_NOTE).toContain("at most 240 characters");
-      expect(SWARM_ORCHESTRATOR_NOTE).toContain("No page content or sitemap/robots/favicon extras");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("no sitemap/robots/favicon extras");
       expect(SWARM_ORCHESTRATOR_NOTE).toContain("at most 2 pages");
       expect(SWARM_ORCHESTRATOR_NOTE).toContain("UI primitives/layout may be their own small task");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("no worker is a long pole");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("on the very next call after the stubs batch");
     });
 
     it("tells the orchestrator which paths to own and which to write before delegating", () => {

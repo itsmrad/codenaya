@@ -199,7 +199,7 @@ describe("classifySwarmPrompt", () => {
 describe("isFoundationPath", () => {
   it.each(["package.json", "vite.config.ts", "src/App.tsx", "src/main.tsx", "src/index.css", "src/lib/api.ts", "src/types/menu.ts", "src/types.ts", "src/vite-env.d.ts", "src/styles/tokens.css", "src/theme/colors.ts"])(
     "lets the orchestrator write %s before delegation", (path) => expect(isFoundationPath(path)).toBe(true));
-  it.each(["src/pages/menu.tsx", "src/components/nav.tsx", "src", "src/lib"])(
+  it.each(["src/pages/menu.tsx", "src/components/nav.tsx", "src/data/site.ts", "src", "src/lib"])(
     "keeps %s for a worker", (path) => expect(isFoundationPath(path)).toBe(false));
 });
 
