@@ -1,6 +1,8 @@
 import { Sandbox, type SandboxOpts } from "e2b";
 import { z } from "zod";
 
+import { killTreeCommand } from "./dev-server";
+
 /**
  * Sandbox setup shared by the preview route and the agent's checkBuild tool,
  * so both run a project in the same image, at the same path.
@@ -95,5 +97,11 @@ export const writeProjectFiles = async (
  */
 export const stopSandboxCommands = async (sandbox: Sandbox) => {
   const running = await sandbox.commands.list();
-  await Promise.all(running.map((command) => sandbox.commands.kill(command.pid)));
+  await Promise.all(running.map(async (command) => {
+    try {
+      await sandbox.commands.run(killTreeCommand(command.pid));
+    } catch {
+      // Best-effort cleanup must not prevent a resumed boot (#486).
+    }
+  }));
 };

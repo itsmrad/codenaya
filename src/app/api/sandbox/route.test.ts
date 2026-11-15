@@ -227,7 +227,7 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
     commands: {
       list: vi.fn(async () => [{ pid: 7 }, { pid: 8 }]),
       kill: vi.fn(async () => true),
-      run: vi.fn(async () => {
+      run: vi.fn<(...args: unknown[]) => Promise<object>>(async () => {
         throw new Error("stop after connect");
       }),
     },
@@ -257,17 +257,54 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
     expect(sandbox.kill).not.toHaveBeenCalled();
   });
 
-  it("resumes on the caller's sandbox without creating one or checking the cap", async () => {
+  it("continues resuming on the caller's sandbox even if tree cleanup fails, without creating one or checking the cap", async () => {
     const sandbox = fakeSandbox("sbx_resume");
     mocks.sandboxConnect.mockResolvedValue(sandbox);
 
     await (await boot({ resumeSandboxId: "sbx_resume" })).text();
 
     expect(mocks.sandboxConnect).toHaveBeenCalledWith("sbx_resume");
-    expect(sandbox.commands.kill).toHaveBeenCalledWith(7);
-    expect(sandbox.commands.kill).toHaveBeenCalledWith(8);
+    expect(sandbox.commands.run.mock.calls).toEqual([
+      [killTreeCommand(7)],
+      [killTreeCommand(8)],
+      ["node --version", { timeoutMs: 10_000 }],
+    ]);
+    expect(sandbox.commands.kill).not.toHaveBeenCalled();
     expect(mocks.sandboxCreate).not.toHaveBeenCalled();
     expect(mocks.sandboxList).not.toHaveBeenCalled();
+  });
+
+  it("stops every earlier command tree before resuming, including unmarked install and proxy commands", async () => {
+    const sandbox = fakeSandbox("sbx_resume_tree");
+    // Killing just the wrapper leaves its children alive, as with E2B.
+    const children = new Set([70, 700]);
+    let childrenAtBoot = children.size;
+    const earlierCommands = [
+      { pid: 7 },
+      { pid: 8, envs: { [DEV_COMMAND_ENV]: "npm run dev" } },
+      { pid: 9 },
+    ];
+    sandbox.commands.list.mockResolvedValue(earlierCommands);
+    sandbox.commands.run.mockImplementation(async (command) => {
+      if (command === killTreeCommand(7)) children.clear();
+      if (command === "node --version") {
+        childrenAtBoot = children.size;
+        throw new Error("stop after cleanup");
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    mocks.sandboxConnect.mockResolvedValue(sandbox);
+
+    await (await boot({ resumeSandboxId: "sbx_resume_tree" })).text();
+
+    expect(childrenAtBoot).toBe(0);
+    expect(sandbox.commands.run.mock.calls).toEqual([
+      [killTreeCommand(7)],
+      [killTreeCommand(8)],
+      [killTreeCommand(9)],
+      ["node --version", { timeoutMs: 10_000 }],
+    ]);
+    expect(sandbox.commands.kill).not.toHaveBeenCalled();
   });
 
   it("refuses to resume another user's sandbox", async () => {
