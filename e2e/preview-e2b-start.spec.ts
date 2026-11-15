@@ -3,7 +3,7 @@ import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../convex/_generated/api";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
-import { hasPreviewFixtureEnv, seedPreviewProject, seedStartApp } from "./preview-fixtures";
+import { hasPreviewFixtureEnv, killProjectSandboxes, seedPreviewProject, seedStartApp } from "./preview-fixtures";
 
 const app = (text: string) => `import { createFileRoute, Link } from "@tanstack/react-router";
 
@@ -26,6 +26,15 @@ test.describe("E2B TanStack Start preview", () => {
     "Needs Clerk and Convex fixture env plus E2B_API_KEY (boots a real sandbox)",
   );
 
+  /** The current test's project, whose preview sandbox afterEach frees. */
+  let seeded: string | undefined;
+  test.afterEach(async ({ page }) => {
+    // Closed first, so the preview can't boot a replacement for the killed sandbox.
+    await page.close();
+    if (seeded) await killProjectSandboxes(seeded);
+    seeded = undefined;
+  });
+
   test.beforeEach(async ({ page }) => {
     test.setTimeout(300_000);
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -34,6 +43,7 @@ test.describe("E2B TanStack Start preview", () => {
 
   test("boots a Start page in the preview iframe", async ({ page }) => {
     const projectId = await seedPreviewProject(page, "e2e-preview-e2b-start-boot");
+    seeded = projectId;
     await seedStartApp(projectId, { pageSource: app("Start ready") });
 
     await page.goto(`/projects/${projectId}`);
@@ -48,6 +58,7 @@ test.describe("E2B TanStack Start preview", () => {
 
   test("hot-updates routes/index.tsx without reloading the iframe", async ({ page }) => {
     const projectId = await seedPreviewProject(page, "e2e-preview-e2b-start-hmr");
+    seeded = projectId;
     const pageId = await seedStartApp(projectId, { pageSource: app("Before Start edit") });
     await page.goto(`/projects/${projectId}`);
     await page.getByRole("tab", { name: "Preview" }).click();
@@ -75,6 +86,7 @@ test.describe("E2B TanStack Start preview", () => {
 
   test("reports a broken import with a Fix with AI entry", async ({ page }) => {
     const projectId = await seedPreviewProject(page, "e2e-preview-e2b-start-errors");
+    seeded = projectId;
     const pageId = await seedStartApp(projectId, { pageSource: app("Before Start error") });
     await page.goto(`/projects/${projectId}`);
     await page.getByRole("tab", { name: "Preview" }).click();
@@ -109,6 +121,7 @@ test.describe("E2B TanStack Start preview", () => {
 
   test("calls a createServerFn POST through the preview proxy", async ({ page }) => {
     const projectId = await seedPreviewProject(page, "e2e-preview-e2b-start-actions");
+    seeded = projectId;
     await seedStartApp(projectId, { pageSource: app("Start actions ready") });
     await page.goto(`/projects/${projectId}`);
     await page.getByRole("tab", { name: "Preview" }).click();
