@@ -72,6 +72,7 @@ import {
   NEXT_PRERENDER_ERROR,
   NEXT_TYPE_ERROR,
 } from "../inngest/tools/next-build-output.fixture";
+import { START_BUILD_ERROR, START_TYPE_ERROR } from "../inngest/tools/start-build-output.fixture";
 
 /** Like the real tools: the work runs in a step with a fixed id, when there is a step. */
 function fakeTool<T>(name: string, handler: (input: T) => unknown) {
@@ -538,6 +539,22 @@ describe("verifyAndFix", () => {
     expect(sandbox.fs.get(`${DIR}/src/App.tsx`)).toBe(BROKEN_APP);
   });
 
+  it("never lets a repair edit the generated route tree", async () => {
+    const sandbox = fakeSandbox();
+    const requests = modelReplies(
+      toolCall("writeFiles", { files: [{ path: "src/routeTree.gen.ts", content: "// edited\n" }] }),
+      text("Could not edit it."),
+    );
+
+    const { result } = await run(sandbox, { maxAttempts: 1 });
+
+    expect(result).toMatchObject({ status: "failed", reason: "Repair made no changes" });
+    expect(JSON.stringify(requests.slice(1).map(({ messages }) => messages.at(-1)))).toContain(
+      "Error: src/routeTree.gen.ts is outside this task's files",
+    );
+    expect(convexFiles.has("src/routeTree.gen.ts")).toBe(false);
+  });
+
   it.each([
     ["the check cannot finish", () => fakeSandbox({ install: () => new Error("sandbox connection reset") })],
     ["the sandbox's files cannot be listed", () => fakeSandbox({ find: () => new Error("sandbox gone") })],
@@ -742,6 +759,23 @@ describe("parseBuildErrors", () => {
     expect(parseBuildErrors(text)).toEqual([
       { file: "src/app/page.tsx", message: "Module not found: Can't resolve 'zod'", kind: "build" },
     ]);
+  });
+
+  /** checkBuild's failure text for a modelled TanStack Start `vite build && tsc` output. */
+  const startFailure = ({ stdout, stderr }: { stdout: string; stderr: string }) =>
+    "Error: Build failed. Fix these errors, then call checkBuild again:\n" +
+    trimBuildOutput(`${stderr}\n${stdout}`, "/home/user/app", "tanstack-start");
+
+  it("reads a TanStack Start type error found by tsc after the build", () => {
+    expect(parseBuildErrors(startFailure(START_TYPE_ERROR))).toEqual([
+      { file: "src/routes/index.tsx", line: 12, message: "error TS2322: Type 'number' is not assignable to type 'string'.", kind: "type" },
+    ]);
+  });
+
+  it("keeps a TanStack Start vite build failure whole", () => {
+    const [error] = parseBuildErrors(startFailure(START_BUILD_ERROR));
+    expect(error.kind).toBe("build");
+    expect(error.message).toMatch(/^error during build:\n\[vite\]: Rollup failed to resolve import "@\/components\/Hero"/);
   });
 
   it("keeps a Next.js prerender failure whole: it names no source file", () => {
