@@ -1,6 +1,8 @@
 import { createAgent, createNetwork } from "@inngest/agent-kit";
 import { NonRetriableError } from "inngest";
 
+import { unresolvedImports } from "@/features/sandbox-preview/utils/missing-references";
+import { projectChecks } from "@/features/sandbox-preview/utils/project-checks";
 import { inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
 import { getAppError } from "@/lib/convex-error";
@@ -10,7 +12,7 @@ import { costUsd, creditsForCost, usageOfResponse } from "@/features/billing/cre
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../agent-models";
-import { type AgentStep, runWrittenPaths, stepsFromResponse, stepsFromToolResults, turnHeartbeat } from "../agent-steps";
+import { type AgentStep, buildPathIndex, runWrittenPaths, stepsFromResponse, stepsFromToolResults, turnHeartbeat } from "../agent-steps";
 import {
   CHILD_WORKER_TIMEOUT_MS, MAX_SUBORCH_USD, MAX_SWARM_AGENTS, MAX_SWARM_DEPTH, MAX_WORKER_USD,
   SUBORCH_MAX_STEPS, SUBORCH_TIMEOUT_MS, WORKER_MAX_STEPS, WORKER_TIMEOUT_MS,
@@ -146,6 +148,8 @@ export const swarmWorker = inngest.createFunction(
     let turn = 0;
     let cutOff = false;
     let unfinished = false;
+    let staticChecked = false;
+    let staticFixNote = "";
     const options = { internalKey, projectId, registry: createRegistryCheck() };
     const subOrchestrator = task.role === "sub-orchestrator" && depth < MAX_SWARM_DEPTH;
     // Shared by every worker of the run, so they share its cache; the task line goes after it.
@@ -192,7 +196,9 @@ export const swarmWorker = inngest.createFunction(
         onStart: async ({ agent, prompt, history }) => {
           await recordSteps("worker-turn-start", []);
           const note = agent.name === SUMMARY_AGENT_NAME ? [{ type: "text" as const, role: "user" as const, content: creditStopped ? OUT_OF_CREDITS_NOTE : STEP_BUDGET_NOTE }] : [];
-          return { prompt, history: [...trimFileHistory(history ?? []), ...note], stop: false };
+          const fix = staticFixNote ? [{ type: "text" as const, role: "user" as const, content: staticFixNote }] : [];
+          staticFixNote = "";
+          return { prompt, history: [...trimFileHistory(history ?? []), ...note, ...fix], stop: false };
         },
         onResponse: async ({ agent, result }) => {
           decodeToolCalls(result.output);
@@ -204,8 +210,38 @@ export const swarmWorker = inngest.createFunction(
           if (cutOff) markCutOffCalls(result.output);
           return result;
         },
-        onFinish: async ({ result }) => {
+        onFinish: async ({ agent, result }) => {
           if (result.toolCalls.length) await recordSteps("worker-tool-results", stepsFromToolResults(result.toolCalls, Date.now()));
+          const finishing = result.output.some((m) => m.type === "text" && m.role === "assistant") &&
+            !result.output.some((m) => m.type === "tool_call") && !cutOff;
+          const written = new Set(runWrittenPaths([...recorded.values()]));
+          if (agent.name !== SUMMARY_AGENT_NAME && finishing && written.size && !staticChecked &&
+              turn < maxSteps - 1 && usage.costUsd < maxUsd && !outOfCredits()) {
+            staticChecked = true;
+            const problems = await step.run("worker-static-check", async () => {
+              try {
+                const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
+                const pathOf = buildPathIndex(rows);
+                const paths = new Set<string>();
+                const files: { path: string; content: string }[] = [];
+                for (const row of rows) {
+                  const path = row.type === "file" ? pathOf(row._id) : undefined;
+                  if (!path) continue;
+                  paths.add(path);
+                  if (typeof row.content === "string") files.push({ path, content: row.content });
+                }
+                // Exclude the manifest: export checks need no framework/package heuristics.
+                const exports = projectChecks(files.filter((f) => f.path !== "package.json"), paths, written, { references: false })
+                  .filter((f) => f.checkId === "export" && [...written].some((path) => f.message.startsWith(`${path}:`) || f.message.startsWith(`${path} imports `)))
+                  .map((f) => f.message);
+                return [...unresolvedImports(files.filter((f) => written.has(f.path)), paths), ...exports].slice(0, 10);
+              } catch {
+                // Advisory only: a failed snapshot must not prevent the handoff.
+                return [];
+              }
+            });
+            if (problems.length) staticFixNote = `Fix these before finishing (within your owned paths; report missing shared contracts in NEEDS):\n- ${problems.join("\n- ")}`;
+          }
           return result;
         },
       },
@@ -228,7 +264,7 @@ export const swarmWorker = inngest.createFunction(
           unfinished = true;
           return summaryAgent;
         }
-        if (last && hasText && !hasCalls && !cutOff) return undefined;
+        if (last && hasText && !hasCalls && !cutOff && !staticFixNote) return undefined;
         // BYOK is unpriced, so only the step cap bounds it.
         if (callCount >= maxSteps - 1 || usage.costUsd >= maxUsd) {
           unfinished = true;

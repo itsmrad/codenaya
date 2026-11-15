@@ -501,6 +501,8 @@ Use as few writeFiles calls as you can, each at most ${WRITE_BATCH_FILES} files 
 call is cut off and writes NOTHING. editFile stays right for changes to existing files.
 Avoid per-file edit/read loops. Do not re-read what you wrote.
 Do not run checkBuild or any build: the orchestrator integrates and checks the complete project.
+Before your final summary, read the shared contract files you use (src/types/*, src/data/*, src/components/shared/*) ONCE: verify every field/export has that exact name, and your page's default/named export matches src/App.tsx and the route table already on disk.
+If a shared file you need is missing or lacks a field, say so in your summary instead of inventing it; the orchestrator integrates.
 Stop once your files are written. Finish with a one-line summary of changes and any remaining work. Put dependency requests,
 shared edits, or integration requirements in a NEEDS: section for the orchestrator.
 Your reply goes to the orchestrator, not the user: no next steps, suggestions or action chips.
