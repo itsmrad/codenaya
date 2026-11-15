@@ -224,6 +224,15 @@ const activationEventValidator = v.union(
   }),
 );
 
+/** A project's brand theme (#302). `font` is a `THEME_FONTS` id; colours are `#rrggbb`. */
+export const projectThemeValidator = v.object({
+  primary: v.string(),
+  accent: v.string(),
+  radius: v.number(),
+  font: v.string(),
+  defaultMode: v.union(v.literal("light"), v.literal("dark"), v.literal("system")),
+});
+
 /** A project's link to its GitHub repo (#343). */
 export const githubSyncValidator = v.object({
   repo: v.string(), // "owner/name"
@@ -313,6 +322,8 @@ export default defineSchema({
     notes: v.optional(
       v.array(v.object({ id: v.string(), text: v.string(), createdAt: v.number() })),
     ),
+    // Brand theme every agent run applies (#302); validated by `validateTheme`.
+    theme: v.optional(projectThemeValidator),
     // Set when the owner deletes the project. The project is hidden at once
     // while `projects.deleteBatch` removes its data in the background.
     deletingAt: v.optional(v.number()),
@@ -595,7 +606,7 @@ export default defineSchema({
     // Catalog provider id, or "custom" for a user-supplied MCP server URL.
     providerId: v.string(),
     label: v.string(),
-    authMode: v.union(v.literal("oauth"), v.literal("api_key")),
+    authMode: v.union(v.literal("oauth"), v.literal("api_key"), v.literal("none")),
     // Base MCP endpoint before per-project scoping is applied.
     serverUrl: v.string(),
     status: v.union(
@@ -707,6 +718,9 @@ export default defineSchema({
 
     // Last four characters only, e.g. "••••3f2a".
     maskedPreview: v.string(),
+    // First 12 hex chars of a KEK-keyed HMAC of the key, set on save (#614).
+    // Keys saved before it have none; pickers then fall back to maskedPreview.
+    fingerprint: v.optional(v.string()),
     status: v.union(v.literal("active"), v.literal("invalid")),
     statusMessage: v.optional(v.string()),
     lastTestedAt: v.optional(v.number()),

@@ -27,6 +27,7 @@ import { UserMenu } from "@/components/user-menu";
 import { useIsCompact, useIsMobile } from "@/hooks/use-mobile";
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
 import { EditorView } from "@/features/editor/components/editor-view";
+import { useEditorLeaveGuard } from "@/features/editor/hooks/use-editor-leave-guard";
 import { useEditorStore } from "@/features/editor/store/use-editor-store";
 import {
   Tooltip,
@@ -112,6 +113,7 @@ export const ProjectIdView = ({
   projectId: Id<"projects">;
 }) => {
   const isMobile = useIsMobile();
+  useEditorLeaveGuard(projectId);
   // Below desktop width the chat is a tab rather than a side panel.
   const isCompact = useIsCompact();
   // Switching preview engines reloads the page with `?view=preview` so the user
@@ -426,7 +428,7 @@ export const ProjectIdView = ({
             </button>
           )}
           <button
-            onClick={openIntegrations}
+            onClick={() => openIntegrations()}
             aria-label="Integrations"
             title="Integrations"
             className="flex items-center gap-1.5 h-8 px-2 @3xl:px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"

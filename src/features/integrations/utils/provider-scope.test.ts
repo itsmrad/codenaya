@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { getProvider } from "../catalog";
-import { describeProviderScope } from "./connection-scope-form";
+import {
+  describeProviderScope,
+  normaliseList,
+  parseListInput,
+} from "./provider-scope";
 
 describe("describeProviderScope", () => {
   it("summarises a query-param string and a list against the provider's options", () => {
@@ -41,5 +45,21 @@ describe("describeProviderScope", () => {
   it("describes nothing for a custom server or a provider with no scope fields", () => {
     expect(describeProviderScope(undefined, { projectRef: "abc" })).toEqual([]);
     expect(describeProviderScope(getProvider("linear"), { projectRef: "abc" })).toEqual([]);
+  });
+});
+
+describe("normaliseList", () => {
+  it("trims, drops blanks, de-duplicates and sorts", () => {
+    expect(normaliseList([" docs", "database", "", "  ", "docs"])).toEqual([
+      "database",
+      "docs",
+    ]);
+  });
+});
+
+describe("parseListInput", () => {
+  it("splits comma-separated input and normalises it", () => {
+    expect(parseListInput("repos, issues,,repos ")).toEqual(["issues", "repos"]);
+    expect(parseListInput("")).toEqual([]);
   });
 });

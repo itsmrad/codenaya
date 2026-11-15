@@ -120,3 +120,31 @@ defaults to secret.
 - **Cleanup crons** prune expired OAuth states, lapsed approvals, orphaned links and
   audit entries older than 30 days. See `convex/crons.ts`.
 
+
+## Public documentation providers (no sign-in)
+
+Microsoft Learn (`https://learn.microsoft.com/api/mcp`) and Cloudflare Docs
+(`https://docs.mcp.cloudflare.com/mcp`) use `authMode: "none"`. Connect probes the
+fixed catalog endpoint before saving. No credential is sealed or opened, no KEK
+is required, and probe/runtime requests carry no Authorization or API key.
+The existing required credential columns contain empty strings on these rows;
+existing OAuth and API-key rows retain their representation. The Convex auth-mode
+validator is extended by a union member only; no data migration is needed.
+User-supplied endpoints are rejected for these providers. Unknown tools remain
+gated even on read-only links; only catalog-verified documentation reads qualify
+for the existing read-only tool policy.
+
+Verified on 2026-11-15 with unauthenticated MCP `initialize` and `tools/list`
+(protocol `2025-03-26`), without invoking tools:
+
+| Provider | Read-only inventory | Official source |
+| --- | --- | --- |
+| Microsoft Learn | `microsoft_docs_search`, `microsoft_docs_fetch`, `microsoft_code_sample_search` | [Microsoft README](https://github.com/MicrosoftDocs/mcp), [developer reference](https://learn.microsoft.com/en-us/training/support/mcp-developer-reference) |
+| Cloudflare Docs | `search_cloudflare_documentation`, `migrate_pages_to_workers_guide` | [Cloudflare README](https://github.com/cloudflare/mcp-server-cloudflare/tree/main/apps/docs-ai-search), [tool source](https://github.com/cloudflare/mcp-server-cloudflare/blob/main/packages/mcp-common/src/shared-tools/docs-ai-search.tools.ts) |
+
+Both servers currently expose documentation reads only (`supportsReadOnly: true`).
+Cloudflare's migration-guide tool retrieves instructions; it does not migrate an
+account. All three Microsoft tools and both Cloudflare tools advertise
+`readOnlyHint: true`. None of these tools runs a user agent, crawls a site, returns
+credentials or charges a connected account. No requested provider was deferred.
+Other catalog providers keep their existing authentication modes.

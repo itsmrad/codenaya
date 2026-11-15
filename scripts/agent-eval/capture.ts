@@ -84,21 +84,40 @@ export async function probePreview(page: Page, trail: Trail) {
   trail.preview.overlay = overlay;
 }
 
-export async function screenshot(page: Page, directory: string, trail: Trail) {
+/** "/" keeps the original app.png; "/menu" → app-menu.png. */
+export const screenshotFile = (route: string) => route === "/" ? "app.png" : `app${route.replace(/[^A-Za-z0-9]+/g, "-").replace(/-$/, "")}.png`;
+
+/** The preview URL with the route's path, keeping the sandbox host and any query. */
+export const routeUrl = (src: string, route: string) => { const url = new URL(src); url.pathname = route; return url.toString(); };
+
+/** Each route on a fresh load, scrolled top to bottom first so scroll-reveal sections render in the full-page capture. */
+export async function screenshot(page: Page, directory: string, trail: Trail, routes = ["/"]) {
   const src = await page.locator('iframe[title="Preview"]').getAttribute("src");
   if (!src || !isAppUrl(src)) throw new Error("No E2B iframe URL for app screenshot");
   const app = await page.context().newPage();
   try {
     trail.preview.errors = [];
+    trail.preview.screenshots = [];
     app.on("console", (message) => {
       if (message.type() !== "error" || !isAppUrl(message.location().url)) return;
       trail.consoleErrors.push({ text: message.text(), url: message.location().url });
       trail.preview.errors!.push(message.text()); // A fresh load: build-time errors excluded.
     });
-    await app.goto(src, { waitUntil: "domcontentloaded", timeout: 90_000 }); // A loaded Mac or cold sandbox can take over 30s.
-    await app.locator("#root > *, vite-error-overlay").first().waitFor({ timeout: 90_000 });
-    await app.waitForTimeout(5_000);
-    await app.screenshot({ path: `${directory}/app.png`, fullPage: true });
-    trail.preview.screenshot = "app.png";
+    for (const route of routes) {
+      await app.goto(routeUrl(src, route), { waitUntil: "domcontentloaded", timeout: 90_000 }); // A loaded Mac or cold sandbox can take over 30s.
+      await app.locator("#root > *, vite-error-overlay").first().waitFor({ timeout: 90_000 });
+      await app.waitForTimeout(route === routes[0] ? 5_000 : 2_000);
+      // Capped, so an infinite-scroll page cannot keep growing under the loop.
+      for (let y = 0; y < Math.min(20_000, await app.evaluate(() => document.documentElement.scrollHeight)); y += 600) {
+        await app.evaluate((top) => window.scrollTo(0, top), y);
+        await app.waitForTimeout(300);
+      }
+      await app.evaluate(() => window.scrollTo(0, 0));
+      await app.waitForTimeout(500);
+      const file = screenshotFile(route);
+      await app.screenshot({ path: `${directory}/${file}`, fullPage: true });
+      trail.preview.screenshots.push({ route, file });
+    }
+    trail.preview.screenshot = trail.preview.screenshots[0]?.file;
   } finally { await app.close(); }
 }

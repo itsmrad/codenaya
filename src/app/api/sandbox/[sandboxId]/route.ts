@@ -11,7 +11,11 @@ import {
   getOwnedSandbox,
   requestReinstall,
 } from "@/features/sandbox-preview/server/sandbox-registry";
-import { RESTART_VITE_COMMAND } from "@/features/sandbox-preview/server/restart-vite";
+import { installWithDevServerStopped } from "@/features/sandbox-preview/server/dev-server";
+import {
+  REINSTALL_DEBOUNCE_MS,
+  debounceSerial,
+} from "@/features/sandbox-preview/server/debounce-serial";
 import {
   installFailure,
   type InstallFailure,
@@ -28,6 +32,51 @@ const patchSchema = z.object({
   files: projectFilesSchema,
   installCommand: z.string().optional(),
 });
+
+type Install = () => Promise<InstallFailure | undefined>;
+
+interface InstallQueue {
+  queue: ReturnType<typeof debounceSerial>;
+  /** The latest sync's install; a burst runs only the last one. */
+  install: Install;
+  outcome?: { failure?: InstallFailure } | { error: unknown };
+  /** Syncs awaiting this queue; the last one out removes it. */
+  waiting: number;
+}
+
+/**
+ * One debounced, serial install per sandbox for syncs this instance handles, so
+ * a burst of package.json syncs installs once and starts the dev server once (#486).
+ */
+const installQueues = new Map<string, InstallQueue>();
+
+const installAfterBurst = async (sandboxId: string, install: Install) => {
+  let entry = installQueues.get(sandboxId);
+  if (!entry) {
+    const created: InstallQueue = {
+      install,
+      waiting: 0,
+      queue: debounceSerial(async () => {
+        try {
+          created.outcome = { failure: await created.install() };
+        } catch (error) {
+          created.outcome = { error };
+        }
+      }, REINSTALL_DEBOUNCE_MS),
+    };
+    installQueues.set(sandboxId, created);
+    entry = created;
+  }
+  entry.install = install;
+  entry.queue.schedule();
+  entry.waiting++;
+  await entry.queue.idle();
+  // Idle, and nobody scheduled since: drop it, so the map doesn't grow per sandbox.
+  if (--entry.waiting === 0) installQueues.delete(sandboxId);
+  const outcome = entry.outcome;
+  if (outcome && "error" in outcome) throw outcome.error;
+  return outcome?.failure;
+};
 
 interface RouteParams {
   params: Promise<{ sandboxId: string }>;
@@ -140,36 +189,34 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       !requestReinstall(sandboxId)
     ) {
       const command = installCommand || DEFAULT_INSTALL_COMMAND;
-      // Retain only the safe npm code for a timeout; output and exception
-      // messages may include injected secrets, even ones since rotated (#498).
-      let tail = "";
-      let timeoutFailure: InstallFailure = { exitCode: 124 };
-      const observe = (chunk: string) => {
-        tail = (tail + chunk).slice(-8192);
-        const failure = installFailure({ exitCode: 124, stdout: tail, stderr: "" });
-        if (failure.code) timeoutFailure = failure;
-      };
-      const result = await sandbox.commands
-        .run(command, {
-          cwd: WORK_DIR,
-          timeoutMs: boundedTimeout(5 * 60 * 1000, budget.left()),
-          onStdout: observe,
-          onStderr: observe,
-        })
-        .catch((error: unknown) => {
-          // A non-zero exit is the app's failure, not a dead sandbox (#491).
-          if (error instanceof CommandExitError) return error;
-          if (error instanceof TimeoutError) {
-            installFailed = timeoutFailure;
-            return null;
-          }
-          throw error;
-        });
-      if (result && result.exitCode !== 0) {
-        installFailed = installFailure(result);
-      } else if (result) {
-        await sandbox.commands.run(RESTART_VITE_COMMAND, { cwd: WORK_DIR });
-      }
+      installFailed = await installAfterBurst(sandboxId, () =>
+        installWithDevServerStopped(sandbox, async () => {
+          // Retain only the safe npm code for a timeout; output and exception
+          // messages may include injected secrets, even ones since rotated (#498).
+          let tail = "";
+          let timeoutFailure: InstallFailure = { exitCode: 124 };
+          const observe = (chunk: string) => {
+            tail = (tail + chunk).slice(-8192);
+            const failure = installFailure({ exitCode: 124, stdout: tail, stderr: "" });
+            if (failure.code) timeoutFailure = failure;
+          };
+          const result = await sandbox.commands
+            .run(command, {
+              cwd: WORK_DIR,
+              timeoutMs: boundedTimeout(5 * 60 * 1000, budget.left()),
+              onStdout: observe,
+              onStderr: observe,
+            })
+            .catch((error: unknown) => {
+              // A non-zero exit is the app's failure, not a dead sandbox (#491).
+              if (error instanceof CommandExitError) return error;
+              if (error instanceof TimeoutError) return null;
+              throw error;
+            });
+          if (!result) return timeoutFailure;
+          return result.exitCode !== 0 ? installFailure(result) : undefined;
+        }),
+      );
     }
 
     return Response.json({ success: true, synced: files.length, installFailed });

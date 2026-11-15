@@ -20,7 +20,9 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { AgentModelSelect } from "@/features/conversations/components/agent-model-select";
 import { EnhancePromptButton } from "@/features/conversations/components/enhance-prompt-button";
+import { type ComposerMode, PlanModeToggle } from "@/features/conversations/components/plan-mode-toggle";
 import { useAgentModel } from "@/features/conversations/hooks/use-agent-model";
+import { useSwarmEnabled } from "@/features/conversations/hooks/use-agent-tasks";
 import { useEnhancePrompt } from "@/features/conversations/hooks/use-enhance-prompt";
 import { GridCross } from "@/components/landing/section-header";
 import { MENU_CONTENT, MenuHeader } from "@/components/menu-chrome";
@@ -70,7 +72,8 @@ const useTypedPlaceholder = (enabled: boolean) => {
 const ComposerModelSelect = ({ disabled }: { disabled: boolean }) => {
   const [agentModel, setAgentModel] = useAgentModel();
   return (
-    // Shrinks before Clear and Build do; the name truncates, the tooltip keeps it readable.
+    // Shrinks before Clear and Build do; the name truncates (vendor mark only in a narrow
+    // composer), the tooltip keeps it readable.
     <div className={cn(CELL, "min-w-0 shrink border-r")}>
       <AgentModelSelect
         value={agentModel}
@@ -86,7 +89,7 @@ const ComposerModelSelect = ({ disabled }: { disabled: boolean }) => {
           </p>
         }
         // Fill the cell, so the whole cell hovers and clicks like Templates.
-        triggerClassName="h-full data-[size=sm]:h-full max-w-96 rounded-none px-3 font-mono text-[10px] uppercase tracking-[0.12em] hover:bg-muted/50 dark:hover:bg-muted/50 aria-expanded:bg-muted/50"
+        triggerClassName="h-full data-[size=sm]:h-full max-w-96 rounded-none @max-[480px]:[&_[data-slot=select-value]>span:last-child]:sr-only px-3 font-mono text-[10px] uppercase tracking-[0.12em] hover:bg-muted/50 dark:hover:bg-muted/50 aria-expanded:bg-muted/50"
       />
     </div>
   );
@@ -108,7 +111,7 @@ const TOOL = cn(
 
 interface PromptComposerProps {
   /** Resolves to true when the prompt was accepted; the box is then cleared. */
-  onSubmit: (prompt: string) => Promise<boolean>;
+  onSubmit: (prompt: string, mode: ComposerMode) => Promise<boolean>;
   isSubmitting?: boolean;
   /** Show the agent model chip (shares the chat's saved choice). */
   showModelSelect?: boolean;
@@ -122,7 +125,7 @@ interface PromptComposerProps {
 
 /**
  * The "describe what to build" box, as a window on the page grid: a mono label
- * strip, the prompt, and a toolbar of cells (Enhance, the model; then a
+ * strip, the prompt, and a toolbar of cells (Enhance, the mode, the model; then a
  * character count, Clear and Build). Used by the dashboard hero, the new-project dialog and the
  * landing page.
  */
@@ -142,10 +145,14 @@ export const PromptComposer = ({
   const isBusy = isSubmitting || enhancer.isEnhancing;
   const reduceMotion = useReducedMotion();
   const placeholder = useTypedPlaceholder(!reduceMotion && !input && !isFocused);
+  const [chosenMode, setMode] = useState<ComposerMode>("build");
+  const swarmEnabled = useSwarmEnabled();
+  // Swarm switched off mid-draft falls back to Build, as in the chat.
+  const mode = chosenMode === "swarm" && !swarmEnabled ? "build" : chosenMode;
 
   const handleSubmit = async (message: PromptInputMessage) => {
     if (!message.text.trim() || isBusy) return;
-    if (await onSubmit(message.text)) setInput("");
+    if (await onSubmit(message.text, mode)) setInput("");
   };
 
   const fill = (prompt: string) => {
@@ -156,14 +163,15 @@ export const PromptComposer = ({
   return (
     // A window on the page grid: `+` marks on its corners, a mono label strip,
     // the prompt, and a toolbar of cells ending in the Build cell.
-    <div className={cn("group/composer relative isolate w-full text-left", className)}>
+    // @container: the mode toggle shows its labels once the box is wide enough.
+    <div className={cn("group/composer @container relative isolate w-full text-left", className)}>
       <GridCross className="-top-[5px] -left-[5px]" />
       <GridCross className="-top-[5px] -right-[5px]" />
       <GridCross className="-bottom-[5px] -left-[5px]" />
       <GridCross className="-right-[5px] -bottom-[5px]" />
 
       {/* `composer-orbit` (globals.css): an orange light circles the box while it has focus. */}
-      <div className="composer-window composer-orbit rounded-md border border-border bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04),0_16px_48px_-28px_rgb(0_0_0/0.3)] transition-[border-color] duration-300 focus-within:border-brand/30">
+      <div data-testid="prompt-composer" className="composer-window composer-orbit rounded-md border border-border bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04),0_16px_48px_-28px_rgb(0_0_0/0.3)] transition-[border-color] duration-300 focus-within:border-brand/30">
         {/* Label strip */}
         <div className="flex h-9 items-center justify-between gap-3 border-b border-border px-4 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           <span className="flex items-center gap-2.5">
@@ -194,7 +202,7 @@ export const PromptComposer = ({
 
           {/* Toolbar of cells; p-0! beats the addon's own padding so every cell centres. */}
           <PromptInputFooter className="h-11 items-stretch gap-0 border-t border-border p-0!">
-            <PromptInputTools className="min-w-0 items-stretch gap-0">
+            <PromptInputTools data-testid="prompt-composer-tools" className="min-w-0 items-stretch gap-0">
               {showEnhance && (
                 <EnhancePromptButton
                   enhancer={enhancer}
@@ -212,16 +220,27 @@ export const PromptComposer = ({
                   className={cn(TOOL, "h-full w-auto rounded-none has-[>svg]:px-3 [&_svg]:size-3.5")}
                 />
               )}
+              {/* The chat's mode radios; Swarm only while the kill switch is on. */}
+              <div className={cn(CELL, "border-r")}>
+                <PlanModeToggle
+                  mode={mode}
+                  onModeChange={setMode}
+                  swarm={swarmEnabled}
+                  disabled={isSubmitting}
+                  size="sm"
+                />
+              </div>
               {tools}
               {showModelSelect && <ComposerModelSelect disabled={isSubmitting} />}
             </PromptInputTools>
 
-            <div className="flex items-stretch">
+            {/* shrink-0: the tools give way first, so Build never leaves the frame. */}
+            <div data-testid="prompt-composer-actions" className="flex shrink-0 items-stretch">
               {input && (
                 <span
                   className={cn(
                     CELL,
-                    "border-l px-3 font-mono text-[10px] tabular-nums tracking-[0.12em] text-muted-foreground max-md:hidden",
+                    "border-l px-3 font-mono text-[10px] tabular-nums tracking-[0.12em] text-muted-foreground @max-[640px]:hidden",
                   )}
                 >
                   {input.length.toLocaleString("en-US")} CHARS

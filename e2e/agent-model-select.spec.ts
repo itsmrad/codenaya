@@ -28,7 +28,14 @@ test.describe("chat agent model switcher", () => {
     // The full model name fits at the default panel width (#217).
     const name = trigger.locator('[data-slot="select-value"]');
     await expect(name).not.toBeEmpty();
-    expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    // The measurement rides in the message so a red run says what overflowed (#606).
+    const fit = await name.evaluate((el) => ({
+      text: el.textContent,
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      panelWidth: el.closest(".chat-composer")?.clientWidth,
+    }));
+    expect(fit.scrollWidth, JSON.stringify(fit)).toBeLessThanOrEqual(fit.clientWidth);
     // Focus shows the full name too, for panels narrow enough to truncate it.
     await trigger.focus();
     await expect(page.getByRole("tooltip")).toContainText((await name.textContent())!);

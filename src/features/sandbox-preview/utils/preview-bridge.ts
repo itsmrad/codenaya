@@ -24,6 +24,9 @@ export function installPreviewBridge(
   maxText: number,
 ): void {
   if (win.parent === win) return;
+  // A new document: errors the last one reported are gone. Vite reloads the
+  // page itself after re-optimizing dependencies or restarting (#486).
+  win.parent.postMessage({ source, version, kind: "page", message: "" }, "*");
   let lastPosted = "";
   const post = (kind: string, message: string, detail?: string) => {
     // One error can arrive twice in the same task (window error and its log).
@@ -158,10 +161,11 @@ const envelope = {
 const previewMessage = z.discriminatedUnion("kind", [
   z.object({ ...envelope, kind: z.literal("runtime"), stack: z.string().optional() }),
   z.object({ ...envelope, kind: z.literal("build"), file: z.string().optional() }),
+  z.object({ ...envelope, kind: z.literal("page") }),
 ]);
 
 /**
- * The error a preview message reports, or null. Only the preview
+ * The error a preview message reports, a new page, or null. Only the preview
  * iframe's own window on the preview's origin is trusted; anything else on
  * the page can post messages too.
  */
@@ -169,7 +173,7 @@ export const readPreviewMessage = (
   event: Pick<MessageEvent, "data" | "origin" | "source">,
   frame: Window | null | undefined,
   previewUrl: string | null | undefined,
-): AppError | null => {
+): AppError | { kind: "page" } | null => {
   if (!frame || !previewUrl || event.source !== frame) return null;
   try {
     if (event.origin !== new URL(previewUrl).origin) return null;
@@ -178,6 +182,7 @@ export const readPreviewMessage = (
   }
   const parsed = previewMessage.safeParse(event.data);
   if (!parsed.success) return null;
+  if (parsed.data.kind === "page") return { kind: "page" };
   if (parsed.data.kind === "build") return overlayError(parsed.data.message, parsed.data.file);
   return {
     kind: "runtime",

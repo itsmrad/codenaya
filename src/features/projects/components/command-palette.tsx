@@ -48,6 +48,7 @@ import {
 } from "@/lib/command-palette";
 import { isCommandPaletteKey } from "@/lib/shortcuts";
 import { isMacPlatform } from "@/lib/hooks/use-is-mac";
+import { confirmLeaveEditor } from "@/features/editor/hooks/use-editor-leave-guard";
 import { SETTINGS_NAV } from "@/features/settings/nav";
 
 import { useProjects } from "../hooks/use-projects";
@@ -150,6 +151,7 @@ export const CommandPalette = () => {
     action();
   };
   const goTo = (href: string) => {
+    if (!confirmLeaveEditor(href)) return;
     setOpen(false);
     router.push(href);
   };

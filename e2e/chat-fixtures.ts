@@ -117,7 +117,8 @@ export const chatEntryAnimations = (page: Page) =>
 
 /** Drags the chat/editor sash so the chat panel is `width` px wide (desktop layout). */
 export const setChatPanelWidth = async (page: Page, width: number) => {
-  const panel = page.locator('[role="log"]');
+  // The panel root, not the transcript: an empty chat renders no [role="log"].
+  const panel = page.getByTestId("chat-panel");
   const sash = page.locator('[class*="sash-module_sash"]').first();
   for (let attempt = 0; attempt < 3; attempt++) {
     const current = (await panel.boundingBox())!.width;

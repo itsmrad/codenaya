@@ -32,3 +32,12 @@ it("new-connection mode still shows the endpoint and label fields", () => {
   expect(html).toContain('name="serverUrl"');
   expect(html).toContain('name="label"');
 });
+
+it.each(["microsoft-learn", "cloudflare-docs"])("%s offers a direct probe without an auth form", (providerId) => {
+  const html = render({ providerId });
+  expect(html).toContain("No sign-in");
+  expect(html).toContain("Connect ");
+  expect(html).not.toContain('name="apiKey"');
+  expect(html).not.toContain('name="serverUrl"');
+  expect(html).not.toContain("Connect with");
+});

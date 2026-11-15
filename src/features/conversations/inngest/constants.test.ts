@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { CODING_AGENT_SYSTEM_PROMPT } from "./constants";
+import { CODING_AGENT_SYSTEM_PROMPT, STARTER_IN_PLACE_NOTE } from "./constants";
 import { KNOWN_GOOD_VERSIONS } from "./known-good-versions";
 
 describe("coding agent integration instructions", () => {
+  it("imports shipped shadcn components and uses Sonner (#294)", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Import existing components; do not rewrite them");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("button, card, input, label, textarea, badge, dialog, dropdown-menu, select, tabs, sheet, separator, skeleton, tooltip, avatar and sonner");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Add other components and their dependencies only when needed");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain('import { toast } from "sonner"');
+    expect(STARTER_IN_PLACE_NOTE).toContain("Import these components; do not rewrite them");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/useToast\(\)|write them all|ALL shadcn component source files|Write the actual component source/);
+  });
+
   it("treats runtime MCP state as authoritative over generated project files", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       'Integration availability comes only from the runtime "Connected integrations" section',
@@ -142,5 +151,14 @@ describe("coding agent prompt consistency (#293)", () => {
   it("trusts the installed versions and keeps third-party API calls off the browser", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("never use APIs or syntax from a newer major");
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("usually fails on CORS");
+  });
+
+  it("keeps generated content visible by default and respects reduced motion", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Content is visible by default");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Never animate above-the-fold content");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain('reducedMotion="user"');
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("reveals may only translate");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/initial=\{\{\s*opacity:\s*0/);
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/hidden:\s*\{[^}]*opacity:\s*0/);
   });
 });

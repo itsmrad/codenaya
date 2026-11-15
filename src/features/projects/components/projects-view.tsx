@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { MotionConfig, motion } from "motion/react";
 import { GitBranch, Search } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { useCommandPalette } from "@/lib/command-palette";
 import { useIsMac } from "@/lib/hooks/use-is-mac";
 import { Kbd } from "@/components/ui/kbd";
@@ -18,7 +20,7 @@ import { LabelBar, SectionHeader } from "@/components/landing/section-header";
 import { useProjects } from "../hooks/use-projects";
 import { useDashboardTab } from "../hooks/use-dashboard-tab";
 import { useCreateProjectFromPrompt } from "../hooks/use-create-project-from-prompt";
-import { takePendingPrompt } from "../utils/pending-prompt";
+import { clearPendingPrompt, peekPendingPrompt, resumePendingPrompt } from "../utils/pending-prompt";
 import { takePendingImport } from "../utils/pending-import";
 import { githubRepoUrl, parseGithubRepo } from "../utils/github-repo";
 import type { DashboardTab } from "../utils/dashboard-tab";
@@ -63,14 +65,33 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
   const [tab, setTab] = useDashboardTab();
   const tabsRef = useRef<HTMLDivElement>(null);
 
-  // A template picked on /showcase or a prompt typed on the landing page
-  // before signing up: create its project now. Taking them clears them, so
-  // this runs at most once.
+  const didResume = useRef(false);
+  const createProjectRef = useRef(createProject);
   useEffect(() => {
+    createProjectRef.current = createProject;
+    if (didResume.current) return;
+    didResume.current = true;
     const pendingTemplate = takePendingTemplate();
-    const pendingPrompt = takePendingPrompt();
-    if (pendingTemplate) void createProject(pendingTemplate.prompt, pendingTemplate.id);
-    else if (pendingPrompt) void createProject(pendingPrompt, undefined, true);
+    if (pendingTemplate) {
+      // The template wins; a stale landing draft must not create a second project later.
+      clearPendingPrompt();
+      void createProject(pendingTemplate.prompt, pendingTemplate.id);
+      return;
+    }
+    const resume = async () => {
+      const created = await resumePendingPrompt((pending) =>
+        createProjectRef.current(pending.prompt, undefined, true, pending.mode),
+      );
+      // A refusal that drops the draft (credentials) leaves nothing to retry.
+      if (created === false && peekPendingPrompt() !== null) {
+        toast.error("Your prompt is saved. Try creating the project again.", {
+          id: "pending-prompt-retry",
+          duration: Infinity,
+          action: { label: "Retry", onClick: () => void resume() },
+        });
+      }
+    };
+    void resume();
   }, [createProject]);
 
   // A repo from an "Open in Codenaya" link kept across sign-up, when the
@@ -165,10 +186,10 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
       <main className="flex flex-1 flex-col overflow-x-clip bg-background">
         {/* The landing page's grid: one framed column, sections on shared borders. */}
         <div className="mx-auto w-full max-w-[1200px] flex-1 border-x border-border">
-          {/* ─── Hero: the prompt composer ─── */}
+          {/* ─── Hero: the prompt composer; tighter on phones for returning users so a Recent card fits at 375x812 (#572) ─── */}
           <section className="border-b border-border">
             <div className={`relative isolate overflow-hidden px-6 md:px-12 ${
-                hasNoProjects ? "pt-16 pb-14 md:pt-20 md:pb-16" : "pt-8 pb-8 md:pt-12 md:pb-10"
+                hasNoProjects ? "pt-16 pb-14 md:pt-20 md:pb-16" : "pt-6 pb-6 sm:pt-8 sm:pb-8 md:pt-12 md:pb-10"
               }`}>
               {/* The landing hero's backdrop: a grid fading out from the top centre. */}
               <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
@@ -185,19 +206,19 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
                   >
                     What will you <span className="text-brand">build?</span>
                   </motion.h2>
-                  <motion.p {...enter(0.2)} className="mx-auto mt-5 max-w-md text-[15px] leading-relaxed text-muted-foreground">
+                  <motion.p {...enter(0.2)} className={cn("mx-auto mt-5 max-w-md text-[15px] leading-relaxed text-muted-foreground", !hasNoProjects && "max-sm:mt-3")}>
                     {hasNoProjects
                       ? "Describe your first app, or start from a template below."
                       : "Describe an app and Codenaya builds it, with a live preview."}
                   </motion.p>
                 </div>
 
-                <motion.div {...enter(0.28)} className="mt-9">
+                <motion.div {...enter(0.28)} className={cn("mt-9", !hasNoProjects && "max-sm:mt-6")}>
                   <PromptComposer
-                    onSubmit={createProject}
+                    onSubmit={(prompt, mode) => createProject(prompt, undefined, false, mode)}
                     isSubmitting={isSubmitting}
                   />
-                  <div className="mt-5 flex items-center justify-center gap-4 text-xs text-muted-foreground">
+                  <div className={cn("mt-5 flex items-center justify-center gap-4 text-xs text-muted-foreground", !hasNoProjects && "max-sm:mt-4")}>
                     <button
                       onClick={() => setImportDialogOpen(true)}
                       className="flex items-center gap-1.5 transition-colors hover:text-foreground"
@@ -234,9 +255,9 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
             </>
           ) : (
             <>
-              <section className="hidden border-b border-border has-[>:nth-child(2)]:block">
+              {/* The setup pill goes under Recent so it can't push the first card below the fold (#572). */}
+              <section className="hidden border-b border-border has-[>:nth-child(2)]:block [&>[aria-labelledby=recent-heading]:not(:last-child)]:border-b">
                 <LabelBar label="Workspace" />
-                {checklist}
                 {allProjects && allProjects.length > RECENT_MIN && (
                   <RecentProjects
                     projects={allProjects}
@@ -246,6 +267,7 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
                     }}
                   />
                 )}
+                {checklist}
               </section>
               <Tabs
                 ref={tabsRef}

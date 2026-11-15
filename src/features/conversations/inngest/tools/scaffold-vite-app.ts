@@ -6,8 +6,98 @@ import { getAppError } from "@/lib/convex-error";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
-import { VITE_REACT_STARTER } from "../vite-starter";
-import { folderEnsurer, folderPaths, getProjectFiles, indexProjectFiles, lockedPathError, splitPath } from "./paths";
+import { PRE_UI_STARTER, VITE_REACT_STARTER } from "../vite-starter";
+import { getFileByAgentId } from "./get-file";
+import {
+  folderEnsurer,
+  folderPaths,
+  getProjectFiles,
+  indexProjectFiles,
+  lockedPathError,
+  splitPath,
+  type ProjectIndex,
+} from "./paths";
+
+const STARTER = new Map(VITE_REACT_STARTER.map((file) => [file.path, file.content]));
+const DEP_SECTIONS = ["dependencies", "devDependencies"] as const;
+type Manifest = Partial<Record<(typeof DEP_SECTIONS)[number], Record<string, string>>>;
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const parseManifest = (content: string): Manifest | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (isObject(parsed) && DEP_SECTIONS.every((key) => parsed[key] === undefined || isObject(parsed[key]))) {
+      return parsed as Manifest;
+    }
+  } catch {
+    // Reported by the caller.
+  }
+  return undefined;
+};
+
+const STARTER_MANIFEST = parseManifest(STARTER.get("package.json")!)!;
+
+/**
+ * Brings files kept from a pre-#294 starter up to what the description
+ * promises: adds the starter's missing pinned packages to package.json
+ * (never touching the user's own) and replaces files still exactly as the old
+ * starter wrote them. Returns a line per change and per promise not kept.
+ */
+const upgradeKeptFiles = async (
+  internalKey: string,
+  projectId: Id<"projects">,
+  index: ProjectIndex,
+  kept: string[],
+) => {
+  const notes: string[] = [];
+  // package.json last: the preview reinstalls when it changes.
+  const paths = kept.filter((path) => path === "package.json" || path in PRE_UI_STARTER);
+  paths.sort((a, b) => Number(a === "package.json") - Number(b === "package.json"));
+  for (const path of paths) {
+    const file = index.byPath.get(path)?.file;
+    const current = file && (await getFileByAgentId(internalKey, projectId, file._id));
+    if (!current) continue;
+    const content = current.content ?? "";
+
+    let next: string;
+    let change: string;
+    if (path === "package.json") {
+      const pkg = parseManifest(content);
+      if (!pkg) {
+        const needed = DEP_SECTIONS.flatMap((section) => Object.keys(STARTER_MANIFEST[section] ?? {}));
+        notes.push(`package.json could not be parsed, so it was left as is. Fix it and keep these packages in it: ${needed.join(", ")}.`);
+        continue;
+      }
+      const added: string[] = [];
+      for (const section of DEP_SECTIONS) {
+        for (const [name, range] of Object.entries(STARTER_MANIFEST[section] ?? {})) {
+          if (DEP_SECTIONS.some((other) => name in (pkg[other] ?? {}))) continue;
+          pkg[section] = { ...pkg[section], [name]: range };
+          added.push(`${name}@${range}`);
+        }
+      }
+      if (added.length === 0) continue;
+      next = `${JSON.stringify(pkg, null, 2)}\n`;
+      change = `added ${added.join(", ")}`;
+    } else if (content === PRE_UI_STARTER[path]) {
+      next = STARTER.get(path)!;
+      change = "replaced the unchanged old starter copy with the current one";
+    } else {
+      if (path === "src/main.tsx" && !content.includes("<Toaster")) {
+        notes.push(
+          'Kept your src/main.tsx, but src/main.tsx does not mount <Toaster /> from "@/components/ui/sonner": render it once there or toast() shows nothing.',
+        );
+      }
+      continue;
+    }
+
+    await convex.mutation(api.system.updateFile, { internalKey, projectId, fileId: current._id, content: next });
+    notes.push(`Updated ${path}: ${change}.`);
+  }
+  return notes;
+};
 
 interface ScaffoldViteAppToolOptions {
   projectId: Id<"projects">;
@@ -23,7 +113,7 @@ export const createScaffoldViteAppTool = ({
     description:
       "Write the known-good Vite + React + TypeScript + Tailwind + shadcn starter into the project root: " +
       VITE_REACT_STARTER.map((file) => file.path).join(", ") +
-      ". It boots in the preview as-is. Call it first when starting a new Vite + React app, then extend it. Files that already exist are kept. " +
+      ". Common shadcn/ui components and their Radix dependencies are already included: import from @/components/ui/<name>, do not rewrite them. Add other components only when needed. Sonner Toaster is mounted in src/main.tsx; import toast from sonner. It boots in the preview as-is. Call it first when starting a new Vite + React app, then extend it. Files that already exist are kept, except that it adds missing starter packages to package.json and updates files an older starter wrote that were never changed; the result names anything still missing. " +
       "The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>.",
     parameters: z.object({}),
     handler: async (_params, { step: toolStep }) => {
@@ -92,6 +182,8 @@ export const createScaffoldViteAppTool = ({
               ? `Error: Incomplete scaffold. Locks kept starter files out${heldBack.length > 0 ? `, so ${heldBack.join(", ")} were not written either and the preview won't start` : ""}. Created: ${created.join(", ") || "nothing"}.`
               : `Scaffolded the Vite + React starter. Created: ${created.join(", ") || "nothing"}.`,
             kept.length > 0 ? `Kept existing: ${kept.join(", ")}.` : "",
+            // Not when blocked: an incomplete starter must not get a package.json bump and reinstall.
+            ...(blocked ? [] : await upgradeKeptFiles(internalKey, projectId, index, kept)),
             locked.length > 0 ? `Not written, locked by the user: ${locked.join(", ")}. Don't modify them.` : "",
             blocked
               ? "Tell the user the Vite starter needs these paths unlocked."

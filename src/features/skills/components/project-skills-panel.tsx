@@ -43,6 +43,7 @@ import { convexErrorMessage } from "@/lib/convex-error";
 import { SKILLS_SETTINGS_URL } from "@/features/settings/nav";
 import { ProjectInstructionsForm } from "@/features/projects/components/project-instructions-form";
 import { ProjectNotesList } from "@/features/projects/components/project-notes";
+import { ProjectThemeForm } from "@/features/projects/components/project-theme-form";
 
 import type { ProjectSkillSummary } from "../types";
 import {
@@ -311,7 +312,7 @@ export const ProjectSkillsPanel = ({
   );
 };
 
-/** Project instructions and the Skills panel as a dialog, opened from the IDE navbar. */
+/** Project instructions, theme and the Skills panel as a dialog, opened from the IDE navbar. */
 export const ProjectSkillsDialog = ({
   projectId,
   open,
@@ -324,16 +325,18 @@ export const ProjectSkillsDialog = ({
   <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
       <DialogHeader>
-        <DialogTitle>Instructions and skills</DialogTitle>
+        <DialogTitle>Instructions, design and skills</DialogTitle>
         <DialogDescription>
-          Tell this project&apos;s agent what to always follow, and choose the
-          skills it can use. Library skills are off until you enable them here.
+          Tell this project&apos;s agent what to always follow, set the look it
+          applies, and choose the skills it can use. Library skills are off
+          until you enable them here.
         </DialogDescription>
       </DialogHeader>
       {open && (
         <>
           <ProjectInstructionsForm projectId={projectId} />
           <ProjectNotesList projectId={projectId} />
+          <ProjectThemeForm projectId={projectId} />
           <ProjectSkillsPanel projectId={projectId} />
         </>
       )}
