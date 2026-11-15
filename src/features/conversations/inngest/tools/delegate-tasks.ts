@@ -72,6 +72,11 @@ export const createDelegateTasksTool = ({
     handler: async (input, { step }) => {
       if (delegated) return "Error: already delegated, integrate now.";
       if (depth >= MAX_SWARM_DEPTH) return "Error: Workers cannot delegate; build it yourself.";
+      // The board shows the reason from this call's recorded step (`swarmSoloReason`).
+      if (input.solo && !input.tasks?.length) {
+        delegated = true;
+        return "Building solo: build it yourself, then run checkBuild.";
+      }
       const plan = validatePlan(input, { withinPaths: parent?.ownedPaths, maxDepth });
       if (typeof plan === "string") return plan;
       if (!step) throw new Error("delegateTasks runs only inside an Inngest function");

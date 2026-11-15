@@ -21,6 +21,9 @@ vi.mock("@/lib/convex-client", async () => {
 import { withEnvPlatform } from "@/features/ai-providers/server/active-platform.mock";
 
 import { inngest } from "@/inngest/client";
+import { mergeMessageSteps } from "../../../../convex/messageSteps";
+import type { AgentStep } from "../agent-steps";
+import { swarmHeader, swarmSoloReason } from "../swarm-status";
 import { BUILD_NOT_BUILT_NOTE } from "./build-check-gate";
 import { drive, text, toolCall } from "./process-message.driver";
 
@@ -69,8 +72,10 @@ const toolResults = (bodies: unknown[]) =>
 const mutationArgs = (name: string) =>
   mocks.mutation.mock.calls.filter(([ref]) => getFunctionName(ref) === name).map(([, args]) => args);
 
-const swarm = (inferences: Parameters<typeof drive>[1], invokeResults: unknown[], cancelWhen?: () => boolean) =>
-  drive({ modelId: "x-ai/grok-4.7" }, inferences, "Build a site", { mode: "swarm", ownerId: "user_1" }, {
+const PIZZERIA = "Build a pizzeria site with home, menu, about and contact pages";
+
+const swarm = (inferences: Parameters<typeof drive>[1], invokeResults: unknown[], cancelWhen?: () => boolean, prompt = PIZZERIA) =>
+  drive({ modelId: "x-ai/grok-4.7" }, inferences, prompt, { mode: "swarm", ownerId: "user_1" }, {
     invokeResults,
     cancelWhen,
   });
@@ -100,6 +105,10 @@ describe("processMessage swarm mode", () => {
     const [first] = codingRequests(outcome.inferenceBodies);
     expect(first.tools?.map((tool) => tool.function.name)).toContain("delegateTasks");
     expect(String(first.messages[0].content)).toContain("## Swarm mode");
+    // The orchestrator sees the real multi-page request, and no blanket "too small to split" escape hatch.
+    expect(JSON.stringify(first.messages)).toContain(PIZZERIA);
+    expect(String(first.messages[0].content)).toContain("never too small to split");
+    expect(String(first.messages[0].content)).not.toContain("If the work is too small to split");
 
     expect(mutationArgs("agentTasks:createTasks")).toEqual([expect.objectContaining({
       messageId: "m1",
@@ -291,6 +300,25 @@ describe("processMessage swarm mode", () => {
     expect(toolResults(outcome.inferenceBodies)[0])
       .toBe("Error: another swarm is already running for this account; build this one yourself.");
     expect(outcome.invocations).toEqual([]);
+  });
+
+  it("records the solo reason for a tiny request and runs no workers", async () => {
+    const outcome = await swarm([
+      { data: toolCall("delegateTasks", { tasks: [], solo: "one-line copy change" }) },
+      { data: toolCall("writeFiles", { files: [{ path: "src/App.tsx", content: "export default () => null;\n" }] }) },
+      { data: toolCall("checkBuild") },
+      { data: text("Done.") },
+    ], [], undefined, "Change the hero title to Hello");
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(toolResults(outcome.inferenceBodies)[0]).toBe("Building solo: build it yourself, then run checkBuild.");
+    expect(mutationArgs("agentTasks:createTasks")).toEqual([]);
+    expect(outcome.invocations).toEqual([]);
+    // Merged as Convex stores them: the finish record keeps the call's recorded targets.
+    const steps = mutationArgs("system:upsertMessageSteps")
+      .reduce<AgentStep[]>((all, { steps }) => mergeMessageSteps(all, steps as AgentStep[]), []);
+    expect(swarmSoloReason(steps)).toBe("one-line copy change");
+    expect(swarmHeader([], 0, 5000, swarmSoloReason(steps))).toBe("Swarm · Built solo: one-line copy change · 0:05");
   });
 
   it("offers no delegateTasks and no swarm note outside swarm mode", async () => {

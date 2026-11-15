@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 import type { Doc } from "../../../../convex/_generated/dataModel";
 import { runWrittenPaths } from "../agent-steps";
-import { groupSwarmTasks, type SwarmTask, swarmElapsed, swarmHeader, swarmSelfCheckStatus, swarmTaskStatus } from "../swarm-status";
+import { groupSwarmTasks, type SwarmTask, swarmElapsed, swarmHeader, swarmSelfCheckStatus, swarmSoloReason, swarmTaskStatus } from "../swarm-status";
 import { AgentRunLog } from "./agent-run";
 
 const STATUS_LABELS = {
@@ -110,7 +110,7 @@ export const SwarmBoard = ({ message, tasks, onOpenFile, children }: {
     <section aria-label="Swarm board" className="@container min-w-0 overflow-hidden rounded-xl border border-border bg-card/60">
       <h3 className="flex items-center gap-2 px-3 py-2.5 text-xs font-medium">
         <UsersIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="leading-5">{tasks === undefined ? "Swarm · Loading workers…" : swarmHeader(tasks, message._creationTime, endedAt)}</span>
+        <span className="leading-5">{tasks === undefined ? "Swarm · Loading workers…" : swarmHeader(tasks, message._creationTime, endedAt, live ? undefined : swarmSoloReason(message.steps ?? []))}</span>
       </h3>
       <ul role="list" className="min-w-0 list-none">
         {/* Open by default: the parent run keeps its revert and fix actions in view. */}
