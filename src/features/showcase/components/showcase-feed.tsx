@@ -6,7 +6,7 @@ import { Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
-import { useShowcaseFeed, type ShowcaseSort } from "../hooks/use-showcase";
+import { useShowcaseFeed, useShowcaseRankingTime, useShowcaseTopCreators, type ShowcaseSort } from "../hooks/use-showcase";
 import { showcasePath } from "../hooks/use-remix";
 import {
   TECH_STACK_OPTIONS,
@@ -19,9 +19,12 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 /** The full community showcase: search, sort, tag filters and a paginated card grid. */
 export const ShowcaseFeed = () => {
+  const [sortBy, setSortBy] = useState<ShowcaseSort>("newest");
+  const isWeekly = sortBy === "week";
+  const now = useShowcaseRankingTime(isWeekly);
+  const creators = useShowcaseTopCreators(now, isWeekly);
   const [showcaseSearch, setShowcaseSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [sortBy, setSortBy] = useState<ShowcaseSort>("newest");
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
   const [selectedTech, setSelectedTech] = useState<string[]>([]);
   const [selectedDesign, setSelectedDesign] = useState<string[]>([]);
@@ -35,6 +38,7 @@ export const ShowcaseFeed = () => {
   const { results, status, loadMore, searching } = useShowcaseFeed({
     search: debouncedSearch,
     sortBy,
+    now,
     category: selectedCategory,
     techStack: selectedTech,
     designStyle: selectedDesign,
@@ -43,8 +47,8 @@ export const ShowcaseFeed = () => {
   const hasActiveFilters = selectedCategory || selectedTech.length > 0 || selectedDesign.length > 0;
 
   return (
-    <>
-      <div>
+    <div className="flex flex-col gap-8 lg:flex-row">
+      <div className="min-w-0 flex-1">
         {/* Header + Search + Sort */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4">
           <div className="relative w-full sm:w-auto sm:flex-1 sm:max-w-xs">
@@ -61,7 +65,7 @@ export const ShowcaseFeed = () => {
 
           {/* Sort */}
           <div className="flex items-center p-0.5 bg-muted/30 rounded-lg border border-border/40">
-            {(["newest", "upvotes", "imports"] as ShowcaseSort[]).map((s) => (
+            {(["newest", "week", "upvotes", "imports"] as ShowcaseSort[]).map((s) => (
               <button
                 key={s}
                 onClick={() => setSortBy(s)}
@@ -74,7 +78,7 @@ export const ShowcaseFeed = () => {
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {s === "newest" ? "New" : s === "upvotes" ? "Top" : "Popular"}
+                {s === "newest" ? "New" : s === "week" ? "This week" : s === "upvotes" ? "Top" : "Popular"}
               </button>
             ))}
           </div>
@@ -162,7 +166,9 @@ export const ShowcaseFeed = () => {
                 ? "Loading..."
                 : searching || hasActiveFilters
                   ? "No projects match your filters"
-                  : "No showcase projects yet"}
+                  : sortBy === "week"
+                    ? "No activity this week yet. Explore New to find projects."
+                    : "No showcase projects yet"}
             </p>
           </div>
         ) : (
@@ -190,6 +196,24 @@ export const ShowcaseFeed = () => {
           </div>
         )}
       </div>
-    </>
+      {isWeekly && <aside className="lg:w-44 lg:shrink-0" aria-label="Top creators this week">
+        <h2 className="text-sm font-medium">Top creators</h2>
+        <p className="mt-1 text-xs text-muted-foreground">This week</p>
+        {creators === undefined ? (
+          <p className="mt-3 text-xs text-muted-foreground">Loading...</p>
+        ) : creators.length === 0 ? (
+          <p className="mt-3 text-xs text-muted-foreground">Creators will appear as projects get upvotes and remixes.</p>
+        ) : (
+          <ol className="mt-3 space-y-3">
+            {creators.map((creator, index) => (
+              <li key={index} className="flex items-center justify-between gap-2 text-sm">
+                <span className="truncate">{creator.name}</span>
+                <span className="text-xs text-muted-foreground" aria-label={`${creator.score} weekly points`}>{creator.score}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </aside>}
+    </div>
   );
 };
