@@ -28,6 +28,7 @@ vi.mock("@/lib/convex-client", async () => {
 
 import { TURN_HEARTBEAT_ID } from "../agent-steps";
 import { WORKER_MAX_STEPS } from "../swarm";
+import { WRITE_BATCH_FILES } from "./constants";
 import { drive, text, toolCall } from "./process-message.driver";
 import { swarmWorker } from "./swarm-worker";
 import { createDelegateTasksTool } from "./tools/delegate-tasks";
@@ -107,6 +108,12 @@ describe("swarmWorker", () => {
       ["deleteFiles", "editFile", "listFiles", "readFiles", "searchFiles", "writeFiles"],
     );
     expect(request.messages[0].content).toContain("[swarm-worker]");
+    expect(request.messages[0].content).toContain(`one writeFiles call (at most ${WRITE_BATCH_FILES} files per call)`);
+    expect(request.messages[0].content).toContain("across at most two calls. An oversized call is cut off and writes NOTHING.");
+    expect(request.messages[0].content).toContain("Read only files you must import from; shared types and stubs are listed in the tree.");
+    expect(request.messages[0].content).toContain("Avoid per-file edit/read loops. Do not re-read what you wrote.");
+    expect(request.messages[0].content).toContain("Do not run checkBuild or any build: the orchestrator integrates and checks the complete project.");
+    expect(request.messages[0].content).toContain("Stop once your files are written. Finish with a one-line summary");
     expect(request.messages[0].content).toContain("Owned paths: src/pages/");
     expect(request.messages.at(-1)?.content).toBe(TASK.brief);
 
