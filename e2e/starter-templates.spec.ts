@@ -9,6 +9,13 @@ import { userConvexClient } from "./convex-client";
 const PENDING_TEMPLATE_KEY = "codenaya:pendingTemplate";
 const TEMPLATE_CARD = /^Use the .+ template$/;
 
+// The template's own files in the explorer, which only shows on the Code view. Scoped to
+// the explorer so the run card's trigger and file chips in the chat can't satisfy it.
+const openExplorer = async (page: Page) => {
+  await page.getByRole("tab", { name: "Code", exact: true }).click();
+  return page.getByTestId("file-explorer");
+};
+
 const openTemplatesTab = async (page: Page) => {
   await page.getByRole("heading", { name: "What will you build?" }).waitFor();
   const tab = page.getByRole("tab", { name: "Templates" });
@@ -65,10 +72,11 @@ test.describe("starter templates on the dashboard", () => {
     await expect(page).toHaveURL(/\/projects\/[a-z0-9]+$/, { timeout: 30_000 });
     const projectId = new URL(page.url()).pathname.split("/").pop() as Id<"projects">;
     try {
-      await expect(page.getByRole("button", { name: "package.json" })).toBeVisible({
+      const explorer = await openExplorer(page);
+      await expect(explorer.getByRole("button", { name: "package.json", exact: true })).toBeVisible({
         timeout: 30_000,
       });
-      await expect(page.getByRole("button", { name: "src", exact: true })).toBeVisible();
+      await expect(explorer.getByRole("button", { name: "src", exact: true })).toBeVisible();
       // An instant template opens as a finished app: no run, so the chat stays
       // empty and offers "Make it mine" (#362).
       const card = page.getByRole("region", { name: "Make it mine" });
@@ -98,7 +106,8 @@ test.describe("starter templates on the dashboard", () => {
     await expect(page).toHaveURL(/\/projects\/[a-z0-9]+$/, { timeout: 30_000 });
     const projectId = new URL(page.url()).pathname.split("/").pop() as Id<"projects">;
     try {
-      await expect(page.getByRole("button", { name: "package.json" })).toBeVisible({
+      const explorer = await openExplorer(page);
+      await expect(explorer.getByRole("button", { name: "package.json", exact: true })).toBeVisible({
         timeout: 30_000,
       });
       expect(await page.evaluate((key) => localStorage.getItem(key), PENDING_TEMPLATE_KEY)).toBeNull();
