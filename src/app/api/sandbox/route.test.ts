@@ -258,6 +258,7 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
   });
 
   it.each([false, true])("continues resuming after tree cleanup fails (wrapper kill fails: %s), without creating one or checking the cap", async (killFails) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const sandbox = fakeSandbox("sbx_resume");
     if (killFails) sandbox.commands.kill.mockRejectedValue(new Error("wrapper kill failed"));
     mocks.sandboxConnect.mockResolvedValue(sandbox);
@@ -266,11 +267,18 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
 
     expect(mocks.sandboxConnect).toHaveBeenCalledWith("sbx_resume");
     expect(sandbox.commands.run.mock.calls).toEqual([
-      [killTreeCommand(7)],
-      [killTreeCommand(8)],
+      [killTreeCommand(7), { timeoutMs: 10_000 }],
+      [killTreeCommand(8), { timeoutMs: 10_000 }],
       ["node --version", { timeoutMs: 10_000 }],
     ]);
-    expect(sandbox.commands.kill.mock.calls).toEqual([[7], [8]]);
+    expect(sandbox.commands.kill.mock.calls).toEqual([
+      [7, { requestTimeoutMs: 10_000 }],
+      [8, { requestTimeoutMs: 10_000 }],
+    ]);
+    expect(warn.mock.calls).toEqual(killFails ? [
+      ["[project-sandbox] Failed to stop command", 7],
+      ["[project-sandbox] Failed to stop command", 8],
+    ] : []);
     expect(mocks.sandboxCreate).not.toHaveBeenCalled();
     expect(mocks.sandboxList).not.toHaveBeenCalled();
   });
@@ -300,9 +308,9 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
 
     expect(childrenAtBoot).toBe(0);
     expect(sandbox.commands.run.mock.calls).toEqual([
-      [killTreeCommand(7)],
-      [killTreeCommand(8)],
-      [killTreeCommand(9)],
+      [killTreeCommand(7), { timeoutMs: 10_000 }],
+      [killTreeCommand(8), { timeoutMs: 10_000 }],
+      [killTreeCommand(9), { timeoutMs: 10_000 }],
       ["node --version", { timeoutMs: 10_000 }],
     ]);
     expect(sandbox.commands.kill).not.toHaveBeenCalled();

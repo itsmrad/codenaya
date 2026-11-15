@@ -99,10 +99,12 @@ export const stopSandboxCommands = async (sandbox: Sandbox) => {
   const running = await sandbox.commands.list();
   await Promise.all(running.map(async (command) => {
     try {
-      await sandbox.commands.run(killTreeCommand(command.pid));
+      await sandbox.commands.run(killTreeCommand(command.pid), { timeoutMs: 10_000 });
     } catch {
       // Best-effort cleanup must not prevent a resumed boot (#486).
-      await sandbox.commands.kill(command.pid).catch(() => {});
+      await sandbox.commands.kill(command.pid, { requestTimeoutMs: 10_000 }).catch(() => {
+        console.warn("[project-sandbox] Failed to stop command", command.pid);
+      });
     }
   }));
 };
