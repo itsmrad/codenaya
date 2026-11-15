@@ -521,6 +521,7 @@ describe("known reads exclude tools that return secrets", () => {
     ["netlify", "netlify-observability-get-request-detail"],
     ["railway", "check-cloud-agent-task"],
     ["railway", "get-cloud-agent-transcript"],
+    ["railway", "list-cloud-agent-tasks"],
   ] as const)("%s does not list %s", (id, name) => {
     expect(PROVIDERS[id].readOnlyTools ?? []).not.toContain(name);
     expect(requiresApproval(

@@ -1306,9 +1306,10 @@ const CATALOG = {
       "check-cloud-agent-task",
       "get-cloud-agent-transcript",
     ],
+    // Task lists, results and transcripts carry agent output and stay gated.
     readOnlyTools: [
       "whoami", "list-projects", "list-services", "list-feature-flags",
-      "get-feature-flag", "list-cloud-agent-tasks", "list-cloud-agent-models",
+      "get-feature-flag", "list-cloud-agent-models",
     ],
     // The resource's 401 challenge and protected-resource metadata both name
     // this scope; without it the token cannot reach any workspace.
