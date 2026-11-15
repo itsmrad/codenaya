@@ -7,6 +7,7 @@ import {
   installPreviewBridge,
   injectPreviewBridge,
   insertBridge,
+  previewTargetOrigin,
   readPreviewMessage,
   routePreviewMessage,
 } from "./preview-bridge";
@@ -44,6 +45,19 @@ describe("injectPreviewBridge", () => {
   });
 });
 
+describe("previewTargetOrigin", () => {
+  it("returns the origin of an http(s) URL, port included", () => {
+    expect(previewTargetOrigin("https://4000-abc.e2b.app/x?y=1")).toBe("https://4000-abc.e2b.app");
+    expect(previewTargetOrigin("http://localhost:5173/")).toBe("http://localhost:5173");
+  });
+
+  it("is null for URLs with no usable origin", () => {
+    for (const url of ["about:blank", "blob:https://a.example/id", "data:text/html,hi", "not a url", "", null, undefined]) {
+      expect(previewTargetOrigin(url)).toBeNull();
+    }
+  });
+});
+
 describe("readPreviewMessage", () => {
   const frame = {} as Window;
   const previewUrl = "https://4000-abc.e2b.app";
@@ -70,6 +84,7 @@ describe("readPreviewMessage", () => {
     expect(readPreviewMessage({ ...event, origin: "https://evil.example" }, frame, previewUrl)).toBeNull();
     expect(readPreviewMessage(event, null, previewUrl)).toBeNull();
     expect(readPreviewMessage(event, frame, null)).toBeNull();
+    expect(readPreviewMessage({ ...event, origin: "null" }, frame, "about:blank")).toBeNull();
   });
 
   it("ignores malformed or foreign payloads", () => {

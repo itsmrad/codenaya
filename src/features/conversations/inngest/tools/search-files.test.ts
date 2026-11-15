@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { getFunctionName } from "convex/server";
+import { convexToJson } from "convex/values";
 const mocks = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock("@/lib/convex-client", () => ({ convex: { query: mocks.query } }));
 import { createSearchFilesTool } from "./search-files";
@@ -20,6 +21,22 @@ it("searches inside a replayable step with the run's project and returns query o
   expect(getFunctionName(ref)).toBe("files:searchFiles");
   expect(args).toEqual({ ...options, pattern: "hello" });
 });
+it("excludes the swarm registry from Convex query args", async () => {
+  const swarmOptions = { ...options, registry: vi.fn(async () => []) };
+  const params = { pattern: "hello", isRegex: false, pathGlob: "src/**", maxResults: 10 };
+  mocks.query.mockImplementation(async (_ref, args) => {
+    // Exercise the same serialization boundary as ConvexHttpClient, without a network call.
+    convexToJson(args);
+    return "src/app.ts:1: hello";
+  });
+
+  expect(await createSearchFilesTool(swarmOptions).handler(params, { step } as never)).toBe("src/app.ts:1: hello");
+  const [ref, args] = mocks.query.mock.calls[0];
+  expect(getFunctionName(ref)).toBe("files:searchFiles");
+  expect(args).toEqual({ ...options, ...params });
+  expect(swarmOptions.registry).not.toHaveBeenCalled();
+});
+
 it("rejects invalid tool input before querying", async () => {
   expect(await createSearchFilesTool(options).handler({ pattern: "", maxResults: -1 }, { step } as never)).toMatch(/^Error:/);
   expect(mocks.query).not.toHaveBeenCalled();

@@ -10,13 +10,19 @@ import { injectPreviewBridge } from "../src/features/sandbox-preview/utils/previ
 import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
 
 /**
- * Stubs the sandbox so the boot resolves at once, after any `output` lines;
- * returns the boot request count.
+ * Stubs the sandbox so the boot resolves once `ready` does (at once by default),
+ * after any `output` lines; returns the boot request count.
  */
-const stubSandbox = async (page: Page, output: string[] = [], previewUrl = "about:blank") => {
+const stubSandbox = async (
+  page: Page,
+  output: string[] = [],
+  previewUrl = "about:blank",
+  ready: Promise<unknown> = Promise.resolve(),
+) => {
   const counter = { boots: 0 };
-  await page.route("**/api/sandbox", (route) => {
+  await page.route("**/api/sandbox", async (route) => {
     counter.boots += 1;
+    await ready;
     return route.fulfill({
       contentType: "application/x-ndjson",
       body: [
@@ -71,8 +77,8 @@ const startFirstBuild = async (page: Page, name: string) => {
         content: "{}\n",
       }),
     /** Writes `name` as the first run, which lists it on the build card after the file lands. */
-    writeFile: async (name: string) => {
-      await system.mutation(api.system.createFile, { internalKey, projectId, name, content: `${name}\n` });
+    writeFile: async (name: string, content = `${name}\n`) => {
+      await system.mutation(api.system.createFile, { internalKey, projectId, name, content });
       const now = Date.now();
       await system.mutation(api.system.upsertMessageSteps, {
         internalKey,
@@ -193,6 +199,96 @@ test.describe("first build auto-opens the preview", () => {
       expect(errors).toEqual([]);
     });
   }
+
+  for (const startupRefreshed of [false, true]) {
+    test(`reloads the finished first build in a visible tab (startup refresh ${startupRefreshed ? "done" : "pending"}, #561)`, async ({ page }) => {
+      test.setTimeout(150_000);
+      await signIn(page);
+      const previewUrl = new URL("/__e2e-first-build-preview", page.url()).href;
+      let heading = "App";
+      let loads = 0;
+      // Serve the current app on navigation, with no HMR connection.
+      await page.route(previewUrl, (route) => {
+        loads += 1;
+        return route.fulfill({ contentType: "text/html", body: `<h1>${heading}</h1>` });
+      });
+      await stubSandbox(page, [], previewUrl);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      const build = await startFirstBuild(page, `e2e-preview-first-build-reload-${startupRefreshed}`);
+
+      try {
+        await page.clock.install();
+        await page.goto(`/projects/${build.projectId}`);
+        await expect(page.getByRole("status", { name: "Building your app" })).toBeVisible({ timeout: 60_000 });
+        await page.clock.pauseAt(Date.now() + 1_000);
+        expect(await page.evaluate(() => document.visibilityState)).toBe("visible");
+        await build.writePackageJson();
+        await expect.poll(async () => {
+          await page.clock.runFor(500);
+          return loads;
+        }, { timeout: 30_000 }).toBe(1);
+        const app = page.frameLocator('iframe[title="Preview"]').getByRole("heading");
+        await expect(app).toHaveText("App", { timeout: 30_000 });
+        // Cover completion both before and after the startup refresh fires.
+        if (startupRefreshed) {
+          await page.clock.runFor(2_500);
+          await expect.poll(() => loads).toBe(2);
+        }
+        const beforeCompletion = loads;
+        await build.writeFile("App.tsx", 'export default function App() { return <h1>Booking page</h1>; }');
+        heading = "Booking page";
+        await expect(app).toHaveText("App");
+        await build.run.complete();
+        await expect(page.getByRole("status", { name: "Still building" })).toBeHidden();
+        await page.clock.runFor(2_500);
+        await expect(app).toHaveText("Booking page");
+        // One reload: a pending startup refresh folds into the end-of-build one.
+        expect(loads).toBe(beforeCompletion + 1);
+
+        // Completing a follow-up run must not reload the app.
+        const second = await build.startRun();
+        await expect(page.getByText("Agent working")).toBeVisible();
+        await second.complete();
+        await expect(page.getByText("Agent working")).toBeHidden();
+        await page.clock.runFor(3_000);
+        expect(loads).toBe(beforeCompletion + 1);
+      } finally {
+        await build.cleanup();
+      }
+    });
+  }
+
+  test("a first build that ends while the sandbox boots reloads once, via the startup refresh (#561)", async ({ page }) => {
+    test.setTimeout(150_000);
+    await signIn(page);
+    const previewUrl = new URL("/__e2e-first-build-booting", page.url()).href;
+    let loads = 0;
+    await page.route(previewUrl, (route) => {
+      loads += 1;
+      return route.fulfill({ contentType: "text/html", body: "<h1>App</h1>" });
+    });
+    let boot = () => {};
+    const sandbox = await stubSandbox(page, [], previewUrl, new Promise<void>((resolve) => (boot = resolve)));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const build = await startFirstBuild(page, "e2e-preview-first-build-booting");
+
+    try {
+      await page.goto(`/projects/${build.projectId}`);
+      await expect(page.getByRole("status", { name: "Building your app" })).toBeVisible({ timeout: 60_000 });
+      await build.writePackageJson();
+      await expect.poll(() => sandbox.boots, { timeout: 30_000 }).toBe(1);
+      // The run ends mid-boot: nothing to reload yet.
+      await build.run.complete();
+      await page.waitForTimeout(2_000);
+      boot();
+      // The boot's load, then its startup refresh, and nothing more.
+      await expect.poll(() => loads, { timeout: 30_000 }).toBe(2);
+      await page.waitForTimeout(5_000);
+      expect(loads).toBe(2);
+    } finally {
+      await build.cleanup();
+    }
+  });
 
   test("holds the boot while the first build keeps writing (#486)", async ({ page }) => {
     test.setTimeout(150_000);
@@ -377,7 +473,7 @@ test.describe("first build auto-opens the preview", () => {
           await expect.poll(() => sent.length, { timeout: 30_000 }).toBe(1);
           expect(sent[0]).toContain("Two Reacts");
         }
-        // No reload loop.
+        // Exactly one reload for the first build's end, and no loop.
         await page.waitForTimeout(5_000);
         expect(loads).toBe(3);
       } finally {

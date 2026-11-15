@@ -501,6 +501,32 @@ describe("showcase.isProjectPublished", () => {
   });
 });
 
+test("a published entry of a user whose deletion started leaves every public read", async () => {
+  vi.useFakeTimers(); // keeps the scheduled purge from running
+  try {
+    const t = convexTest(schema, modules);
+    const [id] = await seed(t, [{ title: "Weather", publishedAt: 1, featured: true }]);
+    const reads = async () => {
+      const list = await t.query(api.showcase.list, { paginationOpts: page(10) });
+      const search = await t.query(api.showcase.search, { query: "weather", paginationOpts: page(10) });
+      return [
+        list.page.length,
+        search.page.length,
+        (await t.query(api.showcase.getById, { id })) ? 1 : 0,
+        (await t.query(api.showcase.getTrending, {})).length,
+        (await t.query(api.showcase.getFeatured, {})).length,
+      ];
+    };
+    expect(await reads()).toEqual([1, 1, 1, 1, 1]);
+
+    await t.mutation(internal.users.markDeleted, { clerkUserId: "user_alice" });
+
+    expect(await reads()).toEqual([0, 0, 0, 0, 0]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 describe("showcase.importToWorkspace", () => {
   const importAs = (t: T, subject: string, showcaseProjectId: Id<"showcaseProjects">) =>
     t.withIdentity({ subject }).mutation(api.showcase.importToWorkspace, { showcaseProjectId });
@@ -525,6 +551,19 @@ describe("showcase.importToWorkspace", () => {
     await t.run(async (ctx) => ctx.db.patch((await ctx.db.get(id))!.projectId, { deletingAt: 1 }));
 
     await expect(importAs(t, "user_bob", id)).rejects.toThrow("Project not found");
+    expect(await importCountOf(t, id)).toBe(0);
+  });
+
+  test("refuses imports past the hourly project limit", async () => {
+    const t = convexTest(schema, modules);
+    const [id] = await seed(t, [{ title: "Todo", publishedAt: 1 }]);
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 20; i++) {
+        await ctx.db.insert("projects", { name: `p${i}`, ownerId: "user_bob", updatedAt: 0 });
+      }
+    });
+
+    await expect(importAs(t, "user_bob", id)).rejects.toThrow("per hour");
     expect(await importCountOf(t, id)).toBe(0);
   });
 });

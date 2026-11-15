@@ -7,6 +7,7 @@ import {
   INSUFFICIENT_CREDITS_CODE,
   type RunSource,
   creditRefusal,
+  creditStanding,
   minRunCredits,
 } from "@/features/billing/credits";
 import { MODEL_LIMIT_CODE, spendRefusal, spendRefusalMessage } from "@/features/billing/model-spend";
@@ -27,7 +28,7 @@ import {
   autoRouteModel,
   autoRunLabel,
 } from "../auto-route";
-import { type ModelPricing, promoKindOf } from "../catalog";
+import { type ModelPricing, pickableModels, promoKindOf } from "../catalog";
 import {
   type PlatformProviderId,
   type RoutedModel,
@@ -173,7 +174,7 @@ const platformRunLabel = (model: RoutedModel) => runModelLabel({ id: model.id, l
  * A promo model (ADR 0009) needs the caller's claim with a run left. The check
  * changes nothing; `promoKind` tells `takePromoRun` which run to take once the
  * send is known to go. Any other platform model needs credits left (ADR 0011);
- * a run that starts with some may end past zero, and the next send is refused.
+ * between-step checks stop runs once their starting balance is spent.
  * A model with a spend limit (ADR 0012), promo or not, needs room under it.
  *
  * Auto (#322) becomes the `task`'s route model (`autoRouteModel`: the admin's
@@ -181,7 +182,8 @@ const platformRunLabel = (model: RoutedModel) => runModelLabel({ id: model.id, l
  * catalog default) before any of these checks, so the message and the run
  * record that concrete model. An image send on Auto only ever routes to a
  * vision model, and is refused when there is none. Auto skips models at
- * their spend limit; with none left it falls to the default, checked as usual,
+ * their spend limit or above the remaining credit balance; with none left it
+ * falls to the default, checked as usual,
  * and an image send whose vision models are all at their limit gets the 402.
  */
 export async function validateModelChoice({
@@ -210,14 +212,32 @@ export async function validateModelChoice({
     const reached = auto
       ? await Promise.all(configured.map((m) => spendLimitReached({ internalKey, userId, model: m })))
       : [];
-    const routed =
-      auto &&
-      autoRouteModel(
+    const creditsLeft = creditStanding(PLANS[account?.plan ?? "free"], account, Date.now()).left;
+    const affordable = (m: RoutedModel) =>
+      process.env.CREDIT_LIMITS_ENFORCED !== "true" || minRunCredits(m.pricing) <= creditsLeft;
+    const eligible = configured.filter((m, i) => !reached[i] && affordable(m));
+    let routed = auto ? autoRouteModel(
+      eligible,
+      // Images need a vision model whatever the task, plan mode included.
+      withImages ? "vision" : task,
+      catalog.autoModelIds,
+    ) : undefined;
+    // Text Auto already falls back outside an unusable pool. Keep that fallback affordable too.
+    if (auto && !routed && !withImages && configured.some((m) => !affordable(m))) {
+      const pickable = pickableModels(eligible);
+      routed = pickable.find((m) => m.id === catalog.defaultModelId) ?? pickable[0];
+    }
+    if (auto && !routed) {
+      const unaffordable = autoRouteModel(
         configured.filter((_, i) => !reached[i]),
-        // Images need a vision model whatever the task, plan mode included.
         withImages ? "vision" : task,
         catalog.autoModelIds,
       );
+      if (unaffordable && !affordable(unaffordable)) {
+        const refusal = creditRefusal(PLANS[account?.plan ?? "free"], account, Date.now(), minRunCredits(unaffordable.pricing));
+        if (refusal) throw new ModelChoiceError(CREDIT_REFUSAL_MESSAGES[refusal], 402, INSUFFICIENT_CREDITS_CODE);
+      }
+    }
     if (auto && withImages && !routed) {
       // A vision model Auto would pick but for its spend limit gets that limit's refusal.
       const capped = autoRouteModel(configured, "vision", catalog.autoModelIds);

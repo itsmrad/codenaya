@@ -39,7 +39,7 @@ export interface ConnectionSummary {
   _id: Id<"userConnections">;
   providerId: string;
   label: string;
-  authMode: "oauth" | "api_key";
+  authMode: "oauth" | "api_key" | "none";
   serverUrl: string;
   status: "active" | "needs_reauth" | "revoked" | "error";
   statusMessage?: string;
@@ -157,7 +157,7 @@ export const ConnectionCard = ({ connection }: ConnectionCardProps) => {
             ·
           </span>
           <span>
-            {connection.authMode === "oauth" ? "OAuth" : "API key"}
+            {connection.authMode === "none" ? "No sign-in" : connection.authMode === "oauth" ? "OAuth" : "API key"}
           </span>
           <span aria-hidden="true" className="text-muted-foreground/40">
             ·

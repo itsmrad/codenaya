@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import ky, { HTTPError } from "ky";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -21,6 +21,7 @@ import { INSUFFICIENT_CREDITS_CODE } from "@/features/billing/credits";
 import { MODEL_LIMIT_CODE } from "@/features/billing/model-spend";
 import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 
+import { clearPendingPrompt } from "../utils/pending-prompt";
 import { useUpdateProjectInstructions } from "./use-projects";
 
 const CREDENTIAL_ERROR =
@@ -52,6 +53,7 @@ export const createWithPromptBody = (
  */
 export const useCreateProjectFromPrompt = () => {
   const router = useRouter();
+  const submitting = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [agentModel] = useAgentModel();
   const updateInstructions = useUpdateProjectInstructions();
@@ -63,22 +65,24 @@ export const useCreateProjectFromPrompt = () => {
       fromLanding?: boolean,
       mode?: ComposerMode,
     ): Promise<boolean> => {
+      if (submitting.current) return false;
       const text = prompt.trim();
       if (!text) return false;
 
+      // A landing draft with a credential can never be created as written: drop it so Retry isn't offered.
       if (detectCredential(text).detected) {
+        if (fromLanding) clearPendingPrompt();
         toast.error(CREDENTIAL_ERROR);
         return false;
       }
 
-      // A short prompt for an empty project gets the setup questions first
-      // (#344); a template already made those choices.
-      const answers = !templateId && shouldAskSetupQuestions(text) ? await askSetupQuestions() : null;
-      if (answers === undefined) return false;
-
+      submitting.current = true;
       setIsSubmitting(true);
-
       try {
+        // Lock before setup questions too: state alone cannot block same-tick calls.
+        const answers = !templateId && shouldAskSetupQuestions(text) ? await askSetupQuestions() : null;
+        if (answers === undefined) return false;
+
         const { projectId } = await ky
           .post("/api/projects/create-with-prompt", {
             json: createWithPromptBody(withSetupAnswers(text, answers), agentModel, templateId, fromLanding, mode),
@@ -109,6 +113,7 @@ export const useCreateProjectFromPrompt = () => {
             return true;
           }
           if (body.code === "credential_detected") {
+            if (fromLanding) clearPendingPrompt();
             toast.error(body.error ?? CREDENTIAL_ERROR);
             return false;
           }
@@ -128,6 +133,7 @@ export const useCreateProjectFromPrompt = () => {
         toast.error("Unable to create project");
         return false;
       } finally {
+        submitting.current = false;
         setIsSubmitting(false);
       }
     },

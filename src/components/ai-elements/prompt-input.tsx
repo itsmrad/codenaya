@@ -37,11 +37,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  BROWSER_DICTATION_LANGUAGES,
+  DICTATION_AUTO,
   DICTATION_SILENCE_MS,
+  SERVER_DICTATION_LANGUAGES,
   dictationErrorMessage,
+  dictationRouteOrNull,
   insertTranscript,
   isDictationKey,
+  recorderErrorCode,
+  transcribeErrorMessage,
 } from "@/lib/dictation";
+import {
+  type DictationRecorder,
+  canRecordDictation,
+  createDictationRecorder,
+} from "@/lib/dictation-recorder";
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart } from "ai";
 import {
@@ -1141,14 +1152,23 @@ const getSpeechRecognition = () =>
     ? undefined
     : (window.SpeechRecognition ?? window.webkitSpeechRecognition);
 
+const browserLanguage = () => navigator.language || "en-US";
+
+const PICKER_LANGUAGES = [...SERVER_DICTATION_LANGUAGES, ...BROWSER_DICTATION_LANGUAGES];
+
+type DictationStatus = "idle" | "listening" | "transcribing";
+
 /**
- * Voice dictation (#301). Renders nothing where the browser has no speech
- * recognition (e.g. Firefox). Final transcripts go in at the cursor through
- * `onTranscriptionChange`, keeping typed text. Recording stops when the page
- * loses focus and after DICTATION_SILENCE_MS without speech; a submit or
- * unmount discards what is still pending, so no words land after a send.
- * Alt+V (Option+V) toggles it in the focused composer. Errors (a blocked
- * microphone, no speech) show a toast and are announced.
+ * Voice dictation (#301). Records with MediaRecorder and transcribes on the
+ * server (`/api/transcribe`) in the languages it knows; any other language,
+ * or a browser that can't record, uses the browser's speech recognition.
+ * Renders nothing where neither exists. Text goes in at the cursor through
+ * `onTranscriptionChange`, keeping typed text, and is never sent by itself.
+ * Recording stops when the page loses focus, at DICTATION_MAX_MS, and (browser
+ * speech) after DICTATION_SILENCE_MS without speech; a submit or unmount
+ * discards what is still pending, so no words land after a send. Alt+V
+ * (Option+V) toggles it in the focused composer. Errors show a toast and are
+ * announced.
  */
 export const PromptInputSpeechButton = ({
   className,
@@ -1156,14 +1176,20 @@ export const PromptInputSpeechButton = ({
   onTranscriptionChange,
   ...props
 }: PromptInputSpeechButtonProps) => {
-  const supported = useSyncExternalStore(
+  const canRecognize = useSyncExternalStore(
     noopSubscribe,
     () => Boolean(getSpeechRecognition()),
     () => false
   );
-  const [isListening, setIsListening] = useState(false);
+  const canRecord = useSyncExternalStore(noopSubscribe, canRecordDictation, () => false);
+  const [picked, setPicked] = useState<string>(DICTATION_AUTO);
+  // The server answered that it can't transcribe: the browser dictates instead.
+  const [serverDown, setServerDown] = useState(false);
+  const [status, setStatus] = useState<DictationStatus>("idle");
   const [announcement, setAnnouncement] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recorderRef = useRef<DictationRecorder | null>(null);
+  const uploadRef = useRef<AbortController | null>(null);
   // Set once a submit or unmount cancels: later results are dropped.
   const discardRef = useRef(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -1172,55 +1198,22 @@ export const PromptInputSpeechButton = ({
     onTranscriptionRef.current = onTranscriptionChange;
   });
 
-  const toggleListening = useCallback(() => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      return;
-    }
-    const Recognition = getSpeechRecognition();
-    if (!Recognition) return;
+  const routeFor = useCallback(
+    (language: string) =>
+      dictationRouteOrNull({
+        picked: language,
+        browserLanguage: browserLanguage(),
+        canRecord: canRecord && !serverDown,
+        canRecognize,
+      }),
+    [canRecord, canRecognize, serverDown]
+  );
 
-    const recognition = new Recognition();
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.lang = navigator.language || "en-US";
-
-    discardRef.current = false;
-    let failure: string | null = null;
-    let silence: ReturnType<typeof setTimeout> | undefined;
-    const waitForSpeech = () => {
-      clearTimeout(silence);
-      silence = setTimeout(() => recognition.stop(), DICTATION_SILENCE_MS);
-    };
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setAnnouncement("Dictation started");
-      waitForSpeech();
-    };
-    recognition.onerror = (event) => {
-      failure = dictationErrorMessage(event.error);
-      if (failure) toast.error(failure);
-    };
-    // Also follows an error, such as a denied microphone.
-    recognition.onend = () => {
-      clearTimeout(silence);
-      if (recognitionRef.current === recognition) recognitionRef.current = null;
-      setIsListening(false);
-      setAnnouncement(failure ?? "Dictation stopped");
-    };
-    recognition.onresult = (event) => {
-      if (discardRef.current) return;
-      waitForSpeech();
-      let transcript = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) transcript += result[0]?.transcript ?? "";
-      }
+  const insert = useCallback(
+    (transcript: string) => {
       const textarea =
         textareaRef?.current ?? buttonRef.current?.closest("form")?.querySelector("textarea");
-      if (!transcript.trim() || !textarea) return;
-
+      if (discardRef.current || !transcript.trim() || !textarea) return;
       const next = insertTranscript(
         textarea.value,
         transcript,
@@ -1229,29 +1222,160 @@ export const PromptInputSpeechButton = ({
       );
       onTranscriptionRef.current?.(next.value);
       requestAnimationFrame(() => textarea.setSelectionRange(next.caret, next.caret));
-    };
+    },
+    [textareaRef]
+  );
 
-    recognitionRef.current = recognition;
-    try {
-      recognition.start();
-    } catch {
-      recognitionRef.current = null;
+  const report = useCallback((message: string | null, otherwise = "Dictation stopped") => {
+    if (message) toast.error(message);
+    setAnnouncement(message ?? otherwise);
+  }, []);
+
+  const upload = useCallback(
+    async (audio: Blob, language: string | undefined) => {
+      if (discardRef.current) return;
+      const controller = new AbortController();
+      uploadRef.current = controller;
+      setStatus("transcribing");
+      setAnnouncement("Transcribing");
+      const form = new FormData();
+      form.set("audio", audio);
+      if (language) form.set("language", language);
+      try {
+        const response = await fetch("/api/transcribe", {
+          method: "POST",
+          body: form,
+          signal: controller.signal,
+        });
+        const body = (await response.json().catch(() => ({}))) as { text?: string; error?: string };
+        if (!response.ok) {
+          if (response.status === 503) setServerDown(true);
+          report(transcribeErrorMessage(response.status, body.error));
+        } else if (!body.text?.trim()) {
+          report(dictationErrorMessage("no-speech"));
+        } else {
+          insert(body.text);
+          setAnnouncement("Dictation inserted");
+        }
+      } catch {
+        // A network failure; an abort is our own cancel and says nothing.
+        if (!controller.signal.aborted) report(transcribeErrorMessage(0));
+      } finally {
+        if (uploadRef.current === controller) {
+          uploadRef.current = null;
+          setStatus("idle");
+        }
+      }
+    },
+    [insert, report]
+  );
+
+  const record = useCallback(
+    (language: string | undefined) => {
+      const recorder = createDictationRecorder({
+        onStateChange: (state) => {
+          if (state === "recording") setAnnouncement("Dictation started");
+          setStatus(state === "idle" ? "idle" : "listening");
+          if (state === "idle" && recorderRef.current === recorder) recorderRef.current = null;
+        },
+        onRecorded: (audio) => void upload(audio, language),
+        onError: (error) => report(dictationErrorMessage(recorderErrorCode(error))),
+      });
+      recorderRef.current = recorder;
+      recorder.start();
+    },
+    [upload, report]
+  );
+
+  const recognize = useCallback(
+    (lang: string) => {
+      const Recognition = getSpeechRecognition();
+      if (!Recognition) return;
+
+      const recognition = new Recognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = lang;
+
+      let failure: string | null = null;
+      let silence: ReturnType<typeof setTimeout> | undefined;
+      const waitForSpeech = () => {
+        clearTimeout(silence);
+        silence = setTimeout(() => recognition.stop(), DICTATION_SILENCE_MS);
+      };
+
+      recognition.onstart = () => {
+        setStatus("listening");
+        setAnnouncement("Dictation started");
+        waitForSpeech();
+      };
+      recognition.onerror = (event) => {
+        failure = dictationErrorMessage(event.error);
+        if (failure) toast.error(failure);
+      };
+      // Also follows an error, such as a denied microphone.
+      recognition.onend = () => {
+        clearTimeout(silence);
+        if (recognitionRef.current === recognition) recognitionRef.current = null;
+        setStatus("idle");
+        setAnnouncement(failure ?? "Dictation stopped");
+      };
+      recognition.onresult = (event) => {
+        waitForSpeech();
+        let transcript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          if (result.isFinal) transcript += result[0]?.transcript ?? "";
+        }
+        insert(transcript);
+      };
+
+      recognitionRef.current = recognition;
+      try {
+        recognition.start();
+      } catch {
+        recognitionRef.current = null;
+      }
+    },
+    [insert]
+  );
+
+  const toggleListening = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
     }
-  }, [textareaRef]);
+    if (recorderRef.current) {
+      recorderRef.current.stop();
+      return;
+    }
+    if (uploadRef.current) return;
+    const route = routeFor(picked);
+    if (!route) return;
+    discardRef.current = false;
+    if (route.engine === "server") record(route.language);
+    else recognize(route.lang);
+  }, [picked, routeFor, record, recognize]);
 
   // abort(), not stop(): stop() still delivers a last result, which would land
   // in the box after it was sent and cleared.
   const cancel = useCallback(() => {
     discardRef.current = true;
     recognitionRef.current?.abort();
+    recorderRef.current?.cancel();
+    uploadRef.current?.abort();
   }, []);
 
   // Unmounting (e.g. the composer hides while a run is processing) cancels it.
   useEffect(() => cancel, [cancel]);
 
+  const busy = status !== "idle";
   useEffect(() => {
-    if (!isListening) return;
-    const stop = () => recognitionRef.current?.stop();
+    if (!busy) return;
+    const stop = () => {
+      recognitionRef.current?.stop();
+      recorderRef.current?.stop();
+    };
     const form = buttonRef.current?.closest("form");
     window.addEventListener("blur", stop);
     form?.addEventListener("submit", cancel);
@@ -1259,8 +1383,9 @@ export const PromptInputSpeechButton = ({
       window.removeEventListener("blur", stop);
       form?.removeEventListener("submit", cancel);
     };
-  }, [isListening, cancel]);
+  }, [busy, cancel]);
 
+  const supported = canRecord || canRecognize;
   useEffect(() => {
     if (!supported) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1277,23 +1402,56 @@ export const PromptInputSpeechButton = ({
 
   if (!supported) return null;
 
+  const names = new Intl.DisplayNames([browserLanguage()], { type: "language" });
+  // The one line that says a language falls back to the browser's speech.
+  const itemLabel = (language: string, name: string) =>
+    canRecord && routeFor(language)?.engine === "browser" ? `${name} (browser speech)` : name;
+  const transcribing = status === "transcribing";
+
   return (
     <>
       <PromptInputButton
         ref={buttonRef}
         aria-label="Dictate"
-        aria-pressed={isListening}
-        title="Dictate (Alt+V)"
+        aria-pressed={status === "listening"}
+        aria-busy={transcribing}
+        disabled={transcribing}
+        title={transcribing ? "Transcribing…" : "Dictate (Alt+V)"}
         className={cn(
           "relative transition-all duration-200",
-          isListening && "motion-safe:animate-pulse bg-accent text-accent-foreground",
+          status === "listening" && "motion-safe:animate-pulse bg-accent text-accent-foreground",
           className
         )}
         onClick={toggleListening}
         {...props}
       >
-        <MicIcon className="size-4" />
+        {transcribing ? (
+          <Loader2Icon className="size-4 animate-spin" />
+        ) : (
+          <MicIcon className="size-4" />
+        )}
       </PromptInputButton>
+      <PromptInputSelect value={picked} onValueChange={setPicked} disabled={busy}>
+        <PromptInputSelectTrigger
+          size="sm"
+          aria-label="Dictation language"
+          className={cn("h-8 w-auto gap-1 px-2 text-xs max-sm:hidden", className)}
+        >
+          <PromptInputSelectValue>
+            {picked === DICTATION_AUTO ? "Auto" : picked.toUpperCase()}
+          </PromptInputSelectValue>
+        </PromptInputSelectTrigger>
+        <PromptInputSelectContent>
+          <PromptInputSelectItem value={DICTATION_AUTO}>
+            {itemLabel(DICTATION_AUTO, "Auto-detect")}
+          </PromptInputSelectItem>
+          {PICKER_LANGUAGES.map((language) => (
+            <PromptInputSelectItem key={language} value={language}>
+              {itemLabel(language, names.of(language) ?? language)}
+            </PromptInputSelectItem>
+          ))}
+        </PromptInputSelectContent>
+      </PromptInputSelect>
       <span className="sr-only" role="status" aria-live="polite">
         {announcement}
       </span>

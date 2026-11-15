@@ -204,17 +204,20 @@ export const pruneOrphanedProjectConnections = internalMutation({
  * `LOST_RUN_MESSAGE`, which re-enables the composer and offers Retry. Steps
  * still marked running are closed as errors so the run block reads as failed.
  *
- * Processing rows are few, and the index orders them oldest first, so a single
- * batch reaches the lost ones.
+ * The status index includes creation time: exclude young runs before reading
+ * their live steps to avoid contending with writes to runs that cannot be lost.
  */
 export const failLostMessageRuns = internalMutation({
   args: {},
+  returns: v.object({ scanned: v.number(), failed: v.number() }),
   handler: async (ctx) => {
     const now = Date.now();
 
     const processing = await ctx.db
       .query("messages")
-      .withIndex("by_status", (q) => q.eq("status", "processing"))
+      .withIndex("by_status", (q) =>
+        q.eq("status", "processing").lte("_creationTime", now - LOST_RUN_MS),
+      )
       .take(BATCH_SIZE);
 
     let failed = 0;

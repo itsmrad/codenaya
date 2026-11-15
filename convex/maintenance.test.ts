@@ -52,6 +52,20 @@ describe("failLostMessageRuns", () => {
     return convexTest(schema, modules);
   }
 
+  test.each([
+    { name: "does not scan a young run", age: LOST_RUN_MS - 1, scanned: 0, status: "processing" },
+    { name: "scans and fails a lost run", age: LOST_RUN_MS + 1, scanned: 1, status: "completed" },
+  ])("$name", async ({ age, scanned, status }) => {
+    const t = setup();
+    const messageId = await seedMessage(t, { status: "processing" });
+
+    vi.setSystemTime(START + age);
+    const result = await t.mutation(internal.maintenance.failLostMessageRuns, {});
+
+    expect(result).toEqual({ scanned, failed: scanned });
+    expect(await t.run((ctx) => ctx.db.get("messages", messageId))).toMatchObject({ status });
+  });
+
   test("fails a run with no progress for LOST_RUN_MS and closes its running steps", async () => {
     const t = setup();
     const messageId = await seedMessage(t, {

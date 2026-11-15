@@ -52,6 +52,10 @@ export const isPlanReply = (content: string) =>
 /** The build request sent when the user accepts a plan. */
 export const buildPlanMessage = (plan: string) => `Build this plan:\n\n${plan}`;
 
+/** The build request for a plan the user edited (#527); null when it is empty. */
+export const editedPlanMessage = (plan: string) =>
+  plan.trim() ? buildPlanMessage(plan.trim()) : null;
+
 /**
  * The plan-mode message "Diagnose in Ask / Plan mode" pre-fills for a stuck run
  * (#306), with the likely cause of a known error (#334).

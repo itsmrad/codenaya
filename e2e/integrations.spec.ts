@@ -26,6 +26,7 @@ test.describe("integration catalog", () => {
         await expect(providers.getByRole("listitem")).toHaveCount(listProviders().length);
         await expect(providers.locator("img")).toHaveCount(listProviders().length);
         for (const logo of await providers.locator("img").all()) {
+          await logo.scrollIntoViewIfNeeded();
           await expect.poll(() => logo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

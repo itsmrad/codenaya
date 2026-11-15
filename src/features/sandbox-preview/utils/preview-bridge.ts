@@ -265,6 +265,20 @@ const previewMessage = z.discriminatedUnion("kind", [
 ]);
 
 /**
+ * The origin to post to or accept messages from, or null for a preview URL that
+ * has none worth trusting (about:blank, blob:, garbage): only http(s) qualifies.
+ */
+export const previewTargetOrigin = (previewUrl: string | null | undefined): string | null => {
+  if (!previewUrl) return null;
+  try {
+    const url = new URL(previewUrl);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
  * The error a preview message reports, a new page, or null. Only the preview
  * iframe's own window on the preview's origin is trusted; anything else on
  * the page can post messages too.
@@ -274,12 +288,8 @@ export const readPreviewMessage = (
   frame: Window | null | undefined,
   previewUrl: string | null | undefined,
 ): AppError | { kind: "page" } | { kind: "select:off" } | { kind: "select:picked"; element: PickedElement } | null => {
-  if (!frame || !previewUrl || event.source !== frame) return null;
-  try {
-    if (event.origin !== new URL(previewUrl).origin) return null;
-  } catch {
-    return null;
-  }
+  const origin = previewTargetOrigin(previewUrl);
+  if (!frame || !origin || event.source !== frame || event.origin !== origin) return null;
   const parsed = previewMessage.safeParse(event.data);
   if (!parsed.success) return null;
   if (parsed.data.kind === "select:picked") return { kind: "select:picked", element: parsed.data.element };
