@@ -21,11 +21,12 @@ vi.mock("@/lib/convex-client", async () => {
 
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { BUILD_NOT_BUILT_NOTE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
-import { STARTER_IN_PLACE_NOTE } from "./constants";
+import { FIRST_BUILD_APP_NOTE, STARTER_IN_PLACE_NOTE } from "./constants";
 import { drive, text, toolCall } from "./process-message.driver";
 import { VITE_REACT_STARTER } from "./vite-starter";
 
 let projectFiles: unknown[];
+let needsFirstBuild: boolean;
 
 const QUERIES: Record<string, () => unknown> = {
   "system:getConversationById": () => ({ title: DEFAULT_CONVERSATION_TITLE }),
@@ -35,6 +36,8 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectFiles": () => projectFiles,
   "system:getProjectFilesWithUrls": () => projectFiles,
   "system:getProjectSkills": () => [],
+  "projects:conversationNeedsFirstBuildForServer": () => needsFirstBuild,
+  "swarm:getSwarmSettings": () => ({ enabled: true, platformMaxDepth: 1 }),
 };
 
 interface ChatBody {
@@ -71,6 +74,7 @@ beforeEach(() => {
       : null,
   );
   projectFiles = [];
+  needsFirstBuild = false;
 });
 
 describe("processMessage title off the first-build path", () => {
@@ -128,6 +132,36 @@ describe("processMessage title off the first-build path", () => {
 });
 
 describe("processMessage first build (#338)", () => {
+  it.each(["seeded", "empty"])("adds early App guidance for a %s solo first build", async (kind) => {
+    needsFirstBuild = true;
+    projectFiles = kind === "seeded"
+      ? VITE_REACT_STARTER.map(({ path }) => ({ _id: `id:${path}`, name: path, type: "file" }))
+      : [];
+
+    const outcome = await drive(MODEL, [{ data: text("Todo app") }, { data: text("Built it.") }]);
+
+    expect(codingRequest(outcome.inferenceBodies).system)
+      .toContain(JSON.stringify(FIRST_BUILD_APP_NOTE).slice(1, -1));
+    expect(mocks.query.mock.calls.map(([ref, args]) => [getFunctionName(ref), args])).toContainEqual([
+      "projects:conversationNeedsFirstBuildForServer",
+      { internalKey: "ik", conversationId: "c1" },
+    ]);
+  });
+
+  it.each([
+    ["a follow-up", false, undefined],
+    ["a plan", true, "plan"],
+    ["a top-level swarm", true, "swarm"],
+  ] as const)("does not add solo early App guidance for %s", async (_, firstBuild, mode) => {
+    needsFirstBuild = firstBuild;
+    const outcome = await drive(
+      MODEL, [{ data: text("Todo app") }, { data: text("Built it.") }], "todo app", { mode },
+    );
+
+    expect(codingRequest(outcome.inferenceBodies).system)
+      .not.toContain(JSON.stringify(FIRST_BUILD_APP_NOTE).slice(1, -1));
+  });
+
   it("leaves the first build pending when the check could not build the app", async () => {
     // No sandbox and no Vite project: the check passes without building.
     await drive(MODEL, [

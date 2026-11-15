@@ -35,12 +35,19 @@ import {
   getOwnedSandbox,
   rememberSandbox,
 } from "@/features/sandbox-preview/server/sandbox-registry";
-import { debounceSerial } from "@/features/sandbox-preview/server/debounce-serial";
+import {
+  REINSTALL_DEBOUNCE_MS,
+  debounceSerial,
+} from "@/features/sandbox-preview/server/debounce-serial";
 import {
   boundedTimeout,
   streamBudget,
 } from "@/features/sandbox-preview/server/stream-budget";
-import { RESTART_VITE_COMMAND } from "@/features/sandbox-preview/server/restart-vite";
+import {
+  DEV_COMMAND_ENV,
+  installWithDevServerStopped,
+  type DevStart,
+} from "@/features/sandbox-preview/server/dev-server";
 import {
   missingReferencedFiles,
   undeclaredPackages,
@@ -100,8 +107,6 @@ const requestSchema = z.object({
 });
 
 const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour (E2B free plan max)
-/** A package.json sync waits this long for more edits before re-installing. */
-const REINSTALL_DEBOUNCE_MS = 2000;
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
@@ -299,6 +304,8 @@ export async function POST(request: Request) {
       };
 
       let sandbox: Sandbox | null = null;
+      /** Started again by a reinstall when no dev server is found running (#486). */
+      let devStart: DevStart | undefined;
       const installCmd = settings?.installCommand || DEFAULT_INSTALL_COMMAND;
 
       // E2B throws on a non-zero exit; the callers report it as an install
@@ -325,16 +332,21 @@ export async function POST(request: Request) {
         if (!sandbox) return;
         send({ type: "output", data: `\npackage.json changed.\n$ ${installCmd}\n` });
         try {
-          // May run past the stream budget, so it is bounded by the close.
-          const result = await runInstall(
-            sandbox,
-            boundedTimeout(INSTALL_TIMEOUT_MS, budget.closeLeft()),
+          const target = sandbox;
+          const result = await installWithDevServerStopped(
+            target,
+            // May run past the stream budget, so it is bounded by the close.
+            () => runInstall(target, boundedTimeout(INSTALL_TIMEOUT_MS, budget.closeLeft())),
+            {
+              onStdout: (data) => send({ type: "output", data }),
+              onStderr: (data) => send({ type: "output", data }),
+            },
+            devStart,
           );
           if (result.exitCode !== 0) {
             throw new Error(`${installCmd} failed with exit code ${result.exitCode}`);
           }
           send({ type: "output", data: "\nDependencies installed.\n" });
-          await sandbox.commands.run(RESTART_VITE_COMMAND, { cwd: WORK_DIR });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unknown error";
           send({ type: "output", data: `\nError: ${message}\n` });
@@ -502,14 +514,24 @@ export async function POST(request: Request) {
         // Track the port detected from dev server output
         let detectedPort: number | null = null;
 
+        devStart = {
+          command: devCmdWithHost,
+          cwd: WORK_DIR,
+          // Project variables first so DEV_SERVER_ENVS wins: HOST/HOSTNAME must
+          // stay 0.0.0.0 for E2B port forwarding, and a user variable overriding
+          // them would break the preview in a way that looks like a broken app.
+          envs: {
+            ...toProcessEnv(envEntries),
+            ...DEV_SERVER_ENVS,
+            // A reinstall stops this and starts it again (#486).
+            [DEV_COMMAND_ENV]: devCmdWithHost,
+          },
+        };
         await sandbox.commands.run(devCmdWithHost, {
           cwd: WORK_DIR,
           background: true,
           timeoutMs: 0, // Prevent E2B from killing the dev server after the default 60s timeout
-          // Project variables first so DEV_SERVER_ENVS wins: HOST/HOSTNAME must
-          // stay 0.0.0.0 for E2B port forwarding, and a user variable overriding
-          // them would break the preview in a way that looks like a broken app.
-          envs: { ...toProcessEnv(envEntries), ...DEV_SERVER_ENVS },
+          envs: devStart.envs,
           onStdout: (data) => {
             send({ type: "output", data });
             if (!detectedPort) {

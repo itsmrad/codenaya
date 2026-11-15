@@ -1,0 +1,27 @@
+/** Example files meant to be committed and shared (the convention `security/scan-project.ts` also uses). */
+const SHAREABLE_ENV_FILE = /^\.env\.(?:example|sample)$/;
+
+/**
+ * File names that usually hold credentials. GitHub imports keep whatever was
+ * committed, so these must not reach anyone but the owner.
+ */
+const SECRET_FILE_PATTERNS = [
+  /^\.env(?:rc)?$/, // .env; direnv's .envrc exports secrets too
+  /^\.env\./, // .env.local, .env.production, ...
+  /\.env$/, // prod.env
+  /\.(?:pem|key)$/, // certificates and private keys
+  /^id_(?:rsa|ed25519)/, // SSH keys; the .pub halves too, nobody needs them from a share
+  /^\.(?:npmrc|pypirc|netrc)$/, // registry and login tokens
+  /^credentials.*\.json$/, // cloud CLI credentials
+  /service-account.*\.json$/, // cloud service-account keys
+];
+
+/**
+ * Whether a file, by name only (so at any depth, case-insensitive), likely
+ * holds secrets. Share links hide these and copies into someone else's
+ * workspace (Remix, showcase import) skip them (#260).
+ */
+export const isSecretFile = (name: string) => {
+  const lower = name.toLowerCase();
+  return !SHAREABLE_ENV_FILE.test(lower) && SECRET_FILE_PATTERNS.some((pattern) => pattern.test(lower));
+};

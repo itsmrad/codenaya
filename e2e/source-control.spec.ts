@@ -133,6 +133,7 @@ test.describe("source control", () => {
     await page.route("**/api/sandbox/**", (route) => route.fulfill({ json: {} }));
     // A user of its own: the mode is account-wide and would change other specs' layout.
     await signInAsSpecUser(page, "source-control-chat");
+    const errors = collectConsoleErrors(page);
     await page.goto("/settings/workspace");
     const chatFirst = page.getByRole("radio", { name: /Chat-first/ });
     await chatFirst.click();
@@ -152,6 +153,10 @@ test.describe("source control", () => {
     await palette.getByRole("option", { name: "Show source control" }).click();
     await expect(page.getByRole("tab", { name: "Code", exact: true })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("tab", { name: "Source control", exact: true })).toHaveAttribute("aria-selected", "true");
+    const pane = page.getByRole("region", { name: "Source control", exact: true });
+    await expect(pane.getByRole("heading", { name: "Checkpoint history" })).toBeVisible();
+    await expect(pane).toContainText("No linked repository");
     await page.screenshot({ path: "test-results/source-control-chat-first.png" });
+    expect(errors).toEqual([]);
   });
 });

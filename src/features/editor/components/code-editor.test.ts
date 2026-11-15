@@ -1,4 +1,4 @@
-import { EditorState, type TransactionSpec } from "@codemirror/state";
+import { EditorState, Text, type TransactionSpec } from "@codemirror/state";
 import { afterEach, expect, test, vi } from "vitest";
 
 // Exercise the component's effects with real CodeMirror transactions, without a browser.
@@ -104,4 +104,15 @@ test("remote edits map the existing cursor and retain undo history for local edi
   const dispatch = view.dispatch.bind(view);
   undo({ state: view.state, dispatch });
   expect(view.state.doc.toString()).toBe("new header\nbody");
+});
+
+test("a keystroke serializes the document once (#605)", () => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  const onChange = vi.fn();
+  const view = render("heading", onChange);
+  const toString = vi.spyOn(Text.prototype, "toString");
+  view.dispatch({ changes: { from: 7, insert: "!" } });
+  expect(toString).toHaveBeenCalledTimes(1);
+  toString.mockRestore();
+  expect(onChange).toHaveBeenCalledWith("heading!", "heading");
 });

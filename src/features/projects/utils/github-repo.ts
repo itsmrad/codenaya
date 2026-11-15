@@ -31,3 +31,7 @@ export const parseGithubRepo = (input: string): string | null => {
 
 /** The GitHub URL of a repo slug from `parseGithubRepo`. */
 export const githubRepoUrl = (slug: string) => `${GITHUB_URL_PREFIX}${slug}`;
+
+/** The "Open in Codenaya" deep link for a repo slug from `parseGithubRepo`. */
+export const importPath = (slug: string) =>
+  `/import?repo=${slug.split("/").map(encodeURIComponent).join("/")}`;

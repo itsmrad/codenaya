@@ -152,11 +152,50 @@ export const markDeleted = internalMutation({
       });
     }
 
+    // Hide the first page of projects (and their share links) in this same
+    // transaction; a larger account continues from a cursor in the purge.
+    const cursor = await hideProjects(ctx, clerkUserId, null);
     await ctx.scheduler.runAfter(0, internal.users.purgeUserData, {
       clerkUserId,
+      ...(cursor ? { cursor } : {}),
     });
   },
 });
+
+/**
+ * Marks one page of a user's projects as being deleted (`deletingAt`) and
+ * unpublishes their showcase entries (status "removed", like
+ * `showcase.unpublish`), so share links and the public feed stop showing them
+ * before the batched purge reaches them. Idempotent. Returns the cursor of the next page, or null when done.
+ */
+async function hideProjects(
+  ctx: MutationCtx,
+  userId: string,
+  cursor: string | null,
+): Promise<string | null> {
+  const page = await ctx.db
+    .query("projects")
+    .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+    .paginate({ numItems: CASCADE_BATCH_SIZE, cursor });
+  const now = Date.now();
+  for (const project of page.page) {
+    if (project.deletingAt === undefined) {
+      await ctx.db.patch("projects", project._id, { deletingAt: now });
+    }
+    for (const status of ["published", "unlisted"] as const) {
+      const entry = await ctx.db
+        .query("showcaseProjects")
+        .withIndex("by_projectId_and_status", (q) =>
+          q.eq("projectId", project._id).eq("status", status),
+        )
+        .first();
+      if (entry) {
+        await ctx.db.patch("showcaseProjects", entry._id, { status: "removed", updatedAt: now });
+      }
+    }
+  }
+  return page.isDone ? null : page.continueCursor;
+}
 
 /**
  * Deletes everything a user owns, one bounded batch per run, rescheduling
@@ -164,8 +203,17 @@ export const markDeleted = internalMutation({
  * added here (project-scoped tables belong in `projectCascade.ts`).
  */
 export const purgeUserData = internalMutation({
-  args: { clerkUserId: v.string() },
-  handler: async (ctx, { clerkUserId }) => {
+  // `cursor` is set while the projects are still being hidden (see `hideProjects`).
+  args: { clerkUserId: v.string(), cursor: v.optional(v.string()) },
+  handler: async (ctx, { clerkUserId, cursor }) => {
+    if (cursor !== undefined) {
+      const next = await hideProjects(ctx, clerkUserId, cursor);
+      await ctx.scheduler.runAfter(0, internal.users.purgeUserData, {
+        clerkUserId,
+        ...(next ? { cursor: next } : {}),
+      });
+      return;
+    }
     const finished = await purgeUserDataBatch(ctx, clerkUserId);
     if (!finished) {
       await ctx.scheduler.runAfter(0, internal.users.purgeUserData, {

@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
+import { useProjectCommands } from "@/lib/command-palette";
 import { useSecurityGate } from "@/features/security/hooks/use-security-gate";
 import { SecurityScanDialog } from "@/features/security/components/security-scan-dialog";
 
@@ -37,6 +38,7 @@ import { GITHUB_NOT_LINKED, GITHUB_SYNC_BRANCH, GITHUB_SYNC_CONFLICT } from "../
 import { GithubNotLinkedAlert } from "./github-not-linked-alert";
 import { PullConflictDialog } from "./pull-conflict-dialog";
 import { DownloadZipButton } from "./download-zip-button";
+import { ReadmeBadgeSnippet } from "./readme-badge-snippet";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 import Link from "next/link";
@@ -77,6 +79,8 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
   const exportRepoUrl = project?.exportRepoUrl;
   const githubSync = project?.githubSync;
   const unpushed = useUnpushedRuns(projectId);
+  // Also opened from the chat's first-build card (#341), until the first export.
+  useProjectCommands({ "export-github": exportStatus === "completed" ? null : () => setOpen(true) });
 
   const form = useForm({
     defaultValues: {
@@ -211,6 +215,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
               Close
             </Button>
           </div>
+          <ReadmeBadgeSnippet repoUrl={exportRepoUrl} />
         </div>
       )
     }

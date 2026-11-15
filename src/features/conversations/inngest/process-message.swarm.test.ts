@@ -21,15 +21,21 @@ vi.mock("@/lib/convex-client", async () => {
 import { withEnvPlatform } from "@/features/ai-providers/server/active-platform.mock";
 
 import { inngest } from "@/inngest/client";
+import { mergeMessageSteps } from "../../../../convex/messageSteps";
+import type { AgentStep } from "../agent-steps";
+import { swarmHeader, swarmSoloReason } from "../swarm-status";
 import { BUILD_NOT_BUILT_NOTE } from "./build-check-gate";
+import { SWARM_DELEGATE_NUDGE, SWARM_ORCHESTRATOR_NOTE } from "./constants";
+import { FOUNDATION_MAX_STEPS } from "../constants";
 import { drive, text, toolCall } from "./process-message.driver";
 
 let swarmEnabled: boolean;
 let projectFiles: Array<Record<string, unknown>>;
+let recentMessages: Array<Record<string, unknown>>;
 
 const QUERIES: Record<string, () => unknown> = {
   "system:getConversationById": () => ({ title: "Existing chat" }),
-  "system:getRecentMessages": () => [],
+  "system:getRecentMessages": () => recentMessages,
   "system:getProjectById": () => ({ ownerId: "user_1" }),
   "system:getProjectMcpConnections": () => [],
   "system:getProjectFiles": () => projectFiles,
@@ -66,11 +72,16 @@ const codingRequests = (bodies: unknown[]) =>
 const toolResults = (bodies: unknown[]) =>
   (codingRequests(bodies).at(-1)?.messages ?? []).filter((m) => m.role === "tool")
     .map((m) => String((JSON.parse(String(m.content)) as { data: unknown }).data));
+/** Every delegation turn (forced or nudged; this route is nudged, see `toolForcing`), in order. */
+const forcedRequests = (bodies: unknown[]) =>
+  codingRequests(bodies).filter((body) => JSON.stringify(body.messages.at(-1)).includes(SWARM_DELEGATE_NUDGE));
 const mutationArgs = (name: string) =>
   mocks.mutation.mock.calls.filter(([ref]) => getFunctionName(ref) === name).map(([, args]) => args);
 
-const swarm = (inferences: Parameters<typeof drive>[1], invokeResults: unknown[], cancelWhen?: () => boolean) =>
-  drive({ modelId: "x-ai/grok-4.7" }, inferences, "Build a site", { mode: "swarm", ownerId: "user_1" }, {
+const PIZZERIA = "Build a pizzeria site with home, menu, about and contact pages";
+
+const swarm = (inferences: Parameters<typeof drive>[1], invokeResults: unknown[], cancelWhen?: () => boolean, prompt = PIZZERIA) =>
+  drive({ modelId: "x-ai/grok-4.7" }, inferences, prompt, { mode: "swarm", ownerId: "user_1" }, {
     invokeResults,
     cancelWhen,
   });
@@ -83,6 +94,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   swarmEnabled = true;
   projectFiles = [];
+  recentMessages = [];
   vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
   mocks.query.mockImplementation(async (ref) => QUERIES[getFunctionName(ref)]?.());
   mocks.mutation.mockImplementation(async (ref, args) => MUTATIONS[getFunctionName(ref)]?.(args) ?? null);
@@ -100,6 +112,10 @@ describe("processMessage swarm mode", () => {
     const [first] = codingRequests(outcome.inferenceBodies);
     expect(first.tools?.map((tool) => tool.function.name)).toContain("delegateTasks");
     expect(String(first.messages[0].content)).toContain("## Swarm mode");
+    // The orchestrator sees the real multi-page request, and no blanket "too small to split" escape hatch.
+    expect(JSON.stringify(first.messages)).toContain(PIZZERIA);
+    expect(String(first.messages[0].content)).toContain("never too small to split");
+    expect(String(first.messages[0].content)).not.toContain("If the work is too small to split");
 
     expect(mutationArgs("agentTasks:createTasks")).toEqual([expect.objectContaining({
       messageId: "m1",
@@ -156,6 +172,23 @@ describe("processMessage swarm mode", () => {
     expect(toolResults(outcome.inferenceBodies)[0]).toContain("Files written: src/pages/home.tsx, src/pages/about.tsx");
   });
 
+  it("delegates a plan with a detailed 5000-character brief (#646)", async () => {
+    const brief = `Build the home page. ${"Match the dental clinic's tone and layout. ".repeat(120)}`.slice(0, 4999) + ".";
+    const plan = { tasks: [{ ...PLAN.tasks[0], brief }, PLAN.tasks[1]] };
+    const outcome = await swarm([
+      { data: toolCall("delegateTasks", plan) },
+      { data: toolCall("checkBuild") },
+      { data: text("Done.") },
+    ], [DONE, NAV_DONE]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(mutationArgs("agentTasks:createTasks")[0].tasks).toEqual([
+      expect.objectContaining({ taskId: "pages", brief }),
+      expect.objectContaining({ taskId: "nav" }),
+    ]);
+    expect(outcome.invocations).toHaveLength(2);
+  });
+
   it("returns an invalid plan as an Error to re-plan, then runs the valid one", async () => {
     const outcome = await swarm([
       { data: toolCall("delegateTasks", { tasks: [PLAN.tasks[0], { ...PLAN.tasks[1], ownedPaths: ["src/pages/nav.tsx"] }] }) },
@@ -169,6 +202,20 @@ describe("processMessage swarm mode", () => {
     expect(invalid).toMatch(/^Error: Owned paths overlap between pages and nav/);
     expect(valid).toContain("(done)");
     expect(mutationArgs("agentTasks:createTasks")).toHaveLength(1);
+  });
+
+  it.each([{ tasks: [] }, { tasks: [PLAN.tasks[0]] }])("returns an Error to the model for too few tasks (%j)", async ({ tasks }) => {
+    const outcome = await swarm([
+      { data: toolCall("delegateTasks", { tasks }) },
+      { data: text("I need a valid delegation plan.") },
+    ], []);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(toolResults(outcome.inferenceBodies)[0]).toBe(
+      "Error: Delegate 2-4 tasks, or pass tasks [] with solo set to why this is too tiny to split",
+    );
+    expect(mutationArgs("agentTasks:createTasks")).toEqual([]);
+    expect(outcome.invocations).toEqual([]);
   });
 
   it("refuses a second delegateTasks call", async () => {
@@ -291,6 +338,252 @@ describe("processMessage swarm mode", () => {
     expect(toolResults(outcome.inferenceBodies)[0])
       .toBe("Error: another swarm is already running for this account; build this one yourself.");
     expect(outcome.invocations).toEqual([]);
+  });
+
+  it.each([
+    ["one-line copy change", "one-line copy change"],
+    [`  ${"x".repeat(201)}  `, "x".repeat(200)],
+  ])("keeps a tiny prompt solo with the classifier's reason, records its own (%s), and forces nothing", async (solo, expected) => {
+    const outcome = await swarm([
+      { data: toolCall("delegateTasks", { tasks: [], solo }) },
+      { data: toolCall("writeFiles", { files: [{ path: "src/App.tsx", content: "export default () => null;\n" }] }) },
+      { data: toolCall("checkBuild") },
+      { data: text("Done.") },
+    ], [], undefined, "Change the hero title to Hello");
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(toolResults(outcome.inferenceBodies)[0]).toBe("Building solo: build it yourself, then run checkBuild.");
+    expect(mutationArgs("agentTasks:createTasks")).toEqual([]);
+    expect(outcome.invocations).toEqual([]);
+    // Merged as Convex stores them: the finish record keeps the call's recorded targets.
+    const steps = mutationArgs("system:upsertMessageSteps")
+      .reduce<AgentStep[]>((all, { steps }) => mergeMessageSteps(all, steps as AgentStep[]), []);
+    expect(steps.find((step) => step.tool === "delegateTasks")?.targets).toEqual([expected]);
+    // The board's reason is the classifier's, decided before the run.
+    expect(swarmSoloReason(steps)).toBe("a small edit");
+    expect(swarmHeader([], 0, 5000, swarmSoloReason(steps))).toBe("Swarm · Built solo: a small edit · 0:05");
+    expect(forcedRequests(outcome.inferenceBodies)).toEqual([]);
+  });
+
+  it("keeps a tiny follow-up to a completed reply solo", async () => {
+    recentMessages = [
+      { _id: "u0", role: "user", content: PIZZERIA },
+      { _id: "a0", role: "assistant", content: "Built the site.", status: "completed" },
+      { _id: "u1", role: "user", content: "change the button color to red" },
+      { _id: "m1", role: "assistant", content: "", status: "processing" },
+    ];
+    const outcome = await swarm([
+      { data: toolCall("writeFiles", { files: [{ path: "src/components/button.tsx", content: `export const B = () => <button>${"x".repeat(300)}</button>;\n` }] }) },
+      { data: text("Done.") },
+    ], [], undefined, "change the button color to red");
+
+    expect(toolResults(outcome.inferenceBodies)[0]).not.toMatch(/^Error/);
+    expect(forcedRequests(outcome.inferenceBodies)).toEqual([]);
+    const steps = mutationArgs("system:upsertMessageSteps").flatMap(({ steps }) => steps as AgentStep[]);
+    expect(swarmSoloReason(steps)).toBe("a small edit");
+  });
+
+  describe("a split request (the classifier says delegate)", () => {
+    const FOUNDATION = toolCall("writeFiles", { files: [
+      { path: "src/App.tsx", content: "import Home from './pages/home';\nexport default Home;\n" },
+      // A one-line placeholder the pages worker overwrites, so App.tsx's import resolves meanwhile.
+      { path: "src/pages/home.tsx", content: "export default () => null;\n" },
+    ] });
+    const PAGE = toolCall("writeFiles", { files: [{ path: "src/pages/menu.tsx", content: `export default () => <main>${"x".repeat(300)}</main>;\n` }] });
+    const OVERLAP = { tasks: [PLAN.tasks[0], { ...PLAN.tasks[1], ownedPaths: ["src/pages/nav.tsx"] }] };
+
+    it("caps the foundation at 5 steps, then routes delegation with a nudge", async () => {
+      expect(FOUNDATION_MAX_STEPS).toBe(5);
+      const outcome = await swarm([
+        ...Array.from({ length: 5 }, () => ({ data: FOUNDATION })),
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE]);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      const requests = codingRequests(outcome.inferenceBodies);
+      expect(requests).toHaveLength(8);
+      expect(JSON.stringify(requests.slice(0, 5))).not.toContain(SWARM_DELEGATE_NUDGE);
+      expect(forcedRequests(outcome.inferenceBodies)).toEqual([requests[5]]);
+      expect(requests[5].messages.at(-1)).toEqual({ role: "user", content: SWARM_DELEGATE_NUDGE });
+      expect(requests[5].tools?.map((tool) => tool.function.name)).toContain("delegateTasks");
+      // OpenRouter Grok is nudged, not forced via tool_choice (see toolForcing).
+      expect(requests[5]).toMatchObject({ model: "x-ai/grok-4.7", tool_choice: "auto" });
+      expect(outcome.inferenceUrls[outcome.inferenceBodies.indexOf(requests[5])])
+        .toBe("https://openrouter.ai/api/v1/chat/completions");
+      expect(outcome.invocations).toHaveLength(2);
+    });
+
+    it("requests a minimal foundation and balanced page tasks", () => {
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("minimal shared foundation");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("at most 240 characters");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("No page content or sitemap/robots/favicon extras");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("at most 2 pages");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("UI primitives/layout may be their own small task");
+    });
+
+    it("refuses a page write before delegation, then forces delegateTasks, which runs the workers", async () => {
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: PAGE },
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE]);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      const [foundation, page, report] = toolResults(outcome.inferenceBodies);
+      expect(foundation).not.toMatch(/^Error/);
+      expect(page).toBe("Error: Swarm mode: src/pages/menu.tsx belongs to a worker. Call delegateTasks now with 2-4 tasks that own it.");
+      expect(report).toContain("## pages: Pages (done)");
+      // Only the third call is the delegation turn: nudged, and on this route not forced.
+      expect(forcedRequests(outcome.inferenceBodies)).toEqual([codingRequests(outcome.inferenceBodies)[2]]);
+      expect((codingRequests(outcome.inferenceBodies)[2] as { tool_choice?: unknown }).tool_choice).toBe("auto");
+      expect(mutationArgs("agentTasks:createTasks")[0].tasks).toHaveLength(2);
+    });
+
+    it("classifies Stop then \"continue\" on the stopped request, so it still delegates", async () => {
+      recentMessages = [
+        { _id: "u0", role: "user", content: PIZZERIA },
+        { _id: "a0", role: "assistant", content: "", status: "cancelled" },
+        { _id: "u1", role: "user", content: "continue" },
+        { _id: "m1", role: "assistant", content: "", status: "processing" },
+      ];
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: PAGE },
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE], undefined, "continue");
+
+      expect(outcome.finalType).toBe("function-resolved");
+      expect(toolResults(outcome.inferenceBodies)[1]).toMatch(/^Error: Swarm mode: src\/pages\/menu.tsx belongs to a worker/);
+      expect(forcedRequests(outcome.inferenceBodies)).toHaveLength(1);
+      expect(mutationArgs("agentTasks:createTasks")).toHaveLength(1);
+    });
+
+    it("builds solo with the reason, and completes, when the forced turn's request fails", async () => {
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: PAGE },
+        { error: { name: "Error", message: "400 tool_choice forced is not compatible with thinking" } },
+        { data: PAGE },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], []);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      // The page write after the fallback goes through.
+      expect(toolResults(outcome.inferenceBodies).at(-2)).not.toMatch(/^Error/);
+      expect(mutationArgs("agentTasks:createTasks")).toEqual([]);
+      const steps = mutationArgs("system:upsertMessageSteps")
+        .reduce<AgentStep[]>((all, { steps }) => mergeMessageSteps(all, steps as AgentStep[]), []);
+      expect(swarmSoloReason(steps)).toMatch(/^delegation failed \(.*tool_choice/);
+    });
+
+    it("refuses a placeholder over a file that already exists", async () => {
+      projectFiles = [
+        { _id: "d1", name: "src", type: "folder" },
+        { _id: "d2", name: "pages", type: "folder", parentId: "d1" },
+        { _id: "f1", name: "home.tsx", type: "file", parentId: "d2" },
+      ];
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE]);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      expect(toolResults(outcome.inferenceBodies)[0])
+        .toBe("Error: Swarm mode: src/pages/home.tsx already exists, so it belongs to a worker; placeholders are for new files only. Call delegateTasks now with 2-4 tasks that own it.");
+      expect(mutationArgs("system:createFiles")).toEqual([]);
+    });
+
+    it("lets an error after a successful delegation take the normal error path, not \"delegation failed\"", async () => {
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: PAGE },
+        { data: toolCall("delegateTasks", PLAN) },
+        { error: { name: "Error", message: "500 upstream failed" } },
+      ], [DONE, NAV_DONE]);
+
+      expect(outcome.invocations).toHaveLength(2);
+      const steps = mutationArgs("system:upsertMessageSteps")
+        .reduce<AgentStep[]>((all, { steps }) => mergeMessageSteps(all, steps as AgentStep[]), []);
+      expect(steps.find((step) => step.id === "swarm-solo")).toBeUndefined();
+    });
+
+    it("redacts a secret in the failed delegation's reason", async () => {
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: PAGE },
+        { error: { name: "Error", message: "401 bad key sk-or-v1-abcdefghijklmnopqrstuvwxyz0123" } },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], []);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      const steps = mutationArgs("system:upsertMessageSteps")
+        .reduce<AgentStep[]>((all, { steps }) => mergeMessageSteps(all, steps as AgentStep[]), []);
+      expect(swarmSoloReason(steps)).toContain("[redacted-by-codenaya]");
+      expect(JSON.stringify(steps)).not.toContain("abcdefghijklmnop");
+    });
+
+    it("forces delegateTasks when the orchestrator would end without delegating", async () => {
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: text("All done.") },
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE]);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      expect(forcedRequests(outcome.inferenceBodies)).toHaveLength(1);
+      expect(outcome.invocations).toHaveLength(2);
+    });
+
+    it("refuses a solo call, and forces once more after an invalid forced plan", async () => {
+      const outcome = await swarm([
+        { data: toolCall("delegateTasks", { tasks: [], solo: "small enough" }) },
+        { data: toolCall("delegateTasks", OVERLAP) },
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE]);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      const [solo, invalid, report] = toolResults(outcome.inferenceBodies);
+      expect(solo).toMatch(/^Error: Swarm mode: this request is split among workers \(it names 4 pages or features/);
+      expect(invalid).toMatch(/^Error: Owned paths overlap/);
+      expect(report).toContain("(done)");
+      expect(forcedRequests(outcome.inferenceBodies)).toHaveLength(2);
+    });
+
+    it("builds solo, with the refusal as the board's reason, after two invalid forced plans", async () => {
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: PAGE },
+        { data: toolCall("delegateTasks", OVERLAP) },
+        { data: toolCall("delegateTasks", OVERLAP) },
+        { data: PAGE },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], []);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      const results = toolResults(outcome.inferenceBodies);
+      // The page write after the fallback goes through.
+      expect(results[4]).not.toMatch(/^Error/);
+      expect(forcedRequests(outcome.inferenceBodies)).toHaveLength(2);
+      expect(mutationArgs("agentTasks:createTasks")).toEqual([]);
+      const steps = mutationArgs("system:upsertMessageSteps")
+        .reduce<AgentStep[]>((all, { steps }) => mergeMessageSteps(all, steps as AgentStep[]), []);
+      expect(swarmSoloReason(steps)).toMatch(/^Owned paths overlap between pages and nav/);
+    });
   });
 
   it("offers no delegateTasks and no swarm note outside swarm mode", async () => {

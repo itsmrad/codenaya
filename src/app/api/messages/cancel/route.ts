@@ -11,6 +11,8 @@ import { api } from "../../../../../convex/_generated/api";
 
 const requestSchema = z.object({
   projectId: z.string(),
+  // What stopped the run, for diagnosing unintended cancels (#608).
+  source: z.enum(["esc", "button"]).optional(),
 });
 
 export async function POST(request: Request) {
@@ -26,7 +28,7 @@ export async function POST(request: Request) {
     return invalid;
   }
 
-  const { projectId } = data;
+  const { projectId, source } = data;
 
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
 
@@ -55,6 +57,12 @@ export async function POST(request: Request) {
       projectId: project._id,
     }
   );
+
+  console.info("Run cancel requested", {
+    projectId: project._id,
+    source: source ?? "unknown",
+    messageIds: processingMessages.map((msg) => msg._id),
+  });
 
   if (processingMessages.length === 0) {
     return NextResponse.json({ success: true, cancelled: false });

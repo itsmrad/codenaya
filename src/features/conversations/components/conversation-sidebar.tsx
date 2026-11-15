@@ -52,6 +52,8 @@ import { MODEL_LIMIT_CODE } from "@/features/billing/model-spend";
 import { isPromoRefusalCode } from "@/features/promotions/github-promo";
 import { useEditor } from "@/features/editor/hooks/use-editor";
 import { useFiles } from "@/features/projects/hooks/use-files";
+import { MakeItMineCard } from "@/features/templates/components/make-it-mine-card";
+import { BRAND_FILE } from "@/features/templates/make-it-mine";
 import { useProject } from "@/features/projects/hooks/use-projects";
 import {
   SkillSlashMenu,
@@ -79,7 +81,6 @@ import { EnhancePromptButton } from "./enhance-prompt-button";
 import { type ComposerMode, PlanModeToggle } from "./plan-mode-toggle";
 import {
   type MessageMode,
-  buildPlanMessage,
   diagnoseStuckMessage,
 } from "../plan-mode";
 import { type AgentModelChoice, nextTier } from "../agent-models";
@@ -90,6 +91,7 @@ import { QueuedFollowUp } from "./queued-follow-up";
 import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
 import { chatStarters } from "../chat-starters";
+import { type CancelSource, cancelRun, ESC_CONFIRM_MS, escapeToStop } from "../run-cancel";
 import { type Checkpoint, useCheckpoints } from "../hooks/use-checkpoints";
 import {
   CheckpointHistoryDialog,
@@ -108,11 +110,17 @@ import {
   isNoteProposalDismissed,
 } from "@/features/projects/utils/note-proposals";
 import { looksLikeLastingPreference } from "@/features/projects/notes";
+import { ElementChips } from "./element-chips";
+import type { SelectedElement } from "../selected-elements";
 import {
   CHAT_IMAGE_TYPES,
   MAX_CHAT_IMAGES,
   MAX_CHAT_IMAGE_BYTES,
 } from "../chat-images";
+import { visionSwitchTarget } from "../vision-switch";
+
+// One "Press Esc again" hint at a time.
+const ESC_TOAST_ID = "esc-to-stop";
 
 interface ConversationSidebarProps {
   projectId: Id<"projects">;
@@ -122,7 +130,7 @@ export const ConversationSidebar = ({
   projectId,
 }: ConversationSidebarProps) => {
   const { openIntegrations } = useProjectIntegrations();
-  const { input, setInput, appendInput, contexts, removeContext, clearContexts } = useChatStore();
+  const { input, setInput, appendInput, contexts, removeContext, clearContexts, elements, removeElement, clearElements } = useChatStore();
   const [agentModel, setAgentModel] = useAgentModel();
   const enhancer = useEnhancePrompt(input, setInput);
   const slashMenu = useSkillSlashMenu(projectId, input, setInput);
@@ -146,6 +154,7 @@ export const ConversationSidebar = ({
   const acceptsImages = !agentModel.keyId
     ? resolveCatalogModel(platform, agentModel.modelId).vision
     : !modelKey || modelAcceptsImages(agentModel.modelId, modelKey);
+  const visionSwitch = acceptsImages ? undefined : visionSwitchTarget(agentModel, platform, modelKey);
   const [
     selectedConversationId,
     setSelectedConversationId,
@@ -182,6 +191,7 @@ export const ConversationSidebar = ({
   const [pending, setPending] = useState<{
     text: string;
     imageUrls: string[];
+    elements?: SelectedElement[];
     userCount: number;
   } | null>(null);
   const userCount =
@@ -244,32 +254,45 @@ export const ConversationSidebar = ({
   const stalled = useRunStalled(processingMessage);
   const isProcessing = Boolean(processingMessage) && !stalled;
 
-  const handleCancel = async () => {
+  // When Send last turned into Stop, for the Stop grace period.
+  const processingSinceRef = useRef(0);
+  useEffect(() => {
+    if (isProcessing) processingSinceRef.current = Date.now();
+  }, [isProcessing]);
+
+  const handleCancel = async (source: CancelSource) => {
     try {
-      await ky.post("/api/messages/cancel", {
-        json: { projectId },
-      });
+      await cancelRun(projectId, source, processingSinceRef.current);
     } catch {
       toast.error("Unable to cancel request");
     }
   };
 
-  // Esc stops a running agent, from the composer or the document, but only
-  // when focus isn't elsewhere (a dialog or the editor), where Esc means
+  // Esc twice stops a running agent, from the composer or the document, but
+  // only when focus isn't elsewhere (a dialog or the editor), where Esc means
   // something else.
   const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!isProcessing) return;
+    const pressEscape = escapeToStop();
     const onKeyDown = (event: KeyboardEvent) => {
       const active = document.activeElement;
       const inPanel =
         !active || active === document.body || panelRef.current?.contains(active);
-      if (event.key === "Escape" && !event.defaultPrevented && inPanel) {
-        void handleCancel();
+      if (!inPanel) return;
+      const press = pressEscape(event);
+      if (press === "confirm") {
+        toast("Press Esc again to stop", { id: ESC_TOAST_ID, duration: ESC_CONFIRM_MS });
+      } else if (press === "stop") {
+        toast.dismiss(ESC_TOAST_ID);
+        void handleCancel("esc");
       }
     };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      toast.dismiss(ESC_TOAST_ID);
+    };
     // handleCancel only depends on projectId.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isProcessing, projectId]);
@@ -305,6 +328,7 @@ export const ConversationSidebar = ({
     images?: Id<"_storage">[],
     mode?: MessageMode,
     model: AgentModelChoice = agentModel,
+    elements?: SelectedElement[],
   ): Promise<"sent" | "failed" | "blocked"> => {
     if (detectCredential(text).detected) {
       toast.error(
@@ -331,6 +355,7 @@ export const ConversationSidebar = ({
           message: text,
           model,
           images,
+          elements: elements?.length ? elements : undefined,
           mode,
         },
       });
@@ -408,7 +433,13 @@ export const ConversationSidebar = ({
   // after any message queued from outside the chat, leaving the draft alone.
   // A stopped or failed run gives it back to the composer instead.
   const followUpNext =
-    followUp && followUpAction(followUp, conversationMessages, Boolean(pending || isProcessing || queuedMessage));
+    followUp &&
+    followUpAction(
+      followUp,
+      conversationMessages,
+      Boolean(pending || isProcessing || queuedMessage),
+      stalled ? processingMessage?._id : undefined,
+    );
   useEffect(() => {
     if (!activeConversationId || !followUpNext || followUpNext === "wait") return;
     // Taken from the store, so a re-run of this effect can't act on it twice.
@@ -455,6 +486,7 @@ export const ConversationSidebar = ({
       toast.error("A message is already queued. Edit or remove it first.");
     }
     if (action === "queue" && processingMessage) {
+      if (contexts.length > 0) toast.info("Attachments stay in the box and aren't queued.");
       // The mode is read now: it's what the user picked for this message.
       setFollowUp(processingMessage.conversationId, {
         text: message.text,
@@ -481,6 +513,7 @@ export const ConversationSidebar = ({
     setPending({
       text: finalMessage,
       imageUrls: message.files.map((file) => file.url),
+      elements,
       userCount,
     });
     setInput("");
@@ -495,9 +528,14 @@ export const ConversationSidebar = ({
         finalMessage,
         images,
         mode === "build" ? undefined : mode,
+        undefined,
+        elements,
       );
-      // Only clear contexts after a successful send so they aren't lost on failure
-      if (result === "sent") clearContexts();
+      // Only clear contexts and elements after a successful send so they aren't lost on failure
+      if (result === "sent") {
+        clearContexts();
+        clearElements();
+      }
       // PromptInput keeps its attachments when submit throws, to send again.
       if (result !== "sent" && images) throw new Error("Message not sent");
     } finally {
@@ -514,7 +552,7 @@ export const ConversationSidebar = ({
     const prompt = conversationMessages
       ?.slice(0, messageIndex)
       .findLast((m) => m.role === "user");
-    if (prompt) void sendMessage(prompt.content, prompt.images, mode, model);
+    if (prompt) void sendMessage(prompt.content, prompt.images, mode, model, prompt.elements);
   };
 
   /**
@@ -576,7 +614,7 @@ export const ConversationSidebar = ({
         checkpoint={restoreTarget}
         onOpenChange={(open) => !open && setRestoreTarget(null)}
       />
-      <div ref={panelRef} className="@container flex flex-col h-full bg-sidebar">
+      <div ref={panelRef} data-testid="chat-panel" className="@container flex flex-col h-full bg-sidebar">
         <div className="h-8.75 flex items-center justify-between border-b">
           <div className="text-sm font-medium truncate pl-3">
             {activeConversation?.title ?? DEFAULT_CONVERSATION_TITLE}
@@ -615,7 +653,14 @@ export const ConversationSidebar = ({
           <ChatEmptyState
             starters={starters}
             onSelect={(prompt) => void handleSubmit({ text: prompt, files: [] })}
-          />
+          >
+            {idOfPath.has(BRAND_FILE) && (
+              <MakeItMineCard
+                idOfPath={idOfPath}
+                onDescribe={(prompt) => void handleSubmit({ text: prompt, files: [] })}
+              />
+            )}
+          </ChatEmptyState>
         ) : (
         <Conversation className="flex-1">
           <ConversationContent className="gap-6 px-4 py-4 pb-12">
@@ -625,6 +670,7 @@ export const ConversationSidebar = ({
                   key={message._id}
                   content={message.content}
                   imageUrls={message.imageUrls}
+                  elements={message.elements}
                   skillNames={slashMenu.skillNames}
                   // The saved copy of the pending message replaces it in place.
                   animate={Boolean(history && !history.messageIds.has(message._id)) && !pending}
@@ -656,11 +702,15 @@ export const ConversationSidebar = ({
                   pathOf={pathOf}
                   onOpenFile={handleOpenFile}
                   onRetry={() => resend(messageIndex, message.mode)}
-                  onBuildPlan={() => {
+                  onBuildPlan={async (build) => {
                     setMode("build");
-                    void sendMessage(buildPlanMessage(message.content));
+                    return (await sendMessage(build)) === "sent";
                   }}
                   stuckRetry={message.stuck && stuckRetry(message, messageIndex)}
+                  onSuggestion={(prompt) => {
+                    setInput(prompt);
+                    requestAnimationFrame(() => panelRef.current?.querySelector("textarea")?.focus());
+                  }}
                   onDiagnose={() => {
                     if (!message.stuck) return;
                     setMode("plan");
@@ -684,6 +734,7 @@ export const ConversationSidebar = ({
               <UserMessage
                 content={pending.text}
                 imageUrls={pending.imageUrls}
+                elements={pending.elements}
                 skillNames={slashMenu.skillNames}
                 animate
               />
@@ -739,7 +790,15 @@ export const ConversationSidebar = ({
             }
           >
             <PromptInputBody>
-              <ComposerImages acceptsImages={acceptsImages} />
+              <ComposerImages
+                acceptsImages={acceptsImages}
+                visionSwitch={visionSwitch}
+                onSwitchModel={(choice) => {
+                  setAgentModel(choice);
+                  // The switch button unmounts; keep focus in the composer.
+                  panelRef.current?.querySelector("textarea")?.focus();
+                }}
+              />
               {contexts.length > 0 && (
                 <div className="flex w-full flex-wrap justify-start gap-2 p-2 pb-0">
                   {contexts.map((ctx) => (
@@ -759,6 +818,11 @@ export const ConversationSidebar = ({
                   ))}
                 </div>
               )}
+              <ElementChips
+                elements={elements}
+                onRemove={(index) => removeElement(elements[index].key)}
+                className="w-full p-2 pb-0"
+              />
               <PromptInputTextarea
                 placeholder="Describe a change or ask a question…"
                 className="min-h-11 px-3 pt-3 pb-1 text-sm/6 placeholder:text-muted-foreground/70"
@@ -768,10 +832,9 @@ export const ConversationSidebar = ({
                 disabled={enhancer.isEnhancing}
               />
             </PromptInputBody>
-            <PromptInputFooter className="h-10 px-2 py-0">
-              {/* The tools shrink (the model name truncates) so a narrow
-                  panel never pushes the send button out of view. */}
-              <PromptInputTools className="min-w-0">
+            <PromptInputFooter className="min-h-10 px-2 py-1">
+              {/* Truncate the model name, and wrap tools when even their icons do not fit. */}
+              <PromptInputTools className="min-w-0 flex-1 flex-wrap">
                 <ComposerAttachButton disabled={isProcessing} />
                 {!isProcessing && <PromptInputSpeechButton onTranscriptionChange={setInput} />}
                 <EnhancePromptButton
@@ -786,14 +849,15 @@ export const ConversationSidebar = ({
                   disabled={isProcessing}
                 />
                 <AgentModelSelect
+                  triggerClassName="w-0 min-w-16 flex-1"
                   value={agentModel}
                   onValueChange={setAgentModel}
                   disabled={isProcessing}
                 />
               </PromptInputTools>
               <div className="flex shrink-0 items-center gap-2">
-                {/* Only once even the longest model name (max-w-44) fits beside it (#217). */}
-                <span className="hidden items-center gap-1 text-[11px] text-muted-foreground @[560px]:inline-flex">
+                {/* Leave room for the picker when the mode labels appear. */}
+                <span className="hidden items-center gap-1 text-[11px] text-muted-foreground @[640px]:inline-flex">
                   <kbd className="inline-flex h-4 items-center rounded border px-1 font-sans">
                     <CornerDownLeftIcon className="size-2.5" />
                     <span className="sr-only">Enter</span>
@@ -815,13 +879,13 @@ export const ConversationSidebar = ({
                         variant="default"
                         size="icon-sm"
                         aria-label="Stop"
-                        onClick={() => void handleCancel()}
+                        onClick={() => void handleCancel("button")}
                         className="size-8 rounded-lg"
                       >
                         <SquareIcon className="size-3 animate-in fill-current fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none" />
                       </InputGroupButton>
                     </TooltipTrigger>
-                    <TooltipContent>Stop (Esc)</TooltipContent>
+                    <TooltipContent>Stop (Esc twice)</TooltipContent>
                   </Tooltip>
                 )}
                 {(!isProcessing || input) && (
@@ -835,7 +899,7 @@ export const ConversationSidebar = ({
                             ? Boolean(followUp)
                             : Boolean(pending) ||
                               enhancer.isEnhancing ||
-                              (!input && contexts.length === 0 && images === 0) ||
+                              (!input && contexts.length === 0 && elements.length === 0 && images === 0) ||
                               (images > 0 && !acceptsImages)
                         }
                         aria-label={isProcessing ? "Queue message" : "Send"}

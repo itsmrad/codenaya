@@ -77,7 +77,7 @@ export const FileExplorer = ({
   };
 
   return (
-    <div className="h-full bg-background flex flex-col">
+    <div data-testid="file-explorer" className="h-full bg-background flex flex-col">
       <div className="p-2 shrink-0 border-b border-border/40">
         <div className="group/project relative w-full text-left flex items-center justify-between px-2 h-10 bg-muted/40 hover:bg-muted/60 transition-colors rounded-lg border border-border/50">
           <button

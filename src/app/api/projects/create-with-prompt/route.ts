@@ -9,7 +9,7 @@ import {
 } from "@/lib/rate-limit";
 
 import { DEFAULT_CONVERSATION_TITLE } from "@/features/conversations/constants";
-import { SWARM_MODE } from "@/features/conversations/plan-mode";
+import { PLAN_MODE, SWARM_MODE } from "@/features/conversations/plan-mode";
 import { swarmOffResponse } from "@/features/conversations/server/swarm-off";
 import {
   modelChoiceSchema,
@@ -25,6 +25,7 @@ import {
 } from "@/lib/message-processor";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { seedTemplateFiles } from "@/features/templates/server/seed-template";
+import { readTemplateSource } from "@/features/templates/server/template-source";
 import {
   STARTER_TEMPLATE_IDS,
   getStarterTemplate,
@@ -35,12 +36,12 @@ import { api } from "../../../../../convex/_generated/api";
 const requestSchema = z.object({
   prompt: promptText.min(1),
   model: modelChoiceSchema,
-  /** Seeds the project with a starter template's files first (#119). */
+  /** Seeds the project with a starter template's files first (#119); an instant one gets no run (#362). */
   templateId: z.enum(STARTER_TEMPLATE_IDS).optional(),
   /** A prompt typed on the landing page before sign-up, for activation events (#339). */
   fromLanding: z.boolean().optional(),
-  /** Swarm mode, as in the messages route; omitted means build. */
-  mode: z.literal(SWARM_MODE).optional(),
+  /** Ask / Plan or Swarm mode, as in the messages route; omitted means build. */
+  mode: z.enum([PLAN_MODE, SWARM_MODE]).optional(),
 });
 
 export async function POST(request: Request) {
@@ -84,15 +85,38 @@ export async function POST(request: Request) {
     );
   }
 
+  // An instant template is a finished app (#362): seed its source, no run,
+  // so no model choice either. Its source is read before anything is created.
+  if (template?.instant) {
+    const source = await readTemplateSource(template.id);
+    const { projectId } = await convex.mutation(api.system.createProjectWithConversation, {
+      internalKey,
+      projectName: template.id,
+      conversationTitle: DEFAULT_CONVERSATION_TITLE,
+      ownerId: userId,
+      source: "template",
+    });
+    if (!(await seedTemplateFiles({ internalKey, projectId, template, source }))) {
+      // shortcut: the partly written project stays on the dashboard; delete it here once a system delete exists.
+      return NextResponse.json(
+        { error: "The template couldn't be created. Try again.", code: "seed_failed" },
+        { status: 502 },
+      );
+    }
+    return NextResponse.json({ projectId });
+  }
+
   const swarmOff = await swarmOffResponse(mode);
   if (swarmOff) {
     return swarmOff;
   }
 
+  // Auto (#322): a first run is a build unless it is Ask / Plan, as `classifyRun` routes it.
   const { runModel, promoKind, rejected } = await requireModelChoice({
     internalKey,
     userId,
     model,
+    task: mode === PLAN_MODE ? "plan" : undefined,
   });
 
   if (rejected) {

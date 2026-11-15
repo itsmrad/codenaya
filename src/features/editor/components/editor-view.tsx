@@ -1,9 +1,7 @@
-import { useEffect, useState } from "react";
-
 import { useFile } from "@/features/projects/hooks/use-files";
 
 import { FileEditor } from "./file-editor";
-import { EditorSession } from "../editor-session";
+import { getProjectSessions } from "../editor-session";
 import { EditorEmptyState } from "./editor-empty-state";
 import { useEditor } from "../hooks/use-editor";
 import { TopNavigation } from "./top-navigation";
@@ -14,24 +12,11 @@ import { AlertTriangleIcon } from "lucide-react";
 export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const { activeTabId } = useEditor(projectId);
   const activeFile = useFile(activeTabId);
-  // Keep drafts across tab switches, including conflicts awaiting the user's choice.
-  const [sessions] = useState(() => new Map<Id<"files">, EditorSession>());
+  // Keep drafts across tab switches and remounts, including conflicts awaiting the user's choice.
+  const sessions = getProjectSessions(projectId);
 
   const isActiveFileBinary = activeFile && activeFile.storageId;
   const isActiveFileText = activeFile && !activeFile.storageId;
-
-  useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      for (const session of sessions.values()) {
-        const state = session.getSnapshot();
-        if (!state.dirty && !state.saving && !state.conflict) continue;
-        void session.save();
-        event.preventDefault();
-      }
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [sessions]);
 
   return (
     <div className="h-full flex flex-col">

@@ -46,6 +46,20 @@ describe("catalog", () => {
       "atlassian",
       "gitlab",
       "clerk",
+      "exa",
+      "tavily",
+      "firecrawl",
+      "huggingface",
+      "webflow",
+      "netlify",
+      "railway",
+      "amplitude",
+      "amplitude-eu",
+      "mixpanel",
+      "contentful",
+      "contentful-eu",
+      "microsoft-learn",
+      "cloudflare-docs",
     ]);
   });
 
@@ -90,6 +104,18 @@ describe("catalog", () => {
     ["atlassian", 116, ["executeRead", "executeWrite", "executeDestructive", "replaceConfluenceContentPermissions", "queryInsightsSql", "queryInsightsAi"]],
     ["gitlab", 24, ["create_merge_request_note", "update_merge_request", "create_work_item", "create_branch", "manage_pipeline", "send_duo_session_input", "attach_scan_profile"]],
     ["clerk", 12, ["put_instance_config", "check_domain_dns", "set_oauth_provider_credentials", "configure_mcp_server", "check_mcp_server", "submit_feedback"]],
+    ["exa", 1, ["agent_run"]],
+    ["tavily", 1, ["tavily_research"]],
+    ["firecrawl", 14, ["firecrawl_interact", "firecrawl_agent", "firecrawl_monitor_create", "firecrawl_monitor_delete", "alexandria_library_read", "people_company_search", "people_company_enrich", "jobs_search", "firecrawl_extract"]],
+    ["huggingface", 7, ["create_repo", "hf_fs_write", "hf_jobs", "hf_sandbox", "hf_sandbox_exec", "hf_sandbox_fs", "dynamic_space"]],
+    ["webflow", 31, ["data_apps_tool", "data_cms_tool", "data_sites_tool", "data_scripts_tool", "data_members_tool", "data_webhook_tool", "get_more_tools", "ask_webflow_ai"]],
+    ["netlify", 18, ["netlify-deploy-services-updater", "netlify-project-services-updater", "netlify-team-services-reader", "netlify-project-manage-env-vars", "netlify-team-get-team-env-vars", "netlify-observability-services-reader", "netlify-observability-get-request-logs", "netlify-observability-get-request-detail"]],
+    ["railway", 11, ["redeploy", "accept-deploy", "railway-agent", "run-cloud-agent-task", "respond-cloud-agent-task", "delete-feature-flag", "check-cloud-agent-task", "get-cloud-agent-transcript"]],
+    ["amplitude", 20, ["run_amp", "manage_amp_context", "share_amp_entities", "use_amplitude_cohorts", "use_amp_flags", "render_amplitude_chart"]],
+    ["amplitude-eu", 20, ["run_amp", "manage_amp_context", "share_amp_entities", "use_amplitude_cohorts", "use_amp_flags", "render_amplitude_chart"]],
+    ["mixpanel", 31, ["Delete-Dashboard", "Merge-Group", "Update-Business-Context", "Dismiss-Issues", "Update-Feature-Flag"]],
+    ["contentful", 82, ["create_upload_session", "import_space", "space_to_space_migration_handler", "invoke_ai_action", "delete_environment", "update_editor_interface"]],
+    ["contentful-eu", 82, ["create_upload_session", "import_space", "space_to_space_migration_handler", "invoke_ai_action", "delete_environment", "update_editor_interface"]],
   ] as const)("retains the audited %s write inventory, including indirect and configuration writes", (id, count, sensitive) => {
     const tools = PROVIDERS[id].destructiveTools;
     expect(tools).toHaveLength(count);
@@ -118,23 +144,37 @@ describe("catalog", () => {
     const hostnames = getTrustedHostnames();
     expect(hostnames).toEqual([
       "api.githubcopilot.com",
+      "docs.mcp.cloudflare.com",
       "gitlab.com",
+      "huggingface.co",
+      "learn.microsoft.com",
+      "mcp.amplitude.com",
       "mcp.atlassian.com",
       "mcp.clerk.com",
       "mcp.cloudflare.com",
+      "mcp.contentful.com",
       "mcp.context7.com",
+      "mcp.eu.amplitude.com",
+      "mcp.eu.contentful.com",
+      "mcp.exa.ai",
+      "mcp.firecrawl.dev",
       "mcp.linear.app",
+      "mcp.mixpanel.com",
       "mcp.neon.tech",
+      "mcp.netlify.com",
       "mcp.notion.com",
       "mcp.posthog.com",
       "mcp.prisma.io",
       "mcp.pscale.dev",
+      "mcp.railway.com",
       "mcp.resend.com",
       "mcp.sanity.io",
       "mcp.sentry.dev",
       "mcp.stripe.com",
       "mcp.supabase.com",
+      "mcp.tavily.com",
       "mcp.upstash.com",
+      "mcp.webflow.com",
     ]);
     expect(new Set(hostnames).size).toBe(hostnames.length);
   });
@@ -167,6 +207,19 @@ describe("buildScopedMcpUrl — default (unscoped) URLs", () => {
     ["atlassian", "https://mcp.atlassian.com/v2/mcp"],
     ["gitlab", "https://gitlab.com/api/v4/mcp"],
     ["clerk", "https://mcp.clerk.com/mcp"],
+    ["exa", "https://mcp.exa.ai/mcp"],
+    ["tavily", "https://mcp.tavily.com/mcp"],
+    ["firecrawl", "https://mcp.firecrawl.dev/v2/mcp-oauth"],
+    ["huggingface", "https://huggingface.co/mcp"],
+    ["webflow", "https://mcp.webflow.com/mcp"],
+    ["netlify", "https://mcp.netlify.com/mcp"],
+    // Railway documents the bare origin; normalisation adds the root slash.
+    ["railway", "https://mcp.railway.com/"],
+    ["amplitude", "https://mcp.amplitude.com/mcp"],
+    ["amplitude-eu", "https://mcp.eu.amplitude.com/mcp"],
+    ["mixpanel", "https://mcp.mixpanel.com/mcp"],
+    ["contentful", "https://mcp.contentful.com/mcp"],
+    ["contentful-eu", "https://mcp.eu.contentful.com/mcp"],
   ];
 
   for (const [id, expected] of cases) {
@@ -209,7 +262,7 @@ describe("buildScopedMcpUrl — read-only per provider mechanism", () => {
 
   it("ignores readOnly for providers that cannot express it in the URL", () => {
     // Enforcement for these falls to the destructive-tool approval gate.
-    for (const id of ["stripe", "context7", "prisma", "cloudflare", "sentry", "resend", "upstash", "sanity", "notion", "atlassian", "gitlab", "clerk"] as const) {
+    for (const id of ["stripe", "context7", "prisma", "cloudflare", "sentry", "resend", "upstash", "sanity", "notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface", "webflow", "netlify", "railway", "amplitude", "amplitude-eu", "mixpanel", "contentful", "contentful-eu"] as const) {
       expect(provider(id).supportsReadOnly).toBe(false);
       expect(urlFor(id, { readOnly: true })).toBe(urlFor(id, UNSCOPED));
       expect(buildScopedMcpUrl(provider(id), { readOnly: true }).headers).toEqual({});
@@ -674,4 +727,11 @@ describe("buildScopedMcpUrl — undeclared list values", () => {
 it("defers WorkOS until its tool inventory is verified (#563)", () => {
   expect(getProvider("workos")).toBeUndefined();
   expect(getTrustedHostnames()).not.toContain("mcp.workos.com");
+});
+
+it("defers PayPal until its documented endpoint path matches the live server (#538)", () => {
+  expect(getProvider("paypal")).toBeUndefined();
+  expect(getProvider("paypal-sandbox")).toBeUndefined();
+  expect(getTrustedHostnames()).not.toContain("mcp.paypal.com");
+  expect(getTrustedHostnames()).not.toContain("mcp.sandbox.paypal.com");
 });

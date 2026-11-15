@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { type PublicCatalogModel, pickableModels } from "../src/features/ai-providers/catalog";
+import { envCatalog, platformProviderId } from "../src/features/ai-providers/platform";
 import { EMPTY_CHAT_TITLE } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
@@ -99,21 +101,46 @@ test.describe.serial("chat image attachments", () => {
     stub?.server.close();
   });
 
-  test("a model without vision gets a hint instead of a send", async () => {
+  test("a model without vision offers a one-click switch instead of a send", async () => {
     const errors = collectConsoleErrors(page);
     await openNewChat();
 
+    const draft = `switch e2e ${Date.now()}`;
+    const input = page.getByPlaceholder("Describe a change or ask a question…");
+    await input.fill(draft);
     await page.getByLabel("Upload files").setInputFiles(PNG);
-    await expect(page.getByRole("img", { name: PNG.name })).toBeVisible();
+    // Scoped to the chips: a chip's hover-card preview (a portal) repeats the image.
+    const chip = page.getByTestId("composer-attachments").getByRole("img", { name: PNG.name });
+    await expect(chip).toBeVisible();
 
-    await pickModel("Codenaya", "GLM 5.3");
-    await expect(
-      page.getByRole("alert").filter({ hasText: "can't read images" }),
-    ).toBeVisible();
+    // Any platform model the picker lists that the catalog (what the composer reads) marks as text-only.
+    const models: readonly PublicCatalogModel[] =
+      (await (await userConvexClient(page)).query(api.platformCatalog.getForUsers, {}))?.models ??
+      envCatalog(platformProviderId()).models;
+    const textOnly = new Set(pickableModels(models).filter((m) => !m.vision).map((m) => m.name));
+    await page.getByRole("combobox", { name: "Agent model" }).click();
+    const options = page.getByRole("group", { name: "Codenaya" }).getByRole("option");
+    await expect(options.first()).toBeVisible();
+    const listed = await options.allTextContents();
+    await page.keyboard.press("Escape");
+    const textOnlyModel = listed.map((name) => name.trim()).find((name) => textOnly.has(name));
+    expect(textOnlyModel, `no text-only platform model in the picker: ${listed.join(", ")}`).toBeDefined();
+    await pickModel("Codenaya", textOnlyModel!);
+    const alert = page.getByRole("alert").filter({ hasText: "can't read images" });
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText("Uses your credits");
     await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
 
-    await pickModel("Codenaya", "GPT-5.6 Luna");
+    // The switch only picks the model: the draft and image stay, nothing is sent.
+    const switchTo = alert.getByRole("button", { name: /^Switch to / });
+    const target = (await switchTo.textContent())!.replace("Switch to ", "");
+    await switchTo.click();
+    // The alert collapses under the pointer, which would leave it over the chip.
+    await page.mouse.move(0, 0);
+    await expect(page.getByRole("combobox", { name: "Agent model" })).toHaveText(target);
     await expect(page.getByText("can't read images")).toHaveCount(0);
+    await expect(chip).toBeVisible();
+    await expect(input).toHaveValue(draft);
     await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
 
     expect(errors.filter((error) => !error.includes("webcontainer-api.io"))).toEqual([]);
