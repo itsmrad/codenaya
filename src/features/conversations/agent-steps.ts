@@ -169,7 +169,7 @@ export const describeToolCall = (
     case "delegateTasks":
       targets = (Array.isArray(input.tasks) ? input.tasks : [])
         .map((task) => str((task as Record<string, unknown>)?.title)).filter(Boolean);
-      if (targets.length === 0 && str(input.solo)) targets = [str(input.solo)];
+      if (targets.length === 0 && str(input.solo).trim()) targets = [str(input.solo).trim().slice(0, 200)];
       break;
     default:
       // MCP tools are namespaced `provider__tool`.

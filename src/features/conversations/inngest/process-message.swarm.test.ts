@@ -180,6 +180,20 @@ describe("processMessage swarm mode", () => {
     expect(mutationArgs("agentTasks:createTasks")).toHaveLength(1);
   });
 
+  it.each([{ tasks: [] }, { tasks: [PLAN.tasks[0]] }])("returns an Error to the model for too few tasks (%j)", async ({ tasks }) => {
+    const outcome = await swarm([
+      { data: toolCall("delegateTasks", { tasks }) },
+      { data: text("I need a valid delegation plan.") },
+    ], []);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(toolResults(outcome.inferenceBodies)[0]).toBe(
+      "Error: Delegate 2-4 tasks, or pass tasks [] with solo set to why this is too tiny to split",
+    );
+    expect(mutationArgs("agentTasks:createTasks")).toEqual([]);
+    expect(outcome.invocations).toEqual([]);
+  });
+
   it("refuses a second delegateTasks call", async () => {
     const outcome = await swarm([
       { data: toolCall("delegateTasks", PLAN) },
@@ -302,9 +316,12 @@ describe("processMessage swarm mode", () => {
     expect(outcome.invocations).toEqual([]);
   });
 
-  it("records the solo reason for a tiny request and runs no workers", async () => {
+  it.each([
+    ["one-line copy change", "one-line copy change"],
+    [`  ${"x".repeat(201)}  `, "x".repeat(200)],
+  ])("records the trimmed, capped solo reason (%s) and runs no workers", async (solo, expected) => {
     const outcome = await swarm([
-      { data: toolCall("delegateTasks", { tasks: [], solo: "one-line copy change" }) },
+      { data: toolCall("delegateTasks", { tasks: [], solo }) },
       { data: toolCall("writeFiles", { files: [{ path: "src/App.tsx", content: "export default () => null;\n" }] }) },
       { data: toolCall("checkBuild") },
       { data: text("Done.") },
@@ -317,8 +334,9 @@ describe("processMessage swarm mode", () => {
     // Merged as Convex stores them: the finish record keeps the call's recorded targets.
     const steps = mutationArgs("system:upsertMessageSteps")
       .reduce<AgentStep[]>((all, { steps }) => mergeMessageSteps(all, steps as AgentStep[]), []);
-    expect(swarmSoloReason(steps)).toBe("one-line copy change");
-    expect(swarmHeader([], 0, 5000, swarmSoloReason(steps))).toBe("Swarm · Built solo: one-line copy change · 0:05");
+    expect(steps.find((step) => step.tool === "delegateTasks")?.targets).toEqual([expected]);
+    expect(swarmSoloReason(steps)).toBe(expected);
+    expect(swarmHeader([], 0, 5000, swarmSoloReason(steps))).toBe(`Swarm · Built solo: ${expected} · 0:05`);
   });
 
   it("offers no delegateTasks and no swarm note outside swarm mode", async () => {
