@@ -99,7 +99,12 @@ export const ProjectSkillsPanel = ({
     try {
       await setEnabled({ projectId, skillKey: skill.key, enabled });
     } catch (error) {
-      toast.error(convexErrorMessage(error, `Unable to update ${skill.name}`));
+      toast.error(
+        convexErrorMessage(
+          error,
+          `Couldn't turn ${skill.name} ${enabled ? "on" : "off"}. Check your connection and try again.`,
+        ),
+      );
     }
   };
 
