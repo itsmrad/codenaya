@@ -22,7 +22,7 @@ import {
 } from "@/features/sandbox-preview/server/project-sandbox";
 import { NETWORK_FAILURE } from "@/features/sandbox-preview/utils/app-error";
 import { withErrorHints } from "@/features/sandbox-preview/utils/error-recipes";
-import { detectFramework } from "@/features/sandbox-preview/utils/framework";
+import { type Framework, detectFramework } from "@/features/sandbox-preview/utils/framework";
 import {
   missingReferencedFiles,
   linksWithoutRoutes,
@@ -71,12 +71,20 @@ const WARM_MIN_TIME_LEFT_MS = STEP_BUDGET_MS + 60_000;
 
 const ANSI_ESCAPE = /\u001b\[[\d;]*[A-Za-z]/g;
 
+/** `next build` progress, the route table and its legend, and the telemetry notice. */
+const NEXT_NOISE =
+  /^\s*(?:▲ Next\.js|- (?:Environments?|Experiments)\b|[✓○ƒ●◐λ]\s|[┌├└│]|\+ First Load JS|Route \((?:app|pages)\)|Creating an optimized production build|Compiled (?:successfully|with warnings)|Linting and checking validity of types|Running TypeScript|Collecting page data|Generating static pages|Collecting build traces|Finalizing page optimization|Skipping (?:validation|linting)|Attention: Next\.js now collects|This information is used|You can learn more|https:\/\/nextjs\.org\/telemetry)/;
+/** Where a `next build` failure starts. */
+const NEXT_ERROR_START =
+  /^\s*(?:Failed to compile|Error occurred prerendering page|> Build error occurred|Build error occurred|⨯ |Type error:|Module not found)/;
+
 /**
  * The first lines of compiler output, without colour codes, repeated lines or
  * the sandbox's absolute paths, so errors read as `src/App.tsx(3,1): ...`.
+ * For Next.js, progress and the route table are dropped and the errors come first.
  */
-export const trimBuildOutput = (output: string, dir = WORK_DIR) => {
-  const lines = [
+export const trimBuildOutput = (output: string, dir = WORK_DIR, framework: Framework = "vite") => {
+  let lines = [
     ...new Set(
       output
         .replace(ANSI_ESCAPE, "")
@@ -86,6 +94,11 @@ export const trimBuildOutput = (output: string, dir = WORK_DIR) => {
         .filter(Boolean),
     ),
   ];
+  if (framework === "next") {
+    lines = lines.filter((line) => !NEXT_NOISE.test(line));
+    const start = lines.findIndex((line) => NEXT_ERROR_START.test(line));
+    if (start > 0) lines = [...lines.slice(start), ...lines.slice(0, start)];
+  }
   const more = lines.length - MAX_ERROR_LINES;
   return [
     ...lines.slice(0, MAX_ERROR_LINES),
@@ -102,6 +115,7 @@ type BuildJob = {
   secrets: readonly string[];
   /** Advisory findings appended to a passing result (#333). */
   notes: string;
+  framework: Framework;
 };
 
 /** The step budget ran out; reported as an unfinished check. */
@@ -140,14 +154,15 @@ const run = async (
 };
 
 /**
- * Errors first: Vite writes progress to stdout and the failure to stderr.
+ * Errors first: Vite writes progress to stdout and the failure to stderr
+ * (Next.js output is reordered by `trimBuildOutput`).
  * Secrets are redacted before trimming, which could cut a multi-line one, and
  * after it, since dropping colour codes, `\r` and paths can rejoin one.
  * Known errors anywhere in the output get their cause and fix appended.
  */
-const failureOutput = (result: CommandResult, dir: string, secrets: readonly string[]) => {
+const failureOutput = (result: CommandResult, dir: string, secrets: readonly string[], framework: Framework) => {
   const output = redact(`${result.stderr}\n${result.stdout}`, secrets);
-  return redact(withErrorHints(trimBuildOutput(output, dir), output), secrets);
+  return redact(withErrorHints(trimBuildOutput(output, dir, framework), output), secrets);
 };
 
 /** A timeout or a sandbox failure, not a problem in the project's code. */
@@ -160,11 +175,21 @@ const notBuilt = (reason: string) =>
   "Say in Notes that the build was not verified.";
 
 /**
- * Writes the files to `dir`, then runs `npm install`, `tsc --noEmit` and
- * `vite build` there, within CHECK_TIMEOUT_MS and the step deadline. Returns
- * the tool result for a finished check; throws on sandbox failures and timeouts.
+ * The production build: `tsc --noEmit` then `vite build`, or `next build`
+ * alone (it type-checks itself, and tsc before it would miss `next-env.d.ts`).
  */
-const buildIn = async (sandbox: Sandbox, dir: string, { files, paths, deadline, secrets, notes }: BuildJob) => {
+export const buildCommand = (framework: Framework, paths: Set<string>) => {
+  if (framework === "next") return "NEXT_TELEMETRY_DISABLED=1 npx next build";
+  const tsconfig = ["tsconfig.app.json", "tsconfig.json"].find((path) => paths.has(path));
+  return [tsconfig && `npx tsc --noEmit -p ${tsconfig}`, "npx vite build"].filter(Boolean).join(" && ");
+};
+
+/**
+ * Writes the files to `dir`, then runs `npm install` and the build there,
+ * within CHECK_TIMEOUT_MS and the step deadline. Returns the tool result for
+ * a finished check; throws on sandbox failures and timeouts.
+ */
+const buildIn = async (sandbox: Sandbox, dir: string, { files, paths, deadline, secrets, notes, framework }: BuildJob) => {
   const buildDeadline = Math.min(Date.now() + CHECK_TIMEOUT_MS, deadline);
   const timeLeft = () => within(buildDeadline, CHECK_TIMEOUT_MS);
 
@@ -176,16 +201,12 @@ const buildIn = async (sandbox: Sandbox, dir: string, { files, paths, deadline, 
     if (NETWORK_FAILURE.test(`${install.stderr}\n${install.stdout}`)) {
       return unfinished(new Error("npm could not reach the package registry"));
     }
-    return `Error: npm install failed. Fix package.json, then call checkBuild again:\n${failureOutput(install, dir, secrets)}`;
+    return `Error: npm install failed. Fix package.json, then call checkBuild again:\n${failureOutput(install, dir, secrets, framework)}`;
   }
 
-  const tsconfig = ["tsconfig.app.json", "tsconfig.json"].find((path) => paths.has(path));
-  const command = [tsconfig && `npx tsc --noEmit -p ${tsconfig}`, "npx vite build"]
-    .filter(Boolean)
-    .join(" && ");
-  const build = await run(sandbox, command, timeLeft(), dir);
+  const build = await run(sandbox, buildCommand(framework, paths), timeLeft(), dir);
   if (build.exitCode !== 0) {
-    return `Error: Build failed. Fix these errors, then call checkBuild again:\n${failureOutput(build, dir, secrets)}`;
+    return `Error: Build failed. Fix these errors, then call checkBuild again:\n${failureOutput(build, dir, secrets, framework)}`;
   }
 
   return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.` + notes;
@@ -318,8 +339,15 @@ const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: Bui
   }
 };
 
-/** Whether checkBuild builds a project with these paths: only Vite ones. */
-export const isViteProject = (paths: Iterable<string>) => detectFramework(paths) === "vite";
+/** The framework checkBuild builds a project with, from its paths and package.json; null when it builds none. */
+export const projectFramework = (files: ProjectFile[], paths: Iterable<string>) => {
+  const pkg = files.find((file) => file.path === "package.json")?.content;
+  try {
+    return detectFramework(paths, pkg ? JSON.parse(pkg) : null);
+  } catch {
+    return detectFramework(paths); // Invalid package.json: npm install reports it.
+  }
+};
 
 /** A relative path that stays inside the directory it is joined to. */
 export const isSafeProjectPath = (path: string) =>
@@ -339,7 +367,7 @@ type CheckOptions = {
   sandbox?: Sandbox;
   /**
    * With `sandbox`: the project's directory there, copied into the check first
-   * (without node_modules, .git, the top-level dist and .env files), so files
+   * (without node_modules, .git, the top-level build output and .env files), so files
    * `files` leaves out, such as uploads, are built too. `files` is then
    * written over the copy.
    */
@@ -349,7 +377,7 @@ type CheckOptions = {
 };
 
 /**
- * Static checks, then `npm install`, `tsc --noEmit` and `vite build`: in the
+ * Static checks, then `npm install` and the Vite or Next.js build: in the
  * given `sandbox`, else the owner's running preview sandbox when there is one,
  * else a throwaway sandbox. Returns the tool result, with `secrets` redacted from the raw
  * output before it is trimmed: a passing summary, or an "Error: ..." message
@@ -382,11 +410,12 @@ export const checkProjectBuild = async ({
 
   const advisory = projectChecks(files, paths, undefined, { references: false });
   const notes = advisory.length ? redact(`\nAdvisory project checks:\n- ${advisory.map((f) => `[${f.checkId}] ${f.message}`).join("\n- ")}`, secrets) : "";
-  if (!isViteProject(paths)) {
-    return `${BUILD_NOT_CHECKED}\nStatic checks passed. checkBuild only builds Vite projects, so this one was not built.` + notes;
+  const framework = projectFramework(files, paths);
+  if (!framework) {
+    return `${BUILD_NOT_CHECKED}\nStatic checks passed. checkBuild only builds Vite and Next.js projects, so this one was not built.` + notes;
   }
 
-  const job: BuildJob = { files, paths, deadline: Date.now() + STEP_BUDGET_MS, secrets, notes };
+  const job: BuildJob = { files, paths, deadline: Date.now() + STEP_BUDGET_MS, secrets, notes, framework };
   if (suppliedSandbox) {
     // Snapshot files must stay inside this check's directory.
     if (!files.every(({ path }) => isSafeProjectPath(path))) {
@@ -399,6 +428,7 @@ export const checkProjectBuild = async ({
         // Anchored like the snapshot's skip list: a nested dist, such as public/dist, is project files.
         await suppliedSandbox.commands.run(
           `mkdir -p ${dir} && tar -C '${sourceDir}' --exclude=node_modules --exclude=.git --exclude=./dist ` +
+            (framework === "next" ? "--exclude=./.next --exclude=./out --exclude=./next-env.d.ts " : "") +
             `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
           { timeoutMs, requestTimeoutMs: timeoutMs },
         );
@@ -454,7 +484,7 @@ export const createCheckBuildTool = ({
   return createTool({
     name: "checkBuild",
     description:
-      "Check that the project builds: looks for missing files, undeclared packages and broken imports, then installs dependencies and runs the TypeScript check and the Vite production build in a sandbox. " +
+      "Check that the project builds: looks for missing files, undeclared packages and broken imports, then installs dependencies and runs the TypeScript check and the production build (Vite or Next.js) in a sandbox. " +
       "Call it once before the final summary when files changed. Returns the errors to fix, or a passing result.",
     parameters: z.object({}),
     handler: async (_params, { step: toolStep }) => {
