@@ -23,13 +23,14 @@ export function buildSupabaseHintSection(skills: readonly AgentSkill[]): string 
   const enabled = skills.some((skill) => skill.name === SUPABASE_SKILL);
   return [
     "\n\n## Accounts and saved data",
-    "When the request mentions login, sign-up, accounts, users or saving data, " +
+    "When the request mentions login, sign-up, accounts, or data saved across devices or users, " +
       (enabled
         ? `call loadSkill("${SUPABASE_SKILL}") and follow it.`
         : `offer the built-in ${SUPABASE_SKILL} skill (Supabase auth and a database with Row Level Security): ` +
           "tell the user to turn it on from Skills in the project bar."),
-    "Ask the user to add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY (the publishable or anon key, " +
-      "never the secret or service_role key) in the project's Environment Variables dialog. " +
+    "If the Supabase integration is connected, read VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY " +
+      "(the publishable or anon key, never the secret or service_role key) with its tools and store them with setEnvVar. " +
+      "Otherwise ask the user to add them in the project's Environment Variables dialog. " +
       "Never guess or invent them, and never ask for them in chat.",
   ].join("\n");
 }

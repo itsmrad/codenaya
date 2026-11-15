@@ -72,11 +72,21 @@ describe("buildSupabaseHintSection (#228)", () => {
     const section = buildSupabaseHintSection([findSkills]);
 
     expect(section).toContain("## Accounts and saved data");
-    expect(section).toContain("login, sign-up, accounts, users or saving data");
+    expect(section).toContain("login, sign-up, accounts, or data saved across devices or users");
+    expect(section).not.toContain("saving data");
     expect(section).toContain("offer the built-in supabase-auth-db skill");
-    expect(section).toContain("Environment Variables dialog");
+    expect(section).toContain("Otherwise ask the user to add them in the project's Environment Variables dialog");
     expect(section).toContain("Never guess or invent them");
     expect(section).not.toContain("loadSkill");
+  });
+
+  it("reads the values through a connected Supabase integration instead of asking", () => {
+    const section = buildSupabaseHintSection([findSkills]);
+
+    expect(section).toContain(
+      "If the Supabase integration is connected, read VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY",
+    );
+    expect(section).toContain("with its tools and store them with setEnvVar");
   });
 
   it("loads the skill when the project has it enabled", () => {
