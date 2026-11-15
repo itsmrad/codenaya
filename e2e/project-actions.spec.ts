@@ -77,6 +77,7 @@ test.describe("project actions", () => {
 
         // IDE menu → Rename updates the title.
         const renamed = `${name} renamed`;
+        if (width <= 768) await page.getByRole("button", { name: "More actions", exact: true }).click();
         await page.getByRole("button", { name: "Project actions" }).click();
         await page.getByRole("menuitem", { name: "Rename" }).click();
         const input = page.getByRole("textbox", { name: "Project name" });
@@ -91,6 +92,7 @@ test.describe("project actions", () => {
         ).toBeVisible();
 
         // IDE menu → Delete → back on the dashboard without it.
+        if (width <= 768) await page.getByRole("button", { name: "More actions", exact: true }).click();
         await page.getByRole("button", { name: "Project actions" }).click();
         await page.getByRole("menuitem", { name: "Delete" }).click();
         await confirmDelete(page);

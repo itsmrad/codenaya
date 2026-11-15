@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
@@ -59,18 +60,25 @@ const formSchema = z.object({
 interface ExportPopoverProps {
   projectId: Id<"projects">;
   trigger?: React.ReactNode;
+  fallbackAnchorRef?: React.RefObject<HTMLButtonElement | null>;
   /** The sheet reuses this popover without replacing the navbar command. */
   registerCommands?: boolean;
 }
 
-export const ExportPopover = ({ projectId, trigger, registerCommands = true }: ExportPopoverProps) => {
+export const ExportPopover = ({ projectId, trigger, fallbackAnchorRef, registerCommands = true }: ExportPopoverProps) => {
   const project = useProject(projectId);
   const [open, setOpen] = React.useState(false);
+  const [commandAnchor, setCommandAnchor] = React.useState<HTMLButtonElement | null>(null);
   const [githubNotLinked, setGithubNotLinked] = React.useState(false);
   // Why the last pull needs a choice: local changes, or pushed ones not merged yet.
   const [pullConflict, setPullConflict] = React.useState<"changed" | "unmerged" | null>(null);
 
   const handleOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) {
+      // The navbar trigger is hidden in compact layouts (#317).
+      const anchor = fallbackAnchorRef?.current;
+      setCommandAnchor(anchor?.getClientRects().length ? anchor : null);
+    }
     if (!nextOpen) {
       setGithubNotLinked(false);
     }
@@ -83,7 +91,7 @@ export const ExportPopover = ({ projectId, trigger, registerCommands = true }: E
   const githubSync = project?.githubSync;
   const unpushed = useUnpushedRuns(projectId);
   // Also opened from the chat's first-build card (#341), until the first export.
-  useProjectCommands({ "export-github": !registerCommands || exportStatus === "completed" ? null : () => setOpen(true) });
+  useProjectCommands({ "export-github": !registerCommands || exportStatus === "completed" ? null : () => handleOpenChange(true) });
 
   const form = useForm({
     defaultValues: {
@@ -450,6 +458,7 @@ export const ExportPopover = ({ projectId, trigger, registerCommands = true }: E
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
+      {commandAnchor && <PopoverAnchor virtualRef={{ current: commandAnchor }} />}
       <PopoverTrigger asChild>
         {trigger ?? <button
           type="button"
@@ -464,7 +473,14 @@ export const ExportPopover = ({ projectId, trigger, registerCommands = true }: E
           )}
         </button>}
       </PopoverTrigger>
-      <PopoverContent className="w-80" align="start">
+      <PopoverContent
+        className="w-80"
+        align="start"
+        onCloseAutoFocus={commandAnchor ? (event) => {
+          event.preventDefault();
+          commandAnchor.focus();
+        } : undefined}
+      >
         {renderContent()}
         <SecurityScanDialog pending={gate.pending} onDismiss={gate.dismiss} />
         <div className="mt-4 border-t pt-4">
@@ -480,11 +496,11 @@ export const ExportPopover = ({ projectId, trigger, registerCommands = true }: E
           // Reopened: the dialog's click closed the popover, which shows the
           // progress and the secret scan.
           onOverwrite={() => {
-            setOpen(true);
+            handleOpenChange(true);
             void startPull(true);
           }}
           onKeepLocal={() => {
-            setOpen(true);
+            handleOpenChange(true);
             gate.guard(startPush);
           }}
         />

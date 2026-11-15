@@ -342,7 +342,7 @@ export const ProjectIdView = ({
               size={18}
               className="transition-transform duration-200 group-hover:rotate-12"
             />
-            <span className="text-xs font-semibold tracking-tight text-foreground hidden @3xl:inline">
+            <span className="text-xs font-semibold tracking-tight text-foreground hidden @2xl:inline">
               codenaya
             </span>
           </Link>
@@ -395,7 +395,7 @@ export const ProjectIdView = ({
             // Hidden on phones so the project name keeps its room.
             <Tooltip>
               <TooltipTrigger asChild>
-                <CloudCheckIcon className="hidden @3xl:block size-3 text-muted-foreground/60 shrink-0" />
+                <CloudCheckIcon className="hidden @md:block size-3 text-muted-foreground/60 shrink-0" />
               </TooltipTrigger>
               <TooltipContent>
                 Saved{" "}
@@ -474,7 +474,7 @@ export const ProjectIdView = ({
             <SparklesIcon aria-hidden="true" className="size-3.5" />
             <span className="hidden @3xl:inline">Skills</span>
           </button>
-          <ExportPopover projectId={projectId} />
+          <ExportPopover projectId={projectId} fallbackAnchorRef={actionsTrigger} />
           <SharePopover projectId={projectId} />
           <HelpMenu className="size-8" />
           <div className="w-px h-4 bg-border/40" />

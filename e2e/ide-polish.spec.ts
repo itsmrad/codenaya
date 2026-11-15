@@ -95,6 +95,21 @@ test.describe("IDE polish", () => {
     await openProject(page, projectId, 375);
     const name = page.locator("nav").getByRole("button", { name: PROJECT_NAME, exact: true });
     expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    const longName = "e2e phone project with a very long name that must truncate inside the IDE top bar";
+    await name.click();
+    const rename = page.getByRole("textbox", { name: "Project name", exact: true });
+    await rename.fill(longName);
+    await rename.press("Enter");
+    const longTitle = page.locator("nav").getByRole("button", { name: longName, exact: true });
+    await expect(longTitle).toBeVisible();
+    expect(await longTitle.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    await expect(longTitle).toHaveCSS("text-overflow", "ellipsis");
+    const titleBox = (await longTitle.boundingBox())!;
+    const navBox = (await page.locator("nav").boundingBox())!;
+    expect(titleBox.x).toBeGreaterThanOrEqual(navBox.x);
+    expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(navBox.x + navBox.width);
+    expect(navBox.x + navBox.width).toBeLessThanOrEqual(375);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await expect(page.getByRole("button", { name: "Publish", exact: true })).toHaveText("Publish");
     await expect(page.getByRole("button", { name: "Version history", exact: true })).toBeHidden();
 
