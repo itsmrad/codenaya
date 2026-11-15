@@ -42,9 +42,9 @@ export const IntegrationsDialog = ({
 }: IntegrationsDialogProps) => {
   const connections = useUserConnections();
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(initialProviderId ?? null);
-  const [addingConnection, setAddingConnection] = useState(
-    !connections?.some((connection) => connection.providerId === initialProviderId),
-  );
+  // Only "Add another connection" sets this; otherwise existing connections are
+  // managed, so it stays right when connections load after the dialog opens.
+  const [addingConnection, setAddingConnection] = useState(false);
   const [accountSectionOpen, setAccountSectionOpen] = useState(false);
 
   // Each opening starts at the requested provider, without resuming an old form.
@@ -52,7 +52,7 @@ export const IntegrationsDialog = ({
   if (wasOpen !== open) {
     setWasOpen(open);
     setSelectedProviderId(open ? initialProviderId ?? null : null);
-    setAddingConnection(!connections?.some((connection) => connection.providerId === initialProviderId));
+    setAddingConnection(false);
     setAccountSectionOpen(false);
   }
 
@@ -129,7 +129,7 @@ export const IntegrationsDialog = ({
             <ProviderCatalog
               onSelect={(providerId) => {
                 setSelectedProviderId(providerId);
-                setAddingConnection(!connections?.some((connection) => connection.providerId === providerId));
+                setAddingConnection(false);
               }}
               connectedProviderIds={connections?.map((connection) => connection.providerId)}
             />

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="28" viewBox="0 0 150 28" role="img" aria-label="Open in Codenaya">
+  <title>Open in Codenaya</title>
+  <style>
+    .bg { fill: #09090B; stroke: #27272A; }
+    .fg { fill: #FAFAF9; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #FAFAF9; stroke: #D4D4D8; }
+      .fg { fill: #09090B; }
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="149" height="27" rx="6"/>
+  <g transform="translate(6 6) scale(0.1333)">
+    <g transform="translate(10 10) scale(0.8333)">
+      <path class="fg" d="M99.4 29.2A50 50 0 1 0 99.4 90.8L82.1 77.2A28 28 0 1 1 82.1 42.8Z"/>
+      <rect x="94" y="46" width="14" height="28" rx="2" fill="#e8824f"/>
+    </g>
+  </g>
+  <text class="fg" x="28" y="18" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="12" font-weight="600" textLength="112" lengthAdjust="spacingAndGlyphs">Open in Codenaya</text>
+</svg>

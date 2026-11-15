@@ -46,6 +46,17 @@ export const agentTaskStatusValidator = v.union(
  * loop (by path, or by id for calls made before #292), and the repeated error
  * with its normalised signature (for the next run).
  */
+/** A preview element picked in Select mode (#227); shape of selectedElementSchema. */
+export const selectedElementValidator = v.object({
+  tag: v.string(),
+  id: v.optional(v.string()),
+  classes: v.optional(v.array(v.string())),
+  text: v.string(),
+  domPath: v.string(),
+  outerHTML: v.string(),
+  siblingText: v.optional(v.string()),
+});
+
 export const stuckRunValidator = v.object({
   reason: v.union(
     v.literal("repeated-error"),
@@ -224,6 +235,15 @@ const activationEventValidator = v.union(
   }),
 );
 
+/** A project's brand theme (#302). `font` is a `THEME_FONTS` id; colours are `#rrggbb`. */
+export const projectThemeValidator = v.object({
+  primary: v.string(),
+  accent: v.string(),
+  radius: v.number(),
+  font: v.string(),
+  defaultMode: v.union(v.literal("light"), v.literal("dark"), v.literal("system")),
+});
+
 /** A project's link to its GitHub repo (#343). */
 export const githubSyncValidator = v.object({
   repo: v.string(), // "owner/name"
@@ -308,10 +328,21 @@ export default defineSchema({
     // Always-on agent instructions from the owner (#299), at most
     // MAX_PROJECT_INSTRUCTIONS_LENGTH characters.
     instructions: v.optional(v.string()),
+    // Saved notes from the owner's corrections (#630), at most
+    // MAX_PROJECT_NOTES; managed by convex/projectNotes.ts.
+    notes: v.optional(
+      v.array(v.object({ id: v.string(), text: v.string(), createdAt: v.number() })),
+    ),
+    // Brand theme every agent run applies (#302); validated by `validateTheme`.
+    theme: v.optional(projectThemeValidator),
     // Set when the owner deletes the project. The project is hidden at once
     // while `projects.deleteBatch` removes its data in the background.
     deletingAt: v.optional(v.number()),
-  }).index("by_owner", ["ownerId"]),
+    // Set while a read-only share link (/s/<token>) is on (#260): 128 random bits, hex.
+    shareToken: v.optional(v.string()),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_shareToken", ["shareToken"]),
 
   /**
    * Denormalized running totals, one row per `name`, so public pages can show
@@ -414,10 +445,19 @@ export default defineSchema({
     runModel: v.optional(runModelValidator),
     // User messages only: attached images. Bounded: see MAX_CHAT_IMAGES.
     images: v.optional(v.array(v.id("_storage"))),
+    // User messages only: preview elements picked in Select mode (#227).
+    // Bounded and length-capped by the messages route: see selected-elements.ts.
+    elements: v.optional(v.array(selectedElementValidator)),
     // Assistant messages only: an explicit plan or swarm run.
     mode: v.optional(v.union(v.literal("plan"), v.literal("swarm"))),
     // Assistant messages only: the run was stopped going in circles (#306).
     stuck: v.optional(stuckRunValidator),
+    // Assistant messages only: follow-up prompts shown as chips (#256).
+    // Bounded: at most 3, of at most 100 characters each.
+    suggestions: v.optional(v.array(v.string())),
+    // Assistant messages only: the run that completed the project's first
+    // build (#341), under which the chat offers publish and export once.
+    firstBuild: v.optional(v.boolean()),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"])
@@ -590,7 +630,7 @@ export default defineSchema({
     // Catalog provider id, or "custom" for a user-supplied MCP server URL.
     providerId: v.string(),
     label: v.string(),
-    authMode: v.union(v.literal("oauth"), v.literal("api_key")),
+    authMode: v.union(v.literal("oauth"), v.literal("api_key"), v.literal("none")),
     // Base MCP endpoint before per-project scoping is applied.
     serverUrl: v.string(),
     status: v.union(

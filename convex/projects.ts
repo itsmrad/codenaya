@@ -1,8 +1,9 @@
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
+  action,
   internalMutation,
   mutation,
   query,
@@ -13,7 +14,10 @@ import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { deleteProjectBatch } from "./projectCascade";
-import { copyProjectFiles } from "./projectCopy";
+import { assertCanCopy, copyProjectFiles, remixProject } from "./projectCopy";
+import { getProjectFile, MAX_PROJECT_FILES } from "./files";
+import { readFileContent } from "./fileContents";
+import { isSecretFile } from "./secretFiles";
 import { userSkillKey } from "../src/features/skills/types";
 import { MAX_PROJECT_SKILLS } from "../src/features/skills/limits";
 import {
@@ -21,6 +25,8 @@ import {
   validateProjectName,
 } from "../src/features/projects/utils/project-name";
 import { MAX_PROJECT_INSTRUCTIONS_LENGTH } from "../src/features/projects/instructions";
+import { validateTheme } from "../src/features/projects/theme";
+import { projectThemeValidator } from "./schema";
 import { countProjectBuilt } from "./stats";
 import { recordProjectEvent } from "./activationEvents";
 import { lastRunStatuses } from "../src/features/projects/utils/project-status";
@@ -107,6 +113,28 @@ export const updateInstructions = mutation({
       instructions: instructions || undefined,
       updatedAt: Date.now(),
     });
+  },
+});
+
+/** Sets the project's brand theme; no theme clears it (#302). */
+export const updateTheme = mutation({
+  args: {
+    id: v.id("projects"),
+    theme: v.optional(projectThemeValidator),
+  },
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+    await getOwnedProject(ctx, args.id, identity.subject);
+
+    const theme = args.theme && {
+      ...args.theme,
+      primary: args.theme.primary.toLowerCase(),
+      accent: args.theme.accent.toLowerCase(),
+    };
+    const error = theme && validateTheme(theme);
+    if (error) throw appError("INVALID_ARGUMENT", error);
+
+    await ctx.db.patch("projects", args.id, { theme, updatedAt: Date.now() });
   },
 });
 
@@ -233,7 +261,7 @@ export const rename = mutation({
 
 /**
  * Copies a project into a new one named "<name> (copy)": files, settings,
- * instructions, project skills with their enabled states, and public env vars. Secret env
+ * instructions, theme, project skills with their enabled states, and public env vars. Secret env
  * vars, conversations and integrations stay with the original.
  */
 export const duplicate = mutation({
@@ -243,12 +271,14 @@ export const duplicate = mutation({
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
     const source = await getOwnedProject(ctx, args.id, identity.subject);
+    await assertCanCopy(ctx, identity.subject);
 
     const newProjectId = await ctx.db.insert("projects", {
       name: copyProjectName(source.name),
       ownerId: source.ownerId,
       settings: source.settings,
       instructions: source.instructions,
+      theme: source.theme,
       updatedAt: Date.now(),
     });
     await countProjectBuilt(ctx);
@@ -257,7 +287,8 @@ export const duplicate = mutation({
       props: { source: "duplicate" },
     });
 
-    await copyProjectFiles(ctx, source._id, newProjectId);
+    // The owner's own copy: secret files stay, like their other files.
+    await copyProjectFiles(ctx, source._id, newProjectId, { keepSecretFiles: true });
 
     // Project skills get new ids, so their settings keys are remapped.
     const skillKeyMap = new Map<string, string>();
@@ -313,6 +344,142 @@ export const duplicate = mutation({
     }
 
     return newProjectId;
+  },
+});
+
+/** A share token: 128 random bits as hex (#260). */
+const SHARE_TOKEN_PATTERN = /^[0-9a-f]{32}$/;
+
+/** The project a share token opens, unless the link was revoked or the project is being deleted. */
+async function getSharedProject(ctx: QueryCtx, token: string) {
+  if (!SHARE_TOKEN_PATTERN.test(token)) return null;
+  const project = await ctx.db
+    .query("projects")
+    .withIndex("by_shareToken", (q) => q.eq("shareToken", token))
+    .first();
+  return project && project.deletingAt === undefined ? project : null;
+}
+
+/**
+ * Turns on the project's read-only share link and returns its token; an
+ * existing link is kept. An action, because mutations run on seeded (replayable)
+ * randomness and a token must be unpredictable.
+ */
+export const createShareLink = action({
+  args: { projectId: v.id("projects") },
+  returns: v.string(),
+  handler: async (ctx, args): Promise<string> => {
+    const identity = await verifyAuth(ctx);
+    const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+    return await ctx.runMutation(internal.projects.setShareToken, {
+      projectId: args.projectId,
+      ownerId: identity.subject,
+      token,
+    });
+  },
+});
+
+/** Stores `token` on the owner's project unless it already has one; returns the token in use. */
+export const setShareToken = internalMutation({
+  args: { projectId: v.id("projects"), ownerId: v.string(), token: v.string() },
+  returns: v.string(),
+  handler: async (ctx, args) => {
+    const project = await getOwnedProject(ctx, args.projectId, args.ownerId);
+    if (project.shareToken) return project.shareToken;
+    await ctx.db.patch("projects", project._id, { shareToken: args.token });
+    return args.token;
+  },
+});
+
+/** Secret files (#260 review): left out of a share's tree and file reads, as if they didn't exist. */
+const hiddenFromShare = (file: Doc<"files">) => file.type === "file" && isSecretFile(file.name);
+
+/** Turns the share link off: the old URL stops working, and a new link gets a new token. */
+export const revokeShareLink = mutation({
+  args: { projectId: v.id("projects") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+    await getOwnedProject(ctx, args.projectId, identity.subject);
+    await ctx.db.patch("projects", args.projectId, { shareToken: undefined });
+    return null;
+  },
+});
+
+/**
+ * Public: what a share link shows signed out (#260), or null for an unknown or
+ * revoked token. Only the name, the owner's display name and the file tree:
+ * never env vars, secret files (keys, dotenv, credentials), chat, integrations, settings or storage ids. The `returns`
+ * validator rejects any other field.
+ */
+export const getShared = query({
+  args: { token: v.string() },
+  returns: v.union(
+    v.null(),
+    v.object({
+      name: v.string(),
+      ownerName: v.string(),
+      files: v.array(
+        v.object({
+          _id: v.id("files"),
+          parentId: v.union(v.id("files"), v.null()),
+          name: v.string(),
+          type: v.union(v.literal("file"), v.literal("folder")),
+          binary: v.boolean(),
+        }),
+      ),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const project = await getSharedProject(ctx, args.token);
+    if (!project) return null;
+
+    const owner = await ctx.db
+      .query("users")
+      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", project.ownerId))
+      .unique();
+    const files = await ctx.db
+      .query("files")
+      .withIndex("by_project", (q) => q.eq("projectId", project._id))
+      .take(MAX_PROJECT_FILES);
+
+    return {
+      name: project.name,
+      ownerName: owner?.name || "Anonymous",
+      files: files.filter((file) => !hiddenFromShare(file)).map((file) => ({
+        _id: file._id,
+        parentId: file.parentId ?? null,
+        name: file.name,
+        type: file.type,
+        binary: file.storageId !== undefined,
+      })),
+    };
+  },
+});
+
+/** Public: a shared project's file text (null content for a binary file), or null when not shared. */
+export const getSharedFile = query({
+  args: { token: v.string(), fileId: v.id("files") },
+  returns: v.union(v.null(), v.object({ content: v.union(v.string(), v.null()) })),
+  handler: async (ctx, args) => {
+    const project = await getSharedProject(ctx, args.token);
+    const file = project && (await getProjectFile(ctx, project._id, args.fileId));
+    if (!file || file.type !== "file" || hiddenFromShare(file)) return null;
+    return { content: file.storageId ? null : ((await readFileContent(ctx, file)) ?? "") };
+  },
+});
+
+/** Remix from a share link: copies the shared files into a new project of the signed-in user. */
+export const remixShared = mutation({
+  args: { token: v.string() },
+  returns: v.id("projects"),
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+    const project = await getSharedProject(ctx, args.token);
+    if (!project) throw appError("NOT_FOUND", "Project not found");
+    return await remixProject(ctx, project._id, identity.subject, `${project.name} (imported)`);
   },
 });
 
@@ -375,16 +542,16 @@ export const conversationNeedsFirstBuildForServer = query({
 /**
  * Ends a seeded project's first build (#338): called by the agent run that
  * wrote files and finished. Failed, cancelled, plan and Q&A runs leave it set.
+ * True when this call ended it, so that run gets the ship card (#341).
  */
 export const completeFirstBuild = mutation({
   args: { internalKey: v.string(), projectId: v.id("projects") },
-  returns: v.null(),
+  returns: v.boolean(),
   handler: async (ctx, { internalKey, projectId }) => {
     validateInternalKey(internalKey);
     const project = await ctx.db.get("projects", projectId);
-    if (project?.firstBuildPending) {
-      await ctx.db.patch("projects", projectId, { firstBuildPending: undefined });
-    }
-    return null;
+    if (!project?.firstBuildPending) return false;
+    await ctx.db.patch("projects", projectId, { firstBuildPending: undefined });
+    return true;
   },
 });

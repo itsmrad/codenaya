@@ -76,7 +76,7 @@ export const importGithubRepo = inngest.createFunction(
 
       const folderIdMap: Record<string, Id<"files">> = {};
 
-      for (const { path, name, parentPath } of planFolderCreation(folders)) {
+      for (const { path, name, parentPath } of planFolderCreation(folders, files.map((file) => file.path))) {
         const parentId = parentPath ? folderIdMap[parentPath] : undefined;
 
         folderIdMap[path] = await convex.mutation(api.system.createFolder, {

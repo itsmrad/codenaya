@@ -41,6 +41,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { PreviewView } from "./preview-view";
 import { ExportPopover } from "./export-popover";
+import { SharePopover } from "@/features/share/components/share-popover";
 import { EnvVarsDialog } from "./env-vars-dialog";
 import { useDownloadZip } from "../hooks/use-download-zip";
 import { useChatPanelStore } from "../store/use-chat-panel-store";
@@ -428,7 +429,7 @@ export const ProjectIdView = ({
             </button>
           )}
           <button
-            onClick={openIntegrations}
+            onClick={() => openIntegrations()}
             aria-label="Integrations"
             title="Integrations"
             className="flex items-center gap-1.5 h-8 px-2 @3xl:px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
@@ -446,6 +447,7 @@ export const ProjectIdView = ({
             <span className="hidden @3xl:inline">Skills</span>
           </button>
           <ExportPopover projectId={projectId} />
+          <SharePopover projectId={projectId} />
           <HelpMenu className="size-8" />
           <div className="w-px h-4 bg-border/40" />
           <UserMenu avatarClassName="size-6" />
@@ -523,6 +525,7 @@ export const ProjectIdView = ({
               projectId={projectId}
               firstBuild={firstBuild}
               visible={activeView === "preview"}
+              onElementPicked={() => { if (isCompact) selectView("chat"); }}
               onOpenEnvVars={() => setEnvVarsOpen(true)}
             />
           )}

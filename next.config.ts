@@ -8,6 +8,8 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // Stop `next dev` upserting its agent-rules block into AGENTS.md (#81).
   agentRules: false,
+  // Instant template sources are read at request time (#362).
+  outputFileTracingIncludes: { "/api/projects/create-with-prompt": ["./templates/**/*"] },
   async headers() {
     return [
       {
@@ -20,7 +22,8 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           {
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
+            // The composer records dictation (#301); nothing else gets the mic.
+            value: "camera=(), microphone=(self), geolocation=()",
           },
         ],
       },

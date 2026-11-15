@@ -3,6 +3,7 @@ import { createTool } from "@inngest/agent-kit";
 import { nanoid } from "nanoid";
 
 import { classifyEnvKey, isValidEnvKey, maskSecret } from "@/features/integrations/env-keys";
+import { publicValueSecretRule } from "@/features/integrations/credential-guard";
 import {
   getSecretSealer,
   secretContext,
@@ -42,6 +43,11 @@ interface SetEnvVarToolOptions {
   internalKey: string;
 }
 
+const paramsSchema = z.object({
+  key: z.string().min(1, "Variable name is required"),
+  value: z.string(),
+});
+
 export const createSetEnvVarTool = ({
   projectId,
   ownerId,
@@ -68,7 +74,13 @@ export const createSetEnvVarTool = ({
         ),
       value: z.string().describe("The value to store."),
     }),
-    handler: async ({ key, value }, { step }) => {
+    handler: async (params, { step }) => {
+      const parsed = paramsSchema.safeParse(params);
+      if (!parsed.success) {
+        return `Error: ${parsed.error.issues[0].message}`;
+      }
+
+      const { key, value } = parsed.data;
       const trimmedKey = key.trim();
 
       if (!isValidEnvKey(trimmedKey)) {
@@ -79,6 +91,16 @@ export const createSetEnvVarTool = ({
       }
 
       const visibility = classifyEnvKey(trimmedKey);
+
+      // A public value is bundled into browser code, so refuse known secret formats.
+      const secretRule = visibility === "public" ? publicValueSecretRule(value) : undefined;
+      if (secretRule) {
+        return (
+          `Error: not stored. The value for ${trimmedKey} looks like a secret (${secretRule}), and ` +
+          `public variables are published in the browser bundle. Store it under a name without ` +
+          `a public prefix (e.g. STRIPE_SECRET_KEY) and read it only from server code.`
+        );
+      }
 
       const run = async () => {
         if (visibility === "public") {

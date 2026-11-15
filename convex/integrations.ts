@@ -34,7 +34,7 @@ export interface UserConnectionSummary {
   _id: Id<"userConnections">;
   providerId: string;
   label: string;
-  authMode: "oauth" | "api_key";
+  authMode: "oauth" | "api_key" | "none";
   serverUrl: string;
   status: "active" | "needs_reauth" | "revoked" | "error";
   statusMessage?: string;

@@ -58,6 +58,27 @@ describe("setEnvVar tool", () => {
     expect(step.run).toHaveBeenCalledTimes(1);
   });
 
+  it("refuses a known secret format under a public prefix, without starting a step", async () => {
+    const result = await setEnvVar("NEXT_PUBLIC_STRIPE_KEY", ["sk", "_live_", "0123456789abcdefghij"].join(""));
+
+    expect(result).toMatch(/^Error: not stored\. .*\(stripe\)/);
+    expect(result).not.toContain("0123456789abcdefghij");
+    expect(step.run).not.toHaveBeenCalled();
+    expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["NEXT_PUBLIC_SUPABASE_ANON_KEY", ["eyJhbGciOiJIUzI1NiJ9", "eyJyb2xlIjoiYW5vbiJ9", "abcdefghijklmnop"].join(".")],
+    ["VITE_SUPABASE_PUBLISHABLE_KEY", ["sb", "_publishable_", "0123456789abcdefghij"].join("")],
+    ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", ["pk", "_test_", btoa("example.clerk.accounts.dev$")].join("")],
+    ["VITE_STRIPE_KEY", ["pk", "_live_", "0123456789abcdefghij"].join("")],
+    ["NEXT_PUBLIC_SENTRY_DSN", "https://abc123@o0.ingest.sentry.io/0"],
+  ])("stores public-by-design %s", async (key, value) => {
+    expect(await setEnvVar(key, value)).toMatch(/^Stored public variable /);
+    expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ key, value }));
+    expect(step.run).toHaveBeenCalledTimes(1);
+  });
+
   it("tells the model to read env vars per framework and never from browser code (#330)", async () => {
     vi.stubEnv("CODENAYA_LOCAL_KEK", randomBytes(32).toString("base64"));
     mocks.mutation.mockResolvedValue(null);
@@ -82,5 +103,19 @@ describe("setEnvVar tool", () => {
 
     expect(await setEnvVar("DATABASE_URL")).toMatch(/fetch failed/);
     expect(step.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a readable error for invalid args instead of throwing (#616)", async () => {
+    const tool = createSetEnvVarTool({
+      projectId: "project_a" as Id<"projects">,
+      ownerId: "user_a",
+      internalKey: "key",
+    });
+
+    const result = await tool.handler({ key: null, value: "x" } as never, ctx);
+
+    expect(result).toMatch(/^Error: /);
+    expect(step.run).not.toHaveBeenCalled();
+    expect(mocks.mutation).not.toHaveBeenCalled();
   });
 });

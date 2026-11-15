@@ -137,4 +137,34 @@ describe("debounceSerial", () => {
     await flushing;
     expect(order).toEqual(["ran", "ran", "drained"]);
   });
+
+  it("idle waits for the scheduled run and the one queued behind it, without running early", async () => {
+    let finish = () => {};
+    const task = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { schedule, idle } = debounceSerial(task, 100);
+    const done = vi.fn();
+
+    schedule();
+    void idle().then(done);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(task).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(50);
+    schedule();
+    await vi.advanceTimersByTimeAsync(100);
+    finish();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(task).toHaveBeenCalledTimes(2);
+    expect(done).not.toHaveBeenCalled();
+
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(done).toHaveBeenCalledTimes(1);
+    await expect(idle()).resolves.toBeUndefined();
+  });
 });

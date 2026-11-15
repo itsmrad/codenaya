@@ -63,6 +63,10 @@ export const useUpdateProjectInstructions = () => {
   return useMutation(api.projects.updateInstructions);
 };
 
+export const useUpdateProjectTheme = () => {
+  return useMutation(api.projects.updateTheme);
+};
+
 export const useDuplicateProject = () => {
   return useMutation(api.projects.duplicate);
 };

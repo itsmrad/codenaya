@@ -167,7 +167,7 @@ const approvalRows = () =>
 
 const GATED = ["stripe_api_write", "send_money", "convert_currency", "setup_recipient"];
 
-describe.each(["notion", "atlassian", "gitlab", "clerk"] as const)("%s published writes", (id) => {
+describe.each(["notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface", "webflow", "netlify", "railway", "amplitude", "amplitude-eu", "mixpanel", "contentful", "contentful-eu"] as const)("%s published writes", (id) => {
   it.each([...PROVIDERS[id].destructiveTools, "unlisted_tool"])("never calls %s without approval, even with a misleading read-only hint", async (name) => {
     // Unknown, unannotated tools are gated too; known writes must override hints.
     served = [{
@@ -508,6 +508,34 @@ describe("known reads exclude tools that return secrets", () => {
     ["prisma", "list_prisma_postgres_connection_strings"],
     ["neon", "get_connection_string"],
     ["neon", "get_realtime_secret"],
+    ["firecrawl", "firecrawl_parse"],
+    ["firecrawl", "firecrawl_monitor_get"],
+    ["firecrawl", "firecrawl_monitor_list"],
+    ["firecrawl", "firecrawl_credit_usage"],
+    ["huggingface", "hf_whoami"],
+    ["webflow", "ask_webflow_ai"],
+    ["netlify", "netlify-team-services-reader"],
+    ["netlify", "netlify-team-get-team-env-vars"],
+    ["netlify", "netlify-observability-services-reader"],
+    ["netlify", "netlify-observability-get-request-logs"],
+    ["netlify", "netlify-observability-get-request-detail"],
+    ["railway", "check-cloud-agent-task"],
+    ["railway", "get-cloud-agent-transcript"],
+    ["railway", "list-cloud-agent-tasks"],
+    // Raw user data, transcripts and audit history are gated like secrets.
+    ["amplitude", "get_amp_user_data"],
+    ["amplitude-eu", "get_amplitude_agent_analytics_info"],
+    ["amplitude", "use_amp_flags"],
+    ["mixpanel", "Get-Property-Values"],
+    ["mixpanel", "Get-User-Replays-Data"],
+    ["mixpanel", "Get-Audit-Log"],
+    ["mixpanel", "Get-Dashboard"],
+    ["mixpanel", "Get-Issues"],
+    ["contentful", "create_upload_session"],
+    ["contentful", "get_entry_preview_url"],
+    ["contentful-eu", "list_content_previews"],
+    ["microsoft-learn", "get_api_key"],
+    ["cloudflare-docs", "get_api_token"],
   ] as const)("%s does not list %s", (id, name) => {
     expect(PROVIDERS[id].readOnlyTools ?? []).not.toContain(name);
     expect(requiresApproval(

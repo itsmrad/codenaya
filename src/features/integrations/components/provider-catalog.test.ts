@@ -18,6 +18,7 @@ it("shows all providers with capabilities, local logos and keyboard filters", ()
   }
   expect(html).toContain("Custom MCP server");
   expect(html).toContain("OAuth · API key");
+  expect(html).toContain("No sign-in");
 });
 
 it("offers Manage for existing credentials, including those needing reconnect", () => {

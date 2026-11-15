@@ -28,6 +28,7 @@ import {
   RocketIcon,
   SparklesIcon,
   SunIcon,
+  UploadIcon,
   UsersIcon,
 } from "lucide-react";
 
@@ -68,6 +69,7 @@ const PROJECT_COMMAND_ICONS: Record<ProjectCommandId, LucideIcon> = {
   "version-history": ClockArrowUpIcon,
   publish: RocketIcon,
   "download-zip": DownloadIcon,
+  "export-github": UploadIcon,
   integrations: PlugIcon,
   skills: SparklesIcon,
   "env-vars": KeyRoundIcon,

@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { api } from "../convex/_generated/api";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
+import { expectToolbarFits, expectToolbarFitsAtWidths } from "./composer-fit";
 import { userConvexClient } from "./convex-client";
 
 const SMOKE_PROMPT = "e2e dashboard smoke: reply OK and change nothing.";
@@ -16,6 +17,9 @@ test.describe("dashboard prompt composer", () => {
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
   });
 
+  test("the composer toolbar fits the card at 375 to 1700 px", async ({ page }) => {
+    await expectToolbarFitsAtWidths(page, page.getByRole("main"), "Enhance prompt");
+  });
 
   test("a prompt creates a project and opens it with the agent running", async ({ page }) => {
     test.setTimeout(120_000);
@@ -70,6 +74,7 @@ test.describe("dashboard prompt composer", () => {
 
     const input = dialog.getByRole("textbox", { name: "Describe what you want to build" });
     await expect(input).toBeFocused();
+    await expectToolbarFits(dialog, "Enhance prompt");
 
     await input.fill(SMOKE_PROMPT);
     await dialog.getByRole("button", { name: "Create project" }).click();

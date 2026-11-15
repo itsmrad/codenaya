@@ -151,6 +151,18 @@ describe("first build (#338)", () => {
     });
   });
 
+  test("only the run that ends the first build is marked for the ship card (#341)", async () => {
+    const { t } = setup();
+    const ids = await seededProject(t);
+
+    expect(await t.mutation(api.projects.completeFirstBuild, { ...key, projectId: ids.projectId })).toBe(true);
+    expect(await t.mutation(api.projects.completeFirstBuild, { ...key, projectId: ids.projectId })).toBe(false);
+
+    const run = await startRun(t, ids);
+    await t.mutation(api.system.updateMessageContent, { ...key, messageId: run, content: "Built", firstBuild: true });
+    expect(await t.run((ctx) => ctx.db.get("messages", run))).toMatchObject({ firstBuild: true });
+  });
+
   test("completeFirstBuild needs the internal key", async () => {
     const { t } = setup();
     const { projectId } = await seededProject(t);
