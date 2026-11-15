@@ -40,7 +40,7 @@ vi.mock("@codemirror/view", async (original) => {
       this.state = transaction.state;
       const update = { startState: transaction.startState, state: this.state, docChanged: transaction.docChanged, transactions: [transaction] };
       for (const listener of this.state.facet(actual.EditorView.updateListener)) {
-        listener(update as Parameters<typeof listener>[0]);
+        listener(update as unknown as Parameters<typeof listener>[0]);
       }
     }
     destroy() {}
