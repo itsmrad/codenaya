@@ -798,6 +798,9 @@ export default defineSchema({
     model: v.string(),
     inputTokens: v.number(),
     outputTokens: v.number(),
+    /** Parts of inputTokens served from and written to the prompt cache; absent on older rows. */
+    cacheReadTokens: v.optional(v.number()),
+    cacheWriteTokens: v.optional(v.number()),
     costUsd: v.number(),
     credits: v.number(),
     updatedAt: v.number(),

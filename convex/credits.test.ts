@@ -34,7 +34,7 @@ const seedMessage = (t: TestConvex, ownerId = ALICE) =>
 const record = (
   t: TestConvex,
   messageId: Awaited<ReturnType<typeof seedMessage>>,
-  totals: { inputTokens: number; outputTokens: number; costUsd: number },
+  totals: { inputTokens: number; outputTokens: number; costUsd: number; cacheReadTokens?: number; cacheWriteTokens?: number },
   source: "platform" | "promo" | "byok" = "platform",
 ) => t.mutation(api.credits.recordRunUsage, { internalKey: INTERNAL_KEY, messageId, source, ...totals });
 
@@ -74,6 +74,19 @@ describe("credits.recordRunUsage", () => {
     expect(rows).toMatchObject([
       { userId: ALICE, messageId, source: "platform", model: "GPT-5.6 Luna", inputTokens: 3000, credits: 15 },
     ]);
+  });
+
+  test("stores the run's cache read and write tokens, which only grow", async () => {
+    const t = setup();
+    const messageId = await seedMessage(t);
+
+    await record(t, messageId, { inputTokens: 1000, outputTokens: 100, costUsd: 0.04, cacheWriteTokens: 900 });
+    await record(t, messageId, { inputTokens: 2000, outputTokens: 200, costUsd: 0.05, cacheReadTokens: 900, cacheWriteTokens: 950 });
+    // A replayed earlier step changes nothing.
+    await record(t, messageId, { inputTokens: 1000, outputTokens: 100, costUsd: 0.04, cacheWriteTokens: 900 });
+
+    const rows = await t.run((ctx) => ctx.db.query("creditLedger").collect());
+    expect(rows).toMatchObject([{ inputTokens: 2000, cacheReadTokens: 900, cacheWriteTokens: 950, credits: 8 }]);
   });
 
   test("records BYOK and promo runs at 0 credits", async () => {
