@@ -328,6 +328,11 @@ export default defineSchema({
     // Always-on agent instructions from the owner (#299), at most
     // MAX_PROJECT_INSTRUCTIONS_LENGTH characters.
     instructions: v.optional(v.string()),
+    // Saved notes from the owner's corrections (#630), at most
+    // MAX_PROJECT_NOTES; managed by convex/projectNotes.ts.
+    notes: v.optional(
+      v.array(v.object({ id: v.string(), text: v.string(), createdAt: v.number() })),
+    ),
     // Brand theme every agent run applies (#302); validated by `validateTheme`.
     theme: v.optional(projectThemeValidator),
     // Set when the owner deletes the project. The project is hidden at once
