@@ -6,6 +6,7 @@ import {
   SWARM_ORCHESTRATOR_NOTE,
   SWARM_SUBORCH_NOTE,
   SWARM_WORKER_NOTE,
+  TANSTACK_START_NOTE,
 } from "./constants";
 import { KNOWN_GOOD_VERSIONS } from "./known-good-versions";
 
@@ -87,6 +88,12 @@ describe("coding agent integration instructions", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       "MCP authentication is injected into the server-side transport automatically",
     );
+  });
+
+  it("keeps the TanStack Start block out of the static prompt", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/<tanstack_start>|routeTree\.gen|createServerFn/);
+    expect(TANSTACK_START_NOTE).toContain("Never write or edit src/routeTree.gen.ts");
+    expect(TANSTACK_START_NOTE).toContain(".validator(schema)");
   });
 
   it("requires internal links to point at routes the app defines", () => {

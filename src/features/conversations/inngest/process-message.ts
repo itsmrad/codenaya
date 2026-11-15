@@ -7,6 +7,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../convex/_generated/api";
 import {
   CODING_AGENT_SYSTEM_PROMPT,
+  TANSTACK_START_NOTE,
   MAX_AGENT_STEPS,
   STARTER_NOTES,
   STEP_BUDGET_NOTE,
@@ -602,8 +603,11 @@ export const processMessage = inngest.createFunction(
     const app = starter ?? framework ?? promptFramework(recentMessages.find((msg) => msg.role === "user")?.content ?? message);
     const recoveryNote = starter === null && framework === null ? STARTER_NOTES[app].recovery : undefined;
     const firstBuildNote = recoveryNote ?? STARTER_NOTES[app].firstBuild;
+    // Start's rules ride only on Start runs; the static prompt stays lean for every other app.
+    const startApp = app === "tanstack-start";
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
+      startApp ? TANSTACK_START_NOTE : "",
       buildProjectInstructionsSection(projectInstructions, projectNotes, projectTheme),
       buildSkillsPromptSection(skills),
       buildSupabaseHintSection(skills),

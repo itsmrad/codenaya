@@ -46,13 +46,13 @@ export const ERROR_RECIPES: readonly ErrorRecipe[] = [
     // Browser, then tsc (TS2580).
     match: /process is not defined|Cannot find name 'process'/i,
     cause: "Browser code reads `process` without the framework's supported environment variable replacement; Vite does not define `process` in the browser.",
-    fix: "Vite: read env vars as `import.meta.env.VITE_NAME` (the name must start with VITE_). Next.js: use `process.env.NEXT_PUBLIC_NAME` in client code and plain `process.env.NAME` on the server. Keep server secrets out of browser code; do not add @types/node to silence a browser runtime error.",
+    fix: "Vite: read env vars as `import.meta.env.VITE_NAME` (the name must start with VITE_). Next.js: use `process.env.NEXT_PUBLIC_NAME` in client code and plain `process.env.NAME` on the server. TanStack Start: browser code reads `import.meta.env.VITE_NAME`; read `process.env.NAME` only inside a createServerFn handler or a *.server.ts file. Keep server secrets out of browser code; do not add @types/node to silence a browser runtime error.",
   },
   {
     id: "router-context",
-    match: /may be used only in the context of a <Router>|NextRouter was not mounted|expected app router to be mounted/i,
-    cause: "A router hook or link runs outside its router context, or a Next.js App Router component uses the Pages Router hook.",
-    fix: "Vite with React Router: wrap the whole app once in <BrowserRouter> in src/main.tsx (or App.tsx). Next.js App Router: use hooks from `next/navigation` inside a Client Component and links from `next/link`; do not add BrowserRouter to fix Next.js routing.",
+    match: /may be used only in the context of a <Router>|NextRouter was not mounted|expected app router to be mounted|useRouter must be used inside a <RouterProvider>/i,
+    cause: "A router hook or link runs outside its router context, a Next.js App Router component uses the Pages Router hook, or a TanStack Start app uses react-router-dom.",
+    fix: "Vite with React Router: wrap the whole app once in <BrowserRouter> in src/main.tsx (or App.tsx). Next.js App Router: use hooks from `next/navigation` inside a Client Component and links from `next/link`; do not add BrowserRouter to fix Next.js routing. TanStack Start: import Link and useNavigate from `@tanstack/react-router`, never react-router-dom; the router from src/router.tsx already wraps every route, so do not add BrowserRouter or RouterProvider.",
   },
   {
     id: "missing-query-client",
@@ -137,6 +137,32 @@ export const ERROR_RECIPES: readonly ErrorRecipe[] = [
     match: /next\/image[\s\S]*hostname ["'][^"']+["'] is not configured/i,
     cause: "A remote image URL is not allowed by the Next.js image configuration.",
     fix: "Add the image's exact protocol, hostname and path under images.remotePatterns in next.config.js or next.config.ts, or use a local image. Avoid allowing arbitrary remote hosts.",
+  },
+  // TanStack Start; tsc and Vite wording checked against @tanstack/* 1.169-1.171 sources.
+  {
+    id: "start-input-validator",
+    match: /inputValidator is not a function|Property 'inputValidator' does not exist/i,
+    cause: "createServerFn uses `.inputValidator()`, which TanStack Start 1.0 removed.",
+    fix: "Rename it to `.validator()`: `createServerFn({ method: \"POST\" }).validator(schema).handler(async ({ data }) => ...)`.",
+  },
+  {
+    id: "start-server-only-import",
+    match: /\[import-protection\] Import denied in client environment|has been externalized for browser compatibility/i,
+    cause: "Browser code imports server-only code: a Node built-in, a *.server.ts file, a database client or a secret.",
+    fix: "TanStack Start: move that code into a createServerFn handler (or a *.server.ts file only server functions import) and call the server function from the component or loader. Plain Vite: Node modules do not run in the browser; call them from a backend function instead.",
+  },
+  {
+    id: "start-route-tree",
+    match: /FileRoutesByPath|routeTree\.gen\b/,
+    cause: "The createFileRoute path does not match the file's location under src/routes/, or src/routeTree.gen.ts is stale or was edited by hand.",
+    fix: "Make the createFileRoute(\"...\") path match the file path (src/routes/posts/$postId.tsx is \"/posts/$postId\"). Never write or edit src/routeTree.gen.ts: the router plugin regenerates it on the next dev or build run.",
+  },
+  {
+    // shortcut: a root without <Scripts /> throws nothing (the page just never hydrates), so only the nesting error is matched.
+    id: "root-document",
+    match: /cannot be a child of #document|In HTML, <(?:html|head|body)> cannot be a child of/i,
+    cause: "The root component does not render the whole HTML document, or renders <html>/<body> inside another element.",
+    fix: "TanStack Start: src/routes/__root.tsx must render <html><head><HeadContent /></head><body><Outlet /><Scripts /></body></html>; without <Scripts /> the page never hydrates and buttons do nothing, without <HeadContent /> the stylesheet and meta tags are missing. Next.js: render <html> and <body> only in the root app/layout.tsx.",
   },
   {
     id: "read-property-of-undefined",

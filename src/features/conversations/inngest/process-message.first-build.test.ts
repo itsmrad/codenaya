@@ -231,6 +231,19 @@ describe("processMessage first build (#338)", () => {
     expect(coding.tools?.map((tool) => tool.function.name)).not.toContain("scaffoldViteApp");
   });
 
+  it.each([
+    ["a Vite starter", VITE_REACT_STARTER.map(({ path }) => path), "Build a todo app", false],
+    ["a Next starter", NEXT_APP_STARTER.map(({ path }) => path), "Build a todo app", false],
+    ["a TanStack Start project", ["package.json", "vite.config.ts", "src/router.tsx", "src/routes/__root.tsx"], "Add a blog", true],
+    ["an empty project asked for TanStack Start", [], "Build a TanStack Start blog", true],
+  ])("adds the TanStack Start rules only for a Start run: %s", async (_, paths, prompt, start) => {
+    projectFiles = paths.map((path) => ({ _id: `id:${path}`, name: path, type: "file" }));
+    const outcome = await drive(MODEL, [{ data: text("Blog") }, { data: text("Built it.") }], prompt);
+    expect(codingRequest(outcome.inferenceBodies).system.includes("<tanstack_start>")).toBe(start);
+    const coding = (outcome.inferenceBodies as ChatBody[]).find((body) => body.tools)!;
+    if (start) expect(coding.tools?.map((tool) => tool.function.name)).not.toContain("scaffoldViteApp");
+  });
+
   it("uses Next first-build guidance and does not offer the Vite scaffold for a Next starter", async () => {
     needsFirstBuild = true;
     projectFiles = NEXT_APP_STARTER.map(({ path }) => ({ _id: `id:${path}`, name: path, type: "file" }));

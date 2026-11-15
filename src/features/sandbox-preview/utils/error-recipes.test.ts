@@ -43,6 +43,16 @@ const FIXTURES: Record<string, string> = {
   "async-client-component": "async/await is not yet supported in Client Components, only Server Components.",
   "search-params-suspense": 'useSearchParams() should be wrapped in a suspense boundary at page "/search".',
   "browser-api-on-server": "ReferenceError: window is not defined",
+  "start-input-validator":
+    "TypeError: createServerFn(...).inputValidator is not a function\n    at src/routes/index.tsx:6:4",
+  "start-server-only-import": [
+    "[import-protection] Import denied in client environment",
+    '  Importer: src/routes/index.tsx',
+    '  Import: "../lib/db.server"',
+  ].join("\n"),
+  "start-route-tree":
+    "src/routes/about.tsx(3,39): error TS2345: Argument of type '\"/aboutt\"' is not assignable to parameter of type 'keyof FileRoutesByPath'.",
+  "root-document": "In HTML, <div> cannot be a child of #document.\nThis will cause a hydration error.",
   "next-image-host": 'Invalid src prop (https://example.com/photo.png) on `next/image`, hostname "example.com" is not configured under images in your `next.config.js`',
 };
 
@@ -116,6 +126,31 @@ describe("ERROR_RECIPES", () => {
   ])("%s matches the Next.js wording: %s", (id, fixture) => {
     expect(explainError(fixture).map((match) => match.recipeId)).toEqual([id]);
     expect(recipeIdsIn(withErrorHints(fixture))).toEqual([id]);
+  });
+
+  it.each([
+    ["start-input-validator", "src/server.ts(4,6): error TS2339: Property 'inputValidator' does not exist on type 'ServerFnBuilder<{}, \"POST\">'."],
+    ["start-server-only-import", 'Module "node:fs" has been externalized for browser compatibility. Cannot access "node:fs.readFileSync" in client code.'],
+    ["router-context", "Warning: useRouter must be used inside a <RouterProvider> component!"],
+    ["router-context", "Uncaught Error: useHref() may be used only in the context of a <Router> component."],
+    ["root-document", "In HTML, <html> cannot be a child of <div>."],
+  ])("%s matches the TanStack Start wording: %s", (id, fixture) => {
+    expect(explainError(fixture).map((match) => match.recipeId)).toEqual([id]);
+  });
+
+  it("points a hand-edited route tree back at the router plugin", () => {
+    const stale = "src/routeTree.gen.ts(9,28): error TS2307: Cannot find module './routes/about' or its corresponding type declarations.";
+    expect(explainError(stale).map((match) => match.recipeId)).toEqual(["unresolved-import", "start-route-tree"]);
+    expect(withErrorHints(stale)).toContain("Never write or edit src/routeTree.gen.ts");
+  });
+
+  it.each([
+    ["process-not-defined", "createServerFn handler"],
+    ["router-context", "@tanstack/react-router"],
+    ["start-server-only-import", "createServerFn"],
+    ["root-document", "<Scripts />"],
+  ])("%s gives the TanStack Start fix", (id, startFix) => {
+    expect(withErrorHints(FIXTURES[id])).toContain(startFix);
   });
 
   it.each([

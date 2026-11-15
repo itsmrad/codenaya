@@ -106,6 +106,13 @@ describe("validatePlan", () => {
     expect(ownsPath(["src/app/about"], "src/app/about/page.tsx")).toBe(true);
     expect(ownsPath(["src/app/about"], "src/app/contact/page.tsx")).toBe(false);
   });
+
+  it("keeps TanStack Start's root, router, route tree and stylesheet shared, but delegates its route pages", () => {
+    for (const path of ["src/routes/__root.tsx", "src/routes", "src/router.tsx", "src/routeTree.gen.ts", "src/styles/app.css"]) {
+      expect(validatePlan({ tasks: [task("a", [path]), task("b", ["src/b.ts"])] }), path).toMatch(/shared file/);
+    }
+    expect(validatePlan({ tasks: [task("a", ["src/routes/about.tsx"]), task("b", ["src/routes/posts/"])] })).toHaveProperty("tasks");
+  });
 });
 
 describe("validatePlan roles and nesting", () => {
@@ -270,7 +277,7 @@ describe("classifySwarmPrompt", () => {
 });
 
 describe("isFoundationPath", () => {
-  it.each(["package.json", "vite.config.ts", "src/App.tsx", "src/main.tsx", "src/index.css", "src/lib/api.ts", "src/types/menu.ts", "src/types.ts", "src/vite-env.d.ts", "src/styles/tokens.css", "src/theme/colors.ts"])(
+  it.each(["package.json", "vite.config.ts", "src/App.tsx", "src/main.tsx", "src/index.css", "src/lib/api.ts", "src/types/menu.ts", "src/types.ts", "src/vite-env.d.ts", "src/styles/tokens.css", "src/theme/colors.ts", "src/routes/__root.tsx", "src/router.tsx"])(
     "lets the orchestrator write %s before delegation", (path) => expect(isFoundationPath(path)).toBe(true));
   it.each(["src/pages/menu.tsx", "src/app/about/page.tsx", "src/app/api/todos/route.ts", "src/components/nav.tsx", "src/data/site.ts", "src", "src/lib"])(
     "keeps %s for a worker", (path) => expect(isFoundationPath(path)).toBe(false));
