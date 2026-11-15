@@ -11,6 +11,7 @@ import {
   getOwnedSandbox,
   rememberSandbox,
   requestReinstall,
+  waitForReinstall,
 } from "./sandbox-registry";
 
 const fakeSandbox = (sandboxId: string, ownerId?: string) =>
@@ -74,6 +75,20 @@ describe("sandbox registry", () => {
 
     expect(requestReinstall("sbx_1")).toBe(true);
     expect(reinstall).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for the stream install to drain before acknowledging a sync (#774)", async () => {
+    let finish = () => {};
+    const installed = new Promise<void>((resolve) => { finish = resolve; });
+    rememberSandbox(fakeSandbox("sbx_1"), "user_a", vi.fn(), () => installed);
+    expect(requestReinstall("sbx_1")).toBe(true);
+    let acknowledged = false;
+    const waiting = waitForReinstall("sbx_1").then(() => { acknowledged = true; });
+    await Promise.resolve();
+    expect(acknowledged).toBe(false);
+    finish();
+    await waiting;
+    expect(acknowledged).toBe(true);
   });
 
   it("reports a reinstall it cannot hand off", async () => {

@@ -1,15 +1,23 @@
 import type { Sandbox } from "e2b";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   DEV_COMMAND_ENV,
+  DEV_SERVER_ENVS,
+  DevServerStartError,
   PROXY_TARGET_ENV,
+  fallbackDevStart,
   findPreviewDevServer,
   installWithDevServerStopped,
   isPortOpen,
   killTreeCommand,
+  proxyTargetPort,
   restartDevServerIfDown,
 } from "./dev-server";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const fakeSandbox = (processes: Array<{ pid: number; envs: Record<string, string>; cwd?: string; cmd?: string; args?: string[] }>) => {
   const run = vi.fn<(...args: unknown[]) => Promise<object>>(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
@@ -106,6 +114,80 @@ describe("installWithDevServerStopped (#486)", () => {
   it("names only the given pid in the kill command", () => {
     expect(killTreeCommand(12)).toContain("$(tree 12)");
     expect(killTreeCommand(12)).not.toMatch(/pkill|killall/);
+  });
+
+  it("waits for the dev server's port after starting a missing one (#774)", async () => {
+    vi.useFakeTimers();
+    const { sandbox, run } = fakeSandbox([]);
+    run.mockResolvedValueOnce({}).mockResolvedValueOnce({ stdout: "" }).mockResolvedValue({ stdout: "open\n" });
+    const fallback = { command: "npm run dev", envs: dev.envs, readyPort: 3000 };
+    let done = false;
+    const install = installWithDevServerStopped(sandbox, async () => "installed", {}, fallback).then(() => { done = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(250);
+    await install;
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(run.mock.calls[2][0]).toContain("port:3000");
+  });
+
+  it("rejects instead of succeeding when the port stays closed after launch", async () => {
+    vi.useFakeTimers();
+    const { sandbox, run } = fakeSandbox([]);
+    run.mockResolvedValue({ stdout: "" });
+    const rejected = expect(installWithDevServerStopped(sandbox, async () => undefined, {}, {
+      command: "npm run dev", envs: dev.envs, readyPort: 5173,
+    })).rejects.toBeInstanceOf(DevServerStartError);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rejected;
+  });
+
+  it("does not start a second dev server when another instance started one during the install", async () => {
+    const { sandbox, run } = fakeSandbox([]);
+    vi.mocked(sandbox.commands.list).mockResolvedValueOnce([]).mockResolvedValue([{ ...dev, cmd: "/bin/bash", args: [] }] as never);
+    run.mockResolvedValue({ stdout: "open\n" });
+    await installWithDevServerStopped(sandbox, async () => undefined, {}, { command: "npm run dev", envs: dev.envs, readyPort: 5173 });
+    // No second start, but its readiness is still awaited.
+    expect(run.mock.calls.map(([command]) => command)).toEqual([expect.stringContaining("port:5173")]);
+  });
+
+  it("does not expose process errors from a failed fallback start", async () => {
+    const { sandbox, run } = fakeSandbox([]);
+    run.mockRejectedValue(new Error("private project env"));
+    await expect(installWithDevServerStopped(sandbox, async () => undefined, {}, {
+      command: "npm run dev", envs: dev.envs,
+    })).rejects.toThrow(new DevServerStartError().message);
+  });
+});
+
+describe("fallbackDevStart (#774)", () => {
+  it.each([
+    [{ dependencies: { vite: "7" } }, undefined, "npm run dev -- --host 0.0.0.0", 5173],
+    [{ dependencies: { next: "16" } }, undefined, "npm run dev -- -H 0.0.0.0", 3000],
+    [{ scripts: { dev: "next dev" } }, "npm run dev -- --host 0.0.0.0", "npm run dev -- -H 0.0.0.0", 3000],
+  ])("starts %j like the boot and waits on the framework's port", (pkg, devCommand, command, readyPort) => {
+    const files = [{ path: "package.json", content: JSON.stringify(pkg) }];
+    expect(fallbackDevStart(files, devCommand, "/home/user/app")).toEqual({
+      command,
+      cwd: "/home/user/app",
+      envs: { ...DEV_SERVER_ENVS, [DEV_COMMAND_ENV]: command },
+      readyPort,
+    });
+  });
+
+  it("waits on the proxy's target port when known, e.g. a custom server.port", () => {
+    const files = [{ path: "package.json", content: "{}" }];
+    expect(fallbackDevStart(files, undefined, "/home/user/app", 5180).readyPort).toBe(5180);
+  });
+});
+
+describe("proxyTargetPort (#774)", () => {
+  it("reads the port the boot's proxy forwards to, or nothing", async () => {
+    const read = vi.fn(async () => 'const TARGET_PORT = parseInt(process.env.TARGET_PORT || "5180", 10);');
+    const sandbox = { files: { read } } as unknown as Sandbox;
+    await expect(proxyTargetPort(sandbox)).resolves.toBe(5180);
+    read.mockRejectedValue(new Error("not found"));
+    await expect(proxyTargetPort(sandbox)).resolves.toBeUndefined();
   });
 });
 

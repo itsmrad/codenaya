@@ -1,10 +1,42 @@
 import type { Sandbox } from "e2b";
+import { appendHostFlag, detectFrameworkFromFiles } from "../utils/dev-command";
 
 /**
  * Set on the dev server's E2B process to its own command line, so any server
  * instance can find it in `commands.list()` and start it again the same way.
  */
 export const DEV_COMMAND_ENV = "CODENAYA_DEV_COMMAND";
+
+/** Written at boot by the POST route; its TARGET_PORT is the dev server's port. */
+export const PROXY_SCRIPT_PATH = "/home/user/e2b-proxy.js";
+
+/** The port the boot's proxy forwards to: exact even for a custom server.port. */
+export const proxyTargetPort = async (sandbox: Sandbox): Promise<number | undefined> => {
+  try {
+    const script = await sandbox.files.read(PROXY_SCRIPT_PATH);
+    return Number(/TARGET_PORT \|\| "(\d+)"/.exec(script)?.[1]) || undefined;
+  } catch {
+    // No proxy yet, or an older sandbox: the framework default below applies.
+    return undefined;
+  }
+};
+
+/**
+ * Environment variables that force dev servers to bind to 0.0.0.0
+ * instead of localhost. E2B port forwarding only works when the
+ * server listens on all interfaces.
+ */
+export const DEV_SERVER_ENVS: Record<string, string> = {
+  HOST: "0.0.0.0",           // Create React App, Vite (some versions)
+  HOSTNAME: "0.0.0.0",       // Next.js
+  NEXT_TELEMETRY_DISABLED: "1",
+};
+
+export class DevServerStartError extends Error {
+  constructor() {
+    super("The preview server did not restart after installing dependencies. Restart the preview to retry.");
+  }
+}
 
 /**
  * SIGKILLs `pid` and every process under it, root first. E2B's `commands.kill`
@@ -27,7 +59,26 @@ export interface DevStart {
   command: string;
   envs: Record<string, string>;
   cwd?: string;
+  /** The dev server's local port; once set, a restart must listen on it within 10 s. */
+  readyPort?: number;
 }
+
+/**
+ * The start for a sync that finds no marked dev server, framework-aware like
+ * the boot's. Project env is not known here, only the bind variables.
+ */
+export const fallbackDevStart = (
+  files: { path: string; content: string }[],
+  devCommand: string | undefined,
+  cwd: string,
+  proxyPort?: number,
+): DevStart => {
+  const framework = detectFrameworkFromFiles(files, devCommand);
+  const command = appendHostFlag(devCommand || "npm run dev", framework);
+  // A sync carries only changed files, so non-Next means Vite even without vite.config.
+  const readyPort = proxyPort ?? (framework === "next" ? 3000 : 5173);
+  return { command, cwd, envs: { ...DEV_SERVER_ENVS, [DEV_COMMAND_ENV]: command }, readyPort };
+};
 
 /** A listening socket is ready even while Next compiles its first HTTP response. */
 export const isPortOpen = async (sandbox: Sandbox, port: number): Promise<boolean> => {
@@ -43,6 +94,16 @@ export const isPortOpen = async (sandbox: Sandbox, port: number): Promise<boolea
     // A refused connection or probe timeout is retried by the readiness loop.
     return false;
   }
+};
+
+/** The proxy can survive a dead dev server; background:true alone is not readiness (#774). */
+const waitForDevServer = async (sandbox: Sandbox, port: number) => {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (await isPortOpen(sandbox, port)) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new DevServerStartError();
 };
 
 /**
@@ -62,11 +123,15 @@ export const installWithDevServerStopped = async <T>(
   fallback?: DevStart,
 ): Promise<T> => {
   const [dev] = await stopDevServers(sandbox);
-  const start = dev ? devStartOf(dev) : fallback;
+  // A marked server keeps its command/env; the caller still knows its port.
+  const start = dev ? { ...devStartOf(dev), readyPort: fallback?.readyPort } : fallback;
   try {
     return await install();
   } finally {
-    if (start) await startDevServer(sandbox, start, output);
+    // Another instance may have started one during this install: narrows that race, a lock would close it.
+    const startedElsewhere = !dev && start && (await sandbox.commands.list()).some((command) => command.envs?.[DEV_COMMAND_ENV]);
+    if (start && !startedElsewhere) await startDevServer(sandbox, start, output);
+    else if (start?.readyPort) await waitForDevServer(sandbox, start.readyPort);
   }
 };
 
@@ -123,11 +188,19 @@ const stopDevServers = async (sandbox: Sandbox) => {
   return running;
 };
 
-const startDevServer = (sandbox: Sandbox, start: DevStart, output: DevOutput & { requestTimeoutMs?: number } = {}) =>
-  sandbox.commands.run(start.command, {
-    cwd: start.cwd,
-    envs: start.envs,
-    background: true,
-    timeoutMs: 0, // Like the boot's: E2B would kill it after 60s.
-    ...output,
-  });
+/** Waits for `readyPort` when given; any failure is the safe DevServerStartError. */
+const startDevServer = async (sandbox: Sandbox, start: DevStart, output: DevOutput & { requestTimeoutMs?: number } = {}) => {
+  try {
+    await sandbox.commands.run(start.command, {
+      cwd: start.cwd,
+      envs: start.envs,
+      background: true,
+      timeoutMs: 0, // Like the boot's: E2B would kill it after 60s.
+      ...output,
+    });
+    if (start.readyPort) await waitForDevServer(sandbox, start.readyPort);
+  } catch {
+    // Process errors can include project env values; expose only our safe message.
+    throw new DevServerStartError();
+  }
+};

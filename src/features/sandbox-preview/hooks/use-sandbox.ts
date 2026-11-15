@@ -74,6 +74,8 @@ export const useSandbox = ({
   const [terminalOutput, setTerminalOutput] = useState("");
   /** A compile error the dev server printed after boot (#223). */
   const [appError, setAppError] = useState<AppError | null>(null);
+  // Snapshot acknowledged by the sandbox, including an awaited PATCH reinstall.
+  const [syncedFiles, setSyncedFiles] = useState<Doc<"files">[] | undefined>();
   const [buildErrors] = useState(createBuildErrorDetector);
   const [bootHistory, setBootHistory] = useState<BootHistory>({});
   const [phase, setPhase] = useState<BootPhase | null>(null);
@@ -232,6 +234,12 @@ export const useSandbox = ({
                     sandboxIdRef.current = event.sandboxId;
                     break;
                   case "error":
+                    if (ready) {
+                      setError(event.message);
+                      setErrorKind(classifySandboxError({ code: event.code }));
+                      setStatus("error");
+                      break;
+                    }
                     throw new SandboxStartError(
                       event.message,
                       classifySandboxError({ code: event.code }),
@@ -344,7 +352,10 @@ export const useSandbox = ({
           return;
         }
         const changedFiles = getChangedFiles(flatFiles, syncedContentRef.current);
-        if (changedFiles.length === 0) return;
+        if (changedFiles.length === 0) {
+          setSyncedFiles(files);
+          return;
+        }
 
         // The dev server reports the error again if this edit doesn't fix it.
         setAppError(null);
@@ -356,9 +367,17 @@ export const useSandbox = ({
             body: JSON.stringify({
               files: changedFiles,
               installCommand: settings?.installCommand,
+              devCommand: settings?.devCommand,
             }),
             signal,
           });
+          const body = await response.json().catch(() => null);
+          if (body?.code === "dev_server_unavailable" && isCurrent()) {
+            setError(body.error);
+            setErrorKind("transient");
+            setStatus("error");
+            return;
+          }
           if (!response.ok) throw new Error("File sync failed");
           if (!isCurrent()) return;
           // Acknowledge exactly the sent snapshot, never files edited in flight.
@@ -368,11 +387,13 @@ export const useSandbox = ({
 
           // After the boot stream ends, a failed reinstall reaches only this (#497).
           const failure = readInstallFailure(
-            await response.json().catch(() => null),
+            body,
             settings?.installCommand || "npm install",
           );
           // Not `cancelled`: edits during a slow reinstall must not hide its failure.
-          if (!isCurrent() || !failure) return;
+          if (!isCurrent()) return;
+          setSyncedFiles(files);
+          if (!failure) return;
           setTerminalOutput((prev) => `${prev}\npackage.json changed.\n${failure.output}`);
           const { error } = failure;
           if (error) setAppError((prev) => mergeAppError(prev, error));
@@ -404,7 +425,7 @@ export const useSandbox = ({
       clearTimeout(timeoutId);
       flushSyncRef.current = null;
     };
-  }, [enabled, files, status, settings?.installCommand, buildErrors, restart]);
+  }, [enabled, files, status, settings?.installCommand, settings?.devCommand, buildErrors, restart]);
 
   // Cleanup sandbox on unmount or when disabled
   useEffect(() => {
@@ -489,6 +510,7 @@ export const useSandbox = ({
     error,
     errorKind,
     appError,
+    syncedFiles,
     restart,
     terminalOutput,
     phase,

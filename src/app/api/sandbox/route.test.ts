@@ -91,10 +91,13 @@ const routes = [
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("ok")));
   resetRateLimits();
   vi.stubEnv("E2B_API_KEY", "e2b-test");
   mocks.auth.mockResolvedValue({ userId: "user_1" });
 });
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe.each(routes)("$name", ({ call }) => {
   it.each([
@@ -488,8 +491,12 @@ describe("POST /api/sandbox after ready (#492)", () => {
     finishInstall();
     await settle();
     expect(installRuns(run)).toBe(2);
-    expect((await patch).status).toBe(200);
+    let acknowledged = false;
+    void patch.then(() => { acknowledged = true; });
+    await settle();
+    expect(acknowledged).toBe(false);
     finishInstall();
+    expect((await patch).status).toBe(200);
     await drain(reader);
 
     expect(stats.maxConcurrentInstalls).toBe(1);
@@ -671,7 +678,9 @@ describe("PATCH /api/sandbox/[sandboxId] install failure (#497)", () => {
   const SECRET = "sk_live_synthetic_0123456789";
 
   it("answers with the exit code and npm code only, and keeps the sandbox", async () => {
-    const run = vi.fn(async () => {
+    const run = vi.fn(async (command: string, options?: { background?: boolean }) => {
+      if (options?.background) return {};
+      if (command.startsWith("node -e ")) return { exitCode: 0, stdout: "open", stderr: "" };
       throw new (CommandExitError as unknown as new (result: object) => Error)({
         exitCode: 1,
         stdout: `postinstall: API_KEY=${SECRET}\n`,
@@ -681,6 +690,7 @@ describe("PATCH /api/sandbox/[sandboxId] install failure (#497)", () => {
     });
     mocks.sandboxConnect.mockResolvedValue({
       sandboxId: "sbx_patch",
+      getHost: () => "4000-sbx.e2b.app",
       getInfo: async () => ({ metadata: { userId: "user_1" } }),
       files: { write: vi.fn() },
       commands: { run, list: vi.fn(async () => []) },
@@ -714,13 +724,16 @@ describe("PATCH reinstall timeout", () => {
     "hands off a timeout with npm code %s without leaking output or losing its classification",
     async (code) => {
       const secret = "synthetic-private-install-output";
-      const run = vi.fn(async (_command: string, options: { onStderr?: (chunk: string) => void }) => {
+      const run = vi.fn(async (command: string, options: { onStderr?: (chunk: string) => void; background?: boolean }) => {
+        if (options.background) return {};
+        if (command.startsWith("node -e ")) return { exitCode: 0, stdout: "open", stderr: "" };
         options.onStderr?.(`npm error ${secret}\nnpm error co`);
         options.onStderr?.(code ? `de ${code}\n` : "ntent\n");
         throw new TimeoutError(secret);
       });
       mocks.sandboxConnect.mockResolvedValue({
         sandboxId: "sbx_timeout",
+        getHost: () => "4000-sbx.e2b.app",
         getInfo: async () => ({ metadata: { userId: "user_1" } }),
         files: { write: vi.fn() },
         commands: { run, list: vi.fn(async () => []) },
@@ -739,7 +752,7 @@ describe("PATCH reinstall timeout", () => {
         const failure = readInstallFailure(body, "npm install");
         if (code === "ETIMEDOUT" || code === "ECONNRESET") expect(failure?.error).toBeNull();
         else expect(failure?.error).toMatchObject({ kind: "build", file: "package.json" });
-        expect(run).toHaveBeenCalledTimes(1);
+        expect(run.mock.calls.filter(([command]) => !command.startsWith("node -e "))).toHaveLength(2);
         await sync();
         expect(mocks.sandboxConnect).toHaveBeenCalledTimes(1);
       } finally {
@@ -755,6 +768,7 @@ describe("PATCH /api/sandbox/[sandboxId] package.json burst (#486)", () => {
     let serving = true;
     const order: string[] = [];
     const run = vi.fn(async (command: string, options?: { envs?: Record<string, string> }) => {
+      if (command.startsWith("node -e ")) return { exitCode: 0, stdout: "open", stderr: "" };
       if (command === killTreeCommand(9)) serving = false;
       if (options?.envs?.[DEV_COMMAND_ENV]) serving = true;
       order.push(command === DEFAULT_INSTALL_COMMAND ? `install:${serving ? "serving" : "stopped"}` : command);
@@ -762,6 +776,7 @@ describe("PATCH /api/sandbox/[sandboxId] package.json burst (#486)", () => {
     });
     mocks.sandboxConnect.mockResolvedValue({
       sandboxId: "sbx_burst",
+      getHost: () => "4000-sbx.e2b.app",
       getInfo: async () => ({ metadata: { userId: "user_1" } }),
       files: { write: vi.fn() },
       commands: {
@@ -785,7 +800,7 @@ describe("PATCH /api/sandbox/[sandboxId] package.json burst (#486)", () => {
         expect(await response.json()).toEqual({ success: true, synced: 1 });
       }
       expect(order).toEqual([killTreeCommand(9), "install:stopped", "npm run dev -- --host"]);
-      expect(run).toHaveBeenLastCalledWith("npm run dev -- --host", {
+      expect(run).toHaveBeenCalledWith("npm run dev -- --host", {
         cwd: "/home/user/app",
         envs: devEnvs,
         background: true,
@@ -793,6 +808,66 @@ describe("PATCH /api/sandbox/[sandboxId] package.json burst (#486)", () => {
       });
     } finally {
       forgetSandbox("sbx_burst");
+    }
+  });
+});
+
+describe("PATCH missing dev server (#774)", () => {
+  it("returns a failed install, not a 503, when the restart after it fails too", async () => {
+    const run = vi.fn(async (_command: string, options?: { background?: boolean }) => {
+      if (options?.background) throw new Error("private start output");
+      throw new (CommandExitError as unknown as new (result: object) => Error)({
+        exitCode: 1, stdout: "", stderr: "npm error code ERESOLVE\n", error: "exit status 1",
+      });
+    });
+    mocks.sandboxConnect.mockResolvedValue({
+      sandboxId: "sbx_install_and_start_fail",
+      getHost: () => "4000-sbx.e2b.app",
+      getInfo: async () => ({ metadata: { userId: "user_1" } }),
+      files: { write: vi.fn() },
+      commands: { run, list: vi.fn(async () => []) },
+    });
+    try {
+      const response = await PATCH(request("PATCH", JSON.stringify({ files: [{ path: "package.json", content: "{}" }] })),
+        { params: Promise.resolve({ sandboxId: "sbx_install_and_start_fail" }) });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ success: true, synced: 1, installFailed: { exitCode: 1, code: "ERESOLVE" } });
+    } finally {
+      forgetSandbox("sbx_install_and_start_fail");
+    }
+  });
+
+  it.each([false, true])("starts a missing server after install and surfaces start failure (%s)", async (startFails) => {
+    const run = vi.fn(async (command: string, options?: { background?: boolean }) => {
+      if (options?.background && startFails) throw new Error("private start output");
+      if (command.startsWith("node -e ")) return { exitCode: 0, stdout: "open", stderr: "" };
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    mocks.sandboxConnect.mockResolvedValue({
+      sandboxId: "sbx_missing_dev",
+      getHost: () => "4000-sbx.e2b.app",
+      getInfo: async () => ({ metadata: { userId: "user_1" } }),
+      files: { write: vi.fn() },
+      commands: { run, list: vi.fn(async () => []) },
+    });
+    try {
+      const response = await PATCH(request("PATCH", JSON.stringify({
+        files: [{ path: "package.json", content: "{}" }], devCommand: "vite --port 5173",
+      })), { params: Promise.resolve({ sandboxId: "sbx_missing_dev" }) });
+      const commands = run.mock.calls.map(([command]) => command);
+      expect(commands.slice(0, 2)).toEqual([DEFAULT_INSTALL_COMMAND, "vite --port 5173 --host 0.0.0.0"]);
+      expect(response.status).toBe(startFails ? 503 : 200);
+      const body = await response.json();
+      if (startFails) {
+        expect(body.code).toBe("dev_server_unavailable");
+        expect(body.error).not.toContain("private start output");
+      } else {
+        expect(body).toEqual({ success: true, synced: 1 });
+        // Ready once Vite's port listens.
+        expect(commands[2]).toContain("port:5173");
+      }
+    } finally {
+      forgetSandbox("sbx_missing_dev");
     }
   });
 });
