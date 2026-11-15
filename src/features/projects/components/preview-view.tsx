@@ -558,20 +558,21 @@ export const PreviewView = ({
   // Automatically refresh the iframe shortly after the dev server announces it's running.
   // The first request to Vite often serves the index.html and CSS instantly but hangs 
   // compiling the JS bundle. An auto-refresh ensures the JS hydration catches up seamlessly.
+  // Server frameworks hydrate themselves; remounting can cancel a navigation or Server Action.
   // Skipped if another reload, e.g. a first build ending (#561), beat it: one reload, not two.
   const refreshKeyRef = useRef(refreshKey);
   useEffect(() => {
     refreshKeyRef.current = refreshKey;
   }, [refreshKey]);
   useEffect(() => {
-    if (status === "running" && previewUrl) {
+    if (!sandboxOnly && status === "running" && previewUrl) {
       const armedKey = refreshKeyRef.current;
       const timer = setTimeout(() => {
         setRefreshKey((k) => (k === armedKey ? k + 1 : k));
       }, 2500);
       return () => clearTimeout(timer);
     }
-  }, [status, previewUrl]);
+  }, [sandboxOnly, status, previewUrl]);
 
   return (
     <div className="h-full flex flex-col bg-transparent gap-3">
