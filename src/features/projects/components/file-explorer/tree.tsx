@@ -132,10 +132,12 @@ export const Tree = ({
   // delete took.
   const handleDelete = () => {
     setConfirmingDelete(false);
-    if (item.type === "file") closeTab(item._id);
     deleteFile({ id: item._id }).then(
       // Null when the project is too big to snapshot: no Undo then.
-      (undoCheckpointId) =>
+      (undoCheckpointId) => {
+        // Close the tab only once the file is really gone, so a failed delete
+        // doesn't leave the user without the tab of a file that still exists.
+        if (item.type === "file") closeTab(item._id);
         toast.success(`Deleted ${item.name}`, {
           action: undoCheckpointId
             ? undoAction(() =>
@@ -145,7 +147,8 @@ export const Tree = ({
                 ),
               )
             : undefined,
-        }),
+        });
+      },
       (error) => toast.error(convexErrorMessage(error, `Couldn't delete ${item.name}`)),
     );
   };
