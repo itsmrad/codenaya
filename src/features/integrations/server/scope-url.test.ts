@@ -595,8 +595,12 @@ describe("buildScopedMcpUrl — irrelevant selection fields", () => {
 
   it("keeps every scoped URL on its provider's trusted hostname", () => {
     for (const definition of listProviders()) {
-      const selection: ProjectScopeSelection =
-        definition.id === "sentry" ? everything : { ...everything, projectSlug: undefined };
+      const selection: ProjectScopeSelection = {
+        ...everything,
+        ...(definition.id === "sentry" ? {} : { projectSlug: undefined }),
+        // GitLab declares its toolsets, so the shared "issues" would fail closed.
+        ...(definition.id === "gitlab" ? { toolsets: ["core"] } : {}),
+      };
       const { hostname } = new URL(buildScopedMcpUrl(definition, selection).url);
       expect(definition.trustedHostnames).toContain(hostname);
     }
