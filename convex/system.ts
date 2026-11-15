@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 
+import { publicValueSecretRule } from "../src/features/integrations/credential-guard";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import {
@@ -1814,6 +1815,7 @@ export const setPublicEnvVarInternal = mutation({
     key: v.string(),
     value: v.string(),
   },
+  returns: v.id("projectEnvVars"),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
@@ -1821,6 +1823,14 @@ export const setPublicEnvVarInternal = mutation({
     // so it must be the project's real owner (#211).
     if (!(await ownedProjectOrNull(ctx, args.projectId, args.ownerId))) {
       throw appError("NOT_FOUND", "Project not found");
+    }
+
+    if (publicValueSecretRule(args.value)) {
+      throw appError(
+        "INVALID_ARGUMENT",
+        "This looks like a secret key and would be published in the browser bundle. " +
+          "Use a name without a public prefix and store it as a secret instead.",
+      );
     }
 
     const existing = await ctx.db
