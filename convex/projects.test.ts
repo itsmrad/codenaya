@@ -8,6 +8,7 @@ import type { Id, TableNames } from "./_generated/dataModel";
 import { deleteProjectBatch } from "./projectCascade";
 import schema from "./schema";
 import { MAX_PROJECT_INSTRUCTIONS_LENGTH } from "../src/features/projects/instructions";
+import { THEME_PRESETS } from "../src/features/projects/theme";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -396,6 +397,7 @@ describe("project-scoped public mutations", () => {
     for (const write of [
       () => alice.mutation(api.projects.updateSettings, { id: projectId, settings: {} }),
       () => alice.mutation(api.projects.updateInstructions, { id: projectId, instructions: "" }),
+      () => alice.mutation(api.projects.updateTheme, { id: projectId }),
       () => alice.mutation(api.conversations.create, { projectId, title: "Chat" }),
       () => alice.mutation(api.chatImages.generateUploadUrl, { projectId }),
       () => alice.mutation(api.envVars.setPublicEnvVar, { projectId, key: "NEXT_PUBLIC_A", value: "1" }),
@@ -621,5 +623,63 @@ describe("projects.get card status (#318)", () => {
       broken: [undefined, "failed"],
       quiet: [undefined, undefined],
     });
+  });
+});
+
+describe("project theme (#302)", () => {
+  const theme = THEME_PRESETS[1].theme;
+
+  test("only the owner sets it; colours are stored lowercase; no theme clears it", async () => {
+    const { t, alice, bob } = setup();
+    const projectId = await t.run((ctx) =>
+      ctx.db.insert("projects", { name: "p", ownerId: ALICE, updatedAt: 0 })
+    );
+
+    await alice.mutation(api.projects.updateTheme, {
+      id: projectId,
+      theme: { ...theme, primary: "#2563EB" },
+    });
+    expect((await alice.query(api.projects.getById, { id: projectId })).theme).toEqual({
+      ...theme,
+      primary: "#2563eb",
+    });
+
+    await expect(bob.mutation(api.projects.updateTheme, { id: projectId, theme })).rejects.toThrow(
+      /Unauthorized/
+    );
+    await expect(t.mutation(api.projects.updateTheme, { id: projectId, theme })).rejects.toThrow();
+
+    await alice.mutation(api.projects.updateTheme, { id: projectId });
+    expect((await alice.query(api.projects.getById, { id: projectId })).theme).toBeUndefined();
+  });
+
+  test.each([
+    ["a non-hex colour", { primary: "blue" }],
+    ["a short hex colour", { accent: "#fff" }],
+    ["a radius over 1rem", { radius: 1.5 }],
+    ["a negative radius", { radius: -0.25 }],
+    ["a font outside the list", { font: "comic-sans" }],
+  ])("rejects %s and keeps the saved theme", async (_label, change) => {
+    const { t, alice } = setup();
+    const projectId = await t.run((ctx) =>
+      ctx.db.insert("projects", { name: "p", ownerId: ALICE, updatedAt: 0, theme })
+    );
+
+    await expect(
+      alice.mutation(api.projects.updateTheme, { id: projectId, theme: { ...theme, ...change } })
+    ).rejects.toEqual(
+      expect.objectContaining({ data: expect.objectContaining({ code: "INVALID_ARGUMENT" }) })
+    );
+    expect((await alice.query(api.projects.getById, { id: projectId })).theme).toEqual(theme);
+  });
+
+  test("a duplicate keeps the theme", async () => {
+    const { t, alice } = setup();
+    const projectId = await t.run((ctx) =>
+      ctx.db.insert("projects", { name: "p", ownerId: ALICE, updatedAt: 0, theme })
+    );
+
+    const copyId = await alice.mutation(api.projects.duplicate, { id: projectId });
+    expect((await alice.query(api.projects.getById, { id: copyId })).theme).toEqual(theme);
   });
 });

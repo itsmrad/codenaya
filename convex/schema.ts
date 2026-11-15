@@ -224,6 +224,15 @@ const activationEventValidator = v.union(
   }),
 );
 
+/** A project's brand theme (#302). `font` is a `THEME_FONTS` id; colours are `#rrggbb`. */
+export const projectThemeValidator = v.object({
+  primary: v.string(),
+  accent: v.string(),
+  radius: v.number(),
+  font: v.string(),
+  defaultMode: v.union(v.literal("light"), v.literal("dark"), v.literal("system")),
+});
+
 /** A project's link to its GitHub repo (#343). */
 export const githubSyncValidator = v.object({
   repo: v.string(), // "owner/name"
@@ -308,6 +317,8 @@ export default defineSchema({
     // Always-on agent instructions from the owner (#299), at most
     // MAX_PROJECT_INSTRUCTIONS_LENGTH characters.
     instructions: v.optional(v.string()),
+    // Brand theme every agent run applies (#302); validated by `validateTheme`.
+    theme: v.optional(projectThemeValidator),
     // Set when the owner deletes the project. The project is hidden at once
     // while `projects.deleteBatch` removes its data in the background.
     deletingAt: v.optional(v.number()),

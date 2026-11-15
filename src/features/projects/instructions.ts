@@ -1,3 +1,5 @@
+import { buildDesignTokensSection, type ProjectTheme } from "./theme";
+
 /** Longest project instructions an owner may save (#299). */
 export const MAX_PROJECT_INSTRUCTIONS_LENGTH = 4000;
 
@@ -15,14 +17,17 @@ const stripDelimiterTags = (text: string): string => {
 /**
  * The system prompt's project instructions section (#299): the owner's
  * always-on preferences, delimited and framed as user text, not system rules.
- * Capped here too, so a stored value can never outgrow the limit. Empty when
- * there are none.
+ * Capped here too, so a stored value can never outgrow the limit. The
+ * project theme's design tokens (#302) follow it. Empty when there are neither.
  */
-export function buildProjectInstructionsSection(instructions?: string): string {
+export function buildProjectInstructionsSection(
+  instructions?: string,
+  theme?: ProjectTheme,
+): string {
   const text = stripDelimiterTags(instructions ?? "")
     .trim()
     .slice(0, MAX_PROJECT_INSTRUCTIONS_LENGTH);
-  if (!text) return "";
+  if (!text) return buildDesignTokensSection(theme);
 
   return [
     "\n\n## Project instructions (from the user)",
@@ -32,5 +37,5 @@ export function buildProjectInstructionsSection(instructions?: string): string {
     "<project_instructions>",
     text,
     "</project_instructions>",
-  ].join("\n");
+  ].join("\n") + buildDesignTokensSection(theme);
 }
