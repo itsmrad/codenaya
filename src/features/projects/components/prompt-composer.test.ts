@@ -76,6 +76,17 @@ it("submits an explicitly picked framework", async () => {
   expect(onSubmit).toHaveBeenCalledWith("A blog", "build", "next");
 });
 
+it("submits an explicitly picked TanStack Start framework", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(true);
+  const render = () => { harness.resetCursor(); return PromptComposer({ onSubmit }); };
+  let tree = render();
+  (find(tree, Select).props.onValueChange as (value: string) => void)("tanstack-start");
+  expect(harness.write).toHaveBeenCalledWith("tanstack-start");
+  tree = render();
+  await (find(tree, PromptInput).props.onSubmit as (message: { text: string }) => Promise<void>)({ text: "A blog" });
+  expect(onSubmit).toHaveBeenCalledWith("A blog", "build", "tanstack-start");
+});
+
 it("restores an old saved vite choice and submits it explicitly", async () => {
   harness.saved = "vite";
   const onSubmit = vi.fn().mockResolvedValue(true);
@@ -93,6 +104,16 @@ it("restores the saved choice after mount and disables changes while creating", 
   harness.effects[0]();
   const select = find(render(), Select);
   expect(select.props.value).toBe("next");
+  expect(select.props.disabled).toBe(true);
+});
+
+it("restores a saved TanStack Start choice after mount and disables changes while creating", () => {
+  harness.saved = "tanstack-start";
+  const render = () => { harness.resetCursor(); return PromptComposer({ onSubmit: vi.fn(), isSubmitting: true }); };
+  render();
+  harness.effects[0]();
+  const select = find(render(), Select);
+  expect(select.props.value).toBe("tanstack-start");
   expect(select.props.disabled).toBe(true);
 });
 

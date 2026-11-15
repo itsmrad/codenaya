@@ -31,6 +31,7 @@ import {
 } from "@/features/sandbox-preview/server/provider/types";
 import {
   INSTALLING,
+  SHORT_CALL_MS,
   type PreviewDevServer,
   findPreviewDevServer,
   restartDevServerIfDown,
@@ -73,8 +74,6 @@ const INSTALL_POLL_MS = 2_500;
 /** Copying the preview's node_modules; seconds for the starter. */
 const COPY_TIMEOUT_MS = 30_000;
 const CREATE_TIMEOUT_MS = 30_000;
-/** Listing, connecting, process lists, state reads and cleanup. */
-const SHORT_CALL_MS = 10_000;
 /** E2B reaps the sandbox after this even if the kill below is lost. */
 const SANDBOX_TIMEOUT_MS = 5 * 60_000;
 const MAX_ERROR_LINES = 40;
@@ -94,7 +93,7 @@ const ANSI_ESCAPE = /\u001b\[[\d;]*[A-Za-z]/g;
 
 /** `next build` progress, the route table and its legend, and the telemetry notice. */
 const NEXT_NOISE =
-  /^\s*(?:▲ Next\.js|- (?:Environments?|Experiments)\b|[✓○ƒ●◐λ]\s|[┌├└│]|\+ First Load JS|Route \((?:app|pages)\)|Creating an optimized production build|Compiled (?:successfully|with warnings)|Linting and checking validity of types|Running TypeScript|Collecting page data|Generating static pages|Collecting build traces|Finalizing page optimization|Skipping (?:validation|linting)|Attention: Next\.js now collects|This information is used|You can learn more|https:\/\/nextjs\.org\/telemetry)/;
+  /^\s*(?:▲ Next\.js|- (?:Environments?|Experiments)\b|[✓○ƒ●◐λ]\s|[┌├└│]|\+ First Load JS|Route \((?:app|pages)\)|Creating an optimized production build|Compiled (?:successfully|with warnings)|Linting and checking validity of types|Running TypeScript|Finished TypeScript|Collecting page data|Generating static pages|Collecting build traces|Finalizing page optimization|Skipping (?:validation|linting)|Attention: Next\.js now collects|This information is used|You can learn more|https:\/\/nextjs\.org\/telemetry)/;
 /** Where a `next build` failure starts. */
 const NEXT_ERROR_START =
   /^\s*(?:Failed to compile|Error occurred prerendering page|> Build error occurred|Build error occurred|⨯ |Type error:|Module not found)/;

@@ -46,21 +46,26 @@ import {
 import {
   DEV_COMMAND_ENV,
   PROXY_TARGET_ENV,
+  DEV_SERVER_ENVS,
+  DevServerStartError,
+  PROXY_SCRIPT_PATH,
   installWithDevServerStopped,
   isPortOpen,
+  runDevServer,
   type DevStart,
 } from "@/features/sandbox-preview/server/dev-server";
-import { rewriteProxyHeaders, shouldInjectBridge } from "@/features/sandbox-preview/server/preview-proxy";
+import {
+  createBridgeInjector,
+  rewriteProxyHeaders,
+  shouldInjectBridge,
+} from "@/features/sandbox-preview/server/preview-proxy";
 import { appendHostFlag, detectFrameworkFromFiles } from "@/features/sandbox-preview/utils/dev-command";
 import {
   missingReferencedFiles,
   undeclaredPackages,
 } from "@/features/sandbox-preview/utils/missing-references";
 import { nodeIncompatibility } from "@/features/sandbox-preview/utils/node-compat";
-import {
-  PREVIEW_BRIDGE_SCRIPT,
-  insertBridge,
-} from "@/features/sandbox-preview/utils/preview-bridge";
+import { PREVIEW_BRIDGE_SCRIPT } from "@/features/sandbox-preview/utils/preview-bridge";
 import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 import {
   recordBootPhase,
@@ -112,17 +117,6 @@ const requestSchema = z.object({
 
 const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour (E2B free plan max)
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
-
-/**
- * Environment variables that force dev servers to bind to 0.0.0.0
- * instead of localhost. E2B port forwarding only works when the
- * server listens on all interfaces.
- */
-const DEV_SERVER_ENVS: Record<string, string> = {
-  HOST: "0.0.0.0",           // Create React App, Vite (some versions)
-  HOSTNAME: "0.0.0.0",       // Next.js
-  NEXT_TELEMETRY_DISABLED: "1",
-};
 
 /**
  * Regex patterns to detect the port from dev server stdout.
@@ -333,7 +327,9 @@ export async function POST(request: Request) {
       // The first build boots the preview from its starter while the agent is
       // still writing, so dependencies it adds to package.json later have to be
       // installed here, with the output on this stream (#254).
+      let reinstallStartError: DevServerStartError | null = null;
       const reinstall = debounceSerial(async () => {
+        reinstallStartError = null;
         if (!sandbox) return;
         send({ type: "output", data: `\npackage.json changed.\n$ ${installCmd}\n` });
         try {
@@ -355,6 +351,10 @@ export async function POST(request: Request) {
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unknown error";
           send({ type: "output", data: `\nError: ${message}\n` });
+          if (error instanceof DevServerStartError) {
+            reinstallStartError = error;
+            send({ type: "error", message, code: "transient" });
+          }
         }
       }, REINSTALL_DEBOUNCE_MS);
 
@@ -408,7 +408,10 @@ export async function POST(request: Request) {
         }
 
         // File syncs reuse this handle instead of reconnecting (#179).
-        rememberSandbox(sandbox, userId, reinstall.schedule);
+        rememberSandbox(sandbox, userId, reinstall.schedule, async () => {
+          await reinstall.idle();
+          if (reinstallStartError) throw reinstallStartError;
+        });
 
         send({
           type: "output",
@@ -532,11 +535,7 @@ export async function POST(request: Request) {
             [DEV_COMMAND_ENV]: devCmdWithHost,
           },
         };
-        await sandbox.commands.run(devCmdWithHost, {
-          cwd: WORK_DIR,
-          background: true,
-          timeoutMs: 0, // Prevent E2B from killing the dev server after the default 60s timeout
-          envs: devStart.envs,
+        await runDevServer(sandbox, devStart, {
           onStdout: (data) => {
             send({ type: "output", data });
             if (!detectedPort) {
@@ -567,6 +566,8 @@ export async function POST(request: Request) {
               "Check the terminal output above for errors."
           );
         }
+
+        devStart.readyPort = localPort;
 
         // Start the proxy to bypass Vite allowedHosts and bind issues
         const proxyPort = await startE2bProxy(sandbox, localPort);
@@ -762,6 +763,7 @@ async function startE2bProxy(sandbox: Sandbox, targetPort: number): Promise<numb
   const proxyCode = `
 const http = require('http');
 const net = require('net');
+const { Transform, pipeline } = require('stream');
 
 process.on('uncaughtException', (err) => console.error('E2B Proxy Uncaught Exception:', err));
 process.on('unhandledRejection', (reason) => console.error('E2B Proxy Unhandled Rejection:', reason));
@@ -769,7 +771,7 @@ process.on('unhandledRejection', (reason) => console.error('E2B Proxy Unhandled 
 const TARGET_PORT = parseInt(process.env.TARGET_PORT || "${targetPort}", 10);
 const PROXY_PORT = parseInt(process.env.PROXY_PORT || "${proxyPort}", 10);
 const BRIDGE = ${JSON.stringify(PREVIEW_BRIDGE_SCRIPT)};
-const insertBridge = ${String(insertBridge)};
+const createBridgeInjector = ${String(createBridgeInjector)};
 const rewriteProxyHeaders = ${String(rewriteProxyHeaders)};
 const shouldInjectBridge = ${String(shouldInjectBridge)};
 
@@ -785,21 +787,30 @@ const server = http.createServer((req, res) => {
   delete options.headers['accept-encoding'];
 
   const proxyReq = http.request(options, (proxyRes) => {
-    const headers = { ...proxyRes.headers };
+    const headers = Object.assign({}, proxyRes.headers);
     const isPage = shouldInjectBridge(req.method, proxyRes.statusCode, headers);
     if (!isPage) {
       res.writeHead(proxyRes.statusCode, headers);
       proxyRes.pipe(res, { end: true });
       return;
     }
-    const chunks = [];
-    proxyRes.on('data', (chunk) => chunks.push(chunk));
-    proxyRes.on('end', () => {
-      const html = insertBridge(Buffer.concat(chunks).toString('utf8'), BRIDGE);
-      delete headers['transfer-encoding'];
-      headers['content-length'] = Buffer.byteLength(html);
-      res.writeHead(proxyRes.statusCode, headers);
-      res.end(html);
+    delete headers['content-length'];
+    delete headers['transfer-encoding'];
+    res.writeHead(proxyRes.statusCode, headers);
+    const injector = createBridgeInjector(BRIDGE);
+    pipeline(proxyRes, new Transform({
+      transform(chunk, encoding, callback) {
+        for (const part of injector.push(chunk)) this.push(part);
+        callback();
+      },
+      flush(callback) {
+        for (const part of injector.flush()) this.push(part);
+        callback();
+      },
+    }), res, (err) => {
+      if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+        console.error('E2B Proxy Response Error:', err);
+      }
     });
   });
 
@@ -855,9 +866,9 @@ server.listen(PROXY_PORT, '0.0.0.0', () => {
 });
   `;
 
-  await sandbox.files.write("/home/user/e2b-proxy.js", proxyCode);
+  await sandbox.files.write(PROXY_SCRIPT_PATH, proxyCode);
   
-  await sandbox.commands.run("node /home/user/e2b-proxy.js", {
+  await sandbox.commands.run(`node ${PROXY_SCRIPT_PATH}`, {
     background: true,
     // Also listed with the process, so checkBuild can tell whether the dev server is still up.
     envs: { [PROXY_TARGET_ENV]: String(targetPort) },

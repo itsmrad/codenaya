@@ -5,9 +5,10 @@ import semver from "semver";
 
 import { KNOWN_GOOD_VERSIONS } from "../src/features/conversations/inngest/known-good-versions.ts";
 
-// fromNodeImage("22") in e2b/build-template.mts pins no minor. Check its floor
-// conservatively; this does not certify the deployed template or WebContainer.
-const NODE_FLOOR = "22.0.0";
+// fromNodeImage("22") in e2b/build-template.mts pins no minor. Vite 8 needs
+// 22.12+, and the sandbox refuses an older Node before installing (node-compat.ts).
+// This does not certify the deployed template or WebContainer.
+const NODE_FLOOR = "22.12.0";
 
 export function checkKnownGoodVersions(view = (spec) => JSON.parse(execFileSync(
   "npm", ["view", spec, "version", "peerDependencies", "engines", "--json"],

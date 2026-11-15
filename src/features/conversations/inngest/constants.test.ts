@@ -6,6 +6,7 @@ import {
   SWARM_ORCHESTRATOR_NOTE,
   SWARM_SUBORCH_NOTE,
   SWARM_WORKER_NOTE,
+  TANSTACK_START_NOTE,
 } from "./constants";
 import { KNOWN_GOOD_VERSIONS } from "./known-good-versions";
 
@@ -89,6 +90,12 @@ describe("coding agent integration instructions", () => {
     );
   });
 
+  it("keeps the TanStack Start block out of the static prompt", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/<tanstack_start>|routeTree\.gen|createServerFn/);
+    expect(TANSTACK_START_NOTE).toContain("Never write or edit src/routeTree.gen.ts");
+    expect(TANSTACK_START_NOTE).toContain(".validator(schema)");
+  });
+
   it("requires internal links to point at routes the app defines", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       "Every internal link (<Link to>, <a href=\"/...\">, navigate()) must point to a route the app defines",
@@ -112,7 +119,9 @@ describe("coding agent integration instructions", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       `"@vitejs/plugin-react": "${KNOWN_GOOD_VERSIONS["@vitejs/plugin-react"]}"`,
     );
-    expect(KNOWN_GOOD_VERSIONS.vite).toMatch(/^\^6\./);
+    expect(KNOWN_GOOD_VERSIONS.vite).toMatch(/^\^8\./);
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("New apps use Vite 8 with @vitejs/plugin-react 6");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("Never use Vite 7+");
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       'resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } }',
     );

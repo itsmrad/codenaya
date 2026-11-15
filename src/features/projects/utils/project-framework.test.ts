@@ -14,6 +14,8 @@ it("defaults to Auto and remembers every choice, including an old saved vite", (
   expect(readProjectFramework()).toBe("auto");
   writeProjectFramework("next");
   expect(readProjectFramework()).toBe("next");
+  writeProjectFramework("tanstack-start");
+  expect(readProjectFramework()).toBe("tanstack-start");
   writeProjectFramework("vite");
   expect(readProjectFramework()).toBe("vite");
   writeProjectFramework("auto");

@@ -76,6 +76,26 @@ describe("catalog", () => {
       "zapier",
       "make",
       "customer-io",
+      "cloudflare-browser",
+      "descope",
+      "wandb",
+      "langfuse",
+      "klaviyo",
+      "granola",
+      "kit",
+      "mailerlite",
+      "beehiiv",
+      "prismic",
+      "gitbook",
+      "scite",
+      "snyk-evo",
+      "axiom",
+      "fathom",
+      "help-scout",
+      "omnisend",
+      "datocms",
+      "circleback",
+      "getimg-ai",
     ]);
   });
 
@@ -132,6 +152,10 @@ describe("catalog", () => {
     ["mixpanel", 31, ["Delete-Dashboard", "Merge-Group", "Update-Business-Context", "Dismiss-Issues", "Update-Feature-Flag"]],
     ["contentful", 82, ["create_upload_session", "import_space", "space_to_space_migration_handler", "invoke_ai_action", "delete_environment", "update_editor_interface"]],
     ["contentful-eu", 82, ["create_upload_session", "import_space", "space_to_space_migration_handler", "invoke_ai_action", "delete_environment", "update_editor_interface"]],
+    ["cloudflare-browser", 4, ["start_crawl", "get_url_json", "kill_browser_session"]],
+    ["descope", 10, ["session", "users_write", "auth_keys_write", "agentic_write"]],
+    ["wandb", 3, ["create_wandb_report_tool", "log_analysis_to_wandb", "aria_send_message"]],
+    ["langfuse", 1, ["submitFeedback"]],
   ] as const)("retains the audited %s write inventory, including indirect and configuration writes", (id, count, sensitive) => {
     const tools = PROVIDERS[id].destructiveTools;
     expect(tools).toHaveLength(count);
@@ -160,16 +184,26 @@ describe("catalog", () => {
     const hostnames = getTrustedHostnames();
     expect(hostnames).toEqual([
       "ai.todoist.net",
+      "api.fathom.ai",
       "api.fireflies.ai",
       "api.githubcopilot.com",
+      "api.scite.ai",
+      "app.kit.com",
+      "browser.mcp.cloudflare.com",
+      "circleback.ai",
       "docs.mcp.cloudflare.com",
+      "evo.snyk.io",
+      "getimg.ai",
       "gitlab.com",
       "huggingface.co",
+      "langfuse.com",
       "learn.microsoft.com",
       "mcp.airtable.com",
       "mcp.amplitude.com",
       "mcp.atlassian.com",
       "mcp.attio.com",
+      "mcp.axiom.co",
+      "mcp.beehiiv.com",
       "mcp.cal.com",
       "mcp.calendly.com",
       "mcp.canva.com",
@@ -179,12 +213,19 @@ describe("catalog", () => {
       "mcp.contentful.com",
       "mcp.context7.com",
       "mcp.customer.io",
+      "mcp.datocms.com",
+      "mcp.descope.com",
       "mcp.eu.amplitude.com",
       "mcp.eu.contentful.com",
       "mcp.exa.ai",
       "mcp.firecrawl.dev",
+      "mcp.gitbook.com",
+      "mcp.granola.ai",
+      "mcp.helpscout.net",
       "mcp.intercom.com",
+      "mcp.klaviyo.com",
       "mcp.linear.app",
+      "mcp.mailerlite.com",
       "mcp.make.com",
       "mcp.miro.com",
       "mcp.mixpanel.com",
@@ -192,8 +233,10 @@ describe("catalog", () => {
       "mcp.neon.tech",
       "mcp.netlify.com",
       "mcp.notion.com",
+      "mcp.omnisend.com",
       "mcp.posthog.com",
       "mcp.prisma.io",
+      "mcp.prismic.io",
       "mcp.pscale.dev",
       "mcp.railway.com",
       "mcp.resend.com",
@@ -204,6 +247,7 @@ describe("catalog", () => {
       "mcp.tavily.com",
       "mcp.upstash.com",
       "mcp.webflow.com",
+      "mcp.withwandb.com",
       "mcp.wix.com",
       "mcp.zapier.com",
       "public-api.wordpress.com",
@@ -252,6 +296,11 @@ describe("buildScopedMcpUrl — default (unscoped) URLs", () => {
     ["mixpanel", "https://mcp.mixpanel.com/mcp"],
     ["contentful", "https://mcp.contentful.com/mcp"],
     ["contentful-eu", "https://mcp.eu.contentful.com/mcp"],
+    ["cloudflare-browser", "https://browser.mcp.cloudflare.com/mcp"],
+    // Descope documents the bare origin, which is also its protected-resource identifier.
+    ["descope", "https://mcp.descope.com/"],
+    ["wandb", "https://mcp.withwandb.com/mcp"],
+    ["langfuse", "https://langfuse.com/api/mcp"],
   ];
 
   for (const [id, expected] of cases) {
@@ -294,7 +343,7 @@ describe("buildScopedMcpUrl — read-only per provider mechanism", () => {
 
   it("ignores readOnly for providers that cannot express it in the URL", () => {
     // Enforcement for these falls to the destructive-tool approval gate.
-    for (const id of ["stripe", "context7", "prisma", "cloudflare", "sentry", "resend", "upstash", "sanity", "notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface", "webflow", "netlify", "railway", "amplitude", "amplitude-eu", "mixpanel", "contentful", "contentful-eu"] as const) {
+    for (const id of ["stripe", "context7", "prisma", "cloudflare", "sentry", "resend", "upstash", "sanity", "notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface", "webflow", "netlify", "railway", "amplitude", "amplitude-eu", "mixpanel", "contentful", "contentful-eu", "cloudflare-browser", "descope", "wandb", "langfuse"] as const) {
       expect(provider(id).supportsReadOnly).toBe(false);
       expect(urlFor(id, { readOnly: true })).toBe(urlFor(id, UNSCOPED));
       expect(buildScopedMcpUrl(provider(id), { readOnly: true }).headers).toEqual({});

@@ -60,6 +60,10 @@ const startFirstBuild = async (page: Page, name: string) => {
     });
     runs.push(messageId);
     return {
+      checkBuildDone: () => system.mutation(api.system.upsertMessageSteps, {
+        internalKey, messageId,
+        steps: [{ id: "checked", kind: "tool", tool: "checkBuild", status: "done", startedAt: Date.now(), endedAt: Date.now() }],
+      }),
       complete: () =>
         system.mutation(api.system.updateMessageStatus, { internalKey, messageId, status: "completed" }),
     };
@@ -257,6 +261,73 @@ test.describe("first build auto-opens the preview", () => {
       }
     });
   }
+
+  test("reloads a failed document once after a checked repair's final sync, without HMR (#774)", async ({ page }) => {
+    test.setTimeout(150_000);
+    await signIn(page);
+    const previewUrl = new URL("/__e2e-repair-preview", page.url()).href;
+    let available = true;
+    let loads = 0;
+    await page.route(previewUrl, (route) => {
+      loads++;
+      return route.fulfill({ status: available ? 200 : 502, contentType: "text/html", body: available ? "<h1>Bright Smile</h1>" : "" });
+    });
+    await stubSandbox(page, [], previewUrl);
+    let holdSync = false;
+    let syncing = false;
+    let finishSync = () => {};
+    const sync = new Promise<void>((resolve) => { finishSync = resolve; });
+    await page.route("**/api/sandbox/**", async (route) => {
+      if (holdSync && route.request().method() === "PATCH") {
+        syncing = true;
+        await sync;
+      }
+      return route.fulfill({ json: {} });
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const build = await startFirstBuild(page, "e2e-preview-repair-reload");
+    // The page clock drives the sync debounce and the reload timers, so no step sleeps.
+    const tick = async (ms: number) => { await page.clock.runFor(ms); };
+    try {
+      await page.clock.install();
+      await page.goto(`/projects/${build.projectId}`);
+      // package.json must land after the page sees a first build, or nothing boots the preview.
+      await expect(page.getByRole("status", { name: "Building your app" })).toBeVisible({ timeout: 60_000 });
+      await page.clock.pauseAt(Date.now() + 1_000);
+      await build.writePackageJson();
+      const app = page.frameLocator('iframe[title="Preview"]').getByRole("heading");
+      await expect.poll(async () => { await tick(500); return loads; }, { timeout: 30_000 }).toBeGreaterThan(0);
+      await expect(app).toHaveText("Bright Smile", { timeout: 30_000 });
+      await build.run.complete();
+      await expect(page.getByRole("status", { name: "Still building" })).toBeHidden();
+      // Let the startup and end-of-build reloads settle.
+      await tick(4_000);
+      available = false;
+      await page.getByRole("button", { name: "Refresh page", exact: true }).click();
+      await expect(app).toHaveCount(0);
+      const beforeRepair = loads;
+      const repair = await build.startRun();
+      await expect(page.getByText("Agent working")).toBeVisible();
+      holdSync = true;
+      await build.writeFile("repaired.txt");
+      await expect.poll(async () => { await tick(500); return syncing; }).toBe(true);
+      await repair.checkBuildDone();
+      await repair.complete();
+      await expect(page.getByText("Agent working")).toBeHidden();
+      // No reload into the stopped dev server while the final sync is held.
+      await tick(1_500);
+      expect(loads).toBe(beforeRepair);
+      available = true;
+      finishSync();
+      await expect.poll(async () => { await tick(500); return loads; }, { timeout: 30_000 }).toBe(beforeRepair + 1);
+      await expect(app).toHaveText("Bright Smile");
+      await tick(4_000);
+      expect(loads).toBe(beforeRepair + 1);
+    } finally {
+      finishSync();
+      await build.cleanup();
+    }
+  });
 
   test("a first build that ends while the sandbox boots reloads once, via the startup refresh (#561)", async ({ page }) => {
     test.setTimeout(150_000);

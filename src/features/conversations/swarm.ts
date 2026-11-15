@@ -32,6 +32,8 @@ export const SWARM_SHARED_PATHS = [
   "index.html", "components.json", "src/main.tsx", "src/App.tsx", "src/index.css", "src/lib/utils.ts",
   // The home route stays with the orchestrator, like App.tsx; workers own nested routes or home components.
   "src/app/layout.tsx", "src/app/globals.css", "src/app/page.tsx", "src/app/providers.tsx", "src/middleware.ts",
+  // TanStack Start's root document, router and plugin-generated route tree.
+  "src/routes/__root.tsx", "src/router.tsx", "src/routeTree.gen.ts", "src/styles/app.css",
 ] as const;
 
 export const swarmPlanSchema = z.object({

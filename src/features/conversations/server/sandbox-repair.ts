@@ -217,6 +217,8 @@ const LOCATED = /^([\w@./-]+\.[\w]+)(?:\((\d+),\d+\)|:(\d+):\d+):?\s*(.+)$/;
 // next build: "./src/app/page.tsx:12:3" alone, then the message on the next line.
 const LOCATION_ONLY = /^(?:\.\/)?([\w@./-]+\.\w+)(?::(\d+):\d+)?$/;
 const NEXT_MESSAGE = /^(?:Type error|Module not found|Syntax error|Error): /;
+// Vite 8 (Rolldown/Oxc): "[UNRESOLVED_IMPORT] Could not resolve ...", then "╭─[ src/App.tsx:1:21 ]".
+const CODE_FRAME = /^\s*╭─\[ ([\w@./-]+\.\w+):(\d+):\d+ \]$/;
 
 /** checkBuild's failure text as structured errors; the whole body when no line names a file. */
 export const parseBuildErrors = (text: string): BuildError[] => {
@@ -236,6 +238,11 @@ export const parseBuildErrors = (text: string): BuildError[] => {
         message: next,
         kind: install ? "install" : next.startsWith("Type error") ? "type" : "build",
       }];
+    }
+    const frame = CODE_FRAME.exec(line);
+    const previous = body[index - 1]?.trim();
+    if (frame && previous) {
+      return [{ file: frame[1], line: Number(frame[2]), message: previous, kind: install ? "install" : "build" }];
     }
     const match = LOCATED.exec(line);
     if (!match) return [];

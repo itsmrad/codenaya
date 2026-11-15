@@ -15,7 +15,7 @@ export interface AppError {
 /** Caps what an error carries, so a huge stack can't flood the banner or the prompt. */
 export const MAX_ERROR_TEXT = 2048;
 
-// Vite, esbuild, tsc and Next.js error shapes, matched per line.
+// Vite (esbuild or Oxc), tsc and Next.js error shapes, matched per line.
 const ERROR_LINE =
   /\[plugin:[^\]]+\]|\berror TS\d+:|Failed to resolve import|Transform failed|Internal server error:|Pre-transform error:|Module not found: Can't resolve|^\s*(?:Type error:|ReferenceError:|Error: .+ is not defined\b|Unhandled Runtime Error\b)/;
 // "3:04:05 PM [vite] (client) Pre-transform error: " and similar log prefixes.
@@ -39,6 +39,7 @@ const WORK_DIR_PREFIX = /\/home\/user\/app\//g;
 
 const FILE_PATTERNS = [
   /\bFile: (\S+?):(\d+)(?::\d+)?/, // Vite
+  /╭─\[ (\S+?):(\d+):\d+ \]/, // Vite 8 (Oxc/Rolldown) code frame: ╭─[ src/App.tsx:2:13 ]
   /(\S+\.\w+)\((\d+),\d+\)/, // tsc: src/App.tsx(3,20)
   /^\s*(?:⨯\s*)?\.\/(\S+):(\d+):\d+\s*$/m, // Next.js compile header
   /\((?:\.\/)?([^\s()]+):(\d+):\d+\)/, // Next.js: at Foo (./src/app/page.tsx:12:3)
@@ -70,13 +71,13 @@ export const detectBuildError = (chunk: string): AppError | null => {
   }
 
   let message = lines[index].replace(LOG_PREFIX, "").replace(NEXT_LOG_PREFIX, "").trim();
-  // "Transform failed with 1 error:" says nothing until the next line.
-  const next = lines[index + 1]?.replace(NEXT_LOG_PREFIX, "").trim();
+  // "Transform failed with 1 error:" says nothing until the next non-blank line
+  // (Vite 8's Oxc puts a blank line between them).
+  const next = lines.slice(index + 1).find((line) => line.trim())?.replace(NEXT_LOG_PREFIX, "").trim();
   if (NEXT_LOCATION.test(message)) {
     // A streamed location alone is not enough to start an auto-fix.
-    const detail = lines.slice(index + 1).find((line) => line.trim())?.replace(NEXT_LOG_PREFIX, "").trim();
-    if (!detail) return null;
-    message = detail;
+    if (!next) return null;
+    message = next;
   } else if ((message.endsWith(":") || message === "Unhandled Runtime Error") && next) {
     message = `${message} ${next}`;
   }

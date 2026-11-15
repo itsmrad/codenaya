@@ -146,6 +146,7 @@ Verified on 2026-11-15 with unauthenticated MCP `initialize` and `tools/list`
 | --- | --- | --- |
 | Microsoft Learn | `microsoft_docs_search`, `microsoft_docs_fetch`, `microsoft_code_sample_search` | [Microsoft README](https://github.com/MicrosoftDocs/mcp), [developer reference](https://learn.microsoft.com/en-us/training/support/mcp-developer-reference) |
 | Cloudflare Docs | `search_cloudflare_documentation`, `migrate_pages_to_workers_guide` | [Cloudflare README](https://github.com/cloudflare/mcp-server-cloudflare/tree/main/apps/docs-ai-search), [tool source](https://github.com/cloudflare/mcp-server-cloudflare/blob/main/packages/mcp-common/src/shared-tools/docs-ai-search.tools.ts) |
+| Langfuse Docs (`https://langfuse.com/api/mcp`, batch C) | `searchLangfuseDocs`, `getLangfuseDocsPage`, `getLangfuseOverview`; `submitFeedback` is gated as a write | [Langfuse Docs MCP](https://langfuse.com/docs/docs-mcp), [MCP reference](https://mcp.reference.langfuse.com/) |
 
 Both servers currently expose documentation reads only (`supportsReadOnly: true`).
 Cloudflare's migration-guide tool retrieves instructions; it does not migrate an
@@ -287,3 +288,9 @@ Verified from the [official sign-in docs](https://docs.firecrawl.dev/mcp-server)
 and [API-key docs](https://docs.firecrawl.dev/mcp-server/keyless#add-an-api-key)
 on 2026-11-15. Validation uses mocked MCP handshakes; no vendor calls or real
 credentials are needed.
+
+## Batch D1 OAuth providers
+
+Klaviyo, Granola, Kit, MailerLite, beehiiv, Prismic, GitBook, Scite, Snyk Evo, Axiom, Fathom, Help Scout, Omnisend, DatoCMS, Circleback, getimg.ai use OAuth discovery and dynamic client registration. Unauthenticated initialize returned 401 and protected-resource/authorization-server metadata advertised DCR on 2026-11-15. No registration, sign-in or tool calls were performed. Kit uses its account server (`https://app.kit.com/mcp`).
+
+All tools remain approval-gated, including tools advertising read-only hints; no URL-level read-only mode is claimed. Account roles, plans and usage charges still apply (see each catalog entry). BrowserStack was dropped because initialize and protected-resource metadata returned HTTP 403 during re-verification.

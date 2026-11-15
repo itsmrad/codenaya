@@ -113,6 +113,9 @@ const TOOL = cn(
 );
 
 interface PromptComposerProps {
+  initialPrompt?: string;
+  initialMode?: ComposerMode;
+  initialFramework?: ProjectFramework;
   /** Resolves to true when the prompt was accepted; the box is then cleared. */
   onSubmit: (prompt: string, mode: ComposerMode, framework?: ProjectFramework) => Promise<boolean>;
   isSubmitting?: boolean;
@@ -133,6 +136,9 @@ interface PromptComposerProps {
  * landing page.
  */
 export const PromptComposer = ({
+  initialPrompt = "",
+  initialMode = "build",
+  initialFramework,
   onSubmit,
   isSubmitting = false,
   showModelSelect = true,
@@ -141,19 +147,19 @@ export const PromptComposer = ({
   autoFocus,
   className,
 }: PromptComposerProps) => {
-  const [framework, setFramework] = useState<FrameworkChoice>("auto");
+  const [framework, setFramework] = useState<FrameworkChoice>(initialFramework ?? "auto");
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFramework(readProjectFramework());
-  }, []);
-  const [input, setInput] = useState("");
+    setFramework(initialFramework ?? readProjectFramework());
+  }, [initialFramework]);
+  const [input, setInput] = useState(initialPrompt);
   const [isFocused, setIsFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const enhancer = useEnhancePrompt(input, setInput);
   const isBusy = isSubmitting || enhancer.isEnhancing;
   const reduceMotion = useReducedMotion();
   const placeholder = useTypedPlaceholder(!reduceMotion && !input && !isFocused);
-  const [chosenMode, setMode] = useState<ComposerMode>("build");
+  const [chosenMode, setMode] = useState<ComposerMode>(initialMode);
   const swarmEnabled = useSwarmEnabled();
   // Swarm switched off mid-draft falls back to Build, as in the chat.
   const mode = chosenMode === "swarm" && !swarmEnabled ? "build" : chosenMode;
@@ -216,7 +222,7 @@ export const PromptComposer = ({
 
           <div className="flex h-9 items-center border-t border-border">
             <Select value={framework} onValueChange={(value) => {
-              const next = value === "next" || value === "vite" ? value : "auto";
+              const next = value === "next" || value === "vite" || value === "tanstack-start" ? value : "auto";
               setFramework(next);
               writeProjectFramework(next);
             }} disabled={isBusy}>
@@ -229,6 +235,7 @@ export const PromptComposer = ({
                   <SelectItem value="auto">Auto</SelectItem>
                   <SelectItem value="vite">Vite (React)</SelectItem>
                   <SelectItem value="next">Next.js</SelectItem>
+                  <SelectItem value="tanstack-start">TanStack Start</SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>

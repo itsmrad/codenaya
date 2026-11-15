@@ -22,6 +22,7 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
 }));
 
 import { probeMcpServer } from "./probe";
+import { REDACTION_PLACEHOLDER } from "./redact";
 
 const probe = () => probeMcpServer({ url: "https://mcp.example.com/mcp" });
 
@@ -42,6 +43,36 @@ describe("probeMcpServer", () => {
 
     expect(result).toMatchObject({ ok: false, kind: "protocol" });
     expect(JSON.stringify(result)).not.toContain("secret");
+  });
+
+  it("redacts a key echoed in a non-JSON handshake body before logging", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const apiKey = "custom-probe-key-abcdefghij";
+    // Assembled so the source is not a credential literal push protection flags.
+    const echoedToken = ["sk", "-", "abcdefghijklmnopqrstuvwxyz012345"].join("");
+    mocks.connect.mockRejectedValue(
+      new Error(
+        `Unexpected token '<', "<html>${apiKey} ${echoedToken}" is not valid JSON`,
+      ),
+    );
+
+    const result = await probeMcpServer({
+      url: "https://mcp.example.com/mcp",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      kind: "protocol",
+      error:
+        "The endpoint did not complete an MCP handshake. Check the URL points to an MCP server.",
+    });
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).not.toContain(apiKey);
+    expect(logged).not.toContain(echoedToken);
+    expect(logged).toContain(REDACTION_PLACEHOLDER);
+    expect(JSON.stringify(result)).not.toContain(apiKey);
+    expect(JSON.stringify(result)).not.toContain(echoedToken);
   });
 
   it.each([
