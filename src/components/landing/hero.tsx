@@ -12,13 +12,13 @@ import { CountUp } from "./reveal";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-const CHIPS = ["Bring your own key", "Cloud sandbox", "GitHub export", "Desktop + phone"];
+const CHIPS = ["BYOK: no credits used", "Choose your model", "GitHub import + export", "Desktop + phone"];
 
 // Named providers only; "custom" is the any-endpoint option, counted by the "+".
 const NAMED_PROVIDERS = AI_PROVIDER_IDS.filter((id) => id !== "custom").length;
 
 const STATS = [
-  { value: 300, suffix: "", caption: "Free credits every month" },
+  { value: 0, suffix: "", caption: "Credits used by runs on your own key" },
   { value: NAMED_PROVIDERS, suffix: "+", caption: "Key providers, plus any OpenAI-compatible endpoint" },
 ];
 
@@ -56,8 +56,8 @@ export const LandingHero = () => {
           </motion.h1>
 
           <motion.p {...enter(0.3)} className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
-            A browser IDE with an AI agent that writes your code, a live preview to run it, and GitHub
-            export when it&apos;s done. On desktop or phone.
+            Bring your own key on any plan. Import from GitHub, build with AI, preview live,
+            then export or download a ZIP.
           </motion.p>
 
           <motion.div {...enter(0.4)} className="mx-auto mt-10 max-w-3xl">
