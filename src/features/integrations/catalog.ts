@@ -1180,7 +1180,8 @@ const CATALOG = {
     scope: NO_URL_SCOPING,
     // Every tool tagged "write" in the full inventory (each tool fronts several
     // actions, so one write action gates the whole tool), plus get_more_tools,
-    // which requests capabilities beyond the loaded set:
+    // which requests capabilities beyond the loaded set, and ask_webflow_ai,
+    // which is AI-backed and may spend:
     // https://developers.webflow.com/mcp/tools/data-tools
     // https://developers.webflow.com/mcp/tools/designer-tools
     // https://developers.webflow.com/mcp/tools/utility-tools
@@ -1215,6 +1216,12 @@ const CATALOG = {
       "asset_tool",
       "designer_tool",
       "get_more_tools",
+      "ask_webflow_ai",
+    ],
+    // Tools tagged read-only in the same references.
+    readOnlyTools: [
+      "data_aeo_tool", "data_analyze_tool", "data_optimize_tool",
+      "element_snapshot_tool", "get_asset_preview", "webflow_guide_tool",
     ],
     notes:
       "Each authorization covers one workspace. Element snapshots, image uploads, and reading or changing the Designer selection, page, mode, branch, canvas or breakpoints need the Webflow Designer open with the MCP Bridge App connected. No URL-level read-only mode.",
@@ -1235,7 +1242,8 @@ const CATALOG = {
     // (https://github.com/netlify/netlify-mcp, src/tools). The default surface
     // groups operations into netlify-<domain>-services-{reader,updater}
     // dispatchers; the per-operation names are its ?verbose=true surface. The
-    // team reader is gated because it returns team environment variables.
+    // team reader returns team environment variables, and request logs can hold
+    // printed secrets, so those readers are gated too.
     destructiveTools: [
       "netlify-deploy-services-updater",
       "netlify-project-services-updater",
@@ -1252,6 +1260,19 @@ const CATALOG = {
       "netlify-extension-change-extension-installation",
       "netlify-submit-feedback",
       "netlify-team-get-team-env-vars",
+      "netlify-observability-services-reader",
+      "netlify-observability-get-request-logs",
+      "netlify-observability-get-request-detail",
+    ],
+    // Per-operation reads annotated read-only in the same source, plus the
+    // standalone deploy card and coding-context tools. The grouped readers are
+    // dispatchers and stay unlisted.
+    readOnlyTools: [
+      "netlify-open-deployments", "netlify-refresh-deployments", "get-netlify-coding-context",
+      "netlify-user-get-user", "netlify-deploy-get-deploy", "netlify-deploy-get-deploy-for-site",
+      "netlify-project-get-project", "netlify-project-get-projects",
+      "netlify-project-get-forms-for-project", "netlify-extension-get-extensions",
+      "netlify-extension-get-full-extension-details", "netlify-get-database-setup-steps",
     ],
     notes:
       "OAuth only; the personal access token fallback applies to the local server, not this hosted endpoint. Renaming a project releases its old netlify.app subdomain. No URL-level read-only mode.",
@@ -1270,7 +1291,8 @@ const CATALOG = {
     scope: NO_URL_SCOPING,
     // Hosted-server inventory: https://docs.railway.com/ai/mcp-server#available-mcp-tools
     // railway-agent and the cloud-agent task tools act on the user's behalf;
-    // starting a cloud agent is billed.
+    // starting a cloud agent is billed. Agents hold CLI credentials, so their
+    // results and transcripts are gated as well.
     destructiveTools: [
       "create-project",
       "set-feature-flag",
@@ -1281,6 +1303,12 @@ const CATALOG = {
       "run-cloud-agent-task",
       "respond-cloud-agent-task",
       "cancel-cloud-agent-task",
+      "check-cloud-agent-task",
+      "get-cloud-agent-transcript",
+    ],
+    readOnlyTools: [
+      "whoami", "list-projects", "list-services", "list-feature-flags",
+      "get-feature-flag", "list-cloud-agent-tasks", "list-cloud-agent-models",
     ],
     // The resource's 401 challenge and protected-resource metadata both name
     // this scope; without it the token cannot reach any workspace.

@@ -101,9 +101,9 @@ describe("catalog", () => {
     ["tavily", 1, ["tavily_research"]],
     ["firecrawl", 14, ["firecrawl_interact", "firecrawl_agent", "firecrawl_monitor_create", "firecrawl_monitor_delete", "alexandria_library_read", "people_company_search", "people_company_enrich", "jobs_search", "firecrawl_extract"]],
     ["huggingface", 7, ["create_repo", "hf_fs_write", "hf_jobs", "hf_sandbox", "hf_sandbox_exec", "hf_sandbox_fs", "dynamic_space"]],
-    ["webflow", 30, ["data_apps_tool", "data_cms_tool", "data_sites_tool", "data_scripts_tool", "data_members_tool", "data_webhook_tool", "get_more_tools"]],
-    ["netlify", 15, ["netlify-deploy-services-updater", "netlify-project-services-updater", "netlify-team-services-reader", "netlify-project-manage-env-vars", "netlify-team-get-team-env-vars"]],
-    ["railway", 9, ["redeploy", "accept-deploy", "railway-agent", "run-cloud-agent-task", "respond-cloud-agent-task", "delete-feature-flag"]],
+    ["webflow", 31, ["data_apps_tool", "data_cms_tool", "data_sites_tool", "data_scripts_tool", "data_members_tool", "data_webhook_tool", "get_more_tools", "ask_webflow_ai"]],
+    ["netlify", 18, ["netlify-deploy-services-updater", "netlify-project-services-updater", "netlify-team-services-reader", "netlify-project-manage-env-vars", "netlify-team-get-team-env-vars", "netlify-observability-services-reader", "netlify-observability-get-request-logs", "netlify-observability-get-request-detail"]],
+    ["railway", 11, ["redeploy", "accept-deploy", "railway-agent", "run-cloud-agent-task", "respond-cloud-agent-task", "delete-feature-flag", "check-cloud-agent-task", "get-cloud-agent-transcript"]],
   ] as const)("retains the audited %s write inventory, including indirect and configuration writes", (id, count, sensitive) => {
     const tools = PROVIDERS[id].destructiveTools;
     expect(tools).toHaveLength(count);
