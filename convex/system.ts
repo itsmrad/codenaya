@@ -216,7 +216,8 @@ export const updateMessageStatus = mutation({
         await ctx.db.get("messages", args.messageId),
         args.status === "cancelled" ? "cancelled" : "ok",
       );
-      await closeOpenTasks(ctx, args.messageId);
+      // A cancelled run's open rows stay as they are: the board shows them Cancelled, not Error.
+      if (args.status !== "cancelled") await closeOpenTasks(ctx, args.messageId);
     }
     await ctx.db.patch("messages", args.messageId, {
       status: args.status,

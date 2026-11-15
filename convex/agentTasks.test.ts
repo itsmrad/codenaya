@@ -359,11 +359,18 @@ describe("agentTasks", () => {
       await expectClosed(t, swarm);
     });
 
-    test("on cancel", async () => {
+    test("on complete", async () => {
+      const t = setup();
+      const swarm = await seedSwarm(t);
+      await t.mutation(api.system.updateMessageStatus, { internalKey: INTERNAL_KEY, messageId: swarm.parent.messageId, status: "completed" });
+      await expectClosed(t, swarm);
+    });
+
+    test("not on cancel: the board shows the open rows Cancelled", async () => {
       const t = setup();
       const swarm = await seedSwarm(t);
       await t.mutation(api.system.updateMessageStatus, { internalKey: INTERNAL_KEY, messageId: swarm.parent.messageId, status: "cancelled" });
-      await expectClosed(t, swarm);
+      expect(await get(t, swarm.parent.messageId)).toMatchObject([{ status: "running" }, { status: "done" }, { status: "queued" }]);
     });
 
     test("when a lost run is failed", async () => {
