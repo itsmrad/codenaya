@@ -5,7 +5,7 @@ import { inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
 import { getAppError } from "@/lib/convex-error";
 import { resolveWorkerModel } from "@/features/ai-providers/server/resolve-run-model";
-import { withoutToolCalls } from "@/features/ai-providers/server/agentkit-model";
+import { withoutToolCalls, withPromptCache } from "@/features/ai-providers/server/agentkit-model";
 import { costUsd, creditsForCost, usageOfResponse } from "@/features/billing/credits";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -142,19 +142,24 @@ export const swarmWorker = inngest.createFunction(
     };
 
     // Running totals, rebuilt on replay, as in processMessage (ADR 0011).
-    const usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+    const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 };
     let turn = 0;
     let cutOff = false;
     let unfinished = false;
     const options = { internalKey, projectId, registry: createRegistryCheck() };
-    const codingModel = runModel.coding(0.3);
     const subOrchestrator = task.role === "sub-orchestrator" && depth < MAX_SWARM_DEPTH;
+    // Shared by every worker of the run, so they share its cache; the task line goes after it.
+    const sharedSystem = [CODING_AGENT_SYSTEM_PROMPT, subOrchestrator ? SWARM_SUBORCH_NOTE : SWARM_WORKER_NOTE, tree, planOverview,
+      ...(originalPrompt ? [`## The user's original request (context, build only your task)\n${originalPrompt}`] : []), ""].join("\n\n");
+    const codingModel = withPromptCache(runModel.coding(0.3), sharedSystem);
     const maxSteps = subOrchestrator ? SUBORCH_MAX_STEPS : WORKER_MAX_STEPS;
     const maxUsd = subOrchestrator ? MAX_SUBORCH_USD : MAX_WORKER_USD;
     const recordUsage = async (raw: string | undefined, id: string) => {
       const tokens = usageOfResponse(raw);
       usage.inputTokens += tokens.inputTokens;
       usage.outputTokens += tokens.outputTokens;
+      usage.cacheReadTokens += tokens.cacheReadTokens ?? 0;
+      usage.cacheWriteTokens += tokens.cacheWriteTokens ?? 0;
       usage.costUsd += runModel.metering.coding ? costUsd(runModel.metering.coding, tokens) : 0;
       const totals = { ...usage };
       await step.run(id, async () => {
@@ -172,9 +177,7 @@ export const swarmWorker = inngest.createFunction(
     const childWrites: string[] = [];
     const agentOptions: Parameters<typeof createAgent>[0] = {
       name: "swarm-worker",
-      system: [CODING_AGENT_SYSTEM_PROMPT, subOrchestrator ? SWARM_SUBORCH_NOTE : SWARM_WORKER_NOTE, tree, planOverview,
-        ...(originalPrompt ? [`## The user's original request (context, build only your task)\n${originalPrompt}`] : []),
-        `## Your task: ${task.title}\nOwned paths: ${task.ownedPaths.join(", ")}`].join("\n\n"),
+      system: `${sharedSystem}## Your task: ${task.title}\nOwned paths: ${task.ownedPaths.join(", ")}`,
       model: codingModel,
       tools: [
         createListFilesTool(options), createReadFilesTool(options), createSearchFilesTool(options),

@@ -1,11 +1,11 @@
-import { createAgenticModelFromAiAdapter, createTool } from "@inngest/agent-kit";
+import { createAgenticModelFromAiAdapter, createTool, type Message } from "@inngest/agent-kit";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AI_PROVIDERS } from "../registry";
 import { SWARM_DELEGATE_NUDGE } from "@/features/conversations/inngest/constants";
 import { createDelegateTasksTool } from "@/features/conversations/inngest/tools/delegate-tasks";
 
-import { buildAgentKitModel, forceToolCall, toolForcing, withoutToolCalls } from "./agentkit-model";
+import { buildAgentKitModel, forceToolCall, toolForcing, withoutToolCalls, withPromptCache } from "./agentkit-model";
 
 const tool = createTool({ name: "listFiles", description: "List files", handler: () => [] });
 
@@ -119,5 +119,98 @@ describe("forceToolCall", () => {
     expect(body).not.toHaveProperty("thinking");
     expect(body).not.toHaveProperty("reasoning");
     await expect(`${JSON.stringify(body, null, 2)}\n`).toMatchFileSnapshot(`./__fixtures__/forced-turn-${name}.json`);
+  });
+});
+
+describe("withPromptCache", () => {
+  const BASE = "BASE PROMPT, the same for every run.\n";
+  const TREE = "## Project files\nsrc/App.tsx\n";
+  const tools = [tool, createTool({ name: "readFiles", description: "Read files", handler: () => [] })];
+  const call = { type: "tool" as const, id: "call-1", name: "readFiles", input: { paths: ["src/App.tsx"] } };
+  const step1: Message[] = [
+    { type: "text", role: "system", content: BASE + TREE },
+    { type: "text", role: "user", content: "Build a pizzeria site" },
+  ];
+  const step2: Message[] = [
+    ...step1,
+    { type: "tool_call", role: "assistant", tools: [call], stop_reason: "tool" },
+    { type: "tool_result", role: "tool_result", tool: call, content: { data: "export default App" }, stop_reason: "tool" },
+  ];
+
+  type Body = Record<string, unknown> & { system?: unknown; messages: { content: unknown }[]; tools?: unknown[] };
+  const body = (model: ReturnType<typeof buildAgentKitModel>, messages: Message[]) => {
+    const request = createAgenticModelFromAiAdapter(model).requestParser(model, messages, tools, "auto") as unknown as Body;
+    (model.onCall as (adapter: unknown, body: unknown) => void)(model, request);
+    return request;
+  };
+  const claude = () =>
+    withPromptCache(buildAgentKitModel({ provider: "anthropic", apiKey: "sk-ant", model: "claude-haiku-5-5" }), BASE);
+  const breakpoints = (value: unknown) => JSON.stringify(value).split('"cache_control"').length - 1;
+  /** The request as the cache sees it: breakpoints mark where to cache, they are not content. */
+  const content = (value: unknown) => JSON.parse(JSON.stringify(value, (key, v) => (key === "cache_control" ? undefined : v)));
+
+  it("marks the last tool, the shared system prefix and the last two messages on Anthropic", () => {
+    const request = body(claude(), step2);
+    expect(breakpoints(request)).toBe(4);
+    expect(request.tools?.map((t) => "cache_control" in (t as object))).toEqual([false, true]);
+    expect(request.system).toEqual([
+      { type: "text", text: BASE, cache_control: { type: "ephemeral" } },
+      { type: "text", text: TREE },
+    ]);
+    const marked = request.messages.map((m) => breakpoints(m));
+    expect(marked).toEqual([0, 1, 1]);
+    expect(request.messages[2].content).toEqual([
+      expect.objectContaining({ type: "tool_result", cache_control: { type: "ephemeral" } }),
+    ]);
+  });
+
+  it("keeps the cached prefix byte-identical from one step to the next", () => {
+    const first = body(claude(), step1);
+    const second = body(claude(), step2);
+    expect(JSON.stringify(second.tools)).toBe(JSON.stringify(first.tools));
+    expect(JSON.stringify(second.system)).toBe(JSON.stringify(first.system));
+    // Step 1's last message, where it wrote the cache, starts step 2 unchanged.
+    expect(content(second.messages.slice(0, first.messages.length))).toEqual(content(first.messages));
+    expect(breakpoints(first.messages.at(-1))).toBe(1);
+  });
+
+  it("caches the whole system prompt when it does not start with the shared prefix", () => {
+    const request = body(withPromptCache(buildAgentKitModel({ provider: "anthropic", apiKey: "k", model: "claude-opus-5-5" }), "OTHER"), step1);
+    expect(request.system).toEqual([{ type: "text", text: BASE + TREE, cache_control: { type: "ephemeral" } }]);
+  });
+
+  it("gives swarm workers one shared system block, with the task line after it", () => {
+    const shared = `${BASE}\n\n${TREE}\n\n`;
+    const worker = (title: string) => body(
+      withPromptCache(buildAgentKitModel({ provider: "anthropic", apiKey: "k", model: "claude-haiku-5-5" }), shared),
+      [{ type: "text", role: "system", content: `${shared}## Your task: ${title}` }, { type: "text", role: "user", content: title }],
+    ).system as { text: string }[];
+    const [a, b] = [worker("Header"), worker("Footer")];
+    expect(JSON.stringify(a[0])).toBe(JSON.stringify(b[0]));
+    expect(a[0]).toMatchObject({ text: shared, cache_control: { type: "ephemeral" } });
+    expect([a[1].text, b[1].text]).toEqual(["## Your task: Header", "## Your task: Footer"]);
+  });
+
+  it("passes breakpoints through OpenRouter for Claude", () => {
+    const model = withPromptCache(buildAgentKitModel({ provider: "openrouter", apiKey: "sk-or", model: "anthropic/claude-sonnet-5.5" }), BASE);
+    const request = body(model, step2);
+    expect(request.cache_control).toEqual({ type: "ephemeral" });
+    expect(request.messages[0].content).toEqual([
+      { type: "text", text: BASE, cache_control: { type: "ephemeral" } },
+      { type: "text", text: TREE },
+    ]);
+    expect(breakpoints(request.tools)).toBe(0);
+  });
+
+  it("leaves other models' requests unchanged", () => {
+    const model = buildAgentKitModel({ provider: "openrouter", apiKey: "sk-or", model: "x-ai/grok-4.7" });
+    expect(withPromptCache(model, BASE)).toBe(model);
+    expect(breakpoints(body(withPromptCache(model, BASE), step2))).toBe(0);
+  });
+
+  it("keeps its breakpoints under the tool-choice wrappers", () => {
+    const request = body(withoutToolCalls(claude()), step2);
+    expect(request.tool_choice).toEqual({ type: "none" });
+    expect(breakpoints(request)).toBe(4);
   });
 });

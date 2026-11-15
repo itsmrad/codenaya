@@ -17,45 +17,78 @@ export const CREDIT_MARKUP = 1.5;
 export type RunSource = Infer<typeof runSourceValidator>;
 
 export interface TokenUsage {
+  /** All input tokens, cache reads and writes included. */
   inputTokens: number;
   outputTokens: number;
+  /** The part of `inputTokens` read from the prompt cache. */
+  cacheReadTokens?: number;
+  /** The part of `inputTokens` written to the prompt cache. */
+  cacheWriteTokens?: number;
 }
 
-const NO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+/**
+ * Prompt-cache prices against the input price: a read costs 0.1x, a write with
+ * the default 5-minute TTL 1.25x (Claude's rates; we set no 1-hour TTL).
+ */
+export const CACHE_READ_PRICE_RATIO = 0.1;
+export const CACHE_WRITE_PRICE_RATIO = 1.25;
+
+const NO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
 const tokens = (value: unknown) =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 
+const record = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
 /**
  * Tokens one inference used, from AgentKit's raw provider response: OpenAI
- * chat (`prompt_tokens`) or Anthropic (`input_tokens`, plus any cache reads
- * and writes, which Anthropic counts apart). Zero when the response has none.
+ * chat (`prompt_tokens`, cache tokens included) or Anthropic (`input_tokens`,
+ * with cache reads and writes counted apart). Zero when the response has none.
+ * shortcut: OpenAI-format cache tokens count only for Claude (via OpenRouter);
+ * other models' cache rates vary, so their cached input stays at full price.
  */
 export function usageOfResponse(raw: string | undefined): TokenUsage {
-  let usage: Record<string, unknown> | undefined;
+  let response: unknown;
   try {
-    usage = JSON.parse(raw ?? "{}")?.usage;
+    response = JSON.parse(raw ?? "{}");
   } catch {
     return NO_USAGE;
   }
-  if (!usage || typeof usage !== "object") return NO_USAGE;
+  const usage = record(response) ? response.usage : undefined;
+  if (!record(usage)) return NO_USAGE;
   if ("prompt_tokens" in usage || "completion_tokens" in usage) {
-    return { inputTokens: tokens(usage.prompt_tokens), outputTokens: tokens(usage.completion_tokens) };
+    const details = record(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
+    const claude = record(response) && typeof response.model === "string" && /claude|anthropic\//i.test(response.model);
+    const inputTokens = tokens(usage.prompt_tokens);
+    const cacheReadTokens = claude ? Math.min(inputTokens, tokens(details.cached_tokens)) : 0;
+    const cacheWriteTokens = claude ? Math.min(inputTokens - cacheReadTokens, tokens(details.cache_write_tokens)) : 0;
+    return { inputTokens, outputTokens: tokens(usage.completion_tokens), cacheReadTokens, cacheWriteTokens };
   }
+  const cacheReadTokens = tokens(usage.cache_read_input_tokens);
+  const cacheWriteTokens = tokens(usage.cache_creation_input_tokens);
   return {
-    inputTokens:
-      tokens(usage.input_tokens) +
-      tokens(usage.cache_creation_input_tokens) +
-      tokens(usage.cache_read_input_tokens),
+    inputTokens: tokens(usage.input_tokens) + cacheReadTokens + cacheWriteTokens,
     outputTokens: tokens(usage.output_tokens),
+    cacheReadTokens,
+    cacheWriteTokens,
   };
 }
 
+/**
+ * Input tokens weighted by what they cost: uncached at 1x, cache reads and
+ * writes at their ratios.
+ */
+const pricedInputTokens = ({ inputTokens, cacheReadTokens = 0, cacheWriteTokens = 0 }: TokenUsage) =>
+  inputTokens - cacheReadTokens - cacheWriteTokens +
+  cacheReadTokens * CACHE_READ_PRICE_RATIO +
+  cacheWriteTokens * CACHE_WRITE_PRICE_RATIO;
+
 /** The provider's cost in USD for `usage` at a catalog route's price. */
-export const costUsd = (pricing: ModelPricing, { inputTokens, outputTokens }: TokenUsage) =>
+export const costUsd = (pricing: ModelPricing, usage: TokenUsage) =>
   pricing.mode === "blended"
-    ? ((inputTokens + outputTokens) * pricing.usdPerMTok) / 1e6
-    : (inputTokens * pricing.inputUsdPerMTok + outputTokens * pricing.outputUsdPerMTok) / 1e6;
+    ? ((pricedInputTokens(usage) + usage.outputTokens) * pricing.usdPerMTok) / 1e6
+    : (pricedInputTokens(usage) * pricing.inputUsdPerMTok + usage.outputTokens * pricing.outputUsdPerMTok) / 1e6;
 
 /** Credits for a run's total cost, rounded up so a paid run is never free. */
 export const creditsForCost = (usd: number) =>
