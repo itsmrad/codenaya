@@ -25,7 +25,7 @@ import { mergeMessageSteps } from "../../../../convex/messageSteps";
 import type { AgentStep } from "../agent-steps";
 import { swarmHeader, swarmSoloReason } from "../swarm-status";
 import { BUILD_NOT_BUILT_NOTE } from "./build-check-gate";
-import { SWARM_DELEGATE_NUDGE, SWARM_ORCHESTRATOR_NOTE } from "./constants";
+import { SWARM_DELEGATE_NUDGE, SWARM_ORCHESTRATOR_NOTE, WRITE_BATCH_FILES } from "./constants";
 import { FOUNDATION_MAX_STEPS } from "../constants";
 import { drive, text, toolCall } from "./process-message.driver";
 
@@ -416,8 +416,8 @@ describe("processMessage swarm mode", () => {
     });
 
     it("requests a minimal foundation and balanced page tasks", () => {
-      expect(SWARM_ORCHESTRATOR_NOTE).toContain("ONE writeFiles batch");
-      expect(SWARM_ORCHESTRATOR_NOTE).toContain("call delegateTasks immediately");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain(`at most ${WRITE_BATCH_FILES} files per writeFiles call, in 2-3 calls`);
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("right after your last foundation write");
       expect(SWARM_ORCHESTRATOR_NOTE).toContain("at most 240 characters");
       expect(SWARM_ORCHESTRATOR_NOTE).toContain("No page content or sitemap/robots/favicon extras");
       expect(SWARM_ORCHESTRATOR_NOTE).toContain("at most 2 pages");
