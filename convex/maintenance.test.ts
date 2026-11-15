@@ -57,7 +57,7 @@ describe("failLostMessageRuns", () => {
     { age: LOST_RUN_MS, scanned: 1, status: "completed" },
   ])("only scans runs old enough to be lost (age $age)", async ({ age, scanned, status }) => {
     const t = setup();
-    const messageId = await seedMessage(t, { _creationTime: START, status: "processing" });
+    const messageId = await seedMessage(t, { status: "processing" });
 
     vi.setSystemTime(START + age);
     const result = await t.mutation(internal.maintenance.failLostMessageRuns, {});
