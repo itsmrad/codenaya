@@ -110,7 +110,7 @@ export const SwarmBoard = ({ message, tasks, onOpenFile, children }: {
     <section aria-label="Swarm board" className="@container min-w-0 overflow-hidden rounded-xl border border-border bg-card/60">
       <h3 className="flex items-center gap-2 px-3 py-2.5 text-xs font-medium">
         <UsersIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="leading-5">{tasks === undefined ? "Swarm · Loading workers…" : swarmHeader(tasks, message._creationTime, endedAt, live ? undefined : swarmSoloReason(message.steps ?? []))}</span>
+        <span className="leading-5">{tasks === undefined ? "Swarm · Loading workers…" : swarmHeader(tasks, message._creationTime, endedAt, swarmSoloReason(message.steps ?? [], live), message.steps ?? [])}</span>
       </h3>
       <ul role="list" className="min-w-0 list-none">
         {/* Open by default: the parent run keeps its revert and fix actions in view. */}

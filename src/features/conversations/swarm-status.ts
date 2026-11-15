@@ -43,16 +43,25 @@ export const SWARM_SOLO_STEP_ID = "swarm-solo";
 /**
  * Why a finished swarm ran no workers: the classifier's solo reason, the refusal its
  * last delegateTasks call got, that call's own solo reason, or neither.
+ * A live run needs an explicit solo step before it can be labelled solo.
  */
-export const swarmSoloReason = (steps: AgentStep[]) => {
+export const swarmSoloReason = (steps: AgentStep[], live = false) => {
   const solo = steps.find((step) => step.id === SWARM_SOLO_STEP_ID)?.text?.replace(/^Building solo:\s*/, "");
+  if (solo || live) return solo;
   const call = steps.findLast((step) => step.tool === "delegateTasks");
-  return solo || call?.error?.replace(/^error:\s*/i, "") || call?.targets?.[0] || "the orchestrator did not delegate";
+  return call?.error?.replace(/^error:\s*/i, "") || call?.targets?.[0] || "the orchestrator did not delegate";
 };
 
-/** `solo`: a finished run's `swarmSoloReason`, shown in place of the counts when it ran no workers. */
-export const swarmHeader = (tasks: SwarmTask[], startedAt: number, endedAt: number, solo?: string) => {
+/** With no tasks, show the recorded solo reason or the live foundation/planning phase. */
+export const swarmHeader = (tasks: SwarmTask[], startedAt: number, endedAt: number, solo?: string, steps: AgentStep[] = []) => {
   if (solo && tasks.length === 0) return `Swarm · Built solo: ${solo} · ${swarmElapsed(startedAt, endedAt)}`;
+  if (tasks.length === 0) {
+    const completed = steps.filter((step) => step.kind === "tool" && step.status !== "running").length;
+    // The foundation budget (FOUNDATION_MAX_STEPS) counts model calls, in swarm-run's forceDelegation. One reply can write
+    // several files, so tool rows are shown as plain progress and never as n/budget.
+    const planning = steps.some((step) => step.tool === "delegateTasks");
+    return `Swarm · ${planning ? "Planning tasks…" : `Setting up shared files · ${completed} ${completed === 1 ? "step" : "steps"} done`} · ${swarmElapsed(startedAt, endedAt)}`;
+  }
   const workers = tasks.filter((task) => task.role === "worker");
   const leads = tasks.length - workers.length;
   const done = workers.filter((task) => task.status === "done").length;

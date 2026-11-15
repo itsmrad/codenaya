@@ -9,6 +9,7 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../../agent-models";
 import { sanitizeAgentText, toolResultError } from "../../agent-steps";
 import { type MessageMode, SWARM_MODE } from "../../plan-mode";
+import { FOUNDATION_MAX_STEPS } from "../../constants";
 import { MAX_SWARM_DEPTH, classifySwarmPrompt } from "../../swarm";
 import { SWARM_SOLO_STEP_ID } from "../../swarm-status";
 import { SWARM_ORCHESTRATOR_NOTE, SWARM_SUBORCH_OPTION_NOTE } from "../constants";
@@ -21,8 +22,6 @@ import { FOUNDATION_REFUSAL, guardFoundation } from "./ownership-guard";
 
 /** The orchestrator's forced turn: the same agent with tool_choice set to delegateTasks. */
 export const SWARM_DELEGATE_AGENT_NAME = "codenaya-delegate";
-/** Steps the orchestrator may spend on the foundation before its next call is forced. */
-export const FOUNDATION_MAX_STEPS = 5;
 /** A forced call whose plan is refused is forced once more; after that the run builds solo. */
 export const MAX_FORCED_DELEGATIONS = 2;
 
