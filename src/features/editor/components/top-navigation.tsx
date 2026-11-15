@@ -72,7 +72,7 @@ const Tab = ({
         aria-label={`Close ${fileName}`}
         onClick={() => closeTab(fileId)}
         className={cn(
-          "p-0.5 rounded-sm hover:bg-muted-foreground/20 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring transition-opacity cursor-pointer",
+          "p-0.5 rounded-sm hover:bg-muted-foreground/20 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring transition-opacity cursor-pointer [@media(hover:none)]:opacity-100",
           isActive && "opacity-100"
         )}
       >
