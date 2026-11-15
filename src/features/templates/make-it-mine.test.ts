@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starter";
+
 import { getTemplateSeedFiles } from "./seed-files";
 import { readTemplateSource } from "./server/template-source";
 import { BRAND_COLORS, BRAND_FILE, BRAND_FILES, applyBrandOrNull, rewriteCopyPrompt, type BrandFiles } from "./make-it-mine";
@@ -62,8 +64,8 @@ describe("applyBrandOrNull", () => {
 });
 
 describe("instant templates", () => {
-  it("are landing page and admin CRUD for now", () => {
-    expect(INSTANT.map((template) => template.id)).toEqual(["landing-page", "admin-crud"]);
+  it("are all six templates", () => {
+    expect(INSTANT.map((template) => template.id)).toEqual(STARTER_TEMPLATES.map((template) => template.id));
   });
 
   it.each(INSTANT)("$id seeds the starter config with its own app source", async (template) => {
@@ -74,5 +76,18 @@ describe("instant templates", () => {
     expect(app).toContain('from "./brand"');
     expect(app).not.toContain(template.description);
     expect(files.map((file) => file.path)).toEqual(expect.arrayContaining(["package.json", "vite.config.ts", BRAND_FILE]));
+    // The app shows the brand constant rather than hard-coding a name.
+    expect(app).toContain("BRAND_NAME");
+    expect(files.find((file) => file.path === BRAND_FILE)!.content).toMatch(/^export const BRAND_NAME = "[^"]+";$/m);
+  });
+
+  // The apps may only use what the starter ships: no new dependency (#362).
+  it.each(INSTANT)("$id imports only packages the Vite starter ships", async (template) => {
+    const deps = new Set(Object.keys(JSON.parse(VITE_REACT_STARTER.find((f) => f.path === "package.json")!.content).dependencies));
+    const sources = (await readTemplateSource(template.id)).filter((file) => /\.tsx?$/.test(file.path));
+    for (const { content } of sources) {
+      const bare = [...content.matchAll(/from "([^."][^"]*)"/g)].map((m) => m[1].split("/").slice(0, m[1].startsWith("@") ? 2 : 1).join("/"));
+      for (const name of bare) expect(deps.has(name), `${template.id} imports ${name}`).toBe(true);
+    }
   });
 });
