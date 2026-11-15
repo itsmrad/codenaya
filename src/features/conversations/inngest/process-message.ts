@@ -8,6 +8,9 @@ import { api } from "../../../../convex/_generated/api";
 import {
   CODING_AGENT_SYSTEM_PROMPT,
   FIRST_BUILD_APP_NOTE,
+  NEXT_FIRST_BUILD_APP_NOTE,
+  NEXT_STARTER_IN_PLACE_NOTE,
+  NEXT_STARTER_RECOVERY_NOTE,
   MAX_AGENT_STEPS,
   STARTER_IN_PLACE_NOTE,
   STEP_BUDGET_NOTE,
@@ -85,7 +88,9 @@ import {
 import { buildSkillsPromptSection, buildSupabaseHintSection } from '@/features/skills/server/prompt';
 import { buildProjectInstructionsSection } from '@/features/projects/instructions';
 import type { ProjectTheme } from '@/features/projects/theme';
-import { isStarterOnly } from './starter-only';
+import { starterFramework } from './starter-only';
+import { wantsNextJs } from './next-starter';
+import { detectFramework } from '@/features/sandbox-preview/utils/framework';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
@@ -586,6 +591,24 @@ export const processMessage = inngest.createFunction(
       "check-first-build",
       () => convex.query(api.projects.conversationNeedsFirstBuildForServer, { internalKey, conversationId }),
     );
+    // A modified app still has a framework even when it no longer matches a starter.
+    const { starter, framework } = await step.run("check-project-framework", async () => {
+      const files = await convex.query(api.system.getProjectFiles, { internalKey, projectId });
+      const pathOf = buildPathIndex(files);
+      const paths = files.filter((file) => file.type === "file").flatMap((file) => {
+        const path = pathOf(file._id);
+        return path ? [path] : [];
+      });
+      return { starter: starterFramework(files), framework: detectFramework(paths) };
+    });
+    // A failed seed must not turn an explicit Next request into a Vite app on retry.
+    const recoverNext = starter === null && framework === null && wantsNextJs(
+      recentMessages.find((msg) => msg.role === "user")?.content ?? message,
+    );
+    const nextApp = starter === "next" || framework === "next" || recoverNext;
+    const firstBuildNote = nextApp
+      ? (recoverNext ? NEXT_STARTER_RECOVERY_NOTE : NEXT_FIRST_BUILD_APP_NOTE)
+      : FIRST_BUILD_APP_NOTE;
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
       buildProjectInstructionsSection(projectInstructions, projectNotes, projectTheme),
@@ -596,16 +619,14 @@ export const processMessage = inngest.createFunction(
       buildSkillsPromptSection([], forced, unavailable),
       planMode ? PLAN_MODE_PROMPT : "",
       swarm.promptNote,
-      soloFirstBuild ? FIRST_BUILD_APP_NOTE : "",
+      soloFirstBuild ? firstBuildNote : "",
     ].join("");
 
     // A project seeded with the starter says so in the request, not the
     // system prompt, so the first turn builds on it (#338).
-    const starterOnly = await step.run("check-starter-only", async () =>
-      isStarterOnly(
-        await convex.query(api.system.getProjectFiles, { internalKey, projectId }),
-      ),
-    );
+    const starterNote = starter
+      ? (starter === "next" ? NEXT_STARTER_IN_PLACE_NOTE : STARTER_IN_PLACE_NOTE)
+      : (recoverNext ? NEXT_STARTER_RECOVERY_NOTE : "");
 
 
     // Display only: mirrors the agent's tool calls onto the assistant message
@@ -683,7 +704,7 @@ export const processMessage = inngest.createFunction(
       createEditFileTool({ projectId, internalKey, registry }),
       createCreateFilesTool({ projectId, internalKey, registry }),
       createCreateFolderTool({ projectId, internalKey }),
-      createScaffoldViteAppTool({ projectId, internalKey }),
+      ...(nextApp ? [] : [createScaffoldViteAppTool({ projectId, internalKey })]),
       createRenameFileTool({ projectId, internalKey }),
       createDeleteFilesTool({ projectId, internalKey }),
       createCheckBuildTool({ projectId, internalKey, ownerId: mcpOwnerId }),
@@ -968,7 +989,7 @@ export const processMessage = inngest.createFunction(
     let result;
     try {
       result = await network.run(
-        starterOnly ? `${request}\n\n${STARTER_IN_PLACE_NOTE}` : request,
+        starterNote ? `${request}\n\n${starterNote}` : request,
       );
     } catch (error) {
       await settleRun("record-usage-on-error");

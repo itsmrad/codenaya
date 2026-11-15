@@ -19,6 +19,7 @@ describe("Vite starter UI (#294)", () => {
     }
     expect(files.get("src/main.tsx")?.match(/<Toaster \/>/g)).toHaveLength(1);
     expect(files.get("src/components/ui/sonner.tsx")).not.toContain("next-themes");
+    expect(files.get("src/components/ui/sonner.tsx")).toContain("useSyncExternalStore(subscribe, isDark, () => false)");
   });
 
   it("resolves every shipped UI import and pins and prebundles its dependencies", () => {

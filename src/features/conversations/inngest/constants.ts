@@ -396,6 +396,7 @@ PLANNING (mental — do not output this):
 6. Plan the design: color palette tokens, font, spacing scale, dark mode strategy
 
 EXECUTION:
+- For a Next.js App Router starter, build on the files already in place. Do NOT call scaffoldViteApp. Make the first runnable implementation write src/app/page.tsx, keep src/app/layout.tsx and its Toaster, and use next/link and next/navigation for routing (no react-router-dom). Add "use client" to interactive components that use hooks or event handlers. Keep the Next config and src/app/globals.css; never add vite.config.ts, index.html or src/main.tsx. The selected starter defines the framework even when the request does not name it
 - For a NEW Vite + React app, call scaffoldViteApp FIRST, unless the request says the starter is already in place. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx and the common src/components/ui/ components listed above) and returns their paths. The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>. Build on it: use editFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace the placeholder route in src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files. If you edit src/main.tsx, keep its <ErrorBoundary> and <BrowserRouter>; in steps 9a–d skip the files it already wrote
 - Batch independent tool calls: make every call that does not need another call's result in the same turn (several readFiles calls at once), so the run does not use up its steps
 7. Write files with writeFiles by path. It creates missing folders, so never create folders first
@@ -450,6 +451,20 @@ Add a gallery page with my own photos
 /** Added to the request when the project holds only the seeded Vite starter (#338). */
 export const STARTER_IN_PLACE_NOTE =
   "(This project already has the Vite starter and nothing else: package.json, vite.config.ts, the tsconfig files, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx and the common src/components/ui/ components (including the mounted Sonner toaster). Import these components; do not rewrite them. Don't call scaffoldViteApp, and don't start with listFiles: build on these files by path.)";
+
+export const NEXT_STARTER_IN_PLACE_NOTE =
+  '(This project already has the Next.js 15 App Router starter and nothing else: package.json, next.config.ts, tsconfig.json, next-env.d.ts, postcss.config.mjs, components.json, src/app/layout.tsx, src/app/page.tsx, src/app/globals.css, src/app/error.tsx, src/lib/utils.ts and the common src/components/ui/ components, including the mounted Sonner toaster. Import these components; do not rewrite them. Do NOT call scaffoldViteApp or start with listFiles. First write a runnable src/app/page.tsx for the request, keeping layout.tsx. Use next/link and next/navigation, no react-router-dom; add "use client" to interactive components. Never add vite.config.ts, index.html or src/main.tsx. Build on this selected framework even if the request does not name Next.js.)';
+
+export const NEXT_STARTER_RECOVERY_NOTE =
+  '(The original user prompt requests Next.js 15 App Router, but its starter is incomplete or missing. Restore missing Next starter files, including package.json, next.config.ts, tsconfig.json, next-env.d.ts, postcss.config.mjs, src/app/layout.tsx and src/app/globals.css. Then make the first runnable implementation src/app/page.tsx for the actual request, preserving any existing layout and user code. Use next/link and next/navigation, no react-router-dom, and add "use client" to interactive components. Never add vite.config.ts, index.html or src/main.tsx; do NOT call scaffoldViteApp. Keep the app runnable between writes and complete the normal final checkBuild, fix and verification workflow.)';
+
+export const NEXT_FIRST_BUILD_APP_NOTE = `
+
+## First build: show the user's app early
+The Next.js 15 App Router starter is already in place. Override the entry-points-last workflow: make your first implementation write a small, immediately runnable src/app/page.tsx for the user's actual request. Use the requested product name, meaningful domain-specific copy, representative data and a styled main layout, never a generic loading shell or placeholder.
+Import only existing files and installed packages. Keep src/app/layout.tsx, its metadata and Toaster intact. Use next/link and next/navigation, never react-router-dom, and add "use client" to components using hooks or event handlers. Never add vite.config.ts, index.html or src/main.tsx, and do NOT call scaffoldViteApp. Improve existing user implementation in place.
+Then complete every requested feature, extracting components and wiring routes only after their files exist. Keep the app runnable between writes; this first page is an intermediate step. Retain the normal final checkBuild, fix and verification workflow.
+`;
 
 /** Solo first builds only; swarm has its own foundation order and path ownership. */
 export const FIRST_BUILD_APP_NOTE = `
