@@ -83,18 +83,25 @@ export function buildAgentKitModel({
 type AgentKitModel = ReturnType<typeof buildAgentKitModel>;
 type RequestBody = Record<string, unknown>;
 
-/**
- * The same model with tool calls turned off, for a turn that must answer in
- * text. Its tools stay in the request: some providers reject tool calls in the
- * history of a request that declares no tools.
- */
-export function withoutToolCalls(model: AgentKitModel): AgentKitModel {
+/** The same model with every request's `tool_choice` set (only on a request that carries tools). */
+function withToolChoice(model: AgentKitModel, anthropicChoice: unknown, openaiChoice: unknown): AgentKitModel {
   const onCall = model.onCall as ((adapter: unknown, body: RequestBody) => void) | undefined;
   return {
     ...model,
     onCall(adapter: unknown, body: RequestBody) {
       onCall?.(adapter, body);
-      if (body.tools) body.tool_choice = model.format === "anthropic" ? { type: "none" } : "none";
+      if (body.tools) body.tool_choice = model.format === "anthropic" ? anthropicChoice : openaiChoice;
     },
   } as AgentKitModel;
 }
+
+/**
+ * The same model with tool calls turned off, for a turn that must answer in
+ * text. Its tools stay in the request: some providers reject tool calls in the
+ * history of a request that declares no tools.
+ */
+export const withoutToolCalls = (model: AgentKitModel) => withToolChoice(model, { type: "none" }, "none");
+
+/** The same model forced to call the tool `name`, on both AgentKit adapters. */
+export const forceToolCall = (model: AgentKitModel, name: string) =>
+  withToolChoice(model, { type: "tool", name }, { type: "function", function: { name } });

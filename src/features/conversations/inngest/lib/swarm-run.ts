@@ -1,5 +1,5 @@
 import type { GetStepTools } from "inngest";
-import type { Tool } from "@inngest/agent-kit";
+import type { AgentResult, Tool } from "@inngest/agent-kit";
 
 import type { inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
@@ -7,31 +7,81 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../../agent-models";
+import { toolResultError } from "../../agent-steps";
 import { type MessageMode, SWARM_MODE } from "../../plan-mode";
-import { MAX_SWARM_DEPTH } from "../../swarm";
+import { MAX_SWARM_DEPTH, classifySwarmPrompt } from "../../swarm";
+import { SWARM_SOLO_STEP_ID } from "../../swarm-status";
 import { SWARM_ORCHESTRATOR_NOTE, SWARM_SUBORCH_OPTION_NOTE } from "../constants";
 import { createDelegateTasksTool } from "../tools/delegate-tasks";
+import { FOUNDATION_REFUSAL, guardFoundation } from "./ownership-guard";
+
+/** The orchestrator's forced turn: the same agent with tool_choice set to delegateTasks. */
+export const SWARM_DELEGATE_AGENT_NAME = "codenaya-delegate";
+/** Steps the orchestrator may spend on the foundation before its next call is forced. */
+export const FOUNDATION_MAX_STEPS = 8;
+/** A forced call whose plan is refused is forced once more; after that the run builds solo. */
+export const MAX_FORCED_DELEGATIONS = 2;
+
+const FOUNDATION_WRITE_TOOLS = new Set(["writeFiles", "editFile", "updateFile", "scaffoldViteApp"]);
+const wrote = (result: AgentResult) =>
+  result.toolCalls.some(({ tool, content }) => FOUNDATION_WRITE_TOOLS.has(tool.name) && !toolResultError(content));
+
+export interface SwarmRun {
+  tools: Tool.Any[];
+  promptNote: string;
+  /** Wraps every orchestrator tool: before delegation, writes stay in the foundation. */
+  guard: (tool: Tool.Any) => Tool.Any;
+  /** Whether the router's next call must be the forced delegateTasks turn. */
+  forceDelegation: (results: AgentResult[], callCount: number) => boolean;
+}
+
+const NO_SWARM: SwarmRun = { tools: [], promptNote: "", guard: (tool) => tool, forceDelegation: () => false };
 
 /**
- * A swarm-mode run's extra tool and system-prompt note; nothing for other
- * modes, or when the kill switch (ADR 0013) turned swarm off after the send,
+ * A swarm-mode run's extra tool, system-prompt note and delegation gate; nothing for
+ * other modes, or when the kill switch (ADR 0013) turned swarm off after the send,
  * which then runs as a normal build. SWARM_PLATFORM_MAX_DEPTH bounds a platform
  * run's depth; BYOK always gets MAX_SWARM_DEPTH.
+ *
+ * `classifySwarmPrompt` decides before the run whether the request is split. A split
+ * run writes only the foundation, then its next call is forced to delegateTasks: when
+ * a write is refused, a turn writes nothing after earlier writes, it would end, or
+ * FOUNDATION_MAX_STEPS ran. A solo run records the classifier's reason for the board.
  */
-export const swarmRun = async ({ mode, internalKey, messageId, projectId, ownerId, model, step }: {
+export const swarmRun = async ({ mode, message, internalKey, messageId, projectId, ownerId, model, step }: {
   mode?: MessageMode;
+  message: string;
   internalKey: string;
   messageId: Id<"messages">;
   projectId: Id<"projects">;
   ownerId?: string;
   model?: string | AgentModelChoice;
   step: GetStepTools<typeof inngest>;
-}): Promise<{ tools: Tool.Any[]; promptNote: string }> => {
-  if (mode !== SWARM_MODE) return { tools: [], promptNote: "" };
+}): Promise<SwarmRun> => {
+  if (mode !== SWARM_MODE) return NO_SWARM;
   const settings = await step.run("swarm-settings", () => convex.query(api.swarm.getSwarmSettings, {}));
-  if (!settings.enabled) return { tools: [], promptNote: "" };
+  if (!settings.enabled) return NO_SWARM;
   const choice = model && typeof model === "object" ? model : { modelId: model ?? "" };
   const maxDepth = choice.keyId ? MAX_SWARM_DEPTH : settings.platformMaxDepth;
+  const split = classifySwarmPrompt(message);
+  if (!split.delegate) {
+    await step.run("record-swarm-solo", async () => {
+      try {
+        await convex.mutation(api.system.upsertMessageSteps, {
+          internalKey,
+          messageId,
+          steps: [{ id: SWARM_SOLO_STEP_ID, kind: "thinking", text: `Building solo: ${split.reason}`, status: "done", startedAt: Date.now() }],
+        });
+      } catch (error) {
+        console.error("[swarm] failed to record the solo reason", error);
+      }
+    });
+  }
+
+  // Rebuilt on every replay: tool handlers and the router re-run in order.
+  const state = { delegated: false };
+  let fellBack = false;
+  const open = () => !split.delegate || state.delegated || fellBack;
   return {
     tools: [createDelegateTasksTool({
       internalKey,
@@ -41,7 +91,26 @@ export const swarmRun = async ({ mode, internalKey, messageId, projectId, ownerI
       ownerId: ownerId ?? "",
       model: choice,
       maxDepth,
+      state,
+      ...(split.delegate ? { soloRefusal: split.reason } : {}),
     })],
     promptNote: SWARM_ORCHESTRATOR_NOTE + (maxDepth >= MAX_SWARM_DEPTH ? SWARM_SUBORCH_OPTION_NOTE : ""),
+    guard: guardFoundation(open),
+    forceDelegation: (results, callCount) => {
+      if (open() || callCount === 0) return false;
+      // callCount, not results: seeded history is not this run's.
+      const run = results.slice(-callCount);
+      const forced = run.filter((result) => result.agentName === SWARM_DELEGATE_AGENT_NAME).length;
+      // The board shows the last refusal as the solo reason (`swarmSoloReason`).
+      if (forced >= MAX_FORCED_DELEGATIONS) {
+        fellBack = true;
+        return false;
+      }
+      const last = run.at(-1)!;
+      if (last.agentName === SWARM_DELEGATE_AGENT_NAME || callCount >= FOUNDATION_MAX_STEPS) return true;
+      if (last.toolCalls.length === 0) return true;
+      if (last.toolCalls.some(({ content }) => toolResultError(content)?.startsWith(FOUNDATION_REFUSAL))) return true;
+      return !wrote(last) && run.slice(0, -1).some(wrote);
+    },
   };
 };

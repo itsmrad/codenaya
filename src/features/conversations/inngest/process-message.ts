@@ -49,7 +49,7 @@ import {
   keyFailureMessage,
   resolveRunModel,
 } from '@/features/ai-providers/server/resolve-run-model';
-import { withoutToolCalls } from '@/features/ai-providers/server/agentkit-model';
+import { forceToolCall, withoutToolCalls } from '@/features/ai-providers/server/agentkit-model';
 import type { ModelPricing } from '@/features/ai-providers/catalog';
 import { costUsd, usageOfResponse } from '@/features/billing/credits';
 import {
@@ -102,7 +102,7 @@ import {
   PLAN_MODE_TOOLS,
   SWARM_MODE,
 } from '../plan-mode';
-import { swarmRun } from './lib/swarm-run';
+import { SWARM_DELEGATE_AGENT_NAME, swarmRun } from './lib/swarm-run';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -672,7 +672,7 @@ export const processMessage = inngest.createFunction(
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
       ...swarm.tools,
-    ].map(refuseCutOffCalls).map(decodeJsonArgs);
+    ].map(swarm.guard).map(refuseCutOffCalls).map(decodeJsonArgs);
 
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
@@ -854,10 +854,16 @@ export const processMessage = inngest.createFunction(
       name: SUMMARY_AGENT_NAME,
       model: withoutToolCalls(codingModel),
     });
+    // Swarm mode's forced turn: the same agent, made to call delegateTasks.
+    const delegateAgent = createAgent({
+      ...agentOptions,
+      name: SWARM_DELEGATE_AGENT_NAME,
+      model: forceToolCall(codingModel, "delegateTasks"),
+    });
 
     const network = createNetwork({
       name: "codenaya-network",
-      agents: [codingAgent, summaryAgent],
+      agents: [codingAgent, summaryAgent, delegateAgent],
       maxIter: MAX_AGENT_STEPS,
       router: ({ network, callCount }) => {
         const { results } = network.state;
@@ -881,6 +887,9 @@ export const processMessage = inngest.createFunction(
           cutOffRetries += 1;
           return codingAgent;
         }
+
+        // A split swarm run delegates once its foundation is written (see swarmRun).
+        if (!lastStep && swarm.forceDelegation(results, callCount)) return delegateAgent;
 
         // Stop routing to this agent if there's a final text response without
         // tool calls, unless files changed since the last passing build check

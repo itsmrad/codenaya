@@ -2,7 +2,7 @@ import { createAgenticModelFromAiAdapter, createTool } from "@inngest/agent-kit"
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AI_PROVIDERS } from "../registry";
-import { buildAgentKitModel, withoutToolCalls } from "./agentkit-model";
+import { buildAgentKitModel, forceToolCall, withoutToolCalls } from "./agentkit-model";
 
 const tool = createTool({ name: "listFiles", description: "List files", handler: () => [] });
 
@@ -58,5 +58,14 @@ describe("withoutToolCalls", () => {
   it("uses Anthropic's form on the native adapter", () => {
     const model = buildAgentKitModel({ provider: "anthropic", apiKey: "sk-ant", model: "claude-opus-5-5" });
     expect(requestBody(withoutToolCalls(model))).toMatchObject({ tool_choice: { type: "none" } });
+  });
+});
+
+describe("forceToolCall", () => {
+  it("forces the named tool on the OpenAI-compatible and Anthropic adapters", () => {
+    expect(requestBody(forceToolCall(openrouter(), "listFiles")))
+      .toMatchObject({ tool_choice: { type: "function", function: { name: "listFiles" } } });
+    const model = buildAgentKitModel({ provider: "anthropic", apiKey: "sk-ant", model: "claude-opus-5-5" });
+    expect(requestBody(forceToolCall(model, "listFiles"))).toMatchObject({ tool_choice: { type: "tool", name: "listFiles" } });
   });
 });
