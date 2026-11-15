@@ -230,7 +230,7 @@ describe("share links (#260)", () => {
   test("keys and credential files are hidden from the share and not copied by Remix or a showcase import", async () => {
     const t = convexTest(schema, modules);
     const { projectId } = await seed(t);
-    const secrets = ["server.pem", "id_rsa.pub", ".npmrc", "gcp-service-account.json"];
+    const secrets = ["server.pem", "id_rsa.pub", ".npmrc", "gcp-service-account.json", "Upload.P12", "id_ecdsa", ".pgpass", "credentials"];
     const { secretIds, showcaseId } = await t.run(async (ctx) => {
       const now = Date.now();
       const keys = await ctx.db.insert("files", { projectId, name: "keys", type: "folder", updatedAt: now });
