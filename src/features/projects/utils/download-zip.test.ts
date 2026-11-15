@@ -59,6 +59,21 @@ describe("createProjectZip", () => {
     expect(fetchBinary).toHaveBeenCalledWith("https://storage.example/logo");
   });
 
+  it("adds the instructions as AGENTS.md, and nothing when empty", async () => {
+    const files = [file("readme", "README.md", { content: "# Hello" })];
+
+    const zip = await createProjectZip(files, "Use green.");
+    expect(await zip.file("AGENTS.md")!.async("string")).toBe("Use green.\n");
+
+    expect(Object.keys((await createProjectZip(files, "  ")).files)).toEqual(["README.md"]);
+    expect(Object.keys((await createProjectZip(files)).files)).toEqual(["README.md"]);
+  });
+
+  it("keeps the project's own AGENTS.md over the instructions", async () => {
+    const zip = await createProjectZip([file("a", "AGENTS.md", { content: "mine" })], "Use green.");
+    expect(await zip.file("AGENTS.md")!.async("string")).toBe("mine");
+  });
+
   it("fails when a binary file has no download URL", async () => {
     await expect(
       createProjectZip([

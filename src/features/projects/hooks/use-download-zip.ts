@@ -32,7 +32,7 @@ export const useDownloadZip = (projectId: Id<"projects">) => {
       const files = await convex.query(api.files.getFilesWithUrls, {
         projectId,
       });
-      const zip = await createProjectZip(files);
+      const zip = await createProjectZip(files, project?.instructions);
       const blob = await zip.generateAsync({ type: "blob" });
       downloadBlob(blob, getZipFileName(project?.name ?? ""));
     } catch {

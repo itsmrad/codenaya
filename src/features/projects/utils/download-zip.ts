@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 
 import { getFilePath } from "@/features/sandbox-preview/utils/file-tree";
+import { getInstructionsExportFile } from "@/features/projects/instructions";
 
 import { Doc } from "../../../../convex/_generated/dataModel";
 
@@ -18,18 +19,21 @@ const fetchBytes = async (url: string): Promise<ArrayBuffer> => {
 /**
  * Builds a zip of the project's files, keeping the folder structure.
  * Text files are written from their content; binary files are fetched from
- * their storage URL. Empty folders are kept as directory entries.
+ * their storage URL. Empty folders are kept as directory entries. The project
+ * instructions are added as `AGENTS.md` when set (#299).
  */
 export const createProjectZip = async (
   files: ZipSourceFile[],
+  instructions?: string,
   fetchBinary: (url: string) => Promise<ArrayBuffer> = fetchBytes,
 ): Promise<JSZip> => {
   const zip = new JSZip();
   const filesMap = new Map(files.map((file) => [file._id, file]));
+  const paths = files.map((file) => getFilePath(file, filesMap));
 
   await Promise.all(
-    files.map(async (file) => {
-      const path = getFilePath(file, filesMap);
+    files.map(async (file, index) => {
+      const path = paths[index];
 
       if (file.type === "folder") {
         zip.folder(path);
@@ -47,6 +51,9 @@ export const createProjectZip = async (
       zip.file(path, file.content ?? "");
     }),
   );
+
+  const extra = getInstructionsExportFile(instructions, paths);
+  if (extra) zip.file(extra.path, extra.content);
 
   return zip;
 };

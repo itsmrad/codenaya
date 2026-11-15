@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildProjectInstructionsSection,
+  getInstructionsExportFile,
   MAX_PROJECT_INSTRUCTIONS_LENGTH,
 } from "./instructions";
 
@@ -84,5 +85,29 @@ describe("buildProjectInstructionsSection with notes", () => {
 
   it("is empty with no instructions and no notes", () => {
     expect(buildProjectInstructionsSection(undefined, [])).toBe("");
+  });
+});
+
+describe("getInstructionsExportFile", () => {
+  it("returns AGENTS.md with the trimmed instructions", () => {
+    expect(getInstructionsExportFile("  Use green.\n", ["README.md"])).toEqual({
+      path: "AGENTS.md",
+      content: "Use green.\n",
+    });
+  });
+
+  it("returns nothing for empty or whitespace instructions", () => {
+    expect(getInstructionsExportFile(undefined, [])).toBeNull();
+    expect(getInstructionsExportFile(" \n ", [])).toBeNull();
+  });
+
+  it("never replaces the project's own root AGENTS.md", () => {
+    expect(getInstructionsExportFile("Use green.", ["AGENTS.md"])).toBeNull();
+    expect(getInstructionsExportFile("Use green.", ["docs/AGENTS.md"])).not.toBeNull();
+  });
+
+  it("caps the content at the instructions limit", () => {
+    const file = getInstructionsExportFile("x".repeat(MAX_PROJECT_INSTRUCTIONS_LENGTH + 50), []);
+    expect(file!.content).toBe(`${"x".repeat(MAX_PROJECT_INSTRUCTIONS_LENGTH)}\n`);
   });
 });

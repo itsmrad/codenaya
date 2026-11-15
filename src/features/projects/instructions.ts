@@ -48,3 +48,20 @@ export function buildProjectInstructionsSection(
     "</project_instructions>",
   ].join("\n") + buildDesignTokensSection(theme);
 }
+
+/** Where exports put the project's instructions (#299). */
+export const INSTRUCTIONS_EXPORT_PATH = "AGENTS.md";
+
+/**
+ * The extra export file holding the project instructions, or `null` when they
+ * are empty or the project already has its own root `AGENTS.md`, so the user's
+ * file is never overwritten. Capped like the prompt section.
+ */
+export function getInstructionsExportFile(
+  instructions: string | undefined,
+  existingPaths: Iterable<string>,
+): { path: string; content: string } | null {
+  const content = (instructions ?? "").trim().slice(0, MAX_PROJECT_INSTRUCTIONS_LENGTH);
+  if (!content || [...existingPaths].includes(INSTRUCTIONS_EXPORT_PATH)) return null;
+  return { path: INSTRUCTIONS_EXPORT_PATH, content: `${content}\n` };
+}
