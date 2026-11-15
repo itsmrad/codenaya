@@ -3,9 +3,35 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { guardOwnedPaths } from "./inngest/lib/ownership-guard";
-import { ownsPath, validatePlan } from "./swarm";
+import { ownsPath, swarmPlanSchema, validatePlan } from "./swarm";
 
 const task = (id: string, ownedPaths: string[]) => ({ id, title: id, brief: `Build ${id}.`, ownedPaths });
+
+describe("swarmPlanSchema", () => {
+  it("accepts an empty task list with a solo reason", () => {
+    expect(swarmPlanSchema.parse({ tasks: [], solo: "x" })).toEqual({ tasks: [], solo: "x" });
+  });
+
+  it.each([2, 3, 4])("accepts %i tasks", (count) => {
+    const tasks = Array.from({ length: count }, (_, i) => task(`task-${i}`, [`src/${i}.ts`]));
+    expect(swarmPlanSchema.safeParse({ tasks }).success).toBe(true);
+  });
+
+  it.each([0, 1, 5, 6])("rejects %i tasks without a solo reason", (count) => {
+    const tasks = Array.from({ length: count }, (_, i) => task(`task-${i}`, [`src/${i}.ts`]));
+    expect(swarmPlanSchema.safeParse({ tasks }).success).toBe(false);
+  });
+
+  it("rejects one task even with a solo reason", () => {
+    expect(swarmPlanSchema.safeParse({ tasks: [task("a", ["src/a.ts"])], solo: "x" }).success).toBe(false);
+  });
+
+  it("emits the tool JSON schema without a minimum task count", () => {
+    const schema = z.toJSONSchema(swarmPlanSchema, { target: "draft-7" });
+    expect(schema.properties?.tasks).not.toHaveProperty("minItems");
+    expect(schema.properties?.tasks).toHaveProperty("maxItems", 4);
+  });
+});
 
 describe("validatePlan", () => {
   it("accepts 2-4 tasks owning disjoint files and folders under src/, normalised", () => {
@@ -16,6 +42,7 @@ describe("validatePlan", () => {
   });
 
   it("refuses too few or too many tasks", () => {
+    expect(validatePlan({ tasks: [] })).toMatch(/^Error: Delegate 2-4 tasks, or pass tasks \[\] with solo/);
     expect(validatePlan({ tasks: [task("a", ["src/a.ts"])] })).toMatch(/^Error: Delegate 2-4 tasks, or pass tasks \[\] with solo/);
     const five = ["a", "b", "c", "d", "e"].map((id) => task(id, [`src/${id}.ts`]));
     expect(validatePlan({ tasks: five })).toMatch(/^Error:/);
