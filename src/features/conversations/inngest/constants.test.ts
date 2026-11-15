@@ -60,10 +60,10 @@ describe("coding agent integration instructions", () => {
   });
 
   it("describes both swarm foundations and leaves route content to workers or integration", () => {
-    expect(SWARM_ORCHESTRATOR_NOTE).toContain("For Vite, set up src/App.tsx routing");
+    expect(SWARM_ORCHESTRATOR_NOTE).toContain("For Vite, routing is src/App.tsx");
     expect(SWARM_ORCHESTRATOR_NOTE).toContain("routing is the file system");
-    expect(SWARM_ORCHESTRATOR_NOTE).toContain("src/app/layout.tsx and theme tokens in src/app/globals.css");
-    expect(SWARM_ORCHESTRATOR_NOTE).toContain("src/app/<route>/page.tsx stubs (export default function Page(){return null}, at most 240 characters)");
+    expect(SWARM_ORCHESTRATOR_NOTE).toContain("set up src/app/layout.tsx, and new routes use");
+    expect(SWARM_ORCHESTRATOR_NOTE).toContain("src/app/<route>/page.tsx stubs (export default function Page(){return null})");
     expect(SWARM_ORCHESTRATOR_NOTE).toContain("Existing files are never stubbed");
     expect(SWARM_ORCHESTRATOR_NOTE).toContain("delegate home content as a component and wire it in during integration");
   });
