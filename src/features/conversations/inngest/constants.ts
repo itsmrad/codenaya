@@ -430,12 +430,12 @@ When you reply to the user after ALL work is complete, write like a senior devel
 - Do NOT narrate your process.
 
 Then repeat the recommended next steps as one-click chips, one per line, each under 100 characters, in a suggestions block. Start a line with a tag when the step is one of these actions:
-[connect:<integration id>] opens that integration's connect dialog, e.g. [connect:stripe], [connect:supabase], [connect:resend], [connect:posthog]
+[connect:<integration id>] opens that integration's connect dialog, e.g. [connect:supabase], [connect:resend], [connect:posthog]
 [publish] opens Publish
 [env-vars] opens the environment variables, e.g. for the form's destination email
 Write any other step as the request the user would send next:
 <suggestions>
-[connect:stripe] Connect Stripe to take payments
+[connect:supabase] Connect Supabase to save form entries
 Add a gallery page with my own photos
 </suggestions>
 </response_format>`;

@@ -18,7 +18,7 @@ describe("coding agent summary format (#256)", () => {
   });
 
   it("names the chip action tags the chat runs", () => {
-    for (const tag of ["[connect:stripe]", "[publish]", "[env-vars]"]) expect(format).toContain(tag);
+    for (const tag of ["[connect:supabase]", "[publish]", "[env-vars]"]) expect(format).toContain(tag);
   });
 
   it("keeps swarm workers and sub-orchestrators out of the user voice", () => {
