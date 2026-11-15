@@ -70,6 +70,8 @@ const COUNTED_RE = /\bmulti-?page\b|\b(?:\d+|two|three|four|five|six|several|mul
 const EDIT_RE = /^(?:please\s+)?(?:change|fix|rename|update|tweak|adjust|move|remove|delete|replace|make the|set|increase|decrease|align|center|add an?)\b/;
 // An edit names pages in passing ("a contact form on the home page"): it splits only when it adds pages.
 const MULTI_PAGE_RE = /\b(?:pages|screens)\b|\b(?:page|screen)\s*(?:,|and\b|&|\+)/;
+// An edit of a shared element touches every page through one shared file: it never splits.
+const SHARED_EDIT_RE = /^(?:please\s+)?(?:update|change|fix|tweak|rename)\b.*\b(?:header|footer|nav|navbar|logo|colou?rs?|theme|fonts?)\b/;
 const EDIT_MAX_CHARS = 120;
 const LONG_REQUEST_CHARS = 300;
 
@@ -82,6 +84,7 @@ const LONG_REQUEST_CHARS = 300;
 export const classifySwarmPrompt = (prompt: string): { delegate: boolean; reason: string } => {
   const text = prompt.trim().toLowerCase();
   const edit = EDIT_RE.test(text) && text.length <= EDIT_MAX_CHARS;
+  if (edit && SHARED_EDIT_RE.test(text)) return { delegate: false, reason: "a small edit" };
   const features = [...new Set([...text.matchAll(FEATURE_RE)].map((match) => match[1]))];
   if (features.length >= 2 && (!edit || MULTI_PAGE_RE.test(text))) {
     return { delegate: true, reason: `it names ${features.length} pages or features (${features.join(", ")})` };

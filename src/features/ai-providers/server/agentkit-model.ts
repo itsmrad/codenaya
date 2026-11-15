@@ -104,18 +104,20 @@ function withToolChoice(model: AgentKitModel, anthropicChoice: unknown, openaiCh
  */
 export const withoutToolCalls = (model: AgentKitModel) => withToolChoice(model, { type: "none" }, "none");
 
-// Routes known to honour a forced tool_choice; a custom endpoint may reject it.
-const FORCEABLE_BASE_URLS = ["https://openrouter.ai/", "https://api.openai.com/", "https://api.groq.com/"];
+// Official hosts and OpenAI-family models known to honour a forced tool_choice; anything else may reject it.
+const FORCEABLE_BASE_URLS = ["https://api.openai.com/", "https://api.groq.com/"];
+const FORCEABLE_MODEL_RE = /^(?:openai\/)?(?:gpt-|o\d)/i;
 
 /**
  * How a turn that must call one tool can ask for it. Claude rejects a forced tool_choice
  * while it thinks, and only Haiku can turn thinking off (see ai-sdk-model.ts), so other
- * Claude models, like unknown endpoints, get "auto": the caller nudges instead.
+ * Claude models, like other models and hosts, get "auto": the caller nudges instead.
  */
 export const toolForcing = (model: AgentKitModel): "force" | "force-thinking-off" | "auto" => {
   const { model: name = "", baseUrl = "" } = (model.options ?? {}) as { model?: string; baseUrl?: string };
   if (/claude/i.test(name)) return /haiku/i.test(name) ? "force-thinking-off" : "auto";
-  return model.format === "openai-chat" && FORCEABLE_BASE_URLS.some((url) => baseUrl.startsWith(url)) ? "force" : "auto";
+  return model.format === "openai-chat" && FORCEABLE_MODEL_RE.test(name)
+    && FORCEABLE_BASE_URLS.some((url) => baseUrl.startsWith(url)) ? "force" : "auto";
 };
 
 /** The same model made to call the tool `name` where `toolForcing` allows it; otherwise unchanged. */
