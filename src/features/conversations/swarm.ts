@@ -40,10 +40,10 @@ export const swarmPlanSchema = z.object({
 });
 export type SwarmPlan = z.infer<typeof swarmPlanSchema>;
 
-/** The file tools' own normalisation, so ownership judges the path a tool acts on; only paths under src/. */
+/** The file tools' own normalisation, so ownership judges the path a tool acts on; only paths under src/ or public/. */
 const canonical = (raw: string) => {
   const path = normalizePath(raw);
-  return path?.startsWith("src/") ? path : undefined;
+  return path && (path === "public" || path.startsWith("src/") || path.startsWith("public/")) ? path : undefined;
 };
 /** `path` is `folder` itself or inside it: every path is a file or a folder. */
 const within = (folder: string, path: string) => path === folder || path.startsWith(`${folder}/`);
@@ -133,8 +133,8 @@ export const validatePlan = (
   for (const task of tasks) {
     for (const raw of task.ownedPaths) {
       const path = normalizePath(raw);
-      if (!path || path === "src") return `Error: Invalid owned path "${raw}"; use a project-relative path under src/.`;
-      if (!path.startsWith("src/")) return `Error: Owned path "${raw}" is outside src/. Tasks own only paths under src/; write public/ and other root files yourself before delegating, or drop it from ownedPaths, then call delegateTasks again.`;
+      if (!path || path === "src") return `Error: Invalid owned path "${raw}"; use a project-relative path under src/ or public/.`;
+      if (!canonical(path)) return `Error: Owned path "${raw}" is outside src/ and public/. Tasks own paths under src/ or public/; index.html and root config files are yours: write them before delegating, or drop it from ownedPaths, then call delegateTasks again.`;
       if (shared(path)) return `Error: "${raw}" is or holds a shared file reserved for the orchestrator.`;
       if (withinPaths && !ownsPath(withinPaths, path)) return `Error: "${raw}" is outside your owned paths.`;
       const other = owned.find((o) => o.id !== task.id && (within(o.path, path) || within(path, o.path)));

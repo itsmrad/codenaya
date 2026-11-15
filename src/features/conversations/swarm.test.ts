@@ -65,20 +65,30 @@ describe("validatePlan", () => {
     expect(validatePlan({ tasks: [task("a", ["src/a.ts"]), task("a", ["src/b.ts"])] })).toMatch(/unique/);
   });
 
-  it.each(["public", "public/", "public/x.png", "package.json"])("explains how to fix outside-src ownership: %s", (path) => {
+  it("lets a task own public/ files or the folder, normalised, with overlap rules unchanged", () => {
+    const plan = { tasks: [task("seo", ["./public/robots.txt", "public/sitemap.xml"]), task("pages", ["src/pages/"])] };
+    expect(validatePlan(plan)).toEqual({
+      tasks: [task("seo", ["public/robots.txt", "public/sitemap.xml"]), task("pages", ["src/pages"])],
+    });
+    expect(validatePlan({ tasks: [task("a", ["public/"]), task("b", ["src/b.ts"])] })).toMatchObject({ tasks: [{ ownedPaths: ["public"] }, {}] });
+    expect(validatePlan({ tasks: [task("a", ["public"]), task("b", ["public/logo.svg"])] })).toMatch(/overlap/);
+    expect(validatePlan({ tasks: [task("a", ["public/favicon.svg"]), task("b", ["public/favicon.svg"])] })).toMatch(/overlap/);
+  });
+
+  it.each(["index.html", "package.json", "vite.config.ts", "public-old/x.png", "publicfoo"])("explains how to fix outside-src/public ownership: %s", (path) => {
     expect(validatePlan({ tasks: [task("a", [path]), task("b", ["src/b.ts"])] })).toBe(
-      `Error: Owned path "${path}" is outside src/. Tasks own only paths under src/; write public/ and other root files yourself before delegating, or drop it from ownedPaths, then call delegateTasks again.`,
+      `Error: Owned path "${path}" is outside src/ and public/. Tasks own paths under src/ or public/; index.html and root config files are yours: write them before delegating, or drop it from ownedPaths, then call delegateTasks again.`,
     );
   });
 
-  it.each(["src/../x", "/src/x.ts", "src//x.ts", ""])("keeps a clear malformed path error: %s", (path) => {
+  it.each(["src/../x", "/src/x.ts", "src//x.ts", "public/../index.html", "/public/x.png", ""])("keeps a clear malformed path error: %s", (path) => {
     expect(validatePlan({ tasks: [task("a", [path]), task("b", ["src/b.ts"])] })).toBe(
-      `Error: Invalid owned path "${path}"; use a project-relative path under src/.`,
+      `Error: Invalid owned path "${path}"; use a project-relative path under src/ or public/.`,
     );
   });
 
   it("refuses shared files, folders holding one, and outside, absolute or parent paths", () => {
-    for (const path of ["src/App.tsx", "src/lib", "src/lib/", "src", "src/", "src/index.css", "package.json", "/src/x.ts", "src/../x.ts", "public/x.png", "src//x.ts"]) {
+    for (const path of ["src/App.tsx", "src/lib", "src/lib/", "src", "src/", "src/index.css", "package.json", "index.html", "/src/x.ts", "src/../x.ts", "public/../index.html", "/public/x.png", "src//x.ts"]) {
       expect(validatePlan({ tasks: [task("a", [path]), task("b", ["src/b.ts"])] }), path).toMatch(/^Error:/);
     }
   });
@@ -123,6 +133,19 @@ describe("ownsPath", () => {
     expect(ownsPath(owned, "./src/pages/home.tsx")).toBe(true);
   });
 
+  it("covers public/ when owned, never index.html, root config or other tasks' files", () => {
+    const owned = ["public/robots.txt", "public/images"];
+    expect(ownsPath(owned, "public/robots.txt")).toBe(true);
+    expect(ownsPath(owned, "./public/images/hero.png")).toBe(true);
+    expect(ownsPath(owned, "public/sitemap.xml")).toBe(false);
+    expect(ownsPath(owned, "public/../index.html")).toBe(false);
+    expect(ownsPath(owned, "index.html")).toBe(false);
+    expect(ownsPath(["public"], "index.html")).toBe(false);
+    expect(ownsPath(["public"], "package.json")).toBe(false);
+    expect(ownsPath(["public"], "public/sitemap.xml")).toBe(true);
+    expect(ownsPath(["src/pages"], "public/robots.txt")).toBe(false);
+  });
+
   it("treats an owned path without a slash as a folder too", () => {
     expect(ownsPath(["src/components"], "src/components/nav.tsx")).toBe(true);
     expect(ownsPath(["src/components"], "src/components/")).toBe(true);
@@ -154,6 +177,18 @@ describe("guardOwnedPaths", () => {
     expect(await call("deleteFiles", { paths: ["src/pages/a.tsx", "src/lib"] })).toMatch(/^Error/);
     expect(await call("deleteFiles", { fileIds: ["f1"] })).toMatch(/^Error/);
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("lets a worker write its owned public/ file, not another's, index.html or root files", async () => {
+    handler.mockClear();
+    const seo = guardOwnedPaths(["public/robots.txt"])(createTool({ name: "writeFiles", description: "w", parameters: z.object({}).passthrough(), handler }));
+    const write = (path: string) => (seo.handler as (input: unknown, opts: never) => Promise<string>)({ files: [{ path }] }, {} as never);
+    expect(await write("public/robots.txt")).toBe("ok");
+    expect(await write("public/sitemap.xml")).toMatch(/^Error: Write refused/);
+    expect(await write("index.html")).toMatch(/^Error: Write refused/);
+    expect(await write("package.json")).toMatch(/^Error: Write refused/);
+    expect(await write("public/../index.html")).toMatch(/^Error: Write refused/);
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
   it("runs owned writes and leaves reads unrestricted", async () => {
