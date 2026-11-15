@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { EsbuildRecoveryStatus } from "../utils/esbuild-recovery";
 
 import {
   buildFlatFileList,
@@ -66,6 +67,7 @@ export const useSandbox = ({
     "idle" | "booting" | "installing" | "running" | "error"
   >("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [sandboxId, setSandboxId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<SandboxErrorKind | null>(null);
   const [restartKey, setRestartKey] = useState(0);
@@ -83,6 +85,7 @@ export const useSandbox = ({
     if (!enabled) {
       setStatus("idle");
       setPreviewUrl(null);
+      setSandboxId(null);
       setError(null);
       setErrorKind(null);
       setAppError(null);
@@ -217,6 +220,7 @@ export const useSandbox = ({
                   case "ready":
                     ready = true;
                     sandboxIdRef.current = event.sandboxId;
+                    setSandboxId(event.sandboxId);
                     setPreviewUrl(event.previewUrl);
                     setStatus("running");
                     break;
@@ -296,6 +300,7 @@ export const useSandbox = ({
     hasStartedRef.current = false;
     setStatus("idle");
     setPreviewUrl(null);
+    setSandboxId(null);
     setError(null);
     setErrorKind(null);
     setAppError(null);
@@ -434,7 +439,36 @@ export const useSandbox = ({
     };
   }, [killSandbox]);
 
+  // Source/package syncs finish first, so this tab cannot restart during its install (#776).
+  const recoverDevServer = useCallback(() => {
+    const sandboxId = sandboxIdRef.current;
+    const signal = abortControllerRef.current?.signal;
+    const recovery = syncPromiseRef.current.then(async (): Promise<EsbuildRecoveryStatus> => {
+      if (!sandboxId || !signal || signal.aborted || sandboxIdRef.current !== sandboxId) return "unavailable";
+      const response = await fetch(`/api/sandbox/${sandboxId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "recover-esbuild" }),
+        signal,
+      });
+      if (!response.ok) throw new Error("Preview recovery failed");
+      const { status } = await response.json();
+      if (!["restarted", "busy", "limited", "unavailable"].includes(status)) throw new Error("Invalid recovery response");
+      if (status === "restarted" && !signal.aborted && sandboxIdRef.current === sandboxId) {
+        buildErrors.reset();
+        setAppError(null);
+        setTerminalOutput((prev) => `${prev}\nPreview dev server recovered automatically.\n`);
+      }
+      return status;
+    });
+    // A failed recovery must not block later file syncs.
+    syncPromiseRef.current = recovery.then(() => {}, () => {});
+    return recovery;
+  }, [buildErrors]);
+
   return {
+    sandboxId,
+    recoverDevServer,
     status,
     previewUrl,
     error,

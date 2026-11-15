@@ -88,6 +88,39 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("sandbox dev server recovery (#776)", () => {
+  it("waits for the current package sync before restarting and serializes the next edit", async () => {
+    const inflight = deferred<Response>();
+    patch.mockReturnValueOnce(inflight.promise);
+    edit("first");
+    await vi.advanceTimersByTimeAsync(300);
+    const fetchMock = vi.mocked(fetch);
+    const recoveryResponse = deferred<Response>();
+    fetchMock.mockImplementationOnce(() => recoveryResponse.promise);
+    const recovery = render().recoverDevServer();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock.mock.calls.filter(([, init]) => String(init?.body).includes("recover-esbuild"))).toHaveLength(0);
+    edit("latest");
+    await vi.advanceTimersByTimeAsync(300);
+    inflight.resolve(Response.json({ success: true }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/sandbox/sbx_1", expect.objectContaining({ method: "POST", body: '{"action":"recover-esbuild"}' }));
+    expect(patch).toHaveBeenCalledTimes(1);
+    recoveryResponse.resolve(Response.json({ status: "restarted" }));
+    await expect(recovery).resolves.toBe("restarted");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(payloads().at(-1)).toEqual([{ path: "App.tsx", content: "latest" }]);
+  });
+
+  it("does not block later edits after a failed restart", async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new TypeError("offline"));
+    await expect(render().recoverDevServer()).rejects.toThrow("offline");
+    edit("after failure");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(payloads()).toEqual([[{ path: "App.tsx", content: "after failure" }]]);
+  });
+});
+
 describe("sandbox file sync acknowledgements", () => {
   const projectFiles = (framework: "vite" | "next", revision = 1) => [
     {
