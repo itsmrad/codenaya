@@ -5,6 +5,10 @@ import {
   buildFileTree,
   getFilePath
 } from "@/features/webcontainer-preview/utils/file-tree";
+import {
+  WEBCONTAINER_VITE_PINS,
+  pinViteForWebContainer,
+} from "@/features/webcontainer-preview/utils/vite-pin";
 import { injectPreviewBridge } from "@/features/sandbox-preview/utils/preview-bridge";
 import { serialiseDotenv } from "@/features/integrations/dotenv";
 import { buildFlatFileList } from "@/features/sandbox-preview/utils/file-tree";
@@ -118,6 +122,16 @@ export const useWebContainer = ({
         const rootIndex = files.find((file) => file.name === "index.html" && !file.parentId);
         if (rootIndex?.content) {
           await container.fs.writeFile("index.html", injectPreviewBridge(rootIndex.content));
+        }
+        const rootPackage = files.find((file) => file.name === "package.json" && !file.parentId);
+        const pinnedPackage = rootPackage?.content && pinViteForWebContainer(rootPackage.content);
+        if (pinnedPackage) {
+          await container.fs.writeFile("package.json", pinnedPackage);
+          appendOutput(
+            `WebContainer preview: using vite ${WEBCONTAINER_VITE_PINS.vite} + @vitejs/plugin-react ` +
+              `${WEBCONTAINER_VITE_PINS["@vitejs/plugin-react"]} (Vite 8 HMR is unreliable here; ` +
+              `the project's package.json is unchanged).\n`,
+          );
         }
 
         // Public environment variables only. This runs in the browser, so a secret
