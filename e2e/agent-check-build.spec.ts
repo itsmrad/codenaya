@@ -190,7 +190,7 @@ test.describe.serial("agent checkBuild", () => {
     expect(running).toEqual([]);
   });
 
-  test("a warm Next.js build beside the live preview leaves the preview serving", async () => {
+  test("a Next.js checkBuild leaves the live preview serving", async () => {
     test.skip(
       !process.env.E2B_API_KEY || !hasPreviewFixtureEnv(),
       "Needs E2B_API_KEY and the Convex fixture env (boots a real preview sandbox)",
@@ -200,7 +200,7 @@ test.describe.serial("agent checkBuild", () => {
 
     const user = await userConvexClient(page);
     if (projectId) await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});
-    // No project variables, so checkBuild builds in this preview's sandbox, beside `next dev`.
+    // No project variables, so only the framework keeps checkBuild out of this preview's sandbox.
     projectId = await seedPreviewProject(page, "e2e-check-build-next-warm");
     await seedNextApp(projectId, {
       pageSource: "export default function Page() { return <h1>Next preview before checkBuild</h1>; }\n",
@@ -218,7 +218,7 @@ test.describe.serial("agent checkBuild", () => {
     await openRunBlock();
     await expect(page.getByText("Build verified")).toBeVisible();
 
-    // Before the fix the dev server died during the build and the proxy answered 502 from then on.
+    // A `next build` beside `next dev` got the dev server OOM-killed, and the proxy answered 502.
     await expect
       .poll(async () => (await page.request.get(previewUrl)).status(), { timeout: 90_000, intervals: [2_000] })
       .toBe(200);

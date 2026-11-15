@@ -532,17 +532,19 @@ export const checkProjectBuild = async ({
     return notBuilt("No build sandbox is configured") + notes;
   }
 
-  if (preview) {
-    if (!warmWasSlow(preview.projectId)) {
-      const warm = await checkInWarmSandbox(apiKey, preview, job);
+  // `next build` beside `next dev` in the preview's 1 GiB sandbox OOM-kills the dev server: build Next alone.
+  const warmPreview = framework === "next" ? undefined : preview;
+  if (warmPreview) {
+    if (!warmWasSlow(warmPreview.projectId)) {
+      const warm = await checkInWarmSandbox(apiKey, warmPreview, job);
       if (warm) return warm;
     }
     if (job.deadline - Date.now() < MIN_COLD_BUILD_MS) {
-      const path = warmWasSlow(preview.projectId) ? "warm-then-before-cold" : "before-cold";
+      const path = warmWasSlow(warmPreview.projectId) ? "warm-then-before-cold" : "before-cold";
       return unfinished(new OutOfTime(), [], { path, deadline: job.deadline });
     }
   }
-  const afterSlowWarm = !!preview && warmWasSlow(preview.projectId);
+  const afterSlowWarm = !!warmPreview && warmWasSlow(warmPreview.projectId);
 
   let sandbox: Sandbox;
   try {
