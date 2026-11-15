@@ -119,26 +119,43 @@ test.describe.serial("plan mode", () => {
     const planToggle = page.getByRole("radio", { name: "Ask / Plan", exact: true });
     const input = page.getByPlaceholder("Describe a change or ask a question…");
     const buildToggle = page.getByRole("radio", { name: "Build", exact: true });
+    const modeStatus = page.getByRole("status", { name: "Message mode" });
+    await expect(modeStatus).toHaveAttribute("aria-live", "polite");
     await expect(buildToggle).toBeChecked();
+    await expect(modeStatus).toHaveText("Build mode on");
     await input.press("Alt+m");
     await expect(planToggle).toBeChecked();
+    await expect(modeStatus).toHaveText("Plan mode on");
     await expect(input).toBeFocused();
+    // Native reverse focus must work with both an empty and populated draft.
+    for (const draft of ["", "todo app"]) {
+      await input.fill(draft);
+      await input.press("Shift+Tab");
+      await expect(input).not.toBeFocused();
+      expect(await input.evaluate((textarea) => {
+        const previousControl = document.activeElement;
+        return previousControl !== null && previousControl !== document.body &&
+          Boolean(textarea.compareDocumentPosition(previousControl) & Node.DOCUMENT_POSITION_PRECEDING);
+      })).toBe(true);
+      await expect(planToggle).toBeChecked();
+      await expect(modeStatus).toHaveText("Plan mode on");
+    }
     await input.press("Alt+m");
     await expect(buildToggle).toBeChecked();
+    await expect(modeStatus).toHaveText("Build mode on");
     await expect(input).toBeFocused();
     await input.press("Tab");
     await expect(input).not.toBeFocused();
-    await input.focus();
-    await page.keyboard.press("Shift+Tab");
-    await expect(input).not.toBeFocused();
-    expect(await input.evaluate((textarea) => {
-      const previousControl = document.activeElement;
-      return previousControl !== null && previousControl !== document.body &&
-        Boolean(textarea.compareDocumentPosition(previousControl) & Node.DOCUMENT_POSITION_PRECEDING);
-    })).toBe(true);
-    await expect(buildToggle).toBeChecked();
     await planToggle.click();
+    await expect(modeStatus).toHaveText("Plan mode on");
+    await planToggle.press("ArrowLeft");
+    await expect(buildToggle).toBeChecked();
+    await expect(modeStatus).toHaveText("Build mode on");
+    await input.press("Alt+m");
     await expect(planToggle).toBeChecked();
+    await expect(modeStatus).toHaveText("Plan mode on");
+    await planToggle.hover();
+    await expect(page.getByRole("tooltip")).toContainText("Alt+M in composer");
 
     await input.fill("todo app");
     await input.press("Enter");

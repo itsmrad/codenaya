@@ -106,3 +106,22 @@ Seam errors replace E2B's on these paths, so the `[check-build] unfinished` log 
 names `SandboxTimeoutError` rather than `TimeoutError`. The E2B adapter's `snapshot`
 calls the sandbox's own `createSnapshot`. Coverage is still the mocked `e2b` SDK and
 the agent e2e specs; there has been no live run.
+
+## PR3a status / selection and failover
+
+PR3a adds request-time env parsing, pure selection, process-local cooldowns and
+list/count fanout helpers under `provider/`, without changing any call sites.
+PR3b wires these after PR1b and PR2. Selection prefers the last live provider only
+when enabled, configured and healthy; empty fallbacks keep a single candidate.
+Config/auth and rate/quota failures cool down immediately for ten minutes; other
+create failures count as transient across boots, cooling down after two consecutive
+failures. Success or cooldown expiry resets the counter. There is no same-provider
+create retry (an ambiguous failure may already have created a sandbox), and at most
+one failover per boot. The original first error is rethrown unchanged if creation
+fails. An injected notice callback exposes the switch for future terminal wiring.
+Fanout includes enabled providers even during create cooldowns, carries provider ids
+for cleanup routing, and propagates list errors so a cap cannot undercount silently.
+Use the existing seam's `maxSessionMs` to cap lifetime at one hour.
+
+TODO (privacy): update the subprocessor list BEFORE any non-E2B adapter ships;
+the privacy page currently names E2B.

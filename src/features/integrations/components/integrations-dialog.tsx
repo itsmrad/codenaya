@@ -69,8 +69,8 @@ export const IntegrationsDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85dvh] min-w-0 flex-col overflow-x-hidden sm:max-w-2xl">
+        <DialogHeader className="min-w-0 shrink-0">
           <DialogTitle>Integrations</DialogTitle>
           <DialogDescription>
             {projectId
@@ -79,7 +79,8 @@ export const IntegrationsDialog = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        {/* Header stays put; only this region scrolls, and only vertically. */}
+        <div className="min-h-0 min-w-0 w-full max-w-full space-y-4 overflow-x-hidden overflow-y-auto">
           {!!connections?.length && (
             <Collapsible open={accountSectionOpen} onOpenChange={setAccountSectionOpen}>
               <CollapsibleTrigger asChild>

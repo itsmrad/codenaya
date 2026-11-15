@@ -40,3 +40,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 microsoft-learn.svg and cloudflare-docs.svg: original single-path monograms (not vendor logos), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+
+intercom.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/intercom.svg), CC0 1.0 Universal.
+airtable.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/airtable.svg), CC0 1.0 Universal.
+monday.svg: original initials monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+clickup.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/clickup.svg), CC0 1.0 Universal.
+attio.svg: original initials monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+calendly.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/calendly.svg), CC0 1.0 Universal.
+cal-com.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/caldotcom.svg), CC0 1.0 Universal.
+todoist.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/todoist.svg), CC0 1.0 Universal.
+fireflies.svg: original initials monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+miro.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/miro.svg), CC0 1.0 Universal.
+canva.svg: original initials monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+wix.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/wix.svg), CC0 1.0 Universal.
+wordpress-com.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/wordpress.svg), CC0 1.0 Universal.
+zapier.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/zapier.svg), CC0 1.0 Universal.
+make.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/make.svg), CC0 1.0 Universal.
+customer-io.svg: original initials monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/

@@ -60,6 +60,22 @@ describe("catalog", () => {
       "contentful-eu",
       "microsoft-learn",
       "cloudflare-docs",
+      "intercom",
+      "airtable",
+      "monday",
+      "clickup",
+      "attio",
+      "calendly",
+      "cal-com",
+      "todoist",
+      "fireflies",
+      "miro",
+      "canva",
+      "wix",
+      "wordpress-com",
+      "zapier",
+      "make",
+      "customer-io",
     ]);
   });
 
@@ -143,23 +159,36 @@ describe("catalog", () => {
   it("returns a sorted, de-duplicated hostname allowlist", () => {
     const hostnames = getTrustedHostnames();
     expect(hostnames).toEqual([
+      "ai.todoist.net",
+      "api.fireflies.ai",
       "api.githubcopilot.com",
       "docs.mcp.cloudflare.com",
       "gitlab.com",
       "huggingface.co",
       "learn.microsoft.com",
+      "mcp.airtable.com",
       "mcp.amplitude.com",
       "mcp.atlassian.com",
+      "mcp.attio.com",
+      "mcp.cal.com",
+      "mcp.calendly.com",
+      "mcp.canva.com",
       "mcp.clerk.com",
+      "mcp.clickup.com",
       "mcp.cloudflare.com",
       "mcp.contentful.com",
       "mcp.context7.com",
+      "mcp.customer.io",
       "mcp.eu.amplitude.com",
       "mcp.eu.contentful.com",
       "mcp.exa.ai",
       "mcp.firecrawl.dev",
+      "mcp.intercom.com",
       "mcp.linear.app",
+      "mcp.make.com",
+      "mcp.miro.com",
       "mcp.mixpanel.com",
+      "mcp.monday.com",
       "mcp.neon.tech",
       "mcp.netlify.com",
       "mcp.notion.com",
@@ -175,6 +204,9 @@ describe("catalog", () => {
       "mcp.tavily.com",
       "mcp.upstash.com",
       "mcp.webflow.com",
+      "mcp.wix.com",
+      "mcp.zapier.com",
+      "public-api.wordpress.com",
     ]);
     expect(new Set(hostnames).size).toBe(hostnames.length);
   });
@@ -734,4 +766,19 @@ it("defers PayPal until its documented endpoint path matches the live server (#5
   expect(getProvider("paypal-sandbox")).toBeUndefined();
   expect(getTrustedHostnames()).not.toContain("mcp.paypal.com");
   expect(getTrustedHostnames()).not.toContain("mcp.sandbox.paypal.com");
+});
+
+it("scopes the selected auth-mode endpoint before adding project restrictions", () => {
+  const definition: ProviderDefinition = {
+    ...provider("supabase"),
+    urlByAuthMode: { api_key: "https://mcp.supabase.com/key-mcp" },
+  };
+  expect(buildScopedMcpUrl(definition, { readOnly: true, projectRef: "project" }, "api_key")).toEqual({
+    url: "https://mcp.supabase.com/key-mcp?read_only=true&project_ref=project",
+    headers: {},
+  });
+  expect(buildScopedMcpUrl(definition, { readOnly: true, projectRef: "project" }, "oauth")).toEqual({
+    url: "https://mcp.supabase.com/mcp?read_only=true&project_ref=project",
+    headers: {},
+  });
 });

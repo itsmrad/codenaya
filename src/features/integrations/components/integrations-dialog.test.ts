@@ -31,7 +31,8 @@ vi.mock("./provider-catalog", async (original) => {
 vi.mock("../hooks/use-integrations", () => ({ useUserConnections: () => state.connections }));
 // Render the dialog body in Node; browser specs cover the real Radix portal/focus.
 vi.mock("@/components/ui/dialog", () => {
-  const wrapper = ({ children }: { children: ReactNode }) => createElement("div", null, children);
+  const wrapper = ({ children, className }: { children: ReactNode; className?: string }) =>
+    createElement("div", { className }, children);
   return { Dialog: wrapper, DialogContent: wrapper, DialogHeader: wrapper, DialogTitle: wrapper, DialogDescription: wrapper };
 });
 vi.mock("./connection-card", () => ({
@@ -72,6 +73,16 @@ it("opens straight on the catalog without stacked empty states", () => {
   expect(html).toContain('aria-label="Connect Supabase"');
   expect(html).not.toContain("No connections yet");
   expect(html).not.toContain("Nothing to link yet");
+});
+
+it("pins the header and keeps the catalog from widening the dialog", () => {
+  const html = render();
+  expect(html).toContain("shrink-0");
+  expect(html).toContain("overflow-x-hidden");
+  expect(html).toContain("overflow-y-auto");
+  expect(html).toContain("min-w-0");
+  expect(html).toContain("minmax(0,1fr)");
+  expect(html).toContain("overflow-x-auto");
 });
 
 it.each(["active", "needs_reauth", "revoked", "error"] as const)("manages an existing %s connection without opening a new connection form", (status) => {

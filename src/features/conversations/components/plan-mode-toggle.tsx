@@ -4,15 +4,18 @@ import { HammerIcon, ListChecksIcon, UsersIcon } from "lucide-react";
 import { PromptInputButton } from "@/components/ai-elements/prompt-input";
 import { RadioGroup } from "@/components/ui/radio-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { formatShortcutKey } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
 
 import type { MessageMode } from "../plan-mode";
 
 export type ComposerMode = "build" | MessageMode;
 
+const PLAN_SHORTCUT = ["alt", "m"].map((key) => formatShortcutKey(key, false)).join("+");
+
 const MODES = [
   { value: "build", label: "Build", short: "Build", icon: HammerIcon, hint: "Build with one agent" },
-  { value: "plan", label: "Ask / Plan", short: "Plan", icon: ListChecksIcon, hint: "Read-only: answers questions or plans, never changes files (Alt+M in chat composer)" },
+  { value: "plan", label: "Ask / Plan", short: "Plan", icon: ListChecksIcon, hint: `Read-only: answers questions or plans, never changes files (${PLAN_SHORTCUT} in composer)` },
   { value: "swarm", label: "Swarm", short: "Swarm", icon: UsersIcon, hint: "Build with a team of workers" },
 ] as const;
 
@@ -43,6 +46,9 @@ export const PlanModeToggle = ({
       size === "sm" ? "h-full items-stretch" : "items-center gap-0.5 rounded-lg border border-border p-0.5",
     )}
   >
+    <span role="status" aria-label="Message mode" aria-live="polite" className="sr-only">
+      {mode === "plan" ? "Plan" : mode === "swarm" ? "Swarm" : "Build"} mode on
+    </span>
     {MODES.filter(({ value }) => swarm || value !== "swarm").map(({ value, label, short, icon: Icon, hint }) => (
       <Tooltip key={value}>
         <RadioGroupPrimitive.Item

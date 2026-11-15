@@ -87,3 +87,10 @@ export const isCommandPaletteKey = (event: KeyboardEvent, isMac: boolean): boole
   if (event.shiftKey) return key === "p";
   return key === "k" && !isInCodeEditor(event.target);
 };
+
+/** Alt+M only in the composer textarea whose local handler received it. */
+export const isComposerPlanKey = (event: KeyboardEvent, composer: HTMLTextAreaElement): boolean =>
+  event.target === composer &&
+  event.code === "KeyM" && event.altKey &&
+  !event.shiftKey && !event.ctrlKey && !event.metaKey &&
+  !event.defaultPrevented && !event.isComposing;

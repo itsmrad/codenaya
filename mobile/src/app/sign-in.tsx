@@ -12,6 +12,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GoogleIcon } from "@/components/google-icon";
 import { Corners, DotGrid, LabelStrip, monoLabel } from "@/components/grid";
@@ -29,6 +30,7 @@ WebBrowser.maybeCompleteAuthSession();
  */
 export default function SignIn() {
   const c = useColors();
+  const insets = useSafeAreaInsets();
   const { signIn, fetchStatus } = useSignIn();
   const { startSSOFlow } = useSSO();
   const [email, setEmail] = useState("");
@@ -88,7 +90,10 @@ export default function SignIn() {
       behavior="padding"
     >
       <DotGrid />
-      <ScrollView contentContainerStyle={styles.screen} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[styles.screen, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.logo}>
           <Logo size={22} />
         </View>

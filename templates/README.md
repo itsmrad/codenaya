@@ -1,6 +1,6 @@
 # Instant templates
 
-Each folder is a finished app, written over the agent's Vite starter
+Each folder is a finished app (all six templates), written over the agent's Vite starter
 (`src/features/conversations/inngest/vite-starter.ts`). Only the files that
 differ from the starter live here; the seed adds the rest (#362).
 
@@ -12,3 +12,6 @@ tested replacement (`src/features/templates/make-it-mine.ts`):
   (both come from the starter).
 
 These folders are excluded from the Next tsconfig and lint.
+
+Apps use only what the starter already ships (React, react-router-dom,
+lucide-react, sonner, Tailwind): no new dependency, and charts are plain SVG.

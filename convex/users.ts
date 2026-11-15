@@ -262,6 +262,12 @@ async function purgeUserDataBatch(
   }
   if (await deleteRows(ctx, "showcaseVotes", votes)) return false;
 
+  const events = await ctx.db
+    .query("showcaseEvents")
+    .withIndex("by_userId", (q) => q.eq("userId", userId))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "showcaseEvents", events)) return false;
+
   const views = await ctx.db
     .query("showcaseViews")
     .withIndex("by_userId_and_showcaseProjectId", (q) => q.eq("userId", userId))

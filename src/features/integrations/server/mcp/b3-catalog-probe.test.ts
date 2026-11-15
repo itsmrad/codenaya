@@ -43,6 +43,7 @@ import { requiresApproval } from "./discover-tools";
 interface Fixture {
   id: "exa" | "tavily" | "firecrawl" | "huggingface";
   url: string;
+  keyUrl?: string;
   read: string;
   /** Expected key placement; absent for OAuth-only providers. */
   apiKey?: { header: string; valuePrefix: string };
@@ -54,7 +55,11 @@ const CASES: Fixture[] = [
     apiKey: { header: "x-api-key", valuePrefix: "" },
   },
   { id: "tavily", url: "https://mcp.tavily.com/mcp", read: "tavily_search" },
-  { id: "firecrawl", url: "https://mcp.firecrawl.dev/v2/mcp-oauth", read: "firecrawl_map" },
+  {
+    id: "firecrawl", url: "https://mcp.firecrawl.dev/v2/mcp-oauth", read: "firecrawl_map",
+    keyUrl: "https://mcp.firecrawl.dev/v2/mcp",
+    apiKey: { header: "Authorization", valuePrefix: "Bearer " },
+  },
   {
     id: "huggingface", url: "https://huggingface.co/mcp", read: "hub_repo_search",
     apiKey: { header: "Authorization", valuePrefix: "Bearer " },
@@ -184,10 +189,18 @@ describe.each(CASES.filter(({ apiKey }) => apiKey))("$id API-key connect probe",
     if (!placement) throw new Error(`Missing API key placement for ${fixture.id}`);
     expect(placement).toMatchObject(fixture.apiKey ?? {});
     const auth = { [placement.header]: `${placement.valuePrefix}${SECRET}` };
-    expect(mocks.transport.mock.calls[0][0].toString()).toBe(new URL(fixture.url).toString());
+    expect(mocks.transport.mock.calls[0][0].toString()).toBe(new URL(fixture.keyUrl ?? fixture.url).toString());
     expect(mocks.transport.mock.calls[0][1].requestInit.headers).toEqual(auth);
     expect(resolved.servers[0].headers).toEqual(auth);
-    expect(resolved.servers[0].url).toBe(fixture.url);
+    expect(stored).toMatchObject({ authMode: "api_key", serverUrl: fixture.keyUrl ?? fixture.url });
+    expect(resolved.servers[0].url).toBe(fixture.keyUrl ?? fixture.url);
+    const runtimeProbe = await probeMcpServer({
+      url: resolved.servers[0].url, headers: resolved.servers[0].headers,
+      trustedHosts: resolved.servers[0].trustedHostnames,
+    });
+    expect(runtimeProbe.ok).toBe(true);
+    expect(mocks.transport.mock.calls[1][0].toString()).toBe(fixture.keyUrl ?? fixture.url);
+    expect(mocks.transport.mock.calls[1][1].requestInit.headers).toEqual(auth);
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -207,7 +220,7 @@ describe.each(CASES.filter(({ apiKey }) => apiKey))("$id API-key connect probe",
   });
 });
 
-describe.each(["tavily", "firecrawl"] as const)("%s stays OAuth-only", (id) => {
+describe.each(["tavily"] as const)("%s stays OAuth-only", (id) => {
   it("rejects an API key before probing or persisting", async () => {
     expect(PROVIDERS[id].authModes).toEqual(["oauth"]);
     expect(PROVIDERS[id].apiKey).toBeUndefined();
