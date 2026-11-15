@@ -1,6 +1,5 @@
 import type { Doc } from "../../../convex/_generated/dataModel";
 import type { AgentStep } from "./agent-steps";
-import { FOUNDATION_MAX_STEPS } from "./constants";
 
 /** The agentTasks fields the board reads. */
 export type SwarmTask = Pick<
@@ -58,8 +57,9 @@ export const swarmHeader = (tasks: SwarmTask[], startedAt: number, endedAt: numb
   if (solo && tasks.length === 0) return `Swarm · Built solo: ${solo} · ${swarmElapsed(startedAt, endedAt)}`;
   if (tasks.length === 0) {
     const completed = steps.filter((step) => step.kind === "tool" && step.status !== "running").length;
-    const planning = completed >= FOUNDATION_MAX_STEPS || steps.some((step) => step.tool === "delegateTasks");
-    return `Swarm · ${planning ? "Planning tasks…" : `Setting up shared files · step ${completed}/${FOUNDATION_MAX_STEPS}`} · ${swarmElapsed(startedAt, endedAt)}`;
+    // Steps are tool rows, not model calls (one reply can write several files), so they never count against the foundation budget.
+    const planning = steps.some((step) => step.tool === "delegateTasks");
+    return `Swarm · ${planning ? "Planning tasks…" : `Setting up shared files · ${completed} ${completed === 1 ? "step" : "steps"} done`} · ${swarmElapsed(startedAt, endedAt)}`;
   }
   const workers = tasks.filter((task) => task.role === "worker");
   const leads = tasks.length - workers.length;

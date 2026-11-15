@@ -561,7 +561,7 @@ export const ConversationSidebar = ({
         checkpoint={restoreTarget}
         onOpenChange={(open) => !open && setRestoreTarget(null)}
       />
-      <div ref={panelRef} className="@container flex flex-col h-full bg-sidebar">
+      <div ref={panelRef} data-testid="chat-panel" className="@container flex flex-col h-full bg-sidebar">
         <div className="h-8.75 flex items-center justify-between border-b">
           <div className="text-sm font-medium truncate pl-3">
             {activeConversation?.title ?? DEFAULT_CONVERSATION_TITLE}

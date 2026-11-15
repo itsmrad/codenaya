@@ -39,13 +39,13 @@ describe("swarm header", () => {
       { id: "turn-heartbeat", kind: "thinking", status: "done", startedAt: 4 },
     ];
     expect(swarmHeader([], 0, 97000, swarmSoloReason(steps, true), steps))
-      .toBe(`Swarm · Setting up shared files · step 3/${FOUNDATION_MAX_STEPS} · 1:37`);
-    expect(swarmHeader([], 0, 0)).toBe(`Swarm · Setting up shared files · step 0/${FOUNDATION_MAX_STEPS} · 0:00`);
+      .toBe("Swarm · Setting up shared files · 3 steps done · 1:37");
+    expect(swarmHeader([], 0, 0)).toBe("Swarm · Setting up shared files · 0 steps done · 0:00");
   });
 
-  it.each([FOUNDATION_MAX_STEPS, FOUNDATION_MAX_STEPS + 1])("shows planning after %s completed steps", (count) => {
-    expect(swarmHeader([], 0, 97000, undefined, completedSteps(count)))
-      .toBe("Swarm · Planning tasks… · 1:37");
+  it("keeps showing setup past the model-call budget until delegation is recorded", () => {
+    expect(swarmHeader([], 0, 97000, undefined, completedSteps(FOUNDATION_MAX_STEPS + 1)))
+      .toBe(`Swarm · Setting up shared files · ${FOUNDATION_MAX_STEPS + 1} steps done · 1:37`);
   });
 
   it("shows planning as soon as delegation is recorded, even before tasks arrive", () => {
