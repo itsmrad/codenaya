@@ -54,7 +54,7 @@ const wrap = (sandbox: E2bSandbox): Sandbox => ({
     if (files.length) await call(() => sandbox.files.write(files, opts));
   },
   readFile: ((path: string, format: "text" | "bytes", opts?: RequestOptions) =>
-    call(() =>
+    call<string | Uint8Array>(() =>
       format === "bytes"
         ? sandbox.files.read(path, { ...opts, format: "bytes" })
         : sandbox.files.read(path, { ...opts, format: "text" }),
