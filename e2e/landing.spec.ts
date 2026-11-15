@@ -19,9 +19,22 @@ test.describe("landing page", () => {
       await expect(
         page.getByRole("heading", { level: 1, name: "Build with AI." }),
       ).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+      await expect(page.getByText("[ BYOK: no credits used ]", { exact: true })).toBeVisible();
       await expect(
         page.getByRole("textbox", { name: "Describe what you want to build" }).first(),
       ).toBeVisible();
+
+      const trust = page.getByRole("group", { name: "Supported providers and community" });
+      await expect(trust).toBeVisible();
+      await expect(trust.getByRole("link", { name: /^Works with/ })).toBeVisible();
+      await expect(trust.getByRole("link", { name: /GitHub/ })).toBeVisible();
+      const trustBox = await trust.boundingBox();
+      // Two compact lines on mobile, one row from md up.
+      expect(trustBox!.height).toBeLessThanOrEqual(viewport.width < 768 ? 48 : 20);
+      if (viewport.width === 1440) {
+        await expect(trust).toBeInViewport({ ratio: 1 });
+      }
 
       // The navbar collapses the sign-in CTA into a menu below the md breakpoint.
       if (viewport.width < 768) {
@@ -50,7 +63,7 @@ test.describe("landing copy", () => {
     await page.goto("/");
 
     await expect(
-      page.getByText(/real-time collaboration|claude-powered|webcontainer|manage branches|deploy/i),
+      page.getByText(/real-time collaboration|claude-powered|webcontainer|manage branches|deploy|hosting/i),
     ).toHaveCount(0);
     for (const title of [
       "AI agent with model choice",
@@ -100,6 +113,18 @@ test.describe("landing layout", () => {
 });
 
 test.describe("landing social proof", () => {
+  test("shows the live project count under the composer above the fold at 1440x900", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/");
+
+    const trust = page.getByRole("group", { name: "Supported providers and community" });
+    await expect(trust.getByText(/\d[\d,]* projects built/)).toBeVisible({ timeout: 30_000 });
+    await expect(trust).toBeInViewport({ ratio: 1 });
+    const composer = await page.getByRole("textbox", { name: "Describe what you want to build" }).first().boundingBox();
+    const strip = await trust.boundingBox();
+    expect(strip!.y).toBeGreaterThan(composer!.y + composer!.height);
+  });
+
   test("shows real showcase projects and the live project count", async ({ page }) => {
     await page.goto("/");
 

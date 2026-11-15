@@ -27,13 +27,13 @@ const CELLS = [
 ];
 
 export const LandingProviders = () => (
-  <section className="border-b border-border">
+  <section id="providers" className="border-b border-border">
     <SectionHeader
       index={3}
       label="Your key or ours"
       title="Bring any key."
       accent="Or none"
-      description="Start free with 300 credits a month. Add your own provider key for unlimited runs on any plan. You pay your provider directly."
+      description="Start free, or add your own provider key for unlimited runs on any plan. You pay your provider directly."
     />
     <ul className="grid grid-cols-2 border-t border-border lg:grid-cols-3">
       {CELLS.map((cell, i) => (

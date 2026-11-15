@@ -26,6 +26,8 @@ code than the need justifies, so we support exactly two: `"vite" | "next"`.
   probe counts connect-then-timeout as open, since Next compiles `/` lazily.
 - **`checkBuild` runs `next build`** (#711). It type-checks and compiles in one pass, so there
   is no separate `tsc` step. `.next`, `out` and `next-env.d.ts` are excluded from the tree.
+  It builds in a new sandbox, never beside the preview's `next dev`: both together
+  OOM-kill the dev server in E2B's default 1 GiB sandbox.
 - **Next is E2B-only.** The WebContainer engine has no bridge for Next, so Next projects
   force the E2B engine.
 - **Runtime errors:** the preview bridge reads the Next overlay, and the app-error parser and

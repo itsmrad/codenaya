@@ -80,7 +80,7 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
     }
     const resume = async () => {
       const created = await resumePendingPrompt((pending) =>
-        createProjectRef.current(pending.prompt, undefined, true, pending.mode),
+        createProjectRef.current(pending.prompt, undefined, true, pending.mode, pending.framework),
       );
       // A refusal that drops the draft (credentials) leaves nothing to retry.
       if (created === false && peekPendingPrompt() !== null) {
@@ -215,7 +215,7 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
 
                 <motion.div {...enter(0.28)} className={cn("mt-9", !hasNoProjects && "max-sm:mt-6")}>
                   <PromptComposer
-                    onSubmit={(prompt, mode) => createProject(prompt, undefined, false, mode)}
+                    onSubmit={(prompt, mode, framework) => createProject(prompt, undefined, false, mode, framework)}
                     isSubmitting={isSubmitting}
                   />
                   <div className={cn("mt-5 flex items-center justify-center gap-4 text-xs text-muted-foreground", !hasNoProjects && "max-sm:mt-4")}>

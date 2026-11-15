@@ -256,3 +256,19 @@ Matching entries are dropped (whole word, plus embedded in a repo name for
 terms of 6+ characters), whole-word matches in descriptions become
 "MCP clients", and the build fails if any term survives. After a refresh,
 grep the JSON with the same file before committing.
+
+
+## Per-auth-mode MCP endpoints
+
+Catalog entries may declare `urlByAuthMode`; `mcpUrl` remains the default.
+Connect, OAuth discovery/token flows, and runtime project scoping resolve through
+`resolveProviderMcpUrl`. Each endpoint host must be in the provider's
+`trustedHostnames`. Existing connections already persist `authMode`; runtime
+derives the endpoint from that mode without a schema change or migration.
+
+Firecrawl supports OAuth at `https://mcp.firecrawl.dev/v2/mcp-oauth` and API
+keys at `https://mcp.firecrawl.dev/v2/mcp`, using `Authorization: Bearer <key>`.
+Verified from the [official sign-in docs](https://docs.firecrawl.dev/mcp-server)
+and [API-key docs](https://docs.firecrawl.dev/mcp-server/keyless#add-an-api-key)
+on 2026-11-15. Validation uses mocked MCP handshakes; no vendor calls or real
+credentials are needed.

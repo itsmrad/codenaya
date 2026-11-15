@@ -24,6 +24,11 @@ describe("appendHostFlag", () => {
     expect(appendHostFlag("vite --host 0.0.0.0")).toBe("vite --host 0.0.0.0");
     expect(appendHostFlag("node server.js")).toBe("node server.js");
   });
+
+  it("gives TanStack Start Vite's host flag", () => {
+    expect(appendHostFlag("npm run dev", "tanstack-start")).toBe("npm run dev -- --host 0.0.0.0");
+    expect(appendHostFlag("vite dev --port 3000", "tanstack-start")).toBe("vite dev --port 3000 --host 0.0.0.0");
+  });
 });
 
 describe("detectFrameworkFromFiles", () => {
@@ -35,6 +40,15 @@ describe("detectFrameworkFromFiles", () => {
     expect(detectFrameworkFromFiles([manifest('{"scripts":{"dev":"next dev --turbo"}}')])).toBe("next");
     expect(detectFrameworkFromFiles([manifest("{}")], "npx next dev")).toBe("next");
     expect(detectFrameworkFromFiles([manifest("{}"), { path: "vite.config.ts", content: "" }])).toBe("vite");
+  });
+
+  it("detects TanStack Start, even while package.json is half-written", () => {
+    const config = { path: "vite.config.ts", content: "" };
+    const start = manifest('{"scripts":{"dev":"vite dev --port 3000"},"dependencies":{"@tanstack/react-start":"1"}}');
+    expect(detectFrameworkFromFiles([start, config])).toBe("tanstack-start");
+    expect(detectFrameworkFromFiles([manifest("{"), config, { path: "src/routes/__root.tsx", content: "" }])).toBe(
+      "tanstack-start",
+    );
   });
 
   it("tolerates a half-written or non-object manifest", () => {

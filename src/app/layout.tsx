@@ -9,7 +9,6 @@ import { ShortcutsDialog } from "@/components/shortcuts-dialog";
 import { SetupQuestionsDialog } from "@/features/conversations/components/setup-questions-dialog";
 import { CommandPalette } from "@/features/projects/components/command-palette";
 import { AuthLoadingView } from "@/features/auth/components/auth-loading-view";
-import { AGENT_MODELS } from "@/features/conversations/agent-models";
 
 import "allotment/dist/style.css";
 import "./globals.css";
@@ -34,7 +33,7 @@ const nerdMono = IBM_Plex_Mono({
 });
 
 const title = "Codenaya — AI-Powered Browser IDE";
-const description = `Build apps from your browser with an AI agent. Choose from ${AGENT_MODELS.length} models, run a live preview, and export to GitHub or a ZIP.`;
+const description = "Bring your own key on any plan and choose your AI model. Import from GitHub, preview live, then export or download a ZIP. BYOK runs use no credits.";
 
 // Absolute base for Open Graph / Twitter image URLs.
 const appUrl =

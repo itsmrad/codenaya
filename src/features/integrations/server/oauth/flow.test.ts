@@ -43,6 +43,7 @@ const provider: ProviderDefinition = {
   category: "Dev tools",
   logo: "/integrations/github.svg",
   mcpUrl: "https://mcp.example.com/mcp",
+  urlByAuthMode: { oauth: "https://mcp.example.com/oauth-resource" },
   authModes: ["oauth"],
   trustedHostnames: ["mcp.example.com"],
   supportsReadOnly: false,
@@ -98,6 +99,13 @@ describe("OAuth metadata handoff", () => {
     if (!started.ok) return;
 
     expect(started.start.authorizationServerMetadata).toEqual(metadata);
+    expect(mocks.discoverOAuthServerInfo).toHaveBeenCalledWith(
+      "https://mcp.example.com/oauth-resource", { fetchFn: mocks.fetchFn },
+    );
+    expect(mocks.startAuthorization).toHaveBeenCalledWith(
+      "https://auth.example.com",
+      expect.objectContaining({ resource: new URL("https://mcp.example.com/oauth-resource") }),
+    );
 
     const completed = await completeOAuthFlow({
       provider,
@@ -113,7 +121,7 @@ describe("OAuth metadata handoff", () => {
     expect(completed.ok).toBe(true);
     expect(mocks.exchangeAuthorization).toHaveBeenCalledWith(
       "https://auth.example.com",
-      expect.objectContaining({ metadata }),
+      expect.objectContaining({ metadata, resource: new URL("https://mcp.example.com/oauth-resource") }),
     );
   });
 
@@ -129,7 +137,7 @@ describe("OAuth metadata handoff", () => {
     expect(refreshed.ok).toBe(true);
     expect(mocks.refreshAuthorization).toHaveBeenCalledWith(
       "https://auth.example.com",
-      expect.objectContaining({ metadata }),
+      expect.objectContaining({ metadata, resource: new URL("https://mcp.example.com/oauth-resource") }),
     );
   });
 });

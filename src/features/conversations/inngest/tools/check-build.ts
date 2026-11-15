@@ -18,6 +18,7 @@ import {
   type ProjectFile,
   WORK_DIR,
   createProjectSandbox,
+  offlineFirstInstall,
   writeProjectFiles,
 } from "@/features/sandbox-preview/server/project-sandbox";
 import {
@@ -75,6 +76,12 @@ const MAX_ERROR_LINES = 40;
  */
 const WARM_MIN_TIME_LEFT_MS = STEP_BUDGET_MS + 60_000;
 
+/** Build output and generated files kept out of the copy for a framework (Vite's dist is always excluded). */
+const GENERATED_PATHS: Partial<Record<Framework, string[]>> = {
+  next: [".next", "out", "next-env.d.ts"],
+  "tanstack-start": [".output", ".tanstack", ".nitro", ".vinxi"],
+};
+
 const ANSI_ESCAPE = /\u001b\[[\d;]*[A-Za-z]/g;
 
 /** `next build` progress, the route table and its legend, and the telemetry notice. */
@@ -85,9 +92,18 @@ const NEXT_ERROR_START =
   /^\s*(?:Failed to compile|Error occurred prerendering page|> Build error occurred|Build error occurred|⨯ |Type error:|Module not found)/;
 
 /**
+ * Vite's progress for TanStack Start's client and server builds (the banner, step lines and asset
+ * table), and where a failure starts: Vite's `error during build:`, a bracketed plugin or rolldown
+ * code, or a tsc error.
+ */
+const START_NOISE =
+  /^\s*(?:vite v\d|transforming\.\.\.|rendering chunks\.\.\.|computing gzip size\.\.\.|✓ (?:\d+ modules transformed|built in)|(?:dist|\.output|\.nitro)\/\S+\s+[\d.,]+ (?:B|kB|MB)\b)/;
+const START_ERROR_START = /^\s*(?:error during build:|\[[\w:-]+\]|.*\berror TS\d+)/;
+
+/**
  * The first lines of compiler output, without colour codes, repeated lines or
  * the sandbox's absolute paths, so errors read as `src/App.tsx(3,1): ...`.
- * For Next.js, progress and the route table are dropped and the errors come first.
+ * For Next.js and TanStack Start, progress is dropped and the errors come first.
  */
 export const trimBuildOutput = (output: string, dir = WORK_DIR, framework: Framework = "vite") => {
   let lines = [
@@ -100,9 +116,10 @@ export const trimBuildOutput = (output: string, dir = WORK_DIR, framework: Frame
         .filter(Boolean),
     ),
   ];
-  if (framework === "next") {
-    lines = lines.filter((line) => !NEXT_NOISE.test(line));
-    const start = lines.findIndex((line) => NEXT_ERROR_START.test(line));
+  if (framework === "next" || framework === "tanstack-start") {
+    const [noise, errorStart] = framework === "next" ? [NEXT_NOISE, NEXT_ERROR_START] : [START_NOISE, START_ERROR_START];
+    lines = lines.filter((line) => !noise.test(line));
+    const start = lines.findIndex((line) => errorStart.test(line));
     if (start > 0) lines = [...lines.slice(start), ...lines.slice(0, start)];
   }
   const more = lines.length - MAX_ERROR_LINES;
@@ -204,9 +221,11 @@ const notBuilt = (reason: string) =>
 /**
  * The production build: `tsc --noEmit` then `vite build`, or `next build`
  * alone (it type-checks itself, and tsc before it would miss `next-env.d.ts`).
+ * TanStack Start builds first: `vite build` generates src/routeTree.gen.ts, which tsc needs.
  */
 export const buildCommand = (framework: Framework, paths: Set<string>) => {
   if (framework === "next") return "NEXT_TELEMETRY_DISABLED=1 npx next build";
+  if (framework === "tanstack-start") return "npx vite build && npx tsc --noEmit";
   const tsconfig = ["tsconfig.app.json", "tsconfig.json"].find((path) => paths.has(path));
   return [tsconfig && `npx tsc --noEmit -p ${tsconfig}`, "npx vite build"].filter(Boolean).join(" && ");
 };
@@ -227,7 +246,7 @@ const buildIn = async (
 
   await writeProjectFiles(sandbox, files, dir, timeLeft);
 
-  const install = await run(sandbox, "npm install --prefer-offline --no-audit --no-fund --loglevel=error", timeLeft(), dir);
+  const install = await run(sandbox, offlineFirstInstall("--no-audit --no-fund --loglevel=error"), timeLeft(), dir);
   if (install.exitCode !== 0) {
     // The registry or the sandbox's network, not package.json: nothing to fix.
     if (NETWORK_FAILURE.test(`${install.stderr}\n${install.stdout}`)) {
@@ -512,7 +531,7 @@ export const checkProjectBuild = async ({
         // Anchored like the snapshot's skip list: a nested dist, such as public/dist, is project files.
         await suppliedSandbox.commands.run(
           `mkdir -p ${dir} && tar -C '${sourceDir}' --exclude=node_modules --exclude=.git --exclude=./dist ` +
-            (framework === "next" ? "--exclude=./.next --exclude=./out --exclude=./next-env.d.ts " : "") +
+            (GENERATED_PATHS[framework] ?? []).map((path) => `--exclude=./${path} `).join("") +
             `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
           { timeoutMs, requestTimeoutMs: timeoutMs },
         );
@@ -532,17 +551,19 @@ export const checkProjectBuild = async ({
     return notBuilt("No build sandbox is configured") + notes;
   }
 
-  if (preview) {
-    if (!warmWasSlow(preview.projectId)) {
-      const warm = await checkInWarmSandbox(apiKey, preview, job);
+  // Next and Start builds can OOM-kill the dev server in the preview's 1 GiB sandbox: build them alone.
+  const warmPreview = framework === "next" || framework === "tanstack-start" ? undefined : preview;
+  if (warmPreview) {
+    if (!warmWasSlow(warmPreview.projectId)) {
+      const warm = await checkInWarmSandbox(apiKey, warmPreview, job);
       if (warm) return warm;
     }
     if (job.deadline - Date.now() < MIN_COLD_BUILD_MS) {
-      const path = warmWasSlow(preview.projectId) ? "warm-then-before-cold" : "before-cold";
+      const path = warmWasSlow(warmPreview.projectId) ? "warm-then-before-cold" : "before-cold";
       return unfinished(new OutOfTime(), [], { path, deadline: job.deadline });
     }
   }
-  const afterSlowWarm = !!preview && warmWasSlow(preview.projectId);
+  const afterSlowWarm = !!warmPreview && warmWasSlow(warmPreview.projectId);
 
   let sandbox: Sandbox;
   try {

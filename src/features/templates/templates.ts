@@ -2,9 +2,9 @@
  * Official starter templates (#119). An `instant` template is a finished app
  * whose reviewed source lives in `templates/<id>/` (#362): its project opens
  * with that source and no agent run, and its `prompt` is only the brief the
- * source implements. The others still seed the agent's Vite starter (see
- * `seed-files.ts`) and start the agent on their prompt, until they get a
- * source too.
+ * source implements. All six are instant; a template without a source would
+ * seed the agent's Vite starter (see `seed-files.ts`) and start the agent on
+ * its prompt.
  *
  * Plain data, shared by the dashboard, /showcase and the create route, so the
  * server only seeds templates it knows.
@@ -22,17 +22,17 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "saas-dashboard",
-    instant: false,
+    instant: true,
     cover: "dashboard",
     title: "SaaS dashboard",
     description: "Sidebar layout with KPI cards, a revenue chart and a recent orders table.",
-    techStack: ["React", "Vite", "Tailwind", "Recharts"],
+    techStack: ["React", "Vite", "Tailwind"],
     prompt:
       "Build a SaaS analytics dashboard: a collapsible sidebar with navigation, a top bar with search and a user menu, four KPI cards (revenue, users, conversion, churn) with trend badges, a revenue line chart and a signups bar chart using recharts, and a sortable, paginated recent orders table with status badges. Use realistic mock data, make the sidebar a drawer on phones, and support light and dark mode.",
   },
   {
     id: "portfolio",
-    instant: false,
+    instant: true,
     cover: "landing",
     title: "Portfolio",
     description: "Personal site with an about section, project grid and contact form.",
@@ -42,7 +42,7 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "blog",
-    instant: false,
+    instant: true,
     cover: "list",
     title: "Blog",
     description: "Post list with tags and search, plus readable article pages.",
@@ -52,7 +52,7 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "ecommerce-storefront",
-    instant: false,
+    instant: true,
     cover: "landing",
     title: "E-commerce storefront",
     description: "Product catalog with filters, product pages and a working cart.",

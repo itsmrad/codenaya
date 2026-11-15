@@ -7,7 +7,7 @@ import { EMPTY_CHAT_TITLE } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
-import { hasPreviewFixtureEnv, seedNextApp, seedPreviewProject } from "./preview-fixtures";
+import { hasPreviewFixtureEnv, killProjectSandboxes, seedNextApp, seedPreviewProject } from "./preview-fixtures";
 import { STUB_MODEL, type StubChatRequest, startStubProvider } from "./stub-provider";
 
 /**
@@ -77,6 +77,19 @@ test.describe.serial("agent checkBuild", () => {
     }
     await page?.close();
     stub?.server.close();
+  });
+
+  /**
+   * The warm Next preview's project, whose sandbox afterEach frees.
+   * Earlier tests share `page` from beforeAll, so this stays unset for them.
+   */
+  let seeded: string | undefined;
+  test.afterEach(async () => {
+    if (!seeded) return;
+    // Closed first, so the preview can't boot a replacement for the killed sandbox.
+    await page.close();
+    await killProjectSandboxes(seeded);
+    seeded = undefined;
   });
 
   /** Runs one prompt in a fresh project on the stub model and opens its run block. */
@@ -190,7 +203,7 @@ test.describe.serial("agent checkBuild", () => {
     expect(running).toEqual([]);
   });
 
-  test("a warm Next.js build beside the live preview leaves the preview serving", async () => {
+  test("a Next.js checkBuild leaves the live preview serving", async () => {
     test.skip(
       !process.env.E2B_API_KEY || !hasPreviewFixtureEnv(),
       "Needs E2B_API_KEY and the Convex fixture env (boots a real preview sandbox)",
@@ -200,8 +213,9 @@ test.describe.serial("agent checkBuild", () => {
 
     const user = await userConvexClient(page);
     if (projectId) await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});
-    // No project variables, so checkBuild builds in this preview's sandbox, beside `next dev`.
+    // No project variables, so only the framework keeps checkBuild out of this preview's sandbox.
     projectId = await seedPreviewProject(page, "e2e-check-build-next-warm");
+    seeded = projectId;
     await seedNextApp(projectId, {
       pageSource: "export default function Page() { return <h1>Next preview before checkBuild</h1>; }\n",
     });
@@ -218,7 +232,7 @@ test.describe.serial("agent checkBuild", () => {
     await openRunBlock();
     await expect(page.getByText("Build verified")).toBeVisible();
 
-    // Before the fix the dev server died during the build and the proxy answered 502 from then on.
+    // A `next build` beside `next dev` got the dev server OOM-killed, and the proxy answered 502.
     await expect
       .poll(async () => (await page.request.get(previewUrl)).status(), { timeout: 90_000, intervals: [2_000] })
       .toBe(200);

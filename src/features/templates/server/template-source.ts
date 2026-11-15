@@ -3,7 +3,7 @@ import path from "node:path";
 
 import type { SeedFile } from "../seed-files";
 
-// shortcut: CI doesn't run tsc/vite build on templates/<id> yet; add that job with the other 4 templates (#362).
+// shortcut: CI doesn't run tsc/vite build on templates/<id> yet; add that job (#362).
 /** Where instant templates' reviewed sources live (#362), traced into the create route. */
 export const TEMPLATES_DIR = path.join(process.cwd(), "templates");
 
