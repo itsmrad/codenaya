@@ -16,7 +16,7 @@ vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal)
 import { CommandExitError, type CommandResult, type Sandbox, SandboxError, TimeoutError } from "e2b";
 import { getFunctionName } from "convex/server";
 
-import { DEV_COMMAND_ENV, PROXY_TARGET_ENV, killTreeCommand } from "@/features/sandbox-preview/server/dev-server";
+import { DEV_COMMAND_ENV, DEV_START_COMMAND, READ_DEV_PGID_COMMAND, PROXY_TARGET_ENV, killProjectNodesCommand, killTreeCommand } from "@/features/sandbox-preview/server/dev-server";
 
 import { VITE_REACT_STARTER } from "../vite-starter";
 import {
@@ -696,7 +696,7 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
       const [cleanup, ...rest] = afterBuild(warm);
       expect(cleanup).toMatch(/^rm -rf \/home\/user\/check-build-/);
       expect(rest.slice(0, 3)).toEqual(Array(3).fill(expect.stringContaining("port:3000")));
-      expect(rest.slice(3)).toEqual([killTreeCommand(12), "npm run dev -- --hostname 0.0.0.0"]);
+      expect(rest.slice(3)).toEqual([READ_DEV_PGID_COMMAND, killTreeCommand(12), killProjectNodesCommand("/home/user/app"), DEV_START_COMMAND]);
       // Bounded like the rest of the cleanup, so a slow sandbox can't hold the step past its budget.
       expect(warm.commands.run.mock.calls.at(-2)?.[1]).toEqual({ timeoutMs: 10_000, requestTimeoutMs: 10_000 });
       expect(warm.commands.run.mock.calls.at(-1)?.[1]).toEqual({

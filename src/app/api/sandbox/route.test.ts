@@ -68,6 +68,10 @@ import {
 } from "@/features/sandbox-preview/server/project-sandbox";
 import {
   DEV_COMMAND_ENV,
+  DEV_START_COMMAND,
+  READ_DEV_PGID_COMMAND,
+  SHORT_CALL_MS,
+  killProjectNodesCommand,
   killTreeCommand,
 } from "@/features/sandbox-preview/server/dev-server";
 import {
@@ -75,6 +79,8 @@ import {
   requestReinstall,
 } from "@/features/sandbox-preview/server/sandbox-registry";
 import { PATCH } from "./[sandboxId]/route";
+
+const cleanupBounds = { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS };
 
 const params = { params: Promise.resolve({ sandboxId: "sbx_1" }) };
 
@@ -270,6 +276,7 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
 
     expect(mocks.sandboxConnect).toHaveBeenCalledWith("sbx_resume");
     expect(sandbox.commands.run.mock.calls).toEqual([
+      [READ_DEV_PGID_COMMAND, cleanupBounds],
       [killTreeCommand(7), { timeoutMs: 10_000 }],
       [killTreeCommand(8), { timeoutMs: 10_000 }],
       ["node --version", { timeoutMs: 10_000 }],
@@ -311,6 +318,9 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
 
     expect(childrenAtBoot).toBe(0);
     expect(sandbox.commands.run.mock.calls).toEqual([
+      [READ_DEV_PGID_COMMAND, cleanupBounds],
+      [killTreeCommand(8), cleanupBounds],
+      [killProjectNodesCommand("/home/user/app"), cleanupBounds],
       [killTreeCommand(7), { timeoutMs: 10_000 }],
       [killTreeCommand(8), { timeoutMs: 10_000 }],
       [killTreeCommand(9), { timeoutMs: 10_000 }],
@@ -445,7 +455,7 @@ describe("POST /api/sandbox after ready (#492)", () => {
     expect(pendingInstalls()).toBe(1);
     expect(stats.installsWhileServing).toBe(0);
     // Only the marked dev server is stopped, never the proxy (pid 7).
-    expect(run).toHaveBeenCalledWith(killTreeCommand(41));
+    expect(run).toHaveBeenCalledWith(killTreeCommand(41), cleanupBounds);
     expect(run).not.toHaveBeenCalledWith(killTreeCommand(7));
 
     finishInstall();
@@ -799,12 +809,15 @@ describe("PATCH /api/sandbox/[sandboxId] package.json burst (#486)", () => {
       for (const response of responses) {
         expect(await response.json()).toEqual({ success: true, synced: 1 });
       }
-      expect(order).toEqual([killTreeCommand(9), "install:stopped", "npm run dev -- --host"]);
-      expect(run).toHaveBeenCalledWith("npm run dev -- --host", {
+      // The orphan sweep is a `node -e` script, filtered from `order` with the port probes.
+      expect(order).toEqual([READ_DEV_PGID_COMMAND, killTreeCommand(9), "install:stopped", DEV_START_COMMAND]);
+      expect(run).toHaveBeenCalledWith(killProjectNodesCommand("/home/user/app"), expect.anything());
+      expect(run).toHaveBeenCalledWith(DEV_START_COMMAND, {
         cwd: "/home/user/app",
         envs: devEnvs,
         background: true,
         timeoutMs: 0,
+        requestTimeoutMs: SHORT_CALL_MS,
       });
     } finally {
       forgetSandbox("sbx_burst");

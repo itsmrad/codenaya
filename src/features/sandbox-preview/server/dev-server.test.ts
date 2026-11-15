@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import type { Sandbox } from "e2b";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -5,6 +6,9 @@ import {
   DEV_COMMAND_ENV,
   DEV_SERVER_ENVS,
   DevServerStartError,
+  DEV_START_COMMAND,
+  READ_DEV_PGID_COMMAND,
+  SHORT_CALL_MS,
   PROXY_TARGET_ENV,
   fallbackDevStart,
   findPreviewDevServer,
@@ -12,12 +16,16 @@ import {
   isPortOpen,
   killTreeCommand,
   proxyTargetPort,
+  killDevServersCommand,
+  killProjectNodesCommand,
   restartDevServerIfDown,
+  runDevServer,
 } from "./dev-server";
 
 afterEach(() => {
   vi.useRealTimers();
 });
+const bounds = { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS };
 
 const fakeSandbox = (processes: Array<{ pid: number; envs: Record<string, string>; cwd?: string; cmd?: string; args?: string[] }>) => {
   const run = vi.fn<(...args: unknown[]) => Promise<object>>(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
@@ -55,15 +63,17 @@ describe("installWithDevServerStopped (#486)", () => {
     const { sandbox, run } = fakeSandbox([{ pid: 3, envs: {} }, dev]);
     const onStdout = vi.fn();
     const install = vi.fn(async () => {
-      expect(run).toHaveBeenCalledTimes(1);
+      expect(run).toHaveBeenCalledTimes(3);
       return "installed";
     });
 
     await expect(installWithDevServerStopped(sandbox, install, { onStdout })).resolves.toBe("installed");
 
     expect(run.mock.calls).toEqual([
-      [killTreeCommand(12)],
-      ["npm run dev -- --host", { cwd: "/home/user/app", envs: dev.envs, background: true, timeoutMs: 0, onStdout }],
+      [READ_DEV_PGID_COMMAND, bounds],
+      [killTreeCommand(12), bounds],
+      [killProjectNodesCommand(dev.cwd), bounds],
+      [DEV_START_COMMAND, { cwd: "/home/user/app", envs: dev.envs, background: true, timeoutMs: 0, requestTimeoutMs: SHORT_CALL_MS, onStdout }],
     ]);
   });
 
@@ -76,7 +86,7 @@ describe("installWithDevServerStopped (#486)", () => {
       }),
     ).rejects.toThrow("npm install failed");
 
-    expect(run).toHaveBeenLastCalledWith("npm run dev -- --host", expect.objectContaining({ background: true }));
+    expect(run).toHaveBeenLastCalledWith(DEV_START_COMMAND, expect.objectContaining({ background: true }));
   });
 
   it("stops every marked dev server, e.g. one a resumed boot left, and starts exactly one", async () => {
@@ -86,9 +96,10 @@ describe("installWithDevServerStopped (#486)", () => {
     await installWithDevServerStopped(sandbox, async () => undefined);
 
     expect(run.mock.calls.map(([command]) => command)).toEqual([
-      killTreeCommand(30),
-      killTreeCommand(12),
-      "npm run dev -- --host",
+      READ_DEV_PGID_COMMAND,
+      killDevServersCommand([30, 12]),
+      killProjectNodesCommand(dev.cwd),
+      DEV_START_COMMAND,
     ]);
   });
 
@@ -107,7 +118,9 @@ describe("installWithDevServerStopped (#486)", () => {
     await installWithDevServerStopped(sandbox, async () => undefined, {}, fallback);
 
     expect(run.mock.calls).toEqual([
-      ["npm run dev -- --host", { cwd: "/home/user/app", envs: dev.envs, background: true, timeoutMs: 0 }],
+      [READ_DEV_PGID_COMMAND, bounds],
+      [killProjectNodesCommand(dev.cwd), bounds],
+      [DEV_START_COMMAND, { cwd: "/home/user/app", envs: dev.envs, background: true, timeoutMs: 0, requestTimeoutMs: SHORT_CALL_MS }],
     ]);
   });
 
@@ -206,7 +219,6 @@ describe("restarting the preview's dev server after a check build", () => {
     await expect(findPreviewDevServer(fakeSandbox([proxy]).sandbox)).resolves.toBeNull();
   });
 
-  const bounds = { timeoutMs: 10_000, requestTimeoutMs: 10_000 };
   const probes = (run: ReturnType<typeof fakeSandbox>["run"]) =>
     run.mock.calls.filter(([command]) => String(command).includes('require("net")')).length;
 
@@ -238,8 +250,10 @@ describe("restarting the preview's dev server after a check build", () => {
     expect(probes(run)).toBe(3);
     expect(sandbox.commands.list).toHaveBeenCalledWith({ requestTimeoutMs: 10_000 });
     expect(run.mock.calls.slice(3)).toEqual([
+      [READ_DEV_PGID_COMMAND, bounds],
       [killTreeCommand(12), bounds],
-      ["npm run dev", { cwd: "/home/user/app", envs: dev.envs, background: true, timeoutMs: 0, requestTimeoutMs: 10_000 }],
+      [killProjectNodesCommand(dev.cwd), bounds],
+      [DEV_START_COMMAND, { cwd: "/home/user/app", envs: dev.envs, background: true, timeoutMs: 0, requestTimeoutMs: 10_000 }],
     ]);
   });
 
@@ -257,6 +271,98 @@ describe("restarting the preview's dev server after a check build", () => {
 
     await expect(restartDevServerIfDown(sandbox, preview, 10_000)).resolves.toBe(true);
 
-    expect(run).toHaveBeenLastCalledWith("npm run dev", expect.objectContaining({ background: true, envs: dev.envs }));
+    expect(run).toHaveBeenLastCalledWith(DEV_START_COMMAND, expect.objectContaining({ background: true, envs: dev.envs }));
+  });
+});
+
+describe("dev server process groups", () => {
+  it("records the actual session leader inside setsid, including when setsid forks", () => {
+    expect(DEV_START_COMMAND).toContain("command -v setsid");
+    expect(DEV_START_COMMAND).toContain("exec setsid --wait sh -c");
+    expect(DEV_START_COMMAND).toContain('echo "$$" > /tmp/codenaya-dev-server.pgid');
+    expect(DEV_START_COMMAND).toContain('exec sh -c "$CODENAYA_DEV_COMMAND"');
+    expect(DEV_START_COMMAND).toContain("else rm -f /tmp/codenaya-dev-server.pgid;");
+  });
+
+  it("signals the recorded group even when its parent is no longer listed", () => {
+    const command = killDevServersCommand([], 42);
+    expect(command).toBe("kill -TERM -- -42 2>/dev/null; sleep 0.5; kill -KILL -- -42 2>/dev/null; true");
+    expect(command).not.toContain("tree");
+  });
+
+  it.each([undefined, 0, 1, -42, NaN, 12.5, Infinity])("falls back to the listed trees for an unknown/invalid pgid %s", (pgid) => {
+    expect(killDevServersCommand([12], pgid)).toBe(killTreeCommand(12));
+    expect(killDevServersCommand([], pgid)).toBe("");
+  });
+
+  it("uses only Node and /proc to reap remaining project Node processes, excluding itself", () => {
+    const command = killProjectNodesCommand("/home/user/app's code");
+    expect(command).toContain('readdirSync("/proc")');
+    expect(command).toContain('readlinkSync(`${base}/cwd`)');
+    expect(command).toContain('readlinkSync(`${base}/exe`)');
+    expect(command).toContain('pid !== process.pid');
+    expect(command).toContain('process.kill(pid, "SIGKILL")');
+    expect(command).toContain("'/home/user/app'\"'\"'s code'");
+    expect(command).not.toMatch(/lsof|fuser|pkill|killall/);
+  });
+
+  it("reaps an orphan without killing the proxy, a non-Node command, or the cleanup itself", () => {
+    const kill = vi.fn();
+    const cwd = "/home/user/app";
+    const processes: Record<string, { cwd: string; exe: string }> = {
+      "12": { cwd, exe: "/usr/local/bin/node" },
+      "13": { cwd: "/home/user", exe: "/usr/local/bin/node" },
+      "14": { cwd, exe: "/bin/bash" },
+      "15": { cwd, exe: "/usr/local/bin/node" },
+    };
+    const fs = {
+      readdirSync: () => ["self", "12", "13", "14", "15", "16"],
+      readlinkSync: (path: string) => {
+        const [, , pid, field] = path.split("/");
+        const entry = processes[pid];
+        if (!entry) throw Object.assign(new Error("process exited"), { code: "ENOENT" });
+        return field === "cwd" ? entry.cwd : entry.exe;
+      },
+    };
+    const script = killProjectNodesCommand(cwd).match(/^node -e '([^']*)' /)?.[1];
+    expect(script).toBeDefined();
+    runInNewContext(script!, { require: () => fs, process: { argv: ["node", cwd], pid: 15, kill } });
+    expect(kill.mock.calls).toEqual([[12, "SIGKILL"]]);
+  });
+
+  it.each([1000, 60_000])("bounds a background start's request without timing out the server (%s)", async (requestTimeoutMs) => {
+    const { sandbox, run } = fakeSandbox([]);
+    await runDevServer(sandbox, { command: "npm run dev", envs: {} }, { requestTimeoutMs });
+    expect(run).toHaveBeenLastCalledWith(DEV_START_COMMAND, expect.objectContaining({
+      timeoutMs: 0, requestTimeoutMs: Math.min(requestTimeoutMs, SHORT_CALL_MS),
+    }));
+  });
+
+  it.each([true, false])("reinstall kills the persisted group when its parent is listed: %s", async (listed) => {
+    const dev = { pid: 12, cwd: "/home/user/app", envs: { [DEV_COMMAND_ENV]: "npm run dev" } };
+    const { sandbox, run } = fakeSandbox(listed ? [dev] : []);
+    run.mockResolvedValueOnce({ stdout: "42\n" });
+    const install = vi.fn(async () => {
+      expect(run.mock.calls.slice(0, 3)).toEqual([
+        [READ_DEV_PGID_COMMAND, bounds],
+        [killDevServersCommand([12], 42), bounds],
+        [killProjectNodesCommand(dev.cwd), bounds],
+      ]);
+    });
+    await installWithDevServerStopped(sandbox, install, {}, { command: "npm run dev", envs: dev.envs, cwd: dev.cwd });
+    expect(install).toHaveBeenCalledOnce();
+    expect(run).toHaveBeenLastCalledWith(DEV_START_COMMAND, expect.objectContaining({ requestTimeoutMs: SHORT_CALL_MS }));
+  });
+
+  it("restart kills a persisted group after the parent has disappeared from E2B", async () => {
+    const { sandbox, run } = fakeSandbox([]);
+    run.mockImplementation(async (command) => ({ stdout: command === READ_DEV_PGID_COMMAND ? "42\n" : "" }));
+    await restartDevServerIfDown(sandbox, { port: 3000, start: { command: "npm run dev", envs: {}, cwd: "/home/user/app" } }, SHORT_CALL_MS);
+    expect(run.mock.calls.slice(3, 6)).toEqual([
+      [READ_DEV_PGID_COMMAND, bounds],
+      [killDevServersCommand([], 42), bounds],
+      [killProjectNodesCommand("/home/user/app"), bounds],
+    ]);
+    expect(run).toHaveBeenLastCalledWith(DEV_START_COMMAND, expect.objectContaining({ envs: { [DEV_COMMAND_ENV]: "npm run dev" } }));
   });
 });

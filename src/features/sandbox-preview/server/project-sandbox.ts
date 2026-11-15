@@ -1,7 +1,7 @@
 import { Sandbox, type SandboxOpts } from "e2b";
 import { z } from "zod";
 
-import { killTreeCommand } from "./dev-server";
+import { killTreeCommand, SHORT_CALL_MS, stopDevServers } from "./dev-server";
 
 /**
  * Sandbox setup shared by the preview route and the agent's checkBuild tool,
@@ -103,7 +103,12 @@ export const writeProjectFiles = async (
  * proxy), so booting again on the same sandbox doesn't race it (#492).
  */
 export const stopSandboxCommands = async (sandbox: Sandbox) => {
-  const running = await sandbox.commands.list();
+  const running = await sandbox.commands.list({ requestTimeoutMs: SHORT_CALL_MS });
+  try {
+    await stopDevServers(sandbox, running, WORK_DIR);
+  } catch {
+    // Best-effort cleanup: retry the listed trees below if group cleanup failed.
+  }
   await Promise.all(running.map(async (command) => {
     try {
       await sandbox.commands.run(killTreeCommand(command.pid), { timeoutMs: 10_000 });

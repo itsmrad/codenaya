@@ -51,6 +51,7 @@ import {
   PROXY_SCRIPT_PATH,
   installWithDevServerStopped,
   isPortOpen,
+  runDevServer,
   type DevStart,
 } from "@/features/sandbox-preview/server/dev-server";
 import { rewriteProxyHeaders, shouldInjectBridge } from "@/features/sandbox-preview/server/preview-proxy";
@@ -533,11 +534,7 @@ export async function POST(request: Request) {
             [DEV_COMMAND_ENV]: devCmdWithHost,
           },
         };
-        await sandbox.commands.run(devCmdWithHost, {
-          cwd: WORK_DIR,
-          background: true,
-          timeoutMs: 0, // Prevent E2B from killing the dev server after the default 60s timeout
-          envs: devStart.envs,
+        await runDevServer(sandbox, devStart, {
           onStdout: (data) => {
             send({ type: "output", data });
             if (!detectedPort) {
