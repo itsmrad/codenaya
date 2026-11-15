@@ -91,7 +91,7 @@ import { QueuedFollowUp } from "./queued-follow-up";
 import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
 import { chatStarters } from "../chat-starters";
-import { shouldEscapeCancelRun } from "../escape-cancel";
+import { type CancelSource, cancelRun, shouldEscapeCancelRun } from "../run-cancel";
 import { type Checkpoint, useCheckpoints } from "../hooks/use-checkpoints";
 import {
   CheckpointHistoryDialog,
@@ -233,11 +233,15 @@ export const ConversationSidebar = ({
   const stalled = useRunStalled(processingMessage);
   const isProcessing = Boolean(processingMessage) && !stalled;
 
-  const handleCancel = async () => {
+  // When Send last turned into Stop, for the Stop grace period.
+  const processingSinceRef = useRef(0);
+  useEffect(() => {
+    if (isProcessing) processingSinceRef.current = Date.now();
+  }, [isProcessing]);
+
+  const handleCancel = async (source: CancelSource) => {
     try {
-      await ky.post("/api/messages/cancel", {
-        json: { projectId },
-      });
+      await cancelRun(projectId, source, processingSinceRef.current);
     } catch {
       toast.error("Unable to cancel request");
     }
@@ -254,7 +258,7 @@ export const ConversationSidebar = ({
       const inPanel =
         !active || active === document.body || panelRef.current?.contains(active);
       if (inPanel && shouldEscapeCancelRun(event)) {
-        void handleCancel();
+        void handleCancel("esc");
       }
     };
     document.addEventListener("keydown", onKeyDown);
@@ -795,7 +799,7 @@ export const ConversationSidebar = ({
                         variant="default"
                         size="icon-sm"
                         aria-label="Stop"
-                        onClick={() => void handleCancel()}
+                        onClick={() => void handleCancel("button")}
                         className="size-8 rounded-lg"
                       >
                         <SquareIcon className="size-3 animate-in fill-current fade-in-0 zoom-in-75 duration-150 motion-reduce:animate-none" />
