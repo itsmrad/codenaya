@@ -127,12 +127,22 @@ export const useWebContainer = ({
         const pinnedPackage = rootPackage?.content && pinViteForWebContainer(rootPackage.content);
         if (pinnedPackage) {
           await container.fs.writeFile("package.json", pinnedPackage);
-          appendOutput(
-            `WebContainer preview: using vite ${WEBCONTAINER_VITE_PINS.vite} + @vitejs/plugin-react ` +
-              `${WEBCONTAINER_VITE_PINS["@vitejs/plugin-react"]} (Vite 8 HMR is unreliable here; ` +
-              `the project's package.json is unchanged).\n`,
-          );
         }
+        // Same stream as `$ npm install` / `$ npm run dev`. The Logs panel is an
+        // xterm viewport of the tail, so a line written before install has scrolled
+        // out by the time it is read. Emit it under Vite's banner instead.
+        const pinNotice = pinnedPackage
+          ? `WebContainer preview: using vite ${WEBCONTAINER_VITE_PINS.vite} + @vitejs/plugin-react ` +
+            `${WEBCONTAINER_VITE_PINS["@vitejs/plugin-react"]} (Vite 8 HMR is unreliable here; ` +
+            `the project's package.json is unchanged).\n`
+          : null;
+        let pinNoticePending = Boolean(pinNotice);
+        let devTail = "";
+        const emitPinNotice = () => {
+          if (!pinNoticePending || !pinNotice) return;
+          pinNoticePending = false;
+          appendOutput(pinNotice);
+        };
 
         // Public environment variables only. This runs in the browser, so a secret
         // written here would be readable by the end user and by anyone they share
@@ -175,6 +185,8 @@ export const useWebContainer = ({
 
           if (installExitCode !== 0) {
             // The exit code arrives unsigned: -2 reads as 4294967294.
+            // No dev banner is coming; keep the pin visible next to the failure.
+            emitPinNotice();
             throw new Error(
               `${installCmd} failed with code ${installExitCode | 0}`
             );
@@ -194,6 +206,10 @@ export const useWebContainer = ({
           new WritableStream({
             write(data) {
               appendOutput(data);
+              if (!pinNoticePending) return;
+              // ANSI colour codes can split the banner across chunks.
+              devTail = (devTail + data).slice(-80);
+              if (devTail.includes("ready in")) emitPinNotice();
             },
           })
         );
