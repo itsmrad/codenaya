@@ -7,6 +7,7 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../convex/_generated/api";
 import {
   CODING_AGENT_SYSTEM_PROMPT,
+  FIRST_BUILD_APP_NOTE,
   MAX_AGENT_STEPS,
   STARTER_IN_PLACE_NOTE,
   STEP_BUDGET_NOTE,
@@ -99,6 +100,7 @@ import {
   PLAN_MODE,
   PLAN_MODE_PROMPT,
   PLAN_MODE_TOOLS,
+  SWARM_MODE,
 } from '../plan-mode';
 import { swarmRun } from './lib/swarm-run';
 
@@ -558,6 +560,10 @@ export const processMessage = inngest.createFunction(
     // skills and plan mode.
     // Conversation goes in messages (see onStart).
     const swarm = await swarmRun({ ...(event.data as MessageEvent), internalKey, step });
+    const soloFirstBuild = !planMode && mode !== SWARM_MODE && await step.run(
+      "check-first-build",
+      () => convex.query(api.projects.conversationNeedsFirstBuildForServer, { internalKey, conversationId }),
+    );
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
       buildProjectInstructionsSection(projectInstructions),
@@ -568,6 +574,7 @@ export const processMessage = inngest.createFunction(
       buildSkillsPromptSection([], forced, unavailable),
       planMode ? PLAN_MODE_PROMPT : "",
       swarm.promptNote,
+      soloFirstBuild ? FIRST_BUILD_APP_NOTE : "",
     ].join("");
 
     // A project seeded with the starter says so in the request, not the
