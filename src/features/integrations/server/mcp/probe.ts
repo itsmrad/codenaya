@@ -18,6 +18,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 
 import { assertSafeMcpUrl } from "../url-guard";
 import { createGuardedFetch } from "./guarded-fetch";
+import { redactSecrets } from "./redact";
 
 /** Identifies us to MCP servers. Some log or gate on client identity. */
 const CLIENT_INFO = { name: "codenaya", version: "1.0.0" } as const;
@@ -81,7 +82,10 @@ export interface ProbeMcpServerOptions {
  * credential, `network` means check the URL, `protocol` means the endpoint is not
  * an MCP server. Collapsing them into "failed" leaves the user guessing.
  */
-function classifyError(error: unknown): {
+function classifyError(
+  error: unknown,
+  knownSecrets: readonly string[] = [],
+): {
   kind: McpProbeFailureKind;
   error: string;
 } {
@@ -124,9 +128,12 @@ function classifyError(error: unknown): {
 
   // A plain web page or REST endpoint typically fails here: it answers, but not
   // with JSON-RPC. The raw message can quote the response body, so it is logged
-  // here rather than shown: echoing it would turn the probe into a reader for
-  // whatever the URL serves.
-  console.warn("[mcp/probe] handshake failed", raw);
+  // redacted rather than shown: echoing it would turn the probe into a reader
+  // for whatever the URL serves, including a key the vendor echoed back.
+  console.warn(
+    "[mcp/probe] handshake failed",
+    redactSecrets(raw, knownSecrets).text,
+  );
   return {
     kind: "protocol",
     error:
@@ -183,7 +190,13 @@ export async function probeMcpServer(
         typeof info?.version === "string" ? info.version : undefined,
     };
   } catch (error) {
-    return { ok: false, ...classifyError(error) };
+    // Header values are the credentials this probe submitted. A Bearer prefix is
+    // stripped so an echoed key is scrubbed even when the body omits "Bearer".
+    const knownSecrets = Object.values(headers ?? {}).flatMap((value) => {
+      const bearer = /^Bearer\s+(\S+)/i.exec(value);
+      return bearer ? [value, bearer[1]] : [value];
+    });
+    return { ok: false, ...classifyError(error, knownSecrets) };
   } finally {
     // Always release the session. Leaking sessions would eventually exhaust
     // server-side limits for the user's account, which is a failure mode they
