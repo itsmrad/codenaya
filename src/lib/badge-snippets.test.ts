@@ -11,6 +11,12 @@ describe("importPath", () => {
   });
 });
 
+describe("importPath encoding", () => {
+  it("encodes each segment but keeps the slash readable", () => {
+    expect(importPath("a b/c&d#e")).toBe("/import?repo=a%20b/c%26d%23e");
+  });
+});
+
 describe("badgeSnippets", () => {
   it("builds the Open in badge for a repo", () => {
     expect(badgeSnippets("open", ORIGIN, importPath("octocat/Hello-World"))).toEqual({

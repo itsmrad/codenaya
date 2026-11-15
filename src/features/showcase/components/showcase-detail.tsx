@@ -21,6 +21,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { badgeSnippets } from "@/lib/badge-snippets";
@@ -100,16 +101,8 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
     }
   };
 
-  const copyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(
-        new URL(showcasePath(project._id), window.location.origin).toString(),
-      );
-      toast.success("Link copied");
-    } catch {
-      toast.error("Couldn't copy the link");
-    }
-  };
+  const copyLink = () =>
+    copyToClipboard(new URL(showcasePath(project._id), window.location.origin).toString(), "Link copied");
 
   const copyRemixBadge = (format: "markdown" | "html") =>
     copyToClipboard(
@@ -183,9 +176,11 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={copyLink}>Copy link</DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuLabel className="flex items-center justify-between gap-3">
                   Remix badge
-                  <img src="/badges/remix-on-codenaya.svg" alt="Remix on Codenaya" className="h-5 w-auto" />
+                  <img src="/badges/remix-on-codenaya.svg" alt="" className="h-5 w-auto" />
                 </DropdownMenuLabel>
                 <DropdownMenuItem onSelect={() => copyRemixBadge("markdown")}>
                   Copy Markdown
