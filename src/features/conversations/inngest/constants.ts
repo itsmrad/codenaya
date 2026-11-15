@@ -457,6 +457,7 @@ Read any project files you need. Never edit shared files, dependencies, or anoth
 Do not run a build: the orchestrator integrates and checks the complete project.
 Finish with a concise report of changes and any remaining work. Put dependency requests,
 shared edits, or integration requirements in a NEEDS: section for the orchestrator.
+The report is for the orchestrator, not the user: no suggestions block.
 `;
 
 /** A sub-orchestrator is a worker to the e2e stub too, so it keeps the "[swarm-worker]" marker. */
@@ -469,6 +470,7 @@ NEEDS: requests that fall inside your owned paths and finish failed or unfinishe
 Do not run a build: the orchestrator integrates and checks the complete project.
 Finish with a concise report of changes and any remaining work. Put dependency requests,
 shared edits, or integration requirements in a NEEDS: section for the orchestrator.
+The report is for the orchestrator, not the user: no suggestions block.
 `;
 
 /** Swarm-mode orchestrator note; the e2e model stub keys on the delegateTasks tool. */

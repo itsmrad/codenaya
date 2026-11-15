@@ -17,6 +17,11 @@ describe("splitSuggestions", () => {
     expect(suggestions).toEqual(["One", "Two", "Three"]);
   });
 
+  it("keeps a repeated prompt once", () => {
+    expect(splitSuggestions("Done.\n<suggestions>\nAdd dark mode\n- Add dark mode\nAdd a footer\n</suggestions>").suggestions)
+      .toEqual(["Add dark mode", "Add a footer"]);
+  });
+
   it("hides a malformed block", () => {
     expect(splitSuggestions("Done.\n<suggestions>\nAdd a footer")).toEqual({
       content: "Done.",

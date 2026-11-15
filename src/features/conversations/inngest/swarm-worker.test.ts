@@ -120,6 +120,19 @@ describe("swarmWorker", () => {
     expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ agentTaskId: "t1", status: "done" })]);
   });
 
+  it("stores its report without a suggestions block (#256)", async () => {
+    const outcome = await run([
+      { data: text("Built the home page.\n\n<suggestions>\nAdd a footer\n</suggestions>") },
+    ]);
+
+    expect(outcome.data).toMatchObject({ status: "done", summary: "Built the home page." });
+    expect(mutationArgs("agentTasks:finishTask")).toEqual([
+      expect.objectContaining({ status: "done", summary: "Built the home page." }),
+    ]);
+    const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: string }> }>;
+    expect(request.messages[0].content).toContain("no suggestions block");
+  });
+
   it("checks JSON-string array args against its owned paths like real ones", async () => {
     const outcome = await run([
       { data: toolCall("writeFiles", { files: JSON.stringify([{ path: "src/pages/home.tsx", content: "export default () => null;\n" }]) }) },

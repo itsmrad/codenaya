@@ -375,8 +375,8 @@ export const conversationNeedsFirstBuildForServer = query({
 /**
  * Ends a seeded project's first build (#338): called by the agent run that
  * wrote files and finished. Failed, cancelled, plan and Q&A runs leave it set.
+ * True when this call ended it, so that run gets the ship card (#341).
  */
-/** Ends a seeded project's first build; true when this call ended it (#341). */
 export const completeFirstBuild = mutation({
   args: { internalKey: v.string(), projectId: v.id("projects") },
   returns: v.boolean(),

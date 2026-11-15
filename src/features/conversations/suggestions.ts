@@ -16,9 +16,10 @@ const QUOTES = /^["'`]+|["'`]+$/g;
 /** The reply without its suggestions block, and the block's prompts. */
 export const splitSuggestions = (reply: string) => {
   const lines = [...reply.matchAll(BLOCK)].flatMap((match) => match[1].split("\n"));
-  const suggestions = lines
+  const prompts = lines
     .map((line) => line.trim().replace(LIST_MARK, "").replace(QUOTES, "").trim())
-    .filter((line) => line && line.length <= MAX_SUGGESTION_CHARS)
-    .slice(0, MAX_SUGGESTIONS);
+    .filter((line) => line && line.length <= MAX_SUGGESTION_CHARS);
+  // Unique, so a repeated line is one chip.
+  const suggestions = [...new Set(prompts)].slice(0, MAX_SUGGESTIONS);
   return { content: reply.replace(BLOCK, "").replace(STRAY_TAG, "").trim(), suggestions };
 };

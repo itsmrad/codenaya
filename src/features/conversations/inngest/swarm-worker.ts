@@ -17,6 +17,7 @@ import {
 } from "../swarm";
 import { selfCheckStep, selfCheckWorker } from "../swarm-sandbox";
 import { CODING_AGENT_SYSTEM_PROMPT, STEP_BUDGET_NOTE, SWARM_SUBORCH_NOTE, SWARM_WORKER_NOTE } from "./constants";
+import { splitSuggestions } from "../suggestions";
 import { decodeJsonArgs, decodeToolCalls } from "./lib/json-args";
 import { guardOwnedPaths } from "./lib/ownership-guard";
 import { hitOutputLimit, markCutOffCalls, refuseCutOffCalls } from "./lib/output-limit";
@@ -217,9 +218,10 @@ export const swarmWorker = inngest.createFunction(
     });
 
     const result = await network.run(task.brief);
-    const reply = result.state.results.at(-1)?.output.flatMap((m) => m.type === "text" && m.role === "assistant"
-      ? [typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("")] : []).join("\n").trim()
-      || "The worker finished without a summary.";
+    const raw = result.state.results.at(-1)?.output.flatMap((m) => m.type === "text" && m.role === "assistant"
+      ? [typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("")] : []).join("\n") ?? "";
+    // The shared prompt asks for follow-up chips (#256); a worker's are never shown.
+    const reply = splitSuggestions(raw).content || "The worker finished without a summary.";
     // Stored as done: what it wrote is real; the orchestrator reads the prefix.
     const summary = unfinished ? `Unfinished (step or cost cap): ${reply}` : reply;
     const repairBudget = new AbortController();
