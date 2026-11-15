@@ -446,6 +446,9 @@ export const PreviewView = ({
   useEffect(() => {
     if (runActive) hookReloads.current = 0;
   }, [runActive]);
+  useEffect(() => {
+    hookReloads.current = 0;
+  }, [previewUrl]);
   const hookError = isHookError(runtimeError);
   useEffect(() => {
     if (!hookError) return;
