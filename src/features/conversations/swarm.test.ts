@@ -65,6 +65,18 @@ describe("validatePlan", () => {
     expect(validatePlan({ tasks: [task("a", ["src/a.ts"]), task("a", ["src/b.ts"])] })).toMatch(/unique/);
   });
 
+  it.each(["public", "public/", "public/x.png", "package.json"])("explains how to fix outside-src ownership: %s", (path) => {
+    expect(validatePlan({ tasks: [task("a", [path]), task("b", ["src/b.ts"])] })).toBe(
+      `Error: Owned path "${path}" is outside src/. Tasks own only paths under src/; write public/ and other root files yourself before delegating, or drop it from ownedPaths, then call delegateTasks again.`,
+    );
+  });
+
+  it.each(["src/../x", "/src/x.ts", "src//x.ts", ""])("keeps a clear malformed path error: %s", (path) => {
+    expect(validatePlan({ tasks: [task("a", [path]), task("b", ["src/b.ts"])] })).toBe(
+      `Error: Invalid owned path "${path}"; use a project-relative path under src/.`,
+    );
+  });
+
   it("refuses shared files, folders holding one, and outside, absolute or parent paths", () => {
     for (const path of ["src/App.tsx", "src/lib", "src/lib/", "src", "src/", "src/index.css", "package.json", "/src/x.ts", "src/../x.ts", "public/x.png", "src//x.ts"]) {
       expect(validatePlan({ tasks: [task("a", [path]), task("b", ["src/b.ts"])] }), path).toMatch(/^Error:/);
