@@ -1,7 +1,7 @@
 import { createAgent, createNetwork, type Tool } from '@inngest/agent-kit';
 
 import { inngest } from "@/inngest/client";
-import { Id } from "../../../../convex/_generated/dataModel";
+import { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { NonRetriableError } from "inngest";
 import { convex } from "@/lib/convex-client";
 import { api } from "../../../../convex/_generated/api";
@@ -385,6 +385,7 @@ export const processMessage = inngest.createFunction(
     // project row so those act on behalf of whoever owns the work.
     let mcpOwnerId: string | undefined;
     let projectInstructions: string | undefined;
+    let projectNotes: Doc<'projects'>['notes'];
     let projectTheme: ProjectTheme | undefined;
 
     try {
@@ -396,6 +397,7 @@ export const processMessage = inngest.createFunction(
       });
       mcpOwnerId = project?.ownerId;
       projectInstructions = project?.instructions;
+      projectNotes = project?.notes;
       projectTheme = project?.theme;
 
       let entries = await convex.query(api.system.getProjectMcpConnections, {
@@ -586,7 +588,7 @@ export const processMessage = inngest.createFunction(
     );
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
-      buildProjectInstructionsSection(projectInstructions, projectTheme),
+      buildProjectInstructionsSection(projectInstructions, projectNotes, projectTheme),
       buildSkillsPromptSection(skills),
       buildSupabaseHintSection(skills),
       buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
