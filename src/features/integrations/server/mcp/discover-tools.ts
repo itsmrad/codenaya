@@ -239,7 +239,11 @@ export async function discoverTools(
       isReadOnlyVerified(server, tool),
     );
 
-    const baseline = upgradeLegacyBaseline(server.toolBaseline ?? [], allowed);
+    const baseline = upgradeLegacyBaseline(
+      server.toolBaseline ?? [],
+      allowed,
+      server.readOnlyTools,
+    );
     const drift = detectToolDrift(fingerprints, baseline);
 
     // A first connection has no baseline, so everything reads as "added". That is
