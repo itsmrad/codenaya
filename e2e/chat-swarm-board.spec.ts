@@ -132,8 +132,14 @@ test.describe("chat swarm board", () => {
         expect(pickerBox.x + pickerBox.width).toBeLessThanOrEqual(sendBox.x);
         expect(await page.locator(".chat-composer [data-align=block-end]").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
         await picker.click();
-        await expect(page.getByRole("listbox")).toBeVisible();
-        await page.keyboard.press("Escape");
+        const listbox = page.getByRole("listbox");
+        await expect(listbox).toBeVisible();
+        // Radix moves focus into the content just after it shows; an Escape sent before that is lost.
+        await expect(page.getByRole("option", { selected: true })).toBeFocused();
+        await expect(async () => {
+          await page.keyboard.press("Escape");
+          await expect(listbox).toBeHidden({ timeout: 1_000 });
+        }).toPass();
         await send.click({ trial: true });
       }
       await send.click();
