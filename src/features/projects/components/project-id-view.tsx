@@ -6,21 +6,30 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronDownIcon,
+  CircleHelpIcon,
+  ClockArrowUpIcon,
   CloudCheckIcon,
   CodeIcon,
+  DownloadIcon,
   EyeIcon,
+  HistoryIcon,
   LoaderIcon,
   MessageSquareIcon,
+  MoreHorizontalIcon,
   PanelLeftOpenIcon,
   PlugIcon,
+  PlusIcon,
   RocketIcon,
+  SettingsIcon,
+  Share2Icon,
   SparklesIcon,
+  UserIcon,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
-import { useProjectCommands } from "@/lib/command-palette";
+import { useCommandPalette, useProjectCommands } from "@/lib/command-palette";
 import { CodenayaLogo } from "@/components/codenaya-logo";
 import { HelpMenu } from "@/components/help-menu";
 import { UserMenu } from "@/components/user-menu";
@@ -34,6 +43,17 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+
+import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { ACCOUNT_SETTINGS_URL } from "@/features/settings/nav";
 
 import { FileExplorer } from "./file-explorer";
 import { SourceControlPane } from "./source-control-pane";
@@ -232,6 +252,14 @@ export const ProjectIdView = ({
   const [explorerView, setExplorerView] = useState("files");
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsTrigger = useRef<HTMLButtonElement>(null);
+  const pendingAction = useRef<(() => void) | null>(null);
+  const commands = useCommandPalette((state) => state.commands);
+  const closeForAction = (action: () => void) => {
+    pendingAction.current = action;
+    setActionsOpen(false);
+  };
   const { openIntegrations } = useProjectIntegrations();
   const showcaseId = useIsProjectPublished(projectId);
   const rename = useProjectRename(project);
@@ -297,11 +325,11 @@ export const ProjectIdView = ({
           onDeleting={() => router.replace("/")}
         />
       )}
-    <div className="@container h-full flex flex-col gap-2">
+    <div className="@container/ide h-full flex flex-col gap-2">
       {/* ─── Unified Navbar ─── */}
-      <nav className="shrink-0 h-11 flex items-center gap-3 px-3 rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]">
+      <nav className="shrink-0 h-11 flex items-center gap-1.5 px-2 @3xl:gap-3 @3xl:px-3 rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]">
         {/* Left: Brand + Project Name + Save */}
-        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 @3xl:gap-2.5 min-w-0 flex-1 max-w-[60%] @3xl:max-w-none">
           {/* Brings back the desktop chat panel after "Toggle chat panel". */}
           {!isCompact && isChatHidden && (
             <button
@@ -325,19 +353,19 @@ export const ProjectIdView = ({
           </Link>
 
           {/* Separator */}
-          <div className="w-px h-4 bg-border/50 shrink-0" />
+          <div className="hidden @3xl:block w-px h-4 bg-border/50 shrink-0" />
 
           {/* Project Name */}
           {rename.isRenaming ? (
             <input
               {...rename.inputProps}
               type="text"
-              className="min-w-32 flex-1 @xl:flex-none text-xs bg-transparent text-foreground outline-none focus:ring-1 focus:ring-brand/40 aria-invalid:ring-destructive focus:ring-inset rounded px-1 py-0.5 font-medium max-w-44 truncate"
+              className="min-w-0 @3xl:min-w-32 flex-1 @3xl:flex-none text-xs bg-transparent text-foreground outline-none focus:ring-1 focus:ring-brand/40 aria-invalid:ring-destructive focus:ring-inset rounded px-1 py-0.5 font-medium max-w-none @3xl:max-w-44 truncate"
             />
           ) : (
             <button
               onClick={rename.start}
-              className="min-w-0 text-xs font-medium text-foreground/80 hover:text-foreground truncate max-w-44 transition-colors"
+              className="min-w-0 text-xs font-medium text-foreground/80 hover:text-foreground truncate max-w-none @3xl:max-w-44 transition-colors"
             >
               {project?.name ?? "Loading..."}
             </button>
@@ -352,7 +380,7 @@ export const ProjectIdView = ({
                 <button
                   aria-label="Project actions"
                   title="Project actions"
-                  className="-ml-1.5 grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                  className="-ml-1.5 hidden @3xl:grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
                 >
                   <ChevronDownIcon className="size-3.5" />
                 </button>
@@ -364,7 +392,7 @@ export const ProjectIdView = ({
           {project?.importStatus === "importing" ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <LoaderIcon className="size-3 text-muted-foreground animate-spin shrink-0" />
+                <LoaderIcon className="hidden @3xl:block size-3 text-muted-foreground animate-spin shrink-0" />
               </TooltipTrigger>
               <TooltipContent>Importing...</TooltipContent>
             </Tooltip>
@@ -403,8 +431,8 @@ export const ProjectIdView = ({
           </div>
         )}
 
-        {/* Right: Publish + Export + Help + User (phones hide it while renaming to make room) */}
-        <div className={cn("flex items-center gap-1.5 shrink-0", rename.isRenaming && "hidden @xl:flex")}>
+        {/* Desktop actions keep their existing layout. */}
+        <div className="hidden @3xl:flex items-center gap-1.5 shrink-0">
           {mode === "chat" && (
             <button
               onClick={openCode}
@@ -451,11 +479,83 @@ export const ProjectIdView = ({
             <SparklesIcon aria-hidden="true" className="size-3.5" />
             <span className="hidden @3xl:inline">Skills</span>
           </button>
-          <ExportPopover projectId={projectId} />
+          <ExportPopover projectId={projectId} fallbackAnchorRef={actionsTrigger} />
           <SharePopover projectId={projectId} />
           <HelpMenu className="size-8" />
           <div className="w-px h-4 bg-border/40" />
           <UserMenu avatarClassName="size-6" />
+        </div>
+        <div className={cn("ml-auto flex items-center gap-1.5 shrink-0 @3xl:hidden", rename.isRenaming && "hidden")}>
+          {showcaseId === null && (
+            <Button size="sm" className="rounded-full" onClick={() => setPublishDialogOpen(true)}>
+              Publish
+            </Button>
+          )}
+          <Sheet open={actionsOpen} onOpenChange={setActionsOpen}>
+            <SheetTrigger asChild>
+              <Button ref={actionsTrigger} variant="ghost" size="icon-sm" aria-label="More actions">
+                <MoreHorizontalIcon aria-hidden="true" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent
+              side="bottom"
+              className="max-h-[85dvh] overflow-y-auto gap-0 rounded-t-xl pb-[max(1rem,env(safe-area-inset-bottom))]"
+              onCloseAutoFocus={(event) => {
+                const action = pendingAction.current;
+                if (!action) return;
+                // Return focus before the next dialog takes it (#317).
+                event.preventDefault();
+                pendingAction.current = null;
+                actionsTrigger.current?.focus();
+                action();
+              }}
+            >
+              <SheetHeader>
+                <SheetTitle>Project menu</SheetTitle>
+                <SheetDescription className="break-words">{project?.name}</SheetDescription>
+              </SheetHeader>
+              <div className="flex flex-col gap-1 px-4">
+                <Button variant="ghost" className="h-11 justify-start" onClick={() => closeForAction(openIntegrations)}>
+                  <PlugIcon aria-hidden="true" /> Integrations
+                </Button>
+                <Button variant="ghost" className="h-11 justify-start" onClick={() => closeForAction(() => setSkillsDialogOpen(true))}>
+                  <SparklesIcon aria-hidden="true" /> Skills
+                </Button>
+                <ExportPopover projectId={projectId} registerCommands={false} trigger={
+                  <Button variant="ghost" className="h-11 justify-start"><DownloadIcon aria-hidden="true" /> Export</Button>
+                } />
+                {([
+                  ["version-history", "Version history", ClockArrowUpIcon],
+                  ["past-conversations", "Past conversations", HistoryIcon],
+                  ["new-conversation", "New conversation", PlusIcon],
+                ] as const).map(([id, label, Icon]) => (
+                  <Button key={id} variant="ghost" className="h-11 justify-start" disabled={!commands[id]} onClick={() => closeForAction(() => commands[id]?.())}>
+                    <Icon aria-hidden="true" /> {label}
+                  </Button>
+                ))}
+                <HelpMenu trigger={<Button variant="ghost" className="h-11 justify-start"><CircleHelpIcon aria-hidden="true" /> Help</Button>} />
+                <Button variant="ghost" className="h-11 justify-start" asChild>
+                  <Link href={ACCOUNT_SETTINGS_URL}><UserIcon aria-hidden="true" /> Account</Link>
+                </Button>
+                <SharePopover projectId={projectId} trigger={<Button variant="ghost" className="h-11 justify-start"><Share2Icon aria-hidden="true" /> Share</Button>} />
+                {showcaseId && (
+                  <PublishedMenu showcaseId={showcaseId} trigger={<Button variant="ghost" className="h-11 justify-start"><RocketIcon aria-hidden="true" /> Showcase</Button>} />
+                )}
+                {project && (
+                  <ProjectActionsMenu project={project}
+                    onRename={() => closeForAction(rename.start)}
+                    onDelete={() => closeForAction(() => setDeleteOpen(true))}
+                    trigger={<Button variant="ghost" className="h-11 justify-start"><SettingsIcon aria-hidden="true" /> Project actions</Button>}
+                  />
+                )}
+                {mode === "chat" && (
+                  <Button variant="ghost" className="h-11 justify-start" onClick={() => closeForAction(openCode)}>
+                    <CodeIcon aria-hidden="true" /> Open code for this session
+                  </Button>
+                )}
+              </div>
+            </SheetContent>
+          </Sheet>
         </div>
       </nav>
 
@@ -469,7 +569,7 @@ export const ProjectIdView = ({
             )}
           >
             <div className="h-full rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)] flex flex-col overflow-hidden relative">
-              <ConversationSidebar projectId={projectId} />
+              <ConversationSidebar projectId={projectId} actionsInSheet />
             </div>
           </div>
         )}

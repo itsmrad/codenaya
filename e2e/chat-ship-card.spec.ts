@@ -23,6 +23,48 @@ test.describe("after a run", () => {
     "Needs CLERK_SECRET_KEY, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, NEXT_PUBLIC_CONVEX_URL and CODENAYA_CONVEX_INTERNAL_KEY",
   );
 
+  test("ship-card Export to GitHub stays inside the phone viewport", async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await signIn(page);
+    const projectId = await seedPreviewProject(page, PROJECT_NAME);
+    const conversationId = await (await userConvexClient(page)).mutation(api.conversations.create, {
+      projectId,
+      title: "Phone ship card",
+    });
+    const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY!;
+    const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+    const messageId = await system.mutation(api.system.createMessage, {
+      internalKey, conversationId, projectId, role: "assistant", content: "", status: "processing",
+    });
+    await system.mutation(api.system.updateMessageContent, {
+      internalKey, messageId, content: "- A landing page is running in the preview.", firstBuild: true,
+    });
+    await page.goto(`/projects/${projectId}`);
+    const card = page.getByRole("group", { name: "Share your app" });
+    await expect(card).toBeVisible({ timeout: 60_000 });
+    const more = page.getByRole("button", { name: "More actions", exact: true });
+    await expect(more).toBeVisible();
+    await card.getByRole("button", { name: "Export to GitHub", exact: true }).click();
+    const popover = page.locator("[data-slot=popover-content]");
+    await expect(popover.getByRole("button", { name: "Download ZIP", exact: true })).toBeVisible();
+    await expect(popover).toBeInViewport({ ratio: 1 });
+    await expect.poll(async () => {
+      const box = await popover.boundingBox();
+      const anchor = await more.boundingBox();
+      return Boolean(box && anchor && box.y >= anchor.y + anchor.height);
+    }).toBe(true);
+    const box = (await popover.boundingBox())!;
+    const anchorBox = (await more.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(8);
+    expect(box.x + box.width).toBeLessThanOrEqual(375 - 8);
+    expect(box.y).toBeGreaterThanOrEqual(anchorBox.y + anchorBox.height);
+    expect(box.y + box.height).toBeLessThanOrEqual(812 - 8);
+    await page.keyboard.press("Escape");
+    await expect(popover).toBeHidden();
+    await expect(more).toBeFocused();
+  });
+
   test("shows chips under the latest reply and the ship card under the first build", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     await signIn(page);

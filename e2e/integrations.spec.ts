@@ -64,6 +64,7 @@ test.describe("integration catalog", () => {
         await page.route("**/api/sandbox/**", (route) => route.fulfill({ json: {} }));
         await signIn(page);
         await page.goto(`/projects/${process.env.E2E_PROJECT_ID}`);
+        if (viewport.width <= 768) await page.getByRole("button", { name: "More actions", exact: true }).click();
         await page.getByRole("button", { name: "Integrations", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Integrations", exact: true });
         const providers = dialog.getByRole("list", { name: "Integration providers" });

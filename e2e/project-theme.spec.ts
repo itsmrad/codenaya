@@ -30,6 +30,7 @@ test.describe("project theme form (#302)", () => {
     const projectId = await fixtureProject(page);
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`/projects/${projectId}?engine=webcontainer`);
+    await page.getByRole("button", { name: "More actions", exact: true }).click();
     await page.getByRole("button", { name: "Skills", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Instructions, design and skills" });
 
