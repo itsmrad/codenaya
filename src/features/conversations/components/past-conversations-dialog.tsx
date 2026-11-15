@@ -44,25 +44,33 @@ export const PastConversationsDialog = ({
     >
       <CommandInput placeholder="Search conversations..." />
       <CommandList>
-        <CommandEmpty>No conversations found.</CommandEmpty>
-        <CommandGroup heading="Conversations">
-          {conversations?.map((conversation) => (
-            <CommandItem
-              key={conversation._id}
-              value={`${conversation.title}-${conversation._id}`}
-              onSelect={() => handleSelect(conversation._id)}
-            >
-              <div className="flex flex-col gap-0.5">
-                <span>{conversation.title}</span>
-                <span className="text-xs text-muted-foreground">
-                  {formatDistanceToNow(conversation._creationTime, {
-                    addSuffix: true,
-                  })}
-                </span>
-              </div>
-            </CommandItem>
-          ))}
-        </CommandGroup>
+        {conversations === undefined ? (
+          <p role="status" className="py-6 text-center text-sm text-muted-foreground">
+            Loading conversations…
+          </p>
+        ) : (
+          <>
+            <CommandEmpty>No conversations found.</CommandEmpty>
+            <CommandGroup heading="Conversations">
+              {conversations.map((conversation) => (
+                <CommandItem
+                  key={conversation._id}
+                  value={`${conversation.title}-${conversation._id}`}
+                  onSelect={() => handleSelect(conversation._id)}
+                >
+                  <div className="flex flex-col gap-0.5">
+                    <span>{conversation.title}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDistanceToNow(conversation._creationTime, {
+                        addSuffix: true,
+                      })}
+                    </span>
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
       </CommandList>
     </CommandDialog>
   );
