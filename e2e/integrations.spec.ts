@@ -110,6 +110,44 @@ test.describe("integration catalog", () => {
     }
   }
 
+  // Category chips are nowrap; they must scroll inside the dialog, not widen it.
+  for (const width of [390, 1024, 1440]) {
+    test(`IDE connect dialog stays inside its frame at ${width}px`, async ({ page }) => {
+      test.setTimeout(120_000);
+      test.skip(!process.env.E2E_PROJECT_ID, "Needs E2E_PROJECT_ID for the EVAL fixture project");
+      await page.setViewportSize({ width, height: 720 });
+      await page.route("**/api/integrations/**", (route) => route.abort());
+      await page.route("**/api/sandbox", (route) => route.fulfill({
+        contentType: "application/x-ndjson",
+        body: `${JSON.stringify({ type: "ready", sandboxId: "e2e-sandbox", previewUrl: "about:blank" })}\n`,
+      }));
+      await page.route("**/api/sandbox/**", (route) => route.fulfill({ json: {} }));
+      await signIn(page);
+      await page.goto(`/projects/${process.env.E2E_PROJECT_ID}`);
+      if (width <= 768) await page.getByRole("button", { name: "More actions", exact: true }).click();
+      await page.getByRole("button", { name: "Integrations", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Integrations", exact: true });
+      const providers = dialog.getByRole("list", { name: "Integration providers" });
+      await expect(providers.getByRole("listitem").first()).toBeVisible();
+
+      expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+      const connect = providerTile(dialog, listVisibleProviders()[0].displayName);
+      const edges = await connect.evaluate((element) => {
+        const button = element.getBoundingClientRect();
+        const frame = element.closest("[role='dialog']")!.getBoundingClientRect();
+        return { buttonRight: button.right, dialogRight: frame.right };
+      });
+      expect(edges.buttonRight).toBeLessThanOrEqual(edges.dialogRight);
+
+      await dialog.evaluate((element) => {
+        for (const node of [element, ...element.querySelectorAll<HTMLElement>("*")]) {
+          if (node.scrollHeight > node.clientHeight + 1) node.scrollTop = node.scrollHeight;
+        }
+      });
+      await expect(dialog.getByText("Connect services and link them to this project.")).toBeInViewport({ ratio: 1 });
+    });
+  }
+
   test("Settings ?connect= opens that provider; unknown ids show the plain catalog", async ({ page }) => {
     await page.setViewportSize(desktop);
     const errors = collectConsoleErrors(page);
