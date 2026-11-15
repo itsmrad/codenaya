@@ -116,6 +116,38 @@ test.describe("IDE polish", () => {
     expect(errors).toEqual([]);
   });
 
+  test("preview engine choices live in Refresh options and preserve URL parameters", async ({ page }) => {
+    test.setTimeout(120_000);
+    const errors = collectConsoleErrors(page);
+    await signIn(page);
+    const projectId = await emptyProject(page);
+
+    for (const width of [375, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`/projects/${projectId}?engine=sandbox&view=preview&menuTest=keep`);
+      await page.getByRole("button", { name: "Refresh options", exact: true }).click();
+      const cloud = page.getByRole("menuitemradio", { name: "Sandbox", exact: true });
+      const browser = page.getByRole("menuitemradio", { name: "WebContainer", exact: true });
+      await expect(cloud).toHaveAttribute("title", "Use high-fidelity E2B Sandbox");
+      await expect(cloud).toHaveAttribute("aria-checked", "true");
+      await expect(browser).toHaveAttribute("title", "Use in-browser WebContainers");
+      await expect(browser).toHaveAttribute("aria-checked", "false");
+      const menu = (await page.getByRole("menu").boundingBox())!;
+      expect(menu.x).toBeGreaterThanOrEqual(8);
+      expect(menu.x + menu.width).toBeLessThanOrEqual(width - 8);
+
+      await browser.click();
+      await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?engine=webcontainer&view=preview&menuTest=keep$`));
+      await page.getByRole("button", { name: "Refresh options", exact: true }).click();
+      await expect(browser).toHaveAttribute("aria-checked", "true");
+      await expect(page.getByRole("menuitem", { name: "Restart webcontainer", exact: true })).toHaveAttribute("title", "Restart webcontainer");
+      await cloud.click();
+      await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?engine=sandbox&view=preview&menuTest=keep$`));
+    }
+
+    expect(errors).toEqual([]);
+  });
+
   test("a dropped sandbox connection reads as a sentence", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await page.route("**/api/sandbox", (route) => route.abort("failed"));

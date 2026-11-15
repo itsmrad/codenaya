@@ -33,7 +33,9 @@ test.describe("preview open in new tab", () => {
       // Hold the sandbox boot so the not-ready state can be checked first.
       let markReady!: () => void;
       const ready = new Promise<void>((resolve) => (markReady = resolve));
+      let sandboxBoots = 0;
       await page.route("**/api/sandbox", async (route) => {
+        sandboxBoots += 1;
         await ready;
         const events = [
           { type: "status", status: "booting" },
@@ -63,6 +65,12 @@ test.describe("preview open in new tab", () => {
         "title",
         "Available once the preview is running",
       );
+      const refresh = page.getByRole("button", { name: "Refresh page", exact: true });
+      await expect(refresh).toBeDisabled();
+      await page.getByRole("button", { name: "Refresh options", exact: true }).click();
+      await expect(page.getByRole("menuitem", { name: "Restart sandbox", exact: true })).toBeDisabled();
+      await expect(page.getByRole("menuitemradio", { name: "Sandbox", exact: true })).toHaveAttribute("aria-checked", "true");
+      await page.keyboard.press("Escape");
 
       markReady();
       const link = page.getByRole("link", { name: "Open in new tab" });
@@ -70,6 +78,21 @@ test.describe("preview open in new tab", () => {
       await expect(link).toHaveAttribute("href", PREVIEW_URL);
       await expect(link).toHaveAttribute("target", "_blank");
       await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+      await expect(refresh).toBeEnabled();
+
+      const frame = page.getByTitle("Preview", { exact: true });
+      await expect(frame).toBeVisible();
+      const bootsBeforeRefresh = sandboxBoots;
+      await frame.evaluate((el) => el.setAttribute("data-before-refresh", "true"));
+      await refresh.click();
+      await expect(frame).not.toHaveAttribute("data-before-refresh", "true");
+      await expect(page.frameLocator('iframe[title="Preview"]').getByRole("heading", { name: "Hello from the sandbox" })).toBeVisible();
+      expect(sandboxBoots).toBe(bootsBeforeRefresh);
+
+      await page.getByRole("button", { name: "Refresh options", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Restart sandbox", exact: true }).click();
+      await expect.poll(() => sandboxBoots).toBeGreaterThan(bootsBeforeRefresh);
+      await expect(refresh).toBeEnabled();
 
       const popupEvent = context.waitForEvent("page");
       await link.click();

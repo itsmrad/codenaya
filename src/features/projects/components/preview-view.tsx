@@ -80,6 +80,18 @@ import {
 import { usePublishPreviewErrors } from "@/features/sandbox-preview/hooks/use-preview-errors";
 
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 import { useProject, useRecordFirstPreviewShown } from "../hooks/use-projects";
@@ -552,59 +564,71 @@ export const PreviewView = ({
       )}
       <div className="p-1.5 shrink-0 border border-border/50 rounded-xl bg-background shadow-sm flex flex-wrap items-center gap-2">
         <div className="flex items-center p-0.5 bg-muted/40 rounded-lg border border-border/50">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-8 rounded-md hover:bg-muted"
-            disabled={isLoading}
-            onClick={restart}
-            title={`Restart ${activeEngine}`}
-            aria-label={`Restart ${activeEngine}`}
-          >
-            <RefreshCwIcon className="size-4" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-8 rounded-md hover:bg-muted"
-            disabled={isLoading || !previewUrl}
-            onClick={() => setRefreshKey(k => k + 1)}
-            title="Refresh page"
-            aria-label="Refresh page"
-          >
-            <RotateCwIcon className="size-4" />
-          </Button>
+          <ButtonGroup aria-label="Refresh preview">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={isLoading || !previewUrl}
+              onClick={() => setRefreshKey(k => k + 1)}
+              title="Refresh page"
+              aria-label="Refresh page"
+            >
+              <RotateCwIcon data-icon="inline-start" />
+              Refresh
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  title="Refresh options"
+                  aria-label="Refresh options"
+                >
+                  <ChevronDownIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    disabled={isLoading}
+                    onSelect={restart}
+                    title={`Restart ${activeEngine}`}
+                    aria-label={`Restart ${activeEngine}`}
+                  >
+                    <RefreshCwIcon />
+                    Restart sandbox
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Preview engine</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={activeEngine} aria-label="Preview engine">
+                  <DropdownMenuRadioItem
+                    value="sandbox"
+                    onSelect={() => switchEngine("sandbox")}
+                    title="Use high-fidelity E2B Sandbox"
+                    aria-label="Sandbox"
+                  >
+                    <ServerIcon />
+                    Cloud sandbox
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem
+                    value="webcontainer"
+                    onSelect={() => switchEngine("webcontainer")}
+                    title="Use in-browser WebContainers"
+                    aria-label="WebContainer"
+                  >
+                    <BoxIcon />
+                    In-browser (WebContainer)
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </ButtonGroup>
           <PreviewSelectToggle
             active={selecting}
             disabled={status !== "running"}
             onActiveChange={setSelectChosen}
           />
-        </div>
-
-        {/* Engine Toggle UI */}
-        <div className="flex items-center p-0.5 bg-muted/40 rounded-lg border border-border/50">
-            <Button
-              size="sm"
-              variant={activeEngine === "sandbox" ? "secondary" : "ghost"}
-              className="h-8 rounded-md px-2 space-x-1 shadow-none"
-              onClick={() => switchEngine("sandbox")}
-              title="Use high-fidelity E2B Sandbox"
-              aria-label="Sandbox"
-            >
-              <ServerIcon className="size-3.5" />
-              <span className="text-xs hidden @3xl:inline">Sandbox</span>
-            </Button>
-            <Button
-              size="sm"
-              variant={activeEngine === "webcontainer" ? "secondary" : "ghost"}
-              className="h-8 rounded-md px-2 space-x-1 shadow-none"
-              onClick={() => switchEngine("webcontainer")}
-              title="Use in-browser WebContainers"
-              aria-label="WebContainer"
-            >
-              <BoxIcon className="size-3.5" />
-              <span className="text-xs hidden @3xl:inline">WebContainer</span>
-            </Button>
         </div>
 
         {/* A phone-width panel is already a phone-sized frame. */}
