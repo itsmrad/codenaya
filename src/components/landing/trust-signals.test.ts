@@ -13,6 +13,7 @@ describe("trust signals (#246)", () => {
 
   it.each([
     [undefined, null],
+    [null, null],
     [0, null],
     [1, "1 project built"],
     [1234, "1,234 projects built"],
