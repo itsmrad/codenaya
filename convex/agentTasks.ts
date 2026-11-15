@@ -233,7 +233,8 @@ export const listForMessage = query({
   handler: async (ctx, { messageId }) => {
     const identity = await verifyAuth(ctx);
     const message = await ctx.db.get("messages", messageId);
-    if (!message) throw appError("NOT_FOUND", "Message not found");
+    // A message deleted mid-view has no tasks left to show; its rows went with it.
+    if (!message) return [];
     await getOwnedProject(ctx, message.projectId, identity.subject);
     return await ctx.db.query("agentTasks")
       .withIndex("by_message", (q) => q.eq("messageId", messageId))

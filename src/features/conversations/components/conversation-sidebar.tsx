@@ -68,14 +68,14 @@ import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { PastConversationsDialog } from "./past-conversations-dialog";
 import { sendQueuedMessage, useChatStore } from "../store/use-chat-store";
 import { useAgentModel } from "../hooks/use-agent-model";
+import { useSwarmEnabled } from "../hooks/use-agent-tasks";
 import { AgentModelSelect } from "./agent-model-select";
 import { LowCreditsNotice } from "./low-credits-notice";
 import { useEnhancePrompt } from "../hooks/use-enhance-prompt";
 import { EnhancePromptButton } from "./enhance-prompt-button";
-import { PlanModeToggle } from "./plan-mode-toggle";
+import { type ComposerMode, PlanModeToggle } from "./plan-mode-toggle";
 import {
   type MessageMode,
-  PLAN_MODE,
   buildPlanMessage,
   diagnoseStuckMessage,
 } from "../plan-mode";
@@ -115,7 +115,10 @@ export const ConversationSidebar = ({
   const enhancer = useEnhancePrompt(input, setInput);
   const slashMenu = useSkillSlashMenu(projectId, input, setInput);
   const uploadImages = useUploadChatImages(projectId);
-  const [planMode, setPlanMode] = useState(false);
+  const [chosenMode, setMode] = useState<ComposerMode>("build");
+  const swarmEnabled = useSwarmEnabled();
+  // Swarm switched off mid-draft falls back to Build.
+  const mode = chosenMode === "swarm" && !swarmEnabled ? "build" : chosenMode;
   // A key still loading (or gone) is left to the server to check.
   const modelKeys = useAiProviderKeys();
   const platform = usePlatformModelsOrCatalog();
@@ -418,7 +421,7 @@ export const ConversationSidebar = ({
       result = await sendMessage(
         finalMessage,
         images,
-        planMode ? PLAN_MODE : undefined,
+        mode === "build" ? undefined : mode,
       );
       // Only clear contexts after a successful send so they aren't lost on failure
       if (result === "sent") clearContexts();
@@ -562,13 +565,13 @@ export const ConversationSidebar = ({
                   onOpenFile={handleOpenFile}
                   onRetry={() => resend(messageIndex, message.mode)}
                   onBuildPlan={() => {
-                    setPlanMode(false);
+                    setMode("build");
                     void sendMessage(buildPlanMessage(message.content));
                   }}
                   stuckRetry={message.stuck && stuckRetry(message, messageIndex)}
                   onDiagnose={() => {
                     if (!message.stuck) return;
-                    setPlanMode(true);
+                    setMode("plan");
                     // Added after any draft, not over it, then focused to review and send.
                     appendInput(diagnoseStuckMessage(message.stuck, stuckFilePath(message.stuck, pathOf)));
                     requestAnimationFrame(() => panelRef.current?.querySelector("textarea")?.focus());
@@ -672,8 +675,9 @@ export const ConversationSidebar = ({
                   disabled={isProcessing}
                 />
                 <PlanModeToggle
-                  pressed={planMode}
-                  onPressedChange={setPlanMode}
+                  mode={mode}
+                  onModeChange={setMode}
+                  swarm={swarmEnabled}
                   disabled={isProcessing}
                 />
                 <AgentModelSelect
