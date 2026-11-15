@@ -264,7 +264,7 @@ export function ChatComposer({
                     <Image source={image.uri} style={[styles.thumb, { borderColor: c.border }]} contentFit="cover" />
                     <Pressable
                       onPress={() => setImages((current) => current.filter((item) => item.uri !== image.uri))}
-                      hitSlop={8}
+                      hitSlop={13}
                       accessibilityLabel="Remove image"
                       style={[styles.remove, { backgroundColor: c.primary }]}
                     >
