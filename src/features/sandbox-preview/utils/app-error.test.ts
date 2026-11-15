@@ -22,6 +22,12 @@ import {
   VITE8_DEV_SYNTAX_ERROR,
   VITE8_DEV_UNRESOLVED_IMPORT,
 } from "../../conversations/inngest/tools/vite-build-output.fixture";
+import {
+  NEXT16_DEV_COMPILED,
+  NEXT16_DEV_MODULE_NOT_FOUND,
+  NEXT16_DEV_RENDER_ERROR,
+  NEXT16_DEV_SYNTAX_ERROR,
+} from "./next-dev-output.fixture";
 
 describe("detectBuildError", () => {
   it("reads Vite's unresolved import with its file and line", () => {
@@ -137,6 +143,20 @@ describe("detectBuildError", () => {
       kind: "build", message: "Module not found: Can't resolve 'missing-package'",
       file: "src/app/page.tsx", line: 12,
     });
+  });
+
+  it.each([
+    [NEXT16_DEV_MODULE_NOT_FOUND, "Error: Module not found: Can't resolve '@/components/Hero'", 3],
+    [NEXT16_DEV_SYNTAX_ERROR, "Error: Expected ',', got ';'", 6],
+    [NEXT16_DEV_RENDER_ERROR, "Error: STRIPE_SECRET_KEY is not set", 2],
+  ])("reads captured Next 16 (Turbopack) dev output: %#", (output, message, line) => {
+    expect(detectBuildError(output)).toEqual({ kind: "build", message, file: "src/app/page.tsx", line });
+  });
+
+  it("forgets a Next 16 dev error once Turbopack compiles again", () => {
+    const detector = createBuildErrorDetector();
+    expect(detector.push(NEXT16_DEV_MODULE_NOT_FOUND)).not.toBeNull();
+    expect(detector.push(NEXT16_DEV_COMPILED)).toBeNull();
   });
 
   describe("npm install failures (#491)", () => {

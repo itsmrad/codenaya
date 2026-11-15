@@ -26,7 +26,15 @@ import {
 } from "../../agent-steps";
 import { START_BUILD_ERROR, START_TYPE_ERROR } from "./start-build-output.fixture";
 import { buildCommand, checkProjectBuild, createCheckBuildTool, trimBuildOutput, warmSlow } from "./check-build";
-import { NEXT_MODULE_NOT_FOUND, NEXT_PRERENDER_ERROR, NEXT_TYPE_ERROR } from "./next-build-output.fixture";
+import {
+  NEXT16_MODULE_NOT_FOUND,
+  NEXT16_PRERENDER_ERROR,
+  NEXT16_SYNTAX_ERROR,
+  NEXT16_TYPE_ERROR,
+  NEXT_MODULE_NOT_FOUND,
+  NEXT_PRERENDER_ERROR,
+  NEXT_TYPE_ERROR,
+} from "./next-build-output.fixture";
 
 const starter = () => VITE_REACT_STARTER.map((file) => ({ ...file }));
 const check = (files = starter(), apiKey: string | null = "e2b_key") =>
@@ -150,6 +158,17 @@ describe("trimBuildOutput for Next.js", () => {
     ]);
     expect(trimmed).not.toContain("/home/user/app/");
     expect(trimmed).not.toMatch(/Collecting page data|Generating static pages/);
+  });
+
+  it.each([
+    ["type error", NEXT16_TYPE_ERROR, ["Failed to type check.", "src/app/page.tsx(8,13): error TS2322: Type 'number' is not assignable to type 'string'."]],
+    ["missing module", NEXT16_MODULE_NOT_FOUND, ["> Build error occurred", "Error: Turbopack build failed with 1 error:", "./src/app/page.tsx:3:1", "Error: Module not found: Can't resolve '@/components/Hero'"]],
+    ["syntax error", NEXT16_SYNTAX_ERROR, ["> Build error occurred", "Error: Turbopack build failed with 1 error:", "./src/app/page.tsx:6:3", "Error: Expected ',', got ';'"]],
+    ["prerender failure", NEXT16_PRERENDER_ERROR, ['Error occurred prerendering page "/". Read more: https://nextjs.org/docs/messages/prerender-error', "Error: STRIPE_SECRET_KEY is not set", "    at <unknown> (src/app/page.tsx:2:45)"]],
+  ])("keeps a Next 16 (Turbopack) %s first and drops the build progress", (_, fixture, head) => {
+    const trimmed = trimBuildOutput(output(fixture), "/home/user/app", "next");
+    expect(trimmed.split("\n").slice(0, head.length)).toEqual(head);
+    expect(trimmed).not.toMatch(/Next\.js 16|next\.config\.ts took|Creating an optimized|Compiled successfully|TypeScript|Collecting page data|Generating static pages/);
   });
 
   it("puts errors printed after the route table first and drops the table and telemetry notice", () => {

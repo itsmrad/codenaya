@@ -68,6 +68,10 @@ import { VITE_REACT_STARTER } from "../inngest/vite-starter";
 import { type RepairEvent, parseBuildErrors, repairTools, verifyAndFix } from "./sandbox-repair";
 import { trimBuildOutput } from "../inngest/tools/check-build";
 import {
+  NEXT16_MODULE_NOT_FOUND,
+  NEXT16_PRERENDER_ERROR,
+  NEXT16_SYNTAX_ERROR,
+  NEXT16_TYPE_ERROR,
   NEXT_MODULE_NOT_FOUND,
   NEXT_PRERENDER_ERROR,
   NEXT_TYPE_ERROR,
@@ -790,6 +794,20 @@ describe("parseBuildErrors", () => {
     const [error] = parseBuildErrors(startFailure(START_BUILD_ERROR));
     expect(error.kind).toBe("build");
     expect(error.message).toMatch(/^error during build:\n\[vite\]: Rollup failed to resolve import "@\/components\/Hero"/);
+  });
+
+  it.each([
+    [NEXT16_TYPE_ERROR, { file: "src/app/page.tsx", line: 8, message: "error TS2322: Type 'number' is not assignable to type 'string'.", kind: "type" }],
+    [NEXT16_MODULE_NOT_FOUND, { file: "src/app/page.tsx", line: 3, message: "Error: Module not found: Can't resolve '@/components/Hero'", kind: "build" }],
+    [NEXT16_SYNTAX_ERROR, { file: "src/app/page.tsx", line: 6, message: "Error: Expected ',', got ';'", kind: "build" }],
+  ])("reads a Next 16 (Turbopack) failure: %#", (fixture, error) => {
+    expect(parseBuildErrors(nextFailure(fixture))).toEqual([error]);
+  });
+
+  it("keeps a Next 16 prerender failure whole, with its source frame", () => {
+    const [error] = parseBuildErrors(nextFailure(NEXT16_PRERENDER_ERROR));
+    expect(error).toMatchObject({ kind: "build" });
+    expect(error.message).toMatch(/^Error occurred prerendering page "\/"[^\n]*\nError: STRIPE_SECRET_KEY is not set\n {4}at <unknown> \(src\/app\/page\.tsx:2:45\)/);
   });
 
   it("keeps a Next.js prerender failure whole: it names no source file", () => {
