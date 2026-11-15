@@ -167,7 +167,7 @@ const approvalRows = () =>
 
 const GATED = ["stripe_api_write", "send_money", "convert_currency", "setup_recipient"];
 
-describe.each(["notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface"] as const)("%s published writes", (id) => {
+describe.each(["notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface", "webflow", "netlify", "railway"] as const)("%s published writes", (id) => {
   it.each([...PROVIDERS[id].destructiveTools, "unlisted_tool"])("never calls %s without approval, even with a misleading read-only hint", async (name) => {
     // Unknown, unannotated tools are gated too; known writes must override hints.
     served = [{
@@ -513,6 +513,15 @@ describe("known reads exclude tools that return secrets", () => {
     ["firecrawl", "firecrawl_monitor_list"],
     ["firecrawl", "firecrawl_credit_usage"],
     ["huggingface", "hf_whoami"],
+    ["webflow", "ask_webflow_ai"],
+    ["netlify", "netlify-team-services-reader"],
+    ["netlify", "netlify-team-get-team-env-vars"],
+    ["netlify", "netlify-observability-services-reader"],
+    ["netlify", "netlify-observability-get-request-logs"],
+    ["netlify", "netlify-observability-get-request-detail"],
+    ["railway", "check-cloud-agent-task"],
+    ["railway", "get-cloud-agent-transcript"],
+    ["railway", "list-cloud-agent-tasks"],
   ] as const)("%s does not list %s", (id, name) => {
     expect(PROVIDERS[id].readOnlyTools ?? []).not.toContain(name);
     expect(requiresApproval(
