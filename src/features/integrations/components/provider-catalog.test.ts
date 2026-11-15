@@ -12,7 +12,8 @@ it("shows all providers with capabilities, local logos and keyboard filters", ()
   expect(html).toContain('aria-label="Integration categories"');
   expect(html).toContain('aria-pressed="true"');
   for (const provider of listVisibleProviders()) {
-    expect(html).toContain(`aria-label="Connect ${provider.displayName}"`);
+    // Static markup escapes "&" (e.g. "Weights & Biases").
+    expect(html).toContain(`aria-label="Connect ${provider.displayName.replaceAll("&", "&amp;")}"`);
     expect(html).toContain(provider.description);
     expect(html).toContain(`src="${provider.logo}"`);
   }

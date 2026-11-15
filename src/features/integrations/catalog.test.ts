@@ -128,14 +128,16 @@ describe("provider catalog filters", () => {
 
 it("pins the exact public documentation read lists", () => {
   const publicDocs = listProviders().filter((provider) => provider.authModes.includes("none"));
-  expect(publicDocs.map(({ id }) => id)).toEqual(["microsoft-learn", "cloudflare-docs"]);
+  expect(publicDocs.map(({ id }) => id)).toEqual(["microsoft-learn", "cloudflare-docs", "langfuse"]);
   expect(publicDocs.map(({ readOnlyTools }) => readOnlyTools)).toEqual([
     ["microsoft_docs_search", "microsoft_docs_fetch", "microsoft_code_sample_search"],
     ["search_cloudflare_documentation", "migrate_pages_to_workers_guide"],
+    ["searchLangfuseDocs", "getLangfuseDocsPage", "getLangfuseOverview"],
   ]);
   for (const provider of publicDocs) {
     expect(provider.authModes).toEqual(["none"]);
-    expect(provider.supportsReadOnly).toBe(true);
+    // Only a server with no write tool may advertise itself as read-only.
+    expect(provider.supportsReadOnly).toBe(provider.destructiveTools.length === 0);
     expect(provider.trustedHostnames).toEqual([new URL(provider.mcpUrl).hostname]);
     expect(provider.readOnlyTools?.filter((tool) => provider.destructiveTools.includes(tool))).toEqual([]);
   }

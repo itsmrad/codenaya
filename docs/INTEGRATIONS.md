@@ -146,6 +146,7 @@ Verified on 2026-11-15 with unauthenticated MCP `initialize` and `tools/list`
 | --- | --- | --- |
 | Microsoft Learn | `microsoft_docs_search`, `microsoft_docs_fetch`, `microsoft_code_sample_search` | [Microsoft README](https://github.com/MicrosoftDocs/mcp), [developer reference](https://learn.microsoft.com/en-us/training/support/mcp-developer-reference) |
 | Cloudflare Docs | `search_cloudflare_documentation`, `migrate_pages_to_workers_guide` | [Cloudflare README](https://github.com/cloudflare/mcp-server-cloudflare/tree/main/apps/docs-ai-search), [tool source](https://github.com/cloudflare/mcp-server-cloudflare/blob/main/packages/mcp-common/src/shared-tools/docs-ai-search.tools.ts) |
+| Langfuse Docs (`https://langfuse.com/api/mcp`, batch C) | `searchLangfuseDocs`, `getLangfuseDocsPage`, `getLangfuseOverview`; `submitFeedback` is gated as a write | [Langfuse Docs MCP](https://langfuse.com/docs/docs-mcp), [MCP reference](https://mcp.reference.langfuse.com/) |
 
 Both servers currently expose documentation reads only (`supportsReadOnly: true`).
 Cloudflare's migration-guide tool retrieves instructions; it does not migrate an
