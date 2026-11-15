@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { ConvexHttpClient } from "convex/browser";
+import { Sandbox } from "e2b";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
@@ -37,6 +38,25 @@ export const seedPreviewProject = async (page: Page, name: string) => {
   });
 
   return projectId;
+};
+
+/**
+ * Kills the project's running E2B sandboxes. Playwright closes pages without
+ * `beforeunload`, so the preview's own DELETE never fires and each test's
+ * sandbox would count against the user's 3-preview cap for up to an hour.
+ * Best-effort: a cleanup failure never fails the test.
+ */
+export const killProjectSandboxes = async (projectId: string) => {
+  const apiKey = process.env.E2B_API_KEY;
+  try {
+    const running = await Sandbox.list({
+      apiKey,
+      query: { metadata: { projectId }, state: ["running"] },
+    }).nextItems();
+    await Promise.all(running.map(({ sandboxId }) => Sandbox.kill(sandboxId, { apiKey })));
+  } catch (error) {
+    console.warn(`[e2e] could not kill project ${projectId}'s sandboxes:`, error);
+  }
 };
 
 /** Writes the smallest Vite + React app (with `src/App.jsx` from `appSource`) into the project. */

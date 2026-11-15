@@ -4,7 +4,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../convex/_generated/api";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
-import { hasPreviewFixtureEnv, seedPreviewProject, seedViteApp } from "./preview-fixtures";
+import { hasPreviewFixtureEnv, killProjectSandboxes, seedPreviewProject, seedViteApp } from "./preview-fixtures";
 
 const PROJECT_NAME = "e2e-preview-e2b-hmr";
 
@@ -17,6 +17,15 @@ test.describe("E2B preview hot reload", () => {
     "Needs Clerk and Convex fixture env plus E2B_API_KEY (boots a real sandbox)",
   );
 
+  /** The current test's project, whose preview sandbox afterEach frees. */
+  let seeded: string | undefined;
+  test.afterEach(async ({ page }) => {
+    // Closed first, so the preview can't boot a replacement for the killed sandbox.
+    await page.close();
+    if (seeded) await killProjectSandboxes(seeded);
+    seeded = undefined;
+  });
+
   test("an edit hot-updates the preview within 3s, without a reload or websocket errors", async ({
     page,
   }, testInfo) => {
@@ -26,6 +35,7 @@ test.describe("E2B preview hot reload", () => {
 
     await signIn(page);
     const projectId = await seedPreviewProject(page, PROJECT_NAME);
+    seeded = projectId;
     // Vite 6, which also runs on the E2B base image's Node 20.9 (#178).
     const appId = await seedViteApp(projectId, {
       appSource: app("Before edit"),
