@@ -103,7 +103,7 @@ export function SourceControlPane({ project, projectId, disabled }: {
           </li>)}
         </ol>
       </div>
-      {disabled && <p role="status" className="px-3 pb-3 text-muted-foreground">Restore and discard are unavailable while an agent is running.</p>}
+      {disabled && <p role="status" className="px-3 pb-3 text-muted-foreground">Restore and revert are unavailable while an agent is running.</p>}
       {diff && <RunDiffDialog key={`${diff.checkpointId}:${diff.path ?? "run"}`} checkpointId={diff.checkpointId} initialPath={diff.path} scope={diff.scope} open onOpenChange={(open) => { if (!open) setDiff(undefined); }} revertDisabled={disabled} />}
       <RestoreCheckpointDialog checkpoint={restoring} onOpenChange={(open) => { if (!open) setRestoring(null); }} />
     </section>
