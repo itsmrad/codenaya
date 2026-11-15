@@ -51,11 +51,11 @@ const within = (folder: string, path: string) => path === folder || path.startsW
 const shared = (path: string) => SWARM_SHARED_PATHS.some((file) => within(path, file));
 
 /** Before delegation the orchestrator writes only the foundation: these folders, shared files and root files. */
-const FOUNDATION_FOLDERS = ["src/lib", "src/types", "src/styles", "src/theme", "src/data"];
+const FOUNDATION_FOLDERS = ["src/lib", "src/types", "src/styles", "src/theme"];
 /** A file this short is a page stub (`export default () => null;`) that keeps App.tsx's imports resolving. */
 export const FOUNDATION_PLACEHOLDER_MAX_CHARS = 240;
 
-/** Whether the orchestrator may write `raw` before delegateTasks: configs, shared files, lib/types/styles/theme/data. */
+/** Whether the orchestrator may write `raw` before delegateTasks: configs, shared files, lib/types/styles/theme. */
 export const isFoundationPath = (raw: string): boolean => {
   const path = normalizePath(raw);
   if (!path) return false;
