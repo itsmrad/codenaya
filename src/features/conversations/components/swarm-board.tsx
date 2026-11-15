@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 import type { Doc } from "../../../../convex/_generated/dataModel";
 import { runWrittenPaths } from "../agent-steps";
-import { groupSwarmTasks, type SwarmTask, swarmElapsed, swarmHeader, swarmSelfCheckStatus, swarmSoloReason, swarmTaskStatus } from "../swarm-status";
+import { groupSwarmTasks, type SwarmTask, swarmElapsed, swarmHeader, swarmRowStart, swarmSelfCheckStatus, swarmSoloReason, swarmTaskStatus } from "../swarm-status";
 import { AgentRunLog } from "./agent-run";
 
 const STATUS_LABELS = {
@@ -41,7 +41,8 @@ const SwarmRow = ({
 }) => {
   const status = swarmTaskStatus(task.status, parent.status ?? "completed");
   const paths = runWrittenPaths(task.steps);
-  const end = task.endedAt ?? (status === "running" ? now : parent.completedAt ?? task.updatedAt);
+  const startedAt = swarmRowStart(task, status);
+  const end = task.endedAt ?? (status === "running" || status === "queued" ? now : parent.completedAt ?? task.updatedAt);
   const role = ROLE_LABELS[task.role];
   const selfCheck = task.role === "worker" ? swarmSelfCheckStatus(task.selfCheck) : undefined;
   const label = `${task.title}, ${STATUS_LABELS[status]}`;
@@ -62,7 +63,7 @@ const SwarmRow = ({
               <span aria-hidden className={cn("size-1.5 rounded-full bg-current", status === "running" && "animate-pulse motion-reduce:animate-none")} />
               {STATUS_LABELS[status]}
             </span>
-            {task.startedAt !== undefined && <span className="font-mono tabular-nums">{swarmElapsed(task.startedAt, end)}</span>}
+            {startedAt !== undefined && <span className="font-mono tabular-nums">{swarmElapsed(startedAt, end)}</span>}
             <span>· {paths.length} {paths.length === 1 ? "file" : "files"} touched</span>
             {selfCheck && <Badge variant="outline" className={cn("text-[10px] font-normal", selfCheck === "failed" && "border-destructive/50 text-destructive")} title={task.selfCheck}>Self-check {selfCheck}</Badge>}
           </span>

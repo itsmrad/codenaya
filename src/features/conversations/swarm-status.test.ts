@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentStep } from "./agent-steps";
 import { FOUNDATION_MAX_STEPS } from "./constants";
-import { groupSwarmTasks, type SwarmTask, swarmElapsed, swarmHeader, swarmSelfCheckStatus, swarmSoloReason, swarmTaskStatus } from "./swarm-status";
+import { groupSwarmTasks, type SwarmTask, swarmElapsed, swarmHeader, swarmRowStart, swarmSelfCheckStatus, swarmSoloReason, swarmTaskStatus } from "./swarm-status";
 
 describe("swarmTaskStatus", () => {
   it.each(["completed", "cancelled"] as const)("cancels unfinished tasks under a %s parent", (parent) => {
@@ -81,6 +81,15 @@ describe("swarm header", () => {
     expect(swarmElapsed(1000, 0)).toBe("0:00");
     expect(swarmElapsed(0, 60000)).toBe("1:00");
     expect(swarmElapsed(0, 3601000)).toBe("60:01");
+  });
+});
+
+describe("swarmRowStart", () => {
+  it("falls back to updatedAt for a live row that has no startedAt yet", () => {
+    expect(swarmRowStart({ startedAt: undefined, updatedAt: 5 }, "queued")).toBe(5);
+    expect(swarmRowStart({ startedAt: undefined, updatedAt: 5 }, "running")).toBe(5);
+    expect(swarmRowStart({ startedAt: 2, updatedAt: 5 }, "running")).toBe(2);
+    expect(swarmRowStart({ startedAt: undefined, updatedAt: 5 }, "cancelled")).toBeUndefined();
   });
 });
 
