@@ -5,6 +5,7 @@ import { NonRetriableError } from "inngest";
 import { convex } from "@/lib/convex-client";
 import { inngest } from "@/inngest/client";
 import { requireJobGithubToken } from "@/features/projects/server/github-token";
+import { buildFilePaths } from "@/features/projects/utils/github-tree";
 
 import { api } from "../../../../convex/_generated/api";
 import { Doc, Id } from "../../../../convex/_generated/dataModel";
@@ -108,33 +109,6 @@ export const exportToGithub = inngest.createFunction(
         projectId,
       })) as FileWithUrl[];
     });
-
-    // Build a map of file IDs to their full paths
-    const buildFilePaths = (files: FileWithUrl[]) => {
-      const fileMap = new Map<Id<"files">, FileWithUrl>();
-      files.forEach((f) => fileMap.set(f._id, f));
-
-      const getFullPath = (file: FileWithUrl): string => {
-        if (!file.parentId) {
-          return file.name;
-        }
-
-        const parent = fileMap.get(file.parentId);
-
-        if (!parent) {
-          return file.name;
-        }
-
-        return `${getFullPath(parent)}/${file.name}`;
-      };
-
-      const paths: Record<string, FileWithUrl> = {};
-      files.forEach((file) => {
-        paths[getFullPath(file)] = file;
-      });
-
-      return paths;
-    };
 
     const filePaths = buildFilePaths(files);
 

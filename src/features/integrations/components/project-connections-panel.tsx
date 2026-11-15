@@ -35,11 +35,10 @@ import {
   useUserConnections,
 } from "../hooks/use-integrations";
 import {
-  ConnectionScopeForm,
   describeProviderScope,
   type ProviderScopeValue,
-  type ScopeFormValue,
-} from "./connection-scope-form";
+} from "../utils/provider-scope";
+import { ConnectionScopeForm, type ScopeFormValue } from "./connection-scope-form";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 

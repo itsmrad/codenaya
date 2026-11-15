@@ -6,6 +6,7 @@ import { convex } from "@/lib/convex-client";
 import { inngest } from "@/inngest/client";
 import { getJobGithubToken } from "@/features/projects/server/github-token";
 import { readRepoArchive } from "@/features/projects/server/github-archive";
+import { planFolderCreation, splitPath } from "@/features/projects/utils/github-tree";
 import { planSeedTree, type SeedFile } from "@/features/templates/seed-files";
 
 import { api } from "../../../../convex/_generated/api";
@@ -73,20 +74,12 @@ export const importGithubRepo = inngest.createFunction(
 
       const { folders, files } = await readRepoArchive(owner, repo, githubToken);
 
-      // Sort folders by depth so parents are created before children
-      // Input:  ["src/components", "src", "src/components/ui"]
-      // Output: ["src", "src/components", "src/components/ui"]
-      folders.sort((a, b) => a.split("/").length - b.split("/").length);
-
       const folderIdMap: Record<string, Id<"files">> = {};
 
-      for (const folder of folders) {
-        const pathParts = folder.split("/");
-        const name = pathParts.pop()!;
-        const parentPath = pathParts.join("/");
+      for (const { path, name, parentPath } of planFolderCreation(folders)) {
         const parentId = parentPath ? folderIdMap[parentPath] : undefined;
 
-        folderIdMap[folder] = await convex.mutation(api.system.createFolder, {
+        folderIdMap[path] = await convex.mutation(api.system.createFolder, {
           internalKey,
           projectId,
           name,
@@ -101,9 +94,7 @@ export const importGithubRepo = inngest.createFunction(
           const buffer = file.content;
           const isBinary = await isBinaryFile(buffer);
 
-          const pathParts = file.path.split("/");
-          const name = pathParts.pop()!;
-          const parentPath = pathParts.join("/");
+          const { name, parentPath } = splitPath(file.path);
           const parentId = parentPath ? folderIdMap[parentPath] : undefined;
 
           if (isBinary) {
