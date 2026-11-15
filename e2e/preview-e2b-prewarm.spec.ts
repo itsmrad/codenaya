@@ -5,7 +5,7 @@ import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { userConvexClient } from "./convex-client";
-import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
+import { hasPreviewFixtureEnv, killProjectSandboxes, seedPreviewProject } from "./preview-fixtures";
 
 const PROJECT_NAME = "e2e-preview-e2b-prewarm";
 /** How long the simulated first build runs; real runs take about a minute. */
@@ -33,6 +33,15 @@ test.describe("E2B preview pre-warm", () => {
     "Needs Clerk and Convex fixture env plus E2B_API_KEY (boots a real sandbox)",
   );
 
+  /** Every project this test seeds; afterEach frees each preview sandbox. */
+  let seeded: string[] = [];
+  test.afterEach(async ({ page }) => {
+    // Closed first, so the preview can't boot a replacement for the killed sandbox.
+    await page.close();
+    for (const projectId of seeded) await killProjectSandboxes(projectId);
+    seeded = [];
+  });
+
   test("the first build's preview is interactive within 15s of the run completing", async ({ page }, testInfo) => {
     test.setTimeout(900_000);
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -44,6 +53,7 @@ test.describe("E2B preview pre-warm", () => {
 
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       const projectId = await seedPreviewProject(page, PROJECT_NAME);
+      seeded.push(projectId);
       const conversationId = await user.mutation(api.conversations.create, {
         projectId,
         title: `Pre-warm ${attempt}`,
@@ -59,6 +69,8 @@ test.describe("E2B preview pre-warm", () => {
 
       try {
         await page.goto(`/projects/${projectId}`);
+        // The page has left the previous preview, so that sandbox can be freed before this one boots.
+        for (const earlierId of seeded.slice(0, -1)) await killProjectSandboxes(earlierId);
         await expect(page.getByRole("tab", { name: "Code" })).toHaveAttribute("aria-selected", "true", {
           timeout: 60_000,
         });

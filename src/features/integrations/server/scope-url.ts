@@ -30,7 +30,10 @@
  * validates the final URL against the SSRF guard.
  */
 
+import { resolveProviderMcpUrl } from "../catalog";
+
 import type {
+  IntegrationAuthMode,
   HeaderScopeRule,
   ProjectScopeSelection,
   ProviderDefinition,
@@ -135,12 +138,13 @@ function resolveValues(
 function resolveBaseUrl(
   provider: ProviderDefinition,
   selection: ProjectScopeSelection,
+  authMode?: IntegrationAuthMode,
 ): string {
   const path = provider.scope.path;
   if (path?.kind === "readonly-path" && selection.readOnly) {
     return path.readOnlyUrl;
   }
-  return provider.mcpUrl;
+  return resolveProviderMcpUrl(provider, authMode);
 }
 
 /**
@@ -248,8 +252,9 @@ function buildHeaders(
 export function buildScopedMcpUrl(
   provider: ProviderDefinition,
   selection: ProjectScopeSelection,
+  authMode?: IntegrationAuthMode,
 ): ScopedMcpTarget {
-  const url = new URL(resolveBaseUrl(provider, selection));
+  const url = new URL(resolveBaseUrl(provider, selection, authMode));
 
   const path = provider.scope.path;
   if (path?.kind === "segments") {

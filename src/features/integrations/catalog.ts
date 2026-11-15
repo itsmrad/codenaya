@@ -33,6 +33,8 @@
  * policy and confirming, in writing, that Codenia is an approved client. If
  * that ever happens, remove this comment block in the same change so it does
  * not become stale advice.
+ *
+ * Figma, Slack and Square: docs/INTEGRATIONS.md, "Client-access prerequisites (Figma, Slack, Square)".
  */
 
 import {
@@ -1156,7 +1158,10 @@ const CATALOG = {
     category: "Search",
     logo: "/integrations/firecrawl.svg",
     mcpUrl: "https://mcp.firecrawl.dev/v2/mcp-oauth",
-    authModes: ["oauth"],
+    // https://docs.firecrawl.dev/mcp-server/keyless#add-an-api-key
+    urlByAuthMode: { api_key: "https://mcp.firecrawl.dev/v2/mcp" },
+    authModes: ["oauth", "api_key"],
+    apiKey: { header: "Authorization", valuePrefix: "Bearer ", hint: "Firecrawl API key" },
     trustedHostnames: ["mcp.firecrawl.dev"],
     supportsReadOnly: false,
     scope: NO_URL_SCOPING,
@@ -1194,7 +1199,7 @@ const CATALOG = {
       "firecrawl_monitor_checks", "firecrawl_monitor_check",
     ],
     notes:
-      "OAuth endpoint only; API-key connections use a different endpoint and are not offered yet. Interact can click and submit forms on live sites, and monitors can send webhooks or email, so both are gated. Scrape with Alexandria provider calls is billed per call but cannot be gated by name. No URL-level read-only mode.",
+      "Interact can click and submit forms on live sites, and monitors can send webhooks or email, so both are gated. Scrape with Alexandria provider calls is billed per call but cannot be gated by name. No URL-level read-only mode.",
   },
 
   huggingface: {
@@ -1628,4 +1633,16 @@ export function getTrustedHostnames(): readonly string[] {
     }
   }
   return [...hostnames].sort();
+}
+
+/** Resolve the catalog endpoint before applying project scope. */
+export function resolveProviderMcpUrl(
+  provider: ProviderDefinition,
+  authMode?: IntegrationAuthMode,
+): string {
+  const url = (authMode ? provider.urlByAuthMode?.[authMode] : undefined) ?? provider.mcpUrl;
+  if (!provider.trustedHostnames.includes(new URL(url).hostname)) {
+    throw new Error("Provider MCP URL hostname must be in trustedHostnames.");
+  }
+  return url;
 }

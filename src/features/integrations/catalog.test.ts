@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   filterProviders,
   getProvider,
+  resolveProviderMcpUrl,
   hasPreRegisteredClient,
   isDestructiveTool,
   isProviderVisible,
@@ -138,4 +139,43 @@ it("pins the exact public documentation read lists", () => {
     expect(provider.trustedHostnames).toEqual([new URL(provider.mcpUrl).hostname]);
     expect(provider.readOnlyTools?.filter((tool) => provider.destructiveTools.includes(tool))).toEqual([]);
   }
+});
+
+describe("per-auth-mode MCP URLs (#543)", () => {
+  it.each(listProviders())("trusts every endpoint declared by $id", (provider) => {
+    for (const url of [provider.mcpUrl, ...Object.values(provider.urlByAuthMode ?? {})]) {
+      expect(provider.trustedHostnames).toContain(new URL(url).hostname);
+    }
+    for (const mode of provider.authModes) {
+      expect(resolveProviderMcpUrl(provider, mode)).toBe(provider.urlByAuthMode?.[mode] ?? provider.mcpUrl);
+    }
+  });
+
+  it("rejects an override outside the provider's trusted hostnames", () => {
+    const provider = {
+      ...getProvider("firecrawl")!,
+      urlByAuthMode: { api_key: "https://untrusted.example.test/mcp" },
+    };
+    expect(() => resolveProviderMcpUrl(provider, "api_key")).toThrow("trustedHostnames");
+  });
+
+  it.each([
+    ["supabase", "https://mcp.supabase.com/mcp"],
+    ["github", "https://api.githubcopilot.com/mcp/"],
+    ["neon", "https://mcp.neon.tech/mcp"],
+  ])("preserves %s default URL bytes for every auth mode", (id, url) => {
+    const provider = getProvider(id)!;
+    expect(resolveProviderMcpUrl(provider)).toBe(url);
+    for (const mode of provider.authModes) expect(resolveProviderMcpUrl(provider, mode)).toBe(url);
+  });
+
+  it("uses the default for unspecified modes and selects overrides independently", () => {
+    const provider = {
+      ...getProvider("firecrawl")!,
+      urlByAuthMode: { oauth: "https://mcp.firecrawl.dev/other-oauth" },
+    };
+    expect(resolveProviderMcpUrl(provider, "oauth")).toBe("https://mcp.firecrawl.dev/other-oauth");
+    expect(resolveProviderMcpUrl(provider, "api_key")).toBe(provider.mcpUrl);
+    expect(resolveProviderMcpUrl(provider)).toBe(provider.mcpUrl);
+  });
 });

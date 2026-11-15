@@ -26,7 +26,7 @@
  * Nothing here may be logged or returned to a client.
  */
 
-import { getProvider } from "../../catalog";
+import { getProvider, resolveProviderMcpUrl } from "../../catalog";
 import type { ProjectScopeSelection } from "../../types";
 import { getSecretSealer, secretContext } from "../crypto";
 import { buildScopedMcpUrl } from "../scope-url";
@@ -170,7 +170,7 @@ export async function resolveMcpServers(
     // ── Open the credential ──
     const noAuth = connection.authMode === "none";
     const noneProvider = noAuth ? getProvider(connection.providerId) : undefined;
-    if (noAuth && (!noneProvider?.authModes.includes("none") || connection.serverUrl !== noneProvider.mcpUrl)) {
+    if (noAuth && (!noneProvider?.authModes.includes("none") || connection.serverUrl !== resolveProviderMcpUrl(noneProvider, "none"))) {
       fail("No-sign-in providers require their fixed catalog endpoint.");
       continue;
     }
@@ -241,7 +241,7 @@ export async function resolveMcpServers(
       };
 
       try {
-        const target = buildScopedMcpUrl(provider, selection);
+        const target = buildScopedMcpUrl(provider, selection, connection.authMode);
         url = target.url;
         scopeHeaders = target.headers;
       } catch (error) {

@@ -54,8 +54,8 @@ export const ProviderCatalog = ({
   const providers = filterProviders(query, category);
 
   return (
-    <div className="space-y-3">
-      <div className="relative">
+    <div className="min-w-0 w-full max-w-full space-y-3">
+      <div className="relative min-w-0 w-full max-w-full">
         <SearchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" />
         <Input
           type="search"
@@ -66,7 +66,7 @@ export const ProviderCatalog = ({
           className="pl-9"
         />
       </div>
-      <div role="group" aria-label="Integration categories" ref={categoryRow} className="flex flex-nowrap gap-1.5 overflow-x-auto p-1">
+      <div role="group" aria-label="Integration categories" ref={categoryRow} className="flex min-w-0 w-full max-w-full flex-nowrap gap-1.5 overflow-x-auto p-1">
         {[undefined, ...categories].map((value) => (
           <Button
             key={value ?? "all"}
@@ -86,7 +86,7 @@ export const ProviderCatalog = ({
         {providers.length} {providers.length === 1 ? "integration" : "integrations"}
       </p>
       {providers.length > 0 ? (
-        <ul aria-label="Integration providers" className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <ul aria-label="Integration providers" className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
           {providers.map((provider) => {
             const action = connectedProviderIds.includes(provider.id) ? "Manage" : "Connect";
             return (
