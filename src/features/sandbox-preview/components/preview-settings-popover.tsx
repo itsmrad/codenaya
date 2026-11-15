@@ -17,6 +17,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
 
+import { buildFlatFileList } from "../utils/file-tree";
+import { detectFramework } from "../utils/framework";
+
 import { Doc, Id } from "../../../../convex/_generated/dataModel";
 
 const formSchema = z.object({
@@ -28,13 +31,25 @@ interface PreviewSettingsPopoverProps {
   projectId: Id<"projects">;
   initialValues?: Doc<"projects">["settings"];
   onSave?: () => void;
+  files?: Doc<"files">[];
 };
 
 export const PreviewSettingsPopover = ({
   projectId,
   initialValues,
   onSave,
+  files,
 }: PreviewSettingsPopoverProps) => {
+  const flatFiles = buildFlatFileList(files ?? []);
+  let pkg = null;
+  try {
+    pkg = JSON.parse(flatFiles.find((file) => file.path === "package.json")?.content ?? "null");
+  } catch {
+    // A package.json being edited can be temporarily invalid; config paths still work.
+  }
+  const framework = detectFramework(flatFiles.map((file) => file.path), pkg);
+  const devPlaceholder = framework === "next" ? "npm run dev -- -H 0.0.0.0"
+    : framework === "vite" ? "npm run dev -- --host 0.0.0.0" : "npm run dev";
   const [open, setOpen] = useState(false);
   const updateSettings = useUpdateProjectSettings();
 
@@ -135,10 +150,10 @@ export const PreviewSettingsPopover = ({
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
-                    placeholder="npm run dev"
+                    placeholder={devPlaceholder}
                   />
                   <FieldDescription>
-                    Command to start the development server
+                    Command to start the development server{framework ? ` (${framework === "next" ? "Next.js" : "Vite"} detected)` : ""}
                   </FieldDescription>
                 </Field>
               )}
