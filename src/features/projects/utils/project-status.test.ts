@@ -45,6 +45,17 @@ describe("lastRunStatuses (#318)", () => {
     expect(rerun.get("p")).toBe("running");
   });
 
+  it("stays running while an overlapping later run is still going", () => {
+    const statuses = lastRunStatuses(
+      [
+        { projectId: "p", at: 10 },
+        { projectId: "p", at: 20 },
+      ],
+      [{ projectId: "p", at: 30, outcome: "ok" }],
+    );
+    expect(statuses.get("p")).toBe("running");
+  });
+
   it("gives projects without run events no status", () => {
     expect(lastRunStatuses([], [{ projectId: "p", at: 1, outcome: "ok" }]).size).toBe(0);
   });
