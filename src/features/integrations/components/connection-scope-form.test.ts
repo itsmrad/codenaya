@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 
-import { getProvider } from "../catalog";
+import { getProvider, listProviders } from "../catalog";
 import { ConnectionScopeForm } from "./connection-scope-form";
 
 const render = (providerId: string) => {
@@ -29,5 +29,9 @@ it("keeps the provider read-only endpoint description for authenticated provider
 });
 
 it("keeps the warning for providers without read-only support", () => {
-  expect(render("linear")).toContain("Linear has no read-only mode we can request");
+  const provider = listProviders().find((provider) =>
+    !provider.supportsReadOnly && !provider.authModes.includes("none")
+  );
+  if (!provider) throw new Error("Expected an authenticated provider without read-only support");
+  expect(render(provider.id)).toContain(`${provider.displayName} has no read-only mode we can request, so this records your intent only — see the note below.`);
 });
