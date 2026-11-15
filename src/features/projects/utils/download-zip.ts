@@ -24,8 +24,8 @@ const fetchBytes = async (url: string): Promise<ArrayBuffer> => {
  */
 export const createProjectZip = async (
   files: ZipSourceFile[],
-  instructions?: string,
   fetchBinary: (url: string) => Promise<ArrayBuffer> = fetchBytes,
+  instructions?: string,
 ): Promise<JSZip> => {
   const zip = new JSZip();
   const filesMap = new Map(files.map((file) => [file._id, file]));
