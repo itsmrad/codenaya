@@ -393,7 +393,13 @@ export const ConversationSidebar = ({
   // after any message queued from outside the chat, leaving the draft alone.
   // A stopped or failed run gives it back to the composer instead.
   const followUpNext =
-    followUp && followUpAction(followUp, conversationMessages, Boolean(pending || isProcessing || queuedMessage));
+    followUp &&
+    followUpAction(
+      followUp,
+      conversationMessages,
+      Boolean(pending || isProcessing || queuedMessage),
+      stalled ? processingMessage?._id : undefined,
+    );
   useEffect(() => {
     if (!activeConversationId || !followUpNext || followUpNext === "wait") return;
     // Taken from the store, so a re-run of this effect can't act on it twice.
@@ -440,6 +446,7 @@ export const ConversationSidebar = ({
       toast.error("A message is already queued. Edit or remove it first.");
     }
     if (action === "queue" && processingMessage) {
+      if (contexts.length > 0) toast.info("Attachments stay in the box and aren't queued.");
       // The mode is read now: it's what the user picked for this message.
       setFollowUp(processingMessage.conversationId, {
         text: message.text,
