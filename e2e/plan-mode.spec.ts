@@ -184,6 +184,10 @@ test.describe.serial("plan mode", () => {
     const chatTab = page.getByRole("tablist", { name: "Workspace views" }).getByRole("tab", { name: "Chat" });
     await chatTab.click();
     await expect(chatTab).toHaveAttribute("aria-selected", "true");
+    // The composer remounts with the chat tab and its mode resets to Build.
+    const toggle = page.getByRole("radio", { name: "Ask / Plan", exact: true });
+    await toggle.click();
+    await expect(toggle).toBeChecked();
     const input = page.getByPlaceholder("Describe a change or ask a question…");
     await input.fill("todo app with a footer");
     await input.press("Enter");
