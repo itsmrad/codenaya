@@ -43,7 +43,8 @@ export const useWorkspaceMode = () => {
   }, [saved]);
   return {
     mode: resolveWorkspaceMode(saved, cached, swarm),
-    loaded: saved !== undefined && !failed,
+    // Also waits for the swarm switch, so a saved "board" never shows with its option hidden.
+    loaded: saved !== undefined && !failed && swarm !== undefined,
     failed,
     swarmEnabled: swarm === true,
   };
