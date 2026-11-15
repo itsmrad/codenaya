@@ -1,6 +1,7 @@
 "use client";
 
 import { BookOpenIcon, EyeIcon, FileIcon } from "lucide-react";
+import { useId } from "react";
 
 import { CodenayaLogo } from "@/components/codenaya-logo";
 import { Button } from "@/components/ui/button";
@@ -24,8 +25,10 @@ export const EditorEmptyState = ({ projectId }: { projectId: Id<"projects"> }) =
   // The newest conversation's last run: its recorded steps are what the chat card shows.
   const conversations = useConversations(projectId);
   const messages = useMessages(conversations?.[0]?._id ?? null);
+  // Render the section only once messages have loaded, so it doesn't push the buttons down.
   const lastRun = messages?.findLast((message) => message.role === "assistant" && message.steps?.length);
   const recent = recentlyChangedFiles(lastRun?.steps ?? [], files ?? []);
+  const recentLabelId = useId();
   const readme = files?.find(
     (file) => file.type === "file" && !file.parentId && file.name.toLowerCase() === "readme.md",
   );
@@ -36,21 +39,23 @@ export const EditorEmptyState = ({ projectId }: { projectId: Id<"projects"> }) =
       <p className="text-xs text-muted-foreground">Pick a file in the explorer, or:</p>
       {recent.length > 0 && (
         <div className="flex flex-col items-center gap-1.5">
-          <p className="text-xs text-muted-foreground">Recently changed</p>
-          <div className="flex flex-wrap justify-center gap-2">
+          <p id={recentLabelId} className="text-xs text-muted-foreground">Recently changed</p>
+          <ul aria-labelledby={recentLabelId} className="flex flex-wrap justify-center gap-2">
             {recent.map(({ file, path }) => (
-              <Button
-                key={file._id}
-                variant="outline"
-                size="sm"
-                title={path}
-                onClick={() => openFile(file._id, { pinned: true })}
-              >
-                <FileIcon className="size-3.5" />
-                {file.name}
-              </Button>
+              <li key={file._id}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  title={path}
+                  aria-label={path}
+                  onClick={() => openFile(file._id, { pinned: true })}
+                >
+                  <FileIcon className="size-3.5" />
+                  <span className="truncate max-w-[16rem]">{file.name}</span>
+                </Button>
+              </li>
             ))}
-          </div>
+          </ul>
         </div>
       )}
       <div className="flex flex-wrap justify-center gap-2">

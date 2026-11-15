@@ -3,7 +3,9 @@ import { type AgentStep, buildPathIndex, runWrittenPaths } from "@/features/conv
 export const MAX_RECENTLY_CHANGED = 5;
 
 /**
- * The files the last run wrote that still exist, newest write first (#315).
+ * The files the last run wrote that still exist, most recently written first (#315).
+ * Steps are read newest first, so a path written twice ranks by its last write; within one
+ * step the paths keep the order the call listed them in.
  * A path that no longer resolves to a file (deleted, renamed away, a folder) is dropped.
  */
 export const recentlyChangedFiles = <
@@ -20,8 +22,7 @@ export const recentlyChangedFiles = <
       return path ? [[path, file] as const] : [];
     }),
   );
-  return runWrittenPaths(steps)
-    .reverse()
+  return runWrittenPaths([...steps].reverse())
     .flatMap((path) => {
       const file = byPath.get(path);
       return file ? [{ file, path }] : [];

@@ -30,7 +30,18 @@ describe("recentlyChangedFiles (#315)", () => {
       write("2", "editFile", ["src/b.ts"]),
       write("3", "editFile", ["src/a.ts"]),
     ];
-    expect(paths(steps)).toEqual(["src/b.ts", "README.md", "src/a.ts"]);
+    // a was written again last, so it leads; within the first step the call's order holds.
+    expect(paths(steps)).toEqual(["src/a.ts", "src/b.ts", "README.md"]);
+  });
+
+  it("ranks a path written twice by its last write", () => {
+    const steps = [
+      write("1", "editFile", ["src/a.ts"]),
+      write("2", "editFile", ["src/b.ts"]),
+      write("3", "editFile", ["src/a.ts"]),
+    ];
+    expect(paths(steps)).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(paths([...steps, write("4", "editFile", ["src/b.ts"])])).toEqual(["src/b.ts", "src/a.ts"]);
   });
 
   it("drops paths that no longer exist, folders, reads and unfinished writes", () => {
@@ -45,7 +56,7 @@ describe("recentlyChangedFiles (#315)", () => {
 
   it("caps the list and is empty with no steps", () => {
     const steps = [write("1", "writeFiles", ["src/a.ts", "src/b.ts", "README.md"])];
-    expect(paths(steps, 2)).toHaveLength(2);
+    expect(paths(steps, 2)).toEqual(["src/a.ts", "src/b.ts"]);
     expect(paths([])).toEqual([]);
   });
 });
