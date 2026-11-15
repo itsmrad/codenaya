@@ -239,9 +239,11 @@ export const ConnectionScopeForm = ({
   const readOnlySwitchId = `${fieldPrefix}-read-only`;
 
   const readOnlyDescription = readOnly
-    ? readOnlyEnforced
-      ? `${providerName} is asked for its read-only endpoint, so write tools are not offered to the agent.`
-      : `${providerName} has no read-only mode we can request, so this records your intent only — see the note below.`
+    ? provider?.authModes.includes("none")
+      ? "Only tools on the verified read-only list can run without approval; all other tools require approval."
+      : readOnlyEnforced
+        ? `${providerName} is asked for its read-only endpoint, so write tools are not offered to the agent.`
+        : `${providerName} has no read-only mode we can request, so this records your intent only — see the note below.`
     : `The agent may call tools that change data in ${providerName}.`;
 
   const baselineNote = (

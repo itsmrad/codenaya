@@ -78,7 +78,10 @@ export const ShortcutsDialog = () => {
                       key={shortcut.label}
                       className="flex items-center justify-between gap-4 py-2 text-sm"
                     >
-                      <span>{shortcut.label}</span>
+                      <span>
+                        <span>{shortcut.label}</span>
+                        {shortcut.description && <span className="block text-xs text-muted-foreground">{shortcut.description}</span>}
+                      </span>
                       <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
                         {shortcut.keys.map((combo, index) => (
                           <span key={combo.join("+")} className="flex items-center gap-1.5">

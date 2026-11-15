@@ -16,19 +16,20 @@ import { cn } from "@/lib/utils";
 interface HelpMenuProps {
   /** Classes for the trigger, so it can match the navbar it sits in. */
   className?: string;
+  trigger?: React.ReactNode;
 }
 
 /**
  * The "?" menu in the signed-in navbars: the shortcut sheet and a link to
  * report a bug on GitHub.
  */
-export const HelpMenu = ({ className }: HelpMenuProps) => {
+export const HelpMenu = ({ className, trigger }: HelpMenuProps) => {
   const openShortcuts = useShortcutsDialog((state) => state.setOpen);
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
+        {trigger ?? <button
           aria-label="Help"
           title="Help"
           className={cn(
@@ -37,7 +38,7 @@ export const HelpMenu = ({ className }: HelpMenuProps) => {
           )}
         >
           <CircleHelpIcon aria-hidden="true" className="size-4" />
-        </button>
+        </button>}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={6} className={cn(MENU_CONTENT, "w-56")}>
         <MenuHeader>Help</MenuHeader>

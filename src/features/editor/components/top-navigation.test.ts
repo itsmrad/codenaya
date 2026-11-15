@@ -59,6 +59,16 @@ describe("TopNavigation with a file deleted while open", () => {
     expect(tabs()).toMatchObject({ openTabs: [], activeTabId: null });
   });
 
+  it("keeps an inactive tab's close button visible without hover", () => {
+    open(a, b);
+    mocks.useFile.mockImplementation((id: Id<"files">) => ({ name: `${id}.ts` }));
+
+    const closeButton = render().match(/<button[^>]*aria-label="Close a.ts"[^>]*>/)?.[0];
+
+    expect(tabs().activeTabId).toBe(b);
+    expect(closeButton).toContain("[@media(hover:none)]:opacity-100");
+  });
+
   it("keeps a tab whose file is still loading", () => {
     open(a);
     mocks.useFile.mockReturnValue(undefined);

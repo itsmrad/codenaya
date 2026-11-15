@@ -20,7 +20,9 @@ test.describe("IDE top bar", () => {
       await page.goto(href!, { waitUntil: "domcontentloaded" });
       const codeTab = page.getByRole("tab", { name: "Code" });
       await expect(codeTab).toBeVisible({ timeout: 60_000 });
-      await expect(page.getByRole("button", { name: "Integrations" })).toBeVisible();
+      if (width === 768) await page.getByRole("button", { name: "More actions", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Integrations", exact: true })).toBeVisible();
+      if (width === 768) await page.keyboard.press("Escape");
 
       const nav = page.locator("nav").filter({ has: codeTab });
       const projectName = nav.locator("button").first();

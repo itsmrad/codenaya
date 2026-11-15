@@ -16,7 +16,7 @@ import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
 /** The IDE's Share button (#260): turns the read-only link on or off and copies it. */
-export const SharePopover = ({ projectId }: { projectId: Id<"projects"> }) => {
+export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">; trigger?: React.ReactNode }) => {
   const project = useProject(projectId);
   const createShareLink = useAction(api.projects.createShareLink);
   const revokeShareLink = useMutation(api.projects.revokeShareLink);
@@ -51,7 +51,7 @@ export const SharePopover = ({ projectId }: { projectId: Id<"projects"> }) => {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
+        {trigger ?? <button
           type="button"
           aria-label="Share"
           title="Share"
@@ -59,7 +59,7 @@ export const SharePopover = ({ projectId }: { projectId: Id<"projects"> }) => {
         >
           <Share2Icon aria-hidden="true" className="size-3.5" />
           <span className="hidden @3xl:inline">Share</span>
-        </button>
+        </button>}
       </PopoverTrigger>
       <PopoverContent className="w-80 flex flex-col gap-3" align="end">
         <label className="flex items-center justify-between gap-3 text-sm">

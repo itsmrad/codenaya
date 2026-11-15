@@ -3,8 +3,10 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { api } from "./_generated/api";
+import { LOST_RUN_MS } from "../src/features/conversations/agent-steps";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { RUN_ENDED_TASK_ERROR } from "./agentTasks";
 import { deleteProjectBatch, CASCADE_BATCH_SIZE } from "./projectCascade";
 import schema from "./schema";
 import { MAX_SWARM_AGENTS } from "./swarm";
@@ -323,5 +325,53 @@ describe("agentTasks", () => {
     await t.run(async (ctx) => { while (!(await deleteProjectBatch(ctx, parent.projectId))); });
     expect(await t.run((ctx) => ctx.db.get("projects", parent.projectId))).toBeNull();
     expect(await t.run((ctx) => ctx.db.query("agentTasks").collect())).toMatchObject([{ _id: survivingId }]);
+  });
+
+  describe("closes a message's open tasks when its run ends (#649)", () => {
+    const seedSwarm = async (t: TestConvex) => {
+      const parent = await seedMessage(t);
+      await t.run((ctx) => ctx.db.patch("messages", parent.messageId, { status: "processing" }));
+      const ids = await create(t, parent, [task("a"), task("b"), task("c")]);
+      const start = { internalKey: INTERNAL_KEY, parentMessageId: parent.messageId, projectId: parent.projectId };
+      await t.mutation(api.agentTasks.startTask, { ...start, agentTaskId: ids[0] });
+      await t.mutation(api.agentTasks.startTask, { ...start, agentTaskId: ids[1] });
+      await t.mutation(api.agentTasks.finishTask, { internalKey: INTERNAL_KEY, agentTaskId: ids[1], status: "done", summary: "Built" });
+      const other = await seedMessage(t, BOB);
+      await create(t, other);
+      return { parent, other };
+    };
+    const expectClosed = async (t: TestConvex, { parent, other }: Awaited<ReturnType<typeof seedSwarm>>) => {
+      expect(await get(t, parent.messageId)).toMatchObject([
+        { status: "error", error: RUN_ENDED_TASK_ERROR, startedAt: 1000, endedAt: expect.any(Number) },
+        { status: "done", summary: "Built" },
+        { status: "error", error: RUN_ENDED_TASK_ERROR },
+      ]);
+      expect(await t.withIdentity({ subject: BOB }).query(api.agentTasks.listForMessage, { messageId: other.messageId }))
+        .toMatchObject([{ status: "queued" }]);
+    };
+
+    test("on a stuck finish", async () => {
+      const t = setup();
+      const swarm = await seedSwarm(t);
+      await t.mutation(api.system.updateMessageContent, {
+        internalKey: INTERNAL_KEY, messageId: swarm.parent.messageId, content: "Stuck", stuck: { reason: "repeated-write" },
+      });
+      await expectClosed(t, swarm);
+    });
+
+    test("on cancel", async () => {
+      const t = setup();
+      const swarm = await seedSwarm(t);
+      await t.mutation(api.system.updateMessageStatus, { internalKey: INTERNAL_KEY, messageId: swarm.parent.messageId, status: "cancelled" });
+      await expectClosed(t, swarm);
+    });
+
+    test("when a lost run is failed", async () => {
+      const t = setup();
+      const swarm = await seedSwarm(t);
+      vi.setSystemTime(1000 + LOST_RUN_MS + 1);
+      await t.mutation(internal.maintenance.failLostMessageRuns, {});
+      await expectClosed(t, swarm);
+    });
   });
 });

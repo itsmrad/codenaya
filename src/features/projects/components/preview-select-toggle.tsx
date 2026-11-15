@@ -37,7 +37,7 @@ export const PreviewSelectToggle = ({
         disabled
           ? "Available once the preview is running"
           : active
-            ? "Stop selecting (Esc)"
+            ? "Tab to focus, Enter or Space to select, Esc to stop"
             : "Select an element to attach to the chat"
       }
       aria-label="Select element"

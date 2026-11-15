@@ -9,6 +9,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { toast } from "sonner";
 import { Allotment } from "allotment";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -74,12 +75,29 @@ import {
 } from "@/features/sandbox-preview/utils/preview-bridge";
 import { hookReloadDelay, isHookError } from "@/features/sandbox-preview/utils/hook-reload";
 import {
+  TRANSIENT_ERROR_IDLE_MS,
+  transientErrorCover,
+  type TransientErrorCover,
+} from "@/features/sandbox-preview/utils/transient-error-cover";
+import {
   MAX_FIX_ATTEMPTS,
   PreviewErrorBanner,
 } from "@/features/sandbox-preview/components/preview-error-banner";
 import { usePublishPreviewErrors } from "@/features/sandbox-preview/hooks/use-preview-errors";
 
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 import { useProject, useRecordFirstPreviewShown } from "../hooks/use-projects";
@@ -239,7 +257,9 @@ export const PreviewView = ({
         (error) => setRuntimeError((prev) => error ? mergeAppError(prev, error) : null),
         (element) => {
           // Rect is only bridge metadata; chat keeps the existing quoted-data shape.
-          useChatStore.getState().addElement(selectedElementSchema.parse(element));
+          if (!useChatStore.getState().addElement(selectedElementSchema.parse(element))) {
+            toast.error("You can attach up to 3 elements");
+          }
           setSelectChosen(false);
           onElementPicked();
         },
@@ -313,8 +333,29 @@ export const PreviewView = ({
     firstBuildRunning: firstBuild && activeRun !== null,
   });
 
-  // An error the run left is fixed without a click once it is over (#491).
   const runActive = Boolean(activeRun);
+  const coverRunActive = activeEngine === "sandbox" && runActive;
+  const hasAppError = appError !== null;
+  const [transientCover, setTransientCover] = useState<TransientErrorCover>(null);
+  const coverActivity = useRef({ activeRun, files });
+  useLayoutEffect(() => {
+    const activity = coverActivity.current.activeRun !== activeRun || coverActivity.current.files !== files;
+    coverActivity.current = { activeRun, files };
+    const now = Date.now();
+    setTransientCover((previous) => transientErrorCover(previous, coverRunActive, hasAppError, activity, now));
+  }, [activeRun, files, coverRunActive, hasAppError]);
+  useEffect(() => {
+    if (!transientCover?.covered) return;
+    const timer = setTimeout(() => {
+      const now = Date.now();
+      setTransientCover((previous) => transientErrorCover(previous, coverRunActive, false, false, now));
+    }, Math.max(0, transientCover.lastActivityAt + TRANSIENT_ERROR_IDLE_MS - Date.now()));
+    return () => clearTimeout(timer);
+  }, [transientCover, coverRunActive]);
+  const coveringTransientError = Boolean(
+    status !== "error" && coverRunActive && transientCover?.covered,
+  );
+  // An error the run left is fixed without a click once it is over (#491).
   const [autoFixedIds, setAutoFixedIds] = useState<string[]>([]);
   // A fix is pending or its run is working: "Fixing" covers the broken app (#305).
   const [autoFixing, setAutoFixing] = useState(false);
@@ -343,7 +384,7 @@ export const PreviewView = ({
   }, [autoFixer, shownError, canFix, appErrorId, runActive, chatBlock, files, fixAppError]);
 
   const errorBanner =
-    shownError && appErrorId && !autoFixing ? (
+    shownError && appErrorId && !autoFixing && !coveringTransientError ? (
       <PreviewErrorBanner
         error={shownError}
         attempts={attempts}
@@ -439,11 +480,12 @@ export const PreviewView = ({
   const [brokenDuringBuild, setBrokenDuringBuild] = useState(false);
   if (brokenDuringBuild && !firstBuildRun) setBrokenDuringBuild(false);
   if (!brokenDuringBuild && firstBuildRun && appError) setBrokenDuringBuild(true);
+  const buildingRun = coveringTransientError ? activeRun : firstBuildRun;
   const building =
-    firstBuildRun &&
+    buildingRun &&
     status !== "error" &&
-    (status !== "running" || !previewUrl || brokenDuringBuild) ? (
-      <PreviewBuilding steps={firstBuildRun.steps} />
+    (coveringTransientError || status !== "running" || !previewUrl || brokenDuringBuild) ? (
+      <PreviewBuilding steps={buildingRun.steps} />
     ) : null;
   const stillBuilding =
     firstBuildRun && !building && !autoFixing ? liveStepLabel(firstBuildRun.steps) : null;
@@ -552,59 +594,69 @@ export const PreviewView = ({
       )}
       <div className="p-1.5 shrink-0 border border-border/50 rounded-xl bg-background shadow-sm flex flex-wrap items-center gap-2">
         <div className="flex items-center p-0.5 bg-muted/40 rounded-lg border border-border/50">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-8 rounded-md hover:bg-muted"
-            disabled={isLoading}
-            onClick={restart}
-            title={`Restart ${activeEngine}`}
-            aria-label={`Restart ${activeEngine}`}
-          >
-            <RefreshCwIcon className="size-4" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-8 rounded-md hover:bg-muted"
-            disabled={isLoading || !previewUrl}
-            onClick={() => setRefreshKey(k => k + 1)}
-            title="Refresh page"
-            aria-label="Refresh page"
-          >
-            <RotateCwIcon className="size-4" />
-          </Button>
+          <ButtonGroup aria-label="Refresh preview">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={isLoading || !previewUrl}
+              onClick={() => setRefreshKey(k => k + 1)}
+              title="Refresh page"
+              aria-label="Refresh page"
+            >
+              <RotateCwIcon data-icon="inline-start" />
+              Refresh
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  title="Refresh options"
+                  aria-label="Refresh options"
+                >
+                  <ChevronDownIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    disabled={isLoading}
+                    onSelect={restart}
+                    title={`Restart ${activeEngine}`}
+                    aria-label={`Restart ${activeEngine}`}
+                  >
+                    <RefreshCwIcon />
+                    Restart {activeEngine}
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Preview engine</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={activeEngine} aria-label="Preview engine">
+                  <DropdownMenuRadioItem
+                    value="sandbox"
+                    onSelect={() => switchEngine("sandbox")}
+                    title="Use high-fidelity E2B Sandbox"
+                  >
+                    <ServerIcon />
+                    Cloud sandbox
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem
+                    value="webcontainer"
+                    onSelect={() => switchEngine("webcontainer")}
+                    title="Use in-browser WebContainers"
+                  >
+                    <BoxIcon />
+                    In-browser (WebContainer)
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </ButtonGroup>
           <PreviewSelectToggle
             active={selecting}
             disabled={status !== "running"}
             onActiveChange={setSelectChosen}
           />
-        </div>
-
-        {/* Engine Toggle UI */}
-        <div className="flex items-center p-0.5 bg-muted/40 rounded-lg border border-border/50">
-            <Button
-              size="sm"
-              variant={activeEngine === "sandbox" ? "secondary" : "ghost"}
-              className="h-8 rounded-md px-2 space-x-1 shadow-none"
-              onClick={() => switchEngine("sandbox")}
-              title="Use high-fidelity E2B Sandbox"
-              aria-label="Sandbox"
-            >
-              <ServerIcon className="size-3.5" />
-              <span className="text-xs hidden @3xl:inline">Sandbox</span>
-            </Button>
-            <Button
-              size="sm"
-              variant={activeEngine === "webcontainer" ? "secondary" : "ghost"}
-              className="h-8 rounded-md px-2 space-x-1 shadow-none"
-              onClick={() => switchEngine("webcontainer")}
-              title="Use in-browser WebContainers"
-              aria-label="WebContainer"
-            >
-              <BoxIcon className="size-3.5" />
-              <span className="text-xs hidden @3xl:inline">WebContainer</span>
-            </Button>
         </div>
 
         {/* A phone-width panel is already a phone-sized frame. */}

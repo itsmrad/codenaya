@@ -191,6 +191,10 @@ export const AddProviderKeyDialog = ({
                               id={field.name}
                               name={field.name}
                               type="url"
+                              inputMode="url"
+                              autoComplete="off"
+                              autoCapitalize="none"
+                              spellCheck={false}
                               value={field.state.value}
                               onBlur={field.handleBlur}
                               onChange={(e) =>
@@ -228,6 +232,8 @@ export const AddProviderKeyDialog = ({
                                 field.handleChange(e.target.value)
                               }
                               aria-invalid={isInvalid}
+                              autoCapitalize="none"
+                              spellCheck={false}
                               placeholder={"llama-3.3-70b\nqwen-2.5-coder"}
                               rows={3}
                               className="font-mono text-sm"
@@ -259,6 +265,8 @@ export const AddProviderKeyDialog = ({
                       name={field.name}
                       type="password"
                       autoComplete="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
                       value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
@@ -312,18 +320,25 @@ export const AddProviderKeyDialog = ({
         </form>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)}>
-            Cancel
-          </Button>
           <form.Subscribe selector={(state) => state.isSubmitting}>
             {(isSubmitting) => (
-              <Button
-                type="submit"
-                form="add-provider-key-form"
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? "Testing key..." : "Add key"}
-              </Button>
+              <>
+                {/* Stays open while the key is tested so the outcome is seen. */}
+                <Button
+                  variant="outline"
+                  disabled={isSubmitting}
+                  onClick={() => handleOpenChange(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  form="add-provider-key-form"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? "Testing key..." : "Add key"}
+                </Button>
+              </>
             )}
           </form.Subscribe>
         </DialogFooter>

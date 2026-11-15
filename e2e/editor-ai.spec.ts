@@ -43,7 +43,9 @@ const seedProject = async (page: Page) => {
 
 const openFile = async (page: Page, projectId: Id<"projects">) => {
   await page.goto(`/projects/${projectId}?engine=webcontainer`);
-  await page.getByRole("button", { name: FILE_NAME, exact: true }).click();
+  await page.getByRole("tab", { name: "Code", exact: true }).click();
+  // A restored open-file navigation button has the same name (#606).
+  await page.getByTestId("file-explorer").getByRole("button", { name: FILE_NAME, exact: true }).click();
   const editor = page.locator(".cm-content");
   await expect(editor).toContainText("return a + b;");
   return editor;

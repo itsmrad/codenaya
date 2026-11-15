@@ -364,9 +364,17 @@ export default function ProjectIntegrations() {
             label="Unlink"
             destructive
             trailing={<Unlink size={16} color={c.destructive} />}
-            onPress={() => {
+            onPress={async () => {
+              const { _id, connection } = managing;
+              // Close the sheet first so the dialog isn't hidden behind it.
               setManagingId(undefined);
-              unlink({ id: managing._id }).catch(fail("Unable to unlink this connection"));
+              const confirmed = await confirm({
+                title: `Unlink ${connection.label}?`,
+                message: "The agent loses access to it in this project.",
+                confirmLabel: "Unlink",
+                destructive: true,
+              });
+              if (confirmed) unlink({ id: _id }).catch(fail("Unable to unlink this connection"));
             }}
           />
         )}

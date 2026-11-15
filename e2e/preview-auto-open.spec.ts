@@ -331,6 +331,76 @@ test.describe("first build auto-opens the preview", () => {
     }
   });
 
+  for (const kind of ["runtime", "build"] as const) {
+    test(`covers a later run's ${kind} error across clears, then reveals a persistent error`, async ({ page }) => {
+      test.setTimeout(150_000);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await signIn(page);
+      const previewUrl = new URL(`/__e2e-transient-${kind}`, page.url()).href;
+      let loads = 0;
+      await page.route(previewUrl, (route) => {
+        loads += 1;
+        return route.fulfill({
+          contentType: "text/html",
+          body: injectPreviewBridge("<html><head></head><body><h1>App</h1></body></html>"),
+        });
+      });
+      await stubSandbox(page, [], previewUrl);
+      const sent: string[] = [];
+      await page.route("**/api/messages", (route) => {
+        sent.push((route.request().postDataJSON() as { message: string }).message);
+        return route.fulfill({ status: 200, json: {} });
+      });
+      const build = await startFirstBuild(page, `e2e-preview-transient-${kind}`);
+      try {
+        await build.writePackageJson();
+        await build.run.complete();
+        await page.goto(`/projects/${build.projectId}?view=preview`);
+        await expect.poll(() => loads, { timeout: 60_000 }).toBe(2);
+        const iframe = page.locator('iframe[title="Preview"]');
+        const building = page.getByRole("status", { name: "Building your app" });
+        const fixing = page.getByRole("status", { name: "Fixing an error" });
+        const banner = page.getByRole("alert").filter({ hasText: "Transient edit failure" });
+        const report = (messageKind: string) =>
+          page.frameLocator('iframe[title="Preview"]').locator("body").evaluate((_, kind) => {
+            parent.postMessage({ source: "codenaya-preview", version: 1, kind, message: "Transient edit failure" }, "*");
+          }, messageKind);
+
+        // An idle preview's error remains actionable.
+        await report(kind);
+        await expect(banner).toBeVisible();
+        await expect(building).toBeHidden();
+        const repair = await build.startRun();
+        await expect(building).toBeVisible();
+        await expect(banner).toHaveCount(0);
+        await expect(iframe).toHaveAttribute("inert", "");
+        // File edits and new-page signals clear errors mid-run; keep the cover latched.
+        await report("page");
+        await build.writeFile("repair.txt");
+        await page.waitForTimeout(1000);
+        await expect(building).toBeVisible();
+        await report(kind);
+        await repair.complete();
+        // Run end releases this cover and hands the error to the existing auto-fix.
+        await expect(building).toBeHidden();
+        await expect(fixing).toBeVisible();
+        await expect.poll(() => sent.length, { timeout: 30_000 }).toBe(1);
+        const fix = await build.startRun();
+        // Let the active-run subscription observe the stubbed fix before completing it.
+        await page.waitForTimeout(5000);
+        await fix.complete();
+        await expect(banner).toBeVisible({ timeout: 30_000 });
+        await expect(building).toBeHidden();
+        await expect(fixing).toBeHidden();
+        await expect(iframe).not.toHaveAttribute("inert");
+        await expect(banner.getByRole("button", { name: "Fix with AI" })).toBeEnabled();
+        expect(sent).toHaveLength(1);
+      } finally {
+        await build.cleanup();
+      }
+    });
+  }
+
   test("covers a broken first build until its run ends, then shows Fixing (#486, #305)", async ({ page }) => {
     test.setTimeout(180_000);
     // The app the run leaves doesn't compile.
@@ -383,7 +453,7 @@ test.describe("first build auto-opens the preview", () => {
 
       // The sandbox boots mid-run and reports the half-written app's error:
       // the card stays over it, with no banner and no fix.
-      await expect(page.getByRole("button", { name: "Refresh page" })).toBeEnabled({ timeout: 30_000 });
+      await expect(page.getByRole("button", { name: "Refresh page", exact: true })).toBeEnabled({ timeout: 30_000 });
       await page.waitForTimeout(5_000);
       await expect(buildCard).toBeVisible();
       // Covered, so out of the keyboard's and screen readers' reach.

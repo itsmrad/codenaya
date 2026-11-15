@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -35,6 +36,7 @@ export const DefaultModelSelect = ({
   defaultModelId,
 }: DefaultModelSelectProps) => {
   const setPreferences = useSetAiPreferences();
+  const [saving, setSaving] = useState(false);
 
   const groups = pickerKeys(keys, defaultKeyId ?? undefined);
   const defaultKey = keys.find((key) => key._id === defaultKeyId);
@@ -45,6 +47,7 @@ export const DefaultModelSelect = ({
     : resolveCatalogModel(platform, defaultModelId).id;
 
   const handleChange = async (value: string) => {
+    setSaving(true);
     try {
       const { keyId, modelId } = fromChoiceValue(value);
       await setPreferences({
@@ -53,7 +56,11 @@ export const DefaultModelSelect = ({
       });
       toast.success("Default model updated");
     } catch {
-      toast.error("Could not update the default model");
+      toast.error(
+        "Could not update the default model. Your previous choice still applies; try again.",
+      );
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -65,6 +72,7 @@ export const DefaultModelSelect = ({
           modelId,
         })}
         onValueChange={(value) => void handleChange(value)}
+        disabled={saving}
       >
         <SelectTrigger aria-label="Default model" className="w-full sm:w-80">
           <SelectValue />

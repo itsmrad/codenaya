@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { motion } from "motion/react";
 import { ArrowUpDownIcon, FolderPlusIcon, PlusIcon, SearchIcon } from "lucide-react";
 
@@ -41,6 +41,7 @@ export const ProjectsGrid = ({ projects, onNewProject, onImport }: ProjectsGridP
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("updated");
   const [showAll, setShowAll] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
   const isMac = useIsMac();
 
   const filtered = (projects ?? [])
@@ -73,6 +74,7 @@ export const ProjectsGrid = ({ projects, onNewProject, onImport }: ProjectsGridP
             <div className="relative flex flex-1 items-center sm:w-64 sm:flex-none">
               <SearchIcon className="pointer-events-none absolute left-3 size-3.5 text-muted-foreground/70" />
               <input
+                ref={searchRef}
                 type="search"
                 aria-label="Search projects"
                 placeholder="Search projects…"
@@ -131,7 +133,18 @@ export const ProjectsGrid = ({ projects, onNewProject, onImport }: ProjectsGridP
           </button>
         </div>
       ) : filtered.length === 0 ? (
-        <p className="border-t border-border py-14 text-center text-sm text-muted-foreground">No projects match “{query}”</p>
+        <div className="flex flex-col items-center border-t border-border px-6 py-14 text-center">
+          <p role="status" className="max-w-full break-words text-sm text-muted-foreground">No projects match “{query}”</p>
+          <button
+            onClick={() => {
+              setQuery("");
+              searchRef.current?.focus();
+            }}
+            className="mt-4 h-9 rounded-md border border-border bg-card px-4 text-xs font-medium transition-colors hover:border-brand/40 hover:text-brand"
+          >
+            Clear search
+          </button>
+        </div>
       ) : (
         <>
           <Cells>

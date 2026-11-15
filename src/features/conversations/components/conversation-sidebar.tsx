@@ -125,10 +125,12 @@ const ESC_TOAST_ID = "esc-to-stop";
 
 interface ConversationSidebarProps {
   projectId: Id<"projects">;
+  actionsInSheet?: boolean;
 };
 
 export const ConversationSidebar = ({
   projectId,
+  actionsInSheet = false,
 }: ConversationSidebarProps) => {
   const { openIntegrations } = useProjectIntegrations();
   const { input, setInput, appendInput, contexts, removeContext, clearContexts, elements, removeElement, clearElements } = useChatStore();
@@ -634,7 +636,7 @@ export const ConversationSidebar = ({
           <div className="text-sm font-medium truncate pl-3">
             {activeConversation?.title ?? DEFAULT_CONVERSATION_TITLE}
           </div>
-          <div className="flex items-center px-1 gap-1">
+          <div className={actionsInSheet ? "hidden @3xl/ide:flex items-center px-1 gap-1" : "flex items-center px-1 gap-1"}>
             <Button
               size="icon-xs"
               variant="highlight"
@@ -844,7 +846,17 @@ export const ConversationSidebar = ({
                 placeholder="Describe a change or ask a question…"
                 className="min-h-11 px-3 pt-3 pb-1 text-sm/6 placeholder:text-muted-foreground/70"
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={slashMenu.onKeyDown}
+                onKeyDown={(event) => {
+                  if (
+                    event.code === "KeyM" && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey &&
+                    !event.defaultPrevented && !event.nativeEvent.isComposing && !isProcessing && mode !== "swarm"
+                  ) {
+                    event.preventDefault();
+                    setMode((current) => current === "plan" ? "build" : "plan");
+                    return;
+                  }
+                  slashMenu.onKeyDown(event);
+                }}
                 value={input}
                 disabled={enhancer.isEnhancing}
               />

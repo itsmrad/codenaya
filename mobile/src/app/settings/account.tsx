@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { confirm } from "@/components/dialogs";
 import { GitHubIcon } from "@/components/github-icon";
 import { GoogleIcon } from "@/components/google-icon";
 import { LabelStrip, TileRow, monoLabel } from "@/components/grid";
@@ -100,7 +101,20 @@ export default function AccountSettings() {
           trailing={<ArrowUpRight size={16} color={c.mutedForeground} />}
           onPress={openWebsite}
         />
-        <TileRow icon={LogOut} label="Sign out" destructive onPress={() => signOut()} />
+        <TileRow
+          icon={LogOut}
+          label="Sign out"
+          destructive
+          onPress={async () => {
+            const confirmed = await confirm({
+              title: "Sign out of Codenaya?",
+              message: "You'll need to sign in again to see your projects.",
+              confirmLabel: "Sign out",
+              destructive: true,
+            });
+            if (confirmed) signOut();
+          }}
+        />
       </View>
 
       <NameDialog

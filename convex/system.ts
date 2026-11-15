@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 
+import { publicValueSecretRule } from "../src/features/integrations/credential-guard";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import {
@@ -11,6 +12,7 @@ import {
   stuckRunValidator,
   runModelValidator,
 } from "./schema";
+import { closeOpenTasks } from "./agentTasks";
 import { MAX_CHECKPOINT_FILES, createCheckpoint } from "./checkpoints";
 import { runsSince, syncedAt } from "./githubSync";
 import { appError } from "./errors";
@@ -168,6 +170,7 @@ export const updateMessageContent = mutation({
         : {}),
       ...(args.firstBuild ? { firstBuild: true } : {}),
     });
+    await closeOpenTasks(ctx, args.messageId);
   },
 });
 
@@ -213,6 +216,7 @@ export const updateMessageStatus = mutation({
         await ctx.db.get("messages", args.messageId),
         args.status === "cancelled" ? "cancelled" : "ok",
       );
+      await closeOpenTasks(ctx, args.messageId);
     }
     await ctx.db.patch("messages", args.messageId, {
       status: args.status,
@@ -1814,6 +1818,7 @@ export const setPublicEnvVarInternal = mutation({
     key: v.string(),
     value: v.string(),
   },
+  returns: v.id("projectEnvVars"),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
@@ -1821,6 +1826,14 @@ export const setPublicEnvVarInternal = mutation({
     // so it must be the project's real owner (#211).
     if (!(await ownedProjectOrNull(ctx, args.projectId, args.ownerId))) {
       throw appError("NOT_FOUND", "Project not found");
+    }
+
+    if (publicValueSecretRule(args.value)) {
+      throw appError(
+        "INVALID_ARGUMENT",
+        "This looks like a secret key and would be published in the browser bundle. " +
+          "Use a name without a public prefix and store it as a secret instead.",
+      );
     }
 
     const existing = await ctx.db

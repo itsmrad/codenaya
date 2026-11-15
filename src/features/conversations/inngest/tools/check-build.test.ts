@@ -193,6 +193,20 @@ describe("checkProjectBuild", () => {
     expect(e2b.create).not.toHaveBeenCalled();
   });
 
+  it("uses public upload paths when checking internal links", async () => {
+    const files = [...starter(), {
+      path: "src/Links.tsx",
+      content: '<><Route path="/" /><a href="/docs/" /></>',
+    }];
+    expect(await check(files, null)).toContain("Link to /docs/ has no route");
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set([...files.map((file) => file.path), "public/docs/upload.pdf"]),
+    });
+    expect(result.split("\n")[0]).toBe(STATIC_CHECKS_PASSED);
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
   it("reports named-export and Tailwind heuristics as advisory", async () => {
     const sandbox = fakeSandbox();
     const result = await check([
