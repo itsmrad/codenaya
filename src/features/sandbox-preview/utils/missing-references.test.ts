@@ -270,4 +270,45 @@ describe("linksWithoutRoutes", () => {
     expect(linksWithoutRoutes(app(`<Route path={ROUTES.home} />`, links))).toEqual([]);
     expect(linksWithoutRoutes(app(route("/legal/:page?"), links))).toEqual([]);
   });
+
+  it("matches route and link segments case-insensitively", () => {
+    const routes = route("/privacy") + route("/ABOUT") + route("/Blog/:slug");
+    expect(linksWithoutRoutes(app(routes, `<a href="/Privacy" /> <Link to="/about" /> <Link to="/BLOG/post" />`))).toEqual([]);
+  });
+
+  it.each(['"/app"', '{"/app"}', '{basePath}'])("skips BrowserRouter basenames: %s", (basename) => {
+    const files = app(route("/x"), `<a href="/app/x" /> <a href="/missing" />`, {
+      "src/main.tsx": `<BrowserRouter basename=${basename}><App /></BrowserRouter>`,
+    });
+    expect(linksWithoutRoutes(files)).toEqual([]);
+  });
+
+  it("keeps skipping createBrowserRouter projects with basenames", () => {
+    expect(linksWithoutRoutes(app(route("/x"), `<a href="/app/x" />`, {
+      "src/router.tsx": 'createBrowserRouter([{ path: "/x" }], { basename: "/app" })',
+    }))).toEqual([]);
+  });
+
+  it("skips dot-leading segments anywhere in a link", () => {
+    const links = `<a href="/.netlify/functions/x" /> <a href="/app/.well-known/config" /> <a href="/missing" />`;
+    expect(linksWithoutRoutes(app(route("/"), links))).toEqual([
+      "Link to /missing has no route: add a page or remove the link (in src/Footer.tsx)",
+    ]);
+  });
+
+  it("skips extensionless public files and directories without skipping similar paths", () => {
+    const files = app(route("/"), `<a href="/download" /> <a href="/docs/?v=1#top" /> <a href="/docs-missing" />`, {
+      "public/download": "content",
+      "public/docs/index.html": "content",
+    });
+    expect(linksWithoutRoutes(files)).toEqual([
+      "Link to /docs-missing has no route: add a page or remove the link (in src/Footer.tsx)",
+    ]);
+  });
+
+  it("uses the complete path list for public uploads without text content", () => {
+    const files = app(route("/"), `<a href="/downloads" /> <a href="/docs/" />`);
+    const paths = new Set([...files.map((file) => file.path), "public/downloads", "public/docs/upload.pdf"]);
+    expect(linksWithoutRoutes(files, paths)).toEqual([]);
+  });
 });
