@@ -1385,6 +1385,8 @@ const CATALOG = {
     logo: "/integrations/amplitude-eu.svg",
     mcpUrl: "https://mcp.eu.amplitude.com/mcp",
     trustedHostnames: ["mcp.eu.amplitude.com"],
+    // Pinned so a same-site US authorization server is never accepted for EU data.
+    trustedAuthorizationServerOrigins: ["https://mcp.eu.amplitude.com"],
   },
 
   // https://docs.mixpanel.com/docs/mcp. US only: the EU host's protected-resource
@@ -1415,21 +1417,22 @@ const CATALOG = {
     // Queries (Run-Query, Get-Report and Get-Experiment results, Display-Query) count against Query API
     // limits; property values, lookup-table rows, replays and the audit log can carry
     // user PII; health checks, pre-launch checks, prior-experiment and duplicate
-    // searches are analyses. All of those stay gated.
+    // searches are analyses. All of those stay gated, as do Get-Dashboard and Get-Issues,
+    // which may return report results or sample values, until a live tools/list check.
     readOnlyTools: [
       "Describe-Cohort-Schema", "Get-Business-Context", "Get-Cohort", "Get-Custom-Property",
-      "Get-Dashboard", "Get-Events", "Get-Experiment-Results-Interpretation-Guidance",
+      "Get-Events", "Get-Experiment-Results-Interpretation-Guidance",
       "Get-Experiment-Setup-Guidance", "Get-Feature-Flag", "Get-Feature-Flag-Lifecycle-Guidance",
-      "Get-Feature-Flag-Setup-Guidance", "Get-Issues", "Get-Lexicon-URL", "Get-Metric",
+      "Get-Feature-Flag-Setup-Guidance", "Get-Lexicon-URL", "Get-Metric",
       "Get-Projects", "Get-Query-Schema", "Get-Tracking-Plan", "List-Cohorts", "List-Dashboards",
       "List-Experiments", "List-Feature-Flags", "List-Metrics", "List-Organizations",
       "List-Properties", "List-Tracking-Plans", "Search-Entities",
     ],
-    // Mandatory plus documented optional scopes: https://docs.mixpanel.com/docs/mcp#required-oauth-scopes
+    // Mandatory plus documented optional scopes, minus user_details (only gated tools need it):
+    // https://docs.mixpanel.com/docs/mcp#required-oauth-scopes
     oauthScopes: [
       "projects", "analysis", "events", "insights", "segmentation", "retention", "data:read",
-      "funnels", "flows", "data_definitions", "dashboard_reports", "bookmarks", "user_details",
-      "business_context",
+      "funnels", "flows", "data_definitions", "dashboard_reports", "bookmarks", "business_context",
     ],
     notes:
       "An org admin must enable MCP in Settings > Org > AI Settings first (on by default for free and growth accounts created after August 1, 2026; changes take up to 15 minutes). US data region only. No URL-level read-only mode.",
@@ -1452,6 +1455,8 @@ const CATALOG = {
     logo: "/integrations/contentful-eu.svg",
     mcpUrl: "https://mcp.eu.contentful.com/mcp",
     trustedHostnames: ["mcp.eu.contentful.com"],
+    // Pinned so a same-site US authorization server is never accepted for EU data.
+    trustedAuthorizationServerOrigins: ["https://mcp.eu.contentful.com"],
   },
 } as const satisfies Record<string, ProviderDefinition>;
 

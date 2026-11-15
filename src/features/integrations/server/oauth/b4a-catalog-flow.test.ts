@@ -78,7 +78,10 @@ describe.each(CASES)("%s OAuth discovery and DCR", (id, issuer, registrationEndp
   it("rejects an unrelated discovered authorization server before DCR", async () => {
     mocks.discover.mockResolvedValue({ authorizationServerUrl: "https://unrelated.example.test" });
     expect(await startOAuthFlow({ provider: PROVIDERS[id], redirectUri })).toMatchObject({
-      ok: false, error: expect.stringContaining("Refusing to send the user there"),
+      ok: false,
+      // EU entries pin their origin, so they fail the exact-match list instead of the same-site check.
+      error: expect.stringContaining(PROVIDERS[id].trustedAuthorizationServerOrigins
+        ? "is not in the trusted list" : "Refusing to send the user there"),
     });
     expect(mocks.register).not.toHaveBeenCalled();
     expect(mocks.authorize).not.toHaveBeenCalled();
@@ -93,7 +96,23 @@ it("requests Mixpanel's documented scopes at registration and authorization", as
   });
   const scope = PROVIDERS.mixpanel.oauthScopes?.join(" ");
   expect(scope).toContain("data:read");
+  expect(PROVIDERS.mixpanel.oauthScopes).not.toContain("user_details");
   expect(await startOAuthFlow({ provider: PROVIDERS.mixpanel, redirectUri })).toMatchObject({ ok: true });
   expect(mocks.register).toHaveBeenCalledWith(issuer, expect.objectContaining({ scope }));
   expect(mocks.authorize).toHaveBeenCalledWith(issuer, expect.objectContaining({ scope }));
+});
+
+describe.each([
+  ["amplitude-eu", "https://mcp.amplitude.com"],
+  ["contentful-eu", "https://mcp.contentful.com"],
+] as const)("%s pins its EU authorization server", (id, usOrigin) => {
+  it("rejects the US authorization server before DCR", async () => {
+    expect(PROVIDERS[id].trustedAuthorizationServerOrigins).toEqual([new URL(PROVIDERS[id].mcpUrl).origin]);
+    mocks.discover.mockResolvedValue({ authorizationServerUrl: usOrigin });
+    expect(await startOAuthFlow({ provider: PROVIDERS[id], redirectUri })).toMatchObject({
+      ok: false, error: expect.stringContaining(`"${usOrigin}" is not in the trusted list`),
+    });
+    expect(mocks.register).not.toHaveBeenCalled();
+    expect(mocks.authorize).not.toHaveBeenCalled();
+  });
 });

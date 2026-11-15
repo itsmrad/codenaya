@@ -529,6 +529,8 @@ describe("known reads exclude tools that return secrets", () => {
     ["mixpanel", "Get-Property-Values"],
     ["mixpanel", "Get-User-Replays-Data"],
     ["mixpanel", "Get-Audit-Log"],
+    ["mixpanel", "Get-Dashboard"],
+    ["mixpanel", "Get-Issues"],
     ["contentful", "create_upload_session"],
     ["contentful", "get_entry_preview_url"],
     ["contentful-eu", "list_content_previews"],
