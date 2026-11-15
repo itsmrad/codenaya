@@ -202,7 +202,7 @@ export const PromptComposer = ({
 
           {/* Toolbar of cells; p-0! beats the addon's own padding so every cell centres. */}
           <PromptInputFooter className="h-11 items-stretch gap-0 border-t border-border p-0!">
-            <PromptInputTools className="min-w-0 items-stretch gap-0">
+            <PromptInputTools data-testid="prompt-composer-tools" className="min-w-0 items-stretch gap-0">
               {showEnhance && (
                 <EnhancePromptButton
                   enhancer={enhancer}
@@ -235,12 +235,12 @@ export const PromptComposer = ({
             </PromptInputTools>
 
             {/* shrink-0: the tools give way first, so Build never leaves the frame. */}
-            <div className="flex shrink-0 items-stretch">
+            <div data-testid="prompt-composer-actions" className="flex shrink-0 items-stretch">
               {input && (
                 <span
                   className={cn(
                     CELL,
-                    "border-l px-3 font-mono text-[10px] tabular-nums tracking-[0.12em] text-muted-foreground max-md:hidden",
+                    "border-l px-3 font-mono text-[10px] tabular-nums tracking-[0.12em] text-muted-foreground @max-[640px]:hidden",
                   )}
                 >
                   {input.length.toLocaleString("en-US")} CHARS
