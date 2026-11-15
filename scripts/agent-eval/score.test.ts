@@ -49,6 +49,18 @@ describe("agent evaluation", () => {
     expect(isRuntimeError("Uncaught ReferenceError: x is not defined")).toBe(true);
     expect(isRuntimeError("Failed to load resource: 404")).toBe(false);
   });
+  it("drops Next's dev websocket and HMR noise but keeps its real errors", () => {
+    const trail = fixture();
+    const url = "https://3000-abc.e2b.app/";
+    trail.consoleErrors = [
+      { text: "WebSocket connection to 'wss://3000-abc.e2b.app/_next/webpack-hmr' failed: Error during WebSocket handshake", url },
+      { text: "WebSocket connection to 'ws://localhost:3000/_next/webpack-hmr?id=x' failed: net::ERR_CONNECTION_REFUSED", url },
+      { text: "[HMR] connected", url },
+      { text: "[Fast Refresh] performing full reload", url },
+      { text: "Unhandled Runtime Error: Invalid hook call.", url },
+    ];
+    expect(score(trail, []).consoleErrors).toEqual([{ text: "Unhandled Runtime Error: Invalid hook call.", url }]);
+  });
   it("tells the generated app's first paint from the starter's", () => {
     expect(isGeneratedApp("App")).toBe(false);
     expect(isGeneratedApp("  \n")).toBe(false);
