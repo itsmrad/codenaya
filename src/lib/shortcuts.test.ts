@@ -5,7 +5,7 @@ import {
   SHORTCUT_SCOPES,
   formatShortcutKey,
   isCommandPaletteKey,
-  isPlanModeKey,
+  isComposerPlanKey,
   isShortcutSheetKey,
 } from "./shortcuts";
 
@@ -28,10 +28,11 @@ describe("formatShortcutKey", () => {
 });
 
 describe("SHORTCUTS", () => {
-  it("lists Shift+Tab for Plan mode in Chat", () => {
-    expect(SHORTCUTS).toContainEqual({
-      label: "Toggle Plan mode", keys: [["shift", "tab"]], scope: "Chat",
-    });
+  it("lists Alt+M for Plan mode in Chat", () => {
+    expect(SHORTCUTS).toContainEqual(expect.objectContaining({
+      label: "Toggle Ask / Plan mode", keys: [["alt", "m"]], scope: "Chat",
+    }));
+    expect(SHORTCUTS.some(({ keys }) => keys.some((combo) => combo.join("+") === "shift+tab"))).toBe(false);
   });
 
   it("only uses known scopes", () => {
@@ -113,25 +114,26 @@ describe("isShortcutSheetKey", () => {
     expect(isShortcutSheetKey(keyEvent({ key: "/" }))).toBe(false);
   });
 
-  describe("isPlanModeKey", () => {
+  describe("isComposerPlanKey", () => {
     const composer = new FakeElement("TEXTAREA") as unknown as HTMLTextAreaElement;
-    const shiftTab = (init: Partial<KeyboardEvent> = {}) =>
-      keyEvent({ key: "Tab", shiftKey: true, target: composer, ...init });
+    const altM = (init: Partial<KeyboardEvent> = {}) =>
+      keyEvent({ key: "m", code: "KeyM", altKey: true, target: composer, ...init });
 
-    it("recognizes Shift+Tab only in the receiving composer", () => {
-      expect(isPlanModeKey(shiftTab(), composer)).toBe(true);
+    it("recognizes Alt+M only in the receiving composer", () => {
+      expect(isComposerPlanKey(altM(), composer)).toBe(true);
       for (const target of [new FakeElement("BUTTON"), new FakeElement("TEXTAREA"), null]) {
-        expect(isPlanModeKey(shiftTab({ target: target as EventTarget | null }), composer)).toBe(false);
+        expect(isComposerPlanKey(altM({ target: target as EventTarget | null }), composer)).toBe(false);
       }
     });
 
     it("leaves Tab, other modifiers, composition and handled events alone", () => {
       for (const init of [
-        { shiftKey: false }, { key: "Enter" }, { altKey: true },
+        { altKey: false }, { code: "Enter" }, { shiftKey: true },
+        { key: "Tab", code: "Tab", altKey: false, shiftKey: true },
         { ctrlKey: true }, { metaKey: true }, { isComposing: true },
         { defaultPrevented: true },
       ]) {
-        expect(isPlanModeKey(shiftTab(init), composer)).toBe(false);
+        expect(isComposerPlanKey(altM(init), composer)).toBe(false);
       }
     });
   });

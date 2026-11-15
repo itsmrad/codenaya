@@ -30,7 +30,6 @@ export const SHORTCUTS: Shortcut[] = [
 
   { label: "Send message", keys: [["enter"]], scope: "Chat" },
   { label: "New line", keys: [["shift", "enter"]], scope: "Chat" },
-  { label: "Toggle Plan mode", keys: [["shift", "tab"]], scope: "Chat" },
   { label: "Toggle Ask / Plan mode", description: "Build ↔ Ask / Plan; Swarm is not in this cycle.", keys: [["alt", "m"]], scope: "Chat" },
   { label: "Stop the agent", keys: [["esc"]], scope: "Chat" },
   { label: "Start or stop dictation", keys: [["alt", "v"]], scope: "Chat" },
@@ -89,9 +88,9 @@ export const isCommandPaletteKey = (event: KeyboardEvent, isMac: boolean): boole
   return key === "k" && !isInCodeEditor(event.target);
 };
 
-/** Shift+Tab only in the composer textarea whose local handler received it. */
-export const isPlanModeKey = (event: KeyboardEvent, composer: HTMLTextAreaElement): boolean =>
+/** Alt+M only in the composer textarea whose local handler received it. */
+export const isComposerPlanKey = (event: KeyboardEvent, composer: HTMLTextAreaElement): boolean =>
   event.target === composer &&
-  event.key === "Tab" && event.shiftKey &&
-  !event.altKey && !event.ctrlKey && !event.metaKey &&
+  event.code === "KeyM" && event.altKey &&
+  !event.shiftKey && !event.ctrlKey && !event.metaKey &&
   !event.defaultPrevented && !event.isComposing;
