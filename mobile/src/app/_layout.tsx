@@ -10,7 +10,7 @@ import { IBMPlexMono_500Medium } from "@expo-google-fonts/ibm-plex-mono/500Mediu
 import { ConvexReactClient, useConvexAuth } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { useFonts } from "expo-font";
-import { type ErrorBoundaryProps, Stack, ThemeProvider } from "expo-router";
+import { type ErrorBoundaryProps, Stack, ThemeProvider, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, Platform, Pressable, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -32,18 +32,26 @@ const convex = new ConvexReactClient(CONVEX_URL, {
 
 /**
  * Shown instead of a crash when a screen throws (e.g. a query for a project
- * deleted elsewhere). Retry re-renders the screen.
+ * deleted elsewhere). Retry re-renders the screen; a missing project would
+ * only throw again, so that offers the projects list instead.
  */
 export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   const c = useColors();
+  const router = useRouter();
+  const missingProject = error.message.includes("Project not found");
   return (
     <View style={{ flex: 1, justifyContent: "center", alignItems: "center", gap: 12, padding: 24, backgroundColor: c.background }}>
       <Text style={{ color: c.foreground, fontSize: 17, fontFamily: font.semibold }}>Something went wrong</Text>
       <Text style={{ color: c.mutedForeground, fontSize: 13, fontFamily: font.regular, textAlign: "center" }}>
         {error.message}
       </Text>
-      <Pressable onPress={retry} style={{ backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 }}>
-        <Text style={{ color: c.primaryForeground, fontFamily: font.medium }}>Try again</Text>
+      <Pressable
+        onPress={missingProject ? () => router.replace("/projects") : retry}
+        style={{ backgroundColor: c.primary, borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 }}
+      >
+        <Text style={{ color: c.primaryForeground, fontFamily: font.medium }}>
+          {missingProject ? "Back to projects" : "Try again"}
+        </Text>
       </Pressable>
     </View>
   );
