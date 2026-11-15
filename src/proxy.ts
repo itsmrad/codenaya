@@ -24,8 +24,10 @@ export default clerkMiddleware(
 export const config = {
   matcher: [
     // Skip Next.js internals and all static files (unless found in search params)
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    // Always run for API routes
-    '/(api|trpc)(.*)',
+    '/((?!_next|api/inngest|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    // Always run for API routes, except /api/inngest: Inngest signs its own
+    // calls (serve() verifies INNGEST_SIGNING_KEY), so skipping Clerk saves a
+    // middleware run per step.
+    '/(api(?!/inngest)|trpc)(.*)',
   ],
 };
