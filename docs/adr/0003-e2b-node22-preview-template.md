@@ -19,8 +19,7 @@ E2B's `base` image ships Node 20.9. Vite 7 needs `^20.19 || >=22.12` (it calls
 - `e2b/build-template.mts` (`npm run e2b:template`) builds the official Node 22 LTS
   image into an E2B template named by `E2B_TEMPLATE` (default: `codenaya-node22`). E2B gives it the same `user`
   account and `/home/user` home that the route expects.
-- The host sets `E2B_TEMPLATE=codenaya-node22`. The route reads it per environment and
-  falls back to `base` when it's unset.
+- The host may override `E2B_TEMPLATE`; when unset, the app warns once at module load and uses `codenaya-node22` for previews and build checks.
 - Rebuild the template when the Node major version changes or the image needs new
   system packages. Change the template name when you make a breaking change.
 
@@ -37,8 +36,7 @@ E2B's `base` image ships Node 20.9. Vite 7 needs `^20.19 || >=22.12` (it calls
 
 - Previews of modern Vite apps work, and boot time matches the base image.
 - Every environment needs its template built with that environment's `E2B_API_KEY`
-  (README production checklist, step 5). A missing variable quietly degrades to the
-  old Node.
+  (README production checklist, step 5). A missing template fails sandbox creation with E2B's not-found error instead of falling back to the old Node.
 - `e2e/preview-e2b-node.spec.ts` guards the Node version.
 
 ## Addendum: Vite 7 stays deferred (#466)
@@ -48,8 +46,7 @@ Vite 7 and plugin-react 5 need Node `^20.19 || >=22.12` in **both** engines:
 
 - **E2B:** `build-template.mts` uses `fromNodeImage("22")`, so a template built from the
   current `node:22` image is >=22.12. The version actually deployed isn't recorded;
-  `e2e/preview-e2b-node.spec.ts` only guards the major. Without `E2B_TEMPLATE` the
-  `base` image (Node 20.9) is used and Vite 7 crashes.
+  `e2e/preview-e2b-node.spec.ts` only guards the major. Without `E2B_TEMPLATE` the app warns and uses `codenaya-node22`, which must exist in the E2B team.
 - **WebContainer:** boot pins no Node version (`@webcontainer/api` 1.6.4); its in-browser
   Node version is unverified.
 
