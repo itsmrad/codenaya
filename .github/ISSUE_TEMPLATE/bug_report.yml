@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in Codenaya doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security issues go through a private advisory instead (see SECURITY.md). Never paste API keys, tokens or other secrets.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a project
+        2. Send the prompt "..."
+        3. See the error in the preview
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Chat and agent runs
+        - Agent Swarm
+        - Preview and sandbox
+        - Editor and file explorer
+        - Source control and GitHub
+        - Integrations (MCP)
+        - AI providers and BYOK
+        - Showcase, templates or skills
+        - Mobile app
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser and OS, or device for the mobile app. Say whether this is the hosted site or a self-hosted setup, and include the commit if self-hosted.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Console errors, terminal output or screenshots, with secrets removed.

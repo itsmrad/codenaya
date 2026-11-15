@@ -349,7 +349,7 @@ Open bugs only. Gaps found in code without an issue are listed on the flow itsel
   errors have accessible names and states (`project-id-view.tsx`, `settings-nav.tsx`,
   `code-editor.tsx`, `top-navigation.tsx`, `agent-run.tsx`).
 
-## 3. Compared with v0 and Lovable
+## 3. Parity with other AI app builders
 
 P1 = expected in a demo, simple to build. P2 = nice to have.
 

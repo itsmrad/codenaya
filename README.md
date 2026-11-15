@@ -1,437 +1,412 @@
-# Codenaya - Building a Cursor AI Alternative
+<p align="center">
+  <a href="https://github.com/itsmrad/codenaya">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/codenaya-banner-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="docs/assets/codenaya-banner.svg">
+      <img src="docs/assets/codenaya-banner.svg" alt="Codenaya" width="720">
+    </picture>
+  </a>
+</p>
 
-Contributing? Read the [engineering standards](docs/ENGINEERING.md) and [architecture decision records](docs/adr/) first.
+<p align="center">
+  <strong>The open-source AI app builder.</strong> Describe an app, watch agents build it in a cloud sandbox, and ship it from your browser.
+  <br />
+  <br />
+  <a href="https://codenaya.tech"><strong>Website</strong></a>
+  &middot;
+  <a href="https://www.codenaya.tech/docs">Docs</a>
+  &middot;
+  <a href="https://github.com/itsmrad/codenaya/issues">Issues</a>
+  &middot;
+  <a href="#roadmap">Roadmap</a>
+</p>
 
-## What We're Building
+<p align="center">
+  <a href="https://github.com/itsmrad/codenaya/actions/workflows/ci.yml"><img src="https://github.com/itsmrad/codenaya/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0"></a>
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5">
+  <a href="https://github.com/itsmrad/codenaya/pulse"><img src="https://img.shields.io/github/commit-activity/m/itsmrad/codenaya" alt="Commit activity"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs welcome"></a>
+</p>
 
-Codenaya is a browser-based IDE inspired by Cursor AI, featuring:
+## Table of contents
 
-- Real-time collaborative code editing
-- AI-powered code suggestions and quick edit (Cmd+K)
-- Conversation-based AI assistant
-- In-browser code execution with WebContainer
-- GitHub import/export integration
-- Multi-file project management
+- [About the project](#about-the-project)
+- [Screenshots](#screenshots)
+- [Built with](#built-with)
+- [Architecture](#architecture)
+- [Engineering facts](#engineering-facts)
+- [Getting started](#getting-started)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Repository structure](#repository-structure)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
 
-## Tech Stack
+## About the project
 
-| Category      | Technologies                                                |
-| ------------- | ----------------------------------------------------------- |
-| **Frontend**  | Next.js 16, React 19, TypeScript, Tailwind CSS 4            |
-| **Editor**    | CodeMirror 6, Custom Extensions, One Dark Theme             |
-| **Backend**   | Convex (Real-time DB), Inngest (Background Jobs)            |
-| **AI**        | Claude Sonnet 4 (preferred) or Gemini 2.0 Flash (free tier) |
-| **Auth**      | Clerk (with GitHub OAuth)                                   |
-| **Execution** | WebContainer API, xterm.js                                  |
-| **UI**        | shadcn/ui, Radix UI                                         |
+<p align="center">
+  <img src="public/og.png" alt="Codenaya: build with AI, ship from your browser" width="720">
+</p>
 
-## Part 1 Contents (Chapters 1-12)
+Codenaya is an AI website builder and agentic cloud IDE. You type a prompt; a coding agent plans the app, writes the files, runs a type check and a production build in an [E2B](https://e2b.dev) sandbox, fixes what fails, and opens a live preview. The editor, file tree, terminal and chat stay in the browser, so you can keep editing by hand or by asking.
 
-### Phase 1: Foundation & Sponsor Technologies
+What it does today (each item maps to code in [`src/features`](src/features) and [`convex/`](convex), and to a flow in [FEATURES.md](FEATURES.md)):
 
-- **Chapter 1:** Project Setup, UI Library & Theme
-- **Chapter 2:** Clerk Authentication & Protected Routes
-- **Chapter 3:** Convex Database & Real-time Setup
-- **Chapter 4:** Inngest - Background Jobs & Non-Blocking UI
-- **Chapter 5:** Firecrawl - Teaching AI with Live Documentation
-- **Chapter 6:** Sentry - Error Tracking & LLM Monitoring
-- **Chapter 7:** Projects Dashboard & Landing Page
+- **Prompt to working app.** The agent works through 17 file, build, scrape, env and skill tools, and must pass `checkBuild` (`tsc --noEmit` plus `vite build` in E2B) after its last write before a run can finish. A failed build gets bounded repair turns, then a server-side repair in a fresh sandbox. Errors the preview shows after a run are sent back to the agent once, automatically.
+- **Agent Swarm.** For large builds, an orchestrator writes the shared foundation and delegates 2–4 tasks to parallel worker agents (Haiku 5.5 by default), with optional Sonnet 5.5 sub-orchestrators. Each worker owns disjoint paths, and everything ends in one integration build gate. See [ADR 0013](docs/adr/0013-agent-swarm.md).
+- **Build, Ask/Plan and Swarm modes** in the chat composer, plus image input, prompt enhancement, past conversations, cancel and retry.
+- **Cloud preview.** E2B sandboxes with a terminal, device sizes (desktop, tablet, mobile), project environment variables (secrets are sealed and never sent to the browser) and an in-browser engine option.
+- **Source control.** Every build run snapshots the project first (the last 20 checkpoints are kept). The Source Control pane shows history, per-run and per-file diffs, and restore, and GitHub sync pushes runs as commits to a `codenaya-sync` branch and pulls changes back.
+- **GitHub import and export.** Import public repos (private ones with a linked GitHub account), or export a project to a new repository.
+- **Bring your own key (BYOK).** Use your own OpenRouter, OpenAI, Anthropic, Groq or custom OpenAI-compatible endpoint. Platform models are chosen per environment ([ADR 0005](docs/adr/0005-platform-ai-provider-by-env.md)) and per admin selection ([ADR 0006](docs/adr/0006-platform-provider-and-models-in-admin.md)).
+- **MCP integrations catalog.** 18 providers (databases, payments, auth, monitoring, docs and more) plus any custom MCP server. Credentials use envelope encryption, connections are read-only by default, and destructive tools pause for approval. See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
+- **Editor AI.** CodeMirror 6 with inline ghost-text suggestions and Cmd+K quick edit.
+- **Skills, starter templates and a community showcase** for publishing, voting on and remixing projects.
+- **Mobile app.** An Expo app in [`mobile/`](mobile) that uses the same Convex deployment, Clerk instance and API.
 
-### Phase 2: File System & Editor
+## Screenshots
 
-- **Chapter 8:** Project IDE Layout & Resizable Panes
-- **Chapter 9:** File Explorer - Full Implementation
-- **Chapter 10:** Code Editor & State Management
+<!--
+  TODO(owner): add real product screenshots. Suggested set, saved under docs/assets/:
+    docs/assets/ide.png       IDE with chat, editor and live preview
+    docs/assets/swarm.png     Agent Swarm board during a build
+    docs/assets/source-control.png  Source Control pane with a diff
+  Then replace this comment with <img> tags. No screenshots exist in the repo yet,
+  so none are shown here.
+-->
 
-### Phase 3: AI Features (Partial)
+> **TODO:** no product screenshots are in the repository yet. Maintainers: see the comment in this section of `README.md` for the suggested set.
 
-- **Chapter 11:** AI Suggestions & Quick Edit
-- **Chapter 12:** Conversation System
+## Built with
 
-## Part 2 Contents (Chapters 13-16) - Coming Soon
+| Area | Technology |
+| --- | --- |
+| Web app | [Next.js 16](https://nextjs.org) (App Router), [React 19](https://react.dev), [TypeScript 5](https://www.typescriptlang.org), [Tailwind CSS 4](https://tailwindcss.com), [shadcn/ui](https://ui.shadcn.com) on Radix UI |
+| Editor and terminal | [CodeMirror 6](https://codemirror.net), [xterm.js](https://xtermjs.org) |
+| Backend and data | [Convex](https://convex.dev) (database, real-time queries, file storage, crons) |
+| Agent runtime | [Inngest](https://www.inngest.com) with [AgentKit](https://agentkit.inngest.com), [Vercel AI SDK](https://ai-sdk.dev) for editor AI |
+| Sandboxes | [E2B](https://e2b.dev) cloud sandboxes (custom Node 22 template), [WebContainer](https://webcontainers.io) as the in-browser option |
+| Models | OpenRouter, OpenAI, Anthropic or Groq for the platform; any of them, or a custom endpoint, through BYOK |
+| Auth | [Clerk](https://clerk.com) (including GitHub OAuth for import and sync) |
+| Integrations | [Model Context Protocol](https://modelcontextprotocol.io) SDK, OAuth PKCE, AES-256-GCM envelope encryption |
+| Observability | [Sentry](https://sentry.io) |
+| Mobile | [Expo](https://expo.dev) and React Native |
+| Testing | [Vitest](https://vitest.dev), [convex-test](https://www.npmjs.com/package/convex-test), [Playwright](https://playwright.dev) with axe-core |
 
-- **Chapter 13:** AI Agent & Tools (AgentKit, file management tools)
-- **Chapter 14:** WebContainer, Terminal & Preview
-- **Chapter 15:** GitHub Import & Export
-- **Chapter 16:** AI Project Creation & Final Polish
+## Architecture
 
-## Getting Started
+### System overview
+
+```mermaid
+flowchart LR
+  user["Browser<br/>Next.js + React"]
+  mobile["Mobile app<br/>Expo"]
+
+  subgraph host["Next.js host"]
+    api["API routes<br/>/api/messages, /api/sandbox, ..."]
+    inngestRoute["/api/inngest"]
+  end
+
+  subgraph runtime["Inngest agent runtime"]
+    pm["processMessage<br/>AgentKit network"]
+    sw["swarm-worker"]
+    gh["GitHub import / export / push / pull"]
+  end
+
+  convex[("Convex<br/>projects, files, messages,<br/>checkpoints, agentTasks")]
+  clerk["Clerk"]
+  e2b["E2B sandboxes<br/>preview + build checks"]
+  llm["AI providers<br/>platform or BYOK"]
+  mcp["MCP servers"]
+  github["GitHub"]
+
+  user -- "sign in" --> clerk
+  mobile -- "sign in" --> clerk
+  user -- "real-time queries" --> convex
+  mobile -- "real-time queries" --> convex
+  user --> api
+  mobile --> api
+  api --> convex
+  api -- "events" --> runtime
+  inngestRoute -. "serves" .-> runtime
+  api -- "boot, sync files" --> e2b
+  user -- "preview iframe" --> e2b
+  pm --> llm
+  sw --> llm
+  pm --> mcp
+  pm -- "file writes, steps" --> convex
+  sw -- "file writes, steps" --> convex
+  pm -- "checkBuild, repair" --> e2b
+  gh --> github
+  clerk -- "user-sync webhook" --> convex
+```
+
+The Convex file tree is the source of truth. Agents write files to Convex; the open preview syncs that tree into its E2B sandbox. Inngest makes runs durable, cancellable and replay-safe, and keys are resolved outside Inngest steps so no secret lands in run history ([ADR 0002](docs/adr/0002-agent-runtime-inngest-agentkit-openrouter.md)).
+
+### Request lifecycle: prompt to preview
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant W as Web app
+  participant A as /api/messages
+  participant C as Convex
+  participant I as Inngest processMessage
+  participant M as Model
+  participant S as E2B sandbox
+
+  U->>W: Prompt
+  W->>A: POST message
+  A->>A: Rate limit, validate model and key
+  A->>C: Create message
+  A->>I: Send message/sent event
+  loop Agent turns, bounded step budget
+    I->>M: Messages and tools
+    M-->>I: Tool calls
+    I->>C: Write files, record steps
+    C-->>W: Live updates to tree and chat
+  end
+  I->>S: checkBuild: tsc --noEmit and vite build
+  alt Build fails
+    I->>M: Repair turns, up to 2 fixes
+    I->>S: Server-side verify and fix in a fresh sandbox
+  end
+  I->>C: Finish message with build status note
+  W->>S: Sync files and show preview
+  opt Preview reports an error after the run
+    W->>A: Auto-fix message, once per error
+  end
+```
+
+The build gate lives in [`build-check-gate.ts`](src/features/conversations/inngest/build-check-gate.ts) and the server-side repair in [`build-repair.ts`](src/features/conversations/inngest/build-repair.ts). The browser auto-fixer is `createAutoFixer` in [`app-error.ts`](src/features/sandbox-preview/utils/app-error.ts).
+
+### Agent Swarm
+
+```mermaid
+flowchart TB
+  prompt["Prompt in Swarm mode"] --> orch["Orchestrator<br/>run model, Auto routes to Sonnet 5.5"]
+  orch -- "writes shared foundation" --> tree[("Convex file tree")]
+  orch -- "delegateTasks: 2-4 tasks" --> plan{"Plan validated<br/>disjoint owned paths"}
+  plan --> w1["Worker<br/>Haiku 5.5"]
+  plan --> w2["Worker<br/>Haiku 5.5"]
+  plan --> so["Sub-orchestrator<br/>Sonnet 5.5, optional depth 2"]
+  so --> w3["Worker<br/>Haiku 5.5"]
+  so --> w4["Worker<br/>Haiku 5.5"]
+  w1 & w2 & w3 & w4 -- "guarded writes to owned paths" --> tree
+  w1 & w2 & w3 & w4 -. "optional self-check<br/>SWARM_WORKER_SANDBOXES" .-> sb["Worker sandboxes"]
+  w1 & w2 & so -- "reports, NEEDS" --> integ["Orchestrator as integrator"]
+  integ --> gate{"Integration gate<br/>checkBuild + build gate"}
+  gate -- "pass" --> verified["Verified build and preview"]
+  gate -- "fail" --> integ
+```
+
+Each worker is its own Inngest function run, started with parallel `step.invoke`, with its own step budget (20), cost cap ($0.50 at catalog price) and cancellation. A message has at most 8 agents. Swarm can be turned off with the Convex env var `SWARM_ENABLED`. Details and tradeoffs: [ADR 0013](docs/adr/0013-agent-swarm.md).
+
+## Engineering facts
+
+| Metric | Value |
+| --- | --- |
+| Unit and Convex test files (`*.test.ts`, `*.test.tsx`) | 225 |
+| Unit and Convex test cases (`it` / `test` calls) | 2,057 |
+| Playwright e2e specs (`e2e/*.spec.ts`) | 78 |
+| Playwright test cases | 283 |
+| Architecture decision records | 12 |
+| Feature modules (`src/features/*`) | 16 |
+| Convex modules (non-test `convex/*.ts`) | 37 |
+| Next.js API route handlers | 27 |
+| Agent tools (`inngest/tools`) | 17 |
+| Inngest functions | 7 |
+| MCP catalog providers | 18 |
+| Runtime / dev dependencies (web app) | 91 / 16 |
+
+```mermaid
+pie showData
+  title Lines of TypeScript and JavaScript by area
+  "src/features" : 71085
+  "convex" : 18019
+  "e2e" : 9184
+  "src/app" : 9077
+  "src/components" : 9005
+  "mobile" : 8802
+  "src/lib" : 1554
+  "scripts" : 848
+```
+
+Of these lines, 46,422 are tests (unit, Convex and e2e).
+
+<details>
+<summary>How these numbers were computed</summary>
+
+Run from the repository root at commit `33183809` (2026-11-15). Counts include only files tracked by git.
+
+```bash
+git ls-files '*.test.ts' '*.test.tsx' | wc -l                       # test files
+git ls-files '*.test.ts' '*.test.tsx' | xargs grep -hcE '^\s*(it|test)(\.(each|skip|only)[^(]*)?\(' \
+  | awk '{s+=$1} END {print s}'                                     # test cases
+git ls-files 'e2e/*.spec.ts' | wc -l                                # e2e specs
+git ls-files 'e2e/*.spec.ts' | xargs grep -hcE '^\s*test(\.(each|skip|only|fixme)[^(]*)?\(' \
+  | awk '{s+=$1} END {print s}'                                     # e2e cases
+git ls-files 'docs/adr/[0-9]*.md' | grep -v 0000 | wc -l            # ADRs (template excluded)
+ls -d src/features/*/ | wc -l                                       # feature modules
+git ls-files 'convex/*.ts' | grep -v -e '\.test\.ts$' -e '^convex/_generated' | wc -l
+git ls-files 'src/app/api/**/route.ts' | wc -l                      # API route handlers
+grep -cE '^\s*id: "' src/features/integrations/catalog.ts           # MCP catalog providers
+jq '.dependencies, .devDependencies | length' package.json
+# Lines by area (generated Convex code excluded):
+for a in src/app src/components src/features src/lib convex mobile e2e scripts; do
+  git ls-files "$a" | grep -E '\.(ts|tsx|mts|mjs|js)$' | grep -v _generated | xargs cat | wc -l
+done
+git ls-files '*.test.ts' '*.test.tsx' 'e2e/*.ts' | xargs cat | wc -l  # test lines
+```
+
+Agent tools are the files in `src/features/conversations/inngest/tools/` minus tests and helpers (`paths.ts`, `post-write-checks.ts`, `package-versions.ts`, `syntax-error.ts`). Inngest functions are the ones registered in `src/app/api/inngest/route.ts`.
+
+</details>
+
+## Getting started
 
 ### Prerequisites
 
-- Node.js 20.09+
-- npm or pnpm
-- Accounts needed:
-  - [Clerk](https://clerk.com) - Authentication
-  - [Convex](https://convex.dev) - Database
-  - [Inngest](https://inngest.com) - Background jobs
-  - [OpenRouter](https://openrouter.ai) - LLM API
-  - [E2B](https://e2b.dev) - Cloud sandbox previews
-  - [Firecrawl](https://firecrawl.dev) - Web scraping (optional)
-  - [Sentry](https://sentry.io) - Error tracking (optional)
+- Node.js 20.9 or newer (CI runs Node 24) and npm
+- Accounts: [Clerk](https://clerk.com), [Convex](https://convex.dev), [E2B](https://e2b.dev), and a key for one AI provider (OpenRouter by default; OpenAI, Anthropic or Groq also work)
+- Optional: [Firecrawl](https://firecrawl.dev) (URL scraping), [Sentry](https://sentry.io) (errors), [Infisical](https://infisical.com) (secret injection)
 
-### Installation
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/itsmrad/codenaya.git
-   cd codenaya
-   ```
-
-2. Install dependencies:
-
-   ```bash
-   npm install
-   ```
-
-3. Set up environment variables:
-
-   ```bash
-   cp .env.example .env.local
-   ```
-
-4. Fill in `.env.local`. `.env.example` lists every variable the app reads, split into **Required** and **Optional**, and tags each with where it goes: the Next.js host, the Convex deployment, or both. See [Environment & secrets](#environment--secrets).
-
-5. Start the Convex development server:
-
-   ```bash
-   npx convex dev
-   ```
-
-6. In a new terminal, start the Next.js development server:
-
-   ```bash
-   npm run dev
-   ```
-
-7. In another terminal, start the Inngest dev server:
-
-   ```bash
-   npx inngest-cli@latest dev
-   ```
-
-8. Open [http://localhost:3000](http://localhost:3000)
-
-### Environment & secrets
-
-`.env.example` is the reference for every variable: required vs optional, a one-line description, and a tag for where it is read:
-
-- **[Next]** by the Next.js server (and Inngest functions, which run inside it).
-- **[Convex]** by Convex functions, which run on Convex's servers and see only the deployment's own env: `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `SHOWCASE_UNLISTED_OWNER_IDS`.
-- **[Both]** in both places, with the same value: `CODENAYA_CONVEX_INTERNAL_KEY`.
-
-#### Infisical
-
-Secrets live in the Infisical project `codenaya` (environments: `dev`, `staging`, `prod`). The project is linked via `.infisical.json`, which holds no secret values. Never commit `.env*` files or paste secret values into issues or PRs.
+### Quickstart
 
 ```bash
-infisical login                    # once per machine
-npm run dev:infisical              # next dev with dev secrets injected
-infisical run --env dev -- <cmd>   # inject secrets into any other command
+git clone https://github.com/itsmrad/codenaya.git
+cd codenaya
+npm install
+cp .env.example .env.local   # then fill in the Required section
 ```
 
-Outside the repo root (or in a worktree without `.infisical.json`), pass the project explicitly: `infisical run --env dev --projectId 2aecb08a-77b7-45fb-b366-57a36ffab934 -- <cmd>`. `NEXT_PUBLIC_CONVEX_URL` and `CONVEX_DEPLOYMENT` are written to `.env.local` by `npx convex dev`.
+[`.env.example`](.env.example) lists every variable, split into **Required** and **Optional**, and tags where each one is read: the Next.js host `[Next]`, the Convex deployment `[Convex]`, or both. Convex-side variables are set with `npx convex env set NAME value`. The full guide, including Infisical, is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#environment--secrets).
 
-Infisical only injects secrets into local processes. Convex variables must also be set on the deployment:
+Then run three processes:
 
 ```bash
-npx convex env set NAME value          # dev deployment
-npx convex env set --prod NAME value   # production deployment
+npx convex dev                 # Convex functions and schema; writes NEXT_PUBLIC_CONVEX_URL to .env.local
+npm run dev                    # Next.js on http://localhost:3000
+npx inngest-cli@latest dev     # Inngest dev server for agent runs
 ```
 
-#### Production checklist
+With Infisical set up, `npm run dev:infisical` starts Next.js with the `dev` secrets injected.
 
-1. **Next.js host env.** Set every Required `[Next]` variable from the Infisical `prod` environment, plus `NEXT_PUBLIC_APP_URL` (or `INTEGRATIONS_REDIRECT_URI`) for the real domain. Use the same `CODENAYA_LOCAL_KEK` as every other environment, or stored credentials cannot be decrypted.
-2. **Convex env.** On the production deployment, set `CLERK_JWT_ISSUER_DOMAIN` (the production Clerk instance), `CLERK_WEBHOOK_SECRET` (step 4) and `CODENAYA_CONVEX_INTERNAL_KEY` (same value as the host).
-3. **Convex deploy + backfill.** Deploy functions and schema with `npx convex deploy --cmd 'npm run build'` (needs `CONVEX_DEPLOY_KEY`; keep `npm run build` as plain `next build`). After the first deploy, backfill the landing-page project counter once: `npx convex run --prod stats:backfillProjectsBuilt '{}'`.
-4. **Clerk webhook.** In the production Clerk instance, add a webhook to `https://<prod-deployment>.convex.site/clerk-users-webhook` with events `user.created`, `user.updated`, `user.deleted`; put its signing secret in Convex as `CLERK_WEBHOOK_SECRET`. Enable "Delete account" under User & authentication > Account settings.
-5. **E2B template.** Run `npm run e2b:template` with the production `E2B_API_KEY` and optional `E2B_TEMPLATE` (build default: `codenaya-node22`), then set the same template name in `E2B_TEMPLATE` on the host. Without it previews use the `base` image, whose Node is too old for Vite 7.
-6. **Inngest Cloud.** Set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` on the host, leave `INNGEST_DEV` unset, and sync the app at `https://<your-domain>/api/inngest` (the Inngest Vercel integration does both automatically).
+For real previews and build checks, build the E2B template once with `npm run e2b:template` and set `E2B_TEMPLATE` (default `codenaya-node22`).
 
-### Running e2e tests
+### Scripts
 
-End-to-end tests use [Playwright](https://playwright.dev) and live in `e2e/`.
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Start the Next.js dev server |
+| `npm run dev:infisical` | Start the dev server with Infisical `dev` secrets |
+| `npm run build` | Production build (`next build`) |
+| `npm run build:local` | Regenerate Convex types, then build |
+| `npm run start` | Serve the production build |
+| `npm run lint` | ESLint |
+| `npm test` | Unit and Convex tests (Vitest) |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run test:e2e` | Playwright end-to-end tests |
+| `npm run e2b:template` | Build the E2B sandbox template |
+| `npm run eval:agent` | Live agent evaluation; spends real model credits, see [docs/EVAL.md](docs/EVAL.md) |
 
-```bash
-npx playwright install chromium   # once; skipped if ~/.cache/ms-playwright already has it
-npm run test:e2e                  # starts `next dev` on port 3113 (or reuses a running one)
+## Testing
+
+| Layer | Tool | Where | Run |
+| --- | --- | --- | --- |
+| Unit | Vitest | `*.test.ts` next to the code | `npm test` |
+| Convex functions | convex-test (edge runtime) | `convex/*.test.ts` | `npm test` |
+| End to end | Playwright, axe-core | `e2e/*.spec.ts` | `npm run test:e2e` |
+| Agent quality | Live eval harness | `scripts/agent-eval/` | `npm run eval:agent` |
+
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the typecheck, lint, unit tests and production build on every pull request, plus the mobile typecheck and lint when mobile or shared code changes. Playwright needs a live Convex deployment and a Clerk test-user pool, so it runs locally; e2e specs stub the model with [`e2e/stub-provider.ts`](e2e/stub-provider.ts). Setup and opt-in specs are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#running-e2e-tests).
+
+## Deployment
+
+Codenaya runs as a Next.js app (for example on Vercel) with a Convex production deployment, Inngest Cloud and E2B. Deploy Convex and the web app together with `npx convex deploy --cmd 'npm run build'`. Keep Convex schema changes backward compatible, because functions deploy before the web app. The full production checklist (env, Clerk webhook, E2B template, Inngest sync) is in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## Repository structure
+
+```text
+.
+├── src/
+│   ├── app/                 # Next.js App Router: pages, API routes (src/app/api), docs, showcase
+│   ├── components/          # Shared UI (shadcn/ui, landing, AI elements)
+│   ├── features/            # Feature modules (16), each with components/, hooks/, server/
+│   │   ├── conversations/   # Chat, agent runtime (inngest/), tools, build gate, swarm
+│   │   ├── sandbox-preview/ # E2B preview, boot steps, error detection, auto-fix
+│   │   ├── projects/        # IDE shell, file explorer, source control, GitHub jobs
+│   │   ├── integrations/    # MCP catalog, OAuth, credential encryption
+│   │   ├── ai-providers/    # Platform models, BYOK, Auto routing
+│   │   └── ...              # editor, skills, templates, showcase, admin, settings, ...
+│   ├── inngest/             # Inngest client
+│   └── lib/                 # Cross-feature utilities (rate limits, Convex client, Sentry)
+├── convex/                  # Schema, queries, mutations, actions, crons, HTTP webhooks
+├── e2e/                     # Playwright specs, Clerk user pool, stub model provider
+├── e2b/                     # E2B sandbox template build
+├── mobile/                  # Expo mobile app
+├── scripts/agent-eval/      # Live agent evaluation harness
+└── docs/                    # Engineering standards, ADRs, development and deployment guides
 ```
 
-Set `E2E_PORT` to use another port. Failure screenshots and traces go to `test-results/`; open the HTML report with `npx playwright show-report`. Specs that need auth or secrets should call `test.skip(!process.env.SOME_VAR, "reason")` so they skip cleanly when the env var is absent.
-
-Signed-in specs use `e2e/clerk-auth.ts`, which needs `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (run under `infisical run`). Each run signs in as one user from a pool of Clerk DEV test users, `codenaya-e2e-<n>+clerk_test@example.com`, so parallel runs from different worktrees never share a session:
-
-- `n` is `E2E_USER_INDEX` if set, else `E2E_PORT % 6 + 1`; give runs whose ports collide distinct `E2E_USER_INDEX` values. `E2E_EMAIL` pins one specific user instead.
-- `e2e/global-setup.ts` creates the user if needed, revokes its sessions idle for over an hour, signs in once and saves the session to `playwright/.auth/` (gitignored); `signIn(page)` reuses it.
-- It also sets `E2E_PROJECT_ID` to the user's `e2e fixture` project, creating it on first use. With `E2E_EMAIL` set, `E2E_PROJECT_ID` must name a project that user owns.
-
-Opt-in specs skip unless their vars are set:
-
-| Variable | Spec | Value |
-| --- | --- | --- |
-| `E2E_DISPATCH_UNREACHABLE` | `chat-dispatch-failure.spec.ts` | `1`, against a dev server whose Inngest URLs point nowhere (see the spec) |
-| `E2E_LIVE_AGENT` | `agent-vite-scaffold.spec.ts` | `1`; also needs the Inngest dev server, `E2B_API_KEY` and `E2B_TEMPLATE` |
-| `E2E_OPENAI_KEY` | `ai-providers.spec.ts` | a working OpenAI key; the server also needs `CODENAYA_LOCAL_KEK` |
-| `E2E_STORAGE_STATE`, `E2E_PREVIEW_PATH` | `preview-device.spec.ts` | a Playwright storage-state file for a signed-in user, and a `/projects/<id>` path |
-
-### Live agent evaluation
-
-`npm run eval:agent` runs real builds (dev Convex, E2B, platform models from the admin catalog: Claude Haiku/Sonnet/Opus 5.5, and `openai/gpt-6-luna` and `google/gemini-4-hydrogen` through OpenRouter) and scores them. It spends real money, so it never runs in CI. Start the stack, then run it under Infisical dev:
-
-```bash
-infisical run --env dev -- env INNGEST_BASE_URL=http://localhost:8299 npx next dev -p 3213
-npx inngest-cli@latest dev -p 8299 -u http://localhost:3213/api/inngest --no-discovery
-infisical run --env dev -- npm run eval:agent -- --models claude-haiku-5-5 --prompts booking,saas,crm --judge
-```
+### Documentation
 
-Options: `--runs N`, `--max-usd X` per run (default Haiku 0.75, Sonnet 2, Opus 3; the run is cancelled through the app when its metered cost crosses it), `--budget-usd X` for the whole local ledger (default 2), `--judge` / `--judge-model`, `--keep` to keep the projects (deleted after scoring by default), `--as-admin` to build as the existing Clerk user holding `ADMIN_EMAIL` (looked up, never created; its projects are always kept, named by `--title`, default `Night build — {app} — {config}`), `--title "<template>"` with `{app}` and `{config}` placeholders, and `followup` (needs `saas`, runs as its second turn). Metering reads the dev `creditLedger` table with the read-only `npx convex data` CLI, so the Convex CLI must be logged in.
+| Document | Contents |
+| --- | --- |
+| [FEATURES.md](FEATURES.md) | Every user flow, its code path, status and e2e coverage |
+| [docs/ENGINEERING.md](docs/ENGINEERING.md) | Engineering standards a PR is reviewed against |
+| [docs/adr/](docs/adr/) | Architecture decision records |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Environment, secrets, Infisical, e2e setup |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Production checklist |
+| [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | MCP integrations: credentials, KEK rotation, operational limits |
+| [docs/EVAL.md](docs/EVAL.md) | Live agent evaluation harness |
+| [HANDOVER.md](HANDOVER.md) | MCP integrations handover and verification status |
+| [mobile/README.md](mobile/README.md) | Running and building the mobile app |
 
-Each run signs in as `codenaya-eval-297+clerk_test@example.com`, sends the prompt, keeps the project page open through the preview auto-fix window and records a sanitized trail. Output goes to `scripts/agent-eval/results/<timestamp>/` (gitignored): `runs/<id>/{trail.json,score.json,app.png}` and `scoreboard.md`. The cumulative spend is in `scripts/agent-eval/results/ledger.json`. `firstAppPaintMs` is the time to the generated app's first paint, past the starter's "App" heading and its error boundary. An app that renders only images or a canvas has no text and leaves it empty. A Haiku 5.5 run of `booking,saas,crm --judge` cost $0.15 (about $0.08 per completed build, under $0.001 per judge call); see `scripts/agent-eval/baselines/`. Sonnet and Opus cost roughly 20× and 40× that.
+## Roadmap
 
-To add a prompt from a real failure, put the user's prompt and a short rubric of what should be visible into `scripts/agent-eval/prompts.json`, then run it alone with `--prompts <name> --keep` and check the trail for the failing step.
+Planned work is tracked in [GitHub issues](https://github.com/itsmrad/codenaya/issues). Highlights:
 
-## Project Structure
+- Credits and billing ([#105](https://github.com/itsmrad/codenaya/issues/105))
+- Deploy projects to a live URL ([#224](https://github.com/itsmrad/codenaya/issues/224))
+- Select an element in the preview to edit it ([#227](https://github.com/itsmrad/codenaya/issues/227))
+- Read-only share links ([#260](https://github.com/itsmrad/codenaya/issues/260))
+- Wider e2e coverage ([#236](https://github.com/itsmrad/codenaya/issues/236))
 
-```
-src/
-├── app/                    # Next.js App Router
-│   ├── api/               # API routes
-│   │   ├── messages/      # Conversation API
-│   │   ├── suggestion/    # AI suggestions
-│   │   └── quick-edit/    # Cmd+K editing
-│   └── projects/          # Project pages
-├── components/            # Shared components
-│   ├── ui/               # shadcn/ui components
-│   └── ai-elements/      # AI conversation components
-├── features/
-│   ├── auth/             # Authentication
-│   ├── conversations/    # AI chat system
-│   ├── editor/           # CodeMirror setup
-│   │   └── extensions/   # Custom extensions
-│   ├── preview/          # WebContainer (Part 2)
-│   └── projects/         # Project management
-├── inngest/              # Inngest client
-└── lib/                  # Utilities
+[FEATURES.md](FEATURES.md) lists what works today, with known gaps.
 
-convex/
-├── schema.ts             # Database schema
-├── projects.ts           # Project queries/mutations
-├── files.ts              # File operations
-├── conversations.ts      # Conversation operations
-└── system.ts             # Internal API for Inngest
-```
+## Contributing
 
-## Features Implemented (Part 1)
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, branch and commit conventions and the PR checklist, and [docs/ENGINEERING.md](docs/ENGINEERING.md) for the standards reviews use. Issues labeled [`good first issue`](https://github.com/itsmrad/codenaya/labels/good%20first%20issue) are a good place to start. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-### Editor
+### Repo activity
 
-- Syntax highlighting for JS, TS, CSS, HTML, JSON, Markdown, Python
-- Line numbers and code folding
-- Minimap overview
-- Bracket matching and indentation guides
-- Multi-cursor editing
+<!-- TODO(owner): Repobeats needs a one-time sign-in at https://repobeats.axiom.co to generate this repo's embed URL. Paste the generated image tag here. -->
 
-### AI Features
+[![Star history chart](https://api.star-history.com/svg?repos=itsmrad/codenaya&type=Date)](https://star-history.com/#itsmrad/codenaya&Date)
 
-- Real-time code suggestions with ghost text
-- Quick edit with Cmd+K (select code + natural language instruction)
-- Selection tooltip for quick actions
-- Conversation sidebar with message history
+### Contributors
 
-### File Management
+<a href="https://github.com/itsmrad/codenaya/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=itsmrad/codenaya" alt="Contributors to Codenaya">
+</a>
 
-- File explorer with folder hierarchy
-- Create, rename, delete files and folders
-- VSCode-style file icons
-- Tab-based file navigation
-- Auto-save with debouncing
+## Security
 
-### Real-time
+Please don't report vulnerabilities in public issues. Use a private [GitHub security advisory](https://github.com/itsmrad/codenaya/security/advisories/new); [SECURITY.md](SECURITY.md) describes scope and what to expect.
 
-- Convex-powered instant updates
-- Optimistic UI updates
-- Background job processing with Inngest
+## License
 
-## Current Limitations (Part 1)
+Copyright (C) 2026 Codenaya contributors.
 
-These features are planned for Part 2:
+Codenaya is free software, licensed under the [GNU Affero General Public License v3.0 only](LICENSE) (`AGPL-3.0-only`). If you run a modified version as a network service, the AGPL requires you to offer its users the corresponding source code.
 
-- AI agent cannot yet modify files (mock response only)
-- No message cancellation
-- No past conversations dialog
-- No code preview/execution
-- No GitHub integration
-- No AI project generation
+Code adapted from other projects keeps its original license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## Scripts
+## Acknowledgements
 
-```bash
-npm run dev       # Start development server
-npm run dev:infisical  # Start dev server with Infisical secrets
-npm run build     # Build for production
-npm run start     # Start production server
-npm run lint      # Run ESLint
-```
-
-## Project Links
-
-- **Demo Video:** [Coming Soon]
-- **Part 1:** Chapters 1-12
-- **Part 2:** Chapters 13-16
-
-## Sponsors
-
-A huge thank you to the sponsors who made this tutorial possible. Consider checking them out - they offer generous free tiers perfect for learning!
-
-### Authentication
-
-**[Clerk](https://clerk.com)** - Add authentication to your app in minutes, not days.
-
-### Database
-
-**[Convex](https://convex.dev)** - The real-time database that makes building collaborative apps a breeze.
-
-### Background Jobs
-
-**[Inngest](https://inngest.com)** - Reliable background jobs and event-driven workflows.
-
-### Web Scraping
-
-**[Firecrawl](https://firecrawl.dev)** - Turn any website into LLM-ready data.
-
-### Error Tracking
-
-**[Sentry](https://sentry.io)** - See what's broken and fix it fast.
-
-### Code Review
-
-**[CodeRabbit](https://coderabbit.ai)** - AI-powered code reviews that catch bugs before your users do.
-
-## MCP Integrations
-
-Users can connect external services (Supabase, Neon, GitHub, Stripe, Context7,
-Prisma, Sentry, Cloudflare, Linear, or any custom MCP server) and the coding agent
-gains those services' tools. Credentials the agent provisions are stored encrypted
-and injected into the preview, so generated apps can be genuinely full-stack.
-
-### Required environment variables
-
-```bash
-# Master key for the credential store. REQUIRED before any connection can be made.
-# Generate with: openssl rand -base64 32
-CODENAYA_LOCAL_KEK=
-
-# Absolute OAuth callback URL. Required for OAuth connections.
-INTEGRATIONS_REDIRECT_URI=http://localhost:3000/api/integrations/oauth/callback   # local
-# In production, swap the host for your real domain (https required off localhost).
-```
-
-Use the **same `CODENAYA_LOCAL_KEK` in every environment**. A different value means
-credentials sealed in one cannot be opened in another, and the failure surfaces as a
-decryption error rather than a configuration one.
-
-**If you lose the key, stored credentials are unrecoverable.** That is the point of
-encryption — keep a copy in a password manager. Users would need to reconnect.
-
-### Optional
-
-```bash
-# KEK provider. Defaults to "local".
-CODENAYA_KEK_PROVIDER=local          # or "gcp-kms"
-
-# Only for CODENAYA_KEK_PROVIDER=gcp-kms. Reuses GOOGLE_CLIENT_EMAIL /
-# GOOGLE_PRIVATE_KEY, so no new credentials are needed.
-CODENAYA_GCP_KMS_KEY=projects/p/locations/l/keyRings/r/cryptoKeys/k
-
-# Comma-separated decrypt-only keys, for rotation. See below.
-CODENAYA_LOCAL_KEK_RETIRED=
-
-# Allows http:// MCP URLs. Ignored in production even if set.
-CODENAYA_ALLOW_INSECURE_MCP_URLS=1
-```
-
-### How credentials are stored
-
-Envelope encryption. Each secret gets its own random 256-bit data encryption key
-(DEK); the secret is encrypted with AES-256-GCM under that DEK, and the DEK is
-wrapped by the KEK. Only the wrapped DEK and the ciphertext are persisted — the KEK
-never reaches the database.
-
-Every ciphertext is bound to its own row via GCM additional authenticated data, so a
-sealed value copied into a different row fails to decrypt rather than silently
-working.
-
-**The tradeoff:** with the `local` provider the KEK lives in an environment
-variable, so an attacker holding *both* the environment and the database can decrypt
-everything. A hosted KMS would make the database alone insufficient. This is
-accepted deliberately to keep running costs at zero.
-
-### Rotating the KEK
-
-No downtime and no bulk migration needed:
-
-```bash
-CODENAYA_LOCAL_KEK=<new key>          # wraps all new DEKs
-CODENAYA_LOCAL_KEK_RETIRED=<old key>  # decrypt-only
-```
-
-New credentials seal under the new key; existing rows still open with the retired
-one. Keys are identified by a SHA-256 fingerprint stored per row, so ordering does
-not matter. Drop the retired entry once everything has been re-wrapped.
-
-### Moving to Google Cloud KMS
-
-Because the KEK only ever wraps DEKs, this is a pass over one short column rather
-than a re-encryption of every credential — `ciphertext`, `iv` and `authTag` are
-copied through byte-identical (asserted by `rewrap.test.ts`).
-
-1. Create a key ring and key in Cloud KMS.
-2. Grant the existing service account `roles/cloudkms.cryptoKeyEncrypterDecrypter`.
-3. Set `CODENAYA_GCP_KMS_KEY`.
-4. Re-wrap existing rows using `rewrapSealedSecret`, which is idempotent and safe to
-   re-run after an interruption.
-5. Set `CODENAYA_KEK_PROVIDER=gcp-kms`.
-
-Old and new rows stay readable throughout, because each row records the provider and
-key that sealed it.
-
-### Preview engines and secret visibility
-
-| | Cloud Sandbox (E2B) | In-browser (WebContainer) |
-| --- | --- | --- |
-| Runs | Server-side | In the user's page |
-| Public vars | ✅ | ✅ |
-| Secret vars | ✅ | ❌ withheld |
-
-WebContainer boots in the browser, so anything given to it is readable by the end
-user and by anyone they share a preview with. Variables prefixed
-`NEXT_PUBLIC_`, `VITE_`, `PUBLIC_`, `REACT_APP_`, `EXPO_PUBLIC_`, `GATSBY_` or
-`NUXT_PUBLIC_` are treated as public — bundlers inline them into client JavaScript
-regardless, so calling them secret would be a false promise. Everything else
-defaults to secret.
-
-### Operational notes
-
-- **Read-only by default.** New project connections are read-only; enabling writes
-  requires explicit confirmation. Five providers (Stripe, Context7, Prisma,
-  Cloudflare, Sentry) cannot express read-only in their MCP endpoint, so for those it
-  is enforced by the approval gate instead and the UI says so.
-- **Destructive tools require approval.** The agent pauses and waits up to 15 minutes
-  for a decision. With no approval mechanism available the call is refused, never
-  silently executed.
-- **Tool budget.** 40 tools per connection, 80 per project. Tool schemas are sent to
-  the model on every request, so an unbounded set would evict the conversation from
-  context.
-- **Tool drift.** Definitions are fingerprinted at approval time. If a server later
-  changes a tool's description or schema, that tool is withheld until reviewed — a
-  description is instruction text the model obeys.
-- **Cleanup crons** prune expired OAuth states, lapsed approvals, orphaned links and
-  audit entries older than 30 days. See `convex/crons.ts`.
-
-## Acknowledgments
-
-- [Cursor](https://cursor.sh) - Inspiration for the project
-- [Orchids](https://orchids.app) - Inspiration for the project
-- [shadcn/ui](https://ui.shadcn.com) - UI components
-- [CodeMirror](https://codemirror.net) - Code editor
+Codenaya is built on open-source work, including [shadcn/ui](https://ui.shadcn.com), [CodeMirror](https://codemirror.net), [xterm.js](https://xtermjs.org), [AgentKit](https://agentkit.inngest.com), the [Model Context Protocol](https://modelcontextprotocol.io) SDK and [Beautiful UI](https://www.beautifului.dev/).
