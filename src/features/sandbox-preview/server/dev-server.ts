@@ -7,6 +7,20 @@ import { appendHostFlag, detectFrameworkFromFiles } from "../utils/dev-command";
  */
 export const DEV_COMMAND_ENV = "CODENAYA_DEV_COMMAND";
 
+/** Written at boot by the POST route; its TARGET_PORT is the dev server's port. */
+export const PROXY_SCRIPT_PATH = "/home/user/e2b-proxy.js";
+
+/** The port the boot's proxy forwards to: exact even for a custom server.port. */
+export const proxyTargetPort = async (sandbox: Sandbox): Promise<number | undefined> => {
+  try {
+    const script = await sandbox.files.read(PROXY_SCRIPT_PATH);
+    return Number(/TARGET_PORT \|\| "(\d+)"/.exec(script)?.[1]) || undefined;
+  } catch {
+    // No proxy yet, or an older sandbox: the framework default below applies.
+    return undefined;
+  }
+};
+
 /**
  * Environment variables that force dev servers to bind to 0.0.0.0
  * instead of localhost. E2B port forwarding only works when the
@@ -57,12 +71,12 @@ export const fallbackDevStart = (
   files: { path: string; content: string }[],
   devCommand: string | undefined,
   cwd: string,
+  proxyPort?: number,
 ): DevStart => {
   const framework = detectFrameworkFromFiles(files, devCommand);
   const command = appendHostFlag(devCommand || "npm run dev", framework);
   // A sync carries only changed files, so non-Next means Vite even without vite.config.
-  // shortcut: framework default ports, not a custom server.port; read the proxy's target port if that bites.
-  const readyPort = framework === "next" ? 3000 : 5173;
+  const readyPort = proxyPort ?? (framework === "next" ? 3000 : 5173);
   return { command, cwd, envs: { ...DEV_SERVER_ENVS, [DEV_COMMAND_ENV]: command }, readyPort };
 };
 

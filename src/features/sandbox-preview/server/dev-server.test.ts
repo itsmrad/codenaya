@@ -11,6 +11,7 @@ import {
   installWithDevServerStopped,
   isPortOpen,
   killTreeCommand,
+  proxyTargetPort,
   restartDevServerIfDown,
 } from "./dev-server";
 
@@ -170,6 +171,21 @@ describe("fallbackDevStart (#774)", () => {
       envs: { ...DEV_SERVER_ENVS, [DEV_COMMAND_ENV]: command },
       readyPort,
     });
+  });
+
+  it("waits on the proxy's target port when known, e.g. a custom server.port", () => {
+    const files = [{ path: "package.json", content: "{}" }];
+    expect(fallbackDevStart(files, undefined, "/home/user/app", 5180).readyPort).toBe(5180);
+  });
+});
+
+describe("proxyTargetPort (#774)", () => {
+  it("reads the port the boot's proxy forwards to, or nothing", async () => {
+    const read = vi.fn(async () => 'const TARGET_PORT = parseInt(process.env.TARGET_PORT || "5180", 10);');
+    const sandbox = { files: { read } } as unknown as Sandbox;
+    await expect(proxyTargetPort(sandbox)).resolves.toBe(5180);
+    read.mockRejectedValue(new Error("not found"));
+    await expect(proxyTargetPort(sandbox)).resolves.toBeUndefined();
   });
 });
 

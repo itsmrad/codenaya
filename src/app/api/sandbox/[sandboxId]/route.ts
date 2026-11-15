@@ -16,6 +16,7 @@ import {
   DevServerStartError,
   fallbackDevStart,
   installWithDevServerStopped,
+  proxyTargetPort,
 } from "@/features/sandbox-preview/server/dev-server";
 import {
   REINSTALL_DEBOUNCE_MS,
@@ -195,7 +196,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
         await waitForReinstall(sandboxId);
       } else {
         const command = installCommand || DEFAULT_INSTALL_COMMAND;
-        installFailed = await installAfterBurst(sandboxId, () =>
+        installFailed = await installAfterBurst(sandboxId, async () =>
           installWithDevServerStopped(sandbox, async () => {
             // Retain only the safe npm code for a timeout; output and exception
             // messages may include injected secrets, even ones since rotated (#498).
@@ -221,7 +222,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
               });
             if (!result) return timeoutFailure;
             return result.exitCode !== 0 ? installFailure(result) : undefined;
-          }, {}, fallbackDevStart(files, devCommand, WORK_DIR)),
+          }, {}, fallbackDevStart(files, devCommand, WORK_DIR, await proxyTargetPort(sandbox))),
         );
       }
     }

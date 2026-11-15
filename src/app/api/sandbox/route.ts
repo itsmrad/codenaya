@@ -48,6 +48,7 @@ import {
   PROXY_TARGET_ENV,
   DEV_SERVER_ENVS,
   DevServerStartError,
+  PROXY_SCRIPT_PATH,
   installWithDevServerStopped,
   isPortOpen,
   type DevStart,
@@ -857,9 +858,9 @@ server.listen(PROXY_PORT, '0.0.0.0', () => {
 });
   `;
 
-  await sandbox.files.write("/home/user/e2b-proxy.js", proxyCode);
+  await sandbox.files.write(PROXY_SCRIPT_PATH, proxyCode);
   
-  await sandbox.commands.run("node /home/user/e2b-proxy.js", {
+  await sandbox.commands.run(`node ${PROXY_SCRIPT_PATH}`, {
     background: true,
     // Also listed with the process, so checkBuild can tell whether the dev server is still up.
     envs: { [PROXY_TARGET_ENV]: String(targetPort) },
