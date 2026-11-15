@@ -24,6 +24,7 @@ import {
   PromptInputBody,
   PromptInputFooter,
   PromptInputSubmit,
+  PromptInputSpeechButton,
   PromptInputTextarea,
   PromptInputTools,
   type PromptInputMessage,
@@ -669,6 +670,7 @@ export const ConversationSidebar = ({
                   panel never pushes the send button out of view. */}
               <PromptInputTools className="min-w-0">
                 <ComposerAttachButton disabled={isProcessing} />
+                {!isProcessing && <PromptInputSpeechButton onTranscriptionChange={setInput} />}
                 <EnhancePromptButton
                   enhancer={enhancer}
                   value={input}
