@@ -98,9 +98,31 @@ describe("createBridgeInjector", () => {
   it("injects at end when a short document has no head", () => {
     const injector = create(bridge);
     expect(injector.push(Buffer.from("<html><body>hello"))).toEqual([]);
-    expect(Buffer.concat(injector.flush()).toString()).toBe(bridge + "<html><body>hello");
+    expect(Buffer.concat(injector.flush()).toString()).toBe("<html>" + bridge + "<body>hello");
     expect(injector.flush()).toEqual([]);
     expect(Buffer.concat(create(bridge).flush()).toString()).toBe(bridge);
+  });
+
+  it("never places the bridge before the doctype when there is no head", () => {
+    const flushed = create(bridge);
+    expect(flushed.push(Buffer.from("<!DOCTYPE html><html lang=en><body>hi"))).toEqual([]);
+    expect(Buffer.concat(flushed.flush()).toString()).toBe(`<!DOCTYPE html><html lang=en>${bridge}<body>hi`);
+    const doctypeOnly = create(bridge);
+    doctypeOnly.push(Buffer.from("<!doctype html>hi"));
+    expect(Buffer.concat(doctypeOnly.flush()).toString()).toBe(`<!doctype html>${bridge}hi`);
+    const capped = create(bridge);
+    const filler = Buffer.alloc(16384, 120);
+    expect(Buffer.concat(capped.push(Buffer.concat([Buffer.from("<!DOCTYPE html><html>"), filler]))).toString())
+      .toBe(`<!DOCTYPE html><html>${bridge}${filler}`);
+  });
+
+  it("does not inject twice when the page already has the bridge", () => {
+    const page = `<html><head>${bridge}</head>`;
+    const injector = create(bridge);
+    expect(Buffer.concat(injector.push(Buffer.from(page))).toString()).toBe(page);
+    const noHead = create(bridge);
+    noHead.push(Buffer.from(`<html>${bridge}<body>`));
+    expect(Buffer.concat(noHead.flush()).toString()).toBe(`<html>${bridge}<body>`);
   });
 
   it("flushes at 16 KiB without waiting for a head or the end", () => {
