@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import type { FollowUp } from "../follow-up";
+
 export interface ChatContext {
   id: string;
   fileName: string;
@@ -46,6 +48,11 @@ interface ChatStore {
   unqueueMessage: (message: QueuedMessage) => void;
   /** The chat is sending a message (typed or queued); mirrored from its pending state. */
   sendPending: boolean;
+  /** Per conversation, the one message typed during its run, sent when it ends (#257). */
+  followUps: Record<string, FollowUp>;
+  setFollowUp: (conversationId: string, followUp: FollowUp | null) => void;
+  /** Removes and returns the conversation's follow-up, so it is acted on once. */
+  takeFollowUp: (conversationId: string) => FollowUp | null;
 }
 
 export const useChatStore = create<ChatStore>()((set, get) => ({
@@ -84,6 +91,19 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     if (get().queuedMessage === message) set({ queuedMessage: null });
   },
   sendPending: false,
+  followUps: {},
+  setFollowUp: (conversationId, followUp) =>
+    set((state) => {
+      const followUps = { ...state.followUps };
+      if (followUp) followUps[conversationId] = followUp;
+      else delete followUps[conversationId];
+      return { followUps };
+    }),
+  takeFollowUp: (conversationId) => {
+    const followUp = get().followUps[conversationId] ?? null;
+    if (followUp) get().setFollowUp(conversationId, null);
+    return followUp;
+  },
 }));
 
 /**

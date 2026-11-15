@@ -71,6 +71,9 @@ function readString(
  * When the provider declares options for the field, anything else is dropped.
  * Stored selections are free-form strings, so this is what stops a direct
  * write from enabling an undeclared group (e.g. `all`) the UI never offers.
+ * If that leaves nothing of a non-blank selection, this throws rather than
+ * returning `[]`: an empty list means "provider defaults", which can be broader
+ * than whatever the stored selection was trying to ask for.
  */
 function readList(
   selection: ProjectScopeSelection,
@@ -81,9 +84,17 @@ function readList(
   if (raw === undefined) return [];
   const allowed = options?.[field]?.map((option) => option.id);
   const cleaned = new Set<string>();
+  let dropped = false;
   for (const entry of raw) {
     const trimmed = entry.trim();
-    if (trimmed !== "" && (!allowed || allowed.includes(trimmed))) cleaned.add(trimmed);
+    if (trimmed === "") continue;
+    if (!allowed || allowed.includes(trimmed)) cleaned.add(trimmed);
+    else dropped = true;
+  }
+  if (dropped && cleaned.size === 0) {
+    throw new Error(
+      `None of the selected "${field}" are supported; choose at least one supported option.`,
+    );
   }
   return [...cleaned].sort();
 }
@@ -230,8 +241,9 @@ function buildHeaders(
  * those providers is enforced at the tool-call gate via
  * `isDestructiveTool`, not in the transport.
  *
- * @throws Error when the selection is internally inconsistent — currently only
- * a path segment supplied without its parent segment.
+ * @throws Error when the selection is internally inconsistent: a path segment
+ * supplied without its parent segment, or a non-blank list selection with no
+ * value the provider declares.
  */
 export function buildScopedMcpUrl(
   provider: ProviderDefinition,

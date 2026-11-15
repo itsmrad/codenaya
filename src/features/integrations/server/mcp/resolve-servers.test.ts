@@ -225,6 +225,35 @@ describe("resolveMcpServers", () => {
       expect(problems[0].reason).toMatch(/orgSlug/);
     });
 
+    it("skips a connection whose stored list scope has no supported values", async () => {
+      // Falling back to GitLab's default toolsets would widen access beyond
+      // the stored selection, so the server is skipped instead.
+      const gitlab = await makeConnection({
+        _id: "gitlab",
+        providerId: "gitlab",
+        serverUrl: "https://gitlab.com/api/v4/mcp",
+        credentialRef: "ref_gitlab",
+      });
+      const good = await makeConnection({ _id: "good", credentialRef: "ref_ok" });
+
+      const { servers, problems } = await resolveMcpServers([
+        {
+          link: makeLink({ _id: "link_gitlab", providerScope: { toolsets: ["bogus"] } }),
+          connection: gitlab,
+        },
+        { link: makeLink({ _id: "link_good" }), connection: good },
+      ]);
+
+      expect(servers.map((s) => s.userConnectionId)).toEqual(["good"]);
+      expect(problems).toEqual([
+        {
+          projectConnectionId: "link_gitlab",
+          providerId: "gitlab",
+          reason: expect.stringMatching(/None of the selected "toolsets" are supported/),
+        },
+      ]);
+    });
+
     it("reports the provider id on every problem so the UI can name it", async () => {
       const connection = await makeConnection({ providerId: "neon" });
       const corrupted = {

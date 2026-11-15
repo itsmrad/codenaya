@@ -64,11 +64,15 @@ export function buildAgentKitModel({
   // AgentKit sends `parallel_tool_calls: false` with every tool list, so a turn
   // could make one call. Allow several, or drop the parameter for an endpoint
   // that rejects it. A request without tools (the title) never carries it.
+  //
+  // AgentKit defaults parameterized tools to strict mode, which rejects our
+  // optional fields (#566). Opt out without changing schemas or validation.
   return {
     ...adapter,
     onCall(...args: Parameters<NonNullable<typeof adapter.onCall>>) {
       adapter.onCall?.(...args);
       const body = args[1];
+      for (const tool of body.tools ?? []) tool.function.strict = false;
       if (body.parallel_tool_calls !== false) return;
       if (parallel) body.parallel_tool_calls = true;
       else delete body.parallel_tool_calls;

@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { AI_PROVIDERS, PLATFORM_PROVIDER, keyModels } from "../registry";
+import { PLATFORM_PROVIDER, keyGroupLabel, keyModels, pickerKeys } from "../registry";
 import { resolveCatalogModel } from "../platform";
 import { fromChoiceValue, toChoiceValue } from "../model-choice";
 import { usePlatformModelsOrCatalog, useSetAiPreferences } from "../hooks/use-ai-providers";
@@ -36,9 +36,7 @@ export const DefaultModelSelect = ({
 }: DefaultModelSelectProps) => {
   const setPreferences = useSetAiPreferences();
 
-  const groups = keys.filter(
-    (key) => key.status === "active" || key._id === defaultKeyId,
-  );
+  const groups = pickerKeys(keys, defaultKeyId ?? undefined);
   const defaultKey = keys.find((key) => key._id === defaultKeyId);
   const platform = usePlatformModelsOrCatalog();
   // A platform default no longer offered shows as the one that runs.
@@ -82,10 +80,7 @@ export const DefaultModelSelect = ({
           </SelectGroup>
           {groups.map((key) => (
             <SelectGroup key={key._id}>
-              <SelectLabel>
-                {AI_PROVIDERS[key.provider].label} · {key.label}
-                {key.status === "invalid" && " (invalid)"}
-              </SelectLabel>
+              <SelectLabel>{keyGroupLabel(key)}</SelectLabel>
               {keyModels(key).map((model) => (
                 <SelectItem key={model.id} value={toChoiceValue({ keyId: key._id, modelId: model.id })}>
                   {model.label}

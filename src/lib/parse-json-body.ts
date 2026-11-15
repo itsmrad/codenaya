@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { MAX_PROMPT_LENGTH } from "./prompt-limit";
+
 type ParseJsonBodyResult<T> =
   | { data: T; invalid: undefined }
   | { data: undefined; invalid: NextResponse };
@@ -34,5 +36,5 @@ export const parseJsonBody = async <S extends z.ZodType>(
  * Size caps for text a route forwards to a paid model (#242), so one request
  * can't send megabytes of tokens. Oversized bodies get the same 400.
  */
-export const promptText = z.string().max(50_000);
+export const promptText = z.string().max(MAX_PROMPT_LENGTH);
 export const codeText = z.string().max(200_000);
