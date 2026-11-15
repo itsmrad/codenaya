@@ -123,7 +123,6 @@ export async function POST(request: Request) {
       ok: true,
       keyId,
       maskedPreview: sealed.maskedPreview,
-      fingerprint: sealed.fingerprint,
       status: "active",
     });
   } catch (error) {

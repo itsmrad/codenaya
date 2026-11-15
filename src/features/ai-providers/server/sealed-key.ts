@@ -1,9 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 
 import { nanoid } from "nanoid";
 
 import { maskSecret } from "@/features/integrations/env-keys";
 import {
+  deriveLocalKekSubkey,
   getSecretSealer,
   secretContext,
   type SealedSecret,
@@ -19,16 +20,24 @@ const aadFor = (secretRef: string) =>
   secretContext("aiProviderKeys", secretRef, "apiKey");
 
 /**
- * Seals a key for storage. The result is safe to persist in Convex. The
- * fingerprint (first 12 hex chars of its SHA-256) lets pickers tell apart two
- * keys that share their last four characters (#614).
+ * First 12 hex chars of an HMAC-SHA256 of the key under a KEK-derived subkey,
+ * so a database dump alone cannot confirm a guessed key (#614). Lets pickers
+ * tell apart keys that share their last four characters. Undefined without a
+ * local KEK; pickers then fall back to the masked preview.
+ * shortcut: a KEK rotation changes new fingerprints, so a key re-added after
+ * one is not deduped against its older copy; re-fingerprint on rewrap if that matters.
  */
+function fingerprintKey(apiKey: string): string | undefined {
+  const subkey = deriveLocalKekSubkey("codenaya:v1:aiProviderKeys:fingerprint");
+  return subkey ? createHmac("sha256", subkey).update(apiKey).digest("hex").slice(0, 12) : undefined;
+}
+
+/** Seals a key for storage. The result is safe to persist in Convex. */
 export async function sealProviderKey(apiKey: string) {
   // Generated before the insert so it can anchor the AAD in a single write.
   const secretRef = nanoid();
   const sealed = await getSecretSealer().seal(apiKey, aadFor(secretRef));
-  const fingerprint = createHash("sha256").update(apiKey).digest("hex").slice(0, 12);
-  return { secretRef, maskedPreview: maskSecret(apiKey), fingerprint, ...sealed };
+  return { secretRef, maskedPreview: maskSecret(apiKey), fingerprint: fingerprintKey(apiKey), ...sealed };
 }
 
 /** Recovers the plaintext key from a stored row. Server-side only. */

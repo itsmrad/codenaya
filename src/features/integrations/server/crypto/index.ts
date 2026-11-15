@@ -31,6 +31,7 @@ import {
 } from "./kek/local";
 import type { KekProvider, SealedSecret, SecretSealer } from "./types";
 
+export { deriveLocalKekSubkey } from "./kek/local";
 export { secretContext } from "./types";
 export type { SealedSecret, SecretSealer, KekProvider } from "./types";
 

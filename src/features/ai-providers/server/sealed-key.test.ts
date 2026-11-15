@@ -37,15 +37,27 @@ describe("sealProviderKey", () => {
     }
   });
 
-  it("fingerprints the key with a short SHA-256 prefix (#614)", async () => {
+  it("fingerprints the key with a KEK-keyed HMAC, not a bare hash (#614)", async () => {
     const { createHash } = await import("node:crypto");
     const a = await sealProviderKey(API_KEY);
     const b = await sealProviderKey(API_KEY);
     const other = await sealProviderKey(`${API_KEY.slice(0, -5)}Xwxyz`);
-    expect(a.fingerprint).toBe(createHash("sha256").update(API_KEY).digest("hex").slice(0, 12));
+    expect(a.fingerprint).toMatch(/^[0-9a-f]{12}$/);
     expect(b.fingerprint).toBe(a.fingerprint);
     expect(other.maskedPreview).toBe(a.maskedPreview);
     expect(other.fingerprint).not.toBe(a.fingerprint);
+    // A dump alone cannot confirm a guessed key: the unkeyed hash does not match.
+    expect(a.fingerprint).not.toBe(createHash("sha256").update(API_KEY).digest("hex").slice(0, 12));
+
+    vi.stubEnv("CODENAYA_LOCAL_KEK", randomBytes(32).toString("base64"));
+    resetSecretSealer();
+    expect((await sealProviderKey(API_KEY)).fingerprint).not.toBe(a.fingerprint);
+  });
+
+  it("omits the fingerprint when no local KEK is configured (#614)", async () => {
+    vi.stubEnv("CODENAYA_LOCAL_KEK", "");
+    const { deriveLocalKekSubkey } = await import("@/features/integrations/server/crypto");
+    expect(deriveLocalKekSubkey("x")).toBeUndefined();
   });
 
   it("binds the ciphertext to its own row", async () => {
