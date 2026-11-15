@@ -31,13 +31,13 @@ const hooks = vi.hoisted(() => {
   };
 });
 vi.mock("react", () => hooks);
-import { useEsbuildRecovery } from "./use-esbuild-recovery";
+import { useEsbuildRecovery as runRecoveryHook } from "./use-esbuild-recovery";
 
 const error: AppError = { kind: "build", message: "The service is no longer running: write EPIPE", file: "esbuild/lib/main.js:718" };
 const recover = vi.fn<() => Promise<EsbuildRecoveryStatus>>();
 const render = (props: { error?: AppError | null } = {}) => {
   hooks.render();
-  const result = useEsbuildRecovery({ sandboxId: "sbx", framework: "vite", error: "error" in props ? props.error! : error, recover });
+  const result = runRecoveryHook({ sandboxId: "sbx", framework: "vite", error: "error" in props ? props.error! : error, recover });
   hooks.commit();
   return result;
 };
