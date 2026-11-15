@@ -143,4 +143,11 @@ describe("coding agent prompt consistency (#293)", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("never use APIs or syntax from a newer major");
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("usually fails on CORS");
   });
+
+  it("keeps generated content visible by default and respects reduced motion", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Content is visible by default");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Never animate above-the-fold content");
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain('reducedMotion="user"');
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/initial=\{\{\s*opacity:\s*0/);
+  });
 });

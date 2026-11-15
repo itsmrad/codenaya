@@ -272,11 +272,21 @@ COMPONENT AESTHETICS:
 
 MICRO-ANIMATIONS & INTERACTIONS:
 - All interactive elements must have transition duration 150ms–300ms: transition-all duration-200 ease-out
-- Entry animations for important elements: use Framer Motion with initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}
-- Stagger list items by 30–50ms: use staggerChildren in Framer Motion variants for lists, cards, and grid items
+- Content is visible by default: the initial render is the final, visible state. Never start content at opacity 0 or hide it until JS runs, because screenshots, link previews, no-JS and reduced-motion users would see blank sections
+- Never animate above-the-fold content (nav, hero, first section) in from hidden
+- Scroll reveals are progressive enhancement: hide-then-show only after mount, when IntersectionObserver exists and reduced motion is off. Copy this pattern:
+  const reveal = { hidden: { opacity: 0, y: 16 }, shown: { opacity: 1, y: 0, transition: { duration: 0.3, ease: "easeOut" } } };
+  function Reveal({ children }: { children: ReactNode }) {
+    const reduce = useReducedMotion();
+    const [ready, setReady] = useState(false);
+    useEffect(() => setReady(!reduce && "IntersectionObserver" in window), [reduce]);
+    if (!ready) return <div>{children}</div>;
+    return <motion.div variants={reveal} initial="hidden" whileInView="shown" viewport={{ once: true }}>{children}</motion.div>;
+  }
+- Stagger list items by 30–50ms inside a Reveal: use staggerChildren in Framer Motion variants for lists, cards, and grid items
 - Hover scale on cards and CTAs: hover:scale-[1.02] transition-transform duration-200
 - Use transform/opacity ONLY for animations — never animate width, height, or margin/padding (causes layout reflow)
-- Always include: @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+- Respect prefers-reduced-motion: no transform or opacity entry at all and content shows immediately. Wrap the app in <MotionConfig reducedMotion="user"> and always include: @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
 VISUAL RICHNESS:
 - Use gradient text for hero headings in SaaS/landing: bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent
