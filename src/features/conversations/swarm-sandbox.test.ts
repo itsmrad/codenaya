@@ -40,7 +40,7 @@ const running = (...purposes: (string | undefined)[]) => ({
 const mutated = (name: string) =>
   mocks.mutation.mock.calls.filter(([ref]) => getFunctionName(ref) === name).map(([, args]) => args);
 
-const step = { run: vi.fn(async (_id: string, fn: () => Promise<unknown>) => fn()) };
+const step = { run: vi.fn(async (_id: string, fn: () => unknown) => fn()) };
 const onResponse = vi.fn(async () => {});
 const selfCheck = (invokedAt = Date.now(), timeoutMs?: number, signal?: AbortSignal) => selfCheckWorker({
   step, ...ids, agentTaskId: "t1" as Id<"agentTasks">, ownedPaths, invokedAt, timeoutMs, model: {} as VerifyAndFixOptions["model"],
@@ -196,8 +196,10 @@ describe("swarm sandboxes", () => {
         signal = opts.signal;
         // 12 min timeout, invoked now: the deadline is 8 min away.
         await vi.advanceTimersByTimeAsync(8 * 60_000 - 1);
+        await opts.step!("verify:1", async () => {});
         expect(signal?.aborted).toBe(false);
         await vi.advanceTimersByTimeAsync(1);
+        await opts.step!("verify:2", async () => {});
         expect(signal?.aborted).toBe(true);
         return { ok: false, status: "unverified", errors: [], filesChanged: [], attempts: 1, reason: "Cancelled" };
       });
@@ -212,6 +214,49 @@ describe("swarm sandboxes", () => {
       });
       expect(await selfCheck(Date.now(), undefined, spent.signal)).toEqual({ selfCheck: "skipped (cost budget)", filesChanged: [] });
       expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("replays earlier repairs after the deadline without losing their changed files", async () => {
+    vi.useFakeTimers();
+    try {
+      const invokedAt = Date.now() - 9 * 60_000;
+      const filesChanged = ["src/pages/home.tsx"];
+      const memo = new Map<string, unknown>([
+        ["self-check-start", { sandboxId: "sbx", maxAttempts: 1 }],
+        ["verify:1-late", false],
+        ["verify:1", { status: "failed" }],
+        ["sync:1-late", false],
+        ["sync:1", filesChanged],
+      ]);
+      step.run.mockImplementation(async (id, fn) => {
+        // Inngest replays memoized steps across timer ticks.
+        await vi.advanceTimersByTimeAsync(1);
+        if (!memo.has(id)) memo.set(id, await fn());
+        return memo.get(id);
+      });
+      mocks.verifyAndFix.mockImplementation(async (opts: VerifyAndFixOptions) => {
+        await vi.advanceTimersByTimeAsync(1);
+        if (opts.signal?.aborted) {
+          return { status: "unverified", errors: [], filesChanged: [], reason: "Cancelled" };
+        }
+        const unexpected = async () => { throw new Error("Memoized work must not run again"); };
+        await opts.step!("verify:1", unexpected);
+        const changed = await opts.step!("sync:1", unexpected);
+        expect(opts.signal?.aborted).toBe(false);
+        await opts.step!("verify:2", async () => {
+          expect(opts.signal?.aborted).toBe(true);
+        });
+        return { status: "unverified", errors: [], filesChanged: changed, reason: "Cancelled" };
+      });
+
+      expect(await selfCheck(invokedAt)).toEqual({ selfCheck: "skipped (time budget)", filesChanged });
+      expect(memo.get("verify:2-late")).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(e2b.create).not.toHaveBeenCalled();
+      expect(e2b.connect).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

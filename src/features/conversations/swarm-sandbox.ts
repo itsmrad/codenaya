@@ -215,7 +215,7 @@ export const selfCheckStep = (event: RepairEvent, now: number): AgentStep => ({
   ...(event.status === "running" ? {} : { endedAt: now }),
 });
 
-type Step = { run: (id: string, fn: () => Promise<unknown>) => Promise<unknown> };
+type Step = { run: (id: string, fn: () => unknown) => Promise<unknown> };
 
 /**
  * A worker's self-check, called from the swarm-worker function body (never
@@ -249,7 +249,7 @@ export const selfCheckWorker = async ({
   const owns = (path: string) => ownsPath(ownedPaths, path);
   // Stop repairing once no full verify fits before step.invoke's timeout; the slack alone can't cover a round.
   const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(), invokedAt + timeoutMs - CHECK_ROUND_MS - Date.now());
+  const deadlineAt = invokedAt + timeoutMs - CHECK_ROUND_MS;
   const repairSignal = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
   const result = await verifyAndFix({
     sandbox: () => Sandbox.connect(started.sandboxId, { apiKey: process.env.E2B_API_KEY?.trim() }),
@@ -264,8 +264,11 @@ export const selfCheckWorker = async ({
     onEvent,
     onResponse,
     signal: repairSignal,
-    step: (id, fn) => step.run(id, fn),
-  }).finally(() => clearTimeout(timer));
+    step: async (id, fn) => {
+      if (await step.run(`${id}-late`, () => Date.now() >= deadlineAt)) deadline.abort();
+      return step.run(id, fn);
+    },
+  });
   await step.run("self-check-stop", async () => {
     await Sandbox.kill(started.sandboxId, { apiKey: process.env.E2B_API_KEY?.trim() }).catch(() => false);
   });
