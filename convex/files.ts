@@ -428,10 +428,19 @@ export const updateFile = mutation({
   args: {
     id: v.id("files"),
     content: v.string(),
+    expectedContent: v.optional(v.string()),
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
     const { file } = await getOwnedFile(ctx, args.id, identity.subject);
+
+    if (args.expectedContent !== undefined && (
+      file.type !== "file" || file.storageId ||
+      (await readFileContent(ctx, file) ?? "") !== args.expectedContent
+    )) {
+      throw appError("CONFLICT", "This file changed elsewhere. Reload it or choose to keep your edits.");
+    }
 
     // Doesn't touch the `files` doc, so file lists don't re-run on every autosave.
     await writeFileContent(ctx, file, args.content);
@@ -439,6 +448,7 @@ export const updateFile = mutation({
     await ctx.db.patch("projects", file.projectId, {
       updatedAt: Date.now(),
     });
+    return null;
   },
 });
 

@@ -161,3 +161,50 @@ test("file reads and writes on a project being deleted throw NOT_FOUND", async (
     alice.mutation(api.files.createFile, { projectId, name: "n.ts", content: "" })
   ).rejects.toEqual(notFound);
 });
+
+describe("files.updateFile stale editor protection (#581)", () => {
+  test("rejects a stale buffer and preserves the newer persisted agent content", async () => {
+    const { alice, fileId } = await setup();
+    await alice.mutation(api.files.updateFile, { id: fileId, content: "new agent heading" });
+
+    await expect(alice.mutation(api.files.updateFile, {
+      id: fileId, content: "old heading plus manual edit", expectedContent: "",
+    })).rejects.toMatchObject({ data: { code: "CONFLICT" } });
+    expect((await alice.query(api.files.getFile, { id: fileId }))?.content).toBe("new agent heading");
+  });
+});
+
+test("matching editor bases save both legacy and migrated content; omitted bases stay compatible (#581)", async () => {
+  const { alice, projectId, fileId } = await setup();
+  await alice.mutation(api.files.updateFile, { id: fileId, content: "first", expectedContent: "" });
+  await alice.mutation(api.files.updateFile, { id: fileId, content: "second", expectedContent: "first" });
+  expect((await alice.query(api.files.getFile, { id: fileId }))?.content).toBe("second");
+  const newId = await alice.mutation(api.files.createFile, { projectId, name: "new.ts", content: "agent" });
+  await alice.mutation(api.files.updateFile, { id: newId, content: "manual", expectedContent: "agent" });
+  await expect(alice.mutation(api.files.updateFile, { id: newId, content: "stale", expectedContent: "agent" }))
+    .rejects.toMatchObject({ data: { code: "CONFLICT" } });
+  expect((await alice.query(api.files.getFile, { id: newId }))?.content).toBe("manual");
+  await alice.mutation(api.files.updateFile, { id: newId, content: "legacy caller" });
+  expect((await alice.query(api.files.getFile, { id: newId }))?.content).toBe("legacy caller");
+});
+
+test("guarded saves validate ownership before comparing content (#581)", async () => {
+  const { t, alice, fileId } = await setup();
+  const bob = t.withIdentity({ subject: "user_bob" });
+  for (const expectedContent of ["", "wrong"]) {
+    await expect(bob.mutation(api.files.updateFile, { id: fileId, content: "stolen", expectedContent }))
+      .rejects.toMatchObject({ data: { code: "FORBIDDEN" } });
+  }
+  await expect(t.mutation(api.files.updateFile, { id: fileId, content: "anonymous", expectedContent: "" }))
+    .rejects.toThrow();
+  expect((await alice.query(api.files.getFile, { id: fileId }))?.content).toBe("");
+});
+
+test("a guarded empty-text autosave cannot write into a file restored as binary (#581)", async () => {
+  const { t, alice, fileId } = await setup();
+  const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["binary"])));
+  await t.run((ctx) => ctx.db.patch("files", fileId, { content: undefined, storageId }));
+  await expect(alice.mutation(api.files.updateFile, { id: fileId, content: "stale text", expectedContent: "" }))
+    .rejects.toMatchObject({ data: { code: "CONFLICT" } });
+  expect((await alice.query(api.files.getFile, { id: fileId }))?.content).toBeUndefined();
+});
