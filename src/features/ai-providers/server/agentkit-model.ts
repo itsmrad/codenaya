@@ -65,9 +65,8 @@ export function buildAgentKitModel({
   // could make one call. Allow several, or drop the parameter for an endpoint
   // that rejects it. A request without tools (the title) never carries it.
   //
-  // It also marks every tool `strict`, and OpenAI-family models then reject the
-  // whole request because our schemas have optional fields (#566). Turn it off,
-  // as for MCP tools: Anthropic runs never had it, so handlers already cope.
+  // AgentKit defaults parameterized tools to strict mode, which rejects our
+  // optional fields (#566). Opt out without changing schemas or validation.
   return {
     ...adapter,
     onCall(...args: Parameters<NonNullable<typeof adapter.onCall>>) {

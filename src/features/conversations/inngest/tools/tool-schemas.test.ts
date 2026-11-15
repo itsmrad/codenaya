@@ -62,20 +62,29 @@ const strictIssues = (schema: unknown, at = "$"): string[] => {
 type SentTool = { function: { name: string; parameters?: unknown; strict?: boolean } };
 
 describe("agent tool schemas on an OpenAI-format provider (#566)", () => {
-  it("never sends a tool in strict mode with a schema strict mode rejects", () => {
-    const model = buildAgentKitModel({ provider: "openrouter", apiKey: "sk-or", model: "openai/gpt-6-luna" });
-    const body = createAgenticModelFromAiAdapter(model).requestParser(
-      model,
-      [{ type: "text", role: "user", content: "hi" }],
-      agentTools,
-      "auto",
-    ) as { tools: SentTool[] };
-    (model.onCall as (adapter: unknown, body: unknown) => void)(model, body);
+  it.each(["openrouter", "openai", "groq", "custom"] as const)(
+    "%s disables strict mode for every agent tool without rewriting schemas",
+    (provider) => {
+      const model = buildAgentKitModel({
+        provider, apiKey: "test", model: "openai/gpt-6-luna",
+        ...(provider === "custom" ? { baseUrl: "https://llm.example.com/v1" } : {}),
+      });
+      const body = createAgenticModelFromAiAdapter(model).requestParser(
+        model,
+        [{ type: "text", role: "user", content: "hi" }],
+        agentTools,
+        "auto",
+      ) as { tools: SentTool[] };
+      const parameters = structuredClone(body.tools.map((tool) => tool.function.parameters));
+      (model.onCall as (adapter: unknown, body: unknown) => void)(model, body);
 
-    expect(body.tools).toHaveLength(agentTools.length);
-    const rejected = body.tools.flatMap(({ function: fn }) =>
-      fn.strict ? strictIssues(fn.parameters).map((issue) => `${fn.name} ${issue}`) : [],
-    );
-    expect(rejected).toEqual([]);
-  });
+      expect(body.tools).toHaveLength(agentTools.length);
+      expect(body.tools.every((tool) => tool.function.strict === false)).toBe(true);
+      expect(body.tools.map((tool) => tool.function.parameters)).toEqual(parameters);
+      const rejected = body.tools.flatMap(({ function: fn }) =>
+        fn.strict ? strictIssues(fn.parameters).map((issue) => `${fn.name} ${issue}`) : [],
+      );
+      expect(rejected).toEqual([]);
+    },
+  );
 });
