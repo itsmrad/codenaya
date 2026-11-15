@@ -1,6 +1,8 @@
 /**
- * Full https://posthog.com/docs/model-context-protocol/tools inventory reviewed 2026-11-15.
+ * Full https://posthog.com/docs/model-context-protocol/tools inventory reviewed 2026-11-14.
  * Writes, dispatchers and operations without a clearly read-only description are gated.
+ * `render-ui` is a dispatcher: it runs a named tool's data load server-side, limited to
+ * reads only by PostHog's own annotations (services/mcp/src/tools/render-ui.ts), so it is gated.
  * Keep this static list independent of remote annotations: a misleading hint must not bypass approval.
  */
 export const POSTHOG_DESTRUCTIVE_TOOLS = [
@@ -153,7 +155,7 @@ export const POSTHOG_DESTRUCTIVE_TOOLS = [
   "posthog-connection-forward", "products-enable", "project-create",
   "project-settings-update", "property-definition-update", "proxy-create",
   "proxy-delete", "proxy-retry", "reminder-create",
-  "reminder-delete", "reminder-update", "review-hog-reviews-trigger",
+  "reminder-delete", "reminder-update", "render-ui", "review-hog-reviews-trigger",
   "saved-query-column-annotations-create", "scheduled-changes-create", "scheduled-changes-delete",
   "scheduled-changes-update", "scout-check-record-result", "scout-config-create",
   "scout-config-delete", "scout-config-precheck-test", "scout-config-sync",
