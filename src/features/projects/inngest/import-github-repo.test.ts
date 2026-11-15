@@ -105,7 +105,7 @@ describe("importGithubRepo", () => {
     expect(created(".env.local")).toEqual([]);
     expect(created(".env.example")).toHaveLength(1);
     expect(mocks.mutation.mock.calls.find(([, args]) => args.status === "completed")?.[1]).toMatchObject({
-      importInfo: { source: "bolt", envVarNames: ["API_KEY", "VITE_SUPABASE_URL"] },
+      importInfo: { source: "other-builder", envVarNames: ["API_KEY", "VITE_SUPABASE_URL"] },
     });
   });
 

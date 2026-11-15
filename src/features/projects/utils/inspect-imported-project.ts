@@ -2,10 +2,10 @@ import { MAX_ENV_KEY_LENGTH, MAX_ENV_VARS, isValidEnvKey } from "@/features/inte
 
 interface ImportedFile { path: string; content: string }
 
-// Product names are detection markers only, never user-facing copy.
+// Marker strings matched in imported files; any match sets source "other-builder".
 const BUILDER_MARKERS = [
-  { source: "lovable", dependency: "lovable-tagger" },
-  { source: "bolt", directory: ".bolt" },
+  { dependency: "lovable-tagger" },
+  { directory: ".bolt" },
 ] as const;
 const BUILT_INS = new Set(["MODE", "DEV", "PROD", "BASE_URL", "SSR", "NODE_ENV"]);
 
@@ -49,11 +49,11 @@ export function inspectImportedProject(files: readonly ImportedFile[]) {
       }
     } catch { /* An invalid package.json must not prevent importing the repo. */ }
   }
-  const source = BUILDER_MARKERS.find((marker) =>
+  const source = BUILDER_MARKERS.some((marker) =>
     "dependency" in marker
       ? dependencies.has(marker.dependency)
       : files.some((file) => file.path === marker.directory || file.path.startsWith(`${marker.directory}/`)),
-  )?.source;
+  ) ? ("other-builder" as const) : undefined;
   const envVarNames = [...new Set(files.flatMap(parseEnvVarNames))].sort().slice(0, MAX_ENV_VARS);
   return { ...(source ? { source } : {}), envVarNames };
 }

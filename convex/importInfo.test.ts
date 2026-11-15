@@ -18,7 +18,7 @@ async function setup(instructions?: string) {
   }));
   const args = {
     internalKey: "import-test-key", projectId, status: "completed" as const,
-    importInfo: { source: "bolt" as const, envVarNames: ["API_KEY", "VITE_SUPABASE_URL"] },
+    importInfo: { source: "other-builder" as const, envVarNames: ["API_KEY", "VITE_SUPABASE_URL"] },
   };
   return { t, projectId, args };
 }

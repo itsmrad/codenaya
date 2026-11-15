@@ -7,11 +7,11 @@ const file = (path: string, content = "") => ({ path, content });
 
 describe("inspectImportedProject", () => {
   it("detects the dependency marker, including nested packages", () => {
-    expect(inspectImportedProject([file("app/package.json", JSON.stringify({ devDependencies: { "lovable-tagger": "1" } }))])).toEqual({ source: "lovable", envVarNames: [] });
+    expect(inspectImportedProject([file("app/package.json", JSON.stringify({ devDependencies: { "lovable-tagger": "1" } }))])).toEqual({ source: "other-builder", envVarNames: [] });
   });
   it("detects the directory marker with or without a directory entry", () => {
     for (const path of [".bolt", ".bolt/config.json"]) {
-      expect(inspectImportedProject([file(path)]).source).toBe("bolt");
+      expect(inspectImportedProject([file(path)]).source).toBe("other-builder");
     }
   });
   it("leaves unknown sources unset and tolerates invalid package JSON", () => {

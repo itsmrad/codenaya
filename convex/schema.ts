@@ -258,7 +258,7 @@ export const githubSyncValidator = v.object({
 });
 
 export const importInfoValidator = v.object({
-  source: v.optional(v.union(v.literal("lovable"), v.literal("bolt"))),
+  source: v.optional(v.literal("other-builder")),
   envVarNames: v.array(v.string()),
 });
 
