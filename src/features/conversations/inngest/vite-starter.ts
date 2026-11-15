@@ -55,7 +55,11 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    // One React for every package, even one that ships its own nested copy.
+    dedupe: ["react", "react-dom"],
+  },
   // Pre-bundle the starter's libraries on the first pass: a dependency found later
   // re-optimizes mid-load, and the page briefly runs two React copies ("Invalid hook call").
   optimizeDeps: {

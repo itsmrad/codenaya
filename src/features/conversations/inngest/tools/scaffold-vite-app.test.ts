@@ -122,6 +122,7 @@ describe("scaffoldViteApp tool", () => {
       expect(deps).not.toHaveProperty(name);
     }
     expect(read("vite.config.ts")).toContain("plugins: [react(), tailwindcss()]");
+    expect(read("vite.config.ts")).toContain('dedupe: ["react", "react-dom"]');
     expect(read("src/index.css")).toMatch(/^@import "tailwindcss";\n@import "tw-animate-css";/);
     expect(read("src/index.css")).toContain("--color-background: var(--background);");
     expect(JSON.parse(read("components.json")).tailwind.config).toBe("");
