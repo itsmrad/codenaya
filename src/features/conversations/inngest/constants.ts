@@ -511,3 +511,6 @@ export const SWARM_DELEGATE_NUDGE =
 /** Appended to the orchestrator note only when this run may use sub-orchestrators (ADR 0013). */
 export const SWARM_SUBORCH_OPTION_NOTE = `
 In delegateTasks, a large task (at most 2) can have role "sub-orchestrator": it splits its owned paths among up to 3 workers of its own. At most 8 agents run in total.`;
+
+export const OUT_OF_CREDITS_NOTE = "This run stopped because you ran out of credits. Summarize the work completed and anything left unfinished. Do not call tools.";
+export const OUT_OF_CREDITS_REPLY = "This run stopped because you ran out of credits. Add your own key in Settings → AI providers, or wait for your credits to reset.";

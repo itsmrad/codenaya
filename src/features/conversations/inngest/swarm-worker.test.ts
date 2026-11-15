@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   mutation: vi.fn(),
   catalog: vi.fn(),
+  account: vi.fn(),
   selfCheckWorker: vi.fn(),
 }));
 
@@ -22,7 +23,7 @@ vi.mock("../swarm-sandbox", async (importOriginal) => ({
 
 vi.mock("@/lib/convex-client", async () => {
   const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query, mocks.catalog), mutation: mocks.mutation } };
+  return { convex: { query: withEnvPlatform(mocks.query, mocks.catalog, mocks.account), mutation: mocks.mutation } };
 });
 
 import { TURN_HEARTBEAT_ID } from "../agent-steps";
@@ -68,6 +69,7 @@ const withUsage = (body: object) => ({ ...body, usage: { prompt_tokens: 1_000, c
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubEnv("CREDIT_LIMITS_ENFORCED", "");
   vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "ik");
   vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
   mocks.query.mockImplementation(async (ref) =>
@@ -170,6 +172,34 @@ describe("swarmWorker", () => {
     expect(outcome.inferenceBodies).toHaveLength(2);
     expect(outcome.data).toMatchObject({ status: "unfinished" });
     expect(mutationArgs("credits:recordRunUsage")[0].costUsd).toBeCloseTo(0.6, 10);
+  });
+
+  it.each([0, 3, 4])("stops a worker at its %i-credit balance with one summary", async (left) => {
+    vi.stubEnv("CREDIT_LIMITS_ENFORCED", "true");
+    const now = Date.now();
+    mocks.account.mockReturnValue({ plan: "free", periodStartsAt: Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1),
+      periodUsed: 60 - left, dayStartsAt: new Date(now).setUTCHours(0, 0, 0, 0), dayUsed: 60 - left });
+    mocks.query.mockImplementation(async (ref) => getFunctionName(ref) === "system:getProjectById"
+      ? { ownerId: "real_owner" } : []);
+    mocks.catalog.mockReturnValue({
+      models: [{
+        id: "anthropic/claude-haiku-5.5", name: "Haiku", vendor: "a", provider: "openrouter",
+        providerModelId: "anthropic/claude-haiku-5.5", vision: false, tools: "reported",
+        pricing: { mode: "blended", usdPerMTok: 10 }, access: "everyone", hidden: false,
+      }],
+      defaultModelId: "anthropic/claude-haiku-5.5", utilityModelId: "anthropic/claude-haiku-5.5",
+    });
+    const outcome = await run([
+      ...(left > 0 ? [{ data: withUsage(toolCall("listFiles")) }] : []), // 3 credits
+      ...(left > 3 ? [{ data: withUsage(toolCall("listFiles")) }] : []),
+      { data: text("Listed files; the task is unfinished.") },
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(left === 0 ? 1 : left === 3 ? 2 : 3);
+    expect(outcome.data).toMatchObject({ status: "unfinished", summary: expect.stringContaining("ran out of credits") });
+    expect(JSON.stringify(outcome.inferenceBodies.at(-1))).toContain("ran out of credits");
+    expect(mocks.account).toHaveBeenCalledTimes(1);
+    expect(mocks.selfCheckWorker.mock.calls[0][0].signal.aborted).toBe(true);
   });
 
   it("ends quietly when its task row is gone", async () => {

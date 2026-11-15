@@ -10,15 +10,16 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   mutation: vi.fn(),
   catalog: vi.fn(),
+  account: vi.fn(),
 }));
 
 vi.mock("@/lib/convex-client", async () => {
   const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query, mocks.catalog), mutation: mocks.mutation } };
+  return { convex: { query: withEnvPlatform(mocks.query, mocks.catalog, mocks.account), mutation: mocks.mutation } };
 });
 
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
-import { drive, text } from "./process-message.driver";
+import { drive, text, toolCall } from "./process-message.driver";
 
 const QUERIES: Record<string, () => unknown> = {
   "system:getConversationById": () => ({ title: DEFAULT_CONVERSATION_TITLE }),
@@ -60,6 +61,7 @@ const usageRecords = () =>
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubEnv("CREDIT_LIMITS_ENFORCED", "");
   vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "ik");
   vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -103,5 +105,48 @@ describe("processMessage credit metering", () => {
     ]);
 
     expect(outcome.finalType).toBe("function-resolved");
+  });
+});
+
+
+describe("processMessage credit limit", () => {
+  beforeEach(() => {
+    vi.stubEnv("CREDIT_LIMITS_ENFORCED", "true");
+    const now = Date.now();
+    mocks.account.mockReturnValue({ plan: "free", periodStartsAt: Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1),
+      periodUsed: 57, dayStartsAt: new Date(now).setUTCHours(0, 0, 0, 0), dayUsed: 57 });
+    mocks.query.mockImplementation(async (ref) => getFunctionName(ref) === "system:getConversationById"
+      ? { title: "Existing chat" } : getFunctionName(ref) === "promoClaims:hasClaimForProjectOwner"
+        ? true : QUERIES[getFunctionName(ref)]?.());
+  });
+
+  it.each([3, 4])("stops at a %i-credit balance and continues while below it", async (left) => {
+    const account = mocks.account();
+    mocks.account.mockReturnValue({ ...account, dayUsed: 60 - left });
+    const inference = { ...toolCall("listFiles"), usage: { prompt_tokens: 1_000, completion_tokens: 1_000 } }; // $0.02 = 3 credits
+    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
+      { data: inference },
+      ...(left > 3 ? [{ data: inference }] : []),
+      { data: text("Listed files; work remains.") },
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(left > 3 ? 3 : 2);
+    expect(JSON.stringify(outcome.inferenceBodies.at(-1))).toContain("ran out of credits");
+    const reply = mocks.mutation.mock.calls.find(([ref]) => getFunctionName(ref) === "system:updateMessageContent")?.[1];
+    expect(reply.content).toContain("ran out of credits");
+    expect(reply.outcome).not.toBe("error");
+    expect(mocks.account).toHaveBeenCalledTimes(2); // explicit fixture read plus one durable snapshot
+  });
+
+  it.each(["promo", "unenforced"])("leaves %s runs uncapped", async (kind) => {
+    if (kind === "promo") mocks.catalog.mockReturnValue({ ...CATALOG, models: CATALOG.models.map((m) => ({ ...m, access: "promo_unlimited" })) });
+    else vi.stubEnv("CREDIT_LIMITS_ENFORCED", "");
+    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
+      { data: { ...toolCall("listFiles"), usage: { prompt_tokens: 10_000, completion_tokens: 10_000 } } },
+      { data: text("Finished normally.") },
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(JSON.stringify(outcome.inferenceBodies.at(-1))).not.toContain("ran out of credits");
+    expect(mocks.account).not.toHaveBeenCalled();
   });
 });
