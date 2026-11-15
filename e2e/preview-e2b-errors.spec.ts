@@ -3,7 +3,7 @@ import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../convex/_generated/api";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
-import { hasPreviewFixtureEnv, seedPreviewProject, seedViteApp } from "./preview-fixtures";
+import { hasPreviewFixtureEnv, killProjectSandboxes, seedPreviewProject, seedViteApp } from "./preview-fixtures";
 
 const PROJECT_NAME = "e2e-preview-e2b-errors";
 
@@ -19,12 +19,22 @@ test.describe("E2B preview error banner (#223)", () => {
     "Needs Clerk and Convex fixture env plus E2B_API_KEY (boots a real sandbox)",
   );
 
+  /** The current test's project, whose preview sandbox afterEach frees. */
+  let seeded: string | undefined;
+  test.afterEach(async ({ page }) => {
+    // Closed first, so the preview can't boot a replacement for the killed sandbox.
+    await page.close();
+    if (seeded) await killProjectSandboxes(seeded);
+    seeded = undefined;
+  });
+
   test("shows build and runtime errors and sends one fix message", async ({ page }, testInfo) => {
     test.setTimeout(300_000);
     await page.setViewportSize({ width: 1440, height: 900 });
 
     await signIn(page);
     const projectId = await seedPreviewProject(page, PROJECT_NAME);
+    seeded = projectId;
     const appId = await seedViteApp(projectId, {
       appSource: BROKEN_IMPORT,
       devDependencies: { vite: "^6.0.0", "@vitejs/plugin-react": "^4.0.0" },

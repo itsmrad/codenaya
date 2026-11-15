@@ -3,7 +3,7 @@ import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../convex/_generated/api";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
-import { hasPreviewFixtureEnv, seedPreviewProject, seedViteApp } from "./preview-fixtures";
+import { hasPreviewFixtureEnv, killProjectSandboxes, seedPreviewProject, seedViteApp } from "./preview-fixtures";
 
 const PROJECT_NAME = "e2e-preview-e2b-references";
 
@@ -13,6 +13,15 @@ test.describe("E2B preview config references", () => {
     "Needs Clerk and Convex fixture env plus E2B_API_KEY",
   );
 
+  /** The current test's project, whose preview sandbox afterEach frees. */
+  let seeded: string | undefined;
+  test.afterEach(async ({ page }) => {
+    // Closed first, so the preview can't boot a replacement for the killed sandbox.
+    await page.close();
+    if (seeded) await killProjectSandboxes(seeded);
+    seeded = undefined;
+  });
+
   // A tsconfig.json that references a file nobody wrote used to boot into a
   // Vite error overlay; the preview now names the file before booting (#190).
   test("names a config file the project references but doesn't contain", async ({ page }) => {
@@ -21,6 +30,7 @@ test.describe("E2B preview config references", () => {
 
     await signIn(page);
     const projectId = await seedPreviewProject(page, PROJECT_NAME);
+    seeded = projectId;
     await seedViteApp(projectId, {
       appSource: "export default function App() {\n  return <h1>Missing config</h1>;\n}\n",
       devDependencies: { vite: "^6.0.0", "@vitejs/plugin-react": "^4.0.0" },
