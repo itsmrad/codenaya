@@ -29,6 +29,10 @@ test.describe("keyboard shortcut sheet", () => {
     await openWith(page, "?");
     await expect(sheet(page).getByText("New project")).toBeVisible();
     await expect(sheet(page).getByText("Quick edit the selection")).toBeVisible();
+    await expect(sheet(page).getByText("Toggle Ask / Plan mode")).toBeVisible();
+    const modeShortcut = sheet(page).getByRole("listitem").filter({ hasText: "Toggle Ask / Plan mode" });
+    await expect(modeShortcut.locator('[data-slot="kbd"]')).toHaveText([/^(Alt|⌥)$/, "M"]);
+    await expect(modeShortcut).toContainText("Build ↔ Ask / Plan; Swarm is not in this cycle.");
 
     await page.keyboard.press("Escape");
     await expect(sheet(page)).toBeHidden();
