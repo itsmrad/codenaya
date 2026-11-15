@@ -33,6 +33,8 @@
  * policy and confirming, in writing, that Codenia is an approved client. If
  * that ever happens, remove this comment block in the same change so it does
  * not become stale advice.
+ *
+ * Figma, Slack and Square: docs/INTEGRATIONS.md, "Client-access prerequisites (Figma, Slack, Square)".
  */
 
 import {
