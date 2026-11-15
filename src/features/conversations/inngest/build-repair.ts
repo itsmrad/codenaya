@@ -47,7 +47,7 @@ export const MAX_SERVER_REPAIRS = 2;
 const REPAIR_SANDBOX_TIMEOUT_MS = 10 * 60_000;
 /**
  * The warm-up install's own budget. Each check installs again, from scratch,
- * within its 120 s; with the npm cache warm that is mostly linking.
+ * within its 180 s; with the npm cache warm that is mostly linking.
  */
 const INSTALL_TIMEOUT_MS = 240_000;
 const UPLOAD_TIMEOUT_MS = 10_000;
