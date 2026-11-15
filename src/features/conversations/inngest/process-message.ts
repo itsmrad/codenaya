@@ -111,7 +111,6 @@ import {
   PLAN_MODE,
   PLAN_MODE_PROMPT,
   PLAN_MODE_TOOLS,
-  SWARM_MODE,
 } from '../plan-mode';
 import { splitSuggestions } from '../suggestions';
 import { SWARM_DELEGATE_AGENT_NAME, swarmRequest, swarmRun } from './lib/swarm-run';
@@ -587,7 +586,8 @@ export const processMessage = inngest.createFunction(
     // skills and plan mode.
     // Conversation goes in messages (see onStart).
     const swarm = await swarmRun({ ...(event.data as MessageEvent), request: swarmRequest(earlierTurns, request), internalKey, step });
-    const soloFirstBuild = !planMode && mode !== SWARM_MODE && await step.run(
+    // Empty tools: swarm never started (another mode, or the kill switch). A live orchestrator always has delegateTasks.
+    const soloFirstBuild = !planMode && swarm.tools.length === 0 && await step.run(
       "check-first-build",
       () => convex.query(api.projects.conversationNeedsFirstBuildForServer, { internalKey, conversationId }),
     );
