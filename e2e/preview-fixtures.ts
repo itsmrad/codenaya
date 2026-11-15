@@ -3,6 +3,7 @@ import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { pinnedVersions } from "../src/features/conversations/inngest/known-good-versions";
 import { userConvexClient } from "./convex-client";
 
 export const hasPreviewFixtureEnv = () =>
@@ -105,4 +106,82 @@ export const seedViteApp = async (
   });
 
   return created.find((file) => file.name === "App.jsx")!.fileId as Id<"files">;
+};
+
+/** Minimal Next App Router fixture; returns page.tsx's id for live edits. */
+export const seedNextApp = async (
+  projectId: Id<"projects">,
+  { pageSource }: { pageSource: string },
+) => {
+  const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY!;
+  const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+  await system.mutation(api.system.createFiles, {
+    internalKey,
+    projectId,
+    files: [{
+      name: "package.json",
+      content: JSON.stringify({
+        name: "next-e2e",
+        private: true,
+        scripts: { dev: "next dev", build: "next build" },
+        dependencies: pinnedVersions(["next", "react", "react-dom"]),
+        devDependencies: pinnedVersions([
+          "typescript", "@types/node", "@types/react", "@types/react-dom",
+        ]),
+      }),
+    }],
+  });
+  const srcId = await system.mutation(api.system.createFolder, {
+    internalKey, projectId, name: "src",
+  });
+  const appId = await system.mutation(api.system.createFolder, {
+    internalKey, projectId, parentId: srcId, name: "app",
+  });
+  const created = await system.mutation(api.system.createFiles, {
+    internalKey,
+    projectId,
+    parentId: appId,
+    files: [
+      {
+        name: "layout.tsx",
+        content: `import type { ReactNode } from "react";
+export default function Layout({ children }: { children: ReactNode }) {
+  return <html lang="en"><body>{children}</body></html>;
+}
+`,
+      },
+      { name: "page.tsx", content: pageSource },
+    ],
+  });
+  const actionsId = await system.mutation(api.system.createFolder, {
+    internalKey, projectId, parentId: appId, name: "actions",
+  });
+  await system.mutation(api.system.createFiles, {
+    internalKey,
+    projectId,
+    parentId: actionsId,
+    files: [{
+      name: "page.tsx",
+      content: `import { redirect } from "next/navigation";
+export default async function Page({ searchParams }: {
+  searchParams: Promise<{ message?: string }>;
+}) {
+  const { message } = await searchParams;
+  async function submit(formData: FormData) {
+    "use server";
+    redirect("/actions?message=" + encodeURIComponent(String(formData.get("message"))));
+  }
+  return <main>
+    <h1>Server Action form</h1>
+    <p role="status">{message ? "Submitted: " + message : "No submission yet"}</p>
+    <form action={submit}>
+      <label>Message<input name="message" /></label>
+      <button type="submit">Submit message</button>
+    </form>
+  </main>;
+}
+`,
+    }],
+  });
+  return created.find((file) => file.name === "page.tsx")!.fileId as Id<"files">;
 };
