@@ -212,7 +212,10 @@ export async function resolveMcpServers(
     // itself recorded.
     const isCustom = !provider;
 
-    const placement = provider?.apiKey ?? DEFAULT_PLACEMENT;
+    // A provider's key placement (e.g. Exa's `x-api-key`) applies to API keys
+    // only; OAuth access tokens are always bearer tokens.
+    const placement =
+      (connection.authMode === "api_key" ? provider?.apiKey : undefined) ?? DEFAULT_PLACEMENT;
     const displayName = provider?.displayName ?? connection.label;
 
     // ── Apply per-project scope ──

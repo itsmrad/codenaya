@@ -46,6 +46,10 @@ describe("catalog", () => {
       "atlassian",
       "gitlab",
       "clerk",
+      "exa",
+      "tavily",
+      "firecrawl",
+      "huggingface",
     ]);
   });
 
@@ -90,6 +94,10 @@ describe("catalog", () => {
     ["atlassian", 116, ["executeRead", "executeWrite", "executeDestructive", "replaceConfluenceContentPermissions", "queryInsightsSql", "queryInsightsAi"]],
     ["gitlab", 24, ["create_merge_request_note", "update_merge_request", "create_work_item", "create_branch", "manage_pipeline", "send_duo_session_input", "attach_scan_profile"]],
     ["clerk", 12, ["put_instance_config", "check_domain_dns", "set_oauth_provider_credentials", "configure_mcp_server", "check_mcp_server", "submit_feedback"]],
+    ["exa", 1, ["agent_run"]],
+    ["tavily", 1, ["tavily_research"]],
+    ["firecrawl", 11, ["firecrawl_interact", "firecrawl_agent", "firecrawl_monitor_create", "firecrawl_monitor_delete", "alexandria_library_read", "people_company_enrich"]],
+    ["huggingface", 7, ["create_repo", "hf_fs_write", "hf_jobs", "hf_sandbox", "hf_sandbox_exec", "hf_sandbox_fs", "dynamic_space"]],
   ] as const)("retains the audited %s write inventory, including indirect and configuration writes", (id, count, sensitive) => {
     const tools = PROVIDERS[id].destructiveTools;
     expect(tools).toHaveLength(count);
@@ -119,10 +127,13 @@ describe("catalog", () => {
     expect(hostnames).toEqual([
       "api.githubcopilot.com",
       "gitlab.com",
+      "huggingface.co",
       "mcp.atlassian.com",
       "mcp.clerk.com",
       "mcp.cloudflare.com",
       "mcp.context7.com",
+      "mcp.exa.ai",
+      "mcp.firecrawl.dev",
       "mcp.linear.app",
       "mcp.neon.tech",
       "mcp.notion.com",
@@ -134,6 +145,7 @@ describe("catalog", () => {
       "mcp.sentry.dev",
       "mcp.stripe.com",
       "mcp.supabase.com",
+      "mcp.tavily.com",
       "mcp.upstash.com",
     ]);
     expect(new Set(hostnames).size).toBe(hostnames.length);
@@ -167,6 +179,10 @@ describe("buildScopedMcpUrl — default (unscoped) URLs", () => {
     ["atlassian", "https://mcp.atlassian.com/v2/mcp"],
     ["gitlab", "https://gitlab.com/api/v4/mcp"],
     ["clerk", "https://mcp.clerk.com/mcp"],
+    ["exa", "https://mcp.exa.ai/mcp"],
+    ["tavily", "https://mcp.tavily.com/mcp"],
+    ["firecrawl", "https://mcp.firecrawl.dev/v2/mcp-oauth"],
+    ["huggingface", "https://huggingface.co/mcp"],
   ];
 
   for (const [id, expected] of cases) {
@@ -209,7 +225,7 @@ describe("buildScopedMcpUrl — read-only per provider mechanism", () => {
 
   it("ignores readOnly for providers that cannot express it in the URL", () => {
     // Enforcement for these falls to the destructive-tool approval gate.
-    for (const id of ["stripe", "context7", "prisma", "cloudflare", "sentry", "resend", "upstash", "sanity", "notion", "atlassian", "gitlab", "clerk"] as const) {
+    for (const id of ["stripe", "context7", "prisma", "cloudflare", "sentry", "resend", "upstash", "sanity", "notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface"] as const) {
       expect(provider(id).supportsReadOnly).toBe(false);
       expect(urlFor(id, { readOnly: true })).toBe(urlFor(id, UNSCOPED));
       expect(buildScopedMcpUrl(provider(id), { readOnly: true }).headers).toEqual({});
