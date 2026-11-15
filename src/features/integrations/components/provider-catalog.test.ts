@@ -41,14 +41,13 @@ it("describes read-only capability only on cards that render the badge", () => {
   for (const [index, provider] of providers.entries()) {
     const card = cards[index];
     const describedBy = card.match(/aria-describedby="([^"]+)"/)![1].split(" ");
-    const badgeId = describedBy[0].replace(/-description$/, "-read-only");
-    expect(describedBy).toHaveLength(provider.supportsReadOnly ? 3 : 2);
+    const metaId = describedBy[0].replace(/-description$/, "-meta");
+    expect(describedBy).toHaveLength(2);
+    expect(describedBy).toContain(metaId);
+    expect(card).toContain(`id="${metaId}"`);
+    expect(card.includes("Read-only capable")).toBe(provider.supportsReadOnly);
     if (provider.supportsReadOnly) {
-      expect(describedBy).toContain(badgeId);
-      expect(card).toContain(`id="${badgeId}"`);
-    } else {
-      expect(describedBy).not.toContain(badgeId);
-      expect(card).not.toContain(`id="${badgeId}"`);
+      expect(card.indexOf(`id="${metaId}"`)).toBeLessThan(card.indexOf("Read-only capable"));
     }
   }
 });

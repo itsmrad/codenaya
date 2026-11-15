@@ -49,7 +49,7 @@ it("disables stdio-only servers with the local-runtime reason and offers Connect
   expect(html).toMatch(/aria-label="owner\/server-1: [^"]+"[^>]*aria-disabled="true"/);
   expect(html).toContain("Local only");
   expect(html).toMatch(/aria-label="Connect owner\/remote"(?![^>]*aria-disabled)/);
-  expect(html).toContain("Remote · OAuth");
+  expect(html).toContain("Remote · token");
   expect(html).toContain(">Official<");
 });
 

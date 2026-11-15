@@ -20,10 +20,10 @@ import { CatalogTile, TileChip } from "./catalog-tile";
 /** Tiles rendered per page; "Show more" adds another page. */
 export const COMMUNITY_PAGE_SIZE = 60;
 
-export const STDIO_DISABLED_REASON = "Needs local runtime (coming with #545)";
+export const STDIO_DISABLED_REASON = "Needs a local runtime (not supported yet)";
 
 const AUTH_LABELS: Record<CommunityServer["auth"], string> = {
-  oauth: "OAuth",
+  oauth: "token",
   "api-key": "API key",
   unknown: "Auth unknown",
 };

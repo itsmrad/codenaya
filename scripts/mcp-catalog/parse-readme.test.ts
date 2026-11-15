@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyExclusions,
+  applyContentPolicy,
   cleanDescription,
   parseExcludeTerms,
   parseGithubUrl,
@@ -124,5 +125,22 @@ describe("remote trust boundaries", () => {
     }
     expect(isVettedRemote(undefined, trusted)).toBe(false);
     expect(() => readTrustedHostnames("trustedHostnames: [variable]")).toThrow();
+  });
+});
+
+
+describe("app hosting and catalog content policy", () => {
+  it.each(["run.app", "fly.dev", "herokuapp.com", "ngrok-free.app", "ngrok.io", "ngrok.app"])(
+    "rejects owner namespaces on %s app hosts",
+    (domain) => {
+      expect(publisherVouches("io.github.acme/hub", { owner: "acme" }, `https://acme.${domain}/mcp`)).toBeNull();
+    },
+  );
+
+  it("drops bypass descriptions even when the repo has an unrelated name", () => {
+    const descriptions = ["CAPTCHA solver", "Anti-bot browser", "bot detection bypass", "stealth browser", "undetected automation"];
+    const sample = descriptions.map((description) => ({ name: "acme/tool", description }));
+    const safe = { name: "acme/docs", description: "Search documentation" };
+    expect(applyContentPolicy([...sample, safe])).toEqual({ kept: [safe], dropped: sample.length });
   });
 });

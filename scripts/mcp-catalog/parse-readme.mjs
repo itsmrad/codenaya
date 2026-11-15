@@ -162,7 +162,12 @@ export function applyExclusions(entries, terms) {
 }
 
 /** Shared hosting cannot establish that a repo publisher owns a remote. */
-const HOSTING_DOMAINS = ["smithery.ai", "glama.ai", "github.io", "workers.dev", "pages.dev", "vercel.app", "netlify.app"];
+const HOSTING_DOMAINS = [
+  "smithery.ai", "glama.ai", "run.app", "fly.dev", "herokuapp.com", "railway.app",
+  "ngrok-free.app", "ngrok.io", "ngrok.app", "vercel.app", "netlify.app", "pages.dev",
+  "workers.dev", "onrender.com", "azurewebsites.net", "cloudfront.net", "appspot.com",
+  "github.io", "glitch.me", "replit.app", "repl.co", "deno.dev", "koyeb.app", "up.railway.app",
+];
 // Fail closed for unrecognised/multi-label suffixes; no guessed eTLD+1 parsing.
 const OWNER_DOMAIN_SUFFIXES = new Set(["com", "org", "net", "io", "dev", "app", "ai", "tech", "cloud", "tools", "software"]);
 
@@ -194,4 +199,12 @@ export function readTrustedHostnames(source) {
 
 export function isVettedRemote(remoteUrl, trustedHostnames) {
   return !!remoteUrl && trustedHostnames.has(new URL(remoteUrl).hostname.toLowerCase());
+}
+
+
+/** Keep bypass tooling out of the catalog, including renamed repos. */
+export function applyContentPolicy(entries) {
+  const bypass = /captcha|anti[\s-]?bot|bot[\s-]+detection[\s-]+bypass|stealth|undetected/i;
+  const kept = entries.filter((entry) => !bypass.test(`${entry.name} ${entry.description}`));
+  return { kept, dropped: entries.length - kept.length };
 }

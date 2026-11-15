@@ -202,18 +202,20 @@ and nothing in it is trusted.
   line, sorted by stars then id. Generated, not hand-edited.
 - **Remote vs local.** An entry gets a `remoteUrl` (and `http`/`sse` transport)
   only from the official MCP registry (its server list, `remotes[]`), matched to
-  its GitHub repo. The registry publisher must be the repo's GitHub owner
-  (`io.github.<owner>/…`) or own an owner-named registrable domain the remote
-  is served on (recognised single-label suffixes only; other domain vouches fail
-  closed). Shared hosting/proxy domains cannot vouch. Entries matching vetted
+  its GitHub repo. A GitHub-owner vouch means the registry namespace matches the repo owner
+  (`io.github.<owner>/…`) and the remote host is not on the aggregator/app-hosting
+  denylist; it does not establish domain ownership. A domain vouch requires an
+  owner-named domain (recognised single-label suffixes only; other domain vouches
+  fail closed). Denylisted hosting/proxy domains cannot vouch. Entries matching vetted
   providers’ trusted hosts are omitted in favour of the vetted entry. URLs are
   never scraped from READMEs. Everything else is `stdio` and shows
-  "Needs local runtime (coming with #545)", disabled.
+  "Needs a local runtime (not supported yet)", disabled.
 - **Auth** is `api-key` when the registry remote declares headers, `oauth` when
   the remote publishes RFC 9728 protected-resource metadata (opt-in
   `--probe-oauth`: one unauthenticated GET per remote entry, paced), else
   `unknown`. The custom-server form is key-based today, so an OAuth-only remote
-  needs a bearer token pasted as its key.
+  needs a bearer token pasted as its key. Its tile says "Remote · token"; sign-in
+  is not supported yet.
 
 ### Safety model
 
@@ -233,8 +235,15 @@ trust list. `community-approval.test.ts` checks this for every remote entry.
 
 ```bash
 node scripts/mcp-catalog/build.mjs \
-  --exclude-file <path to the excluded-names list> --probe-oauth
+  --exclude-file <path to the excluded-names list>
 ```
+
+`--probe-oauth` is maintainer-only: it makes requests to registry-provided URLs
+without a private-IP check. Normal refreshes reuse cached OAuth observations
+without probing. Do not enable probes for untrusted input or on a privileged network.
+
+The generator also drops descriptions/names advertising CAPTCHA, anti-bot,
+stealth, undetected automation, or bot-detection bypass tooling.
 
 Needs an authenticated `gh` CLI. Stars are fetched by GraphQL in batches of 100,
 paced, and cached with registry responses under `scripts/mcp-catalog/.cache/`

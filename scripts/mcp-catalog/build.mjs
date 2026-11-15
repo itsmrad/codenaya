@@ -18,6 +18,7 @@ import { parseArgs } from "node:util";
 
 import {
   applyExclusions,
+  applyContentPolicy,
   parseExcludeTerms,
   parseGithubUrl,
   parseReadme,
@@ -257,7 +258,7 @@ async function main() {
   })), false);
   stats.vetted = 0;
   const used = new Set();
-  const ranked = alive
+  let ranked = alive
     .map((entry) => ({ entry, stars: stars.repos[entry.repo.key].stars }))
     .sort((a, b) => b.stars - a.stars || a.entry.name.localeCompare(b.entry.name))
     .slice(0, limit)
@@ -287,10 +288,15 @@ async function main() {
       };
     });
 
-  if (values["probe-oauth"]) {
-    const oauth = await probeOAuth(ranked.filter((e) => e.remoteUrl && e.auth === "unknown").map((e) => e.remoteUrl), maxAgeMs);
-    for (const entry of ranked) if (entry.remoteUrl && oauth[entry.remoteUrl]) entry.auth = "oauth";
-  }
+  const contentPolicy = applyContentPolicy(ranked);
+  ranked = contentPolicy.kept;
+  stats.bypassTooling = contentPolicy.dropped;
+
+  // Reuse existing observations without sending requests unless explicitly opted in.
+  const oauth = values["probe-oauth"]
+    ? await probeOAuth(ranked.filter((e) => e.remoteUrl && e.auth === "unknown").map((e) => e.remoteUrl), maxAgeMs)
+    : readCache("oauth.json", maxAgeMs)?.results ?? {};
+  for (const entry of ranked) if (entry.remoteUrl && oauth[entry.remoteUrl]) entry.auth = "oauth";
 
   ranked.sort((a, b) => b.stars - a.stars || a.id.localeCompare(b.id));
 

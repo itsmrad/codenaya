@@ -215,7 +215,7 @@ test.describe("integration catalog", () => {
 
     const search = catalog.getByRole("searchbox", { name: "Search community servers" });
     await search.fill(local.name);
-    await expect(servers.getByRole("button", { name: `${local.name}: Needs local runtime (coming with #545)` })).toHaveAttribute("aria-disabled", "true");
+    await expect(servers.getByRole("button", { name: `${local.name}: Needs a local runtime (not supported yet)` })).toHaveAttribute("aria-disabled", "true");
 
     await search.fill(remote.name);
     await servers.getByRole("button", { name: `Connect ${remote.name}`, exact: true }).click();
