@@ -89,6 +89,89 @@ afterEach(() => {
 });
 
 describe("sandbox file sync acknowledgements", () => {
+  const projectFiles = (framework: "vite" | "next", revision = 1) => [
+    {
+      ...file(JSON.stringify({ scripts: { dev: framework === "next" ? "next dev" : "vite" }, revision })),
+      _id: "package" as Id<"files">, name: "package.json",
+    },
+    {
+      ...file("export default {}"), _id: `${framework}-config` as Id<"files">,
+      name: `${framework}.config.ts`,
+    },
+  ];
+  const bootProject = async (framework: "vite" | "next") => {
+    render().restart();
+    files = projectFiles(framework);
+    render();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(render().status).toBe("running");
+    await vi.advanceTimersByTimeAsync(300);
+    patch.mockClear();
+    vi.mocked(fetch).mockClear();
+  };
+
+  it.each(["vite", "next"] as const)("keeps the reinstall path for a %s dependency edit", async (framework) => {
+    await bootProject(framework);
+    files = projectFiles(framework, 2);
+    render();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(patch).toHaveBeenCalledTimes(1);
+    expect(payloads()[0][0].path).toBe("package.json");
+    expect(fetch).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ method: "DELETE" }));
+    expect(render().status).toBe("running");
+  });
+
+  it.each([
+    ["vite", "next"],
+    ["next", "vite"],
+  ] as const)("fully reboots %s → %s before sending a reinstall", async (before, after) => {
+    await bootProject(before);
+    files = projectFiles(after);
+    render();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(patch).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith("/api/sandbox/sbx_1", expect.objectContaining({ method: "DELETE" }));
+    render();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(render().status).toBe("running");
+    const boot = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(String(boot?.[1]?.body)).files).toEqual([
+      { path: "package.json", content: files[0].content },
+      { path: `${after}.config.ts`, content: files[1].content },
+    ]);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it("detects a switch when the old config is removed after package.json was synced", async () => {
+    await bootProject("next");
+    const nextConfig = files[1];
+    files = [...projectFiles("vite"), nextConfig];
+    render();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(patch).toHaveBeenCalledTimes(1);
+    vi.mocked(fetch).mockClear();
+    files = files.filter((file) => file.name !== "next.config.ts");
+    render();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(patch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith("/api/sandbox/sbx_1", expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it("retains the boot framework across an incomplete package.json snapshot", async () => {
+    await bootProject("next");
+    files = [{ ...files[0], content: "{" }];
+    render();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(patch).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ method: "DELETE" }));
+    files = projectFiles("vite");
+    render();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(patch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith("/api/sandbox/sbx_1", expect.objectContaining({ method: "DELETE" }));
+  });
+
   it.each(["network", "http"])("retries a failed %s sync without another file edit", async (failure) => {
     if (failure === "network") patch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     else patch.mockResolvedValueOnce(Response.json({ error: "unavailable" }, { status: 503 }));
