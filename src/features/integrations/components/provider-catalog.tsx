@@ -19,6 +19,7 @@ export const supportsOAuth = (authModes: readonly IntegrationAuthMode[]) =>
   authModes.includes("oauth");
 
 const authModeLabel = (authModes: readonly IntegrationAuthMode[]) => {
+  if (authModes.includes("none")) return "No sign-in";
   if (supportsOAuth(authModes) && supportsApiKey(authModes)) return "OAuth · API key";
   return supportsApiKey(authModes) ? "API key" : "OAuth";
 };

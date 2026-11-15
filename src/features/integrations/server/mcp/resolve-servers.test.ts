@@ -403,3 +403,22 @@ describe("collectKnownSecrets", () => {
     expect(collectKnownSecrets([])).toEqual([]);
   });
 });
+
+it("preserves API-key and OAuth header bytes", async () => {
+  const apiKey = await makeConnection({ providerId: "exa", credential: { type: "api_key", apiKey: "api-key-fixture" } });
+  const oauth = await makeConnection({ providerId: "exa", authMode: "oauth", credential: { type: "oauth", accessToken: "oauth-fixture" } });
+  const { servers, problems } = await resolveMcpServers([
+    { connection: apiKey, link: makeLink() }, { connection: oauth, link: makeLink() },
+  ]);
+  expect(problems).toEqual([]);
+  expect(servers[0].headers).toMatchInlineSnapshot(`
+    {
+      "x-api-key": "api-key-fixture",
+    }
+  `);
+  expect(servers[1].headers).toMatchInlineSnapshot(`
+    {
+      "Authorization": "Bearer oauth-fixture",
+    }
+  `);
+});

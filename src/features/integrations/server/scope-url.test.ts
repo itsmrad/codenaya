@@ -58,6 +58,8 @@ describe("catalog", () => {
       "mixpanel",
       "contentful",
       "contentful-eu",
+      "microsoft-learn",
+      "cloudflare-docs",
     ]);
   });
 
@@ -142,8 +144,10 @@ describe("catalog", () => {
     const hostnames = getTrustedHostnames();
     expect(hostnames).toEqual([
       "api.githubcopilot.com",
+      "docs.mcp.cloudflare.com",
       "gitlab.com",
       "huggingface.co",
+      "learn.microsoft.com",
       "mcp.amplitude.com",
       "mcp.atlassian.com",
       "mcp.clerk.com",

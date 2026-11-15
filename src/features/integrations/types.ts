@@ -28,7 +28,7 @@
  */
 
 /** How Codenia authenticates to a provider's MCP endpoint. */
-export type IntegrationAuthMode = "oauth" | "api_key";
+export type IntegrationAuthMode = "oauth" | "api_key" | "none";
 
 /** Boolean fields of `ProjectScopeSelection` a scope rule may read. */
 export type ScopeFlagField = "readOnly" | "experimental";

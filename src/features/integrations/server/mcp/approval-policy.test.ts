@@ -534,6 +534,8 @@ describe("known reads exclude tools that return secrets", () => {
     ["contentful", "create_upload_session"],
     ["contentful", "get_entry_preview_url"],
     ["contentful-eu", "list_content_previews"],
+    ["microsoft-learn", "get_api_key"],
+    ["cloudflare-docs", "get_api_token"],
   ] as const)("%s does not list %s", (id, name) => {
     expect(PROVIDERS[id].readOnlyTools ?? []).not.toContain(name);
     expect(requiresApproval(

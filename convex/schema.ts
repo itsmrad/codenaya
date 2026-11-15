@@ -590,7 +590,7 @@ export default defineSchema({
     // Catalog provider id, or "custom" for a user-supplied MCP server URL.
     providerId: v.string(),
     label: v.string(),
-    authMode: v.union(v.literal("oauth"), v.literal("api_key")),
+    authMode: v.union(v.literal("oauth"), v.literal("api_key"), v.literal("none")),
     // Base MCP endpoint before per-project scoping is applied.
     serverUrl: v.string(),
     status: v.union(
