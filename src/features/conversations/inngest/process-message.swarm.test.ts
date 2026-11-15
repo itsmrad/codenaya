@@ -431,11 +431,6 @@ describe("processMessage swarm mode", () => {
       expect(SWARM_ORCHESTRATOR_NOTE).toContain("Anything outside src/ (public/ assets, root config) and the shared files are yours: write them before delegating.");
     });
 
-    it("tells the orchestrator which paths to own and which to write before delegating", () => {
-      expect(SWARM_ORCHESTRATOR_NOTE).toContain("ownedPaths must be files or folders under src/ (e.g. src/pages/Home.tsx, src/components/gallery), disjoint between tasks.");
-      expect(SWARM_ORCHESTRATOR_NOTE).toContain("Anything outside src/ (public/ assets, root config) and the shared files are yours: write them before delegating.");
-    });
-
     it("refuses a page write before delegation, then forces delegateTasks, which runs the workers", async () => {
       const outcome = await swarm([
         { data: FOUNDATION },
