@@ -1050,6 +1050,8 @@ const CATALOG = {
     // Full published inventory: https://docs.exa.ai/reference/exa-mcp#available-tools
     // agent_run is usage-billed, so it is gated as spend.
     destructiveTools: ["agent_run"],
+    // Public-web reads from the inventory above.
+    readOnlyTools: ["web_search_exa", "web_fetch_exa", "web_search_advanced_exa"],
     apiKey: {
       header: "x-api-key",
       valuePrefix: "",
@@ -1076,6 +1078,8 @@ const CATALOG = {
     // Full published inventory: https://docs.tavily.com/documentation/mcp#what-you-get
     // Every tool reads the public web; tavily_research is a long multi-source run, gated as spend.
     destructiveTools: ["tavily_research"],
+    // Public-web reads from the inventory above. tavily_crawl runs a billed multi-page job, so it stays gated.
+    readOnlyTools: ["tavily_search", "tavily_extract", "tavily_map"],
     notes:
       "OAuth only here; Tavily's documented key option puts the key in the MCP URL query string. Connecting with OAuth uses the account's mcp_auth_default API key, which Tavily creates if it does not exist. All tools consume Tavily credits. No URL-level read-only mode.",
   },
@@ -1111,6 +1115,18 @@ const CATALOG = {
       "jobs_search",
       "firecrawl_extract",
     ],
+    // Reads from the inventory above. Left gated: firecrawl_scrape (billed per
+    // call, incl. Alexandria runs), firecrawl_crawl (starts a billed job),
+    // firecrawl_parse (returns a signed upload target), monitor list/get
+    // (webhook configuration) and firecrawl_credit_usage (per-key billing).
+    readOnlyTools: [
+      "firecrawl_search", "firecrawl_map", "firecrawl_check_crawl_status",
+      "firecrawl_agent_status", "firecrawl_developer_search", "firecrawl_gov_search",
+      "firecrawl_research_search_papers", "firecrawl_research_related_papers",
+      "firecrawl_research_read_paper", "firecrawl_research_inspect_paper",
+      "firecrawl_find_tools", "alexandria_library_search",
+      "firecrawl_monitor_checks", "firecrawl_monitor_check",
+    ],
     notes:
       "OAuth endpoint only; API-key connections use a different endpoint and are not offered yet. Interact can click and submit forms on live sites, and monitors can send webhooks or email, so both are gated. Scrape with Alexandria provider calls is billed per call but cannot be gated by name. No URL-level read-only mode.",
   },
@@ -1137,6 +1153,9 @@ const CATALOG = {
       "hf_sandbox_fs",
       "dynamic_space",
     ],
+    // Hub reads from the inventory above. hf_whoami is left gated because it
+    // describes the connected credential and its permissions.
+    readOnlyTools: ["hub_repo_search", "hub_repo_details", "hf_fs"],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",

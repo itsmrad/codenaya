@@ -54,7 +54,7 @@ const CASES: Fixture[] = [
     apiKey: { header: "x-api-key", valuePrefix: "" },
   },
   { id: "tavily", url: "https://mcp.tavily.com/mcp", read: "tavily_search" },
-  { id: "firecrawl", url: "https://mcp.firecrawl.dev/v2/mcp-oauth", read: "firecrawl_scrape" },
+  { id: "firecrawl", url: "https://mcp.firecrawl.dev/v2/mcp-oauth", read: "firecrawl_map" },
   {
     id: "huggingface", url: "https://huggingface.co/mcp", read: "hub_repo_search",
     apiKey: { header: "Authorization", valuePrefix: "Bearer " },
@@ -219,4 +219,16 @@ describe.each(["tavily", "firecrawl"] as const)("%s stays OAuth-only", (id) => {
     expect(mocks.transport).not.toHaveBeenCalled();
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
+});
+
+it.each([
+  ["exa", "agent_run"],
+  ["tavily", "tavily_research"],
+  ["firecrawl", "firecrawl_scrape"],
+  ["firecrawl", "firecrawl_extract"],
+  ["firecrawl", "people_company_search"],
+  ["firecrawl", "people_company_enrich"],
+  ["firecrawl", "jobs_search"],
+] as const)("keeps billed %s tool %s out of known reads", (id, name) => {
+  expect(PROVIDERS[id].readOnlyTools ?? []).not.toContain(name);
 });
