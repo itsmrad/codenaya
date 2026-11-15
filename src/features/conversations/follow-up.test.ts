@@ -30,6 +30,14 @@ describe("followUpAction", () => {
     expect(followUpAction(followUp, run({ status: "cancelled" }), true)).toBe("drop");
   });
 
+  test("sends once its run stalled, when the composer could send over it", () => {
+    const live = run({ status: "processing" });
+    expect(followUpAction(followUp, live, false, runId)).toBe("send");
+    expect(followUpAction(followUp, live, true, runId)).toBe("wait");
+    // Another run's stall doesn't count.
+    expect(followUpAction(followUp, live, false, "other" as Id<"messages">)).toBe("wait");
+  });
+
   test("drops it when the run was stopped or failed", () => {
     expect(followUpAction(followUp, run({ status: "cancelled" }))).toBe("drop");
     for (const content of [AGENT_FAILURE_MESSAGE, LOST_RUN_MESSAGE, DISPATCH_FAILED_MESSAGE, `Bad key. ${KEY_FAILURE_SUFFIX}`]) {

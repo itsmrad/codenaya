@@ -18,6 +18,7 @@ export const PROJECT_COMMANDS = [
   { id: "version-history", label: "Version history" },
   { id: "publish", label: "Publish" },
   { id: "download-zip", label: "Export ZIP" },
+  { id: "export-github", label: "Export to GitHub" },
   { id: "integrations", label: "Integrations" },
   { id: "skills", label: "Skills" },
   { id: "env-vars", label: "Environment variables" },

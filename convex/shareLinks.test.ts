@@ -161,6 +161,26 @@ describe("share links (#260)", () => {
     await expect(bob(t).mutation(api.projects.remixShared, { token })).rejects.toThrow("Project not found");
   });
 
+  test("remixShared and duplicate refuse past the hourly project limit", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await seed(t);
+    const token = await alice(t).action(api.projects.createShareLink, { projectId });
+    // Bob already made 20 projects this hour, so neither copy entry point may add another.
+    const ownId = await t.run(async (ctx) => {
+      for (let i = 0; i < 19; i++) {
+        await ctx.db.insert("projects", { name: `p${i}`, ownerId: BOB, updatedAt: 0 });
+      }
+      return await ctx.db.insert("projects", { name: "Mine", ownerId: BOB, updatedAt: 0 });
+    });
+
+    await expect(bob(t).mutation(api.projects.remixShared, { token })).rejects.toThrow("per hour");
+    await expect(bob(t).mutation(api.projects.duplicate, { id: ownId })).rejects.toThrow("per hour");
+    expect(await t.run(async (ctx) => (await ctx.db.query("projects").collect()).filter((p) => p.ownerId === BOB).length)).toBe(20);
+
+    // Alice is unaffected.
+    await alice(t).mutation(api.projects.duplicate, { id: projectId });
+  });
+
   test("dotenv files at any depth are hidden from the share and not remixed; examples stay", async () => {
     const t = convexTest(schema, modules);
     const { projectId } = await seed(t);

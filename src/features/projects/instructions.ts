@@ -1,3 +1,4 @@
+import { capNotesForPrompt, type ProjectNote } from "./notes";
 import { buildDesignTokensSection, type ProjectTheme } from "./theme";
 
 /** Longest project instructions an owner may save (#299). */
@@ -16,17 +17,25 @@ const stripDelimiterTags = (text: string): string => {
 
 /**
  * The system prompt's project instructions section (#299): the owner's
- * always-on preferences, delimited and framed as user text, not system rules.
- * Capped here too, so a stored value can never outgrow the limit. The
- * project theme's design tokens (#302) follow it. Empty when there are neither.
+ * always-on preferences and saved notes (#630), delimited and framed as user
+ * text, not system rules. Capped here too, so a stored value can never
+ * outgrow the limit. The project theme's design tokens (#302) follow it.
+ * Empty when there is none of them.
  */
 export function buildProjectInstructionsSection(
   instructions?: string,
+  notes?: readonly ProjectNote[],
   theme?: ProjectTheme,
 ): string {
-  const text = stripDelimiterTags(instructions ?? "")
-    .trim()
-    .slice(0, MAX_PROJECT_INSTRUCTIONS_LENGTH);
+  const noteLines = capNotesForPrompt(notes).map(
+    (note) => `- ${stripDelimiterTags(note).replace(/\s*\n\s*/g, " ").trim()}`,
+  );
+  const text = [
+    stripDelimiterTags(instructions ?? "").trim().slice(0, MAX_PROJECT_INSTRUCTIONS_LENGTH),
+    noteLines.length ? `Notes:\n${noteLines.join("\n")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   if (!text) return buildDesignTokensSection(theme);
 
   return [

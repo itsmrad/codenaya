@@ -3,6 +3,17 @@ import { describe, expect, it } from "vitest";
 import { CODING_AGENT_SYSTEM_PROMPT, STARTER_IN_PLACE_NOTE } from "./constants";
 import { KNOWN_GOOD_VERSIONS } from "./known-good-versions";
 
+describe("coding agent summary format (#256)", () => {
+  it("asks for short bullets and follow-up suggestions, not a tree or setup steps", () => {
+    const format = CODING_AGENT_SYSTEM_PROMPT.slice(CODING_AGENT_SYSTEM_PROMPT.indexOf("<response_format>"));
+    expect(format).toContain("3 to 5 Markdown bullets");
+    expect(format).toContain("<suggestions>");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("npm install");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("npm run dev");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/File structure|real tree of the files/);
+  });
+});
+
 describe("coding agent integration instructions", () => {
   it("imports shipped shadcn components and uses Sonner (#294)", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("Import existing components; do not rewrite them");

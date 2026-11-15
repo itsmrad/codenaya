@@ -23,6 +23,9 @@ import { STUB_MODEL, startStubProvider, type StubChatRequest } from "./stub-prov
 const PLAN_ITEM = "Add a todo list page";
 const PLAN = `A simple todo app.\n\n### Steps\n- [ ] ${PLAN_ITEM}\n- [ ] Keep todos in local state`;
 const BUILD_REPLY = "Built the todo app";
+const CHIP = "Save the todos in local storage";
+// Follow-up chips (#256): the block is stored apart and never shown.
+const BUILD_REPLY_WITH_CHIPS = `- ${BUILD_REPLY}\n\n<suggestions>\n${CHIP}\nAdd a footer\n</suggestions>`;
 const ADDED_FILE = "todo-app.tsx";
 const QUESTION = "what does useAuth do?";
 const ANSWER = "useAuth returns the signed-in user";
@@ -55,7 +58,7 @@ test.describe.serial("plan mode", () => {
 
   test.beforeAll(async ({ browser }) => {
     stub = await startStubProvider(apiKey, {
-      reply: (request) => (isQuestion(request) ? ANSWER : isBuild(request) ? BUILD_REPLY : PLAN),
+      reply: (request) => (isQuestion(request) ? ANSWER : isBuild(request) ? BUILD_REPLY_WITH_CHIPS : PLAN),
       toolCall: (request) =>
         isBuild(request)
           ? {
@@ -146,6 +149,19 @@ test.describe.serial("plan mode", () => {
     await expect.poll(fileNames, { timeout: 30_000 }).toContain(ADDED_FILE);
     await expect(planToggle).not.toBeChecked();
     expect(JSON.stringify(stub.requests.find(isBuild)?.messages)).toContain(PLAN_ITEM);
+
+    // The build reply ends with chips; one fills the composer without sending.
+    const chip = page.getByRole("button", { name: CHIP });
+    await expect(chip).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add a footer" })).toBeVisible();
+    await expect(page.getByText("<suggestions>")).toHaveCount(0);
+    const requestsBefore = stub.requests.length;
+    await chip.click();
+    const composer = page.getByPlaceholder("Describe a change or ask a question…");
+    await expect(composer).toHaveValue(CHIP);
+    await expect(composer).toBeFocused();
+    expect(stub.requests.length).toBe(requestsBefore);
+    await composer.fill("");
     await test.info().attach("build-reply", {
       body: await page.screenshot(),
       contentType: "image/png",
@@ -167,6 +183,8 @@ test.describe.serial("plan mode", () => {
 
     await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 120_000 });
     await expect(page.getByRole("button", { name: "Build this plan" })).toHaveCount(0);
+    // Chips are only under the latest reply, and never under a plan-mode one.
+    await expect(page.getByRole("button", { name: CHIP })).toHaveCount(0);
     await test.info().attach("answer-reply", {
       body: await page.screenshot(),
       contentType: "image/png",

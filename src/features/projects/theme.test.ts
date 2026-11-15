@@ -79,7 +79,7 @@ describe("buildDesignTokensSection", () => {
     expect(buildDesignTokensSection(undefined)).toBe("");
     expect(buildDesignTokensSection({ ...theme, primary: "blue" })).toBe("");
     expect(buildProjectInstructionsSection(undefined)).toBe("");
-    expect(buildProjectInstructionsSection(undefined, theme)).toContain(
+    expect(buildProjectInstructionsSection(undefined, undefined, theme)).toContain(
       "## Design tokens (project theme)",
     );
   });
@@ -97,7 +97,7 @@ describe("buildDesignTokensSection", () => {
   });
 
   it("follows the project instructions", () => {
-    const section = buildProjectInstructionsSection("All prices in INR.", theme);
+    const section = buildProjectInstructionsSection("All prices in INR.", undefined, theme);
 
     expect(section.indexOf("</project_instructions>")).toBeLessThan(
       section.indexOf("## Design tokens"),
