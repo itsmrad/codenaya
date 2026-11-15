@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { detectCredential } from "@/features/integrations/credential-guard";
 import { convexErrorMessage } from "@/lib/convex-error";
 
 import {
@@ -22,7 +23,12 @@ import {
   useRemoveProjectNote,
   useUpdateProjectNote,
 } from "../hooks/use-project-notes";
-import { MAX_PROJECT_NOTE_LENGTH, MAX_PROMPT_NOTES, type ProjectNote } from "../notes";
+import {
+  MAX_PROJECT_NOTE_LENGTH,
+  MAX_PROMPT_NOTES,
+  NOTE_CREDENTIAL_ERROR,
+  type ProjectNote,
+} from "../notes";
 import { Id } from "../../../../convex/_generated/dataModel";
 
 const iconButtonClassName = "size-7 text-muted-foreground hover:text-foreground";
@@ -48,6 +54,10 @@ export const ProjectNoteDialog = ({
 
   const save = async () => {
     if (!draft) return;
+    if (detectCredential(draft.text).detected) {
+      toast.error(NOTE_CREDENTIAL_ERROR);
+      return;
+    }
     setSaving(true);
     try {
       if (draft.noteId) {

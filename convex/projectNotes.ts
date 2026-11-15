@@ -5,9 +5,11 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { getOwnedProject } from "./projects";
+import { detectCredential } from "../src/features/integrations/credential-guard";
 import {
   MAX_PROJECT_NOTE_LENGTH,
   MAX_PROJECT_NOTES,
+  NOTE_CREDENTIAL_ERROR,
   type ProjectNote,
 } from "../src/features/projects/notes";
 
@@ -21,6 +23,9 @@ function validNoteText(text: string) {
       "INVALID_ARGUMENT",
       `A note must be at most ${MAX_PROJECT_NOTE_LENGTH} characters`,
     );
+  }
+  if (detectCredential(trimmed).detected) {
+    throw appError("INVALID_ARGUMENT", NOTE_CREDENTIAL_ERROR);
   }
   return trimmed;
 }

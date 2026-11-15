@@ -5,6 +5,9 @@ export type ProjectNote = { id: string; text: string; createdAt: number };
 export const MAX_PROJECT_NOTES = 50;
 /** Longest single note. */
 export const MAX_PROJECT_NOTE_LENGTH = 300;
+/** Shown, and thrown by the backend, when a note holds a credential. */
+export const NOTE_CREDENTIAL_ERROR =
+  "Notes can't hold credentials. Remove the secret and add the connection through Integrations instead.";
 /** Most notes, and characters, that go into a run's prompt. */
 export const MAX_PROMPT_NOTES = 20;
 export const MAX_PROMPT_NOTES_CHARS = 2000;
