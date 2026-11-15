@@ -288,3 +288,9 @@ Verified from the [official sign-in docs](https://docs.firecrawl.dev/mcp-server)
 and [API-key docs](https://docs.firecrawl.dev/mcp-server/keyless#add-an-api-key)
 on 2026-11-15. Validation uses mocked MCP handshakes; no vendor calls or real
 credentials are needed.
+
+## Batch D1 OAuth providers
+
+Klaviyo, Granola, Kit, MailerLite, beehiiv, Prismic, GitBook, Scite, Snyk Evo, Axiom, Fathom, Help Scout, Omnisend, DatoCMS, Circleback, getimg.ai use OAuth discovery and dynamic client registration. Unauthenticated initialize returned 401 and protected-resource/authorization-server metadata advertised DCR on 2026-11-15. No registration, sign-in or tool calls were performed. Kit uses its account server (`https://app.kit.com/mcp`).
+
+All tools remain approval-gated, including tools advertising read-only hints; no URL-level read-only mode is claimed. Account roles, plans and usage charges still apply (see each catalog entry). BrowserStack was dropped because initialize and protected-resource metadata returned HTTP 403 during re-verification.

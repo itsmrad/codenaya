@@ -59,3 +59,5 @@ make.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-ic
 customer-io.svg: original initials monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
 cloudflare-browser.svg: a copy of cloudflare.svg (Simple Icons, CC0 1.0 Universal). wandb.svg: Simple Icons "weightsandbiases", CC0 1.0 Universal.
 descope.svg and langfuse.svg: original single-path monograms (not vendor logos), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+
+klaviyo.svg, granola.svg, kit.svg, mailerlite.svg, beehiiv.svg, prismic.svg, gitbook.svg, scite.svg, snyk-evo.svg, axiom.svg, fathom.svg, help-scout.svg, omnisend.svg, datocms.svg, circleback.svg, getimg-ai.svg: original pixel initials monograms (not vendor logos), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
