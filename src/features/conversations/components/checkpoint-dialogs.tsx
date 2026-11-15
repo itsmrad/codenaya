@@ -57,12 +57,12 @@ export const RestoreCheckpointDialog = ({
     <AlertDialog open={checkpoint !== null} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Restore to before this run?</AlertDialogTitle>
+          <AlertDialogTitle>{checkpoint?.messageId ? "Restore to before this run?" : "Restore this checkpoint?"}</AlertDialogTitle>
           <AlertDialogDescription>
             The project&apos;s files go back to how they were{" "}
             {checkpoint &&
               formatDistanceToNow(checkpoint._creationTime, { addSuffix: true })}
-            , before the agent ran. Changes made since then are replaced.
+            . Changes made since then are replaced.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

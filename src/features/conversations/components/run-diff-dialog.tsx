@@ -30,6 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DiffViewer } from "@/features/editor/components/diff-viewer";
+import { convexErrorMessage } from "@/lib/convex-error";
 import { cn } from "@/lib/utils";
 
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -67,14 +68,14 @@ export const totalDelta = (changes: RunChange[]) =>
     { additions: 0, deletions: 0 },
   );
 
-const DiffBody = ({ checkpointId, path }: { checkpointId: Id<"checkpoints">; path: string }) => {
-  const diff = useFileDiff(checkpointId, path);
+const DiffBody = ({ checkpointId, path, scope }: { checkpointId: Id<"checkpoints">; path: string; scope?: "project" }) => {
+  const diff = useFileDiff(checkpointId, path, scope);
   const note = (text: string) => (
     <p className="p-6 text-center text-sm text-muted-foreground">{text}</p>
   );
   if (diff instanceof Error) return note("Couldn't load this diff.");
   if (diff === undefined) return note("Loading…");
-  if (diff === null) return note("This file no longer differs from before the run.");
+  if (diff === null) return note("This file no longer differs from the checkpoint.");
   if (!("before" in diff)) {
     return note(diff.binary ? "Binary file changed. There is no text diff." : "This file is too large to diff.");
   }
@@ -90,46 +91,53 @@ export const RunDiffDialog = ({
   open,
   onOpenChange,
   revertDisabled,
+  scope,
+  initialPath,
 }: {
   checkpointId: Id<"checkpoints">;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** An agent run is in progress. */
   revertDisabled: boolean;
+  scope?: "project";
+  initialPath?: string;
 }) => {
-  const result = useRunChanges(open ? checkpointId : null);
+  const result = useRunChanges(open ? checkpointId : null, scope);
   const changes = result instanceof Error ? null : result;
-  const [selected, setSelected] = useState<string>();
-  const [confirming, setConfirming] = useState(false);
+  const [selected, setSelected] = useState<string | undefined>(initialPath);
+  const [confirming, setConfirming] = useState<RunChange | null>(null);
   const revert = useRevertFile();
+  const [reverting, setReverting] = useState(false);
   const current = changes?.find((change) => change.path === selected) ?? changes?.[0];
   const total = changes && totalDelta(changes);
 
   const handleRevert = () => {
-    if (!current) return;
-    setConfirming(false);
-    revert({ checkpointId, path: current.path }).then(
-      () => toast.success(`Reverted ${current.path}`),
-      () => toast.error("Couldn't revert the file"),
-    );
+    if (!confirming) return;
+    const path = confirming.path;
+    setConfirming(null);
+    setReverting(true);
+    revert({ checkpointId, path, ...(scope && { scope }) }).then(
+      () => toast.success(`Reverted ${path}`),
+      (error) => toast.error(convexErrorMessage(error, "Couldn't revert the file")),
+    ).finally(() => setReverting(false));
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex flex-col gap-0 overflow-hidden p-0 max-sm:h-dvh max-sm:max-w-none max-sm:rounded-none max-sm:border-0 sm:h-[min(85vh,760px)] sm:max-w-5xl">
         <DialogHeader className="border-b px-4 py-3 pr-12 text-left">
-          <DialogTitle className="text-base">Changes in this run</DialogTitle>
+          <DialogTitle className="text-base">{scope ? "Project changes" : "Changes in this run"}</DialogTitle>
           <DialogDescription>
             {changes === undefined
               ? "Loading…"
               : changes === null
-                ? "This run's diff isn't available."
+                ? result instanceof Error ? "Couldn't load changes. Close and reopen to retry." : "Comparison exceeds the file or read limit; no partial results are shown."
                 : `${changes.length} ${changes.length === 1 ? "file" : "files"} changed, +${total!.additions} −${total!.deletions} lines`}
           </DialogDescription>
         </DialogHeader>
         {changes?.length === 0 && (
           <p className="p-6 text-center text-sm text-muted-foreground">
-            No changes from this run are left in the project.
+            No changes from this checkpoint are left in the project.
           </p>
         )}
         {current && (
@@ -181,29 +189,29 @@ export const RunDiffDialog = ({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={revertDisabled}
+                  disabled={revertDisabled || reverting}
                   title={revertDisabled ? "Stop the running agent first" : undefined}
-                  onClick={() => setConfirming(true)}
+                  onClick={() => setConfirming(current)}
                 >
                   <Undo2Icon className="size-3.5" />
-                  Revert this file
+                  {scope ? "Discard file changes" : "Revert this file"}
                 </Button>
               </div>
               <div className="min-h-0 flex-1 overflow-auto">
-                <DiffBody checkpointId={checkpointId} path={current.path} />
+                <DiffBody checkpointId={checkpointId} path={current.path} scope={scope} />
               </div>
             </div>
           </div>
         )}
       </DialogContent>
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+      <AlertDialog open={confirming !== null} onOpenChange={(open) => { if (!open) setConfirming(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revert {current?.path}?</AlertDialogTitle>
+            <AlertDialogTitle>{scope ? "Discard changes to" : "Revert"} {confirming?.path}?</AlertDialogTitle>
             <AlertDialogDescription>
-              {current?.status === "added"
-                ? "This run created the file, so reverting deletes it."
-                : "The file goes back to how it was before this run, replacing any later edits to it."}{" "}
+              {confirming?.status === "added"
+                ? "This file is absent from the checkpoint, so reverting deletes it."
+                : "The file goes back to the checkpoint version, replacing any later edits to it."}{" "}
               Other files keep their changes.
             </AlertDialogDescription>
           </AlertDialogHeader>
