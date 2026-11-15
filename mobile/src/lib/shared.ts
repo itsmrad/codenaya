@@ -24,9 +24,11 @@ export {
   MAX_CUSTOM_MODEL_IDS,
   PLATFORM_PROVIDER,
   type ProviderModel,
+  keyGroupLabel,
   keyModels,
   modelAcceptsImages,
   modelIdsFor,
+  pickerKeys,
   runModelLabel,
 } from "../../../src/features/ai-providers/registry";
 export { splitSlashSkills } from "../../../src/features/skills/parse-slash";

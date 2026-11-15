@@ -1,5 +1,4 @@
 /* eslint-disable react-hooks/refs */
-/* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
@@ -37,6 +36,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DICTATION_SILENCE_MS,
+  dictationErrorMessage,
+  insertTranscript,
+  isDictationKey,
+} from "@/lib/dictation";
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart } from "ai";
 import {
@@ -50,6 +55,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { nanoid } from "nanoid";
+import { toast } from "sonner";
 import {
   type ChangeEvent,
   type ChangeEventHandler,
@@ -71,6 +77,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 // ============================================================================
@@ -1071,6 +1078,7 @@ interface SpeechRecognition extends EventTarget {
   lang: string;
   start(): void;
   stop(): void;
+  abort(): void;
   onstart: ((this: SpeechRecognition, ev: Event) => any) | null;
   onend: ((this: SpeechRecognition, ev: Event) => any) | null;
   onresult:
@@ -1126,102 +1134,170 @@ export type PromptInputSpeechButtonProps = ComponentProps<
   onTranscriptionChange?: (text: string) => void;
 };
 
+const noopSubscribe = () => () => {};
+
+const getSpeechRecognition = () =>
+  typeof window === "undefined"
+    ? undefined
+    : (window.SpeechRecognition ?? window.webkitSpeechRecognition);
+
+/**
+ * Voice dictation (#301). Renders nothing where the browser has no speech
+ * recognition (e.g. Firefox). Final transcripts go in at the cursor through
+ * `onTranscriptionChange`, keeping typed text. Recording stops when the page
+ * loses focus and after DICTATION_SILENCE_MS without speech; a submit or
+ * unmount discards what is still pending, so no words land after a send.
+ * Alt+V (Option+V) toggles it in the focused composer. Errors (a blocked
+ * microphone, no speech) show a toast and are announced.
+ */
 export const PromptInputSpeechButton = ({
   className,
   textareaRef,
   onTranscriptionChange,
   ...props
 }: PromptInputSpeechButtonProps) => {
-  const [isListening, setIsListening] = useState(false);
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(
-    null
+  const supported = useSyncExternalStore(
+    noopSubscribe,
+    () => Boolean(getSpeechRecognition()),
+    () => false
   );
+  const [isListening, setIsListening] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-
+  // Set once a submit or unmount cancels: later results are dropped.
+  const discardRef = useRef(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const onTranscriptionRef = useRef(onTranscriptionChange);
   useEffect(() => {
-    if (
-      typeof window !== "undefined" &&
-      ("SpeechRecognition" in window || "webkitSpeechRecognition" in window)
-    ) {
-      const SpeechRecognition =
-        window.SpeechRecognition || window.webkitSpeechRecognition;
-      const speechRecognition = new SpeechRecognition();
-
-      speechRecognition.continuous = true;
-      speechRecognition.interimResults = true;
-      speechRecognition.lang = "en-US";
-
-      speechRecognition.onstart = () => {
-        setIsListening(true);
-      };
-
-      speechRecognition.onend = () => {
-        setIsListening(false);
-      };
-
-      speechRecognition.onresult = (event) => {
-        let finalTranscript = "";
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const result = event.results[i];
-          if (result.isFinal) {
-            finalTranscript += result[0]?.transcript ?? "";
-          }
-        }
-
-        if (finalTranscript && textareaRef?.current) {
-          const textarea = textareaRef.current;
-          const currentValue = textarea.value;
-          const newValue =
-            currentValue + (currentValue ? " " : "") + finalTranscript;
-
-          textarea.value = newValue;
-          textarea.dispatchEvent(new Event("input", { bubbles: true }));
-          onTranscriptionChange?.(newValue);
-        }
-      };
-
-      speechRecognition.onerror = (event) => {
-        console.error("Speech recognition error:", event.error);
-        setIsListening(false);
-      };
-
-      recognitionRef.current = speechRecognition;
-      setRecognition(speechRecognition);
-    }
-
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-    };
-  }, [textareaRef, onTranscriptionChange]);
+    onTranscriptionRef.current = onTranscriptionChange;
+  });
 
   const toggleListening = useCallback(() => {
-    if (!recognition) {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
       return;
     }
+    const Recognition = getSpeechRecognition();
+    if (!Recognition) return;
 
-    if (isListening) {
-      recognition.stop();
-    } else {
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = navigator.language || "en-US";
+
+    discardRef.current = false;
+    let failure: string | null = null;
+    let silence: ReturnType<typeof setTimeout> | undefined;
+    const waitForSpeech = () => {
+      clearTimeout(silence);
+      silence = setTimeout(() => recognition.stop(), DICTATION_SILENCE_MS);
+    };
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setAnnouncement("Dictation started");
+      waitForSpeech();
+    };
+    recognition.onerror = (event) => {
+      failure = dictationErrorMessage(event.error);
+      if (failure) toast.error(failure);
+    };
+    // Also follows an error, such as a denied microphone.
+    recognition.onend = () => {
+      clearTimeout(silence);
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
+      setIsListening(false);
+      setAnnouncement(failure ?? "Dictation stopped");
+    };
+    recognition.onresult = (event) => {
+      if (discardRef.current) return;
+      waitForSpeech();
+      let transcript = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) transcript += result[0]?.transcript ?? "";
+      }
+      const textarea =
+        textareaRef?.current ?? buttonRef.current?.closest("form")?.querySelector("textarea");
+      if (!transcript.trim() || !textarea) return;
+
+      const next = insertTranscript(
+        textarea.value,
+        transcript,
+        textarea.selectionStart,
+        textarea.selectionEnd
+      );
+      onTranscriptionRef.current?.(next.value);
+      requestAnimationFrame(() => textarea.setSelectionRange(next.caret, next.caret));
+    };
+
+    recognitionRef.current = recognition;
+    try {
       recognition.start();
+    } catch {
+      recognitionRef.current = null;
     }
-  }, [recognition, isListening]);
+  }, [textareaRef]);
+
+  // abort(), not stop(): stop() still delivers a last result, which would land
+  // in the box after it was sent and cleared.
+  const cancel = useCallback(() => {
+    discardRef.current = true;
+    recognitionRef.current?.abort();
+  }, []);
+
+  // Unmounting (e.g. the composer hides while a run is processing) cancels it.
+  useEffect(() => cancel, [cancel]);
+
+  useEffect(() => {
+    if (!isListening) return;
+    const stop = () => recognitionRef.current?.stop();
+    const form = buttonRef.current?.closest("form");
+    window.addEventListener("blur", stop);
+    form?.addEventListener("submit", cancel);
+    return () => {
+      window.removeEventListener("blur", stop);
+      form?.removeEventListener("submit", cancel);
+    };
+  }, [isListening, cancel]);
+
+  useEffect(() => {
+    if (!supported) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !isDictationKey(event)) return;
+      // Only the composer with focus answers, e.g. not the dashboard's
+      // behind the new-project dialog.
+      if (!buttonRef.current?.closest("form")?.contains(document.activeElement)) return;
+      event.preventDefault();
+      toggleListening();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [supported, toggleListening]);
+
+  if (!supported) return null;
 
   return (
-    <PromptInputButton
-      className={cn(
-        "relative transition-all duration-200",
-        isListening && "animate-pulse bg-accent text-accent-foreground",
-        className
-      )}
-      disabled={!recognition}
-      onClick={toggleListening}
-      {...props}
-    >
-      <MicIcon className="size-4" />
-    </PromptInputButton>
+    <>
+      <PromptInputButton
+        ref={buttonRef}
+        aria-label="Dictate"
+        aria-pressed={isListening}
+        title="Dictate (Alt+V)"
+        className={cn(
+          "relative transition-all duration-200",
+          isListening && "motion-safe:animate-pulse bg-accent text-accent-foreground",
+          className
+        )}
+        onClick={toggleListening}
+        {...props}
+      >
+        <MicIcon className="size-4" />
+      </PromptInputButton>
+      <span className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </span>
+    </>
   );
 };
 

@@ -477,11 +477,11 @@ The report is for the orchestrator, not the user: no suggestions block.
 export const SWARM_ORCHESTRATOR_NOTE = `
 
 ## Swarm mode
-You lead parallel workers. Work in this order:
-1. Write the shared foundation yourself: package.json dependencies, src/App.tsx routing and wiring, shared types, design tokens and src/index.css.
+You lead parallel workers. A request with two or more pages, screens or features is never too small to split. Work in this order:
+1. Write only the shared foundation yourself: package.json dependencies, src/App.tsx routing and wiring, shared types, design tokens and src/index.css. Do not build the pages or features themselves.
 2. Call delegateTasks once with 2-4 tasks. Each task owns files or folders under src/ that no other task owns, and gets a self-contained brief: what to build, the props, types and routes it must match, and the files it must not touch.
 3. Integrate: apply every NEEDS: request from the reports, finish any failed or unfinished task yourself, then call checkBuild and fix what it reports before the final summary.
-If the work is too small to split, build it yourself without delegateTasks.`;
+Only a genuinely tiny request (one small component, a copy or style tweak, a one-file fix) skips the workers: first call delegateTasks with tasks [] and solo set to a short reason, then build it yourself.`;
 
 /** Appended to the orchestrator note only when this run may use sub-orchestrators (ADR 0013). */
 export const SWARM_SUBORCH_OPTION_NOTE = `

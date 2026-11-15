@@ -157,6 +157,12 @@ export interface ApiKeyPlacement {
 export interface ProviderDefinition {
   readonly id: string;
   readonly displayName: string;
+  /** Concise, user-facing capability summary for the catalog. */
+  readonly description: string;
+  /** Browsing category, shared by Settings and the IDE. */
+  readonly category: string;
+  /** Local SVG asset path under /integrations/. */
+  readonly logo: string;
   /** Default (unscoped) MCP endpoint. */
   readonly mcpUrl: string;
   readonly authModes: readonly IntegrationAuthMode[];
@@ -178,6 +184,13 @@ export interface ProviderDefinition {
    * gate, so this list is deliberately conservative.
    */
   readonly destructiveTools: readonly string[];
+  /**
+   * Tools verified read-only against the provider's published inventory. A
+   * `readOnlyHint: true` is believed on a new connection only for these names,
+   * so a renamed or new write tool cannot skip approval by claiming read-only.
+   * Absent means none: every other name is gated until a baseline vouches for it.
+   */
+  readonly readOnlyTools?: readonly string[];
   readonly apiKey?: ApiKeyPlacement;
   /**
    * Authorization server origins this provider is allowed to nominate during

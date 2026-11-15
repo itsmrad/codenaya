@@ -16,7 +16,7 @@ describe("validatePlan", () => {
   });
 
   it("refuses too few or too many tasks", () => {
-    expect(validatePlan({ tasks: [task("a", ["src/a.ts"])] })).toMatch(/^Error: .*build it yourself/);
+    expect(validatePlan({ tasks: [task("a", ["src/a.ts"])] })).toMatch(/^Error: Delegate 2-4 tasks, or pass tasks \[\] with solo/);
     const five = ["a", "b", "c", "d", "e"].map((id) => task(id, [`src/${id}.ts`]));
     expect(validatePlan({ tasks: five })).toMatch(/^Error:/);
   });

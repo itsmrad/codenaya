@@ -78,7 +78,7 @@ import {
   resolveForcedSkills,
   resolveSkills,
 } from '@/features/skills/server/resolve-skills';
-import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
+import { buildSkillsPromptSection, buildSupabaseHintSection } from '@/features/skills/server/prompt';
 import { buildProjectInstructionsSection } from '@/features/projects/instructions';
 import { isStarterOnly } from './starter-only';
 import { generateConversationTitle } from './generate-title';
@@ -563,6 +563,7 @@ export const processMessage = inngest.createFunction(
       CODING_AGENT_SYSTEM_PROMPT,
       buildProjectInstructionsSection(projectInstructions),
       buildSkillsPromptSection(skills),
+      buildSupabaseHintSection(skills),
       buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
       projectTree,
       buildSkillsPromptSection([], forced, unavailable),

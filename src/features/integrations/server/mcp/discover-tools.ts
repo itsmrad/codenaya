@@ -26,6 +26,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 
 import { assertSafeMcpUrl } from "../url-guard";
 import {
+  baselineTrustsReadOnly,
   detectToolDrift,
   fingerprintTools,
   hasDrift,
@@ -97,10 +98,10 @@ export function qualifyToolName(namespace: string, toolName: string): string {
  * - Listed in the catalog's `destructiveTools`: always gated. Server hints are
  *   advisory and never override the known write list.
  * - `destructiveHint: true`: always gated, even beside `readOnlyHint: true`.
- * - Otherwise ungated only when classified read-only by a trusted source: an
- *   explicit `readOnlyHint: true` from a catalog provider, or a link in the
- *   provider's own server-enforced read-only mode. Missing or malformed hints
- *   are gated.
+ * - Otherwise ungated only when classified read-only by a trusted source: a
+ *   verified `readOnlyHint: true` from a catalog provider (see
+ *   `isReadOnlyVerified`), or a link in the provider's own server-enforced
+ *   read-only mode. Missing or malformed hints are gated.
  *
  * Custom servers are untrusted, so their `readOnlyHint` is ignored (as the MCP
  * spec advises) and every tool on them is gated: a server, or a prompt injection
@@ -109,17 +110,46 @@ export function qualifyToolName(namespace: string, toolName: string): string {
  * `fingerprintTool`); a tool first seen on a later run is withheld as drift.
  */
 export function requiresApproval(
-  server: Pick<
-    ResolvedMcpServer,
-    "destructiveTools" | "readOnlyEnforced" | "annotationsTrusted"
-  >,
+  server: ApprovalPolicyServer,
   tool: McpToolDefinition,
 ): boolean {
   if (server.destructiveTools.includes(tool.name)) return true;
   if (tool.annotations?.destructiveHint === true) return true;
   const trustedReadOnly =
-    server.annotationsTrusted === true && isAnnotatedReadOnly(tool);
+    server.annotationsTrusted === true &&
+    isAnnotatedReadOnly(tool) &&
+    isReadOnlyVerified(server, tool);
   return !(trustedReadOnly || server.readOnlyEnforced === true);
+}
+
+type ApprovalPolicyServer = Pick<
+  ResolvedMcpServer,
+  | "destructiveTools"
+  | "readOnlyEnforced"
+  | "annotationsTrusted"
+  | "readOnlyTools"
+  | "toolBaseline"
+>;
+
+/**
+ * Whether a catalog `readOnlyHint` may be believed for this tool name.
+ *
+ * Only for names the catalog lists as reads, or whose exact read-only
+ * definition this connection's baseline already holds as trusted. A first
+ * connection has no baseline to compare against, so without this a renamed or
+ * new write tool claiming read-only would run unreviewed, and the baseline
+ * recorded after that run would then vouch for it on every later one. Unlisted
+ * claims are therefore gated and fingerprinted "unverified", which keeps them
+ * gated on later runs too, the way custom servers are.
+ */
+function isReadOnlyVerified(
+  server: Pick<ApprovalPolicyServer, "readOnlyTools" | "toolBaseline">,
+  tool: McpToolDefinition,
+): boolean {
+  return (
+    server.readOnlyTools?.includes(tool.name) === true ||
+    baselineTrustsReadOnly(server.toolBaseline ?? [], tool)
+  );
 }
 
 /**
@@ -205,9 +235,15 @@ export async function discoverTools(
     // Fingerprints cover the allowed set, which is what the model will actually
     // see. Digesting tools we filter out would produce drift alarms for
     // definitions that can never reach the model.
-    const fingerprints = fingerprintTools(allowed);
+    const fingerprints = fingerprintTools(allowed, (tool) =>
+      isReadOnlyVerified(server, tool),
+    );
 
-    const baseline = upgradeLegacyBaseline(server.toolBaseline ?? [], allowed);
+    const baseline = upgradeLegacyBaseline(
+      server.toolBaseline ?? [],
+      allowed,
+      server.readOnlyTools,
+    );
     const drift = detectToolDrift(fingerprints, baseline);
 
     // A first connection has no baseline, so everything reads as "added". That is

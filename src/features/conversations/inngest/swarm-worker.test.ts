@@ -238,9 +238,14 @@ describe("swarmWorker", () => {
     const { opts } = swarmWorker as unknown as { opts: { cancelOn: unknown; concurrency: unknown } };
     expect(opts.cancelOn).toEqual([
       { event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" },
-      { event: "agent-task/cancel", if: "event.data.agentTaskId == async.data.agentTaskId" },
-      { event: "agent-task/cancel", if: "event.data.parentAgentTaskId == async.data.agentTaskId" },
+      {
+        event: "agent-task/cancel",
+        if: "event.data.agentTaskId == async.data.agentTaskId || event.data.parentAgentTaskId == async.data.agentTaskId",
+      },
     ]);
+    // One cancelOn entry per event name.
+    const events = (opts.cancelOn as Array<{ event: string }>).map(({ event }) => event);
+    expect(new Set(events).size).toBe(events.length);
     expect(opts.concurrency).toEqual([{ key: "event.data.ownerId", limit: 16 }]);
   });
 });
@@ -351,15 +356,15 @@ describe("swarmWorker as a sub-orchestrator", () => {
 });
 
 describe("swarm cancellation", () => {
-  // The CEL `a == b` of cancelOn, with `event` the run's trigger and `async` the cancel event.
+  // The CEL `a == b || c == d` of cancelOn, with `event` the run's trigger and `async` the cancel event.
   const cancels = (data: Record<string, unknown>, cancel: Record<string, unknown>, event = "message/cancel") => {
     const { opts } = swarmWorker as unknown as { opts: { cancelOn: Array<{ event: string; if: string }> } };
     const value = (path: string) => path.split(".").slice(1)
       .reduce<unknown>((o, key) => (o as Record<string, unknown>)?.[key], { event: { data }, async: { data: cancel } }[path.split(".")[0]]);
-    return opts.cancelOn.some((rule) => {
-      const [left, right] = rule.if.split(" == ").map(value);
-      return rule.event === event && left !== undefined && left === right;
-    });
+    return opts.cancelOn.some((rule) => rule.event === event && rule.if.split(" || ").some((clause) => {
+      const [left, right] = clause.split(" == ").map(value);
+      return left !== undefined && left === right;
+    }));
   };
 
   it("matches a top-level task and a sub-orchestrator's child alike, and no other message", () => {

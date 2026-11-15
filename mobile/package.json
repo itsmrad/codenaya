@@ -1,6 +1,7 @@
 {
   "name": "codenaya-mobile",
   "version": "1.0.0",
+  "license": "AGPL-3.0-only",
   "main": "expo-router/entry",
   "dependencies": {
     "@clerk/expo": "^4.14.0",

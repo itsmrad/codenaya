@@ -23,23 +23,26 @@ vi.mock("./constants", async (importOriginal) => ({
   MAX_AGENT_STEPS: 26,
 }));
 
+import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { MAX_AGENT_STEPS, STEP_BUDGET_NOTE } from "./constants";
-import { AGENT_FAILURE_MESSAGE } from "./lib/conversation-history";
+import { AGENT_FAILURE_MESSAGE, UNFINISHED_REPLY } from "./lib/conversation-history";
 import { drive, text, toolCall } from "./process-message.driver";
 
 type Stored = { _id: string; role: "user" | "assistant"; content: string; status?: string; imageUrls?: string[] };
 
 let recentMessages: Stored[] = [];
+let conversationTitle = "Existing chat";
 let projectFiles: { _id: string; name: string; type: "file" | "folder"; parentId?: string }[] = [];
 
 const QUERIES: Record<string, () => unknown> = {
-  "system:getConversationById": () => ({ title: "Existing chat" }),
+  "system:getConversationById": () => ({ title: conversationTitle }),
   "system:getRecentMessages": () => recentMessages,
   "system:getProjectById": () => ({ ownerId: "user_1" }),
   "system:getProjectMcpConnections": () => [],
   "system:getProjectFiles": () => projectFiles,
   "system:getProjectSkills": () => [],
   "system:getFileById": () => ({ _id: "f1", name: "a.ts", type: "file", content: "line\n".repeat(6000) }),
+  "swarm:getSwarmSettings": () => ({ enabled: true, platformMaxDepth: 2 }),
 };
 
 interface ChatBody {
@@ -66,6 +69,7 @@ const run = async () =>
 
 beforeEach(() => {
   vi.resetAllMocks();
+  conversationTitle = "Existing chat";
   vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "ik");
   vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -111,6 +115,69 @@ describe("processMessage conversation history", () => {
     expect(last.messages.at(-1)).toEqual({ role: "user", content: STEP_BUDGET_NOTE });
   }, 20_000);
 
+  // P0: a pizzeria prompt built a generic app after its first run was stopped.
+  const PIZZERIA = "A fully built, minimalist premium website for a pizzeria: Home, Menu, Reservations.";
+  const SOLO: Record<string, unknown> = {};
+  const SWARM: Record<string, unknown> = { mode: "swarm", ownerId: "user_1" };
+  /** The first coding request's messages after the system prompt, as the model got them. */
+  const firstCall = async (request: string, event: Record<string, unknown>) => {
+    // A new chat titles itself first; that inference never carries tools.
+    const titled = conversationTitle === DEFAULT_CONVERSATION_TITLE ? [{ data: text("Pizzeria"), held: true }] : [];
+    const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [...titled, { data: text("Done.") }], request, event);
+    const body = firstCodingRequest(outcome.inferenceBodies)!;
+    expect(body.messages[0].role).toBe("system");
+    return body.messages.slice(1).map(({ role, content }) => ({ role, content }));
+  };
+
+  it.each([
+    ["dashboard create-with-prompt, single", SOLO],
+    ["dashboard create-with-prompt, swarm", SWARM],
+  ])("%s: the first call is the original prompt", async (_route, event) => {
+    // What create-with-prompt stores: a default-titled chat with the prompt and its reply placeholder.
+    conversationTitle = DEFAULT_CONVERSATION_TITLE;
+    recentMessages = conversation().slice(-1);
+    recentMessages.unshift({ _id: "u1", role: "user", content: PIZZERIA });
+
+    expect(await firstCall(PIZZERIA, event)).toEqual([{ role: "user", content: PIZZERIA }]);
+  });
+
+  it.each([
+    ["in-project send, single", SOLO],
+    ["in-project send, swarm", SWARM],
+  ])("%s: the first call ends with the original prompt", async (_route, event) => {
+    recentMessages = [
+      { _id: "u0", role: "user", content: "Set up the project" },
+      { _id: "a0", role: "assistant", content: "Set it up.", status: "completed" },
+      { _id: "u1", role: "user", content: PIZZERIA },
+      { _id: "m1", role: "assistant", content: "", status: "processing" },
+    ];
+
+    expect(await firstCall(PIZZERIA, event)).toEqual([
+      { role: "user", content: "Set up the project" },
+      { role: "assistant", content: "Set it up." },
+      { role: "user", content: PIZZERIA },
+    ]);
+  });
+
+  it.each([
+    ["single", SOLO],
+    ["swarm", SWARM],
+  ])("keeps the prompt of a stopped run when the user says continue (%s)", async (_mode, event) => {
+    conversationTitle = "Premium Minimalist Pizzeria Website Build";
+    recentMessages = [
+      { _id: "u1", role: "user", content: PIZZERIA },
+      { _id: "a1", role: "assistant", content: "", status: "cancelled" },
+      { _id: "u2", role: "user", content: "continue" },
+      { _id: "m1", role: "assistant", content: "", status: "processing" },
+    ];
+
+    expect(await firstCall("continue", event)).toEqual([
+      { role: "user", content: PIZZERIA },
+      { role: "assistant", content: UNFINISHED_REPLY },
+      { role: "user", content: "continue" },
+    ]);
+  });
+
   it("sends earlier turns as messages, in order, before the request", async () => {
     recentMessages = conversation(
       { _id: "u1", role: "user", content: "Build a todo app" },
@@ -124,6 +191,8 @@ describe("processMessage conversation history", () => {
     expect(request?.messages.map(({ role, content }) => ({ role, content })).slice(1)).toEqual([
       { role: "user", content: "Build a todo app" },
       { role: "assistant", content: "Built a todo app." },
+      { role: "user", content: "Add a chart" },
+      { role: "assistant", content: UNFINISHED_REPLY },
       { role: "user", content: "Now make it dark" },
     ]);
     expect(request?.messages[0].role).toBe("system");

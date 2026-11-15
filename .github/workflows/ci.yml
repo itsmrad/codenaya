@@ -14,7 +14,7 @@ concurrency:
 
 # Playwright e2e (`npm run test:e2e`) is intentionally not run here: it needs a
 # live Convex deployment, the Clerk test-user pool and other real secrets.
-# Run it locally (see the README e2e section).
+# Run it locally (see docs/DEVELOPMENT.md, "Running e2e tests").
 
 jobs:
   check:

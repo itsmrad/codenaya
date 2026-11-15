@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { SETTINGS_NAV } from "../src/features/settings/nav";
 import { collectConsoleErrors } from "./console-errors";
+import { listProviders } from "../src/features/integrations/catalog";
 
 const horizontalOverflow = () =>
   document.documentElement.scrollWidth - document.documentElement.clientWidth;
@@ -130,6 +131,29 @@ test.describe("settings", () => {
       await page.reload();
       await expect(page.getByRole("radio", { name: "Light" })).toBeChecked();
       await expect(page.locator("html")).not.toHaveClass(/\bdark\b/);
+    });
+
+    test("integrations can be searched and filtered with the keyboard", async ({ page }) => {
+      await signIn(page);
+      await page.goto("/settings/integrations");
+      const catalog = page.getByRole("region", { name: "Browse integrations" });
+      const providers = catalog.getByRole("list", { name: "Integration providers" });
+      await expect(providers.getByRole("listitem")).toHaveCount(listProviders().length);
+      const search = catalog.getByRole("searchbox", { name: "Search integrations" });
+      await search.fill("STACK TRACES");
+      await expect(providers.getByRole("listitem")).toHaveCount(1);
+      await expect(providers.getByRole("button", { name: /Sentry/ })).toBeVisible();
+
+      const database = catalog.getByRole("button", { name: "Database", exact: true });
+      await database.focus();
+      await page.keyboard.press("Space");
+      await expect(database).toHaveAttribute("aria-pressed", "true");
+      await expect(catalog.getByText("No integrations match your filters.")).toBeVisible();
+      await catalog.getByRole("button", { name: "Clear filters" }).focus();
+      await page.keyboard.press("Enter");
+      await expect(search).toHaveValue("");
+      await expect(catalog.getByRole("button", { name: "All", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(providers.getByRole("listitem")).toHaveCount(listProviders().length);
     });
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildSkillsPromptSection, formatSkill } from "./prompt";
+import { buildSkillsPromptSection, buildSupabaseHintSection, formatSkill } from "./prompt";
 import type { AgentSkill } from "./resolve-skills";
 
 const seo: AgentSkill = {
@@ -57,5 +57,42 @@ describe("formatSkill", () => {
     expect(formatSkill(seo)).toBe(
       '<skill name="seo-metadata" source="user">\n# SEO\nSECRET_BODY_MARKER\n</skill>',
     );
+  });
+});
+
+describe("buildSupabaseHintSection (#228)", () => {
+  const supabase: AgentSkill = {
+    name: "supabase-auth-db",
+    description: "Supabase auth and data",
+    body: "# Supabase",
+    source: "builtin",
+  };
+
+  it("offers the skill for login and saved data, with env vars from the dialog", () => {
+    const section = buildSupabaseHintSection([findSkills]);
+
+    expect(section).toContain("## Accounts and saved data");
+    expect(section).toContain("login, sign-up, accounts, or data saved across devices or users");
+    expect(section).not.toContain("saving data");
+    expect(section).toContain("offer the built-in supabase-auth-db skill");
+    expect(section).toContain("Otherwise ask the user to add them in the project's Environment Variables dialog");
+    expect(section).toContain("Never guess or invent them");
+    expect(section).not.toContain("loadSkill");
+  });
+
+  it("reads the values through a connected Supabase integration instead of asking", () => {
+    const section = buildSupabaseHintSection([findSkills]);
+
+    expect(section).toContain(
+      "If the Supabase integration is connected, read VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY",
+    );
+    expect(section).toContain("with its tools and store them with setEnvVar");
+  });
+
+  it("loads the skill when the project has it enabled", () => {
+    const section = buildSupabaseHintSection([supabase]);
+
+    expect(section).toContain('call loadSkill("supabase-auth-db")');
+    expect(section).not.toContain("offer the built-in");
   });
 });
