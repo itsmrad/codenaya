@@ -1020,8 +1020,6 @@ export const processMessage = inngest.createFunction(
 
     await settleRun("record-usage-final");
 
-    if (creditStopped || outOfCredits()) assistantResponse += `\n\n${OUT_OF_CREDITS_REPLY}`;
-
     // Changes that did not end on a verified build are not a working build.
     const noteBefore = unverifiedBuildNote(result.state.results);
     const { verified, note: buildNote } = repair
@@ -1040,7 +1038,12 @@ export const processMessage = inngest.createFunction(
       ));
 
     // Follow-up chips (#256) come out of the reply; the raw block is never shown.
-    const { content, suggestions } = splitSuggestions(assistantResponse);
+    // The credits note goes on after the split: a reply cut off inside an
+    // unclosed block must not swallow it.
+    const { content: modelReply, suggestions } = splitSuggestions(assistantResponse);
+    const content = creditStopped || outOfCredits()
+      ? [modelReply, OUT_OF_CREDITS_REPLY].filter(Boolean).join("\n\n")
+      : modelReply;
     const reply = content || DEFAULT_REPLY_MESSAGE;
 
     // Update the assistant message with the response (this also sets status to completed)
