@@ -21,8 +21,13 @@ describe("followUpAction", () => {
     expect(followUpAction(followUp, run({ status: "processing" }).slice(0, 1))).toBe("wait");
   });
 
-  test("sends once the run completed", () => {
-    expect(followUpAction(followUp, run({ status: "completed", content: "Added the hero." }))).toBe("send");
+  test("sends once the run completed and the chat is free", () => {
+    const done = run({ status: "completed", content: "Added the hero." });
+    expect(followUpAction(followUp, done)).toBe("send");
+    // A send in flight, another run or an outside message: it waits its turn.
+    expect(followUpAction(followUp, done, true)).toBe("wait");
+    // A stopped run is dropped even while the chat is busy.
+    expect(followUpAction(followUp, run({ status: "cancelled" }), true)).toBe("drop");
   });
 
   test("drops it when the run was stopped or failed", () => {
@@ -56,11 +61,12 @@ describe("composerSubmitAction", () => {
 describe("follow-ups in the chat store", () => {
   test("are kept per conversation and taken once", () => {
     const { setFollowUp, takeFollowUp } = useChatStore.getState();
-    setFollowUp("a", { text: "for A", afterMessageId: runId });
+    setFollowUp("a", { text: "for A", afterMessageId: runId, mode: "plan" });
     setFollowUp("b", { text: "for B", afterMessageId: runId });
 
     expect(useChatStore.getState().followUps.a.text).toBe("for A");
-    expect(takeFollowUp("a")?.text).toBe("for A");
+    // Sent with the mode it was queued in.
+    expect(takeFollowUp("a")).toMatchObject({ text: "for A", mode: "plan" });
     expect(takeFollowUp("a")).toBeNull();
     expect(useChatStore.getState().followUps.b.text).toBe("for B");
   });

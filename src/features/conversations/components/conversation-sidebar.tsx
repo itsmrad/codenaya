@@ -392,10 +392,10 @@ export const ConversationSidebar = ({
   // A follow-up typed during a run (#257) goes out once that run completes,
   // after any message queued from outside the chat, leaving the draft alone.
   // A stopped or failed run gives it back to the composer instead.
-  const followUpNext = followUp && followUpAction(followUp, conversationMessages);
+  const followUpNext =
+    followUp && followUpAction(followUp, conversationMessages, Boolean(pending || isProcessing || queuedMessage));
   useEffect(() => {
     if (!activeConversationId || !followUpNext || followUpNext === "wait") return;
-    if (followUpNext === "send" && (pending || isProcessing || queuedMessage)) return;
     // Taken from the store, so a re-run of this effect can't act on it twice.
     const taken = takeFollowUp(activeConversationId);
     if (!taken) return;
@@ -404,12 +404,12 @@ export const ConversationSidebar = ({
       toast.info("The run didn't finish, so your queued message wasn't sent. It's back in the composer.");
       return;
     }
-    const { text } = taken;
+    const { text, mode: queuedMode } = taken;
     // Like a typed message, it shows at once as pending; the send is the external effect.
     void (async () => {
       setPending({ text, imageUrls: [], userCount });
       try {
-        if ((await sendMessage(text, undefined, planMode ? PLAN_MODE : undefined)) === "blocked") {
+        if ((await sendMessage(text, undefined, queuedMode)) === "blocked") {
           appendInput(text);
         }
       } catch {
@@ -420,7 +420,7 @@ export const ConversationSidebar = ({
     })();
     // sendMessage is recreated every render; the follow-up's state is what matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConversationId, followUpNext, pending, isProcessing, queuedMessage]);
+  }, [activeConversationId, followUpNext]);
 
   const handleSubmit = async (message: PromptInputMessage) => {
     // During a run, a submit only queues one follow-up for when it ends
@@ -440,7 +440,12 @@ export const ConversationSidebar = ({
       toast.error("A message is already queued. Edit or remove it first.");
     }
     if (action === "queue" && processingMessage) {
-      setFollowUp(processingMessage.conversationId, { text: message.text, afterMessageId: processingMessage._id });
+      // The mode is read now: it's what the user picked for this message.
+      setFollowUp(processingMessage.conversationId, {
+        text: message.text,
+        afterMessageId: processingMessage._id,
+        mode: mode === "build" ? undefined : mode,
+      });
       setInput("");
     }
     if (action !== "send") return;
