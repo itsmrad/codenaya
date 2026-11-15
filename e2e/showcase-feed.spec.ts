@@ -82,6 +82,17 @@ test.describe("showcase feed pagination", () => {
     expect(errors).toEqual([]);
   });
 
+  test("This week is selectable and search keeps best-match ordering", async ({ page }) => {
+    await page.goto("/showcase");
+    const weekly = page.getByRole("button", { name: "This week", exact: true });
+    await weekly.click();
+    await expect(weekly).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("complementary", { name: "Top creators this week" })).toBeVisible();
+    await page.getByRole("textbox", { name: "Search showcase" }).fill(RUN_ID);
+    await expect(weekly).toBeDisabled();
+    await expect(cards(page)).toHaveCount(12);
+  });
+
   test("search reaches past the first page and combines with a category filter", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await page.goto("/showcase");

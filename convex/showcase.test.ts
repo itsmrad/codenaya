@@ -7,6 +7,7 @@ import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import schema from "./schema";
 import { relistEntries, setFeatured, unlistTestEntries } from "./showcase";
+import { deleteShowcaseBatch } from "./projectCascade";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -575,4 +576,128 @@ test("getTrending clamps its limit", async () => {
 
   expect(await t.query(api.showcase.getTrending, { limit: 1000 })).toHaveLength(50);
   expect(await t.query(api.showcase.getTrending, { limit: 0 })).toHaveLength(1);
+});
+
+describe("weekly showcase", () => {
+  const now = Date.UTC(2026, 10, 15, 12);
+  const day = 24 * 60 * 60 * 1000;
+  afterEach(() => vi.useRealTimers());
+
+  test("records only new upvotes and deduplicates same-day toggles in the score", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const t = convexTest(schema, modules);
+    const [id] = await seed(t, [{ title: "demo", publishedAt: 1 }]);
+    const user = t.withIdentity({ subject: "user_bob" });
+    const vote = (value: "up" | "down") => user.mutation(api.showcase.vote, { showcaseProjectId: id, vote: value });
+    await vote("down"); // A downvote and a switch to up add no events.
+    await vote("up");
+    expect(await t.run((ctx) => ctx.db.query("showcaseEvents").take(10))).toEqual([]);
+    await vote("up"); // Remove.
+    await vote("up"); // New upvote.
+    await vote("up"); // Remove.
+    await vote("up"); // New upvote, same day.
+    const events = await t.run((ctx) => ctx.db.query("showcaseEvents").take(10));
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ showcaseProjectId: id, kind: "upvote", userId: "user_bob", createdAt: now });
+    expect(await t.query(api.showcase.getTopCreators, { now })).toEqual([
+      { name: "Alice", avatarUrl: null, score: 1 },
+    ]);
+  });
+
+  test("records a counted remix, excludes self-remixes and repeat imports", async () => {
+    const t = convexTest(schema, modules);
+    const [id] = await seed(t, [{ title: "demo", publishedAt: 1 }]);
+    await t.withIdentity({ subject: "user_alice" }).mutation(api.showcase.importToWorkspace, { showcaseProjectId: id });
+    const user = t.withIdentity({ subject: "user_bob" });
+    await user.mutation(api.showcase.importToWorkspace, { showcaseProjectId: id });
+    await user.mutation(api.showcase.importToWorkspace, { showcaseProjectId: id });
+    const events = await t.run((ctx) => ctx.db.query("showcaseEvents").take(10));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ showcaseProjectId: id, kind: "remix", userId: "user_bob" });
+  });
+
+  test("ranks recent weighted events, ignoring old, future, unlisted and removed activity", async () => {
+    const t = convexTest(schema, modules);
+    const [up, remix, old, hidden, removed] = await seed(t, [
+      { title: "up", publishedAt: 5, upvotes: 100, category: "game" },
+      { title: "remix", publishedAt: 1, category: "tool", ownerId: "user_bob" },
+      { title: "old", publishedAt: 10, upvotes: 1000 },
+      { title: "hidden", publishedAt: 20, status: "unlisted" },
+      { title: "removed", publishedAt: 30, status: "removed" },
+    ]);
+    await t.run(async (ctx) => {
+      for (const [id, kind, createdAt] of [
+        [up, "upvote", now - 7 * day], // Inclusive boundary.
+        [remix, "remix", now],
+        [old, "remix", now - 7 * day - 1],
+        [old, "remix", now + 1],
+        [hidden, "remix", now],
+        [removed, "remix", now],
+      ] as const) {
+        await ctx.db.insert("showcaseEvents", { showcaseProjectId: id, kind, createdAt, userId: "voter" });
+      }
+    });
+    const first = await t.query(api.showcase.list, { sortBy: "week", now, paginationOpts: page(1) });
+    expect(titles(first.page)).toEqual(["remix"]);
+    expect(first.isDone).toBe(false);
+    const second = await t.query(api.showcase.list, { sortBy: "week", now, paginationOpts: page(1, first.continueCursor) });
+    expect(titles(second.page)).toEqual(["up"]);
+    expect(second.isDone).toBe(true);
+    const filtered = await t.query(api.showcase.list, { sortBy: "week", now, category: "game", paginationOpts: page(10) });
+    expect(titles(filtered.page)).toEqual(["up"]);
+    expect(first.page[0]).not.toHaveProperty("ownerId");
+    expect(first.page[0]).not.toHaveProperty("projectId");
+    expect((await t.query(api.showcase.list, { sortBy: "week", now, techStack: ["react"], paginationOpts: page(10) })).page).toEqual([]);
+    const creators = await t.query(api.showcase.getTopCreators, { now, limit: 100 });
+    expect(creators.map((creator) => creator.score)).toEqual([2, 1]);
+    expect(Object.keys(creators[0]).sort()).toEqual(["avatarUrl", "name", "score"]);
+  });
+
+  test("returns an empty weekly page and creators for legacy entries with no events", async () => {
+    const t = convexTest(schema, modules);
+    await seed(t, [{ title: "legacy", publishedAt: 1, upvotes: 99 }]);
+    const result = await t.query(api.showcase.list, { sortBy: "week", now, paginationOpts: page(12) });
+    expect(result.page).toEqual([]);
+    expect(result.isDone).toBe(true);
+    expect(await t.query(api.showcase.getTopCreators, { now })).toEqual([]);
+    expect(titles((await t.query(api.showcase.list, { paginationOpts: page(12) })).page)).toEqual(["legacy"]);
+  });
+
+  test("caps creators at five and sums scores across each owner's entries", async () => {
+    const t = convexTest(schema, modules);
+    const ids = await seed(t, Array.from({ length: 7 }, (_, i) => ({
+      title: `p${i}`, publishedAt: i, ownerId: `owner${i % 6}`,
+    })));
+    await t.run(async (ctx) => {
+      for (const id of ids) await ctx.db.insert("showcaseEvents", {
+        showcaseProjectId: id, kind: "upvote", userId: "voter", createdAt: now,
+      });
+    });
+    const creators = await t.query(api.showcase.getTopCreators, { now, limit: 100 });
+    expect(creators).toHaveLength(5);
+    expect(creators[0].score).toBe(2);
+  });
+
+  test("deletes timestamped events with their showcase entry", async () => {
+    const t = convexTest(schema, modules);
+    const [id] = await seed(t, [{ title: "demo", publishedAt: 1 }]);
+    await t.withIdentity({ subject: "user_bob" }).mutation(api.showcase.vote, { showcaseProjectId: id, vote: "up" });
+    await t.run(async (ctx) => {
+      const entry = await ctx.db.get("showcaseProjects", id);
+      if (!entry) throw new Error("Missing seed");
+      expect(await deleteShowcaseBatch(ctx, entry)).toBe(false); // Votes.
+      expect(await deleteShowcaseBatch(ctx, entry)).toBe(false); // Events.
+      expect(await deleteShowcaseBatch(ctx, entry)).toBe(true);
+    });
+    expect(await t.run((ctx) => ctx.db.query("showcaseEvents").take(10))).toEqual([]);
+  });
+
+  test("refuses unauthenticated event writes", async () => {
+    const t = convexTest(schema, modules);
+    const [id] = await seed(t, [{ title: "demo", publishedAt: 1 }]);
+    await expect(t.mutation(api.showcase.vote, { showcaseProjectId: id, vote: "up" })).rejects.toThrow();
+    await expect(t.mutation(api.showcase.importToWorkspace, { showcaseProjectId: id })).rejects.toThrow();
+    expect(await t.run((ctx) => ctx.db.query("showcaseEvents").take(10))).toEqual([]);
+  });
 });
