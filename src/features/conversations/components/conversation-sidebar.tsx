@@ -862,7 +862,7 @@ export const ConversationSidebar = ({
               />
             </PromptInputBody>
             <PromptInputFooter className="min-h-10 px-2 py-1">
-              {/* Truncate the model name, and wrap tools when even their icons do not fit. */}
+              {/* The model name keeps its full width (basis auto) and wraps to its own row before it truncates (#217). */}
               <PromptInputTools className="min-w-0 flex-1 flex-wrap">
                 <ComposerAttachButton disabled={isProcessing} />
                 {!isProcessing && <PromptInputSpeechButton onTranscriptionChange={setInput} />}
@@ -878,7 +878,7 @@ export const ConversationSidebar = ({
                   disabled={isProcessing}
                 />
                 <AgentModelSelect
-                  triggerClassName="w-0 min-w-16 flex-1"
+                  triggerClassName="min-w-16 flex-1"
                   value={agentModel}
                   onValueChange={setAgentModel}
                   disabled={isProcessing}
