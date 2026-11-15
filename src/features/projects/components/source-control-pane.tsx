@@ -94,7 +94,7 @@ export function SourceControlPane({ project, projectId, disabled }: {
           {checkpoints.map((checkpoint) => <li key={checkpoint._id} className="relative pb-4">
             <span aria-hidden="true" className="absolute -left-4 top-1 size-1.5 rounded-full bg-brand" />
             <p className="truncate font-medium" title={checkpoint.label}>{checkpoint.label || "Untitled checkpoint"}</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">{checkpoint.messageId ? "Before run" : "Snapshot"} · {formatDistanceToNow(checkpoint._creationTime, { addSuffix: true })} · {checkpoint.fileCount} files</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">{checkpoint.messageId ? "Before run" : "Snapshot"} · {formatDistanceToNow(checkpoint._creationTime, { addSuffix: true })} · {checkpoint.fileCount} {checkpoint.fileCount === 1 ? "file" : "files"}</p>
             <div className="mt-1 flex flex-wrap gap-1">
               <Button size="sm" variant="ghost" className="h-7 px-1.5 text-xs" aria-pressed={baseline?._id === checkpoint._id} onClick={() => setSelected(checkpoint._id)}>Compare to current</Button>
               {checkpoint.messageId && <Button size="sm" variant="ghost" className="h-7 px-1.5 text-xs" onClick={() => setDiff({ checkpointId: checkpoint._id })}>Run diff</Button>}
