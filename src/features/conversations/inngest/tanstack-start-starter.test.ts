@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { KNOWN_GOOD_VERSIONS } from "./known-good-versions";
 import { TANSTACK_START_STARTER, wantsTanStackStart } from "./tanstack-start-starter";
-import { INDEX_CSS, UTILS_TS, VITE_DEV_DEPENDENCIES } from "./vite-starter";
+import { INDEX_CSS, UTILS_TS, VITE_DEPENDENCIES, VITE_DEV_DEPENDENCIES } from "./vite-starter";
 import { VITE_STARTER_UI } from "./vite-starter-ui";
 
 const files = new Map(TANSTACK_START_STARTER.map(({ path, content }) => [path, content]));
@@ -26,10 +25,7 @@ describe("TanStack Start starter", () => {
       expect(version, name).toMatch(/^\d+\.\d+\.\d+$/);
     }
     expect(pkg.devDependencies).toEqual(VITE_DEV_DEPENDENCIES);
-    for (const name of ["@tanstack/react-start", "@tanstack/react-router"] as const) {
-      expect(KNOWN_GOOD_VERSIONS[name], name).toBeTruthy();
-      expect(pkg.dependencies[name].split(".")[0], name).toBe("1");
-    }
+    expect(pkg.dependencies["@fontsource/inter"]).toBe(VITE_DEPENDENCIES["@fontsource/inter"]);
   });
 
   it("puts the Start plugin before React, then Tailwind, on port 3000", () => {
@@ -46,7 +42,7 @@ describe("TanStack Start starter", () => {
 
   it("renders the document shell with one toaster, an error card and the ?url stylesheet", () => {
     const root = files.get("src/routes/__root.tsx")!;
-    for (const part of ["<HeadContent />", "<Scripts />", "errorComponent: RootError", 'from "../styles/app.css?url"']) {
+    for (const part of ["<HeadContent />", "<Scripts />", "errorComponent: RootError", 'from "../styles/app.css?url"', 'from "@fontsource/inter/400.css?url"']) {
       expect(root, part).toContain(part);
     }
     expect(root.match(/<Toaster \/>/g)).toHaveLength(1);

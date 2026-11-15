@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import semver from "semver";
 
 import { VITE_REACT_STARTER } from "../src/features/conversations/inngest/vite-starter";
 import { NEXT_APP_STARTER } from "../src/features/conversations/inngest/next-starter";
@@ -40,6 +41,10 @@ try {
     const shipped = starter.find(({ path }) => path === "src/routeTree.gen.ts")!.content;
     assert.equal(readFileSync(join(directory, "src/routeTree.gen.ts"), "utf8"), shipped, "Stale src/routeTree.gen.ts");
     run(join(directory, "node_modules/.bin/tsc"), ["--noEmit"]);
+    // A router pin outside react-start's own router range installs a second router copy.
+    const startPkg = JSON.parse(readFileSync(join(directory, "node_modules/@tanstack/react-start/package.json"), "utf8"));
+    const routerPin = JSON.parse(starter.find(({ path }) => path === "package.json")!.content).dependencies["@tanstack/react-router"];
+    assert.ok(semver.satisfies(routerPin, startPkg.dependencies["@tanstack/react-router"]), "Router pin doesn't match react-start's router dependency");
   } else {
     run(join(directory, "node_modules/.bin/tsc"), ["--noEmit", "-p", "tsconfig.app.json"]);
     run(join(directory, "node_modules/.bin/vite"), ["build"]);
