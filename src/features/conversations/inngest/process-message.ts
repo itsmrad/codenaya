@@ -84,6 +84,7 @@ import {
 } from '@/features/skills/server/resolve-skills';
 import { buildSkillsPromptSection, buildSupabaseHintSection } from '@/features/skills/server/prompt';
 import { buildProjectInstructionsSection } from '@/features/projects/instructions';
+import type { ProjectTheme } from '@/features/projects/theme';
 import { isStarterOnly } from './starter-only';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
@@ -380,6 +381,7 @@ export const processMessage = inngest.createFunction(
     // project row so those act on behalf of whoever owns the work.
     let mcpOwnerId: string | undefined;
     let projectInstructions: string | undefined;
+    let projectTheme: ProjectTheme | undefined;
 
     try {
       // Fetched unconditionally: the owner is needed by setEnvVar, which is useful
@@ -390,6 +392,7 @@ export const processMessage = inngest.createFunction(
       });
       mcpOwnerId = project?.ownerId;
       projectInstructions = project?.instructions;
+      projectTheme = project?.theme;
 
       let entries = await convex.query(api.system.getProjectMcpConnections, {
         internalKey,
@@ -579,7 +582,7 @@ export const processMessage = inngest.createFunction(
     );
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
-      buildProjectInstructionsSection(projectInstructions),
+      buildProjectInstructionsSection(projectInstructions, projectTheme),
       buildSkillsPromptSection(skills),
       buildSupabaseHintSection(skills),
       buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
