@@ -207,3 +207,66 @@ export const seedRunConversation = async (page: Page, projectId: string) => {
   return () =>
     system.mutation(api.system.updateMessageStatus, { internalKey, messageId: live, status: "cancelled" });
 };
+
+/**
+ * Seeds a fresh conversation (it becomes the active one) with a live swarm
+ * run: three workers, one done, one running and one queued. Returns the
+ * mutations a spec needs to move it along.
+ */
+export const seedSwarmConversation = async (page: Page, projectId: string) => {
+  const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY!;
+  const user = await userConvexClient(page);
+  const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+  const project = projectId as Id<"projects">;
+  const conversationId = await user.mutation(api.conversations.create, {
+    projectId: project,
+    title: `Swarm board ${Date.now()}`,
+  });
+  await system.mutation(api.system.createMessage, {
+    internalKey, conversationId, projectId: project, role: "user", content: "Build a landing page",
+  });
+  const messageId = await system.mutation(api.system.createMessage, {
+    internalKey,
+    conversationId,
+    projectId: project,
+    role: "assistant",
+    content: "",
+    status: "processing",
+    mode: "swarm",
+    runModel: { modelId: "claude-sonnet-5-5", label: "Anthropic · Sonnet 5.5" },
+  });
+  const now = Date.now();
+  const worker = (taskId: string, title: string, path: string) => ({
+    taskId, role: "worker" as const, title, brief: `Build the ${title.toLowerCase()}`, ownedPaths: [path],
+    modelId: "claude-haiku-5-5", model: "Haiku 5.5",
+  });
+  const tasks = [
+    worker("hero", "Hero section", "src/hero.tsx"),
+    worker("pricing", "Pricing table", "src/pricing.tsx"),
+    worker("footer", "Footer", "src/footer.tsx"),
+  ];
+  // As the run records it: one target per task, its title, in plan order.
+  await system.mutation(api.system.upsertMessageSteps, {
+    internalKey,
+    messageId,
+    steps: [{ id: "delegate", kind: "tool", tool: "delegateTasks", targets: tasks.map((task) => task.title), status: "done", startedAt: now, endedAt: now }],
+  });
+  const [hero, pricing] = await system.mutation(api.agentTasks.createTasks, { internalKey, messageId, projectId: project, tasks });
+  for (const agentTaskId of [hero, pricing]) {
+    await system.mutation(api.agentTasks.startTask, { internalKey, agentTaskId, parentMessageId: messageId, projectId: project });
+  }
+  const write = (path: string, status: "done" | "running") => ({
+    id: `write-${path}`, kind: "tool" as const, tool: "createFiles", targets: [path], status, startedAt: now, endedAt: status === "done" ? now : undefined,
+  });
+  await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: hero, steps: [write("src/hero.tsx", "done")] });
+  await system.mutation(api.agentTasks.finishTask, { internalKey, agentTaskId: hero, status: "done", summary: "Added the hero section." });
+  await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: pricing, steps: [write("src/pricing.tsx", "running")] });
+
+  return {
+    finishPricing: async () => {
+      await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: pricing, steps: [write("src/pricing.tsx", "done")] });
+      await system.mutation(api.agentTasks.finishTask, { internalKey, agentTaskId: pricing, status: "done" });
+    },
+    cancel: () => system.mutation(api.system.updateMessageStatus, { internalKey, messageId, status: "cancelled" }),
+  };
+};

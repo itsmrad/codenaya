@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { type AgentStep, BUILD_VERIFIED, FIRST_STEP_HINT_MS, SLOW_RUN_MS, turnHeartbeat } from "../agent-steps";
-import { AgentRun } from "./agent-run";
+import { AgentRun, AgentRunLog } from "./agent-run";
 
 // The run diff loads from Convex; the header under test doesn't need it.
 vi.mock("../hooks/use-checkpoints", () => ({ useRunChanges: () => undefined }));
@@ -90,5 +90,17 @@ describe("AgentRun while live", () => {
     );
     expect(html).not.toContain("Taking longer");
     expect(html).not.toContain("Planning the work");
+  });
+});
+
+describe("delegateTasks row", () => {
+  const log = (status: AgentStep["status"]) =>
+    renderToStaticMarkup(
+      createElement(AgentRunLog, { steps: [step("d", "delegateTasks", status, { targets: ["Hero section", "Pricing table", "Footer"] })], live: true }),
+    );
+
+  it("counts tasks while delegating and once delegated", () => {
+    expect(log("running")).toContain("Delegating 3 tasks");
+    expect(log("done")).toContain("Delegated 3 tasks");
   });
 });
