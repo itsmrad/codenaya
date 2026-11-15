@@ -5,7 +5,7 @@ export type Usage = { messageId: string; model: string; inputTokens: number; out
 export type SandboxEvent = { at: number; type: string; code?: string; message?: string; phase?: string; data?: string; sandboxId?: string };
 export type Trail = {
   id: string; model: string; prompt: string; projectId?: string;
-  startedAt: number; endedAt: number; firstPreviewAt?: number;
+  startedAt: number; endedAt: number; firstPreviewAt?: number; firstAppPaintAt?: number;
   messages: Message[]; usage: Usage[]; sandboxEvents: SandboxEvent[];
   consoleErrors: { text: string; url: string }[];
   capped: boolean; error?: string;
