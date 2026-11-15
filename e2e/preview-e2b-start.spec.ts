@@ -60,14 +60,19 @@ test.describe("E2B TanStack Start preview", () => {
     const projectId = await seedPreviewProject(page, "e2e-preview-e2b-start-hmr");
     seeded = projectId;
     const pageId = await seedStartApp(projectId, { pageSource: app("Before Start edit") });
+    let previewLoads = 0;
+    page.on("framenavigated", (frame) => {
+      if (new URL(frame.url()).hostname.endsWith(".e2b.app")) previewLoads++;
+    });
     await page.goto(`/projects/${projectId}`);
     await page.getByRole("tab", { name: "Preview" }).click();
     const preview = page.frameLocator('iframe[title="Preview"]');
     await expect(preview.getByRole("heading", { name: "Before Start edit" })).toBeVisible({
       timeout: 240_000,
     });
-    // Let the post-boot sync and automatic preview refresh settle, as in the Vite HMR spec.
-    await page.waitForTimeout(5_000);
+    // Wait for the automatic startup reload before marking the page, as in #779.
+    await expect.poll(() => previewLoads, { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
+    await expect(preview.getByRole("heading", { name: "Before Start edit" })).toBeVisible();
     const frame = page.frame({ url: /e2b\.app/ })!;
     await frame.evaluate(() => ((window as { hmrMarker?: boolean }).hmrMarker = true));
 
