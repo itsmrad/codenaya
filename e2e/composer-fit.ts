@@ -3,8 +3,9 @@ import { expect, type Locator, type Page } from "@playwright/test";
 export const COMPOSER_WIDTHS = [375, 768, 1280, 1700];
 
 /**
- * The composer toolbar fits its card: Build stays inside the frame and the mode
- * toggle is no taller than the toolbar's cells (`cell` names one, e.g. Clear).
+ * The composer toolbar fits its card: Build stays inside the frame, the mode
+ * toggle is no taller than the toolbar's cells (`cell` names one, e.g. Clear) and sits
+ * inside the card, and neither it nor the last tool overlaps the Clear/Build group.
  */
 export const expectToolbarFits = async (scope: Locator, cell: string) => {
   // first(): the landing page also has the CTA composer further down.
@@ -15,9 +16,17 @@ export const expectToolbarFits = async (scope: Locator, cell: string) => {
     const submit = await card.getByRole("button", { name: "Create project" }).boundingBox();
     const toggle = await card.getByRole("radiogroup", { name: "Message mode" }).boundingBox();
     const reference = await card.getByRole("button", { name: cell }).boundingBox();
-    if (!frame || !submit || !toggle || !reference) throw new Error("composer toolbar not rendered");
+    // The Clear/Build group (incl. the char count) starts where the tools row must end.
+    const actions = await card.getByTestId("prompt-composer-actions").boundingBox();
+    const lastTool = await card.getByTestId("prompt-composer-tools").locator(":scope > *").last().boundingBox();
+    if (!frame || !submit || !toggle || !reference || !actions || !lastTool) {
+      throw new Error("composer toolbar not rendered");
+    }
     expect(submit.x + submit.width).toBeLessThanOrEqual(frame.x + frame.width + 0.5);
     expect(toggle.height).toBeLessThanOrEqual(reference.height + 2);
+    expect(toggle.x).toBeGreaterThanOrEqual(frame.x - 0.5);
+    expect(toggle.x + toggle.width).toBeLessThanOrEqual(actions.x + 0.5);
+    expect(lastTool.x + lastTool.width).toBeLessThanOrEqual(actions.x + 0.5);
   }).toPass({ timeout: 5_000 });
 };
 
