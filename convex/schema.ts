@@ -46,6 +46,17 @@ export const agentTaskStatusValidator = v.union(
  * loop (by path, or by id for calls made before #292), and the repeated error
  * with its normalised signature (for the next run).
  */
+/** A preview element picked in Select mode (#227); shape of selectedElementSchema. */
+export const selectedElementValidator = v.object({
+  tag: v.string(),
+  id: v.optional(v.string()),
+  classes: v.optional(v.array(v.string())),
+  text: v.string(),
+  domPath: v.string(),
+  outerHTML: v.string(),
+  siblingText: v.optional(v.string()),
+});
+
 export const stuckRunValidator = v.object({
   reason: v.union(
     v.literal("repeated-error"),
@@ -327,7 +338,11 @@ export default defineSchema({
     // Set when the owner deletes the project. The project is hidden at once
     // while `projects.deleteBatch` removes its data in the background.
     deletingAt: v.optional(v.number()),
-  }).index("by_owner", ["ownerId"]),
+    // Set while a read-only share link (/s/<token>) is on (#260): 128 random bits, hex.
+    shareToken: v.optional(v.string()),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_shareToken", ["shareToken"]),
 
   /**
    * Denormalized running totals, one row per `name`, so public pages can show
@@ -430,10 +445,19 @@ export default defineSchema({
     runModel: v.optional(runModelValidator),
     // User messages only: attached images. Bounded: see MAX_CHAT_IMAGES.
     images: v.optional(v.array(v.id("_storage"))),
+    // User messages only: preview elements picked in Select mode (#227).
+    // Bounded and length-capped by the messages route: see selected-elements.ts.
+    elements: v.optional(v.array(selectedElementValidator)),
     // Assistant messages only: an explicit plan or swarm run.
     mode: v.optional(v.union(v.literal("plan"), v.literal("swarm"))),
     // Assistant messages only: the run was stopped going in circles (#306).
     stuck: v.optional(stuckRunValidator),
+    // Assistant messages only: follow-up prompts shown as chips (#256).
+    // Bounded: at most 3, of at most 100 characters each.
+    suggestions: v.optional(v.array(v.string())),
+    // Assistant messages only: the run that completed the project's first
+    // build (#341), under which the chat offers publish and export once.
+    firstBuild: v.optional(v.boolean()),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"])

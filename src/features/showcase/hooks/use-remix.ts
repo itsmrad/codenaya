@@ -8,7 +8,6 @@ import { convexErrorMessage } from "@/lib/convex-error";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 import { savePendingRemix, takePendingRemix } from "../utils/pending-remix";
-import { useImportToWorkspace } from "./use-showcase";
 
 /** Public URL of a showcase project's detail page. */
 export const showcasePath = (id: string) => `/showcase/${id}`;
@@ -18,14 +17,14 @@ export const authRedirectUrl = (authUrl: string, path: string) =>
   `${authUrl}?redirect_url=${encodeURIComponent(path)}`;
 
 /**
- * Remix copies a showcase project into the user's workspace and opens it in
- * the IDE. Signed-out visitors are sent to sign-up first; the intent is kept
- * and finished when they come back to the project's page signed in.
+ * Remix copies a project (a showcase entry or a share link, #260) into the
+ * user's workspace with `copy` and opens it in the IDE. Signed-out visitors
+ * are sent to sign-up first; the intent is kept and finished when they come
+ * back to `sourcePath` signed in. `copy` must be stable (`useCallback`).
  */
-export const useRemix = (showcaseId: Id<"showcaseProjects">) => {
+export const useRemix = (sourcePath: string, copy: () => Promise<Id<"projects">>) => {
   const router = useRouter();
   const { isLoading: isAuthLoading, isAuthenticated } = useConvexAuth();
-  const importToWorkspace = useImportToWorkspace();
   // A transition stays pending through the navigation to the IDE.
   const [isRemixing, startRemix] = useTransition();
 
@@ -33,21 +32,21 @@ export const useRemix = (showcaseId: Id<"showcaseProjects">) => {
     () =>
       startRemix(async () => {
         try {
-          const newProjectId = await importToWorkspace({ showcaseProjectId: showcaseId });
+          const newProjectId = await copy();
           toast.success("Remixed into your workspace!");
           router.push(`/projects/${newProjectId}`);
         } catch (err: unknown) {
           toast.error(convexErrorMessage(err, "Failed to remix"));
         }
       }),
-    [importToWorkspace, router, showcaseId],
+    [copy, router],
   );
 
   const remix = () => {
     if (isRemixing || isAuthLoading) return;
     if (!isAuthenticated) {
-      savePendingRemix(showcaseId);
-      router.push(authRedirectUrl(SIGN_UP_URL, showcasePath(showcaseId)));
+      savePendingRemix(sourcePath);
+      router.push(authRedirectUrl(SIGN_UP_URL, sourcePath));
       return;
     }
     copyToWorkspace();
@@ -57,8 +56,8 @@ export const useRemix = (showcaseId: Id<"showcaseProjects">) => {
   // this runs at most once.
   useEffect(() => {
     if (!isAuthenticated) return;
-    if (takePendingRemix() === showcaseId) copyToWorkspace();
-  }, [isAuthenticated, showcaseId, copyToWorkspace]);
+    if (takePendingRemix() === sourcePath) copyToWorkspace();
+  }, [isAuthenticated, sourcePath, copyToWorkspace]);
 
   return { remix, isRemixing };
 };

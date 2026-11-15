@@ -9,6 +9,10 @@ interface LoadSkillToolOptions {
   skills: readonly AgentSkill[];
 }
 
+const paramsSchema = z.object({
+  name: z.string(),
+});
+
 export const createLoadSkillTool = ({ skills }: LoadSkillToolOptions) => {
   return createTool({
     name: "loadSkill",
@@ -17,7 +21,13 @@ export const createLoadSkillTool = ({ skills }: LoadSkillToolOptions) => {
     parameters: z.object({
       name: z.string().describe("The skill's name, exactly as listed"),
     }),
-    handler: async ({ name }) => {
+    handler: async (params) => {
+      const parsed = paramsSchema.safeParse(params);
+      if (!parsed.success) {
+        return `Error: ${parsed.error.issues[0].message}`;
+      }
+
+      const { name } = parsed.data;
       const skill = skills.find((s) => s.name === name.trim());
       if (!skill) {
         const valid = skills.map((s) => s.name).join(", ") || "none";

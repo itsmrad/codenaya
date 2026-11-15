@@ -22,4 +22,9 @@ describe("loadSkill tool", () => {
       'Error: Unknown skill "seo". Available skills: find-skills, seo-metadata',
     );
   });
+
+  it("returns a readable error for invalid args instead of throwing (#616)", async () => {
+    const result = await createLoadSkillTool({ skills }).handler({ name: null } as never, {} as never);
+    expect(result).toMatch(/^Error: /);
+  });
 });

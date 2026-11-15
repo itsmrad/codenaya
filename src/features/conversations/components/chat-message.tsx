@@ -19,6 +19,7 @@ import {
   MessageActions,
   MessageResponse,
 } from "@/components/ai-elements/message";
+import { Suggestion } from "@/components/ai-elements/suggestion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { usePreviewErrors } from "@/features/sandbox-preview/hooks/use-preview-errors";
@@ -33,13 +34,18 @@ import { buildPlanMessage, isPlanReply } from "../plan-mode";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
 import { PlanEditor } from "./plan-editor";
+import { ShipCard } from "./ship-card";
 import { SwarmBoard } from "./swarm-board";
 import { type StuckRetry, StuckRunCard } from "./stuck-run-card";
+import { ElementChips } from "./element-chips";
+import type { SelectedElement } from "../selected-elements";
 
 interface UserMessageProps {
   content: string;
   /** Attached images, shown as thumbnails above the text. */
   imageUrls?: string[];
+  /** Preview elements picked in Select mode (#227), shown as chips above the text. */
+  elements?: SelectedElement[];
   /** Enabled skills: leading `/name` tokens naming one show as a chip. */
   skillNames?: ReadonlySet<string>;
   /** Sent while the conversation was open (not history): fades up on mount. */
@@ -53,6 +59,7 @@ interface UserMessageProps {
 export const UserMessage = ({
   content,
   imageUrls = [],
+  elements = [],
   skillNames,
   animate = false,
   onRemember,
@@ -87,6 +94,7 @@ export const UserMessage = ({
         fadeUp && "animate-fade-up motion-reduce:animate-none",
       )}
     >
+      <ElementChips elements={elements} className="mb-1.5 justify-end" />
       {imageUrls.length > 0 && (
         <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
           {imageUrls.map((url, index) => (
@@ -233,6 +241,8 @@ interface AssistantMessageProps {
   stuckRetry?: StuckRetry;
   /** A stuck run (#306): pre-fills a plan-mode message about the loop. */
   onDiagnose?: () => void;
+  /** A follow-up chip (#256): fills the composer with the prompt, unsent. */
+  onSuggestion?: (prompt: string) => void;
 }
 
 export const AssistantMessage = ({
@@ -245,6 +255,7 @@ export const AssistantMessage = ({
   onBuildPlan,
   stuckRetry,
   onDiagnose,
+  onSuggestion,
   checkpointId,
   revertDisabled,
 }: AssistantMessageProps) => {
@@ -415,6 +426,20 @@ export const AssistantMessage = ({
               </Button>
             </div>
           )}
+          {message.firstBuild && <ShipCard projectId={message.projectId} />}
+          {/* Only under the latest build reply; a plan has "Build this plan". */}
+          {isLast && onSuggestion && message.mode !== "plan" && !message.stuck && message.suggestions?.length ? (
+            <div className={cn("flex flex-wrap gap-2", settle)}>
+              {message.suggestions.map((prompt) => (
+                <Suggestion
+                  key={prompt}
+                  suggestion={prompt}
+                  onClick={onSuggestion}
+                  className="h-auto whitespace-normal px-3 py-1.5 text-left text-xs font-normal"
+                />
+              ))}
+            </div>
+          ) : null}
           <MessageActions
             className={cn(
               "-ml-1.5 -mt-1 opacity-0 transition-opacity duration-100 group-hover/msg:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",

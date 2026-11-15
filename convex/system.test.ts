@@ -290,3 +290,52 @@ describe("updateConversationTitle names a generated project", () => {
     expect(await project(t, empty.projectId)).toMatchObject({ name: "democratic-mule-coral" });
   });
 });
+
+describe("updateMessageContent stores follow-up suggestions (#256)", () => {
+  beforeEach(() => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", INTERNAL_KEY);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  test("keeps at most 3, of at most 100 characters, and none when there are none", async () => {
+    const t = convexTest(schema, modules);
+    const { a } = await seedProjects(t);
+    const [withChips, without] = await t.run(async (ctx) => {
+      const conversationId = await ctx.db.insert("conversations", {
+        projectId: a.projectId,
+        title: "c",
+        updatedAt: 0,
+      });
+      const message = () =>
+        ctx.db.insert("messages", {
+          conversationId,
+          projectId: a.projectId,
+          role: "assistant",
+          content: "",
+          status: "processing",
+        });
+      return [await message(), await message()];
+    });
+
+    await t.mutation(api.system.updateMessageContent, {
+      internalKey: INTERNAL_KEY,
+      messageId: withChips,
+      content: "- Built it.",
+      suggestions: ["One", "Two", "x".repeat(150), "Four"],
+    });
+    await t.mutation(api.system.updateMessageContent, {
+      internalKey: INTERNAL_KEY,
+      messageId: without,
+      content: "- Built it.",
+      suggestions: [],
+    });
+
+    const [chips, none] = await t.run(async (ctx) =>
+      Promise.all([ctx.db.get("messages", withChips), ctx.db.get("messages", without)]),
+    );
+    expect(chips?.suggestions).toEqual(["One", "Two", "x".repeat(100)]);
+    expect(none).not.toHaveProperty("suggestions");
+  });
+});

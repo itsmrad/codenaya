@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useConvexAuth } from "convex/react";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { badgeSnippets } from "@/lib/badge-snippets";
@@ -34,6 +35,7 @@ import {
   useUserVote,
   useVote,
   useIncrementView,
+  useImportToWorkspace,
 } from "../hooks/use-showcase";
 import { authRedirectUrl, showcasePath, useRemix } from "../hooks/use-remix";
 
@@ -55,7 +57,14 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
   const vote = useVote();
   const incrementView = useIncrementView();
   const { isLoading: isAuthLoading, isAuthenticated } = useConvexAuth();
-  const { remix, isRemixing } = useRemix(project._id);
+  const importToWorkspace = useImportToWorkspace();
+  const { remix, isRemixing } = useRemix(
+    showcasePath(project._id),
+    useCallback(
+      () => importToWorkspace({ showcaseProjectId: project._id }),
+      [importToWorkspace, project._id],
+    ),
+  );
 
   // Live query for realtime vote counts
   const liveProject = useShowcaseById(project._id);
@@ -100,16 +109,8 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
     }
   };
 
-  const copyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(
-        new URL(showcasePath(project._id), window.location.origin).toString(),
-      );
-      toast.success("Link copied");
-    } catch {
-      toast.error("Couldn't copy the link");
-    }
-  };
+  const copyLink = () =>
+    copyToClipboard(new URL(showcasePath(project._id), window.location.origin).toString(), "Link copied");
 
   const copyRemixBadge = (format: "markdown" | "html") =>
     copyToClipboard(
@@ -183,9 +184,11 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={copyLink}>Copy link</DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuLabel className="flex items-center justify-between gap-3">
                   Remix badge
-                  <img src="/badges/remix-on-codenaya.svg" alt="Remix on Codenaya" className="h-5 w-auto" />
+                  <img src="/badges/remix-on-codenaya.svg" alt="" className="h-5 w-auto" />
                 </DropdownMenuLabel>
                 <DropdownMenuItem onSelect={() => copyRemixBadge("markdown")}>
                   Copy Markdown

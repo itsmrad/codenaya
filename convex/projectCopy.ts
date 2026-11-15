@@ -11,19 +11,51 @@ import {
 import { appError } from "./errors";
 import { insertFileContent, withContents } from "./fileContents";
 import { releaseStorageIfUnreferenced } from "./projectCascade";
+import { isSecretFile } from "./secretFiles";
+import { countProjectBuilt } from "./stats";
+import { recordProjectEvent } from "./activationEvents";
 
 /**
  * Copies a project's file tree into another project. Shared by project
- * duplication (`projects.duplicate`) and showcase imports
- * (`showcase.importToWorkspace`).
+ * duplication (`projects.duplicate`) and Remix (`remixProject`).
  */
+
+/** Most projects a user may create per hour through the copy entry points. */
+const COPIES_PER_HOUR = 20;
+
+/**
+ * Refuses a copy once the user has made `COPIES_PER_HOUR` projects in the last
+ * hour. Counts the user's recent projects, so it needs no extra table.
+ *
+ * shortcut: a soft limiter, upgrade to a real rate limiter if abused.
+ * - Deleting a project frees a slot only once its batched delete has run
+ *   (`deletingAt` rows still count), and copy-then-delete churn can still
+ *   exceed the cap over time.
+ * - Other create paths (`projects.create`) are not gated, but their projects
+ *   are counted.
+ */
+export async function assertCanCopy(ctx: MutationCtx, ownerId: string) {
+  const recent = await ctx.db
+    .query("projects")
+    .withIndex("by_owner", (q) =>
+      q.eq("ownerId", ownerId).gt("_creationTime", Date.now() - 60 * 60 * 1000),
+    )
+    .take(COPIES_PER_HOUR);
+  if (recent.length >= COPIES_PER_HOUR) {
+    throw appError(
+      "LIMIT_EXCEEDED",
+      `You can create up to ${COPIES_PER_HOUR} projects per hour. Try again later.`,
+    );
+  }
+}
 
 /** Largest file tree copied in one transaction. */
 export const MAX_COPY_FILES = 5000;
 
 /**
  * Inserts a copy of every file and folder of `sourceId` into `targetId`,
- * keeping the tree shape. Binary files share the source's storage blob until
+ * keeping the tree shape. Secret files (`isSecretFile`) are skipped unless
+ * `keepSecretFiles`: only the owner's own duplicate keeps them. Binary files share the source's storage blob until
  * `copyBlobs` gives each copy its own. Blob deletes are reference-checked
  * (`releaseStorageIfUnreferenced`), so deleting either side meanwhile, or a
  * `copyBlobs` run that never finishes, can't remove a blob the other uses.
@@ -32,19 +64,23 @@ export async function copyProjectFiles(
   ctx: MutationCtx,
   sourceId: Id<"projects">,
   targetId: Id<"projects">,
+  { keepSecretFiles = false }: { keepSecretFiles?: boolean } = {},
 ) {
-  const sourceFiles = await ctx.db
+  const allFiles = await ctx.db
     .query("files")
     .withIndex("by_project", (q) => q.eq("projectId", sourceId))
     .take(MAX_COPY_FILES + 1);
 
-  if (sourceFiles.length > MAX_COPY_FILES) {
+  if (allFiles.length > MAX_COPY_FILES) {
     throw appError(
       "LIMIT_EXCEEDED",
       `Projects with more than ${MAX_COPY_FILES} files can't be copied`,
     );
   }
 
+  const sourceFiles = keepSecretFiles
+    ? allFiles
+    : allFiles.filter((file) => !(file.type === "file" && isSecretFile(file.name)));
   const now = Date.now();
   const idMap = new Map<Id<"files">, Id<"files">>();
   const binaryFileIds: Id<"files">[] = [];
@@ -86,6 +122,32 @@ export async function copyProjectFiles(
       fileIds: binaryFileIds,
     });
   }
+}
+
+/**
+ * A Remix: a new project for `ownerId` holding a copy of `sourceId`'s files
+ * only, without secret files. Shared by showcase imports and share links (#260); the caller checks
+ * the source may be copied.
+ */
+export async function remixProject(
+  ctx: MutationCtx,
+  sourceId: Id<"projects">,
+  ownerId: string,
+  name: string,
+) {
+  await assertCanCopy(ctx, ownerId);
+  const newProjectId = await ctx.db.insert("projects", {
+    name,
+    ownerId,
+    updatedAt: Date.now(),
+  });
+  await countProjectBuilt(ctx);
+  await recordProjectEvent(ctx, newProjectId, {
+    name: "project_created",
+    props: { source: "remix" },
+  });
+  await copyProjectFiles(ctx, sourceId, newProjectId);
+  return newProjectId;
 }
 
 /** Files handled per query and per mutation in `copyBlobs`. */

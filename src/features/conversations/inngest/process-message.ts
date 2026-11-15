@@ -89,6 +89,7 @@ import { isStarterOnly } from './starter-only';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
+import { withSelectedElements } from '../selected-elements';
 import { trimFileHistory } from "./lib/trim-file-history";
 import {
   MAX_CUT_OFF_RETRIES,
@@ -107,6 +108,7 @@ import {
   PLAN_MODE_TOOLS,
   SWARM_MODE,
 } from '../plan-mode';
+import { splitSuggestions } from '../suggestions';
 import { SWARM_DELEGATE_AGENT_NAME, swarmRequest, swarmRun } from './lib/swarm-run';
 
 interface MessageEvent {
@@ -330,11 +332,11 @@ export const processMessage = inngest.createFunction(
       });
     });
 
-    // Images on the user message this run answers: the last one before it.
-    const imageUrls =
-      recentMessages
-        .slice(0, recentMessages.findIndex((msg) => msg._id === messageId))
-        .findLast((msg) => msg.role === "user")?.imageUrls ?? [];
+    // Images and picked elements on the user message this run answers: the last one before it.
+    const asked = recentMessages
+      .slice(0, recentMessages.findIndex((msg) => msg._id === messageId))
+      .findLast((msg) => msg.role === "user");
+    const imageUrls = asked?.imageUrls ?? [];
     // The catalog can change between the send and this run (a queued run, a
     // retry): never send images to a model that can't read them (#322).
     if (imageUrls.length > 0 && !runModel.acceptsImages) {
@@ -348,8 +350,10 @@ export const processMessage = inngest.createFunction(
       return { success: false, messageId, conversationId };
     }
     // A message can be images alone; the agents still need a request to answer.
-    const request =
-      imageUrls.length > 0 && !message.trim() ? IMAGE_ONLY_PROMPT : message;
+    const request = withSelectedElements(
+      imageUrls.length > 0 && !message.trim() ? IMAGE_ONLY_PROMPT : message,
+      asked?.elements,
+    );
 
     // Earlier turns go to the model as chat messages, never in the system prompt.
     const earlierTurns = priorTurns(recentMessages, messageId);
@@ -1027,19 +1031,27 @@ export const processMessage = inngest.createFunction(
     // The first run that wrote files and verified its build ends a seeded
     // project's first build (#338). Before the message completes, so the
     // client sees the flag cleared by the time the run is no longer active.
-    if (verified && wroteFiles(result.state.results)) {
-      await step.run("complete-first-build", async () => {
-        await convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId });
-      });
-    }
+    // The run that ends it gets the one-time publish / export card (#341).
+    const firstBuild =
+      verified &&
+      wroteFiles(result.state.results) &&
+      (await step.run("complete-first-build", () =>
+        convex.mutation(api.projects.completeFirstBuild, { internalKey, projectId }),
+      ));
+
+    // Follow-up chips (#256) come out of the reply; the raw block is never shown.
+    const { content, suggestions } = splitSuggestions(assistantResponse);
+    const reply = content || DEFAULT_REPLY_MESSAGE;
 
     // Update the assistant message with the response (this also sets status to completed)
     await step.run("update-assistant-message", async () => {
       await convex.mutation(api.system.updateMessageContent, {
         internalKey,
         messageId,
-        content: buildNote && !stuck ? `${assistantResponse}\n\n${buildNote}` : assistantResponse,
+        content: buildNote && !stuck ? `${reply}\n\n${buildNote}` : reply,
         ...(stuck ? { stuck } : verified || creditStopped ? {} : { outcome: "error" as const }),
+        ...(suggestions.length ? { suggestions } : {}),
+        ...(firstBuild ? { firstBuild: true } : {}),
       })
     });
 
