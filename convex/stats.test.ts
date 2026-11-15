@@ -31,6 +31,16 @@ describe("projects built counter", () => {
     expect(await t.query(api.stats.projectsBuilt, {})).toBe(3);
   });
 
+  test("sums the legacy row and every shard", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("counters", { name: "projectsBuilt", value: 7 });
+      await ctx.db.insert("counters", { name: "projectsBuilt:2", value: 3 });
+      await ctx.db.insert("counters", { name: "projectsBuilt:7", value: 1 });
+    });
+    expect(await t.query(api.stats.projectsBuilt, {})).toBe(11);
+  });
+
   test("backfill recounts existing projects across batches", async () => {
     vi.useFakeTimers();
     try {
@@ -41,6 +51,7 @@ describe("projects built counter", () => {
         }
         // A stale value the backfill must overwrite, not add to.
         await ctx.db.insert("counters", { name: "projectsBuilt", value: 7 });
+        await ctx.db.insert("counters", { name: "projectsBuilt:3", value: 5 });
       });
 
       await t.mutation(internal.stats.backfillProjectsBuilt, {});
