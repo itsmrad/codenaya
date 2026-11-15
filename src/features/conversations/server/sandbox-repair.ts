@@ -287,7 +287,7 @@ const errorSources = (files: ProjectFile[], errors: BuildError[], secrets: strin
 };
 
 const repairSystem = (framework?: Framework | null) =>
-  `You fix build errors in a ${framework === "next" ? "Next.js (App Router)" : "Vite"} + TypeScript project. ` +
+  `You fix build errors in a ${framework === "next" ? "Next.js (App Router)" : framework === "tanstack-start" ? "TanStack Start (Vite)" : "Vite"} + TypeScript project. ` +
   "Read the files you need with readFiles, then fix them " +
   "with editFile (or writeFiles for a whole file). Make the smallest change that fixes the listed errors and " +
   "change nothing else. When done, reply with one line saying what you changed.";
