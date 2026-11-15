@@ -9,6 +9,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { toast } from "sonner";
 import { Allotment } from "allotment";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -236,7 +237,9 @@ export const PreviewView = ({
         (error) => setRuntimeError((prev) => error ? mergeAppError(prev, error) : null),
         (element) => {
           // Rect is only bridge metadata; chat keeps the existing quoted-data shape.
-          useChatStore.getState().addElement(selectedElementSchema.parse(element));
+          if (!useChatStore.getState().addElement(selectedElementSchema.parse(element))) {
+            toast.error("You can attach up to 3 elements");
+          }
           setSelectChosen(false);
           onElementPicked();
         },
