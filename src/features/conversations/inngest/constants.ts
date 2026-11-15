@@ -1,4 +1,5 @@
 import { KNOWN_GOOD_VERSIONS_LINES } from "./known-good-versions";
+import type { Framework } from "@/features/sandbox-preview/utils/framework";
 
 /**
  * The most files, and lines in all, the agent should write in one turn (#493).
@@ -470,6 +471,20 @@ Import only existing files and installed packages. Keep src/app/layout.tsx, its 
 Then complete every requested feature, extracting components and wiring routes only after their files exist. Keep the app runnable between writes; this first page is an intermediate step. Retain the normal final checkBuild, fix and verification workflow.
 `;
 
+export const START_STARTER_IN_PLACE_NOTE =
+  "(This project already has the TanStack Start starter and nothing else: package.json, vite.config.ts, tsconfig.json, components.json, src/router.tsx, src/routeTree.gen.ts, src/routes/__root.tsx, src/routes/index.tsx, src/styles/app.css, src/lib/utils.ts and the common src/components/ui/ components, including the mounted Sonner toaster. Import these components; do not rewrite them. Do NOT call scaffoldViteApp or start with listFiles. First write a runnable src/routes/index.tsx for the request, keeping __root.tsx. Add pages as file routes under src/routes/ and use Link and useNavigate from @tanstack/react-router, no react-router-dom. Never edit src/routeTree.gen.ts; the Start plugin regenerates it. Never add index.html or src/main.tsx. Build on this selected framework even if the request does not name TanStack Start.)";
+
+export const START_STARTER_RECOVERY_NOTE =
+  "(The original user prompt requests TanStack Start, but its starter is incomplete or missing. Restore missing Start starter files, including package.json, vite.config.ts, tsconfig.json, src/router.tsx, src/routes/__root.tsx and src/styles/app.css. Then make the first runnable implementation src/routes/index.tsx for the actual request, preserving any existing user code. Use @tanstack/react-router, no react-router-dom. Never add index.html or src/main.tsx; do NOT call scaffoldViteApp. Keep the app runnable between writes and complete the normal final checkBuild, fix and verification workflow.)";
+
+export const START_FIRST_BUILD_APP_NOTE = `
+
+## First build: show the user's app early
+The TanStack Start starter is already in place. Override the entry-points-last workflow: make your first implementation write a small, immediately runnable src/routes/index.tsx for the user's actual request. Use the requested product name, meaningful domain-specific copy, representative data and a styled main layout, never a generic loading shell or placeholder.
+Import only existing files and installed packages. Keep src/routes/__root.tsx, its head, Toaster, errorComponent and <Scripts /> intact, and never edit src/routeTree.gen.ts. Use @tanstack/react-router, never react-router-dom. Never add index.html or src/main.tsx, and do NOT call scaffoldViteApp. Improve existing user implementation in place.
+Then complete every requested feature, adding file routes and components only after their files exist. Keep the app runnable between writes; this first page is an intermediate step. Retain the normal final checkBuild, fix and verification workflow.
+`;
+
 /** Solo first builds only; swarm has its own foundation order and path ownership. */
 export const FIRST_BUILD_APP_NOTE = `
 
@@ -478,6 +493,13 @@ For this first build of a Vite + React app, override the entry-points-last workf
 Keep this first App self-contained: import only files that already exist and packages already available in the starter. Do not import future pages/components or dependencies you still need to add. Keep the starter's main.tsx, router and error boundary intact. If App.tsx already contains user implementation, improve it in place rather than replacing working user code.
 Then fill in every requested feature and refine the design, extracting components and wiring routes only after their files exist. Keep the app runnable between writes. This early App is an intermediate step, never task completion: retain all final quality requirements and the normal final checkBuild, fix and verification workflow. If the user explicitly requested Next.js or another stack, follow that stack's entry points instead.
 `;
+
+/** Per-starter notes: first-build (system prompt), in-place (request) and recovery for a failed seed. */
+export const STARTER_NOTES: Record<Framework, { firstBuild: string; inPlace: string; recovery?: string }> = {
+  vite: { firstBuild: FIRST_BUILD_APP_NOTE, inPlace: STARTER_IN_PLACE_NOTE },
+  next: { firstBuild: NEXT_FIRST_BUILD_APP_NOTE, inPlace: NEXT_STARTER_IN_PLACE_NOTE, recovery: NEXT_STARTER_RECOVERY_NOTE },
+  "tanstack-start": { firstBuild: START_FIRST_BUILD_APP_NOTE, inPlace: START_STARTER_IN_PLACE_NOTE, recovery: START_STARTER_RECOVERY_NOTE },
+};
 
 export const TITLE_GENERATOR_SYSTEM_PROMPT =
   "Generate a short, descriptive title (3-6 words) for a conversation based on the user's message. Return ONLY the title, nothing else. No quotes, no punctuation at the end.";

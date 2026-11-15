@@ -10,6 +10,44 @@ import { VITE_STARTER_UI } from "./vite-starter-ui";
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
+// Exact versions, newest within the known-good majors (npm view, 2026-11-15): a
+// range resolves today's newest, which an older cached packument may lack (ETARGET).
+export const VITE_DEPENDENCIES = {
+  "@fontsource/inter": "5.3.0",
+  "@hookform/resolvers": "7.0.6",
+  "@radix-ui/react-avatar": "1.3.1",
+  "@radix-ui/react-dialog": "1.3.1",
+  "@radix-ui/react-dropdown-menu": "2.2.1",
+  "@radix-ui/react-label": "2.1.17",
+  "@radix-ui/react-select": "2.4.1",
+  "@radix-ui/react-separator": "1.2.0",
+  "@radix-ui/react-slot": "1.5.0",
+  "@radix-ui/react-tabs": "1.2.1",
+  "@radix-ui/react-tooltip": "1.4.1",
+  sonner: "2.0.8",
+  "class-variance-authority": "0.7.1",
+  clsx: "2.1.1",
+  "lucide-react": "1.73.0",
+  react: "19.3.1",
+  "react-dom": "19.3.1",
+  "react-hook-form": "7.92.0",
+  "react-router-dom": "7.18.5",
+  "tailwind-merge": "3.7.0",
+  zod: "4.6.7",
+};
+
+export const VITE_DEV_DEPENDENCIES = {
+  "@tailwindcss/vite": "4.3.5",
+  "@types/node": "22.20.5",
+  "@types/react": "19.3.0",
+  "@types/react-dom": "19.3.0",
+  "@vitejs/plugin-react": "6.3.0",
+  tailwindcss: "4.3.5",
+  "tw-animate-css": "1.4.0",
+  typescript: "5.9.3",
+  vite: "8.3.8",
+};
+
 const PACKAGE_JSON = json({
   name: "app",
   private: true,
@@ -21,42 +59,8 @@ const PACKAGE_JSON = json({
     preview: "vite preview",
     lint: "eslint src",
   },
-  // Exact versions, newest within the known-good majors (npm view, 2026-11-15): a
-  // range resolves today's newest, which an older cached packument may lack (ETARGET).
-  dependencies: {
-    "@fontsource/inter": "5.3.0",
-    "@hookform/resolvers": "7.0.6",
-    "@radix-ui/react-avatar": "1.3.1",
-    "@radix-ui/react-dialog": "1.3.1",
-    "@radix-ui/react-dropdown-menu": "2.2.1",
-    "@radix-ui/react-label": "2.1.17",
-    "@radix-ui/react-select": "2.4.1",
-    "@radix-ui/react-separator": "1.2.0",
-    "@radix-ui/react-slot": "1.5.0",
-    "@radix-ui/react-tabs": "1.2.1",
-    "@radix-ui/react-tooltip": "1.4.1",
-    sonner: "2.0.8",
-    "class-variance-authority": "0.7.1",
-    clsx: "2.1.1",
-    "lucide-react": "1.73.0",
-    react: "19.3.1",
-    "react-dom": "19.3.1",
-    "react-hook-form": "7.92.0",
-    "react-router-dom": "7.18.5",
-    "tailwind-merge": "3.7.0",
-    zod: "4.6.7",
-  },
-  devDependencies: {
-    "@tailwindcss/vite": "4.3.5",
-    "@types/node": "22.20.5",
-    "@types/react": "19.3.0",
-    "@types/react-dom": "19.3.0",
-    "@vitejs/plugin-react": "6.3.0",
-    tailwindcss: "4.3.5",
-    "tw-animate-css": "1.4.0",
-    typescript: "5.9.3",
-    vite: "8.3.8",
-  },
+  dependencies: VITE_DEPENDENCIES,
+  devDependencies: VITE_DEV_DEPENDENCIES,
 });
 
 const VITE_CONFIG = `import { fileURLToPath, URL } from "node:url";

@@ -26,6 +26,7 @@ vi.mock("@/lib/message-processor", () => ({
 
 import { resetRateLimits } from "@/lib/rate-limit";
 import { NEXT_APP_STARTER } from "@/features/conversations/inngest/next-starter";
+import { TANSTACK_START_STARTER } from "@/features/conversations/inngest/tanstack-start-starter";
 import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starter";
 import { STARTER_TEMPLATE_IDS } from "@/features/templates/templates";
 import { POST } from "./route";
@@ -60,6 +61,11 @@ describe("POST /api/projects/create-with-prompt", () => {
     [{ prompt: "Use Next.js for a dashboard" }, NEXT_APP_STARTER],
     [{ prompt: "Build a dashboard", framework: "next" }, NEXT_APP_STARTER],
     [{ prompt: "Use Next.js", framework: "vite" }, VITE_REACT_STARTER],
+    [{ prompt: "Use TanStack Start for a dashboard" }, TANSTACK_START_STARTER],
+    [{ prompt: "TanStack Start or Next.js, your pick" }, TANSTACK_START_STARTER],
+    [{ prompt: "Build a dashboard", framework: "tanstack-start" }, TANSTACK_START_STARTER],
+    [{ prompt: "Use TanStack Start", framework: "next" }, NEXT_APP_STARTER],
+    [{ prompt: "Use TanStack Query for a dashboard" }, VITE_REACT_STARTER],
   ])("selects the starter for %j", async (body, starter) => {
     const res = await POST(post(body));
     expect(res.status).toBe(200);
