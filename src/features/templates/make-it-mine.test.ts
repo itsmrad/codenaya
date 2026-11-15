@@ -40,7 +40,7 @@ describe("applyBrandOrNull", () => {
   it("keeps a name with replacement patterns literal", async () => {
     const next = applyBrandOrNull(await brandFilesOf(INSTANT[0]), { name: "$& $1" })!;
     expect(next[BRAND_FILE]).toContain('export const BRAND_NAME = "$& $1";');
-    expect(next["index.html"]).toContain("<title>$& $1</title>");
+    expect(next["index.html"]).toContain("<title>$&amp; $1</title>");
   });
 
   it("applies the name alone and leaves the colours", async () => {
