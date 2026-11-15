@@ -89,10 +89,12 @@ export async function POST(request: Request) {
     return swarmOff;
   }
 
+  // Auto (#322): a first run is a build unless it is Ask / Plan, as `classifyRun` routes it.
   const { runModel, promoKind, rejected } = await requireModelChoice({
     internalKey,
     userId,
     model,
+    task: mode === PLAN_MODE ? "plan" : undefined,
   });
 
   if (rejected) {

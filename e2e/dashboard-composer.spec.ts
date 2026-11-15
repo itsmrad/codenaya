@@ -53,9 +53,10 @@ test.describe("dashboard prompt composer", () => {
     await expect(swarm).toBeChecked();
 
     const composer = main.getByRole("textbox", { name: "Describe what you want to build" });
-    await composer.fill("a kanban board");
+    // 8+ words, so no setup questions open first (#586).
+    await composer.fill("a kanban board app with columns, cards and drag and drop");
     await composer.press("Enter");
-    expect(await sent).toMatchObject({ prompt: "a kanban board", mode: "swarm" });
+    expect(await sent).toMatchObject({ prompt: "a kanban board app with columns, cards and drag and drop", mode: "swarm" });
   });
 
   test("Ctrl+J opens the new-project dialog, which creates a project", async ({ page }) => {

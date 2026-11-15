@@ -19,6 +19,11 @@ vi.mock("@/lib/convex-client", async () => {
 vi.mock("@/inngest/client", () => ({
   inngest: { send: mocks.inngestSend },
 }));
+// Spied, unchanged: plan and build share their routes, so only the task shows the difference.
+vi.mock("@/features/ai-providers/auto-route", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/features/ai-providers/auto-route")>();
+  return { ...original, autoRouteModel: vi.fn(original.autoRouteModel) };
+});
 
 import { POST as messagesPOST } from "./messages/route";
 import { POST as cancelPOST } from "./messages/cancel/route";
@@ -35,6 +40,7 @@ import {
 } from "@/lib/rate-limit";
 import { PROMO_ENDS_AT } from "@/features/promotions/github-promo";
 import { SWARM_OFF_ERROR } from "@/features/conversations/server/swarm-off";
+import { autoRouteModel } from "@/features/ai-providers/auto-route";
 
 const post = (body: unknown) =>
   new Request("http://localhost/api", {
@@ -369,6 +375,20 @@ describe("POST /api/messages with Auto (#322)", () => {
     });
     expect(mocks.mutation).not.toHaveBeenCalled();
     expect(mocks.inngestSend).not.toHaveBeenCalled();
+  });
+
+  it("routes an Ask / Plan first run on Auto as a plan, and any other as a build", async () => {
+    const tasks = () => vi.mocked(autoRouteModel).mock.calls.map(([, task]) => task);
+    mocks.mutation.mockImplementation(async (_ref, args) =>
+      "projectName" in args ? { projectId: "p1", conversationId: "c1" } : args.role === "assistant" ? "m_assistant" : null,
+    );
+
+    expect((await createWithPromptPOST(post({ prompt: "Plan a todo app", model: "auto", mode: "plan" }))).status).toBe(200);
+    expect(tasks()).toEqual(["plan"]);
+
+    vi.mocked(autoRouteModel).mockClear();
+    await createWithPromptPOST(post({ prompt: "Fix it", model: "auto" }));
+    expect(tasks()).toEqual(["build"]);
   });
 
   it("makes no extra read for a model the user picked", async () => {
