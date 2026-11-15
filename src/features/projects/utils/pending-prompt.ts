@@ -46,7 +46,7 @@ const parse = (raw: string | null): PendingPrompt | null => {
     const value: unknown = JSON.parse(raw);
     if (value && typeof value === "object" && typeof (value as PendingPrompt).prompt === "string") {
       const { prompt, mode, framework } = value as PendingPrompt;
-      saved = { prompt, ...(isMode(mode) ? { mode } : {}), ...(framework === "vite" || framework === "next" ? { framework } : {}) };
+      saved = { prompt, ...(isMode(mode) ? { mode } : {}), ...(framework === "vite" || framework === "next" || framework === "tanstack-start" ? { framework } : {}) };
     }
   } catch {
     // A plain prompt.

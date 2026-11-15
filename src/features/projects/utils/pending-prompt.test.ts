@@ -21,7 +21,7 @@ describe("pending prompt", () => {
   beforeEach(() => vi.stubGlobal("localStorage", memoryStorage()));
   afterEach(() => vi.unstubAllGlobals());
 
-  it.each(["vite", "next"] as const)("keeps %s with the draft across a failed creation", async (framework) => {
+  it.each(["vite", "next", "tanstack-start"] as const)("keeps %s with the draft across a failed creation", async (framework) => {
     savePendingPrompt("A blog", "plan", framework);
     const create = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     await resumePendingPrompt(create);
