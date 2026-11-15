@@ -9,7 +9,7 @@ import {
 } from "@/lib/rate-limit";
 
 import { DEFAULT_CONVERSATION_TITLE } from "@/features/conversations/constants";
-import { SWARM_MODE } from "@/features/conversations/plan-mode";
+import { PLAN_MODE, SWARM_MODE } from "@/features/conversations/plan-mode";
 import { swarmOffResponse } from "@/features/conversations/server/swarm-off";
 import {
   modelChoiceSchema,
@@ -39,8 +39,8 @@ const requestSchema = z.object({
   templateId: z.enum(STARTER_TEMPLATE_IDS).optional(),
   /** A prompt typed on the landing page before sign-up, for activation events (#339). */
   fromLanding: z.boolean().optional(),
-  /** Swarm mode, as in the messages route; omitted means build. */
-  mode: z.literal(SWARM_MODE).optional(),
+  /** Ask / Plan or Swarm mode, as in the messages route; omitted means build. */
+  mode: z.enum([PLAN_MODE, SWARM_MODE]).optional(),
 });
 
 export async function POST(request: Request) {
@@ -89,10 +89,12 @@ export async function POST(request: Request) {
     return swarmOff;
   }
 
+  // Auto (#322): a first run is a build unless it is Ask / Plan, as `classifyRun` routes it.
   const { runModel, promoKind, rejected } = await requireModelChoice({
     internalKey,
     userId,
     model,
+    task: mode === PLAN_MODE ? "plan" : undefined,
   });
 
   if (rejected) {

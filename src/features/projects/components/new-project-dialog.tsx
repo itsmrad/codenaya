@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+import type { ComposerMode } from "@/features/conversations/components/plan-mode-toggle";
 import { useCreateProjectFromPrompt } from "../hooks/use-create-project-from-prompt";
 import { PromptComposer } from "./prompt-composer";
 
@@ -22,8 +23,8 @@ export const NewProjectDialog = ({
 }: NewProjectDialogProps) => {
   const { createProject, isSubmitting } = useCreateProjectFromPrompt();
 
-  const handleSubmit = async (prompt: string) => {
-    const created = await createProject(prompt);
+  const handleSubmit = async (prompt: string, mode: ComposerMode) => {
+    const created = await createProject(prompt, undefined, false, mode);
     if (created) onOpenChange(false);
     return created;
   };
