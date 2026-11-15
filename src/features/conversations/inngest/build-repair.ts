@@ -38,7 +38,10 @@ import { isSafeProjectPath, projectFramework } from "./tools/check-build";
  * closed), killed on reopen (#492) or hold the project's `.env`.
  */
 
-/** Repairs after the first check, each followed by a fresh check. */
+/**
+ * Repairs after the first check, each followed by a fresh check. With a
+ * `fallbackModel`, these run on the cheap model, and one more on the fallback.
+ */
 export const MAX_SERVER_REPAIRS = 2;
 /** Renewed by each connect; E2B reaps it after this if every kill is lost. */
 const REPAIR_SANDBOX_TIMEOUT_MS = 10 * 60_000;
@@ -157,8 +160,11 @@ export const repairOutcome = (repair: RepairResult, noteBefore: string | undefin
 export const repairBuild = async ({
   step,
   recordSteps,
+  fallbackModel,
   ...options
 }: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId" | "model" | "onResponse" | "signal"> & {
+  /** Takes over once the repairs on `model` (a cheap one) fail or change nothing. */
+  fallbackModel?: VerifyAndFixOptions["model"];
   step: NonNullable<VerifyAndFixOptions["step"]>;
   /** Upserts the rows `build` returns into the run block, in a step. */
   recordSteps: (build: () => AgentStep[]) => Promise<void>;
@@ -198,7 +204,9 @@ export const repairBuild = async ({
   const result = await verifyAndFix({
     ...options,
     sandbox,
-    maxAttempts: MAX_SERVER_REPAIRS,
+    ...(fallbackModel
+      ? { fallback: { model: fallbackModel, after: MAX_SERVER_REPAIRS }, maxAttempts: MAX_SERVER_REPAIRS + 1 }
+      : { maxAttempts: MAX_SERVER_REPAIRS }),
     step,
     onEvent: (event) => recordSteps(() => repairSteps(event)),
   });

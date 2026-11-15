@@ -117,7 +117,7 @@ const scriptedRepair = (result: RepairResult) => async (options: VerifyAndFixOpt
   const event = (e: Omit<RepairEvent, "id">) => options.onEvent?.({ id: `${options.runId}:main:${e.phase}:${e.attempt}`, ...e });
   await event({ phase: "verify", attempt: 1, status: "error", errors: [{ file: "main.ts", line: 1, message: "error TS2307: Cannot find module './absent'", kind: "type" }] });
   await event({ phase: "repair", attempt: 1, status: "running" });
-  await options.onResponse?.(JSON.stringify({ usage: { prompt_tokens: 500, completion_tokens: 50 } }));
+  await options.onResponse?.(JSON.stringify({ usage: { prompt_tokens: 500, completion_tokens: 50 } }), false);
   await event({ phase: "repair", attempt: 1, status: "done", filesChanged: result.filesChanged });
   await event({ phase: "verify", attempt: 2, status: result.ok ? "done" : "error", errors: result.errors });
   return result;
@@ -151,7 +151,7 @@ beforeEach(() => {
 });
 
 describe("processMessage repair after the run", () => {
-  it("repairs a run that ended on a failed check with the run's model, metered, and ends verified", async () => {
+  it("repairs a run that ended on a failed check on the utility model, then the run's, metered, and ends verified", async () => {
     mocks.verifyAndFix.mockImplementation(
       scriptedRepair({ ok: true, status: "verified", errors: [], filesChanged: ["main.ts"], attempts: 1 }),
     );
@@ -164,8 +164,10 @@ describe("processMessage repair after the run", () => {
       projectId: "p1",
       internalKey: "ik",
       runId: "run-under-test",
-      maxAttempts: MAX_SERVER_REPAIRS,
-      model: { options: { model: "x-ai/grok-4.7" } },
+      // The utility model's repairs first; the run's own model takes over after them.
+      maxAttempts: MAX_SERVER_REPAIRS + 1,
+      model: { options: { model: "anthropic/claude-haiku-5.5" } },
+      fallback: { model: { options: { model: "x-ai/grok-4.7" } }, after: MAX_SERVER_REPAIRS },
     });
 
     // A new sandbox with the project, its npm cache warmed, then stopped.

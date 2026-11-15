@@ -61,6 +61,9 @@ const REPAIR_MAX_STEPS = 8;
 /** Larger files skip the static checks; the in-sandbox copy still builds them. */
 const MAX_TEXT_BYTES = 1_000_000;
 const MAX_SNAPSHOT_FILES = 2_000;
+/** Files the errors name, shown whole in the repair prompt so it need not read them first. */
+const MAX_SOURCE_FILES = 3;
+const MAX_SOURCE_CHARS = 20_000;
 const SHORT_CALL_MS = 10_000;
 /**
  * Never read into a check or copied into the sandbox, like the preview's `.env` on the warm path.
@@ -110,6 +113,8 @@ type CheckOutcome = {
   reason?: string;
   /** On a failed check, for the repair prompt; missing on outcomes memoized before Next.js support (Vite). */
   framework?: Framework | null;
+  /** On a failed check: the files the errors name, for the repair prompt. */
+  sources?: ProjectFile[];
 };
 
 type Model = NonNullable<Parameters<typeof createAgent>[0]["model"]>;
@@ -130,6 +135,12 @@ export type VerifyAndFixOptions = {
   agentTaskId?: string;
   /** The repair agent's model, built by the caller (`buildAgentKitModel`). */
   model: Model;
+  /**
+   * Escalation, e.g. a cheap `model` first and the run's own model last: once
+   * `after` repairs on `model` have run, or one changed nothing or threw, the
+   * remaining repairs use `fallback.model`.
+   */
+  fallback?: { model: Model; after: number };
   /** Repairs, 1 to MAX_REPAIR_ATTEMPTS; anything else is clamped, and NaN means the maximum. */
   maxAttempts?: number;
   /** Keep the errors this worker owns; what it drops can only yield `scoped-ok`. */
@@ -147,8 +158,8 @@ export type VerifyAndFixOptions = {
   /** Redacted from every error, event and result. */
   secrets?: string[];
   onEvent?: (event: RepairEvent) => void | Promise<void>;
-  /** Called with each of the repair agent's model responses, e.g. to meter its usage. */
-  onResponse?: (raw: string | undefined) => Promise<void>;
+  /** Called with each of the repair agent's model responses, e.g. to meter its usage; `onFallback` names the model. */
+  onResponse?: (raw: string | undefined, onFallback: boolean) => Promise<void>;
   /**
    * Runs each verify and each copy into the sandbox as a durable step,
    * `<runId>:<agentTaskId>:verify:<n>` and `...:sync:<n>`, e.g.
@@ -256,7 +267,23 @@ const verify = async (connect: () => Promise<Sandbox>, dir: string, secrets: str
   if (!text.startsWith("Error:") || text.startsWith(BUILD_CHECK_UNFINISHED)) {
     return { status: "unverified", errors: [], paths, reason: text.split("\n")[0] };
   }
-  return { status: "failed", errors: parseBuildErrors(text), paths, framework: projectFramework(snap.files, snap.paths) };
+  const errors = parseBuildErrors(text);
+  return {
+    status: "failed",
+    errors,
+    paths,
+    framework: projectFramework(snap.files, snap.paths),
+    sources: errorSources(snap.files, errors, secrets),
+  };
+};
+
+/** The first few files the errors name: small ones holding none of the secrets. */
+const errorSources = (files: ProjectFile[], errors: BuildError[], secrets: string[]) => {
+  const named = new Set(errors.flatMap(({ file }) => (file ? [file.replace(/^\.\//, "")] : [])));
+  return files
+    .filter(({ path, content }) =>
+      named.has(path) && content.length <= MAX_SOURCE_CHARS && !secrets.some((secret) => secret && content.includes(secret)))
+    .slice(0, MAX_SOURCE_FILES);
 };
 
 const repairSystem = (framework?: Framework | null) =>
@@ -333,7 +360,7 @@ export const repairTools = ({
  * `allowedPaths` are refused whole, as SWARM's own guard does.
  */
 const repair = async ({
-  projectId, internalKey, model, name, errors, paths, framework, signal, allowedPaths, onResponse,
+  projectId, internalKey, model, name, errors, paths, framework, sources = [], signal, allowedPaths, onResponse, written,
 }: {
   projectId: Id<"projects">;
   internalKey: string;
@@ -342,11 +369,13 @@ const repair = async ({
   errors: BuildError[];
   paths: string[];
   framework?: Framework | null;
+  sources?: ProjectFile[];
   signal?: AbortSignal;
   allowedPaths?: (path: string) => boolean;
   onResponse?: (raw: string | undefined) => Promise<void>;
+  /** The caller's: holds what was written even when the repair throws. */
+  written: string[];
 }) => {
-  const written: string[] = [];
   const agent = createAgent({
     name,
     system: repairSystem(framework),
@@ -374,8 +403,11 @@ const repair = async ({
   const listed = errors.map(({ file, line, message }) =>
     `- ${file ? `${file}${line ? `:${line}` : ""}: ` : ""}${message}`,
   );
+  // Only the errors and the files they name: never the chat, so a cheap model can do it.
+  const shown = sources.map(({ path, content }) => `--- ${path} ---\n${content}`);
   await network.run(
-    `The build check failed with:\n${listed.join("\n")}\n\nProject files:\n${paths.slice(0, 300).join("\n")}`,
+    `The build check failed with:\n${listed.join("\n")}\n\nProject files:\n${paths.slice(0, 300).join("\n")}` +
+      (shown.length ? `\n\nCurrent content of files the errors name (no need to read these again):\n${shown.join("\n")}` : ""),
   );
   return [...new Set(written)];
 };
@@ -427,6 +459,7 @@ export const verifyAndFix = async ({
   runId,
   agentTaskId = "main",
   model,
+  fallback,
   maxAttempts = MAX_REPAIR_ATTEMPTS,
   filterErrors,
   allowedPaths,
@@ -461,42 +494,63 @@ export const verifyAndFix = async ({
     ...(reason ? { reason } : {}),
   });
 
+  let escalated = false;
+  // Kept for the next pass when a repair on `model` changed nothing: the
+  // sandbox is as checked, so the fallback gets the same errors unchecked.
+  let checked: CheckOutcome | undefined;
   for (let attempt = 1; ; attempt++) {
     if (signal?.aborted) return result("unverified", "Cancelled");
-    await emit({ phase: "verify", attempt, status: "running" });
-    const outcome = await durable(`verify:${attempt}`, () => verify(connect, dir, secrets));
-    errors = outcome.errors;
+    let outcome = checked;
+    checked = undefined;
+    if (!outcome) {
+      await emit({ phase: "verify", attempt, status: "running" });
+      outcome = await durable(`verify:${attempt}`, () => verify(connect, dir, secrets));
+      errors = outcome.errors;
 
-    if (outcome.status === "passed") {
-      await emit({ phase: "verify", attempt, status: "done" });
-      return result("verified");
-    }
-    if (outcome.status === "unverified") {
-      await emit({ phase: "verify", attempt, status: "error", reason: outcome.reason });
-      return result("unverified", outcome.reason);
+      if (outcome.status === "passed") {
+        await emit({ phase: "verify", attempt, status: "done" });
+        return result("verified");
+      }
+      if (outcome.status === "unverified") {
+        await emit({ phase: "verify", attempt, status: "error", reason: outcome.reason });
+        return result("unverified", outcome.reason);
+      }
+      if ((filterErrors ? filterErrors(errors) : errors).length === 0) {
+        await emit({ phase: "verify", attempt, status: "done", errors, reason: "Only filtered-out errors remain" });
+        return result("scoped-ok", "Only filtered-out errors remain");
+      }
+      await emit({ phase: "verify", attempt, status: "error", errors });
     }
     const owned = filterErrors ? filterErrors(errors) : errors;
-    if (owned.length === 0) {
-      await emit({ phase: "verify", attempt, status: "done", errors, reason: "Only filtered-out errors remain" });
-      return result("scoped-ok", "Only filtered-out errors remain");
-    }
-    await emit({ phase: "verify", attempt, status: "error", errors });
     if (attempts >= cap) return result("failed", `Build still fails after ${attempts} repair attempt(s)`);
     if (signal?.aborted) return result("unverified", "Cancelled");
 
+    const escalation = fallback && (escalated || attempts >= fallback.after) ? fallback : undefined;
+    const onFallback = escalation !== undefined;
+    // Until it has had its turn, the fallback takes over from a failed repair.
+    const canEscalate = fallback !== undefined && !onFallback;
     attempts += 1;
     await emit({ phase: "repair", attempt, status: "running" });
+    const wrote: string[] = [];
     let written: string[];
+    // Set when a repair that could escalate threw: the fallback takes over.
+    let crashed: string | undefined;
     try {
       written = await repair({
-        projectId, internalKey, model, name: `${prefix}:repair:${attempt}`,
-        errors: owned, paths: outcome.paths, framework: outcome.framework, signal, allowedPaths, onResponse,
+        projectId, internalKey, model: escalation?.model ?? model, name: `${prefix}:repair:${attempt}`,
+        errors: owned, paths: outcome.paths, framework: outcome.framework, sources: outcome.sources,
+        signal, allowedPaths, onResponse: onResponse && ((raw) => onResponse(raw, onFallback)), written: wrote,
       });
     } catch (error) {
       console.error("[sandbox-repair] repair failed", projectId, error);
       const reason = failure("Repair could not run", error);
-      await emit({ phase: "repair", attempt, status: "error", reason });
-      return result("failed", reason);
+      if (!canEscalate) {
+        await emit({ phase: "repair", attempt, status: "error", reason });
+        return result("failed", reason);
+      }
+      // What it wrote before the error is in Convex: copied into the sandbox below.
+      written = [...new Set(wrote)];
+      crashed = reason;
     }
     let changed: string[];
     try {
@@ -515,8 +569,20 @@ export const verifyAndFix = async ({
       await emit({ phase: "repair", attempt, status: "error", filesChanged: changed, reason: "Cancelled" });
       return result("unverified", "Cancelled");
     }
+    if (crashed) {
+      await emit({ phase: "repair", attempt, status: "error", reason: crashed, ...(changed.length ? { filesChanged: changed } : {}) });
+      escalated = true;
+      // Checked again only when its writes changed the sandbox.
+      if (changed.length === 0) checked = outcome;
+      continue;
+    }
     if (changed.length === 0) {
       await emit({ phase: "repair", attempt, status: "error", reason: "Repair made no changes" });
+      if (canEscalate) {
+        escalated = true;
+        checked = outcome;
+        continue;
+      }
       return result("failed", "Repair made no changes");
     }
     await emit({ phase: "repair", attempt, status: "done", filesChanged: changed });

@@ -484,8 +484,13 @@ export const MAX_AGENT_STEPS = 40;
 export const STEP_BUDGET_NOTE =
   "Step budget reached: no more tool calls. Give the final summary now, with a bullet on what is not done yet.";
 
-/** Model-only stale file payload marker (#298). */
-export const FILE_HISTORY_PLACEHOLDER = "[{detail}; content omitted; re-read if needed]";
+/**
+ * Model-only stale file payload marker (#298). Byte-stable for a given file
+ * body, so trimmed history stays a cacheable prompt prefix; it says the file
+ * is unchanged so the model does not re-read it just because it was trimmed.
+ */
+export const FILE_HISTORY_PLACEHOLDER =
+  "[{detail}; content omitted from history. Unchanged since unless a later turn changed it: re-read only if you need its exact text]";
 
 /** Worker prompt note. "[swarm-worker]" is the marker the e2e model stub keys on. */
 export const SWARM_WORKER_NOTE = `

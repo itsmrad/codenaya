@@ -248,7 +248,7 @@ it("bounds file payloads in a long stub run and deterministically replays the re
   expect(requests.every((body) => JSON.stringify(body.messages[0]) === JSON.stringify(system))).toBe(true);
   expect(sizes.at(-1)!).toBeLessThan(sizes[12] * 1.1);
   const final = JSON.stringify(requests.at(-1));
-  expect(final).toContain("re-read if needed");
+  expect(final).toContain("content omitted from history");
   const lastTool = requests.at(-1)!.messages.filter((m) => m.role === "tool").at(-1)!;
   expect(JSON.parse(JSON.parse(lastTool.content as string).data)[0].content.length).toBe(30_000);
   const untrimmedEstimate = sizes[0] + 24 * (sizes[1] - sizes[0]);

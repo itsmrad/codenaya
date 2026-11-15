@@ -1,7 +1,7 @@
 import { type ToolMessage, createAgenticModelFromAiAdapter } from "@inngest/agent-kit";
 import { describe, expect, it } from "vitest";
 import { buildAgentKitModel } from "@/features/ai-providers/server/agentkit-model";
-import { FILE_HISTORY_THRESHOLD, trimFileHistory, type HistoryMessage } from "./trim-file-history";
+import { FILE_HISTORY_THRESHOLD, MIN_CUT_TURNS, trimFileHistory, type HistoryMessage } from "./trim-file-history";
 
 const payload = "line\n".repeat(5000);
 const turn = (i: number, name = "updateFile", input: Record<string, unknown> | null = { path: "a.ts", content: payload }, data: unknown = "ok"): HistoryMessage[] => {
@@ -12,6 +12,15 @@ const turn = (i: number, name = "updateFile", input: Record<string, unknown> | n
   ];
 };
 const long = () => Array.from({ length: 18 }, (_, i) => turn(i)).flat();
+const OMITTED = "; content omitted from history. Unchanged since unless a later turn changed it: re-read only if you need its exact text]";
+const HASH = "hash [0-9a-f]{8}";
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** A stub: `[<detail>; content omitted ...]`, with `HASH` matching any hash in `detail`. */
+const stub = (detail: string) => new RegExp(`^\\[${escape(detail).replace(escape(HASH), HASH)}${escape(OMITTED)}$`);
+const resultData = (message: HistoryMessage) => {
+  if (message.type !== "tool_result") throw new Error("Expected a tool result");
+  return (message.content as { data: unknown }).data;
+};
 
 describe("trimFileHistory", () => {
   it("leaves a small history untouched, and retains at least six full turns", () => {
@@ -45,7 +54,7 @@ describe("trimFileHistory", () => {
   ])("clears old %s payloads", (name, input) => {
     const trimmed = trimFileHistory([...turn(99, name, input), ...long()]);
     expect(JSON.stringify(trimmed.slice(0, 2))).not.toContain(payload);
-    expect(JSON.stringify(trimmed.slice(0, 2))).toContain("re-read if needed");
+    expect(JSON.stringify(trimmed.slice(0, 2))).toContain("content omitted from history");
   });
 
   it.each([
@@ -55,7 +64,7 @@ describe("trimFileHistory", () => {
   ])("clears old reads regardless of result format", (input, data) => {
     const trimmed = trimFileHistory([...turn(99, "readFiles", input, data), ...long()]);
     expect(JSON.stringify(trimmed.slice(0, 2))).not.toContain(payload);
-    expect(JSON.stringify(trimmed.slice(0, 2))).toContain("re-read if needed");
+    expect(JSON.stringify(trimmed.slice(0, 2))).toContain("content omitted from history");
   });
 
   it("preserves errors, unknown tools and unaddressed inputs", () => {
@@ -91,10 +100,7 @@ describe("trimFileHistory", () => {
   it("trims ranged-only reads using their paths", () => {
     const input = { ranges: [{ path: "range.ts", startLine: 1, endLine: 5000 }] };
     const trimmed = trimFileHistory([...turn(99, "readFiles", input, `range.ts\n1: ${payload}`), ...long()]);
-    const result = trimmed[1];
-    expect(result.type === "tool_result" && result.content).toEqual({
-      data: "[content of range.ts; content omitted; re-read if needed]",
-    });
+    expect(resultData(trimmed[1])).toMatch(stub(`content of range.ts, ${HASH}`));
   });
 
   it("keeps error lines when read results mix JSON or numbered content with errors", () => {
@@ -102,9 +108,9 @@ describe("trimFileHistory", () => {
     for (const data of [JSON.stringify([{ path: "a.ts", content: payload }]), `a.ts\n1: ${payload}`]) {
       const mixed = `${data}\n${errors.join("\n")}`;
       const trimmed = trimFileHistory([...turn(99, "readFiles", { paths: ["a.ts"] }, mixed), ...long()]);
-      expect(trimmed[1].type === "tool_result" && trimmed[1].content).toEqual({
-        data: ["[content of a.ts; content omitted; re-read if needed]", ...errors].join("\n"),
-      });
+      const [first, ...rest] = String(resultData(trimmed[1])).split("\n");
+      expect(first).toMatch(stub(`content of a.ts, ${HASH}`));
+      expect(rest).toEqual(errors);
     }
   });
 
@@ -114,12 +120,9 @@ describe("trimFileHistory", () => {
       ...turn(99, "readFiles", { paths: ["a.ts", "missing.ts"] }, serialized ? JSON.stringify(data) : data),
       ...long(),
     ]);
-    const result = trimmed[1];
-    expect(result.type).toBe("tool_result");
-    if (result.type !== "tool_result") throw new Error("Expected a tool result");
-    const content = result.content as { data: unknown };
-    expect(serialized ? JSON.parse(content.data as string) : content.data).toEqual({
-      ...data, files: [{ path: "a.ts", content: "[content of a.ts; content omitted; re-read if needed]" }],
+    const content = resultData(trimmed[1]);
+    expect(serialized ? JSON.parse(content as string) : content).toEqual({
+      ...data, files: [{ path: "a.ts", content: expect.stringMatching(stub(`content of a.ts, 5000 lines, ${HASH}`)) }],
     });
   });
 
@@ -135,17 +138,15 @@ describe("trimFileHistory", () => {
     const old = turn(99, "readFiles", { paths: ["old.ts"] }, payload);
     const trimmed = trimFileHistory([...old, ...long(), ...recent]);
     expect(trimmed.slice(-2)).toEqual(recent);
-    expect(trimmed[1].type === "tool_result" && trimmed[1].content).toEqual({
-      data: "[content of old.ts; content omitted; re-read if needed]",
-    });
+    expect(resultData(trimmed[1])).toMatch(stub(`content of old.ts, ${HASH}`));
   });
 
   it.each([["", 0], ["one", 1], ["one\n", 1], ["one\ntwo\n", 2]])(
     "counts %j correctly and describes supplied content without claiming a failed write succeeded", (content, lines) => {
       const error = "Error: write rejected";
       const trimmed = trimFileHistory([...turn(99, "updateFile", { path: "a.ts", content }, error), ...long()]);
-      expect(trimmed[0].type === "tool_call" && trimmed[0].tools[0].input.content).toBe(
-        `[${lines} lines supplied for a.ts; content omitted; re-read if needed]`,
+      expect(trimmed[0].type === "tool_call" && trimmed[0].tools[0].input.content).toMatch(
+        stub(`write supplied for a.ts, ${lines} lines, ${HASH}`),
       );
       expect(trimmed[1].type === "tool_result" && trimmed[1].content).toEqual({ data: error });
     },
@@ -155,9 +156,60 @@ describe("trimFileHistory", () => {
     const trimmed = trimFileHistory([
       ...turn(99, "editFile", { path: "a.ts", edits: [{ oldText: payload, newText: payload }] }), ...long(),
     ]);
-    expect(trimmed[0].type === "tool_call" && trimmed[0].tools[0].input.edits).toEqual([
-      { oldText: "[edits to a.ts; content omitted; re-read if needed]", newText: "[edits to a.ts; content omitted; re-read if needed]" },
-    ]);
+    const edits = (trimmed[0].type === "tool_call" ? trimmed[0].tools[0].input.edits : undefined) as
+      Array<{ oldText: string; newText: string }>;
+    expect(edits).toEqual([{ oldText: expect.stringMatching(stub(`edits to a.ts, ${HASH}`)), newText: expect.any(String) }]);
+    expect(edits[0].newText).toBe(edits[0].oldText);
+  });
+
+  it("keeps each request's history a byte-stable prefix of the next one between rare cuts", () => {
+    const read = (i: number) => turn(i, "readFiles", { paths: [`f${i}.ts`] },
+      JSON.stringify([{ path: `f${i}.ts`, content: `// file ${i}\n`.repeat(2000) }]));
+    let history: HistoryMessage[] = [{ type: "text", role: "user", content: "Build it" }];
+    let previous: HistoryMessage[] = [];
+    const cuts: number[] = [];
+    const frozen = new Map<number, string>();
+    for (let i = 0; i < 48; i++) {
+      history = [...history, ...read(i)];
+      const view = trimFileHistory(history);
+      if (JSON.stringify(view.slice(0, previous.length)) !== JSON.stringify(previous)) cuts.push(i);
+      // A trimmed message never changes again.
+      view.forEach((message, index) => {
+        const json = JSON.stringify(message);
+        if (json.includes("content omitted")) {
+          expect(frozen.get(index) ?? json).toBe(json);
+          frozen.set(index, json);
+        }
+      });
+      // The newest turns are always whole.
+      expect(view.slice(-12)).toEqual(history.slice(-12));
+      previous = view;
+    }
+    expect(cuts.length).toBeGreaterThan(0);
+    expect(cuts.length).toBeLessThanOrEqual(Math.ceil(48 / MIN_CUT_TURNS));
+    cuts.slice(1).forEach((cut, i) => expect(cut - cuts[i]).toBeGreaterThanOrEqual(MIN_CUT_TURNS));
+  });
+
+  it("never cuts a history that is long only because of text, so its cache prefix holds", () => {
+    const chat: HistoryMessage[] = Array.from({ length: 20 }, (_, i): HistoryMessage[] => [
+      { type: "text", role: "user", content: `request ${i} ${"words ".repeat(2000)}` },
+      ...turn(i, "readFiles", { paths: ["a.ts"] }, JSON.stringify([{ path: "a.ts", content: "tiny" }])),
+    ]).flat();
+    expect(JSON.stringify(chat).length).toBeGreaterThan(FILE_HISTORY_THRESHOLD);
+    expect(trimFileHistory(chat)).toBe(chat);
+  });
+
+  it("gives a file the same stub on every trim, naming its path, lines and a content hash", () => {
+    const history = (content: string) => [
+      ...turn(99, "readFiles", { paths: ["src/App.tsx"] }, JSON.stringify([{ path: "src/App.tsx", content }])),
+      ...long(),
+    ];
+    const contentOf = (view: HistoryMessage[]) => JSON.parse(resultData(view[1]) as string)[0].content as string;
+    const first = contentOf(trimFileHistory(history("a\nb\nc\n")));
+    expect(first).toMatch(stub(`content of src/App.tsx, 3 lines, ${HASH}`));
+    expect(contentOf(trimFileHistory(history("a\nb\nc\n")))).toBe(first);
+    expect(contentOf(trimFileHistory([...history("a\nb\nc\n"), ...turn(200)]))).toBe(first);
+    expect(contentOf(trimFileHistory(history("a\nb\nd\n")))).not.toBe(first);
   });
 
 });
