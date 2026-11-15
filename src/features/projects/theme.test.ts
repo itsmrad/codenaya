@@ -8,6 +8,7 @@ import {
   foregroundFor,
   hexToHsl,
   meetsContrastAA,
+  sameTheme,
   validateTheme,
   type ProjectTheme,
 } from "./theme";
@@ -52,6 +53,24 @@ describe("contrast", () => {
       expect(validateTheme(preset.theme)).toBeNull();
       expect(meetsContrastAA(preset.theme.primary)).toBe(true);
     }
+  });
+});
+
+describe("sameTheme", () => {
+  it("compares field by field, whatever the key order or hex case", () => {
+    // Key order as Convex returns it (sorted), unlike the presets.
+    const fromConvex: ProjectTheme = {
+      accent: "#E0F2FE",
+      defaultMode: "dark",
+      font: "dm-sans",
+      primary: "#2563eb",
+      radius: 0.5,
+    };
+    expect(JSON.stringify(fromConvex)).not.toBe(JSON.stringify(theme));
+    expect(sameTheme(fromConvex, theme)).toBe(true);
+    expect(sameTheme(null, null)).toBe(true);
+    expect(sameTheme(theme, null)).toBe(false);
+    expect(sameTheme(theme, { ...theme, radius: 0.75 })).toBe(false);
   });
 });
 

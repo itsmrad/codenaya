@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { MonitorIcon, MoonIcon, PaintbrushIcon, SunIcon, TriangleAlertIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -28,6 +28,7 @@ import {
   fontById,
   foregroundFor,
   meetsContrastAA,
+  sameTheme,
   validateTheme,
   type ProjectTheme,
   type ThemeMode,
@@ -41,9 +42,6 @@ const MODES: { value: ThemeMode; label: string; icon: typeof SunIcon }[] = [
   { value: "dark", label: "Dark", icon: MoonIcon },
   { value: "system", label: "System", icon: MonitorIcon },
 ];
-
-const sameTheme = (a: ProjectTheme | null, b: ProjectTheme | null) =>
-  JSON.stringify(a) === JSON.stringify(b);
 
 /** Brand colours, font, radius and mode the agent applies on every run (#302). */
 export const ProjectThemeForm = ({ projectId }: { projectId: Id<"projects"> }) => {
@@ -176,13 +174,19 @@ const ColorField = ({
         <Input
           id={id}
           value={value}
-          onChange={(e) => onChange(e.target.value.trim())}
+          onChange={(e) => onChange(e.target.value.trim().toLowerCase())}
           aria-invalid={!valid}
+          aria-describedby={valid ? undefined : `${id}-error`}
           spellCheck={false}
           maxLength={7}
           className="h-9 font-mono text-xs md:text-xs"
         />
       </div>
+      {!valid && (
+        <FieldError id={`${id}-error`} className="text-xs">
+          Use a hex colour like #2563eb.
+        </FieldError>
+      )}
     </Field>
   );
 };

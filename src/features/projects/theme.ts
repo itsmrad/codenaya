@@ -46,6 +46,17 @@ const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 
 export const fontById = (id: string) => THEME_FONTS.find((font) => font.id === id);
 
+/** Field by field, so key order (Convex returns keys sorted) doesn't matter. */
+export const sameTheme = (a: ProjectTheme | null, b: ProjectTheme | null) =>
+  a === b ||
+  (a !== null &&
+    b !== null &&
+    a.primary.toLowerCase() === b.primary.toLowerCase() &&
+    a.accent.toLowerCase() === b.accent.toLowerCase() &&
+    a.radius === b.radius &&
+    a.font === b.font &&
+    a.defaultMode === b.defaultMode);
+
 /** Returns why the theme is invalid, or null when it is valid. */
 export function validateTheme(theme: ProjectTheme): string | null {
   if (!HEX_COLOR.test(theme.primary) || !HEX_COLOR.test(theme.accent)) {

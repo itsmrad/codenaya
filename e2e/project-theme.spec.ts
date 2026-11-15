@@ -45,6 +45,9 @@ test.describe("project theme form (#302)", () => {
 
     await dialog.getByLabel("Primary", { exact: true }).fill("#12");
     await expect(dialog.getByRole("button", { name: "Save" })).toBeDisabled();
+    await expect(dialog.getByLabel("Primary", { exact: true })).toHaveAccessibleDescription(
+      "Use a hex colour like #2563eb.",
+    );
 
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
