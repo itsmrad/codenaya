@@ -95,7 +95,7 @@ export const AgentModelSelect = ({
               triggerClassName,
             )}
           >
-            <PromptInputSelectValue />
+            <PromptInputSelectValue className="min-w-0" />
           </PromptInputSelectTrigger>
         </TooltipTrigger>
         <TooltipContent>
@@ -116,7 +116,7 @@ export const AgentModelSelect = ({
               className={TAGGED_ITEM}
             >
               {icon(model.vendor)}
-              {model.name}
+              <span className="truncate">{model.name}</span>
             </PromptInputSelectItem>
           ))}
         </SelectGroup>
@@ -131,7 +131,7 @@ export const AgentModelSelect = ({
                 className={TAGGED_ITEM}
               >
                 {icon(key.provider)}
-                {model.label}
+                <span className="truncate">{model.label}</span>
               </PromptInputSelectItem>
             ))}
           </SelectGroup>

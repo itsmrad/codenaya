@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentStep } from "./agent-steps";
-import { FOUNDATION_MAX_STEPS } from "./swarm";
+import { FOUNDATION_MAX_STEPS } from "./constants";
 import { groupSwarmTasks, type SwarmTask, swarmElapsed, swarmHeader, swarmSelfCheckStatus, swarmSoloReason, swarmTaskStatus } from "./swarm-status";
 
 describe("swarmTaskStatus", () => {

@@ -733,10 +733,9 @@ export const ConversationSidebar = ({
                 disabled={enhancer.isEnhancing}
               />
             </PromptInputBody>
-            <PromptInputFooter className="h-10 px-2 py-0">
-              {/* The tools shrink (the model name truncates) so a narrow
-                  panel never pushes the send button out of view. */}
-              <PromptInputTools className="min-w-0">
+            <PromptInputFooter className="min-h-10 px-2 py-1">
+              {/* Truncate the model name, and wrap tools when even their icons do not fit. */}
+              <PromptInputTools className="min-w-0 flex-1 flex-wrap">
                 <ComposerAttachButton disabled={isProcessing} />
                 {!isProcessing && <PromptInputSpeechButton onTranscriptionChange={setInput} />}
                 <EnhancePromptButton
@@ -751,14 +750,15 @@ export const ConversationSidebar = ({
                   disabled={isProcessing}
                 />
                 <AgentModelSelect
+                  triggerClassName="w-0 min-w-16 flex-1"
                   value={agentModel}
                   onValueChange={setAgentModel}
                   disabled={isProcessing}
                 />
               </PromptInputTools>
               <div className="flex shrink-0 items-center gap-2">
-                {/* Only once even the longest model name (max-w-44) fits beside it (#217). */}
-                <span className="hidden items-center gap-1 text-[11px] text-muted-foreground @[560px]:inline-flex">
+                {/* Leave room for the picker when the mode labels appear. */}
+                <span className="hidden items-center gap-1 text-[11px] text-muted-foreground @[640px]:inline-flex">
                   <kbd className="inline-flex h-4 items-center rounded border px-1 font-sans">
                     <CornerDownLeftIcon className="size-2.5" />
                     <span className="sr-only">Enter</span>

@@ -4,8 +4,6 @@ import { MAX_SWARM_AGENTS, MAX_SWARM_TASKS } from "../../../convex/swarm";
 import { normalizePath } from "./agent-steps";
 
 export { MAX_SWARM_AGENTS, MAX_SWARM_TASKS };
-/** Steps the orchestrator may spend on the foundation before its next call is forced. */
-export const FOUNDATION_MAX_STEPS = 5;
 export const WORKER_MAX_STEPS = 20;
 export const MAX_WORKER_USD = 0.50;
 /** A brief is a worker's whole prompt: ~3k tokens fits a detailed spec, and 4 tasks stay under ~12k tokens. */

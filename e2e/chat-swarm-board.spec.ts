@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { api } from "../convex/_generated/api";
-import { EMPTY_CHAT_TITLE, hasInternalKey, seedSwarmConversation } from "./chat-fixtures";
+import { EMPTY_CHAT_TITLE, hasInternalKey, seedSwarmConversation, setChatPanelWidth } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
@@ -88,6 +88,7 @@ test.describe("chat swarm board", () => {
 
   test("the Swarm toggle sends mode swarm", async ({ page }) => {
     test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1280, height: 720 });
     await signIn(page);
     const user = await userConvexClient(page);
     const projectId = await user.mutation(api.projects.create, { name: `e2e-swarm-toggle-${Date.now()}` });
@@ -114,7 +115,28 @@ test.describe("chat swarm board", () => {
 
       const input = page.getByPlaceholder("Describe a change or ask a question…");
       await input.fill("landing page");
-      await input.press("Enter");
+      const picker = page.getByRole("combobox", { name: "Agent model" });
+      await picker.click();
+      await expect(page.getByRole("option").first()).toBeVisible();
+      const names = await page.getByRole("option").allTextContents();
+      const longest = names.reduce((a, b) => a.length >= b.length ? a : b);
+      await page.getByRole("option", { name: longest, exact: true }).first().click();
+      await expect(picker).toHaveText(longest);
+      const send = page.getByRole("button", { name: "Send", exact: true });
+      // Cover narrow panels and the mode-label / keyboard-hint breakpoints.
+      for (const width of [200, 320, 480, 560, 640]) {
+        await setChatPanelWidth(page, width);
+        const pickerBox = (await picker.boundingBox())!;
+        const sendBox = (await send.boundingBox())!;
+        expect(pickerBox.width).toBeGreaterThanOrEqual(64);
+        expect(pickerBox.x + pickerBox.width).toBeLessThanOrEqual(sendBox.x);
+        expect(await page.locator(".chat-composer [data-align=block-end]").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+        await picker.click();
+        await expect(page.getByRole("listbox")).toBeVisible();
+        await page.keyboard.press("Escape");
+        await send.click({ trial: true });
+      }
+      await send.click();
       expect(await sent).toMatchObject({ message: "landing page", mode: "swarm" });
     } finally {
       await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});

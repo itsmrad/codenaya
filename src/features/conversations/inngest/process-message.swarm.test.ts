@@ -26,7 +26,7 @@ import type { AgentStep } from "../agent-steps";
 import { swarmHeader, swarmSoloReason } from "../swarm-status";
 import { BUILD_NOT_BUILT_NOTE } from "./build-check-gate";
 import { SWARM_DELEGATE_NUDGE, SWARM_ORCHESTRATOR_NOTE } from "./constants";
-import { FOUNDATION_MAX_STEPS } from "../swarm";
+import { FOUNDATION_MAX_STEPS } from "../constants";
 import { drive, text, toolCall } from "./process-message.driver";
 
 let swarmEnabled: boolean;

@@ -1,6 +1,6 @@
 import type { Doc } from "../../../convex/_generated/dataModel";
 import type { AgentStep } from "./agent-steps";
-import { FOUNDATION_MAX_STEPS } from "./swarm";
+import { FOUNDATION_MAX_STEPS } from "./constants";
 
 /** The agentTasks fields the board reads. */
 export type SwarmTask = Pick<
