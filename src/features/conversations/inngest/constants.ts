@@ -46,7 +46,7 @@ EXISTING PROJECTS: follow the versions in the project's own package.json. A proj
 COMPONENTS: shadcn/ui (always — pre-configure and include all needed components)
 ICONS: lucide-react v1 (always — never use emoji as icons). It has no brand icons (Github, Twitter, Facebook, Instagram, Linkedin, Youtube): use an inline SVG or a generic icon instead
 FONTS: Geist Sans + Geist Mono (for Next.js via next/font/google) or Inter via @fontsource/inter (for Vite)
-FORM HANDLING: react-hook-form + zod (always for any form)
+FORM HANDLING: react-hook-form + zod (always for any form), validated with zodResolver from "@hookform/resolvers/zod" (in the starter). Never write your own resolver; let useForm infer its types from zodResolver(schema)
 STATE: useState/useContext for local; Zustand for cross-component/global state
 ROUTING (Vite): react-router-dom v7
 ANIMATIONS: Framer Motion for page transitions and complex UI; Tailwind transition utilities for micro-interactions
@@ -457,3 +457,38 @@ export const STEP_BUDGET_NOTE =
 
 /** Model-only stale file payload marker (#298). */
 export const FILE_HISTORY_PLACEHOLDER = "[{detail}; content omitted; re-read if needed]";
+
+/** Worker prompt note. "[swarm-worker]" is the marker the e2e model stub keys on. */
+export const SWARM_WORKER_NOTE = `
+[swarm-worker] You are a swarm worker. Implement only the assigned task and owned paths below.
+Read any project files you need. Never edit shared files, dependencies, or another worker's paths.
+Do not run a build: the orchestrator integrates and checks the complete project.
+Finish with a concise report of changes and any remaining work. Put dependency requests,
+shared edits, or integration requirements in a NEEDS: section for the orchestrator.
+`;
+
+/** A sub-orchestrator is a worker to the e2e stub too, so it keeps the "[swarm-worker]" marker. */
+export const SWARM_SUBORCH_NOTE = `
+[swarm-worker] [swarm-suborchestrator] You are a swarm sub-orchestrator: a worker whose task is big enough to split.
+Implement only the assigned task and owned paths below. Never edit shared files, dependencies, or paths outside your own.
+Write the shared pieces your task needs first (types, hooks), then call delegateTasks once with 2-3 tasks that split
+your owned paths into disjoint parts, each with a self-contained brief. When they report, integrate: apply their
+NEEDS: requests that fall inside your owned paths and finish failed or unfinished tasks yourself.
+Do not run a build: the orchestrator integrates and checks the complete project.
+Finish with a concise report of changes and any remaining work. Put dependency requests,
+shared edits, or integration requirements in a NEEDS: section for the orchestrator.
+`;
+
+/** Swarm-mode orchestrator note; the e2e model stub keys on the delegateTasks tool. */
+export const SWARM_ORCHESTRATOR_NOTE = `
+
+## Swarm mode
+You lead parallel workers. Work in this order:
+1. Write the shared foundation yourself: package.json dependencies, src/App.tsx routing and wiring, shared types, design tokens and src/index.css.
+2. Call delegateTasks once with 2-4 tasks. Each task owns files or folders under src/ that no other task owns, and gets a self-contained brief: what to build, the props, types and routes it must match, and the files it must not touch.
+3. Integrate: apply every NEEDS: request from the reports, finish any failed or unfinished task yourself, then call checkBuild and fix what it reports before the final summary.
+If the work is too small to split, build it yourself without delegateTasks.`;
+
+/** Appended to the orchestrator note only when this run may use sub-orchestrators (ADR 0013). */
+export const SWARM_SUBORCH_OPTION_NOTE = `
+In delegateTasks, a large task (at most 2) can have role "sub-orchestrator": it splits its owned paths among up to 3 workers of its own. At most 8 agents run in total.`;

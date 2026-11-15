@@ -17,6 +17,7 @@ import { MENU_CONTENT, MENU_ITEM, MenuHeader } from "@/components/menu-chrome";
 import { cn } from "@/lib/utils";
 
 import { Doc } from "../../../../convex/_generated/dataModel";
+import type { ProjectCardStatus } from "../utils/project-status";
 import { ProjectCard } from "./project-card";
 
 export const SORTS = {
@@ -30,7 +31,7 @@ type SortKey = keyof typeof SORTS;
 const COLLAPSED_COUNT = 7;
 
 interface ProjectsGridProps {
-  projects: Doc<"projects">[] | undefined;
+  projects: (Doc<"projects"> & ProjectCardStatus)[] | undefined;
   onNewProject: () => void;
   onImport: () => void;
 }

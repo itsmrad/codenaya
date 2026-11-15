@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createTool } from "@inngest/agent-kit";
 
 import { convex } from "@/lib/convex-client";
+import { getAppError } from "@/lib/convex-error";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
@@ -60,12 +61,20 @@ export const createCreateFolderTool = ({
             }
           }
 
-          const folderId = await convex.mutation(api.system.createFolder, {
-            internalKey,
-            projectId,
-            name,
-            parentId: parentId ? (parentId as Id<"files">) : undefined,
-          });
+          let folderId;
+          try {
+            folderId = await convex.mutation(api.system.createFolder, {
+              internalKey,
+              projectId,
+              name,
+              parentId: parentId ? (parentId as Id<"files">) : undefined,
+            });
+          } catch (error) {
+            // A lock refusal (#307) is the model's to handle; anything else may be transient, so Inngest retries it.
+            const appError = getAppError(error);
+            if (appError?.code === "FORBIDDEN") return `Error: ${appError.message}`;
+            throw error;
+          }
 
           return `Folder created with ID: ${folderId}`;
         });

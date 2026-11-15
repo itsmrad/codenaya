@@ -281,60 +281,78 @@ export const useSandbox = ({
   // Sync file changes to the running sandbox (hot-reload)
   useEffect(() => {
     const sandboxId = sandboxIdRef.current;
-    if (!sandboxId || !files || status !== "running") return;
+    const signal = abortControllerRef.current?.signal;
+    if (!enabled || !sandboxId || !files || status !== "running" || !signal) return;
 
-    // Debounce the file sync to batch rapid AI file generations into a single update
-    const timeoutId = setTimeout(() => {
-      // Only what changed: rewriting e.g. vite.config restarts the dev server
-      // and breaks the open preview's HMR connection (#146).
-      const changedFiles = getChangedFiles(
-        buildFlatFileList(files),
-        syncedContentRef.current,
-      );
+    let cancelled = false;
+    let failures = 0;
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const isCurrent = () => !signal.aborted && sandboxIdRef.current === sandboxId;
 
-      if (changedFiles.length === 0) return;
+    const sync = () => {
+      // Calculate the diff after earlier writes finish, so a queued edit cannot
+      // mistake an unacknowledged write for content the sandbox already has.
+      syncPromiseRef.current = syncPromiseRef.current.then(async () => {
+        if (cancelled || !isCurrent()) return;
+        const changedFiles = getChangedFiles(
+          buildFlatFileList(files),
+          syncedContentRef.current,
+        );
+        if (changedFiles.length === 0) return;
 
-      for (const file of changedFiles) {
-        syncedContentRef.current.set(file.path, file.content);
-      }
-  
-      // The edit may fix the shown error. If not, the dev server prints it again
-      // once the preview reloads the module, which is after this write lands.
-      setAppError(null);
-      buildErrors.reset();
-
-      // Serialize file syncs to prevent out-of-order writes
-      syncPromiseRef.current = syncPromiseRef.current
-        .then(() =>
-          fetch(`/api/sandbox/${sandboxId}`, {
+        // The dev server reports the error again if this edit doesn't fix it.
+        setAppError(null);
+        buildErrors.reset();
+        try {
+          const response = await fetch(`/api/sandbox/${sandboxId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               files: changedFiles,
               installCommand: settings?.installCommand,
             }),
-          })
-        )
-        // After the boot stream ends, a failed reinstall reaches only this (#497).
-        .then(async (response) => {
+            signal,
+          });
+          if (!response.ok) throw new Error("File sync failed");
+          if (!isCurrent()) return;
+          // Acknowledge exactly the sent snapshot, never files edited in flight.
+          for (const file of changedFiles) {
+            syncedContentRef.current.set(file.path, file.content);
+          }
+
+          // After the boot stream ends, a failed reinstall reaches only this (#497).
           const failure = readInstallFailure(
             await response.json().catch(() => null),
             settings?.installCommand || "npm install",
           );
-          // Not after a restart: that sandbox is gone.
-          if (!failure || sandboxIdRef.current !== sandboxId) return;
+          // Not `cancelled`: edits during a slow reinstall must not hide its failure.
+          if (!isCurrent() || !failure) return;
           setTerminalOutput((prev) => `${prev}\npackage.json changed.\n${failure.output}`);
           const { error } = failure;
           if (error) setAppError((prev) => mergeAppError(prev, error));
-        })
-        .catch(() => {
-          // Non-critical — file sync failure shouldn't crash the preview
-        })
-        .then(); // Return void promise
-    }, 300); // Short enough to feel instant, long enough to batch a burst of writes
-
-    return () => clearTimeout(timeoutId);
-  }, [files, status, settings?.installCommand, buildErrors]);
+        } catch {
+          // The write may have landed anyway, so a revert must still be resent.
+          if (sandboxIdRef.current === sandboxId) {
+            for (const file of changedFiles) syncedContentRef.current.delete(file.path);
+          }
+          if (cancelled || !isCurrent()) return;
+          if (failures < 3) {
+            timeoutId = setTimeout(sync, 1_000 * 2 ** failures++);
+          } else {
+            setError("Couldn't sync preview files. Restart the preview to retry.");
+            setErrorKind("transient");
+            setStatus("error");
+          }
+        }
+      });
+    };
+    // Debounce rapid file generations; a new files snapshot cancels old retries.
+    timeoutId = setTimeout(sync, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [enabled, files, status, settings?.installCommand, buildErrors]);
 
   // Cleanup sandbox on unmount or when disabled
   useEffect(() => {

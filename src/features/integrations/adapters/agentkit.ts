@@ -163,7 +163,7 @@ function describeTool(
   const parts = [`[${server.displayName}]`];
 
   if (tool.destructive) {
-    parts.push("(modifies real data — requires approval)");
+    parts.push("(may modify real data — requires approval)");
   } else if (server.readOnly) {
     parts.push("(read-only)");
   }
@@ -332,7 +332,7 @@ export function createMcpToolsForAgentKit(
             trace("blocked");
             await record("blocked", 0);
             return (
-              `Not permitted: "${tool.name}" modifies real data and no approval ` +
+              `Not permitted: "${tool.name}" may modify real data and no approval ` +
               `mechanism is available in this run. Tell the user this action needs ` +
               `to be performed manually.`
             );

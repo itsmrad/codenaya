@@ -33,6 +33,7 @@ import { Id } from "../../../../../../convex/_generated/dataModel";
 const requestSchema = z.object({
   providerId: z.string().min(1),
   projectId: z.string().optional(),
+  connectionId: z.string().optional(),
 });
 
 function jsonError(error: string, status: number) {
@@ -206,6 +207,20 @@ export async function POST(request: Request) {
     );
   }
 
+  // Reconnect: checked here so a foreign or deleted connection fails before the
+  // popup, and again in the callback in case it changed in between.
+  const connectionId = parsed.data.connectionId;
+  const existing = connectionId
+    ? await convex.query(api.system.getConnectionForReconnect, {
+        internalKey,
+        userId,
+        connectionId,
+        providerId: provider.id,
+        authMode: "oauth",
+      })
+    : null;
+  if (connectionId && !existing) return jsonError("Connection not found", 404);
+
   const result = await startOAuthFlow({ provider, redirectUri });
   if (!result.ok) {
     // Discovery and client-registration failures are provider-side, not our bug,
@@ -227,6 +242,7 @@ export async function POST(request: Request) {
   try {
     sealed = await getSecretSealer().seal(
       JSON.stringify({
+        connectionId: existing?._id,
         codeVerifier: start.codeVerifier,
         clientInformation: start.clientInformation,
         // The SDK uses this metadata to select the provider's advertised token

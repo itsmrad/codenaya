@@ -35,6 +35,8 @@ import {
 } from "@/components/ui/tooltip";
 
 import { FileExplorer } from "./file-explorer";
+import { SourceControlPane } from "./source-control-pane";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { PreviewView } from "./preview-view";
 import { ExportPopover } from "./export-popover";
@@ -60,6 +62,8 @@ import {
   restorableTabs,
   saveIdeSession,
 } from "../utils/ide-session";
+import { activeViewFor, visibleViews } from "../utils/workspace-mode";
+import { useWorkspaceMode } from "@/features/settings/hooks/use-workspace-mode";
 
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 800;
@@ -124,7 +128,13 @@ export const ProjectIdView = ({
   );
   const [pickedView, setSelectedView] = useState<IdeView | null>(openOnPreview ? "preview" : null);
   const selectedView: IdeView = pickedView ?? savedView ?? "chat";
-  const activeView = !isCompact && selectedView === "chat" ? "editor" : selectedView;
+  // Chat-first hides the code (#524); "Open code for this session" shows the
+  // IDE for this visit without changing the setting.
+  const { mode: accountMode } = useWorkspaceMode();
+  const [codeOpened, setCodeOpened] = useState(false);
+  const mode = codeOpened ? "ide" : accountMode;
+  const viewTabs = VIEW_TABS.filter(({ view }) => visibleViews(mode, isCompact).includes(view));
+  const activeView = activeViewFor(selectedView, mode, isCompact);
   // The preview boots a cloud sandbox or WebContainer as soon as it mounts, so
   // mount it on first open and keep it mounted so tab switches don't reboot it.
   // It only opens by itself when the user left the project on it.
@@ -140,6 +150,7 @@ export const ProjectIdView = ({
   // switches to it when the run ends, unless the user picked a tab meanwhile.
   // Phones keep the chat and get a toast (#254).
   const activeRun = useActiveRun(projectId);
+  const project = useProject(projectId);
   const files = useFiles(projectId);
   const hasPackageJson = files ? hasRootPackageJson(files) : false;
 
@@ -156,11 +167,14 @@ export const ProjectIdView = ({
     const tabs = restorableTabs(session, new Set(files.map((file) => file._id)));
     restoreTabs(projectId, tabs.openTabs as Id<"files">[], tabs.activeTabId as Id<"files"> | null);
   }, [files, projectId, restoreTabs]);
+  // Chat-first keeps the picked view rather than its Preview fallback, so a
+  // saved Code view reopens after switching back to the IDE.
+  const sessionView = mode === "chat" ? selectedView : activeView;
   useEffect(() => {
     // Not before the restore, or the empty starting tabs would overwrite the saved ones.
     if (!tabsRestored.current) return;
-    saveIdeSession(projectId, { view: activeView, openTabs, activeTabId });
-  }, [projectId, activeView, openTabs, activeTabId]);
+    saveIdeSession(projectId, { view: sessionView, openTabs, activeTabId });
+  }, [projectId, sessionView, openTabs, activeTabId]);
   const [firstBuild, setFirstBuild] = useState(false);
   const [viewPickedDuringBuild, setViewPickedDuringBuild] = useState(false);
   const [previewReadyToasts, setPreviewReadyToasts] = useState(0);
@@ -179,8 +193,10 @@ export const ProjectIdView = ({
   if (firstBuild && activeRun === null) {
     setFirstBuild(false);
     if (hasPackageJson && !viewPickedDuringBuild) {
+      // A seeded project whose build did not verify keeps its first build
+      // pending: its preview is not ready.
       if (isMobile) {
-        setPreviewReadyToasts((count) => count + 1);
+        if (project?.firstBuildPending !== true) setPreviewReadyToasts((count) => count + 1);
       } else {
         setSelectedView("preview");
       }
@@ -205,10 +221,10 @@ export const ProjectIdView = ({
     setSelectedView(view);
     if (firstBuild) setViewPickedDuringBuild(true);
   };
+  const [explorerView, setExplorerView] = useState("files");
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
   const { openIntegrations } = useProjectIntegrations();
-  const project = useProject(projectId);
   const showcaseId = useIsProjectPublished(projectId);
   const rename = useProjectRename(project);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -217,12 +233,20 @@ export const ProjectIdView = ({
   const { isHidden: isChatHidden, setHidden: setChatHidden } = useChatPanelStore();
   const router = useRouter();
 
+  const openCode = () => {
+    setCodeOpened(true);
+    selectView("editor");
+  };
+
   useProjectCommands({
-    "show-code": () => selectView("editor"),
+    "show-code": mode === "ide" ? () => selectView("editor") : null,
+    "open-code-session": mode === "chat" ? openCode : null,
+    // Chat mode opens the code session first; the explorer lives there.
+    "source-control": () => { openCode(); setExplorerView("source-control"); },
     "show-preview": () => selectView("preview"),
     // Desktops toggle the side panel (ProjectIdLayout); here the chat is a tab.
     "toggle-chat": isCompact
-      ? () => selectView(activeView === "chat" ? "editor" : "chat")
+      ? () => selectView(activeView === "chat" ? activeViewFor("editor", mode, true) : "chat")
       : null,
     publish: showcaseId === null ? () => setPublishDialogOpen(true) : null,
     "download-zip": () => void zipExport.download(),
@@ -354,27 +378,36 @@ export const ProjectIdView = ({
 
         {/* Center: view tabs (phones use the bottom tab bar; desktops keep
             the chat beside them, so they only switch Code / Preview) */}
-        {!isMobile && (
+        {!isMobile && viewTabs.length > 1 && (
           <div
             role="tablist"
             aria-label="Workspace views"
             className="flex items-center p-0.5 bg-muted/40 rounded-lg border border-border/40"
           >
-            {VIEW_TABS.filter(({ view }) => isCompact || view !== "chat").map(
-              ({ view, label }) => (
-                <Tab
-                  key={view}
-                  label={label}
-                  isActive={activeView === view}
-                  onClick={() => selectView(view)}
-                />
-              )
-            )}
+            {viewTabs.map(({ view, label }) => (
+              <Tab
+                key={view}
+                label={label}
+                isActive={activeView === view}
+                onClick={() => selectView(view)}
+              />
+            ))}
           </div>
         )}
 
         {/* Right: Publish + Export + Help + User (phones hide it while renaming to make room) */}
         <div className={cn("flex items-center gap-1.5 shrink-0", rename.isRenaming && "hidden @xl:flex")}>
+          {mode === "chat" && (
+            <button
+              onClick={openCode}
+              aria-label="Open code for this session"
+              title="Open code for this session"
+              className="flex items-center gap-1.5 h-8 px-2 @3xl:px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
+            >
+              <CodeIcon aria-hidden="true" className="size-3.5" />
+              <span className="hidden @3xl:inline">Open code</span>
+            </button>
+          )}
           {showcaseId && (
             <PublishedMenu
               showcaseId={showcaseId}
@@ -431,6 +464,7 @@ export const ProjectIdView = ({
             </div>
           </div>
         )}
+        {mode === "ide" && (
         <div
           className={cn(
             "absolute inset-0 flex gap-2 transition-none",
@@ -451,7 +485,18 @@ export const ProjectIdView = ({
             >
               <div className={cn("h-full box-border", isMobile ? "pb-1" : "pr-1")}>
                 <div className="h-full rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)] overflow-hidden flex flex-col">
-                  <FileExplorer projectId={projectId} />
+                  <Tabs value={explorerView} onValueChange={setExplorerView} className="min-h-0 flex-1 gap-0">
+                    <TabsList aria-label="Explorer views" className="m-1 h-8 w-auto shrink-0">
+                      <TabsTrigger value="files" className="text-xs">Files</TabsTrigger>
+                      <TabsTrigger value="source-control" className="text-xs">Source control</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="files" className="flex min-h-0 flex-col border-t">
+                      <FileExplorer projectId={projectId} />
+                    </TabsContent>
+                    <TabsContent value="source-control" className="flex min-h-0 flex-col border-t">
+                      {activeView === "editor" && <SourceControlPane projectId={projectId} project={project} disabled={activeRun !== null} />}
+                    </TabsContent>
+                  </Tabs>
                 </div>
               </div>
             </Allotment.Pane>
@@ -464,6 +509,7 @@ export const ProjectIdView = ({
             </Allotment.Pane>
           </Allotment>
         </div>
+        )}
         <div
           className={cn(
             "absolute inset-0 flex flex-col",
@@ -486,9 +532,12 @@ export const ProjectIdView = ({
         <div
           role="tablist"
           aria-label="Workspace views"
-          className="shrink-0 grid grid-cols-3 gap-1 p-1 mb-[env(safe-area-inset-bottom)] rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]"
+          className={cn(
+            "shrink-0 grid gap-1 p-1 mb-[env(safe-area-inset-bottom)] rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]",
+            viewTabs.length === 2 ? "grid-cols-2" : "grid-cols-3"
+          )}
         >
-          {VIEW_TABS.map(({ view, label, icon: Icon }) => (
+          {viewTabs.map(({ view, label, icon: Icon }) => (
             <button
               key={view}
               type="button"

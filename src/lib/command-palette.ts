@@ -9,6 +9,8 @@ import { create } from "zustand";
  */
 export const PROJECT_COMMANDS = [
   { id: "show-code", label: "Show code" },
+  { id: "open-code-session", label: "Open code for this session" },
+  { id: "source-control", label: "Show source control" },
   { id: "show-preview", label: "Show preview" },
   { id: "toggle-chat", label: "Toggle chat panel" },
   { id: "new-conversation", label: "New conversation" },

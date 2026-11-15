@@ -40,13 +40,14 @@ export type RunChange = NonNullable<FunctionReturnType<typeof api.checkpoints.li
  */
 export const useRunChanges = (
   checkpointId: Id<"checkpoints"> | null | undefined,
+  scope?: "project",
 ): RunChange[] | null | undefined | Error => {
   // `useQueries` hands back a failure as an Error instead of throwing it.
   const queries = useMemo(() => {
     const request: RequestForQueries = {};
-    if (checkpointId) request.changes = { query: api.checkpoints.listChanges, args: { checkpointId } };
+    if (checkpointId) request.changes = { query: api.checkpoints.listChanges, args: { checkpointId, ...(scope && { scope }) } };
     return request;
-  }, [checkpointId]);
+  }, [checkpointId, scope]);
   return useQueries(queries).changes;
 };
 
@@ -54,10 +55,11 @@ export const useRunChanges = (
 export const useFileDiff = (
   checkpointId: Id<"checkpoints">,
   path: string,
+  scope?: "project",
 ): FunctionReturnType<typeof api.checkpoints.fileDiff> | Error | undefined => {
   const queries = useMemo(
-    () => ({ diff: { query: api.checkpoints.fileDiff, args: { checkpointId, path } } }),
-    [checkpointId, path],
+    () => ({ diff: { query: api.checkpoints.fileDiff, args: { checkpointId, path, ...(scope && { scope }) } } }),
+    [checkpointId, path, scope],
   );
   return useQueries(queries).diff;
 };

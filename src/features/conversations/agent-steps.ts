@@ -1,3 +1,4 @@
+import type { AgentResult } from "@inngest/agent-kit";
 import type { Infer } from "convex/values";
 
 import { recipeIdsIn } from "../sandbox-preview/utils/error-recipes";
@@ -163,6 +164,11 @@ export const describeToolCall = (
       break;
     case "loadSkill":
       targets = str(input.name) ? [str(input.name)] : [];
+      break;
+    // One per swarm task: the board counts them ("Delegating N tasks").
+    case "delegateTasks":
+      targets = (Array.isArray(input.tasks) ? input.tasks : [])
+        .map((task) => str((task as Record<string, unknown>)?.title)).filter(Boolean);
       break;
     default:
       // MCP tools are namespaced `provider__tool`.
@@ -431,3 +437,45 @@ export const writtenFilePaths = (steps: AgentStep[]) => [
       .reverse(),
   ),
 ];
+
+/** Pure response-to-display rows, shared by independently replayed agent functions. */
+export const stepsFromResponse = (
+  result: Pick<AgentResult, "output" | "raw">,
+  turn: number,
+  now: number,
+  pathOf: (id: string) => string | undefined = () => undefined,
+): AgentStep[] => {
+  const calls = result.output.flatMap((m) => m.type === "tool_call" ? m.tools : []);
+  let reasoning = "";
+  try {
+    const value: unknown = JSON.parse(result.raw ?? "{}")?.choices?.[0]?.message?.reasoning;
+    if (typeof value === "string") reasoning = sanitizeAgentText(value);
+  } catch { /* Providers without reasoning need no thinking row. */ }
+  if (!calls.length) return reasoning ? [{
+    id: `thinking-final-${turn}`, kind: "thinking", text: clampStepText(reasoning), status: "done", startedAt: now,
+  }] : [];
+  const thought = clampStepText([
+    ...result.output.map((m) => m.type === "text" && m.role === "assistant"
+      ? typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("") : ""),
+    reasoning,
+  ].filter(Boolean).join("\n\n"));
+  return [
+    ...(thought ? [{ id: `thinking-${calls[0].id}`, kind: "thinking" as const, text: thought, status: "done" as const, startedAt: now }] : []),
+    ...calls.map((call) => ({ id: call.id, kind: "tool" as const, tool: call.name,
+      targets: describeToolCall(call, pathOf), status: "running" as const, startedAt: now })),
+  ];
+};
+
+/** Finish rows omit targets so the upsert retains the paths recorded before a delete. */
+export const stepsFromToolResults = (
+  results: AgentResult["toolCalls"],
+  now: number,
+  pathOf: (id: string) => string | undefined = () => undefined,
+): AgentStep[] => results.map(({ tool, content }) => {
+  const error = toolResultError(content, pathOf);
+  const label = !error && tool.name === "checkBuild" ? buildCheckLabel(content) : undefined;
+  const recipeIds = toolResultRecipeIds(content);
+  return { id: tool.id, kind: "tool", tool: tool.name, status: error ? "error" : "done",
+    ...(error ? { error } : {}), ...(label ? { text: label } : {}),
+    ...(recipeIds.length ? { recipeIds } : {}), startedAt: now, endedAt: now };
+});

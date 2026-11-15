@@ -14,6 +14,7 @@ import type * as agentTasks from "../agentTasks.js";
 import type * as aiProviders from "../aiProviders.js";
 import type * as auth from "../auth.js";
 import type * as chatImages from "../chatImages.js";
+import type * as checkpointComparison from "../checkpointComparison.js";
 import type * as checkpoints from "../checkpoints.js";
 import type * as conversations from "../conversations.js";
 import type * as credits from "../credits.js";
@@ -39,6 +40,7 @@ import type * as skills from "../skills.js";
 import type * as stats from "../stats.js";
 import type * as swarm from "../swarm.js";
 import type * as system from "../system.js";
+import type * as userPreferences from "../userPreferences.js";
 import type * as users from "../users.js";
 import type * as waitlist from "../waitlist.js";
 
@@ -55,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   aiProviders: typeof aiProviders;
   auth: typeof auth;
   chatImages: typeof chatImages;
+  checkpointComparison: typeof checkpointComparison;
   checkpoints: typeof checkpoints;
   conversations: typeof conversations;
   credits: typeof credits;
@@ -80,6 +83,7 @@ declare const fullApi: ApiFromModules<{
   stats: typeof stats;
   swarm: typeof swarm;
   system: typeof system;
+  userPreferences: typeof userPreferences;
   users: typeof users;
   waitlist: typeof waitlist;
 }>;
