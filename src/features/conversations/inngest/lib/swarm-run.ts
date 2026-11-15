@@ -22,7 +22,7 @@ import { FOUNDATION_REFUSAL, guardFoundation } from "./ownership-guard";
 /** The orchestrator's forced turn: the same agent with tool_choice set to delegateTasks. */
 export const SWARM_DELEGATE_AGENT_NAME = "codenaya-delegate";
 /** Steps the orchestrator may spend on the foundation before its next call is forced. */
-export const FOUNDATION_MAX_STEPS = 8;
+export const FOUNDATION_MAX_STEPS = 5;
 /** A forced call whose plan is refused is forced once more; after that the run builds solo. */
 export const MAX_FORCED_DELEGATIONS = 2;
 
