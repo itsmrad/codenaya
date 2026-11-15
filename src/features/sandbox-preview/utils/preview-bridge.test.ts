@@ -384,6 +384,19 @@ describe("installPreviewBridge", () => {
     expect(original).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    "Hydration failed because the server rendered HTML didn't match the client.",
+    "A tree hydrated but some attributes of the server rendered HTML didn't match the client properties.",
+    "Text content does not match server-rendered HTML.",
+  ])("reports hydration console errors without a boundary log: %s", (message) => {
+    for (const value of [message, new Error(message)]) {
+      const { win, posted, original } = setup();
+      win.console.error(value);
+      expect(posted).toEqual([expect.objectContaining({ kind: "runtime", message })]);
+      expect(original).toHaveBeenCalledWith(value);
+    }
+  });
+
   it("never throws on a hostile error object, and still logs", () => {
     const { win, listeners, posted, original } = setup();
     const hostile = Object.create(Error.prototype, {

@@ -223,11 +223,12 @@ export function installPreviewBridge(
     if (!reporting) {
       reporting = true;
       try {
-        // Only React's log for a boundary-caught error: an app's own
+        // React's boundary and hydration logs: an app's own
         // `catch (e) { console.error(e) }` is handled and stays quiet.
         let boundaryLog = false;
         let error: unknown = null;
         for (const arg of args) {
+          if ((typeof arg === "string" || arg instanceof Error) && /Hydration failed|A tree hydrated but some attributes of the server rendered HTML didn't match|Text content does not match/i.test(String(arg))) report(arg, arg);
           if (typeof arg === "string" && arg.indexOf("The above error occurred") === 0) {
             boundaryLog = true;
           } else if (error === null && arg instanceof Error) {

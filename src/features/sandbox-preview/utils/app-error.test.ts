@@ -66,6 +66,57 @@ describe("detectBuildError", () => {
     ).toMatchObject({ file: "src/App.tsx", line: 3 });
   });
 
+  it.each([
+    "Module not found: Can't resolve 'missing-package'",
+    "Type error: Type 'number' is not assignable to type 'string'.",
+  ])("reads a Next.js location header followed by %s", (message) => {
+    expect(detectBuildError(`\x1b[31m⨯\x1b[0m ./src/app/page.tsx:12:3\n${message}\n`)).toEqual({
+      kind: "build", message, file: "src/app/page.tsx", line: 12,
+    });
+  });
+
+  it.each(["src/app/page.tsx", "./src/app/page.tsx"])("reads a Next.js runtime stack at %s", (file) => {
+    expect(detectBuildError(`⨯ Error: Render failed\n    at Foo (${file}:12:3)\n`)).toEqual({
+      kind: "build", message: "Error: Render failed", file: "src/app/page.tsx", line: 12,
+    });
+  });
+
+  it.each([
+    ["⨯ ReferenceError: window is not defined", "ReferenceError: window is not defined"],
+    ["Error: document is not defined", "Error: document is not defined"],
+    ["ReferenceError: localStorage is not defined", "ReferenceError: localStorage is not defined"],
+    ["Module not found: Can't resolve './missing'", "Module not found: Can't resolve './missing'"],
+    ["Type error: Invalid page props", "Type error: Invalid page props"],
+    ["Unhandled Runtime Error\nError: Render failed", "Unhandled Runtime Error Error: Render failed"],
+  ])("reads the Next.js error %s", (output, message) => {
+    expect(detectBuildError(output)).toEqual({ kind: "build", message });
+  });
+
+  it.each([
+    "⚠ Module not found: Can't resolve 'optional-package'",
+    "⚠ Error: optional integration is not defined",
+    "✓ Compiled /error in 300ms",
+    "○ Compiling /error ...",
+  ])("ignores Next.js status and warning output: %s", (output) => {
+    expect(detectBuildError(output)).toBeNull();
+  });
+
+  it("waits for a Next.js location's message across chunks", () => {
+    const detector = createBuildErrorDetector();
+    expect(detector.push("⨯ ./src/app/page.tsx:12:3\n")).toBeNull();
+    expect(detector.push("Module not found: Can't resolve 'missing-package'\n")).toEqual({
+      kind: "build", message: "Module not found: Can't resolve 'missing-package'",
+      file: "src/app/page.tsx", line: 12,
+    });
+  });
+
+  it("skips blank lines between a Next.js location and its error", () => {
+    expect(detectBuildError("⨯ ./src/app/page.tsx:12:3\n\n  \nModule not found: Can't resolve 'missing-package'\n")).toEqual({
+      kind: "build", message: "Module not found: Can't resolve 'missing-package'",
+      file: "src/app/page.tsx", line: 12,
+    });
+  });
+
   describe("npm install failures (#491)", () => {
     const install = "npm install --prefer-offline --no-audit --no-fund";
 
@@ -125,6 +176,12 @@ describe("detectBuildError", () => {
 });
 
 describe("isHmrSuccess", () => {
+  it("matches Next.js successful compilation lines", () => {
+    expect(isHmrSuccess("✓ Compiled /route in 1.2s")).toBe(true);
+    expect(isHmrSuccess("○ Compiling /route ...\n  \x1b[32m✓\x1b[0m Compiled /route in 1.2s\n")).toBe(true);
+    expect(isHmrSuccess("⚠ Compiled with warnings")).toBe(false);
+  });
+
   it("matches Vite 5 and Vite 6 update lines", () => {
     expect(isHmrSuccess("3:04:05 PM [vite] hmr update /src/App.jsx")).toBe(true);
     expect(isHmrSuccess("3:04:05 PM \x1b[36m[vite]\x1b[39m (client) page reload index.html")).toBe(true);
@@ -273,6 +330,13 @@ describe("trackFixAttempts", () => {
 });
 
 describe("createBuildErrorDetector", () => {
+  it("forgets error A after Next.js compiles so the next error B is shown", () => {
+    const detector = createBuildErrorDetector();
+    expect(detector.push("⨯ Error: A\n")).toEqual({ kind: "build", message: "Error: A" });
+    expect(detector.push("✓ Compiled /x in 5ms\n")).toBeNull();
+    expect(detector.push("⨯ Error: B\n")).toEqual({ kind: "build", message: "Error: B" });
+  });
+
   const chunk =
     '[vite] Internal server error: Failed to resolve import "./Missing" from "src/App.jsx". Does the file exist?\n' +
     "  Plugin: vite:import-analysis\n" +
