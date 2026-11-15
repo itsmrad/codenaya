@@ -45,7 +45,8 @@ export const nodeIncompatibility = (
   const pkg = packageJson ? parsePackageJson(packageJson) : null;
   if (!node || !pkg) return null;
   const sandbox = `but the cloud sandbox has Node ${nodeVersion.trim()}`;
-  const template = "set E2B_TEMPLATE to a Node 22 template (npm run e2b:template)";
+  const template =
+    "set E2B_TEMPLATE to a Node 22 template (default: codenaya-node22; build or rebuild with npm run e2b:template)";
 
   // No older Start release to fall back to: it needs the newer Node.
   if ((pkg.dependencies?.["@tanstack/react-start"] ?? pkg.devDependencies?.["@tanstack/react-start"]) && !atLeast22_12(node)) {

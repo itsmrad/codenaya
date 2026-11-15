@@ -10,9 +10,13 @@ import { killTreeCommand } from "./dev-server";
 
 /**
  * The base image ships Node 20.9, too old for Vite 7 (#178). E2B_TEMPLATE
- * points at the Node 22 template built by `npm run e2b:template`.
+ * overrides the default Node 22 template built by `npm run e2b:template`.
  */
-export const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || "base";
+export const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || "codenaya-node22";
+
+if (!process.env.E2B_TEMPLATE?.trim()) {
+  console.warn("[project-sandbox] E2B_TEMPLATE unset; using codenaya-node22. Build it with npm run e2b:template");
+}
 
 /** Where project files are written inside the sandbox. */
 export const WORK_DIR = "/home/user/app";

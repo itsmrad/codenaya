@@ -293,7 +293,7 @@ npx inngest-cli@latest dev     # Inngest dev server for agent runs
 
 With Infisical set up, `npm run dev:infisical` starts Next.js with the `dev` secrets injected.
 
-For real previews and build checks, build the E2B template once with `npm run e2b:template` and set `E2B_TEMPLATE` (default `codenaya-node22`).
+For real previews and build checks, build the E2B template once with `npm run e2b:template`; `E2B_TEMPLATE` defaults to `codenaya-node22` with a warning when unset, and sandbox creation fails if the template is missing.
 
 ### Scripts
 

@@ -21,9 +21,8 @@ test.describe("E2B preview Node version", () => {
     seeded = undefined;
   });
 
-  // Vite 7 needs Node 20.19+: it boots on the Node 22 template (E2B_TEMPLATE)
-  // and fails with a clear reason on the base image's Node 20.9 (#178).
-  test("a Vite 7 app boots, or says why the sandbox's Node can't run it", async ({
+  // Vite 7 boots on the Node 22 template, including the default codenaya-node22 (#178).
+  test("a Vite 7 app boots on the configured or default Node 22 template", async ({
     page,
   }) => {
     test.setTimeout(300_000);
@@ -41,16 +40,10 @@ test.describe("E2B preview Node version", () => {
     await page.goto(`/projects/${projectId}`);
     await page.getByRole("tab", { name: "Preview" }).click();
 
-    if (process.env.E2B_TEMPLATE) {
-      const preview = page.frameLocator('iframe[title="Preview"]');
-      await expect(preview.getByRole("heading", { name: "Vite 7 app" })).toBeVisible({
-        timeout: 240_000,
-      });
-      expect(errors).toEqual([]);
-    } else {
-      await expect(
-        page.getByRole("alert").filter({ hasText: "needs Node 20.19+" }),
-      ).toBeVisible({ timeout: 120_000 });
-    }
+    const preview = page.frameLocator('iframe[title="Preview"]');
+    await expect(preview.getByRole("heading", { name: "Vite 7 app" })).toBeVisible({
+      timeout: 240_000,
+    });
+    expect(errors).toEqual([]);
   });
 });
