@@ -429,7 +429,7 @@ describe("installPreviewBridge", () => {
     expect(win.console.error).toBe(original);
   });
 
-  describe("Vite's error overlay (#497)", () => {
+  describe("dev error overlays", () => {
     /** A Vite overlay element as `ErrorOverlay` builds it, open shadow root and all. */
     const overlay = (parts: Record<string, string>) => ({
       nodeName: "VITE-ERROR-OVERLAY",
@@ -444,11 +444,14 @@ describe("installPreviewBridge", () => {
       ".file": "/home/user/app/src/App.tsx:2:19",
     });
 
-    const setupDom = (readyState: string, existing: unknown = null) => {
+    const setupDom = (readyState: string, existing: { nodeName: string } | null = null) => {
       const posted: Array<Record<string, unknown>> = [];
       const documentListeners: Record<string, () => void> = {};
       const observers: Array<{ callback: (records: unknown[]) => void; target: unknown }> = [];
-      const body = { querySelector: () => existing };
+      const body = {
+        querySelector: (selector: string) => existing?.nodeName.toLowerCase() === selector ? existing : null,
+        querySelectorAll: (selector: string) => existing?.nodeName.toLowerCase() === selector ? [existing] : [],
+      };
       const win = {
         parent: { postMessage: (message: Record<string, unknown>) => posted.push(message) },
         addEventListener: vi.fn(),
@@ -472,6 +475,68 @@ describe("installPreviewBridge", () => {
         observers.forEach(({ callback }) => callback([{ addedNodes: nodes }]));
       return { posted, documentListeners, observers, body, append };
     };
+
+    const nextOverlay = (parts: Record<string, string>) => ({
+      nodeName: "NEXTJS-PORTAL",
+      shadowRoot: {
+        querySelector: (selector: string) => selector in parts ? { textContent: parts[selector] } : null,
+      },
+    });
+
+    it("reads Next's title, description, and first codeframe location", () => {
+      const portal = nextOverlay({
+        "#nextjs__container_errors_label": "Runtime Error",
+        "#nextjs__container_errors_desc": "Cannot read properties of undefined",
+        "[data-nextjs-codeframe] .code-frame-header [data-text]": "app/page.tsx (7:3) @ Page",
+      });
+      const { posted, observers } = setupDom("complete", portal);
+      expect(posted).toEqual([expect.objectContaining({
+        kind: "build",
+        message: "Runtime Error\nCannot read properties of undefined",
+        file: "app/page.tsx:7:3",
+      })]);
+      expect(observers.filter(({ target }) => target === portal.shadowRoot)).toHaveLength(1);
+    });
+
+    it("observes a Next portal populated after attachment, and later error updates", () => {
+      const parts: Record<string, string> = {};
+      const portal = nextOverlay(parts);
+      const { posted, observers, append } = setupDom("complete");
+      append(portal);
+      expect(posted).toHaveLength(0);
+      parts["#nextjs__container_errors_label"] = "Build Error";
+      parts["#nextjs__container_errors_desc"] = "Failed to compile";
+      parts["[data-nextjs-codeframe] p"] = "./app/page.tsx (3:8) @ Page";
+      parts["[data-nextjs-codeframe] pre"] = "Unexpected token";
+      const observer = observers.find(({ target }) => target === portal.shadowRoot)!;
+      observer.callback([]);
+      expect(posted).toEqual([expect.objectContaining({ kind: "build", file: "./app/page.tsx:3:8", message: "Build Error\nFailed to compile\nUnexpected token" })]);
+      parts["#nextjs__container_errors_desc"] = "Module not found";
+      observer.callback([]);
+      expect(posted).toHaveLength(2);
+      expect(observers.filter(({ target }) => target === portal.shadowRoot)).toHaveLength(1);
+    });
+
+    it("ignores a Next indicator or missing shadow root, and bounds long messages", () => {
+      const { posted, append } = setupDom("complete");
+      expect(() => append({ nodeName: "NEXTJS-PORTAL" }, nextOverlay({}))).not.toThrow();
+      expect(posted).toHaveLength(0);
+      append(nextOverlay({ "#nextjs__container_errors_desc": "x".repeat(3000) }));
+      expect(posted[0].message).toHaveLength(2048);
+    });
+
+    it("reads the older Next 15 terminal's first source file link", () => {
+      const { posted } = setupDom("complete", nextOverlay({
+        "#nextjs__container_errors_label": "Build Error",
+        "#nextjs__container_errors_desc": "Failed to compile",
+        "[data-nextjs-terminal] [data-with-open-in-editor-link-source-file]": "./app/page.tsx:4:9",
+        "[data-nextjs-terminal] pre": "Module not found: Can't resolve './Missing'",
+      }));
+      expect(posted).toEqual([expect.objectContaining({
+        file: "./app/page.tsx:4:9",
+        message: "Build Error\nFailed to compile\nModule not found: Can't resolve './Missing'",
+      })]);
+    });
 
     it("reports an overlay appended to <body> as a build error", () => {
       const { posted, observers, body, append } = setupDom("complete");

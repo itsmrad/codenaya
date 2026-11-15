@@ -29,6 +29,22 @@ export interface DevStart {
   cwd?: string;
 }
 
+/** A listening socket is ready even while Next compiles its first HTTP response. */
+export const isPortOpen = async (sandbox: Sandbox, port: number): Promise<boolean> => {
+  try {
+    const result = await sandbox.commands.run(
+      `node -e 'const socket=require("net").connect({host:"localhost",port:${port}});` +
+        `socket.setTimeout(1500);socket.once("connect",()=>{console.log("open");socket.destroy()});` +
+        `socket.once("timeout",()=>socket.destroy());socket.once("error",()=>{});'`,
+      { timeoutMs: 3000 },
+    );
+    return result.stdout.trim() === "open";
+  } catch {
+    // A refused connection or probe timeout is retried by the readiness loop.
+    return false;
+  }
+};
+
 /**
  * Runs `install` with the dev server stopped, then starts it once with the same
  * command and env, also after a failed install. Every marked process is

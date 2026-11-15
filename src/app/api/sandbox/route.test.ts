@@ -331,7 +331,7 @@ describe("POST /api/sandbox after ready (#492)", () => {
     const stats = { maxConcurrentInstalls: 0, devStarts: 0, startsWhileInstalling: 0, installsWhileServing: 0 };
     const run = vi.fn(async (cmd: string, options?: { envs?: Record<string, string> }) => {
       if (cmd === "node --version") return { exitCode: 0, stdout: "v22.12.0\n", stderr: "" };
-      if (cmd.startsWith("curl")) return { exitCode: 0, stdout: "200", stderr: "" };
+      if (cmd.startsWith("node -e ")) return { exitCode: 0, stdout: "open", stderr: "" };
       if (options?.envs?.[DEV_COMMAND_ENV]) {
         stats.devStarts++;
         if (installing > 0) stats.startsWhileInstalling++;
