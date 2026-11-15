@@ -53,8 +53,8 @@ export const CommunityCatalogList = ({ servers, onSelect }: CommunityCatalogList
   const update = <T,>(set: (value: T) => void) => (value: T) => { set(value); setVisible(COMMUNITY_PAGE_SIZE); };
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+    <div className="min-w-0 w-full max-w-full space-y-3">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
         <div className="relative min-w-0 flex-1">
           <SearchIcon aria-hidden="true" className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" />
           <Input
@@ -66,7 +66,7 @@ export const CommunityCatalogList = ({ servers, onSelect }: CommunityCatalogList
             className="pl-9"
           />
         </div>
-        <div className="flex gap-2">
+        <div className="flex min-w-0 gap-2">
           <select
             aria-label="Community category"
             value={category}
@@ -80,7 +80,7 @@ export const CommunityCatalogList = ({ servers, onSelect }: CommunityCatalogList
             aria-label="Sort community servers"
             value={sort}
             onChange={(event) => update(setSort)(event.target.value as CommunitySort)}
-            className={selectClassName}
+            className={`${selectClassName} min-w-0`}
           >
             <option value="stars">Most stars</option>
             <option value="name">Name (A–Z)</option>
@@ -92,7 +92,7 @@ export const CommunityCatalogList = ({ servers, onSelect }: CommunityCatalogList
         {matches.length > shown.length && ` · showing ${shown.length}`}
       </p>
       {shown.length > 0 ? (
-        <ul aria-label="Community servers" className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <ul aria-label="Community servers" className="grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
           {shown.map((server) => {
             const prefill = toCustomServerPrefill(server);
             return (
@@ -167,11 +167,11 @@ export const CommunityCatalog = ({ onSelect }: CommunityCatalogProps) => {
   }, []);
 
   return (
-    <section aria-labelledby={headingId} className="space-y-3 border-t border-border/60 pt-4">
-      <div className="space-y-1">
-        <h3 id={headingId} className="flex items-center gap-1.5 text-sm font-medium">
-          <UsersIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-          Community — not reviewed; every action asks for approval
+    <section aria-labelledby={headingId} className="min-w-0 w-full max-w-full space-y-3 border-t border-border/60 pt-4">
+      <div className="min-w-0 space-y-1">
+        <h3 id={headingId} className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
+          <UsersIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0">Community — not reviewed; every action asks for approval</span>
         </h3>
         <p className="text-xs text-muted-foreground">
           Popular MCP servers from a public list, ranked by GitHub stars. We have not checked them. Remote servers
