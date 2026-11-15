@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 
 import { api } from "./_generated/api";
 import schema from "./schema";
+import { NOTE_CREDENTIAL_ERROR } from "../src/features/projects/notes";
 import { MAX_PROJECT_NOTE_LENGTH, MAX_PROJECT_NOTES } from "../src/features/projects/notes";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -65,5 +66,25 @@ describe("projectNotes", () => {
     await expect(alice.mutation(api.projectNotes.add, { projectId, text: "one more" })).rejects.toThrow(
       /at most/,
     );
+  });
+
+  test("refuses a note holding a credential, on add and update", async () => {
+    const { alice } = setup();
+    const projectId = await alice.mutation(api.projects.create, { name: "Site" });
+    // Assembled so no key-shaped literal sits in the source (as credential-guard.test.ts does).
+    const secret = ["sbp", "_", "0123456789abcdefghijklmnopqrstuvwxyz"].join("");
+
+    await expect(
+      alice.mutation(api.projectNotes.add, { projectId, text: `Use ${secret} for the API` }),
+    ).rejects.toThrow(NOTE_CREDENTIAL_ERROR);
+
+    await alice.mutation(api.projectNotes.add, { projectId, text: "Prices are in EUR" });
+    const [note] = await alice.query(api.projectNotes.list, { projectId });
+    await expect(
+      alice.mutation(api.projectNotes.update, { projectId, noteId: note.id, text: secret }),
+    ).rejects.toThrow(NOTE_CREDENTIAL_ERROR);
+
+    const notes = await alice.query(api.projectNotes.list, { projectId });
+    expect(notes.map((n) => n.text)).toEqual(["Prices are in EUR"]);
   });
 });
