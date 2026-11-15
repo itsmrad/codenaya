@@ -278,6 +278,32 @@ describe("installPreviewBridge", () => {
     expect(posted).toHaveLength(1);
   });
 
+  it.each(["null", "body", "html"])("ignores Enter and Space with %s focused, without suppressing them", (focused) => {
+    const { win, listeners, posted } = setup();
+    const body = new ElementStub();
+    const html = new ElementStub();
+    Object.assign(win.document, {
+      body,
+      documentElement: html,
+      activeElement: ({ null: null, body, html } as Record<string, ElementStub | null>)[focused],
+    });
+    listeners.message({ source: win.parent, origin: "https://ide.example", data: { source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "select:on" } });
+    for (const key of ["Enter", " "]) {
+      const event = { key, target: null, preventDefault: vi.fn(), stopPropagation: vi.fn(), stopImmediatePropagation: vi.fn() };
+      listeners.keydown(event);
+      expect(event.preventDefault).not.toHaveBeenCalled();
+      expect(event.stopImmediatePropagation).not.toHaveBeenCalled();
+    }
+    expect(posted).toHaveLength(0);
+  });
+
+  it("posts Escape to the pinned embedding origin only", () => {
+    const { win, listeners, postMessage } = setup();
+    listeners.message({ source: win.parent, origin: "https://ide.example", data: { source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "select:on" } });
+    listeners.keydown({ key: "Escape", preventDefault: vi.fn(), stopPropagation: vi.fn() });
+    expect(postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "select:off" }), "https://ide.example");
+  });
+
   // React 19's dev log for an error an error boundary caught (#335).
   const boundaryLog = (error: unknown) => [
     "%o\n\n%s\n\n%s\n",

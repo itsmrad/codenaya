@@ -29,6 +29,10 @@ export function installPreviewBridge(
   win.parent.postMessage({ source, version, kind: "page", message: "" }, "*");
   let parentOrigin = "";
   try {
+    // Known limitation: without ancestorOrigins (Firefox), a full-page navigation
+    // inside the preview makes document.referrer the preview's own origin, so the
+    // parent's commands no longer match and Select stops working. It fails closed
+    // on purpose: an unverifiable embedding origin is never trusted.
     parentOrigin = win.location.ancestorOrigins?.[0] || new URL(win.document.referrer).origin;
     if (parentOrigin === "null") parentOrigin = "";
   } catch {
@@ -101,7 +105,10 @@ export function installPreviewBridge(
     try {
       if (!selecting) return;
       if (event.key === "Enter" || event.key === " ") {
-        pick(event, win.document.activeElement);
+        // Nothing focused: leave the page's own Enter/Space handling alone.
+        const active = win.document.activeElement;
+        if (!active || active === win.document.body || active === win.document.documentElement) return;
+        pick(event, active);
         return;
       }
       if (event.key !== "Escape") return;
