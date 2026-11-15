@@ -64,6 +64,12 @@ describe("describeToolCall", () => {
     ).toEqual(["src/a.tsx"]);
   });
 
+  it("names each delegated swarm task by its title", () => {
+    const tasks = [{ id: "pages", title: "Pages" }, { id: "nav", title: "Navigation" }, null];
+    expect(describeToolCall({ name: "delegateTasks", input: { tasks } }, pathOf)).toEqual(["Pages", "Navigation"]);
+    expect(describeToolCall({ name: "delegateTasks", input: {} }, pathOf)).toEqual([]);
+  });
+
   it("shows rename source and new name", () => {
     expect(
       describeToolCall(

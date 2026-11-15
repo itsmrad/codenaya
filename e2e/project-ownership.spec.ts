@@ -57,6 +57,9 @@ test.describe.serial("project ownership across users", () => {
   });
 
   test("every route answers 404 for the victim's ids and changes nothing", async () => {
+    // Eight API routes, each compiled by `next dev` on its first request here
+    // (/api/sandbox ~8s, /api/messages ~5s on an idle box); under load that outran 60s.
+    test.slow();
     const before = await victimState();
 
     const attempts: Array<[string, Record<string, unknown>]> = [

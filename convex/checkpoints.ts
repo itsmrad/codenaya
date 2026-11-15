@@ -7,6 +7,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
+import { projectChanges, validateComparisonPath } from "./checkpointComparison";
 import {
   insertFileContent,
   readFileContent,
@@ -277,7 +278,7 @@ async function getOwnedCheckpoint(ctx: QueryCtx, checkpointId: Id<"checkpoints">
   const identity = await verifyAuth(ctx);
   const checkpoint = await ctx.db.get("checkpoints", checkpointId);
   if (!checkpoint) {
-    throw new Error("Checkpoint not found");
+    throw appError("NOT_FOUND", "Checkpoint not found");
   }
   await getOwnedProject(ctx, checkpoint.projectId, identity.subject);
   return checkpoint;
@@ -515,15 +516,27 @@ function summarize({ path, before, after }: NonNullable<Awaited<ReturnType<typeo
   };
 }
 
+const comparisonScope = v.optional(v.literal("project"));
+const changeValidator = v.object({
+  path: v.string(),
+  status: v.union(v.literal("added"), v.literal("modified"), v.literal("deleted")),
+  binary: v.boolean(),
+  tooLarge: v.boolean(),
+  additions: v.optional(v.number()),
+  deletions: v.optional(v.number()),
+});
+
 /**
  * The files a run changed, with line counts; no contents (#225). Null when
  * the run touched more than MAX_DIFF_FILES files.
  */
 export const listChanges = query({
-  args: { checkpointId: v.id("checkpoints") },
+  args: { checkpointId: v.id("checkpoints"), scope: comparisonScope },
+  returns: v.union(v.array(changeValidator), v.null()),
   handler: async (ctx, args) => {
     const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
-    return (await runChanges(ctx, checkpoint))?.map(summarize) ?? null;
+    const changes = args.scope === "project" ? await projectChanges(ctx, checkpoint) : await runChanges(ctx, checkpoint);
+    return changes?.map(summarize) ?? null;
   },
 });
 
@@ -532,10 +545,13 @@ export const listChanges = query({
  * didn't change it. Binary and too-large files come without contents.
  */
 export const fileDiff = query({
-  args: { checkpointId: v.id("checkpoints"), path: v.string() },
+  args: { checkpointId: v.id("checkpoints"), path: v.string(), scope: comparisonScope },
+  returns: v.union(changeValidator.extend({ before: v.optional(v.string()), after: v.optional(v.string()) }), v.null()),
   handler: async (ctx, args) => {
     const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
-    const changes = await runChanges(ctx, checkpoint, args.path);
+    const changes = args.scope === "project"
+      ? await projectChanges(ctx, checkpoint, args.path)
+      : await runChanges(ctx, checkpoint, args.path);
     const change = changes?.find(({ path }) => path === args.path);
     if (!change) return null;
     const summary = summarize(change);
@@ -578,13 +594,15 @@ async function folderAt(
  * shortcut: whole file only; hunk revert (#225 follow-up) would add an optional range.
  */
 export const revertFile = mutation({
-  args: { checkpointId: v.id("checkpoints"), path: v.string() },
+  args: { checkpointId: v.id("checkpoints"), path: v.string(), scope: comparisonScope },
+  returns: v.null(),
   handler: async (ctx, args) => {
     const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
     const { projectId } = checkpoint;
     await assertNoRunningAgent(ctx, projectId, "reverting");
-    // Any other path would delete or overwrite a file the run never touched.
-    if (!isUnder(args.path, await runTargets(ctx, checkpoint))) {
+    validateComparisonPath(args.path);
+    // Run callers may only overwrite paths written by that run.
+    if (args.scope !== "project" && !isUnder(args.path, await runTargets(ctx, checkpoint))) {
       throw appError("NOT_FOUND", "This run didn't change that file");
     }
 
@@ -607,7 +625,7 @@ export const revertFile = mutation({
 
     const now = Date.now();
     if (!row) {
-      if (!live) return;
+      if (!live) return null;
       await deleteFileTree(ctx, live);
     } else if (live) {
       if (live.storageId !== row.storageId) {
@@ -631,5 +649,6 @@ export const revertFile = mutation({
       }
     }
     await ctx.db.patch("projects", projectId, { updatedAt: now });
+    return null;
   },
 });

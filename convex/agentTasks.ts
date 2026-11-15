@@ -1,22 +1,47 @@
 import { v } from "convex/values";
 
 import type { Id } from "./_generated/dataModel";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { mergeMessageSteps } from "./messageSteps";
 import { getOwnedProject } from "./projects";
 import schema, { agentTaskInputValidator, agentTaskStatusValidator, messageStepValidator } from "./schema";
-import { MAX_SWARM_TASKS } from "./swarm";
+import { MAX_SWARM_AGENTS, platformMaxDepth } from "./swarm";
 
-/** Replays return the original rows without resetting their instructions or state. */
+/** Whether another of the owner's platform swarms has queued or running tasks under a running message. */
+const otherPlatformSwarmRunning = async (ctx: QueryCtx, ownerId: string, messageId: Id<"messages">) => {
+  const checked = new Set<Id<"messages">>([messageId]);
+  for (const status of ["queued", "running"] as const) {
+    // Newest first: a task left running under a cancelled message is older than any swarm started since.
+    // shortcut: those stale rows are never cleaned up; finish them on cancel if they ever crowd this window.
+    const rows = await ctx.db.query("agentTasks")
+      .withIndex("by_ownerId_and_platform_and_status", (q) =>
+        q.eq("ownerId", ownerId).eq("platform", true).eq("status", status))
+      .order("desc")
+      .take(2 * MAX_SWARM_AGENTS);
+    for (const row of rows) {
+      if (checked.has(row.messageId)) continue;
+      checked.add(row.messageId);
+      if ((await ctx.db.get("messages", row.messageId))?.status === "processing") return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Replays return the original rows without resetting their instructions or state.
+ * A platform run (`byok` unset) gets sub-orchestrators only when SWARM_PLATFORM_MAX_DEPTH
+ * allows them, and fans out only while no other platform swarm of the owner's runs.
+ */
 export const createTasks = mutation({
   args: {
     internalKey: v.string(),
     messageId: v.id("messages"),
     projectId: v.id("projects"),
     tasks: v.array(agentTaskInputValidator),
+    byok: v.optional(v.boolean()),
   },
   returns: v.array(v.id("agentTasks")),
   handler: async (ctx, args) => {
@@ -26,9 +51,17 @@ export const createTasks = mutation({
     if (!message || message.projectId !== args.projectId || !project || project.deletingAt !== undefined) {
       throw appError("NOT_FOUND", "Message not found");
     }
+    if (message.role !== "assistant" || message.mode !== "swarm") {
+      throw appError("INVALID_ARGUMENT", "Only a swarm reply can have tasks");
+    }
+    const platform = args.byok !== true;
+    if (platform && platformMaxDepth() < 2 && args.tasks.some((task) => task.role === "sub-orchestrator")) {
+      throw appError("INVALID_ARGUMENT", "Sub-orchestrators are off for platform models");
+    }
     const existing = await ctx.db.query("agentTasks")
       .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
-      .take(MAX_SWARM_TASKS + 1);
+      .take(MAX_SWARM_AGENTS + 1);
+    const seedSnapshotId = existing.find((row) => row.seedSnapshotId)?.seedSnapshotId;
     let count = existing.length;
     const ids: Id<"agentTasks">[] = [];
     for (const task of args.tasks) {
@@ -39,13 +72,20 @@ export const createTasks = mutation({
         ids.push(row._id);
         continue;
       }
-      if (count >= MAX_SWARM_TASKS) {
-        throw appError("LIMIT_EXCEEDED", "Too many swarm tasks");
+      if (count >= MAX_SWARM_AGENTS) {
+        throw appError("LIMIT_EXCEEDED", "Too many swarm agents");
+      }
+      // Checked once, before the first new row: a replay of created rows never trips it.
+      if (platform && count === existing.length && await otherPlatformSwarmRunning(ctx, project.ownerId, args.messageId)) {
+        throw appError("CONFLICT", "Another swarm is already running for this account");
       }
       ids.push(await ctx.db.insert("agentTasks", {
         ...task,
         messageId: args.messageId,
         projectId: args.projectId,
+        ownerId: project.ownerId,
+        platform,
+        ...(seedSnapshotId ? { seedSnapshotId } : {}),
         status: "queued",
         steps: [],
         updatedAt: Date.now(),
@@ -62,7 +102,8 @@ export const upsertTaskSteps = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     const task = await ctx.db.get("agentTasks", args.agentTaskId);
-    if (!task) return null; // The project may have been deleted mid-run.
+    // The project may have been deleted mid-run; a finished task's steps are final.
+    if (!task || task.status === "done" || task.status === "error") return null;
     await ctx.db.patch("agentTasks", task._id, {
       steps: mergeMessageSteps(task.steps, args.steps),
       updatedAt: Date.now(),
@@ -82,7 +123,7 @@ export const startTask = mutation({
     parentMessageId: v.id("messages"),
     projectId: v.id("projects"),
   },
-  returns: agentTaskInputValidator.omit("role").extend({
+  returns: agentTaskInputValidator.omit("parentTaskId").extend({
     messageId: v.id("messages"),
     projectId: v.id("projects"),
     status: agentTaskStatusValidator,
@@ -99,8 +140,8 @@ export const startTask = mutation({
       status = "running";
       await ctx.db.patch("agentTasks", task._id, { status, startedAt: now, updatedAt: now });
     }
-    const { ownedPaths, brief, title, modelId, model, taskId, messageId, projectId } = task;
-    return { ownedPaths, brief, title, modelId, model, taskId, messageId, projectId, status };
+    const { role, ownedPaths, brief, title, modelId, model, taskId, messageId, projectId } = task;
+    return { role, ownedPaths, brief, title, modelId, model, taskId, messageId, projectId, status };
   },
 });
 
@@ -111,6 +152,7 @@ export const finishTask = mutation({
     status: v.union(v.literal("done"), v.literal("error")),
     summary: v.optional(v.string()),
     error: v.optional(v.string()),
+    selfCheck: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -122,10 +164,63 @@ export const finishTask = mutation({
       status: args.status,
       summary: args.summary,
       error: args.error,
+      ...(args.selfCheck !== undefined ? { selfCheck: args.selfCheck } : {}),
+      startedAt: task.startedAt ?? now,
       endedAt: now,
       updatedAt: now,
     });
+    // A failed sub-orchestrator's workers can't report to anyone.
+    if (args.status === "error" && task.role === "sub-orchestrator") {
+      const children = await ctx.db.query("agentTasks")
+        .withIndex("by_message", (q) => q.eq("messageId", task.messageId))
+        .take(MAX_SWARM_AGENTS);
+      for (const child of children) {
+        if (child.parentTaskId !== task.taskId || child.status === "done" || child.status === "error") continue;
+        await ctx.db.patch("agentTasks", child._id, {
+          status: "error", error: "Parent sub-orchestrator failed.", startedAt: child.startedAt ?? now, endedAt: now, updatedAt: now,
+        });
+      }
+    }
     return null;
+  },
+});
+
+/** Stores the swarm's foundation snapshot on its task rows, for the workers' self-checks. */
+export const setSeedSnapshot = mutation({
+  args: { internalKey: v.string(), messageId: v.id("messages"), snapshotId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const tasks = await ctx.db.query("agentTasks")
+      .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
+      .take(MAX_SWARM_AGENTS);
+    for (const task of tasks) await ctx.db.patch("agentTasks", task._id, { seedSnapshotId: args.snapshotId });
+    return null;
+  },
+});
+
+/**
+ * Takes one of the swarm's `max` self-check slots for this task. A slot is any
+ * task's self-check that was not skipped, across both depths (at most two).
+ * Retries keep a slot already taken.
+ */
+export const claimSelfCheck = mutation({
+  args: { internalKey: v.string(), agentTaskId: v.id("agentTasks"), max: v.number() },
+  returns: v.union(v.object({ seedSnapshotId: v.string() }), v.object({ skipped: v.string() })),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const task = await ctx.db.get("agentTasks", args.agentTaskId);
+    if (!task || task.status === "done" || task.status === "error") return { skipped: "task finished" };
+    const { seedSnapshotId } = task;
+    if (!seedSnapshotId) return { skipped: "no snapshot yet" };
+    if (task.selfCheck === "running") return { seedSnapshotId };
+    const siblings = await ctx.db.query("agentTasks")
+      .withIndex("by_message", (q) => q.eq("messageId", task.messageId))
+      .take(MAX_SWARM_AGENTS);
+    const taken = siblings.filter((row) => row.selfCheck !== undefined && !row.selfCheck.startsWith("skipped")).length;
+    if (!(taken < Math.min(args.max, 2))) return { skipped: "swarm sandbox cap reached" };
+    await ctx.db.patch("agentTasks", task._id, { selfCheck: "running", updatedAt: Date.now() });
+    return { seedSnapshotId };
   },
 });
 
@@ -143,6 +238,6 @@ export const listForMessage = query({
     return await ctx.db.query("agentTasks")
       .withIndex("by_message", (q) => q.eq("messageId", messageId))
       .order("asc")
-      .take(MAX_SWARM_TASKS);
+      .take(MAX_SWARM_AGENTS);
   },
 });

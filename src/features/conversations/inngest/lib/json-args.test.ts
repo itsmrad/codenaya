@@ -30,6 +30,42 @@ describe("decodeJsonArgs", () => {
     expect(other).toEqual({ files: "[]" });
   });
 
+  it("decodes array args whose string values hold raw newlines, tabs and CRs", () => {
+    const edits = '[\n  {\n    "oldText": "  \\"name\\": \\"app\\",\n",\n\t"newText": "a\tb\r\nc \\\\"\n  }\n]';
+    const input = { path: "package.json", edits };
+    call(fake("editFile").tool, input);
+    expect(input.edits).toEqual([{ oldText: '  "name": "app",\n', newText: "a\tb\r\nc \\" }]);
+    const files = { files: '[{"path":"src/index.css","content":"body {\n\tmargin: 0;\n}\n"}]' };
+    call(fake("writeFiles").tool, files);
+    expect(files.files).toEqual([{ path: "src/index.css", content: "body {\n\tmargin: 0;\n}\n" }]);
+  });
+
+  it("decodes double-encoded array args", () => {
+    const value = [{ oldText: '"a": 1,\n', newText: '"a": 2,\n' }];
+    const input = { edits: JSON.stringify(JSON.stringify(value)) };
+    call(fake("editFile").tool, input);
+    expect(input.edits).toEqual(value);
+    const files = [{ path: "src/x.ts", content: "x\n" }];
+    const write = { files: JSON.stringify(JSON.stringify(files)) };
+    call(fake("writeFiles").tool, write);
+    expect(write.files).toEqual(files);
+  });
+
+  it("warns once per call with the shape, not the content, of an arg it can't decode", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { tool } = fake("editFile");
+    const input = { edits: '[{"oldText": secret}]' };
+    call(tool, input);
+    call(tool, input);
+    expect(input.edits).toBe('[{"oldText": secret}]');
+    expect(warn).toHaveBeenCalledTimes(1);
+    const logged = String(warn.mock.calls[0]?.[0]);
+    expect(logged).toContain("editFile.edits");
+    expect(logged).toContain('[{\\"xxxxxxx\\": xxxxxx}]');
+    expect(logged).not.toContain("secret");
+    warn.mockRestore();
+  });
+
   it("leaves a string over the size cap for the normal validation error", () => {
     const files = JSON.stringify([{ path: "a.ts", content: "x".repeat(2_000_000) }]);
     const input = { files };
