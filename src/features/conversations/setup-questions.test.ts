@@ -42,6 +42,12 @@ describe("setupQuestionsFor", () => {
     expect(ids(`${PIZZERIA} and online orders with checkout`)).toContain("payments");
   });
 
+  test("the payments question names no provider", () => {
+    const payments = setupQuestionsFor("a shop site with checkout").find(({ id }) => id === "payments");
+    expect(payments).toMatchObject({ recommended: "Yes, add a payment step", options: ["Yes, add a payment step", "Not now", DECIDE_LATER] });
+    expect(JSON.stringify(payments)).not.toMatch(/stripe|paypal/i);
+  });
+
   test("at most 4 questions of at most 4 options, each service with a recommendation and Decide later", () => {
     const all = setupQuestionsFor("a shop site with checkout, member login, email reminders, analytics and a booking form");
     expect(all).toHaveLength(MAX_SETUP_QUESTIONS);

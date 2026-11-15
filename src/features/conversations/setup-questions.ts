@@ -42,8 +42,9 @@ const NEEDS: readonly (SetupQuestion & { match: RegExp })[] = [
     id: "payments",
     label: "Take online payments?",
     topic: "Payments",
-    options: ["Stripe", "Not now", DECIDE_LATER],
-    recommended: "Stripe",
+    // Provider-neutral: the payment provider is not decided, so no name is recommended.
+    options: ["Yes, add a payment step", "Not now", DECIDE_LATER],
+    recommended: "Yes, add a payment step",
     match: /\b(pay(ment|ments|ing)?|checkout|cart|e-?commerce|shop|online store|sell\w*|subscriptions?|donat\w*|tickets?|deposits?|order online|online orders?)\b/i,
   },
   {
