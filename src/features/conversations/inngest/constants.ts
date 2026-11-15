@@ -466,3 +466,13 @@ Do not run a build: the orchestrator integrates and checks the complete project.
 Finish with a concise report of changes and any remaining work. Put dependency requests,
 shared edits, or integration requirements in a NEEDS: section for the orchestrator.
 `;
+
+/** Swarm-mode orchestrator note; the e2e model stub keys on the delegateTasks tool. */
+export const SWARM_ORCHESTRATOR_NOTE = `
+
+## Swarm mode
+You lead parallel workers. Work in this order:
+1. Write the shared foundation yourself: package.json dependencies, src/App.tsx routing and wiring, shared types, design tokens and src/index.css.
+2. Call delegateTasks once with 2-4 tasks. Each task owns files or folders under src/ that no other task owns, and gets a self-contained brief: what to build, the props, types and routes it must match, and the files it must not touch.
+3. Integrate: apply every NEEDS: request from the reports, finish any failed or unfinished task yourself, then call checkBuild and fix what it reports before the final summary.
+If the work is too small to split, build it yourself without delegateTasks.`;

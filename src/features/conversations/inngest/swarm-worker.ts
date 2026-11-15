@@ -63,7 +63,11 @@ export const swarmWorker = inngest.createFunction(
     concurrency: [{ key: "event.data.ownerId", limit: 2 * MAX_SWARM_TASKS }],
     // `event` is this run's trigger, `async` the cancel event. A cancel skips
     // onFailure; the board shows the task cancelled from its parent message.
-    cancelOn: [{ event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" }],
+    // `agent-task/cancel`: the orchestrator stops a worker whose step.invoke timed out.
+    cancelOn: [
+      { event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" },
+      { event: "agent-task/cancel", if: "event.data.agentTaskId == async.data.agentTaskId" },
+    ],
     triggers: [{ event: "agent-task/run" }],
     onFailure: async ({ event, step }) => {
       const { agentTaskId } = event.data.event.data as SwarmWorkerEvent;

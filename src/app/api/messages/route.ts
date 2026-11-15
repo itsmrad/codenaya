@@ -23,7 +23,8 @@ import {
   dispatchProcessMessageOrFail,
 } from "@/lib/message-processor";
 import { MAX_CHAT_IMAGES } from "@/features/conversations/chat-images";
-import { PLAN_MODE } from "@/features/conversations/plan-mode";
+import { PLAN_MODE, SWARM_MODE } from "@/features/conversations/plan-mode";
+import { swarmOffResponse } from "@/features/conversations/server/swarm-off";
 import { requireOwnedConversation } from "@/features/projects/server/require-owned-project";
 
 import { api } from "../../../../convex/_generated/api";
@@ -35,8 +36,8 @@ const requestSchema = z.object({
   model: modelChoiceSchema,
   // Storage ids of images registered through api.chatImages.register.
   images: z.array(z.string()).max(MAX_CHAT_IMAGES).optional(),
-  // Plan mode (#120): the agent replies with a plan and writes nothing.
-  mode: z.literal(PLAN_MODE).optional(),
+  // Plan mode (#120): the agent replies with a plan and writes nothing. Swarm: it leads parallel workers.
+  mode: z.enum([PLAN_MODE, SWARM_MODE]).optional(),
   // A fix request ("Fix with AI" #223, loop-breaker retry #306): Auto routes it to the fix model.
   source: z.literal("fix").optional(),
 });
@@ -79,6 +80,11 @@ export async function POST(request: Request) {
       },
       { status: 422 },
     );
+  }
+
+  const swarmOff = await swarmOffResponse(mode);
+  if (swarmOff) {
+    return swarmOff;
   }
 
   // Auto (#322) routes by task, which needs one more read: alongside the
