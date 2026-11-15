@@ -68,6 +68,7 @@ import { useChatStore } from "@/features/conversations/store/use-chat-store";
 import {
   PREVIEW_MESSAGE_SOURCE,
   PREVIEW_PROTOCOL_VERSION,
+  previewTargetOrigin,
   routePreviewMessage,
   readPreviewMessage,
 } from "@/features/sandbox-preview/utils/preview-bridge";
@@ -220,12 +221,13 @@ export const PreviewView = ({
   // script injected into the preview.
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const sendSelectMode = useCallback(() => {
-    if (!previewUrl) return;
+    const origin = previewTargetOrigin(previewUrl);
+    if (!origin) return;
     iframeRef.current?.contentWindow?.postMessage({
       source: PREVIEW_MESSAGE_SOURCE,
       version: PREVIEW_PROTOCOL_VERSION,
       kind: selecting ? "select:on" : "select:off",
-    }, new URL(previewUrl).origin);
+    }, origin);
   }, [previewUrl, selecting]);
   useEffect(sendSelectMode, [sendSelectMode]);
   const [runtimeError, setRuntimeError] = useState<AppError | null>(null);
