@@ -20,7 +20,8 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           {
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
+            // The composer records dictation (#301); nothing else gets the mic.
+            value: "camera=(), microphone=(self), geolocation=()",
           },
         ],
       },
