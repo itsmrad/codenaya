@@ -26,6 +26,7 @@ import {
   KeyRoundIcon,
   PlugIcon,
   WrenchIcon,
+  UsersIcon,
   type LucideIcon,
 } from "lucide-react";
 
@@ -79,6 +80,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   scrapeUrls: { icon: GlobeIcon, running: "Fetching", done: "Fetched" },
   setEnvVar: { icon: KeyRoundIcon, running: "Setting env", done: "Set env" },
   loadSkill: { icon: BookOpenIcon, running: "Loading skill", done: "Used skill" },
+  delegateTasks: { icon: UsersIcon, running: "Delegating", done: "Delegated" },
   checkBuild: { icon: HammerIcon, running: "Checking build", done: "Checked build" },
 };
 
@@ -134,6 +136,10 @@ const rowLabel = (row: Row, live: boolean) => {
   const meta = toolMeta(row.step.tool);
   // A passing check records what it verified ("Static checks passed").
   const verb = live ? meta.running : (row.step.tool === "checkBuild" && row.step.text) || meta.done;
+  if (row.step.tool === "delegateTasks") {
+    const count = row.targets.length;
+    return `${verb} ${count} ${count === 1 ? "task" : "tasks"}`;
+  }
   // "Read 4 files" reads better than four chips with no count.
   if (row.step.tool === "readFiles" && row.targets.length > 1) {
     return `${verb} ${row.targets.length} files`;
@@ -174,7 +180,7 @@ const FileChip = ({ path, onOpen, label = false }: FileChipProps) => {
 const CHIP_LIMIT = 6;
 
 /** Tools whose targets are not project files: their chips never open. */
-const NON_FILE_TOOLS = new Set(["searchFiles", "scrapeUrls", "setEnvVar", "loadSkill", "checkBuild"]);
+const NON_FILE_TOOLS = new Set(["searchFiles", "scrapeUrls", "setEnvVar", "loadSkill", "checkBuild", "delegateTasks"]);
 
 const isFileTool = (tool = "") => !NON_FILE_TOOLS.has(tool) && !tool.includes("__");
 
@@ -189,6 +195,7 @@ const Targets = ({
   const { tool } = row.step;
   const files = isFileTool(tool);
   const open = files && tool !== "deleteFiles" ? onOpenFile : undefined;
+  if (tool === "delegateTasks") return null;
   if (tool === "renameFile" && row.targets.length === 2) {
     return (
       <>
@@ -337,6 +344,23 @@ const StepRow = ({
     </div>
   );
 };
+
+/** Shared timeline for expanded swarm rows, without another run header. */
+export const AgentRunLog = ({
+  steps,
+  live,
+  onOpenFile,
+}: {
+  steps: AgentStep[];
+  live: boolean;
+  onOpenFile?: (path: string) => void;
+}) => (
+  <div className="relative before:absolute before:inset-y-1 before:left-[12.5px] before:w-px before:bg-border">
+    {toRows(steps).map((row) => (
+      <StepRow key={row.key} row={row} live={live} onOpenFile={onOpenFile} />
+    ))}
+  </div>
+);
 
 /** What a live run is doing right now, e.g. "Creating page.tsx…". */
 export const liveStepLabel = (steps: AgentStep[]) => {
