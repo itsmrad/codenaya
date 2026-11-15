@@ -112,55 +112,63 @@ export const ProjectNotesList = ({ projectId }: { projectId: Id<"projects"> }) =
     }
   };
 
+  const renderNotes = () => {
+    if (notes === null) {
+      return <p className="text-xs text-muted-foreground">Notes are unavailable right now.</p>;
+    }
+    if (notes.length === 0) {
+      return (
+        <p className="text-xs text-muted-foreground">
+          No notes yet. Use &quot;Remember for this project&quot; on a chat message to add one.
+        </p>
+      );
+    }
+    return (
+      <>
+        <ul className="divide-y divide-border/50 rounded-md border border-border/50">
+          {notes.map((note) => (
+            <li key={note.id} className="flex items-start gap-2 px-3 py-2">
+              <p className="min-w-0 flex-1 whitespace-pre-wrap text-xs [overflow-wrap:anywhere]">
+                {note.text}
+              </p>
+              <Button
+                size="icon"
+                variant="ghost"
+                className={iconButtonClassName}
+                aria-label="Edit note"
+                title="Edit"
+                onClick={() => setDraft({ text: note.text, noteId: note.id })}
+              >
+                <PencilIcon className="size-3.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className={`${iconButtonClassName} hover:text-destructive`}
+                aria-label="Delete note"
+                title="Delete"
+                onClick={() => void remove(note)}
+              >
+                <Trash2Icon className="size-3.5" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+        {notes.length > MAX_PROMPT_NOTES && (
+          <p className="text-xs text-muted-foreground">
+            Runs read the newest {MAX_PROMPT_NOTES} notes.
+          </p>
+        )}
+      </>
+    );
+  };
+
   return (
     <section aria-labelledby="project-notes-heading" className="space-y-2">
       <h3 id="project-notes-heading" className="text-xs font-medium text-muted-foreground">
         Notes
       </h3>
-      {notes === null ? (
-        <p className="text-xs text-muted-foreground">Notes are unavailable right now.</p>
-      ) : notes.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          No notes yet. Use &quot;Remember for this project&quot; on a chat message to add one.
-        </p>
-      ) : (
-        <>
-          <ul className="divide-y divide-border/50 rounded-md border border-border/50">
-            {notes.map((note) => (
-              <li key={note.id} className="flex items-start gap-2 px-3 py-2">
-                <p className="min-w-0 flex-1 whitespace-pre-wrap text-xs [overflow-wrap:anywhere]">
-                  {note.text}
-                </p>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className={iconButtonClassName}
-                  aria-label="Edit note"
-                  title="Edit"
-                  onClick={() => setDraft({ text: note.text, noteId: note.id })}
-                >
-                  <PencilIcon className="size-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className={`${iconButtonClassName} hover:text-destructive`}
-                  aria-label="Delete note"
-                  title="Delete"
-                  onClick={() => void remove(note)}
-                >
-                  <Trash2Icon className="size-3.5" />
-                </Button>
-              </li>
-            ))}
-          </ul>
-          {notes.length > MAX_PROMPT_NOTES && (
-            <p className="text-xs text-muted-foreground">
-              Runs read the newest {MAX_PROMPT_NOTES} notes.
-            </p>
-          )}
-        </>
-      )}
+      {renderNotes()}
       <ProjectNoteDialog projectId={projectId} draft={draft} onDraftChange={setDraft} />
     </section>
   );
