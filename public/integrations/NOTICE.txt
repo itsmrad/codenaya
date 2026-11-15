@@ -1,8 +1,8 @@
 Provider logo sources
 
 Supabase, Neon, GitHub, Stripe, Prisma, Sentry, Cloudflare, Linear, PostHog,
-Resend, Upstash, Sanity, PlanetScale, Notion, Atlassian, GitLab, Clerk and
-Hugging Face SVGs:
+Resend, Upstash, Sanity, PlanetScale, Notion, Atlassian, GitLab, Clerk, Hugging
+Face, Webflow, Netlify and Railway SVGs:
 https://github.com/simple-icons/simple-icons/tree/develop/icons
 Simple Icons is distributed under CC0 1.0 Universal:
 https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md

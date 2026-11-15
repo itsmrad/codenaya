@@ -1166,6 +1166,128 @@ const CATALOG = {
     notes:
       "The advertised tools follow the account's MCP settings on huggingface.co. Jobs and sandboxes run billed compute. Space tools added in those settings are labelled destructive by the server and so require approval. Prefer a fine-grained, read-only token. No URL-level read-only mode.",
   },
+
+  webflow: {
+    id: "webflow",
+    displayName: "Webflow",
+    description: "Build pages, manage CMS content, and publish Webflow sites.",
+    category: "Content",
+    logo: "/integrations/webflow.svg",
+    mcpUrl: "https://mcp.webflow.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.webflow.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Every tool tagged "write" in the full inventory (each tool fronts several
+    // actions, so one write action gates the whole tool), plus get_more_tools,
+    // which requests capabilities beyond the loaded set:
+    // https://developers.webflow.com/mcp/tools/data-tools
+    // https://developers.webflow.com/mcp/tools/designer-tools
+    // https://developers.webflow.com/mcp/tools/utility-tools
+    destructiveTools: [
+      "data_agent_instructions_tool",
+      "data_apps_tool",
+      "data_assets_tool",
+      "data_campaigns_tool",
+      "data_cms_tool",
+      "data_comments_tool",
+      "data_component_builder",
+      "data_component_props_tool",
+      "data_component_tool",
+      "data_component_variants_tool",
+      "data_element_builder",
+      "data_element_settings_tool",
+      "data_element_tool",
+      "data_enterprise_tool",
+      "data_fonts_tool",
+      "data_forms_tool",
+      "data_interactions_tool",
+      "data_localization_tool",
+      "data_members_tool",
+      "data_pages_tool",
+      "data_scripts_tool",
+      "data_sitemap_tool",
+      "data_sites_tool",
+      "data_style_tool",
+      "data_variable_tool",
+      "data_webhook_tool",
+      "data_whtml_builder",
+      "asset_tool",
+      "designer_tool",
+      "get_more_tools",
+    ],
+    notes:
+      "Each authorization covers one workspace. Element snapshots, image uploads, and reading or changing the Designer selection, page, mode, branch, canvas or breakpoints need the Webflow Designer open with the MCP Bridge App connected. No URL-level read-only mode.",
+  },
+
+  netlify: {
+    id: "netlify",
+    displayName: "Netlify",
+    description: "Create projects, deploy sites, and manage Netlify project settings.",
+    category: "Hosting",
+    logo: "/integrations/netlify.svg",
+    mcpUrl: "https://mcp.netlify.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.netlify.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Docs publish no tool table; names come from the official server source
+    // (https://github.com/netlify/netlify-mcp, src/tools). The default surface
+    // groups operations into netlify-<domain>-services-{reader,updater}
+    // dispatchers; the per-operation names are its ?verbose=true surface. The
+    // team reader is gated because it returns team environment variables.
+    destructiveTools: [
+      "netlify-deploy-services-updater",
+      "netlify-project-services-updater",
+      "netlify-extension-services-updater",
+      "netlify-feedback-services-updater",
+      "netlify-team-services-reader",
+      "netlify-deploy-site",
+      "netlify-project-update-visitor-access-controls",
+      "netlify-project-update-forms",
+      "netlify-project-manage-form-submissions",
+      "netlify-project-update-project-name",
+      "netlify-project-manage-env-vars",
+      "netlify-project-create-new-project",
+      "netlify-extension-change-extension-installation",
+      "netlify-submit-feedback",
+      "netlify-team-get-team-env-vars",
+    ],
+    notes:
+      "OAuth only; the personal access token fallback applies to the local server, not this hosted endpoint. Renaming a project releases its old netlify.app subdomain. No URL-level read-only mode.",
+  },
+
+  railway: {
+    id: "railway",
+    displayName: "Railway",
+    description: "Create projects, redeploy services, and manage Railway feature flags.",
+    category: "Hosting",
+    logo: "/integrations/railway.svg",
+    mcpUrl: "https://mcp.railway.com",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.railway.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Hosted-server inventory: https://docs.railway.com/ai/mcp-server#available-mcp-tools
+    // railway-agent and the cloud-agent task tools act on the user's behalf;
+    // starting a cloud agent is billed.
+    destructiveTools: [
+      "create-project",
+      "set-feature-flag",
+      "delete-feature-flag",
+      "redeploy",
+      "accept-deploy",
+      "railway-agent",
+      "run-cloud-agent-task",
+      "respond-cloud-agent-task",
+      "cancel-cloud-agent-task",
+    ],
+    // The resource's 401 challenge and protected-resource metadata both name
+    // this scope; without it the token cannot reach any workspace.
+    oauthScopes: ["workspace:member"],
+    notes:
+      "OAuth as a user; project tokens are not accepted. You choose the workspaces and projects at consent. Cloud agent tasks are billed. No URL-level read-only mode.",
+  },
 } as const satisfies Record<string, ProviderDefinition>;
 
 /** Catalog provider identifiers, derived from the registry itself. */

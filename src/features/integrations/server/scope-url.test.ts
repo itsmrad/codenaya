@@ -50,6 +50,9 @@ describe("catalog", () => {
       "tavily",
       "firecrawl",
       "huggingface",
+      "webflow",
+      "netlify",
+      "railway",
     ]);
   });
 
@@ -98,6 +101,9 @@ describe("catalog", () => {
     ["tavily", 1, ["tavily_research"]],
     ["firecrawl", 14, ["firecrawl_interact", "firecrawl_agent", "firecrawl_monitor_create", "firecrawl_monitor_delete", "alexandria_library_read", "people_company_search", "people_company_enrich", "jobs_search", "firecrawl_extract"]],
     ["huggingface", 7, ["create_repo", "hf_fs_write", "hf_jobs", "hf_sandbox", "hf_sandbox_exec", "hf_sandbox_fs", "dynamic_space"]],
+    ["webflow", 30, ["data_apps_tool", "data_cms_tool", "data_sites_tool", "data_scripts_tool", "data_members_tool", "data_webhook_tool", "get_more_tools"]],
+    ["netlify", 15, ["netlify-deploy-services-updater", "netlify-project-services-updater", "netlify-team-services-reader", "netlify-project-manage-env-vars", "netlify-team-get-team-env-vars"]],
+    ["railway", 9, ["redeploy", "accept-deploy", "railway-agent", "run-cloud-agent-task", "respond-cloud-agent-task", "delete-feature-flag"]],
   ] as const)("retains the audited %s write inventory, including indirect and configuration writes", (id, count, sensitive) => {
     const tools = PROVIDERS[id].destructiveTools;
     expect(tools).toHaveLength(count);
@@ -136,10 +142,12 @@ describe("catalog", () => {
       "mcp.firecrawl.dev",
       "mcp.linear.app",
       "mcp.neon.tech",
+      "mcp.netlify.com",
       "mcp.notion.com",
       "mcp.posthog.com",
       "mcp.prisma.io",
       "mcp.pscale.dev",
+      "mcp.railway.com",
       "mcp.resend.com",
       "mcp.sanity.io",
       "mcp.sentry.dev",
@@ -147,6 +155,7 @@ describe("catalog", () => {
       "mcp.supabase.com",
       "mcp.tavily.com",
       "mcp.upstash.com",
+      "mcp.webflow.com",
     ]);
     expect(new Set(hostnames).size).toBe(hostnames.length);
   });
@@ -183,6 +192,10 @@ describe("buildScopedMcpUrl — default (unscoped) URLs", () => {
     ["tavily", "https://mcp.tavily.com/mcp"],
     ["firecrawl", "https://mcp.firecrawl.dev/v2/mcp-oauth"],
     ["huggingface", "https://huggingface.co/mcp"],
+    ["webflow", "https://mcp.webflow.com/mcp"],
+    ["netlify", "https://mcp.netlify.com/mcp"],
+    // Railway documents the bare origin; normalisation adds the root slash.
+    ["railway", "https://mcp.railway.com/"],
   ];
 
   for (const [id, expected] of cases) {
@@ -225,7 +238,7 @@ describe("buildScopedMcpUrl — read-only per provider mechanism", () => {
 
   it("ignores readOnly for providers that cannot express it in the URL", () => {
     // Enforcement for these falls to the destructive-tool approval gate.
-    for (const id of ["stripe", "context7", "prisma", "cloudflare", "sentry", "resend", "upstash", "sanity", "notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface"] as const) {
+    for (const id of ["stripe", "context7", "prisma", "cloudflare", "sentry", "resend", "upstash", "sanity", "notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface", "webflow", "netlify", "railway"] as const) {
       expect(provider(id).supportsReadOnly).toBe(false);
       expect(urlFor(id, { readOnly: true })).toBe(urlFor(id, UNSCOPED));
       expect(buildScopedMcpUrl(provider(id), { readOnly: true }).headers).toEqual({});
@@ -690,4 +703,11 @@ describe("buildScopedMcpUrl — undeclared list values", () => {
 it("defers WorkOS until its tool inventory is verified (#563)", () => {
   expect(getProvider("workos")).toBeUndefined();
   expect(getTrustedHostnames()).not.toContain("mcp.workos.com");
+});
+
+it("defers PayPal until its documented endpoint path matches the live server (#538)", () => {
+  expect(getProvider("paypal")).toBeUndefined();
+  expect(getProvider("paypal-sandbox")).toBeUndefined();
+  expect(getTrustedHostnames()).not.toContain("mcp.paypal.com");
+  expect(getTrustedHostnames()).not.toContain("mcp.sandbox.paypal.com");
 });
