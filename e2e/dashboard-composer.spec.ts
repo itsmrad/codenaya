@@ -27,6 +27,12 @@ test.describe("dashboard prompt composer", () => {
       name: "Describe what you want to build",
     });
 
+    const plan = page.getByRole("main").getByRole("radio", { name: "Ask / Plan", exact: true });
+    await composer.press("Shift+Tab");
+    await expect(plan).toBeChecked();
+    await expect(composer).toBeFocused();
+    await composer.press("Shift+Tab");
+    await expect(plan).not.toBeChecked();
     await composer.fill(SMOKE_PROMPT);
     await composer.press("Enter");
 

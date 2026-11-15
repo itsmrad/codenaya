@@ -128,17 +128,18 @@ test.describe.serial("plan mode", () => {
     await expect(input).toBeFocused();
     await input.press("Tab");
     await expect(input).not.toBeFocused();
-    await input.focus();
+    // Shift+Tab outside the textarea keeps its native focus behavior.
     await page.keyboard.press("Shift+Tab");
-    await expect(input).not.toBeFocused();
-    expect(await input.evaluate((textarea) => {
-      const previousControl = document.activeElement;
-      return previousControl !== null && previousControl !== document.body &&
-        Boolean(textarea.compareDocumentPosition(previousControl) & Node.DOCUMENT_POSITION_PRECEDING);
-    })).toBe(true);
     await expect(buildToggle).toBeChecked();
-    await planToggle.click();
+    await input.press("Shift+Tab");
+    await expect(input).toBeFocused();
     await expect(planToggle).toBeChecked();
+    await input.press("Shift+Tab");
+    await expect(buildToggle).toBeChecked();
+    await input.press("Shift+Tab");
+    await expect(planToggle).toBeChecked();
+    await planToggle.hover();
+    await expect(page.getByRole("tooltip")).toContainText("Shift+Tab in composer");
 
     await input.fill("todo app");
     await input.press("Enter");

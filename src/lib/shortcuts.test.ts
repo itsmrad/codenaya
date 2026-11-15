@@ -5,6 +5,7 @@ import {
   SHORTCUT_SCOPES,
   formatShortcutKey,
   isCommandPaletteKey,
+  isPlanModeKey,
   isShortcutSheetKey,
 } from "./shortcuts";
 
@@ -27,6 +28,12 @@ describe("formatShortcutKey", () => {
 });
 
 describe("SHORTCUTS", () => {
+  it("lists Shift+Tab for Plan mode in Chat", () => {
+    expect(SHORTCUTS).toContainEqual({
+      label: "Toggle Plan mode", keys: [["shift", "tab"]], scope: "Chat",
+    });
+  });
+
   it("only uses known scopes", () => {
     for (const shortcut of SHORTCUTS) {
       expect(SHORTCUT_SCOPES).toContain(shortcut.scope);
@@ -104,6 +111,29 @@ describe("isShortcutSheetKey", () => {
   it("leaves keys another handler already took", () => {
     expect(isShortcutSheetKey(keyEvent({ key: "/", ctrlKey: true, defaultPrevented: true }))).toBe(false);
     expect(isShortcutSheetKey(keyEvent({ key: "/" }))).toBe(false);
+  });
+
+  describe("isPlanModeKey", () => {
+    const composer = new FakeElement("TEXTAREA") as unknown as HTMLTextAreaElement;
+    const shiftTab = (init: Partial<KeyboardEvent> = {}) =>
+      keyEvent({ key: "Tab", shiftKey: true, target: composer, ...init });
+
+    it("recognizes Shift+Tab only in the receiving composer", () => {
+      expect(isPlanModeKey(shiftTab(), composer)).toBe(true);
+      for (const target of [new FakeElement("BUTTON"), new FakeElement("TEXTAREA"), null]) {
+        expect(isPlanModeKey(shiftTab({ target: target as EventTarget | null }), composer)).toBe(false);
+      }
+    });
+
+    it("leaves Tab, other modifiers, composition and handled events alone", () => {
+      for (const init of [
+        { shiftKey: false }, { key: "Enter" }, { altKey: true },
+        { ctrlKey: true }, { metaKey: true }, { isComposing: true },
+        { defaultPrevented: true },
+      ]) {
+        expect(isPlanModeKey(shiftTab(init), composer)).toBe(false);
+      }
+    });
   });
 
   describe("isCommandPaletteKey", () => {

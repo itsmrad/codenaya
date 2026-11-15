@@ -29,6 +29,7 @@ import { useEnhancePrompt } from "@/features/conversations/hooks/use-enhance-pro
 import { GridCross } from "@/components/landing/section-header";
 import { MENU_CONTENT, MenuHeader } from "@/components/menu-chrome";
 import { cn } from "@/lib/utils";
+import { isPlanModeKey } from "@/lib/shortcuts";
 
 const PLACEHOLDER_PREFIX = "Ask Codenaya to build ";
 const PLACEHOLDER_IDEAS = [
@@ -199,6 +200,12 @@ export const PromptComposer = ({
               placeholder={placeholder}
               className="min-h-24 px-5 pt-4 pb-3 text-[15px]/7 placeholder:text-muted-foreground/55"
               onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(event) => {
+                if (isPlanModeKey(event.nativeEvent, event.currentTarget) && !isBusy && mode !== "swarm") {
+                  event.preventDefault();
+                  setMode((current) => current === "plan" ? "build" : "plan");
+                }
+              }}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               value={input}
