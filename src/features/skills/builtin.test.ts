@@ -61,6 +61,21 @@ describe("built-in skills", () => {
     expect(body).not.toMatch(/disable row level security|using \(true\)\s*;/i);
   });
 
+  it("supabase-auth-db distinguishes Vite browser auth from Next.js cookie-based server auth", () => {
+    const body = bodyOf("supabase-auth-db");
+
+    expect(body).toContain("import.meta.env.VITE_SUPABASE_URL");
+    expect(body).toContain("import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY");
+    expect(body).toContain("process.env.NEXT_PUBLIC_SUPABASE_URL");
+    expect(body).toContain("process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+    for (const rule of ["@supabase/ssr", "createBrowserClient", "createServerClient", "await cookies()", "getAll", "setAll", "src/app/api/**/route.ts", "src/middleware.ts", "supabase.auth.getUser()", "exchangeCodeForSession"]) {
+      expect(body).toContain(rule);
+    }
+    expect(body).toContain("React Router examples in steps 2–4 are Vite-only");
+    expect(body).toContain("missing value does not break");
+    expect(body).not.toMatch(/NEXT_PUBLIC_\w*(SECRET|SERVICE)/);
+  });
+
   it("stripe-checkout keeps secrets server-side and verifies webhooks", () => {
     const body = bodyOf("stripe-checkout");
 
