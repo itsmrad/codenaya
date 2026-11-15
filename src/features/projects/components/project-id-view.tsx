@@ -27,6 +27,7 @@ import { UserMenu } from "@/components/user-menu";
 import { useIsCompact, useIsMobile } from "@/hooks/use-mobile";
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
 import { EditorView } from "@/features/editor/components/editor-view";
+import { useEditorLeaveGuard } from "@/features/editor/hooks/use-editor-leave-guard";
 import { useEditorStore } from "@/features/editor/store/use-editor-store";
 import {
   Tooltip,
@@ -112,6 +113,7 @@ export const ProjectIdView = ({
   projectId: Id<"projects">;
 }) => {
   const isMobile = useIsMobile();
+  useEditorLeaveGuard(projectId);
   // Below desktop width the chat is a tab rather than a side panel.
   const isCompact = useIsCompact();
   // Switching preview engines reloads the page with `?view=preview` so the user

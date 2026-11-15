@@ -702,6 +702,9 @@ export default defineSchema({
 
     // Last four characters only, e.g. "••••3f2a".
     maskedPreview: v.string(),
+    // First 12 hex chars of a KEK-keyed HMAC of the key, set on save (#614).
+    // Keys saved before it have none; pickers then fall back to maskedPreview.
+    fingerprint: v.optional(v.string()),
     status: v.union(v.literal("active"), v.literal("invalid")),
     statusMessage: v.optional(v.string()),
     lastTestedAt: v.optional(v.number()),

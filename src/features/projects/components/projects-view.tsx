@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { MotionConfig, motion } from "motion/react";
 import { GitBranch, Search } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { useCommandPalette } from "@/lib/command-palette";
 import { useIsMac } from "@/lib/hooks/use-is-mac";
 import { Kbd } from "@/components/ui/kbd";
@@ -165,10 +166,10 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
       <main className="flex flex-1 flex-col overflow-x-clip bg-background">
         {/* The landing page's grid: one framed column, sections on shared borders. */}
         <div className="mx-auto w-full max-w-[1200px] flex-1 border-x border-border">
-          {/* ─── Hero: the prompt composer ─── */}
+          {/* ─── Hero: the prompt composer; tighter on phones for returning users so a Recent card fits at 375x812 (#572) ─── */}
           <section className="border-b border-border">
             <div className={`relative isolate overflow-hidden px-6 md:px-12 ${
-                hasNoProjects ? "pt-16 pb-14 md:pt-20 md:pb-16" : "pt-8 pb-8 md:pt-12 md:pb-10"
+                hasNoProjects ? "pt-16 pb-14 md:pt-20 md:pb-16" : "pt-6 pb-6 sm:pt-8 sm:pb-8 md:pt-12 md:pb-10"
               }`}>
               {/* The landing hero's backdrop: a grid fading out from the top centre. */}
               <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
@@ -185,19 +186,19 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
                   >
                     What will you <span className="text-brand">build?</span>
                   </motion.h2>
-                  <motion.p {...enter(0.2)} className="mx-auto mt-5 max-w-md text-[15px] leading-relaxed text-muted-foreground">
+                  <motion.p {...enter(0.2)} className={cn("mx-auto mt-5 max-w-md text-[15px] leading-relaxed text-muted-foreground", !hasNoProjects && "max-sm:mt-3")}>
                     {hasNoProjects
                       ? "Describe your first app, or start from a template below."
                       : "Describe an app and Codenaya builds it, with a live preview."}
                   </motion.p>
                 </div>
 
-                <motion.div {...enter(0.28)} className="mt-9">
+                <motion.div {...enter(0.28)} className={cn("mt-9", !hasNoProjects && "max-sm:mt-6")}>
                   <PromptComposer
                     onSubmit={(prompt, mode) => createProject(prompt, undefined, false, mode)}
                     isSubmitting={isSubmitting}
                   />
-                  <div className="mt-5 flex items-center justify-center gap-4 text-xs text-muted-foreground">
+                  <div className={cn("mt-5 flex items-center justify-center gap-4 text-xs text-muted-foreground", !hasNoProjects && "max-sm:mt-4")}>
                     <button
                       onClick={() => setImportDialogOpen(true)}
                       className="flex items-center gap-1.5 transition-colors hover:text-foreground"
@@ -234,9 +235,9 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
             </>
           ) : (
             <>
-              <section className="hidden border-b border-border has-[>:nth-child(2)]:block">
+              {/* The setup pill goes under Recent so it can't push the first card below the fold (#572). */}
+              <section className="hidden border-b border-border has-[>:nth-child(2)]:block [&>[aria-labelledby=recent-heading]:not(:last-child)]:border-b">
                 <LabelBar label="Workspace" />
-                {checklist}
                 {allProjects && allProjects.length > RECENT_MIN && (
                   <RecentProjects
                     projects={allProjects}
@@ -246,6 +247,7 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
                     }}
                   />
                 )}
+                {checklist}
               </section>
               <Tabs
                 ref={tabsRef}

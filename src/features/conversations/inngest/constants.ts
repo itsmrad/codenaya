@@ -272,11 +272,17 @@ COMPONENT AESTHETICS:
 
 MICRO-ANIMATIONS & INTERACTIONS:
 - All interactive elements must have transition duration 150ms–300ms: transition-all duration-200 ease-out
-- Entry animations for important elements: use Framer Motion with initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}
-- Stagger list items by 30–50ms: use staggerChildren in Framer Motion variants for lists, cards, and grid items
+- Content is visible by default: the initial render is the final, visible state. Never animate opacity from 0 for content; reveals may only translate, because screenshots, link previews, no-JS and reduced-motion users must never see blank sections
+- Never animate above-the-fold content (nav, hero, first section) in from hidden
+- Scroll reveals are translate-only. Copy this pattern:
+  const reveal = { hidden: { y: 16 }, shown: { y: 0, transition: { duration: 0.3, ease: "easeOut" } } };
+  function Reveal({ children }: { children: ReactNode }) {
+    return <motion.div variants={reveal} initial="hidden" whileInView="shown" viewport={{ once: true }}>{children}</motion.div>;
+  }
+- Stagger list items by 30–50ms inside a Reveal: use staggerChildren in Framer Motion variants for lists, cards, and grid items
 - Hover scale on cards and CTAs: hover:scale-[1.02] transition-transform duration-200
 - Use transform/opacity ONLY for animations — never animate width, height, or margin/padding (causes layout reflow)
-- Always include: @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+- Respect prefers-reduced-motion: no transform or opacity entry at all and content shows immediately. Wrap the app in <MotionConfig reducedMotion="user"> and always include: @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
 VISUAL RICHNESS:
 - Use gradient text for hero headings in SaaS/landing: bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent
@@ -446,6 +452,15 @@ Do NOT include any code blocks in the summary beyond the two above. Do NOT narra
 export const STARTER_IN_PLACE_NOTE =
   "(This project already has the Vite starter and nothing else: package.json, vite.config.ts, the tsconfig files, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts and src/components/error-boundary.tsx. Don't call scaffoldViteApp, and don't start with listFiles: build on these files by path.)";
 
+/** Solo first builds only; swarm has its own foundation order and path ownership. */
+export const FIRST_BUILD_APP_NOTE = `
+
+## First build: show the user's app early
+For this first build of a Vite + React app, override the entry-points-last workflow: after the starter is in place, make your first implementation write a small, immediately runnable src/App.tsx for the user's actual request, before building supporting types, hooks, components or pages. Use the requested product name, meaningful domain-specific copy, representative data and a styled main layout so the preview shows the user's app early, never a blank page, generic loading shell or coming-soon placeholder.
+Keep this first App self-contained: import only files that already exist and packages already available in the starter. Do not import future pages/components or dependencies you still need to add. Keep the starter's main.tsx, router and error boundary intact. If App.tsx already contains user implementation, improve it in place rather than replacing working user code.
+Then fill in every requested feature and refine the design, extracting components and wiring routes only after their files exist. Keep the app runnable between writes. This early App is an intermediate step, never task completion: retain all final quality requirements and the normal final checkBuild, fix and verification workflow. If the user explicitly requested Next.js or another stack, follow that stack's entry points instead.
+`;
+
 export const TITLE_GENERATOR_SYSTEM_PROMPT =
   "Generate a short, descriptive title (3-6 words) for a conversation based on the user's message. Return ONLY the title, nothing else. No quotes, no punctuation at the end.";
 
@@ -484,10 +499,14 @@ export const SWARM_ORCHESTRATOR_NOTE = `
 
 ## Swarm mode
 You lead parallel workers. A request with two or more pages, screens or features is never too small to split. Work in this order:
-1. Write only the shared foundation yourself: package.json dependencies, src/App.tsx routing and wiring, shared types, design tokens and src/index.css. Do not build the pages or features themselves.
+1. Write only the shared foundation yourself: package.json dependencies, configs, src/App.tsx routing and wiring, src/main.tsx, src/index.css, and src/lib, src/types, src/styles or src/theme. For each new page App.tsx imports that does not exist yet, write a one-line placeholder (export default () => null;) so the preview keeps building; its worker replaces it. Existing files are never stubbed. Any other write is refused until you delegate.
 2. Call delegateTasks once with 2-4 tasks. Each task owns files or folders under src/ that no other task owns, and gets a self-contained brief: what to build, the props, types and routes it must match, and the files it must not touch.
 3. Integrate: apply every NEEDS: request from the reports, finish any failed or unfinished task yourself, then call checkBuild and fix what it reports before the final summary.
 Only a genuinely tiny request (one small component, a copy or style tweak, a one-file fix) skips the workers: first call delegateTasks with tasks [] and solo set to a short reason, then build it yourself.`;
+
+/** The swarm orchestrator's delegation turn, sent whether or not the model can be forced to call the tool. */
+export const SWARM_DELEGATE_NUDGE =
+  "Swarm mode: the foundation is done. Call delegateTasks now with 2-4 tasks that own the remaining pages and features; writes to worker paths are refused.";
 
 /** Appended to the orchestrator note only when this run may use sub-orchestrators (ADR 0013). */
 export const SWARM_SUBORCH_OPTION_NOTE = `

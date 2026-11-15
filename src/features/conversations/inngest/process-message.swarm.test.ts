@@ -25,14 +25,16 @@ import { mergeMessageSteps } from "../../../../convex/messageSteps";
 import type { AgentStep } from "../agent-steps";
 import { swarmHeader, swarmSoloReason } from "../swarm-status";
 import { BUILD_NOT_BUILT_NOTE } from "./build-check-gate";
+import { SWARM_DELEGATE_NUDGE } from "./constants";
 import { drive, text, toolCall } from "./process-message.driver";
 
 let swarmEnabled: boolean;
 let projectFiles: Array<Record<string, unknown>>;
+let recentMessages: Array<Record<string, unknown>>;
 
 const QUERIES: Record<string, () => unknown> = {
   "system:getConversationById": () => ({ title: "Existing chat" }),
-  "system:getRecentMessages": () => [],
+  "system:getRecentMessages": () => recentMessages,
   "system:getProjectById": () => ({ ownerId: "user_1" }),
   "system:getProjectMcpConnections": () => [],
   "system:getProjectFiles": () => projectFiles,
@@ -69,6 +71,9 @@ const codingRequests = (bodies: unknown[]) =>
 const toolResults = (bodies: unknown[]) =>
   (codingRequests(bodies).at(-1)?.messages ?? []).filter((m) => m.role === "tool")
     .map((m) => String((JSON.parse(String(m.content)) as { data: unknown }).data));
+/** The tool_choice of every forced request, in order. */
+const forcedRequests = (bodies: unknown[]) =>
+  (bodies as Array<{ tool_choice?: unknown }>).map((body) => body.tool_choice).filter((choice) => choice && typeof choice === "object");
 const mutationArgs = (name: string) =>
   mocks.mutation.mock.calls.filter(([ref]) => getFunctionName(ref) === name).map(([, args]) => args);
 
@@ -88,6 +93,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   swarmEnabled = true;
   projectFiles = [];
+  recentMessages = [];
   vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
   mocks.query.mockImplementation(async (ref) => QUERIES[getFunctionName(ref)]?.());
   mocks.mutation.mockImplementation(async (ref, args) => MUTATIONS[getFunctionName(ref)]?.(args) ?? null);
@@ -163,6 +169,23 @@ describe("processMessage swarm mode", () => {
       expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_1", depth: 1 }) }, timeout: "12m" }),
     ]);
     expect(toolResults(outcome.inferenceBodies)[0]).toContain("Files written: src/pages/home.tsx, src/pages/about.tsx");
+  });
+
+  it("delegates a plan with a detailed 5000-character brief (#646)", async () => {
+    const brief = `Build the home page. ${"Match the dental clinic's tone and layout. ".repeat(120)}`.slice(0, 4999) + ".";
+    const plan = { tasks: [{ ...PLAN.tasks[0], brief }, PLAN.tasks[1]] };
+    const outcome = await swarm([
+      { data: toolCall("delegateTasks", plan) },
+      { data: toolCall("checkBuild") },
+      { data: text("Done.") },
+    ], [DONE, NAV_DONE]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(mutationArgs("agentTasks:createTasks")[0].tasks).toEqual([
+      expect.objectContaining({ taskId: "pages", brief }),
+      expect.objectContaining({ taskId: "nav" }),
+    ]);
+    expect(outcome.invocations).toHaveLength(2);
   });
 
   it("returns an invalid plan as an Error to re-plan, then runs the valid one", async () => {
@@ -319,7 +342,7 @@ describe("processMessage swarm mode", () => {
   it.each([
     ["one-line copy change", "one-line copy change"],
     [`  ${"x".repeat(201)}  `, "x".repeat(200)],
-  ])("records the trimmed, capped solo reason (%s) and runs no workers", async (solo, expected) => {
+  ])("keeps a tiny prompt solo with the classifier's reason, records its own (%s), and forces nothing", async (solo, expected) => {
     const outcome = await swarm([
       { data: toolCall("delegateTasks", { tasks: [], solo }) },
       { data: toolCall("writeFiles", { files: [{ path: "src/App.tsx", content: "export default () => null;\n" }] }) },
@@ -335,8 +358,170 @@ describe("processMessage swarm mode", () => {
     const steps = mutationArgs("system:upsertMessageSteps")
       .reduce<AgentStep[]>((all, { steps }) => mergeMessageSteps(all, steps as AgentStep[]), []);
     expect(steps.find((step) => step.tool === "delegateTasks")?.targets).toEqual([expected]);
-    expect(swarmSoloReason(steps)).toBe(expected);
-    expect(swarmHeader([], 0, 5000, swarmSoloReason(steps))).toBe(`Swarm · Built solo: ${expected} · 0:05`);
+    // The board's reason is the classifier's, decided before the run.
+    expect(swarmSoloReason(steps)).toBe("a small edit");
+    expect(swarmHeader([], 0, 5000, swarmSoloReason(steps))).toBe("Swarm · Built solo: a small edit · 0:05");
+    expect(forcedRequests(outcome.inferenceBodies)).toEqual([]);
+  });
+
+  it("keeps a tiny follow-up to a completed reply solo", async () => {
+    recentMessages = [
+      { _id: "u0", role: "user", content: PIZZERIA },
+      { _id: "a0", role: "assistant", content: "Built the site.", status: "completed" },
+      { _id: "u1", role: "user", content: "change the button color to red" },
+      { _id: "m1", role: "assistant", content: "", status: "processing" },
+    ];
+    const outcome = await swarm([
+      { data: toolCall("writeFiles", { files: [{ path: "src/components/button.tsx", content: `export const B = () => <button>${"x".repeat(300)}</button>;\n` }] }) },
+      { data: text("Done.") },
+    ], [], undefined, "change the button color to red");
+
+    expect(toolResults(outcome.inferenceBodies)[0]).not.toMatch(/^Error/);
+    expect(forcedRequests(outcome.inferenceBodies)).toEqual([]);
+    const steps = mutationArgs("system:upsertMessageSteps").flatMap(({ steps }) => steps as AgentStep[]);
+    expect(swarmSoloReason(steps)).toBe("a small edit");
+  });
+
+  describe("a split request (the classifier says delegate)", () => {
+    const FOUNDATION = toolCall("writeFiles", { files: [
+      { path: "src/App.tsx", content: "import Home from './pages/home';\nexport default Home;\n" },
+      // A one-line placeholder the pages worker overwrites, so App.tsx's import resolves meanwhile.
+      { path: "src/pages/home.tsx", content: "export default () => null;\n" },
+    ] });
+    const PAGE = toolCall("writeFiles", { files: [{ path: "src/pages/menu.tsx", content: `export default () => <main>${"x".repeat(300)}</main>;\n` }] });
+    const OVERLAP = { tasks: [PLAN.tasks[0], { ...PLAN.tasks[1], ownedPaths: ["src/pages/nav.tsx"] }] };
+
+    it("refuses a page write before delegation, then forces delegateTasks, which runs the workers", async () => {
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: PAGE },
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE]);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      const [foundation, page, report] = toolResults(outcome.inferenceBodies);
+      expect(foundation).not.toMatch(/^Error/);
+      expect(page).toBe("Error: Swarm mode: src/pages/menu.tsx belongs to a worker. Call delegateTasks now with 2-4 tasks that own it.");
+      expect(report).toContain("## pages: Pages (done)");
+      // Only the third call was forced, on the OpenAI-compatible route, with the nudge.
+      expect(forcedRequests(outcome.inferenceBodies)).toEqual([{ type: "function", function: { name: "delegateTasks" } }]);
+      expect(JSON.stringify(codingRequests(outcome.inferenceBodies)[2].messages)).toContain(SWARM_DELEGATE_NUDGE);
+      expect(mutationArgs("agentTasks:createTasks")[0].tasks).toHaveLength(2);
+    });
+
+    it("classifies Stop then \"continue\" on the stopped request, so it still delegates", async () => {
+      recentMessages = [
+        { _id: "u0", role: "user", content: PIZZERIA },
+        { _id: "a0", role: "assistant", content: "", status: "cancelled" },
+        { _id: "u1", role: "user", content: "continue" },
+        { _id: "m1", role: "assistant", content: "", status: "processing" },
+      ];
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: PAGE },
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE], undefined, "continue");
+
+      expect(outcome.finalType).toBe("function-resolved");
+      expect(toolResults(outcome.inferenceBodies)[1]).toMatch(/^Error: Swarm mode: src\/pages\/menu.tsx belongs to a worker/);
+      expect(forcedRequests(outcome.inferenceBodies)).toHaveLength(1);
+      expect(mutationArgs("agentTasks:createTasks")).toHaveLength(1);
+    });
+
+    it("builds solo with the reason, and completes, when the forced turn's request fails", async () => {
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: PAGE },
+        { error: { name: "Error", message: "400 tool_choice forced is not compatible with thinking" } },
+        { data: PAGE },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], []);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      // The page write after the fallback goes through.
+      expect(toolResults(outcome.inferenceBodies).at(-2)).not.toMatch(/^Error/);
+      expect(mutationArgs("agentTasks:createTasks")).toEqual([]);
+      const steps = mutationArgs("system:upsertMessageSteps")
+        .reduce<AgentStep[]>((all, { steps }) => mergeMessageSteps(all, steps as AgentStep[]), []);
+      expect(swarmSoloReason(steps)).toMatch(/^delegation failed \(.*tool_choice/);
+    });
+
+    it("refuses a placeholder over a file that already exists", async () => {
+      projectFiles = [
+        { _id: "d1", name: "src", type: "folder" },
+        { _id: "d2", name: "pages", type: "folder", parentId: "d1" },
+        { _id: "f1", name: "home.tsx", type: "file", parentId: "d2" },
+      ];
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE]);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      expect(toolResults(outcome.inferenceBodies)[0])
+        .toBe("Error: Swarm mode: src/pages/home.tsx already exists, so it belongs to a worker; placeholders are for new files only. Call delegateTasks now with 2-4 tasks that own it.");
+      expect(mutationArgs("system:createFiles")).toEqual([]);
+    });
+
+    it("forces delegateTasks when the orchestrator would end without delegating", async () => {
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: text("All done.") },
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE]);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      expect(forcedRequests(outcome.inferenceBodies)).toHaveLength(1);
+      expect(outcome.invocations).toHaveLength(2);
+    });
+
+    it("refuses a solo call, and forces once more after an invalid forced plan", async () => {
+      const outcome = await swarm([
+        { data: toolCall("delegateTasks", { tasks: [], solo: "small enough" }) },
+        { data: toolCall("delegateTasks", OVERLAP) },
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE]);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      const [solo, invalid, report] = toolResults(outcome.inferenceBodies);
+      expect(solo).toMatch(/^Error: Swarm mode: this request is split among workers \(it names 4 pages or features/);
+      expect(invalid).toMatch(/^Error: Owned paths overlap/);
+      expect(report).toContain("(done)");
+      expect(forcedRequests(outcome.inferenceBodies)).toHaveLength(2);
+    });
+
+    it("builds solo, with the refusal as the board's reason, after two invalid forced plans", async () => {
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: PAGE },
+        { data: toolCall("delegateTasks", OVERLAP) },
+        { data: toolCall("delegateTasks", OVERLAP) },
+        { data: PAGE },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], []);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      const results = toolResults(outcome.inferenceBodies);
+      // The page write after the fallback goes through.
+      expect(results[4]).not.toMatch(/^Error/);
+      expect(forcedRequests(outcome.inferenceBodies)).toHaveLength(2);
+      expect(mutationArgs("agentTasks:createTasks")).toEqual([]);
+      const steps = mutationArgs("system:upsertMessageSteps")
+        .reduce<AgentStep[]>((all, { steps }) => mergeMessageSteps(all, steps as AgentStep[]), []);
+      expect(swarmSoloReason(steps)).toMatch(/^Owned paths overlap between pages and nav/);
+    });
   });
 
   it("offers no delegateTasks and no swarm note outside swarm mode", async () => {

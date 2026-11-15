@@ -1,6 +1,6 @@
 {
   "booking": {
-    "prompt": "Build a booking page for a consultant named Alex Rivera, like a mini cal.com. Show a profile header, a list of 3 meeting types (15 min intro call, 30 min consultation, 60 min deep dive) with durations. Selecting one shows a month calendar where weekdays are available and weekends are disabled, then a list of time slots (9:00–17:00, every 30 min) for the picked day. Picking a slot opens a booking form (name, email, notes) with validation; on submit show a confirmation screen with the meeting details and an 'Add another booking' button. Keep bookings in localStorage so booked slots show as unavailable. Clean, modern, responsive design.",
+    "prompt": "Build a booking page for a consultant named Alex Rivera, like a small scheduling app. Show a profile header, a list of 3 meeting types (15 min intro call, 30 min consultation, 60 min deep dive) with durations. Selecting one shows a month calendar where weekdays are available and weekends are disabled, then a list of time slots (9:00–17:00, every 30 min) for the picked day. Picking a slot opens a booking form (name, email, notes) with validation; on submit show a confirmation screen with the meeting details and an 'Add another booking' button. Keep bookings in localStorage so booked slots show as unavailable. Clean, modern, responsive design.",
     "rubric": ["profile header", "3 meeting types w/ durations", "calendar with weekends disabled", "time slots", "form w/ validation", "confirmation screen", "responsive/polished", "no broken layout"]
   },
   "saas": {

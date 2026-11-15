@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { guardOwnedPaths } from "./inngest/lib/ownership-guard";
-import { ownsPath, swarmPlanSchema, validatePlan } from "./swarm";
+import { MAX_BRIEF_CHARS, classifySwarmPrompt, isFoundationPath, ownsPath, swarmPlanSchema, validatePlan } from "./swarm";
 
 const task = (id: string, ownedPaths: string[]) => ({ id, title: id, brief: `Build ${id}.`, ownedPaths });
 
@@ -39,6 +39,15 @@ describe("validatePlan", () => {
     expect(validatePlan(plan)).toEqual({
       tasks: [task("nav", ["src/components/nav"]), task("hero", ["src/components/hero.tsx"])],
     });
+  });
+
+  it("accepts a detailed brief and names the task, length and limit for one over the cap (#646)", () => {
+    const long = { ...task("pages", ["src/pages/"]), brief: "x".repeat(5000) };
+    expect(validatePlan({ tasks: [long, task("nav", ["src/nav.tsx"])] })).toMatchObject({ tasks: [{ brief: long.brief }, {}] });
+    const over = { ...long, brief: "x".repeat(MAX_BRIEF_CHARS + 1) };
+    expect(validatePlan({ tasks: [task("nav", ["src/nav.tsx"]), over] })).toBe(
+      `Error: The brief for task pages is ${MAX_BRIEF_CHARS + 1} characters; the limit is ${MAX_BRIEF_CHARS}. Shorten it and call delegateTasks again.`,
+    );
   });
 
   it("refuses too few or too many tasks", () => {
@@ -143,3 +152,39 @@ describe("guardOwnedPaths", () => {
     expect(handler).toHaveBeenCalledTimes(3);
   });
 });
+
+describe("classifySwarmPrompt", () => {
+  it.each([
+    "Build a pizzeria site with home, menu, about and contact pages",
+    "Make a website for a dental clinic: home, services, our dentists, appointments and contact",
+    "Create a booking app where customers pick a service, choose a time slot and get a confirmation page, plus an admin view",
+    "Build a CRM with contacts, a deals pipeline and a dashboard",
+    "A 3-page portfolio site",
+    "Add a menu page and a contact page",
+    "add a login page and a dashboard",
+  ])("delegates %j", (prompt) => {
+    expect(classifySwarmPrompt(prompt)).toMatchObject({ delegate: true });
+  });
+
+  it.each([
+    "change the button color to red",
+    "Fix the typo in the footer",
+    "Add a contact form to the home page",
+  ])("keeps %j solo as a small edit", (prompt) => {
+    expect(classifySwarmPrompt(prompt)).toEqual({ delegate: false, reason: "a small edit" });
+  });
+
+  it("names the pages it counted, and keeps a short vague request solo", () => {
+    expect(classifySwarmPrompt("Build a pizzeria site with home, menu, about and contact pages").reason)
+      .toBe("it names 4 pages or features (home, menu, about, contact)");
+    expect(classifySwarmPrompt("Build a todo app").delegate).toBe(false);
+  });
+});
+
+describe("isFoundationPath", () => {
+  it.each(["package.json", "vite.config.ts", "src/App.tsx", "src/main.tsx", "src/index.css", "src/lib/api.ts", "src/types/menu.ts", "src/types.ts", "src/vite-env.d.ts", "src/styles/tokens.css", "src/theme/colors.ts"])(
+    "lets the orchestrator write %s before delegation", (path) => expect(isFoundationPath(path)).toBe(true));
+  it.each(["src/pages/menu.tsx", "src/components/nav.tsx", "src", "src/lib"])(
+    "keeps %s for a worker", (path) => expect(isFoundationPath(path)).toBe(false));
+});
+
