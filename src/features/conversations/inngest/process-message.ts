@@ -11,6 +11,8 @@ import {
   MAX_AGENT_STEPS,
   STARTER_IN_PLACE_NOTE,
   STEP_BUDGET_NOTE,
+  OUT_OF_CREDITS_NOTE,
+  OUT_OF_CREDITS_REPLY,
   SWARM_DELEGATE_NUDGE,
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
@@ -52,7 +54,7 @@ import {
 } from '@/features/ai-providers/server/resolve-run-model';
 import { forceToolCall, withoutToolCalls } from '@/features/ai-providers/server/agentkit-model';
 import type { ModelPricing } from '@/features/ai-providers/catalog';
-import { costUsd, usageOfResponse } from '@/features/billing/credits';
+import { costUsd, creditsForCost, usageOfResponse } from '@/features/billing/credits';
 import {
   type AgentStep,
   buildCheckLabel,
@@ -82,6 +84,7 @@ import {
 } from '@/features/skills/server/resolve-skills';
 import { buildSkillsPromptSection, buildSupabaseHintSection } from '@/features/skills/server/prompt';
 import { buildProjectInstructionsSection } from '@/features/projects/instructions';
+import type { ProjectTheme } from '@/features/projects/theme';
 import { isStarterOnly } from './starter-only';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
@@ -94,6 +97,7 @@ import {
   markCutOffCalls,
   refuseCutOffCalls,
 } from './lib/output-limit';
+import { runCreditLimit } from "./lib/run-credit-limit";
 import { decodeJsonArgs, decodeToolCalls } from './lib/json-args';
 import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
@@ -225,6 +229,13 @@ export const processMessage = inngest.createFunction(
       return { success: false, messageId, conversationId };
     }
 
+    const creditLimit = await step.run("get-run-credit-limit", () =>
+      runCreditLimit(internalKey, projectId, runModel.metering.source));
+    // Rebuilt from sequential coding turns only: the parallel title may finish at any router call.
+    let codingCostUsd = 0;
+    const outOfCredits = () => creditLimit !== null && creditsForCost(codingCostUsd) >= creditLimit;
+    let creditStopped = false;
+
     const runKey = runModel.key;
     if (runKey) {
       await step.run("mark-ai-provider-key-used", async () => {
@@ -304,7 +315,9 @@ export const processMessage = inngest.createFunction(
       const tokens = usageOfResponse(raw);
       usage.inputTokens += tokens.inputTokens;
       usage.outputTokens += tokens.outputTokens;
-      usage.costUsd += pricing ? costUsd(pricing, tokens) : 0;
+      const cost = pricing ? costUsd(pricing, tokens) : 0;
+      usage.costUsd += cost;
+      if (id !== "record-usage-title") codingCostUsd += cost;
       await sendUsage(id);
     };
 
@@ -368,6 +381,7 @@ export const processMessage = inngest.createFunction(
     // project row so those act on behalf of whoever owns the work.
     let mcpOwnerId: string | undefined;
     let projectInstructions: string | undefined;
+    let projectTheme: ProjectTheme | undefined;
 
     try {
       // Fetched unconditionally: the owner is needed by setEnvVar, which is useful
@@ -378,6 +392,7 @@ export const processMessage = inngest.createFunction(
       });
       mcpOwnerId = project?.ownerId;
       projectInstructions = project?.instructions;
+      projectTheme = project?.theme;
 
       let entries = await convex.query(api.system.getProjectMcpConnections, {
         internalKey,
@@ -567,7 +582,7 @@ export const processMessage = inngest.createFunction(
     );
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
-      buildProjectInstructionsSection(projectInstructions),
+      buildProjectInstructionsSection(projectInstructions, projectTheme),
       buildSkillsPromptSection(skills),
       buildSupabaseHintSection(skills),
       buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
@@ -716,7 +731,7 @@ export const processMessage = inngest.createFunction(
           await recordSteps("record-turn-start", () => [turnHeartbeat(Date.now())], false);
           const trimmed = trimFileHistory([...earlierTurns, ...(history ?? [])]);
           const { stuck } = loopGuard;
-          const summaryNote = stuck ? stuckNote(stuck) : STEP_BUDGET_NOTE;
+          const summaryNote = creditStopped ? OUT_OF_CREDITS_NOTE : stuck ? stuckNote(stuck) : STEP_BUDGET_NOTE;
           const nudge =
             agent.name === SUMMARY_AGENT_NAME
               ? summaryNote
@@ -878,6 +893,12 @@ export const processMessage = inngest.createFunction(
           (m) => m.type === "tool_call"
         );
 
+        if (lastResult?.agentName === SUMMARY_AGENT_NAME) return undefined;
+        if (outOfCredits()) {
+          creditStopped = true;
+          return hasTextResponse && !hasToolCalls ? undefined : summaryAgent;
+        }
+
         // callCount, not results: seeded history would count as steps.
         const lastStep = callCount >= MAX_AGENT_STEPS - 1;
 
@@ -967,14 +988,24 @@ export const processMessage = inngest.createFunction(
     // Changes that ended on a failed or missing check get a repair here, before
     // the run completes, so it needs no open tab. Its model calls are metered
     // like the run's; cancelling the run stops it between steps.
-    const repair = !stuck && needsBuildRepair(result.state.results)
+    const repairNeeded = !stuck && needsBuildRepair(result.state.results);
+    if (repairNeeded && outOfCredits()) creditStopped = true;
+    const repairBudget = new AbortController();
+    const repair = repairNeeded && !outOfCredits()
       ? await repairBuild({
           projectId,
           internalKey,
           runId,
           model: codingModel,
           step: (id, fn) => step.run(id, fn),
-          onResponse: (raw) => recordUsage(raw, runModel.metering.coding),
+          signal: repairBudget.signal,
+          onResponse: async (raw) => {
+            await recordUsage(raw, runModel.metering.coding);
+            if (outOfCredits()) {
+              creditStopped = true;
+              repairBudget.abort();
+            }
+          },
           recordSteps: async (build) => {
             await recordSteps("record-repair-steps", build, false);
           },
@@ -982,6 +1013,8 @@ export const processMessage = inngest.createFunction(
       : null;
 
     await settleRun("record-usage-final");
+
+    if (creditStopped || outOfCredits()) assistantResponse += `\n\n${OUT_OF_CREDITS_REPLY}`;
 
     // Changes that did not end on a verified build are not a working build.
     const noteBefore = unverifiedBuildNote(result.state.results);
@@ -1004,7 +1037,7 @@ export const processMessage = inngest.createFunction(
         internalKey,
         messageId,
         content: buildNote && !stuck ? `${assistantResponse}\n\n${buildNote}` : assistantResponse,
-        ...(stuck ? { stuck } : verified ? {} : { outcome: "error" as const }),
+        ...(stuck ? { stuck } : verified || creditStopped ? {} : { outcome: "error" as const }),
       })
     });
 

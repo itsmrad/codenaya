@@ -184,7 +184,8 @@ export const autoFixTarget = (
  * Fixes, without a click, the error the run that just ended left (#491).
  * Armed when a run ends, for `windowMs`; disarmed by the next run, and by any
  * file change after the run ended, which is the user's edit, not the run's. An
- * error must stay eligible for `delayMs`, so the run's last syncs can clear it.
+ * error waits `delayMs`, so the run's last syncs can clear it. A reload that
+ * briefly clears the same error keeps its original deadline (#486).
  * `onFixingChange` says when a fix is pending, or sent and its run not over
  * (plus `delayMs` to settle) (#305); a sent fix that starts no run stops
  * counting after `windowMs`.
@@ -211,6 +212,8 @@ export const createAutoFixer = ({
   let fixTimer: ReturnType<typeof setTimeout> | undefined;
   let sentTimer: ReturnType<typeof setTimeout> | undefined;
   let pendingId: string | null = null;
+  let deadlineId: string | null = null;
+  let deadline = 0;
   // A fix was sent and the run it starts hasn't ended.
   let awaitingRun = false;
   let fixing = false;
@@ -230,6 +233,9 @@ export const createAutoFixer = ({
     clearTimeout(fixTimer);
     pendingId = target;
     if (target === null) return;
+    const now = Date.now();
+    if (target !== deadlineId || now > deadline) deadline = now + delayMs;
+    deadlineId = target;
     fixTimer = setTimeout(() => {
       pendingId = null;
       awaitingRun = true;
@@ -237,12 +243,13 @@ export const createAutoFixer = ({
       fix(target);
       sentTimer = setTimeout(stopAwaiting, windowMs);
       report();
-    }, delayMs);
+    }, Math.max(0, deadline - now));
   };
   const disarm = () => {
     armedFiles = null;
     clearTimeout(windowTimer);
     schedule(null);
+    deadlineId = null;
   };
 
   return {
@@ -279,15 +286,15 @@ export const createAutoFixer = ({
       } else if (armedFiles !== null && files !== armedFiles) {
         disarm();
       }
+      if (chatBusy) deadlineId = null;
       schedule(
         armedFiles === null ? null : autoFixTarget(errorId, { runActive, chatBusy, sent, max }),
       );
       report();
     },
     dispose: () => {
-      clearTimeout(windowTimer);
+      disarm();
       clearTimeout(sentTimer);
-      schedule(null);
     },
   };
 };

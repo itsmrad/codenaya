@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useConvexAuth } from "convex/react";
 import { toast } from "sonner";
@@ -11,10 +11,20 @@ import {
   EyeIcon,
   GitForkIcon,
   LinkIcon,
+  Share2Icon,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { badgeSnippets } from "@/lib/badge-snippets";
+import { copyToClipboard } from "@/lib/clipboard";
 import { ProjectCover } from "@/components/project-cover";
 import { SIGN_IN_URL } from "@/features/auth/constants";
 
@@ -24,6 +34,7 @@ import {
   useUserVote,
   useVote,
   useIncrementView,
+  useImportToWorkspace,
 } from "../hooks/use-showcase";
 import { authRedirectUrl, showcasePath, useRemix } from "../hooks/use-remix";
 
@@ -45,7 +56,14 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
   const vote = useVote();
   const incrementView = useIncrementView();
   const { isLoading: isAuthLoading, isAuthenticated } = useConvexAuth();
-  const { remix, isRemixing } = useRemix(project._id);
+  const importToWorkspace = useImportToWorkspace();
+  const { remix, isRemixing } = useRemix(
+    showcasePath(project._id),
+    useCallback(
+      () => importToWorkspace({ showcaseProjectId: project._id }),
+      [importToWorkspace, project._id],
+    ),
+  );
 
   // Live query for realtime vote counts
   const liveProject = useShowcaseById(project._id);
@@ -100,6 +118,12 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
       toast.error("Couldn't copy the link");
     }
   };
+
+  const copyRemixBadge = (format: "markdown" | "html") =>
+    copyToClipboard(
+      badgeSnippets("remix", window.location.origin, showcasePath(project._id))[format],
+      "Badge copied",
+    );
 
   return (
     <>
@@ -160,6 +184,25 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
               <LinkIcon className="size-4" />
               Copy link
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" aria-label="Share">
+                  <Share2Icon className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel className="flex items-center justify-between gap-3">
+                  Remix badge
+                  <img src="/badges/remix-on-codenaya.svg" alt="Remix on Codenaya" className="h-5 w-auto" />
+                </DropdownMenuLabel>
+                <DropdownMenuItem onSelect={() => copyRemixBadge("markdown")}>
+                  Copy Markdown
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => copyRemixBadge("html")}>
+                  Copy HTML
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               onClick={remix}
               disabled={isRemixing || isAuthLoading}

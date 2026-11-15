@@ -14,14 +14,26 @@ export interface PendingPrompt {
   mode?: MessageMode;
 }
 
+let draftRevision = 0;
+
 const isMode = (value: unknown): value is MessageMode => value === PLAN_MODE || value === SWARM_MODE;
 
 /** A build prompt stays a plain string, as stored before modes; another mode is kept as JSON. */
 export const savePendingPrompt = (prompt: string, mode?: MessageMode) => {
   try {
     localStorage.setItem(PENDING_PROMPT_KEY, mode ? JSON.stringify({ prompt, mode }) : prompt);
+    draftRevision++;
   } catch {
     // Without storage the prompt is simply not resumed.
+  }
+};
+
+/** Drops the saved prompt, for a draft that can never be created as written. */
+export const clearPendingPrompt = () => {
+  try {
+    localStorage.removeItem(PENDING_PROMPT_KEY);
+  } catch {
+    // Best-effort, like every other storage access.
   }
 };
 
@@ -50,13 +62,39 @@ export const peekPendingPrompt = (): string | null => {
   }
 };
 
-/** Returns the saved prompt and its mode at most once: reading it also clears it. */
-export const takePendingPrompt = (): PendingPrompt | null => {
+// Shared across effect replays and dashboard remounts while a request is pending.
+let isResuming = false;
+
+/** Keep the draft until creation succeeds; null means there was nothing to attempt. */
+export const resumePendingPrompt = async (
+  create: (pending: PendingPrompt) => Promise<boolean>,
+): Promise<boolean | null> => {
+  if (isResuming) return null;
+  let raw: string | null;
   try {
-    const saved = parse(localStorage.getItem(PENDING_PROMPT_KEY));
-    localStorage.removeItem(PENDING_PROMPT_KEY);
-    return saved;
+    raw = localStorage.getItem(PENDING_PROMPT_KEY);
   } catch {
     return null;
+  }
+  const pending = parse(raw);
+  if (!pending) return null;
+
+  const revision = draftRevision;
+  isResuming = true;
+  try {
+    if (!(await create(pending))) return false;
+    try {
+      // A draft saved during the request belongs to a later submission.
+      if (draftRevision === revision && localStorage.getItem(PENDING_PROMPT_KEY) === raw) {
+        localStorage.removeItem(PENDING_PROMPT_KEY);
+      }
+    } catch {
+      // Storage remains best-effort, even after a successful creation.
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    isResuming = false;
   }
 };

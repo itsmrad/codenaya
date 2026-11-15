@@ -383,6 +383,84 @@ describe("createAutoFixer (#491)", () => {
     expect(fix).toHaveBeenCalledExactlyOnceWith("a");
   });
 
+  it("keeps the first deadline through repeated reload clears (#486)", () => {
+    runEnds("a");
+    for (let reload = 0; reload < 2; reload++) {
+      vi.advanceTimersByTime(1000);
+      update({ errorId: null });
+      vi.advanceTimersByTime(100);
+      update({ errorId: "a" });
+    }
+    vi.advanceTimersByTime(799);
+    expect(fix).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(fix).toHaveBeenCalledExactlyOnceWith("a");
+    update({ errorId: null });
+    update({ errorId: "a" });
+    vi.advanceTimersByTime(3000);
+    expect(fix).toHaveBeenCalledTimes(1);
+  });
+
+  it("never fixes an error healed by the reload", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(1000);
+    update({ errorId: null });
+    vi.advanceTimersByTime(120_000);
+    expect(fix).not.toHaveBeenCalled();
+  });
+
+  it("gives a different error after a clear the full delay", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(1000);
+    update({ errorId: null });
+    vi.advanceTimersByTime(1000);
+    update({ errorId: "b" });
+    vi.advanceTimersByTime(2999);
+    expect(fix).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(fix).toHaveBeenCalledExactlyOnceWith("b");
+  });
+
+  it("starts a new delay when the same error returns after its old deadline", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(1000);
+    update({ errorId: null });
+    vi.advanceTimersByTime(3000);
+    update({ errorId: "a" });
+    vi.advanceTimersByTime(2999);
+    expect(fix).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(fix).toHaveBeenCalledExactlyOnceWith("a");
+  });
+
+  it("forgets a cleared error's deadline when a file edit disarms it", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(1000);
+    update({ errorId: null });
+    update({ files: ["user edit"] });
+    update({ errorId: "a" });
+    vi.advanceTimersByTime(1000);
+    expect(fix).not.toHaveBeenCalled();
+
+    runEnds("a");
+    vi.advanceTimersByTime(2999);
+    expect(fix).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(fix).toHaveBeenCalledExactlyOnceWith("a");
+  });
+
+  it("starts a fresh delay after the chat interrupts a pending fix", () => {
+    runEnds("a");
+    vi.advanceTimersByTime(1000);
+    update({ chatBusy: true });
+    vi.advanceTimersByTime(1000);
+    update({ chatBusy: false });
+    vi.advanceTimersByTime(2999);
+    expect(fix).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(fix).toHaveBeenCalledExactlyOnceWith("a");
+  });
+
   it("disarms on a file edit after the run ended: the user's typo is left alone", () => {
     runEnds(null);
     update({ files: ["user edit"] });

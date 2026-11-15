@@ -9,9 +9,12 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../../agent-models";
 import { sanitizeAgentText, toolResultError } from "../../agent-steps";
 import { type MessageMode, SWARM_MODE } from "../../plan-mode";
+import { FOUNDATION_MAX_STEPS } from "../../constants";
 import { MAX_SWARM_DEPTH, classifySwarmPrompt } from "../../swarm";
 import { SWARM_SOLO_STEP_ID } from "../../swarm-status";
 import { SWARM_ORCHESTRATOR_NOTE, SWARM_SUBORCH_OPTION_NOTE } from "../constants";
+import { redactSecrets } from "@/features/integrations/server/mcp/redact";
+
 import { createDelegateTasksTool } from "../tools/delegate-tasks";
 import { getProjectFiles, indexProjectFiles, normalizePath } from "../tools/paths";
 import { UNFINISHED_REPLY } from "./conversation-history";
@@ -19,8 +22,6 @@ import { FOUNDATION_REFUSAL, guardFoundation } from "./ownership-guard";
 
 /** The orchestrator's forced turn: the same agent with tool_choice set to delegateTasks. */
 export const SWARM_DELEGATE_AGENT_NAME = "codenaya-delegate";
-/** Steps the orchestrator may spend on the foundation before its next call is forced. */
-export const FOUNDATION_MAX_STEPS = 8;
 /** A forced call whose plan is refused is forced once more; after that the run builds solo. */
 export const MAX_FORCED_DELEGATIONS = 2;
 
@@ -126,9 +127,13 @@ export const swarmRun = async ({ mode, request, internalKey, messageId, projectI
         try {
           return await run(...args);
         } catch (error) {
+          // Workers already run: a later error in this turn is the run's, not a failed delegation.
+          if (state.delegated) throw error;
           // A provider that refuses the forced call (or any error in this turn) must not fail the run.
           fellBack = true;
-          const message = sanitizeAgentText(String((error as { message?: unknown } | null)?.message ?? error)).slice(0, 160);
+          const raw = String((error as { message?: unknown } | null)?.message ?? error);
+          // Redacted before the cut, so a key is never left half-recognisable.
+          const message = sanitizeAgentText(redactSecrets(raw).text).slice(0, 160);
           await recordSolo(`delegation failed (${message})`);
           return new AgentResult(agent.name, [], [], new Date());
         }

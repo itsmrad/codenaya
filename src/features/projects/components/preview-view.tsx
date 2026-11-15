@@ -62,6 +62,7 @@ import {
   type AppError,
   type FixAttempts,
 } from "@/features/sandbox-preview/utils/app-error";
+import { hookReloadDelay, isHookError } from "@/features/sandbox-preview/utils/hook-reload";
 import { readPreviewMessage } from "@/features/sandbox-preview/utils/preview-bridge";
 import {
   MAX_FIX_ATTEMPTS,
@@ -345,17 +346,41 @@ export const PreviewView = ({
     const firstBuildEnded = wasFirstBuild.current && !firstBuild;
     const fixRunEnded = wasRunActive.current && !runActive && appStartFailed && buildError;
     if (status === "error" && (firstBuildEnded || fixRunEnded)) restart();
-    // A first build's runtime error may be from mid-build HMR (#486): reload once
-    // against the finished files before the auto-fix; the bridge reports it again if real.
-    else if (firstBuildEnded && runtimeError) setRefreshKey((key) => key + 1);
+    // Reload once against the finished files: HMR may have missed a write (#561), and a
+    // runtime error may be from mid-build HMR (#486), reported again if real, before the auto-fix.
+    // Still booting: the startup refresh covers it.
+    else if (firstBuildEnded && status === "running" && previewUrl) setRefreshKey((key) => key + 1);
     wasFirstBuild.current = firstBuild;
     wasRunActive.current = runActive;
-  }, [firstBuild, runActive, appStartFailed, buildError, runtimeError, status, restart]);
+  }, [firstBuild, runActive, appStartFailed, buildError, previewUrl, status, restart]);
 
   // The iframe's latest load, so first_preview_shown waits until it is visible.
   const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
   const previewKey = `${projectId}:${previewUrl}:${refreshKey}`;
   const handlePreviewLoad = useCallback(() => setLoadedPreview(previewKey), [previewKey]);
+
+  // A hook error right after a late dependency made Vite re-optimize (#486) is two
+  // React copies in a stale page; a reload heals it. Vite's own reload gets a moment
+  // first, any other reload counts as this one, and a bug that survives falls to the auto-fix.
+  const lastReloadAt = useRef(0);
+  const hookReloads = useRef(0);
+  useEffect(() => {
+    lastReloadAt.current = Date.now();
+  }, [refreshKey]);
+  useEffect(() => {
+    if (runActive) hookReloads.current = 0;
+  }, [runActive]);
+  const hookError = isHookError(runtimeError);
+  useEffect(() => {
+    if (!hookError) return;
+    const delay = hookReloadDelay(hookReloads.current, lastReloadAt.current, Date.now());
+    if (delay === null) return;
+    const timer = setTimeout(() => {
+      hookReloads.current += 1;
+      setRefreshKey((key) => key + 1);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [hookError]);
 
   // Only ever called from a user action. WebContainer needs the COOP/COEP headers
   // next.config.ts sets for `?engine=webcontainer`, so switching is a full page
@@ -439,10 +464,16 @@ export const PreviewView = ({
   // Automatically refresh the iframe shortly after the dev server announces it's running.
   // The first request to Vite often serves the index.html and CSS instantly but hangs 
   // compiling the JS bundle. An auto-refresh ensures the JS hydration catches up seamlessly.
+  // Skipped if another reload, e.g. a first build ending (#561), beat it: one reload, not two.
+  const refreshKeyRef = useRef(refreshKey);
+  useEffect(() => {
+    refreshKeyRef.current = refreshKey;
+  }, [refreshKey]);
   useEffect(() => {
     if (status === "running" && previewUrl) {
+      const armedKey = refreshKeyRef.current;
       const timer = setTimeout(() => {
-        setRefreshKey((k) => k + 1);
+        setRefreshKey((k) => (k === armedKey ? k + 1 : k));
       }, 2500);
       return () => clearTimeout(timer);
     }

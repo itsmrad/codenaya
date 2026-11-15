@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDownIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -17,10 +18,16 @@ import { ConnectionCard } from "@/features/integrations/components/connection-ca
 import { IntegrationsDialog } from "@/features/integrations/components/integrations-dialog";
 import { ProviderCatalog } from "@/features/integrations/components/provider-catalog";
 import { useUserConnections } from "@/features/integrations/hooks/use-integrations";
+import { linkedProviderId, SETTINGS_CONNECT_PARAM } from "@/features/integrations/links";
 
 export const IntegrationsSettings = () => {
   const connections = useUserConnections();
-  const [selectedProviderId, setSelectedProviderId] = useState<string>();
+  const router = useRouter();
+  const pathname = usePathname();
+  // `?connect=<providerId>` (see integrationLink) opens that provider's dialog.
+  const connectParam = useSearchParams().get(SETTINGS_CONNECT_PARAM);
+  const [pickedProviderId, setPickedProviderId] = useState<string>();
+  const selectedProviderId = pickedProviderId ?? linkedProviderId(connectParam);
 
   return (
     <Card>
@@ -52,14 +59,19 @@ export const IntegrationsSettings = () => {
         <section aria-label="Browse integrations" className="space-y-3">
           <h2 className="text-sm font-medium">Browse integrations</h2>
           <ProviderCatalog
-            onSelect={setSelectedProviderId}
+            onSelect={setPickedProviderId}
             connectedProviderIds={connections?.map((connection) => connection.providerId)}
           />
         </section>
       </CardContent>
       <IntegrationsDialog
         open={selectedProviderId !== undefined}
-        onOpenChange={(open) => { if (!open) setSelectedProviderId(undefined); }}
+        onOpenChange={(open) => {
+          if (open) return;
+          setPickedProviderId(undefined);
+          // Drop the param so closing sticks and a reload doesn't reopen it.
+          if (connectParam !== null) router.replace(pathname, { scroll: false });
+        }}
         initialProviderId={selectedProviderId}
       />
     </Card>

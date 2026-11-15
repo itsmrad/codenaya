@@ -45,7 +45,7 @@ export interface ConnectionRecord {
   _id: string;
   providerId: string;
   label: string;
-  authMode: "oauth" | "api_key";
+  authMode: "oauth" | "api_key" | "none";
   serverUrl: string;
   credentialRef: string;
   kekProvider: string;
@@ -155,7 +155,6 @@ export async function resolveMcpServers(
     connection: ConnectionRecord;
   }>,
 ): Promise<ResolveResult> {
-  const sealer = getSecretSealer();
   const servers: ResolvedMcpServer[] = [];
   const problems: ResolveProblem[] = [];
 
@@ -169,24 +168,32 @@ export async function resolveMcpServers(
     };
 
     // ── Open the credential ──
-    let credential: StoredCredential;
+    const noAuth = connection.authMode === "none";
+    const noneProvider = noAuth ? getProvider(connection.providerId) : undefined;
+    if (noAuth && (!noneProvider?.authModes.includes("none") || connection.serverUrl !== noneProvider.mcpUrl)) {
+      fail("No-sign-in providers require their fixed catalog endpoint.");
+      continue;
+    }
+    let credential: StoredCredential = { type: "api_key" };
     try {
-      const opened = await sealer.open(
-        {
-          kekProvider: connection.kekProvider,
-          kekKeyId: connection.kekKeyId,
-          wrappedDek: connection.wrappedDek,
-          ciphertext: connection.ciphertext,
-          iv: connection.iv,
-          authTag: connection.authTag,
-        },
-        secretContext(
-          "userConnections",
-          connection.credentialRef,
-          "credential",
-        ),
-      );
-      credential = JSON.parse(opened) as StoredCredential;
+      if (!noAuth) {
+        const opened = await getSecretSealer().open(
+          {
+            kekProvider: connection.kekProvider,
+            kekKeyId: connection.kekKeyId,
+            wrappedDek: connection.wrappedDek,
+            ciphertext: connection.ciphertext,
+            iv: connection.iv,
+            authTag: connection.authTag,
+          },
+          secretContext(
+            "userConnections",
+            connection.credentialRef,
+            "credential",
+          ),
+        );
+        credential = JSON.parse(opened) as StoredCredential;
+      }
     } catch (error) {
       // Deliberately vague to the caller: the detail (wrong KEK, tampered row)
       // is operator information, and it is already logged with context by the
@@ -200,7 +207,7 @@ export async function resolveMcpServers(
     }
 
     const secret = credentialValue(credential);
-    if (!secret) {
+    if (!noAuth && !secret) {
       fail("The stored credential is missing an access token.");
       continue;
     }
@@ -212,7 +219,10 @@ export async function resolveMcpServers(
     // itself recorded.
     const isCustom = !provider;
 
-    const placement = provider?.apiKey ?? DEFAULT_PLACEMENT;
+    // A provider's key placement (e.g. Exa's `x-api-key`) applies to API keys
+    // only; OAuth access tokens are always bearer tokens.
+    const placement =
+      (connection.authMode === "api_key" ? provider?.apiKey : undefined) ?? DEFAULT_PLACEMENT;
     const displayName = provider?.displayName ?? connection.label;
 
     // ── Apply per-project scope ──
@@ -263,13 +273,14 @@ export async function resolveMcpServers(
       namespace: connection.providerId.replace(/[^a-zA-Z0-9_]/g, "_"),
       displayName,
       url,
-      headers: {
+      headers: noAuth ? {} : {
         ...scopeHeaders,
         [placement.header]: `${placement.valuePrefix}${secret}`,
       },
       trustedHostnames: isCustom ? [] : provider.trustedHostnames,
       readOnly: link.readOnly,
-      readOnlyEnforced: link.readOnly && provider?.supportsReadOnly === true,
+      // Public docs use the per-tool read list so future tools remain gated.
+      readOnlyEnforced: !noAuth && link.readOnly && provider?.supportsReadOnly === true,
       annotationsTrusted: !isCustom,
       writeApproved: link.writeApproved,
       allowedTools: link.allowedTools,
@@ -278,7 +289,7 @@ export async function resolveMcpServers(
       toolBaseline: link.toolBaseline,
       // Both forms are included so a tool echoing either the raw key or the
       // bearer header value is caught.
-      knownSecrets: [secret],
+      knownSecrets: secret ? [secret] : [],
       needsRefresh,
     });
   }

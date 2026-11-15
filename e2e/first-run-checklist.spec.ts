@@ -79,7 +79,8 @@ test.describe("first-run checklist", () => {
     await pill.click();
     const checklist = page.getByRole("region", { name: "Get started with Codenaya" });
     await expect(checklist.getByRole("heading", { name: "Get started with Codenaya" })).toBeFocused();
-    await expect(checklist).toContainText(`${done} of 5 done`);
+    // Count only, not the decoration ("3 of 5", "[ 3 / 5 ]"); the data-done count below pins the number.
+    await expect(checklist).toContainText(new RegExp(`\\b${done}\\s*(?:of|/)\\s*5\\b`));
     await expect(checklist.locator('li[data-done="true"]')).toHaveCount(Number(done));
   });
 

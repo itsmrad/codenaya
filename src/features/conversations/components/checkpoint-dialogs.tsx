@@ -98,7 +98,11 @@ export const CheckpointHistoryDialog = ({
           run and everything after it.
         </DialogDescription>
       </DialogHeader>
-      {checkpoints?.length === 0 ? (
+      {checkpoints === undefined ? (
+        <p role="status" className="py-6 text-center text-sm text-muted-foreground">
+          Loading version history…
+        </p>
+      ) : checkpoints.length === 0 ? (
         <p className="py-6 text-center text-sm text-muted-foreground">
           No checkpoints yet.
         </p>
