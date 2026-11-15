@@ -1,19 +1,23 @@
 import { buildPathIndex, type PathIndexFile } from "../agent-steps";
 import { VITE_REACT_STARTER } from "./vite-starter";
+import { NEXT_APP_STARTER } from "./next-starter";
 
 type ProjectFileRow = PathIndexFile & { type: "file" | "folder" };
 
 /**
- * Whether the project holds exactly the Vite starter's files, as seeded at
- * creation (#338), so the request can say the starter is already in place.
+ * Which starter's exact file set the project holds, or null for an edited tree.
  */
-export const isStarterOnly = (files: ProjectFileRow[]) => {
+export const starterFramework = (files: ProjectFileRow[]): "vite" | "next" | null => {
   const pathOf = buildPathIndex(files);
   const filePaths = new Set(
     files.filter((file) => file.type === "file").map((file) => pathOf(file._id)),
   );
-  return (
-    filePaths.size === VITE_REACT_STARTER.length &&
-    VITE_REACT_STARTER.every(({ path }) => filePaths.has(path))
-  );
+  for (const [framework, starter] of [["vite", VITE_REACT_STARTER], ["next", NEXT_APP_STARTER]] as const) {
+    if (filePaths.size === starter.length && starter.every(({ path }) => filePaths.has(path))) {
+      return framework;
+    }
+  }
+  return null;
 };
+
+export const isStarterOnly = (files: ProjectFileRow[]) => starterFramework(files) !== null;

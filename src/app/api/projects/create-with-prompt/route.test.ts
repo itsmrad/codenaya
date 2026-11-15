@@ -25,6 +25,8 @@ vi.mock("@/lib/message-processor", () => ({
 }));
 
 import { resetRateLimits } from "@/lib/rate-limit";
+import { NEXT_APP_STARTER } from "@/features/conversations/inngest/next-starter";
+import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starter";
 import { POST } from "./route";
 
 const post = (body: unknown) =>
@@ -52,6 +54,32 @@ beforeEach(() => {
 });
 
 describe("POST /api/projects/create-with-prompt", () => {
+  it.each([
+    [{ prompt: "Build a dashboard" }, VITE_REACT_STARTER],
+    [{ prompt: "Use Next.js for a dashboard" }, NEXT_APP_STARTER],
+    [{ prompt: "Build a dashboard", framework: "next" }, NEXT_APP_STARTER],
+    [{ prompt: "Use Next.js", framework: "vite" }, VITE_REACT_STARTER],
+  ])("selects the starter for %j", async (body, starter) => {
+    const res = await POST(post(body));
+    expect(res.status).toBe(200);
+    expect(mocks.seed).toHaveBeenCalledWith(expect.objectContaining({ starter }));
+  });
+
+  it.each(["invalid", "Next", null, 15])("rejects invalid framework %j before creating a project", async (framework) => {
+    const res = await POST(post({ framework }));
+    expect(res.status).toBe(400);
+    expect(mocks.mutation).not.toHaveBeenCalled();
+    expect(mocks.seed).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("uses Next instead of a prompt-flow template's Vite placeholder when explicitly requested", async () => {
+    const res = await POST(post({ prompt: "Use Next.js for my blog", templateId: "blog" }));
+    expect(res.status).toBe(200);
+    expect(mocks.seed).toHaveBeenCalledWith(expect.objectContaining({ template: undefined, starter: NEXT_APP_STARTER }));
+    expect(mocks.dispatch).toHaveBeenCalledOnce();
+  });
+
   it("seeds an instant template with no message, run or promo run (#362)", async () => {
     const res = await POST(post({ templateId: "landing-page" }));
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { isStarterOnly } from "./starter-only";
+import { isStarterOnly, starterFramework } from "./starter-only";
+import { NEXT_APP_STARTER } from "./next-starter";
 import { VITE_REACT_STARTER } from "./vite-starter";
 
 /** Project rows for the given file paths, folders implied, ids like `id:src/App.tsx`. */
@@ -28,6 +29,15 @@ const STARTER_PATHS = VITE_REACT_STARTER.map((file) => file.path);
 describe("isStarterOnly", () => {
   it("is true for a project that holds exactly the seeded starter", () => {
     expect(isStarterOnly(rowsFor(STARTER_PATHS))).toBe(true);
+    expect(starterFramework(rowsFor(STARTER_PATHS))).toBe("vite");
+  });
+
+  it("recognises the Next starter and rejects partial or mixed starters", () => {
+    const paths = NEXT_APP_STARTER.map(({ path }) => path);
+    expect(isStarterOnly(rowsFor(paths))).toBe(true);
+    expect(starterFramework(rowsFor(paths))).toBe("next");
+    expect(isStarterOnly(rowsFor(paths.slice(1)))).toBe(false);
+    expect(isStarterOnly(rowsFor([...paths, "vite.config.ts"]))).toBe(false);
   });
 
   it.each([

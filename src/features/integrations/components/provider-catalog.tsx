@@ -6,8 +6,11 @@ import { EyeIcon, SearchIcon, ServerCogIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { filterProviders, listProviders } from "../catalog";
+import { filterProviders, listProviders, offeredAuthModes } from "../catalog";
+import type { CustomServerPrefill } from "../community-catalog";
 import type { IntegrationAuthMode } from "../types";
+import { CatalogTile, TileChip } from "./catalog-tile";
+import { CommunityCatalog } from "./community-catalog";
 
 /**
  * Sentinel provider id for a user-supplied MCP endpoint.
@@ -31,7 +34,8 @@ const authModeLabel = (authModes: readonly IntegrationAuthMode[]) => {
 };
 
 interface ProviderCatalogProps {
-  onSelect: (providerId: string) => void;
+  /** A prefill is passed only for a community server, which opens the custom form. */
+  onSelect: (providerId: string, prefill?: CustomServerPrefill) => void;
   connectedProviderIds?: readonly string[];
 }
 
@@ -86,30 +90,24 @@ export const ProviderCatalog = ({
           {providers.map((provider) => {
             const action = connectedProviderIds.includes(provider.id) ? "Manage" : "Connect";
             return (
-              <li key={provider.id} className="min-w-0">
-                <button
-                  type="button"
-                  aria-label={`${action} ${provider.displayName}`}
-                  aria-describedby={`${catalogId}-${provider.id}-description ${catalogId}-${provider.id}-auth${provider.supportsReadOnly ? ` ${catalogId}-${provider.id}-read-only` : ""}`}
-                  onClick={() => onSelect(provider.id)}
-                  className="flex h-full w-full flex-col gap-2 rounded-lg border border-border/60 bg-card p-3 text-left transition-colors hover:border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                >
-                  <span className="flex items-center gap-2.5 text-sm font-medium text-foreground">
-                    <Image src={provider.logo} alt="" width={24} height={24} className="size-6 shrink-0 dark:invert" />
-                    {provider.displayName}
-                  </span>
-                  <span id={`${catalogId}-${provider.id}-description`} className="text-xs leading-relaxed text-muted-foreground">{provider.description}</span>
-                  <span className="mt-auto flex w-full flex-wrap items-center justify-between gap-2 pt-1">
-                    <span id={`${catalogId}-${provider.id}-auth`} className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{authModeLabel(provider.authModes)}</span>
+              <CatalogTile
+                key={provider.id}
+                idPrefix={`${catalogId}-${provider.id}`}
+                name={provider.displayName}
+                label={`${action} ${provider.displayName}`}
+                description={provider.description}
+                icon={<Image src={provider.logo} alt="" width={24} height={24} className="size-6 shrink-0 dark:invert" />}
+                meta={(
+                  <>
+                    <TileChip>{authModeLabel(offeredAuthModes(provider))}</TileChip>
                     {provider.supportsReadOnly && (
-                      <span id={`${catalogId}-${provider.id}-read-only`} className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                        <EyeIcon aria-hidden="true" className="size-2.5" /> Read-only capable
-                      </span>
+                      <TileChip><EyeIcon aria-hidden="true" className="mr-1 inline size-2.5" />Read-only capable</TileChip>
                     )}
-                    <span className="text-xs font-medium text-foreground">{action}</span>
-                  </span>
-                </button>
-              </li>
+                  </>
+                )}
+                action={action}
+                onSelect={() => onSelect(provider.id)}
+              />
             );
           })}
         </ul>
@@ -127,6 +125,7 @@ export const ProviderCatalog = ({
           <ServerCogIcon aria-hidden="true" /> Custom MCP server
         </Button>
       </div>
+      <CommunityCatalog onSelect={(prefill) => onSelect(CUSTOM_PROVIDER_ID, prefill)} />
     </div>
   );
 };

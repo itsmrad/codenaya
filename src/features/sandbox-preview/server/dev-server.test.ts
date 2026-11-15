@@ -1,7 +1,7 @@
 import type { Sandbox } from "e2b";
 import { describe, expect, it, vi } from "vitest";
 
-import { DEV_COMMAND_ENV, installWithDevServerStopped, killTreeCommand } from "./dev-server";
+import { DEV_COMMAND_ENV, installWithDevServerStopped, isPortOpen, killTreeCommand } from "./dev-server";
 
 const fakeSandbox = (processes: Array<{ pid: number; envs: Record<string, string>; cwd?: string }>) => {
   const run = vi.fn<(...args: unknown[]) => Promise<object>>(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
@@ -10,6 +10,27 @@ const fakeSandbox = (processes: Array<{ pid: number; envs: Record<string, string
   } as unknown as Sandbox;
   return { sandbox, run };
 };
+
+describe("isPortOpen", () => {
+  it("accepts a TCP connection without requesting a lazily compiled page", async () => {
+    const { sandbox, run } = fakeSandbox([]);
+    run.mockResolvedValue({ stdout: "open\n" });
+    await expect(isPortOpen(sandbox, 3000)).resolves.toBe(true);
+    const [command, options] = run.mock.calls[0];
+    expect(command).toContain('require("net").connect');
+    expect(command).toContain("port:3000");
+    expect(command).not.toContain("curl");
+    expect(options).toEqual({ timeoutMs: 3000 });
+  });
+
+  it("rejects refused connections and timed-out probes", async () => {
+    const { sandbox, run } = fakeSandbox([]);
+    run.mockResolvedValue({ stdout: "" });
+    await expect(isPortOpen(sandbox, 5173)).resolves.toBe(false);
+    run.mockRejectedValue(new Error("probe timeout"));
+    await expect(isPortOpen(sandbox, 5173)).resolves.toBe(false);
+  });
+});
 
 describe("installWithDevServerStopped (#486)", () => {
   const dev = { pid: 12, envs: { [DEV_COMMAND_ENV]: "npm run dev -- --host", HOST: "0.0.0.0" }, cwd: "/home/user/app" };

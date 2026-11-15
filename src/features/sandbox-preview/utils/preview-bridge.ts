@@ -12,7 +12,7 @@ type ErrorLike = { message?: unknown; stack?: unknown } | null | undefined;
  * Runs inside the previewed app and reports its errors to the IDE: uncaught
  * errors and rejections, and errors an error boundary caught, which React
  * reports only to console.error, after "The above error occurred…" (#335), and
- * compile errors shown in Vite's error overlay (#497). The preview is
+ * errors shown in Vite's or Next's dev overlay (#497). The preview is
  * cross-origin, so this is the only way they leave the iframe. It runs from its
  * source, so it must stay self-contained, and it must never
  * break the app: every report is guarded and the app's console.error always runs.
@@ -152,16 +152,40 @@ export function installPreviewBridge(
   };
 
   // Vite appends a new overlay to <body> for each compile error. Its shadow
-  // root is open, and it fills it in before appending.
+  // root is open. Next renders into its portal's shadow root after appending.
+  const watchedPortals = new WeakSet<ShadowRoot>();
   const reportOverlay = (node: unknown) => {
     try {
       const overlay = node as Element;
-      if (!overlay || overlay.nodeName !== "VITE-ERROR-OVERLAY" || !overlay.shadowRoot) return;
+      if (!overlay || !/^(VITE-ERROR-OVERLAY|NEXTJS-PORTAL)$/.test(overlay.nodeName) || !overlay.shadowRoot) return;
       const root = overlay.shadowRoot;
       const text = (selector: string) => {
         const found = root.querySelector(selector);
         return found && found.textContent ? found.textContent.trim() : "";
       };
+      if (overlay.nodeName === "NEXTJS-PORTAL") {
+        if (!watchedPortals.has(root)) {
+          watchedPortals.add(root);
+          new win.MutationObserver(() => reportOverlay(overlay)).observe(root, {
+            childList: true, subtree: true, characterData: true,
+          });
+        }
+        const description = text("#nextjs__container_errors_desc");
+        // Next also uses the portal for its dev indicator, without an error.
+        if (!description) return;
+        const message = [
+          text("#nextjs__container_errors_label"),
+          description,
+          text("[data-nextjs-codeframe] pre") || text("[data-nextjs-terminal] pre"),
+        ].filter(Boolean).join("\n").slice(0, maxText);
+        const location = (
+          text("[data-nextjs-codeframe] .code-frame-header [data-text]") ||
+          text("[data-nextjs-codeframe] p") ||
+          text("[data-nextjs-terminal] [data-with-open-in-editor-link-source-file]")
+        ).replace(/\s+@.*$/, "").replace(/\s+\((\d+):(\d+)\)$/, ":$1:$2");
+        post("build", message, location.slice(0, maxText) || undefined);
+        return;
+      }
       const plugin = text(".plugin");
       const message = ((plugin ? plugin + " " : "") + text(".message-body")).slice(0, maxText);
       if (message) post("build", message, text(".file").slice(0, maxText) || undefined);
@@ -174,6 +198,7 @@ export function installPreviewBridge(
       const body = win.document.body;
       if (!body) return;
       reportOverlay(body.querySelector("vite-error-overlay"));
+      body.querySelectorAll("nextjs-portal").forEach(reportOverlay);
       new win.MutationObserver((records) => {
         for (let r = 0; r < records.length; r++) {
           const added = records[r].addedNodes;
@@ -198,11 +223,12 @@ export function installPreviewBridge(
     if (!reporting) {
       reporting = true;
       try {
-        // Only React's log for a boundary-caught error: an app's own
+        // React's boundary and hydration logs: an app's own
         // `catch (e) { console.error(e) }` is handled and stays quiet.
         let boundaryLog = false;
         let error: unknown = null;
         for (const arg of args) {
+          if ((typeof arg === "string" || arg instanceof Error) && /Hydration failed|A tree hydrated but some attributes of the server rendered HTML didn't match|Text content does not match/i.test(String(arg))) report(arg, arg);
           if (typeof arg === "string" && arg.indexOf("The above error occurred") === 0) {
             boundaryLog = true;
           } else if (error === null && arg instanceof Error) {

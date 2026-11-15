@@ -10,7 +10,7 @@ import type { StarterTemplate } from "../templates";
 
 /**
  * Writes a template's seed files (with an instant template's `source`, #362)
- * into a new, empty project, or the plain Vite starter without one, so
+ * into a new, empty project, or the selected starter (Vite by default), so
  * package.json exists before the first run and the preview can start booting
  * at once (#338).
  *
@@ -23,14 +23,16 @@ export const seedTemplateFiles = async ({
   projectId,
   template,
   source,
+  starter = VITE_REACT_STARTER,
 }: {
   internalKey: string;
   projectId: Id<"projects">;
   template?: StarterTemplate;
   source?: SeedFile[];
+  starter?: readonly SeedFile[];
 }): Promise<boolean> => {
   const { folders, filesByFolder } = planSeedTree(
-    template ? getTemplateSeedFiles(template, source) : [...VITE_REACT_STARTER],
+    template ? getTemplateSeedFiles(template, source) : [...starter],
   );
   const folderIds = new Map<string, Id<"files">>();
   const batches = [...filesByFolder].sort(([a], [b]) => Number(a === "") - Number(b === ""));

@@ -6,6 +6,7 @@ const mutation = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/convex-client", () => ({ convex: { mutation } }));
 
 import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starter";
+import { NEXT_APP_STARTER } from "@/features/conversations/inngest/next-starter";
 
 import { getTemplateSeedFiles } from "../seed-files";
 import { STARTER_TEMPLATES } from "../templates";
@@ -58,6 +59,22 @@ describe("seedTemplateFiles", () => {
       name: "package.json",
       content: VITE_REACT_STARTER.find((f) => f.path === "package.json")!.content,
     });
+  });
+
+  it("writes the selected Next starter, including the App Router entry files", async () => {
+    mutation.mockReset();
+    mutation.mockImplementation(async (_ref, args) => `id:${args.name}`);
+
+    await seedTemplateFiles({ internalKey: "key", projectId: "p1" as never, starter: NEXT_APP_STARTER });
+
+    const written = mutation.mock.calls
+      .filter(([ref]) => getFunctionName(ref) === "system:createFiles")
+      .flatMap(([, a]) => a.files);
+    expect(written).toHaveLength(NEXT_APP_STARTER.length);
+    for (const path of ["package.json", "src/app/layout.tsx", "src/app/page.tsx"]) {
+      expect(written).toContainEqual({ name: path.split("/").at(-1), content: NEXT_APP_STARTER.find((file) => file.path === path)!.content });
+    }
+    expect(written.some((file: { name: string }) => file.name === "vite.config.ts")).toBe(false);
   });
 });
 

@@ -53,6 +53,7 @@ export const KNOWN_GOOD_VERSIONS = {
   // Next.js apps.
   next: "^15.5.0",
   "@tailwindcss/postcss": "^4.3.0",
+  postcss: "^8.5.23",
 } as const satisfies Record<string, string>;
 
 export type KnownGoodPackage = keyof typeof KNOWN_GOOD_VERSIONS;

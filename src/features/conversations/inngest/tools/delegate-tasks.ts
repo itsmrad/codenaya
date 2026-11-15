@@ -9,8 +9,8 @@ import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../../agent-models";
 import {
-  CHILD_WORKER_TIMEOUT_MS, MAX_ORIGINAL_PROMPT_CHARS, MAX_SWARM_AGENTS, MAX_SWARM_DEPTH, SUBORCH_TIMEOUT_MS, type SwarmPlan,
-  WORKER_TIMEOUT_MS, swarmPlanSchema, validatePlan,
+  CHILD_WORKER_TIMEOUT_MS, MAX_SWARM_AGENTS, MAX_SWARM_DEPTH, SUBORCH_TIMEOUT_MS, type SwarmPlan,
+  WORKER_TIMEOUT_MS, capOriginalPrompt, swarmPlanSchema, validatePlan,
 } from "../../swarm";
 import { cleanupSwarmSandboxes, seedSwarmSnapshot } from "../../swarm-sandbox";
 import { type SwarmWorkerEvent, type SwarmWorkerResult, swarmWorker } from "../swarm-worker";
@@ -22,7 +22,7 @@ interface DelegateTasksToolOptions {
   messageId: Id<"messages">;
   ownerId: string;
   model: AgentModelChoice;
-  /** The user's request (`swarmRequest`), handed to each worker; trimmed to MAX_ORIGINAL_PROMPT_CHARS. */
+  /** The user's request (`swarmRequest`), handed to each worker; capped by `capOriginalPrompt`. */
   originalPrompt?: string;
   /** A sub-orchestrator's call (depth 1): its task, whose owned paths its workers split. */
   parent?: { taskId: string; agentTaskId: Id<"agentTasks">; ownedPaths: string[]; depth: number };
@@ -70,8 +70,8 @@ export const createDelegateTasksTool = ({
   return createTool({
     name: "delegateTasks",
     description:
-      "Run 2-4 tasks in parallel, each by a worker that writes only its owned paths. ownedPaths must be files or folders under src/ (e.g. src/pages/Home.tsx, src/components/gallery), disjoint between tasks. " +
-      "Anything outside src/ (public/ assets, root config) and the shared files (package.json, src/App.tsx, src/main.tsx, src/index.css, configs) are yours: write them before delegating. Call it once, after writing the shared foundation. " +
+      "Run 2-4 tasks in parallel, each by a worker that writes only its owned paths. ownedPaths must be files or folders under src/ or public/ (e.g. src/pages/Home.tsx, src/components/gallery, public), disjoint between tasks. " +
+      "Root config and the shared files (index.html, package.json, src/App.tsx, src/main.tsx, src/index.css, configs) are yours: write them before delegating. Call it once, after writing the shared foundation. " +
       "Returns each task's report: done, unfinished or failed, the files it wrote, and its NEEDS: requests." +
       (subOrchestrators ? " A task with role \"sub-orchestrator\" (at most 2) splits its own paths among up to 3 workers." : ""),
     parameters: swarmPlanSchema,
@@ -159,7 +159,7 @@ export const createDelegateTasksTool = ({
               ownerId,
               model,
               planOverview,
-              ...(originalPrompt ? { originalPrompt: originalPrompt.slice(0, MAX_ORIGINAL_PROMPT_CHARS) } : {}),
+              ...(originalPrompt ? { originalPrompt: capOriginalPrompt(originalPrompt) } : {}),
               depth: depth + 1,
             } satisfies SwarmWorkerEvent,
             timeout: parent ? CHILD_WORKER_TIMEOUT_MS : task.role === "sub-orchestrator" ? SUBORCH_TIMEOUT_MS : WORKER_TIMEOUT_MS,

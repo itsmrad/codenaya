@@ -40,3 +40,20 @@ E2B's `base` image ships Node 20.9. Vite 7 needs `^20.19 || >=22.12` (it calls
   (README production checklist, step 5). A missing variable quietly degrades to the
   old Node.
 - `e2e/preview-e2b-node.spec.ts` guards the Node version.
+
+## Addendum: Vite 7 stays deferred (#466)
+
+The manifest (`known-good-versions.ts`) keeps Vite `^6` and `@vitejs/plugin-react` `^4`.
+Vite 7 and plugin-react 5 need Node `^20.19 || >=22.12` in **both** engines:
+
+- **E2B:** `build-template.mts` uses `fromNodeImage("22")`, so a template built from the
+  current `node:22` image is >=22.12. The version actually deployed isn't recorded;
+  `e2e/preview-e2b-node.spec.ts` only guards the major. Without `E2B_TEMPLATE` the
+  `base` image (Node 20.9) is used and Vite 7 crashes.
+- **WebContainer:** boot pins no Node version (`@webcontainer/api` 1.6.4); its in-browser
+  Node version is unverified.
+
+Decision: don't change the manifest, prompt or `node-compat.ts` guard until `node -v`
+is recorded from the deployed E2B template and a WebContainer boot, and a Vite 7 starter
+is shown to build in both. A bump then updates the manifest and `node-compat.ts` together.
+The weekly `manifest-registry.yml` check only uses a Node 22.0.0 floor and doesn't certify either runtime.

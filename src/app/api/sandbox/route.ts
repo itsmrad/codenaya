@@ -46,8 +46,11 @@ import {
 import {
   DEV_COMMAND_ENV,
   installWithDevServerStopped,
+  isPortOpen,
   type DevStart,
 } from "@/features/sandbox-preview/server/dev-server";
+import { rewriteProxyHeaders, shouldInjectBridge } from "@/features/sandbox-preview/server/preview-proxy";
+import { appendHostFlag, detectFrameworkFromFiles } from "@/features/sandbox-preview/utils/dev-command";
 import {
   missingReferencedFiles,
   undeclaredPackages,
@@ -117,6 +120,7 @@ const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
 const DEV_SERVER_ENVS: Record<string, string> = {
   HOST: "0.0.0.0",           // Create React App, Vite (some versions)
   HOSTNAME: "0.0.0.0",       // Next.js
+  NEXT_TELEMETRY_DISABLED: "1",
 };
 
 /**
@@ -506,7 +510,7 @@ export async function POST(request: Request) {
         const devCmdWithHost =
           plan === "static"
             ? STATIC_SERVE_COMMAND
-            : appendHostFlag(settings?.devCommand || "npm run dev");
+            : appendHostFlag(settings?.devCommand || "npm run dev", detectFrameworkFromFiles(files));
         sendPhase("start");
         
         send({ type: "output", data: `$ ${devCmdWithHost}\n` });
@@ -747,30 +751,6 @@ async function waitForPublicUrl(url: string, maxWaitMs = 3000): Promise<void> {
 }
 
 /**
- * Append --host 0.0.0.0 to the dev command so the server binds to all
- * interfaces. E2B port forwarding requires this.
- */
-function appendHostFlag(devCmd: string): string {
-  if (devCmd.includes("--host") || devCmd.includes("-H ")) {
-    return devCmd;
-  }
-
-  if (/^(npm|yarn|pnpm)\s+run\s+/.test(devCmd)) {
-    return `${devCmd} -- --host 0.0.0.0`;
-  }
-
-  if (devCmd.includes("vite")) {
-    return `${devCmd} --host 0.0.0.0`;
-  }
-
-  if (devCmd.includes("next")) {
-    return `${devCmd} -H 0.0.0.0`;
-  }
-
-  return devCmd;
-}
-
-/**
  * Run a native Node.js reverse proxy inside the sandbox that listens on 0.0.0.0
  * and forwards traffic to 127.0.0.1, rewriting the Host header.
  * This completely avoids the Vite `allowedHosts` block and requires ZERO changes
@@ -789,6 +769,8 @@ const TARGET_PORT = parseInt(process.env.TARGET_PORT || "${targetPort}", 10);
 const PROXY_PORT = parseInt(process.env.PROXY_PORT || "${proxyPort}", 10);
 const BRIDGE = ${JSON.stringify(PREVIEW_BRIDGE_SCRIPT)};
 const insertBridge = ${String(insertBridge)};
+const rewriteProxyHeaders = ${String(rewriteProxyHeaders)};
+const shouldInjectBridge = ${String(shouldInjectBridge)};
 
 const server = http.createServer((req, res) => {
   const options = {
@@ -796,19 +778,14 @@ const server = http.createServer((req, res) => {
     port: TARGET_PORT,
     path: req.url,
     method: req.method,
-    headers: req.headers,
+    headers: rewriteProxyHeaders(req.headers, TARGET_PORT),
   };
-  options.headers['host'] = 'localhost:' + TARGET_PORT;
   // Plain HTML from the dev server, so the error bridge can go in (#223).
   delete options.headers['accept-encoding'];
 
   const proxyReq = http.request(options, (proxyRes) => {
     const headers = { ...proxyRes.headers };
-    const isPage =
-      req.method === 'GET' &&
-      proxyRes.statusCode === 200 &&
-      String(headers['content-type'] || '').includes('text/html') &&
-      !headers['content-encoding'];
+    const isPage = shouldInjectBridge(req.method, proxyRes.statusCode, headers);
     if (!isPage) {
       res.writeHead(proxyRes.statusCode, headers);
       proxyRes.pipe(res, { end: true });
@@ -853,10 +830,9 @@ server.on('upgrade', (req, socket, head) => {
   };
 
   const proxySocket = net.connect(options, () => {
-    const headers = Object.keys(req.headers).map(k => {
-      let v = req.headers[k];
-      if (k.toLowerCase() === 'host') v = 'localhost:' + TARGET_PORT;
-      return \`\${k}: \${v}\`;
+    const rewritten = rewriteProxyHeaders(req.headers, TARGET_PORT);
+    const headers = Object.keys(rewritten).map(k => {
+      return \`\${k}: \${rewritten[k]}\`;
     });
     const reqStr = \`\${req.method} \${req.url} HTTP/\${req.httpVersion}\\r\\n\` + headers.join('\\r\\n') + '\\r\\n\\r\\n';
     proxySocket.write(reqStr);
@@ -889,25 +865,4 @@ server.listen(PROXY_PORT, '0.0.0.0', () => {
   await new Promise((resolve) => setTimeout(resolve, 500));
   
   return proxyPort;
-}
-
-/**
- * Check if a port is open and accepting connections.
- */
-async function isPortOpen(
-  sandbox: Sandbox,
-  port: number
-): Promise<boolean> {
-  try {
-    const result = await sandbox.commands.run(
-      `curl -s -o /dev/null -w "%{http_code}" http://localhost:${port}/ 2>/dev/null || true`,
-      { timeoutMs: 3000 }
-    );
-
-    const code = result.stdout.trim();
-    // Any HTTP response (even 404) means the server is running
-    return code !== "" && code !== "000";
-  } catch {
-    return false;
-  }
 }

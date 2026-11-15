@@ -177,7 +177,7 @@ const COMPONENTS_JSON = json({
   },
 });
 
-const INDEX_CSS = `@import "tailwindcss";
+export const INDEX_CSS = `@import "tailwindcss";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
@@ -414,7 +414,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
 }
 `;
 
-const UTILS_TS = `import { clsx, type ClassValue } from "clsx";
+export const UTILS_TS = `import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {

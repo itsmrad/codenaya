@@ -27,7 +27,8 @@ vi.mock("@/lib/convex-client", async () => {
 });
 
 import { TURN_HEARTBEAT_ID } from "../agent-steps";
-import { MAX_ORIGINAL_PROMPT_CHARS, WORKER_MAX_STEPS } from "../swarm";
+import { MAX_ORIGINAL_PROMPT_CHARS, WORKER_MAX_STEPS, capOriginalPrompt } from "../swarm";
+import { WRITE_BATCH_FILES, WRITE_BATCH_LINES } from "./constants";
 import { drive, text, toolCall } from "./process-message.driver";
 import { swarmWorker } from "./swarm-worker";
 import { createDelegateTasksTool } from "./tools/delegate-tasks";
@@ -107,6 +108,12 @@ describe("swarmWorker", () => {
       ["deleteFiles", "editFile", "listFiles", "readFiles", "searchFiles", "writeFiles"],
     );
     expect(request.messages[0].content).toContain("[swarm-worker]");
+    expect(request.messages[0].content).toContain(`as few writeFiles calls as you can, each at most ${WRITE_BATCH_FILES} files and about ${WRITE_BATCH_LINES} lines in all`);
+    expect(request.messages[0].content).toContain("is cut off and writes NOTHING. editFile stays right for changes to existing files.");
+    expect(request.messages[0].content).toContain("Read only files you must import from; shared types and stubs are listed in the tree.");
+    expect(request.messages[0].content).toContain("Avoid per-file edit/read loops. Do not re-read what you wrote.");
+    expect(request.messages[0].content).toContain("Do not run checkBuild or any build: the orchestrator integrates and checks the complete project.");
+    expect(request.messages[0].content).toContain("Stop once your files are written. Finish with a one-line summary");
     expect(request.messages[0].content).toContain("Owned paths: src/pages/");
     expect(request.messages.at(-1)?.content).toBe(TASK.brief);
 
@@ -305,6 +312,8 @@ describe("swarmWorker as a sub-orchestrator", () => {
       { id: "list", title: "List", brief: "Build the product list.", ownedPaths: ["src/shop/list.tsx"] },
     ],
   };
+  // Over the cap: the oldest text goes, the newest request (the tail) stays.
+  const LONG_REQUEST = `${"old ".repeat(MAX_ORIGINAL_PROMPT_CHARS)}NEWEST REQUEST`;
   const CART = { status: "done", summary: "Built the cart.", writtenPaths: ["src/shop/cart/cart.tsx"] };
   const LIST = { status: "done", summary: "Built the list.", writtenPaths: ["src/shop/list.tsx"] };
   const PRICED = (id: string, usdPerMTok: number) => ({
@@ -331,7 +340,7 @@ describe("swarmWorker as a sub-orchestrator", () => {
       { data: withUsage(toolCall("delegateTasks", CHILDREN)) }, // 2,000 tokens at Sonnet's $10/MTok
       { data: toolCall("writeFiles", { files: [{ path: "src/shop/index.tsx", content: "export {};\n" }] }) },
       { data: text("Built the shop.") },
-    ], { originalPrompt: "x".repeat(MAX_ORIGINAL_PROMPT_CHARS + 500) }, [CART, LIST]);
+    ], { originalPrompt: LONG_REQUEST }, [CART, LIST]);
 
     expect(outcome.finalType).toBe("function-resolved");
     const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: string }>; tools: Array<{ function: { name: string } }> }>;
@@ -347,8 +356,11 @@ describe("swarmWorker as a sub-orchestrator", () => {
       ],
     })]);
     // Children carry both parent ids, so message and sub-orchestrator cancellation reach them.
+    const [{ payload }] = outcome.invocations as Array<{ payload: { data: { originalPrompt: string } } }>;
+    expect(payload.data.originalPrompt).toHaveLength(MAX_ORIGINAL_PROMPT_CHARS);
+    expect(payload.data.originalPrompt).toMatch(/^\[truncated\] .*NEWEST REQUEST$/);
     expect(outcome.invocations).toEqual([
-      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_0", parentAgentTaskId: "t1", parentMessageId: "m1", ownerId: "user_1", depth: 2, originalPrompt: "x".repeat(MAX_ORIGINAL_PROMPT_CHARS) }) }, timeout: "10m" }),
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_0", parentAgentTaskId: "t1", parentMessageId: "m1", ownerId: "user_1", depth: 2, originalPrompt: capOriginalPrompt(LONG_REQUEST) }) }, timeout: "10m" }),
       expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_1", parentAgentTaskId: "t1", depth: 2 }) }, timeout: "10m" }),
     ]);
     expect(outcome.data).toMatchObject({

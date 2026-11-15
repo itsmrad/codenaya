@@ -1387,7 +1387,8 @@ const subscribe = (onChange: () => void) => {
 const isDark = () => document.documentElement.classList.contains("dark")
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const dark = useSyncExternalStore(subscribe, isDark)
+  // Server snapshot: Next prerenders the layout's <Toaster />; light until the client syncs.
+  const dark = useSyncExternalStore(subscribe, isDark, () => false)
   return (
     <Sonner
       theme={dark ? "dark" : "light"}

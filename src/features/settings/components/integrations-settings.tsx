@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { ConnectionCard } from "@/features/integrations/components/connection-card";
+import type { CustomServerPrefill } from "@/features/integrations/community-catalog";
 import { IntegrationsDialog } from "@/features/integrations/components/integrations-dialog";
 import { ProviderCatalog } from "@/features/integrations/components/provider-catalog";
 import { useUserConnections } from "@/features/integrations/hooks/use-integrations";
@@ -27,6 +28,7 @@ export const IntegrationsSettings = () => {
   // `?connect=<providerId>` (see integrationLink) opens that provider's dialog.
   const connectParam = useSearchParams().get(SETTINGS_CONNECT_PARAM);
   const [pickedProviderId, setPickedProviderId] = useState<string>();
+  const [prefill, setPrefill] = useState<CustomServerPrefill>();
   const selectedProviderId = pickedProviderId ?? linkedProviderId(connectParam);
 
   return (
@@ -59,7 +61,10 @@ export const IntegrationsSettings = () => {
         <section aria-label="Browse integrations" className="space-y-3">
           <h2 className="text-sm font-medium">Browse integrations</h2>
           <ProviderCatalog
-            onSelect={setPickedProviderId}
+            onSelect={(providerId, communityPrefill) => {
+              setPickedProviderId(providerId);
+              setPrefill(communityPrefill);
+            }}
             connectedProviderIds={connections?.map((connection) => connection.providerId)}
           />
         </section>
@@ -69,10 +74,12 @@ export const IntegrationsSettings = () => {
         onOpenChange={(open) => {
           if (open) return;
           setPickedProviderId(undefined);
+          setPrefill(undefined);
           // Drop the param so closing sticks and a reload doesn't reopen it.
           if (connectParam !== null) router.replace(pathname, { scroll: false });
         }}
         initialProviderId={selectedProviderId}
+        initialPrefill={prefill}
       />
     </Card>
   );

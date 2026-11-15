@@ -33,6 +33,12 @@ const check = (files = starter(), apiKey: string | null = "e2b_key") =>
     apiKey: apiKey ?? undefined,
   });
 
+/** The structured lines `unfinished` logs, parsed. */
+const unfinishedLogs = () =>
+  vi.mocked(console.error).mock.calls
+    .filter(([label]) => label === "[check-build] unfinished")
+    .map(([, line]) => JSON.parse(line as string));
+
 type Answer = { exitCode: number; stdout?: string; stderr?: string } | Error;
 
 type Proc = { cmd: string; args: string[] };
@@ -418,6 +424,14 @@ describe("checkProjectBuild", () => {
     expect(result).toContain("not an error in the project's code");
     expect(sandbox.kill).toHaveBeenCalledTimes(1);
   });
+
+  it("logs which path an unfinished check took, its sandbox and the budget left", async () => {
+    Object.assign(fakeSandbox(new TimeoutError("Command timed out")), { sandboxId: "sbx_cold" });
+    await check();
+    expect(unfinishedLogs()).toEqual([
+      expect.objectContaining({ path: "cold", sandboxId: "sbx_cold", error: "TimeoutError", reason: "Command timed out" }),
+    ]);
+  });
 });
 
 const SECRET = "sk_live_SYNTHETIC_0123456789";
@@ -488,6 +502,7 @@ describe("checkProjectBuild redaction (#465)", () => {
     });
     expect(result).toMatch(/^Error: The build check could not finish/);
     expect(result).not.toContain(SECRET);
+    expect(JSON.stringify(unfinishedLogs())).not.toContain(SECRET);
   });
 });
 
@@ -878,6 +893,72 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expect(result).toMatch(/^Error: The build check could not finish \(Command timed out\)/);
     expect(warm.kill).not.toHaveBeenCalled();
     expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("kills the timed-out build's own processes before removing its directory, never the dev server", async () => {
+    listed({});
+    const warm = warmSandbox((command) =>
+      command.startsWith("npm install") ? new TimeoutError("Command timed out") : undefined,
+    );
+
+    await warmCheck();
+
+    const runs = commandsOf(warm);
+    const killAt = runs.findIndex((run) => run.includes("kill -9"));
+    const rmAt = runs.findIndex((run) => run.startsWith("rm -rf "));
+    const dir = runs[rmAt].slice("rm -rf ".length);
+    expect(killAt).toBeGreaterThan(-1);
+    expect(killAt).toBeLessThan(rmAt);
+    expect(runs[killAt]).toContain(`${dir}|${dir}/*`);
+    expect(warm.commands.run.mock.calls[killAt][1]).toMatchObject({ timeoutMs: 10_000, requestTimeoutMs: 10_000 });
+    expect(warm.kill).not.toHaveBeenCalled();
+  });
+
+  it("still reports the timeout and cleans up when killing the build's processes fails", async () => {
+    listed({});
+    const warm = warmSandbox((command) => {
+      if (command.startsWith("npm install")) return new TimeoutError("Command timed out");
+      return command.includes("kill -9") ? new Error("sandbox gone") : undefined;
+    });
+
+    const result = await warmCheck();
+
+    expect(result).toMatch(/^Error: The build check could not finish \(Command timed out\)/);
+    expect(commandsOf(warm).some((run) => run.startsWith("rm -rf "))).toBe(true);
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("kills nothing when the warm build finishes or fails", async () => {
+    listed({});
+    const warm = warmSandbox((command) => (command.startsWith("npx") ? { exitCode: 1, stderr: "error" } : undefined));
+
+    await warmCheck();
+
+    expect(commandsOf(warm).some((run) => run.includes("kill -9"))).toBe(false);
+  });
+
+  it("logs a warm unfinished check with its sandbox, elapsed time and the budget left", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    listed({});
+    const warm = warmSandbox((command) => {
+      if (command.startsWith("npm install")) now += 125_000;
+      return undefined;
+    });
+    Object.assign(warm, { sandboxId: "sbx_warm_0" });
+
+    await warmCheck();
+
+    expect(unfinishedLogs()).toEqual([
+      {
+        path: "warm",
+        elapsedMs: 125_000,
+        budgetLeftMs: 115_000,
+        sandboxId: "sbx_warm_0",
+        error: "OutOfTime",
+        reason: "The check ran out of time",
+      },
+    ]);
   });
 
   it("does not start a new sandbox when a failed warm attempt left too little of the step budget", async () => {

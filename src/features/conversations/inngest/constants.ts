@@ -396,6 +396,7 @@ PLANNING (mental — do not output this):
 6. Plan the design: color palette tokens, font, spacing scale, dark mode strategy
 
 EXECUTION:
+- For a Next.js App Router starter, build on the files already in place. Do NOT call scaffoldViteApp. Make the first runnable implementation write src/app/page.tsx, keep src/app/layout.tsx and its Toaster, and use next/link and next/navigation for routing (no react-router-dom). Add "use client" to interactive components that use hooks or event handlers. Keep the Next config and src/app/globals.css; never add vite.config.ts, index.html or src/main.tsx. The selected starter defines the framework even when the request does not name it
 - For a NEW Vite + React app, call scaffoldViteApp FIRST, unless the request says the starter is already in place. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx and the common src/components/ui/ components listed above) and returns their paths. The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>. Build on it: use editFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace the placeholder route in src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files. If you edit src/main.tsx, keep its <ErrorBoundary> and <BrowserRouter>; in steps 9a–d skip the files it already wrote
 - Batch independent tool calls: make every call that does not need another call's result in the same turn (several readFiles calls at once), so the run does not use up its steps
 7. Write files with writeFiles by path. It creates missing folders, so never create folders first
@@ -451,6 +452,20 @@ Add a gallery page with my own photos
 export const STARTER_IN_PLACE_NOTE =
   "(This project already has the Vite starter and nothing else: package.json, vite.config.ts, the tsconfig files, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx and the common src/components/ui/ components (including the mounted Sonner toaster). Import these components; do not rewrite them. Don't call scaffoldViteApp, and don't start with listFiles: build on these files by path.)";
 
+export const NEXT_STARTER_IN_PLACE_NOTE =
+  '(This project already has the Next.js 15 App Router starter and nothing else: package.json, next.config.ts, tsconfig.json, next-env.d.ts, postcss.config.mjs, components.json, src/app/layout.tsx, src/app/page.tsx, src/app/globals.css, src/app/error.tsx, src/lib/utils.ts and the common src/components/ui/ components, including the mounted Sonner toaster. Import these components; do not rewrite them. Do NOT call scaffoldViteApp or start with listFiles. First write a runnable src/app/page.tsx for the request, keeping layout.tsx. Use next/link and next/navigation, no react-router-dom; add "use client" to interactive components. Never add vite.config.ts, index.html or src/main.tsx. Build on this selected framework even if the request does not name Next.js.)';
+
+export const NEXT_STARTER_RECOVERY_NOTE =
+  '(The original user prompt requests Next.js 15 App Router, but its starter is incomplete or missing. Restore missing Next starter files, including package.json, next.config.ts, tsconfig.json, next-env.d.ts, postcss.config.mjs, src/app/layout.tsx and src/app/globals.css. Then make the first runnable implementation src/app/page.tsx for the actual request, preserving any existing layout and user code. Use next/link and next/navigation, no react-router-dom, and add "use client" to interactive components. Never add vite.config.ts, index.html or src/main.tsx; do NOT call scaffoldViteApp. Keep the app runnable between writes and complete the normal final checkBuild, fix and verification workflow.)';
+
+export const NEXT_FIRST_BUILD_APP_NOTE = `
+
+## First build: show the user's app early
+The Next.js 15 App Router starter is already in place. Override the entry-points-last workflow: make your first implementation write a small, immediately runnable src/app/page.tsx for the user's actual request. Use the requested product name, meaningful domain-specific copy, representative data and a styled main layout, never a generic loading shell or placeholder.
+Import only existing files and installed packages. Keep src/app/layout.tsx, its metadata and Toaster intact. Use next/link and next/navigation, never react-router-dom, and add "use client" to components using hooks or event handlers. Never add vite.config.ts, index.html or src/main.tsx, and do NOT call scaffoldViteApp. Improve existing user implementation in place.
+Then complete every requested feature, extracting components and wiring routes only after their files exist. Keep the app runnable between writes; this first page is an intermediate step. Retain the normal final checkBuild, fix and verification workflow.
+`;
+
 /** Solo first builds only; swarm has its own foundation order and path ownership. */
 export const FIRST_BUILD_APP_NOTE = `
 
@@ -475,9 +490,13 @@ export const FILE_HISTORY_PLACEHOLDER = "[{detail}; content omitted; re-read if 
 /** Worker prompt note. "[swarm-worker]" is the marker the e2e model stub keys on. */
 export const SWARM_WORKER_NOTE = `
 [swarm-worker] You are a swarm worker. Implement only the assigned task and owned paths below.
-Read any project files you need. Never edit shared files, dependencies, or another worker's paths.
-Do not run a build: the orchestrator integrates and checks the complete project.
-Finish with a concise report of changes and any remaining work. Put dependency requests,
+Read only files you must import from; shared types and stubs are listed in the tree.
+Never edit shared files, dependencies, or another worker's paths.
+Use as few writeFiles calls as you can, each at most ${WRITE_BATCH_FILES} files and about ${WRITE_BATCH_LINES} lines in all; an oversized
+call is cut off and writes NOTHING. editFile stays right for changes to existing files.
+Avoid per-file edit/read loops. Do not re-read what you wrote.
+Do not run checkBuild or any build: the orchestrator integrates and checks the complete project.
+Stop once your files are written. Finish with a one-line summary of changes and any remaining work. Put dependency requests,
 shared edits, or integration requirements in a NEEDS: section for the orchestrator.
 Your reply goes to the orchestrator, not the user: no next steps, suggestions or action chips.
 `;
@@ -500,9 +519,9 @@ export const SWARM_ORCHESTRATOR_NOTE = `
 
 ## Swarm mode
 You lead parallel workers. A request with two or more pages, screens or features is never too small to split. Work in this order:
-1. Write ONLY the structure, no content, in a single writeFiles call of at most ${WRITE_BATCH_FILES} files (after scaffoldViteApp for a new app, or readFiles for an existing one; use editFile for package.json dependencies and src/index.css tokens): src/types/* (the TypeScript shapes workers share), src/App.tsx routes, and a layout shell plus a page stub for each new page App.tsx imports that does not exist yet, each stub at most 240 characters (export default () => null;); its worker replaces it. Existing files are never stubbed. Do NOT write data, copy, or page content, and no sitemap/robots/favicon extras: workers or integration do. Any other write is refused until you call delegateTasks. Call delegateTasks on the very next call after the stubs batch.
-2. Call delegateTasks once with 2-4 balanced tasks with at most 2 pages each: group small pages together and give a big page its own task. Give the slowest page (forms, booking) its own task or split it, so no worker is a long pole. UI primitives/layout may be their own small task. ownedPaths must be files or folders under src/ (e.g. src/pages/Home.tsx, src/components/gallery), disjoint between tasks. Anything outside src/ (public/ assets, root config) and the shared files are yours: write them before delegating. Keep each task brief to at most ~800 characters. Each worker also receives the user's original request, so the brief only says what is YOUR task's slice: the files it writes, which shared types/routes it uses (by file name: workers read them from disk, so never paste or restate them), and what must render (acceptance); do not restate the request, and no code samples.
-3. Integrate: apply every NEEDS: request from the reports, finish any failed or unfinished task yourself, then call checkBuild and fix what it reports before the final summary.
+1. Write ONLY the structure, no content, in a single writeFiles call of at most ${WRITE_BATCH_FILES} files (after scaffoldViteApp for a new app, or readFiles for an existing one; use editFile for package.json dependencies and src/index.css tokens): src/types/* (the TypeScript shapes workers share), src/App.tsx routes, and a layout shell plus a page stub for each new page App.tsx imports that does not exist yet, each stub at most 240 characters (export default () => null;); its worker replaces it. Existing files are never stubbed. Do NOT write data, copy, or page content, and no sitemap/robots/favicon extras: a worker task that owns public/ writes them. Any other write is refused until you call delegateTasks. Call delegateTasks on the very next call after the stubs batch.
+2. Call delegateTasks once with 2-4 balanced tasks with at most 2 pages each: group small pages together and give a big page its own task. Give the slowest page (forms, booking) its own task or split it, so no worker is a long pole. UI primitives/layout may be their own small task. ownedPaths must be files or folders under src/ or public/ (e.g. src/pages/Home.tsx, src/components/gallery, public), disjoint between tasks. Give static assets (public/: favicon, robots.txt, sitemap.xml, images) to a worker task that owns public/; root config and the shared files are yours: write them before delegating. Keep each task brief to at most ~800 characters. Each worker also receives the user's original request, so the brief only says what is YOUR task's slice: the files it writes, which shared types/routes it uses (by file name: workers read them from disk, so never paste or restate them), and what must render (acceptance); do not restate the request, and no code samples.
+3. Integrate: apply every NEEDS: request from the reports, finish any failed or unfinished task yourself, then call checkBuild and fix what it reports before the final summary. After delegateTasks returns, only edit index.html (title/meta) if needed and run checkBuild; do not rewrite or re-generate finished pages or assets.
 Only a genuinely tiny request (one small component, a copy or style tweak, a one-file fix) skips the workers: first call delegateTasks with tasks [] and solo set to a short reason, then build it yourself.`;
 
 /** The swarm orchestrator's delegation turn, sent whether or not the model can be forced to call the tool. */

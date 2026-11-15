@@ -18,7 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 
-import { getProvider } from "../catalog";
+import { getProvider, offeredAuthModes } from "../catalog";
+import type { CustomServerPrefill } from "../community-catalog";
 import {
   useOAuthPopup,
   type OAuthPopupState,
@@ -254,6 +255,8 @@ interface ConnectApiKeyFormProps {
   projectId?: Id<"projects">;
   /** Called after a connection is created, so the parent can reset its flow. */
   onConnected?: () => void;
+  /** Custom servers only: name and URL of a community server, still editable. */
+  prefill?: CustomServerPrefill;
 }
 
 export const ConnectApiKeyForm = ({
@@ -261,6 +264,7 @@ export const ConnectApiKeyForm = ({
   providerId,
   projectId,
   onConnected,
+  prefill,
 }: ConnectApiKeyFormProps) => {
   const isCustom = providerId === CUSTOM_PROVIDER_ID;
   const provider = isCustom ? undefined : getProvider(providerId);
@@ -270,7 +274,7 @@ export const ConnectApiKeyForm = ({
     : provider?.displayName ?? providerId;
 
   const noAuth = provider?.authModes.includes("none") === true;
-  const oauthAvailable = connection ? connection.authMode === "oauth" : provider ? supportsOAuth(provider.authModes) : false;
+  const oauthAvailable = connection ? connection.authMode === "oauth" : provider ? supportsOAuth(offeredAuthModes(provider)) : false;
   // Custom servers are always key-based; catalog providers say so themselves.
   const apiKeyAvailable = connection ? connection.authMode === "api_key" : isCustom
     ? true
@@ -289,8 +293,8 @@ export const ConnectApiKeyForm = ({
   const form = useForm({
     defaultValues: {
       apiKey: "",
-      label: connection?.label ?? "",
-      serverUrl: connection?.serverUrl ?? "",
+      label: connection?.label ?? prefill?.label ?? "",
+      serverUrl: connection?.serverUrl ?? prefill?.serverUrl ?? "",
     },
     validators: {
       onSubmit: buildSchema(isCustom, noAuth),
@@ -423,6 +427,16 @@ export const ConnectApiKeyForm = ({
         ? "This provider authorises through OAuth, so there is no key to paste."
         : "We verify the key against the provider before saving it.";
 
+  const communityNote = isCustom && prefill && !connection ? (
+    <div role="note" className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5">
+      <InfoIcon aria-hidden="true" className="size-3.5 shrink-0 mt-0.5 text-amber-700 dark:text-amber-400" />
+      <p className="text-[11px] leading-relaxed text-foreground">
+        Community server — not reviewed by Codenaya. It connects as a custom server, so the agent asks for your
+        approval before every tool call, including ones that claim to be read-only.
+      </p>
+    </div>
+  ) : null;
+
   const notes = provider?.notes ? (
     <div className="flex items-start gap-2 rounded-lg border border-border/50 bg-muted/20 p-2.5">
       <InfoIcon
@@ -544,6 +558,8 @@ export const ConnectApiKeyForm = ({
         <h4 className="text-sm font-medium">{connection ? "Reconnect" : "Connect"} {displayName}</h4>
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
+
+      {communityNote}
 
       {oauthAvailable && (
         <OAuthConnectPanel

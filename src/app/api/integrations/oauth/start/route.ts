@@ -1,7 +1,7 @@
 import { requireUserId } from "@/features/auth/server/require-user-id";
 import { z } from "zod";
 
-import { getProvider } from "@/features/integrations/catalog";
+import { getProvider, hasPreRegisteredClient } from "@/features/integrations/catalog";
 import {
   getSecretSealer,
   secretContext,
@@ -200,7 +200,12 @@ export async function POST(request: Request) {
     return jsonError(`Unknown provider "${parsed.data.providerId}"`, 400);
   }
 
-  if (!provider.authModes.includes("oauth")) {
+  // A pre-registered client (#539) whose env vars are unset leaves OAuth off,
+  // matching the hidden option in the UI; the API key path stays.
+  if (
+    !provider.authModes.includes("oauth") ||
+    (provider.preRegisteredClient && !hasPreRegisteredClient(provider))
+  ) {
     return jsonError(
       `${provider.displayName} does not support OAuth. Connect it with an API key instead.`,
       400,

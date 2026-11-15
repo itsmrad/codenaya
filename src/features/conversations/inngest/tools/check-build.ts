@@ -165,10 +165,29 @@ const failureOutput = (result: CommandResult, dir: string, secrets: readonly str
   return redact(withErrorHints(trimBuildOutput(output, dir, framework), output), secrets);
 };
 
+/** Where an unfinished check stopped; "step" is a failure outside any build path. */
+type Where = { path: "warm" | "cold" | "given" | "before-cold" | "step"; deadline?: number; sandbox?: Sandbox | null };
+
 /** A timeout or a sandbox failure, not a problem in the project's code. */
-const unfinished = (error: unknown, secrets: readonly string[] = []) =>
-  `${BUILD_CHECK_UNFINISHED} (${redact(error instanceof Error ? error.message : "Unknown error", secrets)}). ` +
-  "This is not an error in the project's code. Say in Notes that the build was not verified.";
+const unfinished = (error: unknown, secrets: readonly string[] = [], { path, deadline, sandbox }: Where = { path: "step" }) => {
+  const reason = redact(error instanceof Error ? error.message : "Unknown error", secrets);
+  // One line per unfinished check, so a repeat can be told apart: which path, how long it ran, what was left.
+  console.error(
+    "[check-build] unfinished",
+    JSON.stringify({
+      path,
+      elapsedMs: deadline && Date.now() - (deadline - STEP_BUDGET_MS),
+      budgetLeftMs: deadline && deadline - Date.now(),
+      sandboxId: sandbox?.sandboxId,
+      error: error instanceof Error ? error.constructor.name : typeof error,
+      reason: reason.slice(0, 200),
+    }),
+  );
+  return (
+    `${BUILD_CHECK_UNFINISHED} (${reason}). ` +
+    "This is not an error in the project's code. Say in Notes that the build was not verified."
+  );
+};
 
 const notBuilt = (reason: string) =>
   `${STATIC_CHECKS_PASSED}\n${reason}, so the type check and build did not run. ` +
@@ -189,7 +208,12 @@ export const buildCommand = (framework: Framework, paths: Set<string>) => {
  * within CHECK_TIMEOUT_MS and the step deadline. Returns the tool result for
  * a finished check; throws on sandbox failures and timeouts.
  */
-const buildIn = async (sandbox: Sandbox, dir: string, { files, paths, deadline, secrets, notes, framework }: BuildJob) => {
+const buildIn = async (
+  sandbox: Sandbox,
+  dir: string,
+  { files, paths, deadline, secrets, notes, framework }: BuildJob,
+  path: Where["path"],
+) => {
   const buildDeadline = Math.min(Date.now() + CHECK_TIMEOUT_MS, deadline);
   const timeLeft = () => within(buildDeadline, CHECK_TIMEOUT_MS);
 
@@ -199,7 +223,7 @@ const buildIn = async (sandbox: Sandbox, dir: string, { files, paths, deadline, 
   if (install.exitCode !== 0) {
     // The registry or the sandbox's network, not package.json: nothing to fix.
     if (NETWORK_FAILURE.test(`${install.stderr}\n${install.stdout}`)) {
-      return unfinished(new Error("npm could not reach the package registry"));
+      return unfinished(new Error("npm could not reach the package registry"), [], { path, deadline, sandbox });
     }
     return `Error: npm install failed. Fix package.json, then call checkBuild again:\n${failureOutput(install, dir, secrets, framework)}`;
   }
@@ -300,6 +324,19 @@ const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPr
 };
 
 /**
+ * Best effort: SIGKILL whatever runs in the check's own directory. A command that
+ * times out may only be disconnected from, leaving its build running in the preview.
+ * The dev server runs in WORK_DIR, so it is left alone.
+ */
+const killBuildProcesses = (sandbox: Sandbox, dir: string) =>
+  sandbox.commands
+    .run(`for p in /proc/[0-9]*; do case "$(readlink "$p/cwd")" in ${dir}|${dir}/*) kill -9 "\${p##*/}";; esac; done; true`, {
+      timeoutMs: SHORT_CALL_MS,
+      requestTimeoutMs: SHORT_CALL_MS,
+    })
+    .catch(() => {});
+
+/**
  * The check in the project's warm preview sandbox, or null to use a new one.
  * It builds in its own directory with a copy of the preview's node_modules, so
  * the dev server, its HMR and its installed packages are left alone, and the
@@ -323,11 +360,15 @@ const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: Bui
     }
 
     building = true;
-    return await buildIn(sandbox, dir, job);
+    return await buildIn(sandbox, dir, job, "warm");
   } catch (error) {
-    if (error instanceof OutOfTime) return unfinished(error);
+    const where: Where = { path: "warm", deadline: job.deadline, sandbox };
+    if (error instanceof OutOfTime) return unfinished(error, [], where);
     // A slow build would time out in a new sandbox too.
-    if (building && error instanceof TimeoutError) return unfinished(error, job.secrets);
+    if (building && error instanceof TimeoutError) {
+      if (sandbox) await killBuildProcesses(sandbox, dir);
+      return unfinished(error, job.secrets, where);
+    }
     console.error("[check-build] warm sandbox unavailable, starting a new one", error);
     return null;
   } finally {
@@ -433,9 +474,9 @@ export const checkProjectBuild = async ({
           { timeoutMs, requestTimeoutMs: timeoutMs },
         );
       }
-      return await buildIn(suppliedSandbox, dir, job);
+      return await buildIn(suppliedSandbox, dir, job, "given");
     } catch (error) {
-      return unfinished(error, secrets);
+      return unfinished(error, secrets, { path: "given", deadline: job.deadline, sandbox: suppliedSandbox });
     } finally {
       // Never kill: the caller owns this sandbox. Only our directory goes.
       await suppliedSandbox.commands
@@ -451,7 +492,7 @@ export const checkProjectBuild = async ({
   if (preview) {
     const warm = await checkInWarmSandbox(apiKey, preview, job);
     if (warm) return warm;
-    if (job.deadline - Date.now() < MIN_COLD_BUILD_MS) return unfinished(new OutOfTime());
+    if (job.deadline - Date.now() < MIN_COLD_BUILD_MS) return unfinished(new OutOfTime(), [], { path: "before-cold", deadline: job.deadline });
   }
 
   let sandbox: Sandbox;
@@ -468,9 +509,9 @@ export const checkProjectBuild = async ({
   }
 
   try {
-    return await buildIn(sandbox, WORK_DIR, job);
+    return await buildIn(sandbox, WORK_DIR, job, "cold");
   } catch (error) {
-    return unfinished(error, secrets);
+    return unfinished(error, secrets, { path: "cold", deadline: job.deadline, sandbox });
   } finally {
     await sandbox.kill().catch(() => {});
   }
