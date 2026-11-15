@@ -20,7 +20,6 @@ const mocks = vi.hoisted(() => {
     connect: vi.fn(),
     list: vi.fn(),
     kill: vi.fn(),
-    createSnapshot: vi.fn(),
     deleteSnapshot: vi.fn(),
   };
 });
@@ -32,12 +31,11 @@ vi.mock("e2b", () => ({
     connect: mocks.connect,
     list: mocks.list,
     kill: mocks.kill,
-    createSnapshot: mocks.createSnapshot,
     deleteSnapshot: mocks.deleteSnapshot,
   },
 }));
 
-import { createE2bProvider } from "./e2b";
+import { createE2bProvider, e2bHandleOf } from "./e2b";
 import { SandboxConfigError, SandboxRateLimitError, SandboxTimeoutError } from "./types";
 
 const fakeE2bSandbox = () => ({
@@ -47,6 +45,7 @@ const fakeE2bSandbox = () => ({
   getHost: vi.fn((port: number) => `${port}-sbx1.e2b.app`),
   getInfo: vi.fn(),
   kill: vi.fn(),
+  createSnapshot: vi.fn(),
 });
 
 const provider = createE2bProvider("key_1");
@@ -139,6 +138,13 @@ describe("E2B provider", () => {
       return { e2b, sandbox: await provider.connect("sbx1") };
     };
 
+    it("keeps the raw handle for the seam's E2B-only callers", async () => {
+      const { e2b, sandbox } = await connect();
+
+      expect(e2bHandleOf(sandbox)).toBe(e2b);
+      expect(e2bHandleOf({ ...sandbox })).toBeNull();
+    });
+
     it("resolves a non-zero exit with its code and output", async () => {
       const { e2b, sandbox } = await connect();
       e2b.commands.run.mockRejectedValue(new mocks.errors.CommandExitError(2, "out", "err"));
@@ -187,14 +193,15 @@ describe("E2B provider", () => {
       expect(await sandbox.info()).toEqual({ metadata: { userId: "u1" }, endAt });
     });
 
-    it("snapshots by sandbox id and creates from and deletes the snapshot", async () => {
-      const { sandbox } = await connect();
-      mocks.createSnapshot.mockResolvedValue({ snapshotId: "snap:1" });
+    it("snapshots the sandbox and creates from and deletes the snapshot", async () => {
+      const { e2b, sandbox } = await connect();
+      e2b.createSnapshot.mockResolvedValue({ snapshotId: "snap:1" });
       mocks.create.mockResolvedValue(fakeE2bSandbox());
       mocks.deleteSnapshot.mockResolvedValue(true);
 
-      expect(await provider.snapshot!(sandbox)).toBe("snap:1");
-      expect(mocks.createSnapshot).toHaveBeenCalledWith("sbx1", { apiKey: "key_1" });
+      expect(await provider.snapshot!(sandbox, { requestTimeoutMs: 5 })).toBe("snap:1");
+      await expect(provider.snapshot!({ ...sandbox })).rejects.toThrow("Not an E2B sandbox");
+      expect(e2b.createSnapshot).toHaveBeenCalledWith({ requestTimeoutMs: 5 });
       await provider.createFromSnapshot!("snap:1", { timeoutMs: 1, metadata: { messageId: "m1" } });
       expect(mocks.create).toHaveBeenCalledWith("snap:1", expect.objectContaining({ apiKey: "key_1", metadata: { messageId: "m1" } }));
       expect(await provider.deleteSnapshot!("snap:1")).toBe(true);

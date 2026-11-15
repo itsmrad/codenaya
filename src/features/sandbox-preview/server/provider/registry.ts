@@ -18,3 +18,13 @@ export const getProvider = (id: ProviderId): SandboxProvider => {
 
 /** Where new sandboxes are created. Selection by env and failover come later (ADR 0015). */
 export const getDefaultProvider = () => getProvider("e2b");
+
+/** The default provider, or null when it is not configured. */
+export const getDefaultProviderOrNull = () => {
+  try {
+    return getDefaultProvider();
+  } catch (error) {
+    if (error instanceof SandboxConfigError) return null;
+    throw error;
+  }
+};

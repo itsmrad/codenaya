@@ -13,10 +13,11 @@ vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal)
   resolveProjectEnv: mocks.resolveEnv,
 }));
 
-import { CommandExitError, type CommandResult, type Sandbox, SandboxError, TimeoutError } from "e2b";
+import { CommandExitError, type CommandResult, type Sandbox as E2bSandbox, SandboxError, TimeoutError } from "e2b";
 import { getFunctionName } from "convex/server";
 
 import { DEV_COMMAND_ENV, PROXY_TARGET_ENV, killTreeCommand } from "@/features/sandbox-preview/server/dev-server";
+import { createE2bProvider, fromE2bSandbox } from "@/features/sandbox-preview/server/provider/e2b";
 
 import { VITE_REACT_STARTER } from "../vite-starter";
 import {
@@ -33,7 +34,7 @@ const check = (files = starter(), apiKey: string | null = "e2b_key") =>
   checkProjectBuild({
     files,
     paths: new Set(files.map((file) => file.path)),
-    apiKey: apiKey ?? undefined,
+    provider: apiKey ? createE2bProvider(apiKey) : undefined,
   });
 
 /** The structured lines `unfinished` logs, parsed. */
@@ -288,7 +289,7 @@ describe("checkProjectBuild", () => {
     const result = await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      sandbox: sandbox as unknown as Sandbox,
+      sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
     });
 
     expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
@@ -308,7 +309,7 @@ describe("checkProjectBuild", () => {
     await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      sandbox: sandbox as unknown as Sandbox,
+      sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
       sourceDir: "/home/user/app",
     });
 
@@ -327,7 +328,7 @@ describe("checkProjectBuild", () => {
     const result = await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      sandbox: sandbox as unknown as Sandbox,
+      sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
     });
 
     expect(result).toBe("Error: Static checks failed: Invalid project file path.");
@@ -379,7 +380,7 @@ describe("checkProjectBuild", () => {
     await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      sandbox: sandbox as unknown as Sandbox,
+      sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
       sourceDir: "/home/user/app",
     });
     const [copy] = sandbox.commands.run.mock.calls.map(([command]) => command);
@@ -395,7 +396,7 @@ describe("checkProjectBuild", () => {
     await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      sandbox: sandbox as unknown as Sandbox,
+      sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
       sourceDir: "/home/user/app",
     });
     const [copy] = sandbox.commands.run.mock.calls.map(([command]) => command);
@@ -474,7 +475,7 @@ describe("checkProjectBuild", () => {
     Object.assign(fakeSandbox(new TimeoutError("Command timed out")), { sandboxId: "sbx_cold" });
     await check();
     expect(unfinishedLogs()).toEqual([
-      expect.objectContaining({ path: "cold", sandboxId: "sbx_cold", error: "TimeoutError", reason: "Command timed out" }),
+      expect.objectContaining({ path: "cold", sandboxId: "sbx_cold", error: "SandboxTimeoutError", reason: "Command timed out" }),
     ]);
   });
 });
@@ -488,7 +489,7 @@ describe("checkProjectBuild redaction (#465)", () => {
     const result = await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      apiKey: "e2b_key",
+      provider: createE2bProvider("e2b_key"),
       secrets: [SECRET],
     });
     expect(result).toMatch(/^Error: Build failed/);
@@ -508,7 +509,7 @@ describe("checkProjectBuild redaction (#465)", () => {
     const result = await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      apiKey: "e2b_key",
+      provider: createE2bProvider("e2b_key"),
       secrets: [key],
     });
     expect(result).toMatch(/^Error: Build failed/);
@@ -529,7 +530,7 @@ describe("checkProjectBuild redaction (#465)", () => {
     const result = await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      apiKey: "e2b_key",
+      provider: createE2bProvider("e2b_key"),
       secrets: [secret],
     });
     expect(result).toContain("[redacted]");
@@ -542,7 +543,7 @@ describe("checkProjectBuild redaction (#465)", () => {
     const result = await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      apiKey: "e2b_key",
+      provider: createE2bProvider("e2b_key"),
       secrets: [SECRET],
     });
     expect(result).toMatch(/^Error: The build check could not finish/);
@@ -562,7 +563,7 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     return checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      apiKey: "e2b_key",
+      provider: createE2bProvider("e2b_key"),
       metadata: { projectId: "proj_1", purpose: "check-build" },
       preview: { projectId: "proj_1", ownerId: "user_1" },
       secrets,

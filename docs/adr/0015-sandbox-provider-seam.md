@@ -85,3 +85,24 @@ registry before it gets an adapter.
   (`e2e/preview-e2b-*`) are the first run against the real service.
 - A new vendor means a new adapter, an image build script and per-vendor e2e secrets.
   Each vendor also becomes a subprocessor for the `.env` secrets written into its sandboxes.
+
+## PR2 status
+
+`check-build.ts`, `build-repair.ts`, `sandbox-repair.ts` and `swarm-sandbox.ts` now
+reach sandboxes only through the seam (`getDefaultProviderOrNull()`, `provider.create`,
+`list`, `connect`, `kill`, the snapshot methods, and `run`/`writeFiles`/`readFile` plus
+`runOrThrow`, `exists` and `remove` from `helpers.ts`). Metadata is unchanged:
+`purpose`, `projectId`, `runId` and `messageId`, and `userId` on the warm-preview lookup.
+The swarm stays off by default and needs a provider with all three snapshot methods.
+
+`e2bHandleOf(sandbox)` (in `e2b.ts`) hands back the raw E2B handle in two places only:
+- **The warm preview in `check-build.ts`.** The install poll uses `commands.list` and
+  `findPreviewDevServer`/`restartDevServerIfDown` from `dev-server.ts`, all of which are
+  typed to the E2B handle until PR1b moves `dev-server.ts`. Their E2B timeout handling
+  is unchanged.
+- **The swarm's envd-version gate** before a snapshot.
+
+Seam errors replace E2B's on these paths, so the `[check-build] unfinished` log now
+names `SandboxTimeoutError` rather than `TimeoutError`. The E2B adapter's `snapshot`
+calls the sandbox's own `createSnapshot`. Coverage is still the mocked `e2b` SDK and
+the agent e2e specs; there has been no live run.

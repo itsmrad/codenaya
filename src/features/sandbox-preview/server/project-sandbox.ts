@@ -81,6 +81,10 @@ export const createProjectSandbox = (
   opts: Pick<SandboxOpts, "apiKey" | "timeoutMs" | "metadata" | "network" | "requestTimeoutMs">,
 ) => Sandbox.create(SANDBOX_TEMPLATE, opts);
 
+/** `files` under `dir`, as one `writeFiles` batch for the provider seam. */
+export const projectFileEntries = (files: ProjectFile[], dir = WORK_DIR) =>
+  files.map((file) => ({ path: `${dir}/${file.path}`, data: file.content }));
+
 /**
  * One batched upload; E2B creates the parent directories. `timeLeft` bounds
  * each request by what is left of the caller's budget.
