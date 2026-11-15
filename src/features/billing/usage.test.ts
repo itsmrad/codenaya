@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { runCostLabel, usageView } from "./usage";
+import { formatResetTime, runCostLabel, usageView } from "./usage";
 
 const NOV_15 = Date.UTC(2026, 10, 15, 10);
 const account = {
@@ -50,8 +50,23 @@ describe("usageView", () => {
     expect(usageView({ ...account, periodUsed: 300 }, Date.UTC(2026, 11, 1, 1)).month.left).toBe(300);
   });
 
+  test("re-derived at the reset time, a fully used day is full again (#552)", () => {
+    const usedUp = usageView({ ...account, dayUsed: 60 }, NOV_15);
+    expect(usedUp.day).toMatchObject({ left: 0 });
+    expect(usageView({ ...account, dayUsed: 60 }, usedUp.dayResetsAt).day).toMatchObject({ left: 60, percentLeft: 100 });
+  });
+
   test("a plan without a daily cap has no day bar", () => {
     expect(usageView({ ...account, plan: "pro" }, NOV_15)).toMatchObject({ day: null, month: { left: 1_900 } });
+  });
+});
+
+describe("formatResetTime", () => {
+  test("shows the time in the viewer's zone, with its name", () => {
+    // Some ICU versions put a narrow no-break space before "AM".
+    const reset = (timeZone: string) => formatResetTime(Date.UTC(2026, 10, 16), timeZone).replace(/\u202f/g, " ");
+    expect(reset("UTC")).toBe("Nov 16, 12:00 AM UTC");
+    expect(reset("Asia/Kolkata")).toBe("Nov 16, 5:30 AM GMT+5:30");
   });
 });
 

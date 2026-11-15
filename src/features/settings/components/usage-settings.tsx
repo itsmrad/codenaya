@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { format } from "date-fns";
 import { KeyRoundIcon } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -11,7 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { useAiPreferences } from "@/features/ai-providers/hooks/use-ai-providers";
 import { useCreditUsage } from "@/features/billing/hooks/use-credit-usage";
 import { formatCredits } from "@/features/billing/plans";
-import type { Allowance } from "@/features/billing/usage";
+import { type Allowance, formatResetTime } from "@/features/billing/usage";
 
 import { AI_PROVIDERS_SETTINGS_URL } from "../nav";
 
@@ -26,7 +25,7 @@ const AllowanceRow = ({ label, allowance, resetsAt }: { label: string; allowance
     </div>
     <Progress value={allowance.percentLeft} aria-label={`${label}: credits left`} />
     <p className="text-xs text-muted-foreground">
-      Resets <time dateTime={new Date(resetsAt).toISOString()}>{format(resetsAt, "MMM d, h:mm a")}</time>
+      Resets <time dateTime={new Date(resetsAt).toISOString()}>{formatResetTime(resetsAt)}</time>
     </p>
   </div>
 );
