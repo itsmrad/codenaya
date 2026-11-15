@@ -179,6 +179,11 @@ test.describe.serial("plan mode", () => {
   test("edits the plan before building it, on a phone-width panel", async () => {
     test.setTimeout(240_000);
     await page.setViewportSize({ width: 375, height: 740 });
+    // Phones show the chat as a tab. The IDE reopens on the view saved on the
+    // desktop, where the chat is a side panel (the editor), so pick Chat.
+    const chatTab = page.getByRole("tablist", { name: "Workspace views" }).getByRole("tab", { name: "Chat" });
+    await chatTab.click();
+    await expect(chatTab).toHaveAttribute("aria-selected", "true");
     const input = page.getByPlaceholder("Describe a change or ask a question…");
     await input.fill("todo app with a footer");
     await input.press("Enter");
