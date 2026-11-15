@@ -72,6 +72,8 @@ test.describe("chat swarm board", () => {
         await test.info().attach(`swarm-board-${theme}`, { body: await board.screenshot(), contentType: "image/png" });
       }
       await page.setViewportSize({ width: 375, height: 812 });
+      // Mobile chat is a tab; the desktop's selected Preview view can hide it.
+      await page.getByRole("tab", { name: "Chat", exact: true }).click();
       for (const theme of ["light", "dark"]) {
         await page.evaluate((value) => document.documentElement.classList.toggle("dark", value === "dark"), theme);
         await expect(nested.getByRole("button", { name: /Hero section/ })).toBeVisible();
