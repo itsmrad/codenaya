@@ -32,11 +32,15 @@ import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
 import { SwarmBoard } from "./swarm-board";
 import { type StuckRetry, StuckRunCard } from "./stuck-run-card";
+import { ElementChips } from "./element-chips";
+import type { SelectedElement } from "../selected-elements";
 
 interface UserMessageProps {
   content: string;
   /** Attached images, shown as thumbnails above the text. */
   imageUrls?: string[];
+  /** Preview elements picked in Select mode (#227), shown as chips above the text. */
+  elements?: SelectedElement[];
   /** Enabled skills: leading `/name` tokens naming one show as a chip. */
   skillNames?: ReadonlySet<string>;
   /** Sent while the conversation was open (not history): fades up on mount. */
@@ -46,6 +50,7 @@ interface UserMessageProps {
 export const UserMessage = ({
   content,
   imageUrls = [],
+  elements = [],
   skillNames,
   animate = false,
 }: UserMessageProps) => {
@@ -78,6 +83,7 @@ export const UserMessage = ({
         fadeUp && "animate-fade-up motion-reduce:animate-none",
       )}
     >
+      <ElementChips elements={elements} className="mb-1.5 justify-end" />
       {imageUrls.length > 0 && (
         <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
           {imageUrls.map((url, index) => (

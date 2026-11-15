@@ -101,6 +101,8 @@ import {
   WithAttachmentCount,
 } from "./composer-attachments";
 import { useUploadChatImages } from "../hooks/use-chat-images";
+import { ElementChips } from "./element-chips";
+import type { SelectedElement } from "../selected-elements";
 import {
   CHAT_IMAGE_TYPES,
   MAX_CHAT_IMAGES,
@@ -115,7 +117,7 @@ export const ConversationSidebar = ({
   projectId,
 }: ConversationSidebarProps) => {
   const { openIntegrations } = useProjectIntegrations();
-  const { input, setInput, appendInput, contexts, removeContext, clearContexts } = useChatStore();
+  const { input, setInput, appendInput, contexts, removeContext, clearContexts, elements, removeElement, clearElements } = useChatStore();
   const [agentModel, setAgentModel] = useAgentModel();
   const enhancer = useEnhancePrompt(input, setInput);
   const slashMenu = useSkillSlashMenu(projectId, input, setInput);
@@ -167,6 +169,7 @@ export const ConversationSidebar = ({
   const [pending, setPending] = useState<{
     text: string;
     imageUrls: string[];
+    elements?: SelectedElement[];
     userCount: number;
   } | null>(null);
   const userCount =
@@ -290,6 +293,7 @@ export const ConversationSidebar = ({
     images?: Id<"_storage">[],
     mode?: MessageMode,
     model: AgentModelChoice = agentModel,
+    elements?: SelectedElement[],
   ): Promise<"sent" | "failed" | "blocked"> => {
     if (detectCredential(text).detected) {
       toast.error(
@@ -316,6 +320,7 @@ export const ConversationSidebar = ({
           message: text,
           model,
           images,
+          elements: elements?.length ? elements : undefined,
           mode,
         },
       });
@@ -466,6 +471,7 @@ export const ConversationSidebar = ({
     setPending({
       text: finalMessage,
       imageUrls: message.files.map((file) => file.url),
+      elements,
       userCount,
     });
     setInput("");
@@ -480,9 +486,14 @@ export const ConversationSidebar = ({
         finalMessage,
         images,
         mode === "build" ? undefined : mode,
+        undefined,
+        elements,
       );
-      // Only clear contexts after a successful send so they aren't lost on failure
-      if (result === "sent") clearContexts();
+      // Only clear contexts and elements after a successful send so they aren't lost on failure
+      if (result === "sent") {
+        clearContexts();
+        clearElements();
+      }
       // PromptInput keeps its attachments when submit throws, to send again.
       if (result !== "sent" && images) throw new Error("Message not sent");
     } finally {
@@ -499,7 +510,7 @@ export const ConversationSidebar = ({
     const prompt = conversationMessages
       ?.slice(0, messageIndex)
       .findLast((m) => m.role === "user");
-    if (prompt) void sendMessage(prompt.content, prompt.images, mode, model);
+    if (prompt) void sendMessage(prompt.content, prompt.images, mode, model, prompt.elements);
   };
 
   /**
@@ -610,6 +621,7 @@ export const ConversationSidebar = ({
                   key={message._id}
                   content={message.content}
                   imageUrls={message.imageUrls}
+                  elements={message.elements}
                   skillNames={slashMenu.skillNames}
                   // The saved copy of the pending message replaces it in place.
                   animate={Boolean(history && !history.messageIds.has(message._id)) && !pending}
@@ -650,6 +662,7 @@ export const ConversationSidebar = ({
               <UserMessage
                 content={pending.text}
                 imageUrls={pending.imageUrls}
+                elements={pending.elements}
                 skillNames={slashMenu.skillNames}
                 animate
               />
@@ -724,6 +737,11 @@ export const ConversationSidebar = ({
                   ))}
                 </div>
               )}
+              <ElementChips
+                elements={elements}
+                onRemove={(index) => removeElement(elements[index].key)}
+                className="w-full p-2 pb-0"
+              />
               <PromptInputTextarea
                 placeholder="Describe a change or ask a question…"
                 className="min-h-11 px-3 pt-3 pb-1 text-sm/6 placeholder:text-muted-foreground/70"
@@ -800,7 +818,7 @@ export const ConversationSidebar = ({
                             ? Boolean(followUp)
                             : Boolean(pending) ||
                               enhancer.isEnhancing ||
-                              (!input && contexts.length === 0 && images === 0) ||
+                              (!input && contexts.length === 0 && elements.length === 0 && images === 0) ||
                               (images > 0 && !acceptsImages)
                         }
                         aria-label={isProcessing ? "Queue message" : "Send"}

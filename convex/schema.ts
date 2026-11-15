@@ -46,6 +46,17 @@ export const agentTaskStatusValidator = v.union(
  * loop (by path, or by id for calls made before #292), and the repeated error
  * with its normalised signature (for the next run).
  */
+/** A preview element picked in Select mode (#227); shape of selectedElementSchema. */
+export const selectedElementValidator = v.object({
+  tag: v.string(),
+  id: v.optional(v.string()),
+  classes: v.optional(v.array(v.string())),
+  text: v.string(),
+  domPath: v.string(),
+  outerHTML: v.string(),
+  siblingText: v.optional(v.string()),
+});
+
 export const stuckRunValidator = v.object({
   reason: v.union(
     v.literal("repeated-error"),
@@ -414,6 +425,9 @@ export default defineSchema({
     runModel: v.optional(runModelValidator),
     // User messages only: attached images. Bounded: see MAX_CHAT_IMAGES.
     images: v.optional(v.array(v.id("_storage"))),
+    // User messages only: preview elements picked in Select mode (#227).
+    // Bounded and length-capped by the messages route: see selected-elements.ts.
+    elements: v.optional(v.array(selectedElementValidator)),
     // Assistant messages only: an explicit plan or swarm run.
     mode: v.optional(v.union(v.literal("plan"), v.literal("swarm"))),
     // Assistant messages only: the run was stopped going in circles (#306).

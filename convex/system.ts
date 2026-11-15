@@ -7,6 +7,7 @@ import {
   githubSyncValidator,
   messageStepValidator,
   projectSourceValidator,
+  selectedElementValidator,
   stuckRunValidator,
   runModelValidator,
 } from "./schema";
@@ -88,6 +89,7 @@ export const createMessage = mutation({
     images: v.optional(v.array(v.id("_storage"))),
     // The sender, required with images: only their own uploads can be attached.
     ownerId: v.optional(v.string()),
+    elements: v.optional(v.array(selectedElementValidator)),
     mode: v.optional(v.union(v.literal("plan"), v.literal("swarm"))),
   },
   returns: v.id("messages"),
@@ -114,6 +116,7 @@ export const createMessage = mutation({
       status: args.status,
       runModel: args.runModel,
       ...(args.images?.length ? { images: args.images } : {}),
+      ...(args.elements?.length ? { elements: args.elements } : {}),
       ...(args.mode ? { mode: args.mode } : {}),
     });
     if (args.role === "assistant" && args.status === "processing") {

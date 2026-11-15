@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { FollowUp } from "../follow-up";
+import { MAX_SELECTED_ELEMENTS, type SelectedElement } from "../selected-elements";
 
 export interface ChatContext {
   id: string;
@@ -34,6 +35,12 @@ interface ChatStore {
   addContext: (context: Omit<ChatContext, "id">) => void;
   removeContext: (id: string) => void;
   clearContexts: () => void;
+  /** Preview elements picked for the next message (#227), at most MAX_SELECTED_ELEMENTS. */
+  elements: (SelectedElement & { key: string })[];
+  /** False, adding nothing, when the message already has the most elements. */
+  addElement: (element: SelectedElement) => boolean;
+  removeElement: (key: string) => void;
+  clearElements: () => void;
   queuedMessage: QueuedMessage | null;
   /** Ignored while a message is sending, so a click mid-send doesn't send again. */
   queueMessage: (message: QueuedMessage) => void;
@@ -70,6 +77,16 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     contexts: state.contexts.filter((c) => c.id !== id)
   })),
   clearContexts: () => set({ contexts: [] }),
+  elements: [],
+  addElement: (element) => {
+    if (get().elements.length >= MAX_SELECTED_ELEMENTS) return false;
+    set((state) => ({ elements: [...state.elements, { ...element, key: crypto.randomUUID() }] }));
+    return true;
+  },
+  removeElement: (key) => set((state) => ({
+    elements: state.elements.filter((e) => e.key !== key),
+  })),
+  clearElements: () => set({ elements: [] }),
   queuedMessage: null,
   queueMessage: (message) => {
     if (!get().queuedMessage?.sending) set({ queuedMessage: message });

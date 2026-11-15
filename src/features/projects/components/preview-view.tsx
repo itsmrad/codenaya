@@ -28,6 +28,7 @@ import {
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
+import { PreviewSelectToggle } from "./preview-select-toggle";
 import { OpenOnPhonePopover } from "@/features/sandbox-preview/components/open-on-phone-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
 import { logsAfterClear } from "@/features/sandbox-preview/utils/cleared-logs";
@@ -186,6 +187,9 @@ export const PreviewView = ({
 
   const activeInstance = activeEngine === "sandbox" ? sandbox : webcontainer;
   const { status, previewUrl, error, restart, terminalOutput } = activeInstance;
+  // Select mode (#227) is off whenever the app isn't running, so a restart never leaves it on.
+  const [selectChosen, setSelectChosen] = useState(false);
+  const selecting = selectChosen && status === "running";
   // A restart empties the output; forget the clear so the new run shows in
   // full even when it repeats the cleared lines (#480).
   if (clearedLogs && !terminalOutput.startsWith(clearedLogs)) setClearedLogs("");
@@ -502,6 +506,11 @@ export const PreviewView = ({
           >
             <RotateCwIcon className="size-4" />
           </Button>
+          <PreviewSelectToggle
+            active={selecting}
+            disabled={status !== "running"}
+            onActiveChange={setSelectChosen}
+          />
         </div>
 
         {/* Engine Toggle UI */}
