@@ -494,6 +494,29 @@ describe.each(Object.keys(PROVIDERS) as ProviderId[])("%s known reads", (id) => 
   });
 });
 
+describe("known reads exclude tools that return secrets", () => {
+  it.each([
+    ["github", "get_secret_scanning_alert"],
+    ["github", "list_secret_scanning_alerts"],
+    ["posthog", "skill-store-install-command"],
+    ["posthog", "llma-provider-key-get"],
+    ["posthog", "llma-provider-key-list"],
+    ["resend", "get-webhook"],
+    ["upstash", "redis_get_database"],
+    ["upstash", "qstash_list_users"],
+    ["upstash", "index_get"],
+    ["prisma", "list_prisma_postgres_connection_strings"],
+    ["neon", "get_connection_string"],
+    ["neon", "get_realtime_secret"],
+  ] as const)("%s does not list %s", (id, name) => {
+    expect(PROVIDERS[id].readOnlyTools ?? []).not.toContain(name);
+    expect(requiresApproval(
+      { destructiveTools: PROVIDERS[id].destructiveTools, readOnlyTools: PROVIDERS[id].readOnlyTools, annotationsTrusted: true },
+      { name, annotations: { readOnlyHint: true } },
+    )).toBe(true);
+  });
+});
+
 describe("requiresApproval", () => {
   const listed = { destructiveTools: ["write"], readOnlyTools: ["x"], annotationsTrusted: true };
   const writesThing = { name: "writes_thing", annotations: { readOnlyHint: true, destructiveHint: false } };

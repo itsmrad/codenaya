@@ -114,9 +114,11 @@ const CATALOG = {
     readOnlyTools: [
       "generate_typescript_types", "get_advisors", "get_cost", "get_edge_function", "get_logs",
       "get_notebook", "get_organization", "get_project", "get_project_url",
-      "get_publishable_keys", "get_storage_config", "list_branches", "list_edge_functions",
+      "get_storage_config", "list_branches", "list_edge_functions",
       "list_extensions", "list_migrations", "list_notebooks", "list_organizations",
       "list_projects", "list_storage_buckets", "list_tables", "query_logs", "search_docs",
+      // Returns publishable (anon) keys, which are public by design.
+      "get_publishable_keys",
     ],
   },
 
@@ -172,12 +174,14 @@ const CATALOG = {
       "describe_table_schema", "fetch", "get_branch_consumption", "get_database_tables",
       "get_doc", "get_function", "get_neon_auth_config", "get_postgres_endpoint",
       "get_project_consumption", "get_realtime", "get_snapshot_schedule", "get_storage",
-      "get_trigger", "inspect_database", "list_auth_oauth_clients", "list_auth_oauth_providers",
+      "get_trigger", "inspect_database", "list_auth_oauth_providers",
       "list_auth_trusted_domains", "list_branch_computes", "list_branches", "list_functions",
       "list_functions_custom_domains", "list_incidents", "list_log_field_values",
       "list_log_fields", "list_organizations", "list_postgres_endpoints", "list_projects",
       "list_slow_queries", "list_snapshots", "list_storage_buckets", "list_storage_objects",
       "list_triggers", "query_logs", "query_loki_logs", "search", "search_docs",
+      // List output never includes client_secret (zNeonAuthOAuthClient in @neon/tools); only create returns it.
+      "list_auth_oauth_clients",
     ],
   },
 
@@ -215,14 +219,14 @@ const CATALOG = {
       "get_dependabot_alert", "get_discussion", "get_discussion_comments", "get_file_blame",
       "get_file_contents", "get_gist", "get_global_security_advisory", "get_job_logs",
       "get_label", "get_latest_release", "get_me", "get_notification_details",
-      "get_release_by_tag", "get_repository_tree", "get_secret_scanning_alert", "get_tag",
+      "get_release_by_tag", "get_repository_tree", "get_tag",
       "get_team_members", "get_teams", "issue_artifact_read", "issue_dependency_read",
       "issue_read", "list_branches", "list_code_scanning_alerts", "list_commits",
       "list_dependabot_alerts", "list_discussion_categories", "list_discussions", "list_gists",
       "list_global_security_advisories", "list_issue_fields", "list_issue_types", "list_issues",
       "list_label", "list_notifications", "list_org_repository_security_advisories",
       "list_pull_requests", "list_releases", "list_repository_collaborators",
-      "list_repository_security_advisories", "list_secret_scanning_alerts",
+      "list_repository_security_advisories",
       "list_starred_repositories", "list_tags", "projects_get", "projects_list",
       "pull_request_read", "repository_ruleset_read", "search_code", "search_commits",
       "search_issues", "search_orgs", "search_pull_requests", "search_repositories",
@@ -341,7 +345,7 @@ const CATALOG = {
     destructiveTools: ["update_issue", "create_project", "update_project_settings"],
     // Reads from getsentry/sentry-mcp packages/mcp-core/src/toolDefinitions.json.
     readOnlyTools: [
-      "find_alert_rules", "find_dashboards", "find_dropped_events", "find_dsns",
+      "find_alert_rules", "find_dashboards", "find_dropped_events",
       "find_metric_monitors", "find_monitors", "find_organizations", "find_projects",
       "find_releases", "find_teams", "find_uptime_monitors", "get_agent_conversation_details",
       "get_ai_conversation_details", "get_alert_options", "get_alert_rule",
@@ -355,6 +359,8 @@ const CATALOG = {
       "search_docs", "search_errors", "search_events", "search_issue_events", "search_issues",
       "search_logs", "search_metrics", "search_profiles", "search_replays", "search_traces",
       "whoami",
+      // Returns DSNs, client keys that are public by design.
+      "find_dsns",
     ],
   },
 
@@ -1017,10 +1023,14 @@ const CATALOG = {
     ],
     // Reads from the inventory above.
     readOnlyTools: [
-      "clerk_sdk_snippet", "get_application", "get_domain_status", "get_instance_config",
-      "get_instance_config_schema", "list_application_feedback", "list_applications",
+      "clerk_sdk_snippet", "get_domain_status", "get_instance_config",
+      "get_instance_config_schema", "list_application_feedback",
       "list_clerk_sdk_snippets", "list_domains", "list_organization_memberships",
       "list_organizations", "list_user_organization_memberships", "list_users", "whoami",
+      // Returns publishable keys only, which are public by design; never secret keys.
+      "list_applications",
+      // Returns publishable keys only, which are public by design; never secret keys.
+      "get_application",
     ],
     notes:
       "Acts as your Clerk Dashboard account in the selected workspace. No URL-level read-only mode; production-instance creation cannot be undone.",
