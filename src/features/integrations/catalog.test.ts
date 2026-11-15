@@ -17,6 +17,10 @@ import {
 import { HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN } from "./hidden-until-payment-provider";
 
 describe("provider catalog display metadata", () => {
+  it("contains exactly 68 vetted providers", () => {
+    expect(listProviders()).toHaveLength(68);
+  });
+
   it.each(listProviders())("has complete display metadata and a local logo for $id", (provider) => {
     expect(provider.displayName.trim()).not.toBe("");
     expect(provider.description.trim()).not.toBe("");
