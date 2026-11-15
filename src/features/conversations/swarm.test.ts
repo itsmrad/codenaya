@@ -170,6 +170,9 @@ describe("classifySwarmPrompt", () => {
     "change the button color to red",
     "Fix the typo in the footer",
     "Add a contact form to the home page",
+    "update the header on the home and about pages",
+    "Change the font on the menu and contact pages",
+    "fix the navbar logo on the home, menu and about pages",
   ])("keeps %j solo as a small edit", (prompt) => {
     expect(classifySwarmPrompt(prompt)).toEqual({ delegate: false, reason: "a small edit" });
   });
