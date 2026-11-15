@@ -30,6 +30,7 @@ const SUMMARY_KEYS = [
   "baseUrl",
   "modelIds",
   "maskedPreview",
+  "fingerprint",
   "status",
   "lastTestedAt",
 ];
@@ -69,6 +70,7 @@ describe("aiProviders", () => {
       provider: "custom",
       baseUrl: "https://llm.example.com/v1",
       modelIds: ["llama-4"],
+      fingerprint: "0123456789ab",
     });
     await createKey(t, BOB);
 
@@ -84,6 +86,23 @@ describe("aiProviders", () => {
     for (const field of ["ciphertext", "wrappedDek", "secretRef", "authTag", "userId"]) {
       expect(serialized).not.toContain(field);
     }
+  });
+
+  test("stores the fingerprint and returns it, never the key (#614)", async () => {
+    const t = setup();
+    const plaintext = "sk-test-not-a-real-key-1234";
+    await createKey(t, ALICE, { fingerprint: "0123456789ab" });
+
+    const stored = await t.run((ctx) => ctx.db.query("aiProviderKeys").first());
+    expect(stored?.fingerprint).toBe("0123456789ab");
+
+    const alice = as(t, ALICE);
+    const responses = await Promise.all([
+      alice.query(api.aiProviders.list, {}),
+      alice.query(api.aiProviders.getPreferences, {}),
+    ]);
+    expect(responses[0][0].fingerprint).toBe("0123456789ab");
+    expect(JSON.stringify(responses)).not.toContain(plaintext);
   });
 
   test("requires a signed-in user", async () => {

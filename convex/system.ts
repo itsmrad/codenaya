@@ -1847,6 +1847,7 @@ export const createAiProviderKey = mutation({
     modelIds: v.optional(v.array(v.string())),
     secretRef: v.string(),
     maskedPreview: v.string(),
+    fingerprint: v.optional(v.string()),
     ...sealedFields,
   },
   handler: async (ctx, { internalKey, ...args }) => {

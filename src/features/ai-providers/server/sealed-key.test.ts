@@ -37,6 +37,17 @@ describe("sealProviderKey", () => {
     }
   });
 
+  it("fingerprints the key with a short SHA-256 prefix (#614)", async () => {
+    const { createHash } = await import("node:crypto");
+    const a = await sealProviderKey(API_KEY);
+    const b = await sealProviderKey(API_KEY);
+    const other = await sealProviderKey(`${API_KEY.slice(0, -5)}Xwxyz`);
+    expect(a.fingerprint).toBe(createHash("sha256").update(API_KEY).digest("hex").slice(0, 12));
+    expect(b.fingerprint).toBe(a.fingerprint);
+    expect(other.maskedPreview).toBe(a.maskedPreview);
+    expect(other.fingerprint).not.toBe(a.fingerprint);
+  });
+
   it("binds the ciphertext to its own row", async () => {
     const a = await sealProviderKey(API_KEY);
     const b = await sealProviderKey(API_KEY);

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { nanoid } from "nanoid";
 
 import { maskSecret } from "@/features/integrations/env-keys";
@@ -16,12 +18,17 @@ import {
 const aadFor = (secretRef: string) =>
   secretContext("aiProviderKeys", secretRef, "apiKey");
 
-/** Seals a key for storage. The result is safe to persist in Convex. */
+/**
+ * Seals a key for storage. The result is safe to persist in Convex. The
+ * fingerprint (first 12 hex chars of its SHA-256) lets pickers tell apart two
+ * keys that share their last four characters (#614).
+ */
 export async function sealProviderKey(apiKey: string) {
   // Generated before the insert so it can anchor the AAD in a single write.
   const secretRef = nanoid();
   const sealed = await getSecretSealer().seal(apiKey, aadFor(secretRef));
-  return { secretRef, maskedPreview: maskSecret(apiKey), ...sealed };
+  const fingerprint = createHash("sha256").update(apiKey).digest("hex").slice(0, 12);
+  return { secretRef, maskedPreview: maskSecret(apiKey), fingerprint, ...sealed };
 }
 
 /** Recovers the plaintext key from a stored row. Server-side only. */
