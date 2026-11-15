@@ -12,6 +12,7 @@ import {
   stuckRunValidator,
   runModelValidator,
 } from "./schema";
+import { closeOpenTasks } from "./agentTasks";
 import { MAX_CHECKPOINT_FILES, createCheckpoint } from "./checkpoints";
 import { runsSince, syncedAt } from "./githubSync";
 import { appError } from "./errors";
@@ -169,6 +170,7 @@ export const updateMessageContent = mutation({
         : {}),
       ...(args.firstBuild ? { firstBuild: true } : {}),
     });
+    await closeOpenTasks(ctx, args.messageId);
   },
 });
 
@@ -214,6 +216,7 @@ export const updateMessageStatus = mutation({
         await ctx.db.get("messages", args.messageId),
         args.status === "cancelled" ? "cancelled" : "ok",
       );
+      await closeOpenTasks(ctx, args.messageId);
     }
     await ctx.db.patch("messages", args.messageId, {
       status: args.status,
