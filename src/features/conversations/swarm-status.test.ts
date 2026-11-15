@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type SwarmTask, swarmElapsed, swarmHeader, swarmTaskStatus } from "./swarm-status";
+import { groupSwarmTasks, type SwarmTask, swarmElapsed, swarmHeader, swarmSelfCheckStatus, swarmTaskStatus } from "./swarm-status";
 
 describe("swarmTaskStatus", () => {
   it.each(["completed", "cancelled"] as const)("cancels unfinished tasks under a %s parent", (parent) => {
@@ -28,12 +28,50 @@ describe("swarm header", () => {
   it("handles zero workers, singular workers and sub-orchestrators", () => {
     expect(swarmHeader([], 0, 0)).toBe("Swarm · 0 workers · 0:00 · 0 done");
     expect(swarmHeader([task("queued"), task("error", "sub-orchestrator")], 0, 59000))
-      .toBe("Swarm · 1 worker · 0:59 · 0 done");
+      .toBe("Swarm · 1 lead · 1 worker · 0:59 · 0 done");
+    expect(swarmHeader([task("done", "sub-orchestrator"), task("done", "sub-orchestrator"), task("done")], 0, 0))
+      .toBe("Swarm · 2 leads · 1 worker · 0:00 · 1 done");
   });
 
   it("clamps a future start and pads seconds across minute boundaries", () => {
     expect(swarmElapsed(1000, 0)).toBe("0:00");
     expect(swarmElapsed(0, 60000)).toBe("1:00");
     expect(swarmElapsed(0, 3601000)).toBe("60:01");
+  });
+});
+
+describe("groupSwarmTasks", () => {
+  const task = (taskId: string, role: SwarmTask["role"] = "worker", parentTaskId?: string): SwarmTask => ({
+    taskId, role, parentTaskId, title: taskId, model: "Haiku 5.5", status: "queued", steps: [], updatedAt: 0,
+  });
+
+  it("groups children arriving after other roots under their lead, preserving sibling order", () => {
+    const lead = task("lead", "sub-orchestrator");
+    const first = task("lead/first", "worker", "lead");
+    const second = task("lead/second", "worker", "lead");
+    const direct = task("direct");
+    expect(groupSwarmTasks([lead, direct, first, second])).toEqual([
+      { task: lead, children: [first, second] }, { task: direct, children: [] },
+    ]);
+  });
+
+  it("keeps orphaned workers visible and handles children arriving before their lead", () => {
+    const lead = task("lead", "sub-orchestrator");
+    const child = task("child", "worker", "lead");
+    const orphan = task("orphan", "worker", "missing");
+    expect(groupSwarmTasks([child, orphan, lead])).toEqual([
+      { task: orphan, children: [] }, { task: lead, children: [child] },
+    ]);
+    expect(groupSwarmTasks([])).toEqual([]);
+  });
+});
+
+describe("swarmSelfCheckStatus", () => {
+  it.each([
+    ["scoped-ok", "ok"], ["scoped-failed (2 in owned files)", "failed"],
+    ["skipped (cost budget)", "skipped"], ["running", "running"],
+    [undefined, undefined], ["unknown", undefined],
+  ])("labels %s without implying integration verification", (value, expected) => {
+    expect(swarmSelfCheckStatus(value)).toBe(expected);
   });
 });
