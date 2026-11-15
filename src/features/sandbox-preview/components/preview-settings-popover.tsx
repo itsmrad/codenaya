@@ -1,7 +1,7 @@
 "use client";
 
 import { z } from "zod";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useForm } from "@tanstack/react-form";
 import { SettingsIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -40,14 +40,16 @@ export const PreviewSettingsPopover = ({
   onSave,
   files,
 }: PreviewSettingsPopoverProps) => {
-  const flatFiles = buildFlatFileList(files ?? []);
-  let pkg = null;
-  try {
-    pkg = JSON.parse(flatFiles.find((file) => file.path === "package.json")?.content ?? "null");
-  } catch {
-    // A package.json being edited can be temporarily invalid; config paths still work.
-  }
-  const framework = detectFramework(flatFiles.map((file) => file.path), pkg);
+  const framework = useMemo(() => {
+    const flatFiles = buildFlatFileList(files ?? []);
+    let pkg = null;
+    try {
+      pkg = JSON.parse(flatFiles.find((file) => file.path === "package.json")?.content ?? "null");
+    } catch {
+      // A package.json being edited can be temporarily invalid; config paths still work.
+    }
+    return detectFramework(flatFiles.map((file) => file.path), pkg);
+  }, [files]);
   const devPlaceholder = framework === "next" ? "npm run dev -- -H 0.0.0.0"
     : framework === "vite" ? "npm run dev -- --host 0.0.0.0" : "npm run dev";
   const [open, setOpen] = useState(false);

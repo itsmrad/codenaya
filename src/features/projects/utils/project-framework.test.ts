@@ -10,19 +10,21 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("defaults to Vite and remembers either framework", () => {
-  expect(readProjectFramework()).toBe("vite");
+it("defaults to Auto and remembers every choice, including an old saved vite", () => {
+  expect(readProjectFramework()).toBe("auto");
   writeProjectFramework("next");
   expect(readProjectFramework()).toBe("next");
   writeProjectFramework("vite");
   expect(readProjectFramework()).toBe("vite");
+  writeProjectFramework("auto");
+  expect(readProjectFramework()).toBe("auto");
 });
 
 it("ignores invalid storage and tolerates blocked storage", () => {
   localStorage.setItem("codenaya:projectFramework", "unknown");
-  expect(readProjectFramework()).toBe("vite");
+  expect(readProjectFramework()).toBe("auto");
   const blocked = () => { throw new Error("blocked"); };
   vi.stubGlobal("localStorage", { getItem: blocked, setItem: blocked });
-  expect(readProjectFramework()).toBe("vite");
+  expect(readProjectFramework()).toBe("auto");
   expect(() => writeProjectFramework("next")).not.toThrow();
 });

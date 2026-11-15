@@ -1,16 +1,19 @@
 export type ProjectFramework = "vite" | "next";
+/** "auto" sends no framework, so the server detects it from the prompt. */
+export type FrameworkChoice = "auto" | ProjectFramework;
 
 const KEY = "codenaya:projectFramework";
 
-export const readProjectFramework = (): ProjectFramework => {
+export const readProjectFramework = (): FrameworkChoice => {
   try {
-    return localStorage.getItem(KEY) === "next" ? "next" : "vite";
+    const saved = localStorage.getItem(KEY);
+    return saved === "next" || saved === "vite" ? saved : "auto";
   } catch {
-    return "vite";
+    return "auto";
   }
 };
 
-export const writeProjectFramework = (framework: ProjectFramework) => {
+export const writeProjectFramework = (framework: FrameworkChoice) => {
   try {
     localStorage.setItem(KEY, framework);
   } catch {

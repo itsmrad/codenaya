@@ -19,7 +19,7 @@ import { LandingModelPicker } from "./landing-model-picker";
 export const LandingPromptComposer = ({ className }: { className?: string }) => {
   const router = useRouter();
 
-  const handleSubmit = async (prompt: string, mode: ComposerMode, framework: ProjectFramework) => {
+  const handleSubmit = async (prompt: string, mode: ComposerMode, framework?: ProjectFramework) => {
     savePendingPrompt(prompt, mode === "build" ? undefined : mode, framework);
     router.push(SIGN_IN_URL);
     return true;

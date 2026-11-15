@@ -8,7 +8,7 @@ const harness = vi.hoisted(() => {
   const states: unknown[] = [];
   let cursor = 0;
   return {
-    states, effects: [] as (() => void)[], saved: "vite", write: vi.fn(),
+    states, effects: [] as (() => void)[], saved: "auto", write: vi.fn(),
     resetCursor: () => { cursor = 0; },
     useState: (initial: unknown) => {
       const index = cursor++;
@@ -50,22 +50,40 @@ function find(node: ReactNode, type: unknown): ReactElement<Record<string, unkno
 beforeEach(() => {
   harness.states.length = 0;
   harness.effects.length = 0;
-  harness.saved = "vite";
+  harness.saved = "auto";
   vi.clearAllMocks();
 });
 
-it("offers an accessible default Vite choice and submits the selected framework", async () => {
+it("defaults to Auto, sending no framework so the prompt decides", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(true);
+  harness.resetCursor();
+  const tree = PromptComposer({ onSubmit });
+  expect(find(tree, Select).props.value).toBe("auto");
+  expect(find(tree, SelectTrigger).props["aria-label"]).toBe("Framework");
+  expect(find(tree, SelectItem).props.children).toBe("Auto");
+  await (find(tree, PromptInput).props.onSubmit as (message: { text: string }) => Promise<void>)({ text: "A Next.js blog" });
+  expect(onSubmit).toHaveBeenCalledWith("A Next.js blog", "build", undefined);
+});
+
+it("submits an explicitly picked framework", async () => {
   const onSubmit = vi.fn().mockResolvedValue(true);
   const render = () => { harness.resetCursor(); return PromptComposer({ onSubmit }); };
   let tree = render();
-  expect(find(tree, Select).props.value).toBe("vite");
-  expect(find(tree, SelectTrigger).props["aria-label"]).toBe("Framework");
-  expect(find(tree, SelectItem).props.children).toBe("Vite (React)");
   (find(tree, Select).props.onValueChange as (value: string) => void)("next");
   expect(harness.write).toHaveBeenCalledWith("next");
   tree = render();
   await (find(tree, PromptInput).props.onSubmit as (message: { text: string }) => Promise<void>)({ text: "A blog" });
   expect(onSubmit).toHaveBeenCalledWith("A blog", "build", "next");
+});
+
+it("restores an old saved vite choice and submits it explicitly", async () => {
+  harness.saved = "vite";
+  const onSubmit = vi.fn().mockResolvedValue(true);
+  const render = () => { harness.resetCursor(); return PromptComposer({ onSubmit }); };
+  render();
+  harness.effects[0]();
+  await (find(render(), PromptInput).props.onSubmit as (message: { text: string }) => Promise<void>)({ text: "A blog" });
+  expect(onSubmit).toHaveBeenCalledWith("A blog", "build", "vite");
 });
 
 it("restores the saved choice after mount and disables changes while creating", () => {

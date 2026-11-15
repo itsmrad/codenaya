@@ -24,7 +24,7 @@ export const NewProjectDialog = ({
 }: NewProjectDialogProps) => {
   const { createProject, isSubmitting } = useCreateProjectFromPrompt();
 
-  const handleSubmit = async (prompt: string, mode: ComposerMode, framework: ProjectFramework) => {
+  const handleSubmit = async (prompt: string, mode: ComposerMode, framework?: ProjectFramework) => {
     const created = await createProject(prompt, undefined, false, mode, framework);
     if (created) onOpenChange(false);
     return created;
