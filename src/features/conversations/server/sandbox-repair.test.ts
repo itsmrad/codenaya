@@ -66,6 +66,12 @@ import { z } from "zod";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { VITE_REACT_STARTER } from "../inngest/vite-starter";
 import { type RepairEvent, parseBuildErrors, repairTools, verifyAndFix } from "./sandbox-repair";
+import { trimBuildOutput } from "../inngest/tools/check-build";
+import {
+  NEXT_MODULE_NOT_FOUND,
+  NEXT_PRERENDER_ERROR,
+  NEXT_TYPE_ERROR,
+} from "../inngest/tools/next-build-output.fixture";
 
 /** Like the real tools: the work runs in a step with a fixed id, when there is a step. */
 function fakeTool<T>(name: string, handler: (input: T) => unknown) {
@@ -621,5 +627,36 @@ describe("parseBuildErrors", () => {
     expect(parseBuildErrors("Error: Build failed. Fix these errors, then call checkBuild again:\nsomething broke")).toEqual([
       { message: "something broke", kind: "build" },
     ]);
+  });
+
+  /** checkBuild's failure text for a captured `next build` output. */
+  const nextFailure = ({ stdout, stderr }: { stdout: string; stderr: string }) =>
+    "Error: Build failed. Fix these errors, then call checkBuild again:\n" +
+    trimBuildOutput(`${stderr}\n${stdout}`, "/home/user/app", "next");
+
+  it("reads a Next.js type error from its location line and the message after it", () => {
+    expect(parseBuildErrors(nextFailure(NEXT_TYPE_ERROR))).toEqual([
+      { file: "src/app/page.tsx", line: 12, message: "Type error: Type 'number' is not assignable to type 'string'.", kind: "type" },
+    ]);
+  });
+
+  it("reads a Next.js missing module", () => {
+    expect(parseBuildErrors(nextFailure(NEXT_MODULE_NOT_FOUND))).toEqual([
+      { file: "src/app/page.tsx", line: 3, message: "Module not found: Can't resolve '@/components/Hero'", kind: "build" },
+    ]);
+  });
+
+  it("reads a Next.js location without a line", () => {
+    const text = "Error: Build failed. Fix these errors, then call checkBuild again:\nFailed to compile.\n./src/app/page.tsx\nModule not found: Can't resolve 'zod'";
+    expect(parseBuildErrors(text)).toEqual([
+      { file: "src/app/page.tsx", message: "Module not found: Can't resolve 'zod'", kind: "build" },
+    ]);
+  });
+
+  it("keeps a Next.js prerender failure whole: it names no source file", () => {
+    const [error] = parseBuildErrors(nextFailure(NEXT_PRERENDER_ERROR));
+    expect(error.kind).toBe("build");
+    expect(error.file).toBeUndefined();
+    expect(error.message).toMatch(/^Error occurred prerendering page "\/"[^\n]*\nError: STRIPE_SECRET_KEY is not set/);
   });
 });

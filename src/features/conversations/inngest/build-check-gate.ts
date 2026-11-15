@@ -46,7 +46,7 @@ export const BUILD_FAILED_NOTE =
   "**Build check:** The build still has errors after the fix attempts this run allows, so the preview may not work yet. Ask me to fix the build errors to try again.";
 export const BUILD_UNVERIFIED_NOTE =
   "**Build check:** The build was not verified after the last changes, so the preview may not work yet. Ask me to check the build to verify it.";
-// Another check would not build it either (no build sandbox, or not a Vite project).
+// Another check would not build it either (no build sandbox, or a framework checkBuild does not build).
 export const BUILD_NOT_BUILT_NOTE =
   "**Build check:** Static checks passed, but the app could not be built here, so it has not been verified. Check the preview before relying on it.";
 // The run ended on a failed or missing check, and the repair after it passed.

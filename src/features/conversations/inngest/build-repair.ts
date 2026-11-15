@@ -26,7 +26,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
 import { BUILD_FAILED_NOTE, BUILD_REPAIRED_NOTE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
-import { isSafeProjectPath, isViteProject } from "./tools/check-build";
+import { isSafeProjectPath, projectFramework } from "./tools/check-build";
 
 /**
  * The chat run's build repair after its own turns: when the run's changes
@@ -85,7 +85,7 @@ const provision = async (
     else if (row.storageUrl) uploads.push({ path, url: row.storageUrl });
   }
   // Any other project could never verify, so a repair would only spend.
-  if (!isViteProject([...files, ...uploads].map(({ path }) => path))) return null;
+  if (!projectFramework(files, [...files, ...uploads].map(({ path }) => path))) return null;
   const sandbox = await createProjectSandbox({
     apiKey,
     timeoutMs: REPAIR_SANDBOX_TIMEOUT_MS,
