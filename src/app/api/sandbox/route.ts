@@ -46,6 +46,7 @@ import {
 import {
   DEV_COMMAND_ENV,
   installWithDevServerStopped,
+  type DevStart,
 } from "@/features/sandbox-preview/server/dev-server";
 import {
   missingReferencedFiles,
@@ -303,6 +304,8 @@ export async function POST(request: Request) {
       };
 
       let sandbox: Sandbox | null = null;
+      /** Started again by a reinstall when no dev server is found running (#486). */
+      let devStart: DevStart | undefined;
       const installCmd = settings?.installCommand || DEFAULT_INSTALL_COMMAND;
 
       // E2B throws on a non-zero exit; the callers report it as an install
@@ -338,6 +341,7 @@ export async function POST(request: Request) {
               onStdout: (data) => send({ type: "output", data }),
               onStderr: (data) => send({ type: "output", data }),
             },
+            devStart,
           );
           if (result.exitCode !== 0) {
             throw new Error(`${installCmd} failed with exit code ${result.exitCode}`);
@@ -510,10 +514,9 @@ export async function POST(request: Request) {
         // Track the port detected from dev server output
         let detectedPort: number | null = null;
 
-        await sandbox.commands.run(devCmdWithHost, {
+        devStart = {
+          command: devCmdWithHost,
           cwd: WORK_DIR,
-          background: true,
-          timeoutMs: 0, // Prevent E2B from killing the dev server after the default 60s timeout
           // Project variables first so DEV_SERVER_ENVS wins: HOST/HOSTNAME must
           // stay 0.0.0.0 for E2B port forwarding, and a user variable overriding
           // them would break the preview in a way that looks like a broken app.
@@ -523,6 +526,12 @@ export async function POST(request: Request) {
             // A reinstall stops this and starts it again (#486).
             [DEV_COMMAND_ENV]: devCmdWithHost,
           },
+        };
+        await sandbox.commands.run(devCmdWithHost, {
+          cwd: WORK_DIR,
+          background: true,
+          timeoutMs: 0, // Prevent E2B from killing the dev server after the default 60s timeout
+          envs: devStart.envs,
           onStdout: (data) => {
             send({ type: "output", data });
             if (!detectedPort) {

@@ -22,9 +22,19 @@ interface DevOutput {
   onStderr?: (data: string) => void;
 }
 
+/** How the boot started the dev server, for when none is running to copy. */
+export interface DevStart {
+  command: string;
+  envs: Record<string, string>;
+  cwd?: string;
+}
+
 /**
  * Runs `install` with the dev server stopped, then starts it once with the same
- * command and env, also after a failed install. A Vite serving while npm
+ * command and env, also after a failed install. Every marked process is
+ * stopped: a resumed boot or another instance can leave two. With none
+ * running, `fallback` starts one, so a lost start heals on the next install.
+ * A Vite serving while npm
  * rewrites node_modules re-optimizes mid-load, and the page runs two copies of
  * React ("Invalid hook call", #486). The page's Vite client polls until the
  * server is back, then reloads.
@@ -33,16 +43,19 @@ export const installWithDevServerStopped = async <T>(
   sandbox: Sandbox,
   install: () => Promise<T>,
   output: DevOutput = {},
+  fallback?: DevStart,
 ): Promise<T> => {
-  const dev = (await sandbox.commands.list()).find((command) => command.envs?.[DEV_COMMAND_ENV]);
-  if (dev) await sandbox.commands.run(killTreeCommand(dev.pid));
+  const running = (await sandbox.commands.list()).filter((command) => command.envs?.[DEV_COMMAND_ENV]);
+  for (const dev of running) await sandbox.commands.run(killTreeCommand(dev.pid));
+  const [dev] = running;
+  const start = dev ? { command: dev.envs[DEV_COMMAND_ENV], envs: dev.envs, cwd: dev.cwd } : fallback;
   try {
     return await install();
   } finally {
-    if (dev) {
-      await sandbox.commands.run(dev.envs[DEV_COMMAND_ENV], {
-        cwd: dev.cwd,
-        envs: dev.envs,
+    if (start) {
+      await sandbox.commands.run(start.command, {
+        cwd: start.cwd,
+        envs: start.envs,
         background: true,
         timeoutMs: 0, // Like the boot's: E2B would kill it after 60s.
         ...output,

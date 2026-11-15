@@ -40,6 +40,8 @@ interface InstallQueue {
   /** The latest sync's install; a burst runs only the last one. */
   install: Install;
   outcome?: { failure?: InstallFailure } | { error: unknown };
+  /** Syncs awaiting this queue; the last one out removes it. */
+  waiting: number;
 }
 
 /**
@@ -53,6 +55,7 @@ const installAfterBurst = async (sandboxId: string, install: Install) => {
   if (!entry) {
     const created: InstallQueue = {
       install,
+      waiting: 0,
       queue: debounceSerial(async () => {
         try {
           created.outcome = { failure: await created.install() };
@@ -66,7 +69,10 @@ const installAfterBurst = async (sandboxId: string, install: Install) => {
   }
   entry.install = install;
   entry.queue.schedule();
+  entry.waiting++;
   await entry.queue.idle();
+  // Idle, and nobody scheduled since: drop it, so the map doesn't grow per sandbox.
+  if (--entry.waiting === 0) installQueues.delete(sandboxId);
   const outcome = entry.outcome;
   if (outcome && "error" in outcome) throw outcome.error;
   return outcome?.failure;
@@ -217,7 +223,6 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   } catch (error) {
     // The cached handle may belong to a sandbox that has since died.
     forgetSandbox(sandboxId);
-    installQueues.delete(sandboxId);
 
     const message = error instanceof Error ? error.message : "Unknown error";
 

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DEV_COMMAND_ENV, installWithDevServerStopped, killTreeCommand } from "./dev-server";
 
 const fakeSandbox = (processes: Array<{ pid: number; envs: Record<string, string>; cwd?: string }>) => {
-  const run = vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
+  const run = vi.fn<(...args: unknown[]) => Promise<object>>(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
   const sandbox = {
     commands: { list: vi.fn(async () => processes), run },
   } as unknown as Sandbox;
@@ -42,12 +42,36 @@ describe("installWithDevServerStopped (#486)", () => {
     expect(run).toHaveBeenLastCalledWith("npm run dev -- --host", expect.objectContaining({ background: true }));
   });
 
-  it("only installs when no dev server is running", async () => {
+  it("stops every marked dev server, e.g. one a resumed boot left, and starts exactly one", async () => {
+    const stale = { ...dev, pid: 30 };
+    const { sandbox, run } = fakeSandbox([stale, { pid: 3, envs: {} }, dev]);
+
+    await installWithDevServerStopped(sandbox, async () => undefined);
+
+    expect(run.mock.calls.map(([command]) => command)).toEqual([
+      killTreeCommand(30),
+      killTreeCommand(12),
+      "npm run dev -- --host",
+    ]);
+  });
+
+  it("only installs when no dev server is running and the caller has no fallback", async () => {
     const { sandbox, run } = fakeSandbox([{ pid: 3, envs: {} }]);
 
     await installWithDevServerStopped(sandbox, async () => undefined);
 
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it("starts the boot's dev server after the install when none is running, so a lost start heals", async () => {
+    const { sandbox, run } = fakeSandbox([{ pid: 3, envs: {} }]);
+    const fallback = { command: "npm run dev -- --host", envs: dev.envs, cwd: "/home/user/app" };
+
+    await installWithDevServerStopped(sandbox, async () => undefined, {}, fallback);
+
+    expect(run.mock.calls).toEqual([
+      ["npm run dev -- --host", { cwd: "/home/user/app", envs: dev.envs, background: true, timeoutMs: 0 }],
+    ]);
   });
 
   it("names only the given pid in the kill command", () => {
