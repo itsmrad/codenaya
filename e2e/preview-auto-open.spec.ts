@@ -284,16 +284,24 @@ test.describe("first build auto-opens the preview", () => {
       }
       return route.fulfill({ json: {} });
     });
+    await page.setViewportSize({ width: 1440, height: 900 });
     const build = await startFirstBuild(page, "e2e-preview-repair-reload");
+    // The page clock drives the sync debounce and the reload timers, so no step sleeps.
+    const tick = async (ms: number) => { await page.clock.runFor(ms); };
     try {
-      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.clock.install();
       await page.goto(`/projects/${build.projectId}`);
+      // package.json must land after the page sees a first build, or nothing boots the preview.
+      await expect(page.getByRole("status", { name: "Building your app" })).toBeVisible({ timeout: 60_000 });
+      await page.clock.pauseAt(Date.now() + 1_000);
       await build.writePackageJson();
       const app = page.frameLocator('iframe[title="Preview"]').getByRole("heading");
-      await expect(app).toHaveText("Bright Smile", { timeout: 60_000 });
+      await expect.poll(async () => { await tick(500); return loads; }, { timeout: 30_000 }).toBeGreaterThan(0);
+      await expect(app).toHaveText("Bright Smile", { timeout: 30_000 });
       await build.run.complete();
       await expect(page.getByRole("status", { name: "Still building" })).toBeHidden();
-      await page.waitForTimeout(4_000);
+      // Let the startup and end-of-build reloads settle.
+      await tick(4_000);
       available = false;
       await page.getByRole("button", { name: "Refresh page", exact: true }).click();
       await expect(app).toHaveCount(0);
@@ -302,16 +310,18 @@ test.describe("first build auto-opens the preview", () => {
       await expect(page.getByText("Agent working")).toBeVisible();
       holdSync = true;
       await build.writeFile("repaired.txt");
-      await expect.poll(() => syncing).toBe(true);
+      await expect.poll(async () => { await tick(500); return syncing; }).toBe(true);
       await repair.checkBuildDone();
       await repair.complete();
       await expect(page.getByText("Agent working")).toBeHidden();
-      await page.waitForTimeout(1500);
+      // No reload into the stopped dev server while the final sync is held.
+      await tick(1_500);
       expect(loads).toBe(beforeRepair);
       available = true;
       finishSync();
+      await expect.poll(async () => { await tick(500); return loads; }, { timeout: 30_000 }).toBe(beforeRepair + 1);
       await expect(app).toHaveText("Bright Smile");
-      await page.waitForTimeout(4_000);
+      await tick(4_000);
       expect(loads).toBe(beforeRepair + 1);
     } finally {
       finishSync();
