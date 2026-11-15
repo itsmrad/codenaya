@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   mutation: vi.fn(),
   seed: vi.fn(),
   takePromoRun: vi.fn(),
+  requireModelChoice: vi.fn(),
   dispatch: vi.fn(),
 }));
 
@@ -15,7 +16,7 @@ vi.mock("@/lib/convex-client", () => ({ convex: { mutation: mocks.mutation } }))
 vi.mock("@/features/templates/server/seed-template", () => ({ seedTemplateFiles: mocks.seed }));
 vi.mock("@/features/ai-providers/server/resolve-run-model", () => ({
   modelChoiceSchema: z.any(),
-  requireModelChoice: async () => ({ runModel: { kind: "auto" } }),
+  requireModelChoice: mocks.requireModelChoice,
   takePromoRun: mocks.takePromoRun,
 }));
 vi.mock("@/lib/message-processor", () => ({
@@ -46,6 +47,8 @@ beforeEach(() => {
   );
   mocks.takePromoRun.mockResolvedValue({ promoRun: { refund: vi.fn() } });
   mocks.dispatch.mockResolvedValue(true);
+  mocks.seed.mockResolvedValue(true);
+  mocks.requireModelChoice.mockResolvedValue({ runModel: { kind: "auto" } });
 });
 
 describe("POST /api/projects/create-with-prompt", () => {
@@ -59,7 +62,19 @@ describe("POST /api/projects/create-with-prompt", () => {
     expect(mocks.seed).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "p1", template: expect.objectContaining({ id: "landing-page" }) }),
     );
+    expect(mocks.requireModelChoice).not.toHaveBeenCalled();
     expect(mocks.takePromoRun).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("answers 502 when an instant template's seed stops partway", async () => {
+    mocks.seed.mockResolvedValue(false);
+
+    const res = await POST(post({ templateId: "admin-crud" }));
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ code: "seed_failed" });
+    expect(calledMutations()).not.toContain("system:createMessage");
     expect(mocks.dispatch).not.toHaveBeenCalled();
   });
 

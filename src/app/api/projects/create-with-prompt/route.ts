@@ -25,6 +25,7 @@ import {
 } from "@/lib/message-processor";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { seedTemplateFiles } from "@/features/templates/server/seed-template";
+import { readTemplateSource } from "@/features/templates/server/template-source";
 import {
   STARTER_TEMPLATE_IDS,
   getStarterTemplate,
@@ -84,6 +85,27 @@ export async function POST(request: Request) {
     );
   }
 
+  // An instant template is a finished app (#362): seed its source, no run,
+  // so no model choice either. Its source is read before anything is created.
+  if (template?.instant) {
+    const source = await readTemplateSource(template.id);
+    const { projectId } = await convex.mutation(api.system.createProjectWithConversation, {
+      internalKey,
+      projectName: template.id,
+      conversationTitle: DEFAULT_CONVERSATION_TITLE,
+      ownerId: userId,
+      source: "template",
+    });
+    if (!(await seedTemplateFiles({ internalKey, projectId, template, source }))) {
+      // shortcut: the partly written project stays on the dashboard; delete it here once a system delete exists.
+      return NextResponse.json(
+        { error: "The template couldn't be created. Try again.", code: "seed_failed" },
+        { status: 502 },
+      );
+    }
+    return NextResponse.json({ projectId });
+  }
+
   const swarmOff = await swarmOffResponse(mode);
   if (swarmOff) {
     return swarmOff;
@@ -97,19 +119,6 @@ export async function POST(request: Request) {
 
   if (rejected) {
     return rejected;
-  }
-
-  // An instant template is a finished app (#362): seed its source, no run.
-  if (template?.instant) {
-    const { projectId } = await convex.mutation(api.system.createProjectWithConversation, {
-      internalKey,
-      projectName: template.id,
-      conversationTitle: DEFAULT_CONVERSATION_TITLE,
-      ownerId: userId,
-      source: "template",
-    });
-    await seedTemplateFiles({ internalKey, projectId, template });
-    return NextResponse.json({ projectId });
   }
 
   // Before anything is created (ADR 0009).

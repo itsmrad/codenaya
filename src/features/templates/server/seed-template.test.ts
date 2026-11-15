@@ -17,7 +17,8 @@ describe("seedTemplateFiles", () => {
     mutation.mockImplementation(async (_ref, args) => `id:${args.name}`);
     const template = STARTER_TEMPLATES[0];
 
-    await seedTemplateFiles({ internalKey: "key", projectId: "p1" as never, template });
+    const source = await readTemplateSource(template.id);
+    expect(await seedTemplateFiles({ internalKey: "key", projectId: "p1" as never, template, source })).toBe(true);
 
     const calls = mutation.mock.calls.map(([ref, args]) => [getFunctionName(ref), args]);
     const folders = calls.filter(([name]) => name === "system:createFolder");
@@ -36,7 +37,6 @@ describe("seedTemplateFiles", () => {
     const written = batches.flatMap(([, a]) => a.files.map((f: { name: string }) => [a.parentId, f.name]));
     // An instant template writes its full source (#362).
     expect(template.instant).toBe(true);
-    const source = await readTemplateSource(template.id);
     expect(written).toHaveLength(getTemplateSeedFiles(template, source).length);
     expect(written).toContainEqual(["id:src", "brand.ts"]);
     expect(written).toContainEqual([undefined, "package.json"]);
@@ -75,7 +75,7 @@ describe("seedTemplateFiles when Convex fails partway (#338)", () => {
 
     await expect(
       seedTemplateFiles({ internalKey: "key", projectId: "p1" as never }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
 
     const written = mutation.mock.calls
       .filter(([ref]) => getFunctionName(ref) === "system:createFiles")

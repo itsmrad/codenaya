@@ -55,11 +55,11 @@ export const MakeItMineCard = ({ idOfPath, onDescribe }: MakeItMineCardProps) =>
       }
       setSaving(true);
       try {
-        await Promise.all(
-          BRAND_FILES.filter((path) => next[path] !== files[path]).map((path) =>
-            updateFile({ id: current[path]!._id, content: next[path], expectedContent: files[path] }),
-          ),
-        );
+        // One at a time, so a CONFLICT stops before the next file is written.
+        for (const path of BRAND_FILES) {
+          if (next[path] === files[path]) continue;
+          await updateFile({ id: current[path]!._id, content: next[path], expectedContent: files[path] });
+        }
         toast.success("Applied to your app");
       } catch {
         toast.error("Couldn't update the app. Try again.");
