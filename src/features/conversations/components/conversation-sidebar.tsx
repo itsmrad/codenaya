@@ -717,7 +717,11 @@ export const ConversationSidebar = ({
               <ComposerImages
                 acceptsImages={acceptsImages}
                 visionSwitch={visionSwitch}
-                onSwitchModel={setAgentModel}
+                onSwitchModel={(choice) => {
+                  setAgentModel(choice);
+                  // The switch button unmounts; keep focus in the composer.
+                  panelRef.current?.querySelector("textarea")?.focus();
+                }}
               />
               {contexts.length > 0 && (
                 <div className="flex w-full flex-wrap justify-start gap-2 p-2 pb-0">

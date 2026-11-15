@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { ImageOffIcon, PlusIcon } from "lucide-react";
 
 import {
@@ -58,6 +58,7 @@ export const ComposerImages = ({
   onSwitchModel: (choice: AgentModelChoice) => void;
 }) => {
   const { files } = usePromptInputAttachments();
+  const billingId = useId();
   if (files.length === 0) return null;
 
   return (
@@ -79,11 +80,14 @@ export const ComposerImages = ({
                 size="sm"
                 variant="outline"
                 className="h-6 px-2 text-xs"
+                aria-describedby={billingId}
                 onClick={() => onSwitchModel(visionSwitch.choice)}
               >
                 Switch to {visionSwitch.name}
               </Button>
-              <span className="text-muted-foreground">{visionSwitch.billing}</span>
+              <span id={billingId} className="text-muted-foreground">
+                {visionSwitch.billing}
+              </span>
             </>
           ) : (
             "No model you can pick reads images. Remove the images to send."
