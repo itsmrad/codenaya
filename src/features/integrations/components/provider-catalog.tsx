@@ -1,15 +1,21 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Image from "next/image";
-import { SearchIcon, ServerCogIcon } from "lucide-react";
+import { EyeIcon, SearchIcon, ServerCogIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { filterProviders, listProviders } from "../catalog";
 import type { IntegrationAuthMode } from "../types";
 
-// Custom endpoints keep their existing connection flow, outside the registry.
+/**
+ * Sentinel provider id for a user-supplied MCP endpoint.
+ *
+ * The catalog only describes providers we have verified, so "custom" cannot
+ * live there. `/api/integrations/connect` recognises the same literal and
+ * requires a `serverUrl` alongside it.
+ */
 export const CUSTOM_PROVIDER_ID = "custom";
 
 export const supportsApiKey = (authModes: readonly IntegrationAuthMode[]) =>
@@ -36,6 +42,10 @@ export const ProviderCatalog = ({
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>();
   const catalogId = useId();
+  const categoryRow = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    categoryRow.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [category]);
   const categories = [...new Set(listProviders().map((provider) => provider.category))];
   const providers = filterProviders(query, category);
 
@@ -52,7 +62,7 @@ export const ProviderCatalog = ({
           className="pl-9"
         />
       </div>
-      <div role="group" aria-label="Integration categories" className="flex flex-wrap gap-1.5">
+      <div role="group" aria-label="Integration categories" ref={categoryRow} className="flex flex-nowrap gap-1.5 overflow-x-auto p-1">
         {[undefined, ...categories].map((value) => (
           <Button
             key={value ?? "all"}
@@ -61,7 +71,8 @@ export const ProviderCatalog = ({
             size="sm"
             aria-pressed={category === value}
             onClick={() => setCategory(value)}
-            className="h-8 rounded-full px-3 text-xs"
+            onFocus={(event) => event.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" })}
+            className="h-8 shrink-0 rounded-full px-3 text-xs"
           >
             {value ?? "All"}
           </Button>
@@ -90,6 +101,11 @@ export const ProviderCatalog = ({
                   <span id={`${catalogId}-${provider.id}-description`} className="text-xs leading-relaxed text-muted-foreground">{provider.description}</span>
                   <span className="mt-auto flex w-full flex-wrap items-center justify-between gap-2 pt-1">
                     <span id={`${catalogId}-${provider.id}-auth`} className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{authModeLabel(provider.authModes)}</span>
+                    {provider.supportsReadOnly && (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        <EyeIcon aria-hidden="true" className="size-2.5" /> Read-only capable
+                      </span>
+                    )}
                     <span className="text-xs font-medium text-foreground">{action}</span>
                   </span>
                 </button>

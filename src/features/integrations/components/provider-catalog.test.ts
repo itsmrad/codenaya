@@ -16,6 +16,7 @@ it("shows all providers with capabilities, local logos and keyboard filters", ()
     expect(html).toContain(provider.description);
     expect(html).toContain(`src="${provider.logo}"`);
   }
+  expect(html.match(/Read-only capable/g)).toHaveLength(listProviders().filter((provider) => provider.supportsReadOnly).length);
   expect(html).toContain("Custom MCP server");
   expect(html).toContain("OAuth · API key");
   expect(html).toContain("No sign-in");
