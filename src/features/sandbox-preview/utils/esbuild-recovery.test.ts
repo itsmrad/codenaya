@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readInstallFailure } from "./app-error";
 import { isEsbuildServiceFailure, nextEsbuildRecovery, ESBUILD_RECOVERY_COOLDOWN_MS } from "./esbuild-recovery";
 
 describe("esbuild service recovery (#776)", () => {
@@ -19,6 +20,12 @@ describe("esbuild service recovery (#776)", () => {
       { kind: "build" as const, message: "Failed to resolve import './Missing'" },
       { kind: "build" as const, message: "npm error code ERESOLVE" },
     ]) expect(isEsbuildServiceFailure(error, "vite")).toBe(false);
+  });
+
+  it("ignores a package.json install failure that only mentions EPIPE", () => {
+    const { error } = readInstallFailure({ installFailed: { exitCode: 1, code: "EPIPE" } }, "npm install")!;
+    expect(error?.message).toContain("EPIPE");
+    expect(isEsbuildServiceFailure(error!, "vite")).toBe(false);
   });
 
   it("only recovers a Vite project: Next and unknown frameworks never restart", () => {

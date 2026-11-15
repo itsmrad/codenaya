@@ -112,6 +112,21 @@ describe("sandbox dev server recovery (#776)", () => {
     expect(payloads().at(-1)).toEqual([{ path: "App.tsx", content: "latest" }]);
   });
 
+  it("syncs a still-debouncing edit before the recovery request", async () => {
+    edit("pending");
+    vi.mocked(fetch)
+      .mockImplementationOnce((url, init) => patch(url, init))
+      .mockResolvedValueOnce(Response.json({ status: "restarted" }));
+    const recovery = render().recoverDevServer();
+    await vi.advanceTimersByTimeAsync(0); // The 300 ms debounce has not elapsed.
+    expect(payloads()).toEqual([[{ path: "App.tsx", content: "pending" }]]);
+    const calls = vi.mocked(fetch).mock.calls.map(([, init]) => init?.method);
+    expect(calls.lastIndexOf("PATCH")).toBeLessThan(calls.lastIndexOf("POST"));
+    await expect(recovery).resolves.toBe("restarted");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(patch).toHaveBeenCalledTimes(1); // The flushed timer does not sync twice.
+  });
+
   it("does not block later edits after a failed restart", async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new TypeError("offline"));
     await expect(render().recoverDevServer()).rejects.toThrow("offline");

@@ -34,6 +34,8 @@ test("esbuild death recovers once, waits for install, and bypasses AI repair (#7
   const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY!;
   await system.mutation(api.system.createFile, { internalKey, projectId, name: "package.json", content: "{}\n" });
+  // Recovery is Vite-only, so the fixture must read as a Vite project.
+  await system.mutation(api.system.createFile, { internalKey, projectId, name: "vite.config.js", content: "export default {};\n" });
   const conversationId = await user.mutation(api.conversations.create, { projectId, title: "Follow-up edit" });
   // Arm the existing automatic-fix window by ending a run after preview boot.
   const messageId = await system.mutation(api.system.createMessage, {

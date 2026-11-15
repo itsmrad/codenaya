@@ -25,6 +25,7 @@ export const useEsbuildRecovery = ({ sandboxId, framework, error, recover }: {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     let waits = 0;
+    let retried = false;
     const attempt = async () => {
       if (cancelled) return;
       const previous = attempts.current?.sandboxId === sandboxId ? attempts.current.state : undefined;
@@ -42,15 +43,21 @@ export const useEsbuildRecovery = ({ sandboxId, framework, error, recover }: {
       try {
         const status = await recover();
         if (cancelled) return;
+        // An install already in flight owns the server; no restart happened, so no attempt is spent.
+        if (status === "busy") attempts.current = previous ? { sandboxId, state: previous } : null;
         if (status === "busy" && waits++ < 15) {
-          // An install already in flight owns the server; wait without spending an attempt.
-          attempts.current = previous ? { sandboxId, state: previous } : null;
           timer = setTimeout(attempt, 2_000);
         } else {
           setRecovering(false);
         }
       } catch {
-        if (!cancelled) setRecovering(false);
+        if (cancelled) return;
+        setRecovering(false);
+        // One retry after the cooldown for a failed request; leaving the error cancels it.
+        if (!retried && next.attempts < MAX_ESBUILD_RECOVERIES) {
+          retried = true;
+          timer = setTimeout(attempt, ESBUILD_RECOVERY_COOLDOWN_MS);
+        }
       }
     };
     // Defer past React's effect setup/cleanup cycle; only a committed preview recovers.
