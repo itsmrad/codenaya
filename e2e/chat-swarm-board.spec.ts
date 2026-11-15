@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { api } from "../convex/_generated/api";
-import { EMPTY_CHAT_TITLE, hasInternalKey, seedSwarmConversation } from "./chat-fixtures";
+import { EMPTY_CHAT_TITLE, hasInternalKey, seedSwarmConversation, setChatPanelWidth } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
@@ -21,14 +21,23 @@ test.describe("chat swarm board", () => {
     const user = await userConvexClient(page);
     const projectId = await user.mutation(api.projects.create, { name: `e2e-swarm-board-${Date.now()}` });
     try {
+      // A second seed must work even if this Clerk user has a live earlier seed.
+      const previous = await seedSwarmConversation(page, projectId);
       const swarm = await seedSwarmConversation(page, projectId);
+      const previousMessages = await user.query(api.conversations.getMessages, { conversationId: previous.conversationId });
+      expect(previousMessages.find((message) => message.mode === "swarm")?.status).toBe("cancelled");
       await page.goto(`/projects/${projectId}?engine=webcontainer`);
       await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
 
       const board = page.getByRole("region", { name: "Swarm board" });
-      await expect(board.getByText(/^Swarm · 3 workers · \d+:\d\d · 1 done$/)).toBeVisible({ timeout: 60_000 });
-      await expect(board.getByText("Delegated 3 tasks")).toBeVisible();
+      await expect(board.getByText(/^Swarm · 1 lead · 3 workers · \d+:\d\d · 1 done$/)).toBeVisible({ timeout: 60_000 });
+      await expect(board.getByText("Delegated 2 tasks")).toBeVisible();
       const row = (title: string) => board.getByRole("button", { name: new RegExp(title) });
+      const nested = board.getByRole("list", { name: "Page sections workers" });
+      await expect(nested.getByRole("button")).toHaveCount(2);
+      await expect(nested.getByRole("button", { name: /Hero section/ })).toBeVisible();
+      await expect(nested.getByRole("button", { name: /Pricing table/ })).toBeVisible();
+      await expect(nested.getByRole("button", { name: /Footer/ })).toHaveCount(0);
       await expect(row("Hero section")).toContainText("Done");
       await expect(row("Pricing table")).toContainText("Running");
       await expect(row("Footer")).toContainText("Queued");
@@ -39,10 +48,19 @@ test.describe("chat swarm board", () => {
       await hero.click();
       await expect(hero).toHaveAttribute("aria-expanded", "true");
       await expect(board.getByText("Added the hero section.")).toBeVisible();
+      await expect(hero).toContainText("Self-check ok");
+      await expect(board.getByText("Self-check: scoped-ok", { exact: true })).toBeVisible();
+      await hero.focus();
+      await expect(hero).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(hero).toHaveAttribute("aria-expanded", "false");
 
       // A status change streams in without a reload.
       await swarm.finishPricing();
       await expect(row("Pricing table")).toContainText("Done");
+      await expect(row("Pricing table")).toContainText("Self-check skipped");
+      await row("Pricing table").click();
+      await expect(board.getByText("Self-check: skipped (swarm sandbox cap reached)", { exact: true })).toBeVisible();
       await expect(board.getByText(/ · 2 done$/)).toBeVisible();
 
       // Stopping the parent run shows its unfinished workers as cancelled.
@@ -53,6 +71,15 @@ test.describe("chat swarm board", () => {
         await page.evaluate((value) => document.documentElement.classList.toggle("dark", value === "dark"), theme);
         await test.info().attach(`swarm-board-${theme}`, { body: await board.screenshot(), contentType: "image/png" });
       }
+      await page.setViewportSize({ width: 375, height: 812 });
+      // Mobile chat is a tab; the desktop's selected Preview view can hide it.
+      await page.getByRole("tab", { name: "Chat", exact: true }).click();
+      for (const theme of ["light", "dark"]) {
+        await page.evaluate((value) => document.documentElement.classList.toggle("dark", value === "dark"), theme);
+        await expect(nested.getByRole("button", { name: /Hero section/ })).toBeVisible();
+        expect(await board.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+        await test.info().attach(`swarm-board-375-${theme}`, { body: await board.screenshot(), contentType: "image/png" });
+      }
     } finally {
       await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});
     }
@@ -61,6 +88,7 @@ test.describe("chat swarm board", () => {
 
   test("the Swarm toggle sends mode swarm", async ({ page }) => {
     test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1280, height: 720 });
     await signIn(page);
     const user = await userConvexClient(page);
     const projectId = await user.mutation(api.projects.create, { name: `e2e-swarm-toggle-${Date.now()}` });
@@ -87,7 +115,34 @@ test.describe("chat swarm board", () => {
 
       const input = page.getByPlaceholder("Describe a change or ask a question…");
       await input.fill("landing page");
-      await input.press("Enter");
+      const picker = page.getByRole("combobox", { name: "Agent model" });
+      await picker.click();
+      await expect(page.getByRole("option").first()).toBeVisible();
+      const names = await page.getByRole("option").allTextContents();
+      const longest = names.reduce((a, b) => a.length >= b.length ? a : b);
+      await page.getByRole("option", { name: longest, exact: true }).first().click();
+      await expect(picker).toHaveText(longest);
+      const send = page.getByRole("button", { name: "Send", exact: true });
+      // Cover narrow panels and the mode-label / keyboard-hint breakpoints.
+      for (const width of [200, 320, 480, 560, 640]) {
+        await setChatPanelWidth(page, width);
+        const pickerBox = (await picker.boundingBox())!;
+        const sendBox = (await send.boundingBox())!;
+        expect(pickerBox.width).toBeGreaterThanOrEqual(64);
+        expect(pickerBox.x + pickerBox.width).toBeLessThanOrEqual(sendBox.x);
+        expect(await page.locator(".chat-composer [data-align=block-end]").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+        await picker.click();
+        const listbox = page.getByRole("listbox");
+        await expect(listbox).toBeVisible();
+        // Radix moves focus into the content just after it shows; an Escape sent before that is lost.
+        await expect(page.getByRole("option", { selected: true })).toBeFocused();
+        await expect(async () => {
+          await page.keyboard.press("Escape");
+          await expect(listbox).toBeHidden({ timeout: 1_000 });
+        }).toPass();
+        await send.click({ trial: true });
+      }
+      await send.click();
       expect(await sent).toMatchObject({ message: "landing page", mode: "swarm" });
     } finally {
       await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});

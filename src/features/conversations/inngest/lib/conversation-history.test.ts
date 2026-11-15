@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { LOST_RUN_MESSAGE } from "../../agent-steps";
 import { keyFailureMessage } from "@/features/ai-providers/server/resolve-run-model";
-import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from "./conversation-history";
+import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, UNFINISHED_REPLY, priorTurns } from "./conversation-history";
 
 import { AI_NOT_CONFIGURED_MESSAGE } from "@/features/ai-providers/server/platform-model";
 import { PROMO_REFUSAL_MESSAGES } from "@/features/promotions/github-promo";
@@ -19,17 +19,25 @@ const reply = (content: string, status: Status = "completed") => ({
   status,
 });
 
+const unfinished = (content: string) => [
+  { type: "text", role: "user", content },
+  { type: "text", role: "assistant", content: UNFINISHED_REPLY },
+];
+
 describe("priorTurns", () => {
   it.each([
     AI_NOT_CONFIGURED_MESSAGE,
     ...Object.values(PROMO_REFUSAL_MESSAGES),
     DISPATCH_FAILED_MESSAGE,
-  ])("omits the entire failed turn for %s", (content) => {
-    expect(priorTurns([user("Try"), reply(content)], "current")).toEqual([]);
+  ])("keeps the request but not the failure text for %s", (content) => {
+    expect(priorTurns([user("Try"), reply(content), user("Again")], "current")).toEqual([
+      { type: "text", role: "user", content: "Try" },
+      { type: "text", role: "assistant", content: UNFINISHED_REPLY },
+    ]);
   });
 
   it("keeps the request and default reply when a successful run had no summary", () => {
-    expect(priorTurns([user("Build a todo app"), reply(DEFAULT_REPLY_MESSAGE)], "current")).toEqual([
+    expect(priorTurns([user("Build a todo app"), reply(DEFAULT_REPLY_MESSAGE), user("Next")], "current")).toEqual([
       { type: "text", role: "user", content: "Build a todo app" },
       { type: "text", role: "assistant", content: DEFAULT_REPLY_MESSAGE },
     ]);
@@ -54,7 +62,7 @@ describe("priorTurns", () => {
     ]);
   });
 
-  it("leaves out cancelled, failed, running and empty turns whole", () => {
+  it("keeps the requests of cancelled, failed, running and empty turns, without their replies", () => {
     const current = reply("", "processing");
     const messages = [
       user("Stopped"),
@@ -74,9 +82,17 @@ describe("priorTurns", () => {
     ];
 
     expect(priorTurns(messages, current._id)).toEqual([
+      ...["Stopped", "Crashed", "Lost", "Bad key", "Still running"].flatMap(unfinished),
       { type: "text", role: "user", content: "Kept" },
       { type: "text", role: "assistant", content: "Done." },
     ]);
+  });
+
+  it("keeps the original request when a stopped first run is followed by continue", () => {
+    const current = reply("", "processing");
+    const messages = [user("Build a pizzeria site"), reply("", "cancelled"), user("continue"), current];
+
+    expect(priorTurns(messages, current._id)).toEqual(unfinished("Build a pizzeria site"));
   });
 
   it("drops a reply whose request fell outside the window, and keeps image-only requests", () => {

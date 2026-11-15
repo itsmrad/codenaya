@@ -65,7 +65,12 @@ test.describe("chat when an agent run stops responding", () => {
 
       await expect(page.locator('[data-run-status="running"]')).toBeVisible({ timeout: 60_000 });
       await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
-      await expect(composer).toBeDisabled();
+      // The composer stays usable during a run so a follow-up can be queued (#257).
+      await expect(composer).toBeEnabled();
+      await composer.fill("Add a footer");
+      await expect(page.getByRole("button", { name: "Queue message" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+      await composer.fill("");
 
       // Past the stall threshold with no new steps.
       await page.clock.fastForward("11:00");

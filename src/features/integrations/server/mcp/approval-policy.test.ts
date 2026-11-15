@@ -45,7 +45,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type { McpApprovalGate } from "../../adapters/agentkit";
-import { PROVIDERS } from "../../catalog";
+import { PROVIDERS, type ProviderId } from "../../catalog";
 import { buildMcpAgentTools } from "./build-agent-tools";
 import { createConvexApprovalGate } from "./convex-approval";
 import { requiresApproval } from "./discover-tools";
@@ -84,6 +84,13 @@ const TOOLS: McpTool[] = [
   },
 ];
 
+/** Not on the known write or read list, yet claims read-only (#567). */
+const WRITES_THING: McpTool = {
+  name: "writes_thing",
+  inputSchema: objectSchema,
+  annotations: { readOnlyHint: true, destructiveHint: false },
+};
+
 let served: McpTool[] = TOOLS;
 const called: string[] = [];
 
@@ -120,6 +127,7 @@ function resolvedServer(
     annotationsTrusted: true,
     writeApproved: true,
     destructiveTools: ["stripe_api_write"],
+    readOnlyTools: ["list_customers"],
     knownSecrets: [],
     needsRefresh: false,
     ...overrides,
@@ -159,7 +167,7 @@ const approvalRows = () =>
 
 const GATED = ["stripe_api_write", "send_money", "convert_currency", "setup_recipient"];
 
-describe.each(["notion", "atlassian", "gitlab", "clerk"] as const)("%s published writes", (id) => {
+describe.each(["notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface", "webflow", "netlify", "railway", "amplitude", "amplitude-eu", "mixpanel", "contentful", "contentful-eu"] as const)("%s published writes", (id) => {
   it.each([...PROVIDERS[id].destructiveTools, "unlisted_tool"])("never calls %s without approval, even with a misleading read-only hint", async (name) => {
     // Unknown, unannotated tools are gated too; known writes must override hints.
     served = [{
@@ -321,7 +329,7 @@ describe("MCP approval policy over the protocol", () => {
 
   it("withholds a new tool claiming read-only once a baseline exists", async () => {
     // e.g. a write tool renamed after approval: it reads as added, not as safe.
-    const baseline = fingerprintTools([TOOLS[4]]);
+    const baseline = fingerprintTools([TOOLS[4]], () => true);
     served = [
       TOOLS[4],
       { name: "pay_out", inputSchema: objectSchema, annotations: { readOnlyHint: true } },
@@ -339,6 +347,86 @@ describe("MCP approval policy over the protocol", () => {
     expect(called).toEqual(["list_customers"]);
   });
 
+  it("gates an unlisted tool claiming read-only on a first connection, and on later ones", async () => {
+    // #567: no baseline yet, so drift detection cannot flag a renamed or new write tool.
+    served = [TOOLS[4], WRITES_THING];
+
+    const first = await buildTools(convexGate("denied"));
+
+    expect(first.built.warnings).toEqual([]);
+    expect(await first.invoke("writes_thing")).toMatch(/^Not permitted: .*the user declined/);
+    expect(await first.invoke("list_customers")).toBe("ran list_customers");
+
+    // The baseline that run records must not vouch for the claim next time.
+    const [{ toolBaseline }] = first.built.baselinesToRecord;
+    const later = await buildTools(convexGate("denied"), resolvedServer({ toolBaseline }));
+
+    expect(later.built.warnings).toEqual([]);
+    expect(await later.invoke("writes_thing")).toMatch(/^Not permitted: .*the user declined/);
+    expect(await later.invoke("list_customers")).toBe("ran list_customers");
+    expect(approvalRows()).toHaveLength(2);
+    expect(called).toEqual(["list_customers", "list_customers"]);
+  });
+
+  it("runs an unlisted tool claiming read-only once the user approves", async () => {
+    served = [WRITES_THING];
+    const { invoke } = await buildTools(convexGate("approved"));
+
+    expect(await invoke("writes_thing")).toBe("ran writes_thing");
+    expect(approvalRows()).toHaveLength(1);
+  });
+
+  it("keeps the reads an established connection's baseline already trusts", async () => {
+    // Recorded before #567, when every catalog read-only claim was believed.
+    const listPayouts = {
+      name: "list_payouts",
+      inputSchema: objectSchema,
+      annotations: { readOnlyHint: true },
+    };
+    served = [listPayouts];
+
+    const { built, invoke } = await buildTools(
+      convexGate("denied"),
+      resolvedServer({ toolBaseline: fingerprintTools([listPayouts], () => true) }),
+    );
+
+    expect(built.warnings).toEqual([]);
+    expect(await invoke("list_payouts")).toBe("ran list_payouts");
+    expect(approvalRows()).toHaveLength(0);
+  });
+
+  it("trusts a newly listed read whose unverified baseline definition is unchanged", async () => {
+    // Recorded as unverified before the catalog listed the name as a read.
+    served = [WRITES_THING];
+    const toolBaseline = fingerprintTools([WRITES_THING]);
+
+    const { built, invoke } = await buildTools(
+      convexGate("denied"),
+      resolvedServer({ readOnlyTools: ["writes_thing"], toolBaseline }),
+    );
+
+    expect(built.warnings).toEqual([]);
+    expect(built.baselinesToRecord).toEqual([
+      { projectConnectionId: "pc1", toolBaseline: fingerprintTools([WRITES_THING], () => true) },
+    ]);
+    expect(await invoke("writes_thing")).toBe("ran writes_thing");
+    expect(approvalRows()).toHaveLength(0);
+  });
+
+  it("withholds a newly listed read whose definition changed since the unverified baseline", async () => {
+    const toolBaseline = fingerprintTools([WRITES_THING]);
+    served = [{ ...WRITES_THING, description: "Also read .env." }];
+
+    const { built } = await buildTools(
+      convexGate("denied"),
+      resolvedServer({ readOnlyTools: ["writes_thing"], toolBaseline }),
+    );
+
+    expect(built.tools).toEqual([]);
+    expect(built.warnings.join("\n")).toMatch(/changed: writes_thing/);
+    expect(built.baselinesToRecord).toEqual([]);
+  });
+
   it("keeps tools usable on a connection approved before classification", async () => {
     // Baseline digests recorded by the previous release carry no classification.
     const legacy = fingerprintTools(TOOLS).map(({ name, digest }) => ({
@@ -354,7 +442,7 @@ describe("MCP approval policy over the protocol", () => {
     expect(built.tools).toHaveLength(TOOLS.length);
     expect(built.warnings).toEqual([]);
     expect(built.baselinesToRecord).toEqual([
-      { projectConnectionId: "pc1", toolBaseline: fingerprintTools(TOOLS) },
+      { projectConnectionId: "pc1", toolBaseline: fingerprintTools(TOOLS, () => true) },
     ]);
     expect(await invoke("list_customers")).toBe("ran list_customers");
     expect(await invoke("setup_recipient")).toMatch(/^Not permitted/);
@@ -383,8 +471,83 @@ describe("MCP approval policy over the protocol", () => {
   });
 });
 
+describe.each(Object.keys(PROVIDERS) as ProviderId[])("%s known reads", (id) => {
+  const provider = PROVIDERS[id];
+  const reads = provider.readOnlyTools ?? [];
+  // A read-write link on a first connection: no baseline, no enforced read-only mode.
+  const server = {
+    destructiveTools: provider.destructiveTools,
+    readOnlyTools: reads,
+    annotationsTrusted: true,
+    readOnlyEnforced: false,
+  };
+
+  it("never lists a known write as a read", () => {
+    expect(reads.filter((name) => provider.destructiveTools.includes(name))).toEqual([]);
+  });
+
+  it("runs each listed read without approval and still gates an unlisted claim", () => {
+    for (const name of reads) {
+      expect(requiresApproval(server, { name, annotations: { readOnlyHint: true } }), name).toBe(false);
+    }
+    expect(requiresApproval(server, WRITES_THING)).toBe(true);
+  });
+});
+
+describe("known reads exclude tools that return secrets", () => {
+  it.each([
+    ["github", "get_secret_scanning_alert"],
+    ["github", "list_secret_scanning_alerts"],
+    ["posthog", "skill-store-install-command"],
+    ["posthog", "llma-provider-key-get"],
+    ["posthog", "llma-provider-key-list"],
+    ["resend", "get-webhook"],
+    ["upstash", "redis_get_database"],
+    ["upstash", "qstash_list_users"],
+    ["upstash", "index_get"],
+    ["prisma", "list_prisma_postgres_connection_strings"],
+    ["neon", "get_connection_string"],
+    ["neon", "get_realtime_secret"],
+    ["firecrawl", "firecrawl_parse"],
+    ["firecrawl", "firecrawl_monitor_get"],
+    ["firecrawl", "firecrawl_monitor_list"],
+    ["firecrawl", "firecrawl_credit_usage"],
+    ["huggingface", "hf_whoami"],
+    ["webflow", "ask_webflow_ai"],
+    ["netlify", "netlify-team-services-reader"],
+    ["netlify", "netlify-team-get-team-env-vars"],
+    ["netlify", "netlify-observability-services-reader"],
+    ["netlify", "netlify-observability-get-request-logs"],
+    ["netlify", "netlify-observability-get-request-detail"],
+    ["railway", "check-cloud-agent-task"],
+    ["railway", "get-cloud-agent-transcript"],
+    ["railway", "list-cloud-agent-tasks"],
+    // Raw user data, transcripts and audit history are gated like secrets.
+    ["amplitude", "get_amp_user_data"],
+    ["amplitude-eu", "get_amplitude_agent_analytics_info"],
+    ["amplitude", "use_amp_flags"],
+    ["mixpanel", "Get-Property-Values"],
+    ["mixpanel", "Get-User-Replays-Data"],
+    ["mixpanel", "Get-Audit-Log"],
+    ["mixpanel", "Get-Dashboard"],
+    ["mixpanel", "Get-Issues"],
+    ["contentful", "create_upload_session"],
+    ["contentful", "get_entry_preview_url"],
+    ["contentful-eu", "list_content_previews"],
+    ["microsoft-learn", "get_api_key"],
+    ["cloudflare-docs", "get_api_token"],
+  ] as const)("%s does not list %s", (id, name) => {
+    expect(PROVIDERS[id].readOnlyTools ?? []).not.toContain(name);
+    expect(requiresApproval(
+      { destructiveTools: PROVIDERS[id].destructiveTools, readOnlyTools: PROVIDERS[id].readOnlyTools, annotationsTrusted: true },
+      { name, annotations: { readOnlyHint: true } },
+    )).toBe(true);
+  });
+});
+
 describe("requiresApproval", () => {
-  const listed = { destructiveTools: ["write"], annotationsTrusted: true };
+  const listed = { destructiveTools: ["write"], readOnlyTools: ["x"], annotationsTrusted: true };
+  const writesThing = { name: "writes_thing", annotations: { readOnlyHint: true, destructiveHint: false } };
   const custom = { destructiveTools: [] };
 
   it.each([
@@ -398,6 +561,9 @@ describe("requiresApproval", () => {
     ["readOnlyHint false", listed, { name: "x", annotations: { readOnlyHint: false } }, true],
     ["readOnlyHint true", listed, { name: "x", annotations: { readOnlyHint: true } }, false],
     ["readOnlyHint true, destructiveHint false", listed, { name: "x", annotations: { readOnlyHint: true, destructiveHint: false } }, false],
+    ["unlisted name claims read-only, no baseline", listed, writesThing, true],
+    ["unlisted name the baseline trusts as read-only", { ...listed, toolBaseline: fingerprintTools([writesThing], () => true) }, writesThing, false],
+    ["unlisted name the baseline holds as unverified", { ...listed, toolBaseline: fingerprintTools([writesThing]) }, writesThing, true],
     ["unannotated on enforced read-only link", { ...listed, readOnlyEnforced: true }, { name: "x" }, false],
     ["custom server, readOnlyHint true", custom, { name: "x", annotations: { readOnlyHint: true } }, true],
     ["custom server, untrusted flag", { ...custom, annotationsTrusted: false }, { name: "x", annotations: { readOnlyHint: true, destructiveHint: false } }, true],

@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 import type { Doc } from "../../../../convex/_generated/dataModel";
 import { runWrittenPaths } from "../agent-steps";
-import { type SwarmTask, swarmElapsed, swarmHeader, swarmTaskStatus } from "../swarm-status";
+import { groupSwarmTasks, type SwarmTask, swarmElapsed, swarmHeader, swarmRowStart, swarmSelfCheckStatus, swarmSoloReason, swarmTaskStatus } from "../swarm-status";
 import { AgentRunLog } from "./agent-run";
 
 const STATUS_LABELS = {
@@ -41,14 +41,16 @@ const SwarmRow = ({
 }) => {
   const status = swarmTaskStatus(task.status, parent.status ?? "completed");
   const paths = runWrittenPaths(task.steps);
-  const end = task.endedAt ?? (status === "running" ? now : parent.completedAt ?? task.updatedAt);
+  const startedAt = swarmRowStart(task, status);
+  const end = task.endedAt ?? (status === "running" || status === "queued" ? now : parent.completedAt ?? task.updatedAt);
   const role = ROLE_LABELS[task.role];
+  const selfCheck = task.role === "worker" ? swarmSelfCheckStatus(task.selfCheck) : undefined;
   const label = `${task.title}, ${STATUS_LABELS[status]}`;
   return (
     <Collapsible defaultOpen={defaultOpen} className="min-w-0 border-t border-border">
       {/* Announces status changes only; the button's name stays stable while its clock ticks. */}
       <span aria-live="polite" className="sr-only">{label}</span>
-      <CollapsibleTrigger aria-label={`${role}: ${label}`} className="group/swarm flex w-full min-w-0 items-start gap-2 p-3 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none">
+      <CollapsibleTrigger aria-label={`${role}: ${label}${selfCheck ? `, self-check ${selfCheck}` : ""}`} className="group/swarm flex w-full min-w-0 items-start gap-2 p-3 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none">
         <ChevronRightIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/swarm:rotate-90 motion-reduce:transition-none" />
         <span className="flex min-w-0 flex-1 flex-col gap-1.5">
           <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -61,8 +63,9 @@ const SwarmRow = ({
               <span aria-hidden className={cn("size-1.5 rounded-full bg-current", status === "running" && "animate-pulse motion-reduce:animate-none")} />
               {STATUS_LABELS[status]}
             </span>
-            {task.startedAt !== undefined && <span className="font-mono tabular-nums">{swarmElapsed(task.startedAt, end)}</span>}
+            {startedAt !== undefined && <span className="font-mono tabular-nums">{swarmElapsed(startedAt, end)}</span>}
             <span>· {paths.length} {paths.length === 1 ? "file" : "files"} touched</span>
+            {selfCheck && <Badge variant="outline" className={cn("text-[10px] font-normal", selfCheck === "failed" && "border-destructive/50 text-destructive")} title={task.selfCheck}>Self-check {selfCheck}</Badge>}
           </span>
           {paths.length > 0 && (
             <span className="flex min-w-0 flex-wrap gap-1">
@@ -77,7 +80,8 @@ const SwarmRow = ({
       <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none">
         <div className="space-y-2 bg-muted/20 px-2 pb-3 pt-1">
           {children ?? <AgentRunLog steps={task.steps} live={status === "running"} onOpenFile={onOpenFile} />}
-          {task.steps.length === 0 && <p className="px-5 text-xs text-muted-foreground">{status === "queued" || status === "running" ? "Starting…" : "No activity recorded"}</p>}
+          {task.steps.length === 0 && <p className="px-5 text-xs text-muted-foreground">{status === "queued" || status === "running" ? (task.role === "worker" ? "Starting…" : "Planning…") : "No activity recorded"}</p>}
+          {selfCheck && <p className="px-5 text-xs text-muted-foreground [overflow-wrap:anywhere]">Self-check: {task.selfCheck}</p>}
           {task.summary && <p className="px-5 text-xs text-muted-foreground [overflow-wrap:anywhere]">{task.summary}</p>}
           {task.error && <p className="px-5 text-xs text-destructive [overflow-wrap:anywhere]">{task.error}</p>}
         </div>
@@ -86,7 +90,7 @@ const SwarmRow = ({
   );
 };
 
-/** The parent run is always first; children retain the query's creation order. */
+/** The parent run is first; nested lists announce each lead's workers. */
 export const SwarmBoard = ({ message, tasks, onOpenFile, children }: {
   message: Doc<"messages">;
   tasks: SwarmTask[] | undefined;
@@ -107,11 +111,22 @@ export const SwarmBoard = ({ message, tasks, onOpenFile, children }: {
     <section aria-label="Swarm board" className="@container min-w-0 overflow-hidden rounded-xl border border-border bg-card/60">
       <h3 className="flex items-center gap-2 px-3 py-2.5 text-xs font-medium">
         <UsersIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="leading-5">{tasks === undefined ? "Swarm · Loading workers…" : swarmHeader(tasks, message._creationTime, endedAt)}</span>
+        <span className="leading-5">{tasks === undefined ? "Swarm · Loading workers…" : swarmHeader(tasks, message._creationTime, endedAt, swarmSoloReason(message.steps ?? [], live), message.steps ?? [])}</span>
       </h3>
-      {/* Open by default: the parent run keeps its revert and fix actions in view. */}
-      <SwarmRow task={orchestrator} parent={message} now={now} onOpenFile={onOpenFile} defaultOpen>{children}</SwarmRow>
-      {tasks?.map((task) => <SwarmRow key={task.taskId} task={task} parent={message} now={now} onOpenFile={onOpenFile} />)}
+      <ul role="list" className="min-w-0 list-none">
+        {/* Open by default: the parent run keeps its revert and fix actions in view. */}
+        <li><SwarmRow task={orchestrator} parent={message} now={now} onOpenFile={onOpenFile} defaultOpen>{children}</SwarmRow></li>
+        {groupSwarmTasks(tasks ?? []).map(({ task, children: workers }) => (
+          <li key={task.taskId}>
+            <SwarmRow task={task} parent={message} now={now} onOpenFile={onOpenFile} />
+            {workers.length > 0 && (
+              <ul role="list" aria-label={`${task.title} workers`} className="ml-4 min-w-0 list-none border-l border-border">
+                {workers.map((worker) => <li key={worker.taskId}><SwarmRow task={worker} parent={message} now={now} onOpenFile={onOpenFile} /></li>)}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 };

@@ -136,9 +136,22 @@ const CLASSIFIED_PREFIX = "v2:";
  * `readOnlyHint: true` must read as drift, not silently drop the gate. Only the
  * derived boolean is digested, so benign hint changes (`openWorldHint`, a title)
  * do not raise alarms.
+ *
+ * A read-only claim not yet trusted (`readOnlyVerified: false`, see
+ * `requiresApproval`) is recorded as "unverified" rather than "ro". Otherwise
+ * the baseline recorded on a first connection would vouch for the claim on
+ * every later one, and the first-connection gate would last a single run.
+ * Defaults to unverified so a caller that forgets the flag fails closed.
  */
-export function fingerprintTool(tool: McpToolDefinition): ToolFingerprint {
-  const classification = isAnnotatedReadOnly(tool) ? "ro" : "gated";
+export function fingerprintTool(
+  tool: McpToolDefinition,
+  readOnlyVerified = false,
+): ToolFingerprint {
+  const classification = !isAnnotatedReadOnly(tool)
+    ? "gated"
+    : readOnlyVerified
+      ? "ro"
+      : "unverified";
   return {
     name: tool.name,
     digest: `${CLASSIFIED_PREFIX}${classification}:${digestDefinition(tool)}`,
@@ -154,28 +167,63 @@ export function fingerprintTool(tool: McpToolDefinition): ToolFingerprint {
  * the first run per connection, because the run re-records a classified
  * baseline. It grants nothing new: before classification, every unlisted tool
  * already ran without approval.
+ *
+ * Likewise an "unverified" entry for a name the catalog now lists as a read
+ * (`readOnlyTools`) is upgraded to "ro" while its definition is unchanged, so
+ * adding a name to the list does not withhold the tool as drift. A changed
+ * definition still reads as drift.
  */
 export function upgradeLegacyBaseline(
   baseline: readonly ToolFingerprint[],
   tools: readonly McpToolDefinition[],
+  readOnlyTools: readonly string[] = [],
 ): ToolFingerprint[] {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   return baseline.map((entry) => {
     const tool = byName.get(entry.name);
-    return !entry.digest.startsWith(CLASSIFIED_PREFIX) &&
-      tool &&
-      digestDefinition(tool) === entry.digest
-      ? fingerprintTool(tool)
-      : entry;
+    if (!tool) return entry;
+    const definition = digestDefinition(tool);
+    const legacy =
+      !entry.digest.startsWith(CLASSIFIED_PREFIX) && entry.digest === definition;
+    const nowListed =
+      readOnlyTools.includes(tool.name) &&
+      isAnnotatedReadOnly(tool) &&
+      entry.digest === `${CLASSIFIED_PREFIX}unverified:${definition}`;
+    return legacy || nowListed ? fingerprintTool(tool, true) : entry;
   });
+}
+
+/**
+ * Whether the baseline recorded this exact definition as a trusted read.
+ *
+ * Legacy entries are upgraded first, so a connection approved before
+ * classification keeps the reads it already had.
+ *
+ * By design, an "ro" entry stays trusted while its definition is unchanged,
+ * even after its name is removed from `readOnlyTools`: delisting stops new
+ * connections from trusting the claim but does not revoke trust already
+ * recorded. Only `destructiveTools` (checked first in `requiresApproval`)
+ * gates such a tool again.
+ */
+export function baselineTrustsReadOnly(
+  baseline: readonly ToolFingerprint[],
+  tool: McpToolDefinition,
+): boolean {
+  const recorded = baseline.filter((entry) => entry.name === tool.name);
+  const [entry] = upgradeLegacyBaseline(recorded, [tool]);
+  return (
+    isAnnotatedReadOnly(tool) &&
+    entry?.digest === fingerprintTool(tool, true).digest
+  );
 }
 
 /** Fingerprint a tool list, sorted by name so the baseline is order-stable. */
 export function fingerprintTools(
   tools: readonly McpToolDefinition[],
+  isReadOnlyVerified: (tool: McpToolDefinition) => boolean = () => false,
 ): ToolFingerprint[] {
   return tools
-    .map(fingerprintTool)
+    .map((tool) => fingerprintTool(tool, isReadOnlyVerified(tool)))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 

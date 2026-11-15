@@ -1,3 +1,6 @@
+/** A package.json sync waits this long for more edits before re-installing. */
+export const REINSTALL_DEBOUNCE_MS = 2000;
+
 /**
  * Runs `task` `delayMs` after the last `schedule()` and never twice at once: a
  * call that lands while the task runs queues exactly one more run after it.
@@ -7,6 +10,11 @@ export const debounceSerial = (task: () => Promise<void>, delayMs: number) => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let current: Promise<void> | undefined;
   let pending = false;
+  const idleWaiters: Array<() => void> = [];
+  const wakeIdle = () => {
+    if (timer !== undefined || current) return;
+    for (const resolve of idleWaiters.splice(0)) resolve();
+  };
 
   const schedule = () => {
     clearTimeout(timer);
@@ -16,6 +24,7 @@ export const debounceSerial = (task: () => Promise<void>, delayMs: number) => {
   const cancel = () => {
     clearTimeout(timer);
     timer = undefined;
+    wakeIdle();
   };
 
   const run = async () => {
@@ -33,6 +42,7 @@ export const debounceSerial = (task: () => Promise<void>, delayMs: number) => {
           pending = false;
           schedule();
         }
+        wakeIdle();
       }
     })();
     await current;
@@ -55,5 +65,12 @@ export const debounceSerial = (task: () => Promise<void>, delayMs: number) => {
     onDrained?.();
   };
 
-  return { schedule, cancel, flush };
+  /** Resolves once nothing is scheduled or running, without running early. */
+  const idle = () =>
+    new Promise<void>((resolve) => {
+      idleWaiters.push(resolve);
+      wakeIdle();
+    });
+
+  return { schedule, cancel, flush, idle };
 };

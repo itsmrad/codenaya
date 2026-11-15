@@ -372,6 +372,17 @@ describe("createAutoFixer (#491)", () => {
     expect(fix).toHaveBeenCalledExactlyOnceWith("c");
   });
 
+  it("fixes an error that comes back after the reload that cleared it (#486)", () => {
+    // The first build's end reloads the preview, which clears its error; a real
+    // one is reported again by the new page and still gets one fix.
+    runEnds("a");
+    update({ errorId: null });
+    vi.advanceTimersByTime(1000);
+    update({ errorId: "a" });
+    vi.advanceTimersByTime(3000);
+    expect(fix).toHaveBeenCalledExactlyOnceWith("a");
+  });
+
   it("disarms on a file edit after the run ended: the user's typo is left alone", () => {
     runEnds(null);
     update({ files: ["user edit"] });

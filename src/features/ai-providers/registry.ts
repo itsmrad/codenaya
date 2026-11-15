@@ -190,6 +190,61 @@ export function modelAcceptsImages(
   return AI_PROVIDERS[key.provider].models.find((model) => model.id === modelId)?.vision === true;
 }
 
+/** The key fields a picker shows; all are in the browser-safe key summary. */
+interface PickerKey {
+  _id: string;
+  provider: AiProviderId;
+  label: string;
+  baseUrl?: string;
+  modelIds?: readonly string[];
+  maskedPreview: string;
+  fingerprint?: string;
+  status: "active" | "invalid";
+}
+
+/**
+ * A key's name in pickers: its label, or "Your key ••••3f2a" when the label
+ * only repeats the provider name (the default label), so the group never reads
+ * "Anthropic · Anthropic" and its models never look like the platform's (#600).
+ */
+export function keyDisplayName(key: Pick<PickerKey, "provider" | "label" | "maskedPreview">): string {
+  const label = key.label.trim();
+  return !label || label.toLowerCase() === AI_PROVIDERS[key.provider].label.toLowerCase()
+    ? `Your key ${key.maskedPreview}`
+    : label;
+}
+
+/** A key's group heading in pickers: "Anthropic · Work", flagged when invalid. */
+export function keyGroupLabel(key: Pick<PickerKey, "provider" | "label" | "maskedPreview" | "status">): string {
+  const invalid = key.status === "invalid" ? " (invalid)" : "";
+  return `${AI_PROVIDERS[key.provider].label} · ${keyDisplayName(key)}${invalid}`;
+}
+
+/**
+ * The keys a picker lists, one group each: active keys, plus the selected key
+ * even if since marked invalid. A key that repeats another's whole route
+ * (provider, endpoint, label, secret, models) is the same key added twice, so
+ * it is listed once, keeping the selected one. Keys that differ in any of
+ * those are distinct routes and all stay. The secret is compared by
+ * fingerprint when both keys have one, else by masked preview (#614).
+ */
+export function pickerKeys<K extends PickerKey>(keys: readonly K[], selectedKeyId?: string): K[] {
+  const route = (key: K) =>
+    JSON.stringify([key.provider, key.baseUrl ?? "", key.label.trim(), modelIdsFor(key)]);
+  const sameKey = (a: K, b: K) =>
+    route(a) === route(b) &&
+    (a.fingerprint && b.fingerprint ? a.fingerprint === b.fingerprint : a.maskedPreview === b.maskedPreview);
+  const shown = keys.filter((key) => key.status === "active" || key._id === selectedKeyId);
+  const selected = shown.find((key) => key._id === selectedKeyId);
+  const kept: K[] = selected ? [selected] : [];
+  return shown.filter((key) => {
+    if (key === selected) return true;
+    if (kept.some((other) => sameKey(other, key))) return false;
+    kept.push(key);
+    return true;
+  });
+}
+
 /**
  * Short "provider · model" label for a run, shown on the chat's run block.
  * Without a key it names the platform (pass its resolved model); a custom

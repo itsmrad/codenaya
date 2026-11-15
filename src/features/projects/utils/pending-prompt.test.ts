@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   PENDING_PROMPT_KEY,
+  clearPendingPrompt,
   peekPendingPrompt,
+  resumePendingPrompt,
   savePendingPrompt,
-  takePendingPrompt,
 } from "./pending-prompt";
 
 const memoryStorage = () => {
@@ -17,64 +18,101 @@ const memoryStorage = () => {
 };
 
 describe("pending prompt", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
+  beforeEach(() => vi.stubGlobal("localStorage", memoryStorage()));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps the draft and mode on failure, then clears them on successful retry", async () => {
+    savePendingPrompt(" A kanban board ", "swarm");
+    const create = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    expect(await resumePendingPrompt(create)).toBe(false);
+    expect(peekPendingPrompt()).toBe("A kanban board");
+    expect(await resumePendingPrompt(create)).toBe(true);
+    expect(create).toHaveBeenNthCalledWith(2, { prompt: "A kanban board", mode: "swarm" });
+    expect(peekPendingPrompt()).toBeNull();
+    expect(await resumePendingPrompt(create)).toBeNull();
+    expect(create).toHaveBeenCalledTimes(2);
   });
 
-  it("returns a saved prompt once, then clears it", () => {
-    const storage = memoryStorage();
-    vi.stubGlobal("localStorage", storage);
-
-    savePendingPrompt("  A portfolio site  ");
-
-    expect(storage.getItem(PENDING_PROMPT_KEY)).toBe("  A portfolio site  ");
-    expect(takePendingPrompt()).toBe("A portfolio site");
-    expect(takePendingPrompt()).toBeNull();
+  it("keeps the draft on rejection and releases it for retry", async () => {
+    savePendingPrompt("A portfolio site");
+    expect(await resumePendingPrompt(vi.fn().mockRejectedValue(new Error("offline")))).toBe(false);
+    expect(peekPendingPrompt()).toBe("A portfolio site");
+    expect(await resumePendingPrompt(async () => true)).toBe(true);
+    expect(peekPendingPrompt()).toBeNull();
   });
 
-  it("treats a blank prompt as nothing to resume", () => {
-    vi.stubGlobal("localStorage", memoryStorage());
+  it.each([true, false])("preserves a newer draft when creation returns %s", async (created) => {
+    savePendingPrompt("Original draft", "plan");
+    await resumePendingPrompt(async () => {
+      savePendingPrompt("New draft", "swarm");
+      return created;
+    });
+    expect(peekPendingPrompt()).toBe("New draft");
+    const create = vi.fn().mockResolvedValue(true);
+    await resumePendingPrompt(create);
+    expect(create).toHaveBeenCalledWith({ prompt: "New draft", mode: "swarm" });
+  });
 
+  it("preserves a newly saved draft even when its text is identical", async () => {
+    savePendingPrompt("Same draft");
+    await resumePendingPrompt(async () => {
+      savePendingPrompt("Same draft");
+      return true;
+    });
+    expect(peekPendingPrompt()).toBe("Same draft");
+  });
+
+  it("ignores duplicate effect attempts while creation is pending", async () => {
+    savePendingPrompt("A portfolio site");
+    let finish!: (created: boolean) => void;
+    const create = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    const first = resumePendingPrompt(create);
+    expect(peekPendingPrompt()).toBe("A portfolio site");
+    expect(await resumePendingPrompt(create)).toBeNull();
+    expect(create).toHaveBeenCalledTimes(1);
+    finish(true);
+    expect(await first).toBe(true);
+    expect(await resumePendingPrompt(create)).toBeNull();
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["  An old todo app ", { prompt: "An old todo app" }],
+    ['{"title":"not a saved prompt"}', { prompt: '{"title":"not a saved prompt"}' }],
+    ['{"prompt":"A shop","mode":"unknown"}', { prompt: "A shop" }],
+    ['{"prompt":"A blog","mode":"plan"}', { prompt: "A blog", mode: "plan" }],
+  ])("reads existing storage: %s", async (raw, pending) => {
+    localStorage.setItem(PENDING_PROMPT_KEY, raw);
+    const create = vi.fn().mockResolvedValue(true);
+    await resumePendingPrompt(create);
+    expect(create).toHaveBeenCalledWith(pending);
+  });
+
+  it("peeks without consuming and ignores blank drafts", async () => {
+    savePendingPrompt(" A habit tracker ");
+    expect(localStorage.getItem(PENDING_PROMPT_KEY)).toBe(" A habit tracker ");
+    expect(peekPendingPrompt()).toBe("A habit tracker");
+    expect(peekPendingPrompt()).toBe("A habit tracker");
     savePendingPrompt("   ");
-
-    expect(takePendingPrompt()).toBeNull();
+    const create = vi.fn();
+    expect(await resumePendingPrompt(create)).toBeNull();
+    expect(create).not.toHaveBeenCalled();
   });
 
-  it("does not throw when storage is unavailable", () => {
-    vi.stubGlobal("localStorage", {
-      getItem: () => {
-        throw new Error("blocked");
-      },
-      setItem: () => {
-        throw new Error("blocked");
-      },
-      removeItem: () => {
-        throw new Error("blocked");
-      },
-    });
-
-    expect(() => savePendingPrompt("todo app")).not.toThrow();
-    expect(takePendingPrompt()).toBeNull();
+  it("does not throw when storage is unavailable", async () => {
+    const blocked = () => { throw new Error("blocked"); };
+    vi.stubGlobal("localStorage", { getItem: blocked, setItem: blocked, removeItem: blocked });
+    expect(() => savePendingPrompt("A todo app")).not.toThrow();
+    expect(peekPendingPrompt()).toBeNull();
+    expect(await resumePendingPrompt(vi.fn())).toBeNull();
   });
 
-  // #252: the auth pages show the prompt without consuming it.
-  it("peeks at the prompt without clearing it, so the dashboard still gets it", () => {
-    vi.stubGlobal("localStorage", memoryStorage());
+  it("clears the draft, and tolerates unavailable storage", () => {
+    savePendingPrompt("A todo app");
+    clearPendingPrompt();
     expect(peekPendingPrompt()).toBeNull();
-
-    savePendingPrompt("  A habit tracker  ");
-    expect(peekPendingPrompt()).toBe("A habit tracker");
-    expect(peekPendingPrompt()).toBe("A habit tracker");
-    expect(takePendingPrompt()).toBe("A habit tracker");
-    expect(peekPendingPrompt()).toBeNull();
-  });
-
-  it("peeks at nothing when storage is unavailable", () => {
-    vi.stubGlobal("localStorage", {
-      getItem: () => {
-        throw new Error("blocked");
-      },
-    });
-    expect(peekPendingPrompt()).toBeNull();
+    const blocked = () => { throw new Error("blocked"); };
+    vi.stubGlobal("localStorage", { removeItem: blocked });
+    expect(() => clearPendingPrompt()).not.toThrow();
   });
 });

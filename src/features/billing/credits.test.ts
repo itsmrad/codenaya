@@ -6,6 +6,7 @@ import {
   creditStanding,
   creditsForCost,
   currentUsage,
+  minRunCredits,
   usageOfResponse,
 } from "./credits";
 import { PLANS } from "./plans";
@@ -80,5 +81,18 @@ describe("standing", () => {
     expect(creditRefusal(PLANS.free, { ...usage, periodUsed: 300, dayUsed: 60 }, OCT_29)).toBe("month_used_up");
     // Yesterday's cap doesn't carry over.
     expect(creditRefusal(PLANS.free, { ...usage, dayUsed: 60 }, Date.UTC(2026, 9, 30, 1))).toBeNull();
+  });
+
+  it("refuses a run the credits left can't cover one step of (#643)", () => {
+    // Sonnet 5.5's price: 30k in, 2k out is $0.08, so 12 credits.
+    const sonnet = minRunCredits({ mode: "split", inputUsdPerMTok: 2, outputUsdPerMTok: 10 });
+    expect(sonnet).toBe(12);
+    expect(minRunCredits(undefined)).toBe(1);
+    expect(minRunCredits({ mode: "blended", usdPerMTok: 0 })).toBe(1);
+    // 7 left today, as in the issue.
+    expect(creditRefusal(PLANS.free, { ...usage, dayUsed: 53 }, OCT_29, sonnet)).toBe("day_used_up");
+    expect(creditRefusal(PLANS.free, { ...usage, dayUsed: 48 }, OCT_29, sonnet)).toBeNull();
+    expect(creditRefusal(PLANS.pro, { ...usage, periodUsed: 1_995 }, OCT_29, sonnet)).toBe("month_used_up");
+    expect(creditRefusal(PLANS.pro, { ...usage, periodUsed: 1_988 }, OCT_29, sonnet)).toBeNull();
   });
 });

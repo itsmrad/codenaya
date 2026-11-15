@@ -25,7 +25,7 @@ export interface RefreshableConnection {
   _id: string;
   providerId: string;
   label: string;
-  authMode: "oauth" | "api_key";
+  authMode: "oauth" | "api_key" | "none";
   credentialRef: string;
   kekProvider: string;
   kekKeyId: string;

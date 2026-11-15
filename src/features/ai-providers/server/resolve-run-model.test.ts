@@ -624,6 +624,33 @@ describe("validateModelChoice: credits (ADR 0011)", () => {
     vi.useRealTimers();
   });
 
+  it.each([false, true])("Auto picks an affordable model before the gate (images: %s)", async (withImages) => {
+    mocks.account.mockReturnValue({ ...spentToday, dayUsed: 55 }); // 5 left
+    mocks.platform.mockReturnValue({
+      models: [
+        catalogModel("expensive", "Expensive", { pricing: { mode: "blended", usdPerMTok: 10 } }),
+        catalogModel("cheap", "Cheap"),
+      ],
+      defaultModelId: "expensive", utilityModelId: "cheap", autoModelIds: ["expensive", "cheap"],
+    });
+    expect(await validateModelChoice({ internalKey: "ik", userId: "user_1", model: "auto", task: "build", withImages }))
+      .toMatchObject({ modelId: "cheap", label: "Auto · Cheap" });
+    // A direct choice still gets its own minimum, and turning enforcement off restores Auto's pick.
+    await expect(validate("expensive")).rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
+    vi.stubEnv("CREDIT_LIMITS_ENFORCED", "");
+    expect(await validate("auto")).toMatchObject({ modelId: "expensive" });
+  });
+
+  it.each([false, true])("Auto refuses only when no candidate fits (images: %s)", async (withImages) => {
+    mocks.account.mockReturnValue({ ...spentToday, dayUsed: 56 }); // 4 left; cheapest needs 5
+    mocks.platform.mockReturnValue({
+      models: [catalogModel("expensive", "Expensive", { pricing: { mode: "blended", usdPerMTok: 10 } }), catalogModel("cheap", "Cheap")],
+      defaultModelId: "expensive", utilityModelId: "cheap", autoModelIds: ["expensive", "cheap"],
+    });
+    await expect(validateModelChoice({ internalKey: "ik", userId: "user_1", model: "auto", withImages }))
+      .rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
+  });
+
   it("lets a spent account run while credit limits aren't enforced", async () => {
     vi.stubEnv("CREDIT_LIMITS_ENFORCED", "");
     mocks.account.mockReturnValue({ ...spentToday, periodUsed: 300 });
@@ -653,6 +680,22 @@ describe("validateModelChoice: credits (ADR 0011)", () => {
     mocks.query.mockResolvedValue({ opusRunsUsed: 0 });
     expect(await validate("anthropic/claude-sonnet-5.5")).toMatchObject({ promoKind: "sonnet" });
 
+    mocks.query.mockResolvedValue(openAiKey);
+    expect(await validate({ keyId: "key_1", modelId: "gpt-5.6-luna" })).toMatchObject({ keyId: "key_1" });
+  });
+
+  it("refuses a run the credits left can't cover, and lets one through that they can (#643)", async () => {
+    // One step on Sonnet 5.5's price is 12 credits.
+    const priced = { pricing: { mode: "split", inputUsdPerMTok: 2, outputUsdPerMTok: 10 } };
+    mocks.platform.mockReturnValue({ ...ROUTED_SAVED, models: [catalogModel("x-ai/grok-4.7", "Grok 4.7", priced)] });
+
+    mocks.account.mockReturnValue({ ...spentToday, dayUsed: 53 });
+    await expect(validate("x-ai/grok-4.7")).rejects.toMatchObject({ status: 402, code: "insufficient_credits" });
+
+    mocks.account.mockReturnValue({ ...spentToday, dayUsed: 48 });
+    expect(await validate("x-ai/grok-4.7")).toMatchObject({ modelId: "x-ai/grok-4.7" });
+
+    mocks.account.mockReturnValue({ ...spentToday, dayUsed: 53 });
     mocks.query.mockResolvedValue(openAiKey);
     expect(await validate({ keyId: "key_1", modelId: "gpt-5.6-luna" })).toMatchObject({ keyId: "key_1" });
   });

@@ -259,9 +259,9 @@ describe("upgradeLegacyBaseline", () => {
 
     const upgraded = upgradeLegacyBaseline(baseline, [readOnly]);
 
-    expect(hasDrift(detectToolDrift(fingerprintTools([readOnly]), upgraded))).toBe(
-      false,
-    );
+    expect(
+      hasDrift(detectToolDrift(fingerprintTools([readOnly], () => true), upgraded)),
+    ).toBe(false);
   });
 
   it("still reports a definition that changed since the legacy baseline", () => {

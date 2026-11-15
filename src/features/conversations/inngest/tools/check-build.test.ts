@@ -13,7 +13,7 @@ vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal)
   resolveProjectEnv: mocks.resolveEnv,
 }));
 
-import { CommandExitError, type CommandResult, type Sandbox, TimeoutError } from "e2b";
+import { CommandExitError, type CommandResult, type Sandbox, SandboxError, TimeoutError } from "e2b";
 import { getFunctionName } from "convex/server";
 
 import { VITE_REACT_STARTER } from "../vite-starter";
@@ -553,6 +553,83 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expectCold(await result, warm);
     expect(coldAt - start).toBeLessThanOrEqual(60_000);
     expect(commandsOf(warm).some((run) => run.startsWith("mkdir"))).toBe(false);
+  });
+
+  it.each([
+    new SandboxError("2: [unknown] The operation was aborted due to timeout"),
+    new TimeoutError("[deadline_exceeded] Request timed out"),
+  ])("keeps waiting warm after a process-list request timeout: %s", async (error) => {
+    vi.useFakeTimers();
+    listed({});
+    const warm = warmSandbox();
+    // The e2b client aborts a slow list at its request timeout and reports it as an unknown error.
+    const slowAbort = (opts?: { requestTimeoutMs?: number }) =>
+      new Promise<Proc[]>((_, reject) =>
+        setTimeout(
+          () => reject(error),
+          opts?.requestTimeoutMs,
+        ),
+      );
+    warm.commands.list
+      .mockResolvedValueOnce([DEV_SERVER, installing("npm install")])
+      .mockImplementationOnce(slowAbort);
+    fakeSandbox();
+
+    const result = warmCheck();
+    await vi.runAllTimersAsync();
+
+    expect((await result).split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(commandsOf(warm).some((run) => run.startsWith("npx tsc"))).toBe(true);
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [new SandboxError("sandbox not found"), 0],
+    [new SandboxError("sandbox not found"), 10_000],
+    [new TimeoutError("This error is likely due to sandbox timeout"), 0],
+    [new TimeoutError("This error is likely due to sandbox timeout"), 10_000],
+  ])("uses a new sandbox when the preview is gone: %s after %i ms", async (error, delay) => {
+    vi.useFakeTimers();
+    listed({});
+    const warm = warmSandbox();
+    warm.commands.list.mockImplementation(() => new Promise((_, reject) => setTimeout(() => reject(error), delay)));
+    fakeSandbox();
+
+    const result = warmCheck();
+    await vi.runAllTimersAsync();
+    expectCold(await result, warm);
+    expect(warm.commands.list).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([0, 200_000])("bounds repeated process-list timeouts after %i ms of the step budget", async (elapsed) => {
+    vi.useFakeTimers();
+    const start = Date.now();
+    listed({});
+    const warm = warmSandbox();
+    e2b.connect.mockImplementation(async () => {
+      vi.setSystemTime(start + elapsed);
+      return warm;
+    });
+    const timeouts: number[] = [];
+    warm.commands.list.mockImplementation((opts) => {
+      const timeout = opts!.requestTimeoutMs!;
+      timeouts.push(timeout);
+      return new Promise((_, reject) => setTimeout(() => reject(new TimeoutError("Request timed out")), timeout));
+    });
+    fakeSandbox();
+
+    const result = warmCheck();
+    await vi.runAllTimersAsync();
+
+    if (elapsed === 0) expectCold(await result, warm);
+    else {
+      expect(await result).toContain("The check ran out of time");
+      expect(e2b.create).not.toHaveBeenCalled();
+    }
+    expect(Date.now() - start).toBeLessThanOrEqual(elapsed + Math.min(60_000, 240_000 - elapsed));
+    expect(timeouts).toHaveLength(elapsed === 0 ? 5 : 4);
+    expect(timeouts.at(-1)).toBe(elapsed === 0 ? 10_000 : 2_500);
+    expect(commandsOf(warm)).toEqual([]);
   });
 
   it("stops waiting for an install at the step deadline", async () => {

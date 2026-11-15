@@ -29,6 +29,7 @@ import { useIsCompact, useIsMobile } from "@/hooks/use-mobile";
 import { ConversationSidebar } from "@/features/conversations/components/conversation-sidebar";
 import { ProjectSwarmBoard } from "@/features/conversations/components/project-swarm-board";
 import { EditorView } from "@/features/editor/components/editor-view";
+import { useEditorLeaveGuard } from "@/features/editor/hooks/use-editor-leave-guard";
 import { useEditorStore } from "@/features/editor/store/use-editor-store";
 import {
   Tooltip,
@@ -42,6 +43,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { PreviewView } from "./preview-view";
 import { ExportPopover } from "./export-popover";
+import { SharePopover } from "@/features/share/components/share-popover";
 import { EnvVarsDialog } from "./env-vars-dialog";
 import { useDownloadZip } from "../hooks/use-download-zip";
 import { useChatPanelStore } from "../store/use-chat-panel-store";
@@ -115,6 +117,7 @@ export const ProjectIdView = ({
   projectId: Id<"projects">;
 }) => {
   const isMobile = useIsMobile();
+  useEditorLeaveGuard(projectId);
   // Below desktop width the chat is a tab rather than a side panel.
   const isCompact = useIsCompact();
   // Switching preview engines reloads the page with `?view=preview` so the user
@@ -430,7 +433,7 @@ export const ProjectIdView = ({
             </button>
           )}
           <button
-            onClick={openIntegrations}
+            onClick={() => openIntegrations()}
             aria-label="Integrations"
             title="Integrations"
             className="flex items-center gap-1.5 h-8 px-2 @3xl:px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
@@ -448,6 +451,7 @@ export const ProjectIdView = ({
             <span className="hidden @3xl:inline">Skills</span>
           </button>
           <ExportPopover projectId={projectId} />
+          <SharePopover projectId={projectId} />
           <HelpMenu className="size-8" />
           <div className="w-px h-4 bg-border/40" />
           <UserMenu avatarClassName="size-6" />

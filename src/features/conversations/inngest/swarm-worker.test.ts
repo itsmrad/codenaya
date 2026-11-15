@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   mutation: vi.fn(),
   catalog: vi.fn(),
+  account: vi.fn(),
   selfCheckWorker: vi.fn(),
 }));
 
@@ -22,7 +23,7 @@ vi.mock("../swarm-sandbox", async (importOriginal) => ({
 
 vi.mock("@/lib/convex-client", async () => {
   const { withEnvPlatform } = await import("@/features/ai-providers/server/active-platform.mock");
-  return { convex: { query: withEnvPlatform(mocks.query, mocks.catalog), mutation: mocks.mutation } };
+  return { convex: { query: withEnvPlatform(mocks.query, mocks.catalog, mocks.account), mutation: mocks.mutation } };
 });
 
 import { TURN_HEARTBEAT_ID } from "../agent-steps";
@@ -68,6 +69,7 @@ const withUsage = (body: object) => ({ ...body, usage: { prompt_tokens: 1_000, c
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.stubEnv("CREDIT_LIMITS_ENFORCED", "");
   vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "ik");
   vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
   mocks.query.mockImplementation(async (ref) =>
@@ -172,6 +174,37 @@ describe("swarmWorker", () => {
     expect(mutationArgs("credits:recordRunUsage")[0].costUsd).toBeCloseTo(0.6, 10);
   });
 
+  it.each([
+    { left: 0, final: false }, { left: 3, final: false }, { left: 4, final: false }, { left: 2, final: true },
+  ])("stops at a $left-credit balance and preserves a final answer: $final", async ({ left, final }) => {
+    vi.stubEnv("CREDIT_LIMITS_ENFORCED", "true");
+    const now = Date.now();
+    mocks.account.mockReturnValue({ plan: "free", periodStartsAt: Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1),
+      periodUsed: 60 - left, dayStartsAt: new Date(now).setUTCHours(0, 0, 0, 0), dayUsed: 60 - left });
+    mocks.query.mockImplementation(async (ref) => getFunctionName(ref) === "system:getProjectById"
+      ? { ownerId: "real_owner" } : []);
+    mocks.catalog.mockReturnValue({
+      models: [{
+        id: "anthropic/claude-haiku-5.5", name: "Haiku", vendor: "a", provider: "openrouter",
+        providerModelId: "anthropic/claude-haiku-5.5", vision: false, tools: "reported",
+        pricing: { mode: "blended", usdPerMTok: 10 }, access: "everyone", hidden: false,
+      }],
+      defaultModelId: "anthropic/claude-haiku-5.5", utilityModelId: "anthropic/claude-haiku-5.5",
+    });
+    const outcome = await run([
+      ...(left > 0 ? [{ data: withUsage(final ? text("The real final answer.") : toolCall("listFiles")) }] : []), // 3 credits
+      ...(left > 3 ? [{ data: withUsage(toolCall("listFiles")) }] : []),
+      ...(!final ? [{ data: text("Listed files; the task is unfinished.") }] : []),
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(final || left === 0 ? 1 : left === 3 ? 2 : 3);
+    expect(outcome.data).toMatchObject({ status: final ? "done" : "unfinished", summary: expect.stringContaining("ran out of credits") });
+    if (final) expect(outcome.data).toMatchObject({ summary: expect.stringContaining("The real final answer.") });
+    if (!final) expect(JSON.stringify(outcome.inferenceBodies.at(-1))).toContain("ran out of credits");
+    expect(mocks.account).toHaveBeenCalledTimes(1);
+    expect(mocks.selfCheckWorker.mock.calls[0][0].signal.aborted).toBe(true);
+  });
+
   it("ends quietly when its task row is gone", async () => {
     MUTATIONS["agentTasks:startTask"] = () => {
       throw new ConvexError({ code: "NOT_FOUND", message: "Task not found" });
@@ -225,9 +258,14 @@ describe("swarmWorker", () => {
     const { opts } = swarmWorker as unknown as { opts: { cancelOn: unknown; concurrency: unknown } };
     expect(opts.cancelOn).toEqual([
       { event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" },
-      { event: "agent-task/cancel", if: "event.data.agentTaskId == async.data.agentTaskId" },
-      { event: "agent-task/cancel", if: "event.data.parentAgentTaskId == async.data.agentTaskId" },
+      {
+        event: "agent-task/cancel",
+        if: "event.data.agentTaskId == async.data.agentTaskId || event.data.parentAgentTaskId == async.data.agentTaskId",
+      },
     ]);
+    // One cancelOn entry per event name.
+    const events = (opts.cancelOn as Array<{ event: string }>).map(({ event }) => event);
+    expect(new Set(events).size).toBe(events.length);
     expect(opts.concurrency).toEqual([{ key: "event.data.ownerId", limit: 16 }]);
   });
 });
@@ -338,15 +376,15 @@ describe("swarmWorker as a sub-orchestrator", () => {
 });
 
 describe("swarm cancellation", () => {
-  // The CEL `a == b` of cancelOn, with `event` the run's trigger and `async` the cancel event.
+  // The CEL `a == b || c == d` of cancelOn, with `event` the run's trigger and `async` the cancel event.
   const cancels = (data: Record<string, unknown>, cancel: Record<string, unknown>, event = "message/cancel") => {
     const { opts } = swarmWorker as unknown as { opts: { cancelOn: Array<{ event: string; if: string }> } };
     const value = (path: string) => path.split(".").slice(1)
       .reduce<unknown>((o, key) => (o as Record<string, unknown>)?.[key], { event: { data }, async: { data: cancel } }[path.split(".")[0]]);
-    return opts.cancelOn.some((rule) => {
-      const [left, right] = rule.if.split(" == ").map(value);
-      return rule.event === event && left !== undefined && left === right;
-    });
+    return opts.cancelOn.some((rule) => rule.event === event && rule.if.split(" || ").some((clause) => {
+      const [left, right] = clause.split(" == ").map(value);
+      return left !== undefined && left === right;
+    }));
   };
 
   it("matches a top-level task and a sub-orchestrator's child alike, and no other message", () => {

@@ -39,6 +39,9 @@ import {
 const provider: ProviderDefinition = {
   id: "example",
   displayName: "Example",
+  description: "Example tools for OAuth flow tests.",
+  category: "Dev tools",
+  logo: "/integrations/github.svg",
   mcpUrl: "https://mcp.example.com/mcp",
   authModes: ["oauth"],
   trustedHostnames: ["mcp.example.com"],

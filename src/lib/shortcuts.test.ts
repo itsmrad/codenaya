@@ -14,6 +14,8 @@ describe("formatShortcutKey", () => {
     expect(formatShortcutKey("mod", false)).toBe("Ctrl");
     expect(formatShortcutKey("shift", true)).toBe("⇧");
     expect(formatShortcutKey("shift", false)).toBe("Shift");
+    expect(formatShortcutKey("alt", true)).toBe("⌥");
+    expect(formatShortcutKey("alt", false)).toBe("Alt");
   });
 
   it("names special keys and upper-cases letters", () => {

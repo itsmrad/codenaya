@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { AppError } from "./app-error";
 import {
   PREVIEW_BRIDGE_SCRIPT,
   PREVIEW_MESSAGE_SOURCE,
@@ -101,9 +102,18 @@ describe("readPreviewMessage", () => {
     ).toBeNull();
   });
 
+  it("reads a new page from the preview iframe only (#486)", () => {
+    const page = { source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "page", message: "" };
+    expect(readPreviewMessage({ ...event, data: page }, frame, previewUrl)).toEqual({ kind: "page" });
+    // Another window or origin can't clear the preview's errors.
+    expect(readPreviewMessage({ ...event, data: page, source: {} as Window }, frame, previewUrl)).toBeNull();
+    expect(readPreviewMessage({ ...event, data: page, origin: "https://evil.example" }, frame, previewUrl)).toBeNull();
+    expect(readPreviewMessage({ ...event, data: { ...page, source: "other" } }, frame, previewUrl)).toBeNull();
+  });
+
   it("truncates long text", () => {
     const long = "a".repeat(10_000);
-    const error = readPreviewMessage({ ...event, data: { ...data, message: long, stack: long } }, frame, previewUrl);
+    const error = readPreviewMessage({ ...event, data: { ...data, message: long, stack: long } }, frame, previewUrl) as AppError;
     expect(error?.message).toHaveLength(2048);
     expect(error?.stack).toHaveLength(2048);
   });
@@ -124,6 +134,8 @@ describe("installPreviewBridge", () => {
       setTimeout,
     };
     install(win as unknown as typeof window, PREVIEW_MESSAGE_SOURCE, 1, 2048);
+    // The new-page signal; its own test covers it.
+    posted.splice(0, 1);
     return { win, listeners, posted, original };
   };
   // React 19's dev log for an error an error boundary caught (#335).
@@ -230,6 +242,18 @@ describe("installPreviewBridge", () => {
     expect(posted.map((message) => message.message)).toEqual(["Uncaught one", "plain reason"]);
   });
 
+  it("announces each new document before the app's scripts run (#486)", () => {
+    const posted: unknown[] = [];
+    const win = {
+      parent: { postMessage: (message: unknown) => posted.push(message) },
+      addEventListener: vi.fn(),
+      console: { error: vi.fn() },
+      setTimeout,
+    };
+    install(win as unknown as typeof window, PREVIEW_MESSAGE_SOURCE, 1, 2048);
+    expect(posted).toEqual([{ source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "page", message: "" }]);
+  });
+
   it("does nothing outside an iframe", () => {
     const original = vi.fn();
     const win = { addEventListener: vi.fn(), console: { error: original } } as unknown as typeof window;
@@ -277,6 +301,7 @@ describe("installPreviewBridge", () => {
         },
       };
       install(win as unknown as typeof window, PREVIEW_MESSAGE_SOURCE, 1, 2048);
+      posted.splice(0, 1);
       const append = (...nodes: unknown[]) =>
         observers.forEach(({ callback }) => callback([{ addedNodes: nodes }]));
       return { posted, documentListeners, observers, body, append };

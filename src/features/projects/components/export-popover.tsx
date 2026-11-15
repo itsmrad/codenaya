@@ -37,6 +37,7 @@ import { GITHUB_NOT_LINKED, GITHUB_SYNC_BRANCH, GITHUB_SYNC_CONFLICT } from "../
 import { GithubNotLinkedAlert } from "./github-not-linked-alert";
 import { PullConflictDialog } from "./pull-conflict-dialog";
 import { DownloadZipButton } from "./download-zip-button";
+import { ReadmeBadgeSnippet } from "./readme-badge-snippet";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 import Link from "next/link";
@@ -211,6 +212,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
               Close
             </Button>
           </div>
+          <ReadmeBadgeSnippet repoUrl={exportRepoUrl} />
         </div>
       )
     }

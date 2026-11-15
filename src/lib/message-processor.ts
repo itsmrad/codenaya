@@ -6,6 +6,7 @@ import type { MessageMode } from "@/features/conversations/plan-mode";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { DISPATCH_FAILED_MESSAGE } from "@/features/conversations/failed-run-reply";
 
 interface ProcessMessageDispatchInput {
   internalKey: string;
@@ -49,9 +50,7 @@ export async function dispatchProcessMessage(
   return { backend: "inngest", eventId: event.ids[0] };
 }
 
-/** Written in place of the reply when the agent could not be started. */
-export const DISPATCH_FAILED_MESSAGE =
-  "I couldn't start working on this because the agent service is unreachable. Please try again in a moment.";
+export { DISPATCH_FAILED_MESSAGE };
 
 /** API error for a request whose agent run could not be started. */
 export const DISPATCH_FAILED_ERROR =

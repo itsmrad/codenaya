@@ -1,5 +1,4 @@
 /* eslint-disable react-hooks/refs */
-/* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
@@ -37,6 +36,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  BROWSER_DICTATION_LANGUAGES,
+  DICTATION_AUTO,
+  DICTATION_SILENCE_MS,
+  SERVER_DICTATION_LANGUAGES,
+  dictationErrorMessage,
+  dictationRouteOrNull,
+  insertTranscript,
+  isDictationKey,
+  recorderErrorCode,
+  transcribeErrorMessage,
+} from "@/lib/dictation";
+import {
+  type DictationRecorder,
+  canRecordDictation,
+  createDictationRecorder,
+} from "@/lib/dictation-recorder";
 import { cn } from "@/lib/utils";
 import type { ChatStatus, FileUIPart } from "ai";
 import {
@@ -50,6 +66,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { nanoid } from "nanoid";
+import { toast } from "sonner";
 import {
   type ChangeEvent,
   type ChangeEventHandler,
@@ -71,6 +88,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 // ============================================================================
@@ -1071,6 +1089,7 @@ interface SpeechRecognition extends EventTarget {
   lang: string;
   start(): void;
   stop(): void;
+  abort(): void;
   onstart: ((this: SpeechRecognition, ev: Event) => any) | null;
   onend: ((this: SpeechRecognition, ev: Event) => any) | null;
   onresult:
@@ -1126,102 +1145,317 @@ export type PromptInputSpeechButtonProps = ComponentProps<
   onTranscriptionChange?: (text: string) => void;
 };
 
+const noopSubscribe = () => () => {};
+
+const getSpeechRecognition = () =>
+  typeof window === "undefined"
+    ? undefined
+    : (window.SpeechRecognition ?? window.webkitSpeechRecognition);
+
+const browserLanguage = () => navigator.language || "en-US";
+
+const PICKER_LANGUAGES = [...SERVER_DICTATION_LANGUAGES, ...BROWSER_DICTATION_LANGUAGES];
+
+type DictationStatus = "idle" | "listening" | "transcribing";
+
+/**
+ * Voice dictation (#301). Records with MediaRecorder and transcribes on the
+ * server (`/api/transcribe`) in the languages it knows; any other language,
+ * or a browser that can't record, uses the browser's speech recognition.
+ * Renders nothing where neither exists. Text goes in at the cursor through
+ * `onTranscriptionChange`, keeping typed text, and is never sent by itself.
+ * Recording stops when the page loses focus, at DICTATION_MAX_MS, and (browser
+ * speech) after DICTATION_SILENCE_MS without speech; a submit or unmount
+ * discards what is still pending, so no words land after a send. Alt+V
+ * (Option+V) toggles it in the focused composer. Errors show a toast and are
+ * announced.
+ */
 export const PromptInputSpeechButton = ({
   className,
   textareaRef,
   onTranscriptionChange,
   ...props
 }: PromptInputSpeechButtonProps) => {
-  const [isListening, setIsListening] = useState(false);
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(
-    null
+  const canRecognize = useSyncExternalStore(
+    noopSubscribe,
+    () => Boolean(getSpeechRecognition()),
+    () => false
   );
+  const canRecord = useSyncExternalStore(noopSubscribe, canRecordDictation, () => false);
+  const [picked, setPicked] = useState<string>(DICTATION_AUTO);
+  // The server answered that it can't transcribe: the browser dictates instead.
+  const [serverDown, setServerDown] = useState(false);
+  const [status, setStatus] = useState<DictationStatus>("idle");
+  const [announcement, setAnnouncement] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-
+  const recorderRef = useRef<DictationRecorder | null>(null);
+  const uploadRef = useRef<AbortController | null>(null);
+  // Set once a submit or unmount cancels: later results are dropped.
+  const discardRef = useRef(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const onTranscriptionRef = useRef(onTranscriptionChange);
   useEffect(() => {
-    if (
-      typeof window !== "undefined" &&
-      ("SpeechRecognition" in window || "webkitSpeechRecognition" in window)
-    ) {
-      const SpeechRecognition =
-        window.SpeechRecognition || window.webkitSpeechRecognition;
-      const speechRecognition = new SpeechRecognition();
+    onTranscriptionRef.current = onTranscriptionChange;
+  });
 
-      speechRecognition.continuous = true;
-      speechRecognition.interimResults = true;
-      speechRecognition.lang = "en-US";
+  const routeFor = useCallback(
+    (language: string) =>
+      dictationRouteOrNull({
+        picked: language,
+        browserLanguage: browserLanguage(),
+        canRecord: canRecord && !serverDown,
+        canRecognize,
+      }),
+    [canRecord, canRecognize, serverDown]
+  );
 
-      speechRecognition.onstart = () => {
-        setIsListening(true);
+  const insert = useCallback(
+    (transcript: string) => {
+      const textarea =
+        textareaRef?.current ?? buttonRef.current?.closest("form")?.querySelector("textarea");
+      if (discardRef.current || !transcript.trim() || !textarea) return;
+      const next = insertTranscript(
+        textarea.value,
+        transcript,
+        textarea.selectionStart,
+        textarea.selectionEnd
+      );
+      onTranscriptionRef.current?.(next.value);
+      requestAnimationFrame(() => textarea.setSelectionRange(next.caret, next.caret));
+    },
+    [textareaRef]
+  );
+
+  const report = useCallback((message: string | null, otherwise = "Dictation stopped") => {
+    if (message) toast.error(message);
+    setAnnouncement(message ?? otherwise);
+  }, []);
+
+  const upload = useCallback(
+    async (audio: Blob, language: string | undefined) => {
+      if (discardRef.current) return;
+      const controller = new AbortController();
+      uploadRef.current = controller;
+      setStatus("transcribing");
+      setAnnouncement("Transcribing");
+      const form = new FormData();
+      form.set("audio", audio);
+      if (language) form.set("language", language);
+      try {
+        const response = await fetch("/api/transcribe", {
+          method: "POST",
+          body: form,
+          signal: controller.signal,
+        });
+        const body = (await response.json().catch(() => ({}))) as { text?: string; error?: string };
+        if (!response.ok) {
+          if (response.status === 503) setServerDown(true);
+          report(transcribeErrorMessage(response.status, body.error));
+        } else if (!body.text?.trim()) {
+          report(dictationErrorMessage("no-speech"));
+        } else {
+          insert(body.text);
+          setAnnouncement("Dictation inserted");
+        }
+      } catch {
+        // A network failure; an abort is our own cancel and says nothing.
+        if (!controller.signal.aborted) report(transcribeErrorMessage(0));
+      } finally {
+        if (uploadRef.current === controller) {
+          uploadRef.current = null;
+          setStatus("idle");
+        }
+      }
+    },
+    [insert, report]
+  );
+
+  const record = useCallback(
+    (language: string | undefined) => {
+      const recorder = createDictationRecorder({
+        onStateChange: (state) => {
+          if (state === "recording") setAnnouncement("Dictation started");
+          setStatus(state === "idle" ? "idle" : "listening");
+          if (state === "idle" && recorderRef.current === recorder) recorderRef.current = null;
+        },
+        onRecorded: (audio) => void upload(audio, language),
+        onError: (error) => report(dictationErrorMessage(recorderErrorCode(error))),
+      });
+      recorderRef.current = recorder;
+      recorder.start();
+    },
+    [upload, report]
+  );
+
+  const recognize = useCallback(
+    (lang: string) => {
+      const Recognition = getSpeechRecognition();
+      if (!Recognition) return;
+
+      const recognition = new Recognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = lang;
+
+      let failure: string | null = null;
+      let silence: ReturnType<typeof setTimeout> | undefined;
+      const waitForSpeech = () => {
+        clearTimeout(silence);
+        silence = setTimeout(() => recognition.stop(), DICTATION_SILENCE_MS);
       };
 
-      speechRecognition.onend = () => {
-        setIsListening(false);
+      recognition.onstart = () => {
+        setStatus("listening");
+        setAnnouncement("Dictation started");
+        waitForSpeech();
       };
-
-      speechRecognition.onresult = (event) => {
-        let finalTranscript = "";
-
+      recognition.onerror = (event) => {
+        failure = dictationErrorMessage(event.error);
+        if (failure) toast.error(failure);
+      };
+      // Also follows an error, such as a denied microphone.
+      recognition.onend = () => {
+        clearTimeout(silence);
+        if (recognitionRef.current === recognition) recognitionRef.current = null;
+        setStatus("idle");
+        setAnnouncement(failure ?? "Dictation stopped");
+      };
+      recognition.onresult = (event) => {
+        waitForSpeech();
+        let transcript = "";
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const result = event.results[i];
-          if (result.isFinal) {
-            finalTranscript += result[0]?.transcript ?? "";
-          }
+          if (result.isFinal) transcript += result[0]?.transcript ?? "";
         }
-
-        if (finalTranscript && textareaRef?.current) {
-          const textarea = textareaRef.current;
-          const currentValue = textarea.value;
-          const newValue =
-            currentValue + (currentValue ? " " : "") + finalTranscript;
-
-          textarea.value = newValue;
-          textarea.dispatchEvent(new Event("input", { bubbles: true }));
-          onTranscriptionChange?.(newValue);
-        }
+        insert(transcript);
       };
 
-      speechRecognition.onerror = (event) => {
-        console.error("Speech recognition error:", event.error);
-        setIsListening(false);
-      };
-
-      recognitionRef.current = speechRecognition;
-      setRecognition(speechRecognition);
-    }
-
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
+      recognitionRef.current = recognition;
+      try {
+        recognition.start();
+      } catch {
+        recognitionRef.current = null;
       }
-    };
-  }, [textareaRef, onTranscriptionChange]);
+    },
+    [insert]
+  );
 
   const toggleListening = useCallback(() => {
-    if (!recognition) {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
       return;
     }
-
-    if (isListening) {
-      recognition.stop();
-    } else {
-      recognition.start();
+    if (recorderRef.current) {
+      recorderRef.current.stop();
+      return;
     }
-  }, [recognition, isListening]);
+    if (uploadRef.current) return;
+    const route = routeFor(picked);
+    if (!route) return;
+    discardRef.current = false;
+    if (route.engine === "server") record(route.language);
+    else recognize(route.lang);
+  }, [picked, routeFor, record, recognize]);
+
+  // abort(), not stop(): stop() still delivers a last result, which would land
+  // in the box after it was sent and cleared.
+  const cancel = useCallback(() => {
+    discardRef.current = true;
+    recognitionRef.current?.abort();
+    recorderRef.current?.cancel();
+    uploadRef.current?.abort();
+  }, []);
+
+  // Unmounting (e.g. the composer hides while a run is processing) cancels it.
+  useEffect(() => cancel, [cancel]);
+
+  const busy = status !== "idle";
+  useEffect(() => {
+    if (!busy) return;
+    const stop = () => {
+      recognitionRef.current?.stop();
+      recorderRef.current?.stop();
+    };
+    const form = buttonRef.current?.closest("form");
+    window.addEventListener("blur", stop);
+    form?.addEventListener("submit", cancel);
+    return () => {
+      window.removeEventListener("blur", stop);
+      form?.removeEventListener("submit", cancel);
+    };
+  }, [busy, cancel]);
+
+  const supported = canRecord || canRecognize;
+  useEffect(() => {
+    if (!supported) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !isDictationKey(event)) return;
+      // Only the composer with focus answers, e.g. not the dashboard's
+      // behind the new-project dialog.
+      if (!buttonRef.current?.closest("form")?.contains(document.activeElement)) return;
+      event.preventDefault();
+      toggleListening();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [supported, toggleListening]);
+
+  if (!supported) return null;
+
+  const names = new Intl.DisplayNames([browserLanguage()], { type: "language" });
+  // The one line that says a language falls back to the browser's speech.
+  const itemLabel = (language: string, name: string) =>
+    canRecord && routeFor(language)?.engine === "browser" ? `${name} (browser speech)` : name;
+  const transcribing = status === "transcribing";
 
   return (
-    <PromptInputButton
-      className={cn(
-        "relative transition-all duration-200",
-        isListening && "animate-pulse bg-accent text-accent-foreground",
-        className
-      )}
-      disabled={!recognition}
-      onClick={toggleListening}
-      {...props}
-    >
-      <MicIcon className="size-4" />
-    </PromptInputButton>
+    <>
+      <PromptInputButton
+        ref={buttonRef}
+        aria-label="Dictate"
+        aria-pressed={status === "listening"}
+        aria-busy={transcribing}
+        disabled={transcribing}
+        title={transcribing ? "Transcribing…" : "Dictate (Alt+V)"}
+        className={cn(
+          "relative transition-all duration-200",
+          status === "listening" && "motion-safe:animate-pulse bg-accent text-accent-foreground",
+          className
+        )}
+        onClick={toggleListening}
+        {...props}
+      >
+        {transcribing ? (
+          <Loader2Icon className="size-4 animate-spin" />
+        ) : (
+          <MicIcon className="size-4" />
+        )}
+      </PromptInputButton>
+      <PromptInputSelect value={picked} onValueChange={setPicked} disabled={busy}>
+        <PromptInputSelectTrigger
+          size="sm"
+          aria-label="Dictation language"
+          className={cn("h-8 w-auto gap-1 px-2 text-xs max-sm:hidden", className)}
+        >
+          <PromptInputSelectValue>
+            {picked === DICTATION_AUTO ? "Auto" : picked.toUpperCase()}
+          </PromptInputSelectValue>
+        </PromptInputSelectTrigger>
+        <PromptInputSelectContent>
+          <PromptInputSelectItem value={DICTATION_AUTO}>
+            {itemLabel(DICTATION_AUTO, "Auto-detect")}
+          </PromptInputSelectItem>
+          {PICKER_LANGUAGES.map((language) => (
+            <PromptInputSelectItem key={language} value={language}>
+              {itemLabel(language, names.of(language) ?? language)}
+            </PromptInputSelectItem>
+          ))}
+        </PromptInputSelectContent>
+      </PromptInputSelect>
+      <span className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </span>
+    </>
   );
 };
 

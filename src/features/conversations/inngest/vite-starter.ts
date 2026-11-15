@@ -7,6 +7,7 @@
  */
 
 import { pinnedVersions } from "./known-good-versions";
+import { VITE_STARTER_UI } from "./vite-starter-ui";
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -24,6 +25,16 @@ const PACKAGE_JSON = json({
   dependencies: pinnedVersions([
     "@fontsource/inter",
     "@hookform/resolvers",
+    "@radix-ui/react-avatar",
+    "@radix-ui/react-dialog",
+    "@radix-ui/react-dropdown-menu",
+    "@radix-ui/react-label",
+    "@radix-ui/react-select",
+    "@radix-ui/react-separator",
+    "@radix-ui/react-slot",
+    "@radix-ui/react-tabs",
+    "@radix-ui/react-tooltip",
+    "sonner",
     "class-variance-authority",
     "clsx",
     "lucide-react",
@@ -55,12 +66,26 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    // One React for every package, even one that ships its own nested copy.
+    dedupe: ["react", "react-dom"],
+  },
   // Pre-bundle the starter's libraries on the first pass: a dependency found later
   // re-optimizes mid-load, and the page briefly runs two React copies ("Invalid hook call").
   optimizeDeps: {
     include: [
       "@hookform/resolvers/zod",
+      "@radix-ui/react-avatar",
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-dropdown-menu",
+      "@radix-ui/react-label",
+      "@radix-ui/react-select",
+      "@radix-ui/react-separator",
+      "@radix-ui/react-slot",
+      "@radix-ui/react-tabs",
+      "@radix-ui/react-tooltip",
+      "sonner",
       "class-variance-authority",
       "clsx",
       "lucide-react",
@@ -300,12 +325,14 @@ import "./index.css";
 
 import App from "./App";
 import { ErrorBoundary } from "./components/error-boundary";
+import { Toaster } from "./components/ui/sonner";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
       <BrowserRouter>
         <App />
+        <Toaster />
       </BrowserRouter>
     </ErrorBoundary>
   </StrictMode>,
@@ -410,4 +437,22 @@ export const VITE_REACT_STARTER: ReadonlyArray<{ path: string; content: string }
   { path: "src/App.tsx", content: APP_TSX },
   { path: "src/lib/utils.ts", content: UTILS_TS },
   { path: "src/components/error-boundary.tsx", content: ERROR_BOUNDARY_TSX },
+  ...VITE_STARTER_UI,
 ];
+
+/**
+ * Files as seeded just before the UI components (#294), so scaffolding over an
+ * old starter replaces only copies the user never changed. Older variants
+ * (before the optimizeDeps list, the router or the error boundary) are kept:
+ * at worst Vite re-optimizes once, and a main.tsx without <Toaster /> is named.
+ */
+export const PRE_UI_STARTER: Readonly<Record<string, string>> = {
+  "vite.config.ts": VITE_CONFIG.replace(/^ {6}"(@radix-ui\/[^"]+|sonner)",\n/gm, "").replace(
+    /resolve: \{\n {4}(alias: .*),\n {4}\/\/ One React.*\n {4}dedupe: .*\n {2}\},/,
+    "resolve: { $1 },",
+  ),
+  "src/main.tsx": MAIN_TSX.replace('import { Toaster } from "./components/ui/sonner";\n', "").replace(
+    "        <Toaster />\n",
+    "",
+  ),
+};

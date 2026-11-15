@@ -28,6 +28,10 @@ interface DelegateTasksToolOptions {
   writtenPaths?: string[];
   /** How deep this run's swarm may go (see `validatePlan`); Convex enforces it too. */
   maxDepth?: number;
+  /** Shared with the swarm gate (`swarmRun`), which reads `delegated`. */
+  state?: { delegated: boolean };
+  /** Set when the request must be split: a solo call is refused with this reason. */
+  soloRefusal?: string;
 }
 
 type Task = SwarmPlan["tasks"][number];
@@ -56,11 +60,11 @@ const taskReport = (task: Task, settled: PromiseSettledResult<SwarmWorkerResult>
  */
 export const createDelegateTasksTool = ({
   internalKey, projectId, messageId, ownerId, model, parent, writtenPaths, maxDepth = MAX_SWARM_DEPTH,
+  // Rebuilt on every replay: handlers re-run in order, so the first valid call sets it again.
+  state = { delegated: false }, soloRefusal,
 }: DelegateTasksToolOptions) => {
   const depth = parent?.depth ?? 0;
   const subOrchestrators = !parent && maxDepth >= MAX_SWARM_DEPTH;
-  // Rebuilt on every replay: handlers re-run in order, so the first valid call sets it again.
-  let delegated = false;
   return createTool({
     name: "delegateTasks",
     description:
@@ -70,8 +74,14 @@ export const createDelegateTasksTool = ({
       (subOrchestrators ? " A task with role \"sub-orchestrator\" (at most 2) splits its own paths among up to 3 workers." : ""),
     parameters: swarmPlanSchema,
     handler: async (input, { step }) => {
-      if (delegated) return "Error: already delegated, integrate now.";
+      if (state.delegated) return "Error: already delegated, integrate now.";
       if (depth >= MAX_SWARM_DEPTH) return "Error: Workers cannot delegate; build it yourself.";
+      // The board shows the reason from this call's recorded step (`swarmSoloReason`).
+      if (input.solo && !input.tasks?.length) {
+        if (soloRefusal) return `Error: Swarm mode: this request is split among workers (${soloRefusal}). Delegate 2-4 tasks.`;
+        state.delegated = true;
+        return "Building solo: build it yourself, then run checkBuild.";
+      }
       const plan = validatePlan(input, { withinPaths: parent?.ownedPaths, maxDepth });
       if (typeof plan === "string") return plan;
       if (!step) throw new Error("delegateTasks runs only inside an Inngest function");
@@ -88,7 +98,7 @@ export const createDelegateTasksTool = ({
         return null;
       });
       if (lockError) return `Error: ${lockError} Re-plan without it.`;
-      delegated = true;
+      state.delegated = true;
 
       // Only the models' ids and labels leave these steps, never a model or its key.
       const workerModel = await step.run("resolve-worker-model", async () =>

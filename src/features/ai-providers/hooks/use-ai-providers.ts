@@ -23,6 +23,8 @@ export interface PlatformModels {
   defaultModelId: string;
   /** Promo models (ADR 0009), which users can no longer pick. */
   promoModelIds: string[];
+  /** The admin's Auto pool (#322), so the composer offers the model Auto would pick. */
+  autoModelIds?: readonly string[];
 }
 
 /**
@@ -44,13 +46,14 @@ export const platformModels = (catalog: {
   const promo = promoModelIds(catalog.models);
   // Auto (#322) is offered only when the catalog has a model it routes builds to.
   if (!autoRouteModel(models, "build", catalog.autoModelIds)) {
-    return { models, defaultModelId: catalog.defaultModelId, promoModelIds: promo };
+    return { models, defaultModelId: catalog.defaultModelId, promoModelIds: promo, autoModelIds: catalog.autoModelIds };
   }
   return {
     models: [AUTO_MODEL, ...models],
     // Resolved before Auto joins the list, so a fallback default is never Auto.
     defaultModelId: resolveCatalogModel({ models, defaultModelId: catalog.defaultModelId }, undefined).id,
     promoModelIds: promo,
+    autoModelIds: catalog.autoModelIds,
   };
 };
 

@@ -5,7 +5,7 @@
  * Keep this list in sync with the handlers it describes.
  */
 
-export type ShortcutKey = "mod" | "shift" | "enter" | "esc" | "tab" | string;
+export type ShortcutKey = "mod" | "shift" | "alt" | "enter" | "esc" | "tab" | string;
 
 export interface Shortcut {
   label: string;
@@ -30,6 +30,7 @@ export const SHORTCUTS: Shortcut[] = [
   { label: "Send message", keys: [["enter"]], scope: "Chat" },
   { label: "New line", keys: [["shift", "enter"]], scope: "Chat" },
   { label: "Stop the agent", keys: [["esc"]], scope: "Chat" },
+  { label: "Start or stop dictation", keys: [["alt", "v"]], scope: "Chat" },
 
   { label: "Quick edit the selection", keys: [["mod", "k"]], scope: "Editor" },
   { label: "Accept AI suggestion", keys: [["tab"]], scope: "Editor" },
@@ -38,8 +39,8 @@ export const SHORTCUTS: Shortcut[] = [
   { label: "Find in file", keys: [["mod", "f"]], scope: "Editor" },
 ];
 
-const MAC_LABELS: Record<string, string> = { mod: "⌘", shift: "⇧" };
-const OTHER_LABELS: Record<string, string> = { mod: "Ctrl", shift: "Shift" };
+const MAC_LABELS: Record<string, string> = { mod: "⌘", shift: "⇧", alt: "⌥" };
+const OTHER_LABELS: Record<string, string> = { mod: "Ctrl", shift: "Shift", alt: "Alt" };
 const COMMON_LABELS: Record<string, string> = { enter: "Enter", esc: "Esc", tab: "Tab" };
 
 /** Display label for one key token, e.g. `mod` → `⌘` on Mac, `Ctrl` elsewhere. */
