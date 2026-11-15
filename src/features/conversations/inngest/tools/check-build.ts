@@ -23,6 +23,7 @@ import {
 } from "@/features/sandbox-preview/server/project-sandbox";
 import {
   INSTALLING,
+  SHORT_CALL_MS,
   type PreviewDevServer,
   findPreviewDevServer,
   restartDevServerIfDown,
@@ -65,8 +66,6 @@ const INSTALL_POLL_MS = 2_500;
 /** Copying the preview's node_modules; seconds for the starter. */
 const COPY_TIMEOUT_MS = 30_000;
 const CREATE_TIMEOUT_MS = 30_000;
-/** Listing, connecting, process lists, state reads and cleanup. */
-const SHORT_CALL_MS = 10_000;
 /** E2B reaps the sandbox after this even if the kill below is lost. */
 const SANDBOX_TIMEOUT_MS = 5 * 60_000;
 const MAX_ERROR_LINES = 40;

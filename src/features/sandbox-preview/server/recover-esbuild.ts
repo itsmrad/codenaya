@@ -1,5 +1,5 @@
 import type { Sandbox } from "e2b";
-import { DEV_COMMAND_ENV, killTreeCommand } from "./dev-server";
+import { DEV_COMMAND_ENV, runDevServer, stopDevServers } from "./dev-server";
 import { nextEsbuildRecovery, type EsbuildRecoveryAttempts, type EsbuildRecoveryStatus } from "../utils/esbuild-recovery";
 
 interface Recovery extends EsbuildRecoveryAttempts {
@@ -36,13 +36,8 @@ export const recoverEsbuild = async (sandbox: Sandbox): Promise<EsbuildRecoveryS
     const [dev] = running;
     if (!dev) return "unavailable"; // #774 owns starting a missing dev command after installs.
     attempted = true;
-    for (const command of running) await sandbox.commands.run(killTreeCommand(command.pid));
-    await sandbox.commands.run(dev.envs[DEV_COMMAND_ENV], {
-      cwd: dev.cwd,
-      envs: dev.envs,
-      background: true,
-      timeoutMs: 0,
-    });
+    await stopDevServers(sandbox, commands, dev.cwd);
+    await runDevServer(sandbox, { command: dev.envs[DEV_COMMAND_ENV], envs: dev.envs, cwd: dev.cwd });
     return "restarted";
   } finally {
     state.pending = false;
