@@ -37,7 +37,7 @@ vi.mock("e2b", () => ({
   },
 }));
 
-import { createE2bProvider } from "./e2b";
+import { DEFAULT_E2B_TEMPLATE, createE2bProvider, e2bHandleOf } from "./e2b";
 import { SandboxConfigError, SandboxRateLimitError, SandboxTimeoutError } from "./types";
 
 const fakeE2bSandbox = () => ({
@@ -58,7 +58,7 @@ describe("E2B provider", () => {
   });
 
   it("creates from E2B_TEMPLATE with the key, metadata, timeouts and the localhost Host header", async () => {
-    process.env.E2B_TEMPLATE = " codenaya-node22 ";
+    process.env.E2B_TEMPLATE = " my-node22 ";
     mocks.create.mockResolvedValue(fakeE2bSandbox());
 
     const sandbox = await provider.create({
@@ -68,7 +68,7 @@ describe("E2B provider", () => {
       localHostHeader: true,
     });
 
-    expect(mocks.create).toHaveBeenCalledWith("codenaya-node22", {
+    expect(mocks.create).toHaveBeenCalledWith("my-node22", {
       apiKey: "key_1",
       timeoutMs: 60_000,
       requestTimeoutMs: 5_000,
@@ -78,12 +78,22 @@ describe("E2B provider", () => {
     expect(sandbox).toMatchObject({ provider: "e2b", id: "sbx1" });
   });
 
-  it("creates from the base template without a masked host by default", async () => {
+  it("creates from the Node 22 template, never base, without a masked host by default (#178)", async () => {
     mocks.create.mockResolvedValue(fakeE2bSandbox());
 
     await provider.create({ timeoutMs: 1, metadata: { messageId: "m1" } });
 
-    expect(mocks.create).toHaveBeenCalledWith("base", expect.not.objectContaining({ network: expect.anything() }));
+    expect(DEFAULT_E2B_TEMPLATE).toBe("codenaya-node22");
+    expect(mocks.create).toHaveBeenCalledWith("codenaya-node22", expect.not.objectContaining({ network: expect.anything() }));
+  });
+
+  it("lets an explicit image win over E2B_TEMPLATE", async () => {
+    process.env.E2B_TEMPLATE = "codenaya-node22-custom";
+    mocks.create.mockResolvedValue(fakeE2bSandbox());
+
+    await provider.create({ image: "snap:1", timeoutMs: 1, metadata: {} });
+
+    expect(mocks.create).toHaveBeenCalledWith("snap:1", expect.anything());
   });
 
   it("lists one page of running sandboxes by metadata", async () => {
@@ -169,6 +179,7 @@ describe("E2B provider", () => {
       e2b.commands.kill.mockResolvedValue(true);
       e2b.commands.run.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
 
+      expect(e2bHandleOf(sandbox)).toBe(e2b);
       expect(await sandbox.listCommands!()).toEqual([command]);
       expect(e2b.commands.list).toHaveBeenCalledWith();
       await sandbox.listCommands!({ requestTimeoutMs: 5 });
