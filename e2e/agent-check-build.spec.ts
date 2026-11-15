@@ -37,6 +37,8 @@ test.describe.serial("agent checkBuild", () => {
   const label = `Check build ${Date.now()}`;
   let stub: Awaited<ReturnType<typeof startStubProvider>>;
   let page: Page;
+  /** Taken before afterEach closes `page`, so afterAll can still delete fixtures. */
+  let convex: Awaited<ReturnType<typeof userConvexClient>> | undefined;
   let keyId: Id<"aiProviderKeys"> | undefined;
   let projectId: Id<"projects"> | undefined;
   /** Picks the stub's tool calls; each test sets its own script. */
@@ -68,14 +70,14 @@ test.describe.serial("agent checkBuild", () => {
   });
 
   test.afterAll(async () => {
-    const user = page && (await userConvexClient(page));
-    if (keyId) {
+    const user = page?.isClosed() === false ? await userConvexClient(page) : convex;
+    if (user && keyId) {
       await user.mutation(api.aiProviders.remove, { keyId }).catch(() => {});
     }
-    if (projectId) {
+    if (user && projectId) {
       await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});
     }
-    await page?.close();
+    if (page?.isClosed() === false) await page.close();
     stub?.server.close();
   });
 
@@ -86,6 +88,7 @@ test.describe.serial("agent checkBuild", () => {
   let seeded: string | undefined;
   test.afterEach(async () => {
     if (!seeded) return;
+    convex = await userConvexClient(page);
     // Closed first, so the preview can't boot a replacement for the killed sandbox.
     await page.close();
     await killProjectSandboxes(seeded);
