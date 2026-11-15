@@ -25,6 +25,7 @@ import { mergeMessageSteps } from "../../../../convex/messageSteps";
 import type { AgentStep } from "../agent-steps";
 import { swarmHeader, swarmSoloReason } from "../swarm-status";
 import { BUILD_NOT_BUILT_NOTE } from "./build-check-gate";
+import { SWARM_DELEGATE_NUDGE } from "./constants";
 import { drive, text, toolCall } from "./process-message.driver";
 
 let swarmEnabled: boolean;
@@ -404,8 +405,9 @@ describe("processMessage swarm mode", () => {
       expect(foundation).not.toMatch(/^Error/);
       expect(page).toBe("Error: Swarm mode: src/pages/menu.tsx belongs to a worker. Call delegateTasks now with 2-4 tasks that own it.");
       expect(report).toContain("## pages: Pages (done)");
-      // Only the third call was forced, on the OpenAI-compatible route.
+      // Only the third call was forced, on the OpenAI-compatible route, with the nudge.
       expect(forcedRequests(outcome.inferenceBodies)).toEqual([{ type: "function", function: { name: "delegateTasks" } }]);
+      expect(JSON.stringify(codingRequests(outcome.inferenceBodies)[2].messages)).toContain(SWARM_DELEGATE_NUDGE);
       expect(mutationArgs("agentTasks:createTasks")[0].tasks).toHaveLength(2);
     });
 
@@ -428,6 +430,44 @@ describe("processMessage swarm mode", () => {
       expect(toolResults(outcome.inferenceBodies)[1]).toMatch(/^Error: Swarm mode: src\/pages\/menu.tsx belongs to a worker/);
       expect(forcedRequests(outcome.inferenceBodies)).toHaveLength(1);
       expect(mutationArgs("agentTasks:createTasks")).toHaveLength(1);
+    });
+
+    it("builds solo with the reason, and completes, when the forced turn's request fails", async () => {
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: PAGE },
+        { error: { name: "Error", message: "400 tool_choice forced is not compatible with thinking" } },
+        { data: PAGE },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], []);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      // The page write after the fallback goes through.
+      expect(toolResults(outcome.inferenceBodies).at(-2)).not.toMatch(/^Error/);
+      expect(mutationArgs("agentTasks:createTasks")).toEqual([]);
+      const steps = mutationArgs("system:upsertMessageSteps")
+        .reduce<AgentStep[]>((all, { steps }) => mergeMessageSteps(all, steps as AgentStep[]), []);
+      expect(swarmSoloReason(steps)).toMatch(/^delegation failed \(.*tool_choice/);
+    });
+
+    it("refuses a placeholder over a file that already exists", async () => {
+      projectFiles = [
+        { _id: "d1", name: "src", type: "folder" },
+        { _id: "d2", name: "pages", type: "folder", parentId: "d1" },
+        { _id: "f1", name: "home.tsx", type: "file", parentId: "d2" },
+      ];
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE]);
+
+      expect(outcome.finalType).toBe("function-resolved");
+      expect(toolResults(outcome.inferenceBodies)[0])
+        .toBe("Error: Swarm mode: src/pages/home.tsx already exists, so it belongs to a worker; placeholders are for new files only. Call delegateTasks now with 2-4 tasks that own it.");
+      expect(mutationArgs("system:createFiles")).toEqual([]);
     });
 
     it("forces delegateTasks when the orchestrator would end without delegating", async () => {

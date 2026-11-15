@@ -11,6 +11,7 @@ import {
   MAX_AGENT_STEPS,
   STARTER_IN_PLACE_NOTE,
   STEP_BUDGET_NOTE,
+  SWARM_DELEGATE_NUDGE,
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { createSearchFilesTool } from './tools/search-files';
@@ -719,7 +720,9 @@ export const processMessage = inngest.createFunction(
           const nudge =
             agent.name === SUMMARY_AGENT_NAME
               ? summaryNote
-              : takeCutOffNote() ?? buildCheckGate.takeNudge() ?? loopGuard.takeHint();
+              : agent.name === SWARM_DELEGATE_AGENT_NAME
+                ? SWARM_DELEGATE_NUDGE
+                : takeCutOffNote() ?? buildCheckGate.takeNudge() ?? loopGuard.takeHint();
           if (nudge === BUILD_REPAIR_NUDGE) {
             const attempt = buildCheckGate.repairs;
             await recordSteps("record-build-repair", () => [{
@@ -855,11 +858,11 @@ export const processMessage = inngest.createFunction(
       model: withoutToolCalls(codingModel),
     });
     // Swarm mode's forced turn: the same agent, made to call delegateTasks.
-    const delegateAgent = createAgent({
+    const delegateAgent = swarm.catchDelegation(createAgent({
       ...agentOptions,
       name: SWARM_DELEGATE_AGENT_NAME,
       model: forceToolCall(codingModel, "delegateTasks"),
-    });
+    }));
 
     const network = createNetwork({
       name: "codenaya-network",

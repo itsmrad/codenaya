@@ -32,11 +32,12 @@ const ID_WRITE_TOOLS = new Set(["createFiles", "renameFile"]);
 
 /**
  * A swarm orchestrator before delegation (`open` false): it writes only the shared foundation
- * (`isFoundationPath`) and one-line page placeholders, which the owning worker overwrites.
+ * (`isFoundationPath`) and one-line placeholders for new files, which the owning worker overwrites.
+ * `existing` returns the first of the paths that already holds a file: a real page is never stubbed out.
  */
-export const guardFoundation = (open: () => boolean) => (tool: Tool.Any): Tool.Any => ({
+export const guardFoundation = (open: () => boolean, existing: (paths: string[]) => Promise<string | null>) => (tool: Tool.Any): Tool.Any => ({
   ...tool,
-  handler: (input, opts) => {
+  handler: async (input, opts) => {
     if (open()) return tool.handler(input, opts);
     if (ID_WRITE_TOOLS.has(tool.name)) {
       return `${FOUNDATION_REFUSAL} before delegateTasks, write the shared foundation with writeFiles or editFile.`;
@@ -52,6 +53,12 @@ export const guardFoundation = (open: () => boolean) => (tool: Tool.Any): Tool.A
     const blocked = paths.find((path, i) => typeof path !== "string" || !(isFoundationPath(path) || placeholder(i)));
     if (blocked !== undefined) {
       return `${FOUNDATION_REFUSAL} ${String(blocked)} belongs to a worker. Call delegateTasks now with 2-4 tasks that own it.`;
+    }
+    const stubs = (paths as string[]).filter((path) => !isFoundationPath(path));
+    const taken = stubs.length === 0 ? null
+      : opts?.step ? await opts.step.run("swarm-placeholder-check", () => existing(stubs)) : await existing(stubs);
+    if (taken) {
+      return `${FOUNDATION_REFUSAL} ${taken} already exists, so it belongs to a worker; placeholders are for new files only. Call delegateTasks now with 2-4 tasks that own it.`;
     }
     return tool.handler(input, opts);
   },

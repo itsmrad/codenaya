@@ -68,20 +68,26 @@ export const isFoundationPath = (raw: string): boolean => {
 const FEATURE_RE = /\b(home|landing|menu|about|contact|reservation|booking|gallery|pricing|service|blog|faq|team|career|testimonial|dashboard|login|sign-?up|register|profile|setting|cart|checkout|product|catalog|order|customer|deal|lead|pipeline|calendar|appointment|schedule|report|analytics|inbox|admin|portfolio|shop|event|location|dentist|confirmation|payment|invoice)s?\b/g;
 const COUNTED_RE = /\bmulti-?page\b|\b(?:\d+|two|three|four|five|six|several|multiple)[- ](?:page|screen|section)s?\b/;
 const EDIT_RE = /^(?:please\s+)?(?:change|fix|rename|update|tweak|adjust|move|remove|delete|replace|make the|set|increase|decrease|align|center|add an?)\b/;
+// An edit names pages in passing ("a contact form on the home page"): it splits only when it adds pages.
+const MULTI_PAGE_RE = /\b(?:pages|screens)\b|\b(?:page|screen)\s*(?:,|and\b|&|\+)/;
 const EDIT_MAX_CHARS = 120;
 const LONG_REQUEST_CHARS = 300;
 
 /**
  * Whether a swarm request is split among workers, decided before the run so it is
- * deterministic: a short edit stays solo; two or more named pages or features, a
- * counted "N pages", or a long request is delegated.
+ * deterministic: two or more named pages or features (in an edit, only with several
+ * pages: "a menu page and a contact page"), or a counted "N pages", is delegated; a short
+ * edit stays solo; a long request is delegated.
  */
 export const classifySwarmPrompt = (prompt: string): { delegate: boolean; reason: string } => {
   const text = prompt.trim().toLowerCase();
-  if (EDIT_RE.test(text) && text.length <= EDIT_MAX_CHARS) return { delegate: false, reason: "a small edit" };
+  const edit = EDIT_RE.test(text) && text.length <= EDIT_MAX_CHARS;
   const features = [...new Set([...text.matchAll(FEATURE_RE)].map((match) => match[1]))];
-  if (features.length >= 2) return { delegate: true, reason: `it names ${features.length} pages or features (${features.join(", ")})` };
+  if (features.length >= 2 && (!edit || MULTI_PAGE_RE.test(text))) {
+    return { delegate: true, reason: `it names ${features.length} pages or features (${features.join(", ")})` };
+  }
   if (COUNTED_RE.test(text)) return { delegate: true, reason: "it asks for several pages" };
+  if (edit) return { delegate: false, reason: "a small edit" };
   if (text.length >= LONG_REQUEST_CHARS) return { delegate: true, reason: "a long build request" };
   return { delegate: false, reason: "a short request with no separate pages or features" };
 };

@@ -160,6 +160,8 @@ describe("classifySwarmPrompt", () => {
     "Create a booking app where customers pick a service, choose a time slot and get a confirmation page, plus an admin view",
     "Build a CRM with contacts, a deals pipeline and a dashboard",
     "A 3-page portfolio site",
+    "Add a menu page and a contact page",
+    "add a login page and a dashboard",
   ])("delegates %j", (prompt) => {
     expect(classifySwarmPrompt(prompt)).toMatchObject({ delegate: true });
   });

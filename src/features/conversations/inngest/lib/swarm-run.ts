@@ -1,5 +1,5 @@
 import type { GetStepTools } from "inngest";
-import type { AgentResult, TextMessage, Tool } from "@inngest/agent-kit";
+import { type Agent, AgentResult, type StateData, type TextMessage, type Tool } from "@inngest/agent-kit";
 
 import type { inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
@@ -7,12 +7,13 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../../agent-models";
-import { toolResultError } from "../../agent-steps";
+import { sanitizeAgentText, toolResultError } from "../../agent-steps";
 import { type MessageMode, SWARM_MODE } from "../../plan-mode";
 import { MAX_SWARM_DEPTH, classifySwarmPrompt } from "../../swarm";
 import { SWARM_SOLO_STEP_ID } from "../../swarm-status";
 import { SWARM_ORCHESTRATOR_NOTE, SWARM_SUBORCH_OPTION_NOTE } from "../constants";
 import { createDelegateTasksTool } from "../tools/delegate-tasks";
+import { getProjectFiles, indexProjectFiles, normalizePath } from "../tools/paths";
 import { UNFINISHED_REPLY } from "./conversation-history";
 import { FOUNDATION_REFUSAL, guardFoundation } from "./ownership-guard";
 
@@ -47,9 +48,13 @@ export interface SwarmRun {
   guard: (tool: Tool.Any) => Tool.Any;
   /** Whether the router's next call must be the forced delegateTasks turn. */
   forceDelegation: (results: AgentResult[], callCount: number) => boolean;
+  /** The forced turn's agent, made to never fail the run: an error falls back to solo, with its reason. */
+  catchDelegation: <T extends StateData>(agent: Agent<T>) => Agent<T>;
 }
 
-const NO_SWARM: SwarmRun = { tools: [], promptNote: "", guard: (tool) => tool, forceDelegation: () => false };
+const NO_SWARM: SwarmRun = {
+  tools: [], promptNote: "", guard: (tool) => tool, forceDelegation: () => false, catchDelegation: (agent) => agent,
+};
 
 /**
  * A swarm-mode run's extra tool, system-prompt note and delegation gate; nothing for
@@ -79,19 +84,23 @@ export const swarmRun = async ({ mode, request, internalKey, messageId, projectI
   const choice = model && typeof model === "object" ? model : { modelId: model ?? "" };
   const maxDepth = choice.keyId ? MAX_SWARM_DEPTH : settings.platformMaxDepth;
   const split = classifySwarmPrompt(request);
-  if (!split.delegate) {
-    await step.run("record-swarm-solo", async () => {
-      try {
-        await convex.mutation(api.system.upsertMessageSteps, {
-          internalKey,
-          messageId,
-          steps: [{ id: SWARM_SOLO_STEP_ID, kind: "thinking", text: `Building solo: ${split.reason}`, status: "done", startedAt: Date.now() }],
-        });
-      } catch (error) {
-        console.error("[swarm] failed to record the solo reason", error);
-      }
-    });
-  }
+  // The board's "Built solo: <reason>" (`swarmSoloReason`).
+  const recordSolo = (reason: string) => step.run("record-swarm-solo", async () => {
+    try {
+      await convex.mutation(api.system.upsertMessageSteps, {
+        internalKey,
+        messageId,
+        steps: [{ id: SWARM_SOLO_STEP_ID, kind: "thinking", text: `Building solo: ${reason}`, status: "done", startedAt: Date.now() }],
+      });
+    } catch (error) {
+      console.error("[swarm] failed to record the solo reason", error);
+    }
+  });
+  if (!split.delegate) await recordSolo(split.reason);
+  const existing = async (paths: string[]) => {
+    const { byPath } = indexProjectFiles(await getProjectFiles(internalKey, projectId));
+    return paths.find((path) => byPath.get(normalizePath(path) ?? "")?.file) ?? null;
+  };
 
   // Rebuilt on every replay: tool handlers and the router re-run in order.
   const state = { delegated: false };
@@ -110,7 +119,22 @@ export const swarmRun = async ({ mode, request, internalKey, messageId, projectI
       ...(split.delegate ? { soloRefusal: split.reason } : {}),
     })],
     promptNote: SWARM_ORCHESTRATOR_NOTE + (maxDepth >= MAX_SWARM_DEPTH ? SWARM_SUBORCH_OPTION_NOTE : ""),
-    guard: guardFoundation(open),
+    guard: guardFoundation(open, existing),
+    catchDelegation: (agent) => {
+      const run = agent.run.bind(agent);
+      agent.run = async (...args) => {
+        try {
+          return await run(...args);
+        } catch (error) {
+          // A provider that refuses the forced call (or any error in this turn) must not fail the run.
+          fellBack = true;
+          const message = sanitizeAgentText(String((error as { message?: unknown } | null)?.message ?? error)).slice(0, 160);
+          await recordSolo(`delegation failed (${message})`);
+          return new AgentResult(agent.name, [], [], new Date());
+        }
+      };
+      return agent;
+    },
     forceDelegation: (results, callCount) => {
       if (open() || callCount === 0) return false;
       // callCount, not results: seeded history is not this run's.
