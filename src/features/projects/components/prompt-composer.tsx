@@ -216,7 +216,7 @@ export const PromptComposer = ({
 
           <div className="flex h-9 items-center border-t border-border">
             <Select value={framework} onValueChange={(value) => {
-              const next = value === "next" || value === "vite" ? value : "auto";
+              const next = value === "next" || value === "vite" || value === "tanstack-start" ? value : "auto";
               setFramework(next);
               writeProjectFramework(next);
             }} disabled={isBusy}>
@@ -229,6 +229,7 @@ export const PromptComposer = ({
                   <SelectItem value="auto">Auto</SelectItem>
                   <SelectItem value="vite">Vite (React)</SelectItem>
                   <SelectItem value="next">Next.js</SelectItem>
+                  <SelectItem value="tanstack-start">TanStack Start</SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>
