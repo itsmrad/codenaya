@@ -31,9 +31,11 @@ import { Id } from "../../../../convex/_generated/dataModel";
 export const PublishedMenu = ({
   showcaseId,
   className,
+  trigger,
 }: {
   showcaseId: Id<"showcaseProjects">;
   className?: string;
+  trigger?: React.ReactNode;
 }) => {
   const unpublish = useUnpublish();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -51,11 +53,11 @@ export const PublishedMenu = ({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button aria-label="Published" title="Published" className={className}>
+          {trigger ?? <button aria-label="Published" title="Published" className={className}>
             <RocketIcon aria-hidden="true" className="size-3.5 text-brand" />
             <span className="hidden @3xl:inline">Published</span>
             <ChevronDownIcon aria-hidden="true" className="hidden @3xl:block size-3" />
-          </button>
+          </button>}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
           <DropdownMenuItem asChild>

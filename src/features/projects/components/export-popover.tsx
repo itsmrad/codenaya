@@ -58,9 +58,12 @@ const formSchema = z.object({
 
 interface ExportPopoverProps {
   projectId: Id<"projects">;
+  trigger?: React.ReactNode;
+  /** The sheet reuses this popover without replacing the navbar command. */
+  registerCommands?: boolean;
 }
 
-export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
+export const ExportPopover = ({ projectId, trigger, registerCommands = true }: ExportPopoverProps) => {
   const project = useProject(projectId);
   const [open, setOpen] = React.useState(false);
   const [githubNotLinked, setGithubNotLinked] = React.useState(false);
@@ -80,7 +83,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
   const githubSync = project?.githubSync;
   const unpushed = useUnpushedRuns(projectId);
   // Also opened from the chat's first-build card (#341), until the first export.
-  useProjectCommands({ "export-github": exportStatus === "completed" ? null : () => setOpen(true) });
+  useProjectCommands({ "export-github": !registerCommands || exportStatus === "completed" ? null : () => setOpen(true) });
 
   const form = useForm({
     defaultValues: {
@@ -448,7 +451,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
-        <button
+        {trigger ?? <button
           type="button"
           aria-label={triggerLabel}
           title={triggerLabel}
@@ -459,7 +462,7 @@ export const ExportPopover = ({ projectId }: ExportPopoverProps) => {
           {hasUnpushed && (
             <span aria-hidden className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" />
           )}
-        </button>
+        </button>}
       </PopoverTrigger>
       <PopoverContent className="w-80" align="start">
         {renderContent()}

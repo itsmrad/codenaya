@@ -6,7 +6,7 @@ import { collectConsoleErrors } from "./console-errors";
 import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
 import { cleanupProject } from "./convex-client";
 
-const PROJECT_NAME = "e2e ide polish";
+const PROJECT_NAME = "e2e phone project UI";
 
 /** The aborted request below is the scenario, not a bug. */
 const ABORTED_SANDBOX = /net::ERR_FAILED/;
@@ -22,7 +22,7 @@ const emptyProject = async (page: Page) => {
 const openProject = async (page: Page, projectId: string, width: number) => {
   await page.setViewportSize({ width, height: width < 768 ? 812 : 900 });
   await page.goto(`/projects/${projectId}?engine=webcontainer`, { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("button", { name: "Export" })).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator("nav").getByRole("button", { name: PROJECT_NAME, exact: true })).toBeVisible({ timeout: 60_000 });
 };
 
 test.describe("IDE polish", () => {
@@ -62,11 +62,15 @@ test.describe("IDE polish", () => {
 
     for (const width of [375, 768]) {
       await openProject(page, projectId, width);
-      await page.getByRole("button", { name: "Export" }).click();
+      const more = page.getByRole("button", { name: "More actions" });
+      const usesSheet = await more.isVisible();
+      if (usesSheet) await more.click();
+      await page.getByRole("button", { name: "Export", exact: true }).click();
       const box = (await page.locator("[data-slot=popover-content]").boundingBox())!;
       expect(box.x).toBeGreaterThanOrEqual(8);
       expect(box.x + box.width).toBeLessThanOrEqual(width - 8);
       await page.keyboard.press("Escape");
+      if (usesSheet) await page.keyboard.press("Escape");
     }
 
     // At 375 the form is taller than the dialog; the footer must not scroll away.
@@ -83,6 +87,46 @@ test.describe("IDE polish", () => {
     await expect(page.locator(".cm-minimap-gutter")).toBeHidden();
 
     expect(errors).toEqual([]);
+  });
+
+  test("phones show the project name and reach labeled actions from the keyboard", async ({ page }) => {
+    await signIn(page);
+    const projectId = await emptyProject(page);
+    await openProject(page, projectId, 375);
+    const name = page.locator("nav").getByRole("button", { name: PROJECT_NAME, exact: true });
+    expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await expect(page.getByRole("button", { name: "Publish", exact: true })).toHaveText("Publish");
+    await expect(page.getByRole("button", { name: "Version history", exact: true })).toBeHidden();
+
+    const more = page.getByRole("button", { name: "More actions" });
+    await more.focus();
+    await page.keyboard.press("Enter");
+    const sheet = page.getByRole("dialog", { name: "Project menu" });
+    for (const label of ["Integrations", "Skills", "Export", "Version history", "Past conversations", "New conversation", "Help"]) {
+      await expect(sheet.getByRole("button", { name: label, exact: true })).toHaveText(label);
+    }
+    await expect(sheet.getByRole("link", { name: "Account", exact: true })).toBeVisible();
+    await expect(sheet.getByRole("button", { name: "Integrations", exact: true })).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(sheet.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(sheet.getByRole("button", { name: "Integrations", exact: true })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
+    await expect(more).toBeFocused();
+
+    await more.click();
+    await sheet.getByRole("button", { name: "Version history", exact: true }).click();
+    const history = page.getByRole("dialog", { name: "Version history" });
+    await expect(sheet).toBeHidden();
+    await expect(history).toBeVisible();
+    await page.keyboard.press("Escape");
+    await more.click();
+    await sheet.getByRole("button", { name: "Export", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Download ZIP", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await expect(more).toBeFocused();
   });
 
   test("the explorer header gives the project name the full width until hovered", async ({ page }) => {

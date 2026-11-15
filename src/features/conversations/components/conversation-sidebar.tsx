@@ -125,10 +125,12 @@ const ESC_TOAST_ID = "esc-to-stop";
 
 interface ConversationSidebarProps {
   projectId: Id<"projects">;
+  actionsInSheet?: boolean;
 };
 
 export const ConversationSidebar = ({
   projectId,
+  actionsInSheet = false,
 }: ConversationSidebarProps) => {
   const { openIntegrations } = useProjectIntegrations();
   const { input, setInput, appendInput, contexts, removeContext, clearContexts, elements, removeElement, clearElements } = useChatStore();
@@ -634,7 +636,7 @@ export const ConversationSidebar = ({
           <div className="text-sm font-medium truncate pl-3">
             {activeConversation?.title ?? DEFAULT_CONVERSATION_TITLE}
           </div>
-          <div className="flex items-center px-1 gap-1">
+          <div className={actionsInSheet ? "hidden @3xl/ide:flex items-center px-1 gap-1" : "flex items-center px-1 gap-1"}>
             <Button
               size="icon-xs"
               variant="highlight"
