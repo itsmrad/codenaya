@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { MAX_PROJECT_INSTRUCTIONS_LENGTH, buildProjectInstructionsSection } from "@/features/projects/instructions";
+import { MAX_PROMPT_LENGTH } from "@/lib/prompt-limit";
 
 import {
   SETUP_QUESTIONS,
@@ -12,14 +13,11 @@ import {
 const answers = { audience: "A small team", style: "Minimal" };
 
 describe("shouldAskSetupQuestions", () => {
-  test("asks on a short prompt, not on a detailed one or an empty one", () => {
+  test("asks only under 8 words, never on an empty prompt", () => {
     expect(shouldAskSetupQuestions("a CRM")).toBe(true);
-    expect(shouldAskSetupQuestions("a habit tracker for my family with streaks")).toBe(true);
-    expect(
-      shouldAskSetupQuestions(
-        "Build a habit tracker for small teams with a weekly dashboard, streaks per person, reminders by email and a minimal black and white look",
-      ),
-    ).toBe(false);
+    expect(shouldAskSetupQuestions("habit tracker for runners")).toBe(true);
+    expect(shouldAskSetupQuestions("a habit tracker for my running club")).toBe(true); // 7 words
+    expect(shouldAskSetupQuestions("a todo app with dark mode and login")).toBe(false); // 8 words
     expect(shouldAskSetupQuestions("   ")).toBe(false);
   });
 });
@@ -41,6 +39,11 @@ describe("withSetupAnswers", () => {
   test("Skip (or nothing picked) sends the prompt unchanged", () => {
     expect(withSetupAnswers("a CRM", null)).toBe("a CRM");
     expect(withSetupAnswers("a CRM", {})).toBe("a CRM");
+  });
+
+  test("leaves the answers out rather than pass the prompt limit", () => {
+    const long = "x".repeat(MAX_PROMPT_LENGTH - 10);
+    expect(withSetupAnswers(long, answers)).toBe(long);
   });
 });
 

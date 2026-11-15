@@ -55,6 +55,7 @@ export const useCreateProjectFromPrompt = () => {
       // A short prompt for an empty project gets the setup questions first
       // (#344); a template already made those choices.
       const answers = !templateId && shouldAskSetupQuestions(text) ? await askSetupQuestions() : null;
+      if (answers === undefined) return false;
 
       setIsSubmitting(true);
 

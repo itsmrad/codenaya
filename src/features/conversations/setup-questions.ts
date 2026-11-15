@@ -1,4 +1,5 @@
 import { MAX_PROJECT_INSTRUCTIONS_LENGTH } from "@/features/projects/instructions";
+import { MAX_PROMPT_LENGTH } from "@/lib/prompt-limit";
 
 /**
  * Clarifying questions before the first build of an empty project (#344): a
@@ -22,12 +23,15 @@ export const SETUP_QUESTIONS: readonly SetupQuestion[] = [
   { id: "style", label: "What style?", topic: "Style", options: ["Minimal", "Bold and colorful", "Playful", "Professional"] },
 ];
 
-/** Prompts this short leave the big decisions open, so they get questions. */
-export const SETUP_QUESTIONS_MAX_WORDS = 15;
+/**
+ * Prompts with fewer words than this ("a CRM", "habit tracker for runners")
+ * leave the big decisions open, so they get questions.
+ */
+export const SETUP_QUESTIONS_WORD_LIMIT = 8;
 
 export const shouldAskSetupQuestions = (prompt: string) => {
   const words = prompt.trim().split(/\s+/).filter(Boolean).length;
-  return words > 0 && words < SETUP_QUESTIONS_MAX_WORDS;
+  return words > 0 && words < SETUP_QUESTIONS_WORD_LIMIT;
 };
 
 /** Question id → chosen option. Unanswered questions are left out. */
@@ -38,10 +42,14 @@ const decisionLines = (answers: SetupAnswers) =>
 
 const HEADING = "Decisions from setup";
 
-/** The first prompt with the answers below it; unchanged when there are none (Skip). */
+/**
+ * The first prompt with the answers below it; unchanged when there are none
+ * (Skip), or when they'd push it past the routes' prompt limit.
+ */
 export function withSetupAnswers(prompt: string, answers: SetupAnswers | null): string {
   const lines = answers ? decisionLines(answers) : [];
-  return lines.length ? `${prompt}\n\n${HEADING}:\n${lines.join("\n")}` : prompt;
+  const next = lines.length ? `${prompt}\n\n${HEADING}:\n${lines.join("\n")}` : prompt;
+  return next.length > MAX_PROMPT_LENGTH ? prompt : next;
 }
 
 /**

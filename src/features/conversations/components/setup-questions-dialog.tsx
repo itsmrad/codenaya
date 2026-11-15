@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { create } from "zustand";
 
 import { Button } from "@/components/ui/button";
@@ -16,24 +17,30 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 import { SETUP_QUESTIONS, type SetupAnswers } from "../setup-questions";
 
-const useSetupQuestions = create<{ resolve: ((answers: SetupAnswers | null) => void) | null }>()(() => ({
-  resolve: null,
-}));
+/** The picked answers; null for Skip; undefined when dismissed without a choice (don't build). */
+type SetupOutcome = SetupAnswers | null | undefined;
 
-const finish = (answers: SetupAnswers | null) => {
+const useSetupQuestions = create<{
+  resolve: ((outcome: SetupOutcome) => void) | null;
+  /** The page the ask was made on. */
+  askedOn: string | null;
+}>()(() => ({ resolve: null, askedOn: null }));
+
+const finish = (answers: SetupOutcome) => {
   const { resolve } = useSetupQuestions.getState();
-  useSetupQuestions.setState({ resolve: null });
+  useSetupQuestions.setState({ resolve: null, askedOn: null });
   resolve?.(answers);
 };
 
 /**
  * Opens the setup questions (#344). Resolves with the picked answers, or null
- * on Skip, Esc or close, which build with the prompt unchanged.
+ * on Skip, Esc or close, which build with the prompt unchanged. Undefined
+ * when a newer ask or a navigation replaced it: that caller must not build.
  */
 export const askSetupQuestions = () =>
-  new Promise<SetupAnswers | null>((resolve) => {
-    finish(null);
-    useSetupQuestions.setState({ resolve });
+  new Promise<SetupOutcome>((resolve) => {
+    finish(undefined);
+    useSetupQuestions.setState({ resolve, askedOn: window.location.pathname });
   });
 
 const SetupQuestionsForm = () => {
@@ -77,6 +84,12 @@ const SetupQuestionsForm = () => {
 /** Mounted once in the root layout; `askSetupQuestions` opens it. */
 export const SetupQuestionsDialog = () => {
   const open = useSetupQuestions((state) => state.resolve !== null);
+  // Leaving the page drops a pending ask rather than building from it.
+  const pathname = usePathname();
+  useEffect(() => {
+    const { askedOn } = useSetupQuestions.getState();
+    if (askedOn !== null && askedOn !== pathname) finish(undefined);
+  }, [pathname]);
   return (
     <Dialog open={open} onOpenChange={(next) => !next && finish(null)}>
       <DialogContent className="sm:max-w-lg">
