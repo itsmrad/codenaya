@@ -1,14 +1,13 @@
 "use client";
 
 import { motion } from "motion/react";
-import { ArrowRight } from "lucide-react";
 
 import { AI_PROVIDER_IDS } from "@/features/ai-providers/registry";
-import { GITHUB_REPO_URL } from "@/lib/site";
 import { GridPattern } from "./grid-pattern";
 import { HeroDemo } from "./hero-demo";
 import { LandingPromptComposer } from "./landing-prompt-composer";
 import { CountUp } from "./reveal";
+import { TrustStrip } from "./trust-strip";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -22,7 +21,7 @@ const STATS = [
   { value: NAMED_PROVIDERS, suffix: "+", caption: "Key providers, plus any OpenAI-compatible endpoint" },
 ];
 
-export const LandingHero = () => {
+export const LandingHero = ({ githubStars }: { githubStars: number | null }) => {
   const enter = (delay: number) => ({
     initial: { opacity: 0, y: 8 },
     animate: { opacity: 1, y: 0 },
@@ -62,16 +61,7 @@ export const LandingHero = () => {
 
           <motion.div {...enter(0.4)} className="mx-auto mt-10 max-w-3xl">
             <LandingPromptComposer className="text-left" />
-            <div className="mt-5 flex items-center justify-center gap-5 text-xs text-muted-foreground">
-              <a
-                href={GITHUB_REPO_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground"
-              >
-                View on GitHub <ArrowRight className="size-3.5" />
-              </a>
-            </div>
+            <TrustStrip githubStars={githubStars} />
           </motion.div>
         </div>
       </div>

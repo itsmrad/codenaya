@@ -25,6 +25,17 @@ test.describe("landing page", () => {
         page.getByRole("textbox", { name: "Describe what you want to build" }).first(),
       ).toBeVisible();
 
+      const trust = page.getByRole("group", { name: "Supported providers and community" });
+      await expect(trust).toBeVisible();
+      await expect(trust.getByRole("link", { name: /^Works with/ })).toBeVisible();
+      await expect(trust.getByRole("link", { name: /GitHub/ })).toBeVisible();
+      const trustBox = await trust.boundingBox();
+      // Two compact lines on mobile, one row from md up.
+      expect(trustBox!.height).toBeLessThanOrEqual(viewport.width < 768 ? 48 : 20);
+      if (viewport.width === 1440) {
+        await expect(trust).toBeInViewport({ ratio: 1 });
+      }
+
       // The navbar collapses the sign-in CTA into a menu below the md breakpoint.
       if (viewport.width < 768) {
         await page.getByRole("button", { name: "Toggle menu" }).click();
@@ -102,6 +113,18 @@ test.describe("landing layout", () => {
 });
 
 test.describe("landing social proof", () => {
+  test("shows the live project count under the composer above the fold at 1440x900", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/");
+
+    const trust = page.getByRole("group", { name: "Supported providers and community" });
+    await expect(trust.getByText(/\d[\d,]* projects built/)).toBeVisible({ timeout: 30_000 });
+    await expect(trust).toBeInViewport({ ratio: 1 });
+    const composer = await page.getByRole("textbox", { name: "Describe what you want to build" }).first().boundingBox();
+    const strip = await trust.boundingBox();
+    expect(strip!.y).toBeGreaterThan(composer!.y + composer!.height);
+  });
+
   test("shows real showcase projects and the live project count", async ({ page }) => {
     await page.goto("/");
 
