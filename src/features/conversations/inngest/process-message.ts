@@ -102,7 +102,7 @@ import {
   PLAN_MODE_TOOLS,
   SWARM_MODE,
 } from '../plan-mode';
-import { SWARM_DELEGATE_AGENT_NAME, swarmRun } from './lib/swarm-run';
+import { SWARM_DELEGATE_AGENT_NAME, swarmRequest, swarmRun } from './lib/swarm-run';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -559,7 +559,7 @@ export const processMessage = inngest.createFunction(
     // base, project instructions, skill index and integrations, then the project tree, forced
     // skills and plan mode.
     // Conversation goes in messages (see onStart).
-    const swarm = await swarmRun({ ...(event.data as MessageEvent), internalKey, step });
+    const swarm = await swarmRun({ ...(event.data as MessageEvent), request: swarmRequest(earlierTurns, request), internalKey, step });
     const soloFirstBuild = !planMode && mode !== SWARM_MODE && await step.run(
       "check-first-build",
       () => convex.query(api.projects.conversationNeedsFirstBuildForServer, { internalKey, conversationId }),

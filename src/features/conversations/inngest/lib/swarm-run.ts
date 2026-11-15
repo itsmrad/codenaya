@@ -1,5 +1,5 @@
 import type { GetStepTools } from "inngest";
-import type { AgentResult, Tool } from "@inngest/agent-kit";
+import type { AgentResult, TextMessage, Tool } from "@inngest/agent-kit";
 
 import type { inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
@@ -13,6 +13,7 @@ import { MAX_SWARM_DEPTH, classifySwarmPrompt } from "../../swarm";
 import { SWARM_SOLO_STEP_ID } from "../../swarm-status";
 import { SWARM_ORCHESTRATOR_NOTE, SWARM_SUBORCH_OPTION_NOTE } from "../constants";
 import { createDelegateTasksTool } from "../tools/delegate-tasks";
+import { UNFINISHED_REPLY } from "./conversation-history";
 import { FOUNDATION_REFUSAL, guardFoundation } from "./ownership-guard";
 
 /** The orchestrator's forced turn: the same agent with tool_choice set to delegateTasks. */
@@ -25,6 +26,19 @@ export const MAX_FORCED_DELEGATIONS = 2;
 const FOUNDATION_WRITE_TOOLS = new Set(["writeFiles", "editFile", "updateFile", "scaffoldViteApp"]);
 const wrote = (result: AgentResult) =>
   result.toolCalls.some(({ tool, content }) => FOUNDATION_WRITE_TOOLS.has(tool.name) && !toolResultError(content));
+
+/**
+ * What the classifier judges: the request plus the earlier requests right before it that
+ * never got a usable reply (`priorTurns`' UNFINISHED_REPLY), so Stop then "continue" keeps the original ask.
+ */
+export const swarmRequest = (earlierTurns: readonly TextMessage[], request: string) => {
+  const pending: string[] = [];
+  for (let i = earlierTurns.length - 2; i >= 0 && earlierTurns[i + 1].content === UNFINISHED_REPLY; i -= 2) {
+    const { content } = earlierTurns[i];
+    pending.unshift(typeof content === "string" ? content : content.map((part) => part.text).join(""));
+  }
+  return [...pending, request].join("\n\n");
+};
 
 export interface SwarmRun {
   tools: Tool.Any[];
@@ -48,9 +62,10 @@ const NO_SWARM: SwarmRun = { tools: [], promptNote: "", guard: (tool) => tool, f
  * a write is refused, a turn writes nothing after earlier writes, it would end, or
  * FOUNDATION_MAX_STEPS ran. A solo run records the classifier's reason for the board.
  */
-export const swarmRun = async ({ mode, message, internalKey, messageId, projectId, ownerId, model, step }: {
+export const swarmRun = async ({ mode, request, internalKey, messageId, projectId, ownerId, model, step }: {
   mode?: MessageMode;
-  message: string;
+  /** `swarmRequest`'s text. */
+  request: string;
   internalKey: string;
   messageId: Id<"messages">;
   projectId: Id<"projects">;
@@ -63,7 +78,7 @@ export const swarmRun = async ({ mode, message, internalKey, messageId, projectI
   if (!settings.enabled) return NO_SWARM;
   const choice = model && typeof model === "object" ? model : { modelId: model ?? "" };
   const maxDepth = choice.keyId ? MAX_SWARM_DEPTH : settings.platformMaxDepth;
-  const split = classifySwarmPrompt(message);
+  const split = classifySwarmPrompt(request);
   if (!split.delegate) {
     await step.run("record-swarm-solo", async () => {
       try {

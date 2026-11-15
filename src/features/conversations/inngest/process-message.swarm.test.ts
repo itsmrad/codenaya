@@ -29,10 +29,11 @@ import { drive, text, toolCall } from "./process-message.driver";
 
 let swarmEnabled: boolean;
 let projectFiles: Array<Record<string, unknown>>;
+let recentMessages: Array<Record<string, unknown>>;
 
 const QUERIES: Record<string, () => unknown> = {
   "system:getConversationById": () => ({ title: "Existing chat" }),
-  "system:getRecentMessages": () => [],
+  "system:getRecentMessages": () => recentMessages,
   "system:getProjectById": () => ({ ownerId: "user_1" }),
   "system:getProjectMcpConnections": () => [],
   "system:getProjectFiles": () => projectFiles,
@@ -91,6 +92,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   swarmEnabled = true;
   projectFiles = [];
+  recentMessages = [];
   vi.spyOn(inngest, "send").mockResolvedValue({ ids: [] });
   mocks.query.mockImplementation(async (ref) => QUERIES[getFunctionName(ref)]?.());
   mocks.mutation.mockImplementation(async (ref, args) => MUTATIONS[getFunctionName(ref)]?.(args) ?? null);
@@ -361,6 +363,24 @@ describe("processMessage swarm mode", () => {
     expect(forcedRequests(outcome.inferenceBodies)).toEqual([]);
   });
 
+  it("keeps a tiny follow-up to a completed reply solo", async () => {
+    recentMessages = [
+      { _id: "u0", role: "user", content: PIZZERIA },
+      { _id: "a0", role: "assistant", content: "Built the site.", status: "completed" },
+      { _id: "u1", role: "user", content: "change the button color to red" },
+      { _id: "m1", role: "assistant", content: "", status: "processing" },
+    ];
+    const outcome = await swarm([
+      { data: toolCall("writeFiles", { files: [{ path: "src/components/button.tsx", content: `export const B = () => <button>${"x".repeat(300)}</button>;\n` }] }) },
+      { data: text("Done.") },
+    ], [], undefined, "change the button color to red");
+
+    expect(toolResults(outcome.inferenceBodies)[0]).not.toMatch(/^Error/);
+    expect(forcedRequests(outcome.inferenceBodies)).toEqual([]);
+    const steps = mutationArgs("system:upsertMessageSteps").flatMap(({ steps }) => steps as AgentStep[]);
+    expect(swarmSoloReason(steps)).toBe("a small edit");
+  });
+
   describe("a split request (the classifier says delegate)", () => {
     const FOUNDATION = toolCall("writeFiles", { files: [
       { path: "src/App.tsx", content: "import Home from './pages/home';\nexport default Home;\n" },
@@ -387,6 +407,27 @@ describe("processMessage swarm mode", () => {
       // Only the third call was forced, on the OpenAI-compatible route.
       expect(forcedRequests(outcome.inferenceBodies)).toEqual([{ type: "function", function: { name: "delegateTasks" } }]);
       expect(mutationArgs("agentTasks:createTasks")[0].tasks).toHaveLength(2);
+    });
+
+    it("classifies Stop then \"continue\" on the stopped request, so it still delegates", async () => {
+      recentMessages = [
+        { _id: "u0", role: "user", content: PIZZERIA },
+        { _id: "a0", role: "assistant", content: "", status: "cancelled" },
+        { _id: "u1", role: "user", content: "continue" },
+        { _id: "m1", role: "assistant", content: "", status: "processing" },
+      ];
+      const outcome = await swarm([
+        { data: FOUNDATION },
+        { data: PAGE },
+        { data: toolCall("delegateTasks", PLAN) },
+        { data: toolCall("checkBuild") },
+        { data: text("Done.") },
+      ], [DONE, NAV_DONE], undefined, "continue");
+
+      expect(outcome.finalType).toBe("function-resolved");
+      expect(toolResults(outcome.inferenceBodies)[1]).toMatch(/^Error: Swarm mode: src\/pages\/menu.tsx belongs to a worker/);
+      expect(forcedRequests(outcome.inferenceBodies)).toHaveLength(1);
+      expect(mutationArgs("agentTasks:createTasks")).toHaveLength(1);
     });
 
     it("forces delegateTasks when the orchestrator would end without delegating", async () => {
