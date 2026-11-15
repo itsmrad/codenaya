@@ -3,7 +3,30 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { ConnectionSummary } from "./connection-card";
 
-const state = vi.hoisted(() => ({ connections: [] as ConnectionSummary[] | undefined }));
+const state = vi.hoisted(() => ({
+  connections: [] as ConnectionSummary[] | undefined,
+  hooks: [] as unknown[],
+  hookIndex: 0,
+  renderingDialog: false,
+  selectProvider: undefined as ((id: string) => void) | undefined,
+}));
+// Keep dialog state across Node renders so loading -> loaded exercises the same opening.
+vi.mock("react", async (original) => {
+  const react = await original<typeof import("react")>();
+  return { ...react, useState: <T,>(initial: T | (() => T)) => {
+    if (!state.renderingDialog) return react.useState(initial);
+    const index = state.hookIndex++;
+    if (!(index in state.hooks)) state.hooks[index] = typeof initial === "function" ? (initial as () => T)() : initial;
+    return [state.hooks[index], (value: T) => { state.hooks[index] = value; }];
+  } };
+});
+vi.mock("./provider-catalog", async (original) => {
+  const catalog = await original<typeof import("./provider-catalog")>();
+  return { ...catalog, ProviderCatalog: (props: Parameters<typeof catalog.ProviderCatalog>[0]) => {
+    state.selectProvider = props.onSelect;
+    return createElement(catalog.ProviderCatalog, props);
+  } };
+});
 vi.mock("../hooks/use-integrations", () => ({ useUserConnections: () => state.connections }));
 // Render the dialog body in Node; browser specs cover the real Radix portal/focus.
 vi.mock("@/components/ui/dialog", () => {
@@ -24,7 +47,23 @@ const render = (initialProviderId?: string) => renderToStaticMarkup(createElemen
   open: true, onOpenChange: () => {}, initialProviderId,
 }));
 
-beforeEach(() => { state.connections = []; });
+beforeEach(() => {
+  state.connections = [];
+  state.hooks = [];
+  state.selectProvider = undefined;
+});
+
+const renderOpening = (initialProviderId?: string) => {
+  state.hookIndex = 0;
+  state.renderingDialog = true;
+  let tree;
+  try {
+    tree = IntegrationsDialog({ open: true, onOpenChange: () => {}, initialProviderId });
+  } finally {
+    state.renderingDialog = false;
+  }
+  return renderToStaticMarkup(tree);
+};
 
 it("opens straight on the catalog without stacked empty states", () => {
   const html = render();
@@ -54,5 +93,22 @@ it("waits for connection data before choosing a form or management view", () => 
   state.connections = undefined;
   const html = render("github");
   expect(html).toContain("Loading connections...");
+  expect(html).not.toContain("Connect form:");
+});
+
+it.each(["tile click", "deep link"])("manages a provider selected during loading via %s once connections arrive", (entry) => {
+  state.connections = undefined;
+  if (entry === "tile click") {
+    renderOpening();
+    state.selectProvider!("github");
+  }
+  const initialProviderId = entry === "deep link" ? "github" : undefined;
+  expect(renderOpening(initialProviderId)).toContain("Loading connections...");
+  state.connections = [{
+    _id: "existing" as ConnectionSummary["_id"], providerId: "github", label: "My repository", authMode: "oauth",
+    serverUrl: "https://example.com/mcp", status: "active", maskedPreview: "****", scopes: [], createdAt: 0, updatedAt: 0,
+  }];
+  const html = renderOpening(initialProviderId);
+  expect(html).toContain("Manage GitHub");
   expect(html).not.toContain("Connect form:");
 });

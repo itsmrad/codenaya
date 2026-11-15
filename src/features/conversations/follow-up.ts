@@ -18,15 +18,17 @@ type RunMessage = Pick<Doc<"messages">, "_id" | "status" | "content" | "stuck">;
  * run, send it once the run completed and the chat is free (`busy`: a send in
  * flight, another run, a message queued from outside the chat), or drop it
  * when the run was stopped or failed, since the next request may no longer
- * make sense.
+ * make sense. A stalled run (`stalledRunId`, silent too long but not stuck)
+ * counts as ended: the composer could send over it, and the send stops it.
  */
 export function followUpAction(
   followUp: FollowUp,
   messages: readonly RunMessage[] | undefined,
   busy = false,
+  stalledRunId?: Id<"messages">,
 ): "wait" | "send" | "drop" {
   const run = messages?.find((message) => message._id === followUp.afterMessageId);
-  if (!run || run.status === "processing") return "wait";
+  if (!run || (run.status === "processing" && run._id !== stalledRunId)) return "wait";
   const failed = run.status === "cancelled" || Boolean(run.stuck) || isFailedRunReply(run.content);
   if (failed) return "drop";
   return busy ? "wait" : "send";

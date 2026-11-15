@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 
+import { publicValueSecretRule } from "../src/features/integrations/credential-guard";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import {
@@ -7,9 +8,11 @@ import {
   githubSyncValidator,
   messageStepValidator,
   projectSourceValidator,
+  selectedElementValidator,
   stuckRunValidator,
   runModelValidator,
 } from "./schema";
+import { closeOpenTasks } from "./agentTasks";
 import { MAX_CHECKPOINT_FILES, createCheckpoint } from "./checkpoints";
 import { runsSince, syncedAt } from "./githubSync";
 import { appError } from "./errors";
@@ -58,6 +61,9 @@ const MAX_RECENT_MESSAGES = 50;
 /** A project runs one agent at a time; lost runs are failed by a cron. */
 const MAX_PROCESSING_MESSAGES = 20;
 
+/** Most activation events `getActivationEvents` returns; a project makes a few per run. */
+const MAX_ACTIVATION_EVENTS = 200;
+
 export const getConversationById = query({
   args: {
     conversationId: v.id("conversations"),
@@ -88,6 +94,7 @@ export const createMessage = mutation({
     images: v.optional(v.array(v.id("_storage"))),
     // The sender, required with images: only their own uploads can be attached.
     ownerId: v.optional(v.string()),
+    elements: v.optional(v.array(selectedElementValidator)),
     mode: v.optional(v.union(v.literal("plan"), v.literal("swarm"))),
   },
   returns: v.id("messages"),
@@ -114,6 +121,7 @@ export const createMessage = mutation({
       status: args.status,
       runModel: args.runModel,
       ...(args.images?.length ? { images: args.images } : {}),
+      ...(args.elements?.length ? { elements: args.elements } : {}),
       ...(args.mode ? { mode: args.mode } : {}),
     });
     if (args.role === "assistant" && args.status === "processing") {
@@ -137,6 +145,10 @@ export const updateMessageContent = mutation({
     /** Set when the content is a failure reply, so the run counts as an error (#339). */
     outcome: v.optional(v.literal("error")),
     stuck: v.optional(stuckRunValidator),
+    /** Follow-up prompts parsed out of the reply (#256). */
+    suggestions: v.optional(v.array(v.string())),
+    /** The run completed the project's first build (#341). */
+    firstBuild: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -152,7 +164,13 @@ export const updateMessageContent = mutation({
       status: "completed" as const,
       completedAt: Date.now(),
       ...(args.stuck ? { stuck: args.stuck } : {}),
+      // Bounded as in the schema, whatever the caller sends.
+      ...(args.suggestions?.length
+        ? { suggestions: args.suggestions.slice(0, 3).map((s) => s.slice(0, 100)) }
+        : {}),
+      ...(args.firstBuild ? { firstBuild: true } : {}),
     });
+    await closeOpenTasks(ctx, args.messageId);
   },
 });
 
@@ -198,6 +216,7 @@ export const updateMessageStatus = mutation({
         await ctx.db.get("messages", args.messageId),
         args.status === "cancelled" ? "cancelled" : "ok",
       );
+      await closeOpenTasks(ctx, args.messageId);
     }
     await ctx.db.patch("messages", args.messageId, {
       status: args.status,
@@ -864,6 +883,27 @@ export const createProjectWithConversation = mutation({
     });
 
     return { projectId, conversationId };
+  },
+});
+
+/**
+ * A project's activation events (#339), names and times only, for the e2e
+ * spec: `activationEvents:report` only gives totals.
+ */
+export const getActivationEvents = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+  },
+  returns: v.array(v.object({ name: v.string(), at: v.number() })),
+  handler: async (ctx, { internalKey, projectId }) => {
+    validateInternalKey(internalKey);
+
+    const events = await ctx.db
+      .query("activationEvents")
+      .withIndex("by_projectId_and_name_and_at", (q) => q.eq("projectId", projectId))
+      .take(MAX_ACTIVATION_EVENTS);
+    return events.map(({ name, at }) => ({ name, at }));
   },
 });
 
@@ -1778,6 +1818,7 @@ export const setPublicEnvVarInternal = mutation({
     key: v.string(),
     value: v.string(),
   },
+  returns: v.id("projectEnvVars"),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
@@ -1785,6 +1826,14 @@ export const setPublicEnvVarInternal = mutation({
     // so it must be the project's real owner (#211).
     if (!(await ownedProjectOrNull(ctx, args.projectId, args.ownerId))) {
       throw appError("NOT_FOUND", "Project not found");
+    }
+
+    if (publicValueSecretRule(args.value)) {
+      throw appError(
+        "INVALID_ARGUMENT",
+        "This looks like a secret key and would be published in the browser bundle. " +
+          "Use a name without a public prefix and store it as a secret instead.",
+      );
     }
 
     const existing = await ctx.db

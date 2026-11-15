@@ -14,7 +14,7 @@ import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { deleteProjectBatch } from "./projectCascade";
-import { copyProjectFiles, remixProject } from "./projectCopy";
+import { assertCanCopy, copyProjectFiles, remixProject } from "./projectCopy";
 import { getProjectFile, MAX_PROJECT_FILES } from "./files";
 import { readFileContent } from "./fileContents";
 import { isSecretFile } from "./secretFiles";
@@ -271,6 +271,7 @@ export const duplicate = mutation({
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
     const source = await getOwnedProject(ctx, args.id, identity.subject);
+    await assertCanCopy(ctx, identity.subject);
 
     const newProjectId = await ctx.db.insert("projects", {
       name: copyProjectName(source.name),
@@ -541,16 +542,16 @@ export const conversationNeedsFirstBuildForServer = query({
 /**
  * Ends a seeded project's first build (#338): called by the agent run that
  * wrote files and finished. Failed, cancelled, plan and Q&A runs leave it set.
+ * True when this call ended it, so that run gets the ship card (#341).
  */
 export const completeFirstBuild = mutation({
   args: { internalKey: v.string(), projectId: v.id("projects") },
-  returns: v.null(),
+  returns: v.boolean(),
   handler: async (ctx, { internalKey, projectId }) => {
     validateInternalKey(internalKey);
     const project = await ctx.db.get("projects", projectId);
-    if (project?.firstBuildPending) {
-      await ctx.db.patch("projects", projectId, { firstBuildPending: undefined });
-    }
-    return null;
+    if (!project?.firstBuildPending) return false;
+    await ctx.db.patch("projects", projectId, { firstBuildPending: undefined });
+    return true;
   },
 });

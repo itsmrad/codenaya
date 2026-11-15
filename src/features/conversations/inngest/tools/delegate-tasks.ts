@@ -68,8 +68,8 @@ export const createDelegateTasksTool = ({
   return createTool({
     name: "delegateTasks",
     description:
-      "Run 2-4 tasks in parallel, each by a worker that writes only its owned paths (files or folders under src/, disjoint between tasks). " +
-      "Shared files (package.json, src/App.tsx, src/main.tsx, src/index.css, configs) stay yours. Call it once, after writing the shared foundation. " +
+      "Run 2-4 tasks in parallel, each by a worker that writes only its owned paths. ownedPaths must be files or folders under src/ (e.g. src/pages/Home.tsx, src/components/gallery), disjoint between tasks. " +
+      "Anything outside src/ (public/ assets, root config) and the shared files (package.json, src/App.tsx, src/main.tsx, src/index.css, configs) are yours: write them before delegating. Call it once, after writing the shared foundation. " +
       "Returns each task's report: done, unfinished or failed, the files it wrote, and its NEEDS: requests." +
       (subOrchestrators ? " A task with role \"sub-orchestrator\" (at most 2) splits its own paths among up to 3 workers." : ""),
     parameters: swarmPlanSchema,

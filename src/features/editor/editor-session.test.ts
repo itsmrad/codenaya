@@ -2,7 +2,14 @@ import { afterEach, expect, test, vi } from "vitest";
 import { ConvexError } from "convex/values";
 
 import type { Id } from "../../../convex/_generated/dataModel";
-import { clearProjectSessions, EditorSession, getProjectSessions, hasOpenConflict } from "./editor-session";
+import {
+  clearAllProjectSessions,
+  clearProjectSessions,
+  EditorSession,
+  getProjectSessions,
+  hasOpenConflict,
+  retainProjectSessions,
+} from "./editor-session";
 
 afterEach(() => vi.useRealTimers());
 
@@ -131,7 +138,7 @@ test("an unresolved conflict still retains the local document if it is undone to
   session.reload();
 });
 
-test("each project keeps its own sessions until it is left, and reports open conflicts (#604)", () => {
+test("each project keeps its own sessions until another project opens, and reports open conflicts (#604, #618)", () => {
   const a = "projectA" as Id<"projects">;
   const b = "projectB" as Id<"projects">;
   const session = new EditorSession("base", vi.fn());
@@ -139,14 +146,97 @@ test("each project keeps its own sessions until it is left, and reports open con
 
   expect(getProjectSessions(a).get("file" as Id<"files">)).toBe(session);
   expect(getProjectSessions(b).size).toBe(0);
-  expect(hasOpenConflict()).toBe(false);
+  expect(hasOpenConflict(a)).toBe(false);
 
   session.edit("mine");
   session.receive("theirs");
-  expect(hasOpenConflict()).toBe(true);
+  expect(hasOpenConflict(a)).toBe(true);
+  expect(hasOpenConflict(b)).toBe(false);
 
-  clearProjectSessions(a);
+  retainProjectSessions(a);
+  expect(getProjectSessions(a).get("file" as Id<"files">)).toBe(session);
+  retainProjectSessions(b);
   expect(getProjectSessions(a).size).toBe(0);
-  expect(hasOpenConflict()).toBe(false);
+  expect(hasOpenConflict(a)).toBe(false);
+  clearProjectSessions(a);
   clearProjectSessions(b);
+});
+
+test("an echo equal to the draft after a non-conflict save error is not a conflict (#605)", async () => {
+  vi.useFakeTimers();
+  const write = vi.fn().mockRejectedValue(new Error("network down"));
+  const session = new EditorSession("old", write);
+  session.edit("mine");
+  await session.save();
+  expect(session.getSnapshot()).toMatchObject({ conflict: false, error: expect.any(String) });
+
+  // The write landed on the server before the client saw the error.
+  session.receive("mine");
+  expect(session.getSnapshot()).toMatchObject({ content: "mine", dirty: false, conflict: false, error: null });
+  await vi.runAllTimersAsync();
+  expect(write).toHaveBeenCalledTimes(1);
+
+  // A later different echo with no local edits is simply followed.
+  session.receive("agent");
+  expect(session.getSnapshot()).toMatchObject({ content: "agent", conflict: false });
+});
+
+test("an echo that matches an already conflicted draft resolves the conflict (#605)", () => {
+  const session = new EditorSession("old", vi.fn());
+  session.edit("mine");
+  session.receive("theirs");
+  expect(session.getSnapshot().conflict).toBe(true);
+  session.receive("mine");
+  expect(session.getSnapshot()).toMatchObject({ content: "mine", dirty: false, conflict: false });
+});
+
+test("an echo during a save that then errors leaves nothing to retry and no conflict (#605)", async () => {
+  const pending = Promise.withResolvers<null>();
+  const write = vi.fn().mockReturnValueOnce(pending.promise).mockRejectedValue(new ConvexError({ code: "CONFLICT", message: "Changed elsewhere" }));
+  const session = new EditorSession("old", write);
+  session.edit("mine");
+  const saving = session.save();
+  session.receive("mine");
+  pending.reject(new Error("network timeout"));
+  await saving;
+  expect(session.getSnapshot()).toMatchObject({ content: "mine", dirty: false, conflict: false, error: null });
+
+  await session.save();
+  expect(write).toHaveBeenCalledTimes(1);
+  expect(session.getSnapshot().conflict).toBe(false);
+});
+
+test("an agent echo equal to a newer draft during an older save is not a conflict (#605)", async () => {
+  for (const outcome of ["saved", "rejected"] as const) {
+    const pending = Promise.withResolvers<null>();
+    const session = new EditorSession("old", vi.fn().mockReturnValue(pending.promise));
+    session.edit("v1");
+    const saving = session.save();
+    session.edit("v2");
+    session.receive("v2");
+    if (outcome === "saved") pending.resolve(null);
+    else pending.reject(new ConvexError({ code: "CONFLICT", message: "Changed elsewhere" }));
+    await saving;
+    expect(session.getSnapshot()).toMatchObject({ content: "v2", dirty: false, conflict: false, error: null });
+    session.reload();
+  }
+});
+
+test("clearing every project drops the store and cancels pending autosaves (#618)", async () => {
+  vi.useFakeTimers();
+  const write = vi.fn().mockResolvedValue(null);
+  const a = "projectA" as Id<"projects">;
+  const b = "projectB" as Id<"projects">;
+  for (const id of [a, b]) {
+    const session = new EditorSession("old", write);
+    getProjectSessions(id).set("file" as Id<"files">, session);
+    session.edit(`draft in ${id}`);
+  }
+
+  clearAllProjectSessions();
+  await vi.runAllTimersAsync();
+  expect(write).not.toHaveBeenCalled();
+  expect(getProjectSessions(a).size).toBe(0);
+  expect(getProjectSessions(b).size).toBe(0);
+  clearAllProjectSessions();
 });

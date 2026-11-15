@@ -17,6 +17,7 @@ const fixtureProject = async (page: Page, name: string) => {
 
 const openSkills = async (page: Page, projectId: Id<"projects">) => {
   await page.goto(`/projects/${projectId}?engine=webcontainer`);
+  await page.getByRole("button", { name: "More actions", exact: true }).click();
   await page.getByRole("button", { name: "Skills", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Skills" });
   await expect(dialog.getByRole("switch", { name: "Enable find-skills" })).toBeVisible();
@@ -59,6 +60,7 @@ test.describe("project skills panel", () => {
       await findSkills.click();
       await expect(findSkills).toBeChecked();
       await page.reload();
+      await page.getByRole("button", { name: "More actions", exact: true }).click();
       await page.getByRole("button", { name: "Skills", exact: true }).click();
       dialog = page.getByRole("dialog", { name: "Skills" });
       await expect(

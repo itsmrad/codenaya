@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
+import type { Doc } from "./_generated/dataModel";
 import {
   internalMutation,
   query,
@@ -15,20 +16,25 @@ import {
 
 const PROJECTS_BUILT = "projectsBuilt";
 const BACKFILL_BATCH = 500;
+/**
+ * The total is split over this many rows so concurrent project creations
+ * rarely patch the same one (a single hot row made them OCC-retry, #597).
+ * Shard 0 keeps the original name, so an existing total stays counted.
+ * shortcut: fixed shard count; widen SHARDS (readers sum by name) if creates still collide.
+ */
+const SHARDS = 8;
 
-const getProjectsBuiltRow = (ctx: QueryCtx) =>
+const shardName = (i: number) => (i === 0 ? PROJECTS_BUILT : `${PROJECTS_BUILT}:${i}`);
+
+const getShardRow = (ctx: QueryCtx, i: number) =>
   ctx.db
     .query("counters")
-    .withIndex("by_name", (q) => q.eq("name", PROJECTS_BUILT))
+    .withIndex("by_name", (q) => q.eq("name", shardName(i)))
     .unique();
 
-async function setProjectsBuilt(ctx: MutationCtx, value: (current: number) => number) {
-  const counter = await getProjectsBuiltRow(ctx);
-  if (counter) {
-    await ctx.db.patch("counters", counter._id, { value: value(counter.value) });
-  } else {
-    await ctx.db.insert("counters", { name: PROJECTS_BUILT, value: value(0) });
-  }
+async function getShardRows(ctx: QueryCtx) {
+  const rows = await Promise.all(Array.from({ length: SHARDS }, (_, i) => getShardRow(ctx, i)));
+  return rows.filter((row): row is Doc<"counters"> => row !== null);
 }
 
 /**
@@ -37,7 +43,13 @@ async function setProjectsBuilt(ctx: MutationCtx, value: (current: number) => nu
  * does not lower it: the number counts projects ever built, not live ones.
  */
 export async function countProjectBuilt(ctx: MutationCtx) {
-  await setProjectsBuilt(ctx, (current) => current + 1);
+  const shard = Math.floor(Math.random() * SHARDS);
+  const counter = await getShardRow(ctx, shard);
+  if (counter) {
+    await ctx.db.patch("counters", counter._id, { value: counter.value + 1 });
+  } else {
+    await ctx.db.insert("counters", { name: shardName(shard), value: 1 });
+  }
 }
 
 /** The "N projects built" total, or null before anything has been counted. */
@@ -45,8 +57,8 @@ export const projectsBuilt = query({
   args: {},
   returns: v.union(v.number(), v.null()),
   handler: async (ctx) => {
-    const counter = await getProjectsBuiltRow(ctx);
-    return counter?.value ?? null;
+    const rows = await getShardRows(ctx);
+    return rows.length === 0 ? null : rows.reduce((sum, row) => sum + row.value, 0);
   },
 });
 
@@ -77,7 +89,14 @@ export const backfillProjectsBuilt = internalMutation({
       return null;
     }
 
-    await setProjectsBuilt(ctx, () => counted);
+    // The whole total goes in shard 0; stale values in the others are zeroed.
+    const rows = await getShardRows(ctx);
+    const first = rows.find((row) => row.name === PROJECTS_BUILT);
+    if (first) await ctx.db.patch("counters", first._id, { value: counted });
+    else await ctx.db.insert("counters", { name: PROJECTS_BUILT, value: counted });
+    for (const row of rows) {
+      if (row !== first) await ctx.db.patch("counters", row._id, { value: 0 });
+    }
     return null;
   },
 });

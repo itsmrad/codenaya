@@ -5,9 +5,13 @@ import { useReducedMotion } from "motion/react";
 import {
   BookOpenIcon,
   CheckIcon,
+  BookmarkPlusIcon,
   CopyIcon,
   HammerIcon,
+  KeyRoundIcon,
   PencilIcon,
+  PlugIcon,
+  RocketIcon,
   ListChecksIcon,
   RotateCcwIcon,
   Undo2Icon,
@@ -18,6 +22,7 @@ import {
   MessageActions,
   MessageResponse,
 } from "@/components/ai-elements/message";
+import { Suggestion } from "@/components/ai-elements/suggestion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { usePreviewErrors } from "@/features/sandbox-preview/hooks/use-preview-errors";
@@ -32,24 +37,37 @@ import { buildPlanMessage, isPlanReply } from "../plan-mode";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
 import { PlanEditor } from "./plan-editor";
+import { ShipCard } from "./ship-card";
+import { parseSuggestion, type SuggestionAction } from "../suggestions";
 import { SwarmBoard } from "./swarm-board";
 import { type StuckRetry, StuckRunCard } from "./stuck-run-card";
+import { ElementChips } from "./element-chips";
+import type { SelectedElement } from "../selected-elements";
 
 interface UserMessageProps {
   content: string;
   /** Attached images, shown as thumbnails above the text. */
   imageUrls?: string[];
+  /** Preview elements picked in Select mode (#227), shown as chips above the text. */
+  elements?: SelectedElement[];
   /** Enabled skills: leading `/name` tokens naming one show as a chip. */
   skillNames?: ReadonlySet<string>;
   /** Sent while the conversation was open (not history): fades up on mount. */
   animate?: boolean;
+  /** Opens "Remember for this project" with this text (#630); hidden when unset. */
+  onRemember?: () => void;
+  /** Proposes saving this message as a note; set only when it reads like a lasting preference. */
+  onDismissProposal?: () => void;
 }
 
 export const UserMessage = ({
   content,
   imageUrls = [],
+  elements = [],
   skillNames,
   animate = false,
+  onRemember,
+  onDismissProposal,
 }: UserMessageProps) => {
   const textRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -76,10 +94,11 @@ export const UserMessage = ({
     // wrap instead of widening the bubble past the panel.
     <div
       className={cn(
-        "ml-auto flex min-w-0 max-w-[90%] flex-col items-end @sm:max-w-[85%]",
+        "group/user ml-auto flex min-w-0 max-w-[90%] flex-col items-end @sm:max-w-[85%]",
         fadeUp && "animate-fade-up motion-reduce:animate-none",
       )}
     >
+      <ElementChips elements={elements} className="mb-1.5 justify-end" />
       {imageUrls.length > 0 && (
         <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
           {imageUrls.map((url, index) => (
@@ -145,6 +164,30 @@ export const UserMessage = ({
           {expanded ? "Show less" : "Show more"}
         </button>
       )}
+      {onRemember && onDismissProposal && (
+        <div className="mt-1.5 flex flex-wrap items-center justify-end gap-1 text-xs text-muted-foreground">
+          <span>Remember this for the project?</span>
+          <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={onRemember}>
+            Remember
+          </Button>
+          <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={onDismissProposal}>
+            Not now
+          </Button>
+        </div>
+      )}
+      {onRemember && !onDismissProposal && (
+        <MessageActions className="mt-0.5 opacity-0 transition-opacity duration-100 group-hover/user:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+          <MessageAction
+            size="icon-sm"
+            label="Remember for this project"
+            tooltip="Remember for this project"
+            onClick={onRemember}
+            className="size-7 text-muted-foreground hover:text-foreground"
+          >
+            <BookmarkPlusIcon className="size-3.5" />
+          </MessageAction>
+        </MessageActions>
+      )}
     </div>
   );
 };
@@ -202,7 +245,15 @@ interface AssistantMessageProps {
   stuckRetry?: StuckRetry;
   /** A stuck run (#306): pre-fills a plan-mode message about the loop. */
   onDiagnose?: () => void;
+  /** A next-step chip (#256): runs its action, or fills the composer with the prompt, unsent. */
+  onSuggestion?: (line: string) => void;
 }
+
+const ACTION_ICONS: Record<SuggestionAction["kind"], typeof PlugIcon> = {
+  connect: PlugIcon,
+  publish: RocketIcon,
+  "env-vars": KeyRoundIcon,
+};
 
 export const AssistantMessage = ({
   message,
@@ -214,6 +265,7 @@ export const AssistantMessage = ({
   onBuildPlan,
   stuckRetry,
   onDiagnose,
+  onSuggestion,
   checkpointId,
   revertDisabled,
 }: AssistantMessageProps) => {
@@ -384,6 +436,29 @@ export const AssistantMessage = ({
               </Button>
             </div>
           )}
+          {message.firstBuild && <ShipCard projectId={message.projectId} />}
+          {/* Only under the latest build reply; a plan has "Build this plan". */}
+          {isLast && onSuggestion && message.mode !== "plan" && !message.stuck && message.suggestions?.length ? (
+            <div className={cn("flex flex-wrap gap-2", settle)}>
+              {message.suggestions.map((line) => {
+                const { label, action } = parseSuggestion(line);
+                // The ship card already offers Publish under a first build.
+                if (message.firstBuild && action?.kind === "publish") return null;
+                const Icon = action && ACTION_ICONS[action.kind];
+                return (
+                  <Suggestion
+                    key={line}
+                    suggestion={line}
+                    onClick={onSuggestion}
+                    className="h-auto whitespace-normal px-3 py-1.5 text-left text-xs font-normal"
+                  >
+                    {Icon && <Icon className="size-3.5" aria-hidden />}
+                    {label}
+                  </Suggestion>
+                );
+              })}
+            </div>
+          ) : null}
           <MessageActions
             className={cn(
               "-ml-1.5 -mt-1 opacity-0 transition-opacity duration-100 group-hover/msg:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100",

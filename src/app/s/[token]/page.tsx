@@ -22,6 +22,8 @@ export const generateMetadata = async ({ params }: SharePageProps): Promise<Meta
     title: project ? `${project.name} — shared on Codenaya` : "Share link not found — Codenaya",
     // A share link is for the people it was sent to, not for search engines.
     robots: { index: false, follow: false },
+    // The token is in the URL: keep it out of the Referer of anything the page links to or loads.
+    referrer: "no-referrer",
   };
 };
 

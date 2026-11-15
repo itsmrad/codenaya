@@ -110,13 +110,15 @@ export const AppearanceSettings = () => {
               <p className="text-xs text-muted-foreground">
                 {permission === "denied"
                   ? "Notifications are blocked in your browser settings."
-                  : "Sends a system notification with a one-click link to the Preview."}
+                  : permission === "unsupported"
+                    ? "This browser doesn't support notifications."
+                    : "Sends a system notification with a one-click link to the Preview."}
               </p>
             </div>
             <Switch
               id="build-notif-switch"
               checked={mounted ? notifEnabled : false}
-              disabled={permission === "denied"}
+              disabled={permission === "denied" || permission === "unsupported"}
               onCheckedChange={toggleNotif}
               aria-label="Browser notification"
             />

@@ -81,8 +81,9 @@ export const ImportGithubDialog = ({
         router.push(`/projects/${projectId}`);
       } catch (error) {
         if (error instanceof HTTPError) {
-          const body = await error.response.json<{ error: string; code?: string }>();
-          if (body.code === GITHUB_NOT_LINKED) {
+          // A proxy or a crash can answer with HTML; still fall through to the toast.
+          const body = await error.response.json<{ error?: string; code?: string }>().catch(() => null);
+          if (body?.code === GITHUB_NOT_LINKED) {
             setGithubNotLinked(true);
             return;
           }
@@ -144,6 +145,9 @@ export const ImportGithubDialog = ({
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
                       aria-invalid={isInvalid}
+                      inputMode="url"
+                      autoComplete="off"
+                      spellCheck={false}
                       placeholder="https://github.com/owner/repo"
                       className="h-10 rounded-md font-mono text-[13px] focus-visible:border-brand/50 focus-visible:ring-4 focus-visible:ring-brand/10"
                     />

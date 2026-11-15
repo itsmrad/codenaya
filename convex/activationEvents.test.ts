@@ -428,3 +428,40 @@ describe("activationEvents.report", () => {
     expect(report.firstBuildToSandboxRunning).toEqual({ count: 1, medianMs: 1_000, p90Ms: 1_000 });
   });
 });
+
+describe("system.getActivationEvents", () => {
+  test("needs the internal key", async () => {
+    const t = convexTest(schema, modules);
+    const { projectId } = await createProject(t);
+    await expect(
+      t.query(api.system.getActivationEvents, { internalKey: "wrong", projectId }),
+    ).rejects.toThrow("Invalid internal key");
+  });
+
+  test("returns only the project's event names and times", async () => {
+    const t = convexTest(schema, modules);
+    const ids = await createProject(t);
+    await startRun(t, ids);
+    const other = await createProject(t, BOB);
+
+    const events = await t.query(api.system.getActivationEvents, {
+      internalKey: INTERNAL_KEY,
+      projectId: ids.projectId,
+    });
+    expect(events.map((event) => event.name).sort()).toEqual([
+      "first_build_started",
+      "project_created",
+      "run_started",
+    ]);
+    for (const event of events) {
+      expect(Object.keys(event).sort()).toEqual(["at", "name"]);
+      expect(typeof event.at).toBe("number");
+    }
+    expect(
+      await t.query(api.system.getActivationEvents, {
+        internalKey: INTERNAL_KEY,
+        projectId: other.projectId,
+      }),
+    ).toEqual([{ name: "project_created", at: expect.any(Number) }]);
+  });
+});

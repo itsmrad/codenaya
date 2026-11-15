@@ -18,9 +18,20 @@ const connection: ConnectionSummary = {
 };
 
 it.each(["needs_reauth", "revoked", "error"] as const)("offers reconnect for %s", (status) => {
-  const html = renderToStaticMarkup(createElement(ConnectionCard, { connection: { ...connection, status } }));
-  expect(html).toContain(">Reconnect</button>");
-  expect(html).toContain('aria-label="Reconnect My connection connection"');
+  for (const authMode of ["oauth", "api_key"] as const) {
+    const html = renderToStaticMarkup(createElement(ConnectionCard, { connection: { ...connection, authMode, status } }));
+    expect(html).toContain(">Reconnect</button>");
+    expect(html).toContain('aria-label="Reconnect My connection connection"');
+  }
+});
+
+it.each(["active", "needs_reauth", "revoked", "error"] as const)("hides reconnect for a %s none-mode connection", (status) => {
+  const html = renderToStaticMarkup(createElement(ConnectionCard, {
+    connection: { ...connection, providerId: "microsoft-learn", authMode: "none", status },
+  }));
+  expect(html).not.toContain(">Reconnect</button>");
+  expect(html).not.toContain('aria-label="Reconnect My connection connection"');
+  expect(html).toContain('aria-label="Remove My connection connection"');
 });
 
 it("shows linked project scope and last-used time on an active connection", () => {

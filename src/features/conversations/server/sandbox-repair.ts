@@ -10,12 +10,13 @@ import {
   toolResultError,
 } from "@/features/conversations/agent-steps";
 import { decodeJsonArgs } from "@/features/conversations/inngest/lib/json-args";
-import { checkProjectBuild, isSafeProjectPath, redact } from "@/features/conversations/inngest/tools/check-build";
+import { checkProjectBuild, isSafeProjectPath, projectFramework, redact } from "@/features/conversations/inngest/tools/check-build";
 import { createDeleteFilesTool } from "@/features/conversations/inngest/tools/delete-files";
 import { createEditFileTool } from "@/features/conversations/inngest/tools/edit-file";
 import { createReadFilesTool } from "@/features/conversations/inngest/tools/read-files";
 import { createWriteFilesTool } from "@/features/conversations/inngest/tools/write-files";
 import { type ProjectFile, WORK_DIR } from "@/features/sandbox-preview/server/project-sandbox";
+import type { Framework } from "@/features/sandbox-preview/utils/framework";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
@@ -61,8 +62,11 @@ const REPAIR_MAX_STEPS = 8;
 const MAX_TEXT_BYTES = 1_000_000;
 const MAX_SNAPSHOT_FILES = 2_000;
 const SHORT_CALL_MS = 10_000;
-/** Never read into a check or copied into the sandbox, like the preview's `.env` on the warm path. */
-const SKIPPED_DIRS = new Set(["node_modules", ".git", "dist"]);
+/**
+ * Never read into a check or copied into the sandbox, like the preview's `.env` on the warm path.
+ * Build output (Vite's dist, Next.js's .next and out) and Next.js's generated next-env.d.ts.
+ */
+const SKIPPED_DIRS = new Set(["node_modules", ".git", "dist", ".next", "out", "next-env.d.ts"]);
 const isEnvFile = (path: string) => /(^|\/)\.env(\.|$)/.test(path);
 const readable = (path: string) =>
   isSafeProjectPath(path) && !SKIPPED_DIRS.has(path.split("/")[0]) && !isEnvFile(path);
@@ -99,7 +103,14 @@ export type RepairResult = {
 };
 
 /** One verify's outcome: plain JSON, so a step can memoize it. */
-type CheckOutcome = { status: "passed" | "failed" | "unverified"; errors: BuildError[]; paths: string[]; reason?: string };
+type CheckOutcome = {
+  status: "passed" | "failed" | "unverified";
+  errors: BuildError[];
+  paths: string[];
+  reason?: string;
+  /** On a failed check, for the repair prompt; missing on outcomes memoized before Next.js support (Vite). */
+  framework?: Framework | null;
+};
 
 type Model = NonNullable<Parameters<typeof createAgent>[0]["model"]>;
 
@@ -150,7 +161,8 @@ export type VerifyAndFixOptions = {
 const snapshot = async (sandbox: Sandbox, dir: string) => {
   // GNU find: "<bytes> <relative path>" per file.
   const listing = await sandbox.commands.run(
-    "find . -type f -not -path './node_modules/*' -not -path './.git/*' -not -path './dist/*' -printf '%s %P\\n'",
+    "find . -type f -not -path './node_modules/*' -not -path './.git/*' -not -path './dist/*' " +
+      "-not -path './.next/*' -not -path './out/*' -printf '%s %P\\n'",
     { cwd: dir, timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS },
   );
   const entries = listing.stdout
@@ -188,6 +200,9 @@ const snapshot = async (sandbox: Sandbox, dir: string) => {
 
 // "src/App.tsx(3,7): error TS2322: ..." (tsc) or "src/App.tsx:3:7: ERROR: ..." (esbuild).
 const LOCATED = /^([\w@./-]+\.[\w]+)(?:\((\d+),\d+\)|:(\d+):\d+):?\s*(.+)$/;
+// next build: "./src/app/page.tsx:12:3" alone, then the message on the next line.
+const LOCATION_ONLY = /^(?:\.\/)?([\w@./-]+\.\w+)(?::(\d+):\d+)?$/;
+const NEXT_MESSAGE = /^(?:Type error|Module not found|Syntax error|Error): /;
 
 /** checkBuild's failure text as structured errors; the whole body when no line names a file. */
 export const parseBuildErrors = (text: string): BuildError[] => {
@@ -197,7 +212,17 @@ export const parseBuildErrors = (text: string): BuildError[] => {
     return (listed.length ? listed : [head]).map((message) => ({ message, kind: "static" }));
   }
   const install = head.startsWith("Error: npm install failed");
-  const located = body.flatMap((line): BuildError[] => {
+  const located = body.flatMap((line, index): BuildError[] => {
+    const alone = LOCATION_ONLY.exec(line);
+    const next = body[index + 1] ?? "";
+    if (alone && NEXT_MESSAGE.test(next)) {
+      return [{
+        file: alone[1],
+        ...(alone[2] ? { line: Number(alone[2]) } : {}),
+        message: next,
+        kind: install ? "install" : next.startsWith("Type error") ? "type" : "build",
+      }];
+    }
     const match = LOCATED.exec(line);
     if (!match) return [];
     const [, file, tscLine, esLine, message] = match;
@@ -231,11 +256,12 @@ const verify = async (connect: () => Promise<Sandbox>, dir: string, secrets: str
   if (!text.startsWith("Error:") || text.startsWith(BUILD_CHECK_UNFINISHED)) {
     return { status: "unverified", errors: [], paths, reason: text.split("\n")[0] };
   }
-  return { status: "failed", errors: parseBuildErrors(text), paths };
+  return { status: "failed", errors: parseBuildErrors(text), paths, framework: projectFramework(snap.files, snap.paths) };
 };
 
-const REPAIR_SYSTEM =
-  "You fix build errors in a Vite + TypeScript project. Read the files you need with readFiles, then fix them " +
+const repairSystem = (framework?: Framework | null) =>
+  `You fix build errors in a ${framework === "next" ? "Next.js (App Router)" : "Vite"} + TypeScript project. ` +
+  "Read the files you need with readFiles, then fix them " +
   "with editFile (or writeFiles for a whole file). Make the smallest change that fixes the listed errors and " +
   "change nothing else. When done, reply with one line saying what you changed.";
 
@@ -307,7 +333,7 @@ export const repairTools = ({
  * `allowedPaths` are refused whole, as SWARM's own guard does.
  */
 const repair = async ({
-  projectId, internalKey, model, name, errors, paths, signal, allowedPaths, onResponse,
+  projectId, internalKey, model, name, errors, paths, framework, signal, allowedPaths, onResponse,
 }: {
   projectId: Id<"projects">;
   internalKey: string;
@@ -315,6 +341,7 @@ const repair = async ({
   name: string;
   errors: BuildError[];
   paths: string[];
+  framework?: Framework | null;
   signal?: AbortSignal;
   allowedPaths?: (path: string) => boolean;
   onResponse?: (raw: string | undefined) => Promise<void>;
@@ -322,7 +349,7 @@ const repair = async ({
   const written: string[] = [];
   const agent = createAgent({
     name,
-    system: REPAIR_SYSTEM,
+    system: repairSystem(framework),
     model,
     tools: repairTools({ projectId, internalKey, name, signal, allowedPaths, written }),
     lifecycle: {
@@ -463,7 +490,7 @@ export const verifyAndFix = async ({
     try {
       written = await repair({
         projectId, internalKey, model, name: `${prefix}:repair:${attempt}`,
-        errors: owned, paths: outcome.paths, signal, allowedPaths, onResponse,
+        errors: owned, paths: outcome.paths, framework: outcome.framework, signal, allowedPaths, onResponse,
       });
     } catch (error) {
       console.error("[sandbox-repair] repair failed", projectId, error);

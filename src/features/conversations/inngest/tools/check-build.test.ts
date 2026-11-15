@@ -22,7 +22,8 @@ import {
   BUILD_VERIFIED,
   STATIC_CHECKS_PASSED,
 } from "../../agent-steps";
-import { checkProjectBuild, createCheckBuildTool, trimBuildOutput } from "./check-build";
+import { buildCommand, checkProjectBuild, createCheckBuildTool, trimBuildOutput } from "./check-build";
+import { NEXT_MODULE_NOT_FOUND, NEXT_PRERENDER_ERROR, NEXT_TYPE_ERROR } from "./next-build-output.fixture";
 
 const starter = () => VITE_REACT_STARTER.map((file) => ({ ...file }));
 const check = (files = starter(), apiKey: string | null = "e2b_key") =>
@@ -88,6 +89,98 @@ describe("trimBuildOutput", () => {
   });
 });
 
+/** A minimal Next.js App Router project. */
+const nextApp = () => [
+  {
+    path: "package.json",
+    content: JSON.stringify({
+      name: "app",
+      private: true,
+      scripts: { dev: "next dev", build: "next build" },
+      dependencies: { next: "15.5.4", react: "19.1.0", "react-dom": "19.1.0" },
+      devDependencies: { typescript: "^5", "@types/react": "^19" },
+    }),
+  },
+  { path: "next.config.ts", content: "const nextConfig = {};\nexport default nextConfig;\n" },
+  { path: "tsconfig.json", content: JSON.stringify({ compilerOptions: { strict: true, jsx: "preserve" } }) },
+  {
+    path: "src/app/layout.tsx",
+    content: "export default function RootLayout({ children }: { children: React.ReactNode }) {\n  return <html lang=\"en\"><body>{children}</body></html>;\n}\n",
+  },
+  { path: "src/app/page.tsx", content: "export default function Page() {\n  return <h1>Hello</h1>;\n}\n" },
+];
+
+describe("trimBuildOutput for Next.js", () => {
+  const output = ({ stdout, stderr }: { stdout: string; stderr: string }) => `${stderr}\n${stdout}`;
+
+  it("keeps a type error with its location and drops the build progress", () => {
+    const trimmed = trimBuildOutput(output(NEXT_TYPE_ERROR), "/home/user/app", "next");
+    expect(trimmed.split("\n").slice(0, 3)).toEqual([
+      "Failed to compile.",
+      "./src/app/page.tsx:12:3",
+      "Type error: Type 'number' is not assignable to type 'string'.",
+    ]);
+    expect(trimmed).not.toMatch(/Next\.js 15|Creating an optimized|Compiled successfully|Linting and checking/);
+  });
+
+  it("keeps a missing module with its location", () => {
+    const trimmed = trimBuildOutput(output(NEXT_MODULE_NOT_FOUND), "/home/user/app", "next");
+    expect(trimmed.split("\n").slice(0, 3)).toEqual([
+      "Failed to compile.",
+      "./src/app/page.tsx:3:1",
+      "Module not found: Can't resolve '@/components/Hero'",
+    ]);
+  });
+
+  it("starts a prerender failure at its error, without the sandbox's paths", () => {
+    const trimmed = trimBuildOutput(output(NEXT_PRERENDER_ERROR), "/home/user/app", "next");
+    expect(trimmed.split("\n").slice(0, 2)).toEqual([
+      'Error occurred prerendering page "/". Read more: https://nextjs.org/docs/messages/prerender-error',
+      "Error: STRIPE_SECRET_KEY is not set",
+    ]);
+    expect(trimmed).not.toContain("/home/user/app/");
+    expect(trimmed).not.toMatch(/Collecting page data|Generating static pages/);
+  });
+
+  it("puts errors printed after the route table first and drops the table and telemetry notice", () => {
+    const stdout = [
+      "Attention: Next.js now collects completely anonymous telemetry regarding usage.",
+      "https://nextjs.org/telemetry",
+      "Route (app)                                 Size  First Load JS",
+      "┌ ○ /                                      5.4 kB         120 kB",
+      "└ ○ /_not-found                              993 B         103 kB",
+      "+ First Load JS shared by all             102 kB",
+      "○  (Static)  prerendered as static content",
+      "build log line",
+      "Failed to compile.",
+      "./src/app/about/page.tsx:4:10",
+      "Type error: Cannot find name 'foo'.",
+    ].join("\n");
+    expect(trimBuildOutput(stdout, "/home/user/app", "next")).toBe(
+      "Failed to compile.\n./src/app/about/page.tsx:4:10\nType error: Cannot find name 'foo'.\nbuild log line",
+    );
+  });
+
+  it("leaves Vite output in its order", () => {
+    expect(trimBuildOutput("✓ 31 modules transformed.\nerror during build:", "/home/user/app")).toBe(
+      "✓ 31 modules transformed.\nerror during build:",
+    );
+  });
+});
+
+describe("buildCommand", () => {
+  it("runs next build alone for Next.js, without telemetry", () => {
+    expect(buildCommand("next", new Set(["package.json", "tsconfig.json"]))).toBe(
+      "NEXT_TELEMETRY_DISABLED=1 npx next build",
+    );
+  });
+
+  it("type checks before vite build when there is a tsconfig", () => {
+    expect(buildCommand("vite", new Set(["tsconfig.json"]))).toBe("npx tsc --noEmit -p tsconfig.json && npx vite build");
+    expect(buildCommand("vite", new Set())).toBe("npx vite build");
+  });
+});
+
 describe("checkProjectBuild", () => {
   it("returns static failures without starting a sandbox", async () => {
     const files = [
@@ -97,6 +190,20 @@ describe("checkProjectBuild", () => {
     const result = await check(files);
     expect(result).toMatch(/^Error: Static checks failed:/);
     expect(result).toContain("../components/Header (imported by src/pages/Home.tsx)");
+    expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("uses public upload paths when checking internal links", async () => {
+    const files = [...starter(), {
+      path: "src/Links.tsx",
+      content: '<><Route path="/" /><a href="/docs/" /></>',
+    }];
+    expect(await check(files, null)).toContain("Link to /docs/ has no route");
+    const result = await checkProjectBuild({
+      files,
+      paths: new Set([...files.map((file) => file.path), "public/docs/upload.pdf"]),
+    });
+    expect(result.split("\n")[0]).toBe(STATIC_CHECKS_PASSED);
     expect(e2b.create).not.toHaveBeenCalled();
   });
 
@@ -203,6 +310,45 @@ describe("checkProjectBuild", () => {
     const result = await check([{ path: "index.js", content: "console.log(1);\n" }]);
     expect(result.split("\n")[0]).toBe(BUILD_NOT_CHECKED);
     expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("builds a Next.js project with next build", async () => {
+    const sandbox = fakeSandbox({ exitCode: 0 }, { exitCode: 0 });
+    const result = await check(nextApp());
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    const commands = sandbox.commands.run.mock.calls.map((call) => (call as unknown[])[0]);
+    expect(commands).toEqual([
+      "npm install --prefer-offline --no-audit --no-fund --loglevel=error",
+      "NEXT_TELEMETRY_DISABLED=1 npx next build",
+    ]);
+  });
+
+  it("builds a Next.js project named only by its package.json dependency", async () => {
+    const sandbox = fakeSandbox({ exitCode: 0 }, { exitCode: 0 });
+    const result = await check(nextApp().filter(({ path }) => path !== "next.config.ts"));
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(sandbox.commands.run.mock.calls[1][0]).toBe("NEXT_TELEMETRY_DISABLED=1 npx next build");
+  });
+
+  it("returns a Next.js type error first", async () => {
+    fakeSandbox({ exitCode: 0 }, { exitCode: 1, ...NEXT_TYPE_ERROR });
+    const result = await check(nextApp());
+    expect(result).toMatch(
+      /^Error: Build failed\. Fix these errors, then call checkBuild again:\nFailed to compile\.\n\.\/src\/app\/page\.tsx:12:3\nType error: /,
+    );
+  });
+
+  it("leaves Next.js build output out of the sourceDir copy", async () => {
+    const sandbox = sandboxWith(() => undefined);
+    const files = nextApp();
+    await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandbox: sandbox as unknown as Sandbox,
+      sourceDir: "/home/user/app",
+    });
+    const [copy] = sandbox.commands.run.mock.calls.map(([command]) => command);
+    expect(copy).toContain("--exclude=./dist --exclude=./.next --exclude=./out --exclude=./next-env.d.ts --exclude=.env ");
   });
 
   it("installs, type checks and builds, then kills the sandbox", async () => {

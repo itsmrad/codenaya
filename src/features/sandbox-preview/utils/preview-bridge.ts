@@ -27,6 +27,99 @@ export function installPreviewBridge(
   // A new document: errors the last one reported are gone. Vite reloads the
   // page itself after re-optimizing dependencies or restarting (#486).
   win.parent.postMessage({ source, version, kind: "page", message: "" }, "*");
+  let parentOrigin = "";
+  try {
+    // Known limitation: without ancestorOrigins (Firefox), a full-page navigation
+    // inside the preview makes document.referrer the preview's own origin, so the
+    // parent's commands no longer match and Select stops working. It fails closed
+    // on purpose: an unverifiable embedding origin is never trusted.
+    parentOrigin = win.location.ancestorOrigins?.[0] || new URL(win.document.referrer).origin;
+    if (parentOrigin === "null") parentOrigin = "";
+  } catch {
+    // Without a known embedding origin, Select mode stays unavailable.
+  }
+  let selecting = false;
+  let outline: HTMLDivElement | null = null;
+  const stopSelecting = () => {
+    selecting = false;
+    outline?.remove();
+    outline = null;
+  };
+  win.addEventListener("message", (event) => {
+    try {
+      if (!parentOrigin || event.origin !== parentOrigin || event.source !== win.parent ||
+        event.data?.source !== source || event.data?.version !== version) return;
+      if (event.data.kind === "select:on") selecting = true;
+      if (event.data.kind === "select:off") stopSelecting();
+    } catch {
+      // Page objects must never break the app.
+    }
+  });
+  win.addEventListener("mousemove", (event) => {
+    try {
+      if (!selecting || !(event.target instanceof win.Element)) return;
+      if (!outline) {
+        outline = win.document.createElement("div");
+        outline.style.cssText = "position:fixed;pointer-events:none;z-index:2147483647;border:2px solid Highlight;box-sizing:border-box;color:Highlight;font:12px monospace";
+        win.document.documentElement.appendChild(outline);
+      }
+      outline.textContent = event.target.tagName.toLowerCase() + Array.from(event.target.classList).slice(0, 2).map((name) => "." + name.slice(0, 64)).join("");
+      const rect = event.target.getBoundingClientRect();
+      Object.assign(outline.style, { left: rect.x + "px", top: rect.y + "px", width: rect.width + "px", height: rect.height + "px" });
+    } catch {
+      // Best-effort hover decoration on an untrusted page.
+    }
+  }, true);
+  const pick = (event: MouseEvent | KeyboardEvent, target: EventTarget | null) => {
+    try {
+      if (!selecting || !(target instanceof win.Element)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const rect = target.getBoundingClientRect();
+      const path: string[] = [];
+      let node: Element | null = target;
+      while (node && path.join(" > ").length < 512) {
+        const index = node.parentElement ? Array.from(node.parentElement.children).indexOf(node) + 1 : 1;
+        path.unshift(node.tagName.toLowerCase() + ":nth-child(" + index + ")");
+        node = node.parentElement;
+      }
+      const element = {
+        tag: target.tagName.toLowerCase().slice(0, 64),
+        id: target.id.slice(0, 128),
+        classes: Array.from(target.classList).slice(0, 20).map((name) => name.slice(0, 64)),
+        text: (target.textContent || "").trim().slice(0, 200),
+        outerHTML: target.outerHTML.slice(0, 2048),
+        domPath: path.join(" > ").slice(0, 512),
+        siblingText: (target.parentElement?.textContent || "").trim().slice(0, 300),
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      };
+      stopSelecting();
+      win.parent.postMessage({ source, version, kind: "select:picked", element }, parentOrigin);
+    } catch {
+      // Reading hostile page data must never break the app.
+    }
+  };
+  win.addEventListener("click", (event) => pick(event, event.target), true);
+  win.addEventListener("keydown", (event) => {
+    try {
+      if (!selecting) return;
+      if (event.key === "Enter" || event.key === " ") {
+        // Nothing focused: leave the page's own Enter/Space handling alone.
+        const active = win.document.activeElement;
+        if (!active || active === win.document.body || active === win.document.documentElement) return;
+        pick(event, active);
+        return;
+      }
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      stopSelecting();
+      win.parent.postMessage({ source, version, kind: "select:off" }, parentOrigin);
+    } catch {
+      // Leaving Select mode is best effort.
+    }
+  }, true);
   let lastPosted = "";
   const post = (kind: string, message: string, detail?: string) => {
     // One error can arrive twice in the same task (window error and its log).
@@ -152,17 +245,45 @@ export function insertBridge(html: string, bridge: string): string {
 
 export const injectPreviewBridge = (html: string) => insertBridge(html, PREVIEW_BRIDGE_SCRIPT);
 
+const pickedElement = z.object({
+  tag: z.string().max(64),
+  id: z.string().max(128).optional(),
+  classes: z.array(z.string().max(64)).max(20).optional(),
+  text: z.string().max(200),
+  outerHTML: z.string().max(2048),
+  domPath: z.string().max(512),
+  siblingText: z.string().max(300).optional(),
+  rect: z.object({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite(), height: z.number().finite() }),
+});
+export type PickedElement = z.infer<typeof pickedElement>;
+
 const envelope = {
   source: z.literal(PREVIEW_MESSAGE_SOURCE),
   version: z.literal(PREVIEW_PROTOCOL_VERSION),
-  message: z.string(),
+
 };
 // A new kind, not a new shape: older bridges still send runtime messages only.
 const previewMessage = z.discriminatedUnion("kind", [
-  z.object({ ...envelope, kind: z.literal("runtime"), stack: z.string().optional() }),
-  z.object({ ...envelope, kind: z.literal("build"), file: z.string().optional() }),
-  z.object({ ...envelope, kind: z.literal("page") }),
+  z.object({ ...envelope, kind: z.literal("runtime"), message: z.string(), stack: z.string().optional() }),
+  z.object({ ...envelope, kind: z.literal("build"), message: z.string(), file: z.string().optional() }),
+  z.object({ ...envelope, kind: z.literal("page"), message: z.string() }),
+  z.object({ ...envelope, kind: z.literal("select:picked"), element: pickedElement }),
+  z.object({ ...envelope, kind: z.literal("select:off") }),
 ]);
+
+/**
+ * The origin to post to or accept messages from, or null for a preview URL that
+ * has none worth trusting (about:blank, blob:, garbage): only http(s) qualifies.
+ */
+export const previewTargetOrigin = (previewUrl: string | null | undefined): string | null => {
+  if (!previewUrl) return null;
+  try {
+    const url = new URL(previewUrl);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : null;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * The error a preview message reports, a new page, or null. Only the preview
@@ -173,15 +294,13 @@ export const readPreviewMessage = (
   event: Pick<MessageEvent, "data" | "origin" | "source">,
   frame: Window | null | undefined,
   previewUrl: string | null | undefined,
-): AppError | { kind: "page" } | null => {
-  if (!frame || !previewUrl || event.source !== frame) return null;
-  try {
-    if (event.origin !== new URL(previewUrl).origin) return null;
-  } catch {
-    return null;
-  }
+): AppError | { kind: "page" } | { kind: "select:off" } | { kind: "select:picked"; element: PickedElement } | null => {
+  const origin = previewTargetOrigin(previewUrl);
+  if (!frame || !origin || event.source !== frame || event.origin !== origin) return null;
   const parsed = previewMessage.safeParse(event.data);
   if (!parsed.success) return null;
+  if (parsed.data.kind === "select:picked") return { kind: "select:picked", element: parsed.data.element };
+  if (parsed.data.kind === "select:off") return { kind: "select:off" };
   if (parsed.data.kind === "page") return { kind: "page" };
   if (parsed.data.kind === "build") return overlayError(parsed.data.message, parsed.data.file);
   return {
@@ -189,4 +308,18 @@ export const readPreviewMessage = (
     message: parsed.data.message.slice(0, MAX_ERROR_TEXT) || "Uncaught error",
     stack: parsed.data.stack?.slice(0, MAX_ERROR_TEXT),
   };
+};
+
+/** Select messages never enter the error setter, including when a banner is already shown. */
+export const routePreviewMessage = (
+  reported: ReturnType<typeof readPreviewMessage>,
+  onError: (error: AppError | null) => void,
+  onPick: (element: PickedElement) => void,
+  onSelectOff: () => void,
+) => {
+  if (!reported) return;
+  if (reported.kind === "select:picked") onPick(reported.element);
+  else if (reported.kind === "select:off") onSelectOff();
+  else if (reported.kind === "page") onError(null);
+  else onError(reported);
 };

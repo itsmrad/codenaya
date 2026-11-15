@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starter";
 
 import {
+  linksWithoutRoutes,
   missingReferencedFiles,
   undeclaredPackages,
   unresolvedImports,
@@ -210,5 +211,104 @@ describe("unresolvedImports", () => {
   it("names a missing @/ import", () => {
     const files = [{ path: "src/App.tsx", content: 'import { cn } from "@/lib/utils";\n' }];
     expect(unresolvedImports(files)).toEqual(["@/lib/utils (imported by src/App.tsx)"]);
+  });
+});
+
+describe("linksWithoutRoutes", () => {
+  const app = (routes: string, links: string, extra: Record<string, string> = {}) => [
+    { path: "src/App.tsx", content: `<Routes>${routes}</Routes>` },
+    { path: "src/Footer.tsx", content: links },
+    ...Object.entries(extra).map(([path, content]) => ({ path, content })),
+  ];
+  const route = (path: string) => `<Route path="${path}" element={<Page />} />`;
+
+  it("passes the starter", () => {
+    expect(linksWithoutRoutes(starter())).toEqual([]);
+  });
+
+  it("flags a link no route serves, whatever the link syntax", () => {
+    const links = `<Link to="/privacy">P</Link> <a href='/terms?x=1#top'>T</a> <NavLink to={"/about"} /> <button onClick={() => navigate("/pricing")} />`;
+    expect(linksWithoutRoutes(app(route("/"), links))).toEqual([
+      "Link to /privacy has no route: add a page or remove the link (in src/Footer.tsx)",
+      "Link to /terms has no route: add a page or remove the link (in src/Footer.tsx)",
+      "Link to /about has no route: add a page or remove the link (in src/Footer.tsx)",
+      "Link to /pricing has no route: add a page or remove the link (in src/Footer.tsx)",
+    ]);
+  });
+
+  it("accepts defined routes, params and nested relative routes", () => {
+    const routes = route("/privacy") + route("/blog/:slug") + `<Route path="/app">${route("settings")}</Route>`;
+    const links = `<Link to="/privacy" /> <Link to="/blog/hello" /> <Link to="/app/settings" /> <Link to="/" />`;
+    expect(linksWithoutRoutes(app(routes, links))).toEqual([]);
+    expect(linksWithoutRoutes(app(routes, `<Link to="/blog" /> <Link to="/blog/a/b" />`))).toHaveLength(2);
+  });
+
+  it("treats a catch-all route as serving everything", () => {
+    expect(linksWithoutRoutes(app(route("/") + route("*"), `<Link to="/privacy" />`))).toEqual([]);
+  });
+
+  it("serves the rest of a splat route", () => {
+    const routes = route("/docs/*");
+    expect(linksWithoutRoutes(app(routes, `<Link to="/docs/a/b" /> <Link to="/other" />`))).toEqual([
+      "Link to /other has no route: add a page or remove the link (in src/Footer.tsx)",
+    ]);
+  });
+
+  it("skips hash, external, mailto, tel, dynamic, API and asset links", () => {
+    const links = [
+      `<a href="#top">`, `<a href="https://x.com/privacy">`, `<a href="//cdn.x.com/a">`, `<a href="mailto:a@b.c">`,
+      `<a href="tel:123">`, "<Link to={`/u/${id}`} />", `<Link to={path} />`, `<a href="/brochure.pdf">`,
+      `<a href="/api/export">`, `<Link to="privacy">`,
+    ].join(" ");
+    expect(linksWithoutRoutes(app(route("/"), links))).toEqual([]);
+  });
+
+  it("reports nothing when the router can't be read statically", () => {
+    const links = `<Link to="/privacy" />`;
+    expect(linksWithoutRoutes(app("", links))).toEqual([]);
+    expect(linksWithoutRoutes(app(route("/"), links, { "src/router.tsx": "createBrowserRouter([])" }))).toEqual([]);
+    expect(linksWithoutRoutes(app(`<Route path={ROUTES.home} />`, links))).toEqual([]);
+    expect(linksWithoutRoutes(app(route("/legal/:page?"), links))).toEqual([]);
+  });
+
+  it("matches route and link segments case-insensitively", () => {
+    const routes = route("/privacy") + route("/ABOUT") + route("/Blog/:slug");
+    expect(linksWithoutRoutes(app(routes, `<a href="/Privacy" /> <Link to="/about" /> <Link to="/BLOG/post" />`))).toEqual([]);
+  });
+
+  it.each(['"/app"', '{"/app"}', '{basePath}'])("skips BrowserRouter basenames: %s", (basename) => {
+    const files = app(route("/x"), `<a href="/app/x" /> <a href="/missing" />`, {
+      "src/main.tsx": `<BrowserRouter basename=${basename}><App /></BrowserRouter>`,
+    });
+    expect(linksWithoutRoutes(files)).toEqual([]);
+  });
+
+  it("keeps skipping createBrowserRouter projects with basenames", () => {
+    expect(linksWithoutRoutes(app(route("/x"), `<a href="/app/x" />`, {
+      "src/router.tsx": 'createBrowserRouter([{ path: "/x" }], { basename: "/app" })',
+    }))).toEqual([]);
+  });
+
+  it("skips dot-leading segments anywhere in a link", () => {
+    const links = `<a href="/.netlify/functions/x" /> <a href="/app/.well-known/config" /> <a href="/missing" />`;
+    expect(linksWithoutRoutes(app(route("/"), links))).toEqual([
+      "Link to /missing has no route: add a page or remove the link (in src/Footer.tsx)",
+    ]);
+  });
+
+  it("skips extensionless public files and directories without skipping similar paths", () => {
+    const files = app(route("/"), `<a href="/download" /> <a href="/docs/?v=1#top" /> <a href="/docs-missing" />`, {
+      "public/download": "content",
+      "public/docs/index.html": "content",
+    });
+    expect(linksWithoutRoutes(files)).toEqual([
+      "Link to /docs-missing has no route: add a page or remove the link (in src/Footer.tsx)",
+    ]);
+  });
+
+  it("uses the complete path list for public uploads without text content", () => {
+    const files = app(route("/"), `<a href="/downloads" /> <a href="/docs/" />`);
+    const paths = new Set([...files.map((file) => file.path), "public/downloads", "public/docs/upload.pdf"]);
+    expect(linksWithoutRoutes(files, paths)).toEqual([]);
   });
 });

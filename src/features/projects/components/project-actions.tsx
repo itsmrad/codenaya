@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { MENU_CONTENT, MENU_ITEM, MenuHeader } from "@/components/menu-chrome";
+import { confirmLeaveEditor } from "@/features/editor/hooks/use-editor-leave-guard";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -73,10 +74,16 @@ export const ProjectActionsMenu = ({
       const copyId = await duplicateProject({ id: project._id });
       toast.success("Project duplicated", {
         id: toastId,
-        action: { label: "Open", onClick: () => router.push(`/projects/${copyId}`) },
+        action: {
+          label: "Open",
+          onClick: () => {
+            const href = `/projects/${copyId}`;
+            if (confirmLeaveEditor(href)) router.push(href);
+          },
+        },
       });
     } catch {
-      toast.error("Couldn't duplicate the project", { id: toastId });
+      toast.error("Couldn't duplicate the project", { id: toastId, description: "Nothing was created. Try again." });
     }
   };
 
@@ -144,7 +151,7 @@ export const DeleteProjectDialog = ({
     onDeleting?.();
     pending.then(
       () => toast.success(`Deleted “${project.name}”`),
-      () => toast.error("Couldn't delete the project"),
+      () => toast.error(`Couldn't delete “${project.name}”`, { description: "It is still in your projects. Try again." }),
     );
   };
 
@@ -215,7 +222,7 @@ export const RenameProjectDialog = ({
     if (trimmed === project.name) return;
     renameProject({ id: project._id, name: trimmed }).then(
       () => toast.success("Project renamed"),
-      () => toast.error("Couldn't rename the project"),
+      () => toast.error("Couldn't rename the project", { description: "The name is unchanged. Try again." }),
     );
   };
 

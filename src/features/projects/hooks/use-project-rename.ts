@@ -41,7 +41,7 @@ export const useProjectRename = (project: Doc<"projects"> | undefined) => {
 
     setIsRenaming(false);
     renameProject({ id: project._id, name: trimmedName }).catch(() => {
-      toast.error("Couldn't rename the project");
+      toast.error("Couldn't rename the project", { description: "The name is unchanged. Try again." });
     });
   };
 

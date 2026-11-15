@@ -42,18 +42,17 @@ export const IntegrationsDialog = ({
 }: IntegrationsDialogProps) => {
   const connections = useUserConnections();
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(initialProviderId ?? null);
-  // Only "Add another connection" sets this; otherwise existing connections are
-  // managed, so it stays right when connections load after the dialog opens.
-  const [addingConnection, setAddingConnection] = useState(false);
-  const [accountSectionOpen, setAccountSectionOpen] = useState(false);
+  // null keeps selection automatic while connections load, including deep links (#585).
+  const [addingConnection, setAddingConnection] = useState<boolean | null>(null);
+  const [accountSectionOpen, setAccountSectionOpen] = useState(!!projectId);
 
   // Each opening starts at the requested provider, without resuming an old form.
   const [wasOpen, setWasOpen] = useState(open);
   if (wasOpen !== open) {
     setWasOpen(open);
     setSelectedProviderId(open ? initialProviderId ?? null : null);
-    setAddingConnection(false);
-    setAccountSectionOpen(false);
+    setAddingConnection(null);
+    setAccountSectionOpen(!!projectId);
   }
 
   const selectedConnections = connections?.filter((connection) => connection.providerId === selectedProviderId) ?? [];
@@ -106,7 +105,7 @@ export const IntegrationsDialog = ({
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Back to provider list"
-                  onClick={() => { setSelectedProviderId(null); setAddingConnection(false); }}
+                  onClick={() => { setSelectedProviderId(null); setAddingConnection(null); }}
                 >
                   <ArrowLeftIcon aria-hidden="true" />
                 </Button>
@@ -129,7 +128,7 @@ export const IntegrationsDialog = ({
             <ProviderCatalog
               onSelect={(providerId) => {
                 setSelectedProviderId(providerId);
-                setAddingConnection(false);
+                setAddingConnection(null);
               }}
               connectedProviderIds={connections?.map((connection) => connection.providerId)}
             />

@@ -1,7 +1,40 @@
 import { describe, expect, it } from "vitest";
 
-import { CODING_AGENT_SYSTEM_PROMPT, STARTER_IN_PLACE_NOTE } from "./constants";
+import {
+  CODING_AGENT_SYSTEM_PROMPT,
+  STARTER_IN_PLACE_NOTE,
+  SWARM_SUBORCH_NOTE,
+  SWARM_WORKER_NOTE,
+} from "./constants";
 import { KNOWN_GOOD_VERSIONS } from "./known-good-versions";
+
+describe("coding agent summary format (#256)", () => {
+  const format = CODING_AGENT_SYSTEM_PROMPT.slice(CODING_AGENT_SYSTEM_PROMPT.indexOf("<response_format>"));
+
+  it("replies like a senior dev: built, placeholders, next steps, not a tree or setup steps", () => {
+    expect(format).toContain("When you reply to the user");
+    for (const section of ["**What I built**", "**Placeholders to replace**", "**Recommended next steps**"]) {
+      expect(format).toContain(section);
+    }
+    expect(format).toContain("<suggestions>");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("npm install");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toContain("npm run dev");
+    expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/File structure|real tree of the files/);
+  });
+
+  it("names the chip action tags the chat runs", () => {
+    for (const tag of ["[connect:supabase]", "[publish]", "[env-vars]"]) expect(format).toContain(tag);
+  });
+
+  it("keeps swarm workers and sub-orchestrators out of the user voice", () => {
+    for (const note of [SWARM_WORKER_NOTE, SWARM_SUBORCH_NOTE]) {
+      expect(note).toContain("[swarm-worker]");
+      expect(note).toContain("NEEDS: section for the orchestrator");
+      expect(note).toContain("not the user: no next steps, suggestions or action chips");
+    }
+    expect(SWARM_SUBORCH_NOTE).toContain("[swarm-worker] [swarm-suborchestrator]");
+  });
+});
 
 describe("coding agent integration instructions", () => {
   it("imports shipped shadcn components and uses Sonner (#294)", () => {
@@ -31,6 +64,12 @@ describe("coding agent integration instructions", () => {
     );
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
       "MCP authentication is injected into the server-side transport automatically",
+    );
+  });
+
+  it("requires internal links to point at routes the app defines", () => {
+    expect(CODING_AGENT_SYSTEM_PROMPT).toContain(
+      "Every internal link (<Link to>, <a href=\"/...\">, navigate()) must point to a route the app defines",
     );
   });
 

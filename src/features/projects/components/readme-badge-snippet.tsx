@@ -18,7 +18,7 @@ export const ReadmeBadgeSnippet = ({ repoUrl }: { repoUrl: string }) => {
     <div className="w-full space-y-2 border-t pt-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium">Add a README badge</p>
-        <img src="/badges/open-in-codenaya.svg" alt="Open in Codenaya" height={28} className="h-5 w-auto" />
+        <img src="/badges/open-in-codenaya.svg" alt="" height={28} className="h-5 w-auto" />
       </div>
       <div className="flex items-center gap-1">
         <code className="flex-1 truncate rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-[11px] text-muted-foreground">

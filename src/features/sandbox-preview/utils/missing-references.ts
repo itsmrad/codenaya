@@ -211,3 +211,81 @@ export const unresolvedImports = (
 
   return [...new Set(unresolved)];
 };
+
+// Routers we can't read statically: when present, report nothing rather than guess.
+// shortcut: skip basename routers until their link prefixes can be resolved reliably.
+const OPAQUE_ROUTER =
+  /\b(?:createBrowserRouter|createHashRouter|createMemoryRouter|createRoutesFromElements|RouterProvider|useRoutes)\b|@tanstack\/react-router|from\s*["']wouter|<(?:BrowserRouter|HashRouter|MemoryRouter)\b[^>]*\bbasename\s*=/;
+const LINK_TAG = /<(?:Link|NavLink|Navigate|a)\b[^>]*?\b(?:to|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*["']([^"'`$]*)["']\s*\})/g;
+const NAVIGATE_CALL = /\bnavigate\(\s*["']([^"'`$]+)["']/g;
+
+/** Splits a path into segments, ignoring slashes at the ends. */
+const segmentsOf = (path: string) => path.split("/").filter(Boolean);
+
+/** Whether `segments` is served by route `pattern`: params match one segment, `*` the rest. */
+const routeMatches = (pattern: string, segments: string[]) => {
+  const parts = segmentsOf(pattern);
+  const fits = (from: number) => {
+    for (const [i, part] of parts.entries()) {
+      if (part === "*") return true;
+      const segment = segments[from + i];
+      if (segment === undefined || (!part.startsWith(":") && part.toLowerCase() !== segment.toLowerCase())) return false;
+    }
+    return from + parts.length === segments.length;
+  };
+  // A relative pattern is nested under a parent route we don't resolve: match any tail.
+  return pattern.startsWith("/")
+    ? fits(0)
+    : segments.some((_, from) => fits(from));
+};
+
+/**
+ * Describes each internal link to a static path no `<Route path>` serves, e.g.
+ * `Link to /privacy has no route: add a page or remove the link (in src/Footer.tsx)`.
+ * Conservative: reports nothing unless the routes are plain react-router JSX
+ * with literal paths, since a false report sends the agent into a pointless repair.
+ */
+export const linksWithoutRoutes = (
+  files: ProjectFile[],
+  paths: Set<string> = new Set(files.map((file) => file.path)),
+): string[] => {
+  const sources = files
+    .filter((file) => file.path.startsWith("src/") && SOURCE_FILE.test(file.path) && !file.path.endsWith(".d.ts"))
+    .map((file) => ({ path: file.path, text: stripComments(file.content) }));
+  if (sources.some(({ text }) => OPAQUE_ROUTER.test(text))) return [];
+
+  const routes: string[] = [];
+  for (const { text } of sources) {
+    const tags = text.split(/<Route\b/).slice(1);
+    for (const tag of tags) {
+      const attr = tag.slice(0, 400).match(/\bpath\s*=\s*(?:"([^"]*)"|'([^']*)'|(\{))/);
+      if (!attr) continue;
+      const path = attr[1] ?? attr[2];
+      // Dynamic or optional paths can't be matched reliably.
+      if (path === undefined || /[?(]/.test(path)) return [];
+      routes.push(path);
+    }
+  }
+  if (routes.length === 0 || routes.some((path) => path === "*" || path === "/*")) return [];
+
+  const publicPaths = [...paths].filter((path) => path.startsWith("public/"));
+  const missing = new Map<string, string>();
+  for (const { path: file, text } of sources) {
+    for (const match of [...text.matchAll(LINK_TAG), ...text.matchAll(NAVIGATE_CALL)]) {
+      const target = (match[1] ?? match[2] ?? match[3] ?? "").split(/[?#]/)[0];
+      if (!target.startsWith("/") || target.startsWith("//") || /[${}]/.test(target)) continue;
+      const segments = segmentsOf(target);
+      // The root, API/serverless endpoints and public assets are not pages.
+      if (segments.length === 0 || segments[0] === "api" || segments.some((part) => part.startsWith(".")) || /\.\w+$/.test(segments.at(-1)!)) continue;
+      const publicTarget = `public/${segments.join("/")}`;
+      if (publicPaths.some((path) => path === publicTarget || path.startsWith(`${publicTarget}/`))) continue;
+      if (!routes.some((route) => routeMatches(route, segments)) && !missing.has(target)) {
+        missing.set(target, file);
+      }
+    }
+  }
+
+  return [...missing].map(
+    ([target, file]) => `Link to ${target} has no route: add a page or remove the link (in ${file})`,
+  );
+};

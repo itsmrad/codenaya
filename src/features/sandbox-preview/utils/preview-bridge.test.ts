@@ -7,7 +7,9 @@ import {
   installPreviewBridge,
   injectPreviewBridge,
   insertBridge,
+  previewTargetOrigin,
   readPreviewMessage,
+  routePreviewMessage,
 } from "./preview-bridge";
 
 describe("injectPreviewBridge", () => {
@@ -43,6 +45,19 @@ describe("injectPreviewBridge", () => {
   });
 });
 
+describe("previewTargetOrigin", () => {
+  it("returns the origin of an http(s) URL, port included", () => {
+    expect(previewTargetOrigin("https://4000-abc.e2b.app/x?y=1")).toBe("https://4000-abc.e2b.app");
+    expect(previewTargetOrigin("http://localhost:5173/")).toBe("http://localhost:5173");
+  });
+
+  it("is null for URLs with no usable origin", () => {
+    for (const url of ["about:blank", "blob:https://a.example/id", "data:text/html,hi", "not a url", "", null, undefined]) {
+      expect(previewTargetOrigin(url)).toBeNull();
+    }
+  });
+});
+
 describe("readPreviewMessage", () => {
   const frame = {} as Window;
   const previewUrl = "https://4000-abc.e2b.app";
@@ -69,6 +84,7 @@ describe("readPreviewMessage", () => {
     expect(readPreviewMessage({ ...event, origin: "https://evil.example" }, frame, previewUrl)).toBeNull();
     expect(readPreviewMessage(event, null, previewUrl)).toBeNull();
     expect(readPreviewMessage(event, frame, null)).toBeNull();
+    expect(readPreviewMessage({ ...event, origin: "null" }, frame, "about:blank")).toBeNull();
   });
 
   it("ignores malformed or foreign payloads", () => {
@@ -111,6 +127,45 @@ describe("readPreviewMessage", () => {
     expect(readPreviewMessage({ ...event, data: { ...page, source: "other" } }, frame, previewUrl)).toBeNull();
   });
 
+  const element = {
+    tag: "button", id: "save", classes: ["primary"], text: "Save",
+    outerHTML: "<button>Save</button>", domPath: "body > button", siblingText: "Form",
+    rect: { x: 1, y: 2, width: 30, height: 40 },
+  };
+  const picked = { source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "select:picked", element };
+
+  it("accepts picks only from the preview source and origin", () => {
+    const pickEvent = { ...event, data: picked };
+    expect(readPreviewMessage(pickEvent, frame, previewUrl)).toEqual({ kind: "select:picked", element });
+    expect(readPreviewMessage({ ...pickEvent, source: {} as Window }, frame, previewUrl)).toBeNull();
+    expect(readPreviewMessage({ ...pickEvent, origin: "https://other.example" }, frame, previewUrl)).toBeNull();
+  });
+
+  it("refuses every oversized pick field and non-finite rects", () => {
+    const invalid = [
+      { tag: "x".repeat(65) }, { id: "x".repeat(129) },
+      { text: "x".repeat(201) }, { outerHTML: "x".repeat(2049) },
+      { domPath: "x".repeat(513) }, { siblingText: "x".repeat(301) },
+      { classes: Array(21).fill("x") }, { classes: ["x".repeat(65)] },
+      ...["x", "y", "width", "height"].flatMap((field) =>
+        [Infinity, -Infinity, NaN].map((value) => ({ rect: { ...element.rect, [field]: value } }))),
+    ];
+    for (const fields of invalid) {
+      expect(readPreviewMessage({ ...event, data: { ...picked, element: { ...element, ...fields } } }, frame, previewUrl)).toBeNull();
+    }
+  });
+
+  it("routes select:picked without setting or clearing a runtime error", () => {
+    const setRuntimeError = vi.fn();
+    const onPick = vi.fn();
+    const onOff = vi.fn();
+    routePreviewMessage(readPreviewMessage({ ...event, data: picked }, frame, previewUrl), setRuntimeError, onPick, onOff);
+    expect(onPick).toHaveBeenCalledWith(element);
+    expect(setRuntimeError).not.toHaveBeenCalled();
+    routePreviewMessage({ kind: "page" }, setRuntimeError, onPick, onOff);
+    expect(setRuntimeError).toHaveBeenCalledExactlyOnceWith(null);
+  });
+
   it("truncates long text", () => {
     const long = "a".repeat(10_000);
     const error = readPreviewMessage({ ...event, data: { ...data, message: long, stack: long } }, frame, previewUrl) as AppError;
@@ -123,12 +178,25 @@ describe("installPreviewBridge", () => {
   // Run from its source, the way the injected <script> runs it.
   const install = new Function(`return (${String(installPreviewBridge)});`)() as typeof installPreviewBridge;
 
-  const setup = () => {
+  class ElementStub {
+    tagName = "BUTTON";
+    id = "save";
+    classList = ["primary"];
+    textContent = "Save";
+    outerHTML = "<button>Save</button>";
+    parentElement = null;
+    getBoundingClientRect() { return { x: 1, y: 2, width: 30, height: 40 }; }
+  }
+  const setup = (ancestorOrigins = ["https://ide.example"], referrer = "https://fallback.example/projects/1") => {
     const listeners: Record<string, (event: unknown) => void> = {};
     const posted: Array<{ message: string; stack?: string }> = [];
     const original = vi.fn();
+    const postMessage = vi.fn((message: { message: string; stack?: string }) => posted.push(message));
     const win = {
-      parent: { postMessage: (message: { message: string; stack?: string }) => posted.push(message) },
+      parent: { postMessage },
+      location: { ancestorOrigins },
+      document: { referrer, activeElement: new ElementStub() },
+      Element: ElementStub,
       addEventListener: (type: string, listener: (event: unknown) => void) => (listeners[type] = listener),
       console: { error: original },
       setTimeout,
@@ -136,8 +204,106 @@ describe("installPreviewBridge", () => {
     install(win as unknown as typeof window, PREVIEW_MESSAGE_SOURCE, 1, 2048);
     // The new-page signal; its own test covers it.
     posted.splice(0, 1);
-    return { win, listeners, posted, original };
+    return { win, listeners, posted, original, postMessage };
   };
+  it("selects only on parent commands, suppresses navigation, and leaves on Esc", () => {
+    const { win, listeners, posted } = setup();
+    const remove = vi.fn();
+    const style = {};
+    Object.assign(win, {
+      Element: ElementStub,
+      document: { createElement: () => ({ style, remove }), documentElement: { appendChild: vi.fn() } },
+    });
+    const command = { source: win.parent, origin: "https://ide.example", data: { source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "select:on" } };
+    const click = { target: new ElementStub(), preventDefault: vi.fn(), stopPropagation: vi.fn(), stopImmediatePropagation: vi.fn() };
+    listeners.message({ ...command, source: {} });
+    listeners.click(click);
+    expect(click.preventDefault).not.toHaveBeenCalled();
+    listeners.message(command);
+    listeners.mousemove(click);
+    expect(style).toMatchObject({ width: "30px", height: "40px" });
+    listeners.click(click);
+    expect(click.preventDefault).toHaveBeenCalledOnce();
+    expect(click.stopPropagation).toHaveBeenCalledOnce();
+    expect(posted).toEqual([expect.objectContaining({ kind: "select:picked", element: expect.objectContaining({ text: "Save" }) })]);
+    expect(remove).toHaveBeenCalledOnce();
+    listeners.click(click);
+    expect(posted).toHaveLength(1);
+    listeners.message(command);
+    listeners.keydown({ ...click, key: "Escape" });
+    expect(posted).toHaveLength(2);
+    expect(posted[1]).toMatchObject({ kind: "select:off" });
+    listeners.click(click);
+    expect(posted).toHaveLength(2);
+  });
+
+  it.each([
+    { ancestors: ["https://ide.example"], referrer: "https://other.example/projects/1", expected: "https://ide.example" },
+    { ancestors: [], referrer: "https://fallback.example/projects/1", expected: "https://fallback.example" },
+  ])("pins Select to the embedding origin: $expected", ({ ancestors, referrer, expected }) => {
+    const { win, listeners, posted, postMessage } = setup(ancestors, referrer);
+    const command = { source: win.parent, origin: expected, data: { source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "select:on" } };
+    const click = { target: new ElementStub(), preventDefault: vi.fn(), stopPropagation: vi.fn(), stopImmediatePropagation: vi.fn() };
+    listeners.message({ ...command, origin: "https://foreign.example" });
+    listeners.click(click);
+    expect(posted).toHaveLength(0);
+    listeners.message(command);
+    // A navigated parent cannot cancel a valid selection either.
+    listeners.message({ ...command, origin: "https://foreign.example", data: { ...command.data, kind: "select:off" } });
+    listeners.click(click);
+    expect(postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "select:picked" }), expected);
+  });
+
+  it("disables Select without a usable embedding origin", () => {
+    for (const referrer of ["", "invalid", "about:blank"]) {
+      const { win, listeners, posted } = setup([], referrer);
+      listeners.message({ source: win.parent, origin: "https://foreign.example", data: { source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "select:on" } });
+      listeners.keydown({ key: "Enter" });
+      expect(posted).toHaveLength(0);
+    }
+  });
+
+  it.each(["Enter", " "])("picks the focused element with %j and suppresses activation", (key) => {
+    const { win, listeners, posted, postMessage } = setup();
+    listeners.message({ source: win.parent, origin: "https://ide.example", data: { source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "select:on" } });
+    const event = { key, target: null, preventDefault: vi.fn(), stopPropagation: vi.fn(), stopImmediatePropagation: vi.fn() };
+    listeners.keydown({ ...event, key: "Tab" });
+    expect(posted).toHaveLength(0);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    listeners.keydown(event);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
+    expect(postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "select:picked", element: expect.objectContaining({ text: "Save" }) }), "https://ide.example");
+    listeners.keydown(event);
+    expect(posted).toHaveLength(1);
+  });
+
+  it.each(["null", "body", "html"])("ignores Enter and Space with %s focused, without suppressing them", (focused) => {
+    const { win, listeners, posted } = setup();
+    const body = new ElementStub();
+    const html = new ElementStub();
+    Object.assign(win.document, {
+      body,
+      documentElement: html,
+      activeElement: ({ null: null, body, html } as Record<string, ElementStub | null>)[focused],
+    });
+    listeners.message({ source: win.parent, origin: "https://ide.example", data: { source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "select:on" } });
+    for (const key of ["Enter", " "]) {
+      const event = { key, target: null, preventDefault: vi.fn(), stopPropagation: vi.fn(), stopImmediatePropagation: vi.fn() };
+      listeners.keydown(event);
+      expect(event.preventDefault).not.toHaveBeenCalled();
+      expect(event.stopImmediatePropagation).not.toHaveBeenCalled();
+    }
+    expect(posted).toHaveLength(0);
+  });
+
+  it("posts Escape to the pinned embedding origin only", () => {
+    const { win, listeners, postMessage } = setup();
+    listeners.message({ source: win.parent, origin: "https://ide.example", data: { source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "select:on" } });
+    listeners.keydown({ key: "Escape", preventDefault: vi.fn(), stopPropagation: vi.fn() });
+    expect(postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "select:off" }), "https://ide.example");
+  });
+
   // React 19's dev log for an error an error boundary caught (#335).
   const boundaryLog = (error: unknown) => [
     "%o\n\n%s\n\n%s\n",

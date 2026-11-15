@@ -42,6 +42,7 @@ import { Switch } from "@/components/ui/switch";
 import { convexErrorMessage } from "@/lib/convex-error";
 import { SKILLS_SETTINGS_URL } from "@/features/settings/nav";
 import { ProjectInstructionsForm } from "@/features/projects/components/project-instructions-form";
+import { ProjectNotesList } from "@/features/projects/components/project-notes";
 import { ProjectThemeForm } from "@/features/projects/components/project-theme-form";
 
 import type { ProjectSkillSummary } from "../types";
@@ -98,7 +99,12 @@ export const ProjectSkillsPanel = ({
     try {
       await setEnabled({ projectId, skillKey: skill.key, enabled });
     } catch (error) {
-      toast.error(convexErrorMessage(error, `Unable to update ${skill.name}`));
+      toast.error(
+        convexErrorMessage(
+          error,
+          `Couldn't turn ${skill.name} ${enabled ? "on" : "off"}. Check your connection and try again.`,
+        ),
+      );
     }
   };
 
@@ -334,6 +340,7 @@ export const ProjectSkillsDialog = ({
       {open && (
         <>
           <ProjectInstructionsForm projectId={projectId} />
+          <ProjectNotesList projectId={projectId} />
           <ProjectThemeForm projectId={projectId} />
           <ProjectSkillsPanel projectId={projectId} />
         </>
