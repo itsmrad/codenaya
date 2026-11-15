@@ -3,6 +3,7 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
+import { shouldFocusGroupInput } from "@/lib/input-group"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -69,7 +70,7 @@ function InputGroupAddon({
       data-align={align}
       className={cn(inputGroupAddonVariants({ align }), className)}
       onClick={(e) => {
-        if ((e.target as HTMLElement).closest("button")) {
+        if (!shouldFocusGroupInput(e.nativeEvent, e.target as HTMLElement)) {
           return
         }
         e.currentTarget.parentElement?.querySelector("input")?.focus()
