@@ -15,12 +15,16 @@ export interface AppError {
 /** Caps what an error carries, so a huge stack can't flood the banner or the prompt. */
 export const MAX_ERROR_TEXT = 2048;
 
-// Vite, esbuild and tsc error shapes, matched per line.
+// Vite, esbuild, tsc and Next.js error shapes, matched per line.
 const ERROR_LINE =
-  /\[plugin:[^\]]+\]|\berror TS\d+:|Failed to resolve import|Transform failed|Internal server error:|Pre-transform error:/;
+  /\[plugin:[^\]]+\]|\berror TS\d+:|Failed to resolve import|Transform failed|Internal server error:|Pre-transform error:|Module not found: Can't resolve|^\s*(?:Type error:|ReferenceError:|Error: .+ is not defined\b|Unhandled Runtime Error\b)/;
 // "3:04:05 PM [vite] (client) Pre-transform error: " and similar log prefixes.
 const LOG_PREFIX =
   /^.*?\[vite\]\s*(?:\([a-z]+\)\s*)?(?:Internal server error:|Pre-transform error:)?\s*/i;
+const NEXT_LOG_PREFIX = /^\s*[⨯○✓⚠]\s*/;
+const NEXT_STATUS = /^\s*[○✓⚠]/;
+const NEXT_ERROR = /^\s*⨯\s*\S/;
+const NEXT_LOCATION = /^\.\/(\S+):(\d+):\d+$/;
 // The sandbox route's line for a failed install (#491).
 const INSTALL_FAILED = /^Error: (.+ failed with exit code \d+)$/;
 const NPM_ERROR_CODE = /npm (?:ERR!|error) code (\S+)/g;
@@ -36,6 +40,8 @@ const WORK_DIR_PREFIX = /\/home\/user\/app\//g;
 const FILE_PATTERNS = [
   /\bFile: (\S+?):(\d+)(?::\d+)?/, // Vite
   /(\S+\.\w+)\((\d+),\d+\)/, // tsc: src/App.tsx(3,20)
+  /^\s*(?:⨯\s*)?\.\/(\S+):(\d+):\d+\s*$/m, // Next.js compile header
+  /\((?:\.\/)?([^\s()]+):(\d+):\d+\)/, // Next.js: at Foo (./src/app/page.tsx:12:3)
   /(\S+\.\w+):(\d+):\d+/, // esbuild / postcss: src/index.css:5:1
   /from "([^"]+)"/, // Failed to resolve import "./x" from "src/App.tsx"
 ];
@@ -48,7 +54,8 @@ export const detectBuildError = (chunk: string): AppError | null => {
   const text = clean(chunk);
   const lines = text.split(/\r?\n/);
   const index = lines.findIndex(
-    (line) => ERROR_LINE.test(line) || INSTALL_FAILED.test(line.trim()),
+    (line) => !NEXT_STATUS.test(line) &&
+      (ERROR_LINE.test(line) || NEXT_ERROR.test(line) || INSTALL_FAILED.test(line.trim())),
   );
   if (index === -1) return null;
 
@@ -62,10 +69,16 @@ export const detectBuildError = (chunk: string): AppError | null => {
     return { kind: "build", message: message.slice(0, MAX_ERROR_TEXT), file: "package.json" };
   }
 
-  let message = lines[index].replace(LOG_PREFIX, "").trim();
+  let message = lines[index].replace(LOG_PREFIX, "").replace(NEXT_LOG_PREFIX, "").trim();
   // "Transform failed with 1 error:" says nothing until the next line.
-  const next = lines[index + 1]?.trim();
-  if (message.endsWith(":") && next) message = `${message} ${next}`;
+  const next = lines[index + 1]?.replace(NEXT_LOG_PREFIX, "").trim();
+  if (NEXT_LOCATION.test(message)) {
+    // A streamed location alone is not enough to start an auto-fix.
+    if (!next) return null;
+    message = next;
+  } else if ((message.endsWith(":") || message === "Unhandled Runtime Error") && next) {
+    message = `${message} ${next}`;
+  }
 
   // From the error on: the detector's tail can hold older lines with other paths.
   const fromError = lines.slice(index).join("\n");

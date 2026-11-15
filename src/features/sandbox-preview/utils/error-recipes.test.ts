@@ -36,6 +36,13 @@ const FIXTURES: Record<string, string> = {
     "Access to fetch at 'https://api.example.com/items' from origin 'https://5173-abc.e2b.app' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.",
   "missing-list-key":
     'Warning: Each child in a list should have a unique "key" prop.\n\nCheck the render method of `TodoList`.',
+  "next-client-component": "createContext only works in Client Components. Add the 'use client' directive.",
+  "next-client-metadata": 'You are attempting to export "metadata" from a component marked with "use client", which is disallowed.',
+  "hydration-mismatch": "Hydration failed because the server rendered HTML didn't match the client.",
+  "async-client-component": "async/await is not yet supported in Client Components, only Server Components.",
+  "search-params-suspense": 'useSearchParams() should be wrapped in a suspense boundary at page "/search".',
+  "browser-api-on-server": "ReferenceError: window is not defined",
+  "next-image-host": 'Invalid src prop (https://example.com/photo.png) on `next/image`, hostname "example.com" is not configured under images in your `next.config.js`',
 };
 
 /** The same errors as tsc reports them; checkBuild runs tsc before the Vite build. */
@@ -89,6 +96,38 @@ describe("ERROR_RECIPES", () => {
       "tailwind-unknown-class",
     );
   });
+
+  it.each([
+    ["unresolved-import", "Module not found: Can't resolve 'missing-package'"],
+    ["next-client-component", "useState only works in Client Components."],
+    ["next-client-component", "You're importing a component that needs useState."],
+    ["next-client-component", "Event handlers cannot be passed to Client Component props."],
+    ["hydration-mismatch", "A tree hydrated but some attributes of the server rendered HTML didn't match the client properties."],
+    ["hydration-mismatch", "Text content does not match server-rendered HTML."],
+    ["browser-api-on-server", "ReferenceError: document is not defined"],
+    ["browser-api-on-server", "ReferenceError: localStorage is not defined"],
+    ["router-context", "NextRouter was not mounted"],
+    ["router-context", "invariant expected app router to be mounted"],
+  ])("%s matches the Next.js wording: %s", (id, fixture) => {
+    expect(explainError(fixture).map((match) => match.recipeId)).toEqual([id]);
+    expect(recipeIdsIn(withErrorHints(fixture))).toEqual([id]);
+  });
+
+  it.each([
+    ["process-not-defined", "import.meta.env.VITE_NAME", "process.env.NEXT_PUBLIC_NAME"],
+    ["router-context", "BrowserRouter", "next/navigation"],
+    ["invalid-hook-call", "resolve.dedupe", "Next.js"],
+    ["tailwind-unknown-class", "src/index.css", "app/globals.css"],
+  ])("%s gives fixes for both frameworks", (id, viteFix, nextFix) => {
+    const hinted = withErrorHints(FIXTURES[id]);
+    expect(hinted).toContain(viteFix);
+    expect(hinted).toContain(nextFix);
+  });
+
+  it("keeps browser APIs out of the initial render even in a client component", () => {
+    expect(withErrorHints(FIXTURES["browser-api-on-server"])).toContain("useEffect");
+    expect(withErrorHints(FIXTURES["browser-api-on-server"])).toContain("still prerendered on the server");
+  });
 });
 
 describe("withErrorHints", () => {
@@ -102,7 +141,7 @@ describe("withErrorHints", () => {
     const error = `${FIXTURES["process-not-defined"]}\n${FIXTURES["router-context"]}`;
     const hinted = withErrorHints(error);
     expect(hinted.startsWith(`${error}\n\nLikely cause (process-not-defined): `)).toBe(true);
-    expect(hinted).toContain("Known fix: Read env vars as `import.meta.env.VITE_NAME`");
+    expect(hinted).toContain("Known fix: Vite: read env vars as `import.meta.env.VITE_NAME`");
     expect(recipeIdsIn(hinted)).toEqual(["process-not-defined", "router-context"]);
   });
 
