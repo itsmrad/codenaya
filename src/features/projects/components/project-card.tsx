@@ -118,7 +118,7 @@ export const ProjectCard = ({ project }: { project: CardProject }) => {
           {getInitials(project.name)}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-foreground">{project.name}</p>
+          <p className="truncate text-sm font-medium text-foreground" title={project.name}>{project.name}</p>
           <p className="truncate font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
             Edited {formatDistanceToNow(project.updatedAt, { addSuffix: true })}
           </p>
