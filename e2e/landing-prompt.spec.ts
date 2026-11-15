@@ -11,7 +11,16 @@ import { userConvexClient } from "./convex-client";
 const SMOKE_PROMPT = "e2e landing smoke: reply OK and change nothing.";
 
 const pendingPrompt = (page: Page) =>
-  page.evaluate((key) => localStorage.getItem(key), PENDING_PROMPT_KEY);
+  page.evaluate((key) => {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    try {
+      const draft = JSON.parse(raw);
+      return typeof draft?.prompt === "string" ? draft.prompt : raw;
+    } catch {
+      return raw;
+    }
+  }, PENDING_PROMPT_KEY);
 
 /** Types a prompt into the landing hero and submits it. */
 const submitHeroPrompt = async (page: Page, prompt: string) => {

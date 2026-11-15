@@ -78,9 +78,16 @@ describe("landing prompt resume effect", () => {
     action.onClick();
     await vi.waitFor(() => expect(peekPendingPrompt()).toBeNull());
     expect(harness.create).toHaveBeenCalledTimes(2);
-    expect(harness.create).toHaveBeenLastCalledWith("A portfolio site", undefined, true, "plan");
+    expect(harness.create).toHaveBeenLastCalledWith("A portfolio site", undefined, true, "plan", undefined);
     render()();
     expect(harness.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("resumes a landing Next.js draft with its chosen framework", async () => {
+    savePendingPrompt("A blog", undefined, "next");
+    harness.create.mockResolvedValue(true);
+    render()();
+    await vi.waitFor(() => expect(harness.create).toHaveBeenCalledWith("A blog", undefined, true, undefined, "next"));
   });
 
   it("drops a stale draft when a template wins, so no second project is created", async () => {

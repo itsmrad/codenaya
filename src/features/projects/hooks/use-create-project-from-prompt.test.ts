@@ -8,6 +8,20 @@ import { createWithPromptBody, useCreateProjectFromPrompt } from "./use-create-p
 const model = { modelId: "x-ai/grok-4.7" };
 
 describe("createWithPromptBody", () => {
+  it.each(["vite", "next"] as const)("sends the picked %s framework to creation", async (framework) => {
+    const { createProject } = useCreateProjectFromPrompt();
+    mocks.ask.mockResolvedValue(null);
+    mocks.post.mockReturnValue({ json: async () => ({ projectId: "project-1" }) });
+    await createProject("A blog", undefined, false, "build", framework);
+    expect(mocks.post).toHaveBeenLastCalledWith("/api/projects/create-with-prompt", {
+      json: expect.objectContaining({ framework }),
+    });
+  });
+
+  it("keeps legacy callers eligible for prompt-based framework detection", () => {
+    expect(createWithPromptBody("A Next.js blog", model)).not.toHaveProperty("framework");
+  });
+
   it("sends the picked mode", () => {
     expect(createWithPromptBody("A kanban board", model, undefined, false, "swarm")).toMatchObject({
       prompt: "A kanban board",

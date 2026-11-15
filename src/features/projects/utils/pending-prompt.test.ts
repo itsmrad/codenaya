@@ -21,6 +21,21 @@ describe("pending prompt", () => {
   beforeEach(() => vi.stubGlobal("localStorage", memoryStorage()));
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each(["vite", "next"] as const)("keeps %s with the draft across a failed creation", async (framework) => {
+    savePendingPrompt("A blog", "plan", framework);
+    const create = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    await resumePendingPrompt(create);
+    await resumePendingPrompt(create);
+    expect(create).toHaveBeenLastCalledWith({ prompt: "A blog", mode: "plan", framework });
+  });
+
+  it("ignores an invalid saved framework", async () => {
+    localStorage.setItem(PENDING_PROMPT_KEY, JSON.stringify({ prompt: "A blog", framework: "unknown" }));
+    const create = vi.fn().mockResolvedValue(true);
+    await resumePendingPrompt(create);
+    expect(create).toHaveBeenCalledWith({ prompt: "A blog" });
+  });
+
   it("keeps the draft and mode on failure, then clears them on successful retry", async () => {
     savePendingPrompt(" A kanban board ", "swarm");
     const create = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);

@@ -1,3 +1,4 @@
+import type { ProjectFramework } from "./project-framework";
 import { PLAN_MODE, SWARM_MODE, type MessageMode } from "@/features/conversations/plan-mode";
 
 /**
@@ -12,16 +13,17 @@ export interface PendingPrompt {
   prompt: string;
   /** Omitted means build. */
   mode?: MessageMode;
+  framework?: ProjectFramework;
 }
 
 let draftRevision = 0;
 
 const isMode = (value: unknown): value is MessageMode => value === PLAN_MODE || value === SWARM_MODE;
 
-/** A build prompt stays a plain string, as stored before modes; another mode is kept as JSON. */
-export const savePendingPrompt = (prompt: string, mode?: MessageMode) => {
+/** Keep legacy plain prompts; drafts with a mode or framework are stored as JSON. */
+export const savePendingPrompt = (prompt: string, mode?: MessageMode, framework?: ProjectFramework) => {
   try {
-    localStorage.setItem(PENDING_PROMPT_KEY, mode ? JSON.stringify({ prompt, mode }) : prompt);
+    localStorage.setItem(PENDING_PROMPT_KEY, mode || framework ? JSON.stringify({ prompt, mode, framework }) : prompt);
     draftRevision++;
   } catch {
     // Without storage the prompt is simply not resumed.
@@ -43,8 +45,8 @@ const parse = (raw: string | null): PendingPrompt | null => {
   try {
     const value: unknown = JSON.parse(raw);
     if (value && typeof value === "object" && typeof (value as PendingPrompt).prompt === "string") {
-      const { prompt, mode } = value as PendingPrompt;
-      saved = { prompt, ...(isMode(mode) ? { mode } : {}) };
+      const { prompt, mode, framework } = value as PendingPrompt;
+      saved = { prompt, ...(isMode(mode) ? { mode } : {}), ...(framework === "vite" || framework === "next" ? { framework } : {}) };
     }
   } catch {
     // A plain prompt.

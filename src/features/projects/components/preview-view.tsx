@@ -762,6 +762,7 @@ export const PreviewView = ({
             <PreviewSettingsPopover
               projectId={projectId}
               initialValues={project?.settings}
+              files={files}
               onSave={restart}
             />
           </div>
