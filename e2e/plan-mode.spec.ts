@@ -154,8 +154,11 @@ test.describe.serial("plan mode", () => {
     await input.press("Alt+m");
     await expect(planToggle).toBeChecked();
     await expect(modeStatus).toHaveText("Plan mode on");
+    // planToggle.click() above left the pointer on the radio; Radix opens a tooltip on the first pointermove
+    // after a pointerenter, so the pointer must leave and re-enter for hover() to open it.
+    await page.mouse.move(0, 0);
     await planToggle.hover();
-    await expect(page.getByRole("tooltip")).toContainText("Alt+M in composer");
+    await expect(page.getByRole("tooltip").filter({ hasText: "Alt+M in composer" })).toHaveCount(1);
 
     await input.fill("todo app");
     await input.press("Enter");
