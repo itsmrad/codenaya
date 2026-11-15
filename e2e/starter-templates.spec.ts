@@ -98,7 +98,8 @@ test.describe("starter templates on the dashboard", () => {
     await expect(page).toHaveURL(/\/projects\/[a-z0-9]+$/, { timeout: 30_000 });
     const projectId = new URL(page.url()).pathname.split("/").pop() as Id<"projects">;
     try {
-      await expect(page.getByRole("button", { name: "package.json" })).toBeVisible({
+      // exact: the run card's trigger ("Reading N files package.json") also contains the name.
+      await expect(page.getByRole("button", { name: "package.json", exact: true })).toBeVisible({
         timeout: 30_000,
       });
       expect(await page.evaluate((key) => localStorage.getItem(key), PENDING_TEMPLATE_KEY)).toBeNull();
