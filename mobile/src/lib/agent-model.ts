@@ -5,16 +5,17 @@ import { useEffect, useSyncExternalStore } from "react";
 
 import { api } from "@/lib/api";
 import {
-  AI_PROVIDERS,
   type AgentModelChoice,
   type CatalogModel,
   PLATFORM_PROVIDER,
   type ProviderModel,
   envCatalog,
+  keyGroupLabel,
   keyModels,
   modelAcceptsImages,
   modelIdsFor,
   pickableModels,
+  pickerKeys,
   platformProviderId,
   resolveCatalogModel,
   runModelLabel,
@@ -110,9 +111,7 @@ export const useAgentModel = () => {
   // Models the picker offers: the platform's, then one group per usable key.
   const groups = [
     { title: PLATFORM_PROVIDER.label, keyId: undefined, models: platformModels },
-    ...(keys ?? [])
-      .filter((k) => k.status === "active" || k._id === model.keyId)
-      .map((k) => ({ title: `${AI_PROVIDERS[k.provider].label} · ${k.label}${k.status === "invalid" ? " (invalid)" : ""}`, keyId: k._id, models: keyModels(k) })),
+    ...pickerKeys(keys ?? [], model.keyId).map((k) => ({ title: keyGroupLabel(k), keyId: k._id, models: keyModels(k) })),
   ];
 
   return { model, setModel, label, acceptsImages, groups };

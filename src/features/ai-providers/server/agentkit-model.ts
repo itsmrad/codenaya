@@ -64,11 +64,15 @@ export function buildAgentKitModel({
   // AgentKit sends `parallel_tool_calls: false` with every tool list, so a turn
   // could make one call. Allow several, or drop the parameter for an endpoint
   // that rejects it. A request without tools (the title) never carries it.
+  //
+  // AgentKit defaults parameterized tools to strict mode, which rejects our
+  // optional fields (#566). Opt out without changing schemas or validation.
   return {
     ...adapter,
     onCall(...args: Parameters<NonNullable<typeof adapter.onCall>>) {
       adapter.onCall?.(...args);
       const body = args[1];
+      for (const tool of body.tools ?? []) tool.function.strict = false;
       if (body.parallel_tool_calls !== false) return;
       if (parallel) body.parallel_tool_calls = true;
       else delete body.parallel_tool_calls;
@@ -79,18 +83,49 @@ export function buildAgentKitModel({
 type AgentKitModel = ReturnType<typeof buildAgentKitModel>;
 type RequestBody = Record<string, unknown>;
 
-/**
- * The same model with tool calls turned off, for a turn that must answer in
- * text. Its tools stay in the request: some providers reject tool calls in the
- * history of a request that declares no tools.
- */
-export function withoutToolCalls(model: AgentKitModel): AgentKitModel {
+/** The same model with every request's `tool_choice` (and `extra` fields) set, only on a request that carries tools. */
+function withToolChoice(model: AgentKitModel, anthropicChoice: unknown, openaiChoice: unknown, extra?: RequestBody): AgentKitModel {
   const onCall = model.onCall as ((adapter: unknown, body: RequestBody) => void) | undefined;
   return {
     ...model,
     onCall(adapter: unknown, body: RequestBody) {
       onCall?.(adapter, body);
-      if (body.tools) body.tool_choice = model.format === "anthropic" ? { type: "none" } : "none";
+      if (!body.tools) return;
+      body.tool_choice = model.format === "anthropic" ? anthropicChoice : openaiChoice;
+      Object.assign(body, extra);
     },
   } as AgentKitModel;
 }
+
+/**
+ * The same model with tool calls turned off, for a turn that must answer in
+ * text. Its tools stay in the request: some providers reject tool calls in the
+ * history of a request that declares no tools.
+ */
+export const withoutToolCalls = (model: AgentKitModel) => withToolChoice(model, { type: "none" }, "none");
+
+// Official hosts and OpenAI-family models known to honour a forced tool_choice; anything else may reject it.
+const FORCEABLE_BASE_URLS = ["https://api.openai.com/", "https://api.groq.com/"];
+const FORCEABLE_MODEL_RE = /^(?:openai\/)?(?:gpt-|o\d)/i;
+
+/**
+ * How a turn that must call one tool can ask for it. Claude rejects a forced tool_choice
+ * while it thinks, and only Haiku can turn thinking off (see ai-sdk-model.ts), so other
+ * Claude models, like other models and hosts, get "auto": the caller nudges instead.
+ */
+export const toolForcing = (model: AgentKitModel): "force" | "force-thinking-off" | "auto" => {
+  const { model: name = "", baseUrl = "" } = (model.options ?? {}) as { model?: string; baseUrl?: string };
+  if (/claude/i.test(name)) return /haiku/i.test(name) ? "force-thinking-off" : "auto";
+  return model.format === "openai-chat" && FORCEABLE_MODEL_RE.test(name)
+    && FORCEABLE_BASE_URLS.some((url) => baseUrl.startsWith(url)) ? "force" : "auto";
+};
+
+/** The same model made to call the tool `name` where `toolForcing` allows it; otherwise unchanged. */
+export const forceToolCall = (model: AgentKitModel, name: string) => {
+  const forcing = toolForcing(model);
+  if (forcing === "auto") return model;
+  const anthropic = model.format === "anthropic";
+  const thinkingOff = anthropic ? { thinking: { type: "disabled" } } : { reasoning: { enabled: false } };
+  return withToolChoice(model, { type: "tool", name }, { type: "function", function: { name } },
+    forcing === "force-thinking-off" ? thinkingOff : undefined);
+};

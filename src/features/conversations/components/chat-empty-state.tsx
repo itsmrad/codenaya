@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ArrowUpRightIcon, SparklesIcon } from "lucide-react";
 
 import { Suggestion } from "@/components/ai-elements/suggestion";
@@ -7,11 +8,14 @@ import type { ChatStarters } from "../chat-starters";
 interface ChatEmptyStateProps {
   starters: ChatStarters;
   onSelect: (prompt: string) => void;
+  /** Shown above the intro, e.g. an instant template's "Make it mine" card (#362). */
+  children?: ReactNode;
 }
 
 /** Start of a new conversation: a short intro and prompts to send in one click. */
-export const ChatEmptyState = ({ starters, onSelect }: ChatEmptyStateProps) => (
+export const ChatEmptyState = ({ starters, onSelect, children }: ChatEmptyStateProps) => (
   <div className="flex flex-1 flex-col justify-center overflow-y-auto px-4 py-6">
+    {children}
     <div className="grid size-9 place-items-center rounded-xl bg-muted">
       <SparklesIcon className="size-4 text-brand" />
     </div>

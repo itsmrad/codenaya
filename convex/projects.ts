@@ -21,6 +21,8 @@ import {
   validateProjectName,
 } from "../src/features/projects/utils/project-name";
 import { MAX_PROJECT_INSTRUCTIONS_LENGTH } from "../src/features/projects/instructions";
+import { validateTheme } from "../src/features/projects/theme";
+import { projectThemeValidator } from "./schema";
 import { countProjectBuilt } from "./stats";
 import { recordProjectEvent } from "./activationEvents";
 import { lastRunStatuses } from "../src/features/projects/utils/project-status";
@@ -110,6 +112,28 @@ export const updateInstructions = mutation({
   },
 });
 
+/** Sets the project's brand theme; no theme clears it (#302). */
+export const updateTheme = mutation({
+  args: {
+    id: v.id("projects"),
+    theme: v.optional(projectThemeValidator),
+  },
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+    await getOwnedProject(ctx, args.id, identity.subject);
+
+    const theme = args.theme && {
+      ...args.theme,
+      primary: args.theme.primary.toLowerCase(),
+      accent: args.theme.accent.toLowerCase(),
+    };
+    const error = theme && validateTheme(theme);
+    if (error) throw appError("INVALID_ARGUMENT", error);
+
+    await ctx.db.patch("projects", args.id, { theme, updatedAt: Date.now() });
+  },
+});
+
 export const create = mutation({
   args: {
     name: v.string(),
@@ -173,7 +197,7 @@ export const get = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .take(MAX_PROJECTS_LISTED);
     const published = new Set<string>(
-      showcase.filter((entry) => entry.status !== "removed").map((entry) => entry.projectId),
+      showcase.filter((entry) => entry.status === "published").map((entry) => entry.projectId),
     );
 
     const runEvents = (name: "run_started" | "run_finished") =>
@@ -233,7 +257,7 @@ export const rename = mutation({
 
 /**
  * Copies a project into a new one named "<name> (copy)": files, settings,
- * instructions, project skills with their enabled states, and public env vars. Secret env
+ * instructions, theme, project skills with their enabled states, and public env vars. Secret env
  * vars, conversations and integrations stay with the original.
  */
 export const duplicate = mutation({
@@ -249,6 +273,7 @@ export const duplicate = mutation({
       ownerId: source.ownerId,
       settings: source.settings,
       instructions: source.instructions,
+      theme: source.theme,
       updatedAt: Date.now(),
     });
     await countProjectBuilt(ctx);

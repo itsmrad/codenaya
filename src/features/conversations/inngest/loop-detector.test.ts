@@ -28,6 +28,57 @@ const syntaxNote = (entries: string) => `\n${SYNTAX_ERRORS_NOTE}${entries}`;
 const times = <T>(n: number, make: (i: number) => T) => Array.from({ length: n }, (_, i) => make(i));
 
 describe("detectLoop", () => {
+  const arrayError = (path?: string) => call("editFile", "Error: Invalid input: expected array, received string", { path, edits: "not json" });
+  const edited = (path: string) => call("editFile", `File "${path}" edited successfully`, {
+    path, edits: [{ oldText: "before", newText: "after" }, { oldText: "old", newText: "new" }],
+  });
+
+  it("allows a recovered form edit followed by the same validation error on the header (#686)", () => {
+    const form = "src/components/ui/form.tsx";
+    // S2X/2 masked-tool-trace.json: string, string, array(2), writeFiles, string.
+    // Payload text is omitted: loop detection uses the argument paths and tool results.
+    expect(detectLoop([
+      arrayError(form), arrayError(form), edited(form),
+      call("writeFiles", "Wrote 1 file(s). Created: src/lib/appointment-schema.ts.", {
+        files: [{ path: "src/lib/appointment-schema.ts" }],
+      }),
+      arrayError("src/components/site-header.tsx"),
+    ])).toBeNull();
+  });
+
+  it("counts edit array validation failures separately for independent files", () => {
+    expect(detectLoop([arrayError("src/a.tsx"), arrayError("src/b.tsx"), arrayError("src/c.tsx")])).toBeNull();
+  });
+
+  it("resets only the recovered edit path's array validation count", () => {
+    const failures = [arrayError("src/a.tsx"), arrayError("src/a.tsx")];
+    expect(detectLoop([...failures, edited(" ./src/a.tsx "), ...failures])).toBeNull();
+    expect(detectLoop([...failures, edited("src/b.tsx"), arrayError("src/a.tsx")])).toMatchObject({ reason: "repeated-error" });
+    expect(detectLoop([...failures, call("readFiles", "Read 1 file", { paths: ["src/a.tsx"] }), arrayError("src/a.tsx")])).toMatchObject({ reason: "repeated-error" });
+  });
+
+  it("still stops repeated edit validation failures through normalized aliases", () => {
+    expect(detectLoop([arrayError("src/a.tsx"), arrayError("./src/a.tsx"), arrayError(" src/a.tsx ")])).toMatchObject({
+      reason: "repeated-error", path: "src/a.tsx",
+    });
+  });
+
+  it("retains global protection for missing or invalid edit paths", () => {
+    expect(detectLoop([arrayError(), arrayError("../a.tsx"), arrayError("/src/a.tsx")])).toMatchObject({ reason: "repeated-error" });
+  });
+
+  it("does not reset edit validation failures on another tool's success", () => {
+    const failed = arrayError("src/a.tsx");
+    const updated = call("updateFile", 'File "src/a.tsx" updated successfully', { path: "src/a.tsx" });
+    expect(detectLoop([failed, failed, updated, failed])).toMatchObject({ reason: "repeated-error" });
+  });
+
+  it("keeps global protection for other edit errors and other tools' array errors", () => {
+    const paths = ["src/a.tsx", "src/b.tsx", "src/c.tsx"];
+    expect(detectLoop(paths.map((path) => call("editFile", "Error: service unavailable", { path })))).toMatchObject({ reason: "repeated-error" });
+    expect(detectLoop(paths.map((path) => call("writeFiles", "Error: Invalid input: expected array, received string", { files: [{ path }] })))).toMatchObject({ reason: "repeated-error" });
+  });
+
   it("trips on the same tool error three times, not twice", () => {
     const error = () => call("readFiles", 'Error: File with ID "missing" not found.');
     expect(detectLoop(times(2, error))).toBeNull();

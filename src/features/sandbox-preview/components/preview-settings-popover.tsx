@@ -4,6 +4,7 @@ import { z } from "zod";
 import { useState } from "react";
 import { useForm } from "@tanstack/react-form";
 import { SettingsIcon } from "lucide-react";
+import { toast } from "sonner";
 
 import { useUpdateProjectSettings } from "@/features/projects/hooks/use-projects";
 
@@ -48,13 +49,18 @@ export const PreviewSettingsPopover = ({
     onSubmit: async ({ value }) => {
       const trimmedInstall = value.installCommand.trim();
       const trimmedDev = value.devCommand.trim();
-      await updateSettings({
-        id: projectId,
-        settings: {
-          installCommand: trimmedInstall === "" ? undefined : trimmedInstall,
-          devCommand: trimmedDev === "" ? undefined : trimmedDev,
-        },
-      });
+      try {
+        await updateSettings({
+          id: projectId,
+          settings: {
+            installCommand: trimmedInstall === "" ? undefined : trimmedInstall,
+            devCommand: trimmedDev === "" ? undefined : trimmedDev,
+          },
+        });
+      } catch {
+        toast.error("Unable to save preview settings. Please try again.");
+        return;
+      }
       setOpen(false);
       onSave?.();
     }

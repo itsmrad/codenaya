@@ -41,6 +41,8 @@ interface StubOptions {
   followUp?: (request: StubChatRequest) => StubToolCall | undefined;
   /** The JSON object returned to a structured-output request. */
   object?: (request: StubChatRequest) => unknown;
+  /** Delays the response until it settles, e.g. to keep a swarm worker running. */
+  hold?: (request: StubChatRequest) => Promise<void> | undefined;
 }
 
 /** The request's system prompt text (a worker's brief and owned paths live here). */
@@ -76,7 +78,7 @@ const readJson = async (request: IncomingMessage) => {
  */
 export const startStubProvider = async (
   apiKey: string,
-  { reply = "", toolCall = { name: "listFiles", arguments: {} }, followUp, object }: StubOptions,
+  { reply = "", toolCall = { name: "listFiles", arguments: {} }, followUp, object, hold }: StubOptions,
 ) => {
   let rejecting = false;
   const requests: StubChatRequest[] = [];
@@ -98,6 +100,7 @@ export const startStubProvider = async (
 
     const body = await readJson(request);
     requests.push(body);
+    await hold?.(body);
     const call = (tool: StubToolCall) => ({
       role: "assistant",
       content: null,

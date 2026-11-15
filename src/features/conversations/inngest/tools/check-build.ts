@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createTool } from "@inngest/agent-kit";
-import { CommandExitError, type CommandResult, Sandbox, TimeoutError } from "e2b";
+import { CommandExitError, type CommandResult, Sandbox, SandboxError, TimeoutError } from "e2b";
 
 import {
   BUILD_CHECK_UNFINISHED,
@@ -195,15 +195,30 @@ type WarmPreview = { projectId: string; ownerId: string };
 /** An install the preview (or another check) is running; copying node_modules now could catch it half-written. */
 const INSTALLING = /\b(?:npm|pnpm|yarn|bun)\b.*\s(?:install|i|add|ci)(?:\s|$)/;
 
-const installRunning = async (sandbox: Sandbox, deadline: number) =>
-  (await sandbox.commands.list({ requestTimeoutMs: within(deadline, SHORT_CALL_MS) })).some((proc) =>
-    INSTALLING.test([proc.cmd, ...proc.args].join(" ")),
-  );
+/** A request timeout is inconclusive while the preview is busy installing. */
+const installRunning = async (sandbox: Sandbox, deadline: number) => {
+  const requestTimeoutMs = within(deadline, SHORT_CALL_MS);
+  const started = Date.now();
+  try {
+    return (await sandbox.commands.list({ requestTimeoutMs })).some((proc) =>
+      INSTALLING.test([proc.cmd, ...proc.args].join(" ")),
+    );
+  } catch (error) {
+    // E2B also uses TimeoutError for expired sandboxes; those must fall cold.
+    const requestTimedOut =
+      (error instanceof TimeoutError && !error.message.includes("sandbox timeout")) ||
+      (error instanceof SandboxError && error.message.includes("The operation was aborted due to timeout"));
+    if (requestTimedOut && Date.now() - started >= requestTimeoutMs - Math.min(1_000, requestTimeoutMs / 10)) {
+      return true;
+    }
+    throw error;
+  }
+};
 
 /**
  * Polls until no install is running: true once none is, false if one still is
- * after INSTALL_WAIT_MS or near the step deadline. Each poll is bounded by the
- * wait too; one that times out at its end throws, which also means a cold build.
+ * (or the list keeps timing out) after INSTALL_WAIT_MS or near the step deadline.
+ * Each poll is bounded by the wait too.
  */
 const installFinished = async (sandbox: Sandbox, deadline: number) => {
   const waitUntil = Math.min(Date.now() + INSTALL_WAIT_MS, deadline);

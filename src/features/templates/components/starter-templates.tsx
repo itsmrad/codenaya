@@ -102,8 +102,8 @@ interface StarterTemplatesProps {
 
 /**
  * The official starter templates (#119), for the dashboard and /showcase.
- * Picking one creates a project seeded with the template's files and starts
- * the agent on its curated prompt.
+ * Picking one creates a project seeded with the template's files: an instant
+ * template's finished app (#362), or the starter plus a run on its prompt.
  */
 export const StarterTemplates = ({ title, description }: StarterTemplatesProps) => {
   const { isLoading, isAuthenticated } = useConvexAuth();

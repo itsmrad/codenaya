@@ -250,7 +250,13 @@ export const AssistantMessage = ({
   const buildPlan = async (build: string) => {
     if (buildingPlan || !onBuildPlan) return;
     setBuildingPlan(true);
-    if (!(await onBuildPlan(build))) setBuildingPlan(false);
+    // A send that fails or throws re-enables the buttons; a sent build keeps them off.
+    try {
+      if (!(await onBuildPlan(build))) setBuildingPlan(false);
+    } catch (error) {
+      setBuildingPlan(false);
+      throw error;
+    }
   };
   const tasks = useAgentTasks(message.mode === "swarm" ? message._id : null);
   const reduceMotion = useReducedMotion();

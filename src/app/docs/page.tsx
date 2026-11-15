@@ -212,6 +212,28 @@ const SECTIONS: { id: string; title: string; content: ReactNode }[] = [
     ),
   },
   {
+    id: "accounts-and-data",
+    title: "Login and saved data",
+    content: (
+      <>
+        <p>
+          For apps with accounts or saved data, turn on the built-in <code>supabase-auth-db</code>{" "}
+          skill from <strong>Skills</strong> in the project bar. The agent then builds sign-up and
+          sign-in (email and password, or a magic link) and a database where Row Level Security
+          keeps each user&rsquo;s rows private.
+        </p>
+        <p>
+          Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_PUBLISHABLE_KEY</code> (the
+          publishable or anon key from your Supabase project) under{" "}
+          <a href="#env-vars">Environment variables</a>. Never use the secret or{" "}
+          <code>service_role</code> key in the app. The agent writes the table setup as SQL: run it
+          in the Supabase SQL editor, or connect the Supabase{" "}
+          <a href="#integrations">integration</a> and the agent applies it after you approve.
+        </p>
+      </>
+    ),
+  },
+  {
     id: "shortcuts",
     title: "Keyboard shortcuts",
     content: (

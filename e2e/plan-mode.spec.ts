@@ -202,6 +202,10 @@ test.describe.serial("plan mode", () => {
     const chatTab = page.getByRole("tablist", { name: "Workspace views" }).getByRole("tab", { name: "Chat" });
     await chatTab.click();
     await expect(chatTab).toHaveAttribute("aria-selected", "true");
+    // The composer remounts with the chat tab and its mode resets to Build.
+    const toggle = page.getByRole("radio", { name: "Ask / Plan", exact: true });
+    await toggle.click();
+    await expect(toggle).toBeChecked();
     const input = page.getByPlaceholder("Describe a change or ask a question…");
     await input.fill("todo app with a footer");
     await input.press("Enter");
@@ -232,11 +236,14 @@ test.describe.serial("plan mode", () => {
       contentType: "image/png",
     });
     const before = stub.requests.length;
+    // The first test's build reply is already in this chat: count it out.
+    const builtBefore = await page.getByText(BUILD_REPLY).count();
     await buildEdited.click();
 
     // The edited plan is the user's message, and the build gets it.
     await expect(page.getByText(EDITED_ITEM)).toBeVisible();
-    await expect(page.getByText(BUILD_REPLY).last()).toBeVisible({ timeout: 120_000 });
+    await expect(page.getByText(BUILD_REPLY)).toHaveCount(builtBefore + 1, { timeout: 120_000 });
+    await expect.poll(() => stub.requests.slice(before).some(isBuild), { timeout: 30_000 }).toBe(true);
     const editedBuild = stub.requests.slice(before).find(isBuild);
     expect(JSON.stringify(editedBuild?.messages)).toContain(EDITED_ITEM);
   });

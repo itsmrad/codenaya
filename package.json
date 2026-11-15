@@ -2,6 +2,7 @@
 	"name": "codenaya",
 	"version": "0.1.0",
 	"private": true,
+	"license": "AGPL-3.0-only",
 	"scripts": {
 		"dev": "next dev",
 		"dev:infisical": "infisical run --env dev -- next dev",
@@ -12,6 +13,7 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:e2e": "playwright test",
+		"check:starter": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/agent-eval/register.mjs scripts/check-vite-starter.ts",
 		"e2b:template": "node e2b/build-template.mts",
 		"postinstall": "patch-package",
 		"eval:agent": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/agent-eval/register.mjs scripts/agent-eval/run.ts"

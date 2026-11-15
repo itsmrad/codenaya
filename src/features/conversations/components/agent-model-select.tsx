@@ -15,9 +15,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  AI_PROVIDERS,
   PLATFORM_PROVIDER,
+  keyDisplayName,
+  keyGroupLabel,
   keyModels,
+  pickerKeys,
   runModelLabel,
 } from "@/features/ai-providers/registry";
 import { resolveCatalogModel } from "@/features/ai-providers/platform";
@@ -71,9 +73,7 @@ export const AgentModelSelect = ({
 }: AgentModelSelectProps) => {
   const icon = (vendor: string) => withIcons && <VendorIcon vendor={vendor} />;
   const keys = useAiProviderKeys() ?? [];
-  const keyGroups = keys.filter(
-    (key) => key.status === "active" || key._id === value.keyId,
-  );
+  const keyGroups = pickerKeys(keys, value.keyId);
   const selectedKey = keys.find((key) => key._id === value.keyId);
   const platform = usePlatformModelsOrCatalog();
   const selectedPlatformModel = resolveCatalogModel(platform, value.modelId);
@@ -116,25 +116,23 @@ export const AgentModelSelect = ({
               className={TAGGED_ITEM}
             >
               {icon(model.vendor)}
-              {model.name}
+              {/* Its own span, so the trigger truncates the name instead of wrapping it to one word. */}
+              <span className="truncate">{model.name}</span>
             </PromptInputSelectItem>
           ))}
         </SelectGroup>
         {keyGroups.map((key) => (
           <SelectGroup key={key._id}>
-            <SelectLabel>
-              {AI_PROVIDERS[key.provider].label} · {key.label}
-              {key.status === "invalid" && " (invalid)"}
-            </SelectLabel>
+            <SelectLabel>{keyGroupLabel(key)}</SelectLabel>
             {keyModels(key).map((model) => (
               <PromptInputSelectItem
                 key={model.id}
                 value={toChoiceValue({ keyId: key._id, modelId: model.id })}
-                data-tag={key.label}
+                data-tag={keyDisplayName(key)}
                 className={TAGGED_ITEM}
               >
                 {icon(key.provider)}
-                {model.label}
+                <span className="truncate">{model.label}</span>
               </PromptInputSelectItem>
             ))}
           </SelectGroup>

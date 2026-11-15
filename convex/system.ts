@@ -910,7 +910,7 @@ export const createUserConnection = mutation({
     projectId: v.optional(v.id("projects")),
     providerId: v.string(),
     label: v.string(),
-    authMode: v.union(v.literal("oauth"), v.literal("api_key")),
+    authMode: v.union(v.literal("oauth"), v.literal("api_key"), v.literal("none")),
     serverUrl: v.string(),
     credentialRef: v.string(),
     maskedPreview: v.string(),
@@ -979,7 +979,7 @@ const reconnectArgs = {
   userId: v.string(),
   connectionId: v.string(),
   providerId: v.string(),
-  authMode: v.union(v.literal("oauth"), v.literal("api_key")),
+  authMode: v.union(v.literal("oauth"), v.literal("api_key"), v.literal("none")),
 };
 
 async function reconnectConnection(
@@ -988,7 +988,7 @@ async function reconnectConnection(
     userId: string;
     connectionId: string;
     providerId: string;
-    authMode: "oauth" | "api_key";
+    authMode: "oauth" | "api_key" | "none";
   },
 ) {
   const id = ctx.db.normalizeId("userConnections", args.connectionId);
@@ -1856,6 +1856,7 @@ export const createAiProviderKey = mutation({
     modelIds: v.optional(v.array(v.string())),
     secretRef: v.string(),
     maskedPreview: v.string(),
+    fingerprint: v.optional(v.string()),
     ...sealedFields,
   },
   handler: async (ctx, { internalKey, ...args }) => {

@@ -25,7 +25,7 @@
  * position, so reordering the retired list cannot silently break decryption.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, hkdfSync } from "node:crypto";
 
 import { DEK_LENGTH, unwrapBytes, wrapBytes } from "../envelope";
 import type { KekProvider } from "../types";
@@ -73,6 +73,18 @@ function decodeKek(value: string, label: string): Buffer {
   }
 
   return decoded;
+}
+
+/**
+ * A 32-byte subkey of the active local KEK, bound to `purpose` by HKDF-SHA256,
+ * for keyed digests such as HMACs. The KEK itself never leaves this module.
+ * Undefined when no local KEK is configured (e.g. a gcp-kms-only deployment).
+ */
+export function deriveLocalKekSubkey(purpose: string): Buffer | undefined {
+  const activeKek = process.env.CODENAYA_LOCAL_KEK;
+  if (!activeKek || activeKek.trim() === "") return undefined;
+  const kek = decodeKek(activeKek, "CODENAYA_LOCAL_KEK");
+  return Buffer.from(hkdfSync("sha256", kek, Buffer.alloc(0), purpose, DEK_LENGTH));
 }
 
 export interface LocalKekConfig {

@@ -24,6 +24,7 @@ export interface AiProviderKeySummary {
   baseUrl?: string;
   modelIds?: string[];
   maskedPreview: string;
+  fingerprint?: string;
   status: Doc<"aiProviderKeys">["status"];
   lastTestedAt?: number;
 }
@@ -40,6 +41,7 @@ export function toKeySummary(doc: Doc<"aiProviderKeys">): AiProviderKeySummary {
     baseUrl: doc.baseUrl,
     modelIds: doc.modelIds,
     maskedPreview: doc.maskedPreview,
+    fingerprint: doc.fingerprint,
     status: doc.status,
     lastTestedAt: doc.lastTestedAt,
   };

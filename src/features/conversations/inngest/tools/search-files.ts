@@ -26,7 +26,11 @@ export const createSearchFilesTool = (options: { projectId: Id<"projects">; inte
       if (!parsed.success) return `Error: ${parsed.error.issues[0].message}`;
       return await step?.run("search-files", async () => {
         try {
-          return await convex.query(api.files.searchFiles, { ...options, ...parsed.data });
+          return await convex.query(api.files.searchFiles, {
+            projectId: options.projectId,
+            internalKey: options.internalKey,
+            ...parsed.data,
+          });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const redacted = options.internalKey ? message.replaceAll(options.internalKey, "[redacted]") : message;

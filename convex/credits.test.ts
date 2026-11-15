@@ -349,3 +349,26 @@ describe("model spend limits (ADR 0012)", () => {
     expect(await spend(t)).toEqual({ user: null, total: null });
   });
 });
+
+describe("credits.recordTranscriptionUsage", () => {
+  const transcribe = (t: TestConvex, costUsd: number, internalKey = INTERNAL_KEY) =>
+    t.mutation(api.credits.recordTranscriptionUsage, { internalKey, userId: ALICE, costUsd });
+
+  test("charges the user, rounding a fraction of a cent up to a credit", async () => {
+    const t = setup();
+
+    await transcribe(t, 0.0002); // 10 seconds of audio
+    await transcribe(t, 0.0002);
+
+    expect(await account(t)).toMatchObject({ periodUsed: 2, dayUsed: 2 });
+    expect(await account(t, BOB)).toBeNull();
+  });
+
+  test("refuses a bad key or a negative cost", async () => {
+    const t = setup();
+
+    await expect(transcribe(t, 0.01, "wrong")).rejects.toThrow();
+    await expect(transcribe(t, -1)).rejects.toThrow(/not negative/);
+    expect(await account(t)).toBeNull();
+  });
+});

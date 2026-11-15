@@ -35,7 +35,12 @@
  * not become stale advice.
  */
 
+import {
+  CONTENTFUL_DESTRUCTIVE_TOOLS,
+  CONTENTFUL_READ_TOOLS,
+} from "./contentful-tools";
 import { POSTHOG_DESTRUCTIVE_TOOLS } from "./posthog-destructive-tools";
+import { POSTHOG_READ_TOOLS } from "./posthog-read-tools";
 
 import type {
   ProviderDefinition,
@@ -47,6 +52,52 @@ const NO_URL_SCOPING: ProviderScopeCapabilities = {
   queryParams: [],
   headers: [],
 };
+
+/**
+ * Region-independent parts of the Amplitude entries. The US and EU hosts serve
+ * the same tools; each region is its own entry with its own trusted hostname.
+ *
+ * Full inventory: https://amplitude.com/docs/amplitude-ai/amplitude-mcp#available-tools-and-capabilities
+ * (reviewed 2026-11-15). Action-dispatching tools that can create, edit, share,
+ * sync or delete are gated, as is `run_amp`, which proxies the Developer API.
+ * Ad-hoc queries, chart data, natural-language taxonomy search, user profiles,
+ * session replays, feedback comments, agent transcripts and results, Wave,
+ * and warehouse connections are neither listed write nor read, so they stay gated.
+ */
+const AMPLITUDE_SHARED = {
+  description: "Query product analytics and manage charts, dashboards, cohorts, and experiments.",
+  category: "Analytics",
+  authModes: ["oauth"],
+  supportsReadOnly: false,
+  scope: NO_URL_SCOPING,
+  destructiveTools: [
+    "manage_amp_context", "use_amplitude_chart_monitors", "render_amplitude_chart",
+    "use_amp_dashboards", "use_amp_notebooks", "use_amp_comments", "share_amp_entities",
+    "manage_amp_entities", "use_amplitude_cohorts", "use_amp_experiments", "use_amp_flags",
+    "use_amplitude_metrics", "manage_amp_events", "manage_amp_properties", "manage_amp_branches",
+    "manage_wave_opportunities", "manage_wave_product_areas", "manage_wave_verification_artifacts",
+    "use_amp_ai_visibility", "run_amp",
+  ],
+  readOnlyTools: [
+    "get_amp_taxonomy", "get_amplitude_context", "get_from_url", "get_group_types",
+    "get_transformations", "search_amp_entities",
+  ],
+  notes:
+    "Acts as the signed-in Amplitude user; writes also need the Use MCP (write) role action. Org admins can block MCP under Settings > Content Access. Use the entry matching your data region. No URL-level read-only mode.",
+} as const;
+
+/** Region-independent parts of the Contentful entries; same tools on both hosts. */
+const CONTENTFUL_SHARED = {
+  description: "Search, edit, and publish entries, assets, content types, and releases.",
+  category: "Content",
+  authModes: ["oauth"],
+  supportsReadOnly: false,
+  scope: NO_URL_SCOPING,
+  destructiveTools: CONTENTFUL_DESTRUCTIVE_TOOLS,
+  readOnlyTools: CONTENTFUL_READ_TOOLS,
+  notes:
+    "Needs the Contentful MCP app installed in each space and environment; its configuration chooses the allowed tool categories and read-only or read/write per environment. Pick spaces and environments at every sign-in; environment aliases are not supported. Use the entry matching your organization's region.",
+} as const;
 
 /**
  * Freeze the registry all the way down.
@@ -70,6 +121,9 @@ const CATALOG = {
   supabase: {
     id: "supabase",
     displayName: "Supabase",
+    description: "Query tables and run database migrations.",
+    category: "Database",
+    logo: "/integrations/supabase.svg",
     mcpUrl: "https://mcp.supabase.com/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.supabase.com"],
@@ -106,11 +160,24 @@ const CATALOG = {
       "deploy_edge_function",
       "update_storage_config",
     ],
+    // Reads annotated read-only in supabase-community/supabase-mcp src/tools.
+    readOnlyTools: [
+      "generate_typescript_types", "get_advisors", "get_cost", "get_edge_function", "get_logs",
+      "get_notebook", "get_organization", "get_project", "get_project_url",
+      "get_storage_config", "list_branches", "list_edge_functions",
+      "list_extensions", "list_migrations", "list_notebooks", "list_organizations",
+      "list_projects", "list_storage_buckets", "list_tables", "query_logs", "search_docs",
+      // Returns publishable (anon) keys, which are public by design.
+      "get_publishable_keys",
+    ],
   },
 
   neon: {
     id: "neon",
     displayName: "Neon",
+    description: "Query Postgres and manage database branches.",
+    category: "Database",
+    logo: "/integrations/neon.svg",
     mcpUrl: "https://mcp.neon.tech/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.neon.tech"],
@@ -151,13 +218,35 @@ const CATALOG = {
       "reset_from_parent",
       "provision_neon_auth",
     ],
+    // Reads from the neondatabase/mcp-server-neon README tool list; generated Management API tools stay gated.
+    readOnlyTools: [
+      "compare_database_schema", "count_projects", "describe_branch", "describe_project",
+      "describe_table_schema", "fetch", "get_branch_consumption", "get_database_tables",
+      "get_doc", "get_function", "get_neon_auth_config", "get_postgres_endpoint",
+      "get_project_consumption", "get_realtime", "get_snapshot_schedule", "get_storage",
+      "get_trigger", "inspect_database", "list_auth_oauth_providers",
+      "list_auth_trusted_domains", "list_branch_computes", "list_branches", "list_functions",
+      "list_functions_custom_domains", "list_incidents", "list_log_field_values",
+      "list_log_fields", "list_organizations", "list_postgres_endpoints", "list_projects",
+      "list_slow_queries", "list_snapshots", "list_storage_buckets", "list_storage_objects",
+      "list_triggers", "query_logs", "query_loki_logs", "search", "search_docs",
+      // List output never includes client_secret (zNeonAuthOAuthClient in @neon/tools); only create returns it.
+      "list_auth_oauth_clients",
+    ],
   },
 
   github: {
     id: "github",
     displayName: "GitHub",
+    description: "Browse repositories, issues and pull requests.",
+    category: "Dev tools",
+    logo: "/integrations/github.svg",
     mcpUrl: "https://api.githubcopilot.com/mcp/",
-    authModes: ["oauth", "api_key"],
+    // PAT only for now. OAuth cannot complete: the authorization server is
+    // github.com, which the as-guard rejects as cross-site, and GitHub has no
+    // dynamic client registration. Re-add "oauth" with a pre-registered
+    // client (#539) and `trustedAuthorizationServerOrigins`.
+    authModes: ["api_key"],
     trustedHostnames: ["api.githubcopilot.com"],
     supportsReadOnly: true,
     scope: {
@@ -177,6 +266,26 @@ const CATALOG = {
       "delete_repository",
       "push_files",
     ],
+    // Reads annotated read-only in github/github-mcp-server pkg/github/__toolsnaps__.
+    readOnlyTools: [
+      "actions_get", "actions_list", "custom_properties_read", "find_duplicate",
+      "get_code_quality_finding", "get_code_scanning_alert", "get_commit",
+      "get_dependabot_alert", "get_discussion", "get_discussion_comments", "get_file_blame",
+      "get_file_contents", "get_gist", "get_global_security_advisory", "get_job_logs",
+      "get_label", "get_latest_release", "get_me", "get_notification_details",
+      "get_release_by_tag", "get_repository_tree", "get_tag",
+      "get_team_members", "get_teams", "issue_artifact_read", "issue_dependency_read",
+      "issue_read", "list_branches", "list_code_scanning_alerts", "list_commits",
+      "list_dependabot_alerts", "list_discussion_categories", "list_discussions", "list_gists",
+      "list_global_security_advisories", "list_issue_fields", "list_issue_types", "list_issues",
+      "list_label", "list_notifications", "list_org_repository_security_advisories",
+      "list_pull_requests", "list_releases", "list_repository_collaborators",
+      "list_repository_security_advisories",
+      "list_starred_repositories", "list_tags", "projects_get", "projects_list",
+      "pull_request_read", "repository_ruleset_read", "search_code", "search_commits",
+      "search_issues", "search_orgs", "search_pull_requests", "search_repositories",
+      "search_users", "ui_get",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -187,12 +296,20 @@ const CATALOG = {
   stripe: {
     id: "stripe",
     displayName: "Stripe",
+    description: "Look up customers, payments and subscriptions.",
+    category: "Payments",
+    logo: "/integrations/stripe.svg",
     mcpUrl: "https://mcp.stripe.com",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.stripe.com"],
     supportsReadOnly: false,
     scope: NO_URL_SCOPING,
     destructiveTools: ["stripe_api_write", "create_refund"],
+    // Reads from https://docs.stripe.com/mcp#tools. stripe_api_read dispatches any GET method, so it stays gated.
+    readOnlyTools: [
+      "get_balance_summary", "get_stripe_account_info", "search_stripe_documentation",
+      "stripe_api_details", "stripe_api_search",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -205,6 +322,9 @@ const CATALOG = {
   context7: {
     id: "context7",
     displayName: "Context7",
+    description: "Look up current library docs and code examples.",
+    category: "Docs",
+    logo: "/integrations/context7.svg",
     mcpUrl: "https://mcp.context7.com/mcp",
     authModes: ["api_key"],
     trustedHostnames: ["mcp.context7.com"],
@@ -212,6 +332,10 @@ const CATALOG = {
     supportsReadOnly: false,
     scope: NO_URL_SCOPING,
     destructiveTools: [],
+    // Both tools from the upstash/context7 README; documentation lookup only.
+    readOnlyTools: [
+      "query-docs", "resolve-library-id",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -227,6 +351,9 @@ const CATALOG = {
   prisma: {
     id: "prisma",
     displayName: "Prisma Postgres",
+    description: "Query Postgres and update database schemas.",
+    category: "Database",
+    logo: "/integrations/prisma.svg",
     mcpUrl: "https://mcp.prisma.io/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.prisma.io"],
@@ -241,11 +368,22 @@ const CATALOG = {
       "delete_object_store_bucket",
       "delete_object_store_bucket_key",
     ],
+    // Reads from https://www.prisma.io/docs/ai/mcp-tools.
+    readOnlyTools: [
+      "fetch_workspace_details", "get_prisma_composer_topology",
+      "get_prisma_compute_deployment_logs", "introspect_database_schema",
+      "list_object_store_buckets", "list_prisma_compute_apps", "list_prisma_compute_builds",
+      "list_prisma_compute_deployments", "list_prisma_postgres_backups",
+      "list_prisma_postgres_databases", "search_prisma_documentation",
+    ],
   },
 
   sentry: {
     id: "sentry",
     displayName: "Sentry",
+    description: "Investigate errors, issues and stack traces.",
+    category: "Monitoring",
+    logo: "/integrations/sentry.svg",
     mcpUrl: "https://mcp.sentry.dev/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.sentry.dev"],
@@ -259,11 +397,33 @@ const CATALOG = {
       path: { kind: "segments", segments: ["orgSlug", "projectSlug"] },
     },
     destructiveTools: ["update_issue", "create_project", "update_project_settings"],
+    // Reads from getsentry/sentry-mcp packages/mcp-core/src/toolDefinitions.json.
+    readOnlyTools: [
+      "find_alert_rules", "find_dashboards", "find_dropped_events",
+      "find_metric_monitors", "find_monitors", "find_organizations", "find_projects",
+      "find_releases", "find_teams", "find_uptime_monitors", "get_agent_conversation_details",
+      "get_ai_conversation_details", "get_alert_options", "get_alert_rule",
+      "get_dashboard_details", "get_doc", "get_event_attachment", "get_event_stacktrace",
+      "get_issue_activity", "get_issue_breadcrumbs", "get_issue_details",
+      "get_issue_tag_values", "get_issue_user_reports", "get_latest_base_snapshot",
+      "get_metric_monitor_details", "get_monitor_details", "get_profile", "get_profile_details",
+      "get_release_details", "get_replay_details", "get_sentry_mcp_info", "get_sentry_resource",
+      "get_snapshot", "get_snapshot_image", "get_span_details", "get_trace_details",
+      "get_uptime_monitor_details", "search_agent_conversations", "search_ai_conversations",
+      "search_docs", "search_errors", "search_events", "search_issue_events", "search_issues",
+      "search_logs", "search_metrics", "search_profiles", "search_replays", "search_traces",
+      "whoami",
+      // Returns DSNs, client keys that are public by design.
+      "find_dsns",
+    ],
   },
 
   cloudflare: {
     id: "cloudflare",
     displayName: "Cloudflare",
+    description: "Manage Workers, storage and cloud resources.",
+    category: "Dev tools",
+    logo: "/integrations/cloudflare.svg",
     mcpUrl: "https://mcp.cloudflare.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.cloudflare.com"],
@@ -273,6 +433,10 @@ const CATALOG = {
     // Cloudflare API, so it has to be treated as destructive even though its
     // name says nothing about mutation.
     destructiveTools: ["execute"],
+    // From the cloudflare/mcp README. `search` runs agent-written code, so it stays gated.
+    readOnlyTools: [
+      "docs", "whoami",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -285,6 +449,9 @@ const CATALOG = {
   linear: {
     id: "linear",
     displayName: "Linear",
+    description: "Track issues, projects and team work.",
+    category: "Dev tools",
+    logo: "/integrations/linear.svg",
     mcpUrl: "https://mcp.linear.app/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.linear.app"],
@@ -310,6 +477,9 @@ const CATALOG = {
   posthog: {
     id: "posthog",
     displayName: "PostHog",
+    description: "Explore product analytics, feature flags, experiments, and dashboards.",
+    category: "Analytics",
+    logo: "/integrations/posthog.svg",
     mcpUrl: "https://mcp.posthog.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.posthog.com"],
@@ -324,6 +494,7 @@ const CATALOG = {
       ],
     },
     destructiveTools: POSTHOG_DESTRUCTIVE_TOOLS,
+    readOnlyTools: POSTHOG_READ_TOOLS,
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -337,6 +508,9 @@ const CATALOG = {
   resend: {
     id: "resend",
     displayName: "Resend",
+    description: "Send email and manage domains, contacts, and broadcasts.",
+    category: "Communication",
+    logo: "/integrations/resend.svg",
     mcpUrl: "https://mcp.resend.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.resend.com"],
@@ -371,6 +545,24 @@ const CATALOG = {
       "update-template", "update-topic", "update-webhook",
       "verify-domain", "verify-domain-claim",
     ],
+    // Reads annotated read-only in resend/resend-mcp src/tools, except get-webhook, which returns the signing secret.
+    readOnlyTools: [
+      "get-automation", "get-automation-runs", "get-broadcast", "get-contact",
+      "get-contact-import", "get-contact-property", "get-domain", "get-domain-claim",
+      "get-email", "get-email-metrics", "get-inbox", "get-inbox-agent", "get-inbox-draft",
+      "get-inbox-thread", "get-inbox-thread-email", "get-log", "get-received-email",
+      "get-received-email-attachment", "get-segment", "get-sent-email-attachment",
+      "get-suppression", "get-template", "get-tiptap-json-content", "get-topic", "get-usage",
+      "get-webhook-event", "list-api-keys", "list-broadcast-clicked-links",
+      "list-broadcast-recipients", "list-broadcasts", "list-contact-imports",
+      "list-contact-properties", "list-contact-segments", "list-contact-topics",
+      "list-contacts", "list-domains", "list-emails", "list-inbox-drafts", "list-inbox-labels",
+      "list-inbox-thread-emails", "list-inbox-threads", "list-inboxes", "list-logs",
+      "list-oauth-grants", "list-received-email-attachments", "list-received-emails",
+      "list-segments", "list-sent-email-attachments", "list-suppressions", "list-templates",
+      "list-topics", "list-webhook-event-attempts", "list-webhook-events", "list-webhooks",
+      "search-inbox-threads",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -384,6 +576,9 @@ const CATALOG = {
   upstash: {
     id: "upstash",
     displayName: "Upstash",
+    description: "Manage Redis, QStash workflows, and Vector or Search resources.",
+    category: "Database",
+    logo: "/integrations/upstash.svg",
     mcpUrl: "https://mcp.upstash.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.upstash.com"],
@@ -413,6 +608,15 @@ const CATALOG = {
       "search_upsert", "submit_feedback_to_upstash_team", "vector_upsert",
       "workflow_manage_run",
     ],
+    // Tools marked read at https://upstash.com/docs/agent-resources/mcp, except those that can return credentials.
+    readOnlyTools: [
+      "blob_download_url", "box_account", "box_logs", "box_metrics", "console_redis_keys",
+      "console_redis_value", "dlq_list", "index_fetch", "index_get_stats", "index_info",
+      "index_list", "index_list_namespaces", "index_range", "logs_list",
+      "qstash_flow_control_get", "qstash_get_stats", "qstash_list_schedules",
+      "redis_get_insights", "redis_get_stats", "redis_get_traffic", "redis_list_backups",
+      "redis_list_databases", "search_query", "vector_query",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -426,6 +630,9 @@ const CATALOG = {
   sanity: {
     id: "sanity",
     displayName: "Sanity",
+    description: "Query and edit content, manage releases, and configure projects.",
+    category: "Content",
+    logo: "/integrations/sanity.svg",
     mcpUrl: "https://mcp.sanity.io",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.sanity.io"],
@@ -444,6 +651,16 @@ const CATALOG = {
       "media_library_discard_drafts", "media_library_link_assets",
       "generate_image", "transform_image", "run_sanity_cli",
     ],
+    // Reads from https://www.sanity.io/docs/ai/mcp-server.
+    readOnlyTools: [
+      "assets_upload_status", "cors_origins_list", "documents_validate", "get_document",
+      "get_project_studios", "get_sanity_rules", "get_schema", "list_datasets",
+      "list_embeddings_indices", "list_organizations", "list_projects", "list_releases",
+      "list_sanity_rules", "list_workspace_schemas", "media_library_get_document",
+      "media_library_get_schema", "media_library_list", "media_library_list_asset_references",
+      "media_library_query_documents", "query_documents", "read_docs", "schema_type_get",
+      "search_docs", "semantic_search", "usage_history_get", "usage_snapshot_get",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -457,6 +674,9 @@ const CATALOG = {
   planetscale: {
     id: "planetscale",
     displayName: "PlanetScale",
+    description: "Inspect database schema and Insights, and run permitted queries.",
+    category: "Database",
+    logo: "/integrations/planetscale.svg",
     mcpUrl: "https://mcp.pscale.dev/mcp/planetscale",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.pscale.dev"],
@@ -472,6 +692,21 @@ const CATALOG = {
       },
     },
     destructiveTools: ["planetscale_execute_write_query", "planetscale_update_payment_method"],
+    // Reads from https://planetscale.com/docs/mcp-server. planetscale_execute_read_query runs SQL, so it stays gated.
+    readOnlyTools: [
+      "planetscale_get_branch", "planetscale_get_branch_metrics",
+      "planetscale_get_branch_schema", "planetscale_get_database", "planetscale_get_insights",
+      "planetscale_get_invoice_line_items", "planetscale_get_organization",
+      "planetscale_get_organization_billing_payment_method",
+      "planetscale_get_payment_method_setup", "planetscale_get_postgres_logs",
+      "planetscale_get_query_tag", "planetscale_list_branches",
+      "planetscale_list_cluster_size_skus", "planetscale_list_databases",
+      "planetscale_list_invoices", "planetscale_list_organizations",
+      "planetscale_list_query_error_executions", "planetscale_list_query_error_patterns",
+      "planetscale_list_query_tag_summaries", "planetscale_list_query_tags",
+      "planetscale_list_regions_for_organization", "planetscale_list_schema_recommendations",
+      "planetscale_search_documentation",
+    ],
     notes:
       "The read-only selection uses the Insights-only endpoint, excluding both read and write query execution. This is not server-enforced read-only: billing writes remain separately authorized by OAuth consent and gated, and unannotated tools still require approval. No URL-level database scoping. Postgres IP restrictions must allow the MCP server's documented egress IPs.",
   },
@@ -479,6 +714,9 @@ const CATALOG = {
   notion: {
     id: "notion",
     displayName: "Notion",
+    description: "Search and manage Notion pages and databases.",
+    category: "Productivity",
+    logo: "/integrations/notion.svg",
     mcpUrl: "https://mcp.notion.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.notion.com"],
@@ -519,6 +757,23 @@ const CATALOG = {
       "notion-update-view",
       "notion-upload-skill",
     ],
+    // Reads from the inventory above.
+    readOnlyTools: [
+      "notion-ai-search", "notion-calendar-list-calendar-resources",
+      "notion-calendar-list-calendars", "notion-calendar-list-contacts",
+      "notion-calendar-list-coworkers-events", "notion-calendar-list-events",
+      "notion-connector-search", "notion-download-attachment", "notion-download-skill",
+      "notion-fetch", "notion-get-async-task", "notion-get-comments",
+      "notion-get-enabled-skills", "notion-get-file-download-urls", "notion-get-groups",
+      "notion-get-self", "notion-get-session-status", "notion-get-suggested-edit",
+      "notion-get-teams", "notion-get-tool-access", "notion-get-users",
+      "notion-get-version-changes", "notion-list-favorite-pages", "notion-list-page-backlinks",
+      "notion-list-private-pages", "notion-list-recent-pages", "notion-list-session-events",
+      "notion-list-shared-pages", "notion-memory-search", "notion-query-data-sources",
+      "notion-query-meeting-notes", "notion-query-multiple-data-sources",
+      "notion-query-sessions", "notion-read-session-event", "notion-search",
+      "notion-search-agents", "notion-search-sessions", "notion-view-version",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -531,6 +786,9 @@ const CATALOG = {
   atlassian: {
     id: "atlassian",
     displayName: "Atlassian (Jira / Confluence)",
+    description: "Search and manage Jira work items and Confluence pages.",
+    category: "Productivity",
+    logo: "/integrations/atlassian.svg",
     mcpUrl: "https://mcp.atlassian.com/v2/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.atlassian.com"],
@@ -655,6 +913,57 @@ const CATALOG = {
       "queryInsightsSql",
       "queryInsightsAi",
     ],
+    // read_* and search_* groups from the inventory above, minus credit-consuming Enriched tools and exports.
+    readOnlyTools: [
+      "atlassianUserInfo", "describeJiraAlignItemType", "diffConfluenceContentVersions",
+      "discover", "downloadConfluenceAttachment", "downloadJiraIssueAttachment",
+      "getAccessibleAtlassianResources", "getAssetsObject", "getAssetsObjectSchema",
+      "getAssetsObjectType", "getAssetsObjectsById", "getAssetsServiceObjectsById",
+      "getBitbucketRepoBranch", "getBitbucketRepoCommit", "getBitbucketRepoCommitReport",
+      "getBitbucketRepoCommitReportAnnotations", "getBitbucketRepoDefaultReviewers",
+      "getBitbucketRepoDeployment", "getBitbucketRepoEnvironment",
+      "getBitbucketRepoFileContent", "getBitbucketRepoPipeline", "getBitbucketRepoPipelineStep",
+      "getBitbucketRepoPipelineStepLog", "getBitbucketRepoPullRequest",
+      "getBitbucketRepoPullRequestDiff", "getBitbucketRepository", "getBitbucketWorkspace",
+      "getCapacityPlanAllocations", "getConfluenceAttachment", "getConfluenceComment",
+      "getConfluenceContent", "getConfluenceContentPermissions",
+      "getConfluenceContentRestrictionState", "getConfluenceContentSuggestions",
+      "getConfluenceContentVersion", "getConfluenceMauiApp", "getConfluencePersonalSpace",
+      "getConfluencePublicLinkStatus", "getConfluenceReactions", "getConfluenceSpace",
+      "getConfluenceSpaceInstructions", "getConfluenceTask", "getConfluenceTemplate",
+      "getContentFormatGuide", "getFocusArea", "getFocusAreaCustomFields", "getFocusAreaTypes",
+      "getGoal", "getGoalTypes", "getGoalUpdate", "getInsightsResource",
+      "getInsightsResourceLineage", "getJiraAlignItem", "getJiraAlignTerminology",
+      "getJiraBoardConfig", "getJiraBoardIssueData", "getJiraBoardSprintData",
+      "getJiraCurrentUser", "getJiraEntityProperty", "getJiraIssue",
+      "getJiraIssueTypeMetaWithFields", "getJiraProjectVersionRelatedWork",
+      "getJiraProjectVersions", "getJiraUser", "getJsmAgentAvailability", "getJsmOpsAlerts",
+      "getJsmOpsScheduleInfo", "getJsmOpsTeamInfo", "getJsmRequest",
+      "getJsmRequestActionMetadata", "getJsmRequestCreationOptions",
+      "getJsmRequestResolverPlans", "getJsmRequestTypeFields", "getLoomObjectsContent",
+      "getLoomVideoDownloadUrl", "getProject", "getProjectUpdate", "getTalentFields",
+      "getTalentGroupMetrics", "getTalentPosition", "getTalentPositionsByEntity",
+      "getTalentUser", "getTeam", "listAssetsObjectSchemas", "listAssetsObjectTypeAttributes",
+      "listBitbucketRepoCommitReports", "listBitbucketRepoDeployments",
+      "listBitbucketRepoEnvironments", "listBitbucketRepoPipelineSteps",
+      "listBitbucketRepoPipelines", "listBitbucketRepoPullRequestComments",
+      "listBitbucketRepoPullRequestTasks", "listBitbucketRepoPullRequests",
+      "listBitbucketRepositories", "listBitbucketWorkspaces", "listConfluenceAttachments",
+      "listConfluenceComments", "listConfluenceContent", "listConfluenceContentVersions",
+      "listConfluenceSpaces", "listConfluenceTasks", "listConfluenceTemplates",
+      "listJiraAlignItems", "listJiraBoardSprints", "listJiraBoards", "listJiraDashboards",
+      "listJiraFilters", "listJiraIssueAssignableUsers", "listJiraIssueChangelogs",
+      "listJiraIssueComments", "listJiraIssueLinkTypes", "listJiraIssueRemoteIssueLinks",
+      "listJiraIssueTransitions", "listJiraIssueWorklogs", "listJiraProjectComponents",
+      "listJiraProjectIssueTypesMetadata", "listJiraProjects", "listJiraStatuses",
+      "listLoomObjectFolders", "listLoomObjects", "lookupJiraAccountId",
+      "queryAssetsObjectSchemaAttributes", "queryAssetsObjectTypes", "queryAssetsObjects",
+      "queryAssetsObjectsUsingAql", "queryAssetsReferenceTypes",
+      "resolveConfluenceContentMacros", "searchAssetsObjects",
+      "searchCapacityPlanNonProjectWork", "searchConfluence", "searchFocusAreas", "searchGoals",
+      "searchInsightsResources", "searchJiraIssuesUsingJql", "searchJsmRequests",
+      "searchProjects", "searchTalentPositions", "searchTalentSkillTaxonomy", "searchTeams",
+    ],
     notes:
       "Search and other enriched tools may consume Rovo credits. OAuth only here; Atlassian's admin API-token setting applies to token authentication, which this connector does not offer. No URL-level read-only mode.",
   },
@@ -662,6 +971,9 @@ const CATALOG = {
   gitlab: {
     id: "gitlab",
     displayName: "GitLab",
+    description: "Work with GitLab repositories, merge requests, and CI.",
+    category: "Dev tools",
+    logo: "/integrations/gitlab.svg",
     mcpUrl: "https://gitlab.com/api/v4/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["gitlab.com"],
@@ -713,6 +1025,21 @@ const CATALOG = {
       "save_vulnerability",
       "attach_scan_profile",
     ],
+    // Reads from the inventory above, including documented aliases.
+    readOnlyTools: [
+      "get_artifact_file", "get_commit", "get_duo_session", "get_duo_workflow_status",
+      "get_issue", "get_job", "get_job_log", "get_mcp_server_version", "get_merge_request",
+      "get_merge_request_commits", "get_merge_request_conflicts", "get_merge_request_diffs",
+      "get_merge_request_notes", "get_merge_request_pipelines", "get_pages_content",
+      "get_pipeline", "get_pipeline_jobs", "get_project", "get_repository_file",
+      "get_saved_view_work_items", "get_user", "get_vulnerability", "get_work_item",
+      "get_work_item_types", "get_workitem_notes", "list_branches", "list_commits",
+      "list_duo_agents_and_flows", "list_duo_sessions", "list_groups", "list_merge_requests",
+      "list_pipeline_schedules", "list_pipelines", "list_project_members", "list_projects",
+      "list_releases", "list_repository_tree", "list_tags", "list_todos", "list_user_events",
+      "list_vulnerabilities", "list_wiki_pages", "list_work_item_saved_views",
+      "list_work_items", "search", "search_labels",
+    ],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -725,6 +1052,9 @@ const CATALOG = {
   clerk: {
     id: "clerk",
     displayName: "Clerk",
+    description: "Manage Clerk applications, users, and authentication settings.",
+    category: "Authentication",
+    logo: "/integrations/clerk.svg",
     mcpUrl: "https://mcp.clerk.com/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.clerk.com"],
@@ -745,8 +1075,423 @@ const CATALOG = {
       "check_mcp_server",
       "submit_feedback",
     ],
+    // Reads from the inventory above.
+    readOnlyTools: [
+      "clerk_sdk_snippet", "get_domain_status", "get_instance_config",
+      "get_instance_config_schema", "list_application_feedback",
+      "list_clerk_sdk_snippets", "list_domains", "list_organization_memberships",
+      "list_organizations", "list_user_organization_memberships", "list_users", "whoami",
+      // Returns publishable keys only, which are public by design; never secret keys.
+      "list_applications",
+      // Returns publishable keys only, which are public by design; never secret keys.
+      "get_application",
+    ],
     notes:
       "Acts as your Clerk Dashboard account in the selected workspace. No URL-level read-only mode; production-instance creation cannot be undone.",
+  },
+
+  exa: {
+    id: "exa",
+    displayName: "Exa",
+    description: "Search the web, read pages, and run multi-step research.",
+    category: "Search",
+    logo: "/integrations/exa.svg",
+    mcpUrl: "https://mcp.exa.ai/mcp",
+    authModes: ["oauth", "api_key"],
+    trustedHostnames: ["mcp.exa.ai"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full published inventory: https://docs.exa.ai/reference/exa-mcp#available-tools
+    // agent_run is usage-billed, so it is gated as spend.
+    destructiveTools: ["agent_run"],
+    // Public-web reads from the inventory above. web_search_advanced_exa stays
+    // gated: summaries, subpage crawling and up to 100 results bill crawl and LLM spend in one call.
+    readOnlyTools: ["web_search_exa", "web_fetch_exa"],
+    apiKey: {
+      header: "x-api-key",
+      valuePrefix: "",
+      hint: "Exa API key",
+    },
+    notes:
+      "Search and fetch only read the public web; agent_run is usage-billed and always needs approval. Note that " +
+      "this server also answers unauthenticated and invalid-credential requests on its keyless tier (rate-limited, " +
+      "no agent_run), so a successful connection probe does not prove the key or token is valid — it only proves " +
+      "the server is reachable. No URL-level read-only mode.",
+  },
+
+  tavily: {
+    id: "tavily",
+    displayName: "Tavily",
+    description: "Search, extract, crawl, and map the web for current sources.",
+    category: "Search",
+    logo: "/integrations/tavily.svg",
+    mcpUrl: "https://mcp.tavily.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.tavily.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full published inventory: https://docs.tavily.com/documentation/mcp#what-you-get
+    // Every tool reads the public web; tavily_research is a long multi-source run, gated as spend.
+    destructiveTools: ["tavily_research"],
+    // Public-web reads from the inventory above. tavily_crawl runs a billed multi-page job, so it stays gated.
+    readOnlyTools: ["tavily_search", "tavily_extract", "tavily_map"],
+    notes:
+      "OAuth only here; Tavily's documented key option puts the key in the MCP URL query string. Connecting with OAuth uses the account's mcp_auth_default API key, which Tavily creates if it does not exist. All tools consume Tavily credits. No URL-level read-only mode.",
+  },
+
+  firecrawl: {
+    id: "firecrawl",
+    displayName: "Firecrawl",
+    description: "Scrape, crawl, and search the web, or operate a live page.",
+    category: "Search",
+    logo: "/integrations/firecrawl.svg",
+    mcpUrl: "https://mcp.firecrawl.dev/v2/mcp-oauth",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.firecrawl.dev"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full published inventory: https://docs.firecrawl.dev/mcp-server/tools and
+    // https://github.com/firecrawl/firecrawl-mcp-server#available-tools, plus the
+    // deprecated but still-registered firecrawl_extract. Billed enrichment, jobs
+    // and extraction calls are gated as spend despite their readOnlyHint.
+    destructiveTools: [
+      "firecrawl_interact",
+      "firecrawl_interact_stop",
+      "firecrawl_agent",
+      "firecrawl_monitor_create",
+      "firecrawl_monitor_update",
+      "firecrawl_monitor_run",
+      "firecrawl_monitor_delete",
+      "firecrawl_feedback",
+      "firecrawl_search_feedback",
+      "alexandria_library_read",
+      "people_company_search",
+      "people_company_enrich",
+      "jobs_search",
+      "firecrawl_extract",
+    ],
+    // Reads from the inventory above. Left gated: firecrawl_scrape (billed per
+    // call, incl. Alexandria runs), firecrawl_crawl (starts a billed job),
+    // firecrawl_parse (returns a signed upload target), monitor list/get
+    // (webhook configuration) and firecrawl_credit_usage (per-key billing).
+    // firecrawl_search is also gated: with scrapeOptions each result bills as an uncapped scrape.
+    readOnlyTools: [
+      "firecrawl_map", "firecrawl_check_crawl_status",
+      "firecrawl_agent_status", "firecrawl_developer_search", "firecrawl_gov_search",
+      "firecrawl_research_search_papers", "firecrawl_research_related_papers",
+      "firecrawl_research_read_paper", "firecrawl_research_inspect_paper",
+      "firecrawl_find_tools", "alexandria_library_search",
+      "firecrawl_monitor_checks", "firecrawl_monitor_check",
+    ],
+    notes:
+      "OAuth endpoint only; API-key connections use a different endpoint and are not offered yet. Interact can click and submit forms on live sites, and monitors can send webhooks or email, so both are gated. Scrape with Alexandria provider calls is billed per call but cannot be gated by name. No URL-level read-only mode.",
+  },
+
+  huggingface: {
+    id: "huggingface",
+    displayName: "Hugging Face",
+    description: "Explore models, datasets, Spaces, and papers, and run Hub jobs.",
+    category: "AI",
+    logo: "/integrations/huggingface.svg",
+    mcpUrl: "https://huggingface.co/mcp",
+    authModes: ["oauth", "api_key"],
+    trustedHostnames: ["huggingface.co"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Built-in inventory: https://github.com/huggingface/hf-mcp-server/blob/main/packages/mcp/src/tool-ids.ts
+    // hf_jobs and the sandbox tools mix read and write operations, so each is gated as a whole.
+    destructiveTools: [
+      "create_repo",
+      "hf_fs_write",
+      "hf_jobs",
+      "hf_sandbox",
+      "hf_sandbox_exec",
+      "hf_sandbox_fs",
+      "dynamic_space",
+    ],
+    // Hub reads from the inventory above. hf_whoami is left gated because it
+    // describes the connected credential and its permissions.
+    readOnlyTools: ["hub_repo_search", "hub_repo_details", "hf_fs"],
+    apiKey: {
+      header: "Authorization",
+      valuePrefix: "Bearer ",
+      hint: "Hugging Face access token (hf_...)",
+    },
+    notes:
+      "The advertised tools follow the account's MCP settings on huggingface.co. Jobs and sandboxes run billed compute. Space tools added in those settings are labelled destructive by the server and so require approval. Prefer a fine-grained, read-only token. No URL-level read-only mode.",
+  },
+
+  webflow: {
+    id: "webflow",
+    displayName: "Webflow",
+    description: "Build pages, manage CMS content, and publish Webflow sites.",
+    category: "Content",
+    logo: "/integrations/webflow.svg",
+    mcpUrl: "https://mcp.webflow.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.webflow.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Every tool tagged "write" in the full inventory (each tool fronts several
+    // actions, so one write action gates the whole tool), plus get_more_tools,
+    // which requests capabilities beyond the loaded set, and ask_webflow_ai,
+    // which is AI-backed and may spend:
+    // https://developers.webflow.com/mcp/tools/data-tools
+    // https://developers.webflow.com/mcp/tools/designer-tools
+    // https://developers.webflow.com/mcp/tools/utility-tools
+    destructiveTools: [
+      "data_agent_instructions_tool",
+      "data_apps_tool",
+      "data_assets_tool",
+      "data_campaigns_tool",
+      "data_cms_tool",
+      "data_comments_tool",
+      "data_component_builder",
+      "data_component_props_tool",
+      "data_component_tool",
+      "data_component_variants_tool",
+      "data_element_builder",
+      "data_element_settings_tool",
+      "data_element_tool",
+      "data_enterprise_tool",
+      "data_fonts_tool",
+      "data_forms_tool",
+      "data_interactions_tool",
+      "data_localization_tool",
+      "data_members_tool",
+      "data_pages_tool",
+      "data_scripts_tool",
+      "data_sitemap_tool",
+      "data_sites_tool",
+      "data_style_tool",
+      "data_variable_tool",
+      "data_webhook_tool",
+      "data_whtml_builder",
+      "asset_tool",
+      "designer_tool",
+      "get_more_tools",
+      "ask_webflow_ai",
+    ],
+    // Tools tagged read-only in the same references.
+    readOnlyTools: [
+      "data_aeo_tool", "data_analyze_tool", "data_optimize_tool",
+      "element_snapshot_tool", "get_asset_preview", "webflow_guide_tool",
+    ],
+    notes:
+      "Each authorization covers one workspace. Element snapshots, image uploads, and reading or changing the Designer selection, page, mode, branch, canvas or breakpoints need the Webflow Designer open with the MCP Bridge App connected. No URL-level read-only mode.",
+  },
+
+  netlify: {
+    id: "netlify",
+    displayName: "Netlify",
+    description: "Create projects, deploy sites, and manage Netlify project settings.",
+    category: "Hosting",
+    logo: "/integrations/netlify.svg",
+    mcpUrl: "https://mcp.netlify.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.netlify.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Docs publish no tool table; names come from the official server source
+    // (https://github.com/netlify/netlify-mcp, src/tools). The default surface
+    // groups operations into netlify-<domain>-services-{reader,updater}
+    // dispatchers; the per-operation names are its ?verbose=true surface. The
+    // team reader returns team environment variables, and request logs can hold
+    // printed secrets, so those readers are gated too.
+    destructiveTools: [
+      "netlify-deploy-services-updater",
+      "netlify-project-services-updater",
+      "netlify-extension-services-updater",
+      "netlify-feedback-services-updater",
+      "netlify-team-services-reader",
+      "netlify-deploy-site",
+      "netlify-project-update-visitor-access-controls",
+      "netlify-project-update-forms",
+      "netlify-project-manage-form-submissions",
+      "netlify-project-update-project-name",
+      "netlify-project-manage-env-vars",
+      "netlify-project-create-new-project",
+      "netlify-extension-change-extension-installation",
+      "netlify-submit-feedback",
+      "netlify-team-get-team-env-vars",
+      "netlify-observability-services-reader",
+      "netlify-observability-get-request-logs",
+      "netlify-observability-get-request-detail",
+    ],
+    // Per-operation reads annotated read-only in the same source, plus the
+    // standalone deploy card and coding-context tools. The grouped readers are
+    // dispatchers and stay unlisted.
+    readOnlyTools: [
+      "netlify-open-deployments", "netlify-refresh-deployments", "get-netlify-coding-context",
+      "netlify-user-get-user", "netlify-deploy-get-deploy", "netlify-deploy-get-deploy-for-site",
+      "netlify-project-get-project", "netlify-project-get-projects",
+      "netlify-project-get-forms-for-project", "netlify-extension-get-extensions",
+      "netlify-extension-get-full-extension-details", "netlify-get-database-setup-steps",
+    ],
+    notes:
+      "OAuth only; the personal access token fallback applies to the local server, not this hosted endpoint. Renaming a project releases its old netlify.app subdomain. No URL-level read-only mode.",
+  },
+
+  railway: {
+    id: "railway",
+    displayName: "Railway",
+    description: "Create projects, redeploy services, and manage Railway feature flags.",
+    category: "Hosting",
+    logo: "/integrations/railway.svg",
+    mcpUrl: "https://mcp.railway.com",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.railway.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Hosted-server inventory: https://docs.railway.com/ai/mcp-server#available-mcp-tools
+    // railway-agent and the cloud-agent task tools act on the user's behalf;
+    // starting a cloud agent is billed. Agents hold CLI credentials, so their
+    // results and transcripts are gated as well.
+    destructiveTools: [
+      "create-project",
+      "set-feature-flag",
+      "delete-feature-flag",
+      "redeploy",
+      "accept-deploy",
+      "railway-agent",
+      "run-cloud-agent-task",
+      "respond-cloud-agent-task",
+      "cancel-cloud-agent-task",
+      "check-cloud-agent-task",
+      "get-cloud-agent-transcript",
+    ],
+    // Task lists, results and transcripts carry agent output and stay gated.
+    readOnlyTools: [
+      "whoami", "list-projects", "list-services", "list-feature-flags",
+      "get-feature-flag", "list-cloud-agent-models",
+    ],
+    // The resource's 401 challenge and protected-resource metadata both name
+    // this scope; without it the token cannot reach any workspace.
+    oauthScopes: ["workspace:member"],
+    notes:
+      "OAuth as a user; project tokens are not accepted. You choose the workspaces and projects at consent. Cloud agent tasks are billed. No URL-level read-only mode.",
+  },
+
+  // Regions: https://amplitude.com/docs/amplitude-ai/amplitude-mcp#regions
+  amplitude: {
+    ...AMPLITUDE_SHARED,
+    id: "amplitude",
+    displayName: "Amplitude (US)",
+    logo: "/integrations/amplitude.svg",
+    mcpUrl: "https://mcp.amplitude.com/mcp",
+    trustedHostnames: ["mcp.amplitude.com"],
+  },
+
+  "amplitude-eu": {
+    ...AMPLITUDE_SHARED,
+    id: "amplitude-eu",
+    displayName: "Amplitude (EU)",
+    logo: "/integrations/amplitude-eu.svg",
+    mcpUrl: "https://mcp.eu.amplitude.com/mcp",
+    trustedHostnames: ["mcp.eu.amplitude.com"],
+    // Pinned so a same-site US authorization server is never accepted for EU data.
+    trustedAuthorizationServerOrigins: ["https://mcp.eu.amplitude.com"],
+  },
+
+  // https://docs.mixpanel.com/docs/mcp. US only: the EU host's protected-resource
+  // metadata nominates the US authorization server while its docs require
+  // eu.mixpanel.com sign-in, so an EU entry is deferred until that is resolved.
+  mixpanel: {
+    id: "mixpanel",
+    displayName: "Mixpanel (US)",
+    description: "Run product analytics queries and manage boards, Lexicon, cohorts, and flags.",
+    category: "Analytics",
+    logo: "/integrations/mixpanel.svg",
+    mcpUrl: "https://mcp.mixpanel.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.mixpanel.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full table at https://docs.mixpanel.com/docs/mcp#available-tools (reviewed 2026-11-15).
+    destructiveTools: [
+      "Create-Dashboard", "Update-Dashboard", "Duplicate-Dashboard", "Delete-Dashboard",
+      "Edit-Event", "Edit-Property", "Bulk-Edit-Events", "Bulk-Edit-Properties",
+      "Create-Tag", "Rename-Tag", "Delete-Tag", "Dismiss-Issues", "Update-Business-Context",
+      "Dismiss-Duplicate-Group", "Merge-Group", "Create-Tracking-Plan", "Update-Tracking-Plan",
+      "Delete-Tracking-Plan", "Create-Custom-Property", "Update-Custom-Property",
+      "Create-Cohort", "Update-Cohort", "Delete-Cohort", "Create-Lookup-Table",
+      "Update-Lookup-Table", "Create-Metric", "Update-Metric", "Create-Experiment",
+      "Update-Experiment", "Create-Feature-Flag", "Update-Feature-Flag",
+    ],
+    // Queries (Run-Query, Get-Report and Get-Experiment results, Display-Query) count against Query API
+    // limits; property values, lookup-table rows, replays and the audit log can carry
+    // user PII; health checks, pre-launch checks, prior-experiment and duplicate
+    // searches are analyses. All of those stay gated, as do Get-Dashboard and Get-Issues,
+    // which may return report results or sample values, until a live tools/list check.
+    readOnlyTools: [
+      "Describe-Cohort-Schema", "Get-Business-Context", "Get-Cohort", "Get-Custom-Property",
+      "Get-Events", "Get-Experiment-Results-Interpretation-Guidance",
+      "Get-Experiment-Setup-Guidance", "Get-Feature-Flag", "Get-Feature-Flag-Lifecycle-Guidance",
+      "Get-Feature-Flag-Setup-Guidance", "Get-Lexicon-URL", "Get-Metric",
+      "Get-Projects", "Get-Query-Schema", "Get-Tracking-Plan", "List-Cohorts", "List-Dashboards",
+      "List-Experiments", "List-Feature-Flags", "List-Metrics", "List-Organizations",
+      "List-Properties", "List-Tracking-Plans", "Search-Entities",
+    ],
+    // Mandatory plus documented optional scopes, minus user_details (only gated tools need it):
+    // https://docs.mixpanel.com/docs/mcp#required-oauth-scopes
+    oauthScopes: [
+      "projects", "analysis", "events", "insights", "segmentation", "retention", "data:read",
+      "funnels", "flows", "data_definitions", "dashboard_reports", "bookmarks", "business_context",
+    ],
+    notes:
+      "An org admin must enable MCP in Settings > Org > AI Settings first (on by default for free and growth accounts created after August 1, 2026; changes take up to 15 minutes). US data region only. No URL-level read-only mode.",
+  },
+
+  // Regions: https://www.contentful.com/developers/docs/tools/mcp-server/#choose-your-region-global-vs-eu
+  contentful: {
+    ...CONTENTFUL_SHARED,
+    id: "contentful",
+    displayName: "Contentful",
+    logo: "/integrations/contentful.svg",
+    mcpUrl: "https://mcp.contentful.com/mcp",
+    trustedHostnames: ["mcp.contentful.com"],
+  },
+
+  "contentful-eu": {
+    ...CONTENTFUL_SHARED,
+    id: "contentful-eu",
+    displayName: "Contentful (EU)",
+    logo: "/integrations/contentful-eu.svg",
+    mcpUrl: "https://mcp.eu.contentful.com/mcp",
+    trustedHostnames: ["mcp.eu.contentful.com"],
+    // Pinned so a same-site US authorization server is never accepted for EU data.
+    trustedAuthorizationServerOrigins: ["https://mcp.eu.contentful.com"],
+  },
+  // Public documentation inventories verified with unauthenticated MCP on 2026-11-15.
+  // Official sources and live verification details: docs/INTEGRATIONS.md.
+  "microsoft-learn": {
+    id: "microsoft-learn",
+    displayName: "Microsoft Learn",
+    description: "Search Microsoft documentation, code samples and full documentation pages.",
+    category: "Docs",
+    logo: "/integrations/microsoft-learn.svg",
+    mcpUrl: "https://learn.microsoft.com/api/mcp",
+    authModes: ["none"],
+    trustedHostnames: ["learn.microsoft.com"],
+    supportsReadOnly: true,
+    scope: { queryParams: [], headers: [] },
+    destructiveTools: [],
+    readOnlyTools: ["microsoft_docs_search", "microsoft_docs_fetch", "microsoft_code_sample_search"],
+  },
+
+  "cloudflare-docs": {
+    id: "cloudflare-docs",
+    displayName: "Cloudflare Docs",
+    description: "Search Cloudflare documentation and read the Pages migration guide.",
+    category: "Docs",
+    logo: "/integrations/cloudflare-docs.svg",
+    mcpUrl: "https://docs.mcp.cloudflare.com/mcp",
+    authModes: ["none"],
+    trustedHostnames: ["docs.mcp.cloudflare.com"],
+    supportsReadOnly: true,
+    scope: { queryParams: [], headers: [] },
+    destructiveTools: [],
+    readOnlyTools: ["search_cloudflare_documentation", "migrate_pages_to_workers_guide"],
   },
 } as const satisfies Record<string, ProviderDefinition>;
 
@@ -782,6 +1527,16 @@ export function getProvider(
 /** Every catalog provider, in declaration order. */
 export function listProviders(): readonly ProviderDefinition[] {
   return PROVIDER_IDS.map((id) => PROVIDERS[id]);
+}
+
+/** Search display metadata only; category and query filters intersect. */
+export function filterProviders(query: string, category?: string): readonly ProviderDefinition[] {
+  const search = query.trim().toLowerCase();
+  return listProviders().filter((provider) =>
+    (!category || provider.category === category) &&
+    `${provider.displayName} ${provider.description} ${provider.category}`
+      .toLowerCase().includes(search),
+  );
 }
 
 /**

@@ -7,9 +7,13 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../convex/_generated/api";
 import {
   CODING_AGENT_SYSTEM_PROMPT,
+  FIRST_BUILD_APP_NOTE,
   MAX_AGENT_STEPS,
   STARTER_IN_PLACE_NOTE,
   STEP_BUDGET_NOTE,
+  OUT_OF_CREDITS_NOTE,
+  OUT_OF_CREDITS_REPLY,
+  SWARM_DELEGATE_NUDGE,
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { createSearchFilesTool } from './tools/search-files';
@@ -48,9 +52,9 @@ import {
   keyFailureMessage,
   resolveRunModel,
 } from '@/features/ai-providers/server/resolve-run-model';
-import { withoutToolCalls } from '@/features/ai-providers/server/agentkit-model';
+import { forceToolCall, withoutToolCalls } from '@/features/ai-providers/server/agentkit-model';
 import type { ModelPricing } from '@/features/ai-providers/catalog';
-import { costUsd, usageOfResponse } from '@/features/billing/credits';
+import { costUsd, creditsForCost, usageOfResponse } from '@/features/billing/credits';
 import {
   type AgentStep,
   buildCheckLabel,
@@ -78,8 +82,9 @@ import {
   resolveForcedSkills,
   resolveSkills,
 } from '@/features/skills/server/resolve-skills';
-import { buildSkillsPromptSection } from '@/features/skills/server/prompt';
+import { buildSkillsPromptSection, buildSupabaseHintSection } from '@/features/skills/server/prompt';
 import { buildProjectInstructionsSection } from '@/features/projects/instructions';
+import type { ProjectTheme } from '@/features/projects/theme';
 import { isStarterOnly } from './starter-only';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
@@ -92,6 +97,7 @@ import {
   markCutOffCalls,
   refuseCutOffCalls,
 } from './lib/output-limit';
+import { runCreditLimit } from "./lib/run-credit-limit";
 import { decodeJsonArgs, decodeToolCalls } from './lib/json-args';
 import { AGENT_FAILURE_MESSAGE, DEFAULT_REPLY_MESSAGE, priorTurns } from './lib/conversation-history';
 import {
@@ -99,9 +105,10 @@ import {
   PLAN_MODE,
   PLAN_MODE_PROMPT,
   PLAN_MODE_TOOLS,
+  SWARM_MODE,
 } from '../plan-mode';
 import { splitSuggestions } from '../suggestions';
-import { swarmRun } from './lib/swarm-run';
+import { SWARM_DELEGATE_AGENT_NAME, swarmRequest, swarmRun } from './lib/swarm-run';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -223,6 +230,13 @@ export const processMessage = inngest.createFunction(
       return { success: false, messageId, conversationId };
     }
 
+    const creditLimit = await step.run("get-run-credit-limit", () =>
+      runCreditLimit(internalKey, projectId, runModel.metering.source));
+    // Rebuilt from sequential coding turns only: the parallel title may finish at any router call.
+    let codingCostUsd = 0;
+    const outOfCredits = () => creditLimit !== null && creditsForCost(codingCostUsd) >= creditLimit;
+    let creditStopped = false;
+
     const runKey = runModel.key;
     if (runKey) {
       await step.run("mark-ai-provider-key-used", async () => {
@@ -302,7 +316,9 @@ export const processMessage = inngest.createFunction(
       const tokens = usageOfResponse(raw);
       usage.inputTokens += tokens.inputTokens;
       usage.outputTokens += tokens.outputTokens;
-      usage.costUsd += pricing ? costUsd(pricing, tokens) : 0;
+      const cost = pricing ? costUsd(pricing, tokens) : 0;
+      usage.costUsd += cost;
+      if (id !== "record-usage-title") codingCostUsd += cost;
       await sendUsage(id);
     };
 
@@ -366,6 +382,7 @@ export const processMessage = inngest.createFunction(
     // project row so those act on behalf of whoever owns the work.
     let mcpOwnerId: string | undefined;
     let projectInstructions: string | undefined;
+    let projectTheme: ProjectTheme | undefined;
 
     try {
       // Fetched unconditionally: the owner is needed by setEnvVar, which is useful
@@ -376,6 +393,7 @@ export const processMessage = inngest.createFunction(
       });
       mcpOwnerId = project?.ownerId;
       projectInstructions = project?.instructions;
+      projectTheme = project?.theme;
 
       let entries = await convex.query(api.system.getProjectMcpConnections, {
         internalKey,
@@ -558,16 +576,22 @@ export const processMessage = inngest.createFunction(
     // base, project instructions, skill index and integrations, then the project tree, forced
     // skills and plan mode.
     // Conversation goes in messages (see onStart).
-    const swarm = await swarmRun({ ...(event.data as MessageEvent), internalKey, step });
+    const swarm = await swarmRun({ ...(event.data as MessageEvent), request: swarmRequest(earlierTurns, request), internalKey, step });
+    const soloFirstBuild = !planMode && mode !== SWARM_MODE && await step.run(
+      "check-first-build",
+      () => convex.query(api.projects.conversationNeedsFirstBuildForServer, { internalKey, conversationId }),
+    );
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
-      buildProjectInstructionsSection(projectInstructions),
+      buildProjectInstructionsSection(projectInstructions, projectTheme),
       buildSkillsPromptSection(skills),
+      buildSupabaseHintSection(skills),
       buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
       projectTree,
       buildSkillsPromptSection([], forced, unavailable),
       planMode ? PLAN_MODE_PROMPT : "",
       swarm.promptNote,
+      soloFirstBuild ? FIRST_BUILD_APP_NOTE : "",
     ].join("");
 
     // A project seeded with the starter says so in the request, not the
@@ -665,7 +689,7 @@ export const processMessage = inngest.createFunction(
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
       ...swarm.tools,
-    ].map(refuseCutOffCalls).map(decodeJsonArgs);
+    ].map(swarm.guard).map(refuseCutOffCalls).map(decodeJsonArgs);
 
     // Plan-mode runs write nothing, so the gate never fires for them.
     const buildCheckGate = createBuildCheckGate();
@@ -708,11 +732,13 @@ export const processMessage = inngest.createFunction(
           await recordSteps("record-turn-start", () => [turnHeartbeat(Date.now())], false);
           const trimmed = trimFileHistory([...earlierTurns, ...(history ?? [])]);
           const { stuck } = loopGuard;
-          const summaryNote = stuck ? stuckNote(stuck) : STEP_BUDGET_NOTE;
+          const summaryNote = creditStopped ? OUT_OF_CREDITS_NOTE : stuck ? stuckNote(stuck) : STEP_BUDGET_NOTE;
           const nudge =
             agent.name === SUMMARY_AGENT_NAME
               ? summaryNote
-              : takeCutOffNote() ?? buildCheckGate.takeNudge() ?? loopGuard.takeHint();
+              : agent.name === SWARM_DELEGATE_AGENT_NAME
+                ? SWARM_DELEGATE_NUDGE
+                : takeCutOffNote() ?? buildCheckGate.takeNudge() ?? loopGuard.takeHint();
           if (nudge === BUILD_REPAIR_NUDGE) {
             const attempt = buildCheckGate.repairs;
             await recordSteps("record-build-repair", () => [{
@@ -847,10 +873,16 @@ export const processMessage = inngest.createFunction(
       name: SUMMARY_AGENT_NAME,
       model: withoutToolCalls(codingModel),
     });
+    // Swarm mode's forced turn: the same agent, made to call delegateTasks.
+    const delegateAgent = swarm.catchDelegation(createAgent({
+      ...agentOptions,
+      name: SWARM_DELEGATE_AGENT_NAME,
+      model: forceToolCall(codingModel, "delegateTasks"),
+    }));
 
     const network = createNetwork({
       name: "codenaya-network",
-      agents: [codingAgent, summaryAgent],
+      agents: [codingAgent, summaryAgent, delegateAgent],
       maxIter: MAX_AGENT_STEPS,
       router: ({ network, callCount }) => {
         const { results } = network.state;
@@ -861,6 +893,12 @@ export const processMessage = inngest.createFunction(
         const hasToolCalls = lastResult?.output.some(
           (m) => m.type === "tool_call"
         );
+
+        if (lastResult?.agentName === SUMMARY_AGENT_NAME) return undefined;
+        if (outOfCredits()) {
+          creditStopped = true;
+          return hasTextResponse && !hasToolCalls ? undefined : summaryAgent;
+        }
 
         // callCount, not results: seeded history would count as steps.
         const lastStep = callCount >= MAX_AGENT_STEPS - 1;
@@ -874,6 +912,9 @@ export const processMessage = inngest.createFunction(
           cutOffRetries += 1;
           return codingAgent;
         }
+
+        // A split swarm run delegates once its foundation is written (see swarmRun).
+        if (!lastStep && swarm.forceDelegation(results, callCount)) return delegateAgent;
 
         // Stop routing to this agent if there's a final text response without
         // tool calls, unless files changed since the last passing build check
@@ -948,14 +989,24 @@ export const processMessage = inngest.createFunction(
     // Changes that ended on a failed or missing check get a repair here, before
     // the run completes, so it needs no open tab. Its model calls are metered
     // like the run's; cancelling the run stops it between steps.
-    const repair = !stuck && needsBuildRepair(result.state.results)
+    const repairNeeded = !stuck && needsBuildRepair(result.state.results);
+    if (repairNeeded && outOfCredits()) creditStopped = true;
+    const repairBudget = new AbortController();
+    const repair = repairNeeded && !outOfCredits()
       ? await repairBuild({
           projectId,
           internalKey,
           runId,
           model: codingModel,
           step: (id, fn) => step.run(id, fn),
-          onResponse: (raw) => recordUsage(raw, runModel.metering.coding),
+          signal: repairBudget.signal,
+          onResponse: async (raw) => {
+            await recordUsage(raw, runModel.metering.coding);
+            if (outOfCredits()) {
+              creditStopped = true;
+              repairBudget.abort();
+            }
+          },
           recordSteps: async (build) => {
             await recordSteps("record-repair-steps", build, false);
           },
@@ -963,6 +1014,8 @@ export const processMessage = inngest.createFunction(
       : null;
 
     await settleRun("record-usage-final");
+
+    if (creditStopped || outOfCredits()) assistantResponse += `\n\n${OUT_OF_CREDITS_REPLY}`;
 
     // Changes that did not end on a verified build are not a working build.
     const noteBefore = unverifiedBuildNote(result.state.results);
@@ -991,7 +1044,7 @@ export const processMessage = inngest.createFunction(
         internalKey,
         messageId,
         content: buildNote && !stuck ? `${reply}\n\n${buildNote}` : reply,
-        ...(stuck ? { stuck } : verified ? {} : { outcome: "error" as const }),
+        ...(stuck ? { stuck } : verified || creditStopped ? {} : { outcome: "error" as const }),
         ...(suggestions.length ? { suggestions } : {}),
         ...(firstBuild ? { firstBuild: true } : {}),
       })

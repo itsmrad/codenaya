@@ -245,7 +245,7 @@ it("keeps PlanetScale OAuth-only until service-token placement is verified", asy
 });
 
 it.each([
-  ["posthog", ["delete-feature-flag", "create-feature-flag", "posthog-connection-forward", "exec"]],
+  ["posthog", ["delete-feature-flag", "create-feature-flag", "posthog-connection-forward", "exec", "render-ui"]],
   ["resend", ["create-api-key", "remove-api-key", "send-event", "revoke-oauth-grant", "rotate-webhook-signing-secret"]],
   ["upstash", ["box_exec", "blob_bucket", "box_apikey", "blob_upload_url", "box_git"]],
   ["planetscale", ["planetscale_update_payment_method", "unlisted_billing_tool"]],

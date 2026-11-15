@@ -65,5 +65,5 @@ export function IDESidebar({ projectId }: { projectId: Id<"projects"> }) {
 
 - **No drag-and-drop reordering.** Files and folders are always sorted: folders first, then alphabetical within each group.
 - **No multi-select.** Only one item at a time can be created, renamed, or deleted.
-- **WebContainer not wired here.** The explorer manages Convex-backed metadata only; syncing to the in-browser WebContainer file system is handled separately (Chapter 14).
+- **WebContainer not wired here.** The explorer manages Convex-backed metadata only; syncing to the in-browser WebContainer file system is handled separately by `src/features/webcontainer-preview`.
 - **Context menu is right-click only.** There is no touch / long-press equivalent, so the create/rename/delete actions are inaccessible on touch-only devices.

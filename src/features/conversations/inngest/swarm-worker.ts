@@ -6,7 +6,7 @@ import { convex } from "@/lib/convex-client";
 import { getAppError } from "@/lib/convex-error";
 import { resolveWorkerModel } from "@/features/ai-providers/server/resolve-run-model";
 import { withoutToolCalls } from "@/features/ai-providers/server/agentkit-model";
-import { costUsd, usageOfResponse } from "@/features/billing/credits";
+import { costUsd, creditsForCost, usageOfResponse } from "@/features/billing/credits";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../agent-models";
@@ -16,8 +16,9 @@ import {
   SUBORCH_MAX_STEPS, SUBORCH_TIMEOUT_MS, WORKER_MAX_STEPS, WORKER_TIMEOUT_MS,
 } from "../swarm";
 import { selfCheckStep, selfCheckWorker } from "../swarm-sandbox";
-import { CODING_AGENT_SYSTEM_PROMPT, STEP_BUDGET_NOTE, SWARM_SUBORCH_NOTE, SWARM_WORKER_NOTE } from "./constants";
+import { CODING_AGENT_SYSTEM_PROMPT, OUT_OF_CREDITS_NOTE, OUT_OF_CREDITS_REPLY, STEP_BUDGET_NOTE, SWARM_SUBORCH_NOTE, SWARM_WORKER_NOTE } from "./constants";
 import { splitSuggestions } from "../suggestions";
+import { runCreditLimit } from "./lib/run-credit-limit";
 import { decodeJsonArgs, decodeToolCalls } from "./lib/json-args";
 import { guardOwnedPaths } from "./lib/ownership-guard";
 import { hitOutputLimit, markCutOffCalls, refuseCutOffCalls } from "./lib/output-limit";
@@ -77,8 +78,11 @@ export const swarmWorker = inngest.createFunction(
     // `agent-task/cancel`: the orchestrator stops a worker whose step.invoke timed out.
     cancelOn: [
       { event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" },
-      { event: "agent-task/cancel", if: "event.data.agentTaskId == async.data.agentTaskId" },
-      { event: "agent-task/cancel", if: "event.data.parentAgentTaskId == async.data.agentTaskId" },
+      // One entry per event: the task itself, or a depth-2 child of that sub-orchestrator.
+      {
+        event: "agent-task/cancel",
+        if: "event.data.agentTaskId == async.data.agentTaskId || event.data.parentAgentTaskId == async.data.agentTaskId",
+      },
     ],
     triggers: [{ event: "agent-task/run" }],
     onFailure: async ({ event, step }) => {
@@ -108,6 +112,11 @@ export const swarmWorker = inngest.createFunction(
 
     // Model closures can hold decrypted BYOK keys: resolve in the body, never in a step.
     const runModel = await resolveWorkerModel({ internalKey, projectId, choice: model, role: task.role });
+    // shortcut: each worker snapshots the full balance, so a swarm can overshoot ~9x; add shared reservations to bound aggregate spend.
+    const creditLimit = await step.run("get-worker-credit-limit", () =>
+      runCreditLimit(internalKey, projectId, runModel.metering.source));
+    const outOfCredits = () => creditLimit !== null && creditsForCost(usage.costUsd) >= creditLimit;
+    let creditStopped = false;
     if (runModel.checkKey) {
       const { rejected } = await step.run("check-worker-key", runModel.checkKey);
       if (rejected) throw new NonRetriableError("The worker's AI provider key was rejected");
@@ -176,7 +185,7 @@ export const swarmWorker = inngest.createFunction(
       lifecycle: {
         onStart: async ({ agent, prompt, history }) => {
           await recordSteps("worker-turn-start", []);
-          const note = agent.name === SUMMARY_AGENT_NAME ? [{ type: "text" as const, role: "user" as const, content: STEP_BUDGET_NOTE }] : [];
+          const note = agent.name === SUMMARY_AGENT_NAME ? [{ type: "text" as const, role: "user" as const, content: creditStopped ? OUT_OF_CREDITS_NOTE : STEP_BUDGET_NOTE }] : [];
           return { prompt, history: [...trimFileHistory(history ?? []), ...note], stop: false };
         },
         onResponse: async ({ agent, result }) => {
@@ -207,6 +216,12 @@ export const swarmWorker = inngest.createFunction(
         if (last?.agentName === SUMMARY_AGENT_NAME) return undefined;
         const hasCalls = last?.output.some((m) => m.type === "tool_call");
         const hasText = last?.output.some((m) => m.type === "text" && m.role === "assistant");
+        if (outOfCredits()) {
+          creditStopped = true;
+          if (hasText && !hasCalls) return undefined;
+          unfinished = true;
+          return summaryAgent;
+        }
         if (last && hasText && !hasCalls && !cutOff) return undefined;
         // BYOK is unpriced, so only the step cap bounds it.
         if (callCount >= maxSteps - 1 || usage.costUsd >= maxUsd) {
@@ -219,13 +234,11 @@ export const swarmWorker = inngest.createFunction(
 
     const result = await network.run(task.brief);
     const raw = result.state.results.at(-1)?.output.flatMap((m) => m.type === "text" && m.role === "assistant"
-      ? [typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("")] : []).join("\n") ?? "";
+      ? [typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("")] : []).join("\n").trim() ?? "";
     // The shared prompt asks for follow-up chips (#256); a worker's are never shown.
     const reply = splitSuggestions(raw).content || "The worker finished without a summary.";
-    // Stored as done: what it wrote is real; the orchestrator reads the prefix.
-    const summary = unfinished ? `Unfinished (step or cost cap): ${reply}` : reply;
     const repairBudget = new AbortController();
-    if (usage.costUsd >= maxUsd) repairBudget.abort();
+    if (usage.costUsd >= maxUsd || outOfCredits()) repairBudget.abort();
     let repairTurn = 0;
     const check = await selfCheckWorker({
       step, internalKey, projectId, messageId: parentMessageId, agentTaskId, ownedPaths: task.ownedPaths,
@@ -236,9 +249,15 @@ export const swarmWorker = inngest.createFunction(
       signal: repairBudget.signal,
       onResponse: async (raw) => {
         await recordUsage(raw, `worker-self-check-usage-${++repairTurn}`);
-        if (usage.costUsd >= maxUsd) repairBudget.abort();
+        if (outOfCredits()) {
+          creditStopped = true;
+          unfinished = true;
+        }
+        if (usage.costUsd >= maxUsd || outOfCredits()) repairBudget.abort();
       },
     });
+    // Stored as done: what it wrote is real; the orchestrator reads the prefix.
+    const summary = creditStopped ? `${OUT_OF_CREDITS_REPLY}\n\n${reply}` : unfinished ? `Unfinished (step or cost cap): ${reply}` : reply;
     lastHeartbeat.delete(agentTaskId);
     await step.run("finish-worker", () => convex.mutation(api.agentTasks.finishTask, {
       internalKey, agentTaskId, status: "done", summary, selfCheck: check?.selfCheck,
