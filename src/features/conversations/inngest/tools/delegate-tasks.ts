@@ -10,7 +10,7 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../../agent-models";
 import {
   CHILD_WORKER_TIMEOUT_MS, MAX_SWARM_AGENTS, MAX_SWARM_DEPTH, SUBORCH_TIMEOUT_MS, type SwarmPlan,
-  WORKER_TIMEOUT_MS, swarmPlanSchema, validatePlan,
+  WORKER_TIMEOUT_MS, capOriginalPrompt, swarmPlanSchema, validatePlan,
 } from "../../swarm";
 import { cleanupSwarmSandboxes, seedSwarmSnapshot } from "../../swarm-sandbox";
 import { type SwarmWorkerEvent, type SwarmWorkerResult, swarmWorker } from "../swarm-worker";
@@ -22,6 +22,8 @@ interface DelegateTasksToolOptions {
   messageId: Id<"messages">;
   ownerId: string;
   model: AgentModelChoice;
+  /** The user's request (`swarmRequest`), handed to each worker; capped by `capOriginalPrompt`. */
+  originalPrompt?: string;
   /** A sub-orchestrator's call (depth 1): its task, whose owned paths its workers split. */
   parent?: { taskId: string; agentTaskId: Id<"agentTasks">; ownedPaths: string[]; depth: number };
   /** Collects the paths its workers wrote, for the sub-orchestrator's own report. */
@@ -59,7 +61,7 @@ const taskReport = (task: Task, settled: PromiseSettledResult<SwarmWorkerResult>
  * gets it too (`parent`), for 2-3 workers inside its own paths (depth 2).
  */
 export const createDelegateTasksTool = ({
-  internalKey, projectId, messageId, ownerId, model, parent, writtenPaths, maxDepth = MAX_SWARM_DEPTH,
+  internalKey, projectId, messageId, ownerId, model, originalPrompt, parent, writtenPaths, maxDepth = MAX_SWARM_DEPTH,
   // Rebuilt on every replay: handlers re-run in order, so the first valid call sets it again.
   state = { delegated: false }, soloRefusal,
 }: DelegateTasksToolOptions) => {
@@ -157,6 +159,7 @@ export const createDelegateTasksTool = ({
               ownerId,
               model,
               planOverview,
+              ...(originalPrompt ? { originalPrompt: capOriginalPrompt(originalPrompt) } : {}),
               depth: depth + 1,
             } satisfies SwarmWorkerEvent,
             timeout: parent ? CHILD_WORKER_TIMEOUT_MS : task.role === "sub-orchestrator" ? SUBORCH_TIMEOUT_MS : WORKER_TIMEOUT_MS,

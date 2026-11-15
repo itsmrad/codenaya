@@ -42,6 +42,8 @@ export interface SwarmWorkerEvent {
   ownerId: string;
   model: AgentModelChoice;
   planOverview: string;
+  /** The user's request (already capped), context only: the worker builds just its task. */
+  originalPrompt?: string;
   /** 1 for the orchestrator's tasks (the default), 2 for a sub-orchestrator's. */
   depth?: number;
 }
@@ -95,7 +97,7 @@ export const swarmWorker = inngest.createFunction(
     },
   },
   async ({ event, step }): Promise<SwarmWorkerResult> => {
-    const { parentMessageId, agentTaskId, projectId, ownerId, model, planOverview, depth = 1 } = event.data as SwarmWorkerEvent;
+    const { parentMessageId, agentTaskId, projectId, ownerId, model, planOverview, originalPrompt, depth = 1 } = event.data as SwarmWorkerEvent;
     const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
     if (!internalKey) throw new NonRetriableError("CODENAYA_CONVEX_INTERNAL_KEY is not configured");
 
@@ -171,6 +173,7 @@ export const swarmWorker = inngest.createFunction(
     const agentOptions: Parameters<typeof createAgent>[0] = {
       name: "swarm-worker",
       system: [CODING_AGENT_SYSTEM_PROMPT, subOrchestrator ? SWARM_SUBORCH_NOTE : SWARM_WORKER_NOTE, tree, planOverview,
+        ...(originalPrompt ? [`## The user's original request (context, build only your task)\n${originalPrompt}`] : []),
         `## Your task: ${task.title}\nOwned paths: ${task.ownedPaths.join(", ")}`].join("\n\n"),
       model: codingModel,
       tools: [
@@ -178,7 +181,7 @@ export const swarmWorker = inngest.createFunction(
         ...[createWriteFilesTool(options), createEditFileTool(options), createDeleteFilesTool(options)]
           .map(guardOwnedPaths(task.ownedPaths)),
         ...(subOrchestrator ? [createDelegateTasksTool({
-          internalKey, projectId, messageId: parentMessageId, ownerId, model,
+          internalKey, projectId, messageId: parentMessageId, ownerId, model, originalPrompt,
           parent: { taskId: task.taskId, agentTaskId, ownedPaths: task.ownedPaths, depth }, writtenPaths: childWrites,
         })] : []),
       ].map(refuseCutOffCalls).map(decodeJsonArgs),

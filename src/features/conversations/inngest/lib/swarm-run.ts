@@ -115,6 +115,7 @@ export const swarmRun = async ({ mode, request, internalKey, messageId, projectI
       // Swarm sends all carry the owner (#242); it keys the workers' concurrency.
       ownerId: ownerId ?? "",
       model: choice,
+      originalPrompt: request,
       maxDepth,
       state,
       ...(split.delegate ? { soloRefusal: split.reason } : {}),

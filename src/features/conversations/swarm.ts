@@ -8,6 +8,14 @@ export const WORKER_MAX_STEPS = 20;
 export const MAX_WORKER_USD = 0.50;
 /** A brief is a worker's whole prompt: ~3k tokens fits a detailed spec, and 4 tasks stay under ~12k tokens. */
 export const MAX_BRIEF_CHARS = 12_000;
+/** The user's request, passed to every worker so briefs can stay short. */
+export const MAX_ORIGINAL_PROMPT_CHARS = 4_000;
+const TRUNCATED_MARK = "[truncated] ";
+/** At most MAX_ORIGINAL_PROMPT_CHARS, keeping the tail (the user's newest request) and marking the cut. */
+export const capOriginalPrompt = (text: string) =>
+  text.length <= MAX_ORIGINAL_PROMPT_CHARS
+    ? text
+    : TRUNCATED_MARK + text.slice(-(MAX_ORIGINAL_PROMPT_CHARS - TRUNCATED_MARK.length));
 /** How long a worker may queue and run before it counts as failed (step.invoke's timeout). */
 export const WORKER_TIMEOUT_MS = 12 * 60_000;
 export const CHILD_WORKER_TIMEOUT_MS = 10 * 60_000;

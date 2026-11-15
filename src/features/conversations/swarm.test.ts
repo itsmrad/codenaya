@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { guardOwnedPaths } from "./inngest/lib/ownership-guard";
-import { MAX_BRIEF_CHARS, classifySwarmPrompt, isFoundationPath, ownsPath, swarmPlanSchema, validatePlan } from "./swarm";
+import { MAX_BRIEF_CHARS, MAX_ORIGINAL_PROMPT_CHARS, capOriginalPrompt, classifySwarmPrompt, isFoundationPath, ownsPath, swarmPlanSchema, validatePlan } from "./swarm";
 
 const task = (id: string, ownedPaths: string[]) => ({ id, title: id, brief: `Build ${id}.`, ownedPaths });
 
@@ -238,3 +238,17 @@ describe("isFoundationPath", () => {
     "keeps %s for a worker", (path) => expect(isFoundationPath(path)).toBe(false));
 });
 
+
+describe("capOriginalPrompt", () => {
+  it("leaves a short request alone", () => {
+    expect(capOriginalPrompt("Build a pizzeria site")).toBe("Build a pizzeria site");
+  });
+
+  it("keeps the tail within the cap and marks the cut", () => {
+    const capped = capOriginalPrompt(`${"a".repeat(MAX_ORIGINAL_PROMPT_CHARS)}NEWEST`);
+    expect(capped).toHaveLength(MAX_ORIGINAL_PROMPT_CHARS);
+    expect(capped.startsWith("[truncated] ")).toBe(true);
+    expect(capped.endsWith("NEWEST")).toBe(true);
+    expect(capOriginalPrompt(capped)).toBe(capped);
+  });
+});
