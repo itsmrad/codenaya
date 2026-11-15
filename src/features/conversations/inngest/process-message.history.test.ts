@@ -117,10 +117,10 @@ describe("processMessage conversation history", () => {
 
   // P0: a pizzeria prompt built a generic app after its first run was stopped.
   const PIZZERIA = "A fully built, minimalist premium website for a pizzeria: Home, Menu, Reservations.";
-  const SOLO = {};
-  const SWARM = { mode: "swarm", ownerId: "user_1" };
+  const SOLO: Record<string, unknown> = {};
+  const SWARM: Record<string, unknown> = { mode: "swarm", ownerId: "user_1" };
   /** The first coding request's messages after the system prompt, as the model got them. */
-  const firstCall = async (request: string, event: object) => {
+  const firstCall = async (request: string, event: Record<string, unknown>) => {
     // A new chat titles itself first; that inference never carries tools.
     const titled = conversationTitle === DEFAULT_CONVERSATION_TITLE ? [{ data: text("Pizzeria"), held: true }] : [];
     const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [...titled, { data: text("Done.") }], request, event);
