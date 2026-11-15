@@ -43,6 +43,20 @@ export function usageView(account: (CreditUsage & { plan: PlanId }) | null, now:
   return { plan, month, day, monthResetsAt: standing.monthResetsAt, dayResetsAt: standing.dayResetsAt, isLow };
 }
 
+/**
+ * A reset time in the viewer's time zone, with its name, e.g. "Nov 16, 5:30 AM
+ * GMT+5:30": resets happen at UTC midnight, which is rarely local midnight.
+ */
+export const formatResetTime = (at: number, timeZone?: string) =>
+  new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+    timeZone,
+  }).format(at);
+
 /** A finished run's cost chip, e.g. "≈ $0.04"; null when it cost no credits. */
 export const runCostLabel = (credits: number | null | undefined) =>
   credits ? `≈ $${(credits * CREDIT_VALUE_USD).toFixed(2)}` : null;
