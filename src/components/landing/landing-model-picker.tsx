@@ -63,7 +63,8 @@ export const LandingModelPicker = () => {
         className="flex h-full items-center gap-1.5 border-r border-border px-3 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground transition-colors hover:bg-muted/50 aria-expanded:bg-muted/50"
       >
         <span className="size-1.5 rounded-full bg-brand" />
-        <span className="max-w-32 truncate whitespace-nowrap">{selected.name}</span>
+        {/* Dot and chevron only in a narrow composer (@container), like the mode toggle; aria-label keeps the name. */}
+        <span className="hidden max-w-32 min-w-0 truncate whitespace-nowrap @[480px]:inline">{selected.name}</span>
         <ChevronDown className={cn("size-3 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
 
