@@ -3,6 +3,10 @@ import { expect, test, type Locator } from "@playwright/test";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { getProvider, listProviders } from "../src/features/integrations/catalog";
+import communityJson from "../src/features/integrations/community-catalog.json";
+import type { CommunityServer } from "../src/features/integrations/community-catalog";
+
+const community = communityJson as CommunityServer[];
 
 const desktop = { width: 1440, height: 900 };
 const viewports = [
@@ -196,5 +200,27 @@ test.describe("integration catalog", () => {
     await expect(readWriteTile).toBeVisible();
     await expect(readWriteTile.getByText("Read-only capable", { exact: true })).toHaveCount(0);
     await expect(readWriteTile).not.toHaveAccessibleDescription(/Read-only capable/);
+  });
+
+  test("community servers open the custom form; local-only ones are disabled", async ({ page }) => {
+    const remote = community.find((server) => server.remoteUrl)!;
+    const local = community.find((server) => !server.remoteUrl)!;
+    await page.route("**/api/integrations/**", (route) => route.abort());
+    await signIn(page);
+    await page.goto("/settings/integrations");
+    const catalog = page.getByRole("region", { name: "Browse integrations" });
+    const servers = catalog.getByRole("list", { name: "Community servers" });
+    await expect(servers.getByRole("listitem")).toHaveCount(Math.min(60, community.length));
+    await expect(catalog.getByRole("list", { name: "Integration providers" }).getByRole("listitem")).toHaveCount(listProviders().length);
+
+    const search = catalog.getByRole("searchbox", { name: "Search community servers" });
+    await search.fill(local.name);
+    await expect(servers.getByRole("button", { name: `${local.name}: Needs local runtime (coming with #545)` })).toHaveAttribute("aria-disabled", "true");
+
+    await search.fill(remote.name);
+    await servers.getByRole("button", { name: `Connect ${remote.name}`, exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Integrations", exact: true });
+    await expect(dialog.getByLabel("Server URL")).toHaveValue(remote.remoteUrl!);
+    await expect(dialog.getByText("Community server — not reviewed")).toBeVisible();
   });
 });

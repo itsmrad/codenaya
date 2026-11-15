@@ -77,3 +77,6 @@ graphify-out/
 
 # Opt-in live eval artifacts and local spend ledger (baselines are curated).
 /scripts/agent-eval/results/
+
+# community MCP catalog generator cache (network responses)
+/scripts/mcp-catalog/.cache/

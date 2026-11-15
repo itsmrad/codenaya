@@ -20,6 +20,7 @@ import { Spinner } from "@/components/ui/spinner";
 
 import { useUserConnections } from "../hooks/use-integrations";
 import { getProvider } from "../catalog";
+import type { CustomServerPrefill } from "../community-catalog";
 import { ConnectionCard } from "./connection-card";
 import { ConnectApiKeyForm } from "./connect-api-key-form";
 import { ProjectConnectionsPanel } from "./project-connections-panel";
@@ -32,6 +33,8 @@ interface IntegrationsDialogProps {
   onOpenChange: (open: boolean) => void;
   projectId?: Id<"projects">;
   initialProviderId?: string;
+  /** Opens the custom-server form prefilled for a community server. */
+  initialPrefill?: CustomServerPrefill;
 }
 
 export const IntegrationsDialog = ({
@@ -39,11 +42,13 @@ export const IntegrationsDialog = ({
   onOpenChange,
   projectId,
   initialProviderId,
+  initialPrefill,
 }: IntegrationsDialogProps) => {
   const connections = useUserConnections();
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(initialProviderId ?? null);
-  // null keeps selection automatic while connections load, including deep links (#585).
-  const [addingConnection, setAddingConnection] = useState<boolean | null>(null);
+  const [prefill, setPrefill] = useState(initialPrefill);
+  // Prefilled community servers always start a new custom connection.
+  const [addingConnection, setAddingConnection] = useState<boolean | null>(initialPrefill ? true : null);
   const [accountSectionOpen, setAccountSectionOpen] = useState(!!projectId);
 
   // Each opening starts at the requested provider, without resuming an old form.
@@ -51,14 +56,15 @@ export const IntegrationsDialog = ({
   if (wasOpen !== open) {
     setWasOpen(open);
     setSelectedProviderId(open ? initialProviderId ?? null : null);
-    setAddingConnection(null);
+    setPrefill(open ? initialPrefill : undefined);
+    setAddingConnection(open && initialPrefill ? true : null);
     setAccountSectionOpen(!!projectId);
   }
 
   const selectedConnections = connections?.filter((connection) => connection.providerId === selectedProviderId) ?? [];
   const managing = selectedConnections.length > 0 && !addingConnection;
   const selectedName = selectedProviderId === CUSTOM_PROVIDER_ID
-    ? "Custom MCP server"
+    ? prefill?.label ?? "Custom MCP server"
     : selectedProviderId ? getProvider(selectedProviderId)?.displayName ?? selectedProviderId : null;
 
   return (
@@ -105,7 +111,7 @@ export const IntegrationsDialog = ({
                   variant="ghost"
                   size="icon-sm"
                   aria-label="Back to provider list"
-                  onClick={() => { setSelectedProviderId(null); setAddingConnection(null); }}
+                  onClick={() => { setSelectedProviderId(null); setPrefill(undefined); setAddingConnection(null); }}
                 >
                   <ArrowLeftIcon aria-hidden="true" />
                 </Button>
@@ -121,14 +127,19 @@ export const IntegrationsDialog = ({
                   <Button type="button" variant="outline" size="sm" onClick={() => setAddingConnection(true)}>Add another connection</Button>
                 </>
               ) : (
-                <ConnectApiKeyForm providerId={selectedProviderId} projectId={projectId} />
+                <ConnectApiKeyForm
+                  providerId={selectedProviderId}
+                  projectId={projectId}
+                  prefill={selectedProviderId === CUSTOM_PROVIDER_ID ? prefill : undefined}
+                />
               )}
             </section>
           ) : (
             <ProviderCatalog
-              onSelect={(providerId) => {
+              onSelect={(providerId, communityPrefill) => {
                 setSelectedProviderId(providerId);
-                setAddingConnection(null);
+                setPrefill(communityPrefill);
+                setAddingConnection(communityPrefill ? true : null);
               }}
               connectedProviderIds={connections?.map((connection) => connection.providerId)}
             />
