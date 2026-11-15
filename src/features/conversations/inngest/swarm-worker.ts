@@ -76,8 +76,11 @@ export const swarmWorker = inngest.createFunction(
     // `agent-task/cancel`: the orchestrator stops a worker whose step.invoke timed out.
     cancelOn: [
       { event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" },
-      { event: "agent-task/cancel", if: "event.data.agentTaskId == async.data.agentTaskId" },
-      { event: "agent-task/cancel", if: "event.data.parentAgentTaskId == async.data.agentTaskId" },
+      // One entry per event: the task itself, or a depth-2 child of that sub-orchestrator.
+      {
+        event: "agent-task/cancel",
+        if: "event.data.agentTaskId == async.data.agentTaskId || event.data.parentAgentTaskId == async.data.agentTaskId",
+      },
     ],
     triggers: [{ event: "agent-task/run" }],
     onFailure: async ({ event, step }) => {
