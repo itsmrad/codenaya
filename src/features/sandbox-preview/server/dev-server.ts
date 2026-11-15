@@ -44,10 +44,11 @@ export const SHORT_CALL_MS = 10_000;
 const DEV_PGID_FILE = "/tmp/codenaya-dev-server.pgid";
 
 // Record inside setsid: it may fork if E2B's wrapper is already a group leader.
+// The dev command runs in bash, like E2B's own `bash -l -c`: settings may use bash syntax.
 export const DEV_START_COMMAND =
   `if command -v setsid >/dev/null 2>&1; then exec setsid --wait sh -c ` +
-  `'echo "$$" > ${DEV_PGID_FILE}; exec sh -c "$${DEV_COMMAND_ENV}"'; ` +
-  `else rm -f ${DEV_PGID_FILE}; exec sh -c "$${DEV_COMMAND_ENV}"; fi`;
+  `'echo "$$" > ${DEV_PGID_FILE}; exec bash -c "$${DEV_COMMAND_ENV}"'; ` +
+  `else rm -f ${DEV_PGID_FILE}; exec bash -c "$${DEV_COMMAND_ENV}"; fi`;
 
 /** Survives an OOM-killed E2B parent; consumed before the next start records its group. */
 export const READ_DEV_PGID_COMMAND = `cat ${DEV_PGID_FILE} 2>/dev/null; rm -f ${DEV_PGID_FILE}`;
@@ -63,19 +64,31 @@ export const killTreeCommand = (pid: number) =>
   `tree() { echo "$1"; for c in $(kids "$1"); do tree "$c"; done; }; ` +
   `kill -9 $(tree ${Math.trunc(pid)}) 2>/dev/null; true`;
 
-/** Orphans retain their process group even after their parent disappears from /proc. */
-export const killDevServersCommand = (pids: number[], pgid?: number) =>
-  pgid !== undefined && Number.isSafeInteger(pgid) && pgid > 1
-    ? `kill -TERM -- -${pgid} 2>/dev/null; sleep 0.5; kill -KILL -- -${pgid} 2>/dev/null; true`
-    : pids.map(killTreeCommand).join("; ");
+/**
+ * Orphans retain their process group even after their parent disappears from /proc.
+ * The group is signalled only while its leader still carries the dev marker, so a
+ * stale record can't kill a reused group id; otherwise the listed trees are.
+ */
+export const killDevServersCommand = (pids: number[], pgid?: number) => {
+  const trees = pids.map(killTreeCommand).join("; ");
+  if (pgid === undefined || !Number.isSafeInteger(pgid) || pgid <= 1) return trees;
+  return `if tr '\\0' '\\n' < /proc/${pgid}/environ 2>/dev/null | grep -q '^${DEV_COMMAND_ENV}='; then ` +
+    `kill -TERM -- -${pgid} 2>/dev/null; sleep 0.5; kill -KILL -- -${pgid} 2>/dev/null; true; ` +
+    `else ${trees || "true"}; fi`;
+};
 
-/** Old sandboxes may have no group record; Node and /proc are present in node:22. */
+/**
+ * Old sandboxes may have no group record; Node and /proc are present in node:22.
+ * Only processes that inherited the dev marker are reaped, never e.g. a concurrent `npm install`.
+ */
 export const killProjectNodesCommand = (cwd: string) =>
   `node -e 'const fs = require("fs"); const cwd = process.argv[1]; ` +
+  `const marked = (base) => fs.readFileSync(\`\${base}/environ\`, "latin1").split("\\0")` +
+  `.some((env) => env.startsWith("${DEV_COMMAND_ENV}=")); ` +
   `for (const entry of fs.readdirSync("/proc")) { ` +
   `if (!/^[0-9]+$/.test(entry)) continue; const pid = Number(entry); const base = \`/proc/\${entry}\`; ` +
   `try { if (pid !== process.pid && fs.readlinkSync(\`\${base}/cwd\`) === cwd && ` +
-  `fs.readlinkSync(\`\${base}/exe\`).endsWith("/node")) process.kill(pid, "SIGKILL"); ` +
+  `fs.readlinkSync(\`\${base}/exe\`).endsWith("/node") && marked(base)) process.kill(pid, "SIGKILL"); ` +
   `} catch (error) { if (!["ENOENT", "ESRCH", "EACCES"].includes(error.code)) throw error; } }' ` +
   `'${cwd.replaceAll("'", "'\"'\"'")}'`;
 

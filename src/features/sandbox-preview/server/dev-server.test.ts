@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import type { Sandbox } from "e2b";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -280,15 +284,41 @@ describe("dev server process groups", () => {
     expect(DEV_START_COMMAND).toContain("command -v setsid");
     expect(DEV_START_COMMAND).toContain("exec setsid --wait sh -c");
     expect(DEV_START_COMMAND).toContain('echo "$$" > /tmp/codenaya-dev-server.pgid');
-    expect(DEV_START_COMMAND).toContain('exec sh -c "$CODENAYA_DEV_COMMAND"');
+    expect(DEV_START_COMMAND).toContain('exec bash -c "$CODENAYA_DEV_COMMAND"');
+    // A user's devCommand may use bash syntax (`source`, `[[ ]]`, `&>`); node:22's sh is dash.
+    expect(DEV_START_COMMAND).not.toMatch(/(^|[^a-z])sh -c "\$CODENAYA_DEV_COMMAND"/);
     expect(DEV_START_COMMAND).toContain("else rm -f /tmp/codenaya-dev-server.pgid;");
   });
 
   it("signals the recorded group even when its parent is no longer listed", () => {
     const command = killDevServersCommand([], 42);
-    expect(command).toBe("kill -TERM -- -42 2>/dev/null; sleep 0.5; kill -KILL -- -42 2>/dev/null; true");
+    expect(command).toContain("kill -TERM -- -42 2>/dev/null; sleep 0.5; kill -KILL -- -42 2>/dev/null;");
     expect(command).not.toContain("tree");
   });
+
+  const runShell = (command: string, environ: string | null) => {
+    const dir = mkdtempSync(join(tmpdir(), "pgid-"));
+    const log = join(dir, "log");
+    if (environ !== null) writeFileSync(join(dir, "environ"), environ);
+    const script = command.replaceAll("/proc/42/environ", join(dir, "environ"));
+    execFileSync("sh", ["-c", `kill() { echo "kill $*" >> ${log}; }; sleep() { :; }; ${script}`]);
+    return existsSync(log) ? readFileSync(log, "utf8") : "";
+  };
+
+  it("signals the group only while its leader still carries the dev marker", () => {
+    const marked = runShell(killDevServersCommand([], 42), `PATH=/bin\0${DEV_COMMAND_ENV}=npm run dev\0`);
+    expect(marked).toBe("kill -TERM -- -42\nkill -KILL -- -42\n");
+  });
+
+  it.each([["a reused pgid", "PATH=/bin\0npm_command=install\0"], ["an exited leader", null]])(
+    "skips a stale group record for %s and falls back to the listed trees",
+    (_, environ) => {
+      expect(runShell(killDevServersCommand([], 42), environ)).toBe("");
+      const command = killDevServersCommand([12], 42);
+      expect(command).toContain(`else ${killTreeCommand(12)}; fi`);
+      expect(runShell(command, environ)).not.toContain("-- -42");
+    },
+  );
 
   it.each([undefined, 0, 1, -42, NaN, 12.5, Infinity])("falls back to the listed trees for an unknown/invalid pgid %s", (pgid) => {
     expect(killDevServersCommand([12], pgid)).toBe(killTreeCommand(12));
@@ -300,23 +330,27 @@ describe("dev server process groups", () => {
     expect(command).toContain('readdirSync("/proc")');
     expect(command).toContain('readlinkSync(`${base}/cwd`)');
     expect(command).toContain('readlinkSync(`${base}/exe`)');
+    expect(command).toContain('readFileSync(`${base}/environ`');
     expect(command).toContain('pid !== process.pid');
     expect(command).toContain('process.kill(pid, "SIGKILL")');
     expect(command).toContain("'/home/user/app'\"'\"'s code'");
     expect(command).not.toMatch(/lsof|fuser|pkill|killall/);
   });
 
-  it("reaps an orphan without killing the proxy, a non-Node command, or the cleanup itself", () => {
+  it("reaps a marked orphan without killing an install, the proxy, a non-Node command, or the cleanup itself", () => {
     const kill = vi.fn();
     const cwd = "/home/user/app";
-    const processes: Record<string, { cwd: string; exe: string }> = {
-      "12": { cwd, exe: "/usr/local/bin/node" },
-      "13": { cwd: "/home/user", exe: "/usr/local/bin/node" },
-      "14": { cwd, exe: "/bin/bash" },
-      "15": { cwd, exe: "/usr/local/bin/node" },
+    const dev = `HOME=/home/user\0${DEV_COMMAND_ENV}=npm run dev\0`;
+    const processes: Record<string, { cwd: string; exe: string; environ: string }> = {
+      "12": { cwd, exe: "/usr/local/bin/node", environ: dev },
+      "13": { cwd: "/home/user", exe: "/usr/local/bin/node", environ: dev },
+      "14": { cwd, exe: "/bin/bash", environ: dev },
+      "15": { cwd, exe: "/usr/local/bin/node", environ: dev },
+      "17": { cwd, exe: "/usr/local/bin/node", environ: "HOME=/home/user\0npm_command=install\0" },
     };
     const fs = {
-      readdirSync: () => ["self", "12", "13", "14", "15", "16"],
+      readdirSync: () => ["self", "12", "13", "14", "15", "16", "17"],
+      readFileSync: (path: string) => processes[path.split("/")[2]].environ,
       readlinkSync: (path: string) => {
         const [, , pid, field] = path.split("/");
         const entry = processes[pid];
@@ -345,7 +379,7 @@ describe("dev server process groups", () => {
     const install = vi.fn(async () => {
       expect(run.mock.calls.slice(0, 3)).toEqual([
         [READ_DEV_PGID_COMMAND, bounds],
-        [killDevServersCommand([12], 42), bounds],
+        [killDevServersCommand(listed ? [12] : [], 42), bounds],
         [killProjectNodesCommand(dev.cwd), bounds],
       ]);
     });
