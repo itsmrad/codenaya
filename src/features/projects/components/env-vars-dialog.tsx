@@ -43,6 +43,8 @@ import {
 
 import { Id } from "../../../../convex/_generated/dataModel";
 
+import { useProject } from "../hooks/use-projects";
+
 const MASK = "••••••••";
 
 const formSchema = z.object({
@@ -69,7 +71,11 @@ interface EnvVarsDialogProps {
 export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogProps) => {
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
 
+  const project = useProject(projectId);
   const envVars = useEnvVars(open ? projectId : undefined);
+  const missingNames = (project?.importInfo?.envVarNames ?? []).filter(
+    (name) => !envVars?.some((envVar) => envVar.key === name),
+  );
   const setPublicEnvVar = useSetPublicEnvVar();
   const deleteEnvVar = useDeleteEnvVar();
 
@@ -145,6 +151,28 @@ export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogPr
             preview to apply changes.
           </DialogDescription>
         </DialogHeader>
+
+        {envVars !== undefined && missingNames.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              Detected {missingNames.length} missing environment variables in the imported project.
+              Select a name and enter its value to save it.
+            </p>
+            <div className="max-h-40 overflow-y-auto divide-y rounded-md border">
+              {missingNames.map((name) => (
+                <div key={name} className="flex items-center gap-2 p-2 text-xs">
+                  <span className="min-w-0 flex-1 break-all font-mono">{name}</span>
+                  <Badge variant="outline">{classifyEnvKey(name) === "public" ? "Public" : "Secret"}</Badge>
+                  <Button size="sm" variant="ghost" aria-label={`Set ${name}`} onClick={() => {
+                    form.setFieldValue("key", name);
+                    form.setFieldValue("value", "");
+                    document.getElementById("env-var-value")?.focus();
+                  }}>Set value</Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="max-h-64 overflow-y-auto rounded-md border border-border/50 divide-y divide-border/50">
           {envVars === undefined && (

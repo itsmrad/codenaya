@@ -1,10 +1,12 @@
 import { v } from "convex/values";
 
+import { isValidEnvKey } from "../src/features/integrations/env-keys";
 import { publicValueSecretRule } from "../src/features/integrations/credential-guard";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import {
   aiProviderValidator,
+  importInfoValidator,
   githubSyncValidator,
   messageStepValidator,
   projectSourceValidator,
@@ -656,8 +658,12 @@ export const createBinaryFile = mutation({
   },
 });
 
+// Matches the configured env-var limit; metadata stays bounded on the project.
+const MAX_IMPORTED_ENV_VARS = 500;
+
 export const updateImportStatus = mutation({
   args: {
+    importInfo: v.optional(importInfoValidator),
     internalKey: v.string(),
     projectId: v.id("projects"),
     status: v.optional(
@@ -668,13 +674,29 @@ export const updateImportStatus = mutation({
       )
     ),
   },
+  returns: v.null(),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    const project = await ctx.db.get("projects", args.projectId);
+    if (!project || project.deletingAt) throw appError("NOT_FOUND", "Project not found");
+    if (args.importInfo && (
+      args.importInfo.envVarNames.length > MAX_IMPORTED_ENV_VARS ||
+      args.importInfo.envVarNames.some((key) => !isValidEnvKey(key) || key.length > 256)
+    )) {
+      throw appError("INVALID_ARGUMENT", "Invalid imported environment variable names");
+    }
 
     await ctx.db.patch("projects", args.projectId, {
+      ...(args.importInfo ? {
+        importInfo: args.importInfo,
+        ...(!project.instructions && args.importInfo.source ? {
+          instructions: "Imported from another builder. Keep the existing hosted backend and its data in place; configure its environment variables rather than migrating it.",
+        } : {}),
+      } : {}),
       importStatus: args.status,
       updatedAt: Date.now(),
     });
+    return null;
   },
 });
 

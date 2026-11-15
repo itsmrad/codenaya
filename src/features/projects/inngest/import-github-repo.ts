@@ -7,6 +7,7 @@ import { inngest } from "@/inngest/client";
 import { getJobGithubToken } from "@/features/projects/server/github-token";
 import { readRepoArchive } from "@/features/projects/server/github-archive";
 import { planFolderCreation, splitPath } from "@/features/projects/utils/github-tree";
+import { inspectImportedProject, isRealEnvFile } from "@/features/projects/utils/inspect-imported-project";
 import { planSeedTree, type SeedFile } from "@/features/templates/seed-files";
 
 import { api } from "../../../../convex/_generated/api";
@@ -62,7 +63,7 @@ export const importGithubRepo = inngest.createFunction(
 
     // One step: the archive can't be passed between steps (step output is
     // persisted), and a retry starts again from a clean project.
-    await step.run("import-files", async () => {
+    const importInfo = await step.run("import-files", async () => {
       // Cleanup deletes one bounded batch per call (#212).
       let cleaned = false;
       while (!cleaned) {
@@ -72,7 +73,7 @@ export const importGithubRepo = inngest.createFunction(
         }));
       }
 
-      const { folders, files } = await readRepoArchive(owner, repo, githubToken);
+      const { folders, files } = await readRepoArchive(owner, repo, githubToken, undefined, isRealEnvFile);
 
       const folderIdMap: Record<string, Id<"files">> = {};
 
@@ -132,6 +133,10 @@ export const importGithubRepo = inngest.createFunction(
           });
         }
       }
+      return inspectImportedProject([
+        ...textFiles,
+        ...folders.map((path) => ({ path, content: "" })),
+      ]);
     });
 
     await step.run("set-completed-status", async () => {
@@ -139,6 +144,7 @@ export const importGithubRepo = inngest.createFunction(
         internalKey,
         projectId,
         status: "completed",
+        importInfo,
       });
     });
 

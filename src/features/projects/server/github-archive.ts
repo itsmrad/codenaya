@@ -24,7 +24,8 @@ export async function readRepoArchive(
   owner: string,
   repo: string,
   token: string | null,
-  ref?: string
+  ref?: string,
+  skipFile?: (path: string) => boolean,
 ): Promise<RepoArchive> {
   const res = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/tarball${ref ? `/${encodeURIComponent(ref)}` : ""}`,
@@ -72,6 +73,12 @@ export async function readRepoArchive(
             `Repositories over ${MAX_IMPORT_FILES} files or ${MAX_IMPORT_BYTES / 1024 / 1024} MB can't be imported`
           )
         );
+        return;
+      }
+      // Discard excluded bodies without decoding or retaining their values (#310).
+      if (skipFile?.(path)) {
+        archive.skipped.push(path);
+        entry.resume();
         return;
       }
       reads.push(
