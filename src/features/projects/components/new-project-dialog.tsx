@@ -31,10 +31,7 @@ export const NewProjectDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent 
-        showCloseButton={false}
-        className="grid-cols-[minmax(0,1fr)] sm:max-w-xl p-0"
-      >
+      <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-xl p-0">
         <DialogHeader className="gap-1 px-4 pt-4 text-left">
           <DialogTitle className="text-sm font-medium">
             What do you want to build?
