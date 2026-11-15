@@ -14,6 +14,7 @@ import {
   SIGN_UP_URL,
 } from "@/features/auth/constants";
 import { useEnsureCurrentUser } from "@/features/auth/hooks/use-ensure-current-user";
+import { clearPendingStartsOnUserChange } from "@/features/auth/utils/clear-pending-starts";
 import { clearAllProjectSessions } from "@/features/editor/editor-session";
 
 import { SpotlightTracker } from "./spotlight";
@@ -64,6 +65,7 @@ const ClearDraftsOnSignOut = () => {
   useEffect(() => {
     if (userId === undefined) return;
     if (previous.current && previous.current !== userId) clearAllProjectSessions();
+    clearPendingStartsOnUserChange(previous.current, userId);
     previous.current = userId;
   }, [userId]);
   return null;

@@ -18,6 +18,16 @@ import {
   readInstallFailure,
   trackFixAttempts,
 } from "./app-error";
+import {
+  VITE8_DEV_SYNTAX_ERROR,
+  VITE8_DEV_UNRESOLVED_IMPORT,
+} from "../../conversations/inngest/tools/vite-build-output.fixture";
+import {
+  NEXT16_DEV_COMPILED,
+  NEXT16_DEV_MODULE_NOT_FOUND,
+  NEXT16_DEV_RENDER_ERROR,
+  NEXT16_DEV_SYNTAX_ERROR,
+} from "./next-dev-output.fixture";
 
 describe("detectBuildError", () => {
   it("reads Vite's unresolved import with its file and line", () => {
@@ -57,6 +67,24 @@ describe("detectBuildError", () => {
       message: 'X [ERROR] Transform failed with 1 error: src/App.tsx:5:2: ERROR: Expected ";" but found "x"',
       file: "src/App.tsx",
       line: 5,
+    });
+  });
+
+  it("reads Vite 8's Oxc parse error from its code frame, past the blank line after the header", () => {
+    expect(detectBuildError(VITE8_DEV_SYNTAX_ERROR)).toEqual({
+      kind: "build",
+      message: "Transform failed with 1 error: [PARSE_ERROR] Unexpected token",
+      file: "src/App.tsx",
+      line: 2,
+    });
+  });
+
+  it("reads Vite 8's unresolved import, which keeps the Vite 6 shape", () => {
+    expect(detectBuildError(VITE8_DEV_UNRESOLVED_IMPORT)).toEqual({
+      kind: "build",
+      message: 'Failed to resolve import "./components/Missing" from "src/App.tsx". Does the file exist?',
+      file: "src/App.tsx",
+      line: 1,
     });
   });
 
@@ -115,6 +143,20 @@ describe("detectBuildError", () => {
       kind: "build", message: "Module not found: Can't resolve 'missing-package'",
       file: "src/app/page.tsx", line: 12,
     });
+  });
+
+  it.each([
+    [NEXT16_DEV_MODULE_NOT_FOUND, "Error: Module not found: Can't resolve '@/components/Hero'", 3],
+    [NEXT16_DEV_SYNTAX_ERROR, "Error: Expected ',', got ';'", 6],
+    [NEXT16_DEV_RENDER_ERROR, "Error: STRIPE_SECRET_KEY is not set", 2],
+  ])("reads captured Next 16 (Turbopack) dev output: %#", (output, message, line) => {
+    expect(detectBuildError(output)).toEqual({ kind: "build", message, file: "src/app/page.tsx", line });
+  });
+
+  it("forgets a Next 16 dev error once Turbopack compiles again", () => {
+    const detector = createBuildErrorDetector();
+    expect(detector.push(NEXT16_DEV_MODULE_NOT_FOUND)).not.toBeNull();
+    expect(detector.push(NEXT16_DEV_COMPILED)).toBeNull();
   });
 
   describe("npm install failures (#491)", () => {

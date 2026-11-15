@@ -48,6 +48,7 @@ registerHooks({
 const starterDir = "../src/features/conversations/inngest";
 const { VITE_REACT_STARTER } = await import(new URL(`${starterDir}/vite-starter.ts`, import.meta.url).href);
 const { NEXT_APP_STARTER } = await import(new URL(`${starterDir}/next-starter.ts`, import.meta.url).href);
+const { TANSTACK_START_STARTER } = await import(new URL(`${starterDir}/tanstack-start-starter.ts`, import.meta.url).href);
 const warmup = (starter: Array<{ path: string; content: string }>) => {
   const packageJson = starter.find((file) => file.path === "package.json")!.content;
   return [
@@ -60,7 +61,7 @@ const warmup = (starter: Array<{ path: string; content: string }>) => {
 
 const template = Template()
   .fromNodeImage("22")
-  .runCmd([...warmup(VITE_REACT_STARTER), ...warmup(NEXT_APP_STARTER)], { user: "user" });
+  .runCmd([...warmup(VITE_REACT_STARTER), ...warmup(NEXT_APP_STARTER), ...warmup(TANSTACK_START_STARTER)], { user: "user" });
 
 await Template.build(template, TEMPLATE_NAME, {
   onBuildLogs: defaultBuildLogger(),

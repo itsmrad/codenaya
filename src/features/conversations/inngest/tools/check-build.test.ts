@@ -16,7 +16,7 @@ vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal)
 import { CommandExitError, type CommandResult, type Sandbox, SandboxError, TimeoutError } from "e2b";
 import { getFunctionName } from "convex/server";
 
-import { DEV_COMMAND_ENV, PROXY_TARGET_ENV, killTreeCommand } from "@/features/sandbox-preview/server/dev-server";
+import { DEV_COMMAND_ENV, DEV_START_COMMAND, READ_DEV_PGID_COMMAND, PROXY_TARGET_ENV, killProjectNodesCommand, killTreeCommand } from "@/features/sandbox-preview/server/dev-server";
 
 import { VITE_REACT_STARTER } from "../vite-starter";
 import {
@@ -26,7 +26,15 @@ import {
 } from "../../agent-steps";
 import { START_BUILD_ERROR, START_TYPE_ERROR } from "./start-build-output.fixture";
 import { buildCommand, checkProjectBuild, createCheckBuildTool, trimBuildOutput, warmSlow } from "./check-build";
-import { NEXT_MODULE_NOT_FOUND, NEXT_PRERENDER_ERROR, NEXT_TYPE_ERROR } from "./next-build-output.fixture";
+import {
+  NEXT16_MODULE_NOT_FOUND,
+  NEXT16_PRERENDER_ERROR,
+  NEXT16_SYNTAX_ERROR,
+  NEXT16_TYPE_ERROR,
+  NEXT_MODULE_NOT_FOUND,
+  NEXT_PRERENDER_ERROR,
+  NEXT_TYPE_ERROR,
+} from "./next-build-output.fixture";
 
 const starter = () => VITE_REACT_STARTER.map((file) => ({ ...file }));
 const check = (files = starter(), apiKey: string | null = "e2b_key") =>
@@ -150,6 +158,17 @@ describe("trimBuildOutput for Next.js", () => {
     ]);
     expect(trimmed).not.toContain("/home/user/app/");
     expect(trimmed).not.toMatch(/Collecting page data|Generating static pages/);
+  });
+
+  it.each([
+    ["type error", NEXT16_TYPE_ERROR, ["Failed to type check.", "src/app/page.tsx(8,13): error TS2322: Type 'number' is not assignable to type 'string'."]],
+    ["missing module", NEXT16_MODULE_NOT_FOUND, ["> Build error occurred", "Error: Turbopack build failed with 1 error:", "./src/app/page.tsx:3:1", "Error: Module not found: Can't resolve '@/components/Hero'"]],
+    ["syntax error", NEXT16_SYNTAX_ERROR, ["> Build error occurred", "Error: Turbopack build failed with 1 error:", "./src/app/page.tsx:6:3", "Error: Expected ',', got ';'"]],
+    ["prerender failure", NEXT16_PRERENDER_ERROR, ['Error occurred prerendering page "/". Read more: https://nextjs.org/docs/messages/prerender-error', "Error: STRIPE_SECRET_KEY is not set", "    at <unknown> (src/app/page.tsx:2:45)"]],
+  ])("keeps a Next 16 (Turbopack) %s first and drops the build progress", (_, fixture, head) => {
+    const trimmed = trimBuildOutput(output(fixture), "/home/user/app", "next");
+    expect(trimmed.split("\n").slice(0, head.length)).toEqual(head);
+    expect(trimmed).not.toMatch(/Next\.js 16|next\.config\.ts took|Creating an optimized|Compiled successfully|TypeScript|Collecting page data|Generating static pages/);
   });
 
   it("puts errors printed after the route table first and drops the table and telemetry notice", () => {
@@ -677,7 +696,7 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
       const [cleanup, ...rest] = afterBuild(warm);
       expect(cleanup).toMatch(/^rm -rf \/home\/user\/check-build-/);
       expect(rest.slice(0, 3)).toEqual(Array(3).fill(expect.stringContaining("port:3000")));
-      expect(rest.slice(3)).toEqual([killTreeCommand(12), "npm run dev -- --hostname 0.0.0.0"]);
+      expect(rest.slice(3)).toEqual([READ_DEV_PGID_COMMAND, killTreeCommand(12), killProjectNodesCommand("/home/user/app"), DEV_START_COMMAND]);
       // Bounded like the rest of the cleanup, so a slow sandbox can't hold the step past its budget.
       expect(warm.commands.run.mock.calls.at(-2)?.[1]).toEqual({ timeoutMs: 10_000, requestTimeoutMs: 10_000 });
       expect(warm.commands.run.mock.calls.at(-1)?.[1]).toEqual({

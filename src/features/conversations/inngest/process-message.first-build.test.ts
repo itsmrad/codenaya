@@ -21,8 +21,9 @@ vi.mock("@/lib/convex-client", async () => {
 
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { BUILD_NOT_BUILT_NOTE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
-import { FIRST_BUILD_APP_NOTE, NEXT_FIRST_BUILD_APP_NOTE, NEXT_STARTER_IN_PLACE_NOTE, NEXT_STARTER_RECOVERY_NOTE, STARTER_IN_PLACE_NOTE } from "./constants";
+import { FIRST_BUILD_APP_NOTE, NEXT_FIRST_BUILD_APP_NOTE, NEXT_STARTER_IN_PLACE_NOTE, NEXT_STARTER_RECOVERY_NOTE, START_FIRST_BUILD_APP_NOTE, START_STARTER_IN_PLACE_NOTE, START_STARTER_RECOVERY_NOTE, STARTER_IN_PLACE_NOTE } from "./constants";
 import { NEXT_APP_STARTER } from "./next-starter";
+import { TANSTACK_START_STARTER } from "./tanstack-start-starter";
 import { drive, text, toolCall } from "./process-message.driver";
 import { VITE_REACT_STARTER } from "./vite-starter";
 
@@ -203,6 +204,44 @@ describe("processMessage first build (#338)", () => {
     expect(user).toContain(JSON.stringify(NEXT_STARTER_RECOVERY_NOTE).slice(1, -1));
     const coding = (outcome.inferenceBodies as ChatBody[]).find((body) => body.tools)!;
     expect(coding.tools?.map((tool) => tool.function.name)).not.toContain("scaffoldViteApp");
+  });
+
+  it("uses Start first-build guidance and does not offer the Vite scaffold for a Start starter", async () => {
+    needsFirstBuild = true;
+    projectFiles = TANSTACK_START_STARTER.map(({ path }) => ({ _id: `id:${path}`, name: path, type: "file" }));
+    const outcome = await drive(MODEL, [{ data: text("Todo app") }, { data: text("Built it.") }]);
+    const { system, user } = codingRequest(outcome.inferenceBodies);
+    expect(system).toContain(JSON.stringify(START_FIRST_BUILD_APP_NOTE).slice(1, -1));
+    expect(system).not.toContain(JSON.stringify(FIRST_BUILD_APP_NOTE).slice(1, -1));
+    expect(user).toContain(JSON.stringify(START_STARTER_IN_PLACE_NOTE).slice(1, -1));
+    expect(user).not.toContain(JSON.stringify(STARTER_IN_PLACE_NOTE).slice(1, -1));
+    const coding = (outcome.inferenceBodies as ChatBody[]).find((body) => body.tools)!;
+    expect(coding.tools?.map((tool) => tool.function.name)).not.toContain("scaffoldViteApp");
+  });
+
+  it("keeps an explicit Start request on Start when the seed is empty", async () => {
+    needsFirstBuild = true;
+    projectFiles = [];
+    const outcome = await drive(MODEL, [{ data: text("Todo app") }, { data: text("Built it.") }], "Build a TanStack Start todo app");
+    const { system, user } = codingRequest(outcome.inferenceBodies);
+    expect(system).toContain(JSON.stringify(START_STARTER_RECOVERY_NOTE).slice(1, -1));
+    expect(user).toContain(JSON.stringify(START_STARTER_RECOVERY_NOTE).slice(1, -1));
+    expect(user).not.toContain(JSON.stringify(NEXT_STARTER_RECOVERY_NOTE).slice(1, -1));
+    const coding = (outcome.inferenceBodies as ChatBody[]).find((body) => body.tools)!;
+    expect(coding.tools?.map((tool) => tool.function.name)).not.toContain("scaffoldViteApp");
+  });
+
+  it.each([
+    ["a Vite starter", VITE_REACT_STARTER.map(({ path }) => path), "Build a todo app", false],
+    ["a Next starter", NEXT_APP_STARTER.map(({ path }) => path), "Build a todo app", false],
+    ["a TanStack Start project", ["package.json", "vite.config.ts", "src/router.tsx", "src/routes/__root.tsx"], "Add a blog", true],
+    ["an empty project asked for TanStack Start", [], "Build a TanStack Start blog", true],
+  ])("adds the TanStack Start rules only for a Start run: %s", async (_, paths, prompt, start) => {
+    projectFiles = paths.map((path) => ({ _id: `id:${path}`, name: path, type: "file" }));
+    const outcome = await drive(MODEL, [{ data: text("Blog") }, { data: text("Built it.") }], prompt);
+    expect(codingRequest(outcome.inferenceBodies).system.includes("<tanstack_start>")).toBe(start);
+    const coding = (outcome.inferenceBodies as ChatBody[]).find((body) => body.tools)!;
+    if (start) expect(coding.tools?.map((tool) => tool.function.name)).not.toContain("scaffoldViteApp");
   });
 
   it("uses Next first-build guidance and does not offer the Vite scaffold for a Next starter", async () => {

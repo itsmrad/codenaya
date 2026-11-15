@@ -1,7 +1,7 @@
 import type { Sandbox as E2bSandbox } from "e2b";
 import { appendHostFlag, detectFrameworkFromFiles } from "../utils/dev-command";
 import { fromE2bSandbox } from "./provider/e2b";
-import { listCommands } from "./provider/helpers";
+import { listCommands, runOrThrow } from "./provider/helpers";
 import type { Sandbox, SandboxCommand } from "./provider/types";
 
 /** check-build still passes the raw E2B handle to the two helpers it uses. */
@@ -45,6 +45,21 @@ export class DevServerStartError extends Error {
   }
 }
 
+/** Listing, process metadata and cleanup share checkBuild's short-call budget. */
+export const SHORT_CALL_MS = 10_000;
+
+const DEV_PGID_FILE = "/tmp/codenaya-dev-server.pgid";
+
+// Record inside setsid: it may fork if E2B's wrapper is already a group leader.
+// The dev command runs in bash, like E2B's own `bash -l -c`: settings may use bash syntax.
+export const DEV_START_COMMAND =
+  `if command -v setsid >/dev/null 2>&1; then exec setsid --wait sh -c ` +
+  `'echo "$$" > ${DEV_PGID_FILE}; exec bash -c "$${DEV_COMMAND_ENV}"'; ` +
+  `else rm -f ${DEV_PGID_FILE}; exec bash -c "$${DEV_COMMAND_ENV}"; fi`;
+
+/** Survives an OOM-killed E2B parent; consumed before the next start records its group. */
+export const READ_DEV_PGID_COMMAND = `cat ${DEV_PGID_FILE} 2>/dev/null; rm -f ${DEV_PGID_FILE}`;
+
 /**
  * SIGKILLs `pid` and every process under it, root first. E2B's `commands.kill`
  * signals only the `bash -l -c` wrapper (envd `sysSignal`), which would leave
@@ -55,6 +70,34 @@ export const killTreeCommand = (pid: number) =>
   `kids() { grep -l "^PPid:[[:space:]]*$1$" /proc/[0-9]*/status 2>/dev/null | cut -d/ -f3; }; ` +
   `tree() { echo "$1"; for c in $(kids "$1"); do tree "$c"; done; }; ` +
   `kill -9 $(tree ${Math.trunc(pid)}) 2>/dev/null; true`;
+
+/**
+ * Orphans retain their process group even after their parent disappears from /proc.
+ * The group is signalled only while its leader still carries the dev marker, so a
+ * stale record can't kill a reused group id; otherwise the listed trees are.
+ */
+export const killDevServersCommand = (pids: number[], pgid?: number) => {
+  const trees = pids.map(killTreeCommand).join("; ");
+  if (pgid === undefined || !Number.isSafeInteger(pgid) || pgid <= 1) return trees;
+  return `if tr '\\0' '\\n' < /proc/${pgid}/environ 2>/dev/null | grep -q '^${DEV_COMMAND_ENV}='; then ` +
+    `kill -TERM -- -${pgid} 2>/dev/null; sleep 0.5; kill -KILL -- -${pgid} 2>/dev/null; true; ` +
+    `else ${trees || "true"}; fi`;
+};
+
+/**
+ * Old sandboxes may have no group record; Node and /proc are present in node:22.
+ * Only processes that inherited the dev marker are reaped, never e.g. a concurrent `npm install`.
+ */
+export const killProjectNodesCommand = (cwd: string) =>
+  `node -e 'const fs = require("fs"); const cwd = process.argv[1]; ` +
+  `const marked = (base) => fs.readFileSync(\`\${base}/environ\`, "latin1").split("\\0")` +
+  `.some((env) => env.startsWith("${DEV_COMMAND_ENV}=")); ` +
+  `for (const entry of fs.readdirSync("/proc")) { ` +
+  `if (!/^[0-9]+$/.test(entry)) continue; const pid = Number(entry); const base = \`/proc/\${entry}\`; ` +
+  `try { if (pid !== process.pid && fs.readlinkSync(\`\${base}/cwd\`) === cwd && ` +
+  `fs.readlinkSync(\`\${base}/exe\`).endsWith("/node") && marked(base)) process.kill(pid, "SIGKILL"); ` +
+  `} catch (error) { if (!["ENOENT", "ESRCH", "EACCES"].includes(error.code)) throw error; } }' ` +
+  `'${cwd.replaceAll("'", "'\"'\"'")}'`;
 
 interface DevOutput {
   onStdout?: (data: string) => void;
@@ -129,7 +172,9 @@ export const installWithDevServerStopped = async <T>(
   output: DevOutput = {},
   fallback?: DevStart,
 ): Promise<T> => {
-  const [dev] = await stopDevServers(sandbox);
+  const running = await listCommands(sandbox, { requestTimeoutMs: SHORT_CALL_MS });
+  await stopDevServers(sandbox, running, fallback?.cwd);
+  const [dev] = running.filter((command) => command.envs?.[DEV_COMMAND_ENV]);
   // A marked server keeps its command/env; the caller still knows its port.
   const start = dev ? { ...devStartOf(dev), readyPort: fallback?.readyPort } : fallback;
   try {
@@ -175,29 +220,43 @@ export const restartDevServerIfDown = async (raw: Sandbox | E2bSandbox, { port, 
     if (probe) await new Promise((resolve) => setTimeout(resolve, PORT_PROBE_GAP_MS));
     if (await isPortOpen(sandbox, port)) return false;
   }
-  const bounds = { timeoutMs, requestTimeoutMs: timeoutMs };
   const running = await listCommands(sandbox, { requestTimeoutMs: timeoutMs });
   if (running.some((command) => INSTALLING.test([command.cmd, ...command.args].join(" ")))) return false;
-  for (const dev of running.filter((command) => command.envs?.[DEV_COMMAND_ENV])) {
-    await sandbox.run(killTreeCommand(dev.pid), bounds);
-  }
+  await stopDevServers(sandbox, running, start.cwd, timeoutMs);
   await startDevServer(sandbox, start, { requestTimeoutMs: timeoutMs });
   return true;
 };
 
 const devStartOf = (dev: SandboxCommand): DevStart => ({ command: dev.envs[DEV_COMMAND_ENV], envs: dev.envs, cwd: dev.cwd });
 
-/** Stops every marked dev server: a resumed boot or another instance can leave two. Returns them. */
-const stopDevServers = async (sandbox: Sandbox) => {
-  const running = (await listCommands(sandbox)).filter((command) => command.envs?.[DEV_COMMAND_ENV]);
-  for (const dev of running) await sandbox.run(killTreeCommand(dev.pid));
-  return running;
+/** Stops marked servers and project Node orphans before an install, restart or resumed boot. */
+export const stopDevServers = async (sandbox: Sandbox, commands: SandboxCommand[], cwd?: string, timeoutMs = SHORT_CALL_MS) => {
+  const running = commands.filter((command) => command.envs?.[DEV_COMMAND_ENV]);
+  if (!running.length && !cwd) return;
+  const bounds = { timeoutMs: Math.min(timeoutMs, SHORT_CALL_MS), requestTimeoutMs: Math.min(timeoutMs, SHORT_CALL_MS) };
+  // Each step throws on a non-zero exit, as E2B's commands.run did.
+  const { stdout } = await runOrThrow(sandbox, READ_DEV_PGID_COMMAND, bounds);
+  const kill = killDevServersCommand(running.map((dev) => dev.pid), Number(stdout.trim()));
+  if (kill) await runOrThrow(sandbox, kill, bounds);
+  for (const dir of new Set([cwd, ...running.map((dev) => dev.cwd)])) {
+    if (dir) await runOrThrow(sandbox, killProjectNodesCommand(dir), bounds);
+  }
 };
+
+/** Starts the dev server in its own recorded process group; the boot uses it directly. */
+export const runDevServer = (sandbox: Sandbox, start: DevStart, output: DevOutput & { requestTimeoutMs?: number } = {}) =>
+  // In the background with no time limit, like the boot's: E2B would kill it after 60s.
+  sandbox.start(DEV_START_COMMAND, {
+    cwd: start.cwd,
+    envs: { ...start.envs, [DEV_COMMAND_ENV]: start.command },
+    ...output,
+    requestTimeoutMs: Math.min(output.requestTimeoutMs ?? SHORT_CALL_MS, SHORT_CALL_MS),
+  });
 
 /** Waits for `readyPort` when given; any failure is the safe DevServerStartError. */
 const startDevServer = async (sandbox: Sandbox, start: DevStart, output: DevOutput & { requestTimeoutMs?: number } = {}) => {
   try {
-    await sandbox.start(start.command, { cwd: start.cwd, envs: start.envs, ...output });
+    await runDevServer(sandbox, start, output);
     if (start.readyPort) await waitForDevServer(sandbox, start.readyPort);
   } catch {
     // Process errors can include project env values; expose only our safe message.

@@ -31,8 +31,7 @@ describe("injectPreviewBridge", () => {
     expect(injectPreviewBridge(once)).toBe(once);
   });
 
-  it("works from its source alone, the way the E2B proxy runs it", () => {
-    // route.ts writes `const insertBridge = ${String(insertBridge)};` into the proxy.
+  it("works from its source alone", () => {
     const fromSource = new Function(`return (${String(insertBridge)});`)() as typeof insertBridge;
     for (const html of [
       '<html><head lang="en"><title>x</title></head></html>',

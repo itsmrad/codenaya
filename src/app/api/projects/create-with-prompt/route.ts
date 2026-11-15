@@ -25,8 +25,7 @@ import {
 } from "@/lib/message-processor";
 import { detectCredential } from "@/features/integrations/credential-guard";
 import { seedTemplateFiles } from "@/features/templates/server/seed-template";
-import { NEXT_APP_STARTER, wantsNextJs } from "@/features/conversations/inngest/next-starter";
-import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starter";
+import { promptFramework, STARTERS } from "@/features/conversations/inngest/starter-only";
 import { readTemplateSource } from "@/features/templates/server/template-source";
 import {
   STARTER_TEMPLATE_IDS,
@@ -37,7 +36,7 @@ import { api } from "../../../../../convex/_generated/api";
 
 const requestSchema = z.object({
   prompt: promptText.min(1),
-  framework: z.enum(["vite", "next"]).optional(),
+  framework: z.enum(["vite", "next", "tanstack-start"]).optional(),
   model: modelChoiceSchema,
   /** Seeds the project with a starter template's files first (#119); an instant one gets no run (#362). */
   templateId: z.enum(STARTER_TEMPLATE_IDS).optional(),
@@ -76,7 +75,7 @@ export async function POST(request: Request) {
 
   const { prompt, framework, model, templateId, fromLanding, mode } = data;
   const template = templateId ? getStarterTemplate(templateId) : undefined;
-  const useNextStarter = (framework ?? (wantsNextJs(prompt) ? "next" : "vite")) === "next";
+  const starterFramework = framework ?? promptFramework(prompt);
 
   if (detectCredential(prompt).detected) {
     return NextResponse.json(
@@ -163,9 +162,9 @@ export async function POST(request: Request) {
     await seedTemplateFiles({
       internalKey,
       projectId,
-      // Prompt-flow templates use Vite files; an explicit Next selection takes precedence.
-      template: useNextStarter ? undefined : template,
-      starter: useNextStarter ? NEXT_APP_STARTER : VITE_REACT_STARTER,
+      // Prompt-flow templates use Vite files; an explicit Next or Start selection takes precedence.
+      template: starterFramework === "vite" ? template : undefined,
+      starter: STARTERS[starterFramework],
     });
 
     // Create user message

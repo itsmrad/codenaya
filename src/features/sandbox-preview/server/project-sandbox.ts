@@ -1,7 +1,7 @@
 import { Sandbox, type SandboxOpts } from "e2b";
 import { z } from "zod";
 
-import { killTreeCommand } from "./dev-server";
+import { killTreeCommand, SHORT_CALL_MS, stopDevServers } from "./dev-server";
 import { listCommands } from "./provider/helpers";
 import type { Sandbox as SeamSandbox, SandboxProvider } from "./provider/types";
 
@@ -12,9 +12,13 @@ import type { Sandbox as SeamSandbox, SandboxProvider } from "./provider/types";
 
 /**
  * The base image ships Node 20.9, too old for Vite 7 (#178). E2B_TEMPLATE
- * points at the Node 22 template built by `npm run e2b:template`.
+ * overrides the default Node 22 template built by `npm run e2b:template`.
  */
-export const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || "base";
+export const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || "codenaya-node22";
+
+if (!process.env.E2B_TEMPLATE?.trim()) {
+  console.warn("[project-sandbox] E2B_TEMPLATE unset; using codenaya-node22. Build it with npm run e2b:template");
+}
 
 /** Where project files are written inside the sandbox. */
 export const WORK_DIR = "/home/user/app";
@@ -101,7 +105,12 @@ export const writeProjectFiles = async (
  * proxy), so booting again on the same sandbox doesn't race it (#492).
  */
 export const stopSandboxCommands = async (sandbox: SeamSandbox) => {
-  const running = await listCommands(sandbox);
+  const running = await listCommands(sandbox, { requestTimeoutMs: SHORT_CALL_MS });
+  try {
+    await stopDevServers(sandbox, running, WORK_DIR);
+  } catch {
+    // Best-effort cleanup: retry the listed trees below if group cleanup failed.
+  }
   await Promise.all(running.map(async (command) => {
     try {
       await sandbox.run(killTreeCommand(command.pid), { timeoutMs: 10_000 });

@@ -1,3 +1,4 @@
+import { major, minVersion } from "semver";
 import { describe, expect, it } from "vitest";
 
 import { KNOWN_GOOD_VERSIONS } from "./known-good-versions";
@@ -30,9 +31,6 @@ describe("Vite starter UI (#294)", () => {
           const path = specifier.replace("@/", "src/");
           expect(files.has(`${path}.ts`) || files.has(`${path}.tsx`), specifier).toBe(true);
         } else {
-          expect(pkg.dependencies[specifier], specifier).toBe(
-            KNOWN_GOOD_VERSIONS[specifier as keyof typeof KNOWN_GOOD_VERSIONS],
-          );
           expect(pkg.dependencies[specifier], specifier).toBeTruthy();
           if (specifier !== "react") {
             expect(files.get("vite.config.ts"), specifier).toContain(`"${specifier}"`);
@@ -40,6 +38,17 @@ describe("Vite starter UI (#294)", () => {
         }
       }
     }
+  });
+
+  it("pins every dependency exactly, on its known-good major", () => {
+    for (const [name, version] of Object.entries({ ...pkg.dependencies, ...pkg.devDependencies })) {
+      // Exact: a range can resolve past a stale npm cache (ETARGET).
+      expect(version, name).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(major(version as string), name).toBe(minVersion(KNOWN_GOOD_VERSIONS[name as keyof typeof KNOWN_GOOD_VERSIONS])!.major);
+    }
+    expect(pkg.devDependencies).toMatchObject({ vite: "8.3.8", "@vitejs/plugin-react": "6.3.0", typescript: "5.9.3" });
+    expect(pkg.devDependencies["@tailwindcss/vite"]).toBe(pkg.devDependencies.tailwindcss);
+    expect(pkg.dependencies["react-dom"]).toBe(pkg.dependencies.react);
   });
 
   it("defines light and dark values for the v4 theme's semantic color utilities", () => {

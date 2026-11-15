@@ -52,7 +52,7 @@ Opt-in specs skip unless their vars are set:
 | Variable | Spec | Value |
 | --- | --- | --- |
 | `E2E_DISPATCH_UNREACHABLE` | `chat-dispatch-failure.spec.ts` | `1`, against a dev server whose Inngest URLs point nowhere (see the spec) |
-| `E2E_LIVE_AGENT` | `agent-vite-scaffold.spec.ts` | `1`; also needs the Inngest dev server, `E2B_API_KEY` and `E2B_TEMPLATE` |
+| `E2E_LIVE_AGENT` | `agent-vite-scaffold.spec.ts` | `1`; also needs the Inngest dev server, `E2B_API_KEY` and a built E2B template (`E2B_TEMPLATE` defaults to `codenaya-node22`) |
 | `E2E_OPENAI_KEY` | `ai-providers.spec.ts` | a working OpenAI key; the server also needs `CODENAYA_LOCAL_KEK` |
 | `E2E_STORAGE_STATE`, `E2E_PREVIEW_PATH` | `preview-device.spec.ts` | a Playwright storage-state file for a signed-in user, and a `/projects/<id>` path |
 

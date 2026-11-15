@@ -29,7 +29,7 @@ describe("Next App Router starter", () => {
     expect(pkg.devDependencies.postcss).toBeTruthy();
     expect(files.get("postcss.config.mjs")).toContain('"@tailwindcss/postcss"');
     expect(JSON.parse(files.get("tsconfig.json")!).compilerOptions).toMatchObject({
-      paths: { "@/*": ["./src/*"] }, plugins: [{ name: "next" }], jsx: "preserve",
+      paths: { "@/*": ["./src/*"] }, plugins: [{ name: "next" }], jsx: "react-jsx",
     });
     expect(JSON.parse(files.get("components.json")!)).toMatchObject({ rsc: true, tailwind: { css: "src/app/globals.css" } });
   });
@@ -55,11 +55,11 @@ describe("Next App Router starter", () => {
 });
 
 describe("wantsNextJs", () => {
-  it.each(["Use Next.js", "build with NEXTJS", "Use Next JS", "a next 15 app", "next 15 App Router", "Use the App Router", "(Next.js) dashboard", "Next.js 15 App Router"])("recognises %s", (prompt) => {
+  it.each(["Use Next.js", "build with NEXTJS", "Use Next JS", "a next 15 app", "next 15 App Router", "Use the App Router", "(Next.js) dashboard", "Next.js 15 App Router", "a next 16 app", "Next.js 16 App Router"])("recognises %s", (prompt) => {
     expect(wantsNextJs(prompt)).toBe(true);
   });
 
-  it.each(["Build a dashboard", "Use Vite", "what is the next step?", "next steps", "next 15 items", "next 15 minutes", "the next 15 days", "next 15", "next 150", "mynextjsapp", "app routers", "next.jsx", ""])("keeps Vite for %s", (prompt) => {
+  it.each(["Build a dashboard", "Use Vite", "what is the next step?", "next steps", "next 15 items", "next 15 minutes", "the next 15 days", "next 15", "next 150", "next 16 items", "mynextjsapp", "app routers", "next.jsx", ""])("keeps Vite for %s", (prompt) => {
     expect(wantsNextJs(prompt)).toBe(false);
   });
 });

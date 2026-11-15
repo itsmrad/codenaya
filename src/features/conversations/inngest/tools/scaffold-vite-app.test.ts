@@ -119,8 +119,10 @@ describe("scaffoldViteApp tool", () => {
     const starterPkg = JSON.parse(starter("package.json"));
     const pkg = JSON.parse(written("package.json")!);
     // Missing pins are added; the user's own packages and versions stay.
-    expect(pkg.dependencies).toEqual({ ...starterPkg.dependencies, react: "19.1.0", "left-pad": "1.0.0" });
-    expect(pkg.devDependencies).toEqual(starterPkg.devDependencies);
+    expect(pkg.dependencies).toEqual({ ...starterPkg.dependencies, ...oldPkg.dependencies });
+    // An old starter keeps its Vite 6 toolchain.
+    expect(pkg.devDependencies).toEqual({ ...starterPkg.devDependencies, ...oldPkg.devDependencies });
+    expect(pkg.devDependencies.vite).toBe(oldPkg.devDependencies.vite);
     expect(written("src/main.tsx")).toBe(starter("src/main.tsx"));
     expect(written("vite.config.ts")).toBe(starter("vite.config.ts"));
     expect(written("src/components/ui/sonner.tsx")).toBe(starter("src/components/ui/sonner.tsx"));
@@ -194,19 +196,19 @@ describe("scaffoldViteApp tool", () => {
     const pkg = JSON.parse(read("package.json"));
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 
-    // #331: every starter dependency comes from the known-good manifest.
-    for (const [name, range] of Object.entries(deps)) {
-      expect(range, name).toBe(KNOWN_GOOD_VERSIONS[name as keyof typeof KNOWN_GOOD_VERSIONS]);
+    // #331: every starter dependency is in the known-good manifest (exact pins: vite-starter.test.ts).
+    for (const name of Object.keys(deps)) {
+      expect(Object.hasOwn(KNOWN_GOOD_VERSIONS, name), name).toBe(true);
     }
     expect(deps).toMatchObject({
-      react: expect.stringMatching(/^\^19\./),
+      react: expect.stringMatching(/^19\./),
       "react-dom": deps.react,
-      "@types/react": expect.stringMatching(/^\^19\./),
-      tailwindcss: expect.stringMatching(/^\^4\./),
+      "@types/react": expect.stringMatching(/^19\./),
+      tailwindcss: expect.stringMatching(/^4\./),
       "@tailwindcss/vite": deps.tailwindcss,
       "tw-animate-css": expect.any(String),
-      "lucide-react": expect.stringMatching(/^\^1\./),
-      "tailwind-merge": expect.stringMatching(/^\^3\./),
+      "lucide-react": expect.stringMatching(/^1\./),
+      "tailwind-merge": expect.stringMatching(/^3\./),
     });
     for (const name of ["tailwindcss-animate", "postcss", "autoprefixer"]) {
       expect(deps).not.toHaveProperty(name);
@@ -232,9 +234,9 @@ describe("scaffoldViteApp tool", () => {
 
     // The agent hand-wrote a zod resolver when @hookform/resolvers was missing.
     expect(dependencies).toMatchObject({
-      "react-hook-form": KNOWN_GOOD_VERSIONS["react-hook-form"],
-      "@hookform/resolvers": KNOWN_GOOD_VERSIONS["@hookform/resolvers"],
-      zod: KNOWN_GOOD_VERSIONS.zod,
+      "react-hook-form": expect.stringMatching(/^7\./),
+      "@hookform/resolvers": expect.stringMatching(/^7\./),
+      zod: expect.stringMatching(/^4\./),
     });
     const include = read("vite.config.ts").match(/include: \[([^\]]*)\]/)![1];
     const packages = [...include.matchAll(/"([^"]+)"/g)].map(([, id]) => id);
@@ -250,9 +252,7 @@ describe("scaffoldViteApp tool", () => {
     const tool = createScaffoldViteAppTool({ projectId: "p" as never, internalKey: "k" });
     const read = (path: string) => VITE_REACT_STARTER.find((file) => file.path === path)!.content;
 
-    expect(JSON.parse(read("package.json")).dependencies["react-router-dom"]).toBe(
-      KNOWN_GOOD_VERSIONS["react-router-dom"],
-    );
+    expect(JSON.parse(read("package.json")).dependencies["react-router-dom"]).toMatch(/^7\./);
     expect(read("src/main.tsx")).toContain(
       "<ErrorBoundary>\n      <BrowserRouter>\n        <App />\n        <Toaster />\n      </BrowserRouter>\n    </ErrorBoundary>",
     );

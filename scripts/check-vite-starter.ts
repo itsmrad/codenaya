@@ -3,16 +3,20 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import semver from "semver";
 
 import { VITE_REACT_STARTER } from "../src/features/conversations/inngest/vite-starter";
 import { NEXT_APP_STARTER } from "../src/features/conversations/inngest/next-starter";
+import { TANSTACK_START_STARTER } from "../src/features/conversations/inngest/tanstack-start-starter";
 
-assert.ok(process.argv[2] === undefined || process.argv[2] === "next", "Usage: npm run check:starter [-- next]");
-const next = process.argv[2] === "next";
-const starter = next ? NEXT_APP_STARTER : VITE_REACT_STARTER;
+const STARTERS = { vite: VITE_REACT_STARTER, next: NEXT_APP_STARTER, start: TANSTACK_START_STARTER };
+const kind = (process.argv[2] ?? "vite") as keyof typeof STARTERS;
+assert.ok(kind in STARTERS, "Usage: npm run check:starter [-- next|start]");
+const next = kind === "next";
+const starter = STARTERS[kind];
 
 // Install the emitted package.json in isolation: the host app must not mask missing deps.
-const directory = mkdtempSync(join(tmpdir(), next ? "codenaya-next-starter-" : "codenaya-vite-starter-"));
+const directory = mkdtempSync(join(tmpdir(), `codenaya-${kind}-starter-`));
 const run = (command: string, args: string[], timeout = 60_000) =>
   execFileSync(command, args, {
     cwd: directory, stdio: "inherit", timeout,
@@ -31,12 +35,23 @@ try {
   const installSeconds = (performance.now() - started) / 1000;
   if (next) {
     run(join(directory, "node_modules/.bin/next"), ["build"], 300_000);
+  } else if (kind === "start") {
+    run(join(directory, "node_modules/.bin/vite"), ["build"], 300_000);
+    // The build regenerates the route tree; the shipped copy must match it.
+    const shipped = starter.find(({ path }) => path === "src/routeTree.gen.ts")!.content;
+    assert.equal(readFileSync(join(directory, "src/routeTree.gen.ts"), "utf8"), shipped, "Stale src/routeTree.gen.ts");
+    run(join(directory, "node_modules/.bin/tsc"), ["--noEmit"]);
+    // A router pin outside react-start's own router range installs a second router copy.
+    const startPkg = JSON.parse(readFileSync(join(directory, "node_modules/@tanstack/react-start/package.json"), "utf8"));
+    const routerPin = JSON.parse(starter.find(({ path }) => path === "package.json")!.content).dependencies["@tanstack/react-router"];
+    assert.ok(semver.satisfies(routerPin, startPkg.dependencies["@tanstack/react-router"]), "Router pin doesn't match react-start's router dependency");
   } else {
     run(join(directory, "node_modules/.bin/tsc"), ["--noEmit", "-p", "tsconfig.app.json"]);
     run(join(directory, "node_modules/.bin/vite"), ["build"]);
   }
 
-  const assets = join(directory, next ? ".next/static/css" : "dist/assets");
+  // Turbopack (Next 16) writes CSS chunks next to the JS ones.
+  const assets = join(directory, { vite: "dist/assets", next: ".next/static/chunks", start: "dist/client/assets" }[kind]);
   const css = readdirSync(assets).filter((name) => name.endsWith(".css"))
     .map((name) => readFileSync(join(assets, name), "utf8")).join("\n");
   // These utilities cover the primitives' semantic colors, v4 opacity and animations.

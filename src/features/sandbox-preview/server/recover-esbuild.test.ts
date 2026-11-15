@@ -1,14 +1,16 @@
 import type { Sandbox as E2bSandbox } from "e2b";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fromE2bSandbox } from "./provider/e2b";
-import { DEV_COMMAND_ENV, killTreeCommand } from "./dev-server";
+import { DEV_COMMAND_ENV, DEV_START_COMMAND, READ_DEV_PGID_COMMAND, SHORT_CALL_MS, killDevServersCommand, killProjectNodesCommand } from "./dev-server";
 import { recoverEsbuild } from "./recover-esbuild";
 import { ESBUILD_RECOVERY_COOLDOWN_MS } from "../utils/esbuild-recovery";
 
+const bounds = { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS };
+const start = { background: true, timeoutMs: 0, requestTimeoutMs: SHORT_CALL_MS };
 const dev = { pid: 12, cmd: "bash", args: ["-c", "npm run dev"], envs: { [DEV_COMMAND_ENV]: "npm run dev -- --host", HOST: "0.0.0.0" }, cwd: "/home/user/app" };
 let sequence = 0;
 const fakeSandbox = (processes: Array<{ pid: number; cmd: string; args: string[]; envs: Record<string, string>; cwd?: string }> = [dev]) => {
-  const run = vi.fn<(...args: unknown[]) => Promise<{ exitCode: number }>>(async () => ({ exitCode: 0 }));
+  const run = vi.fn<(...args: unknown[]) => Promise<{ exitCode: number; stdout: string }>>(async () => ({ exitCode: 0, stdout: "" }));
   const list = vi.fn(async () => processes);
   const sandbox = fromE2bSandbox({ sandboxId: `recovery-${sequence++}`, commands: { list, run } } as unknown as E2bSandbox);
   return { sandbox, run, list };
@@ -16,22 +18,24 @@ const fakeSandbox = (processes: Array<{ pid: number; cmd: string; args: string[]
 afterEach(() => vi.useRealTimers());
 
 describe("recoverEsbuild (#776)", () => {
-  it("kills every marked tree and starts one with the same command, env and cwd", async () => {
+  it("kills every marked dev server and starts one in its own group with the same command, env and cwd", async () => {
     const { sandbox, run } = fakeSandbox([dev, { ...dev, pid: 30 }, { ...dev, pid: 2, envs: {} }]);
     expect(await recoverEsbuild(sandbox)).toBe("restarted");
     expect(run.mock.calls).toEqual([
-      [killTreeCommand(12)], [killTreeCommand(30)],
-      [dev.envs[DEV_COMMAND_ENV], { cwd: dev.cwd, envs: dev.envs, background: true, timeoutMs: 0 }],
+      [READ_DEV_PGID_COMMAND, bounds],
+      [killDevServersCommand([12, 30]), bounds],
+      [killProjectNodesCommand(dev.cwd), bounds],
+      [DEV_START_COMMAND, { cwd: dev.cwd, envs: dev.envs, ...start }],
     ]);
     expect(await recoverEsbuild(sandbox)).toBe("limited");
-    expect(run).toHaveBeenCalledTimes(3);
+    expect(run).toHaveBeenCalledTimes(4);
   });
 
   it("restarts a Next dev server with its own marked command, not a Vite one", async () => {
     const next = { ...dev, envs: { [DEV_COMMAND_ENV]: "npm run dev -- -H 0.0.0.0", HOSTNAME: "0.0.0.0" } };
     const { sandbox, run } = fakeSandbox([next]);
     expect(await recoverEsbuild(sandbox)).toBe("restarted");
-    expect(run).toHaveBeenLastCalledWith(next.envs[DEV_COMMAND_ENV], { cwd: next.cwd, envs: next.envs, background: true, timeoutMs: 0 });
+    expect(run).toHaveBeenLastCalledWith(DEV_START_COMMAND, { cwd: next.cwd, envs: next.envs, ...start });
   });
 
   it("does nothing during an install and does not spend its attempt", async () => {
@@ -50,7 +54,7 @@ describe("recoverEsbuild (#776)", () => {
     expect(await recoverEsbuild(sandbox)).toBe("busy");
     resolve([dev]);
     expect(await first).toBe("restarted");
-    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenCalledTimes(4);
   });
 
   it("limits failed stop/start attempts too, and stops after three", async () => {

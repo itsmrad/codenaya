@@ -2,9 +2,11 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_INSTALL_COMMAND } from "./project-sandbox";
+
+vi.mock("e2b", () => ({ Sandbox: {} }));
 
 /** Runs the install command in bash against a fake `npm` that exits with `codes` in turn. */
 const installWith = (...codes: number[]) => {
@@ -38,5 +40,47 @@ describe("DEFAULT_INSTALL_COMMAND", () => {
 
   it("fails with the online attempt's exit code when both fail", () => {
     expect(installWith(1, 7).exitCode).toBe(7);
+  });
+});
+
+describe("sandbox template", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it.each([undefined, "", "   "])("defaults to Node 22 when E2B_TEMPLATE is %j", async (value) => {
+    vi.stubEnv("E2B_TEMPLATE", value);
+    const { SANDBOX_TEMPLATE } = await import("./project-sandbox");
+
+    expect(SANDBOX_TEMPLATE).toBe("codenaya-node22");
+    await import("./project-sandbox");
+    expect(console.warn).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledWith(
+      "[project-sandbox] E2B_TEMPLATE unset; using codenaya-node22. Build it with npm run e2b:template",
+    );
+  });
+
+  it("uses the configured template, trimmed, without warning", async () => {
+    vi.stubEnv("E2B_TEMPLATE", " custom-node22 ");
+    const { SANDBOX_TEMPLATE } = await import("./project-sandbox");
+
+    expect(SANDBOX_TEMPLATE).toBe("custom-node22");
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("matches the build script's default template name", async () => {
+    vi.stubEnv("E2B_TEMPLATE", undefined);
+    const { SANDBOX_TEMPLATE } = await import("./project-sandbox");
+    const buildScript = readFileSync("e2b/build-template.mts", "utf8");
+
+    expect(buildScript).toContain(
+      `const TEMPLATE_NAME = process.env.E2B_TEMPLATE?.trim() || "${SANDBOX_TEMPLATE}";`,
+    );
   });
 });
