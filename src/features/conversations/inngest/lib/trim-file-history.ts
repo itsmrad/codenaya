@@ -87,22 +87,24 @@ function trimRead(content: unknown, tool: ToolMessage): unknown {
   return { ...content, data: typeof data === "string" ? JSON.stringify(trimmed) : trimmed };
 }
 
-/** Each message as it reads once trimmed; the latest earlier call gives a result its input. */
-function trimmedMessages(history: HistoryMessage[]): HistoryMessage[] {
-  const calls = new Map<string, ToolMessage>();
-  return history.map((message) => {
-    if (message.type === "tool_call") {
-      for (const tool of message.tools) calls.set(tool.id, tool);
-      return { ...message, tools: message.tools.map(trimWrite) };
-    }
-    const call = message.type === "tool_result" ? calls.get(message.tool.id) : undefined;
-    if (message.type !== "tool_result" || !call) return message;
-    return {
+type Trimmed = { json: string; call?: ToolMessage; message: HistoryMessage; size: number };
+/** Per message object: a run asks for the same history again every turn. Keyed on its JSON too, so a mutated message is trimmed afresh. */
+const trimCache = new WeakMap<HistoryMessage, Trimmed>();
+
+/** A message as it reads once trimmed; `call` (the latest earlier call with its id) gives a result its input. */
+function trimMessage(message: HistoryMessage, json: string, call: ToolMessage | undefined): Trimmed {
+  const hit = trimCache.get(message);
+  if (hit && hit.json === json && hit.call === call) return hit;
+  const trimmed: HistoryMessage =
+    message.type === "tool_call" ? { ...message, tools: message.tools.map(trimWrite) } :
+    message.type === "tool_result" && call ? {
       ...message,
       tool: message.tool.input ? trimWrite(message.tool) : message.tool,
       content: message.tool.name === "readFiles" ? trimRead(message.content, call) : message.content,
-    };
-  });
+    } : message;
+  const entry = { json, call, message: trimmed, size: trimmed === message ? json.length : JSON.stringify(trimmed).length };
+  trimCache.set(message, entry);
+  return entry;
 }
 
 /**
@@ -118,23 +120,33 @@ function trimmedMessages(history: HistoryMessage[]): HistoryMessage[] {
  * one plus new turns, byte for byte.
  */
 export function trimFileHistory(history: HistoryMessage[]): HistoryMessage[] {
-  const raw = history.map((message) => JSON.stringify(message).length);
-  if (raw.reduce((sum, size) => sum + size, 0) <= FILE_HISTORY_THRESHOLD) return history;
-  const trimmed = trimmedMessages(history);
-  const small = trimmed.map((message, i) => message === history[i] ? raw[i] : JSON.stringify(message).length);
+  const json = history.map((message) => JSON.stringify(message));
+  // Sizes of history[0, i) as is.
+  const rawTo = [0];
+  json.forEach((text, i) => rawTo.push(rawTo[i] + text.length));
+  if (rawTo[history.length] <= FILE_HISTORY_THRESHOLD) return history;
   const starts = history.flatMap((message, i) =>
     message.type === "tool_call" ||
     (message.type === "text" && message.role === "assistant" && history[i + 1]?.type !== "tool_call")
       ? [i] : [],
   );
-  // Sizes of history[0, i): as is, and trimmed.
-  const rawTo = [0];
-  const smallTo = [0];
-  raw.forEach((size, i) => {
-    rawTo.push(rawTo[i] + size);
-    smallTo.push(smallTo[i] + small[i]);
+  const calls = new Map<string, ToolMessage>();
+  const callOf = history.map((message) => {
+    if (message.type === "tool_call") message.tools.forEach((tool) => calls.set(tool.id, tool));
+    return message.type === "tool_result" ? calls.get(message.tool.id) : undefined;
   });
-  const view = (cutoff: number, end: number) => smallTo[cutoff] + rawTo[end] - rawTo[cutoff];
+  // Trimmed only as far as a cut is weighed: the newest turns never are.
+  const trimmed: HistoryMessage[] = [];
+  const smallTo = [0];
+  const trimmedBefore = (end: number) => {
+    for (let i = smallTo.length - 1; i < end; i++) {
+      const entry = trimMessage(history[i], json[i], callOf[i]);
+      trimmed.push(entry.message);
+      smallTo.push(smallTo[i] + entry.size);
+    }
+    return smallTo[end];
+  };
+  const view = (cutoff: number, end: number) => trimmedBefore(cutoff) + rawTo[end] - rawTo[cutoff];
 
   let cutoff = 0;
   let cutTurns = 0; // Turns before the cutoff.
