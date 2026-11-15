@@ -272,8 +272,8 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
       ["node --version", { timeoutMs: 10_000 }],
     ]);
     expect(sandbox.commands.kill.mock.calls).toEqual([
-      [7, { timeoutMs: 10_000 }],
-      [8, { timeoutMs: 10_000 }],
+      [7, { requestTimeoutMs: 10_000 }],
+      [8, { requestTimeoutMs: 10_000 }],
     ]);
     expect(warn.mock.calls).toEqual(killFails ? [
       ["[project-sandbox] Failed to stop command", 7],
