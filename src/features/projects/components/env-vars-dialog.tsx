@@ -44,6 +44,7 @@ import {
 import { Id } from "../../../../convex/_generated/dataModel";
 
 import { useProject } from "../hooks/use-projects";
+import { missingEnvVarsMessage } from "../utils/import-notice";
 
 const MASK = "••••••••";
 
@@ -155,7 +156,7 @@ export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogPr
         {envVars !== undefined && missingNames.length > 0 && (
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">
-              Detected {missingNames.length} missing environment variables in the imported project.
+              {missingEnvVarsMessage(missingNames.length)}{" "}
               Select a name and enter its value to save it.
             </p>
             <div className="max-h-40 overflow-y-auto divide-y rounded-md border">

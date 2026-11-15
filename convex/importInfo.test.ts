@@ -3,6 +3,8 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "./_generated/api";
+import { inspectImportedProject } from "../src/features/projects/utils/inspect-imported-project";
+import { MAX_ENV_KEY_LENGTH, MAX_ENV_VARS } from "../src/features/integrations/env-keys";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -45,4 +47,35 @@ it("rejects values masquerading as names", async () => {
   await expect(t.mutation(api.system.updateImportStatus, {
     ...args, importInfo: { envVarNames: ["API_KEY=fake-value"] },
   })).rejects.toThrow();
+});
+
+it("accepts capped inspection output while rejecting oversized direct input", async () => {
+  const { t, projectId, args } = await setup();
+  const names = Array.from({ length: MAX_ENV_VARS + 1 }, (_, i) => `KEY_${String(i).padStart(3, "0")}`);
+  const importInfo = inspectImportedProject([{
+    path: "src/main.ts",
+    content: [...names, "A".repeat(MAX_ENV_KEY_LENGTH + 1)].map((name) => `process.env.${name}`).join(";"),
+  }]);
+  await t.mutation(api.system.updateImportStatus, { ...args, importInfo });
+  const project = await t.run((ctx) => ctx.db.get("projects", projectId));
+  expect(project?.importStatus).toBe("completed");
+  expect(project?.importInfo?.envVarNames).toEqual(names.slice(0, MAX_ENV_VARS));
+  await expect(t.mutation(api.system.updateImportStatus, {
+    ...args, importInfo: { envVarNames: names },
+  })).rejects.toThrow();
+  await expect(t.mutation(api.system.updateImportStatus, {
+    ...args, importInfo: { envVarNames: ["A".repeat(MAX_ENV_KEY_LENGTH + 1)] },
+  })).rejects.toThrow();
+});
+
+it("quietly ignores status updates while deletion is in progress", async () => {
+  const { t, projectId, args } = await setup();
+  await t.run((ctx) => ctx.db.patch("projects", projectId, { deletingAt: 1, importStatus: "importing" }));
+  for (const status of ["completed", "failed"] as const) {
+    await expect(t.mutation(api.system.updateImportStatus, { ...args, status })).resolves.toBeNull();
+  }
+  const project = await t.run((ctx) => ctx.db.get("projects", projectId));
+  expect(project?.importStatus).toBe("importing");
+  expect(project?.importInfo).toBeUndefined();
+  expect(project?.updatedAt).toBe(0);
 });

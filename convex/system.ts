@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 
-import { isValidEnvKey } from "../src/features/integrations/env-keys";
+import { MAX_ENV_KEY_LENGTH, MAX_ENV_VARS, isValidEnvKey } from "../src/features/integrations/env-keys";
 import { publicValueSecretRule } from "../src/features/integrations/credential-guard";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
@@ -52,7 +52,6 @@ import {
   recordRunFinished,
   recordRunStarted,
 } from "./activationEvents";
-import { MAX_ENV_VARS } from "./envVars";
 import { MAX_PROJECT_CONNECTIONS } from "./integrations";
 import { projectNameFromTitle } from "../src/features/projects/utils/project-name";
 import { lockedPathMessage } from "../src/features/conversations/agent-steps";
@@ -658,9 +657,6 @@ export const createBinaryFile = mutation({
   },
 });
 
-// Matches the configured env-var limit; metadata stays bounded on the project.
-const MAX_IMPORTED_ENV_VARS = 500;
-
 export const updateImportStatus = mutation({
   args: {
     importInfo: v.optional(importInfoValidator),
@@ -678,10 +674,11 @@ export const updateImportStatus = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     const project = await ctx.db.get("projects", args.projectId);
-    if (!project || project.deletingAt) throw appError("NOT_FOUND", "Project not found");
+    if (!project) throw appError("NOT_FOUND", "Project not found");
+    if (project.deletingAt) return null; // deleting: a late status write must not fail the import
     if (args.importInfo && (
-      args.importInfo.envVarNames.length > MAX_IMPORTED_ENV_VARS ||
-      args.importInfo.envVarNames.some((key) => !isValidEnvKey(key) || key.length > 256)
+      args.importInfo.envVarNames.length > MAX_ENV_VARS ||
+      args.importInfo.envVarNames.some((key) => !isValidEnvKey(key) || key.length > MAX_ENV_KEY_LENGTH)
     )) {
       throw appError("INVALID_ARGUMENT", "Invalid imported environment variable names");
     }

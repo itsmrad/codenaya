@@ -1,4 +1,4 @@
-import { isValidEnvKey } from "@/features/integrations/env-keys";
+import { MAX_ENV_KEY_LENGTH, MAX_ENV_VARS, isValidEnvKey } from "@/features/integrations/env-keys";
 
 interface ImportedFile { path: string; content: string }
 
@@ -20,7 +20,7 @@ export function parseEnvVarNames({ path, content }: ImportedFile): string[] {
   if (isRealEnvFile(path)) return [];
   const names = new Set<string>();
   const add = (key: string) => {
-    if (isValidEnvKey(key) && !BUILT_INS.has(key)) names.add(key);
+    if (key.length <= MAX_ENV_KEY_LENGTH && isValidEnvKey(key) && !BUILT_INS.has(key)) names.add(key);
   };
   if (/(^|\/)\.env\.(example|sample)$/i.test(path)) {
     for (const match of content.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm)) add(match[1]);
@@ -30,7 +30,10 @@ export function parseEnvVarNames({ path, content }: ImportedFile): string[] {
     // Explicit assignments and backticked names in env sections, not arbitrary prose.
     const sections = content.split(/(?=^#{1,6}\s)/m);
     for (const section of sections.filter((text) => /^#{1,6}\s[^\n]*(?:environment|env vars)/i.test(text))) {
-      for (const match of section.matchAll(/`([A-Z_][A-Z0-9_]+)`|^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=/gm)) add(match[1] ?? match[2]);
+      for (const match of section.matchAll(/`([A-Z_][A-Z0-9_]+)`|^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=/gm)) {
+        const key = match[1] ?? match[2];
+        if (key.length >= 3 && /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/.test(key)) add(key);
+      }
     }
   }
   return [...names].sort();
@@ -51,6 +54,6 @@ export function inspectImportedProject(files: readonly ImportedFile[]) {
       ? dependencies.has(marker.dependency)
       : files.some((file) => file.path === marker.directory || file.path.startsWith(`${marker.directory}/`)),
   )?.source;
-  const envVarNames = [...new Set(files.flatMap(parseEnvVarNames))].sort();
+  const envVarNames = [...new Set(files.flatMap(parseEnvVarNames))].sort().slice(0, MAX_ENV_VARS);
   return { ...(source ? { source } : {}), envVarNames };
 }

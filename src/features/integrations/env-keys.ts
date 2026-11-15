@@ -29,6 +29,12 @@ export const PUBLIC_KEY_PREFIXES = [
   "NUXT_PUBLIC_",
 ] as const;
 
+/** Most env vars per project; shared by convex/envVars and the import inspector. */
+export const MAX_ENV_VARS = 500;
+
+/** Maximum key length accepted in imported environment metadata. */
+export const MAX_ENV_KEY_LENGTH = 256;
+
 /** POSIX-ish environment variable name. */
 const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 

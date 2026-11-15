@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import { publicValueSecretRule } from "../src/features/integrations/credential-guard";
 import {
+  MAX_ENV_VARS,
   PUBLIC_KEY_PREFIXES,
   assertValidEnvKey,
   isPublicByConvention,
@@ -12,8 +13,8 @@ import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { getOwnedProject } from "./projects";
 
-/** Most variables read for one project; far above real usage (#53). */
-export const MAX_ENV_VARS = 500;
+/** Most variables read for one project; far above real usage (#53). Defined in env-keys. */
+export { MAX_ENV_VARS };
 
 /**
  * Project environment variables.
