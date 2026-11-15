@@ -208,8 +208,10 @@ and nothing in it is trusted.
   owner-named domain (recognised single-label suffixes only; other domain vouches
   fail closed). Denylisted hosting/proxy domains cannot vouch. Entries matching vetted
   providers’ trusted hosts are omitted in favour of the vetted entry. URLs are
-  never scraped from READMEs. Everything else is `stdio` and shows
-  "Needs a local runtime (not supported yet)", disabled.
+  never scraped from READMEs. Everything else is `stdio` and stays in the JSON, but
+  the catalog, search, categories and counts omit it while
+  `SHOW_LOCAL_RUNTIME_COMMUNITY_SERVERS` is false. Flip that flag when stdio MCP
+  in the sandbox (#545) ships.
 - **Auth** is `api-key` when the registry remote declares headers, `oauth` when
   the remote publishes RFC 9728 protected-resource metadata (opt-in
   `--probe-oauth`: one unauthenticated GET per remote entry, paced), else

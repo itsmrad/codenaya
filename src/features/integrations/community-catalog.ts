@@ -9,6 +9,8 @@
  * goes through the approval gate.
  */
 
+import { SHOW_LOCAL_RUNTIME_COMMUNITY_SERVERS } from "./show-local-runtime-community-servers";
+
 export const COMMUNITY_TRANSPORTS = ["http", "sse", "stdio"] as const;
 export const COMMUNITY_AUTH = ["oauth", "api-key", "unknown"] as const;
 
@@ -42,6 +44,14 @@ export const isRemoteCapable = (
   server: CommunityServer,
 ): server is CommunityServer & { remoteUrl: string } =>
   server.transport !== "stdio" && typeof server.remoteUrl === "string";
+
+/** Catalog-visible servers. `showLocalRuntime` overrides the flag (tests). */
+export function visibleCommunityServers(
+  servers: readonly CommunityServer[],
+  showLocalRuntime = SHOW_LOCAL_RUNTIME_COMMUNITY_SERVERS,
+): readonly CommunityServer[] {
+  return showLocalRuntime ? servers : servers.filter(isRemoteCapable);
+}
 
 /** The custom-server form values for a remote entry; null for stdio-only ones. */
 export function toCustomServerPrefill(server: CommunityServer): CustomServerPrefill | null {

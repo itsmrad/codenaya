@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { CODING_AGENT_SYSTEM_PROMPT } from "@/features/conversations/inngest/constants";
+import { setupQuestionsFor, withSetupAnswers } from "@/features/conversations/setup-questions";
+import { splitSuggestions } from "@/features/conversations/suggestions";
 import { PROVIDERS } from "./catalog";
 import catalogJson from "./community-catalog.json";
 import {
@@ -10,6 +13,7 @@ import {
   isRemoteCapable,
   listCommunityCategories,
   toCustomServerPrefill,
+  visibleCommunityServers,
   type CommunityServer,
 } from "./community-catalog";
 
@@ -95,6 +99,44 @@ describe("filterCommunityServers", () => {
 
   it("lists categories alphabetically, once each", () => {
     expect(listCommunityCategories(sample)).toEqual(["Databases", "Knowledge & Memory"]);
+  });
+});
+
+describe("visibleCommunityServers", () => {
+  const remote = servers.filter(isRemoteCapable);
+  const local = servers.filter((entry) => !isRemoteCapable(entry));
+
+  it("hides local-runtime entries by default and counts only remotes", () => {
+    const visible = visibleCommunityServers(servers);
+    expect(local.length).toBeGreaterThan(0);
+    expect(visible).toHaveLength(remote.length);
+    expect(visible.every(isRemoteCapable)).toBe(true);
+  });
+
+  it("derives search, categories and star order from the visible set", () => {
+    const visible = visibleCommunityServers(servers);
+    const hidden = local[0];
+    expect(filterCommunityServers(visible, { query: hidden.name })).toEqual([]);
+    expect(listCommunityCategories(visible)).toEqual(listCommunityCategories(remote));
+    expect(filterCommunityServers(visible, { sort: "stars" }).map((entry) => entry.id))
+      .toEqual(filterCommunityServers(remote, { sort: "stars" }).map((entry) => entry.id));
+  });
+
+  it("restores local-runtime entries when the override is true", () => {
+    const visible = visibleCommunityServers(servers, true);
+    expect(visible).toHaveLength(servers.length);
+    expect(visible.some((entry) => !isRemoteCapable(entry))).toBe(true);
+  });
+
+  it("keeps local-runtime names out of suggestions, setup and the agent prompt", () => {
+    const setup = setupQuestionsFor("a booking site with payments, login, email, analytics and hosting");
+    const text = [
+      JSON.stringify(setup),
+      withSetupAnswers("bookings", { data: "Supabase", payments: "Yes, add a payment step" }),
+      JSON.stringify(splitSuggestions("<suggestions>\nConnect a database\n</suggestions>")),
+      CODING_AGENT_SYSTEM_PROMPT,
+    ].join("\n");
+    for (const entry of local) expect(text).not.toContain(entry.name);
   });
 });
 
