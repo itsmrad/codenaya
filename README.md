@@ -32,7 +32,6 @@
 ## Table of contents
 
 - [About the project](#about-the-project)
-- [Screenshots](#screenshots)
 - [Built with](#built-with)
 - [Architecture](#architecture)
 - [Engineering facts](#engineering-facts)
@@ -62,23 +61,19 @@ What it does today (each item maps to code in [`src/features`](src/features) and
 - **Source control.** Every build run snapshots the project first (the last 20 checkpoints are kept). The Source Control pane shows history, per-run and per-file diffs, and restore, and GitHub sync pushes runs as commits to a `codenaya-sync` branch and pulls changes back.
 - **GitHub import and export.** Import public repos (private ones with a linked GitHub account), or export a project to a new repository.
 - **Bring your own key (BYOK).** Use your own OpenRouter, OpenAI, Anthropic, Groq or custom OpenAI-compatible endpoint. Platform models are chosen per environment ([ADR 0005](docs/adr/0005-platform-ai-provider-by-env.md)) and per admin selection ([ADR 0006](docs/adr/0006-platform-provider-and-models-in-admin.md)).
-- **MCP integrations catalog.** 18 providers (databases, payments, auth, monitoring, docs and more) plus any custom MCP server. Credentials use envelope encryption, connections are read-only by default, and destructive tools pause for approval. See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
+- **MCP integrations catalog.** Hosted providers for databases, payments, auth, monitoring, docs and more, plus any custom MCP server. Credentials use envelope encryption, connections are read-only by default, and destructive tools pause for approval. See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
 - **Editor AI.** CodeMirror 6 with inline ghost-text suggestions and Cmd+K quick edit.
 - **Skills, starter templates and a community showcase** for publishing, voting on and remixing projects.
 - **Mobile app.** An Expo app in [`mobile/`](mobile) that uses the same Convex deployment, Clerk instance and API.
-
-## Screenshots
 
 <!--
   TODO(owner): add real product screenshots. Suggested set, saved under docs/assets/:
     docs/assets/ide.png       IDE with chat, editor and live preview
     docs/assets/swarm.png     Agent Swarm board during a build
     docs/assets/source-control.png  Source Control pane with a diff
-  Then replace this comment with <img> tags. No screenshots exist in the repo yet,
-  so none are shown here.
+  Then add a "## Screenshots" section here (and to the table of contents)
+  with <img> tags. No screenshots exist in the repo yet.
 -->
-
-> **TODO:** no product screenshots are in the repository yet. Maintainers: see the comment in this section of `README.md` for the suggested set.
 
 ## Built with
 
@@ -208,12 +203,14 @@ Each worker is its own Inngest function run, started with parallel `step.invoke`
 
 ## Engineering facts
 
+A snapshot taken at commit `eae35515` (2026-11-15). These numbers drift as the code changes; regenerate them with the commands under the table.
+
 | Metric | Value |
 | --- | --- |
-| Unit and Convex test files (`*.test.ts`, `*.test.tsx`) | 225 |
-| Unit and Convex test cases (`it` / `test` calls) | 2,057 |
-| Playwright e2e specs (`e2e/*.spec.ts`) | 78 |
-| Playwright test cases | 283 |
+| Unit and Convex test files (`*.test.ts`, `*.test.tsx`) | 226 |
+| Unit and Convex test cases (`it` / `test` calls) | 2,069 |
+| Playwright e2e specs (`e2e/*.spec.ts`) | 79 |
+| Playwright test cases | 289 |
 | Architecture decision records | 12 |
 | Feature modules (`src/features/*`) | 16 |
 | Convex modules (non-test `convex/*.ts`) | 37 |
@@ -226,22 +223,22 @@ Each worker is its own Inngest function run, started with parallel `step.invoke`
 ```mermaid
 pie showData
   title Lines of TypeScript and JavaScript by area
-  "src/features" : 71085
+  "src/features" : 71291
   "convex" : 18019
-  "e2e" : 9184
+  "e2e" : 9332
   "src/app" : 9077
-  "src/components" : 9005
+  "src/components" : 9081
   "mobile" : 8802
-  "src/lib" : 1554
+  "src/lib" : 1670
   "scripts" : 848
 ```
 
-Of these lines, 46,422 are tests (unit, Convex and e2e).
+Of these lines, 46,795 are tests (unit, Convex and e2e).
 
 <details>
 <summary>How these numbers were computed</summary>
 
-Run from the repository root at commit `33183809` (2026-11-15). Counts include only files tracked by git.
+Run from the repository root at commit `eae35515` (2026-11-15). Counts include only files tracked by git.
 
 ```bash
 git ls-files '*.test.ts' '*.test.tsx' | wc -l                       # test files
