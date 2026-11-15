@@ -11,6 +11,7 @@ import {
   listCommunityCategories,
   loadCommunityServers,
   toCustomServerPrefill,
+  visibleCommunityServers,
   type CommunityServer,
   type CommunitySort,
   type CustomServerPrefill,
@@ -46,8 +47,9 @@ export const CommunityCatalogList = ({ servers, onSelect }: CommunityCatalogList
   const [sort, setSort] = useState<CommunitySort>("stars");
   const [visible, setVisible] = useState(COMMUNITY_PAGE_SIZE);
   const listId = useId();
-  const categories = listCommunityCategories(servers);
-  const matches = filterCommunityServers(servers, { query, category: category || undefined, sort });
+  const visibleServers = visibleCommunityServers(servers);
+  const categories = listCommunityCategories(visibleServers);
+  const matches = filterCommunityServers(visibleServers, { query, category: category || undefined, sort });
   const shown = matches.slice(0, visible);
   // Any filter change starts again from the first page.
   const update = <T,>(set: (value: T) => void) => (value: T) => { set(value); setVisible(COMMUNITY_PAGE_SIZE); };
