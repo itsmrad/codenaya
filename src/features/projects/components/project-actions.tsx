@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { MENU_CONTENT, MENU_ITEM, MenuHeader } from "@/components/menu-chrome";
+import { confirmLeaveEditor } from "@/features/editor/hooks/use-editor-leave-guard";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -73,7 +74,13 @@ export const ProjectActionsMenu = ({
       const copyId = await duplicateProject({ id: project._id });
       toast.success("Project duplicated", {
         id: toastId,
-        action: { label: "Open", onClick: () => router.push(`/projects/${copyId}`) },
+        action: {
+          label: "Open",
+          onClick: () => {
+            const href = `/projects/${copyId}`;
+            if (confirmLeaveEditor(href)) router.push(href);
+          },
+        },
       });
     } catch {
       toast.error("Couldn't duplicate the project", { id: toastId });
