@@ -70,6 +70,9 @@ const CATALOG = {
   supabase: {
     id: "supabase",
     displayName: "Supabase",
+    description: "Query tables and run database migrations.",
+    category: "Database",
+    logo: "/integrations/supabase.svg",
     mcpUrl: "https://mcp.supabase.com/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.supabase.com"],
@@ -111,6 +114,9 @@ const CATALOG = {
   neon: {
     id: "neon",
     displayName: "Neon",
+    description: "Query Postgres and manage database branches.",
+    category: "Database",
+    logo: "/integrations/neon.svg",
     mcpUrl: "https://mcp.neon.tech/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.neon.tech"],
@@ -156,6 +162,9 @@ const CATALOG = {
   github: {
     id: "github",
     displayName: "GitHub",
+    description: "Browse repositories, issues and pull requests.",
+    category: "Dev tools",
+    logo: "/integrations/github.svg",
     mcpUrl: "https://api.githubcopilot.com/mcp/",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["api.githubcopilot.com"],
@@ -187,6 +196,9 @@ const CATALOG = {
   stripe: {
     id: "stripe",
     displayName: "Stripe",
+    description: "Look up customers, payments and subscriptions.",
+    category: "Payments",
+    logo: "/integrations/stripe.svg",
     mcpUrl: "https://mcp.stripe.com",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.stripe.com"],
@@ -205,6 +217,9 @@ const CATALOG = {
   context7: {
     id: "context7",
     displayName: "Context7",
+    description: "Look up current library docs and code examples.",
+    category: "Docs",
+    logo: "/integrations/context7.svg",
     mcpUrl: "https://mcp.context7.com/mcp",
     authModes: ["api_key"],
     trustedHostnames: ["mcp.context7.com"],
@@ -227,6 +242,9 @@ const CATALOG = {
   prisma: {
     id: "prisma",
     displayName: "Prisma Postgres",
+    description: "Query Postgres and update database schemas.",
+    category: "Database",
+    logo: "/integrations/prisma.svg",
     mcpUrl: "https://mcp.prisma.io/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.prisma.io"],
@@ -246,6 +264,9 @@ const CATALOG = {
   sentry: {
     id: "sentry",
     displayName: "Sentry",
+    description: "Investigate errors, issues and stack traces.",
+    category: "Monitoring",
+    logo: "/integrations/sentry.svg",
     mcpUrl: "https://mcp.sentry.dev/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.sentry.dev"],
@@ -264,6 +285,9 @@ const CATALOG = {
   cloudflare: {
     id: "cloudflare",
     displayName: "Cloudflare",
+    description: "Manage Workers, storage and cloud resources.",
+    category: "Dev tools",
+    logo: "/integrations/cloudflare.svg",
     mcpUrl: "https://mcp.cloudflare.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.cloudflare.com"],
@@ -285,6 +309,9 @@ const CATALOG = {
   linear: {
     id: "linear",
     displayName: "Linear",
+    description: "Track issues, projects and team work.",
+    category: "Dev tools",
+    logo: "/integrations/linear.svg",
     mcpUrl: "https://mcp.linear.app/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.linear.app"],
@@ -310,6 +337,9 @@ const CATALOG = {
   posthog: {
     id: "posthog",
     displayName: "PostHog",
+    description: "Explore product analytics, feature flags, experiments, and dashboards.",
+    category: "Analytics",
+    logo: "/integrations/posthog.svg",
     mcpUrl: "https://mcp.posthog.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.posthog.com"],
@@ -337,6 +367,9 @@ const CATALOG = {
   resend: {
     id: "resend",
     displayName: "Resend",
+    description: "Send email and manage domains, contacts, and broadcasts.",
+    category: "Communication",
+    logo: "/integrations/resend.svg",
     mcpUrl: "https://mcp.resend.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.resend.com"],
@@ -384,6 +417,9 @@ const CATALOG = {
   upstash: {
     id: "upstash",
     displayName: "Upstash",
+    description: "Manage Redis, QStash workflows, and Vector or Search resources.",
+    category: "Database",
+    logo: "/integrations/upstash.svg",
     mcpUrl: "https://mcp.upstash.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.upstash.com"],
@@ -426,6 +462,9 @@ const CATALOG = {
   sanity: {
     id: "sanity",
     displayName: "Sanity",
+    description: "Query and edit content, manage releases, and configure projects.",
+    category: "Content",
+    logo: "/integrations/sanity.svg",
     mcpUrl: "https://mcp.sanity.io",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.sanity.io"],
@@ -457,6 +496,9 @@ const CATALOG = {
   planetscale: {
     id: "planetscale",
     displayName: "PlanetScale",
+    description: "Inspect database schema and Insights, and run permitted queries.",
+    category: "Database",
+    logo: "/integrations/planetscale.svg",
     mcpUrl: "https://mcp.pscale.dev/mcp/planetscale",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.pscale.dev"],
@@ -479,6 +521,9 @@ const CATALOG = {
   notion: {
     id: "notion",
     displayName: "Notion",
+    description: "Search and manage Notion pages and databases.",
+    category: "Productivity",
+    logo: "/integrations/notion.svg",
     mcpUrl: "https://mcp.notion.com/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["mcp.notion.com"],
@@ -531,6 +576,9 @@ const CATALOG = {
   atlassian: {
     id: "atlassian",
     displayName: "Atlassian (Jira / Confluence)",
+    description: "Search and manage Jira work items and Confluence pages.",
+    category: "Productivity",
+    logo: "/integrations/atlassian.svg",
     mcpUrl: "https://mcp.atlassian.com/v2/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.atlassian.com"],
@@ -662,6 +710,9 @@ const CATALOG = {
   gitlab: {
     id: "gitlab",
     displayName: "GitLab",
+    description: "Work with GitLab repositories, merge requests, and CI.",
+    category: "Dev tools",
+    logo: "/integrations/gitlab.svg",
     mcpUrl: "https://gitlab.com/api/v4/mcp",
     authModes: ["oauth", "api_key"],
     trustedHostnames: ["gitlab.com"],
@@ -725,6 +776,9 @@ const CATALOG = {
   clerk: {
     id: "clerk",
     displayName: "Clerk",
+    description: "Manage Clerk applications, users, and authentication settings.",
+    category: "Authentication",
+    logo: "/integrations/clerk.svg",
     mcpUrl: "https://mcp.clerk.com/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.clerk.com"],
@@ -782,6 +836,16 @@ export function getProvider(
 /** Every catalog provider, in declaration order. */
 export function listProviders(): readonly ProviderDefinition[] {
   return PROVIDER_IDS.map((id) => PROVIDERS[id]);
+}
+
+/** Search display metadata only; category and query filters intersect. */
+export function filterProviders(query: string, category?: string): readonly ProviderDefinition[] {
+  const search = query.trim().toLowerCase();
+  return listProviders().filter((provider) =>
+    (!category || provider.category === category) &&
+    `${provider.displayName} ${provider.description} ${provider.category}`
+      .toLowerCase().includes(search),
+  );
 }
 
 /**
