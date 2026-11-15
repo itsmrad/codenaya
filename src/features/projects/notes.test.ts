@@ -30,13 +30,32 @@ describe("capNotesForPrompt", () => {
 });
 
 describe("looksLikeLastingPreference", () => {
-  it.each(["Prices are in EUR", "Don't use purple", "Keep the header sticky", "Never change the logo"])(
-    "proposes %s",
-    (text) => expect(looksLikeLastingPreference(text)).toBe(true),
-  );
+  it.each([
+    "Build a pizzeria website. Keep the menu visible; prices must be in EUR.",
+    "Build a pizzeria website. Remember that prices are in EUR.",
+    "Don't change the logo again",
+  ])("never proposes a first message: %s", (text) => {
+    expect(looksLikeLastingPreference(text, false)).toBe(false);
+  });
 
-  it.each(["Add a contact page", "/skill do it", "ok", `Always ${"x".repeat(400)}`, "Keep this.\n\nAnd add more."])(
-    "does not propose %s",
-    (text) => expect(looksLikeLastingPreference(text)).toBe(false),
-  );
+  it.each([
+    "Remember that prices are in EUR",
+    "Don't use purple again",
+    "Stop changing the header again",
+    "Always use EUR when showing prices again",
+    "Never change the logo again",
+    "Don’t change the logo again",
+  ])("proposes %s", (text) => expect(looksLikeLastingPreference(text, true)).toBe(true));
+
+  it.each([
+    "Build a pizzeria website. Keep the menu visible; prices must be in EUR.",
+    "Keep the header sticky",
+    "Prices are in EUR",
+    "Never change the logo",
+    "Add a contact page",
+    "/skill remember that prices are in EUR",
+    "ok",
+    `Remember that ${"x".repeat(400)}`,
+    "Remember that prices are in EUR.\n\nAnd add more.",
+  ])("does not propose %s", (text) => expect(looksLikeLastingPreference(text, true)).toBe(false));
 });

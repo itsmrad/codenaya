@@ -30,15 +30,16 @@ export function capNotesForPrompt(notes: readonly ProjectNote[] = []): string[] 
 // shortcut: a keyword heuristic, no model call; swap for a classifier if it
 // proposes too often or misses real corrections.
 const LASTING_PREFERENCE =
-  /\b(always|never|from now on|don'?t|do not|stop|keep|make sure|instead of|prefer|should be|must|are in|is in)\b/i;
+  /\bremember that\b|\b(?:don['’]?t|do not|stop|always|never)\b[^.!?\n]*\bagain\b/i;
 
 /**
  * Whether a user message reads like a lasting preference or correction worth
- * proposing as a note: short, one paragraph, with a preference keyword.
+ * proposing as a note: a follow-up, short, one paragraph, with correction phrasing.
  */
-export function looksLikeLastingPreference(text: string): boolean {
+export function looksLikeLastingPreference(text: string, hasPriorMessages: boolean): boolean {
   const trimmed = text.trim();
   return (
+    hasPriorMessages &&
     trimmed.length >= 8 &&
     trimmed.length <= MAX_PROJECT_NOTE_LENGTH &&
     !trimmed.includes("\n\n") &&

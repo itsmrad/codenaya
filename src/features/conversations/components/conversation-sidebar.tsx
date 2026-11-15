@@ -105,6 +105,10 @@ import {
 import { useUploadChatImages } from "../hooks/use-chat-images";
 import { useProjectNotes } from "@/features/projects/hooks/use-project-notes";
 import { type NoteDraft, ProjectNoteDialog } from "@/features/projects/components/project-notes";
+import {
+  dismissNoteProposal,
+  isNoteProposalDismissed,
+} from "@/features/projects/utils/note-proposals";
 import { looksLikeLastingPreference } from "@/features/projects/notes";
 import { ElementChips } from "./element-chips";
 import type { SelectedElement } from "../selected-elements";
@@ -135,6 +139,10 @@ export const ConversationSidebar = ({
   const notes = useProjectNotes(projectId);
   const [noteDraft, setNoteDraft] = useState<NoteDraft | null>(null);
   const [dismissedProposalId, setDismissedProposalId] = useState<string | null>(null);
+  const dismissProposal = (messageId: string) => {
+    dismissNoteProposal(projectId, messageId);
+    setDismissedProposalId(messageId);
+  };
   const [chosenMode, setMode] = useState<ComposerMode>("build");
   const swarmEnabled = useSwarmEnabled();
   // Swarm switched off mid-draft falls back to Build.
@@ -670,7 +678,7 @@ export const ConversationSidebar = ({
                     notes
                       ? () => {
                           setNoteDraft({ text: message.content.trim() });
-                          setDismissedProposalId(message._id);
+                          dismissProposal(message._id);
                         }
                       : undefined
                   }
@@ -679,9 +687,10 @@ export const ConversationSidebar = ({
                     messageIndex === conversationMessages.length - 2 &&
                     (conversationMessages[messageIndex + 1].status ?? "completed") === "completed" &&
                     dismissedProposalId !== message._id &&
-                    looksLikeLastingPreference(message.content) &&
+                    !isNoteProposalDismissed(projectId, message._id) &&
+                    looksLikeLastingPreference(message.content, messageIndex > 0) &&
                     !notes.some((note) => note.text === message.content.trim())
-                      ? () => setDismissedProposalId(message._id)
+                      ? () => dismissProposal(message._id)
                       : undefined
                   }
                 />
