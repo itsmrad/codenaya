@@ -1,9 +1,25 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Route, Routes } from "react-router-dom";
-import { ArrowDownRight, ArrowUpRight, LayoutDashboard, Menu, Search, ShoppingCart, Users } from "lucide-react";
+import { Gauge as LayoutDashboard, Search, Users } from "lucide-react";
 
 import { BRAND_NAME } from "./brand";
 import { cn } from "./lib/utils";
+
+function ArrowUpRight({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10" /></svg>;
+}
+
+function ArrowDownRight({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m7 7 10 10M7 17h10V7" /></svg>;
+}
+
+function Menu({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" /></svg>;
+}
+
+function ShoppingCart({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 3h3l3 12h11l3-9H6" /><circle cx="9" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></svg>;
+}
 
 const KPIS = [
   { label: "Revenue", value: "$48,230", change: 12.4 },
@@ -199,6 +215,19 @@ function OrdersTable({ query }: { query: string }) {
 
 function UserMenu() {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const lastOnOpen = useRef(false);
+  const close = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+  useEffect(() => {
+    if (open) {
+      const items = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
+      (lastOnOpen.current ? items?.[items.length - 1] : items?.[0])?.focus();
+    }
+  }, [open]);
   return (
     <div className="relative">
       <button
@@ -206,15 +235,43 @@ function UserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Account menu"
-        onClick={() => setOpen(!open)}
+        aria-controls={open ? "account-menu" : undefined}
+        ref={triggerRef}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            lastOnOpen.current = event.key === "ArrowUp";
+            setOpen(true);
+          }
+        }}
+        onClick={() => { lastOnOpen.current = false; if (open) close(); else setOpen(true); }}
         className="grid size-9 place-items-center rounded-full bg-primary text-sm font-medium text-primary-foreground"
       >
         AP
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 z-10 mt-2 w-40 rounded-md border bg-card p-1 text-sm shadow-lg">
+        <div
+          id="account-menu"
+          ref={menuRef}
+          role="menu"
+          aria-label="Account"
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape" || event.key === "Tab") { event.preventDefault(); close(); }
+            const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+            const index = items.indexOf(document.activeElement as HTMLButtonElement);
+            if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+              event.preventDefault();
+              const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+                : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+              items[next]?.focus();
+            }
+          }}
+          className="absolute right-0 z-10 mt-2 w-40 rounded-md border bg-card p-1 text-sm shadow-lg">
           {["Profile", "Settings", "Sign out"].map((item) => (
-            <button key={item} type="button" role="menuitem" onClick={() => setOpen(false)} className="block w-full rounded px-3 py-2 text-left hover:bg-muted">
+            <button key={item} type="button" role="menuitem" tabIndex={-1} onClick={close} className="block w-full rounded px-3 py-2 text-left hover:bg-muted">
               {item}
             </button>
           ))}

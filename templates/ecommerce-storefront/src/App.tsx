@@ -1,9 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Route, Routes, useParams } from "react-router-dom";
-import { Minus, Plus, ShoppingBag, X } from "lucide-react";
+import { Plus, XIcon as X } from "lucide-react";
 
 import { BRAND_NAME } from "./brand";
+import { sanitizeCart, type CartLine } from "./cart";
 import { cn } from "./lib/utils";
+
+function Minus({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14" /></svg>;
+}
+
+function ShoppingBag({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16l1 14H3L4 7Z" /><path d="M8 7V6a4 4 0 0 1 8 0v1" /></svg>;
+}
 
 type Product = { id: string; name: string; category: string; price: number; sizes: string[]; blurb: string };
 
@@ -18,15 +27,12 @@ const PRODUCTS: Product[] = [
 const CATEGORIES = ["All", ...new Set(PRODUCTS.map((p) => p.category))];
 const CART_KEY = "cart";
 
-type CartLine = { id: string; size: string; qty: number };
 const money = (n: number) => `$${n.toFixed(2)}`;
 const find = (id: string) => PRODUCTS.find((p) => p.id === id)!;
 
 const loadCart = (): CartLine[] => {
   try {
-    const saved = JSON.parse(localStorage.getItem(CART_KEY) ?? "[]") as CartLine[];
-    // Drop lines for products that no longer exist.
-    return saved.filter((line) => PRODUCTS.some((p) => p.id === line.id));
+    return sanitizeCart(localStorage.getItem(CART_KEY), PRODUCTS);
   } catch {
     return [];
   }
@@ -44,12 +50,12 @@ function useCart() {
   const add = (id: string, size: string) =>
     setLines((list) =>
       list.some((l) => l.id === id && l.size === size)
-        ? list.map((l) => (l.id === id && l.size === size ? { ...l, qty: l.qty + 1 } : l))
+        ? list.map((l) => (l.id === id && l.size === size ? { ...l, qty: Math.min(99, l.qty + 1) } : l))
         : [...list, { id, size, qty: 1 }],
     );
   const change = (id: string, size: string, delta: number) =>
     setLines((list) =>
-      list.map((l) => (l.id === id && l.size === size ? { ...l, qty: l.qty + delta } : l)).filter((l) => l.qty > 0),
+      list.map((l) => (l.id === id && l.size === size ? { ...l, qty: Math.min(99, l.qty + delta) } : l)).filter((l) => l.qty > 0),
     );
   const subtotal = lines.reduce((sum, l) => sum + find(l.id).price * l.qty, 0);
   return { lines, add, change, clear: () => setLines([]), subtotal, count: lines.reduce((n, l) => n + l.qty, 0) };
@@ -57,19 +63,37 @@ function useCart() {
 type Cart = ReturnType<typeof useCart>;
 
 function CartPanel({ cart, onClose }: { cart: Cart; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current!;
+    dialog.showModal();
     closeRef.current?.focus();
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    return () => {
+      dialog.close();
+      opener?.focus();
+    };
+  }, []);
   return (
-    <div className="fixed inset-0 z-20 bg-black/50" onClick={onClose}>
+    <dialog
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Shopping cart"
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]'));
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }}
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onClick={onClose}
+      className="fixed inset-0 z-20 bg-black/50 p-0 m-0 h-full max-h-none w-full max-w-none border-0 text-foreground"
+    >
       <aside
-        role="dialog"
-        aria-modal="true"
-        aria-label="Shopping cart"
         onClick={(event) => event.stopPropagation()}
         className="ml-auto flex h-full w-full max-w-sm flex-col bg-background p-6 shadow-lg"
       >
@@ -112,7 +136,7 @@ function CartPanel({ cart, onClose }: { cart: Cart; onClose: () => void }) {
           </>
         )}
       </aside>
-    </div>
+    </dialog>
   );
 }
 

@@ -1,10 +1,22 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Route, Routes } from "react-router-dom";
-import { Github, Linkedin, Mail, X } from "lucide-react";
+import { XIcon as X } from "lucide-react";
 import { toast } from "sonner";
 
 import { BRAND_NAME } from "./brand";
 import { cn } from "./lib/utils";
+
+function Github({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 19c-4 1-4-2-6-2m12 5v-4c0-1-.4-2-1-2 4-.5 7-2 7-6a5 5 0 0 0-1-3 5 5 0 0 0 0-4s-2 0-4 2a14 14 0 0 0-8 0C6 3 4 3 4 3a5 5 0 0 0 0 4 5 5 0 0 0-1 3c0 4 3 5.5 7 6-.6 0-1 1-1 2v4" /></svg>;
+}
+
+function Linkedin({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M7 10v7m0-10v.01M11 17v-7m0 3a3 3 0 0 1 6 0v4" /></svg>;
+}
+
+function Mail({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 6 9 7 9-7" /></svg>;
+}
 
 const SKILLS = ["Product design", "Prototyping", "Design systems", "User research", "Accessibility"];
 
@@ -26,19 +38,37 @@ const EXPERIENCE = [
 ];
 
 function ProjectModal({ project, onClose }: { project: Project; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current!;
+    dialog.showModal();
     closeRef.current?.focus();
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    return () => {
+      dialog.close();
+      opener?.focus();
+    };
+  }, []);
   return (
-    <div className="fixed inset-0 z-20 grid place-items-center bg-black/50 p-4" onClick={onClose}>
+    <dialog
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="project-title"
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]'));
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }}
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onClick={onClose}
+      className="fixed inset-0 z-20 grid place-items-center bg-black/50 p-4 m-0 h-full max-h-none w-full max-w-none border-0 text-foreground"
+    >
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="project-title"
         onClick={(event) => event.stopPropagation()}
         className="w-full max-w-md rounded-xl border bg-card p-6 shadow-lg"
       >
@@ -51,7 +81,7 @@ function ProjectModal({ project, onClose }: { project: Project; onClose: () => v
         <p className="mt-1 text-sm text-muted-foreground">{project.category} · {project.year}</p>
         <p className="mt-4 text-sm">{project.summary}</p>
       </div>
-    </div>
+    </dialog>
   );
 }
 
