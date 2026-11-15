@@ -213,8 +213,9 @@ export const unresolvedImports = (
 };
 
 // Routers we can't read statically: when present, report nothing rather than guess.
+// shortcut: skip basename routers until their link prefixes can be resolved reliably.
 const OPAQUE_ROUTER =
-  /\b(?:createBrowserRouter|createHashRouter|createMemoryRouter|createRoutesFromElements|RouterProvider|useRoutes)\b|@tanstack\/react-router|from\s*["']wouter/;
+  /\b(?:createBrowserRouter|createHashRouter|createMemoryRouter|createRoutesFromElements|RouterProvider|useRoutes)\b|@tanstack\/react-router|from\s*["']wouter|<(?:BrowserRouter|HashRouter|MemoryRouter)\b[^>]*\bbasename\s*=/;
 const LINK_TAG = /<(?:Link|NavLink|Navigate|a)\b[^>]*?\b(?:to|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*["']([^"'`$]*)["']\s*\})/g;
 const NAVIGATE_CALL = /\bnavigate\(\s*["']([^"'`$]+)["']/g;
 
@@ -228,7 +229,7 @@ const routeMatches = (pattern: string, segments: string[]) => {
     for (const [i, part] of parts.entries()) {
       if (part === "*") return true;
       const segment = segments[from + i];
-      if (segment === undefined || (!part.startsWith(":") && part !== segment)) return false;
+      if (segment === undefined || (!part.startsWith(":") && part.toLowerCase() !== segment.toLowerCase())) return false;
     }
     return from + parts.length === segments.length;
   };
@@ -244,7 +245,10 @@ const routeMatches = (pattern: string, segments: string[]) => {
  * Conservative: reports nothing unless the routes are plain react-router JSX
  * with literal paths, since a false report sends the agent into a pointless repair.
  */
-export const linksWithoutRoutes = (files: ProjectFile[]): string[] => {
+export const linksWithoutRoutes = (
+  files: ProjectFile[],
+  paths: Set<string> = new Set(files.map((file) => file.path)),
+): string[] => {
   const sources = files
     .filter((file) => file.path.startsWith("src/") && SOURCE_FILE.test(file.path) && !file.path.endsWith(".d.ts"))
     .map((file) => ({ path: file.path, text: stripComments(file.content) }));
@@ -264,14 +268,17 @@ export const linksWithoutRoutes = (files: ProjectFile[]): string[] => {
   }
   if (routes.length === 0 || routes.some((path) => path === "*" || path === "/*")) return [];
 
+  const publicPaths = [...paths].filter((path) => path.startsWith("public/"));
   const missing = new Map<string, string>();
   for (const { path: file, text } of sources) {
     for (const match of [...text.matchAll(LINK_TAG), ...text.matchAll(NAVIGATE_CALL)]) {
       const target = (match[1] ?? match[2] ?? match[3] ?? "").split(/[?#]/)[0];
       if (!target.startsWith("/") || target.startsWith("//") || /[${}]/.test(target)) continue;
       const segments = segmentsOf(target);
-      // The root, API endpoints and assets (`/logo.svg`) are not pages.
-      if (segments.length === 0 || segments[0] === "api" || /\.\w+$/.test(segments.at(-1)!)) continue;
+      // The root, API/serverless endpoints and public assets are not pages.
+      if (segments.length === 0 || segments[0] === "api" || segments.some((part) => part.startsWith(".")) || /\.\w+$/.test(segments.at(-1)!)) continue;
+      const publicTarget = `public/${segments.join("/")}`;
+      if (publicPaths.some((path) => path === publicTarget || path.startsWith(`${publicTarget}/`))) continue;
       if (!routes.some((route) => routeMatches(route, segments)) && !missing.has(target)) {
         missing.set(target, file);
       }

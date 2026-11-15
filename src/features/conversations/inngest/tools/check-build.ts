@@ -399,7 +399,7 @@ export const checkProjectBuild = async ({
     ...missingReferencedFiles(files),
     ...undeclaredPackages(files),
     ...unresolvedImports(files, paths),
-    ...linksWithoutRoutes(files),
+    ...linksWithoutRoutes(files, paths),
   ];
   if (problems.length > 0) {
     return (
