@@ -44,7 +44,6 @@ export const useShowcaseRankingTime = (enabled: boolean) => {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!enabled) return;
-    setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, [enabled]);
