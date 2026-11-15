@@ -28,9 +28,10 @@ describe("esbuild service recovery (#776)", () => {
     expect(isEsbuildServiceFailure(error!, "vite")).toBe(false);
   });
 
-  it("only recovers a Vite project: Next and unknown frameworks never restart", () => {
+  it("only recovers a Vite-based project: Next and unknown frameworks never restart", () => {
     const error = { kind: "build" as const, message: "The service is no longer running: write EPIPE", stack: "esbuild/lib/main.js" };
     expect(isEsbuildServiceFailure(error, "vite")).toBe(true);
+    expect(isEsbuildServiceFailure(error, "tanstack-start")).toBe(true); // Start runs on Vite
     expect(isEsbuildServiceFailure(error, "next")).toBe(false);
     expect(isEsbuildServiceFailure(error, null)).toBe(false);
   });

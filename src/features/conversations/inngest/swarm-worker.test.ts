@@ -66,6 +66,9 @@ const mutationArgs = (name: string) =>
 const taskSteps = () =>
   mutationArgs("agentTasks:upsertTaskSteps").flatMap(({ steps }) => steps as Array<{ id: string; status: string; error?: string }>);
 
+/** The worker's system prompt as OpenRouter gets it for Claude: cacheable text blocks. */
+type SystemBlock = { type: "text"; text: string; cache_control?: { type: string } };
+
 const withUsage = (body: object) => ({ ...body, usage: { prompt_tokens: 1_000, completion_tokens: 1_000 } });
 
 beforeEach(() => {
@@ -100,21 +103,27 @@ describe("swarmWorker", () => {
     expect(mutationArgs("system:updateFile")).toHaveLength(0);
 
     const [request] = outcome.inferenceBodies as Array<{
-      messages: Array<{ content: string }>;
+      messages: Array<{ content: unknown }>;
       tools: Array<{ function: { name: string } }>;
     }>;
     // Path-based tools only: no rename, move, id-based writes, build, env or MCP.
     expect(request.tools.map((tool) => tool.function.name).sort()).toEqual(
       ["deleteFiles", "editFile", "listFiles", "readFiles", "searchFiles", "writeFiles"],
     );
-    expect(request.messages[0].content).toContain("[swarm-worker]");
-    expect(request.messages[0].content).toContain(`as few writeFiles calls as you can, each at most ${WRITE_BATCH_FILES} files and about ${WRITE_BATCH_LINES} lines in all`);
-    expect(request.messages[0].content).toContain("is cut off and writes NOTHING. editFile stays right for changes to existing files.");
-    expect(request.messages[0].content).toContain("Read only files you must import from; shared types and stubs are listed in the tree.");
-    expect(request.messages[0].content).toContain("Avoid per-file edit/read loops. Do not re-read what you wrote.");
-    expect(request.messages[0].content).toContain("Do not run checkBuild or any build: the orchestrator integrates and checks the complete project.");
-    expect(request.messages[0].content).toContain("Stop once your files are written. Finish with a one-line summary");
-    expect(request.messages[0].content).toContain("Owned paths: src/pages/");
+    // The shared system block is cached; the task line follows it uncached.
+    const [shared, taskLine, ...more] = request.messages[0].content as SystemBlock[];
+    expect(more).toHaveLength(0);
+    expect(shared).toMatchObject({ cache_control: { type: "ephemeral" } });
+    expect(shared.text).toContain("[swarm-worker]");
+    expect(shared.text).toContain(`as few writeFiles calls as you can, each at most ${WRITE_BATCH_FILES} files and about ${WRITE_BATCH_LINES} lines in all`);
+    expect(shared.text).toContain("is cut off and writes NOTHING. editFile stays right for changes to existing files.");
+    expect(shared.text).toContain("Read only files you must import from; shared types and stubs are listed in the tree.");
+    expect(shared.text).toContain("Avoid per-file edit/read loops. Do not re-read what you wrote.");
+    expect(shared.text).toContain("Do not run checkBuild or any build: the orchestrator integrates and checks the complete project.");
+    expect(shared.text).toContain("Stop once your files are written. Finish with a one-line summary");
+    expect(shared.text).not.toContain("Owned paths:");
+    expect(taskLine).not.toHaveProperty("cache_control");
+    expect(taskLine.text).toMatch(/^## Your task: .*\nOwned paths: src\/pages\/$/);
     expect(request.messages.at(-1)?.content).toBe(TASK.brief);
 
     expect(mutationArgs("agentTasks:startTask")[0]).toMatchObject({ agentTaskId: "t1", parentMessageId: "m1", projectId: "p1" });
@@ -131,12 +140,12 @@ describe("swarmWorker", () => {
 
   it("puts the user's original request in the system prompt, and none when absent", async () => {
     const withPrompt = await run([{ data: text("Built it.") }], { originalPrompt: "Pizzeria on 5 Main St, margherita 9.50" });
-    const [request] = withPrompt.inferenceBodies as Array<{ messages: Array<{ content: string }> }>;
-    expect(request.messages[0].content).toContain("original request (context, build only your task)\nPizzeria on 5 Main St, margherita 9.50");
+    const [request] = withPrompt.inferenceBodies as Array<{ messages: Array<{ content: unknown }> }>;
+    expect((request.messages[0].content as SystemBlock[])[0].text).toContain("original request (context, build only your task)\nPizzeria on 5 Main St, margherita 9.50");
 
     const without = await run([{ data: text("Built it.") }]);
-    const [bare] = without.inferenceBodies as Array<{ messages: Array<{ content: string }> }>;
-    expect(bare.messages[0].content).not.toContain("original request");
+    const [bare] = without.inferenceBodies as Array<{ messages: Array<{ content: unknown }> }>;
+    expect((bare.messages[0].content as SystemBlock[])[0].text).not.toContain("original request");
   });
 
   it("stores its report without a suggestions block (#256)", async () => {
@@ -148,10 +157,11 @@ describe("swarmWorker", () => {
     expect(mutationArgs("agentTasks:finishTask")).toEqual([
       expect.objectContaining({ status: "done", summary: "Built the home page." }),
     ]);
-    const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: string }> }>;
+    const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: unknown }> }>;
     // Its reply goes to the orchestrator: the NEEDS: report, not the user voice or chips.
-    expect(request.messages[0].content).toContain("in a NEEDS: section for the orchestrator");
-    expect(request.messages[0].content).toContain(
+    const [shared] = request.messages[0].content as SystemBlock[];
+    expect(shared.text).toContain("in a NEEDS: section for the orchestrator");
+    expect(shared.text).toContain(
       "Your reply goes to the orchestrator, not the user: no next steps, suggestions or action chips.",
     );
   });
@@ -343,10 +353,12 @@ describe("swarmWorker as a sub-orchestrator", () => {
     ], { originalPrompt: LONG_REQUEST }, [CART, LIST]);
 
     expect(outcome.finalType).toBe("function-resolved");
-    const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: string }>; tools: Array<{ function: { name: string } }> }>;
+    const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: unknown }>; tools: Array<{ function: { name: string } }> }>;
     expect(request.tools.map((tool) => tool.function.name)).toContain("delegateTasks");
-    expect(request.messages[0].content).toContain("[swarm-worker]");
-    expect(request.messages[0].content).toContain("[swarm-suborchestrator]");
+    const [shared] = request.messages[0].content as SystemBlock[];
+    expect(shared).toMatchObject({ cache_control: { type: "ephemeral" } });
+    expect(shared.text).toContain("[swarm-worker]");
+    expect(shared.text).toContain("[swarm-suborchestrator]");
 
     expect(mutationArgs("agentTasks:createTasks")).toEqual([expect.objectContaining({
       messageId: "m1",
@@ -400,9 +412,11 @@ describe("swarmWorker as a sub-orchestrator", () => {
   it("offers no delegateTasks at depth 2", async () => {
     const outcome = await run([{ data: text("Done.") }], { depth: 2 });
 
-    const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: string }>; tools: Array<{ function: { name: string } }> }>;
+    const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: unknown }>; tools: Array<{ function: { name: string } }> }>;
     expect(request.tools.map((tool) => tool.function.name)).not.toContain("delegateTasks");
-    expect(request.messages[0].content).not.toContain("[swarm-suborchestrator]");
+    const [shared] = request.messages[0].content as SystemBlock[];
+    expect(shared.text).toContain("[swarm-worker]");
+    expect(shared.text).not.toContain("[swarm-suborchestrator]");
   });
 
   it("refuses a depth-2 delegateTasks call", async () => {

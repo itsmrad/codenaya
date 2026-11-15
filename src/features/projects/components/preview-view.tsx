@@ -54,6 +54,7 @@ import {
 import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 import { buildFlatFileList, hasRootPackageJson } from "@/features/sandbox-preview/utils/file-tree";
 import { detectFrameworkFromFiles } from "@/features/sandbox-preview/utils/dev-command";
+import { needsSandbox } from "@/features/sandbox-preview/utils/framework";
 import type { BootHistory, BootPhase } from "@/features/sandbox-preview/utils/boot-phase";
 import { NOTHING_TO_PREVIEW } from "@/features/sandbox-preview/utils/boot-plan";
 import {
@@ -181,9 +182,9 @@ export const PreviewView = ({
     () => detectFrameworkFromFiles(files ? buildFlatFileList(files) : [], project?.settings?.devCommand),
     [files, project?.settings?.devCommand],
   );
-  const isNext = framework === "next";
-  const activeEngine = isNext ? "sandbox" : requestedEngine;
-  const needsSandboxReload = isNext && requestedEngine === "webcontainer";
+  const sandboxOnly = needsSandbox(framework);
+  const activeEngine = sandboxOnly ? "sandbox" : requestedEngine;
+  const needsSandboxReload = sandboxOnly && requestedEngine === "webcontainer";
 
   // During the first build the E2B sandbox boots once package.json exists and
   // the files have gone quiet (#486), so it is warm when the run ends: later
@@ -487,11 +488,11 @@ export const PreviewView = ({
   // load; doing it automatically on a sandbox error turned config errors into a
   // silent reload with no explanation.
   const switchEngine = useCallback((newEngine: PreviewEngine) => {
-    if (isNext && newEngine === "webcontainer") return;
+    if (sandboxOnly && newEngine === "webcontainer") return;
     if (newEngine === requestedEngine) return;
     window.location.href = previewEngineUrl(pathname, searchParams.toString(), newEngine);
-  }, [requestedEngine, isNext, pathname, searchParams]);
-  // A Next project opened with the browser-engine URL must drop its COEP
+  }, [requestedEngine, sandboxOnly, pathname, searchParams]);
+  // A Next or Start project opened with the browser-engine URL must drop its COEP
   // headers before the E2B iframe can load; a client-side replace keeps them.
   useEffect(() => {
     if (needsSandboxReload) window.location.replace(previewEngineUrl(pathname, searchParams.toString(), "sandbox"));
@@ -536,7 +537,7 @@ export const PreviewView = ({
       restart={restart}
       errorKind={errorKind}
       onUseWebContainer={() => switchEngine("webcontainer")}
-      canUseWebContainer={!isNext}
+      canUseWebContainer={!sandboxOnly}
       agentWorking={Boolean(activeRun)}
       building={cover}
       stillBuilding={stillBuilding}
@@ -672,7 +673,7 @@ export const PreviewView = ({
                     value="webcontainer"
                     onSelect={() => switchEngine("webcontainer")}
                     title="Use in-browser WebContainers"
-                    disabled={isNext}
+                    disabled={sandboxOnly}
                   >
                     <BoxIcon />
                     In-browser (WebContainer)
@@ -773,6 +774,7 @@ export const PreviewView = ({
             <PreviewSettingsPopover
               projectId={projectId}
               initialValues={project?.settings}
+              files={files}
               onSave={restart}
             />
           </div>

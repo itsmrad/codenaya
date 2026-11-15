@@ -6,7 +6,7 @@ import { EyeIcon, SearchIcon, ServerCogIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { filterProviders, listProviders, offeredAuthModes } from "../catalog";
+import { filterProviders, listVisibleProviders, offeredAuthModes } from "../catalog";
 import type { CustomServerPrefill } from "../community-catalog";
 import type { IntegrationAuthMode } from "../types";
 import { CatalogTile, TileChip } from "./catalog-tile";
@@ -50,7 +50,7 @@ export const ProviderCatalog = ({
   useEffect(() => {
     categoryRow.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [category]);
-  const categories = [...new Set(listProviders().map((provider) => provider.category))];
+  const categories = [...new Set(listVisibleProviders().map((provider) => provider.category))];
   const providers = filterProviders(query, category);
 
   return (

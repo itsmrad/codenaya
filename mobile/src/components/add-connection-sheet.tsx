@@ -7,7 +7,7 @@ import { Button, Field } from "@/components/form";
 import { ChevronRight, ExternalLink, Server } from "@/components/icons";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { postApi } from "@/lib/http";
-import { getProvider, listProviders } from "@/lib/shared";
+import { getProvider, listVisibleProviders } from "@/lib/shared";
 import { font, useColors } from "@/lib/theme";
 
 /** The connect route's id for a custom MCP server (provider-catalog.tsx). */
@@ -100,7 +100,7 @@ export function AddConnectionSheet({
     >
       {!providerId ? (
         <>
-          {listProviders().map((item) => (
+          {listVisibleProviders().map((item) => (
             <SheetRow
               key={item.id}
               label={item.displayName}

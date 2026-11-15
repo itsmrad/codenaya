@@ -12,7 +12,7 @@ import { EllipsisVertical, Plus, Trash2 } from "@/components/icons";
 import { Sheet, SheetRow } from "@/components/sheet";
 import { api } from "@/lib/api";
 import { errorMessage, timeAgo } from "@/lib/format";
-import { getProvider, listProviders } from "@/lib/shared";
+import { getProvider, listVisibleProviders } from "@/lib/shared";
 import { font, useColors } from "@/lib/theme";
 
 const providerName = (providerId: string) => getProvider(providerId)?.displayName ?? providerId;
@@ -28,7 +28,7 @@ export default function IntegrationsSettings() {
   const [managingId, setManagingId] = useState<string>();
   const managing = connections?.find((connection) => connection._id === managingId);
   const connectedIds = new Set(connections?.map((connection) => connection.providerId));
-  const available = listProviders().filter((provider) => !connectedIds.has(provider.id));
+  const available = listVisibleProviders().filter((provider) => !connectedIds.has(provider.id));
 
   const confirmDelete = async (connection: Connection) => {
     setManagingId(undefined);

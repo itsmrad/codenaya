@@ -34,6 +34,15 @@ describe("splitSuggestions", () => {
     });
   });
 
+  it("drops chips that name a hidden provider", () => {
+    const reply =
+      "Done.\n<suggestions>\n[connect:stripe] Connect Stripe to take payments\nSet up STRIPE checkout\n[connect:supabase] Save orders in Supabase\nAdd a payment step\n</suggestions>";
+    expect(splitSuggestions(reply).suggestions).toEqual(["[connect:supabase] Save orders in Supabase", "Add a payment step"]);
+    expect(JSON.stringify(splitSuggestions(reply))).not.toMatch(/stripe/i);
+    // Emptying the hidden list keeps them again.
+    expect(splitSuggestions(reply, []).suggestions).toHaveLength(4);
+  });
+
   it("leaves a reply without a block alone", () => {
     expect(splitSuggestions("- Built it.")).toEqual({ content: "- Built it.", suggestions: [] });
   });
@@ -41,9 +50,9 @@ describe("splitSuggestions", () => {
 
 describe("parseSuggestion", () => {
   it("maps action tags to IDE actions and keeps the rest as prompts", () => {
-    expect(parseSuggestion("[connect:stripe] Connect Stripe to take payments")).toEqual({
-      label: "Connect Stripe to take payments",
-      action: { kind: "connect", providerId: "stripe" },
+    expect(parseSuggestion("[connect:resend] Connect Resend to send emails")).toEqual({
+      label: "Connect Resend to send emails",
+      action: { kind: "connect", providerId: "resend" },
     });
     expect(parseSuggestion("[Publish] Publish your site")).toEqual({ label: "Publish your site", action: { kind: "publish" } });
     expect(parseSuggestion("[env-vars] Set the form's destination email")).toEqual({
@@ -59,6 +68,8 @@ describe("parseSuggestion", () => {
     // Vercel is deliberately not in the catalog; "constructor" is a prototype key.
     expect(parseSuggestion("[connect:vercel] Connect Vercel")).toEqual({ label: "Connect Vercel", action: null });
     expect(parseSuggestion("[connect:constructor] Connect it")).toEqual({ label: "Connect it", action: null });
+    // Stripe is hidden until a payment provider is chosen.
+    expect(parseSuggestion("[connect:stripe] Take payments")).toEqual({ label: "Take payments", action: null });
   });
 
   it("parses the chips out of a reply in the new template", () => {

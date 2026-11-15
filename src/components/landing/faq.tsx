@@ -18,7 +18,7 @@ const QUESTIONS = [
   },
   {
     q: "Is it free?",
-    a: "Yes. The Free plan includes 300 credits a month. A credit is $0.01 of AI usage, and each run costs credits based on the model and how much work it does.",
+    a: "Yes. You can start on the Free plan, or add your own provider key for unlimited runs on any plan. A credit is $0.01 of AI usage, and each run costs credits based on the model and how much work it does.",
   },
   {
     q: "Can I use my own API key?",

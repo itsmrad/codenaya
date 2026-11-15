@@ -51,11 +51,13 @@ describe("workspace mode", () => {
     ]);
   });
 
-  test("rejects an unknown mode", async () => {
+  test("accepts the agent board and rejects an unknown mode", async () => {
     const t = setup();
+    await as(t, ALICE).mutation(api.userPreferences.setWorkspaceMode, { workspaceMode: "board" });
+    expect(await as(t, ALICE).query(api.userPreferences.getWorkspaceMode, {})).toBe("board");
     await expect(
       as(t, ALICE).mutation(api.userPreferences.setWorkspaceMode, {
-        workspaceMode: "board" as "chat",
+        workspaceMode: "kanban" as "board",
       }),
     ).rejects.toThrow();
   });

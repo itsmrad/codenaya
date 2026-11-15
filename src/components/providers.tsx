@@ -46,8 +46,8 @@ const clerkLocalization = {
   signIn: { start: { subtitle: "Use GitHub, Google or your email" } },
   signUp: {
     start: {
-      subtitle: "Start free with 300 credits a month",
-      subtitleCombined: "Start free with 300 credits a month",
+      subtitle: "Start free, or bring your own key",
+      subtitleCombined: "Start free, or bring your own key",
     },
   },
 };

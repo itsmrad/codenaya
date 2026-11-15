@@ -1,12 +1,20 @@
 import type { Sandbox } from "e2b";
 import { describe, expect, it, vi } from "vitest";
 
-import { DEV_COMMAND_ENV, installWithDevServerStopped, isPortOpen, killTreeCommand } from "./dev-server";
+import {
+  DEV_COMMAND_ENV,
+  PROXY_TARGET_ENV,
+  findPreviewDevServer,
+  installWithDevServerStopped,
+  isPortOpen,
+  killTreeCommand,
+  restartDevServerIfDown,
+} from "./dev-server";
 
-const fakeSandbox = (processes: Array<{ pid: number; envs: Record<string, string>; cwd?: string }>) => {
+const fakeSandbox = (processes: Array<{ pid: number; envs: Record<string, string>; cwd?: string; cmd?: string; args?: string[] }>) => {
   const run = vi.fn<(...args: unknown[]) => Promise<object>>(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
   const sandbox = {
-    commands: { list: vi.fn(async () => processes), run },
+    commands: { list: vi.fn(async () => processes.map((process) => ({ cmd: "/bin/bash", args: [], ...process }))), run },
   } as unknown as Sandbox;
   return { sandbox, run };
 };
@@ -98,5 +106,75 @@ describe("installWithDevServerStopped (#486)", () => {
   it("names only the given pid in the kill command", () => {
     expect(killTreeCommand(12)).toContain("$(tree 12)");
     expect(killTreeCommand(12)).not.toMatch(/pkill|killall/);
+  });
+});
+
+describe("restarting the preview's dev server after a check build", () => {
+  const dev = { pid: 12, envs: { [DEV_COMMAND_ENV]: "npm run dev", HOSTNAME: "0.0.0.0" }, cwd: "/home/user/app" };
+  const proxy = { pid: 5, envs: { [PROXY_TARGET_ENV]: "3000" } };
+  const preview = { port: 3000, start: { command: "npm run dev", envs: dev.envs, cwd: "/home/user/app" } };
+
+  it("finds the dev server's port from the proxy and how to start it from the dev process", async () => {
+    const { sandbox } = fakeSandbox([proxy, { pid: 3, envs: {} }, dev]);
+    await expect(findPreviewDevServer(sandbox)).resolves.toEqual(preview);
+  });
+
+  it("finds none without a marked proxy or dev server, e.g. a sandbox booted before the proxy was marked", async () => {
+    await expect(findPreviewDevServer(fakeSandbox([dev]).sandbox)).resolves.toBeNull();
+    await expect(findPreviewDevServer(fakeSandbox([proxy]).sandbox)).resolves.toBeNull();
+  });
+
+  const bounds = { timeoutMs: 10_000, requestTimeoutMs: 10_000 };
+  const probes = (run: ReturnType<typeof fakeSandbox>["run"]) =>
+    run.mock.calls.filter(([command]) => String(command).includes('require("net")')).length;
+
+  it("leaves a dev server whose port answers alone", async () => {
+    const { sandbox, run } = fakeSandbox([proxy, dev]);
+    run.mockResolvedValue({ stdout: "open\n" });
+
+    await expect(restartDevServerIfDown(sandbox, preview, 10_000)).resolves.toBe(false);
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0][0]).toContain("port:3000");
+  });
+
+  it("probes again before calling a slow port down", async () => {
+    const { sandbox, run } = fakeSandbox([proxy, dev]);
+    run.mockResolvedValueOnce({ stdout: "" }).mockResolvedValueOnce({ stdout: "open\n" });
+
+    await expect(restartDevServerIfDown(sandbox, preview, 10_000)).resolves.toBe(false);
+
+    expect(probes(run)).toBe(2);
+    expect(run).not.toHaveBeenCalledWith(killTreeCommand(12), expect.anything());
+  });
+
+  it("stops what is left of a dead dev server, e.g. a `next dev` parent whose server was OOM-killed, and starts it the same way, bounded", async () => {
+    const { sandbox, run } = fakeSandbox([proxy, dev]);
+
+    await expect(restartDevServerIfDown(sandbox, preview, 10_000)).resolves.toBe(true);
+
+    expect(probes(run)).toBe(3);
+    expect(sandbox.commands.list).toHaveBeenCalledWith({ requestTimeoutMs: 10_000 });
+    expect(run.mock.calls.slice(3)).toEqual([
+      [killTreeCommand(12), bounds],
+      ["npm run dev", { cwd: "/home/user/app", envs: dev.envs, background: true, timeoutMs: 0, requestTimeoutMs: 10_000 }],
+    ]);
+  });
+
+  it("leaves the dev server to an install that has it stopped (#486), so only one starts", async () => {
+    const install = { pid: 40, envs: {}, cmd: "/bin/bash", args: ["-l", "-c", "npm install --prefer-offline"] };
+    const { sandbox, run } = fakeSandbox([proxy, install]);
+
+    await expect(restartDevServerIfDown(sandbox, preview, 10_000)).resolves.toBe(false);
+
+    expect(run.mock.calls.slice(3)).toEqual([]);
+  });
+
+  it("starts it even when no dev process is left to stop", async () => {
+    const { sandbox, run } = fakeSandbox([proxy]);
+
+    await expect(restartDevServerIfDown(sandbox, preview, 10_000)).resolves.toBe(true);
+
+    expect(run).toHaveBeenLastCalledWith("npm run dev", expect.objectContaining({ background: true, envs: dev.envs }));
   });
 });

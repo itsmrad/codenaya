@@ -16,13 +16,13 @@ vi.mock("@/features/integrations/components/integrations-dialog", () => ({
     open ? `Dialog for ${initialProviderId}` : null,
 }));
 
-import { listProviders } from "@/features/integrations/catalog";
+import { listVisibleProviders } from "@/features/integrations/catalog";
 import { IntegrationsSettings } from "./integrations-settings";
 
 it("shows the full catalog when there are no connections", () => {
   const html = renderToStaticMarkup(createElement(IntegrationsSettings));
   expect(html).toContain("Browse integrations");
-  for (const provider of listProviders()) {
+  for (const provider of listVisibleProviders()) {
     expect(html).toContain(`aria-label="Connect ${provider.displayName}"`);
   }
   expect(html).not.toContain("No connections yet");

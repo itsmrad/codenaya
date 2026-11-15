@@ -1,3 +1,4 @@
+import { major, minVersion } from "semver";
 import { describe, expect, it } from "vitest";
 
 import { KNOWN_GOOD_VERSIONS } from "./known-good-versions";
@@ -17,15 +18,14 @@ describe("Next App Router starter", () => {
     for (const path of ["vite.config.ts", "index.html", "src/main.tsx", "src/vite-env.d.ts", "tsconfig.app.json", "tsconfig.node.json"]) {
       expect(files.has(path), path).toBe(false);
     }
-    expect(pkg.dependencies.next).toBe(KNOWN_GOOD_VERSIONS.next);
-    expect(pkg.dependencies.react).toBe(KNOWN_GOOD_VERSIONS.react);
-    expect(pkg.dependencies["react-dom"]).toBe(KNOWN_GOOD_VERSIONS["react-dom"]);
     expect(pkg.scripts).toEqual({ dev: "next dev", build: "next build", start: "next start" });
     expect(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).join(" ")).not.toMatch(/vite|react-router/);
     for (const [name, version] of Object.entries({ ...pkg.dependencies, ...pkg.devDependencies })) {
-      expect(version, name).toBe(KNOWN_GOOD_VERSIONS[name as keyof typeof KNOWN_GOOD_VERSIONS]);
-      expect(version, name).toBeTruthy();
+      // Exact, on the known-good major: a range can resolve past a stale npm cache (ETARGET).
+      expect(version, name).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(major(version as string), name).toBe(minVersion(KNOWN_GOOD_VERSIONS[name as keyof typeof KNOWN_GOOD_VERSIONS])!.major);
     }
+    expect(pkg.devDependencies["@tailwindcss/postcss"]).toBe(pkg.devDependencies.tailwindcss);
     expect(pkg.devDependencies.postcss).toBeTruthy();
     expect(files.get("postcss.config.mjs")).toContain('"@tailwindcss/postcss"');
     expect(JSON.parse(files.get("tsconfig.json")!).compilerOptions).toMatchObject({

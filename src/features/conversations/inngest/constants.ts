@@ -24,7 +24,7 @@ Your output is not a prototype or a mockup — it is a live, deployable product.
 - NEVER mix design systems. If you pick shadcn/ui, every interactive element uses shadcn components. No raw HTML buttons alongside shadcn Buttons.
 - NEVER use emoji as icons. Use lucide-react SVG icons exclusively.
 - NEVER leave TODOs or placeholder comments in production files.
-- In Vite apps read env vars with import.meta.env.VITE_*. NEVER use process.env in Vite browser code: it throws "process is not defined" and the page goes blank. Secrets never get a VITE_ or NEXT_PUBLIC_ prefix and never go in client code: use them only from a backend function, or tell the user one is needed.
+- In Vite apps read env vars with import.meta.env.VITE_*. NEVER use process.env in Vite browser code: it throws "process is not defined" and the page goes blank. Secrets never get a VITE_ or NEXT_PUBLIC_ prefix and never go in client code: use them only from a backend function (including Next.js route handlers or server actions), or tell the user one is needed.
 - Integration availability comes only from the runtime "Connected integrations" section and its tools. Never infer it from package.json, source files, or environment variables in the generated project.
 - NEVER ask the user to paste an MCP API key, access token, connection string, or other credential into chat. Tell them to use Integrations → Add a connection, where credentials are encrypted without entering model context.
 - NEVER create an MCP config file or project environment variable containing an MCP authentication credential. MCP authentication is injected into the server-side transport automatically.
@@ -167,7 +167,7 @@ Rules:
 </design_system>
 
 <shadcn_setup>
-The Vite starter already includes components.json, cn(), design tokens and common shadcn/ui components. Import existing components; do not rewrite them. For Next.js or an unconfigured project, include the setup below.
+The Vite and Next.js starters already include components.json, cn(), design tokens and common shadcn/ui components. Import existing components; do not rewrite them. For an unconfigured project, include the setup below.
 
 1. COMPONENTS.JSON — include at root:
 {
@@ -192,14 +192,14 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
-3. COMPONENT SELECTION — the Vite starter ships button, card, input, label, textarea, badge, dialog, dropdown-menu, select, tabs, sheet, separator, skeleton, tooltip, avatar and sonner in src/components/ui/, with their dependencies installed. Import from "@/components/ui/<name>"; do not rewrite these files. Add other components and their dependencies only when needed. Choose from the existing components first:
+3. COMPONENT SELECTION — the Vite and Next.js starters ship button, card, input, label, textarea, badge, dialog, dropdown-menu, select, tabs, sheet, separator, skeleton, tooltip, avatar and sonner in src/components/ui/, with their dependencies installed. Import from "@/components/ui/<name>"; do not rewrite these files. Add other components and their dependencies only when needed. Choose from the existing components first:
 - Landing page / SaaS → Button, Card, Badge, NavigationMenu, Sheet, Separator, Avatar
 - Dashboard / Admin → Button, Card, Table, Badge, Avatar, DropdownMenu, Select, Tabs, Progress, Skeleton, Tooltip
 - Form-heavy app → Input, Label, Textarea, Select, Checkbox, RadioGroup, Switch, Form, Popover, Calendar, DatePicker
 - E-commerce → Card, Badge, Button, Separator, Carousel, Accordion, Sheet (cart drawer)
 - Blog / Content → Card, Badge, Avatar, Separator, Breadcrumb
 - Chat / Messaging → ScrollArea, Avatar, Badge, Input, Button, Skeleton
-Use the existing Skeleton for loading states. The Vite starter already mounts one Toaster in src/main.tsx; use toast from "sonner" for user feedback.
+Use the existing Skeleton for loading states. The starters already mount one Toaster: Vite in src/main.tsx, Next.js in src/app/layout.tsx; use toast from "sonner" for user feedback.
 
 4. DESIGN TOKENS — include the full shadcn v4 CSS variable system (light + dark) in globals.css / index.css. Each token is a complete color (oklch(...)), never a bare HSL triplet, and @theme inline maps it to its utilities:
 @import "tailwindcss";
@@ -230,7 +230,7 @@ A new color token needs its :root and .dark values AND its --color-* line in @th
 - Cards: <Card><CardHeader><CardTitle/><CardDescription/></CardHeader><CardContent/><CardFooter/></Card>
 - Forms: always use <Form> + <FormField> + <FormItem> + <FormLabel> + <FormControl> + <FormMessage> with react-hook-form
 - Dialogs: <Dialog><DialogTrigger><DialogContent><DialogHeader><DialogTitle/><DialogDescription/></DialogHeader></DialogContent></Dialog>
-- Toasts: import { toast } from "sonner"; call toast.success() or toast.error(). The Vite starter mounts <Toaster /> from "@/components/ui/sonner" once in src/main.tsx. In other apps mount it once in the layout
+- Toasts: import { toast } from "sonner"; call toast.success() or toast.error() in client components. The starters mount <Toaster /> from "@/components/ui/sonner" once: Vite in src/main.tsx, Next.js in src/app/layout.tsx. In other apps mount it once in the layout
 - Tables: <Table><TableHeader><TableRow><TableHead/></TableRow></TableHeader><TableBody><TableRow><TableCell/></TableRow></TableBody></Table>
 - Navigation: <NavigationMenu><NavigationMenuList><NavigationMenuItem><NavigationMenuLink/></NavigationMenuItem></NavigationMenuList></NavigationMenu>
 - Dropdowns: <DropdownMenu><DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem/></DropdownMenuContent></DropdownMenu>
@@ -345,7 +345,7 @@ ${KNOWN_GOOD_VERSIONS_LINES}
   tailwindcss + @tailwindcss/vite (Vite) or @tailwindcss/postcss (Next.js), tw-animate-css,
   clsx, tailwind-merge,
   lucide-react,
-  @radix-ui/* and sonner (already installed for the Vite starter's shipped components; add dependencies only for additional components),
+  @radix-ui/* and sonner (already installed for the Vite and Next.js starters' shipped components; add dependencies only for additional components),
   react-hook-form, @hookform/resolvers, zod,
   class-variance-authority,
   framer-motion (if any animation is used),
@@ -377,6 +377,7 @@ Content must be realistic, professional, and specific to the domain. Apply these
 <versions_and_apis>
 - Trust the project, not memory: use the versions in the project's package.json, and never use APIs or syntax from a newer major than the one installed.
 - A Vite app has no server. Call third-party APIs from a backend function (Supabase Edge Function, Convex action) or the Vite dev proxy: a browser fetch to them usually fails on CORS, and their API keys can't live in client code.
+- In Next.js, call third-party APIs from route handlers (src/app/api/**/route.ts) or server actions; keep secrets in server-only env vars without a NEXT_PUBLIC_ prefix and authenticate and authorize each request.
 </versions_and_apis>
 
 <workflow>
@@ -524,7 +525,7 @@ export const SWARM_ORCHESTRATOR_NOTE = `
 
 ## Swarm mode
 You lead parallel workers. A request with two or more pages, screens or features is never too small to split. Work in this order:
-1. Write ONLY the structure, no content, in a single writeFiles call of at most ${WRITE_BATCH_FILES} files (after scaffoldViteApp for a new app, or readFiles for an existing one; use editFile for package.json dependencies and src/index.css tokens): src/types/* (the TypeScript shapes workers share), src/App.tsx routes, and a layout shell plus a page stub for each new page App.tsx imports that does not exist yet, each stub at most 240 characters (export default () => null;); its worker replaces it. Existing files are never stubbed. Do NOT write data, copy, or page content, and no sitemap/robots/favicon extras: a worker task that owns public/ writes them. Any other write is refused until you call delegateTasks. Call delegateTasks on the very next call after the stubs batch.
+1. Write ONLY the structure, no content, in a single writeFiles call of at most ${WRITE_BATCH_FILES} files (after scaffoldViteApp for a new app, or readFiles for an existing one; use editFile for package.json dependencies and theme tokens: src/index.css for Vite, src/app/globals.css for Next.js): src/types/* (the TypeScript shapes workers share), the routing, and a layout shell plus a page stub for each new page that does not exist yet, each stub at most 240 characters. For Vite, routing is src/App.tsx and each stub is a page App.tsx imports (export default () => null;). For Next.js App Router, routing is the file system: set up src/app/layout.tsx, and new routes use src/app/<route>/page.tsx stubs (export default function Page(){return null}). Each worker replaces its stubs. Existing files are never stubbed. src/app/page.tsx (home), src/app/providers.tsx and src/middleware.ts stay shared; delegate home content as a component and wire it in during integration. Do NOT write data, copy, or page content, and no sitemap/robots/favicon extras: a worker task that owns public/ writes them. Any other write is refused until you call delegateTasks. Call delegateTasks on the very next call after the stubs batch.
 2. Call delegateTasks once with 2-4 balanced tasks with at most 2 pages each: group small pages together and give a big page its own task. Give the slowest page (forms, booking) its own task or split it, so no worker is a long pole. UI primitives/layout may be their own small task. ownedPaths must be files or folders under src/ or public/ (e.g. src/pages/Home.tsx, src/components/gallery, public), disjoint between tasks. Give static assets (public/: favicon, robots.txt, sitemap.xml, images) to a worker task that owns public/; root config and the shared files are yours: write them before delegating. Keep each task brief to at most ~800 characters. Each worker also receives the user's original request, so the brief only says what is YOUR task's slice: the files it writes, which shared types/routes it uses (by file name: workers read them from disk, so never paste or restate them), and what must render (acceptance); do not restate the request, and no code samples.
 3. Integrate: apply every NEEDS: request from the reports, finish any failed or unfinished task yourself, then call checkBuild and fix what it reports before the final summary. After delegateTasks returns, only edit index.html (title/meta) if needed and run checkBuild; do not rewrite or re-generate finished pages or assets.
 Only a genuinely tiny request (one small component, a copy or style tweak, a one-file fix) skips the workers: first call delegateTasks with tasks [] and solo set to a short reason, then build it yourself.`;

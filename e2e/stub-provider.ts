@@ -45,11 +45,19 @@ interface StubOptions {
   hold?: (request: StubChatRequest) => Promise<void> | undefined;
 }
 
+/** One system message's text: a string, or the text blocks a cached Claude prompt is split into. */
+const systemText = (content: unknown) =>
+  typeof content === "string"
+    ? content
+    : Array.isArray(content)
+      ? content.map((block: { text?: unknown }) => (typeof block?.text === "string" ? block.text : "")).join("")
+      : JSON.stringify(content);
+
 /** The request's system prompt text (a worker's brief and owned paths live here). */
 export const systemPrompt = (request: StubChatRequest) =>
   request.messages
     .filter((message) => message.role === "system")
-    .map(({ content }) => (typeof content === "string" ? content : JSON.stringify(content)))
+    .map(({ content }) => systemText(content))
     .join("\n");
 
 /**

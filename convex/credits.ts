@@ -113,12 +113,15 @@ export const recordRunUsage = mutation({
     source: runSourceValidator,
     inputTokens: v.number(),
     outputTokens: v.number(),
+    // Parts of inputTokens; optional so an older caller still validates.
+    cacheReadTokens: v.optional(v.number()),
+    cacheWriteTokens: v.optional(v.number()),
     costUsd: v.number(),
   },
   returns: v.null(),
   handler: async (ctx, { internalKey, messageId, agentTaskId, modelId: ranId, model: ranLabel, source, ...totals }) => {
     validateInternalKey(internalKey);
-    if (!Object.values(totals).every((n) => Number.isFinite(n) && n >= 0)) {
+    if (!Object.values(totals).every((n) => n === undefined || (Number.isFinite(n) && n >= 0))) {
       throw appError("INVALID_ARGUMENT", "Usage totals must be finite and not negative");
     }
     const message = await ctx.db.get("messages", messageId);
@@ -151,6 +154,8 @@ export const recordRunUsage = mutation({
       ? {
           inputTokens: Math.max(row.inputTokens, totals.inputTokens),
           outputTokens: Math.max(row.outputTokens, totals.outputTokens),
+          cacheReadTokens: Math.max(row.cacheReadTokens ?? 0, totals.cacheReadTokens ?? 0),
+          cacheWriteTokens: Math.max(row.cacheWriteTokens ?? 0, totals.cacheWriteTokens ?? 0),
           costUsd: Math.max(row.costUsd, totals.costUsd),
         }
       : totals;

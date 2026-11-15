@@ -86,6 +86,8 @@ describe("processMessage credit metering", () => {
       source: "platform",
       inputTokens: 900,
       outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
       costUsd: 0.001,
     });
     expect(records[1]).toMatchObject({ inputTokens: 1_900, outputTokens: 1_100 });

@@ -163,8 +163,8 @@ export const planIdValidator = v.union(v.literal("free"), v.literal("pro"));
 /** Who pays for a run (ADR 0011). Only "platform" runs cost credits. */
 export const runSourceValidator = v.union(v.literal("platform"), v.literal("promo"), v.literal("byok"));
 
-/** Workspace layouts (#524). Add "board" here when the agent board mode ships. */
-export const workspaceModeValidator = v.union(v.literal("ide"), v.literal("chat"));
+/** Workspace layouts (#524); "board" is the agent board (#525), shown only while swarm is on. */
+export const workspaceModeValidator = v.union(v.literal("ide"), v.literal("chat"), v.literal("board"));
 
 /**
  * The model an assistant message was produced with. `keyId` is set when the
@@ -798,6 +798,9 @@ export default defineSchema({
     model: v.string(),
     inputTokens: v.number(),
     outputTokens: v.number(),
+    /** Parts of inputTokens served from and written to the prompt cache; absent on older rows. */
+    cacheReadTokens: v.optional(v.number()),
+    cacheWriteTokens: v.optional(v.number()),
     costUsd: v.number(),
     credits: v.number(),
     updatedAt: v.number(),

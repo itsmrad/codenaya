@@ -6,10 +6,14 @@ import {
   filterProviders,
   getProvider,
   hasPreRegisteredClient,
+  isDestructiveTool,
+  isProviderVisible,
   listProviders,
+  listVisibleProviders,
   offeredAuthModes,
   preRegisteredOAuthProviderIds,
 } from "./catalog";
+import { HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN } from "./hidden-until-payment-provider";
 
 describe("provider catalog display metadata", () => {
   it.each(listProviders())("has complete display metadata and a local logo for $id", (provider) => {
@@ -22,6 +26,31 @@ describe("provider catalog display metadata", () => {
     expect(svg).toContain("<svg");
     expect(svg).toContain("<path");
     expect(svg).not.toMatch(/<script|<foreignObject|https?:\/\/(?!www\.w3\.org)/i);
+  });
+});
+
+describe("providers hidden until a payment provider is chosen", () => {
+  it("leaves Stripe out of the visible list and keeps every other provider", () => {
+    const visible = listVisibleProviders().map(({ id }) => id);
+    expect(HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN).toEqual(["stripe"]);
+    expect(visible).not.toContain("stripe");
+    expect(visible).toEqual(listProviders().map(({ id }) => id).filter((id) => id !== "stripe"));
+    expect(visible).toHaveLength(listProviders().length - HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN.length);
+    expect(isProviderVisible("stripe")).toBe(false);
+    expect(isProviderVisible("supabase")).toBe(true);
+    expect(isProviderVisible("vercel")).toBe(false);
+  });
+
+  it("still resolves Stripe for existing connections, with its approval gating", () => {
+    const stripe = getProvider("stripe");
+    expect(stripe).toMatchObject({ id: "stripe", displayName: "Stripe", logo: "/integrations/stripe.svg" });
+    expect(listProviders().map(({ id }) => id)).toContain("stripe");
+    expect(isDestructiveTool("stripe", "create_refund")).toBe(true);
+  });
+
+  it("restores Stripe when the hidden list is emptied", () => {
+    expect(listVisibleProviders([])).toEqual(listProviders());
+    expect(isProviderVisible("stripe", [])).toBe(true);
   });
 });
 
@@ -66,8 +95,13 @@ describe("pre-registered OAuth clients (#539)", () => {
 
 describe("provider catalog filters", () => {
   it("keeps declaration order when the query is empty or whitespace", () => {
-    expect(filterProviders("")).toEqual(listProviders());
-    expect(filterProviders("   ")).toEqual(listProviders());
+    expect(filterProviders("")).toEqual(listVisibleProviders());
+    expect(filterProviders("   ")).toEqual(listVisibleProviders());
+  });
+
+  it("never finds a hidden provider", () => {
+    expect(filterProviders("stripe")).toEqual([]);
+    expect(filterProviders("", "Payments")).toEqual([]);
   });
 
   it("matches names, capabilities and categories without case sensitivity", () => {

@@ -55,7 +55,7 @@ import {
   keyFailureMessage,
   resolveRunModel,
 } from '@/features/ai-providers/server/resolve-run-model';
-import { forceToolCall, withoutToolCalls } from '@/features/ai-providers/server/agentkit-model';
+import { forceToolCall, withoutToolCalls, withPromptCache } from '@/features/ai-providers/server/agentkit-model';
 import type { ModelPricing } from '@/features/ai-providers/catalog';
 import { costUsd, creditsForCost, usageOfResponse } from '@/features/billing/credits';
 import {
@@ -295,7 +295,7 @@ export const processMessage = inngest.createFunction(
     // Running totals, rebuilt from the memoized inferences on every replay, so
     // each record step sends the run's total so far: a retried step changes
     // nothing, and one that failed is caught up by the next (or the final one).
-    const usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+    const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 };
     let usageRecords = 0;
     const sendUsage = (id: string) => {
       const totals = { ...usage };
@@ -321,6 +321,8 @@ export const processMessage = inngest.createFunction(
       const tokens = usageOfResponse(raw);
       usage.inputTokens += tokens.inputTokens;
       usage.outputTokens += tokens.outputTokens;
+      usage.cacheReadTokens += tokens.cacheReadTokens ?? 0;
+      usage.cacheWriteTokens += tokens.cacheWriteTokens ?? 0;
       const cost = pricing ? costUsd(pricing, tokens) : 0;
       usage.costUsd += cost;
       if (id !== "record-usage-title") codingCostUsd += cost;
@@ -739,7 +741,8 @@ export const processMessage = inngest.createFunction(
 
     // Re-validated by resolveRunModel: the event is the boundary this function
     // trusts, and anything holding the event key can send one.
-    const codingModel = runModel.coding(0.3);
+    // The base prompt is the same for every run, so runs share its cache.
+    const codingModel = withPromptCache(runModel.coding(0.3), CODING_AGENT_SYSTEM_PROMPT);
 
     // Create the coding agent with file tools
     const agentOptions: Parameters<typeof createAgent>[0] = {

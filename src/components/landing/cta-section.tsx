@@ -23,12 +23,12 @@ export const LandingCTA = () => {
         transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
         className="relative mx-auto max-w-3xl px-6 py-24 text-center md:py-32"
       >
-        <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">[ Get started ]</p>
+        <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">[ Bring your own key ]</p>
         <h2 className="mt-5 text-5xl font-medium leading-[1.04] tracking-[-0.03em] text-foreground md:text-7xl">
-          Start with <span className="text-brand">one prompt</span>
+          Build with <span className="text-brand">your model</span>
         </h2>
         <p className="mx-auto mt-5 max-w-lg text-lg leading-relaxed text-pretty text-muted-foreground">
-          300 free credits a month, and nothing to install.
+          BYOK runs use no credits. Import from GitHub, then export or download a ZIP.
         </p>
         <LandingPromptComposer className="mt-10 text-left" />
       </motion.div>

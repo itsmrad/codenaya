@@ -16,13 +16,16 @@ vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal)
 import { CommandExitError, type CommandResult, type Sandbox, SandboxError, TimeoutError } from "e2b";
 import { getFunctionName } from "convex/server";
 
+import { DEV_COMMAND_ENV, PROXY_TARGET_ENV, killTreeCommand } from "@/features/sandbox-preview/server/dev-server";
+
 import { VITE_REACT_STARTER } from "../vite-starter";
 import {
   BUILD_NOT_CHECKED,
   BUILD_VERIFIED,
   STATIC_CHECKS_PASSED,
 } from "../../agent-steps";
-import { buildCommand, checkProjectBuild, createCheckBuildTool, trimBuildOutput } from "./check-build";
+import { START_BUILD_ERROR, START_TYPE_ERROR } from "./start-build-output.fixture";
+import { buildCommand, checkProjectBuild, createCheckBuildTool, trimBuildOutput, warmSlow } from "./check-build";
 import { NEXT_MODULE_NOT_FOUND, NEXT_PRERENDER_ERROR, NEXT_TYPE_ERROR } from "./next-build-output.fixture";
 
 const starter = () => VITE_REACT_STARTER.map((file) => ({ ...file }));
@@ -41,7 +44,7 @@ const unfinishedLogs = () =>
 
 type Answer = { exitCode: number; stdout?: string; stderr?: string } | Error;
 
-type Proc = { cmd: string; args: string[] };
+type Proc = { cmd: string; args: string[]; pid?: number; envs?: Record<string, string>; cwd?: string };
 
 /** A sandbox whose commands get `respond`'s answer: a result, or an error to throw. */
 const sandboxWith = (respond: (command: string) => Answer | undefined, processes: Proc[] = []) => ({
@@ -68,6 +71,7 @@ const fakeSandbox = (...answers: Answer[]) => {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  warmSlow.clear();
   vi.unstubAllEnvs();
   vi.resetAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -174,7 +178,32 @@ describe("trimBuildOutput for Next.js", () => {
   });
 });
 
+describe("trimBuildOutput for TanStack Start", () => {
+  const output = ({ stdout, stderr }: { stdout: string; stderr: string }) => `${stderr}\n${stdout}`;
+
+  it("starts at the tsc error after a passing build and drops both builds' progress", () => {
+    expect(trimBuildOutput(output(START_TYPE_ERROR), "/home/user/app", "tanstack-start")).toBe(
+      "src/routes/index.tsx(12,17): error TS2322: Type 'number' is not assignable to type 'string'.",
+    );
+  });
+
+  it("keeps Vite's failure with its location and drops the progress", () => {
+    const trimmed = trimBuildOutput(output(START_BUILD_ERROR), "/home/user/app", "tanstack-start");
+    expect(trimmed.split("\n").slice(0, 2)).toEqual([
+      "error during build:",
+      '[vite]: Rollup failed to resolve import "@/components/Hero" from "src/routes/index.tsx".',
+    ]);
+    expect(trimmed).not.toMatch(/vite v7|transforming|modules transformed/);
+  });
+});
+
 describe("buildCommand", () => {
+  it("builds TanStack Start before type checking, since the build generates its route tree", () => {
+    expect(buildCommand("tanstack-start", new Set(["package.json", "tsconfig.json"]))).toBe(
+      "npx vite build && npx tsc --noEmit",
+    );
+  });
+
   it("runs next build alone for Next.js, without telemetry", () => {
     expect(buildCommand("next", new Set(["package.json", "tsconfig.json"]))).toBe(
       "NEXT_TELEMETRY_DISABLED=1 npx next build",
@@ -324,7 +353,7 @@ describe("checkProjectBuild", () => {
     expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
     const commands = sandbox.commands.run.mock.calls.map((call) => (call as unknown[])[0]);
     expect(commands).toEqual([
-      "npm install --prefer-offline --no-audit --no-fund --loglevel=error",
+      "npm install --prefer-offline --no-audit --no-fund --loglevel=error || npm install --no-audit --no-fund --loglevel=error",
       "NEXT_TELEMETRY_DISABLED=1 npx next build",
     ]);
   });
@@ -357,6 +386,22 @@ describe("checkProjectBuild", () => {
     expect(copy).toContain("--exclude=./dist --exclude=./.next --exclude=./out --exclude=./next-env.d.ts --exclude=.env ");
   });
 
+  it("leaves TanStack Start build output out of the sourceDir copy", async () => {
+    const sandbox = sandboxWith(() => undefined);
+    const files = [
+      { path: "package.json", content: JSON.stringify({ dependencies: { "@tanstack/react-start": "1.0.0", vite: "7.0.0" } }) },
+      { path: "vite.config.ts", content: "export default {};\n" },
+    ];
+    await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandbox: sandbox as unknown as Sandbox,
+      sourceDir: "/home/user/app",
+    });
+    const [copy] = sandbox.commands.run.mock.calls.map(([command]) => command);
+    expect(copy).toContain("--exclude=./dist --exclude=./.output --exclude=./.tanstack --exclude=./.nitro --exclude=./.vinxi --exclude=.env ");
+  });
+
   it("installs, type checks and builds, then kills the sandbox", async () => {
     const sandbox = fakeSandbox({ exitCode: 0 }, { exitCode: 0 });
     const result = await check();
@@ -367,7 +412,7 @@ describe("checkProjectBuild", () => {
     );
     const commands = sandbox.commands.run.mock.calls.map((call) => (call as unknown[])[0]);
     expect(commands).toEqual([
-      "npm install --prefer-offline --no-audit --no-fund --loglevel=error",
+      "npm install --prefer-offline --no-audit --no-fund --loglevel=error || npm install --no-audit --no-fund --loglevel=error",
       "npx tsc --noEmit -p tsconfig.app.json && npx vite build",
     ]);
     expect(sandbox.kill).toHaveBeenCalledTimes(1);
@@ -583,6 +628,90 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     );
     expect(warm.kill).not.toHaveBeenCalled();
     expect(e2b.create).not.toHaveBeenCalled();
+  });
+
+  it("builds a Next.js project in a new sandbox, never beside the preview's next dev", async () => {
+    listed({});
+    const cold = fakeSandbox();
+
+    const result = await warmCheck(nextApp());
+
+    expectCold(result);
+    expect(e2b.list).not.toHaveBeenCalled();
+    expect(e2b.connect).not.toHaveBeenCalled();
+    expect(commandsOf(cold)).toContain("NEXT_TELEMETRY_DISABLED=1 npx next build");
+  });
+
+  it("builds a TanStack Start project in a new sandbox, never beside the preview's dev server", async () => {
+    listed({});
+    const cold = fakeSandbox();
+    const files = [
+      { path: "package.json", content: JSON.stringify({ dependencies: { "@tanstack/react-start": "1.0.0", vite: "7.0.0" } }) },
+      { path: "vite.config.ts", content: "export default {};\n" },
+    ];
+
+    const result = await warmCheck(files);
+
+    expectCold(result);
+    expect(e2b.list).not.toHaveBeenCalled();
+    expect(e2b.connect).not.toHaveBeenCalled();
+    expect(commandsOf(cold)).toContain("npx vite build && npx tsc --noEmit");
+    expect(cold.kill).toHaveBeenCalledTimes(1);
+  });
+
+  describe("the preview's dev server after a warm build", () => {
+    const dev: Proc = { ...DEV_SERVER, pid: 12, envs: { [DEV_COMMAND_ENV]: "npm run dev -- --hostname 0.0.0.0" }, cwd: "/home/user/app" };
+    const proxy: Proc = { cmd: "/bin/bash", args: ["-l", "-c", "node /home/user/e2b-proxy.js"], pid: 5, envs: { [PROXY_TARGET_ENV]: "3000" } };
+    const afterBuild = (warm: ReturnType<typeof sandboxWith>) => {
+      const commands = commandsOf(warm);
+      return commands.slice(commands.indexOf("npx tsc --noEmit -p tsconfig.app.json && npx vite build") + 1);
+    };
+
+    it("starts the dev server again, the same way, when the build took its port down", async () => {
+      listed({});
+      const warm = warmSandbox(undefined, [dev, proxy]);
+
+      const result = await warmCheck();
+
+      expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+      const [cleanup, ...rest] = afterBuild(warm);
+      expect(cleanup).toMatch(/^rm -rf \/home\/user\/check-build-/);
+      expect(rest.slice(0, 3)).toEqual(Array(3).fill(expect.stringContaining("port:3000")));
+      expect(rest.slice(3)).toEqual([killTreeCommand(12), "npm run dev -- --hostname 0.0.0.0"]);
+      // Bounded like the rest of the cleanup, so a slow sandbox can't hold the step past its budget.
+      expect(warm.commands.run.mock.calls.at(-2)?.[1]).toEqual({ timeoutMs: 10_000, requestTimeoutMs: 10_000 });
+      expect(warm.commands.run.mock.calls.at(-1)?.[1]).toEqual({
+        cwd: "/home/user/app", envs: dev.envs, background: true, timeoutMs: 0, requestTimeoutMs: 10_000,
+      });
+      expect(warm.kill).not.toHaveBeenCalled();
+      expect(e2b.create).not.toHaveBeenCalled();
+    });
+
+    it("still builds warm when the dev server lookup fails", async () => {
+      listed({});
+      const warm = warmSandbox(undefined, [dev, proxy]);
+      // The install checks before and after the copy, then the lookup before the build.
+      warm.commands.list
+        .mockResolvedValueOnce([dev, proxy])
+        .mockResolvedValueOnce([dev, proxy])
+        .mockRejectedValueOnce(new Error("envd hiccup"));
+
+      const result = await warmCheck();
+
+      expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect(afterBuild(warm)).toEqual([expect.stringMatching(/^rm -rf /)]);
+      expect(e2b.create).not.toHaveBeenCalled();
+    });
+
+    it("leaves a dev server whose port still answers alone", async () => {
+      listed({});
+      const warm = warmSandbox((command) => (command.includes('require("net")') ? { exitCode: 0, stdout: "open\n" } : undefined), [dev, proxy]);
+
+      const result = await warmCheck();
+
+      expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect(afterBuild(warm)).toEqual([expect.stringMatching(/^rm -rf /), expect.stringContaining("port:3000")]);
+    });
   });
 
   /** Builds, but imports an export App.tsx lacks: an advisory finding (#333). */
@@ -882,17 +1011,76 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expectCold(await warmCheck(), warm);
   });
 
-  it("reports a timeout in the warm build as unfinished, without a second build", async () => {
+  const slowInstall = (command: string) =>
+    command.startsWith("npm install") ? new TimeoutError("Command timed out") : undefined;
+
+  it("builds in a new sandbox when the warm build times out and the step budget allows it", async () => {
     listed({});
-    const warm = warmSandbox((command) =>
-      command.startsWith("npm install") ? new TimeoutError("Command timed out") : undefined,
-    );
+    const warm = warmSandbox(slowInstall);
+    fakeSandbox();
+
+    expectCold(await warmCheck(), warm);
+  });
+
+  it("reports the timeout as unfinished when too little of the step budget is left for a new sandbox", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    listed({});
+    const warm = warmSandbox((command) => {
+      if (!command.startsWith("npm install")) return undefined;
+      now += 185_000;
+      return new TimeoutError("Command timed out");
+    });
+
+    const result = await warmCheck();
+
+    expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
+    expect(warm.kill).not.toHaveBeenCalled();
+    expect(e2b.create).not.toHaveBeenCalled();
+    expect(unfinishedLogs()).toEqual([
+      {
+        path: "warm-then-before-cold",
+        elapsedMs: 185_000,
+        budgetLeftMs: 55_000,
+        error: "OutOfTime",
+        reason: "The check ran out of time",
+      },
+    ]);
+  });
+
+  it("skips the warm preview on the retry after a warm timeout, until the entry expires", async () => {
+    let now = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    listed({});
+    const warm = warmSandbox(slowInstall);
+    fakeSandbox();
+    expectCold(await warmCheck(), warm);
+
+    e2b.create.mockClear();
+    e2b.connect.mockClear();
+    now += 9 * 60_000;
+    fakeSandbox();
+    expectCold(await warmCheck(), warm);
+    expect(e2b.connect).not.toHaveBeenCalled();
+
+    e2b.create.mockClear();
+    now += 2 * 60_000;
+    fakeSandbox();
+    expectCold(await warmCheck(), warm);
+    expect(e2b.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports one unfinished check when the new sandbox also times out, without another build", async () => {
+    listed({});
+    warmSandbox(slowInstall);
+    const cold = fakeSandbox(new TimeoutError("Command timed out"));
 
     const result = await warmCheck();
 
     expect(result).toMatch(/^Error: The build check could not finish \(Command timed out\)/);
-    expect(warm.kill).not.toHaveBeenCalled();
-    expect(e2b.create).not.toHaveBeenCalled();
+    expect(e2b.create).toHaveBeenCalledTimes(1);
+    expect(cold.kill).toHaveBeenCalledTimes(1);
+    expect(unfinishedLogs().map((log) => log.path)).toEqual(["warm-then-cold"]);
   });
 
   it("kills the timed-out build's own processes before removing its directory, never the dev server", async () => {
@@ -901,6 +1089,7 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
       command.startsWith("npm install") ? new TimeoutError("Command timed out") : undefined,
     );
 
+    fakeSandbox();
     await warmCheck();
 
     const runs = commandsOf(warm);
@@ -914,8 +1103,9 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expect(warm.kill).not.toHaveBeenCalled();
   });
 
-  it("still reports the timeout and cleans up when killing the build's processes fails", async () => {
+  it("still tries a new sandbox and cleans up when killing the build's processes fails", async () => {
     listed({});
+    fakeSandbox();
     const warm = warmSandbox((command) => {
       if (command.startsWith("npm install")) return new TimeoutError("Command timed out");
       return command.includes("kill -9") ? new Error("sandbox gone") : undefined;
@@ -923,9 +1113,9 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
 
     const result = await warmCheck();
 
-    expect(result).toMatch(/^Error: The build check could not finish \(Command timed out\)/);
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
     expect(commandsOf(warm).some((run) => run.startsWith("rm -rf "))).toBe(true);
-    expect(e2b.create).not.toHaveBeenCalled();
+    expect(e2b.create).toHaveBeenCalledTimes(1);
   });
 
   it("kills nothing when the warm build finishes or fails", async () => {
@@ -935,30 +1125,6 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     await warmCheck();
 
     expect(commandsOf(warm).some((run) => run.includes("kill -9"))).toBe(false);
-  });
-
-  it("logs a warm unfinished check with its sandbox, elapsed time and the budget left", async () => {
-    let now = 1_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => now);
-    listed({});
-    const warm = warmSandbox((command) => {
-      if (command.startsWith("npm install")) now += 125_000;
-      return undefined;
-    });
-    Object.assign(warm, { sandboxId: "sbx_warm_0" });
-
-    await warmCheck();
-
-    expect(unfinishedLogs()).toEqual([
-      {
-        path: "warm",
-        elapsedMs: 125_000,
-        budgetLeftMs: 115_000,
-        sandboxId: "sbx_warm_0",
-        error: "OutOfTime",
-        reason: "The check ran out of time",
-      },
-    ]);
   });
 
   it("does not start a new sandbox when a failed warm attempt left too little of the step budget", async () => {
@@ -1012,19 +1178,21 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expect(e2b.create).not.toHaveBeenCalled();
   });
 
-  it("reports a warm build that hits its 120 s cap as unfinished, without a cold build", async () => {
+  it("gives the warm build 180 s, so a 130 s install and build still finishes there", async () => {
     let now = 1_000_000;
     vi.spyOn(Date, "now").mockImplementation(() => now);
     listed({});
     const warm = warmSandbox((command) => {
-      if (command.startsWith("npm install")) now += 125_000;
+      if (command.startsWith("npm install")) now += 130_000;
       return undefined;
     });
 
     const result = await warmCheck();
 
-    expect(result).toMatch(/^Error: The build check could not finish \(The check ran out of time\)/);
-    expect(commandsOf(warm).some((run) => run.startsWith("npx tsc"))).toBe(false);
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(warm.commands.run.mock.calls.find((call) => call[0].startsWith("npm install"))?.[1]).toMatchObject({
+      timeoutMs: 180_000,
+    });
     expect(e2b.create).not.toHaveBeenCalled();
   });
 

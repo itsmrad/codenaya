@@ -3,13 +3,16 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { BUILTIN_SKILL_NAMES } from "../src/features/skills/builtin/names";
+import { BUILTIN_SKILLS } from "../src/features/skills/builtin";
 import { MAX_LIBRARY_SKILLS } from "../src/features/skills/limits";
 import { api } from "./_generated/api";
 import { deleteProjectBatch } from "./projectCascade";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
+
+// Listed built-ins: stripe-checkout is hidden until a payment provider is chosen.
+const LISTED_BUILTIN_NAMES = BUILTIN_SKILLS.map(({ name }) => name);
 
 const ALICE = "user_alice";
 const BOB = "user_bob";
@@ -145,7 +148,7 @@ describe("skills", () => {
     const skills = await alice.query(api.skills.listProjectSkills, { projectId });
 
     expect(skills.map(({ name, scope, enabled }) => ({ name, scope, enabled }))).toEqual([
-      ...BUILTIN_SKILL_NAMES.map((name) => ({ name, scope: "builtin", enabled: false })),
+      ...LISTED_BUILTIN_NAMES.map((name) => ({ name, scope: "builtin", enabled: false })),
       { name: "alpha", scope: "library", enabled: false },
       { name: "beta", scope: "library", enabled: false },
     ]);
@@ -165,7 +168,7 @@ describe("skills", () => {
       enabled: true,
     });
     const inP2 = await alice.query(api.skills.listProjectSkills, { projectId: p2 });
-    expect(inP2.map((s) => s.name)).toEqual(BUILTIN_SKILL_NAMES);
+    expect(inP2.map((s) => s.name)).toEqual(LISTED_BUILTIN_NAMES);
     expect(await alice.query(api.skills.listLibrary, {})).toEqual([]);
   });
 
@@ -182,7 +185,7 @@ describe("skills", () => {
     });
     let skills = await alice.query(api.skills.listProjectSkills, { projectId });
     expect(skills.map((s) => [s.name, s.enabled])).toEqual([
-      ...BUILTIN_SKILL_NAMES.map((name) => [name, name === "find-skills"]),
+      ...LISTED_BUILTIN_NAMES.map((name) => [name, name === "find-skills"]),
       ["alpha", false],
       ["local", true],
     ]);
@@ -195,7 +198,7 @@ describe("skills", () => {
     skills = await alice.query(api.skills.listProjectSkills, { projectId });
     expect(skills.every((s) => !s.enabled)).toBe(true);
     // One row per skill, updated in place.
-    expect(await countSettings(t)).toBe(BUILTIN_SKILL_NAMES.length + 2);
+    expect(await countSettings(t)).toBe(LISTED_BUILTIN_NAMES.length + 2);
 
     await expect(
       alice.mutation(api.skills.setProjectSkillEnabled, {

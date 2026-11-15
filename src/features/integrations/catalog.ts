@@ -39,6 +39,7 @@ import {
   CONTENTFUL_DESTRUCTIVE_TOOLS,
   CONTENTFUL_READ_TOOLS,
 } from "./contentful-tools";
+import { HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN } from "./hidden-until-payment-provider";
 import { POSTHOG_DESTRUCTIVE_TOOLS } from "./posthog-destructive-tools";
 import { POSTHOG_READ_TOOLS } from "./posthog-read-tools";
 
@@ -1538,6 +1539,21 @@ export function listProviders(): readonly ProviderDefinition[] {
   return PROVIDER_IDS.map((id) => PROVIDERS[id]);
 }
 
+/** Whether a catalog provider is offered for new connections (see `HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN`). */
+export function isProviderVisible(
+  id: ProviderIdInput,
+  hidden: readonly string[] = HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN,
+): boolean {
+  return getProvider(id) !== undefined && !hidden.includes(id);
+}
+
+/** Catalog providers offered for new connections, in declaration order. */
+export function listVisibleProviders(
+  hidden: readonly string[] = HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN,
+): readonly ProviderDefinition[] {
+  return listProviders().filter(({ id }) => !hidden.includes(id));
+}
+
 type Env = Readonly<Record<string, string | undefined>>;
 
 /** Whether both of a provider's pre-registered client variables are set. */
@@ -1575,10 +1591,10 @@ export function offeredAuthModes(
   return provider.authModes.filter((mode) => mode !== "oauth");
 }
 
-/** Search display metadata only; category and query filters intersect. */
+/** Search display metadata of visible providers only; category and query filters intersect. */
 export function filterProviders(query: string, category?: string): readonly ProviderDefinition[] {
   const search = query.trim().toLowerCase();
-  return listProviders().filter((provider) =>
+  return listVisibleProviders().filter((provider) =>
     (!category || provider.category === category) &&
     `${provider.displayName} ${provider.description} ${provider.category}`
       .toLowerCase().includes(search),

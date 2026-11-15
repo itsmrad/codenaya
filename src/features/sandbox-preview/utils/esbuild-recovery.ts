@@ -7,10 +7,10 @@ export const MAX_ESBUILD_RECOVERIES = 3;
 // readInstallFailure's message ("npm install failed with exit code 1 (EPIPE)") is npm, not esbuild.
 const INSTALL_FAILED = / failed with exit code \d+/;
 
-/** These build errors mean Vite lost esbuild, rather than finding invalid source. Next (SWC/webpack) never restarts as Vite. */
+/** These build errors mean Vite lost esbuild, rather than finding invalid source. Start runs on Vite too; Next (SWC/webpack) never restarts as Vite. */
 export const isEsbuildServiceFailure = (error: AppError | null, framework: Framework | null) => Boolean(
   error &&
-  framework === "vite" &&
+  (framework === "vite" || framework === "tanstack-start") &&
   !INSTALL_FAILED.test(error.message) &&
   (error.kind === "build" || /esbuild/i.test(`${error.file ?? ""}\n${error.stack ?? ""}`)) &&
   /\bEPIPE\b|The service is no longer running|The service was stopped/i.test(error.message),

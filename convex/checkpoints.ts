@@ -3,6 +3,7 @@ import { Text } from "@codemirror/state";
 import { ConvexError, v } from "convex/values";
 
 import { runWrittenPaths } from "../src/features/conversations/agent-steps";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
@@ -249,6 +250,34 @@ async function restoreCheckpoint(
     throw appError("LIMIT_EXCEEDED", "This checkpoint is too large to restore");
   }
   await applyTree(ctx, checkpoint.projectId, rows, new Map(rows.map((row) => [row.path, row.type])));
+}
+
+/** Refuse large snapshots whole, leaving room for configuration reads and writes. */
+const MAX_FORK_BYTES = 4 * 1024 * 1024;
+
+/** Owner copies keep all saved files, just like Duplicate, including secret files. */
+export async function copyCheckpointFiles(
+  ctx: MutationCtx,
+  checkpointId: Id<"checkpoints">,
+  targetId: Id<"projects">,
+) {
+  const rows: Doc<"checkpointFiles">[] = [];
+  let bytes = 0;
+  for await (const row of checkpointRows(ctx, checkpointId)) {
+    bytes += new TextEncoder().encode(JSON.stringify(row)).byteLength;
+    if (rows.length === MAX_CHECKPOINT_FILES || bytes > MAX_FORK_BYTES) {
+      throw appError("LIMIT_EXCEEDED", "This checkpoint is too large to fork");
+    }
+    rows.push(row);
+  }
+  await applyTree(ctx, targetId, rows);
+  const files = await ctx.db.query("files")
+    .withIndex("by_project", (q) => q.eq("projectId", targetId))
+    .take(MAX_CHECKPOINT_FILES);
+  const fileIds = files.filter((file) => file.storageId).map((file) => file._id);
+  if (fileIds.length > 0) {
+    await ctx.scheduler.runAfter(0, internal.projectCopy.copyBlobs, { fileIds });
+  }
 }
 
 /** The project's checkpoints, newest first. Bounded by the retention cap. */

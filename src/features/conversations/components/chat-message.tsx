@@ -36,6 +36,7 @@ import { useAgentTasks } from "../hooks/use-agent-tasks";
 import { buildPlanMessage, isPlanReply } from "../plan-mode";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
+import { ForkCheckpointButton } from "./checkpoint-dialogs";
 import { PlanEditor } from "./plan-editor";
 import { ShipCard } from "./ship-card";
 import { parseSuggestion, type SuggestionAction } from "../suggestions";
@@ -366,8 +367,11 @@ export const AssistantMessage = ({
         <p className="text-sm text-muted-foreground">Request cancelled</p>
       )}
       {/* A stopped run may still have changed files. */}
-      {status === "cancelled" && restoreAction && (
-        <MessageActions className="-ml-1.5 -mt-1">{restoreAction}</MessageActions>
+      {status === "cancelled" && (restoreAction || checkpointId) && (
+        <MessageActions className="-ml-1.5 -mt-1">
+          {restoreAction}
+          {checkpointId && <ForkCheckpointButton checkpointId={checkpointId} />}
+        </MessageActions>
       )}
       {status === "completed" && content && (
         <>
@@ -487,6 +491,7 @@ export const AssistantMessage = ({
             )}
             {/* The stuck card offers it already. */}
             {!message.stuck && restoreAction}
+            {checkpointId && <ForkCheckpointButton checkpointId={checkpointId} />}
           </MessageActions>
         </>
       )}

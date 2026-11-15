@@ -4,23 +4,36 @@ import { describe, expect, it } from "vitest";
 
 import { detectCredential } from "@/features/integrations/credential-guard";
 
-import { BUILTIN_SKILLS } from "./builtin";
+import { ALL_BUILTIN_SKILLS, BUILTIN_SKILLS, visibleBuiltinSkills } from "./builtin";
 import { BUILTIN_SKILL_NAMES } from "./builtin/names";
 import { validateSkill } from "./limits";
 
 describe("built-in skills", () => {
   it("match the reserved name list", () => {
-    expect(BUILTIN_SKILLS.map((skill) => skill.name)).toEqual(BUILTIN_SKILL_NAMES);
+    expect(ALL_BUILTIN_SKILLS.map((skill) => skill.name)).toEqual(BUILTIN_SKILL_NAMES);
   });
 
-  it.each(BUILTIN_SKILLS.map((skill) => [skill.name, skill] as const))(
+  it("list every skill but stripe-checkout until a payment provider is chosen", () => {
+    const names = BUILTIN_SKILLS.map((skill) => skill.name);
+    expect(names).not.toContain("stripe-checkout");
+    expect(names).toEqual(BUILTIN_SKILL_NAMES.filter((name) => name !== "stripe-checkout"));
+    // The skill itself still exists, and keeps its reserved name.
+    expect(ALL_BUILTIN_SKILLS.map((skill) => skill.name)).toContain("stripe-checkout");
+    expect(BUILTIN_SKILL_NAMES).toContain("stripe-checkout");
+  });
+
+  it("list stripe-checkout again when the hidden list is emptied", () => {
+    expect(visibleBuiltinSkills([])).toEqual(ALL_BUILTIN_SKILLS);
+  });
+
+  it.each(ALL_BUILTIN_SKILLS.map((skill) => [skill.name, skill] as const))(
     "%s passes the skill limits",
     (_name, skill) => {
       expect(validateSkill(skill)).toBeNull();
     },
   );
 
-  it.each(BUILTIN_SKILLS.map((skill) => [skill.name, skill] as const))(
+  it.each(ALL_BUILTIN_SKILLS.map((skill) => [skill.name, skill] as const))(
     "%s contains no credential-shaped values",
     (_name, skill) => {
       expect(detectCredential(skill.body).matchedRules).toEqual([]);
@@ -48,7 +61,7 @@ describe("built-in skills", () => {
   });
 
   const bodyOf = (name: string) =>
-    BUILTIN_SKILLS.find((skill) => skill.name === name)?.body ?? "";
+    ALL_BUILTIN_SKILLS.find((skill) => skill.name === name)?.body ?? "";
 
   it("supabase-auth-db keeps RLS on and the secret key out of the app", () => {
     const body = bodyOf("supabase-auth-db");
@@ -59,6 +72,21 @@ describe("built-in skills", () => {
     expect(body).toMatch(/NEVER put the \*\*secret key\*\*[\s\S]*service_role/);
     expect(body).not.toMatch(/VITE_\w*(SECRET|SERVICE)/);
     expect(body).not.toMatch(/disable row level security|using \(true\)\s*;/i);
+  });
+
+  it("supabase-auth-db distinguishes Vite browser auth from Next.js cookie-based server auth", () => {
+    const body = bodyOf("supabase-auth-db");
+
+    expect(body).toContain("import.meta.env.VITE_SUPABASE_URL");
+    expect(body).toContain("import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY");
+    expect(body).toContain("process.env.NEXT_PUBLIC_SUPABASE_URL");
+    expect(body).toContain("process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+    for (const rule of ["@supabase/ssr", "createBrowserClient", "createServerClient", "await cookies()", "getAll", "setAll", "src/app/api/**/route.ts", "src/middleware.ts", "supabase.auth.getUser()", "exchangeCodeForSession"]) {
+      expect(body).toContain(rule);
+    }
+    expect(body).toContain("React Router examples in steps 2–4 are Vite-only");
+    expect(body).toContain("missing value does not break");
+    expect(body).not.toMatch(/NEXT_PUBLIC_\w*(SECRET|SERVICE)/);
   });
 
   it("stripe-checkout keeps secrets server-side and verifies webhooks", () => {
