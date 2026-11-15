@@ -6,6 +6,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { Toaster } from "@/components/ui/sonner";
 import { Providers } from "@/components/providers";
 import { ShortcutsDialog } from "@/components/shortcuts-dialog";
+import { SetupQuestionsDialog } from "@/features/conversations/components/setup-questions-dialog";
 import { CommandPalette } from "@/features/projects/components/command-palette";
 import { AuthLoadingView } from "@/features/auth/components/auth-loading-view";
 import { AGENT_MODELS } from "@/features/conversations/agent-models";
@@ -93,6 +94,7 @@ export default function RootLayout({
             {children}
             <Toaster />
             <ShortcutsDialog />
+            <SetupQuestionsDialog />
             <CommandPalette />
           </Providers>
         </Suspense>

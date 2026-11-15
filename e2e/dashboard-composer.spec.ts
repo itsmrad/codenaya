@@ -25,6 +25,8 @@ test.describe("dashboard prompt composer", () => {
 
     await composer.fill(SMOKE_PROMPT);
     await composer.press("Enter");
+    // A short prompt gets the setup questions first (#344); Skip builds it as typed.
+    await page.getByRole("button", { name: "Skip, just build" }).click();
 
     await expect(page).toHaveURL(/\/projects\/[a-z0-9]+$/, { timeout: 30_000 });
     // The prompt is the first message of the project's conversation.
@@ -45,6 +47,7 @@ test.describe("dashboard prompt composer", () => {
 
     await input.fill(SMOKE_PROMPT);
     await dialog.getByRole("button", { name: "Create project" }).click();
+    await page.getByRole("button", { name: "Skip, just build" }).click();
 
     await expect(page).toHaveURL(/\/projects\/[a-z0-9]+$/, { timeout: 30_000 });
   });
