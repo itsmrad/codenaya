@@ -1,7 +1,7 @@
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { PromptComposer } from "./prompt-composer";
-import { PromptInput } from "@/components/ai-elements/prompt-input";
+import { PromptInput, PromptInputTools } from "@/components/ai-elements/prompt-input";
 import { Select, SelectItem, SelectTrigger } from "@/components/ui/select";
 
 const harness = vi.hoisted(() => {
@@ -33,7 +33,7 @@ vi.mock("@/features/conversations/components/enhance-prompt-button", () => ({ En
 vi.mock("@/features/conversations/components/plan-mode-toggle", () => ({ PlanModeToggle: "div" }));
 vi.mock("@/components/ai-elements/prompt-input", () => ({
   PromptInput: "form", PromptInputBody: "div", PromptInputFooter: "footer",
-  PromptInputSubmit: "button", PromptInputSpeechButton: "button", PromptInputTextarea: "textarea", PromptInputTools: "div",
+  PromptInputSubmit: "button", PromptInputSpeechButton: "button", PromptInputTextarea: "textarea", PromptInputTools: "prompt-tools",
 }));
 
 function find(node: ReactNode, type: unknown): ReactElement<Record<string, unknown>> {
@@ -76,4 +76,13 @@ it("restores the saved choice after mount and disables changes while creating", 
   const select = find(render(), Select);
   expect(select.props.value).toBe("next");
   expect(select.props.disabled).toBe(true);
+});
+
+it("keeps framework outside the measured tools row and compacts at the counter breakpoint", () => {
+  harness.resetCursor();
+  const tree = PromptComposer({ onSubmit: vi.fn() });
+  const trigger = find(tree, SelectTrigger);
+  expect(trigger.props["data-testid"]).toBe("prompt-composer-framework");
+  expect(find(trigger, "span").props.className).toBe("@max-[640px]:sr-only");
+  expect(find(find(tree, PromptInputTools), Select)).toBeUndefined();
 });

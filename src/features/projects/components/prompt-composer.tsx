@@ -213,8 +213,8 @@ export const PromptComposer = ({
               setFramework(next);
               writeProjectFramework(next);
             }} disabled={isBusy}>
-              <SelectTrigger size="sm" aria-label="Framework" className={cn(TOOL, "h-full rounded-none border-y-0 border-l-0 shadow-none")}>
-                <span>Framework</span>
+              <SelectTrigger size="sm" aria-label="Framework" data-testid="prompt-composer-framework" className={cn(TOOL, "h-full rounded-none border-y-0 border-l-0 shadow-none")}>
+                <span className="@max-[640px]:sr-only">Framework</span>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className={MODEL_MENU}>
