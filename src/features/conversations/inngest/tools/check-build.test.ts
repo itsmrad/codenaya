@@ -588,19 +588,31 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expect(e2b.create).not.toHaveBeenCalled();
   });
 
-  describe("the preview's dev server after a warm Next.js build", () => {
+  it("builds a Next.js project in a new sandbox, never beside the preview's next dev", async () => {
+    listed({});
+    const cold = fakeSandbox();
+
+    const result = await warmCheck(nextApp());
+
+    expectCold(result);
+    expect(e2b.list).not.toHaveBeenCalled();
+    expect(e2b.connect).not.toHaveBeenCalled();
+    expect(commandsOf(cold)).toContain("NEXT_TELEMETRY_DISABLED=1 npx next build");
+  });
+
+  describe("the preview's dev server after a warm build", () => {
     const dev: Proc = { ...DEV_SERVER, pid: 12, envs: { [DEV_COMMAND_ENV]: "npm run dev -- --hostname 0.0.0.0" }, cwd: "/home/user/app" };
     const proxy: Proc = { cmd: "/bin/bash", args: ["-l", "-c", "node /home/user/e2b-proxy.js"], pid: 5, envs: { [PROXY_TARGET_ENV]: "3000" } };
     const afterBuild = (warm: ReturnType<typeof sandboxWith>) => {
       const commands = commandsOf(warm);
-      return commands.slice(commands.indexOf("NEXT_TELEMETRY_DISABLED=1 npx next build") + 1);
+      return commands.slice(commands.indexOf("npx tsc --noEmit -p tsconfig.app.json && npx vite build") + 1);
     };
 
     it("starts the dev server again, the same way, when the build took its port down", async () => {
       listed({});
       const warm = warmSandbox(undefined, [dev, proxy]);
 
-      const result = await warmCheck(nextApp());
+      const result = await warmCheck();
 
       expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
       const [cleanup, ...rest] = afterBuild(warm);
@@ -625,7 +637,7 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
         .mockResolvedValueOnce([dev, proxy])
         .mockRejectedValueOnce(new Error("envd hiccup"));
 
-      const result = await warmCheck(nextApp());
+      const result = await warmCheck();
 
       expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
       expect(afterBuild(warm)).toEqual([expect.stringMatching(/^rm -rf /)]);
@@ -636,7 +648,7 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
       listed({});
       const warm = warmSandbox((command) => (command.includes('require("net")') ? { exitCode: 0, stdout: "open\n" } : undefined), [dev, proxy]);
 
-      const result = await warmCheck(nextApp());
+      const result = await warmCheck();
 
       expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
       expect(afterBuild(warm)).toEqual([expect.stringMatching(/^rm -rf /), expect.stringContaining("port:3000")]);
