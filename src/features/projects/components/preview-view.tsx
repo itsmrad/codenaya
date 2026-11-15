@@ -76,6 +76,7 @@ import {
   readPreviewMessage,
 } from "@/features/sandbox-preview/utils/preview-bridge";
 import { hookReloadDelay, isHookError } from "@/features/sandbox-preview/utils/hook-reload";
+import { needsRunEndReload } from "@/features/sandbox-preview/utils/run-end-reload";
 import {
   TRANSIENT_ERROR_IDLE_MS,
   transientErrorCover,
@@ -171,6 +172,7 @@ export const PreviewView = ({
   // The output when Clear was pressed; kept here so it outlives Hide logs (#480).
   const [clearedLogs, setClearedLogs] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const refreshKeyRef = useRef(refreshKey);
   const [device, setDevice] = usePreviewDevice();
   
   // URL dictates isolation mode via next.config.ts conditional headers
@@ -424,17 +426,42 @@ export const PreviewView = ({
   // may have fixed a failed install: the stopped sandbox can't take the edit.
   const wasFirstBuild = useRef(firstBuild);
   const wasRunActive = useRef(runActive);
+  const previousRun = useRef(activeRun);
+  const [pendingRunReload, setPendingRunReload] = useState(false);
   useEffect(() => {
     const firstBuildEnded = wasFirstBuild.current && !firstBuild;
+    const endedRun = activeRun === null ? previousRun.current : null;
     const fixRunEnded = wasRunActive.current && !runActive && appStartFailed && buildError;
     if (status === "error" && (firstBuildEnded || fixRunEnded)) restart();
     // Reload once against the finished files: HMR may have missed a write (#561), and a
     // runtime error may be from mid-build HMR (#486), reported again if real, before the auto-fix.
     // Still booting: the startup refresh covers it.
-    else if (firstBuildEnded && status === "running" && previewUrl) setRefreshKey((key) => key + 1);
+    else if (
+      (firstBuildEnded || endedRun) &&
+      needsRunEndReload(firstBuildEnded, endedRun?.steps ?? []) &&
+      status === "running" && previewUrl
+    ) setPendingRunReload(true);
+    if (activeRun !== undefined) previousRun.current = activeRun;
     wasFirstBuild.current = firstBuild;
     wasRunActive.current = runActive;
-  }, [firstBuild, runActive, appStartFailed, buildError, previewUrl, status, restart]);
+  }, [firstBuild, runActive, activeRun, appStartFailed, buildError, previewUrl, status, restart]);
+
+  useEffect(() => {
+    if (!pendingRunReload) return;
+    if (runActive || status === "error") {
+      setPendingRunReload(false);
+      return;
+    }
+    // A run can finish before the last 300ms sync or its reinstall. Never navigate
+    // into the stopped dev server; a failed restart now surfaces an engine error.
+    if (status !== "running" || !previewUrl || (activeEngine === "sandbox" && sandbox.syncedFiles !== files)) return;
+    const armedKey = refreshKeyRef.current;
+    const timer = setTimeout(() => {
+      setRefreshKey((key) => key === armedKey ? key + 1 : key);
+      setPendingRunReload(false);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [pendingRunReload, runActive, status, previewUrl, activeEngine, sandbox.syncedFiles, files]);
 
   // The iframe's latest load, so first_preview_shown waits until it is visible.
   const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
@@ -460,7 +487,7 @@ export const PreviewView = ({
   }, [previewUrl]);
   const hookError = isHookError(runtimeError);
   useEffect(() => {
-    if (!hookError) return;
+    if (!hookError || pendingRunReload) return;
     const delay = hookReloadDelay(hookReloads.current, lastReloadAt.current, Date.now());
     if (delay === null) return;
     const timer = setTimeout(() => {
@@ -468,7 +495,7 @@ export const PreviewView = ({
       setRefreshKey((key) => key + 1);
     }, delay);
     return () => clearTimeout(timer);
-  }, [hookError]);
+  }, [hookError, pendingRunReload]);
 
   // WebContainer needs the COOP/COEP headers
   // next.config.ts sets for `?engine=webcontainer`, so switching is a full page
@@ -558,14 +585,16 @@ export const PreviewView = ({
   // The first request to Vite often serves the index.html and CSS instantly but hangs 
   // compiling the JS bundle. An auto-refresh ensures the JS hydration catches up seamlessly.
   // Skipped if another reload, e.g. a first build ending (#561), beat it: one reload, not two.
-  const refreshKeyRef = useRef(refreshKey);
+  const pendingRunReloadRef = useRef(pendingRunReload);
   useEffect(() => {
     refreshKeyRef.current = refreshKey;
-  }, [refreshKey]);
+    pendingRunReloadRef.current = pendingRunReload;
+  }, [refreshKey, pendingRunReload]);
   useEffect(() => {
     if (status === "running" && previewUrl) {
       const armedKey = refreshKeyRef.current;
       const timer = setTimeout(() => {
+        if (pendingRunReloadRef.current) return;
         setRefreshKey((k) => (k === armedKey ? k + 1 : k));
       }, 2500);
       return () => clearTimeout(timer);

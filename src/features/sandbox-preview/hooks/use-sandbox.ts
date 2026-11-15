@@ -72,6 +72,8 @@ export const useSandbox = ({
   const [terminalOutput, setTerminalOutput] = useState("");
   /** A compile error the dev server printed after boot (#223). */
   const [appError, setAppError] = useState<AppError | null>(null);
+  // Snapshot acknowledged by the sandbox, including an awaited PATCH reinstall.
+  const [syncedFiles, setSyncedFiles] = useState<Doc<"files">[] | undefined>();
   const [buildErrors] = useState(createBuildErrorDetector);
   const [bootHistory, setBootHistory] = useState<BootHistory>({});
   const [phase, setPhase] = useState<BootPhase | null>(null);
@@ -337,7 +339,10 @@ export const useSandbox = ({
           return;
         }
         const changedFiles = getChangedFiles(flatFiles, syncedContentRef.current);
-        if (changedFiles.length === 0) return;
+        if (changedFiles.length === 0) {
+          setSyncedFiles(files);
+          return;
+        }
 
         // The dev server reports the error again if this edit doesn't fix it.
         setAppError(null);
@@ -373,7 +378,9 @@ export const useSandbox = ({
             settings?.installCommand || "npm install",
           );
           // Not `cancelled`: edits during a slow reinstall must not hide its failure.
-          if (!isCurrent() || !failure) return;
+          if (!isCurrent()) return;
+          setSyncedFiles(files);
+          if (!failure) return;
           setTerminalOutput((prev) => `${prev}\npackage.json changed.\n${failure.output}`);
           const { error } = failure;
           if (error) setAppError((prev) => mergeAppError(prev, error));
@@ -454,6 +461,7 @@ export const useSandbox = ({
     error,
     errorKind,
     appError,
+    syncedFiles,
     restart,
     terminalOutput,
     phase,
