@@ -192,7 +192,11 @@ const CATALOG = {
     category: "Dev tools",
     logo: "/integrations/github.svg",
     mcpUrl: "https://api.githubcopilot.com/mcp/",
-    authModes: ["oauth", "api_key"],
+    // PAT only for now. OAuth cannot complete: the authorization server is
+    // github.com, which the as-guard rejects as cross-site, and GitHub has no
+    // dynamic client registration. Re-add "oauth" with a pre-registered
+    // client (#539) and `trustedAuthorizationServerOrigins`.
+    authModes: ["api_key"],
     trustedHostnames: ["api.githubcopilot.com"],
     supportsReadOnly: true,
     scope: {
