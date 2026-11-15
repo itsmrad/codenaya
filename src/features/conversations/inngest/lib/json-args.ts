@@ -36,7 +36,11 @@ const parseArg = (text: string): object => {
     try {
       parsed = JSON.parse(escapeControlChars(text));
     } catch {
-      throw error;
+      try {
+        parsed = JSON.parse(escapeControlChars(text.replace(/([{,]\s*)"(\w+)">/g, '$1"$2":"')));
+      } catch {
+        throw error;
+      }
     }
   }
   // Double-encoded: the parse gave the array's JSON text.
@@ -45,8 +49,8 @@ const parseArg = (text: string): object => {
   return parsed;
 };
 
-// The same input reaches decodeToolInput twice (recorded call, then handler).
-const warned = new WeakSet<object>();
+// Inngest replays reconstruct input objects, so dedupe by the masked warning text.
+const warned = new Set<string>();
 
 /**
  * Some models (Haiku 5.5) send a file tool's array arg as a JSON string. This
@@ -69,9 +73,11 @@ export const decodeToolInput = (name: string, input: unknown) => {
       failures.push(`${name}.${key} (string, ${value.length} chars): ${reason}; shape ${shape}`);
     }
   }
-  if (failures.length > 0 && !warned.has(input)) {
-    warned.add(input);
-    console.warn(`[json-args] undecodable array arg ${failures.join(" | ")}`);
+  const warning = `[json-args] undecodable array arg ${failures.join(" | ")}`;
+  if (failures.length > 0 && !warned.has(warning)) {
+    if (warned.size >= 100) warned.clear();
+    warned.add(warning);
+    console.warn(warning);
   }
 };
 
