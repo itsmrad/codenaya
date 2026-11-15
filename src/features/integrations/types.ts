@@ -184,6 +184,13 @@ export interface ProviderDefinition {
    * gate, so this list is deliberately conservative.
    */
   readonly destructiveTools: readonly string[];
+  /**
+   * Tools verified read-only against the provider's published inventory. A
+   * `readOnlyHint: true` is believed on a new connection only for these names,
+   * so a renamed or new write tool cannot skip approval by claiming read-only.
+   * Absent means none: every other name is gated until a baseline vouches for it.
+   */
+  readonly readOnlyTools?: readonly string[];
   readonly apiKey?: ApiKeyPlacement;
   /**
    * Authorization server origins this provider is allowed to nominate during

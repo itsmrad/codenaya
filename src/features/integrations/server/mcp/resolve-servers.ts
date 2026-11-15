@@ -102,6 +102,8 @@ export interface ResolvedMcpServer {
   writeApproved: boolean;
   allowedTools?: readonly string[];
   destructiveTools: readonly string[];
+  /** Catalog `readOnlyTools`. Absent means none, which fails closed. */
+  readOnlyTools?: readonly string[];
   toolBaseline?: ReadonlyArray<{ name: string; digest: string }>;
   /** Raw secret values to strip from tool results. Server-side only. */
   knownSecrets: readonly string[];
@@ -272,6 +274,7 @@ export async function resolveMcpServers(
       writeApproved: link.writeApproved,
       allowedTools: link.allowedTools,
       destructiveTools: provider?.destructiveTools ?? [],
+      readOnlyTools: provider?.readOnlyTools ?? [],
       toolBaseline: link.toolBaseline,
       // Both forms are included so a tool echoing either the raw key or the
       // bearer header value is caught.

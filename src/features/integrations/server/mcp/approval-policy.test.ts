@@ -84,6 +84,13 @@ const TOOLS: McpTool[] = [
   },
 ];
 
+/** Not on the known write or read list, yet claims read-only (#567). */
+const WRITES_THING: McpTool = {
+  name: "writes_thing",
+  inputSchema: objectSchema,
+  annotations: { readOnlyHint: true, destructiveHint: false },
+};
+
 let served: McpTool[] = TOOLS;
 const called: string[] = [];
 
@@ -120,6 +127,7 @@ function resolvedServer(
     annotationsTrusted: true,
     writeApproved: true,
     destructiveTools: ["stripe_api_write"],
+    readOnlyTools: ["list_customers"],
     knownSecrets: [],
     needsRefresh: false,
     ...overrides,
@@ -339,6 +347,54 @@ describe("MCP approval policy over the protocol", () => {
     expect(called).toEqual(["list_customers"]);
   });
 
+  it("gates an unlisted tool claiming read-only on a first connection, and on later ones", async () => {
+    // #567: no baseline yet, so drift detection cannot flag a renamed or new write tool.
+    served = [TOOLS[4], WRITES_THING];
+
+    const first = await buildTools(convexGate("denied"));
+
+    expect(first.built.warnings).toEqual([]);
+    expect(await first.invoke("writes_thing")).toMatch(/^Not permitted: .*the user declined/);
+    expect(await first.invoke("list_customers")).toBe("ran list_customers");
+
+    // The baseline that run records must not vouch for the claim next time.
+    const [{ toolBaseline }] = first.built.baselinesToRecord;
+    const later = await buildTools(convexGate("denied"), resolvedServer({ toolBaseline }));
+
+    expect(later.built.warnings).toEqual([]);
+    expect(await later.invoke("writes_thing")).toMatch(/^Not permitted: .*the user declined/);
+    expect(await later.invoke("list_customers")).toBe("ran list_customers");
+    expect(approvalRows()).toHaveLength(2);
+    expect(called).toEqual(["list_customers", "list_customers"]);
+  });
+
+  it("runs an unlisted tool claiming read-only once the user approves", async () => {
+    served = [WRITES_THING];
+    const { invoke } = await buildTools(convexGate("approved"));
+
+    expect(await invoke("writes_thing")).toBe("ran writes_thing");
+    expect(approvalRows()).toHaveLength(1);
+  });
+
+  it("keeps the reads an established connection's baseline already trusts", async () => {
+    // Recorded before #567, when every catalog read-only claim was believed.
+    const listPayouts = {
+      name: "list_payouts",
+      inputSchema: objectSchema,
+      annotations: { readOnlyHint: true },
+    };
+    served = [listPayouts];
+
+    const { built, invoke } = await buildTools(
+      convexGate("denied"),
+      resolvedServer({ toolBaseline: fingerprintTools([listPayouts]) }),
+    );
+
+    expect(built.warnings).toEqual([]);
+    expect(await invoke("list_payouts")).toBe("ran list_payouts");
+    expect(approvalRows()).toHaveLength(0);
+  });
+
   it("keeps tools usable on a connection approved before classification", async () => {
     // Baseline digests recorded by the previous release carry no classification.
     const legacy = fingerprintTools(TOOLS).map(({ name, digest }) => ({
@@ -384,7 +440,8 @@ describe("MCP approval policy over the protocol", () => {
 });
 
 describe("requiresApproval", () => {
-  const listed = { destructiveTools: ["write"], annotationsTrusted: true };
+  const listed = { destructiveTools: ["write"], readOnlyTools: ["x"], annotationsTrusted: true };
+  const writesThing = { name: "writes_thing", annotations: { readOnlyHint: true, destructiveHint: false } };
   const custom = { destructiveTools: [] };
 
   it.each([
@@ -398,6 +455,9 @@ describe("requiresApproval", () => {
     ["readOnlyHint false", listed, { name: "x", annotations: { readOnlyHint: false } }, true],
     ["readOnlyHint true", listed, { name: "x", annotations: { readOnlyHint: true } }, false],
     ["readOnlyHint true, destructiveHint false", listed, { name: "x", annotations: { readOnlyHint: true, destructiveHint: false } }, false],
+    ["unlisted name claims read-only, no baseline", listed, writesThing, true],
+    ["unlisted name the baseline trusts as read-only", { ...listed, toolBaseline: fingerprintTools([writesThing]) }, writesThing, false],
+    ["unlisted name the baseline holds as unverified", { ...listed, toolBaseline: fingerprintTools([writesThing], () => false) }, writesThing, true],
     ["unannotated on enforced read-only link", { ...listed, readOnlyEnforced: true }, { name: "x" }, false],
     ["custom server, readOnlyHint true", custom, { name: "x", annotations: { readOnlyHint: true } }, true],
     ["custom server, untrusted flag", { ...custom, annotationsTrusted: false }, { name: "x", annotations: { readOnlyHint: true, destructiveHint: false } }, true],

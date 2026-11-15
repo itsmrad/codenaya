@@ -564,6 +564,7 @@ const CATALOG = {
       "notion-update-view",
       "notion-upload-skill",
     ],
+    readOnlyTools: ["notion-fetch"],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -703,6 +704,7 @@ const CATALOG = {
       "queryInsightsSql",
       "queryInsightsAi",
     ],
+    readOnlyTools: ["getJiraIssue"],
     notes:
       "Search and other enriched tools may consume Rovo credits. OAuth only here; Atlassian's admin API-token setting applies to token authentication, which this connector does not offer. No URL-level read-only mode.",
   },
@@ -764,6 +766,7 @@ const CATALOG = {
       "save_vulnerability",
       "attach_scan_profile",
     ],
+    readOnlyTools: ["get_project"],
     apiKey: {
       header: "Authorization",
       valuePrefix: "Bearer ",
@@ -799,6 +802,7 @@ const CATALOG = {
       "check_mcp_server",
       "submit_feedback",
     ],
+    readOnlyTools: ["whoami"],
     notes:
       "Acts as your Clerk Dashboard account in the selected workspace. No URL-level read-only mode; production-instance creation cannot be undone.",
   },

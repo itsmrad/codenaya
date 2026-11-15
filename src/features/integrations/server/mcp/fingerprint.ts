@@ -136,9 +136,21 @@ const CLASSIFIED_PREFIX = "v2:";
  * `readOnlyHint: true` must read as drift, not silently drop the gate. Only the
  * derived boolean is digested, so benign hint changes (`openWorldHint`, a title)
  * do not raise alarms.
+ *
+ * A read-only claim not yet trusted (`readOnlyVerified: false`, see
+ * `requiresApproval`) is recorded as "unverified" rather than "ro". Otherwise
+ * the baseline recorded on a first connection would vouch for the claim on
+ * every later one, and the first-connection gate would last a single run.
  */
-export function fingerprintTool(tool: McpToolDefinition): ToolFingerprint {
-  const classification = isAnnotatedReadOnly(tool) ? "ro" : "gated";
+export function fingerprintTool(
+  tool: McpToolDefinition,
+  readOnlyVerified = true,
+): ToolFingerprint {
+  const classification = !isAnnotatedReadOnly(tool)
+    ? "gated"
+    : readOnlyVerified
+      ? "ro"
+      : "unverified";
   return {
     name: tool.name,
     digest: `${CLASSIFIED_PREFIX}${classification}:${digestDefinition(tool)}`,
@@ -170,12 +182,30 @@ export function upgradeLegacyBaseline(
   });
 }
 
+/**
+ * Whether the baseline recorded this exact definition as a trusted read.
+ *
+ * Legacy entries are upgraded first, so a connection approved before
+ * classification keeps the reads it already had.
+ */
+export function baselineTrustsReadOnly(
+  baseline: readonly ToolFingerprint[],
+  tool: McpToolDefinition,
+): boolean {
+  const recorded = baseline.filter((entry) => entry.name === tool.name);
+  const [entry] = upgradeLegacyBaseline(recorded, [tool]);
+  return (
+    isAnnotatedReadOnly(tool) && entry?.digest === fingerprintTool(tool).digest
+  );
+}
+
 /** Fingerprint a tool list, sorted by name so the baseline is order-stable. */
 export function fingerprintTools(
   tools: readonly McpToolDefinition[],
+  isReadOnlyVerified: (tool: McpToolDefinition) => boolean = () => true,
 ): ToolFingerprint[] {
   return tools
-    .map(fingerprintTool)
+    .map((tool) => fingerprintTool(tool, isReadOnlyVerified(tool)))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
