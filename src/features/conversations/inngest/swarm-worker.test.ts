@@ -27,7 +27,7 @@ vi.mock("@/lib/convex-client", async () => {
 });
 
 import { TURN_HEARTBEAT_ID } from "../agent-steps";
-import { WORKER_MAX_STEPS } from "../swarm";
+import { MAX_ORIGINAL_PROMPT_CHARS, WORKER_MAX_STEPS } from "../swarm";
 import { drive, text, toolCall } from "./process-message.driver";
 import { swarmWorker } from "./swarm-worker";
 import { createDelegateTasksTool } from "./tools/delegate-tasks";
@@ -120,6 +120,16 @@ describe("swarmWorker", () => {
       messageId: "m1", steps: [expect.objectContaining({ id: TURN_HEARTBEAT_ID })],
     })]);
     expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ agentTaskId: "t1", status: "done" })]);
+  });
+
+  it("puts the user's original request in the system prompt, and none when absent", async () => {
+    const withPrompt = await run([{ data: text("Built it.") }], { originalPrompt: "Pizzeria on 5 Main St, margherita 9.50" });
+    const [request] = withPrompt.inferenceBodies as Array<{ messages: Array<{ content: string }> }>;
+    expect(request.messages[0].content).toContain("original request (context, build only your task)\nPizzeria on 5 Main St, margherita 9.50");
+
+    const without = await run([{ data: text("Built it.") }]);
+    const [bare] = without.inferenceBodies as Array<{ messages: Array<{ content: string }> }>;
+    expect(bare.messages[0].content).not.toContain("original request");
   });
 
   it("stores its report without a suggestions block (#256)", async () => {
@@ -321,7 +331,7 @@ describe("swarmWorker as a sub-orchestrator", () => {
       { data: withUsage(toolCall("delegateTasks", CHILDREN)) }, // 2,000 tokens at Sonnet's $10/MTok
       { data: toolCall("writeFiles", { files: [{ path: "src/shop/index.tsx", content: "export {};\n" }] }) },
       { data: text("Built the shop.") },
-    ], {}, [CART, LIST]);
+    ], { originalPrompt: "x".repeat(MAX_ORIGINAL_PROMPT_CHARS + 500) }, [CART, LIST]);
 
     expect(outcome.finalType).toBe("function-resolved");
     const [request] = outcome.inferenceBodies as Array<{ messages: Array<{ content: string }>; tools: Array<{ function: { name: string } }> }>;
@@ -338,7 +348,7 @@ describe("swarmWorker as a sub-orchestrator", () => {
     })]);
     // Children carry both parent ids, so message and sub-orchestrator cancellation reach them.
     expect(outcome.invocations).toEqual([
-      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_0", parentAgentTaskId: "t1", parentMessageId: "m1", ownerId: "user_1", depth: 2 }) }, timeout: "10m" }),
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_0", parentAgentTaskId: "t1", parentMessageId: "m1", ownerId: "user_1", depth: 2, originalPrompt: "x".repeat(MAX_ORIGINAL_PROMPT_CHARS) }) }, timeout: "10m" }),
       expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_1", parentAgentTaskId: "t1", depth: 2 }) }, timeout: "10m" }),
     ]);
     expect(outcome.data).toMatchObject({
