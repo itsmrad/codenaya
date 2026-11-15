@@ -153,3 +153,39 @@ account. All three Microsoft tools and both Cloudflare tools advertise
 `readOnlyHint: true`. None of these tools runs a user agent, crawls a site, returns
 credentials or charges a connected account. No requested provider was deferred.
 Other catalog providers keep their existing authentication modes.
+
+## GitHub OAuth (pre-registered OAuth app)
+
+GitHub's hosted MCP server has no dynamic client
+registration, so OAuth needs an OAuth app you register yourself. Until both
+variables below are set, GitHub is offered by personal access token only: the
+OAuth option is hidden and `/api/integrations/oauth/start` refuses it.
+
+1. In GitHub, go to **Settings → Developer settings → OAuth Apps → New OAuth App**
+   (or the organization's equivalent).
+2. Set the **Authorization callback URL** to exactly the value of
+   `INTEGRATIONS_REDIRECT_URI`. Use one app per deployment host, since each app has
+   one callback URL.
+3. Generate a client secret, then set both server environment variables:
+
+```bash
+GITHUB_OAUTH_CLIENT_ID=       # the OAuth app's client ID
+GITHUB_OAUTH_CLIENT_SECRET=   # server-only; never NEXT_PUBLIC_, never logged
+```
+
+4. Rebuild and redeploy. Whether the OAuth option shows is decided at build time
+   (`next.config.ts` inlines the configured provider ids, never the credentials).
+   The start route checks the variables again at request time.
+
+The flow keeps PKCE (S256) and `state`, and requests the `repo` and `read:org`
+scopes. The secret is read from the environment only for each token request. It is
+not stored in the flow state or the sealed credential, and it is redacted from
+token errors. The token endpoint auth method follows the authorization server's
+metadata: `client_secret_basic` when advertised, otherwise `client_secret_post`.
+GitHub advertises no method and documents body credentials, so it gets
+`client_secret_post`. After a client ID rotation, any connection that needs a token
+refresh must be reconnected.
+
+The same mechanism serves any catalog provider without dynamic registration. Give
+the entry `preRegisteredClient: { clientIdEnv, clientSecretEnv }` (variable names
+only) and, if its authorization server is cross-site, `trustedAuthorizationServerOrigins`.

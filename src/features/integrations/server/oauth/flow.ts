@@ -1,5 +1,7 @@
 /**
- * OAuth 2.1 authorization-code flow with PKCE and dynamic client registration.
+ * OAuth 2.1 authorization-code flow with PKCE and dynamic client registration,
+ * or an operator-registered confidential client where the authorization server
+ * has no registration endpoint (see `preRegisteredClientFor`).
  *
  * ## Why the low-level SDK functions instead of `auth()`
  *
@@ -49,6 +51,7 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { nanoid } from "nanoid";
 
+import { hasPreRegisteredClient } from "../../catalog";
 import type { ProviderDefinition } from "../../types";
 import { createGuardedFetch } from "../mcp/guarded-fetch";
 import { validateAuthorizationServer } from "./as-guard";
@@ -78,6 +81,64 @@ function clientMetadataFor(redirectUri: string): OAuthClientMetadata {
     response_types: ["code"],
     token_endpoint_auth_method: "none",
   };
+}
+
+/**
+ * Client information for a pre-registered (confidential) client, or undefined
+ * when the provider uses dynamic registration.
+ *
+ * The secret is deliberately absent: this value is sealed into the flow state
+ * and the stored credential, and `withClientSecret` adds the secret from the
+ * environment only for the token request itself.
+ *
+ * The token endpoint auth method follows the server metadata, preferring
+ * `client_secret_basic`. When metadata advertises neither, it falls back to
+ * `client_secret_post`, which GitHub (the server that needs this) documents
+ * while not advertising any method.
+ */
+function preRegisteredClientFor(
+  provider: ProviderDefinition,
+  redirectUri: string,
+  metadata: AuthorizationServerMetadata | undefined,
+): OAuthClientInformationFull | undefined {
+  const client = provider.preRegisteredClient;
+  if (!client) return undefined;
+  const supported = metadata?.token_endpoint_auth_methods_supported ?? [];
+  return {
+    ...clientMetadataFor(redirectUri),
+    client_id: process.env[client.clientIdEnv] ?? "",
+    token_endpoint_auth_method: supported.includes("client_secret_basic")
+      ? "client_secret_basic"
+      : "client_secret_post",
+  };
+}
+
+type ClientResult =
+  | { ok: true; clientInformation: OAuthClientInformationFull; secret?: string }
+  | { ok: false; error: string };
+
+/** Adds the server-only client secret for a pre-registered client's token request. */
+function withClientSecret(
+  provider: ProviderDefinition,
+  clientInformation: OAuthClientInformationFull,
+): ClientResult {
+  const client = provider.preRegisteredClient;
+  if (!client) return { ok: true, clientInformation };
+  const secret = process.env[client.clientSecretEnv];
+  // A rotated client id means the stored grant belongs to another client.
+  if (!secret || process.env[client.clientIdEnv] !== clientInformation.client_id) {
+    return {
+      ok: false,
+      error: `OAuth for ${provider.displayName} is not configured on this server. Reconnect it, or use an API key.`,
+    };
+  }
+  return { ok: true, clientInformation: { ...clientInformation, client_secret: secret }, secret };
+}
+
+/** Error text with any client secret removed, in case a server echoes it. */
+function errorText(error: unknown, secret?: string): string {
+  const text = error instanceof Error ? error.message : String(error);
+  return secret ? text.split(secret).join("[redacted]") : text;
 }
 
 export interface OAuthFlowStart {
@@ -118,6 +179,13 @@ export async function startOAuthFlow(
 ): Promise<StartOAuthResult> {
   const { provider, redirectUri } = options;
 
+  if (provider.preRegisteredClient && !hasPreRegisteredClient(provider)) {
+    return {
+      ok: false,
+      error: `OAuth for ${provider.displayName} is not configured on this server. Connect it with an API key instead.`,
+    };
+  }
+
   // Discovery talks to a remote server, so it goes through the guarded fetch for
   // the same SSRF reasons as any other outbound MCP request.
   const fetchFn = createGuardedFetch({
@@ -157,8 +225,9 @@ export async function startOAuthFlow(
     : undefined;
 
   let clientInformation: OAuthClientInformationFull;
+  const preRegistered = preRegisteredClientFor(provider, redirectUri, metadata);
   try {
-    clientInformation = await registerClient(serverInfo.authorizationServerUrl, {
+    clientInformation = preRegistered ?? await registerClient(serverInfo.authorizationServerUrl, {
       metadata,
       clientMetadata: clientMetadataFor(redirectUri),
       scope,
@@ -285,10 +354,13 @@ export async function completeOAuthFlow(
     return { ok: false, error: asVerdict.reason };
   }
 
+  const client = withClientSecret(provider, clientInformation);
+  if (!client.ok) return client;
+
   try {
     const tokens = await exchangeAuthorization(authorizationServerUrl, {
       metadata: authorizationServerMetadata,
-      clientInformation,
+      clientInformation: client.clientInformation,
       authorizationCode,
       codeVerifier,
       redirectUri,
@@ -300,9 +372,7 @@ export async function completeOAuthFlow(
   } catch (error) {
     return {
       ok: false,
-      error:
-        `Token exchange failed: ` +
-        `${error instanceof Error ? error.message : String(error)}`,
+      error: `Token exchange failed: ${errorText(error, client.secret)}`,
     };
   }
 }
@@ -343,10 +413,13 @@ export async function refreshOAuthTokens(
     return { ok: false, error: asVerdict.reason };
   }
 
+  const client = withClientSecret(provider, clientInformation);
+  if (!client.ok) return client;
+
   try {
     const tokens = await refreshAuthorization(authorizationServerUrl, {
       metadata: authorizationServerMetadata,
-      clientInformation,
+      clientInformation: client.clientInformation,
       refreshToken,
       resource: new URL(provider.mcpUrl),
       fetchFn: createGuardedFetch({
@@ -358,9 +431,7 @@ export async function refreshOAuthTokens(
   } catch (error) {
     return {
       ok: false,
-      error:
-        `Token refresh failed: ` +
-        `${error instanceof Error ? error.message : String(error)}`,
+      error: `Token refresh failed: ${errorText(error, client.secret)}`,
     };
   }
 }
