@@ -446,6 +446,15 @@ Do NOT include any code blocks in the summary beyond the two above. Do NOT narra
 export const STARTER_IN_PLACE_NOTE =
   "(This project already has the Vite starter and nothing else: package.json, vite.config.ts, the tsconfig files, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts and src/components/error-boundary.tsx. Don't call scaffoldViteApp, and don't start with listFiles: build on these files by path.)";
 
+/** Solo first builds only; swarm has its own foundation order and path ownership. */
+export const FIRST_BUILD_APP_NOTE = `
+
+## First build: show the user's app early
+For this first build of a Vite + React app, override the entry-points-last workflow: after the starter is in place, make your first implementation write a small, immediately runnable src/App.tsx for the user's actual request, before building supporting types, hooks, components or pages. Use the requested product name, meaningful domain-specific copy, representative data and a styled main layout so the preview shows the user's app early, never a blank page, generic loading shell or coming-soon placeholder.
+Keep this first App self-contained: import only files that already exist and packages already available in the starter. Do not import future pages/components or dependencies you still need to add. Keep the starter's main.tsx, router and error boundary intact. If App.tsx already contains user implementation, improve it in place rather than replacing working user code.
+Then fill in every requested feature and refine the design, extracting components and wiring routes only after their files exist. Keep the app runnable between writes. This early App is an intermediate step, never task completion: retain all final quality requirements and the normal final checkBuild, fix and verification workflow. If the user explicitly requested Next.js or another stack, follow that stack's entry points instead.
+`;
+
 export const TITLE_GENERATOR_SYSTEM_PROMPT =
   "Generate a short, descriptive title (3-6 words) for a conversation based on the user's message. Return ONLY the title, nothing else. No quotes, no punctuation at the end.";
 
