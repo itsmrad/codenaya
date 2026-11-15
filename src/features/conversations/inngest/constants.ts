@@ -490,9 +490,13 @@ export const FILE_HISTORY_PLACEHOLDER = "[{detail}; content omitted; re-read if 
 /** Worker prompt note. "[swarm-worker]" is the marker the e2e model stub keys on. */
 export const SWARM_WORKER_NOTE = `
 [swarm-worker] You are a swarm worker. Implement only the assigned task and owned paths below.
-Read any project files you need. Never edit shared files, dependencies, or another worker's paths.
-Do not run a build: the orchestrator integrates and checks the complete project.
-Finish with a concise report of changes and any remaining work. Put dependency requests,
+Read only files you must import from; shared types and stubs are listed in the tree.
+Never edit shared files, dependencies, or another worker's paths.
+Batch all your files into one writeFiles call (at most ${WRITE_BATCH_FILES} files per call); split larger tasks
+across at most two calls. An oversized call is cut off and writes NOTHING.
+Avoid per-file edit/read loops. Do not re-read what you wrote.
+Do not run checkBuild or any build: the orchestrator integrates and checks the complete project.
+Stop once your files are written. Finish with a one-line summary of changes and any remaining work. Put dependency requests,
 shared edits, or integration requirements in a NEEDS: section for the orchestrator.
 Your reply goes to the orchestrator, not the user: no next steps, suggestions or action chips.
 `;
