@@ -7,9 +7,20 @@ const db = vi.hoisted(() => ({ rows: [] as Row[] }));
 vi.mock("@/lib/convex-client", () => ({
   convex: {
     // A snapshot, like the real query: later lock changes don't reach it.
-    query: vi.fn(async () => db.rows.map((row) => ({ ...row }))),
+    query: vi.fn(async (_ref: unknown, args: { fileId?: string }) => {
+      if (!args.fileId) return db.rows.map((row) => ({ ...row }));
+      const row = db.rows.find((candidate) => candidate._id === args.fileId);
+      return row ? { ...row } : null;
+    }),
     mutation: vi.fn(
-      async (_ref: unknown, args: { name?: string; parentId?: string; files?: Row[] }) => {
+      async (
+        _ref: unknown,
+        args: { name?: string; parentId?: string; files?: Row[]; fileId?: string; content?: string },
+      ) => {
+        if (args.fileId) {
+          db.rows.find((row) => row._id === args.fileId)!.content = args.content;
+          return args.fileId;
+        }
         const insert = (row: Omit<Row, "_id">) => {
           const _id = `id${db.rows.length}`;
           db.rows.push({ ...row, _id });
@@ -44,7 +55,8 @@ import { toolResultError } from "@/features/conversations/agent-steps";
 import { missingReferencedFiles } from "@/features/sandbox-preview/utils/missing-references";
 
 import { KNOWN_GOOD_VERSIONS } from "../known-good-versions";
-import { VITE_REACT_STARTER } from "../vite-starter";
+import { PRE_UI_STARTER, VITE_REACT_STARTER } from "../vite-starter";
+import PRE_294_STARTER from "./pre-294-starter.fixture.json";
 import { createScaffoldViteAppTool } from "./scaffold-vite-app";
 
 const scaffold = () =>
@@ -58,6 +70,26 @@ const paths = () => {
     row.parentId ? `${pathOf(byId.get(row.parentId)!)}/${row.name}` : row.name;
   return db.rows.filter((row) => row.type === "file").map((row) => ({ path: pathOf(row), content: row.content! }));
 };
+
+const starter = (path: string) => VITE_REACT_STARTER.find((file) => file.path === path)!.content;
+const written = (path: string) => paths().find((file) => file.path === path)?.content;
+
+const seed = (files: { path: string; content: string }[]) => {
+  for (const { path, content } of files) {
+    const parts = path.split("/");
+    let parentId: string | undefined;
+    for (const name of parts.slice(0, -1)) {
+      let folder = db.rows.find((row) => row.type === "folder" && row.name === name && row.parentId === parentId);
+      if (!folder) db.rows.push((folder = { _id: `id${db.rows.length}`, name, type: "folder", parentId }));
+      parentId = folder._id;
+    }
+    db.rows.push({ _id: `id${db.rows.length}`, name: parts.at(-1)!, type: "file", parentId, content });
+  }
+};
+
+// A project seeded before #294: main's 13 starter files at 698d08be, pinned.
+const preUiStarter = (overrides: Record<string, string> = {}) =>
+  PRE_294_STARTER.map(({ path, content }) => ({ path, content: overrides[path] ?? content }));
 
 describe("scaffoldViteApp tool", () => {
   beforeEach(() => {
@@ -74,6 +106,64 @@ describe("scaffoldViteApp tool", () => {
     expect(result).toContain("tsconfig.app.json");
     expect(result).toContain("src/components/error-boundary.tsx");
     expect(result).not.toMatch(/\bid\d+/);
+  });
+
+  it("upgrades a pre-#294 starter: adds the UI dependencies and mounts the Toaster", async () => {
+    const oldPkg = JSON.parse(PRE_294_STARTER.find((file) => file.path === "package.json")!.content);
+    oldPkg.dependencies.react = "19.1.0";
+    oldPkg.dependencies["left-pad"] = "1.0.0";
+    seed(preUiStarter({ "package.json": JSON.stringify(oldPkg) }));
+
+    const result = await scaffold();
+
+    const starterPkg = JSON.parse(starter("package.json"));
+    const pkg = JSON.parse(written("package.json")!);
+    // Missing pins are added; the user's own packages and versions stay.
+    expect(pkg.dependencies).toEqual({ ...starterPkg.dependencies, react: "19.1.0", "left-pad": "1.0.0" });
+    expect(pkg.devDependencies).toEqual(starterPkg.devDependencies);
+    expect(written("src/main.tsx")).toBe(starter("src/main.tsx"));
+    expect(written("vite.config.ts")).toBe(starter("vite.config.ts"));
+    expect(written("src/components/ui/sonner.tsx")).toBe(starter("src/components/ui/sonner.tsx"));
+    expect(result).toContain("Updated package.json: added @radix-ui/react-avatar");
+    expect(result).toContain("Updated src/main.tsx");
+    expect(result).not.toContain("<Toaster />");
+  });
+
+  it("recognizes the pinned pre-#294 copies as untouched", () => {
+    for (const path of Object.keys(PRE_UI_STARTER)) {
+      expect(PRE_UI_STARTER[path], path).toBe(PRE_294_STARTER.find((file) => file.path === path)!.content);
+    }
+  });
+
+  it("doesn't upgrade a pre-#294 starter when a lock leaves the scaffold incomplete", async () => {
+    seed(preUiStarter());
+    db.rows.find((row) => row.type === "folder" && row.name === "components")!.locked = true;
+
+    const result = await scaffold();
+
+    expect(result).toMatch(/^Error: Incomplete scaffold/);
+    expect(result).not.toContain("Updated ");
+    expect(written("package.json")).toBe(preUiStarter()[0].content);
+    expect(written("src/main.tsx")).toBe(PRE_UI_STARTER["src/main.tsx"]);
+  });
+
+  it("keeps a customized main.tsx and names the missing Toaster", async () => {
+    seed(preUiStarter({ "src/main.tsx": "// mine\n" }));
+
+    const result = await scaffold();
+
+    expect(written("src/main.tsx")).toBe("// mine\n");
+    expect(result).toContain("src/main.tsx does not mount <Toaster />");
+  });
+
+  it("keeps a package.json it cannot parse and names what it could not add", async () => {
+    seed(preUiStarter({ "package.json": "{ not json" }));
+
+    const result = await scaffold();
+
+    expect(written("package.json")).toBe("{ not json");
+    expect(result).toContain("package.json could not be parsed, so it was left as is");
+    expect(result).toContain("sonner");
   });
 
   it("writes package.json after every file outside the root", async () => {

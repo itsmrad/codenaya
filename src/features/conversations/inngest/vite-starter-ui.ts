@@ -1,7 +1,7 @@
-/** Stock shadcn new-york-v4 registry sources (2026-11-15), MIT licensed.
+/** Stock shadcn new-york-v4 registry sources (2026-11-14), MIT licensed.
  * https://github.com/shadcn-ui/ui/blob/main/LICENSE.md
  * Registry aliases resolve to this starter; Radix imports use individual packages.
- * Sonner uses its system theme without requiring a Next.js theme provider.
+ * Sonner follows the starter's class-based .dark instead of a Next.js theme provider.
  */
 export const VITE_STARTER_UI = [
   {
@@ -1375,12 +1375,22 @@ import {
   OctagonXIcon,
   TriangleAlertIcon,
 } from "lucide-react"
+import { useSyncExternalStore } from "react"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
+// Follows the class-based .dark on <html>, as the starter's CSS does.
+const subscribe = (onChange: () => void) => {
+  const observer = new MutationObserver(onChange)
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
+  return () => observer.disconnect()
+}
+const isDark = () => document.documentElement.classList.contains("dark")
+
 const Toaster = ({ ...props }: ToasterProps) => {
+  const dark = useSyncExternalStore(subscribe, isDark)
   return (
     <Sonner
-      theme="system"
+      theme={dark ? "dark" : "light"}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

@@ -439,3 +439,17 @@ export const VITE_REACT_STARTER: ReadonlyArray<{ path: string; content: string }
   { path: "src/components/error-boundary.tsx", content: ERROR_BOUNDARY_TSX },
   ...VITE_STARTER_UI,
 ];
+
+/**
+ * Files as seeded just before the UI components (#294), so scaffolding over an
+ * old starter replaces only copies the user never changed. Older variants
+ * (before the optimizeDeps list, the router or the error boundary) are kept:
+ * at worst Vite re-optimizes once, and a main.tsx without <Toaster /> is named.
+ */
+export const PRE_UI_STARTER: Readonly<Record<string, string>> = {
+  "vite.config.ts": VITE_CONFIG.replace(/^ {6}"(@radix-ui\/[^"]+|sonner)",\n/gm, ""),
+  "src/main.tsx": MAIN_TSX.replace('import { Toaster } from "./components/ui/sonner";\n', "").replace(
+    "        <Toaster />\n",
+    "",
+  ),
+};

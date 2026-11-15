@@ -44,9 +44,13 @@ export default function App() {
 `;
 
 test.describe("agent Vite + React scaffold", () => {
+  // Opt-in (#190): every run spends a real E2B sandbox.
   test.skip(
-    !hasClerkCredentials() || !process.env.E2B_API_KEY || !process.env.E2B_TEMPLATE,
-    "Needs Inngest dev, Clerk, E2B_API_KEY and E2B_TEMPLATE; inference uses a local stub",
+    !process.env.E2E_LIVE_AGENT ||
+      !hasClerkCredentials() ||
+      !process.env.E2B_API_KEY ||
+      !process.env.E2B_TEMPLATE,
+    "Opt-in run: needs E2E_LIVE_AGENT=1, Inngest dev, Clerk, E2B_API_KEY and E2B_TEMPLATE; inference uses a local stub",
   );
 
   test("ships all common components and boots without a Vite error overlay", async ({ page }) => {
