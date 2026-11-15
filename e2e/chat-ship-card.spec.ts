@@ -93,6 +93,9 @@ test.describe("after a run", () => {
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     await expect(page.getByText("Added a pricing section.")).toBeVisible({ timeout: 60_000 });
 
+    await expect(page.getByRole("status", { name: "Run outcome: No changes", exact: true })).toHaveCount(2);
+    await expect(page.getByText("No files were changed in this run.", { exact: true })).toHaveCount(2);
+
     // Chips only under the latest reply; one fills the composer, unsent.
     await expect(page.getByRole("button", { name: OLD_CHIP })).toHaveCount(0);
     await page.getByRole("button", { name: CHIP }).click();

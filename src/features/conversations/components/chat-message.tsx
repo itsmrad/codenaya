@@ -35,6 +35,7 @@ import { useChatSendBlock } from "../hooks/use-queue-chat-message";
 import { useAgentTasks } from "../hooks/use-agent-tasks";
 import { buildPlanMessage, isPlanReply } from "../plan-mode";
 import { userMessageBlocks } from "../user-message";
+import { RUN_VERDICT_LABELS, runVerdict } from "../run-verdict";
 import { AgentRun, useRunStalled } from "./agent-run";
 import { ForkCheckpointButton } from "./checkpoint-dialogs";
 import { PlanEditor } from "./plan-editor";
@@ -280,6 +281,7 @@ export const AssistantMessage = ({
   const refocusEdit = useRef(false);
   const status = message.status ?? "completed";
   const steps = message.steps ?? [];
+  const verdict = runVerdict(message);
   const content = sanitizeAgentText(message.content, pathOf);
   // Safety net for a run that died without reporting back (e.g. the worker
   // crashed): after a long silence, offer a retry instead of a bare spinner.
@@ -373,6 +375,16 @@ export const AssistantMessage = ({
           {checkpointId && <ForkCheckpointButton checkpointId={checkpointId} />}
         </MessageActions>
       )}
+      {verdict && (
+        <Badge
+          variant="outline"
+          role="status"
+          aria-label={`Run outcome: ${RUN_VERDICT_LABELS[verdict]}`}
+          className="max-w-full whitespace-normal text-muted-foreground"
+        >
+          {RUN_VERDICT_LABELS[verdict]}
+        </Badge>
+      )}
       {status === "completed" && content && (
         <>
           {isPlan && (
@@ -400,6 +412,9 @@ export const AssistantMessage = ({
             >
               {shown}
             </MessageResponse>
+          )}
+          {verdict === "no-changes" && (
+            <p className="text-xs text-muted-foreground">No files were changed in this run.</p>
           )}
           {message.stuck && (
             <StuckRunCard
