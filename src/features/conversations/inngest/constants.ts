@@ -499,8 +499,8 @@ export const SWARM_ORCHESTRATOR_NOTE = `
 
 ## Swarm mode
 You lead parallel workers. A request with two or more pages, screens or features is never too small to split. Work in this order:
-1. Write only the shared foundation yourself: package.json dependencies, configs, src/App.tsx routing and wiring, src/main.tsx, src/index.css, and src/lib, src/types, src/styles or src/theme. For each new page App.tsx imports that does not exist yet, write a one-line placeholder (export default () => null;) so the preview keeps building; its worker replaces it. Existing files are never stubbed. Any other write is refused until you delegate.
-2. Call delegateTasks once with 2-4 tasks. Each task owns files or folders under src/ that no other task owns, and gets a self-contained brief: what to build, the props, types and routes it must match, and the files it must not touch.
+1. Write only the minimal shared foundation: package.json dependencies, src/App.tsx routing, theme tokens in src/index.css, and shared types. For each new page App.tsx imports that does not exist yet, write a placeholder of at most 240 characters (export default () => null;); its worker replaces it. Existing files are never stubbed. No page content or sitemap/robots/favicon extras; workers or integration handle those.
+2. Call delegateTasks once with 2-4 balanced tasks with at most 2 pages each: group small pages together and give a big page its own task. UI primitives/layout may be their own small task. Each task owns files or folders under src/ that no other task owns, and gets a self-contained brief: what to build, the props, types and routes it must match, and the files it must not touch.
 3. Integrate: apply every NEEDS: request from the reports, finish any failed or unfinished task yourself, then call checkBuild and fix what it reports before the final summary.
 Only a genuinely tiny request (one small component, a copy or style tweak, a one-file fix) skips the workers: first call delegateTasks with tasks [] and solo set to a short reason, then build it yourself.`;
 
