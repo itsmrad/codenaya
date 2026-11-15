@@ -42,7 +42,7 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 
 const requestSchema = z.object({
   providerId: z.string().min(1),
-  apiKey: z.string().min(1, "API key is required"),
+  apiKey: z.string().min(1, "API key is required").optional(),
   label: z.string().max(80).optional(),
   projectId: z.string().optional(),
   connectionId: z.string().optional(),
@@ -106,6 +106,12 @@ export async function POST(request: Request) {
     if (notFound) return notFound;
   }
 
+  const noAuth = getProvider(providerId)?.authModes.includes("none") === true;
+  if (noAuth && (serverUrl !== undefined || apiKey !== undefined || connectionId !== undefined)) {
+    return jsonError("No-sign-in providers use their fixed catalog endpoint without credentials", 400);
+  }
+  if (!noAuth && apiKey === undefined) return jsonError("API key is required", 400);
+
   const existing = connectionId ? await convex.query(api.system.getConnectionForReconnect, {
     internalKey, userId, connectionId, providerId, authMode: "api_key",
   }) : null;
@@ -142,7 +148,7 @@ export async function POST(request: Request) {
       return jsonError(`Unknown provider "${providerId}"`, 400);
     }
 
-    if (!provider.authModes.includes("api_key")) {
+    if (!noAuth && !provider.authModes.includes("api_key")) {
       // Surfaced explicitly because the alternative — silently attempting an
       // API-key connection against an OAuth-only server — produces a confusing
       // 401 rather than an actionable message.
@@ -160,14 +166,14 @@ export async function POST(request: Request) {
 
   // ── Probe before persisting ──
 
-  const trimmedKey = apiKey.trim();
+  const trimmedKey = apiKey?.trim() ?? "";
 
   const probe = await probeMcpServer({
     url: mcpUrl,
     // Undefined for custom servers, so a user-supplied URL gets full DNS
     // validation rather than inheriting the catalog's allowlist.
     trustedHosts,
-    headers: {
+    headers: noAuth ? {} : {
       [placement.header]: `${placement.valuePrefix}${trimmedKey}`,
     },
   });
@@ -184,14 +190,17 @@ export async function POST(request: Request) {
   // Convex `_id` is not known until afterwards. Immutable for the row's lifetime.
   const credentialRef = existing?.credentialRef ?? nanoid();
 
-  let sealed;
+  // Keep the required legacy columns empty for none; no credential or KEK is used.
+  let sealed = { kekProvider: "", kekKeyId: "", wrappedDek: "", ciphertext: "", iv: "", authTag: "" };
   try {
-    sealed = await getSecretSealer().seal(
-      // Stored as JSON so an OAuth refresh can later add fields without a schema
-      // migration or a second envelope.
-      JSON.stringify({ type: "api_key", apiKey: trimmedKey }),
-      secretContext("userConnections", credentialRef, "credential"),
-    );
+    if (!noAuth) {
+      sealed = await getSecretSealer().seal(
+        // Stored as JSON so an OAuth refresh can later add fields without a schema
+        // migration or a second envelope.
+        JSON.stringify({ type: "api_key", apiKey: trimmedKey }),
+        secretContext("userConnections", credentialRef, "credential"),
+      );
+    }
   } catch (error) {
     // Almost always a missing or malformed CODENAYA_LOCAL_KEK. Logged server-side
     // with detail; the client gets a generic message since the detail names
@@ -218,10 +227,10 @@ export async function POST(request: Request) {
       projectId: projectId as Id<"projects"> | undefined,
       providerId,
       label: label?.trim() || displayName,
-      authMode: "api_key",
+      authMode: noAuth ? "none" : "api_key",
       serverUrl: mcpUrl,
-      credentialRef,
-      maskedPreview: maskCredential(trimmedKey),
+      credentialRef: noAuth ? "" : credentialRef,
+      maskedPreview: noAuth ? "No sign-in" : maskCredential(trimmedKey),
       // API keys carry no OAuth scopes; the array stays empty so the UI can rely
       // on a consistent shape across both auth modes.
       scopes: [],

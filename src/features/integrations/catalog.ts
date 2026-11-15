@@ -1462,6 +1462,37 @@ const CATALOG = {
     // Pinned so a same-site US authorization server is never accepted for EU data.
     trustedAuthorizationServerOrigins: ["https://mcp.eu.contentful.com"],
   },
+  // Public documentation inventories verified with unauthenticated MCP on 2026-11-15.
+  // Official sources and live verification details: docs/INTEGRATIONS.md.
+  "microsoft-learn": {
+    id: "microsoft-learn",
+    displayName: "Microsoft Learn",
+    description: "Search Microsoft documentation, code samples and full documentation pages.",
+    category: "Docs",
+    logo: "/integrations/microsoft-learn.svg",
+    mcpUrl: "https://learn.microsoft.com/api/mcp",
+    authModes: ["none"],
+    trustedHostnames: ["learn.microsoft.com"],
+    supportsReadOnly: true,
+    scope: { queryParams: [], headers: [] },
+    destructiveTools: [],
+    readOnlyTools: ["microsoft_docs_search", "microsoft_docs_fetch", "microsoft_code_sample_search"],
+  },
+
+  "cloudflare-docs": {
+    id: "cloudflare-docs",
+    displayName: "Cloudflare Docs",
+    description: "Search Cloudflare documentation and read the Pages migration guide.",
+    category: "Docs",
+    logo: "/integrations/cloudflare-docs.svg",
+    mcpUrl: "https://docs.mcp.cloudflare.com/mcp",
+    authModes: ["none"],
+    trustedHostnames: ["docs.mcp.cloudflare.com"],
+    supportsReadOnly: true,
+    scope: { queryParams: [], headers: [] },
+    destructiveTools: [],
+    readOnlyTools: ["search_cloudflare_documentation", "migrate_pages_to_workers_guide"],
+  },
 } as const satisfies Record<string, ProviderDefinition>;
 
 /** Catalog provider identifiers, derived from the registry itself. */
