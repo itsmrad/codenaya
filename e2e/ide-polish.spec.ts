@@ -104,7 +104,9 @@ test.describe("IDE polish", () => {
 
       const chevron = header.locator("svg").first();
       const before = (await chevron.boundingBox())!;
-      await header.hover();
+      // Not the header's centre: in the 200px explorer (768/1024) the shown actions
+      // cover it, so Playwright's hover never lands on the header (#606).
+      await chevron.hover();
       // The actions' wrapper carries the hover opacity, not the buttons.
       const actions = page.getByRole("button", { name: "Create file", exact: true }).locator("..");
       await expect(actions).toHaveCSS("opacity", "1");
