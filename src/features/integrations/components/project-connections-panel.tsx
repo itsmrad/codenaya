@@ -5,8 +5,6 @@ import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import {
   EyeIcon,
-  LinkIcon,
-  PlugIcon,
   PlusIcon,
   ShieldAlertIcon,
   SlidersHorizontalIcon,
@@ -423,24 +421,7 @@ export const ProjectConnectionsPanel = ({
     );
   }
 
-  if (accountConnections.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/60 bg-muted/20 px-4 py-6 text-center">
-        <PlugIcon
-          aria-hidden="true"
-          className="size-4 text-muted-foreground/60"
-        />
-        <p className="text-xs font-medium text-foreground">
-          Nothing to link yet
-        </p>
-        <p className="max-w-xs text-[11px] leading-relaxed text-muted-foreground">
-          Create a connection first — see{" "}
-          <span className="font-medium text-foreground">Add a connection</span>{" "}
-          below — then link it here to give this project&apos;s agent its tools.
-        </p>
-      </div>
-    );
-  }
+  if (accountConnections.length === 0) return null;
 
   const linkedIds = new Set(
     projectConnections.map((row) => row.userConnectionId)
@@ -452,20 +433,9 @@ export const ProjectConnectionsPanel = ({
   return (
     <div className="space-y-3">
       {projectConnections.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/60 bg-muted/20 px-4 py-6 text-center">
-          <LinkIcon
-            aria-hidden="true"
-            className="size-4 text-muted-foreground/60"
-          />
-          <p className="text-xs font-medium text-foreground">
-            No connections linked to this project
-          </p>
-          <p className="max-w-sm text-[11px] leading-relaxed text-muted-foreground">
-            Holding a credential is not enough on its own — the agent only sees
-            connections that are linked to the project it is working in. Link one
-            below to give it those tools. Links start read-only.
-          </p>
-        </div>
+        <p className="text-xs text-muted-foreground">
+          No connections linked yet. Choose one below; links start read-only.
+        </p>
       ) : (
         <div className="space-y-2">
           {projectConnections.map((row) => (

@@ -13,6 +13,7 @@ import {
   PromptInputBody,
   PromptInputFooter,
   PromptInputSubmit,
+  PromptInputSpeechButton,
   PromptInputTextarea,
   PromptInputTools,
   type PromptInputMessage,
@@ -201,6 +202,14 @@ export const PromptComposer = ({
                   disabled={isSubmitting}
                   showLabel
                   className={cn(TOOL, "h-full rounded-none [&_svg]:size-3.5")}
+                />
+              )}
+              {/* Signed-in composers only, like Enhance; not the landing page (#301). */}
+              {showEnhance && !isSubmitting && (
+                <PromptInputSpeechButton
+                  textareaRef={textareaRef}
+                  onTranscriptionChange={setInput}
+                  className={cn(TOOL, "h-full w-auto rounded-none has-[>svg]:px-3 [&_svg]:size-3.5")}
                 />
               )}
               {tools}

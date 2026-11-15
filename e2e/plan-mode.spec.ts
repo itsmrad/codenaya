@@ -109,9 +109,9 @@ test.describe.serial("plan mode", () => {
       .click();
     await expect(trigger).toHaveText(STUB_MODEL);
 
-    const planToggle = page.getByRole("button", { name: "Ask / Plan", exact: true });
+    const planToggle = page.getByRole("radio", { name: "Ask / Plan", exact: true });
     await planToggle.click();
-    await expect(planToggle).toHaveAttribute("aria-pressed", "true");
+    await expect(planToggle).toBeChecked();
 
     const input = page.getByPlaceholder("Describe a change or ask a question…");
     await input.fill("todo app");
@@ -140,7 +140,7 @@ test.describe.serial("plan mode", () => {
     await build.click();
     await expect(page.getByText(BUILD_REPLY)).toBeVisible({ timeout: 120_000 });
     await expect.poll(fileNames, { timeout: 30_000 }).toContain(ADDED_FILE);
-    await expect(planToggle).toHaveAttribute("aria-pressed", "false");
+    await expect(planToggle).not.toBeChecked();
     expect(JSON.stringify(stub.requests.find(isBuild)?.messages)).toContain(PLAN_ITEM);
     await test.info().attach("build-reply", {
       body: await page.screenshot(),
@@ -153,9 +153,9 @@ test.describe.serial("plan mode", () => {
   test("answers a question with nothing to build", async () => {
     test.setTimeout(180_000);
     const filesBefore = await fileNames();
-    const toggle = page.getByRole("button", { name: "Ask / Plan", exact: true });
+    const toggle = page.getByRole("radio", { name: "Ask / Plan", exact: true });
     await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(toggle).toBeChecked();
 
     const input = page.getByPlaceholder("Describe a change or ask a question…");
     await input.fill(QUESTION);

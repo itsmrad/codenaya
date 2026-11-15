@@ -155,14 +155,17 @@ type StartResult = { sandboxId: string; maxAttempts: number } | { skipped: strin
  * foundation snapshot with the project's current files. Run inside a step.
  */
 const startWorkerSandbox = async ({
-  internalKey, projectId, messageId, agentTaskId, invokedAt, timeoutMs,
+  internalKey, projectId, messageId, agentTaskId, invokedAt, timeoutMs, signal,
 }: {
   internalKey: string; projectId: Id<"projects">; messageId: Id<"messages">; agentTaskId: Id<"agentTasks">;
   invokedAt: number;
   timeoutMs: number;
+  signal?: AbortSignal;
 }): Promise<StartResult> => {
   const apiKey = e2bKey();
   if (!apiKey) return { off: true };
+  // A worker already at its cost cap leaves the slot to the others.
+  if (signal?.aborted) return { skipped: "cost budget" };
   const remaining = invokedAt + timeoutMs - Date.now();
   const maxAttempts = Math.min(SELF_CHECK_ATTEMPTS, Math.floor((remaining - SELF_CHECK_SLACK_MS) / CHECK_ROUND_MS) - 1);
   // verifyAndFix always allows at least one repair, which needs two verifies plus slack.
@@ -212,7 +215,7 @@ export const selfCheckStep = (event: RepairEvent, now: number): AgentStep => ({
   ...(event.status === "running" ? {} : { endedAt: now }),
 });
 
-type Step = { run: (id: string, fn: () => Promise<unknown>) => Promise<unknown> };
+type Step = { run: (id: string, fn: () => unknown) => Promise<unknown> };
 
 /**
  * A worker's self-check, called from the swarm-worker function body (never
@@ -239,11 +242,15 @@ export const selfCheckWorker = async ({
   signal?: AbortSignal;
 }): Promise<SelfCheck | null> => {
   const started = (await step.run("self-check-start", () =>
-    startWorkerSandbox({ internalKey, projectId, messageId, agentTaskId, invokedAt, timeoutMs }))) as StartResult;
+    startWorkerSandbox({ internalKey, projectId, messageId, agentTaskId, invokedAt, timeoutMs, signal }))) as StartResult;
   if ("off" in started) return null;
   if ("skipped" in started) return { selfCheck: `skipped (${started.skipped})`, filesChanged: [] };
 
   const owns = (path: string) => ownsPath(ownedPaths, path);
+  // Stop repairing once no full verify fits before step.invoke's timeout; the slack alone can't cover a round.
+  const deadline = new AbortController();
+  const deadlineAt = invokedAt + timeoutMs - CHECK_ROUND_MS;
+  const repairSignal = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
   const result = await verifyAndFix({
     sandbox: () => Sandbox.connect(started.sandboxId, { apiKey: process.env.E2B_API_KEY?.trim() }),
     projectId,
@@ -256,14 +263,17 @@ export const selfCheckWorker = async ({
     allowedPaths: owns,
     onEvent,
     onResponse,
-    signal,
-    step: (id, fn) => step.run(id, fn),
+    signal: repairSignal,
+    step: async (id, fn) => {
+      if (await step.run(`${id}-late`, () => Date.now() >= deadlineAt)) deadline.abort();
+      return step.run(id, fn);
+    },
   });
   await step.run("self-check-stop", async () => {
     await Sandbox.kill(started.sandboxId, { apiKey: process.env.E2B_API_KEY?.trim() }).catch(() => false);
   });
   const ownedLeft = ownedErrors(ownedPaths)(result.errors).length;
-  if (result.status === "unverified" && result.reason && !signal?.aborted) {
+  if (result.status === "unverified" && result.reason && !repairSignal.aborted) {
     console.error("[swarm-sandbox] check incomplete", projectId, result.reason);
   }
   // A full pass of a partial tree proves only this worker's files: still scoped.
@@ -271,6 +281,6 @@ export const selfCheckWorker = async ({
     ? "scoped-ok"
     : result.status === "failed"
       ? `scoped-failed (${ownedLeft} in owned files)`
-      : `skipped (${signal?.aborted ? "cost budget" : "check unavailable"})`;
+      : `skipped (${signal?.aborted ? "cost budget" : deadline.signal.aborted ? "time budget" : "check unavailable"})`;
   return { selfCheck, filesChanged: result.filesChanged };
 };

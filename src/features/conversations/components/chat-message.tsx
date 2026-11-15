@@ -26,9 +26,11 @@ import { cn } from "@/lib/utils";
 import type { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { sanitizeAgentText, stuckFilePath } from "../agent-steps";
 import { useChatSendBlock } from "../hooks/use-queue-chat-message";
+import { useAgentTasks } from "../hooks/use-agent-tasks";
 import { isPlanReply } from "../plan-mode";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
+import { SwarmBoard } from "./swarm-board";
 import { type StuckRetry, StuckRunCard } from "./stuck-run-card";
 
 interface UserMessageProps {
@@ -229,6 +231,7 @@ export const AssistantMessage = ({
   const settle = startedProcessing && "animate-fade-up motion-reduce:animate-none";
   // Plan-mode runs also answer questions (#311); only a plan can be built.
   const isPlan = message.mode === "plan" && isPlanReply(content);
+  const tasks = useAgentTasks(message.mode === "swarm" ? message._id : null);
   const reduceMotion = useReducedMotion();
   const shown = useTypewriter(content, startedProcessing && !reduceMotion);
 
@@ -250,23 +253,29 @@ export const AssistantMessage = ({
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const run = (status === "processing" || steps.length > 0) && (
+    <AgentRun
+      steps={steps}
+      status={status}
+      startedAt={message._creationTime}
+      completedAt={message.completedAt}
+      model={message.runModel?.label}
+      stalled={stalled}
+      onOpenFile={onOpenFile}
+      previewErrors={isLast ? { ...previewErrors, sending: fixSending } : undefined}
+      checkpointId={checkpointId}
+      revertDisabled={revertDisabled}
+      messageId={message._id}
+    />
+  );
+
   return (
     <div className="group/msg flex w-full flex-col gap-3">
-      {(status === "processing" || steps.length > 0) && (
-        <AgentRun
-          steps={steps}
-          status={status}
-          startedAt={message._creationTime}
-          completedAt={message.completedAt}
-          model={message.runModel?.label}
-          stalled={stalled}
-          onOpenFile={onOpenFile}
-          previewErrors={isLast ? { ...previewErrors, sending: fixSending } : undefined}
-          checkpointId={checkpointId}
-          revertDisabled={revertDisabled}
-          messageId={message._id}
-        />
-      )}
+      {message.mode === "swarm" ? (
+        <SwarmBoard message={message} tasks={tasks} onOpenFile={onOpenFile}>
+          {run || undefined}
+        </SwarmBoard>
+      ) : run}
       {stalled && isLast && onRetry && (
         <div className="flex items-center gap-2">
           <span className="inline-flex h-5.5 items-center rounded-full bg-destructive/10 px-2 text-[11.5px] text-destructive">
