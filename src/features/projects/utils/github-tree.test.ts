@@ -29,9 +29,33 @@ describe("splitPath", () => {
     expect(splitPath("a/b/c.ts")).toEqual({ name: "c.ts", parentPath: "a/b" });
     expect(splitPath("README.md")).toEqual({ name: "README.md", parentPath: "" });
   });
+
+  // Pins current (wrong) behaviour; flip when #671 is fixed.
+  it("falls back to the root when an imported file's parent folder is missing", () => {
+    const folderIdMap: Record<string, Id<"files">> = {
+      src: "src-id" as Id<"files">,
+    };
+    const { name, parentPath } = splitPath("src/missing/page.tsx");
+    // Mirror the importer's parent lookup: a missing folder does not fall back to src.
+    const parentId = parentPath ? folderIdMap[parentPath] : undefined;
+    const imported = file("page-id", name, parentId);
+
+    expect(parentPath).toBe("src/missing");
+    expect(parentId).toBeUndefined();
+    expect(buildFilePaths([imported])).toEqual({ "page.tsx": imported });
+  });
 });
 
 describe("planFolderCreation", () => {
+  it("keeps duplicate folder names under separate parents", () => {
+    expect(planFolderCreation(["a/ui", "b/ui", "a", "b"])).toEqual([
+      { path: "a", name: "a", parentPath: "" },
+      { path: "b", name: "b", parentPath: "" },
+      { path: "a/ui", name: "ui", parentPath: "a" },
+      { path: "b/ui", name: "ui", parentPath: "b" },
+    ]);
+  });
+
   it("orders parents before children listed ahead of them", () => {
     expect(planFolderCreation(["src/components", "src", "src/components/ui"])).toEqual([
       { path: "src", name: "src", parentPath: "" },
