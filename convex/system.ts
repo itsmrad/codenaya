@@ -139,6 +139,8 @@ export const updateMessageContent = mutation({
     stuck: v.optional(stuckRunValidator),
     /** Follow-up prompts parsed out of the reply (#256). */
     suggestions: v.optional(v.array(v.string())),
+    /** The run completed the project's first build (#341). */
+    firstBuild: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -158,6 +160,7 @@ export const updateMessageContent = mutation({
       ...(args.suggestions?.length
         ? { suggestions: args.suggestions.slice(0, 3).map((s) => s.slice(0, 100)) }
         : {}),
+      ...(args.firstBuild ? { firstBuild: true } : {}),
     });
   },
 });

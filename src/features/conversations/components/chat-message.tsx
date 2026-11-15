@@ -33,6 +33,7 @@ import { buildPlanMessage, isPlanReply } from "../plan-mode";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
 import { PlanEditor } from "./plan-editor";
+import { ShipCard } from "./ship-card";
 import { SwarmBoard } from "./swarm-board";
 import { type StuckRetry, StuckRunCard } from "./stuck-run-card";
 
@@ -382,6 +383,7 @@ export const AssistantMessage = ({
               </Button>
             </div>
           )}
+          {message.firstBuild && <ShipCard projectId={message.projectId} />}
           {/* Only under the latest build reply; a plan has "Build this plan". */}
           {isLast && onSuggestion && message.mode !== "plan" && !message.stuck && message.suggestions?.length ? (
             <div className={cn("flex flex-wrap gap-2", settle)}>

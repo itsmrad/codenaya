@@ -421,6 +421,9 @@ export default defineSchema({
     // Assistant messages only: follow-up prompts shown as chips (#256).
     // Bounded: at most 3, of at most 100 characters each.
     suggestions: v.optional(v.array(v.string())),
+    // Assistant messages only: the run that completed the project's first
+    // build (#341), under which the chat offers publish and export once.
+    firstBuild: v.optional(v.boolean()),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"])

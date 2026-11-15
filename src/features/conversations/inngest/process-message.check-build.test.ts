@@ -146,6 +146,11 @@ describe("processMessage build-check gate", () => {
     projectFiles = VITE_FILES.map((file) => ({ ...file }));
     const run = vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
     mocks.createSandbox.mockResolvedValue(fakeSandbox(run));
+    // This run ends a seeded project's first build (#341).
+    const base = mocks.mutation.getMockImplementation()!;
+    mocks.mutation.mockImplementation(async (ref, args) =>
+      getFunctionName(ref) === "projects:completeFirstBuild" ? true : base(ref, args),
+    );
     const summary = "**What was built:** a script.";
     const outcome = await drive({ modelId: "x-ai/grok-4.7" }, [
       { data: writeMain(BROKEN) },
@@ -177,6 +182,7 @@ describe("processMessage build-check gate", () => {
     expect(update).toMatchObject({ content: summary });
     expect(update).not.toHaveProperty("outcome");
     expect(mutationArgs("projects:completeFirstBuild")).toHaveLength(1);
+    expect(update).toMatchObject({ firstBuild: true });
   });
 
   it.each([
