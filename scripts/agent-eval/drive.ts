@@ -5,11 +5,12 @@ import { userConvexClient } from "../../e2e/convex-client";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { buildFlatFileList } from "../../src/features/sandbox-preview/utils/file-tree";
+import { SWARM_MODE } from "../../src/features/conversations/plan-mode";
 import { capture, probePreview, sanitize, screenshot } from "./capture";
 import { MODELS, readUsage, recordUsage, totalUsd } from "./cost";
-import type { Trail } from "./types";
+import type { Mode, Trail } from "./types";
 
-type Options = { id: string; model: string; prompt: string; maxUsd: number; directory: string; projectId?: Id<"projects">; title?: string };
+type Options = { id: string; model: string; mode: Mode; prompt: string; maxUsd: number; directory: string; projectId?: Id<"projects">; title?: string };
 
 export async function post(page: Page, path: string, data: unknown) {
   const response = await page.request.post(path, { data, timeout: 60_000 });
@@ -40,6 +41,7 @@ async function observe(page: Page, user: ConvexHttpClient, options: Options, tra
     trail.messages = all.filter((m) => m._creationTime >= trail.startedAt);
     const assistants = trail.messages.filter((m) => m.role === "assistant");
     await syncUsage(assistants);
+    if (options.mode === "swarm") trail.tasks = (await Promise.all(assistants.map((m) => user.query(api.agentTasks.listForMessage, { messageId: m._id })))).flat();
     for (const message of assistants) {
       if (message.runModel && (message.runModel.modelId !== options.model || message.runModel.keyId)) throw new Error(`runModel mismatch: requested platform ${options.model}, got ${message.runModel.modelId}`);
     }
@@ -69,17 +71,18 @@ async function observe(page: Page, user: ConvexHttpClient, options: Options, tra
 }
 
 export async function drive(page: Page, user: ConvexHttpClient, options: Options) {
-  const trail: Trail = { id: options.id, model: options.model, prompt: options.prompt, startedAt: Date.now(), endedAt: 0, messages: [], usage: [], sandboxEvents: [], consoleErrors: [], capped: false, preview: { loaded: false, overlay: false } };
+  const trail: Trail = { id: options.id, model: options.model, mode: options.mode, prompt: options.prompt, startedAt: Date.now(), endedAt: 0, messages: [], tasks: [], usage: [], sandboxEvents: [], consoleErrors: [], capped: false, preview: { loaded: false, overlay: false } };
   await mkdir(options.directory, { recursive: true });
   await capture(page, trail);
   try {
     await readUsage(); // Fail before creating anything if metering is unavailable.
+    const mode = options.mode === "swarm" ? { mode: SWARM_MODE } : {};
     if (options.projectId) {
       trail.projectId = options.projectId;
       const conversations = await user.query(api.conversations.getByProject, { projectId: options.projectId });
-      await post(page, "/api/messages", { conversationId: conversations[0]._id, message: options.prompt, model: options.model });
+      await post(page, "/api/messages", { conversationId: conversations[0]._id, message: options.prompt, model: options.model, ...mode });
     } else {
-      const result = await post(page, "/api/projects/create-with-prompt", { prompt: options.prompt, model: options.model });
+      const result = await post(page, "/api/projects/create-with-prompt", { prompt: options.prompt, model: options.model, ...mode });
       trail.projectId = result.projectId;
     }
     await page.goto(`/projects/${trail.projectId}`);

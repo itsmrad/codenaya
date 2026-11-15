@@ -7,7 +7,7 @@ import { ADMIN_TITLE, deleteAfterScoring, projectTitle } from "./projects";
 import type { Trail } from "./types";
 
 const fixture = (): Trail => ({
-  id: "booking", model: "claude-haiku-5-5", prompt: "booking", startedAt: 1000, endedAt: 9000,
+  id: "booking", model: "claude-haiku-5-5", mode: "build", prompt: "booking", tasks: [], startedAt: 1000, endedAt: 9000,
   firstPreviewAt: 5000, capped: false, consoleErrors: [], sandboxEvents: [],
   preview: { loaded: true, overlay: false },
   messages: [{ _id: "assistant" as Trail["messages"][number]["_id"], role: "assistant", status: "completed", content: "Done", runModel: { modelId: "claude-haiku-5-5", label: "Haiku" }, steps: [{ id: "build", kind: "tool", tool: "checkBuild", status: "done", text: "Build verified", startedAt: 2000 }] }],
@@ -81,9 +81,31 @@ describe("agent evaluation", () => {
       [dev, "http://localhost.evil.example"],
     ] as const) expect(() => assertDevTarget(env, url)).toThrow(/Refusing/);
   });
+  it("summarizes a swarm from its agentTasks rows and the orchestrator's steps", () => {
+    const trail = fixture();
+    trail.mode = "swarm";
+    const messageId = trail.messages[0]._id;
+    trail.messages[0].completedAt = 7000;
+    trail.messages[0].steps = [
+      { id: "plan", kind: "tool", tool: "delegateTasks", status: "done", startedAt: 3000 },
+      { id: "fix", kind: "tool", tool: "editFile", status: "done", startedAt: 4000 },
+      { id: "build", kind: "tool", tool: "checkBuild", status: "done", text: "Build verified", startedAt: 5000 },
+    ];
+    trail.tasks = [
+      { messageId, taskId: "ui", role: "worker", status: "done", selfCheck: "scoped-ok" },
+      { messageId, taskId: "data", role: "sub-orchestrator", status: "error" },
+      { messageId, taskId: "data/api", role: "worker", status: "running", parentTaskId: "data", selfCheck: "skipped (swarm sandbox cap reached)" },
+      { messageId, taskId: "data/db", role: "worker", status: "done", parentTaskId: "data", selfCheck: "scoped-failed (tsc)" },
+    ];
+    const result = score(trail, []);
+    expect(result).toMatchObject({ mode: "swarm", messageMs: 6000, swarm: { tasksPlanned: 2, workers: 3, failed: 1, unfinished: 1, maxDepth: 2, integratorTurns: 2 } });
+    expect(result.swarm!.selfChecks.map((c) => c.selfCheck)).toEqual(["ok", "skipped", "failed"]);
+    expect(score(fixture(), []).swarm).toBeNull();
+  });
   it("names projects from a title template and rejects invalid names", () => {
     expect(projectTitle(ADMIN_TITLE, "booking", "claude-haiku-5-5")).toBe("Night build — booking — single Haiku 5.5");
     expect(projectTitle("{app}/{config}/{app}", "saas", "google/gemini-4-hydrogen")).toBe("saas/single Gemini 4 Hydrogen/saas");
+    expect(projectTitle(ADMIN_TITLE, "crm", "claude-sonnet-5-5", "swarm")).toBe("Night build — crm — Swarm Sonnet 5.5 + Haiku 5.5");
     expect(() => projectTitle(" ", "crm", "claude-opus-5-5")).toThrow(/--title/);
     expect(() => projectTitle("x".repeat(101), "crm", "claude-opus-5-5")).toThrow(/--title/);
   });
