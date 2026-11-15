@@ -67,7 +67,7 @@ describe("exclusions", () => {
   it("drops entries named after a term, even glued into a repo name", () => {
     const { kept, dropped } = applyExclusions(entries, terms);
     expect(dropped).toBe(2);
-    expect(kept.map((entry) => entry.name)).toEqual(["acme/hub", "scoped/tool", "mono/repo", "gitlab/thing"]);
+    expect(kept.map((entry: { name: string }) => entry.name)).toEqual(["acme/hub", "scoped/tool", "mono/repo", "gitlab/thing"]);
   });
 
   it("replaces whole-word terms in descriptions, case-insensitively, without repeats", () => {
