@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-labelledby="title">
+  <title id="title">Codenaya</title>
+  <style>
+    .cursor { animation: blink 1.1s steps(1, end) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+  </style>
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="rgba(26,26,26,0.05)" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="300" rx="24" fill="#faf8f5"/>
+  <rect width="1200" height="300" rx="24" fill="url(#grid)"/>
+  <!-- Brand mark (src/components/codenaya-logo.tsx): ring in foreground, cursor in brand orange -->
+  <g transform="translate(273 75) scale(1.25)">
+    <path fill="#1a1a1a" d="M99.4 29.2A50 50 0 1 0 99.4 90.8L82.1 77.2A28 28 0 1 1 82.1 42.8Z"/>
+    <rect class="cursor" x="94" y="46" width="14" height="28" rx="2" fill="#e8824f"/>
+  </g>
+  <text x="453" y="177" fill="#1a1a1a" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="104" font-weight="600" letter-spacing="-3">codenaya</text>
+  <text x="457" y="218" fill="#a24415" font-family="'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" letter-spacing="3">AI APP BUILDER · AGENTIC CLOUD IDE</text>
+</svg>

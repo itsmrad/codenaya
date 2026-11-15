@@ -1,24 +1,24 @@
 <p align="center">
   <a href="https://github.com/itsmrad/codenaya">
-    <img src="public/logo.svg" alt="Codenaya logo" width="96" height="96">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/codenaya-banner-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="docs/assets/codenaya-banner.svg">
+      <img src="docs/assets/codenaya-banner.svg" alt="Codenaya" width="720">
+    </picture>
   </a>
 </p>
 
-<h1 align="center">Codenaya</h1>
-
 <p align="center">
-  The open-source AI app builder: describe an app, watch agents build it in a cloud sandbox, and ship it from your browser.
+  <strong>The open-source AI app builder.</strong> Describe an app, watch agents build it in a cloud sandbox, and ship it from your browser.
   <br />
   <br />
   <a href="https://codenaya.tech"><strong>Website</strong></a>
-  ·
-  <a href="FEATURES.md">Features</a>
-  ·
+  &middot;
+  <a href="https://www.codenaya.tech/docs">Docs</a>
+  &middot;
   <a href="https://github.com/itsmrad/codenaya/issues">Issues</a>
-  ·
-  <a href="CONTRIBUTING.md">Contributing</a>
-  ·
-  <a href="SECURITY.md">Security</a>
+  &middot;
+  <a href="#roadmap">Roadmap</a>
 </p>
 
 <p align="center">
