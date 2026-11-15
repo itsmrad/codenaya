@@ -11,6 +11,29 @@ export const formatSkill = (skill: AgentSkill) =>
 // Descriptions may span lines; the index keeps one line per skill.
 const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 
+const SUPABASE_SKILL = "supabase-auth-db";
+
+/**
+ * The system prompt's accounts-and-data hint (#228): requests for login or saved
+ * data go through the built-in Supabase skill, with the URL and key added by the
+ * user in Environment Variables instead of guessed. Tells the agent to offer
+ * the skill when the project hasn't enabled it.
+ */
+export function buildSupabaseHintSection(skills: readonly AgentSkill[]): string {
+  const enabled = skills.some((skill) => skill.name === SUPABASE_SKILL);
+  return [
+    "\n\n## Accounts and saved data",
+    "When the request mentions login, sign-up, accounts, users or saving data, " +
+      (enabled
+        ? `call loadSkill("${SUPABASE_SKILL}") and follow it.`
+        : `offer the built-in ${SUPABASE_SKILL} skill (Supabase auth and a database with Row Level Security): ` +
+          "tell the user to turn it on from Skills in the project bar."),
+    "Ask the user to add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY (the publishable or anon key, " +
+      "never the secret or service_role key) in the project's Environment Variables dialog. " +
+      "Never guess or invent them, and never ask for them in chat.",
+  ].join("\n");
+}
+
 /**
  * The system prompt's skills sections: `## Available skills` lists names and
  * descriptions only (bodies come from `loadSkill`), and `## Active skills`
