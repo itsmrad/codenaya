@@ -109,7 +109,7 @@ test.describe.serial("plan mode", () => {
       .click();
     await expect(trigger).toHaveText(STUB_MODEL);
 
-    const planToggle = page.getByRole("radio", { name: "Plan", exact: true });
+    const planToggle = page.getByRole("radio", { name: "Ask / Plan", exact: true });
     await planToggle.click();
     await expect(planToggle).toBeChecked();
 
@@ -153,9 +153,9 @@ test.describe.serial("plan mode", () => {
   test("answers a question with nothing to build", async () => {
     test.setTimeout(180_000);
     const filesBefore = await fileNames();
-    const toggle = page.getByRole("button", { name: "Ask / Plan", exact: true });
+    const toggle = page.getByRole("radio", { name: "Ask / Plan", exact: true });
     await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(toggle).toBeChecked();
 
     const input = page.getByPlaceholder("Describe a change or ask a question…");
     await input.fill(QUESTION);

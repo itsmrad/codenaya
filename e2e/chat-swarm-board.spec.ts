@@ -80,7 +80,7 @@ test.describe("chat swarm board", () => {
       const modes = page.getByRole("radiogroup", { name: "Message mode" });
       await modes.getByRole("radio", { name: "Build" }).focus();
       await page.keyboard.press("ArrowRight");
-      await expect(modes.getByRole("radio", { name: "Plan" })).toBeChecked();
+      await expect(modes.getByRole("radio", { name: "Ask / Plan", exact: true })).toBeChecked();
       await modes.getByRole("radio", { name: "Swarm" }).click();
       await expect(modes.getByRole("radio", { name: "Swarm" })).toBeChecked();
       await expect(modes.getByRole("radio", { name: "Build" })).not.toBeChecked();
