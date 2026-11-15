@@ -2,7 +2,7 @@ import { expect, test, type Locator } from "@playwright/test";
 
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
-import { getProvider, listProviders } from "../src/features/integrations/catalog";
+import { getProvider, listVisibleProviders } from "../src/features/integrations/catalog";
 
 const desktop = { width: 1440, height: 900 };
 const viewports = [
@@ -49,13 +49,13 @@ test.describe("integration catalog", () => {
         await page.goto("/settings/integrations");
         const catalog = page.getByRole("region", { name: "Browse integrations" });
         const providers = catalog.getByRole("list", { name: "Integration providers" });
-        await expect(providers.getByRole("listitem")).toHaveCount(listProviders().length);
-        await expect(providers.locator("img")).toHaveCount(listProviders().length);
+        await expect(providers.getByRole("listitem")).toHaveCount(listVisibleProviders().length);
+        await expect(providers.locator("img")).toHaveCount(listVisibleProviders().length);
         for (const logo of await providers.locator("img").all()) {
           await logo.scrollIntoViewIfNeeded();
           await expect.poll(() => logo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
         }
-        await expect(providers.getByText("Read-only capable", { exact: true })).toHaveCount(listProviders().filter((provider) => provider.supportsReadOnly).length);
+        await expect(providers.getByText("Read-only capable", { exact: true })).toHaveCount(listVisibleProviders().filter((provider) => provider.supportsReadOnly).length);
         await checkCategoryRow(catalog);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         await page.screenshot({ path: testInfo.outputPath(`settings-${viewport.width}-${theme}.png`), fullPage: true });
@@ -78,7 +78,7 @@ test.describe("integration catalog", () => {
         await page.getByRole("button", { name: "Integrations", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "Integrations", exact: true });
         const providers = dialog.getByRole("list", { name: "Integration providers" });
-        await expect(providers.getByRole("listitem")).toHaveCount(listProviders().length);
+        await expect(providers.getByRole("listitem")).toHaveCount(listVisibleProviders().length);
         const connections = dialog.getByRole("button", { name: /^Project and account connections/ });
         if (await connections.count()) {
           await expect(connections).toHaveAttribute("aria-expanded", "true");
@@ -100,12 +100,12 @@ test.describe("integration catalog", () => {
         await expect(providers.getByRole("listitem")).toHaveCount(2);
         await search.fill("");
         await dialog.getByRole("button", { name: "All", exact: true }).click();
-        await expect(providers.getByRole("listitem")).toHaveCount(listProviders().length);
+        await expect(providers.getByRole("listitem")).toHaveCount(listVisibleProviders().length);
         await search.fill("Context7");
         await providers.getByRole("button").click();
         await expect(dialog.getByRole("heading", { name: /^(Add|Manage) Context7$/ })).toBeVisible();
         await dialog.getByRole("button", { name: "Back to provider list" }).click();
-        await expect(providers.getByRole("listitem")).toHaveCount(listProviders().length);
+        await expect(providers.getByRole("listitem")).toHaveCount(listVisibleProviders().length);
       });
     }
   }
@@ -126,7 +126,7 @@ test.describe("integration catalog", () => {
 
     await page.goto("/settings/integrations?connect=not-a-provider");
     const providers = page.getByRole("region", { name: "Browse integrations" }).getByRole("list", { name: "Integration providers" });
-    await expect(providers.getByRole("listitem")).toHaveCount(listProviders().length);
+    await expect(providers.getByRole("listitem")).toHaveCount(listVisibleProviders().length);
     // Connections load only after hydration, when a valid id would have opened the dialog.
     await expect(page.getByText("Loading connections...")).toHaveCount(0);
     await expect(dialog).toHaveCount(0);
@@ -179,8 +179,8 @@ test.describe("integration catalog", () => {
 
   test("Read-only capable badge follows supportsReadOnly", async ({ page }) => {
     await page.setViewportSize(desktop);
-    const readOnly = listProviders().find((provider) => provider.supportsReadOnly);
-    const readWrite = listProviders().find((provider) => !provider.supportsReadOnly);
+    const readOnly = listVisibleProviders().find((provider) => provider.supportsReadOnly);
+    const readWrite = listVisibleProviders().find((provider) => !provider.supportsReadOnly);
     expect(readOnly, "catalog has a read-only capable provider").toBeDefined();
     expect(readWrite, "catalog has a provider without read-only").toBeDefined();
     await page.route("**/api/integrations/**", (route) => route.abort());
