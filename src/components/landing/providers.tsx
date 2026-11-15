@@ -27,7 +27,7 @@ const CELLS = [
 ];
 
 export const LandingProviders = () => (
-  <section className="border-b border-border">
+  <section id="providers" className="border-b border-border">
     <SectionHeader
       index={3}
       label="Your key or ours"
