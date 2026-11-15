@@ -1,11 +1,16 @@
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
+import { preRegisteredOAuthProviderIds } from "./src/features/integrations/catalog";
+
 const nextConfig: NextConfig = {
   // Enable Next.js 16 Partial Prerendering and Cache Components
   cacheComponents: true,
   allowedDevOrigins: ['10.5.0.2', '192.168.1.34'],
   poweredByHeader: false,
+  // Provider ids only (never credentials), so the UI can hide OAuth for a
+  // provider whose pre-registered client is not configured (#539).
+  env: { CODENAYA_PREREGISTERED_OAUTH_PROVIDERS: preRegisteredOAuthProviderIds(process.env) },
   // Stop `next dev` upserting its agent-rules block into AGENTS.md (#81).
   agentRules: false,
   // Instant template sources are read at request time (#362).
