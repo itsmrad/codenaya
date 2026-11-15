@@ -1050,20 +1050,22 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expect(e2b.create).not.toHaveBeenCalled();
   });
 
-  it("builds in a new sandbox when the warm build hits its 120 s cap with budget left", async () => {
+  it("gives the warm build 180 s, so a 130 s install and build still finishes there", async () => {
     let now = 1_000_000;
     vi.spyOn(Date, "now").mockImplementation(() => now);
     listed({});
     const warm = warmSandbox((command) => {
-      if (command.startsWith("npm install")) now += 125_000;
+      if (command.startsWith("npm install")) now += 130_000;
       return undefined;
     });
 
-    fakeSandbox();
     const result = await warmCheck();
 
-    expectCold(result, warm);
-    expect(commandsOf(warm).some((run) => run.startsWith("npx tsc"))).toBe(false);
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(warm.commands.run.mock.calls.find((call) => call[0].startsWith("npm install"))?.[1]).toMatchObject({
+      timeoutMs: 180_000,
+    });
+    expect(e2b.create).not.toHaveBeenCalled();
   });
 
   it("bounds each warm command by the time left in the step budget", async () => {

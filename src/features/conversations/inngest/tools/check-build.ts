@@ -42,8 +42,8 @@ interface CheckBuildToolOptions {
   ownerId?: string;
 }
 
-/** Install, type check and build together must finish within this. */
-const CHECK_TIMEOUT_MS = 120_000;
+/** Install, type check and build together must finish within this; swarm projects build in 115-130 s. */
+const CHECK_TIMEOUT_MS = 180_000;
 /**
  * The warm attempt and the cold fallback together. The Inngest route sets no
  * maxDuration, so the step runs under Vercel's default 300 s; this leaves room
