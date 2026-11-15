@@ -120,6 +120,21 @@ describe("model picker key groups (#600)", () => {
     expect(pickerKeys(keys).map((k) => k._id)).toEqual(["a", "b", "c", "d", "e", "f"]);
   });
 
+  it("tells keys apart by fingerprint when both have one (#614)", () => {
+    const keys = [
+      key({ _id: "a", fingerprint: "aaaaaaaaaaaa" }),
+      key({ _id: "b", fingerprint: "bbbbbbbbbbbb" }),
+      key({ _id: "c", fingerprint: "aaaaaaaaaaaa" }),
+    ];
+    expect(pickerKeys(keys).map((k) => k._id)).toEqual(["a", "b"]);
+    expect(pickerKeys(keys, "c").map((k) => k._id)).toEqual(["b", "c"]);
+  });
+
+  it("falls back to the masked preview when a key has no fingerprint (#614)", () => {
+    const keys = [key({ _id: "a" }), key({ _id: "b", fingerprint: "bbbbbbbbbbbb" })];
+    expect(pickerKeys(keys).map((k) => k._id)).toEqual(["a"]);
+  });
+
   it("hides invalid keys unless selected", () => {
     const keys = [key({ _id: "a", status: "invalid" })];
     expect(pickerKeys(keys)).toEqual([]);

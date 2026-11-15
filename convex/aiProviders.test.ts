@@ -3,6 +3,9 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { resetSecretSealer } from "@/features/integrations/server/crypto";
+import { sealProviderKey } from "@/features/ai-providers/server/sealed-key";
+
 import { api } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import schema from "./schema";
@@ -30,6 +33,7 @@ const SUMMARY_KEYS = [
   "baseUrl",
   "modelIds",
   "maskedPreview",
+  "fingerprint",
   "status",
   "lastTestedAt",
 ];
@@ -69,6 +73,7 @@ describe("aiProviders", () => {
       provider: "custom",
       baseUrl: "https://llm.example.com/v1",
       modelIds: ["llama-4"],
+      fingerprint: "0123456789ab",
     });
     await createKey(t, BOB);
 
@@ -84,6 +89,31 @@ describe("aiProviders", () => {
     for (const field of ["ciphertext", "wrappedDek", "secretRef", "authTag", "userId"]) {
       expect(serialized).not.toContain(field);
     }
+  });
+
+  test("a sealed key's plaintext is neither stored nor returned (#614)", async () => {
+    const t = setup();
+    const plaintext = "sk-test-not-a-real-key-1234";
+    // A throwaway KEK, so the row holds real sealed output, not a fixture.
+    vi.stubEnv("CODENAYA_LOCAL_KEK", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=");
+    resetSecretSealer();
+    const sealed = await sealProviderKey(plaintext);
+    await createKey(t, ALICE, sealed);
+
+    const stored = await t.run((ctx) => ctx.db.query("aiProviderKeys").first());
+    expect(stored?.fingerprint).toMatch(/^[0-9a-f]{12}$/);
+
+    const alice = as(t, ALICE);
+    const responses = await Promise.all([
+      alice.query(api.aiProviders.list, {}),
+      alice.query(api.aiProviders.getPreferences, {}),
+    ]);
+    expect(responses[0][0].fingerprint).toBe(stored?.fingerprint);
+    // Everything but the last four, which maskedPreview shows by design.
+    const hidden = plaintext.slice(0, -4);
+    expect(JSON.stringify(stored)).not.toContain(hidden);
+    expect(JSON.stringify(responses)).not.toContain(hidden);
+    resetSecretSealer();
   });
 
   test("requires a signed-in user", async () => {
