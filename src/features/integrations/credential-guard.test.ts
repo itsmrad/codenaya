@@ -70,6 +70,8 @@ describe("public env var values", () => {
     ["resend", fake("re", "_abcd1234_", "0123456789abcdefghijklmn")],
     ["posthog-personal", fake("phx", "_", "0123456789abcdefghijklmn")],
     ["sentry-token", fake("sntrys", "_", "0123456789abcdefghijklmn")],
+    ["sentry-token", fake("sntrys", "_", btoa('{"org":"example","url":"https://sentry.io"}'), "_", "aB1+".repeat(10), "ab/")],
+    ["sentry-token", fake("sntryu", "_", "0123456789abcdef".repeat(4))],
     ["dsn-password", "postgresql://admin:verysecretpassword@db.example.com/app"],
   ])("refuses a %s value", (rule, value) => {
     expect(publicValueSecretRule(value)).toBe(rule);
@@ -77,6 +79,8 @@ describe("public env var values", () => {
 
   it.each([
     ["Supabase anon JWT", jwt("eyJyb2xlIjoiYW5vbiJ9")],
+    ["Supabase publishable key", fake("sb", "_publishable_", "0123456789abcdefghij")],
+    ["Clerk publishable key", fake("pk", "_test_", btoa("example.clerk.accounts.dev$"))],
     ["Stripe publishable key", fake("pk", "_live_", "0123456789abcdefghij")],
     ["Firebase web key", fake("AIza", "0123456789abcdefghijklmnopqrstuvwx")],
     ["Sentry DSN", "https://abc123@o0.ingest.sentry.io/0"],

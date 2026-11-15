@@ -18,7 +18,7 @@ export const CREDENTIAL_TOKEN_PATTERNS: ReadonlyArray<{
   { label: "openai", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
   { label: "resend", pattern: /\bre_[A-Za-z0-9]{8}_[A-Za-z0-9]{20,}\b/g },
   { label: "posthog-personal", pattern: /\bphx_[A-Za-z0-9]{20,}\b/g },
-  { label: "sentry-token", pattern: /\bsntr[ysu]_[A-Za-z0-9_=+/-]{20,}/g },
+  { label: "sentry-token", pattern: /\bsntry[su]_[A-Za-z0-9_=+/-]{20,}/g },
   { label: "slack", pattern: /\bxox[abposr]-[A-Za-z0-9-]{10,}\b/g },
   { label: "google", pattern: /\bAIza[A-Za-z0-9_-]{30,}\b/g },
   { label: "aws", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g },

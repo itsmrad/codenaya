@@ -67,6 +67,18 @@ describe("setEnvVar tool", () => {
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["NEXT_PUBLIC_SUPABASE_ANON_KEY", ["eyJhbGciOiJIUzI1NiJ9", "eyJyb2xlIjoiYW5vbiJ9", "abcdefghijklmnop"].join(".")],
+    ["VITE_SUPABASE_PUBLISHABLE_KEY", ["sb", "_publishable_", "0123456789abcdefghij"].join("")],
+    ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", ["pk", "_test_", btoa("example.clerk.accounts.dev$")].join("")],
+    ["VITE_STRIPE_KEY", ["pk", "_live_", "0123456789abcdefghij"].join("")],
+    ["NEXT_PUBLIC_SENTRY_DSN", "https://abc123@o0.ingest.sentry.io/0"],
+  ])("stores public-by-design %s", async (key, value) => {
+    expect(await setEnvVar(key, value)).toMatch(/^Stored public variable /);
+    expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ key, value }));
+    expect(step.run).toHaveBeenCalledTimes(1);
+  });
+
   it("tells the model to read env vars per framework and never from browser code (#330)", async () => {
     vi.stubEnv("CODENAYA_LOCAL_KEK", randomBytes(32).toString("base64"));
     mocks.mutation.mockResolvedValue(null);
