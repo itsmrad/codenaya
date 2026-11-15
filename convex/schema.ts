@@ -30,6 +30,8 @@ export const agentTaskInputValidator = v.object({
   ownedPaths: v.array(v.string()),
   modelId: v.string(),
   model: v.string(),
+  /** A sub-orchestrator's worker: its parent's taskId (its own is `<parent>/<child>`). */
+  parentTaskId: v.optional(v.string()),
 });
 
 export const agentTaskStatusValidator = v.union(
@@ -433,10 +435,15 @@ export default defineSchema({
     startedAt: v.optional(v.number()),
     endedAt: v.optional(v.number()),
     updatedAt: v.number(),
+    // The project's owner, and whether the run is on platform models: one platform swarm per owner.
+    // Unset on rows created before ADR 0013's per-owner limit.
+    ownerId: v.optional(v.string()),
+    platform: v.optional(v.boolean()),
   }))
     .index("by_message", ["messageId"])
     .index("by_message_and_taskId", ["messageId", "taskId"])
-    .index("by_project", ["projectId"]),
+    .index("by_project", ["projectId"])
+    .index("by_ownerId_and_platform_and_status", ["ownerId", "platform", "status"]),
 
   // Images uploaded from the chat composer: who uploaded each blob, so a
   // message can only attach its sender's own images. Deleted with the project.
