@@ -17,15 +17,21 @@ const noopSubscribe = () => () => {};
 
 // `useQueries` hands back a failure (e.g. a backend without these functions
 // yet) as an Error instead of throwing it into the page's error boundary.
-const WORKSPACE_MODE_QUERY = { mode: { query: api.userPreferences.getWorkspaceMode, args: {} } };
+const WORKSPACE_MODE_QUERY = {
+  mode: { query: api.userPreferences.getWorkspaceMode, args: {} },
+  swarm: { query: api.swarm.isEnabled, args: {} },
+};
 
 /**
  * The account's workspace mode (#524). Until the query resolves, or if it
  * fails, it is the last value seen on this device ("ide" if none), so a
- * project opens without a layout flash or a crash.
+ * project opens without a layout flash or a crash. `swarmEnabled` gates the
+ * agent board (#525).
  */
 export const useWorkspaceMode = () => {
-  const saved = useQueries(WORKSPACE_MODE_QUERY).mode as WorkspaceMode | Error | undefined;
+  const results = useQueries(WORKSPACE_MODE_QUERY);
+  const saved = results.mode as WorkspaceMode | Error | undefined;
+  const swarm = results.swarm as boolean | Error | undefined;
   const cached = useSyncExternalStore(
     noopSubscribe,
     loadCachedWorkspaceMode,
@@ -35,7 +41,12 @@ export const useWorkspaceMode = () => {
   useEffect(() => {
     if (saved && !(saved instanceof Error)) cacheWorkspaceMode(saved);
   }, [saved]);
-  return { mode: resolveWorkspaceMode(saved, cached), loaded: saved !== undefined && !failed, failed };
+  return {
+    mode: resolveWorkspaceMode(saved, cached, swarm),
+    loaded: saved !== undefined && !failed,
+    failed,
+    swarmEnabled: swarm === true,
+  };
 };
 
 export const useSetWorkspaceMode = () =>
