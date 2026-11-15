@@ -41,6 +41,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { PreviewView } from "./preview-view";
 import { ExportPopover } from "./export-popover";
+import { SharePopover } from "@/features/share/components/share-popover";
 import { EnvVarsDialog } from "./env-vars-dialog";
 import { useDownloadZip } from "../hooks/use-download-zip";
 import { useChatPanelStore } from "../store/use-chat-panel-store";
@@ -446,6 +447,7 @@ export const ProjectIdView = ({
             <span className="hidden @3xl:inline">Skills</span>
           </button>
           <ExportPopover projectId={projectId} />
+          <SharePopover projectId={projectId} />
           <HelpMenu className="size-8" />
           <div className="w-px h-4 bg-border/40" />
           <UserMenu avatarClassName="size-6" />

@@ -322,7 +322,11 @@ export default defineSchema({
     // Set when the owner deletes the project. The project is hidden at once
     // while `projects.deleteBatch` removes its data in the background.
     deletingAt: v.optional(v.number()),
-  }).index("by_owner", ["ownerId"]),
+    // Set while a read-only share link (/s/<token>) is on (#260): 128 random bits, hex.
+    shareToken: v.optional(v.string()),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_shareToken", ["shareToken"]),
 
   /**
    * Denormalized running totals, one row per `name`, so public pages can show

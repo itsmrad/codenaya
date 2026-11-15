@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useConvexAuth } from "convex/react";
 import { toast } from "sonner";
@@ -34,6 +34,7 @@ import {
   useUserVote,
   useVote,
   useIncrementView,
+  useImportToWorkspace,
 } from "../hooks/use-showcase";
 import { authRedirectUrl, showcasePath, useRemix } from "../hooks/use-remix";
 
@@ -55,7 +56,14 @@ export const ShowcaseDetail = ({ project, TitleAs = "h1" }: ShowcaseDetailProps)
   const vote = useVote();
   const incrementView = useIncrementView();
   const { isLoading: isAuthLoading, isAuthenticated } = useConvexAuth();
-  const { remix, isRemixing } = useRemix(project._id);
+  const importToWorkspace = useImportToWorkspace();
+  const { remix, isRemixing } = useRemix(
+    showcasePath(project._id),
+    useCallback(
+      () => importToWorkspace({ showcaseProjectId: project._id }),
+      [importToWorkspace, project._id],
+    ),
+  );
 
   // Live query for realtime vote counts
   const liveProject = useShowcaseById(project._id);
