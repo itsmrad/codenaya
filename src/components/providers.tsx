@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { MotionConfig } from "motion/react";
 
 import { ConvexReactClient } from "convex/react";
@@ -13,6 +14,7 @@ import {
   SIGN_UP_URL,
 } from "@/features/auth/constants";
 import { useEnsureCurrentUser } from "@/features/auth/hooks/use-ensure-current-user";
+import { clearAllProjectSessions } from "@/features/editor/editor-session";
 
 import { SpotlightTracker } from "./spotlight";
 import { ThemeProvider } from "./theme-provider";
@@ -55,6 +57,18 @@ const EnsureCurrentUser = () => {
   return null;
 };
 
+// Retained editor drafts belong to the signed-in user; drop them on sign-out or a user switch (#618).
+const ClearDraftsOnSignOut = () => {
+  const { userId } = useAuth();
+  const previous = useRef(userId);
+  useEffect(() => {
+    if (userId === undefined) return;
+    if (previous.current && previous.current !== userId) clearAllProjectSessions();
+    previous.current = userId;
+  }, [userId]);
+  return null;
+};
+
 export const Providers = ({ children }: { children: React.ReactNode }) => {
   return (
     <ClerkProvider
@@ -67,6 +81,7 @@ export const Providers = ({ children }: { children: React.ReactNode }) => {
     >
       <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
         <EnsureCurrentUser />
+        <ClearDraftsOnSignOut />
         <ThemeProvider
           attribute="class"
           defaultTheme="light"

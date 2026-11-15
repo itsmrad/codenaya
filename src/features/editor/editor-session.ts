@@ -27,7 +27,7 @@ export class EditorSession {
     this.snapshot = { ...this.snapshot, dirty: this.snapshot.content !== this.base, saving: this.inFlight };
     this.listeners.forEach((listener) => listener());
   }
-  private cancel() { clearTimeout(this.timer); this.timer = undefined; }
+  cancel() { clearTimeout(this.timer); this.timer = undefined; }
   private schedule() {
     this.cancel();
     if (!this.snapshot.conflict && this.snapshot.content !== this.base) {
@@ -81,7 +81,8 @@ export class EditorSession {
       if (this.remote === expectedContent || this.remote === content) {
         this.remote = content;
         this.snapshot.conflict = false;
-      } else if (this.snapshot.content === content) {
+      } else if (this.snapshot.content === content || this.remote === this.snapshot.content) {
+        // The server moved on to what the editor already shows, e.g. an agent echo of a newer draft (#605).
         this.base = this.remote;
         this.snapshot.content = this.remote;
         this.snapshot.conflict = false;
@@ -91,8 +92,14 @@ export class EditorSession {
       this.snapshot.error = null;
     } catch (error) {
       this.snapshot = { ...this.snapshot };
-      this.snapshot.conflict ||= getAppError(error)?.code === "CONFLICT";
-      this.snapshot.error = convexErrorMessage(error, "Couldn't save your edits. Retry saving.");
+      if (this.remote !== expectedContent && (this.remote === content || this.remote === this.snapshot.content)) {
+        // An echo shows the server already holds this content, so the error is moot (#605).
+        this.base = this.remote;
+        this.snapshot.error = null;
+      } else {
+        this.snapshot.conflict ||= getAppError(error)?.code === "CONFLICT";
+        this.snapshot.error = convexErrorMessage(error, "Couldn't save your edits. Retry saving.");
+      }
     } finally {
       this.inFlight = false;
       this.savingContent = undefined;
@@ -130,6 +137,12 @@ export const getProjectSessions = (projectId: Id<"projects">) => {
 };
 
 export const clearProjectSessions = (projectId: Id<"projects">) => { projectSessions.delete(projectId); };
+
+/** Drops every retained draft and its pending autosave, e.g. on sign-out or a user switch. */
+export const clearAllProjectSessions = () => {
+  for (const sessions of projectSessions.values()) for (const session of sessions.values()) session.cancel();
+  projectSessions.clear();
+};
 
 /** Keeps only this project's drafts, so memory holds one project at most. */
 export const retainProjectSessions = (projectId: Id<"projects">) => {
