@@ -58,6 +58,9 @@ const MAX_RECENT_MESSAGES = 50;
 /** A project runs one agent at a time; lost runs are failed by a cron. */
 const MAX_PROCESSING_MESSAGES = 20;
 
+/** Most activation events `getActivationEvents` returns; a project makes a few per run. */
+const MAX_ACTIVATION_EVENTS = 200;
+
 export const getConversationById = query({
   args: {
     conversationId: v.id("conversations"),
@@ -864,6 +867,27 @@ export const createProjectWithConversation = mutation({
     });
 
     return { projectId, conversationId };
+  },
+});
+
+/**
+ * A project's activation events (#339), names and times only, for the e2e
+ * spec: `activationEvents:report` only gives totals.
+ */
+export const getActivationEvents = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+  },
+  returns: v.array(v.object({ name: v.string(), at: v.number() })),
+  handler: async (ctx, { internalKey, projectId }) => {
+    validateInternalKey(internalKey);
+
+    const events = await ctx.db
+      .query("activationEvents")
+      .withIndex("by_projectId_and_name_and_at", (q) => q.eq("projectId", projectId))
+      .take(MAX_ACTIVATION_EVENTS);
+    return events.map(({ name, at }) => ({ name, at }));
   },
 });
 
