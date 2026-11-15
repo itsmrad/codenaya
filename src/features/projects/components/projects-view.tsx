@@ -263,7 +263,8 @@ export const ProjectsView = ({ linkedRepo = null }: ProjectsViewProps) => {
                     projects={allProjects}
                     onViewAll={() => {
                       setTab("projects");
-                      tabsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+                      tabsRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
                     }}
                   />
                 )}
