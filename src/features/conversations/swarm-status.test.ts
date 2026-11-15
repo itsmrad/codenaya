@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentStep } from "./agent-steps";
+import { FOUNDATION_MAX_STEPS } from "./swarm";
 import { groupSwarmTasks, type SwarmTask, swarmElapsed, swarmHeader, swarmSelfCheckStatus, swarmSoloReason, swarmTaskStatus } from "./swarm-status";
 
 describe("swarmTaskStatus", () => {
@@ -22,12 +23,38 @@ describe("swarm header", () => {
   });
 
   it("counts workers and finished tasks, excluding the parent run", () => {
-    expect(swarmHeader([task("done"), task("done"), task("running")], 1000, 135000))
+    expect(swarmHeader([task("done"), task("done"), task("running")], 1000, 135000, undefined, completedSteps(FOUNDATION_MAX_STEPS)))
       .toBe("Swarm · 3 workers · 2:14 · 2 done");
   });
 
-  it("handles zero workers, singular workers and sub-orchestrators", () => {
-    expect(swarmHeader([], 0, 0)).toBe("Swarm · 0 workers · 0:00 · 0 done");
+  const completedSteps = (count: number): AgentStep[] => Array.from({ length: count }, (_, i) => ({
+    id: `step-${i}`, kind: "tool", tool: "writeFiles", status: "done", startedAt: i,
+  }));
+
+  it("shows foundation progress without counting running tools, thinking or heartbeats", () => {
+    const steps: AgentStep[] = [
+      ...completedSteps(3),
+      { id: "pending", kind: "tool", tool: "writeFiles", status: "running", startedAt: 4 },
+      { id: "thinking-step-0", kind: "thinking", status: "done", startedAt: 0 },
+      { id: "turn-heartbeat", kind: "thinking", status: "done", startedAt: 4 },
+    ];
+    expect(swarmHeader([], 0, 97000, swarmSoloReason(steps, true), steps))
+      .toBe(`Swarm · Setting up shared files · step 3/${FOUNDATION_MAX_STEPS} · 1:37`);
+    expect(swarmHeader([], 0, 0)).toBe(`Swarm · Setting up shared files · step 0/${FOUNDATION_MAX_STEPS} · 0:00`);
+  });
+
+  it.each([FOUNDATION_MAX_STEPS, FOUNDATION_MAX_STEPS + 1])("shows planning after %s completed steps", (count) => {
+    expect(swarmHeader([], 0, 97000, undefined, completedSteps(count)))
+      .toBe("Swarm · Planning tasks… · 1:37");
+  });
+
+  it("shows planning as soon as delegation is recorded, even before tasks arrive", () => {
+    const steps: AgentStep[] = [{ id: "delegate", kind: "tool", tool: "delegateTasks", status: "running", startedAt: 0 }];
+    expect(swarmHeader([], 0, 97000, swarmSoloReason(steps, true), steps))
+      .toBe("Swarm · Planning tasks… · 1:37");
+  });
+
+  it("handles singular workers and sub-orchestrators", () => {
     expect(swarmHeader([task("queued"), task("error", "sub-orchestrator")], 0, 59000))
       .toBe("Swarm · 1 lead · 1 worker · 0:59 · 0 done");
     expect(swarmHeader([task("done", "sub-orchestrator"), task("done", "sub-orchestrator"), task("done")], 0, 0))
@@ -40,6 +67,11 @@ describe("swarm header", () => {
     expect(swarmSoloReason([call({ status: "error", error: "Error: another swarm is already running for this account; build this one yourself." })]))
       .toBe("another swarm is already running for this account; build this one yourself.");
     expect(swarmSoloReason([])).toBe("the orchestrator did not delegate");
+    expect(swarmHeader([], 0, 229000, swarmSoloReason([])))
+      .toBe("Swarm · Built solo: the orchestrator did not delegate · 3:49");
+    const solo: AgentStep[] = [{ id: "swarm-solo", kind: "thinking", text: "Building solo: a small edit", status: "done", startedAt: 0 }];
+    expect(swarmHeader([], 0, 1000, swarmSoloReason(solo, true), solo))
+      .toBe("Swarm · Built solo: a small edit · 0:01");
     expect(swarmHeader([], 0, 229000, "one-line fix")).toBe("Swarm · Built solo: one-line fix · 3:49");
     // Workers ran: the counts stay.
     expect(swarmHeader([task("done")], 0, 0, "ignored")).toBe("Swarm · 1 worker · 0:00 · 1 done");
