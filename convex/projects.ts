@@ -173,7 +173,7 @@ export const get = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .take(MAX_PROJECTS_LISTED);
     const published = new Set<string>(
-      showcase.filter((entry) => entry.status !== "removed").map((entry) => entry.projectId),
+      showcase.filter((entry) => entry.status === "published").map((entry) => entry.projectId),
     );
 
     const runEvents = (name: "run_started" | "run_finished") =>

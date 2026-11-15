@@ -10,10 +10,18 @@ import { detectCredential } from "@/features/integrations/credential-guard";
 import { useAgentModel } from "@/features/conversations/hooks/use-agent-model";
 import type { AgentModelChoice } from "@/features/conversations/agent-models";
 import type { ComposerMode } from "@/features/conversations/components/plan-mode-toggle";
+import { askSetupQuestions } from "@/features/conversations/components/setup-questions-dialog";
+import {
+  shouldAskSetupQuestions,
+  withSetupAnswers,
+  withSetupDecisions,
+} from "@/features/conversations/setup-questions";
 import type { StarterTemplateId } from "@/features/templates/templates";
 import { INSUFFICIENT_CREDITS_CODE } from "@/features/billing/credits";
 import { MODEL_LIMIT_CODE } from "@/features/billing/model-spend";
 import { isPromoRefusalCode } from "@/features/promotions/github-promo";
+
+import { useUpdateProjectInstructions } from "./use-projects";
 
 const CREDENTIAL_ERROR =
   "Remove credentials from the prompt. Create the project first, then add the MCP connection through Integrations.";
@@ -46,6 +54,7 @@ export const useCreateProjectFromPrompt = () => {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [agentModel] = useAgentModel();
+  const updateInstructions = useUpdateProjectInstructions();
 
   const createProject = useCallback(
     async (
@@ -62,14 +71,27 @@ export const useCreateProjectFromPrompt = () => {
         return false;
       }
 
+      // A short prompt for an empty project gets the setup questions first
+      // (#344); a template already made those choices.
+      const answers = !templateId && shouldAskSetupQuestions(text) ? await askSetupQuestions() : null;
+      if (answers === undefined) return false;
+
       setIsSubmitting(true);
 
       try {
         const { projectId } = await ky
           .post("/api/projects/create-with-prompt", {
-            json: createWithPromptBody(text, agentModel, templateId, fromLanding, mode),
+            json: createWithPromptBody(withSetupAnswers(text, answers), agentModel, templateId, fromLanding, mode),
           })
           .json<{ projectId: Id<"projects"> }>();
+
+        // Kept for every later run; the first prompt has them either way.
+        const instructions = withSetupDecisions(undefined, answers);
+        if (instructions) {
+          updateInstructions({ id: projectId, instructions }).catch((error) =>
+            console.warn("[setup-questions] couldn't save the decisions", error),
+          );
+        }
 
         toast.success("Project created");
         router.push(`/projects/${projectId}`);
@@ -109,7 +131,7 @@ export const useCreateProjectFromPrompt = () => {
         setIsSubmitting(false);
       }
     },
-    [router, agentModel],
+    [router, agentModel, updateInstructions],
   );
 
   return { createProject, isSubmitting };

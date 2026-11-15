@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 
-import { useFile, useUpdateFile } from "@/features/projects/hooks/use-files";
+import { useFile } from "@/features/projects/hooks/use-files";
 
-import { CodeEditor } from "./code-editor";
+import { FileEditor } from "./file-editor";
+import { EditorSession } from "../editor-session";
 import { EditorEmptyState } from "./editor-empty-state";
 import { useEditor } from "../hooks/use-editor";
 import { TopNavigation } from "./top-navigation";
@@ -10,41 +11,27 @@ import { FileBreadcrumbs } from "./file-breadcrumbs";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { AlertTriangleIcon } from "lucide-react";
 
-const DEBOUNCE_MS = 1500;
-
 export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const { activeTabId } = useEditor(projectId);
   const activeFile = useFile(activeTabId);
-  const updateFile = useUpdateFile();
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const pendingSaveRef = useRef<(() => void) | null>(null);
+  // Keep drafts across tab switches, including conflicts awaiting the user's choice.
+  const [sessions] = useState(() => new Map<Id<"files">, EditorSession>());
 
   const isActiveFileBinary = activeFile && activeFile.storageId;
   const isActiveFileText = activeFile && !activeFile.storageId;
 
-  // Cleanup pending debounced updates on unmount or file change
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      pendingSaveRef.current = null;
-    };
-  }, [activeTabId]);
-
-  // Switching preview engines reloads the page. Don't let that drop an edit that
-  // is still waiting out the debounce: save it now and have the browser confirm.
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      const save = pendingSaveRef.current;
-      if (!save) return;
-      save();
-      event.preventDefault();
+      for (const session of sessions.values()) {
+        const state = session.getSnapshot();
+        if (!state.dirty && !state.saving && !state.conflict) continue;
+        void session.save();
+        event.preventDefault();
+      }
     };
-
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
+  }, [sessions]);
 
   return (
     <div className="h-full flex flex-col">
@@ -55,27 +42,7 @@ export const EditorView = ({ projectId }: { projectId: Id<"projects"> }) => {
       <div className="flex-1 min-h-0 bg-background">
         {!activeFile && <EditorEmptyState projectId={projectId} />}
         {isActiveFileText && (
-          <CodeEditor
-            key={activeFile._id}
-            fileName={activeFile.name}
-            initialValue={activeFile.content}
-            onChange={(content: string) => {
-              if (timeoutRef.current) {
-                clearTimeout(timeoutRef.current);
-              }
-
-              const save = () => {
-                if (timeoutRef.current) {
-                  clearTimeout(timeoutRef.current);
-                  timeoutRef.current = null;
-                }
-                pendingSaveRef.current = null;
-                updateFile({ id: activeFile._id, content });
-              };
-              pendingSaveRef.current = save;
-              timeoutRef.current = setTimeout(save, DEBOUNCE_MS);
-            }}
-          />
+          <FileEditor key={activeFile._id} file={activeFile} sessions={sessions} />
         )}
         {isActiveFileBinary && (
           <div className="size-full flex items-center justify-center">

@@ -51,6 +51,7 @@ import { openProviderKey } from "./sealed-key";
 import { OUT_OF_CREDIT_PATTERN, isOutOfCredit, testConnection } from "./test-connection";
 import { api } from "../../../../convex/_generated/api";
 import type { Doc, Id } from "../../../../convex/_generated/dataModel";
+import { KEY_FAILURE_SUFFIX } from "@/features/conversations/failed-run-reply";
 
 /**
  * Which model and key an agent run uses.
@@ -369,8 +370,7 @@ export async function takePromoRun({
 /** A run's key could not be used. `message` is written as the assistant reply. */
 export class ProviderKeyError extends Error {}
 
-/** Ends every key-failure reply, so history can leave those turns out. */
-export const KEY_FAILURE_SUFFIX = "Your request was not sent to Codenaya's models.";
+export { KEY_FAILURE_SUFFIX };
 
 /**
  * A run whose message has images, when the catalog changed after the send:

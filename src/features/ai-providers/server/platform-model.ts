@@ -10,6 +10,7 @@ import {
 import { buildAgentKitModel } from "./agentkit-model";
 import { buildAiSdkModel } from "./ai-sdk-model";
 import { api } from "../../../../convex/_generated/api";
+import { AI_NOT_CONFIGURED_MESSAGE } from "@/features/conversations/failed-run-reply";
 
 /**
  * Codenaya's own models, each on its catalog route's provider (ADR 0010): the
@@ -30,9 +31,7 @@ export const PLATFORM_KEY_ENV: Record<PlatformProviderId, string> = {
   groq: "GROQ_API_KEY",
 };
 
-/** Sent to the user when the platform has no key. The env var name is logged, not sent. */
-export const AI_NOT_CONFIGURED_MESSAGE =
-  "Codenaya AI isn't available right now. Try again later, or add your own key in Settings → AI providers.";
+export { AI_NOT_CONFIGURED_MESSAGE };
 
 /** The provider's platform key, or null when its variable isn't set. Quiet. */
 export const platformKeyOrNull = (provider: PlatformProviderId) =>

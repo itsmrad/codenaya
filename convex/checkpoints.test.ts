@@ -708,3 +708,30 @@ describe("project comparison", () => {
     await expect(alice.mutation(api.checkpoints.revertFile, args)).rejects.toMatchObject({ data: { code: "CONFLICT" } });
   });
 });
+
+describe("stale editor saves after checkpoint writes (#581)", () => {
+  beforeEach(() => vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", INTERNAL_KEY));
+  afterEach(() => vi.unstubAllEnvs());
+
+  test.each(["restore", "run revert", "project discard"] as const)("a queued autosave cannot undo %s", async (operation) => {
+    const { t, alice } = setup();
+    const { projectId, conversationId, index } = await seedProject(t);
+    const messageId = await addRun(t, projectId, conversationId);
+    const checkpointId = await snapshot(t, projectId, messageId);
+    await t.mutation(api.system.updateFile, {
+      internalKey: INTERNAL_KEY, projectId, fileId: index, content: "agent heading",
+    });
+    if (operation === "restore") {
+      await alice.mutation(api.checkpoints.restore, { checkpointId });
+    } else {
+      if (operation === "run revert") await setSteps(t, messageId, [step("updateFile", ["index.html"])]);
+      await alice.mutation(api.checkpoints.revertFile, {
+        checkpointId, path: "index.html", ...(operation === "project discard" && { scope: "project" as const }),
+      });
+    }
+    await expect(alice.mutation(api.files.updateFile, {
+      id: index, content: "agent heading plus queued edit", expectedContent: "agent heading",
+    })).rejects.toMatchObject({ data: { code: "CONFLICT" } });
+    expect((await alice.query(api.files.getFile, { id: index }))?.content).toBe("<h1>v1</h1>");
+  });
+});
