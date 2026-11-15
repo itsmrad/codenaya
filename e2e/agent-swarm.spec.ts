@@ -128,7 +128,8 @@ test.describe.serial("agent swarm run", () => {
     }
     await expect(board().getByText(/^Swarm · 2 workers · \d+:\d\d · 2 done$/)).toBeVisible();
 
-    // Both files landed in the one file tree.
+    // Both files landed in the one file tree; the explorer lives on the Code tab.
+    await page.getByRole("tab", { name: "Code" }).click();
     await page.getByRole("button", { name: "src", exact: true }).click();
     await page.getByRole("button", { name: "pages", exact: true }).click();
     for (const { path } of TASKS) {
