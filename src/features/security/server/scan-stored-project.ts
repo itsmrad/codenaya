@@ -1,6 +1,7 @@
 import { convex } from "@/lib/convex-client";
 import { resolveProjectEnv } from "@/features/integrations/server/env/resolve-env";
 import { buildFlatFileList } from "@/features/sandbox-preview/utils/file-tree";
+import { getInstructionsExportFile } from "@/features/projects/instructions";
 
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -9,17 +10,25 @@ import { scanProject, type ScanEnvVar } from "../scan-project";
 /**
  * Scans a project's saved files and env vars (#300). Server-side because the
  * stored secret values it looks for are decrypted here and must not reach the
- * browser; only the findings, which hold no values, are returned.
+ * browser; only the findings, which hold no values, are returned. The
+ * `AGENTS.md` that exports generate from the project instructions is scanned
+ * like any exported file, so pasted credentials are caught before they leave.
  */
 export async function scanStoredProject(
   internalKey: string,
   projectId: Id<"projects">,
 ) {
-  const [files, env] = await Promise.all([
+  const [files, env, project] = await Promise.all([
     convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId }),
     storedScanEnv(internalKey, projectId),
+    convex.query(api.system.getProjectById, { internalKey, projectId }),
   ]);
-  return scanProject(buildFlatFileList(files), env);
+  const flatFiles = buildFlatFileList(files);
+  const instructionsFile = getInstructionsExportFile(
+    project?.instructions,
+    flatFiles.map((file) => file.path),
+  );
+  return scanProject(instructionsFile ? [...flatFiles, instructionsFile] : flatFiles, env);
 }
 
 /** The project's env vars as `scanProject` takes them, decrypted. */
