@@ -181,7 +181,7 @@ export const ConnectionCard = ({ connection }: ConnectionCardProps) => {
             </p>
           ))}
         </div>
-        {connection.status !== "active" && (
+        {connection.authMode !== "none" && connection.status !== "active" && (
           <Button
             size="sm"
             variant="outline"
