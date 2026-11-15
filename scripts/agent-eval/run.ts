@@ -77,8 +77,10 @@ async function main() {
 
 type Judged = Score & { judge?: Awaited<ReturnType<typeof judge>> };
 
+const seconds = (ms: number | null) => ms === null ? "—" : (ms / 1000).toFixed(1);
+
 function scoreboard(scores: Judged[], base: string) {
-  return `# Agent evaluation\n\n| Model / prompt | Completed | Build passes | Tool errors | Calls ≈ / cap | Preview | Fixes | First preview / wall (s) | Tokens in/out | USD | Judge | Project |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n` + scores.map((s) => `| ${s.id} | ${s.completed} | ${s.checkBuild.filter((c) => c.passed).length}/${s.checkBuild.length} | ${s.toolErrorCount} | ${s.modelCallsApprox}/${s.iterationCapHit || s.capped} | ${s.previewOk} | ${s.autoFixCount} | ${s.firstPreviewMs === null ? "—" : (s.firstPreviewMs / 1000).toFixed(1)} / ${(s.wallMs / 1000).toFixed(1)} | ${s.tokensIn}/${s.tokensOut} | ${s.usd.toFixed(6)} | ${s.judge ? `${s.judge.score}/10, ${s.judge.passed}/${s.judge.total}` : "—"} | [open](${base}/projects/${s.projectId}) |`).join("\n") + "\n";
+  return `# Agent evaluation\n\n| Model / prompt | Completed | Build passes | Tool errors | Calls ≈ / cap | Preview | Fixes | First preview / app paint / wall (s) | Tokens in/out | USD | Judge | Project |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n` + scores.map((s) => `| ${s.id} | ${s.completed} | ${s.checkBuild.filter((c) => c.passed).length}/${s.checkBuild.length} | ${s.toolErrorCount} | ${s.modelCallsApprox}/${s.iterationCapHit || s.capped} | ${s.previewOk} | ${s.autoFixCount} | ${seconds(s.firstPreviewMs)} / ${seconds(s.firstAppPaintMs)} / ${seconds(s.wallMs)} | ${s.tokensIn}/${s.tokensOut} | ${s.usd.toFixed(6)} | ${s.judge ? `${s.judge.score}/10, ${s.judge.passed}/${s.judge.total}` : "—"} | [open](${base}/projects/${s.projectId}) |`).join("\n") + "\n";
 }
 
 main().catch((error) => { console.error(JSON.parse(sanitize({ error: String(error) })).error); process.exitCode = 1; });

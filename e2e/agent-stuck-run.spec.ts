@@ -90,7 +90,7 @@ test.describe.serial("stuck agent run", () => {
     expect(coding).toHaveLength(5);
     await expect(card).toContainText("failed to parse 3 times");
 
-    await expect(card.getByRole("button", { name: /Diagnose in Plan mode/ })).toBeVisible();
+    await expect(card.getByRole("button", { name: /Diagnose in Ask \/ Plan mode/ })).toBeVisible();
     await expect(card.getByRole("button", { name: /Restore to before this run/ })).toBeVisible();
     await expect(card.getByRole("button", { name: /Open main\.ts/ })).toBeVisible();
     const retry = card.getByRole("button", { name: /Retry on Claude Sonnet 5\.5 · ~\$0\.15–\$0\.30/ });
@@ -98,10 +98,10 @@ test.describe.serial("stuck agent run", () => {
 
     // Diagnose keeps the draft and moves focus to the composer.
     await input.fill("My draft");
-    await card.getByRole("button", { name: /Diagnose in Plan mode/ }).click();
+    await card.getByRole("button", { name: /Diagnose in Ask \/ Plan mode/ }).click();
     await expect(input).toHaveValue(/^My draft\nThe last run got stuck/);
     await expect(input).toBeFocused();
-    await expect(page.getByRole("button", { name: "Plan", exact: true, pressed: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Ask / Plan", exact: true, pressed: true })).toBeVisible();
     await input.fill("");
 
     const before = stub.requests.length;

@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import type { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { sanitizeAgentText, stuckFilePath } from "../agent-steps";
 import { useChatSendBlock } from "../hooks/use-queue-chat-message";
+import { isPlanReply } from "../plan-mode";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
 import { type StuckRetry, StuckRunCard } from "./stuck-run-card";
@@ -226,7 +227,8 @@ export const AssistantMessage = ({
   // already completed (history) stays still.
   const [startedProcessing] = useState(status === "processing");
   const settle = startedProcessing && "animate-fade-up motion-reduce:animate-none";
-  const isPlan = message.mode === "plan";
+  // Plan-mode runs also answer questions (#311); only a plan can be built.
+  const isPlan = message.mode === "plan" && isPlanReply(content);
   const reduceMotion = useReducedMotion();
   const shown = useTypewriter(content, startedProcessing && !reduceMotion);
 
@@ -262,6 +264,7 @@ export const AssistantMessage = ({
           previewErrors={isLast ? { ...previewErrors, sending: fixSending } : undefined}
           checkpointId={checkpointId}
           revertDisabled={revertDisabled}
+          messageId={message._id}
         />
       )}
       {stalled && isLast && onRetry && (

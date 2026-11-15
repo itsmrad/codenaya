@@ -35,10 +35,10 @@ const E2B_TEAM_SANDBOXES = 10;
 const SWARM_TEAM_BUDGET = 4;
 const DEFAULT_MAX_WORKER_SANDBOXES = 2;
 const FOUNDATION_TIMEOUT_MS = 5 * 60_000;
-/** E2B kills a worker's sandbox after this even if the stop step is lost or the run cancelled. */
-const WORKER_SANDBOX_TIMEOUT_MS = 10 * 60_000;
-/** One check plus one repair at worst (the check's 240 s budget and the model's turns). */
+/** Each verify can use the check's full 240 s budget, including the final recheck. */
 const CHECK_ROUND_MS = 4 * 60_000;
+/** Room for setup, syncing and model turns; a slow in-flight call can still overrun. */
+const SELF_CHECK_SLACK_MS = 60_000;
 /** Inside the foundation step's ~240 s, with room for create, write and snapshot. */
 const INSTALL_TIMEOUT_MS = 150_000;
 const CALL_TIMEOUT_MS = 30_000;
@@ -67,9 +67,6 @@ const overBudget = async (apiKey: string) => {
   if (running.length + MAX_LIVE_SANDBOXES >= E2B_TEAM_SANDBOXES) return "previews need the sandboxes";
   return undefined;
 };
-
-const skipReason = (error: unknown) =>
-  error instanceof RateLimitError ? "E2B rate limit" : error instanceof Error ? error.message : "unknown error";
 
 /** Snapshots need envd 0.5.0 or later in the template. */
 const supportsSnapshots = (version: string) => {
@@ -107,6 +104,7 @@ export const seedSwarmSnapshot = async ({
   const apiKey = e2bKey();
   if (!apiKey || maxWorkerSandboxes() === 0) return null;
   let sandbox: Sandbox | undefined;
+  let snapshotId: string | undefined;
   try {
     if (await overBudget(apiKey)) return null;
     sandbox = await createSwarmSandbox(
@@ -118,12 +116,15 @@ export const seedSwarmSnapshot = async ({
     await sandbox.commands.run(DEFAULT_INSTALL_COMMAND, {
       cwd: WORK_DIR, timeoutMs: INSTALL_TIMEOUT_MS, requestTimeoutMs: INSTALL_TIMEOUT_MS,
     });
-    const { snapshotId } = await sandbox.createSnapshot({ requestTimeoutMs: CALL_TIMEOUT_MS });
+    snapshotId = (await sandbox.createSnapshot({ requestTimeoutMs: CALL_TIMEOUT_MS })).snapshotId;
     await convex.mutation(api.agentTasks.setSeedSnapshot, { internalKey, messageId, snapshotId });
     return snapshotId;
   } catch (error) {
     // A failed install is the integration build's to report.
     if (!(error instanceof CommandExitError)) console.error("[swarm-sandbox] foundation failed", projectId, error);
+    if (snapshotId) await Sandbox.deleteSnapshot(snapshotId, { apiKey }).catch((cleanupError) => {
+      console.error("[swarm-sandbox] snapshot cleanup failed", projectId, cleanupError);
+    });
     return null;
   } finally {
     await sandbox?.kill().catch(() => {});
@@ -162,11 +163,10 @@ const startWorkerSandbox = async ({
 }): Promise<StartResult> => {
   const apiKey = e2bKey();
   if (!apiKey) return { off: true };
-  // The worker's writes are already in Convex: never let the check run it past its timeout.
-  const rounds = Math.floor((invokedAt + timeoutMs - Date.now()) / CHECK_ROUND_MS);
-  if (rounds < 1) return { skipped: "time budget" };
-  // shortcut: verifyAndFix always allows one repair, so with 4-8 min left a slow one can still overrun.
-  const maxAttempts = Math.min(SELF_CHECK_ATTEMPTS, Math.max(1, rounds - 1));
+  const remaining = invokedAt + timeoutMs - Date.now();
+  const maxAttempts = Math.min(SELF_CHECK_ATTEMPTS, Math.floor((remaining - SELF_CHECK_SLACK_MS) / CHECK_ROUND_MS) - 1);
+  // verifyAndFix always allows at least one repair, which needs two verifies plus slack.
+  if (maxAttempts < 1) return { skipped: "time budget" };
   let sandbox: Sandbox | undefined;
   try {
     const budget = await overBudget(apiKey);
@@ -175,32 +175,19 @@ const startWorkerSandbox = async ({
       internalKey, agentTaskId, max: maxWorkerSandboxes(),
     });
     if (claim.skipped !== undefined) return { skipped: claim.skipped };
+    // E2B expires it after the reserved check budget even if cleanup is lost.
     sandbox = await createSwarmSandbox(
-      apiKey, claim.seedSnapshotId, { projectId, messageId, purpose: "swarm-worker" }, WORKER_SANDBOX_TIMEOUT_MS,
+      apiKey, claim.seedSnapshotId, { projectId, messageId, purpose: "swarm-worker" },
+      (maxAttempts + 1) * CHECK_ROUND_MS + SELF_CHECK_SLACK_MS,
     );
     // shortcut: files deleted since the snapshot stay in the sandbox; rare within one swarm.
     await writeProjectFiles(sandbox, await projectTextFiles(internalKey, projectId));
     return { sandboxId: sandbox.sandboxId, maxAttempts };
   } catch (error) {
+    console.error("[swarm-sandbox] worker start failed", projectId, error);
     await sandbox?.kill().catch(() => {});
-    return { skipped: skipReason(error) };
+    return { skipped: error instanceof RateLimitError ? "E2B rate limit" : "sandbox unavailable" };
   }
-};
-
-/**
- * Connects only when verifyAndFix first touches the sandbox, so a replay whose
- * check steps are memoized never reconnects to (or revives) a killed one.
- */
-const lazySandbox = (sandboxId: string, apiKey: string) => {
-  let connected: Promise<Sandbox> | undefined;
-  const part = (name: "commands" | "files") => new Proxy({}, {
-    get: (_, method: string) => async (...args: unknown[]) => {
-      const sandbox = await (connected ??= Sandbox.connect(sandboxId, { apiKey }));
-      const target = sandbox[name] as unknown as Record<string, (...a: unknown[]) => unknown>;
-      return target[method](...args);
-    },
-  });
-  return { sandboxId, commands: part("commands"), files: part("files") } as unknown as Sandbox;
 };
 
 /** Static check errors name their file only in the text, as "(referenced by src/x.tsx)". */
@@ -220,7 +207,7 @@ export const selfCheckStep = (event: RepairEvent, now: number): AgentStep => ({
   ...(event.filesChanged?.length ? { targets: event.filesChanged } : {}),
   text: event.phase === "verify" ? "Self-checked its files" : "Repaired its files",
   status: event.status,
-  ...(event.status === "error" ? { error: event.reason ?? `${event.errors?.length ?? 0} build error(s)` } : {}),
+  ...(event.status === "error" ? { error: event.reason ? "Self-check could not complete" : `${event.errors?.length ?? 0} build error(s)` } : {}),
   startedAt: now,
   ...(event.status === "running" ? {} : { endedAt: now }),
 });
@@ -234,7 +221,8 @@ type Step = { run: (id: string, fn: () => Promise<unknown>) => Promise<unknown> 
  * budget allows it.
  */
 export const selfCheckWorker = async ({
-  step, internalKey, projectId, messageId, agentTaskId, ownedPaths, invokedAt, timeoutMs = WORKER_TIMEOUT_MS, model, onEvent,
+  step, internalKey, projectId, messageId, agentTaskId, ownedPaths, invokedAt, timeoutMs = WORKER_TIMEOUT_MS,
+  model, onEvent, onResponse, signal,
 }: {
   step: Step;
   internalKey: string;
@@ -247,6 +235,8 @@ export const selfCheckWorker = async ({
   timeoutMs?: number;
   model: VerifyAndFixOptions["model"];
   onEvent: (event: RepairEvent) => Promise<void>;
+  onResponse: NonNullable<VerifyAndFixOptions["onResponse"]>;
+  signal?: AbortSignal;
 }): Promise<SelfCheck | null> => {
   const started = (await step.run("self-check-start", () =>
     startWorkerSandbox({ internalKey, projectId, messageId, agentTaskId, invokedAt, timeoutMs }))) as StartResult;
@@ -255,7 +245,7 @@ export const selfCheckWorker = async ({
 
   const owns = (path: string) => ownsPath(ownedPaths, path);
   const result = await verifyAndFix({
-    sandbox: lazySandbox(started.sandboxId, process.env.E2B_API_KEY?.trim() ?? ""),
+    sandbox: () => Sandbox.connect(started.sandboxId, { apiKey: process.env.E2B_API_KEY?.trim() }),
     projectId,
     internalKey,
     runId: messageId,
@@ -265,17 +255,22 @@ export const selfCheckWorker = async ({
     filterErrors: ownedErrors(ownedPaths),
     allowedPaths: owns,
     onEvent,
+    onResponse,
+    signal,
     step: (id, fn) => step.run(id, fn),
   });
   await step.run("self-check-stop", async () => {
     await Sandbox.kill(started.sandboxId, { apiKey: process.env.E2B_API_KEY?.trim() }).catch(() => false);
   });
   const ownedLeft = ownedErrors(ownedPaths)(result.errors).length;
+  if (result.status === "unverified" && result.reason && !signal?.aborted) {
+    console.error("[swarm-sandbox] check incomplete", projectId, result.reason);
+  }
   // A full pass of a partial tree proves only this worker's files: still scoped.
   const selfCheck = result.status === "verified" || result.status === "scoped-ok"
     ? "scoped-ok"
     : result.status === "failed"
       ? `scoped-failed (${ownedLeft} in owned files)`
-      : `skipped (${result.reason ?? "unverified"})`;
+      : `skipped (${signal?.aborted ? "cost budget" : "check unavailable"})`;
   return { selfCheck, filesChanged: result.filesChanged };
 };

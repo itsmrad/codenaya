@@ -16,7 +16,7 @@ import { RateLimitError } from "e2b";
 import { getFunctionName } from "convex/server";
 
 import type { BuildError, VerifyAndFixOptions } from "./server/sandbox-repair";
-import { cleanupSwarmSandboxes, seedSwarmSnapshot, selfCheckWorker } from "./swarm-sandbox";
+import { cleanupSwarmSandboxes, seedSwarmSnapshot, selfCheckStep, selfCheckWorker } from "./swarm-sandbox";
 import type { Id } from "../../../convex/_generated/dataModel";
 
 const ids = {
@@ -41,9 +41,10 @@ const mutated = (name: string) =>
   mocks.mutation.mock.calls.filter(([ref]) => getFunctionName(ref) === name).map(([, args]) => args);
 
 const step = { run: vi.fn(async (_id: string, fn: () => Promise<unknown>) => fn()) };
+const onResponse = vi.fn(async () => {});
 const selfCheck = (invokedAt = Date.now(), timeoutMs?: number) => selfCheckWorker({
   step, ...ids, agentTaskId: "t1" as Id<"agentTasks">, ownedPaths, invokedAt, timeoutMs, model: {} as VerifyAndFixOptions["model"],
-  onEvent: async () => {},
+  onEvent: async () => {}, onResponse,
 });
 
 beforeEach(() => {
@@ -59,6 +60,7 @@ beforeEach(() => {
     getFunctionName(ref) === "agentTasks:claimSelfCheck" ? { seedSnapshotId: "snap" } : null);
   e2b.list.mockReturnValue(running());
   e2b.kill.mockResolvedValue(true);
+  e2b.deleteSnapshot.mockResolvedValue(undefined);
   mocks.verifyAndFix.mockResolvedValue({ ok: false, status: "scoped-ok", errors: [], filesChanged: [], attempts: 0 });
 });
 
@@ -97,14 +99,28 @@ describe("swarm sandboxes", () => {
     expect(sandbox.kill).toHaveBeenCalledTimes(1);
   });
 
+  it.each([false, true])("deletes the snapshot and kills the foundation when storing its id fails (cleanup fails: %s)", async (cleanupFails) => {
+    const sandbox = fakeSandbox();
+    e2b.create.mockResolvedValue(sandbox);
+    mocks.mutation.mockRejectedValue(new Error("private storage error"));
+    if (cleanupFails) e2b.deleteSnapshot.mockRejectedValue(new Error("cleanup error"));
+    expect(await seedSwarmSnapshot(ids)).toBeNull();
+    expect(e2b.deleteSnapshot).toHaveBeenCalledWith("snap", { apiKey: "e2b_key" });
+    expect(sandbox.kill).toHaveBeenCalledTimes(1);
+  });
+
   it("checks a worker in a sandbox from the snapshot, scoped to its owned files, then kills it", async () => {
     e2b.create.mockResolvedValue(fakeSandbox());
     expect(await selfCheck()).toEqual({ selfCheck: "scoped-ok", filesChanged: [] });
     expect(e2b.create).toHaveBeenCalledWith("snap", expect.objectContaining({
-      metadata: { projectId: "p1", messageId: "m1", purpose: "swarm-worker" }, timeoutMs: 10 * 60_000,
+      metadata: { projectId: "p1", messageId: "m1", purpose: "swarm-worker" }, timeoutMs: 9 * 60_000,
     }));
     const opts = mocks.verifyAndFix.mock.calls[0][0] as VerifyAndFixOptions;
-    expect(opts).toMatchObject({ maxAttempts: 2, agentTaskId: "t1", runId: "m1", projectId: "p1" });
+    expect(opts).toMatchObject({ maxAttempts: 1, agentTaskId: "t1", runId: "m1", projectId: "p1", onResponse });
+    expect(e2b.connect).not.toHaveBeenCalled();
+    expect(typeof opts.sandbox).toBe("function");
+    if (typeof opts.sandbox === "function") await opts.sandbox();
+    expect(e2b.connect).toHaveBeenCalledWith("sbx", { apiKey: "e2b_key" });
     expect(opts.allowedPaths?.("src/pages/home.tsx")).toBe(true);
     expect(opts.allowedPaths?.("src/App.tsx")).toBe(false);
     expect(opts.allowedPaths?.("src/nav/menu.tsx")).toBe(false);
@@ -145,17 +161,22 @@ describe("swarm sandboxes", () => {
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
 
-  it("skips with under 4 min of the worker's timeout left, and fits the repairs to what is left", async () => {
+  it("reserves every 4-minute verify plus slack, skipping when no repair fits", async () => {
     const minutesAgo = (minutes: number) => Date.now() - minutes * 60_000;
     expect(await selfCheck(minutesAgo(8.5))).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
     expect(await selfCheck(minutesAgo(6.5), 10 * 60_000)).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
+    expect(await selfCheck(minutesAgo(4))).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
+    expect(await selfCheck(minutesAgo(3.5))).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
     for (const fn of Object.values(e2b)) expect(fn).not.toHaveBeenCalled();
     expect(mocks.mutation).not.toHaveBeenCalled();
     e2b.create.mockResolvedValue(fakeSandbox());
-    await selfCheck(minutesAgo(4.5));
+    await selfCheck(minutesAgo(2.5));
     expect(mocks.verifyAndFix.mock.calls[0][0]).toMatchObject({ maxAttempts: 1 });
-    await selfCheck(minutesAgo(13), 25 * 60_000);
-    expect(mocks.verifyAndFix.mock.calls[1][0]).toMatchObject({ maxAttempts: 2 });
+    await selfCheck(minutesAgo(12.5), 25 * 60_000);
+    expect(mocks.verifyAndFix.mock.calls[1][0]).toMatchObject({ maxAttempts: 1 });
+    await selfCheck(minutesAgo(11), 25 * 60_000);
+    expect(mocks.verifyAndFix.mock.calls[2][0]).toMatchObject({ maxAttempts: 2 });
+    expect(e2b.create.mock.calls[2][1].timeoutMs).toBe(13 * 60_000);
   });
 
   it("skips on an E2B rate limit", async () => {
@@ -164,17 +185,29 @@ describe("swarm sandboxes", () => {
     expect(mocks.verifyAndFix).not.toHaveBeenCalled();
   });
 
+  it.each(["create", "claim"])("keeps private %s errors out of the client result and logs them only server-side", async (failure) => {
+    const error = new Error("private upstream details");
+    if (failure === "create") e2b.create.mockRejectedValue(error);
+    else mocks.mutation.mockRejectedValue(error);
+    expect(await selfCheck()).toEqual({ selfCheck: "skipped (sandbox unavailable)", filesChanged: [] });
+    expect(console.error).toHaveBeenCalledWith("[swarm-sandbox] worker start failed", "p1", error);
+  });
+
   it("never reports verified", async () => {
     const results = [
       [{ status: "verified", errors: [] }, "scoped-ok"],
       [{ status: "failed", errors: [{ file: "src/pages/a.tsx", message: "x", kind: "type" }, { file: "src/b.tsx", message: "y", kind: "type" }] }, "scoped-failed (1 in owned files)"],
-      [{ status: "unverified", errors: [], reason: "Cancelled" }, "skipped (Cancelled)"],
+      [{ status: "unverified", errors: [], reason: "private upstream details" }, "skipped (check unavailable)"],
     ] as const;
     for (const [result, expected] of results) {
       e2b.create.mockResolvedValue(fakeSandbox());
       mocks.verifyAndFix.mockResolvedValueOnce({ ok: result.status === "verified", filesChanged: ["src/pages/a.tsx"], attempts: 1, ...result });
       expect(await selfCheck()).toEqual({ selfCheck: expected, filesChanged: ["src/pages/a.tsx"] });
     }
+    expect(console.error).toHaveBeenCalledWith("[swarm-sandbox] check incomplete", "p1", "private upstream details");
+    expect(selfCheckStep({
+      id: "verify:1", phase: "verify", attempt: 1, status: "error", reason: "private upstream details",
+    }, 1).error).toBe("Self-check could not complete");
   });
 
   it("cleanup kills the swarm's leftover sandboxes and deletes the snapshot", async () => {

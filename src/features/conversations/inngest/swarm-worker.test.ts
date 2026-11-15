@@ -12,6 +12,12 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   mutation: vi.fn(),
   catalog: vi.fn(),
+  selfCheckWorker: vi.fn(),
+}));
+
+vi.mock("../swarm-sandbox", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../swarm-sandbox")>()),
+  selfCheckWorker: mocks.selfCheckWorker,
 }));
 
 vi.mock("@/lib/convex-client", async () => {
@@ -175,6 +181,41 @@ describe("swarmWorker", () => {
       expect(outcome.data).toMatchObject({ status: "error", writtenPaths: [] });
       expect(outcome.inferenceBodies).toHaveLength(0);
       expect(mutationArgs("agentTasks:finishTask")).toHaveLength(0);
+    } finally {
+      MUTATIONS["agentTasks:startTask"] = () => TASK;
+    }
+  });
+
+  it.each(["worker", "sub-orchestrator"])("meters %s repair turns cumulatively in separate durable steps and stops at its cost cap", async (role) => {
+    MUTATIONS["agentTasks:startTask"] = () => ({ ...TASK, role });
+    const modelId = role === "worker" ? "anthropic/claude-haiku-5.5" : "anthropic/claude-sonnet-5.5";
+    mocks.catalog.mockReturnValue({
+      models: [modelId, "x-ai/grok-4.7"].map((id) => ({
+        id, name: id, vendor: "a", provider: "openrouter", providerModelId: id, vision: false, tools: "reported",
+        pricing: { mode: "blended", usdPerMTok: 100 }, access: "everyone", hidden: id === modelId,
+      })),
+      defaultModelId: "x-ai/grok-4.7", utilityModelId: "x-ai/grok-4.7",
+    });
+    mocks.selfCheckWorker.mockImplementation(async ({ onResponse, signal }) => {
+      expect(signal.aborted).toBe(false);
+      await onResponse(JSON.stringify({ usage: { prompt_tokens: 500, completion_tokens: 500 } }));
+      expect(signal.aborted).toBe(false);
+      await onResponse(JSON.stringify({ usage: { prompt_tokens: 10_000, completion_tokens: 10_000 } }));
+      expect(signal.aborted).toBe(true);
+      return { selfCheck: "skipped (cost budget)", filesChanged: [] };
+    });
+    try {
+      const outcome = await run([{ data: withUsage(text("Built the page.")) }]);
+      expect(outcome.finalType).toBe("function-resolved");
+      const records = mutationArgs("credits:recordRunUsage");
+      expect(records).toHaveLength(3);
+      expect(records[0]).toMatchObject({ inputTokens: 1_000, outputTokens: 1_000, costUsd: 0.2 });
+      expect(records[1]).toMatchObject({ inputTokens: 1_500, outputTokens: 1_500 });
+      expect(records[1].costUsd).toBeCloseTo(0.3, 10);
+      expect(records[2]).toMatchObject({
+        messageId: "m1", agentTaskId: "t1", source: "platform", modelId,
+        inputTokens: 11_500, outputTokens: 11_500, costUsd: 2.3,
+      });
     } finally {
       MUTATIONS["agentTasks:startTask"] = () => TASK;
     }
