@@ -426,7 +426,7 @@ export const ProjectIdView = ({
             </button>
           )}
           <button
-            onClick={openIntegrations}
+            onClick={() => openIntegrations()}
             aria-label="Integrations"
             title="Integrations"
             className="flex items-center gap-1.5 h-8 px-2 @3xl:px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg transition-colors"
