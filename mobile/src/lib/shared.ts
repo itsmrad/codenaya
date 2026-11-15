@@ -32,7 +32,7 @@ export {
   runModelLabel,
 } from "../../../src/features/ai-providers/registry";
 export { splitSlashSkills } from "../../../src/features/skills/parse-slash";
-export { getProvider, listProviders } from "../../../src/features/integrations/catalog";
+export { getProvider, listVisibleProviders } from "../../../src/features/integrations/catalog";
 export { classifyEnvKey, isValidEnvKey } from "../../../src/features/integrations/env-keys";
 export { BUILTIN_SKILL_ATTRIBUTIONS, BUILTIN_SKILLS } from "../../../src/features/skills/builtin";
 export { SKILL_BODY_MAX_LENGTH, validateSkill } from "../../../src/features/skills/limits";

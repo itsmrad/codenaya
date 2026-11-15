@@ -48,6 +48,12 @@ describe("setupQuestionsFor", () => {
     expect(JSON.stringify(payments)).not.toMatch(/stripe|paypal/i);
   });
 
+  test("no question names a payment provider", () => {
+    const all = setupQuestionsFor("an online store with a cart, checkout, subscriptions, donations and tickets");
+    expect(all.map(({ id }) => id)).toContain("payments");
+    expect(JSON.stringify(all)).not.toMatch(/stripe|paypal/i);
+  });
+
   test("at most 4 questions of at most 4 options, each service with a recommendation and Decide later", () => {
     const all = setupQuestionsFor("a shop site with checkout, member login, email reminders, analytics and a booking form");
     expect(all).toHaveLength(MAX_SETUP_QUESTIONS);

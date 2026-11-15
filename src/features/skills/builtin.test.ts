@@ -4,23 +4,36 @@ import { describe, expect, it } from "vitest";
 
 import { detectCredential } from "@/features/integrations/credential-guard";
 
-import { BUILTIN_SKILLS } from "./builtin";
+import { ALL_BUILTIN_SKILLS, BUILTIN_SKILLS, visibleBuiltinSkills } from "./builtin";
 import { BUILTIN_SKILL_NAMES } from "./builtin/names";
 import { validateSkill } from "./limits";
 
 describe("built-in skills", () => {
   it("match the reserved name list", () => {
-    expect(BUILTIN_SKILLS.map((skill) => skill.name)).toEqual(BUILTIN_SKILL_NAMES);
+    expect(ALL_BUILTIN_SKILLS.map((skill) => skill.name)).toEqual(BUILTIN_SKILL_NAMES);
   });
 
-  it.each(BUILTIN_SKILLS.map((skill) => [skill.name, skill] as const))(
+  it("list every skill but stripe-checkout until a payment provider is chosen", () => {
+    const names = BUILTIN_SKILLS.map((skill) => skill.name);
+    expect(names).not.toContain("stripe-checkout");
+    expect(names).toEqual(BUILTIN_SKILL_NAMES.filter((name) => name !== "stripe-checkout"));
+    // The skill itself still exists, and keeps its reserved name.
+    expect(ALL_BUILTIN_SKILLS.map((skill) => skill.name)).toContain("stripe-checkout");
+    expect(BUILTIN_SKILL_NAMES).toContain("stripe-checkout");
+  });
+
+  it("list stripe-checkout again when the hidden list is emptied", () => {
+    expect(visibleBuiltinSkills([])).toEqual(ALL_BUILTIN_SKILLS);
+  });
+
+  it.each(ALL_BUILTIN_SKILLS.map((skill) => [skill.name, skill] as const))(
     "%s passes the skill limits",
     (_name, skill) => {
       expect(validateSkill(skill)).toBeNull();
     },
   );
 
-  it.each(BUILTIN_SKILLS.map((skill) => [skill.name, skill] as const))(
+  it.each(ALL_BUILTIN_SKILLS.map((skill) => [skill.name, skill] as const))(
     "%s contains no credential-shaped values",
     (_name, skill) => {
       expect(detectCredential(skill.body).matchedRules).toEqual([]);
@@ -48,7 +61,7 @@ describe("built-in skills", () => {
   });
 
   const bodyOf = (name: string) =>
-    BUILTIN_SKILLS.find((skill) => skill.name === name)?.body ?? "";
+    ALL_BUILTIN_SKILLS.find((skill) => skill.name === name)?.body ?? "";
 
   it("supabase-auth-db keeps RLS on and the secret key out of the app", () => {
     const body = bodyOf("supabase-auth-db");

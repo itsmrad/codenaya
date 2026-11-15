@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { SETTINGS_NAV } from "../src/features/settings/nav";
 import { collectConsoleErrors } from "./console-errors";
-import { listProviders } from "../src/features/integrations/catalog";
+import { listVisibleProviders } from "../src/features/integrations/catalog";
 
 const horizontalOverflow = () =>
   document.documentElement.scrollWidth - document.documentElement.clientWidth;
@@ -138,7 +138,7 @@ test.describe("settings", () => {
       await page.goto("/settings/integrations");
       const catalog = page.getByRole("region", { name: "Browse integrations" });
       const providers = catalog.getByRole("list", { name: "Integration providers" });
-      await expect(providers.getByRole("listitem")).toHaveCount(listProviders().length);
+      await expect(providers.getByRole("listitem")).toHaveCount(listVisibleProviders().length);
       const search = catalog.getByRole("searchbox", { name: "Search integrations" });
       await search.fill("STACK TRACES");
       await expect(providers.getByRole("listitem")).toHaveCount(1);
@@ -153,7 +153,7 @@ test.describe("settings", () => {
       await page.keyboard.press("Enter");
       await expect(search).toHaveValue("");
       await expect(catalog.getByRole("button", { name: "All", exact: true })).toHaveAttribute("aria-pressed", "true");
-      await expect(providers.getByRole("listitem")).toHaveCount(listProviders().length);
+      await expect(providers.getByRole("listitem")).toHaveCount(listVisibleProviders().length);
     });
   });
 });
