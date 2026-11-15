@@ -11,7 +11,7 @@ export type ComposerMode = "build" | MessageMode;
 
 const MODES = [
   { value: "build", label: "Build", icon: HammerIcon, hint: "Build with one agent" },
-  { value: "plan", label: "Plan", icon: ListChecksIcon, hint: "Plan before building" },
+  { value: "plan", label: "Plan", icon: ListChecksIcon, hint: "Read-only: answers questions or plans, never changes files" },
   { value: "swarm", label: "Swarm", icon: UsersIcon, hint: "Build with a team of workers" },
 ] as const;
 

@@ -27,6 +27,7 @@ import type { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { sanitizeAgentText, stuckFilePath } from "../agent-steps";
 import { useChatSendBlock } from "../hooks/use-queue-chat-message";
 import { useAgentTasks } from "../hooks/use-agent-tasks";
+import { isPlanReply } from "../plan-mode";
 import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
 import { SwarmBoard } from "./swarm-board";
@@ -228,7 +229,8 @@ export const AssistantMessage = ({
   // already completed (history) stays still.
   const [startedProcessing] = useState(status === "processing");
   const settle = startedProcessing && "animate-fade-up motion-reduce:animate-none";
-  const isPlan = message.mode === "plan";
+  // Plan-mode runs also answer questions (#311); only a plan can be built.
+  const isPlan = message.mode === "plan" && isPlanReply(content);
   const tasks = useAgentTasks(message.mode === "swarm" ? message._id : null);
   const reduceMotion = useReducedMotion();
   const shown = useTypewriter(content, startedProcessing && !reduceMotion);

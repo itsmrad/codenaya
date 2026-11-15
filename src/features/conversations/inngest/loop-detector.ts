@@ -21,7 +21,7 @@ import { SYNTAX_ERRORS_NOTE } from "./tools/syntax-error";
 
 /** Written when the stuck run's last turn gave no text. */
 export const STUCK_FALLBACK_REPLY =
-  "I got stuck going in circles on this, so I stopped early. You can restore the files, retry on another model, or diagnose the problem in Plan mode.";
+  "I got stuck going in circles on this, so I stopped early. You can restore the files, retry on another model, or diagnose the problem in Ask / Plan mode.";
 
 /** Sent once when this run hits the error the previous run got stuck on. */
 export const PREVIOUS_ERROR_HINT =
