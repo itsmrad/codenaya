@@ -205,3 +205,224 @@ export default async function Page({ searchParams }: {
   });
   return created.find((file) => file.name === "page.tsx")!.fileId as Id<"files">;
 };
+
+/**
+ * Minimal TanStack Start fixture: an index route (`pageSource`, id returned for
+ * live edits) and `/actions`, a form that POSTs a `createServerFn`.
+ * `routeTree.gen.ts` is the plugin's generated shape written by hand; the dev server regenerates it.
+ */
+export const seedStartApp = async (
+  projectId: Id<"projects">,
+  { pageSource }: { pageSource: string },
+) => {
+  const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY!;
+  const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+  await system.mutation(api.system.createFiles, {
+    internalKey,
+    projectId,
+    files: [
+      {
+        name: "package.json",
+        content: JSON.stringify({
+          name: "start-e2e",
+          private: true,
+          type: "module",
+          scripts: { dev: "vite dev", build: "vite build" },
+          dependencies: {
+            "@tanstack/react-start": "1.169.5",
+            "@tanstack/react-router": "1.170.46",
+            react: "19.3.1",
+            "react-dom": "19.3.1",
+          },
+          devDependencies: {
+            vite: "8.3.8",
+            "@vitejs/plugin-react": "6.3.0",
+            typescript: "5.9.3",
+          },
+        }),
+      },
+      {
+        name: "vite.config.ts",
+        content: `import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import viteReact from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+
+export default defineConfig({ plugins: [tanstackStart(), viteReact()] });
+`,
+      },
+      {
+        name: "tsconfig.json",
+        content: JSON.stringify({
+          compilerOptions: {
+            jsx: "react-jsx",
+            module: "ESNext",
+            moduleResolution: "Bundler",
+            target: "ES2022",
+            lib: ["ES2022", "DOM", "DOM.Iterable"],
+            skipLibCheck: true,
+            strictNullChecks: true,
+            noEmit: true,
+          },
+        }),
+      },
+    ],
+  });
+  const srcId = await system.mutation(api.system.createFolder, {
+    internalKey, projectId, name: "src",
+  });
+  await system.mutation(api.system.createFiles, {
+    internalKey,
+    projectId,
+    parentId: srcId,
+    files: [
+      {
+        name: "router.tsx",
+        content: `import { createRouter } from "@tanstack/react-router";
+import { routeTree } from "./routeTree.gen";
+
+export function getRouter() {
+  return createRouter({ routeTree, scrollRestoration: true });
+}
+`,
+      },
+      {
+        name: "routeTree.gen.ts",
+        content: `/* eslint-disable */
+// @ts-nocheck
+import { Route as rootRouteImport } from "./routes/__root";
+import { Route as ActionsRouteImport } from "./routes/actions";
+import { Route as IndexRouteImport } from "./routes/index";
+
+const ActionsRoute = ActionsRouteImport.update({
+  id: "/actions",
+  path: "/actions",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const IndexRoute = IndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => rootRouteImport,
+} as any);
+
+export interface FileRoutesByFullPath {
+  "/": typeof IndexRoute;
+  "/actions": typeof ActionsRoute;
+}
+export interface FileRoutesByTo {
+  "/": typeof IndexRoute;
+  "/actions": typeof ActionsRoute;
+}
+export interface FileRoutesById {
+  __root__: typeof rootRouteImport;
+  "/": typeof IndexRoute;
+  "/actions": typeof ActionsRoute;
+}
+export interface FileRouteTypes {
+  fileRoutesByFullPath: FileRoutesByFullPath;
+  fullPaths: "/" | "/actions";
+  fileRoutesByTo: FileRoutesByTo;
+  to: "/" | "/actions";
+  id: "__root__" | "/" | "/actions";
+  fileRoutesById: FileRoutesById;
+}
+export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute;
+  ActionsRoute: typeof ActionsRoute;
+}
+
+declare module "@tanstack/react-router" {
+  interface FileRoutesByPath {
+    "/actions": {
+      id: "/actions";
+      path: "/actions";
+      fullPath: "/actions";
+      preLoaderRoute: typeof ActionsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/": {
+      id: "/";
+      path: "/";
+      fullPath: "/";
+      preLoaderRoute: typeof IndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+  }
+}
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  ActionsRoute: ActionsRoute,
+};
+export const routeTree = rootRouteImport
+  ._addFileChildren(rootRouteChildren)
+  ._addFileTypes<FileRouteTypes>();
+`,
+      },
+    ],
+  });
+  const routesId = await system.mutation(api.system.createFolder, {
+    internalKey, projectId, parentId: srcId, name: "routes",
+  });
+  const created = await system.mutation(api.system.createFiles, {
+    internalKey,
+    projectId,
+    parentId: routesId,
+    files: [
+      {
+        name: "__root.tsx",
+        content: `import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+
+export const Route = createRootRoute({
+  head: () => ({
+    meta: [
+      { charSet: "utf-8" },
+      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { title: "Start e2e" },
+    ],
+  }),
+  component: () => (
+    <html lang="en">
+      <head><HeadContent /></head>
+      <body><Outlet /><Scripts /></body>
+    </html>
+  ),
+});
+`,
+      },
+      { name: "index.tsx", content: pageSource },
+      {
+        name: "actions.tsx",
+        content: `import { createFileRoute } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
+import { useEffect, useState } from "react";
+
+const submit = createServerFn({ method: "POST" })
+  .validator((data: { message: string }) => data)
+  .handler(async ({ data }) => "Submitted: " + data.message);
+
+export const Route = createFileRoute("/actions")({ component: Actions });
+
+function Actions() {
+  const [status, setStatus] = useState("No submission yet");
+  // Disabled until hydrated, so an early click can't fall back to a native form GET.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  return <main>
+    <h1>Server function form</h1>
+    <p role="status">{status}</p>
+    <form onSubmit={async (event) => {
+      event.preventDefault();
+      const message = String(new FormData(event.currentTarget).get("message"));
+      setStatus(await submit({ data: { message } }));
+    }}>
+      <label>Message<input name="message" /></label>
+      <button type="submit" disabled={!hydrated}>Submit message</button>
+    </form>
+  </main>;
+}
+`,
+      },
+    ],
+  });
+  return created.find((file) => file.name === "index.tsx")!.fileId as Id<"files">;
+};
