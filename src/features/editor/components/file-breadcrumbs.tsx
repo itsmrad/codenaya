@@ -31,26 +31,32 @@ export const FileBreadcrumbs = ({
 
   return (
     <div className="px-4 py-2 bg-background border-b border-border/40 flex items-center h-[52px]">
-      <div className="flex items-center bg-muted/30 px-3 py-1.5 rounded-lg border border-border/40">
-        <Breadcrumb>
-          <BreadcrumbList className="sm:gap-1.5 gap-1.5">
+      <div className="flex min-w-0 max-w-full items-center bg-muted/30 px-3 py-1.5 rounded-lg border border-border/40">
+        <Breadcrumb className="min-w-0">
+          <BreadcrumbList className="sm:gap-1.5 gap-1.5 flex-nowrap overflow-hidden">
             {filePath.map((item, index) => {
               const isLast = index === filePath.length - 1;
 
               return (
                 <React.Fragment key={item._id}>
-                  <BreadcrumbItem className="text-sm">
+                  <BreadcrumbItem className="min-w-0 text-sm">
                     {isLast ? (
-                      <BreadcrumbPage className="flex items-center gap-1.5 font-medium px-2 py-0.5 bg-muted/50 rounded-md">
+                      <BreadcrumbPage
+                        title={item.name}
+                        className="flex min-w-0 items-center gap-1.5 font-medium px-2 py-0.5 bg-muted/50 rounded-md"
+                      >
                         <FileIcon
                           fileName={item.name}
                           autoAssign
-                          className="size-4"
+                          className="size-4 shrink-0"
                         />
-                        {item.name}
+                        <span className="truncate">{item.name}</span>
                       </BreadcrumbPage>
                     ) : (
-                      <span className="px-2 py-0.5 hover:bg-muted/50 rounded-md transition-colors text-muted-foreground">
+                      <span
+                        title={item.name}
+                        className="truncate px-2 py-0.5 hover:bg-muted/50 rounded-md transition-colors text-muted-foreground"
+                      >
                         {item.name}
                       </span>
                     )}
