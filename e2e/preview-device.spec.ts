@@ -26,6 +26,16 @@ test.describe("preview device toggle", () => {
     await expect(frame).toBeVisible({ timeout: 180_000 });
     const panel = await frame.locator("..").boundingBox();
 
+    await expect(page.getByRole("button", { name: "Refresh page", exact: true })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: /^Restart / })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Sandbox", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "WebContainer", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Refresh options", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: /^Restart / })).toBeVisible();
+    await expect(page.getByRole("menuitemradio", { name: "Cloud sandbox", exact: true })).toHaveText("Cloud sandbox");
+    await expect(page.getByRole("menuitemradio", { name: "In-browser (WebContainer)", exact: true })).toHaveText("In-browser (WebContainer)");
+    await page.keyboard.press("Escape");
+
     const mobile = page.getByRole("button", { name: "Mobile (375px)" });
     await mobile.click();
     await expect(mobile).toHaveAttribute("aria-pressed", "true");

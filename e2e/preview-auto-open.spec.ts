@@ -383,7 +383,7 @@ test.describe("first build auto-opens the preview", () => {
 
       // The sandbox boots mid-run and reports the half-written app's error:
       // the card stays over it, with no banner and no fix.
-      await expect(page.getByRole("button", { name: "Refresh page" })).toBeEnabled({ timeout: 30_000 });
+      await expect(page.getByRole("button", { name: "Refresh page", exact: true })).toBeEnabled({ timeout: 30_000 });
       await page.waitForTimeout(5_000);
       await expect(buildCard).toBeVisible();
       // Covered, so out of the keyboard's and screen readers' reach.
