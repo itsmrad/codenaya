@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
+import { useEsbuildRecovery } from "@/features/sandbox-preview/hooks/use-esbuild-recovery";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
 import { PreviewSelectToggle } from "./preview-select-toggle";
@@ -177,10 +178,11 @@ export const PreviewView = ({
   // URL dictates isolation mode via next.config.ts conditional headers
   const engineParam = searchParams.get("engine") as PreviewEngine | null;
   const requestedEngine = engineParam === "webcontainer" ? "webcontainer" : "sandbox";
-  const sandboxOnly = useMemo(
-    () => needsSandbox(detectFrameworkFromFiles(files ? buildFlatFileList(files) : [], project?.settings?.devCommand)),
+  const framework = useMemo(
+    () => detectFrameworkFromFiles(files ? buildFlatFileList(files) : [], project?.settings?.devCommand),
     [files, project?.settings?.devCommand],
   );
+  const sandboxOnly = needsSandbox(framework);
   const activeEngine = sandboxOnly ? "sandbox" : requestedEngine;
   const needsSandboxReload = sandboxOnly && requestedEngine === "webcontainer";
 
@@ -292,6 +294,12 @@ export const PreviewView = ({
   // A compile error is usually why the app also throws, so it goes first.
   const buildError = activeEngine === "sandbox" ? sandbox.appError : null;
   const appError = buildError ?? runtimeError;
+  const { serviceFailed, recovering: recoveringEsbuild } = useEsbuildRecovery({
+    sandboxId: activeEngine === "sandbox" && status === "running" ? sandbox.sandboxId : null,
+    framework,
+    error: appError,
+    recover: sandbox.recoverDevServer,
+  });
   const appErrorId = appError ? appErrorKey(appError) : null;
   const [dismissedErrorId, setDismissedErrorId] = useState<string | null>(null);
   const [fixAttempts, setFixAttempts] = useState<FixAttempts>({ errorId: null, count: 0 });
@@ -312,7 +320,7 @@ export const PreviewView = ({
     if (queuedFixRef.current) unqueueChatMessage(queuedFixRef.current);
   }, [unqueueChatMessage]);
   const fixAppError = useCallback(() => {
-    if (!appError || !appErrorId) return;
+    if (!appError || !appErrorId || serviceFailed) return;
     const message: QueuedMessage = {
       projectId,
       text: buildFixPrompt(appError, terminalOutputRef.current),
@@ -326,9 +334,9 @@ export const PreviewView = ({
     };
     queuedFixRef.current = message;
     queueChatMessage(message);
-  }, [appError, appErrorId, projectId, queueChatMessage, setFixAttempts]);
+  }, [appError, appErrorId, projectId, queueChatMessage, setFixAttempts, serviceFailed]);
   // The chat's run block says when a finished run left the preview broken.
-  const canFix = appErrorId !== null && attempts < MAX_FIX_ATTEMPTS;
+  const canFix = appErrorId !== null && !serviceFailed && attempts < MAX_FIX_ATTEMPTS;
   usePublishPreviewErrors(
     // One: the banner and its fix carry only the error shown (build first).
     previewUrl && appError ? 1 : 0,
@@ -394,7 +402,11 @@ export const PreviewView = ({
   }, [autoFixer, shownError, canFix, appErrorId, runActive, chatBlock, files, fixAppError]);
 
   const errorBanner =
-    shownError && appErrorId && !autoFixing && !coveringTransientError ? (
+    shownError && serviceFailed ? (
+      <div role="status" className="absolute inset-x-3 bottom-3 z-40 rounded-xl border bg-card/95 p-3 text-xs shadow-lg">
+        {recoveringEsbuild ? "Recovering preview…" : "Preview unavailable. Automatic recovery is temporarily paused. Check the logs for details."}
+      </div>
+    ) : shownError && appErrorId && !autoFixing && !coveringTransientError ? (
       <PreviewErrorBanner
         error={shownError}
         attempts={attempts}

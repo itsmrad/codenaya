@@ -2,6 +2,8 @@ import { CommandExitError, TimeoutError } from "e2b";
 import { z } from "zod";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 import { parseJsonBody } from "@/lib/parse-json-body";
+import { checkRateLimit, rateLimitedResponse } from "@/lib/rate-limit";
+import { recoverEsbuild } from "@/features/sandbox-preview/server/recover-esbuild";
 import {
   DEFAULT_INSTALL_COMMAND,
   projectFilesSchema,
@@ -32,6 +34,9 @@ const patchSchema = z.object({
   files: projectFilesSchema,
   installCommand: z.string().optional(),
 });
+
+const recoverySchema = z.object({ action: z.literal("recover-esbuild") });
+const RECOVERY_RATE_LIMIT = { scope: "sandbox-esbuild-recovery", limit: 30, windowMs: 60_000 };
 
 type Install = () => Promise<InstallFailure | undefined>;
 
@@ -122,8 +127,7 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
 /**
  * POST /api/sandbox/[sandboxId]?_method=DELETE
  *
- * Supports navigator.sendBeacon() which can only send POST requests.
- * Used for cleanup during page unload (tab close, navigation away).
+ * Supports navigator.sendBeacon() cleanup and the recover-esbuild action (#776).
  */
 export async function POST(request: Request, { params }: RouteParams) {
   const url = new URL(request.url);
@@ -133,7 +137,24 @@ export async function POST(request: Request, { params }: RouteParams) {
     return DELETE(request, { params });
   }
 
-  return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const { userId, unauthorized } = await requireUserId();
+  if (unauthorized) return unauthorized;
+  const limit = checkRateLimit(userId, RECOVERY_RATE_LIMIT);
+  if (!limit.allowed) return rateLimitedResponse(limit);
+  const { invalid } = await parseJsonBody(request, recoverySchema);
+  if (invalid) return invalid;
+  const { sandboxId } = await params;
+  try {
+    const sandbox = await getOwnedSandbox(sandboxId, userId);
+    if (!sandbox) return Response.json({ error: "Sandbox not found" }, { status: 404 });
+    // A package.json sync may be queued but not yet visible in commands.list().
+    const status = installQueues.has(sandboxId) ? "busy" : await recoverEsbuild(sandbox);
+    return Response.json({ status });
+  } catch {
+    // Never return E2B exception text: it can contain the command's environment.
+    console.warn("[sandbox-recovery] Dev server recovery failed");
+    return Response.json({ error: "Preview recovery failed" }, { status: 502 });
+  }
 }
 
 /**
