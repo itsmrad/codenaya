@@ -59,6 +59,11 @@ test.describe("queued follow-up", () => {
     await composer.press("Enter");
     await expect(queued).toContainText("Add a footer");
     await expect(composer).toHaveValue("");
+    // A second Enter in the empty composer must not stop the run (#578 review).
+    await composer.press("Enter");
+    await expect(page.locator('[data-run-status="running"]')).toBeVisible();
+    await expect(queued).toContainText("Add a footer");
+    await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeEnabled();
 
     // Edit puts it back in the composer; queue it again, changed.
     await queued.getByRole("button", { name: "Edit queued message" }).click();
