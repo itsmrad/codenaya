@@ -12,7 +12,11 @@ test("esbuild death recovers once, waits for install, and bypasses AI repair (#7
   const previewUrl = "https://esbuild-preview.test/";
   let recoveries = 0;
   let messages = 0;
-  await page.route(`${previewUrl}**`, (route) => route.fulfill({ contentType: "text/html", body: "<h1>Bakery</h1>" }));
+  let previewLoads = 0;
+  await page.route(`${previewUrl}**`, (route) => {
+    previewLoads++;
+    return route.fulfill({ contentType: "text/html", body: "<h1>Bakery</h1>" });
+  });
   await page.route("**/api/sandbox", (route) => route.fulfill({
     contentType: "application/x-ndjson",
     body: JSON.stringify({ type: "ready", sandboxId: "esbuild-smoke", previewUrl }) + "\n",
@@ -44,6 +48,10 @@ test("esbuild death recovers once, waits for install, and bypasses AI repair (#7
   try {
     await page.goto(`/projects/${projectId}?view=preview`);
     await expect(page.frameLocator('iframe[title="Preview"]').getByRole("heading", { name: "Bakery" })).toBeVisible({ timeout: 60_000 });
+    // PreviewView reloads the iframe once, 2.5 s after the sandbox runs, which clears page errors
+    // and would cancel a recovery already in flight. Report only after it has settled.
+    await expect.poll(() => previewLoads).toBeGreaterThanOrEqual(2);
+    await expect(page.frameLocator('iframe[title="Preview"]').getByRole("heading", { name: "Bakery" })).toBeVisible();
     await system.mutation(api.system.updateMessageStatus, { internalKey, messageId, status: "completed" });
     const frame = page.frame({ url: previewUrl })!;
     const report = () => frame.evaluate(() => {
