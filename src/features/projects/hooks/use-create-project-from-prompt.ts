@@ -10,7 +10,7 @@ import { detectCredential } from "@/features/integrations/credential-guard";
 import { useAgentModel } from "@/features/conversations/hooks/use-agent-model";
 import { askSetupQuestions } from "@/features/conversations/components/setup-questions-dialog";
 import {
-  shouldAskSetupQuestions,
+  setupQuestionsFor,
   withSetupAnswers,
   withSetupDecisions,
 } from "@/features/conversations/setup-questions";
@@ -52,9 +52,10 @@ export const useCreateProjectFromPrompt = () => {
         return false;
       }
 
-      // A short prompt for an empty project gets the setup questions first
-      // (#344); a template already made those choices.
-      const answers = !templateId && shouldAskSetupQuestions(text) ? await askSetupQuestions() : null;
+      // A first prompt that implies services, or a short one, gets the setup
+      // questions first (#344); a template already made those choices.
+      const questions = templateId ? [] : setupQuestionsFor(text);
+      const answers = questions.length ? await askSetupQuestions(questions) : null;
       if (answers === undefined) return false;
 
       setIsSubmitting(true);

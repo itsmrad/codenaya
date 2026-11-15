@@ -7,7 +7,10 @@ import {
   CheckIcon,
   CopyIcon,
   HammerIcon,
+  KeyRoundIcon,
   PencilIcon,
+  PlugIcon,
+  RocketIcon,
   ListChecksIcon,
   RotateCcwIcon,
   Undo2Icon,
@@ -34,6 +37,7 @@ import { userMessageBlocks } from "../user-message";
 import { AgentRun, useRunStalled } from "./agent-run";
 import { PlanEditor } from "./plan-editor";
 import { ShipCard } from "./ship-card";
+import { parseSuggestion, type SuggestionAction } from "../suggestions";
 import { SwarmBoard } from "./swarm-board";
 import { type StuckRetry, StuckRunCard } from "./stuck-run-card";
 
@@ -204,9 +208,15 @@ interface AssistantMessageProps {
   stuckRetry?: StuckRetry;
   /** A stuck run (#306): pre-fills a plan-mode message about the loop. */
   onDiagnose?: () => void;
-  /** A follow-up chip (#256): fills the composer with the prompt, unsent. */
-  onSuggestion?: (prompt: string) => void;
+  /** A next-step chip (#256): runs its action, or fills the composer with the prompt, unsent. */
+  onSuggestion?: (line: string) => void;
 }
+
+const ACTION_ICONS: Record<SuggestionAction["kind"], typeof PlugIcon> = {
+  connect: PlugIcon,
+  publish: RocketIcon,
+  "env-vars": KeyRoundIcon,
+};
 
 export const AssistantMessage = ({
   message,
@@ -387,14 +397,23 @@ export const AssistantMessage = ({
           {/* Only under the latest build reply; a plan has "Build this plan". */}
           {isLast && onSuggestion && message.mode !== "plan" && !message.stuck && message.suggestions?.length ? (
             <div className={cn("flex flex-wrap gap-2", settle)}>
-              {message.suggestions.map((prompt) => (
-                <Suggestion
-                  key={prompt}
-                  suggestion={prompt}
-                  onClick={onSuggestion}
-                  className="h-auto whitespace-normal px-3 py-1.5 text-left text-xs font-normal"
-                />
-              ))}
+              {message.suggestions.map((line) => {
+                const { label, action } = parseSuggestion(line);
+                // The ship card already offers Publish under a first build.
+                if (message.firstBuild && action?.kind === "publish") return null;
+                const Icon = action && ACTION_ICONS[action.kind];
+                return (
+                  <Suggestion
+                    key={line}
+                    suggestion={line}
+                    onClick={onSuggestion}
+                    className="h-auto whitespace-normal px-3 py-1.5 text-left text-xs font-normal"
+                  >
+                    {Icon && <Icon className="size-3.5" aria-hidden />}
+                    {label}
+                  </Suggestion>
+                );
+              })}
             </div>
           ) : null}
           <MessageActions

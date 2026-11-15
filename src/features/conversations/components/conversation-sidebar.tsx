@@ -1,5 +1,6 @@
 import ky, { HTTPError } from "ky";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { 
   ArrowBigUpIcon,
@@ -40,6 +41,7 @@ import {
 } from "@/components/ui/tooltip";
 import { ApprovalPrompt } from "@/features/integrations/components/approval-prompt";
 import { useProjectIntegrations } from "@/features/integrations/components/project-integrations-context";
+import { integrationLink } from "@/features/integrations/integration-link";
 import {
   useAiProviderKeys,
   usePlatformModelsOrCatalog,
@@ -84,6 +86,7 @@ import {
 import { type AgentModelChoice, nextTier } from "../agent-models";
 import { buildPathIndex, stuckFilePath } from "../agent-steps";
 import { AssistantMessage, UserMessage } from "./chat-message";
+import { parseSuggestion, type SuggestionAction } from "../suggestions";
 import { composerSubmitAction, followUpAction } from "../follow-up";
 import { QueuedFollowUp } from "./queued-follow-up";
 import { useRunStalled } from "./agent-run";
@@ -114,6 +117,21 @@ export const ConversationSidebar = ({
   projectId,
 }: ConversationSidebarProps) => {
   const { openIntegrations } = useProjectIntegrations();
+  const router = useRouter();
+  // A next-step chip's IDE action; false when this page doesn't offer it, so
+  // the chip fills the composer instead.
+  const runSuggestionAction = (action: SuggestionAction) => {
+    if (action.kind === "connect") {
+      router.replace(integrationLink(action.providerId, projectId), { scroll: false });
+      // shortcut: opens the dialog without the provider picked until the
+      // ?integrations= handling lands (CONNECTORS); then drop this call.
+      openIntegrations();
+      return true;
+    }
+    const run = useCommandPalette.getState().commands[action.kind];
+    run?.();
+    return Boolean(run);
+  };
   const { input, setInput, appendInput, contexts, removeContext, clearContexts } = useChatStore();
   const [agentModel, setAgentModel] = useAgentModel();
   const enhancer = useEnhancePrompt(input, setInput);
@@ -626,8 +644,10 @@ export const ConversationSidebar = ({
                     return (await sendMessage(build)) === "sent";
                   }}
                   stuckRetry={message.stuck && stuckRetry(message, messageIndex)}
-                  onSuggestion={(prompt) => {
-                    setInput(prompt);
+                  onSuggestion={(line) => {
+                    const { label, action } = parseSuggestion(line);
+                    if (action && runSuggestionAction(action)) return;
+                    setInput(label);
                     requestAnimationFrame(() => panelRef.current?.querySelector("textarea")?.focus());
                   }}
                   onDiagnose={() => {

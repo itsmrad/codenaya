@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { splitSuggestions } from "./suggestions";
+import { parseSuggestion, splitSuggestions } from "./suggestions";
 
 describe("splitSuggestions", () => {
   it("takes the prompts out of the reply", () => {
@@ -9,12 +9,12 @@ describe("splitSuggestions", () => {
     ).toEqual({ content: "- Built a todo app.", suggestions: ["Add dark mode", "Save todos"] });
   });
 
-  it("keeps at most 3 short, plain prompts", () => {
+  it("keeps at most 4 short, plain prompts", () => {
     const long = "x".repeat(101);
     const { suggestions } = splitSuggestions(
-      `Done.\n<suggestions>\n1. "One"\n\n${long}\n2) Two\n* Three\n\`Four\`\n</suggestions>`,
+      `Done.\n<suggestions>\n1. "One"\n\n${long}\n2) Two\n* Three\n\`Four\`\nFive\n</suggestions>`,
     );
-    expect(suggestions).toEqual(["One", "Two", "Three"]);
+    expect(suggestions).toEqual(["One", "Two", "Three", "Four"]);
   });
 
   it("keeps a repeated prompt once", () => {
@@ -36,5 +36,35 @@ describe("splitSuggestions", () => {
 
   it("leaves a reply without a block alone", () => {
     expect(splitSuggestions("- Built it.")).toEqual({ content: "- Built it.", suggestions: [] });
+  });
+});
+
+describe("parseSuggestion", () => {
+  it("maps action tags to IDE actions and keeps the rest as prompts", () => {
+    expect(parseSuggestion("[connect:stripe] Connect Stripe to take payments")).toEqual({
+      label: "Connect Stripe to take payments",
+      action: { kind: "connect", providerId: "stripe" },
+    });
+    expect(parseSuggestion("[Publish] Publish your site")).toEqual({ label: "Publish your site", action: { kind: "publish" } });
+    expect(parseSuggestion("[env-vars] Set the form's destination email")).toEqual({
+      label: "Set the form's destination email",
+      action: { kind: "env-vars" },
+    });
+    expect(parseSuggestion("Add a gallery page")).toEqual({ label: "Add a gallery page", action: null });
+  });
+
+  it("treats an unknown or empty tag as plain text", () => {
+    expect(parseSuggestion("[deploy] Ship it")).toEqual({ label: "[deploy] Ship it", action: null });
+    expect(parseSuggestion("[publish]")).toEqual({ label: "[publish]", action: null });
+  });
+
+  it("parses the chips out of a reply in the new template", () => {
+    const reply =
+      "**What I built**\n- A pizzeria site, running in the preview.\n\n<suggestions>\n[connect:supabase] Save reservations in Supabase\n[publish] Publish the site\nAdd my real menu prices\n</suggestions>";
+    expect(splitSuggestions(reply).suggestions.map((line) => parseSuggestion(line).action?.kind ?? "prompt")).toEqual([
+      "connect",
+      "publish",
+      "prompt",
+    ]);
   });
 });

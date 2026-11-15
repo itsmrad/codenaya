@@ -4,28 +4,52 @@ import { MAX_PROJECT_INSTRUCTIONS_LENGTH, buildProjectInstructionsSection } from
 import { MAX_PROMPT_LENGTH } from "@/lib/prompt-limit";
 
 import {
-  SETUP_QUESTIONS,
-  shouldAskSetupQuestions,
+  DECIDE_LATER,
+  MAX_SETUP_QUESTIONS,
+  setupQuestionsFor,
   withSetupAnswers,
   withSetupDecisions,
 } from "./setup-questions";
 
 const answers = { audience: "A small team", style: "Minimal" };
+const ids = (prompt: string) => setupQuestionsFor(prompt).map(({ id }) => id);
 
-describe("shouldAskSetupQuestions", () => {
-  test("asks only under 8 words, never on an empty prompt", () => {
-    expect(shouldAskSetupQuestions("a CRM")).toBe(true);
-    expect(shouldAskSetupQuestions("habit tracker for runners")).toBe(true);
-    expect(shouldAskSetupQuestions("a habit tracker for my running club")).toBe(true); // 7 words
-    expect(shouldAskSetupQuestions("a todo app with dark mode and login")).toBe(false); // 8 words
-    expect(shouldAskSetupQuestions("   ")).toBe(false);
+const PIZZERIA =
+  "Build a website for my pizzeria with the menu, a photo gallery, online table reservations and a contact form";
+
+describe("setupQuestionsFor", () => {
+  test("a short prompt gets audience, first screen and style; an empty one nothing", () => {
+    expect(ids("a CRM")).toEqual(["data", "audience", "focus", "style"]);
+    expect(ids("habit tracker for runners")).toEqual(["audience", "focus", "style"]);
+    expect(ids("a habit tracker for my running club")).toEqual(["audience", "focus", "style"]); // 7 words
+    expect(ids("   ")).toEqual([]);
   });
-});
 
-describe("the question set", () => {
-  test("has at most 3 questions of at most 4 options", () => {
-    expect(SETUP_QUESTIONS.length).toBeLessThanOrEqual(3);
-    for (const question of SETUP_QUESTIONS) expect(question.options.length).toBeLessThanOrEqual(4);
+  test("a detailed prompt with no services, or an e2e smoke prompt, builds straight away", () => {
+    expect(ids("a todo app with dark mode and keyboard shortcuts")).toEqual([]);
+    expect(ids("e2e dashboard smoke: reply OK and change nothing.")).toEqual([]);
+    expect(ids("e2e landing smoke: reply OK and change nothing.")).toEqual([]);
+  });
+
+  test("the pizzeria spec asks where reservations go and where it's hosted", () => {
+    const questions = setupQuestionsFor(PIZZERIA);
+    expect(questions.map(({ id }) => id)).toEqual(["data", "hosting"]);
+    expect(questions[0]).toMatchObject({ recommended: "Supabase", options: ["Supabase", "Convex", "Just email me", DECIDE_LATER] });
+    expect(questions[1]).toMatchObject({ recommended: "Codenaya publish" });
+  });
+
+  test("payments only when the prompt sells something", () => {
+    expect(ids(`${PIZZERIA} and online orders with checkout`)).toContain("payments");
+  });
+
+  test("at most 4 questions of at most 4 options, each service with a recommendation and Decide later", () => {
+    const all = setupQuestionsFor("a shop site with checkout, member login, email reminders, analytics and a booking form");
+    expect(all).toHaveLength(MAX_SETUP_QUESTIONS);
+    for (const question of all) {
+      expect(question.options.length).toBeLessThanOrEqual(4);
+      expect(question.options).toContain(DECIDE_LATER);
+      expect(question.options).toContain(question.recommended);
+    }
   });
 });
 
@@ -33,6 +57,12 @@ describe("withSetupAnswers", () => {
   test("adds the answered questions below the prompt", () => {
     expect(withSetupAnswers("a CRM", answers)).toBe(
       "a CRM\n\nDecisions from setup:\n- Audience: A small team\n- Style: Minimal",
+    );
+  });
+
+  test("folds service choices in, Decide later as a placeholder note", () => {
+    expect(withSetupAnswers("pizzeria site", { data: "Supabase", hosting: DECIDE_LATER })).toBe(
+      "pizzeria site\n\nDecisions from setup:\n- Data storage: Supabase\n- Hosting: decide later (leave a clear placeholder)",
     );
   });
 
