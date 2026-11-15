@@ -67,9 +67,14 @@ const MAX_SOURCE_CHARS = 20_000;
 const SHORT_CALL_MS = 10_000;
 /**
  * Never read into a check or copied into the sandbox, like the preview's `.env` on the warm path.
- * Build output (Vite's dist, Next.js's .next and out) and Next.js's generated next-env.d.ts.
+ * Build output (Vite's dist, Next.js's .next and out, TanStack Start's .output, .tanstack, .nitro
+ * and legacy .vinxi) and Next.js's generated next-env.d.ts.
  */
-const SKIPPED_DIRS = new Set(["node_modules", ".git", "dist", ".next", "out", "next-env.d.ts"]);
+const SKIPPED_DIRS = new Set([
+  "node_modules", ".git", "dist", ".next", "out", "next-env.d.ts", ".output", ".tanstack", ".nitro", ".vinxi",
+]);
+/** Written by `vite build`: a repair edit would be overwritten, so repairs may not touch it. */
+const ROUTE_TREE = "src/routeTree.gen.ts";
 const isEnvFile = (path: string) => /(^|\/)\.env(\.|$)/.test(path);
 const readable = (path: string) =>
   isSafeProjectPath(path) && !SKIPPED_DIRS.has(path.split("/")[0]) && !isEnvFile(path);
@@ -172,8 +177,7 @@ export type VerifyAndFixOptions = {
 const snapshot = async (sandbox: Sandbox, dir: string) => {
   // GNU find: "<bytes> <relative path>" per file.
   const listing = await sandbox.commands.run(
-    "find . -type f -not -path './node_modules/*' -not -path './.git/*' -not -path './dist/*' " +
-      "-not -path './.next/*' -not -path './out/*' -printf '%s %P\\n'",
+    `find . -type f ${[...SKIPPED_DIRS].map((dir) => `-not -path './${dir}/*'`).join(" ")} -printf '%s %P\\n'`,
     { cwd: dir, timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS },
   );
   const entries = listing.stdout
@@ -539,7 +543,7 @@ export const verifyAndFix = async ({
       written = await repair({
         projectId, internalKey, model: escalation?.model ?? model, name: `${prefix}:repair:${attempt}`,
         errors: owned, paths: outcome.paths, framework: outcome.framework, sources: outcome.sources,
-        signal, allowedPaths, onResponse: onResponse && ((raw) => onResponse(raw, onFallback)), written: wrote,
+        signal, allowedPaths: (path) => path !== ROUTE_TREE && (allowedPaths?.(path) ?? true), onResponse: onResponse && ((raw) => onResponse(raw, onFallback)), written: wrote,
       });
     } catch (error) {
       console.error("[sandbox-repair] repair failed", projectId, error);

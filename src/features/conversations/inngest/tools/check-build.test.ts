@@ -24,6 +24,7 @@ import {
   BUILD_VERIFIED,
   STATIC_CHECKS_PASSED,
 } from "../../agent-steps";
+import { START_BUILD_ERROR, START_TYPE_ERROR } from "./start-build-output.fixture";
 import { buildCommand, checkProjectBuild, createCheckBuildTool, trimBuildOutput, warmSlow } from "./check-build";
 import { NEXT_MODULE_NOT_FOUND, NEXT_PRERENDER_ERROR, NEXT_TYPE_ERROR } from "./next-build-output.fixture";
 
@@ -177,7 +178,32 @@ describe("trimBuildOutput for Next.js", () => {
   });
 });
 
+describe("trimBuildOutput for TanStack Start", () => {
+  const output = ({ stdout, stderr }: { stdout: string; stderr: string }) => `${stderr}\n${stdout}`;
+
+  it("starts at the tsc error after a passing build and drops both builds' progress", () => {
+    expect(trimBuildOutput(output(START_TYPE_ERROR), "/home/user/app", "tanstack-start")).toBe(
+      "src/routes/index.tsx(12,17): error TS2322: Type 'number' is not assignable to type 'string'.",
+    );
+  });
+
+  it("keeps Vite's failure with its location and drops the progress", () => {
+    const trimmed = trimBuildOutput(output(START_BUILD_ERROR), "/home/user/app", "tanstack-start");
+    expect(trimmed.split("\n").slice(0, 2)).toEqual([
+      "error during build:",
+      '[vite]: Rollup failed to resolve import "@/components/Hero" from "src/routes/index.tsx".',
+    ]);
+    expect(trimmed).not.toMatch(/vite v7|transforming|modules transformed/);
+  });
+});
+
 describe("buildCommand", () => {
+  it("builds TanStack Start before type checking, since the build generates its route tree", () => {
+    expect(buildCommand("tanstack-start", new Set(["package.json", "tsconfig.json"]))).toBe(
+      "npx vite build && npx tsc --noEmit",
+    );
+  });
+
   it("runs next build alone for Next.js, without telemetry", () => {
     expect(buildCommand("next", new Set(["package.json", "tsconfig.json"]))).toBe(
       "NEXT_TELEMETRY_DISABLED=1 npx next build",
@@ -358,6 +384,22 @@ describe("checkProjectBuild", () => {
     });
     const [copy] = sandbox.commands.run.mock.calls.map(([command]) => command);
     expect(copy).toContain("--exclude=./dist --exclude=./.next --exclude=./out --exclude=./next-env.d.ts --exclude=.env ");
+  });
+
+  it("leaves TanStack Start build output out of the sourceDir copy", async () => {
+    const sandbox = sandboxWith(() => undefined);
+    const files = [
+      { path: "package.json", content: JSON.stringify({ dependencies: { "@tanstack/react-start": "1.0.0", vite: "7.0.0" } }) },
+      { path: "vite.config.ts", content: "export default {};\n" },
+    ];
+    await checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandbox: sandbox as unknown as Sandbox,
+      sourceDir: "/home/user/app",
+    });
+    const [copy] = sandbox.commands.run.mock.calls.map(([command]) => command);
+    expect(copy).toContain("--exclude=./dist --exclude=./.output --exclude=./.tanstack --exclude=./.nitro --exclude=./.vinxi --exclude=.env ");
   });
 
   it("installs, type checks and builds, then kills the sandbox", async () => {
