@@ -22,7 +22,7 @@ const fakeProvider = (id: ProviderId = "e2b"): SandboxProvider => ({
 });
 const config: SandboxProviderConfig = {
   primary: "e2b", fallbacks: [second, third],
-  configured: { e2b: true, [second]: true, [third]: true },
+  configured: { e2b: true, ...Object.fromEntries([second, third].map((id) => [id, true])) },
 };
 
 describe("provider config and selection", () => {
