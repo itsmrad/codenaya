@@ -89,6 +89,7 @@ import { isStarterOnly } from './starter-only';
 import { generateConversationTitle } from './generate-title';
 import { parseSlashSkills } from '@/features/skills/parse-slash';
 import { IMAGE_ONLY_PROMPT, withImageParts } from './lib/image-prompt';
+import { withSelectedElements } from '../selected-elements';
 import { trimFileHistory } from "./lib/trim-file-history";
 import {
   MAX_CUT_OFF_RETRIES,
@@ -330,11 +331,11 @@ export const processMessage = inngest.createFunction(
       });
     });
 
-    // Images on the user message this run answers: the last one before it.
-    const imageUrls =
-      recentMessages
-        .slice(0, recentMessages.findIndex((msg) => msg._id === messageId))
-        .findLast((msg) => msg.role === "user")?.imageUrls ?? [];
+    // Images and picked elements on the user message this run answers: the last one before it.
+    const asked = recentMessages
+      .slice(0, recentMessages.findIndex((msg) => msg._id === messageId))
+      .findLast((msg) => msg.role === "user");
+    const imageUrls = asked?.imageUrls ?? [];
     // The catalog can change between the send and this run (a queued run, a
     // retry): never send images to a model that can't read them (#322).
     if (imageUrls.length > 0 && !runModel.acceptsImages) {
@@ -348,8 +349,10 @@ export const processMessage = inngest.createFunction(
       return { success: false, messageId, conversationId };
     }
     // A message can be images alone; the agents still need a request to answer.
-    const request =
-      imageUrls.length > 0 && !message.trim() ? IMAGE_ONLY_PROMPT : message;
+    const request = withSelectedElements(
+      imageUrls.length > 0 && !message.trim() ? IMAGE_ONLY_PROMPT : message,
+      asked?.elements,
+    );
 
     // Earlier turns go to the model as chat messages, never in the system prompt.
     const earlierTurns = priorTurns(recentMessages, messageId);
