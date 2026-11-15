@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   activeViewFor,
+  buildMayOpenPreview,
   cacheWorkspaceMode,
   loadCachedWorkspaceMode,
   resolveWorkspaceMode,
@@ -47,6 +48,12 @@ describe("workspace mode (#524)", () => {
     expect(activeViewFor("preview", "board", false)).toBe("preview");
     // A saved board view in another mode opens on the preview.
     expect(activeViewFor("board", "ide", false)).toBe("preview");
+  });
+
+  it("keeps a first build from taking the view off the board (#525)", () => {
+    expect(buildMayOpenPreview("board")).toBe(false);
+    expect(buildMayOpenPreview("ide")).toBe(true);
+    expect(buildMayOpenPreview("chat")).toBe(true);
   });
 
   it("falls back from board to the IDE once swarm reads off or fails, with no error (#525)", () => {

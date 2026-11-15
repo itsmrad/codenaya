@@ -37,6 +37,12 @@ export const activeViewFor = (view: IdeView, mode: WorkspaceMode, isCompact: boo
 };
 
 /**
+ * Whether a first build may switch the active view to the preview by itself
+ * (#337). Board mode stays on the board, the preview a tab away.
+ */
+export const buildMayOpenPreview = (mode: WorkspaceMode): boolean => mode !== "board";
+
+/**
  * The saved mode; while loading or after a failed read, the device's copy.
  * The board needs swarm: once the switch reads off (or fails), "board" is "ide".
  */

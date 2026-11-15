@@ -45,6 +45,13 @@ test.describe("agent board workspace mode", () => {
 
       await views.getByRole("tab", { name: "Preview" }).click();
       await expect(views.getByRole("tab", { name: "Preview" })).toHaveAttribute("aria-selected", "true");
+    } catch (error) {
+      // Before the cleanup below deletes the project, or the shot is its 404 page.
+      await test.info().attach("failure", {
+        body: await page.screenshot({ fullPage: true }).catch(() => Buffer.alloc(0)),
+        contentType: "image/png",
+      });
+      throw error;
     } finally {
       await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});
       // Leave the spec user on the default layout.
