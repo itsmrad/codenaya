@@ -8,6 +8,7 @@ import {
   injectPreviewBridge,
   insertBridge,
   readPreviewMessage,
+  routePreviewMessage,
 } from "./preview-bridge";
 
 describe("injectPreviewBridge", () => {
@@ -111,6 +112,45 @@ describe("readPreviewMessage", () => {
     expect(readPreviewMessage({ ...event, data: { ...page, source: "other" } }, frame, previewUrl)).toBeNull();
   });
 
+  const element = {
+    tag: "button", id: "save", classes: ["primary"], text: "Save",
+    outerHTML: "<button>Save</button>", domPath: "body > button", siblingText: "Form",
+    rect: { x: 1, y: 2, width: 30, height: 40 },
+  };
+  const picked = { source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "select:picked", element };
+
+  it("accepts picks only from the preview source and origin", () => {
+    const pickEvent = { ...event, data: picked };
+    expect(readPreviewMessage(pickEvent, frame, previewUrl)).toEqual({ kind: "select:picked", element });
+    expect(readPreviewMessage({ ...pickEvent, source: {} as Window }, frame, previewUrl)).toBeNull();
+    expect(readPreviewMessage({ ...pickEvent, origin: "https://other.example" }, frame, previewUrl)).toBeNull();
+  });
+
+  it("refuses every oversized pick field and non-finite rects", () => {
+    const invalid = [
+      { tag: "x".repeat(65) }, { id: "x".repeat(129) },
+      { text: "x".repeat(201) }, { outerHTML: "x".repeat(2049) },
+      { domPath: "x".repeat(513) }, { siblingText: "x".repeat(301) },
+      { classes: Array(21).fill("x") }, { classes: ["x".repeat(65)] },
+      ...["x", "y", "width", "height"].flatMap((field) =>
+        [Infinity, -Infinity, NaN].map((value) => ({ rect: { ...element.rect, [field]: value } }))),
+    ];
+    for (const fields of invalid) {
+      expect(readPreviewMessage({ ...event, data: { ...picked, element: { ...element, ...fields } } }, frame, previewUrl)).toBeNull();
+    }
+  });
+
+  it("routes select:picked without setting or clearing a runtime error", () => {
+    const setRuntimeError = vi.fn();
+    const onPick = vi.fn();
+    const onOff = vi.fn();
+    routePreviewMessage(readPreviewMessage({ ...event, data: picked }, frame, previewUrl), setRuntimeError, onPick, onOff);
+    expect(onPick).toHaveBeenCalledWith(element);
+    expect(setRuntimeError).not.toHaveBeenCalled();
+    routePreviewMessage({ kind: "page" }, setRuntimeError, onPick, onOff);
+    expect(setRuntimeError).toHaveBeenCalledExactlyOnceWith(null);
+  });
+
   it("truncates long text", () => {
     const long = "a".repeat(10_000);
     const error = readPreviewMessage({ ...event, data: { ...data, message: long, stack: long } }, frame, previewUrl) as AppError;
@@ -138,6 +178,46 @@ describe("installPreviewBridge", () => {
     posted.splice(0, 1);
     return { win, listeners, posted, original };
   };
+  it("selects only on parent commands, suppresses navigation, and leaves on Esc", () => {
+    const { win, listeners, posted } = setup();
+    const remove = vi.fn();
+    class ElementStub {
+      tagName = "BUTTON";
+      id = "save";
+      classList = ["primary"];
+      textContent = "Save";
+      outerHTML = "<button>Save</button>";
+      parentElement = null;
+      getBoundingClientRect() { return { x: 1, y: 2, width: 30, height: 40 }; }
+    }
+    const style = {};
+    Object.assign(win, {
+      Element: ElementStub,
+      document: { createElement: () => ({ style, remove }), documentElement: { appendChild: vi.fn() } },
+    });
+    const command = { source: win.parent, data: { source: PREVIEW_MESSAGE_SOURCE, version: 1, kind: "select:on" } };
+    const click = { target: new ElementStub(), preventDefault: vi.fn(), stopPropagation: vi.fn(), stopImmediatePropagation: vi.fn() };
+    listeners.message({ ...command, source: {} });
+    listeners.click(click);
+    expect(click.preventDefault).not.toHaveBeenCalled();
+    listeners.message(command);
+    listeners.mousemove(click);
+    expect(style).toMatchObject({ width: "30px", height: "40px" });
+    listeners.click(click);
+    expect(click.preventDefault).toHaveBeenCalledOnce();
+    expect(click.stopPropagation).toHaveBeenCalledOnce();
+    expect(posted).toEqual([expect.objectContaining({ kind: "select:picked", element: expect.objectContaining({ text: "Save" }) })]);
+    expect(remove).toHaveBeenCalledOnce();
+    listeners.click(click);
+    expect(posted).toHaveLength(1);
+    listeners.message(command);
+    listeners.keydown({ ...click, key: "Escape" });
+    expect(posted).toHaveLength(2);
+    expect(posted[1]).toMatchObject({ kind: "select:off" });
+    listeners.click(click);
+    expect(posted).toHaveLength(2);
+  });
+
   // React 19's dev log for an error an error boundary caught (#335).
   const boundaryLog = (error: unknown) => [
     "%o\n\n%s\n\n%s\n",

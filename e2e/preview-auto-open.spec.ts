@@ -97,6 +97,45 @@ test.describe("first build auto-opens the preview", () => {
     "Needs CLERK_SECRET_KEY, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, NEXT_PUBLIC_CONVEX_URL and CODENAYA_CONVEX_INTERNAL_KEY",
   );
 
+  test("a stubbed bridge pick adds a chip and opens compact Chat (#227)", async ({ page }) => {
+    test.setTimeout(150_000);
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await signIn(page);
+    const previewUrl = new URL("/__e2e-select-preview", page.url()).href;
+    await page.route(previewUrl, (route) => route.fulfill({
+      contentType: "text/html",
+      body: `<html><body><button>Save</button><script>
+        addEventListener('message', (event) => {
+          if (event.source !== parent || event.data.kind !== 'select:on') return;
+          parent.postMessage({ source: 'codenaya-preview', version: 1, kind: 'select:picked', element: {
+            tag: 'button', text: 'Save', domPath: 'body > button', outerHTML: '<button>Save</button>',
+            rect: { x: 0, y: 0, width: 50, height: 30 }
+          } }, '*');
+        });
+      </script></body></html>`,
+    }));
+    await stubSandbox(page, [], previewUrl);
+    const build = await startFirstBuild(page, "e2e-preview-select");
+    try {
+      await page.goto(`/projects/${build.projectId}`);
+      await expect(page.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true", { timeout: 60_000 });
+      await build.writePackageJson();
+      await build.run.complete();
+      await page.getByRole("tab", { name: "Preview" }).click();
+      const select = page.getByRole("button", { name: "Select element", exact: true });
+      await expect(select).toBeEnabled({ timeout: 30_000 });
+      await expect(page.frameLocator('iframe[title="Preview"]').getByRole("button", { name: "Save" })).toBeVisible();
+      await select.click();
+      await expect(page.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByRole("button", { name: 'Remove <button> "Save"', exact: true })).toBeVisible();
+      await page.getByRole("tab", { name: "Preview" }).click();
+      await expect(select).toHaveAttribute("aria-pressed", "false");
+      await expect(page.getByRole("alert").filter({ hasText: "Runtime error" })).toHaveCount(0);
+    } finally {
+      await build.cleanup();
+    }
+  });
+
   for (const [device, width, height] of [["desktop", 1440, 900], ["tablet", 768, 1024]] as const) {
     test(`boots once package.json lands and shows Preview (${device})`, async ({ page }, testInfo) => {
       test.setTimeout(150_000);

@@ -523,6 +523,7 @@ export const ProjectIdView = ({
               projectId={projectId}
               firstBuild={firstBuild}
               visible={activeView === "preview"}
+              onElementPicked={() => { if (isCompact) selectView("chat"); }}
               onOpenEnvVars={() => setEnvVarsOpen(true)}
             />
           )}

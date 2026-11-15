@@ -63,7 +63,14 @@ import {
   type AppError,
   type FixAttempts,
 } from "@/features/sandbox-preview/utils/app-error";
-import { readPreviewMessage } from "@/features/sandbox-preview/utils/preview-bridge";
+import { selectedElementSchema } from "@/features/conversations/selected-elements";
+import { useChatStore } from "@/features/conversations/store/use-chat-store";
+import {
+  PREVIEW_MESSAGE_SOURCE,
+  PREVIEW_PROTOCOL_VERSION,
+  routePreviewMessage,
+  readPreviewMessage,
+} from "@/features/sandbox-preview/utils/preview-bridge";
 import {
   MAX_FIX_ATTEMPTS,
   PreviewErrorBanner,
@@ -121,6 +128,7 @@ export const PreviewView = ({
   firstBuild,
   visible,
   onOpenEnvVars,
+  onElementPicked,
 }: {
   projectId: Id<"projects">;
   /** Its tab is on screen; the IDE keeps it mounted, invisible, behind others. */
@@ -129,6 +137,7 @@ export const PreviewView = ({
   firstBuild: boolean;
   /** Opens the env vars dialog, which ProjectIdView owns so the palette can open it too. */
   onOpenEnvVars: () => void;
+  onElementPicked: () => void;
 }) => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -189,7 +198,8 @@ export const PreviewView = ({
   const { status, previewUrl, error, restart, terminalOutput } = activeInstance;
   // Select mode (#227) is off whenever the app isn't running, so a restart never leaves it on.
   const [selectChosen, setSelectChosen] = useState(false);
-  const selecting = selectChosen && status === "running";
+  if (selectChosen && (status !== "running" || !visible)) setSelectChosen(false);
+  const selecting = selectChosen && status === "running" && visible;
   // A restart empties the output; forget the clear so the new run shows in
   // full even when it repeats the cleared lines (#480).
   if (clearedLogs && !terminalOutput.startsWith(clearedLogs)) setClearedLogs("");
@@ -208,18 +218,34 @@ export const PreviewView = ({
   // and runtime errors and Vite overlay errors (#497) posted by the bridge
   // script injected into the preview.
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const sendSelectMode = useCallback(() => {
+    if (!previewUrl) return;
+    iframeRef.current?.contentWindow?.postMessage({
+      source: PREVIEW_MESSAGE_SOURCE,
+      version: PREVIEW_PROTOCOL_VERSION,
+      kind: selecting ? "select:on" : "select:off",
+    }, new URL(previewUrl).origin);
+  }, [previewUrl, selecting]);
+  useEffect(sendSelectMode, [sendSelectMode]);
   const [runtimeError, setRuntimeError] = useState<AppError | null>(null);
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const reported = readPreviewMessage(event, iframeRef.current?.contentWindow, previewUrl);
-      if (!reported) return;
-      // A new document, e.g. Vite's own reload after re-optimizing (#486): its errors are reported anew.
-      if (reported.kind === "page") setRuntimeError(null);
-      else setRuntimeError((prev) => mergeAppError(prev, reported));
+      routePreviewMessage(
+        reported,
+        (error) => setRuntimeError((prev) => error ? mergeAppError(prev, error) : null),
+        (element) => {
+          // Rect is only bridge metadata; chat keeps the existing quoted-data shape.
+          useChatStore.getState().addElement(selectedElementSchema.parse(element));
+          setSelectChosen(false);
+          onElementPicked();
+        },
+        () => setSelectChosen(false),
+      );
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [previewUrl]);
+  }, [previewUrl, onElementPicked]);
   // An edit or a reload may have fixed it; the bridge reports it again if not.
   const [runtimeErrorScope, setRuntimeErrorScope] = useState({ files, previewUrl, refreshKey });
   if (
@@ -359,7 +385,10 @@ export const PreviewView = ({
   // The iframe's latest load, so first_preview_shown waits until it is visible.
   const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
   const previewKey = `${projectId}:${previewUrl}:${refreshKey}`;
-  const handlePreviewLoad = useCallback(() => setLoadedPreview(previewKey), [previewKey]);
+  const handlePreviewLoad = useCallback(() => {
+    setLoadedPreview(previewKey);
+    sendSelectMode();
+  }, [previewKey, sendSelectMode]);
 
   // Only ever called from a user action. WebContainer needs the COOP/COEP headers
   // next.config.ts sets for `?engine=webcontainer`, so switching is a full page
