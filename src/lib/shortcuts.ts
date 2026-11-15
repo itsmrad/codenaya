@@ -9,6 +9,7 @@ export type ShortcutKey = "mod" | "shift" | "alt" | "enter" | "esc" | "tab" | st
 
 export interface Shortcut {
   label: string;
+  description?: string;
   /** Alternative bindings for the same action, e.g. `?` or `mod+/`. */
   keys: ShortcutKey[][];
   scope: ShortcutScope;
@@ -29,7 +30,7 @@ export const SHORTCUTS: Shortcut[] = [
 
   { label: "Send message", keys: [["enter"]], scope: "Chat" },
   { label: "New line", keys: [["shift", "enter"]], scope: "Chat" },
-  { label: "Toggle Ask / Plan mode", keys: [["shift", "tab"]], scope: "Chat" },
+  { label: "Toggle Ask / Plan mode", description: "Build ↔ Ask / Plan; Swarm is not in this cycle.", keys: [["alt", "m"]], scope: "Chat" },
   { label: "Stop the agent", keys: [["esc"]], scope: "Chat" },
   { label: "Start or stop dictation", keys: [["alt", "v"]], scope: "Chat" },
 

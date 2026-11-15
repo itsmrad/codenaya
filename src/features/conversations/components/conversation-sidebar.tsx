@@ -845,7 +845,10 @@ export const ConversationSidebar = ({
                 className="min-h-11 px-3 pt-3 pb-1 text-sm/6 placeholder:text-muted-foreground/70"
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Tab" && event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && !isProcessing) {
+                  if (
+                    event.code === "KeyM" && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey &&
+                    !event.defaultPrevented && !event.nativeEvent.isComposing && !isProcessing && mode !== "swarm"
+                  ) {
                     event.preventDefault();
                     setMode((current) => current === "plan" ? "build" : "plan");
                     return;
