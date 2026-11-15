@@ -1,6 +1,7 @@
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, it, vi } from "vitest";
+import type { CustomServerPrefill } from "../community-catalog";
 import type { ConnectionSummary } from "./connection-card";
 
 const state = vi.hoisted(() => ({
@@ -43,8 +44,8 @@ vi.mock("./project-connections-panel", () => ({ ProjectConnectionsPanel: () => n
 
 import { IntegrationsDialog } from "./integrations-dialog";
 
-const render = (initialProviderId?: string) => renderToStaticMarkup(createElement(IntegrationsDialog, {
-  open: true, onOpenChange: () => {}, initialProviderId,
+const render = (initialProviderId?: string, initialPrefill?: CustomServerPrefill) => renderToStaticMarkup(createElement(IntegrationsDialog, {
+  open: true, onOpenChange: () => {}, initialProviderId, initialPrefill,
 }));
 
 beforeEach(() => {
@@ -111,4 +112,16 @@ it.each(["tile click", "deep link"])("manages a provider selected during loading
   const html = renderOpening(initialProviderId);
   expect(html).toContain("Manage GitHub");
   expect(html).not.toContain("Connect form:");
+});
+
+
+it("adds a prefilled community server beside existing custom connections", () => {
+  state.connections = [{
+    _id: "existing" as ConnectionSummary["_id"], providerId: "custom", label: "Existing server", authMode: "api_key",
+    serverUrl: "https://example.com/mcp", status: "active", maskedPreview: "****", scopes: [], createdAt: 0, updatedAt: 0,
+  }];
+  const html = render("custom", { label: "acme/tool", serverUrl: "https://mcp.acme.com/mcp" });
+  expect(html).toContain("Add acme/tool");
+  expect(html).toContain("Connect form: custom");
+  expect(html).not.toContain("Add another connection");
 });

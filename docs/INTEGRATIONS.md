@@ -189,3 +189,70 @@ refresh must be reconnected.
 The same mechanism serves any catalog provider without dynamic registration. Give
 the entry `preRegisteredClient: { clientIdEnv, clientSecretEnv }` (variable names
 only) and, if its authorization server is cross-site, `trustedAuthorizationServerOrigins`.
+
+## Community catalog (unreviewed)
+
+Below the vetted providers, the catalog shows a **Community** section: up to 500 of the
+most-starred servers from the public
+[awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) list
+(MIT, attributed in `THIRD_PARTY_NOTICES.md`). It is labelled "not reviewed",
+and nothing in it is trusted.
+
+- **Data:** `src/features/integrations/community-catalog.json`, one entry per
+  line, sorted by stars then id. Generated, not hand-edited.
+- **Remote vs local.** An entry gets a `remoteUrl` (and `http`/`sse` transport)
+  only from the official MCP registry (its server list, `remotes[]`), matched to
+  its GitHub repo. A GitHub-owner vouch means the registry namespace matches the repo owner
+  (`io.github.<owner>/…`) and the remote host is not on the aggregator/app-hosting
+  denylist; it does not establish domain ownership. A domain vouch requires an
+  owner-named domain (recognised single-label suffixes only; other domain vouches
+  fail closed). Denylisted hosting/proxy domains cannot vouch. Entries matching vetted
+  providers’ trusted hosts are omitted in favour of the vetted entry. URLs are
+  never scraped from READMEs. Everything else is `stdio` and shows
+  "Needs a local runtime (not supported yet)", disabled.
+- **Auth** is `api-key` when the registry remote declares headers, `oauth` when
+  the remote publishes RFC 9728 protected-resource metadata (opt-in
+  `--probe-oauth`: one unauthenticated GET per remote entry, paced), else
+  `unknown`. The custom-server form is key-based today, so an OAuth-only remote
+  needs a bearer token pasted as its key. Its tile says "Remote · token"; sign-in
+  is not supported yet.
+
+### Safety model
+
+A community remote opens the **existing custom-server form**, prefilled with its
+name and URL. From there it is an ordinary custom connection:
+
+- the URL gets full SSRF/DNS validation, with no trusted-host bypass;
+- the server is resolved with `annotationsTrusted: false`, no `readOnlyTools`
+  and no `destructiveTools`, so **every tool asks for approval**, including
+  tools that claim `readOnlyHint: true`;
+- with no approval gate available, calls are refused.
+
+Community entries are never added to `catalog.ts`, its `readOnlyTools`, or any
+trust list. `community-approval.test.ts` checks this for every remote entry.
+
+### Refreshing (weekly)
+
+```bash
+node scripts/mcp-catalog/build.mjs \
+  --exclude-file <path to the excluded-names list>
+```
+
+`--probe-oauth` is maintainer-only: it makes requests to registry-provided URLs
+without a private-IP check. Normal refreshes reuse cached OAuth observations
+without probing. Do not enable probes for untrusted input or on a privileged network.
+
+The generator also drops descriptions/names advertising CAPTCHA, anti-bot,
+stealth, undetected automation, or bot-detection bypass tooling.
+
+Needs an authenticated `gh` CLI. Stars are fetched by GraphQL in batches of 100,
+paced, and cached with registry responses under `scripts/mcp-catalog/.cache/`
+(gitignored, reused for `--cache-hours`, default 24). The run prints how many
+entries were skipped as duplicates, excluded, archived/disabled, or missing.
+
+`--exclude-file` is required. It holds names that must never appear in this
+repo, one per line (`#` comments allowed), and it is **never committed**.
+Matching entries are dropped (whole word, plus embedded in a repo name for
+terms of 6+ characters), whole-word matches in descriptions become
+"MCP clients", and the build fails if any term survives. After a refresh,
+grep the JSON with the same file before committing.
