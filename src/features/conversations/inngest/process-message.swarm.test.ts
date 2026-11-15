@@ -165,6 +165,23 @@ describe("processMessage swarm mode", () => {
     expect(toolResults(outcome.inferenceBodies)[0]).toContain("Files written: src/pages/home.tsx, src/pages/about.tsx");
   });
 
+  it("delegates a plan with a detailed 5000-character brief (#646)", async () => {
+    const brief = `Build the home page. ${"Match the dental clinic's tone and layout. ".repeat(120)}`.slice(0, 4999) + ".";
+    const plan = { tasks: [{ ...PLAN.tasks[0], brief }, PLAN.tasks[1]] };
+    const outcome = await swarm([
+      { data: toolCall("delegateTasks", plan) },
+      { data: toolCall("checkBuild") },
+      { data: text("Done.") },
+    ], [DONE, NAV_DONE]);
+
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(mutationArgs("agentTasks:createTasks")[0].tasks).toEqual([
+      expect.objectContaining({ taskId: "pages", brief }),
+      expect.objectContaining({ taskId: "nav" }),
+    ]);
+    expect(outcome.invocations).toHaveLength(2);
+  });
+
   it("returns an invalid plan as an Error to re-plan, then runs the valid one", async () => {
     const outcome = await swarm([
       { data: toolCall("delegateTasks", { tasks: [PLAN.tasks[0], { ...PLAN.tasks[1], ownedPaths: ["src/pages/nav.tsx"] }] }) },
