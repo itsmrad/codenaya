@@ -49,7 +49,7 @@ test.describe("starter templates on /showcase (signed out)", () => {
 test.describe("starter templates on the dashboard", () => {
   test.skip(!hasClerkCredentials(), "needs CLERK_SECRET_KEY and NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
 
-  test("a template creates a project that opens in the IDE with its files", async ({ page }) => {
+  test("an instant template opens in the IDE with its files and no run", async ({ page }) => {
     test.setTimeout(120_000);
     await signIn(page);
     await page.goto("/");
@@ -69,9 +69,18 @@ test.describe("starter templates on the dashboard", () => {
         timeout: 30_000,
       });
       await expect(page.getByRole("button", { name: "src", exact: true })).toBeVisible();
+      // An instant template opens as a finished app: no run, so the chat stays
+      // empty and offers "Make it mine" (#362).
+      const card = page.getByRole("region", { name: "Make it mine" });
+      await expect(card).toBeVisible({ timeout: 30_000 });
+      await card.getByLabel("App name").fill("Acme");
+      await card.getByRole("button", { name: "Teal" }).click();
+      await card.getByRole("button", { name: "Apply" }).click();
+      await expect(page.getByText("Applied to your app")).toBeVisible();
+      await expect(card).toBeVisible();
       expect(errors).toEqual([]);
     } finally {
-      // Don't pile up template projects (and their agent runs) across runs.
+      // Don't pile up template projects across runs.
       await (await userConvexClient(page)).mutation(api.projects.remove, { id: projectId });
     }
   });

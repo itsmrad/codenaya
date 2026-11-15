@@ -8,6 +8,8 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // Stop `next dev` upserting its agent-rules block into AGENTS.md (#81).
   agentRules: false,
+  // Instant template sources are read at request time (#362).
+  outputFileTracingIncludes: { "/api/projects/create-with-prompt": ["./templates/**/*"] },
   async headers() {
     return [
       {
