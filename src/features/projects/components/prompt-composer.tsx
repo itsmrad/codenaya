@@ -72,7 +72,8 @@ const useTypedPlaceholder = (enabled: boolean) => {
 const ComposerModelSelect = ({ disabled }: { disabled: boolean }) => {
   const [agentModel, setAgentModel] = useAgentModel();
   return (
-    // Shrinks before Clear and Build do; the name truncates, the tooltip keeps it readable.
+    // Shrinks before Clear and Build do; the name truncates (vendor mark only in a narrow
+    // composer), the tooltip keeps it readable.
     <div className={cn(CELL, "min-w-0 shrink border-r")}>
       <AgentModelSelect
         value={agentModel}
@@ -88,7 +89,7 @@ const ComposerModelSelect = ({ disabled }: { disabled: boolean }) => {
           </p>
         }
         // Fill the cell, so the whole cell hovers and clicks like Templates.
-        triggerClassName="h-full data-[size=sm]:h-full max-w-96 rounded-none px-3 font-mono text-[10px] uppercase tracking-[0.12em] hover:bg-muted/50 dark:hover:bg-muted/50 aria-expanded:bg-muted/50"
+        triggerClassName="h-full data-[size=sm]:h-full max-w-96 rounded-none @max-[480px]:[&_[data-slot=select-value]>span:last-child]:sr-only px-3 font-mono text-[10px] uppercase tracking-[0.12em] hover:bg-muted/50 dark:hover:bg-muted/50 aria-expanded:bg-muted/50"
       />
     </div>
   );
@@ -170,7 +171,7 @@ export const PromptComposer = ({
       <GridCross className="-right-[5px] -bottom-[5px]" />
 
       {/* `composer-orbit` (globals.css): an orange light circles the box while it has focus. */}
-      <div className="composer-window composer-orbit rounded-md border border-border bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04),0_16px_48px_-28px_rgb(0_0_0/0.3)] transition-[border-color] duration-300 focus-within:border-brand/30">
+      <div data-testid="prompt-composer" className="composer-window composer-orbit rounded-md border border-border bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04),0_16px_48px_-28px_rgb(0_0_0/0.3)] transition-[border-color] duration-300 focus-within:border-brand/30">
         {/* Label strip */}
         <div className="flex h-9 items-center justify-between gap-3 border-b border-border px-4 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           <span className="flex items-center gap-2.5">
@@ -220,19 +221,21 @@ export const PromptComposer = ({
                 />
               )}
               {/* The chat's mode radios; Swarm only while the kill switch is on. */}
-              <div className={cn(CELL, "border-r px-2")}>
+              <div className={cn(CELL, "border-r")}>
                 <PlanModeToggle
                   mode={mode}
                   onModeChange={setMode}
                   swarm={swarmEnabled}
                   disabled={isSubmitting}
+                  size="sm"
                 />
               </div>
               {tools}
               {showModelSelect && <ComposerModelSelect disabled={isSubmitting} />}
             </PromptInputTools>
 
-            <div className="flex items-stretch">
+            {/* shrink-0: the tools give way first, so Build never leaves the frame. */}
+            <div className="flex shrink-0 items-stretch">
               {input && (
                 <span
                   className={cn(

@@ -4,6 +4,7 @@ import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { PENDING_PROMPT_KEY } from "../src/features/projects/utils/pending-prompt";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
+import { expectToolbarFitsAtWidths } from "./composer-fit";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
 
@@ -22,6 +23,12 @@ const submitHeroPrompt = async (page: Page, prompt: string) => {
 };
 
 test.describe("landing hero prompt", () => {
+  test("the hero composer toolbar fits the card at 375 to 1700 px", async ({ page }) => {
+    await page.goto("/");
+    // Signed out there is no Enhance, so Clear is the reference cell.
+    await expectToolbarFitsAtWidths(page, page.locator("body"), "Clear prompt");
+  });
+
   test("a signed-out prompt is kept and routes to sign-in on mobile", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     const errors = collectConsoleErrors(page);
