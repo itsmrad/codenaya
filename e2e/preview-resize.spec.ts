@@ -28,11 +28,15 @@ test.describe("resizing the window keeps the running preview (#777)", () => {
     await signIn(page);
     const projectId = await seedPreviewProject(page, "e2e-preview-resize");
     await page.goto(`/projects/${projectId}?view=preview`);
+    // The dev-tools badge covers the phone tab bar.
+    await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
 
     const iframe = page.locator('iframe[title="Preview"]');
     const composer = page.getByPlaceholder("Describe a change or ask a question…");
     await expect(iframe).toBeVisible({ timeout: 60_000 });
     await expect.poll(() => boots).toBe(1);
+    // The preview reloads its iframe once, 2.5 s after the dev server runs; mark it after that.
+    await page.waitForTimeout(4_000);
     // A remounted iframe loses this mark.
     await iframe.evaluate((el) => el.setAttribute("data-e2e-mark", "kept"));
 
