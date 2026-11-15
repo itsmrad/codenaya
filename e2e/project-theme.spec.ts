@@ -37,14 +37,14 @@ test.describe("project theme form (#302)", () => {
     await ocean.click();
     await expect(ocean).toHaveAttribute("aria-pressed", "true");
     await expect(dialog.getByLabel("Primary", { exact: true })).toHaveValue("#2563eb");
-    await expect(dialog.getByRole("button", { name: "Save" })).toBeEnabled();
+    await expect(dialog.getByRole("button", { name: "Save theme" })).toBeEnabled();
 
     await dialog.getByLabel("Primary", { exact: true }).fill("#787878");
     await expect(dialog.getByRole("status")).toContainText("WCAG AA needs 4.5:1");
     await expect(ocean).toHaveAttribute("aria-pressed", "false");
 
     await dialog.getByLabel("Primary", { exact: true }).fill("#12");
-    await expect(dialog.getByRole("button", { name: "Save" })).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "Save theme" })).toBeDisabled();
     await expect(dialog.getByLabel("Primary", { exact: true })).toHaveAccessibleDescription(
       "Use a hex colour like #2563eb.",
     );

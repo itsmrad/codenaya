@@ -141,7 +141,7 @@ const ThemeEditor = ({
           </Button>
         )}
         <Button size="sm" className="h-7 text-xs" disabled={!changed || invalid || saving || draft === null} onClick={() => save(draft)}>
-          {saving ? "Saving..." : "Save"}
+          {saving ? "Saving..." : "Save theme"}
         </Button>
       </div>
     </FieldSet>
