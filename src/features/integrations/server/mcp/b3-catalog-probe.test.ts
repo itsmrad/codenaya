@@ -223,8 +223,10 @@ describe.each(["tavily", "firecrawl"] as const)("%s stays OAuth-only", (id) => {
 
 it.each([
   ["exa", "agent_run"],
+  ["exa", "web_search_advanced_exa"],
   ["tavily", "tavily_research"],
   ["firecrawl", "firecrawl_scrape"],
+  ["firecrawl", "firecrawl_search"],
   ["firecrawl", "firecrawl_extract"],
   ["firecrawl", "people_company_search"],
   ["firecrawl", "people_company_enrich"],

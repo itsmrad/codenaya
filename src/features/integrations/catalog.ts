@@ -1050,8 +1050,9 @@ const CATALOG = {
     // Full published inventory: https://docs.exa.ai/reference/exa-mcp#available-tools
     // agent_run is usage-billed, so it is gated as spend.
     destructiveTools: ["agent_run"],
-    // Public-web reads from the inventory above.
-    readOnlyTools: ["web_search_exa", "web_fetch_exa", "web_search_advanced_exa"],
+    // Public-web reads from the inventory above. web_search_advanced_exa stays
+    // gated: summaries, subpage crawling and up to 100 results bill crawl and LLM spend in one call.
+    readOnlyTools: ["web_search_exa", "web_fetch_exa"],
     apiKey: {
       header: "x-api-key",
       valuePrefix: "",
@@ -1119,8 +1120,9 @@ const CATALOG = {
     // call, incl. Alexandria runs), firecrawl_crawl (starts a billed job),
     // firecrawl_parse (returns a signed upload target), monitor list/get
     // (webhook configuration) and firecrawl_credit_usage (per-key billing).
+    // firecrawl_search is also gated: with scrapeOptions each result bills as an uncapped scrape.
     readOnlyTools: [
-      "firecrawl_search", "firecrawl_map", "firecrawl_check_crawl_status",
+      "firecrawl_map", "firecrawl_check_crawl_status",
       "firecrawl_agent_status", "firecrawl_developer_search", "firecrawl_gov_search",
       "firecrawl_research_search_papers", "firecrawl_research_related_papers",
       "firecrawl_research_read_paper", "firecrawl_research_inspect_paper",
