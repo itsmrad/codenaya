@@ -495,12 +495,21 @@ export const vote = mutation({
         createdAt: Date.now(),
       });
       if (args.vote === "up") {
-        await ctx.db.insert("showcaseEvents", {
-          showcaseProjectId: args.showcaseProjectId,
-          kind: "upvote",
-          userId: identity.subject,
-          createdAt: Date.now(),
-        });
+        // One event per user/entry/kind per UTC day, matching the scoring dedupe, so toggling cannot flood the window.
+        const now = Date.now();
+        const today = await ctx.db.query("showcaseEvents")
+          .withIndex("by_userId_and_showcaseProjectId_and_kind_and_createdAt", (q) =>
+            q.eq("userId", identity.subject).eq("showcaseProjectId", args.showcaseProjectId).eq("kind", "upvote")
+              .gte("createdAt", Math.floor(now / DAY_MS) * DAY_MS))
+          .first();
+        if (!today) {
+          await ctx.db.insert("showcaseEvents", {
+            showcaseProjectId: args.showcaseProjectId,
+            kind: "upvote",
+            userId: identity.subject,
+            createdAt: now,
+          });
+        }
       }
       const field = args.vote === "up" ? "upvotes" : "downvotes";
       await ctx.db.patch(args.showcaseProjectId, {

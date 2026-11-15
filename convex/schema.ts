@@ -552,7 +552,8 @@ export default defineSchema({
   })
     .index("by_createdAt", ["createdAt"])
     .index("by_userId", ["userId"])
-    .index("by_showcaseProjectId", ["showcaseProjectId"]),
+    .index("by_showcaseProjectId", ["showcaseProjectId"])
+    .index("by_userId_and_showcaseProjectId_and_kind_and_createdAt", ["userId", "showcaseProjectId", "kind", "createdAt"]),
 
   showcaseVotes: defineTable({
     showcaseProjectId: v.id("showcaseProjects"),

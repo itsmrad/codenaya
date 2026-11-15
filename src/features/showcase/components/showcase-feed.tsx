@@ -19,11 +19,12 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 /** The full community showcase: search, sort, tag filters and a paginated card grid. */
 export const ShowcaseFeed = () => {
-  const now = useShowcaseRankingTime();
-  const creators = useShowcaseTopCreators(now);
+  const [sortBy, setSortBy] = useState<ShowcaseSort>("newest");
+  const isWeekly = sortBy === "week";
+  const now = useShowcaseRankingTime(isWeekly);
+  const creators = useShowcaseTopCreators(now, isWeekly);
   const [showcaseSearch, setShowcaseSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [sortBy, setSortBy] = useState<ShowcaseSort>("newest");
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>(undefined);
   const [selectedTech, setSelectedTech] = useState<string[]>([]);
   const [selectedDesign, setSelectedDesign] = useState<string[]>([]);
@@ -195,7 +196,7 @@ export const ShowcaseFeed = () => {
           </div>
         )}
       </div>
-      <aside className="lg:w-44 lg:shrink-0" aria-label="Top creators this week">
+      {isWeekly && <aside className="lg:w-44 lg:shrink-0" aria-label="Top creators this week">
         <h2 className="text-sm font-medium">Top creators</h2>
         <p className="mt-1 text-xs text-muted-foreground">This week</p>
         {creators === undefined ? (
@@ -212,7 +213,7 @@ export const ShowcaseFeed = () => {
             ))}
           </ol>
         )}
-      </aside>
+      </aside>}
     </div>
   );
 };

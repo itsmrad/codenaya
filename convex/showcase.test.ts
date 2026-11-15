@@ -596,13 +596,29 @@ describe("weekly showcase", () => {
     await vote("up"); // Remove.
     await vote("up"); // New upvote.
     await vote("up"); // Remove.
-    await vote("up"); // New upvote, same day.
+    await vote("up"); // New upvote, same day: no second event.
+    await vote("up"); // Remove.
+    await vote("up"); // Same-day toggle again.
     const events = await t.run((ctx) => ctx.db.query("showcaseEvents").take(10));
-    expect(events).toHaveLength(2);
+    expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ showcaseProjectId: id, kind: "upvote", userId: "user_bob", createdAt: now });
     expect(await t.query(api.showcase.getTopCreators, { now })).toEqual([
       { name: "Alice", avatarUrl: null, score: 1 },
     ]);
+  });
+
+  test("an upvote on a later UTC day records a second event", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const t = convexTest(schema, modules);
+    const [id] = await seed(t, [{ title: "demo", publishedAt: 1 }]);
+    const user = t.withIdentity({ subject: "user_bob" });
+    const upvote = () => user.mutation(api.showcase.vote, { showcaseProjectId: id, vote: "up" });
+    await upvote();
+    await upvote(); // Remove.
+    vi.setSystemTime(now + day);
+    await upvote();
+    expect(await t.run((ctx) => ctx.db.query("showcaseEvents").take(10))).toHaveLength(2);
   });
 
   test("records a counted remix, excludes self-remixes and repeat imports", async () => {

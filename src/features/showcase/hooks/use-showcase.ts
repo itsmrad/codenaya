@@ -39,18 +39,21 @@ export const useShowcaseFeed = ({
   return { ...feed, loadMore: () => feed.loadMore(FEED_PAGE_SIZE), searching };
 };
 
-/** Refresh the rolling window even when no new events arrive. */
-export const useShowcaseRankingTime = () => {
+/** Refresh the rolling window even when no new events arrive; only ticks while the weekly view is open. */
+export const useShowcaseRankingTime = (enabled: boolean) => {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
+    if (!enabled) return;
+    setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(timer);
-  }, []);
+  }, [enabled]);
   return now;
 };
 
-export const useShowcaseTopCreators = (now: number) =>
-  useQuery(api.showcase.getTopCreators, { now, limit: 5 });
+/** Skipped unless the weekly view is open: each run reads up to 500 events. */
+export const useShowcaseTopCreators = (now: number, enabled: boolean) =>
+  useQuery(api.showcase.getTopCreators, enabled ? { now, limit: 5 } : "skip");
 
 export const useShowcaseById = (id: Id<"showcaseProjects"> | undefined) => {
   return useQuery(api.showcase.getById, id ? { id } : "skip");
