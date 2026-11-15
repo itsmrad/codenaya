@@ -642,6 +642,23 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expect(commandsOf(cold)).toContain("NEXT_TELEMETRY_DISABLED=1 npx next build");
   });
 
+  it("builds a TanStack Start project in a new sandbox, never beside the preview's dev server", async () => {
+    listed({});
+    const cold = fakeSandbox();
+    const files = [
+      { path: "package.json", content: JSON.stringify({ dependencies: { "@tanstack/react-start": "1.0.0", vite: "7.0.0" } }) },
+      { path: "vite.config.ts", content: "export default {};\n" },
+    ];
+
+    const result = await warmCheck(files);
+
+    expectCold(result);
+    expect(e2b.list).not.toHaveBeenCalled();
+    expect(e2b.connect).not.toHaveBeenCalled();
+    expect(commandsOf(cold)).toContain("npx vite build && npx tsc --noEmit");
+    expect(cold.kill).toHaveBeenCalledTimes(1);
+  });
+
   describe("the preview's dev server after a warm build", () => {
     const dev: Proc = { ...DEV_SERVER, pid: 12, envs: { [DEV_COMMAND_ENV]: "npm run dev -- --hostname 0.0.0.0" }, cwd: "/home/user/app" };
     const proxy: Proc = { cmd: "/bin/bash", args: ["-l", "-c", "node /home/user/e2b-proxy.js"], pid: 5, envs: { [PROXY_TARGET_ENV]: "3000" } };

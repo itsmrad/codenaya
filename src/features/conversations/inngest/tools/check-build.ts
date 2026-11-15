@@ -550,8 +550,8 @@ export const checkProjectBuild = async ({
     return notBuilt("No build sandbox is configured") + notes;
   }
 
-  // `next build` beside `next dev` in the preview's 1 GiB sandbox OOM-kills the dev server: build Next alone.
-  const warmPreview = framework === "next" ? undefined : preview;
+  // Next and Start builds can OOM-kill the dev server in the preview's 1 GiB sandbox: build them alone.
+  const warmPreview = framework === "next" || framework === "tanstack-start" ? undefined : preview;
   if (warmPreview) {
     if (!warmWasSlow(warmPreview.projectId)) {
       const warm = await checkInWarmSandbox(apiKey, warmPreview, job);
