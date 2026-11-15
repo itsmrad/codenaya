@@ -78,3 +78,20 @@ readme.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal
 reka.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
 precip.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
 cleanvoice.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+datadog.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/datadog.svg), CC0 1.0 Universal.
+honeycomb.svg: original initial monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+grafana-cloud.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/grafana.svg), CC0 1.0 Universal.
+new-relic.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/newrelic.svg), CC0 1.0 Universal.
+launchdarkly.svg: original initial monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+postman.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/postman.svg), CC0 1.0 Universal.
+heroku.svg: original initial monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+sourcegraph.svg: original initial monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+clickhouse.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/clickhouse.svg), CC0 1.0 Universal.
+algolia.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/algolia.svg), CC0 1.0 Universal.
+apify.svg: original initial monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+bright-data.svg: original initial monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+parallel.svg: original initial monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+fal.svg: original initial monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+replicate.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/replicate.svg), CC0 1.0 Universal.
+mapbox.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/mapbox.svg), CC0 1.0 Universal.
+mux.svg: original initial monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/

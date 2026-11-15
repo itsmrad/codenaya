@@ -17,8 +17,8 @@ import {
 import { HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN } from "./hidden-until-payment-provider";
 
 describe("provider catalog display metadata", () => {
-  it("contains exactly 85 vetted providers", () => {
-    expect(listProviders()).toHaveLength(85);
+  it("contains exactly 102 vetted providers", () => {
+    expect(listProviders()).toHaveLength(102);
   });
 
   it.each(listProviders())("has complete display metadata and a local logo for $id", (provider) => {
@@ -113,7 +113,7 @@ describe("provider catalog filters", () => {
     expect(filterProviders("  GITHUB  ").map(({ id }) => id)).toEqual(["github"]);
     expect(filterProviders("stack traces").map(({ id }) => id)).toEqual(["sentry"]);
     expect(filterProviders("DATABASE").map(({ id }) => id)).toEqual([
-      "supabase", "neon", "prisma", "upstash", "planetscale", "notion", "airtable",
+      "supabase", "neon", "prisma", "upstash", "planetscale", "notion", "airtable", "clickhouse",
     ]);
   });
 

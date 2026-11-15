@@ -300,3 +300,9 @@ All tools remain approval-gated, including tools advertising read-only hints; no
 Google Maps, Perplexity, Brevo, Better Stack, CircleCI, Kagi, Jina AI, You.com, Pulumi, Supermetrics, ReadMe, Reka, Precip and Cleanvoice use API keys. Each catalog entry supplies the documented header and prefix; paste the key alone. Google Maps uses `X-Goog-Api-Key`, Reka uses `X-Reka-API-Key`, Cleanvoice uses `X-API-Key`, and the others use `Authorization: Bearer <key>`. Kit Docs, Mintlify Docs and Pulumi Brand use no authentication and are separate reference servers.
 
 Unauthenticated initialize matched the documented open handshake or authentication challenge for all 17 endpoints on 2026-11-16. No credentials, sign-in or tool calls were used. All tools remain approval-gated, including tools advertising read-only hints; account permissions, plans and usage charges apply. Open initialization does not establish free or unauthenticated tool access.
+
+## Batch B vendor-hosted OAuth providers
+
+Datadog, Honeycomb, Grafana Cloud, New Relic, LaunchDarkly, Postman, Heroku, Sourcegraph, ClickHouse, Algolia, Apify, Bright Data, Parallel, fal, Replicate, Mapbox and Mux use the existing OAuth discovery and dynamic client registration flow. All 17 remain approval-gated, with no URL-level read-only mode claimed.
+
+The vetted Apify and Grafana Cloud entries replace community records for the same remote hosts. The batch probe fixtures cover all 17 providers without vendor network requests.
