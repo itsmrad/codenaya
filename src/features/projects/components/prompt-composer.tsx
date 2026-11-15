@@ -240,7 +240,7 @@ export const PromptComposer = ({
                 <span
                   className={cn(
                     CELL,
-                    "border-l px-3 font-mono text-[10px] tabular-nums tracking-[0.12em] text-muted-foreground max-md:hidden",
+                    "border-l px-3 font-mono text-[10px] tabular-nums tracking-[0.12em] text-muted-foreground @max-[640px]:hidden",
                   )}
                 >
                   {input.length.toLocaleString("en-US")} CHARS
