@@ -41,7 +41,7 @@ function startServer(id: typeof ids[number], failure?: "initialize" | "list") {
   const reject = () => { throw new McpError(ErrorCode.InternalError, "HTTP 401 private-response-marker"); };
   if (failure === "initialize") server.setRequestHandler(InitializeRequestSchema, reject);
   server.setRequestHandler(ListToolsRequestSchema, failure === "list" ? reject : async () => ({
-    tools: PROVIDERS[id].readOnlyTools.map((name) => ({
+    tools: (PROVIDERS[id].readOnlyTools ?? []).map((name) => ({
       name, inputSchema: { type: "object" as const, properties: {} },
       annotations: { readOnlyHint: true },
     })),
@@ -72,7 +72,7 @@ it.each(ids)("%s connects and resolves without a credential store or Authorizati
   mocks.createTransport = () => startServer(id);
   const response = await connect(id);
   expect(response.status).toBe(200);
-  expect(await response.json()).toMatchObject({ ok: true, toolCount: provider.readOnlyTools.length });
+  expect(await response.json()).toMatchObject({ ok: true, toolCount: provider.readOnlyTools?.length });
   const saved = mocks.mutation.mock.calls[0][1];
   expect(saved).toMatchObject({
     authMode: "none", serverUrl: provider.mcpUrl, credentialRef: "",
@@ -89,7 +89,7 @@ it.each(ids)("%s connects and resolves without a credential store or Authorizati
   expect(runtime.knownSecrets).toEqual([]);
   expect(runtime.url).toBe(provider.mcpUrl);
   expect(runtime.trustedHostnames).toEqual(provider.trustedHostnames);
-  for (const name of provider.readOnlyTools) {
+  for (const name of provider.readOnlyTools ?? []) {
     expect(requiresApproval(runtime, { name, annotations: { readOnlyHint: true } })).toBe(false);
   }
   expect(requiresApproval(runtime, { name: "unlisted_tool", annotations: { readOnlyHint: true } })).toBe(true);
