@@ -603,13 +603,32 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
       const result = await warmCheck(nextApp());
 
       expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
-      const [cleanup, probe, kill, start] = afterBuild(warm);
+      const [cleanup, ...rest] = afterBuild(warm);
       expect(cleanup).toMatch(/^rm -rf \/home\/user\/check-build-/);
-      expect(probe).toContain("port:3000");
-      expect(kill).toBe(killTreeCommand(12));
-      expect(start).toBe("npm run dev -- --hostname 0.0.0.0");
-      expect(warm.commands.run.mock.calls.at(-1)?.[1]).toEqual({ cwd: "/home/user/app", envs: dev.envs, background: true, timeoutMs: 0 });
+      expect(rest.slice(0, 3)).toEqual(Array(3).fill(expect.stringContaining("port:3000")));
+      expect(rest.slice(3)).toEqual([killTreeCommand(12), "npm run dev -- --hostname 0.0.0.0"]);
+      // Bounded like the rest of the cleanup, so a slow sandbox can't hold the step past its budget.
+      expect(warm.commands.run.mock.calls.at(-2)?.[1]).toEqual({ timeoutMs: 10_000, requestTimeoutMs: 10_000 });
+      expect(warm.commands.run.mock.calls.at(-1)?.[1]).toEqual({
+        cwd: "/home/user/app", envs: dev.envs, background: true, timeoutMs: 0, requestTimeoutMs: 10_000,
+      });
       expect(warm.kill).not.toHaveBeenCalled();
+      expect(e2b.create).not.toHaveBeenCalled();
+    });
+
+    it("still builds warm when the dev server lookup fails", async () => {
+      listed({});
+      const warm = warmSandbox(undefined, [dev, proxy]);
+      // The install checks before and after the copy, then the lookup before the build.
+      warm.commands.list
+        .mockResolvedValueOnce([dev, proxy])
+        .mockResolvedValueOnce([dev, proxy])
+        .mockRejectedValueOnce(new Error("envd hiccup"));
+
+      const result = await warmCheck(nextApp());
+
+      expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect(afterBuild(warm)).toEqual([expect.stringMatching(/^rm -rf /)]);
       expect(e2b.create).not.toHaveBeenCalled();
     });
 

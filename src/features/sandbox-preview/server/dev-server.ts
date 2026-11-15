@@ -84,16 +84,31 @@ export const findPreviewDevServer = async (sandbox: Sandbox, requestTimeoutMs?: 
   return port && dev ? { port, start: devStartOf(dev) } : null;
 };
 
+/** An install a preview or a check runs; it stops and restarts the dev server itself (#486). */
+export const INSTALLING = /\b(?:npm|pnpm|yarn|bun)\b.*\s(?:install|i|add|ci)(?:\s|$)/;
+
+const PORT_PROBES = 3;
+const PORT_PROBE_GAP_MS = 500;
+
 /**
  * Starts the dev server again, after stopping what is left of it, when its port no
  * longer answers. A `next build` beside `next dev` in E2B's default 1 GiB sandbox
  * can get the server OOM-killed while its `next dev` parent stays listed, and the
- * preview then answers 502. True when it restarted.
+ * preview then answers 502. Left alone while an install runs: that has it stopped
+ * on purpose and starts it after. Each call is bounded by `timeoutMs`. True when it restarted.
  */
-export const restartDevServerIfDown = async (sandbox: Sandbox, { port, start }: PreviewDevServer) => {
-  if (await isPortOpen(sandbox, port)) return false;
-  await stopDevServers(sandbox);
-  await startDevServer(sandbox, start);
+export const restartDevServerIfDown = async (sandbox: Sandbox, { port, start }: PreviewDevServer, timeoutMs: number) => {
+  for (let probe = 0; probe < PORT_PROBES; probe++) {
+    if (probe) await new Promise((resolve) => setTimeout(resolve, PORT_PROBE_GAP_MS));
+    if (await isPortOpen(sandbox, port)) return false;
+  }
+  const bounds = { timeoutMs, requestTimeoutMs: timeoutMs };
+  const running = await sandbox.commands.list({ requestTimeoutMs: timeoutMs });
+  if (running.some((command) => INSTALLING.test([command.cmd, ...command.args].join(" ")))) return false;
+  for (const dev of running.filter((command) => command.envs?.[DEV_COMMAND_ENV])) {
+    await sandbox.commands.run(killTreeCommand(dev.pid), bounds);
+  }
+  await startDevServer(sandbox, start, { requestTimeoutMs: timeoutMs });
   return true;
 };
 
@@ -108,7 +123,7 @@ const stopDevServers = async (sandbox: Sandbox) => {
   return running;
 };
 
-const startDevServer = (sandbox: Sandbox, start: DevStart, output: DevOutput = {}) =>
+const startDevServer = (sandbox: Sandbox, start: DevStart, output: DevOutput & { requestTimeoutMs?: number } = {}) =>
   sandbox.commands.run(start.command, {
     cwd: start.cwd,
     envs: start.envs,
