@@ -210,7 +210,7 @@ export const seedRunConversation = async (page: Page, projectId: string) => {
 
 /**
  * Seeds a fresh conversation (it becomes the active one) with a live swarm
- * run: three workers, one done, one running and one queued. Returns the
+ * run: one lead with two children, plus a direct worker (done/running/queued). Returns the
  * mutations a spec needs to move it along.
  */
 export const seedSwarmConversation = async (page: Page, projectId: string) => {
@@ -218,6 +218,19 @@ export const seedSwarmConversation = async (page: Page, projectId: string) => {
   const user = await userConvexClient(page);
   const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
   const project = projectId as Id<"projects">;
+  // Reused Clerk users can retain an earlier platform seed after a failed spec.
+  // Only stop this fixture's messages; leave other runs owned by the user alone.
+  for (const owned of await user.query(api.projects.get, {})) {
+    const conversations = await user.query(api.conversations.getByProject, { projectId: owned._id });
+    const seeded = new Set(conversations.filter((conversation) => conversation.title.startsWith("Swarm board ")).map((conversation) => conversation._id));
+    if (seeded.size === 0) continue;
+    const processing = await system.query(api.system.getProcessingMessages, { internalKey, projectId: owned._id });
+    for (const message of processing) {
+      if (message.mode === "swarm" && seeded.has(message.conversationId)) {
+        await system.mutation(api.system.updateMessageStatus, { internalKey, messageId: message._id, status: "cancelled" });
+      }
+    }
+  }
   const conversationId = await user.mutation(api.conversations.create, {
     projectId: project,
     title: `Swarm board ${Date.now()}`,
@@ -240,32 +253,37 @@ export const seedSwarmConversation = async (page: Page, projectId: string) => {
     taskId, role: "worker" as const, title, brief: `Build the ${title.toLowerCase()}`, ownedPaths: [path],
     modelId: "claude-haiku-5-5", model: "Haiku 5.5",
   });
-  const tasks = [
-    worker("hero", "Hero section", "src/hero.tsx"),
-    worker("pricing", "Pricing table", "src/pricing.tsx"),
-    worker("footer", "Footer", "src/footer.tsx"),
-  ];
+  const leadTask = { ...worker("sections", "Page sections", "src/sections"), role: "sub-orchestrator" as const, modelId: "claude-sonnet-5-5", model: "Sonnet 5.5" };
+  const tasks = [leadTask, worker("footer", "Footer", "src/footer.tsx")];
   // As the run records it: one target per task, its title, in plan order.
   await system.mutation(api.system.upsertMessageSteps, {
     internalKey,
     messageId,
     steps: [{ id: "delegate", kind: "tool", tool: "delegateTasks", targets: tasks.map((task) => task.title), status: "done", startedAt: now, endedAt: now }],
   });
-  const [hero, pricing] = await system.mutation(api.agentTasks.createTasks, { internalKey, messageId, projectId: project, tasks });
+  // BYOK fixture rows exercise depth 2 regardless of SWARM_PLATFORM_MAX_DEPTH.
+  const [lead] = await system.mutation(api.agentTasks.createTasks, { internalKey, messageId, projectId: project, tasks, byok: true });
+  await system.mutation(api.agentTasks.startTask, { internalKey, agentTaskId: lead, parentMessageId: messageId, projectId: project });
+  const [hero, pricing] = await system.mutation(api.agentTasks.createTasks, {
+    internalKey, messageId, projectId: project, byok: true,
+    tasks: [worker("sections/hero", "Hero section", "src/sections/hero.tsx"), worker("sections/pricing", "Pricing table", "src/sections/pricing.tsx")]
+      .map((task) => ({ ...task, parentTaskId: leadTask.taskId })),
+  });
   for (const agentTaskId of [hero, pricing]) {
     await system.mutation(api.agentTasks.startTask, { internalKey, agentTaskId, parentMessageId: messageId, projectId: project });
   }
   const write = (path: string, status: "done" | "running") => ({
     id: `write-${path}`, kind: "tool" as const, tool: "createFiles", targets: [path], status, startedAt: now, endedAt: status === "done" ? now : undefined,
   });
-  await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: hero, steps: [write("src/hero.tsx", "done")] });
-  await system.mutation(api.agentTasks.finishTask, { internalKey, agentTaskId: hero, status: "done", summary: "Added the hero section." });
-  await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: pricing, steps: [write("src/pricing.tsx", "running")] });
+  await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: hero, steps: [write("src/sections/hero.tsx", "done")] });
+  await system.mutation(api.agentTasks.finishTask, { internalKey, agentTaskId: hero, status: "done", summary: "Added the hero section.", selfCheck: "scoped-ok" });
+  await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: pricing, steps: [write("src/sections/pricing.tsx", "running")] });
 
   return {
+    conversationId,
     finishPricing: async () => {
-      await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: pricing, steps: [write("src/pricing.tsx", "done")] });
-      await system.mutation(api.agentTasks.finishTask, { internalKey, agentTaskId: pricing, status: "done" });
+      await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: pricing, steps: [write("src/sections/pricing.tsx", "done")] });
+      await system.mutation(api.agentTasks.finishTask, { internalKey, agentTaskId: pricing, status: "done", selfCheck: "skipped (swarm sandbox cap reached)" });
     },
     cancel: () => system.mutation(api.system.updateMessageStatus, { internalKey, messageId, status: "cancelled" }),
   };
