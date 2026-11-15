@@ -30,6 +30,7 @@ describe("splitPath", () => {
     expect(splitPath("README.md")).toEqual({ name: "README.md", parentPath: "" });
   });
 
+  // Pins current (wrong) behaviour; flip when #671 is fixed.
   it("falls back to the root when an imported file's parent folder is missing", () => {
     const folderIdMap: Record<string, Id<"files">> = {
       src: "src-id" as Id<"files">,
