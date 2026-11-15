@@ -100,7 +100,7 @@ export const FileExplorer = ({
             </p>
           </button>
           {/* From md up the actions overlay the name until hover/focus, so they take no width. */}
-          <div className="opacity-100 md:opacity-0 group-hover/project:opacity-100 group-focus-within/project:opacity-100 focus-within:opacity-100 transition-opacity duration-200 flex items-center gap-0.5 shrink-0 md:absolute md:right-1.5 md:top-1/2 md:-translate-y-1/2 md:rounded-md md:bg-[color-mix(in_oklab,var(--muted)_60%,var(--background))]">
+          <div className="opacity-100 md:opacity-0 group-hover/project:opacity-100 group-focus-within/project:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity duration-200 flex items-center gap-0.5 shrink-0 md:absolute md:right-1.5 md:top-1/2 md:-translate-y-1/2 md:rounded-md md:bg-[color-mix(in_oklab,var(--muted)_60%,var(--background))]">
             <Button
               onClick={(e) => {
                 e.stopPropagation();
