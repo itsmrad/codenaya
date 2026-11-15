@@ -208,7 +208,7 @@ export const Tree = ({
         onDelete={() => setConfirmingDelete(true)}
       >
         <FileIcon fileName={fileName} autoAssign className="size-4" />
-        <span className="truncate text-sm">{fileName}</span>
+        <span className="truncate text-sm" title={fileName}>{fileName}</span>
       </TreeItemWrapper>
       {deleteDialog}
       </>
@@ -228,7 +228,7 @@ export const Tree = ({
         />
         <FolderIcon folderName={folderName} className="size-4" />
       </div>
-      <span className="truncate text-sm">{folderName}</span>
+      <span className="truncate text-sm" title={folderName}>{folderName}</span>
     </>
   )
 
