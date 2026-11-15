@@ -258,8 +258,7 @@ export const PREVIEW_BRIDGE_SCRIPT = `<script data-codenaya-preview>(${String(in
 
 /**
  * Puts `bridge` first in <head>, so it is listening before the app's scripts
- * run. The E2B proxy runs this function's source inside the sandbox, so it
- * must stay self-contained: no references outside its body.
+ * run. Used when mounting complete HTML in WebContainer previews.
  */
 export function insertBridge(html: string, bridge: string): string {
   if (html.includes("data-codenaya-preview")) return html;

@@ -50,17 +50,18 @@ import {
   isPortOpen,
   type DevStart,
 } from "@/features/sandbox-preview/server/dev-server";
-import { rewriteProxyHeaders, shouldInjectBridge } from "@/features/sandbox-preview/server/preview-proxy";
+import {
+  createBridgeInjector,
+  rewriteProxyHeaders,
+  shouldInjectBridge,
+} from "@/features/sandbox-preview/server/preview-proxy";
 import { appendHostFlag, detectFrameworkFromFiles } from "@/features/sandbox-preview/utils/dev-command";
 import {
   missingReferencedFiles,
   undeclaredPackages,
 } from "@/features/sandbox-preview/utils/missing-references";
 import { nodeIncompatibility } from "@/features/sandbox-preview/utils/node-compat";
-import {
-  PREVIEW_BRIDGE_SCRIPT,
-  insertBridge,
-} from "@/features/sandbox-preview/utils/preview-bridge";
+import { PREVIEW_BRIDGE_SCRIPT } from "@/features/sandbox-preview/utils/preview-bridge";
 import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 import {
   recordBootPhase,
@@ -762,6 +763,7 @@ async function startE2bProxy(sandbox: Sandbox, targetPort: number): Promise<numb
   const proxyCode = `
 const http = require('http');
 const net = require('net');
+const { Transform, pipeline } = require('stream');
 
 process.on('uncaughtException', (err) => console.error('E2B Proxy Uncaught Exception:', err));
 process.on('unhandledRejection', (reason) => console.error('E2B Proxy Unhandled Rejection:', reason));
@@ -769,7 +771,7 @@ process.on('unhandledRejection', (reason) => console.error('E2B Proxy Unhandled 
 const TARGET_PORT = parseInt(process.env.TARGET_PORT || "${targetPort}", 10);
 const PROXY_PORT = parseInt(process.env.PROXY_PORT || "${proxyPort}", 10);
 const BRIDGE = ${JSON.stringify(PREVIEW_BRIDGE_SCRIPT)};
-const insertBridge = ${String(insertBridge)};
+const createBridgeInjector = ${String(createBridgeInjector)};
 const rewriteProxyHeaders = ${String(rewriteProxyHeaders)};
 const shouldInjectBridge = ${String(shouldInjectBridge)};
 
@@ -785,21 +787,30 @@ const server = http.createServer((req, res) => {
   delete options.headers['accept-encoding'];
 
   const proxyReq = http.request(options, (proxyRes) => {
-    const headers = { ...proxyRes.headers };
+    const headers = Object.assign({}, proxyRes.headers);
     const isPage = shouldInjectBridge(req.method, proxyRes.statusCode, headers);
     if (!isPage) {
       res.writeHead(proxyRes.statusCode, headers);
       proxyRes.pipe(res, { end: true });
       return;
     }
-    const chunks = [];
-    proxyRes.on('data', (chunk) => chunks.push(chunk));
-    proxyRes.on('end', () => {
-      const html = insertBridge(Buffer.concat(chunks).toString('utf8'), BRIDGE);
-      delete headers['transfer-encoding'];
-      headers['content-length'] = Buffer.byteLength(html);
-      res.writeHead(proxyRes.statusCode, headers);
-      res.end(html);
+    delete headers['content-length'];
+    delete headers['transfer-encoding'];
+    res.writeHead(proxyRes.statusCode, headers);
+    const injector = createBridgeInjector(BRIDGE);
+    pipeline(proxyRes, new Transform({
+      transform(chunk, encoding, callback) {
+        for (const part of injector.push(chunk)) this.push(part);
+        callback();
+      },
+      flush(callback) {
+        for (const part of injector.flush()) this.push(part);
+        callback();
+      },
+    }), res, (err) => {
+      if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+        console.error('E2B Proxy Response Error:', err);
+      }
     });
   });
 
