@@ -172,6 +172,8 @@ export interface ProviderDefinition {
   readonly logo: string;
   /** Default (unscoped) MCP endpoint. */
   readonly mcpUrl: string;
+  /** Endpoint overrides for authentication modes that use a different resource. */
+  readonly urlByAuthMode?: Readonly<Partial<Record<IntegrationAuthMode, string>>>;
   readonly authModes: readonly IntegrationAuthMode[];
   /**
    * Hostnames only, for `assertSafeMcpUrl`'s `trustedHosts` option. Catalog
