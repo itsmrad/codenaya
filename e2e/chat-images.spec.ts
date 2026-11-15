@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { type PublicCatalogModel, pickableModels } from "../src/features/ai-providers/catalog";
+import { envCatalog, platformProviderId } from "../src/features/ai-providers/platform";
 import { EMPTY_CHAT_TITLE } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
@@ -109,7 +111,19 @@ test.describe.serial("chat image attachments", () => {
     await page.getByLabel("Upload files").setInputFiles(PNG);
     await expect(page.getByRole("img", { name: PNG.name })).toBeVisible();
 
-    await pickModel("Codenaya", "GLM 5.3");
+    // Any platform model the picker lists that the catalog (what the composer reads) marks as text-only.
+    const models: readonly PublicCatalogModel[] =
+      (await (await userConvexClient(page)).query(api.platformCatalog.getForUsers, {}))?.models ??
+      envCatalog(platformProviderId()).models;
+    const textOnly = new Set(pickableModels(models).filter((m) => !m.vision).map((m) => m.name));
+    await page.getByRole("combobox", { name: "Agent model" }).click();
+    const options = page.getByRole("group", { name: "Codenaya" }).getByRole("option");
+    await expect(options.first()).toBeVisible();
+    const listed = await options.allTextContents();
+    await page.keyboard.press("Escape");
+    const textOnlyModel = listed.map((name) => name.trim()).find((name) => textOnly.has(name));
+    expect(textOnlyModel, `no text-only platform model in the picker: ${listed.join(", ")}`).toBeDefined();
+    await pickModel("Codenaya", textOnlyModel!);
     const alert = page.getByRole("alert").filter({ hasText: "can't read images" });
     await expect(alert).toBeVisible();
     await expect(alert).toContainText("Uses your credits");
