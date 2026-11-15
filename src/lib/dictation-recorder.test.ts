@@ -109,6 +109,25 @@ describe("createDictationRecorder", () => {
     expect(onRecorded).not.toHaveBeenCalled();
   });
 
+  it("frees the mic and reports it when the recorder can't start", async () => {
+    vi.stubGlobal(
+      "MediaRecorder",
+      class extends FakeMediaRecorder {
+        start() {
+          throw new DOMException("unsupported", "NotSupportedError");
+        }
+      },
+    );
+    const { recorder, onError, onRecorded } = setup();
+
+    recorder.start();
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledOnce());
+
+    expect(recorder.state).toBe("idle");
+    expect(track.stop).toHaveBeenCalled();
+    expect(onRecorded).not.toHaveBeenCalled();
+  });
+
   it("reports a refused mic and goes back to idle", async () => {
     getUserMedia.mockRejectedValue(new DOMException("denied", "NotAllowedError"));
     const { recorder, onError } = setup();

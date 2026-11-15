@@ -116,6 +116,9 @@ describe("transcription errors", () => {
       "You've used today's free credits.",
     );
     expect(transcribeErrorMessage(402)).toBe("Out of credits.");
+    expect(transcribeErrorMessage(422, "Your OpenRouter key was refused for transcription.")).toBe(
+      "Your OpenRouter key was refused for transcription.",
+    );
     expect(transcribeErrorMessage(502)).toBe("Transcription failed, try again.");
   });
 });

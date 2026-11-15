@@ -186,8 +186,9 @@ export const recordRunUsage = mutation({
 /**
  * Charges `userId` for one dictation transcribed on the platform key
  * (`/api/transcribe`). The route calls it once per request, after the provider
- * answered. shortcut: no ledger row, since the ledger is per run; add one if
- * dictation needs to show in usage history.
+ * answered. shortcut: no ledger row, since the ledger is per run, and no
+ * `addModelSpend`, so dictation is missing from usage history and from the
+ * admin's site spend; add both if dictation spend starts to matter.
  */
 export const recordTranscriptionUsage = mutation({
   args: { internalKey: v.string(), userId: v.string(), costUsd: v.number() },

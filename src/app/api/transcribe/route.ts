@@ -11,7 +11,7 @@ import {
 } from "@/features/billing/credits";
 import { PLANS } from "@/features/billing/plans";
 import { convex } from "@/lib/convex-client";
-import { DICTATION_MAX_MS } from "@/lib/dictation-recorder";
+import { DICTATION_AUDIO_BITS_PER_SECOND, DICTATION_MAX_MS } from "@/lib/dictation-recorder";
 import { isServerDictationLanguage } from "@/lib/dictation";
 import { TRANSCRIBE_RATE_LIMIT, checkRateLimit, rateLimitedResponse } from "@/lib/rate-limit";
 import { api } from "../../../../convex/_generated/api";
@@ -28,6 +28,12 @@ export const TRANSCRIBE_MODEL = "nvidia/parakeet-tdt-0.6b-v3";
 
 /** Under the hosting platform's 4.5 MB request body limit; the client caps at 3 min. */
 export const TRANSCRIBE_MAX_BYTES = 4 * 1024 * 1024;
+
+/** A slow provider gets this long before the user is told to try again. */
+const PROVIDER_TIMEOUT_MS = 60_000;
+
+/** Room for the multipart boundaries and the language field around the audio. */
+const FORM_OVERHEAD_BYTES = 64 * 1024;
 
 /** The dearer of the model's two providers ($0.0015/min), for a response with no cost. */
 const FALLBACK_USD_PER_SECOND = 0.000025;
@@ -51,6 +57,26 @@ async function defaultOpenRouterKey(internalKey: string, userId: string) {
   return key && key.provider === "openrouter" && key.status !== "invalid" ? key : null;
 }
 
+/**
+ * The body's bytes, or null past `max`. Read by hand because a chunked upload
+ * has no content-length to check, and `formData()` would buffer it all.
+ */
+async function readCappedOrNull(request: Request, max: number): Promise<Blob | null> {
+  const reader = request.body?.getReader();
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let size = 0;
+  for (;;) {
+    const chunk = await reader?.read();
+    if (!chunk || chunk.done) return new Blob(chunks);
+    size += chunk.value.byteLength;
+    if (size > max) {
+      await reader?.cancel();
+      return null;
+    }
+    chunks.push(chunk.value);
+  }
+}
+
 async function transcribe(apiKey: string, audio: Blob, format: string, language: string | undefined) {
   return fetch(TRANSCRIBE_URL, {
     method: "POST",
@@ -60,6 +86,7 @@ async function transcribe(apiKey: string, audio: Blob, format: string, language:
       input_audio: { data: Buffer.from(await audio.arrayBuffer()).toString("base64"), format },
       ...(language && { language }),
     }),
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
   });
 }
 
@@ -72,10 +99,13 @@ export async function POST(request: Request) {
 
   const tooLarge = () =>
     fail(413, "That recording is too long. Try a shorter one.", "audio_too_large");
-  if (Number(request.headers.get("content-length") ?? 0) > TRANSCRIBE_MAX_BYTES + 64 * 1024) {
-    return tooLarge();
-  }
-  const form = await request.formData().catch(() => null);
+  const bytes = await readCappedOrNull(request, TRANSCRIBE_MAX_BYTES + FORM_OVERHEAD_BYTES);
+  if (!bytes) return tooLarge();
+  const form = await new Response(bytes, {
+    headers: { "Content-Type": request.headers.get("content-type") ?? "" },
+  })
+    .formData()
+    .catch(() => null);
   const audio = form?.get("audio");
   if (!(audio instanceof Blob) || audio.size === 0) {
     return fail(400, "No audio was recorded.", "invalid_audio");
@@ -105,18 +135,29 @@ export async function POST(request: Request) {
     if (refusal) return fail(402, CREDIT_REFUSAL_MESSAGES[refusal], INSUFFICIENT_CREDITS_CODE);
   }
 
-  const response = await transcribe(apiKey, audio, format, language);
+  let response: Response;
+  try {
+    response = await transcribe(apiKey, audio, format, language);
+  } catch (error) {
+    // A timeout or network failure: nothing was transcribed, so nothing is charged.
+    console.warn("[transcribe] provider unreachable:", error instanceof Error ? error.name : error);
+    return providerFailure(0, ownKey);
+  }
   if (!response.ok) return providerFailure(response.status, ownKey);
 
   const body = (await response.json().catch(() => null)) as {
     text?: unknown;
-    usage?: { cost?: number; seconds?: number };
+    usage?: { cost?: unknown; seconds?: unknown };
   } | null;
   const text = typeof body?.text === "string" ? body.text.trim() : "";
 
   if (!ownKey) {
-    const seconds = body?.usage?.seconds ?? DICTATION_MAX_MS / 1000;
-    const costUsd = body?.usage?.cost ?? seconds * FALLBACK_USD_PER_SECOND;
+    const { cost, seconds } = body?.usage ?? {};
+    // No reported length: estimate it from the bytes at the recorder's bitrate, capped at its limit.
+    const estimated = Math.min((audio.size * 8) / DICTATION_AUDIO_BITS_PER_SECOND, DICTATION_MAX_MS / 1000);
+    const costUsd = isAmount(cost)
+      ? cost
+      : (isAmount(seconds) ? seconds : estimated) * FALLBACK_USD_PER_SECOND;
     // Like a run's usage: a failure to record is logged, never the user's problem.
     await convex
       .mutation(api.credits.recordTranscriptionUsage, { internalKey, userId, costUsd })
@@ -125,8 +166,12 @@ export async function POST(request: Request) {
   return NextResponse.json({ text });
 }
 
+/** A finite, non-negative number: a usable cost or length from the provider. */
+const isAmount = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0;
+
+/** `status` 0: the provider never answered. */
 function providerFailure(status: number, ownKey: DefaultKey) {
-  console.warn(`[transcribe] provider answered ${status}`);
+  if (status) console.warn(`[transcribe] provider answered ${status}`);
   if (ownKey && (status === 401 || status === 402 || status === 403)) {
     return fail(
       422,

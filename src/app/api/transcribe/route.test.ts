@@ -144,6 +144,48 @@ describe("POST /api/transcribe", () => {
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
 
+  it("answers 502 and charges nothing when the provider times out or is unreachable", async () => {
+    mocks.fetch.mockRejectedValue(new DOMException("The operation timed out.", "TimeoutError"));
+
+    const res = await post();
+
+    expect(res.status).toBe(502);
+    expect((await res.json()).code).toBe("transcription_failed");
+    expect(mocks.fetch.mock.calls[0]?.[1].signal).toBeInstanceOf(AbortSignal);
+    expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
+  it("stops reading a chunked upload with no content-length at the cap", async () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += chunk.byteLength;
+        controller.enqueue(chunk);
+        if (sent > 2 * TRANSCRIBE_MAX_BYTES) controller.close();
+      },
+    });
+    const request = new Request("http://localhost/api/transcribe", {
+      method: "POST",
+      body,
+      duplex: "half",
+    } as RequestInit);
+
+    const res = await POST(request);
+
+    expect(res.status).toBe(413);
+    expect(sent).toBeLessThan(2 * TRANSCRIBE_MAX_BYTES);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it("charges by the reported seconds when the cost isn't a number", async () => {
+    providerSays(200, { text: "hi", usage: { cost: "0.1", seconds: 60 } });
+
+    await post();
+
+    expect(mocks.mutation.mock.calls[0]?.[1].costUsd).toBeCloseTo(0.0015);
+  });
+
   it("points to settings when the provider refuses the user's own key", async () => {
     mocks.query.mockResolvedValue({ key: OWN_KEY, modelId: "x" });
     mocks.openProviderKey.mockResolvedValue("sk-or-own");

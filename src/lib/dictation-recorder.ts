@@ -7,7 +7,7 @@
 export const DICTATION_MAX_MS = 3 * 60_000;
 
 /** ~720 KB for the longest dictation in Opus: speech needs no more. */
-const AUDIO_BITS_PER_SECOND = 32_000;
+export const DICTATION_AUDIO_BITS_PER_SECOND = 32_000;
 
 /** In order of preference: Chromium and Firefox record WebM, Safari MP4. */
 export const DICTATION_MIME_TYPES = [
@@ -65,10 +65,20 @@ export function createDictationRecorder({
       return;
     }
     const mimeType = pickDictationMimeType((type) => MediaRecorder.isTypeSupported(type));
-    const media = new MediaRecorder(stream, {
-      ...(mimeType && { mimeType }),
-      audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
-    });
+    let media: MediaRecorder;
+    try {
+      media = new MediaRecorder(stream, {
+        ...(mimeType && { mimeType }),
+        audioBitsPerSecond: DICTATION_AUDIO_BITS_PER_SECOND,
+      });
+      media.start();
+    } catch (error) {
+      // E.g. a type the browser claimed but can't record: free the mic and say so.
+      stream.getTracks().forEach((track) => track.stop());
+      setState("idle");
+      onError(error);
+      return;
+    }
     const chunks: Blob[] = [];
     media.ondataavailable = (event) => {
       if (event.data.size > 0) chunks.push(event.data);
@@ -81,7 +91,6 @@ export function createDictationRecorder({
       if (!discard) onRecorded(new Blob(chunks, { type: media.mimeType || mimeType }));
     };
     recorder = media;
-    media.start();
     limit = setTimeout(() => stop(), maxMs);
     setState("recording");
   };

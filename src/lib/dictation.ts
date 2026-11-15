@@ -106,9 +106,10 @@ export function dictationRouteOrNull({
   return canRecognize ? { engine: "browser", lang } : null;
 }
 
-/** A failed `/api/transcribe` answer in plain words. */
+/** A failed `/api/transcribe` answer in plain words: the server's own, else by status. */
 export const transcribeErrorMessage = (status: number, serverMessage?: string): string => {
-  if (status === 402) return serverMessage ?? "Out of credits.";
+  if (serverMessage) return serverMessage;
+  if (status === 402) return "Out of credits.";
   if (status === 413) return "That recording is too long. Try a shorter one.";
   if (status === 429) return "Too many dictations at once. Wait a moment and try again.";
   return "Transcription failed, try again.";
