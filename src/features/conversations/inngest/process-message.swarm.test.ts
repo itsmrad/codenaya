@@ -423,6 +423,8 @@ describe("processMessage swarm mode", () => {
       expect(SWARM_ORCHESTRATOR_NOTE).toContain("at most 2 pages");
       expect(SWARM_ORCHESTRATOR_NOTE).toContain("UI primitives/layout may be their own small task");
       expect(SWARM_ORCHESTRATOR_NOTE).toContain("no worker is a long pole");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("at most ~800 characters");
+      expect(SWARM_ORCHESTRATOR_NOTE).toContain("never paste or restate them");
       expect(SWARM_ORCHESTRATOR_NOTE).toContain("on the very next call after the stubs batch");
     });
 
