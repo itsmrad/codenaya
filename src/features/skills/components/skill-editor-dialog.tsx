@@ -1,9 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CopyIcon } from "lucide-react";
 
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,6 +32,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { convexErrorMessage } from "@/lib/convex-error";
 
+import { isSkillDraftDirty } from "../skill-draft";
 import { BUILTIN_SKILLS } from "../builtin";
 import {
   SKILL_BODY_MAX_LENGTH,
@@ -77,6 +82,15 @@ export const SkillEditorDialog = ({
 }: SkillEditorDialogProps) => {
   const stored = useSkill(target?.kind === "edit" ? target.skillId : undefined);
 
+  const [dirty, setDirty] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const close = () => {
+    setDirty(false);
+    setConfirmDiscard(false);
+    onTargetChange(null);
+  };
+  const requestClose = () => dirty ? setConfirmDiscard(true) : close();
+
   const renderForm = () => {
     if (!target) return null;
 
@@ -95,7 +109,7 @@ export const SkillEditorDialog = ({
               initial: { ...builtin, name: `${builtin.name}-copy` },
             })
           }
-          onDone={() => onTargetChange(null)}
+          onDone={close}
         />
       );
     }
@@ -114,7 +128,9 @@ export const SkillEditorDialog = ({
           key={stored._id}
           skillId={stored._id}
           initial={stored}
-          onDone={() => onTargetChange(null)}
+          onDirtyChange={setDirty}
+          onCancel={requestClose}
+          onDone={close}
         />
       );
     }
@@ -123,9 +139,11 @@ export const SkillEditorDialog = ({
       <SkillEditorForm
         key={`create:${target.initial?.name ?? ""}`}
         initial={target.initial ?? EMPTY_SKILL}
+        onDirtyChange={setDirty}
+        onCancel={requestClose}
         projectId={projectId}
         initialScope={target.scope ?? (projectId ? "project" : "library")}
-        onDone={() => onTargetChange(null)}
+        onDone={close}
       />
     );
   };
@@ -140,7 +158,7 @@ export const SkillEditorDialog = ({
   return (
     <Dialog
       open={target !== null}
-      onOpenChange={(open) => !open && onTargetChange(null)}
+      onOpenChange={(open) => !open && requestClose()}
     >
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
@@ -153,6 +171,18 @@ export const SkillEditorDialog = ({
         </DialogHeader>
         {renderForm()}
       </DialogContent>
+      <AlertDialog open={confirmDiscard} onOpenChange={setConfirmDiscard}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+            <AlertDialogDescription>Your unsaved skill changes will be lost.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction onClick={close}>Discard</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 };
@@ -166,6 +196,8 @@ interface SkillEditorFormProps {
   initialScope?: CreateScope;
   readOnly?: boolean;
   onDuplicate?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  onCancel?: () => void;
   onDone: () => void;
 }
 
@@ -176,6 +208,8 @@ const SkillEditorForm = ({
   initialScope = "library",
   readOnly = false,
   onDuplicate,
+  onDirtyChange,
+  onCancel,
   onDone,
 }: SkillEditorFormProps) => {
   const createSkill = useCreateSkill();
@@ -188,6 +222,10 @@ const SkillEditorForm = ({
   const [submitted, setSubmitted] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  const [baseline] = useState(() => ({ ...initial, scope: initialScope }));
+  const dirty = !readOnly && isSkillDraftDirty(baseline, { name, description, body, scope });
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
   const isCreate = !skillId && !readOnly;
   const nameError = name ? validateSkillName(name) : null;
@@ -365,7 +403,7 @@ const SkillEditorForm = ({
           </>
         ) : (
           <>
-            <Button type="button" variant="outline" onClick={onDone}>
+            <Button type="button" variant="outline" onClick={onCancel ?? onDone}>
               Cancel
             </Button>
             <Button type="submit" disabled={isSaving}>
