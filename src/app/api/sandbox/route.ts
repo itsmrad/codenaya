@@ -46,6 +46,8 @@ import {
 import {
   DEV_COMMAND_ENV,
   PROXY_TARGET_ENV,
+  DEV_SERVER_ENVS,
+  DevServerStartError,
   installWithDevServerStopped,
   isPortOpen,
   type DevStart,
@@ -112,17 +114,6 @@ const requestSchema = z.object({
 
 const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour (E2B free plan max)
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
-
-/**
- * Environment variables that force dev servers to bind to 0.0.0.0
- * instead of localhost. E2B port forwarding only works when the
- * server listens on all interfaces.
- */
-const DEV_SERVER_ENVS: Record<string, string> = {
-  HOST: "0.0.0.0",           // Create React App, Vite (some versions)
-  HOSTNAME: "0.0.0.0",       // Next.js
-  NEXT_TELEMETRY_DISABLED: "1",
-};
 
 /**
  * Regex patterns to detect the port from dev server stdout.
@@ -333,7 +324,9 @@ export async function POST(request: Request) {
       // The first build boots the preview from its starter while the agent is
       // still writing, so dependencies it adds to package.json later have to be
       // installed here, with the output on this stream (#254).
+      let reinstallStartError: DevServerStartError | null = null;
       const reinstall = debounceSerial(async () => {
+        reinstallStartError = null;
         if (!sandbox) return;
         send({ type: "output", data: `\npackage.json changed.\n$ ${installCmd}\n` });
         try {
@@ -355,6 +348,10 @@ export async function POST(request: Request) {
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unknown error";
           send({ type: "output", data: `\nError: ${message}\n` });
+          if (error instanceof DevServerStartError) {
+            reinstallStartError = error;
+            send({ type: "error", message, code: "transient" });
+          }
         }
       }, REINSTALL_DEBOUNCE_MS);
 
@@ -408,7 +405,10 @@ export async function POST(request: Request) {
         }
 
         // File syncs reuse this handle instead of reconnecting (#179).
-        rememberSandbox(sandbox, userId, reinstall.schedule);
+        rememberSandbox(sandbox, userId, reinstall.schedule, async () => {
+          await reinstall.idle();
+          if (reinstallStartError) throw reinstallStartError;
+        });
 
         send({
           type: "output",
@@ -567,6 +567,8 @@ export async function POST(request: Request) {
               "Check the terminal output above for errors."
           );
         }
+
+        devStart.readyPort = localPort;
 
         // Start the proxy to bypass Vite allowedHosts and bind issues
         const proxyPort = await startE2bProxy(sandbox, localPort);

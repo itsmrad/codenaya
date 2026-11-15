@@ -226,6 +226,12 @@ export const useSandbox = ({
                     sandboxIdRef.current = event.sandboxId;
                     break;
                   case "error":
+                    if (ready) {
+                      setError(event.message);
+                      setErrorKind(classifySandboxError({ code: event.code }));
+                      setStatus("error");
+                      break;
+                    }
                     throw new SandboxStartError(
                       event.message,
                       classifySandboxError({ code: event.code }),
@@ -343,9 +349,17 @@ export const useSandbox = ({
             body: JSON.stringify({
               files: changedFiles,
               installCommand: settings?.installCommand,
+              devCommand: settings?.devCommand,
             }),
             signal,
           });
+          const body = await response.json().catch(() => null);
+          if (body?.code === "dev_server_unavailable" && isCurrent()) {
+            setError(body.error);
+            setErrorKind("transient");
+            setStatus("error");
+            return;
+          }
           if (!response.ok) throw new Error("File sync failed");
           if (!isCurrent()) return;
           // Acknowledge exactly the sent snapshot, never files edited in flight.
@@ -355,7 +369,7 @@ export const useSandbox = ({
 
           // After the boot stream ends, a failed reinstall reaches only this (#497).
           const failure = readInstallFailure(
-            await response.json().catch(() => null),
+            body,
             settings?.installCommand || "npm install",
           );
           // Not `cancelled`: edits during a slow reinstall must not hide its failure.
@@ -385,7 +399,7 @@ export const useSandbox = ({
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [enabled, files, status, settings?.installCommand, buildErrors, restart]);
+  }, [enabled, files, status, settings?.installCommand, settings?.devCommand, buildErrors, restart]);
 
   // Cleanup sandbox on unmount or when disabled
   useEffect(() => {

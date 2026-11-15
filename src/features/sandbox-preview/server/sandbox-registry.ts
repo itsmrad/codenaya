@@ -5,6 +5,7 @@ interface OwnedSandbox {
   userId: string;
   /** Re-runs the install through the boot stream; only on the instance that booted it. */
   reinstall?: () => void;
+  reinstallDone?: () => Promise<void>;
 }
 
 /**
@@ -24,8 +25,9 @@ export const rememberSandbox = (
   sandbox: Sandbox,
   userId: string,
   reinstall?: () => void,
+  reinstallDone?: () => Promise<void>,
 ) => {
-  sandboxes.set(sandbox.sandboxId, { sandbox, userId, reinstall });
+  sandboxes.set(sandbox.sandboxId, { sandbox, userId, reinstall, reinstallDone });
 };
 
 /**
@@ -37,6 +39,10 @@ export const requestReinstall = (sandboxId: string) => {
   reinstall?.();
   return Boolean(reinstall);
 };
+
+/** A sync must not acknowledge a queued stream install while Vite is stopped (#774). */
+export const waitForReinstall = (sandboxId: string) =>
+  sandboxes.get(sandboxId)?.reinstallDone?.() ?? Promise.resolve();
 
 export const forgetSandbox = (sandboxId: string) => {
   sandboxes.delete(sandboxId);
