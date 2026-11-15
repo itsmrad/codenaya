@@ -1765,6 +1765,100 @@ const CATALOG = {
     readOnlyTools: [],
   },
 
+  // Batch C (#817), probed unauthenticated 2026-11-15. Cloudflare's Radar, Observability,
+  // Builds, Bindings, AI Gateway and GraphQL servers are deprecated upstream in favour of
+  // the `cloudflare` entry above, so only Browser Run is listed here.
+  "cloudflare-browser": {
+    id: "cloudflare-browser",
+    displayName: "Cloudflare Browser",
+    description: "Render pages to HTML, Markdown, screenshots or PDF, and run site crawls.",
+    category: "Dev tools",
+    logo: "/integrations/cloudflare-browser.svg",
+    mcpUrl: "https://browser.mcp.cloudflare.com/mcp",
+    authModes: ["oauth"],
+    trustedHostnames: ["browser.mcp.cloudflare.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full inventory: https://github.com/cloudflare/mcp-server-cloudflare/tree/main/apps/browser-rendering
+    // Crawls and AI extraction bill the account; cancel and kill change session state.
+    destructiveTools: ["start_crawl", "cancel_crawl", "kill_browser_session", "get_url_json"],
+    // Every page render bills Browser Run time, so the get_url_* and scrape tools stay gated.
+    readOnlyTools: ["list_browser_sessions", "get_crawl_result"],
+    notes:
+      "Renders run on your Cloudflare account and count against Browser Run usage. No URL-level read-only mode.",
+  },
+
+  // https://docs.descope.com/mcp/mcp-server (US region; other regions are separate hosts).
+  descope: {
+    id: "descope",
+    displayName: "Descope",
+    description: "Manage Descope users, tenants, flows, access control, and SSO apps.",
+    category: "Authentication",
+    logo: "/integrations/descope.svg",
+    mcpUrl: "https://mcp.descope.com",
+    authModes: ["oauth"],
+    trustedHostnames: ["mcp.descope.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Full grouped inventory from the page above. `session` can elevate to write mode.
+    destructiveTools: [
+      "session", "project_write", "access_control_write", "agentic_write", "auth_keys_write",
+      "flows_write", "tenants_write", "connect_write", "tests_write", "users_write",
+    ],
+    // Left gated: project_read (snapshots), agentic_read and auth_keys_read (secrets),
+    // users_read (PII), audits_read (logs), connect_read (SSO config), tests_read.
+    readOnlyTools: [
+      "list_operations", "docs_search", "docs_ask_question",
+      "access_control_read", "flows_read", "tenants_read",
+    ],
+    notes:
+      "Signs in as your Descope console user; write tools also need write mode elevated for the session. US region only. No URL-level read-only mode.",
+  },
+
+  // https://github.com/wandb/wandb-mcp-server#quick-start
+  wandb: {
+    id: "wandb",
+    displayName: "Weights & Biases",
+    description: "Query runs, Weave traces, artifacts, and registries, and create reports.",
+    category: "AI",
+    logo: "/integrations/wandb.svg",
+    mcpUrl: "https://mcp.withwandb.com/mcp",
+    authModes: ["api_key"],
+    trustedHostnames: ["mcp.withwandb.com"],
+    supportsReadOnly: false,
+    scope: NO_URL_SCOPING,
+    // Inventory: the README tool tables plus docs/agent-lens-tools.md. ARIA runs a hosted agent.
+    destructiveTools: ["create_wandb_report_tool", "log_analysis_to_wandb", "aria_send_message"],
+    // Metadata and docs only; traces, runs, agent spans, automations and integrations stay gated.
+    readOnlyTools: [
+      "search_wandb_docs_tool", "list_entities_tool", "query_wandb_entity_projects",
+      "list_registries_tool", "list_registry_collections_tool", "list_artifact_versions_tool",
+      "get_artifact_details_tool", "compare_artifact_versions_tool",
+    ],
+    apiKey: {
+      header: "Authorization",
+      valuePrefix: "Bearer ",
+      hint: "W&B API key (wandb.ai/authorize)",
+    },
+    notes: "Acts with the full access of the API key's user. No URL-level read-only mode.",
+  },
+
+  // https://langfuse.com/docs/docs-mcp ("Authentication: None"); tools per mcp.reference.langfuse.com.
+  langfuse: {
+    id: "langfuse",
+    displayName: "Langfuse Docs",
+    description: "Search and read Langfuse documentation.",
+    category: "Docs",
+    logo: "/integrations/langfuse.svg",
+    mcpUrl: "https://langfuse.com/api/mcp",
+    authModes: ["none"],
+    trustedHostnames: ["langfuse.com"],
+    // submitFeedback sends text to Langfuse, so this server is not read-only.
+    supportsReadOnly: false,
+    scope: { queryParams: [], headers: [] },
+    destructiveTools: ["submitFeedback"],
+    readOnlyTools: ["searchLangfuseDocs", "getLangfuseDocsPage", "getLangfuseOverview"],
+  },
 } as const satisfies Record<string, ProviderDefinition>;
 
 /** Catalog provider identifiers, derived from the registry itself. */

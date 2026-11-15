@@ -57,3 +57,5 @@ wordpress-com.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/
 zapier.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/zapier.svg), CC0 1.0 Universal.
 make.svg: Simple Icons (https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/make.svg), CC0 1.0 Universal.
 customer-io.svg: original initials monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+cloudflare-browser.svg: a copy of cloudflare.svg (Simple Icons, CC0 1.0 Universal). wandb.svg: Simple Icons "weightsandbiases", CC0 1.0 Universal.
+descope.svg and langfuse.svg: original single-path monograms (not vendor logos), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/

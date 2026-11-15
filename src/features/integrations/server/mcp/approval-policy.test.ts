@@ -167,7 +167,7 @@ const approvalRows = () =>
 
 const GATED = ["stripe_api_write", "send_money", "convert_currency", "setup_recipient"];
 
-describe.each(["notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface", "webflow", "netlify", "railway", "amplitude", "amplitude-eu", "mixpanel", "contentful", "contentful-eu"] as const)("%s published writes", (id) => {
+describe.each(["notion", "atlassian", "gitlab", "clerk", "exa", "tavily", "firecrawl", "huggingface", "webflow", "netlify", "railway", "amplitude", "amplitude-eu", "mixpanel", "contentful", "contentful-eu", "cloudflare-browser", "descope", "wandb", "langfuse"] as const)("%s published writes", (id) => {
   it.each([...PROVIDERS[id].destructiveTools, "unlisted_tool"])("never calls %s without approval, even with a misleading read-only hint", async (name) => {
     // Unknown, unannotated tools are gated too; known writes must override hints.
     served = [{
@@ -536,6 +536,15 @@ describe("known reads exclude tools that return secrets", () => {
     ["contentful-eu", "list_content_previews"],
     ["microsoft-learn", "get_api_key"],
     ["cloudflare-docs", "get_api_token"],
+    // Billed renders, secrets, PII, logs and agent spans stay gated.
+    ["cloudflare-browser", "get_url_markdown"],
+    ["descope", "agentic_read"],
+    ["descope", "auth_keys_read"],
+    ["descope", "users_read"],
+    ["descope", "audits_read"],
+    ["wandb", "query_weave_traces_tool"],
+    ["wandb", "list_wandb_integrations_tool"],
+    ["wandb", "aria_get_thread"],
   ] as const)("%s does not list %s", (id, name) => {
     expect(PROVIDERS[id].readOnlyTools ?? []).not.toContain(name);
     expect(requiresApproval(
