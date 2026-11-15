@@ -1,7 +1,9 @@
 "use client";
 
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
-import { Undo2Icon } from "lucide-react";
+import { GitForkIcon, Undo2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -22,9 +24,45 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { confirmLeaveEditor } from "@/features/editor/hooks/use-editor-leave-guard";
 import { convexErrorMessage } from "@/lib/convex-error";
 
-import { type Checkpoint, undoAction, useRestoreCheckpoint } from "../hooks/use-checkpoints";
+import type { Id } from "../../../../convex/_generated/dataModel";
+
+import { type Checkpoint, undoAction, useForkFromCheckpoint, useRestoreCheckpoint } from "../hooks/use-checkpoints";
+
+/** Shared by history and the run action row; a fork is safe during an active run. */
+export const ForkCheckpointButton = ({ checkpointId }: { checkpointId: Id<"checkpoints"> }) => {
+  const fork = useForkFromCheckpoint();
+  const router = useRouter();
+  const pending = useRef(false);
+  const [isPending, setIsPending] = useState(false);
+  const handleFork = async () => {
+    if (pending.current) return;
+    pending.current = true;
+    setIsPending(true);
+    try {
+      const projectId = await fork({ checkpointId });
+      const open = () => {
+        const href = `/projects/${projectId}`;
+        if (confirmLeaveEditor(href)) router.push(href);
+      };
+      toast.success("Project forked", { action: { label: "Open fork", onClick: open } });
+      open();
+    } catch (error) {
+      toast.error(convexErrorMessage(error, "Couldn't fork this checkpoint"));
+    } finally {
+      pending.current = false;
+      setIsPending(false);
+    }
+  };
+  return (
+    <Button size="sm" variant="outline" disabled={isPending} onClick={handleFork}>
+      <GitForkIcon className="size-3.5" />
+      {isPending ? "Forking…" : "Fork from here"}
+    </Button>
+  );
+};
 
 /** Confirms, then puts the project's files back as they were before a run. */
 export const RestoreCheckpointDialog = ({
@@ -95,7 +133,7 @@ export const CheckpointHistoryDialog = ({
         <DialogTitle>Version history</DialogTitle>
         <DialogDescription>
           A checkpoint is saved before each agent run. Restore one to undo the
-          run and everything after it.
+          run and everything after it, or fork one into a new project.
         </DialogDescription>
       </DialogHeader>
       {checkpoints === undefined ? (
@@ -111,7 +149,7 @@ export const CheckpointHistoryDialog = ({
           {checkpoints?.map((checkpoint) => (
             <li
               key={checkpoint._id}
-              className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-accent/40"
+              className="flex flex-wrap items-center gap-2 rounded-md px-2 py-2 hover:bg-accent/40"
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm" title={checkpoint.label}>
@@ -123,6 +161,7 @@ export const CheckpointHistoryDialog = ({
                   {checkpoint.fileCount} {checkpoint.fileCount === 1 ? "file" : "files"}
                 </p>
               </div>
+              <ForkCheckpointButton checkpointId={checkpoint._id} />
               <Button
                 size="sm"
                 variant="outline"

@@ -5,6 +5,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { api } from "./_generated/api";
 import type { Id, TableNames } from "./_generated/dataModel";
+import { createCheckpoint, MAX_CHECKPOINT_FILES } from "./checkpoints";
+import { withContents } from "./fileContents";
 import { deleteProjectBatch } from "./projectCascade";
 import schema from "./schema";
 import { MAX_PROJECT_INSTRUCTIONS_LENGTH } from "../src/features/projects/instructions";
@@ -687,5 +689,111 @@ describe("project theme (#302)", () => {
 
     const copyId = await alice.mutation(api.projects.duplicate, { id: projectId });
     expect((await alice.query(api.projects.getById, { id: copyId })).theme).toEqual(theme);
+  });
+});
+
+
+describe("fork from checkpoint (#229)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  async function seedFork() {
+    const context = setup();
+    const seeded = await seedProject(context.t, ALICE);
+    const checkpointId = await context.t.run((ctx) => createCheckpoint(ctx, {
+      projectId: seeded.projectId, label: "First version",
+    }));
+    return { ...context, ...seeded, checkpointId };
+  }
+
+  test("copies the saved tree and current configuration, leaving the source untouched during a run", async () => {
+    vi.useFakeTimers();
+    const { t, alice, projectId, checkpointId } = await seedFork();
+    await t.run(async (ctx) => {
+      const files = await ctx.db.query("files").withIndex("by_project", (q) => q.eq("projectId", projectId)).collect();
+      await ctx.db.patch("files", files.find((f) => f.name === "index.ts")!._id, { content: "live edits" });
+      await ctx.db.insert("files", { projectId, name: "live-only.ts", type: "file", content: "new", updatedAt: 0 });
+      const conversation = await ctx.db.query("conversations").withIndex("by_project", (q) => q.eq("projectId", projectId)).first();
+      await ctx.db.insert("messages", { projectId, conversationId: conversation!._id, role: "assistant", content: "", status: "processing" });
+    });
+    const sourceBefore = await rowsOf(t, "files", projectId);
+    const checkpointsBefore = await t.run((ctx) => ctx.db.query("checkpointFiles").collect());
+    const projectBefore = await t.run((ctx) => ctx.db.get("projects", projectId));
+    const forkId = await alice.mutation(api.projects.forkFromCheckpoint, { checkpointId });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+    expect(await alice.query(api.projects.getById, { id: forkId })).toMatchObject({
+      name: "Todo app (fork)", ownerId: ALICE, settings: { devCommand: "npm run dev" },
+    });
+    const files = await t.run(async (ctx) => withContents(ctx, forkId,
+      await ctx.db.query("files").withIndex("by_project", (q) => q.eq("projectId", forkId)).collect()));
+    expect(files.map((f) => f.name).sort()).toEqual(["index.ts", "logo.png", "src"]);
+    const index = files.find((f) => f.name === "index.ts")!;
+    expect(index.content).toBe("export {};");
+    expect(index.parentId).toBe(files.find((f) => f.name === "src")!._id);
+    expect((await rowsOf(t, "projectEnvVars", forkId)).map((e) => e.key)).toEqual(["PUBLIC_URL"]);
+    const [skill] = await rowsOf(t, "skills", forkId);
+    expect(skill.name).toBe("local-skill");
+    expect((await rowsOf(t, "projectSkillSettings", forkId)).map((s) => s.skillKey).sort()).toEqual([
+      "builtin:frontend-design", `user:${skill._id}`,
+    ].sort());
+    expect(await rowsOf(t, "conversations", forkId)).toEqual([]);
+    expect(await rowsOf(t, "messages", forkId)).toEqual([]);
+    expect(await rowsOf(t, "files", projectId)).toEqual(sourceBefore);
+    expect(await t.run((ctx) => ctx.db.query("checkpointFiles").collect())).toEqual(checkpointsBefore);
+    expect(await t.run((ctx) => ctx.db.get("projects", projectId))).toEqual(projectBefore);
+  });
+
+  test("refuses non-owners, unauthenticated callers and deleted sources", async () => {
+    const { t, alice, bob, projectId, checkpointId } = await seedFork();
+    await expect(bob.mutation(api.projects.forkFromCheckpoint, { checkpointId })).rejects.toMatchObject({ data: { code: "FORBIDDEN" } });
+    await expect(t.mutation(api.projects.forkFromCheckpoint, { checkpointId })).rejects.toThrow(/Unauthorized/);
+    await t.run((ctx) => ctx.db.patch("projects", projectId, { deletingAt: Date.now() }));
+    await expect(alice.mutation(api.projects.forkFromCheckpoint, { checkpointId })).rejects.toMatchObject({ data: { code: "NOT_FOUND" } });
+  });
+
+  test("uses the same copy rate limit as duplicate and creates nothing when refused", async () => {
+    const { t, alice, checkpointId } = await seedFork();
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 19; i++) await ctx.db.insert("projects", { name: "Recent", ownerId: ALICE, updatedAt: Date.now() });
+    });
+    await expect(alice.mutation(api.projects.forkFromCheckpoint, { checkpointId })).rejects.toMatchObject({ data: { code: "LIMIT_EXCEEDED" } });
+    expect(await t.run((ctx) => ctx.db.query("projects").collect())).toHaveLength(20);
+  });
+
+  test.each(["files", "bytes"])("refuses snapshots over the %s budget atomically", async (limit) => {
+    const { t, alice, projectId, checkpointId } = await seedFork();
+    await t.run(async (ctx) => {
+      const count = limit === "files" ? MAX_CHECKPOINT_FILES : 8;
+      for (let i = 0; i < count; i++) await ctx.db.insert("checkpointFiles", {
+        checkpointId, projectId, path: `extra-${i}`, type: "file",
+        content: limit === "bytes" ? "x".repeat(600_000) : "",
+      });
+    });
+    await expect(alice.mutation(api.projects.forkFromCheckpoint, { checkpointId })).rejects.toMatchObject({ data: { code: "LIMIT_EXCEEDED" } });
+    expect(await t.run((ctx) => ctx.db.query("projects").collect())).toHaveLength(1);
+  });
+
+  test("deleting the source before blob copying finishes keeps the fork readable", async () => {
+    vi.useFakeTimers();
+    const { t, alice, projectId, checkpointId } = await seedFork();
+    const forkId = await alice.mutation(api.projects.forkFromCheckpoint, { checkpointId });
+    await deleteProjectNow(t, projectId);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const logo = (await rowsOf(t, "files", forkId)).find((f) => f.name === "logo.png")!;
+    expect(await t.run(async (ctx) => (await ctx.storage.get(logo.storageId!))!.text())).toBe("png");
+  });
+
+  test.each(["source", "fork"])("deleting the %s preserves the other project's binary", async (side) => {
+    vi.useFakeTimers();
+    const { t, alice, projectId, checkpointId, storageId } = await seedFork();
+    const forkId = await alice.mutation(api.projects.forkFromCheckpoint, { checkpointId });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const forkLogo = (await rowsOf(t, "files", forkId)).find((f) => f.name === "logo.png")!;
+    expect(forkLogo.storageId).not.toBe(storageId);
+    expect(await t.run(async (ctx) => (await ctx.storage.get(forkLogo.storageId!))!.text())).toBe("png");
+    await alice.mutation(api.projects.remove, { id: side === "source" ? projectId : forkId });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const kept = side === "source" ? forkLogo.storageId! : storageId;
+    expect(await t.run(async (ctx) => (await ctx.storage.get(kept))!.text())).toBe("png");
   });
 });

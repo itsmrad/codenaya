@@ -11,6 +11,8 @@ export const useCheckpoints = (projectId: Id<"projects">) => {
   return useQuery(api.checkpoints.list, { projectId });
 };
 
+export const useForkFromCheckpoint = () => useMutation(api.projects.forkFromCheckpoint);
+
 export const useRestoreCheckpoint = () => {
   return useMutation(api.checkpoints.restore);
 };
