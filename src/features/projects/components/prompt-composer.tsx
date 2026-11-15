@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { readProjectFramework, writeProjectFramework, type FrameworkChoice, type ProjectFramework } from "../utils/project-framework";
 import { AgentModelSelect } from "@/features/conversations/components/agent-model-select";
 import { EnhancePromptButton } from "@/features/conversations/components/enhance-prompt-button";
+import { LowCreditsNotice } from "@/features/conversations/components/low-credits-notice";
 import { type ComposerMode, PlanModeToggle } from "@/features/conversations/components/plan-mode-toggle";
 import { useAgentModel } from "@/features/conversations/hooks/use-agent-model";
 import { useSwarmEnabled } from "@/features/conversations/hooks/use-agent-tasks";
@@ -69,6 +70,13 @@ const useTypedPlaceholder = (enabled: boolean) => {
   }, [enabled]);
 
   return text;
+};
+
+/** Signed-in credit notice under the dashboard composer; skipped when logged out or on BYOK (#643). */
+const ComposerLowCreditsNotice = () => {
+  const [agentModel] = useAgentModel();
+  if (agentModel.keyId) return null;
+  return <LowCreditsNotice modelId={agentModel.modelId} />;
 };
 
 /** The agent model chip; its own component so signed-out composers skip its queries. */
@@ -308,6 +316,7 @@ export const PromptComposer = ({
           </PromptInputFooter>
         </PromptInput>
       </div>
+      {showEnhance && showModelSelect && <ComposerLowCreditsNotice />}
     </div>
   );
 };

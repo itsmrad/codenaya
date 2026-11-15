@@ -23,6 +23,7 @@ import {
   runModelLabel,
 } from "@/features/ai-providers/registry";
 import { resolveCatalogModel } from "@/features/ai-providers/platform";
+import { minRunCredits } from "@/features/billing/credits";
 import {
   fromChoiceValue,
   toChoiceValue,
@@ -112,7 +113,11 @@ export const AgentModelSelect = ({
             <PromptInputSelectItem
               key={model.id}
               value={toChoiceValue({ modelId: model.id })}
-              data-tag={model.vendor}
+              data-tag={
+                model.pricing
+                  ? `${model.vendor} · ~${minRunCredits(model.pricing)} cr`
+                  : model.vendor
+              }
               className={TAGGED_ITEM}
             >
               {icon(model.vendor)}

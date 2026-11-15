@@ -16,11 +16,12 @@ export type CatalogModel = Infer<typeof catalogModelValidator>;
 export type ModelPricing = Infer<typeof modelPricingValidator>;
 export type ModelAccess = Infer<typeof modelAccessValidator>;
 
-/** What users' pickers get: no provider route, no price (`platformCatalog.getForUsers`). */
+/** What users' pickers get: no provider route (`platformCatalog.getForUsers`). */
 export type PublicCatalogModel = Pick<
   CatalogModel,
   "id" | "name" | "vendor" | "vision" | "contextLength" | "access"
->;
+> &
+  Partial<Pick<CatalogModel, "pricing">>;
 
 /**
  * Input tokens weighed against output in a blended price: agent runs read far
