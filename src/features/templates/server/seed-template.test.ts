@@ -10,13 +10,15 @@ import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starte
 import { getTemplateSeedFiles } from "../seed-files";
 import { STARTER_TEMPLATES } from "../templates";
 import { seedTemplateFiles } from "./seed-template";
+import { readTemplateSource } from "./template-source";
 
 describe("seedTemplateFiles", () => {
   it("creates each folder under its parent, then writes every seed file into its folder", async () => {
     mutation.mockImplementation(async (_ref, args) => `id:${args.name}`);
     const template = STARTER_TEMPLATES[0];
 
-    await seedTemplateFiles({ internalKey: "key", projectId: "p1" as never, template });
+    const source = await readTemplateSource(template.id);
+    expect(await seedTemplateFiles({ internalKey: "key", projectId: "p1" as never, template, source })).toBe(true);
 
     const calls = mutation.mock.calls.map(([ref, args]) => [getFunctionName(ref), args]);
     const folders = calls.filter(([name]) => name === "system:createFolder");
@@ -33,7 +35,10 @@ describe("seedTemplateFiles", () => {
     expect(calls.findIndex(([name]) => name === "system:createFiles")).toBe(folders.length);
 
     const written = batches.flatMap(([, a]) => a.files.map((f: { name: string }) => [a.parentId, f.name]));
-    expect(written).toHaveLength(getTemplateSeedFiles(template).length);
+    // An instant template writes its full source (#362).
+    expect(template.instant).toBe(true);
+    expect(written).toHaveLength(getTemplateSeedFiles(template, source).length);
+    expect(written).toContainEqual(["id:src", "brand.ts"]);
     expect(written).toContainEqual([undefined, "package.json"]);
     expect(written).toContainEqual(["id:src", "App.tsx"]);
     expect(batches.every(([, a]) => a.internalKey === "key" && a.projectId === "p1")).toBe(true);
@@ -70,7 +75,7 @@ describe("seedTemplateFiles when Convex fails partway (#338)", () => {
 
     await expect(
       seedTemplateFiles({ internalKey: "key", projectId: "p1" as never }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
 
     const written = mutation.mock.calls
       .filter(([ref]) => getFunctionName(ref) === "system:createFiles")

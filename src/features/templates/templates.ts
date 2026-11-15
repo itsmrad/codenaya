@@ -1,7 +1,10 @@
 /**
- * Official starter templates (#119). Each one creates a project seeded with
- * the agent's Vite + React + Tailwind starter (see `seed-files.ts`) and starts
- * the agent on a curated prompt that builds the template on top of it.
+ * Official starter templates (#119). An `instant` template is a finished app
+ * whose reviewed source lives in `templates/<id>/` (#362): its project opens
+ * with that source and no agent run, and its `prompt` is only the brief the
+ * source implements. The others still seed the agent's Vite starter (see
+ * `seed-files.ts`) and start the agent on their prompt, until they get a
+ * source too.
  *
  * Plain data, shared by the dashboard, /showcase and the create route, so the
  * server only seeds templates it knows.
@@ -9,6 +12,7 @@
 export const STARTER_TEMPLATES = [
   {
     id: "landing-page",
+    instant: true,
     cover: "landing",
     title: "Landing page",
     description: "Hero, feature highlights, pricing table, FAQ and a sign-up call to action.",
@@ -18,6 +22,7 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "saas-dashboard",
+    instant: false,
     cover: "dashboard",
     title: "SaaS dashboard",
     description: "Sidebar layout with KPI cards, a revenue chart and a recent orders table.",
@@ -27,6 +32,7 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "portfolio",
+    instant: false,
     cover: "landing",
     title: "Portfolio",
     description: "Personal site with an about section, project grid and contact form.",
@@ -36,6 +42,7 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "blog",
+    instant: false,
     cover: "list",
     title: "Blog",
     description: "Post list with tags and search, plus readable article pages.",
@@ -45,6 +52,7 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "ecommerce-storefront",
+    instant: false,
     cover: "landing",
     title: "E-commerce storefront",
     description: "Product catalog with filters, product pages and a working cart.",
@@ -54,6 +62,7 @@ export const STARTER_TEMPLATES = [
   },
   {
     id: "admin-crud",
+    instant: true,
     cover: "dashboard",
     title: "Admin CRUD",
     description: "Manage records in a searchable table with create, edit and delete dialogs.",

@@ -40,11 +40,15 @@ import { ShipCard } from "./ship-card";
 import { parseSuggestion, type SuggestionAction } from "../suggestions";
 import { SwarmBoard } from "./swarm-board";
 import { type StuckRetry, StuckRunCard } from "./stuck-run-card";
+import { ElementChips } from "./element-chips";
+import type { SelectedElement } from "../selected-elements";
 
 interface UserMessageProps {
   content: string;
   /** Attached images, shown as thumbnails above the text. */
   imageUrls?: string[];
+  /** Preview elements picked in Select mode (#227), shown as chips above the text. */
+  elements?: SelectedElement[];
   /** Enabled skills: leading `/name` tokens naming one show as a chip. */
   skillNames?: ReadonlySet<string>;
   /** Sent while the conversation was open (not history): fades up on mount. */
@@ -54,6 +58,7 @@ interface UserMessageProps {
 export const UserMessage = ({
   content,
   imageUrls = [],
+  elements = [],
   skillNames,
   animate = false,
 }: UserMessageProps) => {
@@ -86,6 +91,7 @@ export const UserMessage = ({
         fadeUp && "animate-fade-up motion-reduce:animate-none",
       )}
     >
+      <ElementChips elements={elements} className="mb-1.5 justify-end" />
       {imageUrls.length > 0 && (
         <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
           {imageUrls.map((url, index) => (
@@ -260,7 +266,13 @@ export const AssistantMessage = ({
   const buildPlan = async (build: string) => {
     if (buildingPlan || !onBuildPlan) return;
     setBuildingPlan(true);
-    if (!(await onBuildPlan(build))) setBuildingPlan(false);
+    // A send that fails or throws re-enables the buttons; a sent build keeps them off.
+    try {
+      if (!(await onBuildPlan(build))) setBuildingPlan(false);
+    } catch (error) {
+      setBuildingPlan(false);
+      throw error;
+    }
   };
   const tasks = useAgentTasks(message.mode === "swarm" ? message._id : null);
   const reduceMotion = useReducedMotion();

@@ -35,12 +35,22 @@ export const splitPath = (path: string) => {
 };
 
 /**
- * Folders in creation order: sorted by depth so parents are created before
- * children, whatever order the repo listed them in.
+ * Folders in creation order, including missing ancestors of folders and files:
+ * sorted by depth so parents are created before children.
  * Input:  ["src/components", "src", "src/components/ui"]
  * Output: ["src", "src/components", "src/components/ui"]
  */
-export const planFolderCreation = (folders: string[]) =>
-  [...folders]
+export const planFolderCreation = (folders: string[], filePaths: string[] = []) => {
+  const paths = new Set(folders);
+  for (const path of [...folders, ...filePaths]) {
+    let { parentPath } = splitPath(path);
+    while (parentPath) {
+      paths.add(parentPath);
+      parentPath = splitPath(parentPath).parentPath;
+    }
+  }
+
+  return [...paths]
     .sort((a, b) => a.split("/").length - b.split("/").length)
     .map((path) => ({ path, ...splitPath(path) }));
+};

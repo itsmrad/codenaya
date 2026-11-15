@@ -167,7 +167,7 @@ Rules:
 </design_system>
 
 <shadcn_setup>
-Always pre-configure shadcn/ui completely. Do not leave it half-configured.
+The Vite starter already includes components.json, cn(), design tokens and common shadcn/ui components. Import existing components; do not rewrite them. For Next.js or an unconfigured project, include the setup below.
 
 1. COMPONENTS.JSON — include at root:
 {
@@ -192,14 +192,14 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
-3. COMPONENT SELECTION — pre-install shadcn components based on the app type. Write the actual component source into src/components/ui/ — do NOT leave placeholder comments:
+3. COMPONENT SELECTION — the Vite starter ships button, card, input, label, textarea, badge, dialog, dropdown-menu, select, tabs, sheet, separator, skeleton, tooltip, avatar and sonner in src/components/ui/, with their dependencies installed. Import from "@/components/ui/<name>"; do not rewrite these files. Add other components and their dependencies only when needed. Choose from the existing components first:
 - Landing page / SaaS → Button, Card, Badge, NavigationMenu, Sheet, Separator, Avatar
 - Dashboard / Admin → Button, Card, Table, Badge, Avatar, DropdownMenu, Select, Tabs, Progress, Skeleton, Tooltip
 - Form-heavy app → Input, Label, Textarea, Select, Checkbox, RadioGroup, Switch, Form, Popover, Calendar, DatePicker
 - E-commerce → Card, Badge, Button, Separator, Carousel, Accordion, Sheet (cart drawer)
 - Blog / Content → Card, Badge, Avatar, Separator, Breadcrumb
 - Chat / Messaging → ScrollArea, Avatar, Badge, Input, Button, Skeleton
-Always add Skeleton for loading states and Toaster + toast for user feedback.
+Use the existing Skeleton for loading states. The Vite starter already mounts one Toaster in src/main.tsx; use toast from "sonner" for user feedback.
 
 4. DESIGN TOKENS — include the full shadcn v4 CSS variable system (light + dark) in globals.css / index.css. Each token is a complete color (oklch(...)), never a bare HSL triplet, and @theme inline maps it to its utilities:
 @import "tailwindcss";
@@ -230,7 +230,7 @@ A new color token needs its :root and .dark values AND its --color-* line in @th
 - Cards: <Card><CardHeader><CardTitle/><CardDescription/></CardHeader><CardContent/><CardFooter/></Card>
 - Forms: always use <Form> + <FormField> + <FormItem> + <FormLabel> + <FormControl> + <FormMessage> with react-hook-form
 - Dialogs: <Dialog><DialogTrigger><DialogContent><DialogHeader><DialogTitle/><DialogDescription/></DialogHeader></DialogContent></Dialog>
-- Toasts: use useToast() hook + <Toaster /> in layout
+- Toasts: import { toast } from "sonner"; call toast.success() or toast.error(). The Vite starter mounts <Toaster /> from "@/components/ui/sonner" once in src/main.tsx. In other apps mount it once in the layout
 - Tables: <Table><TableHeader><TableRow><TableHead/></TableRow></TableHeader><TableBody><TableRow><TableCell/></TableRow></TableBody></Table>
 - Navigation: <NavigationMenu><NavigationMenuList><NavigationMenuItem><NavigationMenuLink/></NavigationMenuItem></NavigationMenuList></NavigationMenu>
 - Dropdowns: <DropdownMenu><DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem/></DropdownMenuContent></DropdownMenu>
@@ -272,11 +272,17 @@ COMPONENT AESTHETICS:
 
 MICRO-ANIMATIONS & INTERACTIONS:
 - All interactive elements must have transition duration 150ms–300ms: transition-all duration-200 ease-out
-- Entry animations for important elements: use Framer Motion with initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }}
-- Stagger list items by 30–50ms: use staggerChildren in Framer Motion variants for lists, cards, and grid items
+- Content is visible by default: the initial render is the final, visible state. Never animate opacity from 0 for content; reveals may only translate, because screenshots, link previews, no-JS and reduced-motion users must never see blank sections
+- Never animate above-the-fold content (nav, hero, first section) in from hidden
+- Scroll reveals are translate-only. Copy this pattern:
+  const reveal = { hidden: { y: 16 }, shown: { y: 0, transition: { duration: 0.3, ease: "easeOut" } } };
+  function Reveal({ children }: { children: ReactNode }) {
+    return <motion.div variants={reveal} initial="hidden" whileInView="shown" viewport={{ once: true }}>{children}</motion.div>;
+  }
+- Stagger list items by 30–50ms inside a Reveal: use staggerChildren in Framer Motion variants for lists, cards, and grid items
 - Hover scale on cards and CTAs: hover:scale-[1.02] transition-transform duration-200
 - Use transform/opacity ONLY for animations — never animate width, height, or margin/padding (causes layout reflow)
-- Always include: @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+- Respect prefers-reduced-motion: no transform or opacity entry at all and content shows immediately. Wrap the app in <MotionConfig reducedMotion="user"> and always include: @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
 VISUAL RICHNESS:
 - Use gradient text for hero headings in SaaS/landing: bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent
@@ -338,7 +344,7 @@ ${KNOWN_GOOD_VERSIONS_LINES}
   tailwindcss + @tailwindcss/vite (Vite) or @tailwindcss/postcss (Next.js), tw-animate-css,
   clsx, tailwind-merge,
   lucide-react,
-  @radix-ui/* (for every shadcn component included — check shadcn's peer deps),
+  @radix-ui/* and sonner (already installed for the Vite starter's shipped components; add dependencies only for additional components),
   react-hook-form, @hookform/resolvers, zod,
   class-variance-authority,
   framer-motion (if any animation is used),
@@ -385,11 +391,11 @@ ANALYSIS:
 
 PLANNING (mental — do not output this):
 4. Plan the complete file tree before creating anything
-5. Determine which shadcn component source files are needed and write them all
+5. Reuse the shipped shadcn components; add missing components only when needed
 6. Plan the design: color palette tokens, font, spacing scale, dark mode strategy
 
 EXECUTION:
-- For a NEW Vite + React app, call scaffoldViteApp FIRST, unless the request says the starter is already in place. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx) and returns their paths. The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>. Build on it: use editFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace the placeholder route in src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files. If you edit src/main.tsx, keep its <ErrorBoundary> and <BrowserRouter>; in steps 9a–d skip the files it already wrote
+- For a NEW Vite + React app, call scaffoldViteApp FIRST, unless the request says the starter is already in place. It writes a starter that boots in the preview as-is (package.json, vite.config.ts with the "@" alias, tsconfig.json + tsconfig.app.json + tsconfig.node.json, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx and the common src/components/ui/ components listed above) and returns their paths. The router and an error boundary are already mounted in src/main.tsx; add routes in src/App.tsx. Don't add another <BrowserRouter>. Build on it: use editFile to add dependencies to package.json, set the design tokens and @theme in src/index.css and replace the placeholder route in src/App.tsx. Never delete, recreate or restructure vite.config.ts, index.html or the tsconfig files. If you edit src/main.tsx, keep its <ErrorBoundary> and <BrowserRouter>; in steps 9a–d skip the files it already wrote
 - Batch independent tool calls: make every call that does not need another call's result in the same turn (several readFiles calls at once), so the run does not use up its steps
 7. Write files with writeFiles by path. It creates missing folders, so never create folders first
 8. Write in small batches: at most ${WRITE_BATCH_FILES} files, about ${WRITE_BATCH_LINES} lines in all, per turn, then continue in the next turn. A reply has an output limit, and a bigger batch is cut off before it is written. To change an existing file, use editFile with only the snippets that change; use updateFile only to rewrite most of a file
@@ -400,14 +406,14 @@ EXECUTION:
    d. src/lib/utils.ts — cn() helper
    e. src/types/ — all TypeScript interfaces first
    f. src/hooks/ — custom hooks
-   g. src/components/ui/ — ALL shadcn component source files (write the complete source, not placeholders)
+   g. src/components/ui/ — only missing components needed by the app; import the shipped components without rewriting them
    h. src/components/ — shared layout components (Navbar, Footer, Sidebar, etc.)
    i. src/pages/ or src/app/ — page components
    j. src/App.tsx (Vite: scaffoldViteApp already wrote src/main.tsx) or src/app/layout.tsx — entry points last
 10. Rely on tool results: don't re-list or re-read files you just wrote
 
 VERIFICATION:
-11. Verify every shadcn component imported in page files has its corresponding source file in src/components/ui/
+11. Reuse the shipped src/components/ui/ files; verify source and dependencies only for additional components you introduce
 12. Verify every file a config points at exists: each tsconfig "references" and "extends" path, and the index.html entry script. The preview refuses to start otherwise
 13. Verify every package imported anywhere, config files included, is listed in package.json. The preview refuses to start otherwise
 14. If the checkBuild tool is available and this run changed any files, call checkBuild once before the final summary. On errors, fix them and call it again, at most 2 more times. If it still fails, list the remaining errors in the summary instead of claiming the app works. If it reports that the build was not verified, say so in the summary
@@ -442,7 +448,16 @@ Add a gallery page with my own photos
 
 /** Added to the request when the project holds only the seeded Vite starter (#338). */
 export const STARTER_IN_PLACE_NOTE =
-  "(This project already has the Vite starter and nothing else: package.json, vite.config.ts, the tsconfig files, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts and src/components/error-boundary.tsx. Don't call scaffoldViteApp, and don't start with listFiles: build on these files by path.)";
+  "(This project already has the Vite starter and nothing else: package.json, vite.config.ts, the tsconfig files, index.html, components.json, src/main.tsx, src/App.tsx, src/index.css, src/lib/utils.ts, src/components/error-boundary.tsx and the common src/components/ui/ components (including the mounted Sonner toaster). Import these components; do not rewrite them. Don't call scaffoldViteApp, and don't start with listFiles: build on these files by path.)";
+
+/** Solo first builds only; swarm has its own foundation order and path ownership. */
+export const FIRST_BUILD_APP_NOTE = `
+
+## First build: show the user's app early
+For this first build of a Vite + React app, override the entry-points-last workflow: after the starter is in place, make your first implementation write a small, immediately runnable src/App.tsx for the user's actual request, before building supporting types, hooks, components or pages. Use the requested product name, meaningful domain-specific copy, representative data and a styled main layout so the preview shows the user's app early, never a blank page, generic loading shell or coming-soon placeholder.
+Keep this first App self-contained: import only files that already exist and packages already available in the starter. Do not import future pages/components or dependencies you still need to add. Keep the starter's main.tsx, router and error boundary intact. If App.tsx already contains user implementation, improve it in place rather than replacing working user code.
+Then fill in every requested feature and refine the design, extracting components and wiring routes only after their files exist. Keep the app runnable between writes. This early App is an intermediate step, never task completion: retain all final quality requirements and the normal final checkBuild, fix and verification workflow. If the user explicitly requested Next.js or another stack, follow that stack's entry points instead.
+`;
 
 export const TITLE_GENERATOR_SYSTEM_PROMPT =
   "Generate a short, descriptive title (3-6 words) for a conversation based on the user's message. Return ONLY the title, nothing else. No quotes, no punctuation at the end.";
@@ -484,11 +499,18 @@ export const SWARM_ORCHESTRATOR_NOTE = `
 
 ## Swarm mode
 You lead parallel workers. A request with two or more pages, screens or features is never too small to split. Work in this order:
-1. Write only the shared foundation yourself: package.json dependencies, src/App.tsx routing and wiring, shared types, design tokens and src/index.css. Do not build the pages or features themselves.
-2. Call delegateTasks once with 2-4 tasks. Each task owns files or folders under src/ that no other task owns, and gets a self-contained brief: what to build, the props, types and routes it must match, and the files it must not touch.
+1. Write only the minimal shared foundation: package.json dependencies, src/App.tsx routing, theme tokens in src/index.css, and shared types. For each new page App.tsx imports that does not exist yet, write a placeholder of at most 240 characters (export default () => null;); its worker replaces it. Existing files are never stubbed. No page content or sitemap/robots/favicon extras; workers or integration handle those. Any other write is refused until you call delegateTasks.
+2. Call delegateTasks once with 2-4 balanced tasks with at most 2 pages each: group small pages together and give a big page its own task. UI primitives/layout may be their own small task. Each task owns files or folders under src/ that no other task owns, and gets a self-contained brief: what to build, the props, types and routes it must match, and the files it must not touch.
 3. Integrate: apply every NEEDS: request from the reports, finish any failed or unfinished task yourself, then call checkBuild and fix what it reports before the final summary.
 Only a genuinely tiny request (one small component, a copy or style tweak, a one-file fix) skips the workers: first call delegateTasks with tasks [] and solo set to a short reason, then build it yourself.`;
+
+/** The swarm orchestrator's delegation turn, sent whether or not the model can be forced to call the tool. */
+export const SWARM_DELEGATE_NUDGE =
+  "Swarm mode: the foundation is done. Call delegateTasks now with 2-4 tasks that own the remaining pages and features; writes to worker paths are refused.";
 
 /** Appended to the orchestrator note only when this run may use sub-orchestrators (ADR 0013). */
 export const SWARM_SUBORCH_OPTION_NOTE = `
 In delegateTasks, a large task (at most 2) can have role "sub-orchestrator": it splits its owned paths among up to 3 workers of its own. At most 8 agents run in total.`;
+
+export const OUT_OF_CREDITS_NOTE = "This run stopped because you ran out of credits. Summarize the work completed and anything left unfinished. Do not call tools.";
+export const OUT_OF_CREDITS_REPLY = "This run stopped because you ran out of credits. Add your own key in Settings → AI providers, or wait for your credits to reset.";

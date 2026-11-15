@@ -74,12 +74,14 @@ beforeEach(() => {
 
 describe("processMessage on the user's key", () => {
   it("runs on the user's provider and never persists the key in a step result", async () => {
+    vi.stubEnv("CREDIT_LIMITS_ENFORCED", "true");
     const outcome = await drive({ keyId: "key_1", modelId: "gpt-6.1-sol" }, [
       { data: text("Listing files") },
       { data: text("Here are your files.") },
     ]);
 
     expect(outcome.finalType).toBe("function-resolved");
+    expect(JSON.stringify(outcome.inferenceBodies)).not.toContain("ran out of credits");
     const persisted = JSON.stringify(outcome.stepState);
     // The search covers real outputs (inference results included)...
     expect(persisted).toContain("Here are your files.");

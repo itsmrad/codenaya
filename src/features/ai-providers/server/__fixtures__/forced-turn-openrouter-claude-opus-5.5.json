@@ -1,0 +1,84 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Build a pizzeria site with home, menu, about and contact pages"
+    },
+    {
+      "role": "user",
+      "content": "Swarm mode: the foundation is done. Call delegateTasks now with 2-4 tasks that own the remaining pages and features; writes to worker paths are refused."
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "delegateTasks",
+        "description": "Run 2-4 tasks in parallel, each by a worker that writes only its owned paths (files or folders under src/, disjoint between tasks). Shared files (package.json, src/App.tsx, src/main.tsx, src/index.css, configs) stay yours. Call it once, after writing the shared foundation. Returns each task's report: done, unfinished or failed, the files it wrote, and its NEEDS: requests. A task with role \"sub-orchestrator\" (at most 2) splits its own paths among up to 3 workers.",
+        "parameters": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "tasks": {
+              "maxItems": 4,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "brief": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 12000
+                  },
+                  "ownedPaths": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "worker",
+                      "sub-orchestrator"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "brief",
+                  "ownedPaths"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "solo": {
+              "description": "Only for a genuinely tiny request, with tasks []: why you build it yourself. The swarm board shows it.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "tasks"
+          ],
+          "additionalProperties": false
+        },
+        "strict": false
+      }
+    }
+  ],
+  "model": "anthropic/claude-opus-5.5"
+}

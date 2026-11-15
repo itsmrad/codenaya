@@ -28,6 +28,7 @@ import {
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
+import { PreviewSelectToggle } from "./preview-select-toggle";
 import { OpenOnPhonePopover } from "@/features/sandbox-preview/components/open-on-phone-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
 import { logsAfterClear } from "@/features/sandbox-preview/utils/cleared-logs";
@@ -62,7 +63,16 @@ import {
   type AppError,
   type FixAttempts,
 } from "@/features/sandbox-preview/utils/app-error";
-import { readPreviewMessage } from "@/features/sandbox-preview/utils/preview-bridge";
+import { selectedElementSchema } from "@/features/conversations/selected-elements";
+import { useChatStore } from "@/features/conversations/store/use-chat-store";
+import {
+  PREVIEW_MESSAGE_SOURCE,
+  PREVIEW_PROTOCOL_VERSION,
+  previewTargetOrigin,
+  routePreviewMessage,
+  readPreviewMessage,
+} from "@/features/sandbox-preview/utils/preview-bridge";
+import { hookReloadDelay, isHookError } from "@/features/sandbox-preview/utils/hook-reload";
 import {
   MAX_FIX_ATTEMPTS,
   PreviewErrorBanner,
@@ -120,6 +130,7 @@ export const PreviewView = ({
   firstBuild,
   visible,
   onOpenEnvVars,
+  onElementPicked,
 }: {
   projectId: Id<"projects">;
   /** Its tab is on screen; the IDE keeps it mounted, invisible, behind others. */
@@ -128,6 +139,7 @@ export const PreviewView = ({
   firstBuild: boolean;
   /** Opens the env vars dialog, which ProjectIdView owns so the palette can open it too. */
   onOpenEnvVars: () => void;
+  onElementPicked: () => void;
 }) => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -186,6 +198,10 @@ export const PreviewView = ({
 
   const activeInstance = activeEngine === "sandbox" ? sandbox : webcontainer;
   const { status, previewUrl, error, restart, terminalOutput } = activeInstance;
+  // Select mode (#227) is off whenever the app isn't running, so a restart never leaves it on.
+  const [selectChosen, setSelectChosen] = useState(false);
+  if (selectChosen && (status !== "running" || !visible)) setSelectChosen(false);
+  const selecting = selectChosen && status === "running" && visible;
   // A restart empties the output; forget the clear so the new run shows in
   // full even when it repeats the cleared lines (#480).
   if (clearedLogs && !terminalOutput.startsWith(clearedLogs)) setClearedLogs("");
@@ -204,15 +220,35 @@ export const PreviewView = ({
   // and runtime errors and Vite overlay errors (#497) posted by the bridge
   // script injected into the preview.
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const sendSelectMode = useCallback(() => {
+    const origin = previewTargetOrigin(previewUrl);
+    if (!origin) return;
+    iframeRef.current?.contentWindow?.postMessage({
+      source: PREVIEW_MESSAGE_SOURCE,
+      version: PREVIEW_PROTOCOL_VERSION,
+      kind: selecting ? "select:on" : "select:off",
+    }, origin);
+  }, [previewUrl, selecting]);
+  useEffect(sendSelectMode, [sendSelectMode]);
   const [runtimeError, setRuntimeError] = useState<AppError | null>(null);
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const reported = readPreviewMessage(event, iframeRef.current?.contentWindow, previewUrl);
-      if (reported) setRuntimeError((prev) => mergeAppError(prev, reported));
+      routePreviewMessage(
+        reported,
+        (error) => setRuntimeError((prev) => error ? mergeAppError(prev, error) : null),
+        (element) => {
+          // Rect is only bridge metadata; chat keeps the existing quoted-data shape.
+          useChatStore.getState().addElement(selectedElementSchema.parse(element));
+          setSelectChosen(false);
+          onElementPicked();
+        },
+        () => setSelectChosen(false),
+      );
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [previewUrl]);
+  }, [previewUrl, onElementPicked]);
   // An edit or a reload may have fixed it; the bridge reports it again if not.
   const [runtimeErrorScope, setRuntimeErrorScope] = useState({ files, previewUrl, refreshKey });
   if (
@@ -342,14 +378,44 @@ export const PreviewView = ({
     const firstBuildEnded = wasFirstBuild.current && !firstBuild;
     const fixRunEnded = wasRunActive.current && !runActive && appStartFailed && buildError;
     if (status === "error" && (firstBuildEnded || fixRunEnded)) restart();
+    // Reload once against the finished files: HMR may have missed a write (#561), and a
+    // runtime error may be from mid-build HMR (#486), reported again if real, before the auto-fix.
+    // Still booting: the startup refresh covers it.
+    else if (firstBuildEnded && status === "running" && previewUrl) setRefreshKey((key) => key + 1);
     wasFirstBuild.current = firstBuild;
     wasRunActive.current = runActive;
-  }, [firstBuild, runActive, appStartFailed, buildError, status, restart]);
+  }, [firstBuild, runActive, appStartFailed, buildError, previewUrl, status, restart]);
 
   // The iframe's latest load, so first_preview_shown waits until it is visible.
   const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
   const previewKey = `${projectId}:${previewUrl}:${refreshKey}`;
-  const handlePreviewLoad = useCallback(() => setLoadedPreview(previewKey), [previewKey]);
+  const handlePreviewLoad = useCallback(() => {
+    setLoadedPreview(previewKey);
+    sendSelectMode();
+  }, [previewKey, sendSelectMode]);
+
+  // A hook error right after a late dependency made Vite re-optimize (#486) is two
+  // React copies in a stale page; a reload heals it. Vite's own reload gets a moment
+  // first, any other reload counts as this one, and a bug that survives falls to the auto-fix.
+  const lastReloadAt = useRef(0);
+  const hookReloads = useRef(0);
+  useEffect(() => {
+    lastReloadAt.current = Date.now();
+  }, [refreshKey]);
+  useEffect(() => {
+    if (runActive) hookReloads.current = 0;
+  }, [runActive]);
+  const hookError = isHookError(runtimeError);
+  useEffect(() => {
+    if (!hookError) return;
+    const delay = hookReloadDelay(hookReloads.current, lastReloadAt.current, Date.now());
+    if (delay === null) return;
+    const timer = setTimeout(() => {
+      hookReloads.current += 1;
+      setRefreshKey((key) => key + 1);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [hookError]);
 
   // Only ever called from a user action. WebContainer needs the COOP/COEP headers
   // next.config.ts sets for `?engine=webcontainer`, so switching is a full page
@@ -433,10 +499,16 @@ export const PreviewView = ({
   // Automatically refresh the iframe shortly after the dev server announces it's running.
   // The first request to Vite often serves the index.html and CSS instantly but hangs 
   // compiling the JS bundle. An auto-refresh ensures the JS hydration catches up seamlessly.
+  // Skipped if another reload, e.g. a first build ending (#561), beat it: one reload, not two.
+  const refreshKeyRef = useRef(refreshKey);
+  useEffect(() => {
+    refreshKeyRef.current = refreshKey;
+  }, [refreshKey]);
   useEffect(() => {
     if (status === "running" && previewUrl) {
+      const armedKey = refreshKeyRef.current;
       const timer = setTimeout(() => {
-        setRefreshKey((k) => k + 1);
+        setRefreshKey((k) => (k === armedKey ? k + 1 : k));
       }, 2500);
       return () => clearTimeout(timer);
     }
@@ -502,6 +574,11 @@ export const PreviewView = ({
           >
             <RotateCwIcon className="size-4" />
           </Button>
+          <PreviewSelectToggle
+            active={selecting}
+            disabled={status !== "running"}
+            onActiveChange={setSelectChosen}
+          />
         </div>
 
         {/* Engine Toggle UI */}

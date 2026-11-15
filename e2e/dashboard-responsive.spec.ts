@@ -34,34 +34,45 @@ test.describe("signed-in dashboard layout", () => {
     [768, 1024],
     [1440, 900],
   ]) {
-    test(`a recent project shows above the fold at ${width}x${height}`, async ({
-      page,
-    }) => {
-      await page.setViewportSize({ width, height });
-      await signIn(page);
-      const client = await userConvexClient(page);
-      test.skip((await client.query(api.projects.get, {})).length === 0, "needs a project");
-      await page.goto("/");
+    for (const withPill of [true, false]) {
+      test(`a recent project is fully visible at ${width}x${height} ${
+        withPill ? "with" : "without"
+      } the setup pill`, async ({ page }) => {
+        await page.setViewportSize({ width, height });
+        await signIn(page);
+        const client = await userConvexClient(page);
+        test.skip((await client.query(api.projects.get, {})).length === 0, "needs a project");
+        await page.goto("/");
+        const pill = page.getByRole("button", { name: /^Getting started:/ });
+        // The e2e user has no GitHub account linked, so the checklist never completes on its own.
+        await expect(pill).toBeVisible();
+        if (!withPill) {
+          await page.evaluate(() => {
+            const userId = (window as { Clerk?: { user?: { id: string } } }).Clerk!.user!.id;
+            localStorage.setItem(`codenaya:firstRunDismissed:${userId}`, "1");
+          });
+          await page.reload();
+        }
 
-      const card = page.getByRole("region", { name: "Recent" }).getByRole("link").first();
-      await expect(card).toBeVisible();
-      // Wait for the entrance animation to settle: two reads in a row agree.
-      let previous = await card.boundingBox();
-      await expect
-        .poll(async () => {
-          const current = await card.boundingBox();
-          const settled = current?.y === previous?.y;
-          previous = current;
-          return settled;
-        })
-        .toBe(true);
-      const box = (await card.boundingBox())!;
-      expect(box.y).toBeGreaterThanOrEqual(0);
-      expect(box.x + box.width).toBeLessThanOrEqual(width);
-      // Since the #489 hero (plus the setup pill while the checklist is open), the
-      // card's bottom can sit just below the fold; its top must still show.
-      await expect(card).toBeInViewport({ ratio: 0.25 });
-    });
+        const card = page.getByRole("region", { name: "Recent" }).getByRole("link").first();
+        await expect(card).toBeVisible();
+        await expect(pill).toBeVisible({ visible: withPill });
+        // Wait for the entrance animation to settle: two reads in a row agree.
+        let previous = await card.boundingBox();
+        await expect
+          .poll(async () => {
+            const current = await card.boundingBox();
+            const settled = current?.y === previous?.y;
+            previous = current;
+            return settled;
+          })
+          .toBe(true);
+        const box = (await card.boundingBox())!;
+        expect(box.y).toBeGreaterThanOrEqual(0);
+        expect(box.y + box.height).toBeLessThanOrEqual(height);
+        expect(box.x + box.width).toBeLessThanOrEqual(width);
+      });
+    }
   }
 
   test("the dashboard tabs work from the keyboard and remember the last one", async ({ page }) => {

@@ -158,7 +158,7 @@ export const repairBuild = async ({
   step,
   recordSteps,
   ...options
-}: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId" | "model" | "onResponse"> & {
+}: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId" | "model" | "onResponse" | "signal"> & {
   step: NonNullable<VerifyAndFixOptions["step"]>;
   /** Upserts the rows `build` returns into the run block, in a step. */
   recordSteps: (build: () => AgentStep[]) => Promise<void>;

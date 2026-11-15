@@ -3,22 +3,31 @@ import { ConvexHttpClient } from "convex/browser";
 
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
-import { cleanupProject, userConvexClient } from "./convex-client";
+import { userConvexClient } from "./convex-client";
 
 export const hasPreviewFixtureEnv = () =>
   Boolean(process.env.CODENAYA_CONVEX_INTERNAL_KEY && process.env.NEXT_PUBLIC_CONVEX_URL);
 
-/** Reuses (or creates) the e2e user's fixture project; the preview needs a file to boot. */
+/** Longer than any test, so a project this young may still be in use by a parallel test. */
+const STALE_PROJECT_MS = 60 * 60_000;
+
+/**
+ * A fresh fixture project for the e2e user; the preview needs a file to boot.
+ * Never reused: a killed run leaves its messages behind (a "processing" run
+ * stays active), and a parallel test of the same name would share its files.
+ * Removes earlier runs' projects of that name once they are stale.
+ */
 export const seedPreviewProject = async (page: Page, name: string) => {
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY!;
   const user = await userConvexClient(page);
-  const existing = (await user.query(api.projects.get, {})).find(
-    (project) => project.name === name,
-  );
-  const projectId = existing?._id ?? (await user.mutation(api.projects.create, { name }));
+  for (const project of await user.query(api.projects.get, {})) {
+    if (project.name === name && project._creationTime < Date.now() - STALE_PROJECT_MS) {
+      await user.mutation(api.projects.remove, { id: project._id }).catch(() => {});
+    }
+  }
+  const projectId = await user.mutation(api.projects.create, { name });
 
   const system = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-  await cleanupProject(system, internalKey, projectId);
   await system.mutation(api.system.createFile, {
     internalKey,
     projectId,

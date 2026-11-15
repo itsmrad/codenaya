@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { EditorView, keymap } from "@codemirror/view";
-import { Annotation, Compartment, Transaction } from "@codemirror/state";
+import { Annotation, Compartment, EditorState, Transaction } from "@codemirror/state";
 import { useTheme } from "next-themes";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { indentWithTab } from "@codemirror/commands";
@@ -24,16 +24,21 @@ export const editorTheme = (resolvedTheme?: string) =>
 interface Props {
   fileName: string;
   initialValue?: string;
-  onChange: (value: string, previousValue: string) => void;
+  onChange?: (value: string, previousValue: string) => void;
+  /** Viewing only (a share link, #260): no edits and no AI actions, which act on the viewer's own project. */
+  readOnly?: boolean;
 }
 
 export const CodeEditor = ({ 
   fileName, 
   initialValue = "",
-  onChange
+  onChange,
+  readOnly = false,
 }: Props) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  // The view's document as a string, so each change serializes it once (#605).
+  const docRef = useRef(initialValue);
   const onChangeRef = useRef(onChange);
   const [themeCompartment] = useState(() => new Compartment());
   const { resolvedTheme } = useTheme();
@@ -47,6 +52,7 @@ export const CodeEditor = ({
   useEffect(() => {
     if (!editorRef.current) return;
 
+    docRef.current = initialValue;
     const view = new EditorView({
       doc: initialValue,
       parent: editorRef.current,
@@ -55,16 +61,18 @@ export const CodeEditor = ({
         customTheme,
         customSetup,
         languageExtension,
-        suggestion(fileName),
-        quickEdit(),
-        selectionTooltip(fileName),
-        keymap.of([indentWithTab]),
+        readOnly
+          ? EditorState.readOnly.of(true)
+          : [suggestion(fileName), quickEdit(), selectionTooltip(fileName), keymap.of([indentWithTab])],
         minimap(),
         indentationMarkers(),
         EditorView.contentAttributes.of({ "aria-label": `Editor: ${fileName}` }),
         EditorView.updateListener.of((update) => {
+          if (!update.docChanged) return;
+          const previous = docRef.current;
+          docRef.current = update.state.doc.toString();
           if (update.transactions.some((tr) => tr.docChanged && !tr.annotation(externalContent))) {
-            onChangeRef.current(update.state.doc.toString(), update.startState.doc.toString());
+            onChangeRef.current?.(docRef.current, previous);
           }
         })
       ],
@@ -83,7 +91,7 @@ export const CodeEditor = ({
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    const before = view.state.doc.toString();
+    const before = docRef.current;
     if (before === initialValue) return;
     let from = 0;
     let end = before.length;

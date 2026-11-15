@@ -23,6 +23,10 @@ import {
   dispatchProcessMessageOrFail,
 } from "@/lib/message-processor";
 import { MAX_CHAT_IMAGES } from "@/features/conversations/chat-images";
+import {
+  MAX_SELECTED_ELEMENTS,
+  selectedElementSchema,
+} from "@/features/conversations/selected-elements";
 import { PLAN_MODE, SWARM_MODE } from "@/features/conversations/plan-mode";
 import { swarmOffResponse } from "@/features/conversations/server/swarm-off";
 import { requireOwnedConversation } from "@/features/projects/server/require-owned-project";
@@ -36,6 +40,8 @@ const requestSchema = z.object({
   model: modelChoiceSchema,
   // Storage ids of images registered through api.chatImages.register.
   images: z.array(z.string()).max(MAX_CHAT_IMAGES).optional(),
+  // Preview elements picked in Select mode (#227), length-capped here.
+  elements: z.array(selectedElementSchema).max(MAX_SELECTED_ELEMENTS).optional(),
   // Plan mode (#120): the agent replies with a plan and writes nothing. Swarm: it leads parallel workers.
   mode: z.enum([PLAN_MODE, SWARM_MODE]).optional(),
   // A fix request ("Fix with AI" #223, loop-breaker retry #306): Auto routes it to the fix model.
@@ -69,7 +75,7 @@ export async function POST(request: Request) {
     return invalid;
   }
 
-  const { conversationId, message, model, images, mode, source } = data;
+  const { conversationId, message, model, images, elements, mode, source } = data;
 
   if (detectCredential(message).detected) {
     return NextResponse.json(
@@ -177,6 +183,7 @@ export async function POST(request: Request) {
       ...(images?.length
         ? { images: images as Id<"_storage">[], ownerId: userId }
         : {}),
+      ...(elements?.length ? { elements } : {}),
     });
 
     // Create assistant message placeholder with processing status
