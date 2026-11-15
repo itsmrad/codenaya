@@ -90,7 +90,7 @@ export const ProviderCatalog = ({
                 <button
                   type="button"
                   aria-label={`${action} ${provider.displayName}`}
-                  aria-describedby={`${catalogId}-${provider.id}-description ${catalogId}-${provider.id}-auth`}
+                  aria-describedby={`${catalogId}-${provider.id}-description ${catalogId}-${provider.id}-auth${provider.supportsReadOnly ? ` ${catalogId}-${provider.id}-read-only` : ""}`}
                   onClick={() => onSelect(provider.id)}
                   className="flex h-full w-full flex-col gap-2 rounded-lg border border-border/60 bg-card p-3 text-left transition-colors hover:border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
@@ -102,7 +102,7 @@ export const ProviderCatalog = ({
                   <span className="mt-auto flex w-full flex-wrap items-center justify-between gap-2 pt-1">
                     <span id={`${catalogId}-${provider.id}-auth`} className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{authModeLabel(provider.authModes)}</span>
                     {provider.supportsReadOnly && (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                      <span id={`${catalogId}-${provider.id}-read-only`} className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                         <EyeIcon aria-hidden="true" className="size-2.5" /> Read-only capable
                       </span>
                     )}

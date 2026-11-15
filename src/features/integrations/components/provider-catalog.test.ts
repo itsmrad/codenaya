@@ -32,3 +32,23 @@ it("offers Manage for existing credentials, including those needing reconnect", 
   expect(html).not.toContain('aria-label="Connect Supabase"');
   expect(html).toContain('aria-label="Connect Neon"');
 });
+
+it("describes read-only capability only on cards that render the badge", () => {
+  const html = renderToStaticMarkup(createElement(ProviderCatalog, { onSelect: () => {} }));
+  const cards = [...html.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/g)].map((match) => match[1]);
+  const providers = listProviders();
+  expect(cards).toHaveLength(providers.length);
+  for (const [index, provider] of providers.entries()) {
+    const card = cards[index];
+    const describedBy = card.match(/aria-describedby="([^"]+)"/)![1].split(" ");
+    const badgeId = describedBy[0].replace(/-description$/, "-read-only");
+    expect(describedBy).toHaveLength(provider.supportsReadOnly ? 3 : 2);
+    if (provider.supportsReadOnly) {
+      expect(describedBy).toContain(badgeId);
+      expect(card).toContain(`id="${badgeId}"`);
+    } else {
+      expect(describedBy).not.toContain(badgeId);
+      expect(card).not.toContain(`id="${badgeId}"`);
+    }
+  }
+});
