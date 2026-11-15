@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { guardOwnedPaths } from "./inngest/lib/ownership-guard";
-import { ownsPath, swarmPlanSchema, validatePlan } from "./swarm";
+import { MAX_BRIEF_CHARS, ownsPath, swarmPlanSchema, validatePlan } from "./swarm";
 
 const task = (id: string, ownedPaths: string[]) => ({ id, title: id, brief: `Build ${id}.`, ownedPaths });
 
@@ -39,6 +39,15 @@ describe("validatePlan", () => {
     expect(validatePlan(plan)).toEqual({
       tasks: [task("nav", ["src/components/nav"]), task("hero", ["src/components/hero.tsx"])],
     });
+  });
+
+  it("accepts a detailed brief and names the task, length and limit for one over the cap (#646)", () => {
+    const long = { ...task("pages", ["src/pages/"]), brief: "x".repeat(5000) };
+    expect(validatePlan({ tasks: [long, task("nav", ["src/nav.tsx"])] })).toMatchObject({ tasks: [{ brief: long.brief }, {}] });
+    const over = { ...long, brief: "x".repeat(MAX_BRIEF_CHARS + 1) };
+    expect(validatePlan({ tasks: [task("nav", ["src/nav.tsx"]), over] })).toBe(
+      `Error: The brief for task pages is ${MAX_BRIEF_CHARS + 1} characters; the limit is ${MAX_BRIEF_CHARS}. Shorten it and call delegateTasks again.`,
+    );
   });
 
   it("refuses too few or too many tasks", () => {

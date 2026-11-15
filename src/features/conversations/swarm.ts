@@ -6,6 +6,8 @@ import { normalizePath } from "./agent-steps";
 export { MAX_SWARM_AGENTS, MAX_SWARM_TASKS };
 export const WORKER_MAX_STEPS = 20;
 export const MAX_WORKER_USD = 0.50;
+/** A brief is a worker's whole prompt: ~3k tokens fits a detailed spec, and 4 tasks stay under ~12k tokens. */
+export const MAX_BRIEF_CHARS = 12_000;
 /** How long a worker may queue and run before it counts as failed (step.invoke's timeout). */
 export const WORKER_TIMEOUT_MS = 12 * 60_000;
 export const CHILD_WORKER_TIMEOUT_MS = 10 * 60_000;
@@ -26,7 +28,7 @@ export const swarmPlanSchema = z.object({
   tasks: z.array(z.object({
     id: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     title: z.string().trim().min(1),
-    brief: z.string().trim().min(1).max(2000),
+    brief: z.string().trim().min(1).max(MAX_BRIEF_CHARS),
     ownedPaths: z.array(z.string()).min(1),
     role: z.enum(["worker", "sub-orchestrator"]).optional(),
   })).max(MAX_SWARM_TASKS),
@@ -67,7 +69,14 @@ export const validatePlan = (
   { withinPaths, maxDepth = MAX_SWARM_DEPTH }: { withinPaths?: readonly string[]; maxDepth?: number } = {},
 ): SwarmPlan | string => {
   const parsed = swarmPlanSchema.safeParse(input);
-  if (!parsed.success) return `Error: ${parsed.error.issues[0].message}`;
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    if (issue.code === "too_big" && issue.path[2] === "brief") {
+      const task = (input as { tasks: { id: unknown; brief: string }[] }).tasks[issue.path[1] as number];
+      return `Error: The brief for task ${String(task.id)} is ${task.brief.trim().length} characters; the limit is ${MAX_BRIEF_CHARS}. Shorten it and call delegateTasks again.`;
+    }
+    return `Error: ${issue.message}`;
+  }
   const { tasks } = parsed.data;
   if (new Set(tasks.map((task) => task.id)).size !== tasks.length) return "Error: Task ids must be unique.";
   const subs = tasks.filter((task) => task.role === "sub-orchestrator").length;
