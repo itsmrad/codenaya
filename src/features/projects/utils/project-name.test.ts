@@ -23,6 +23,12 @@ describe("copyProjectName", () => {
     expect(copyProjectName("Todo app")).toBe("Todo app (copy)");
   });
 
+  test("supports a fork suffix within the length limit", () => {
+    const name = copyProjectName("a".repeat(PROJECT_NAME_MAX_LENGTH), " (fork)");
+    expect(name.endsWith(" (fork)")).toBe(true);
+    expect(validateProjectName(name)).toBeNull();
+  });
+
   test("stays within the length limit", () => {
     const copy = copyProjectName("a".repeat(PROJECT_NAME_MAX_LENGTH));
     expect(copy.endsWith(" (copy)")).toBe(true);

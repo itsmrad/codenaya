@@ -5,6 +5,9 @@ import { expect, it, vi } from "vitest";
 import type { Checkpoint } from "../hooks/use-checkpoints";
 import { CheckpointHistoryDialog } from "./checkpoint-dialogs";
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("../hooks/use-checkpoints", () => ({ useForkFromCheckpoint: () => vi.fn() }));
+
 // Render the body in Node without Radix's browser portal.
 vi.mock("@/components/ui/dialog", () => {
   const wrapper = ({ children }: { children: ReactNode }) => createElement("div", null, children);
@@ -36,6 +39,7 @@ it("shows resolved checkpoints without the loading or empty state", () => {
   expect(html).toContain("<ul");
   expect(html).toContain("Before edit");
   expect(html).toContain("1 file");
+  expect(html).toContain("Fork from here");
   expect(html).not.toContain("Loading version history…");
   expect(html).not.toContain("No checkpoints yet.");
 });

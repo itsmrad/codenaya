@@ -10,6 +10,7 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
+import { copyCheckpointFiles } from "./checkpoints";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
@@ -290,59 +291,93 @@ export const duplicate = mutation({
     // The owner's own copy: secret files stay, like their other files.
     await copyProjectFiles(ctx, source._id, newProjectId, { keepSecretFiles: true });
 
-    // Project skills get new ids, so their settings keys are remapped.
-    const skillKeyMap = new Map<string, string>();
-    const skills = await ctx.db
-      .query("skills")
-      .withIndex("by_project", (q) => q.eq("projectId", source._id))
-      .take(MAX_PROJECT_SKILLS);
-    for (const skill of skills) {
-      const newSkillId = await ctx.db.insert("skills", {
-        ownerId: skill.ownerId,
-        projectId: newProjectId,
-        name: skill.name,
-        description: skill.description,
-        body: skill.body,
-        source: skill.source,
-        sourceUrl: skill.sourceUrl,
-        updatedAt: Date.now(),
-      });
-      skillKeyMap.set(userSkillKey(skill._id), userSkillKey(newSkillId));
-    }
+    await copyProjectConfiguration(ctx, source._id, newProjectId);
 
-    const settings = await ctx.db
-      .query("projectSkillSettings")
-      .withIndex("by_project", (q) => q.eq("projectId", source._id))
-      .take(MAX_COPIED_ROWS);
-    for (const setting of settings) {
-      await ctx.db.insert("projectSkillSettings", {
-        projectId: newProjectId,
-        ownerId: setting.ownerId,
-        skillKey: skillKeyMap.get(setting.skillKey) ?? setting.skillKey,
-        enabled: setting.enabled,
-        updatedAt: Date.now(),
-      });
-    }
+    return newProjectId;
+  },
+});
 
-    const envVars = await ctx.db
-      .query("projectEnvVars")
-      .withIndex("by_project", (q) => q.eq("projectId", source._id))
-      .take(MAX_COPIED_ROWS);
-    for (const envVar of envVars) {
-      if (envVar.visibility !== "public") continue;
-      await ctx.db.insert("projectEnvVars", {
-        projectId: newProjectId,
-        ownerId: envVar.ownerId,
-        key: envVar.key,
-        visibility: "public",
-        plainValue: envVar.plainValue,
-        maskedPreview: envVar.maskedPreview,
-        source: envVar.source,
-        sourceConnectionId: envVar.sourceConnectionId,
-        updatedAt: Date.now(),
-      });
-    }
+/** Shared project skills, enabled states and public env vars for owner copies. */
+async function copyProjectConfiguration(
+  ctx: MutationCtx,
+  sourceId: Id<"projects">,
+  newProjectId: Id<"projects">,
+) {
+  // Project skills get new ids, so their settings keys are remapped.
+  const skillKeyMap = new Map<string, string>();
+  const skills = await ctx.db
+    .query("skills")
+    .withIndex("by_project", (q) => q.eq("projectId", sourceId))
+    .take(MAX_PROJECT_SKILLS);
+  for (const skill of skills) {
+    const newSkillId = await ctx.db.insert("skills", {
+      ownerId: skill.ownerId,
+      projectId: newProjectId,
+      name: skill.name,
+      description: skill.description,
+      body: skill.body,
+      source: skill.source,
+      sourceUrl: skill.sourceUrl,
+      updatedAt: Date.now(),
+    });
+    skillKeyMap.set(userSkillKey(skill._id), userSkillKey(newSkillId));
+  }
 
+  const settings = await ctx.db
+    .query("projectSkillSettings")
+    .withIndex("by_project", (q) => q.eq("projectId", sourceId))
+    .take(MAX_COPIED_ROWS);
+  for (const setting of settings) {
+    await ctx.db.insert("projectSkillSettings", {
+      projectId: newProjectId,
+      ownerId: setting.ownerId,
+      skillKey: skillKeyMap.get(setting.skillKey) ?? setting.skillKey,
+      enabled: setting.enabled,
+      updatedAt: Date.now(),
+    });
+  }
+
+  const envVars = await ctx.db
+    .query("projectEnvVars")
+    .withIndex("by_project", (q) => q.eq("projectId", sourceId))
+    .take(MAX_COPIED_ROWS);
+  for (const envVar of envVars) {
+    if (envVar.visibility !== "public") continue;
+    await ctx.db.insert("projectEnvVars", {
+      projectId: newProjectId,
+      ownerId: envVar.ownerId,
+      key: envVar.key,
+      visibility: "public",
+      plainValue: envVar.plainValue,
+      maskedPreview: envVar.maskedPreview,
+      source: envVar.source,
+      sourceConnectionId: envVar.sourceConnectionId,
+      updatedAt: Date.now(),
+    });
+  }
+}
+
+/** Branch from saved files without changing the source, even during a run. */
+export const forkFromCheckpoint = mutation({
+  args: { checkpointId: v.id("checkpoints") },
+  returns: v.id("projects"),
+  handler: async (ctx, { checkpointId }) => {
+    const identity = await verifyAuth(ctx);
+    const checkpoint = await ctx.db.get("checkpoints", checkpointId);
+    if (!checkpoint) throw appError("NOT_FOUND", "Checkpoint not found");
+    const source = await getOwnedProject(ctx, checkpoint.projectId, identity.subject);
+    await assertCanCopy(ctx, identity.subject);
+    const newProjectId = await ctx.db.insert("projects", {
+      name: copyProjectName(source.name, " (fork)"),
+      ownerId: source.ownerId,
+      settings: source.settings,
+      instructions: source.instructions,
+      theme: source.theme,
+      updatedAt: Date.now(),
+    });
+    await countProjectBuilt(ctx);
+    await copyCheckpointFiles(ctx, checkpointId, newProjectId);
+    await copyProjectConfiguration(ctx, source._id, newProjectId);
     return newProjectId;
   },
 });

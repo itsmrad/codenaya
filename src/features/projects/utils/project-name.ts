@@ -38,8 +38,8 @@ export function projectNameFromTitle(title: string): string | null {
   return validateProjectName(name) === null ? name : null;
 }
 
-/** "<name> (copy)", shortening the original so the result stays valid. */
-export function copyProjectName(name: string): string {
-  const base = name.trim().slice(0, PROJECT_NAME_MAX_LENGTH - COPY_SUFFIX.length).trimEnd();
-  return `${base || "Untitled"}${COPY_SUFFIX}`;
+/** Appends the copy/fork suffix, shortening the original so the result stays valid. */
+export function copyProjectName(name: string, suffix = COPY_SUFFIX): string {
+  const base = name.trim().slice(0, PROJECT_NAME_MAX_LENGTH - suffix.length).trimEnd();
+  return `${base || "Untitled"}${suffix}`;
 }
