@@ -17,8 +17,10 @@ test.describe("landing page", () => {
       await page.goto("/");
 
       await expect(
-        page.getByRole("heading", { level: 1, name: "Build with AI." }),
+        page.getByRole("heading", { level: 1, name: "Your key. Your AI model.", exact: true }),
       ).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+      await expect(page.getByText("[ BYOK: no credits used ]", { exact: true })).toBeVisible();
       await expect(
         page.getByRole("textbox", { name: "Describe what you want to build" }).first(),
       ).toBeVisible();
@@ -50,7 +52,7 @@ test.describe("landing copy", () => {
     await page.goto("/");
 
     await expect(
-      page.getByText(/real-time collaboration|claude-powered|webcontainer|manage branches|deploy/i),
+      page.getByText(/real-time collaboration|claude-powered|webcontainer|manage branches|deploy|hosting/i),
     ).toHaveCount(0);
     for (const title of [
       "AI agent with model choice",
@@ -69,7 +71,7 @@ test.describe("landing layout", () => {
     await page.goto("/");
 
     const header = await page.locator("header").boundingBox();
-    const heading = await page.getByRole("heading", { level: 1, name: "Build with AI." }).boundingBox();
+    const heading = await page.getByRole("heading", { level: 1, name: "Your key. Your AI model.", exact: true }).boundingBox();
     expect(heading!.y - (header!.y + header!.height)).toBeGreaterThanOrEqual(24);
 
     const composer = await page

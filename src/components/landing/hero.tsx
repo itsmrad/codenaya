@@ -12,7 +12,7 @@ import { CountUp } from "./reveal";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-const CHIPS = ["Bring your own key", "Cloud sandbox", "GitHub export", "Desktop + phone"];
+const CHIPS = ["BYOK: no credits used", "Choose your model", "GitHub import + export", "Desktop + phone"];
 
 // Named providers only; "custom" is the any-endpoint option, counted by the "+".
 const NAMED_PROVIDERS = AI_PROVIDER_IDS.filter((id) => id !== "custom").length;
@@ -50,14 +50,14 @@ export const LandingHero = () => {
             {...enter(0.2)}
             className="mt-7 text-[2.75rem] font-medium leading-[1.04] tracking-[-0.03em] text-foreground sm:text-6xl lg:text-[5.25rem]"
           >
-            Build with AI.
+            Your key.
             <br />
-            Ship from your <span className="text-brand">browser</span>.
+            Your AI <span className="text-brand">model</span>.
           </motion.h1>
 
           <motion.p {...enter(0.3)} className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
-            A browser IDE with an AI agent that writes your code, a live preview to run it, and GitHub
-            export when it&apos;s done. On desktop or phone.
+            Bring your own key on any plan. Import from GitHub, build with AI, preview live,
+            then export or download a ZIP.
           </motion.p>
 
           <motion.div {...enter(0.4)} className="mx-auto mt-10 max-w-3xl">
