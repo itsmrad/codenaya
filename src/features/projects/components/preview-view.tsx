@@ -428,6 +428,7 @@ export const PreviewView = ({
   const wasRunActive = useRef(runActive);
   const previousRun = useRef(activeRun);
   const [pendingRunReload, setPendingRunReload] = useState(false);
+  if (pendingRunReload && (runActive || status === "error")) setPendingRunReload(false);
   useEffect(() => {
     const firstBuildEnded = wasFirstBuild.current && !firstBuild;
     const endedRun = activeRun === null ? previousRun.current : null;
@@ -447,11 +448,7 @@ export const PreviewView = ({
   }, [firstBuild, runActive, activeRun, appStartFailed, buildError, previewUrl, status, restart]);
 
   useEffect(() => {
-    if (!pendingRunReload) return;
-    if (runActive || status === "error") {
-      setPendingRunReload(false);
-      return;
-    }
+    if (!pendingRunReload || runActive || status === "error") return;
     // A run can finish before the last 300ms sync or its reinstall. Never navigate
     // into the stopped dev server; a failed restart now surfaces an engine error.
     if (status !== "running" || !previewUrl || (activeEngine === "sandbox" && sandbox.syncedFiles !== files)) return;
