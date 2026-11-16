@@ -24,7 +24,6 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
   const [chosenMinutes, setMinutes] = useState<0 | 15 | 30 | 60 | null>(null);
   const minutes = chosenMinutes ?? project?.shareKeepLiveMinutes ?? 0;
   const selectedMode = mode ?? project?.shareMode ?? "snapshot";
-  const [enabled, setEnabled] = useState<boolean | null>(null);
   const [refreshSnapshot, setRefreshSnapshot] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -33,13 +32,14 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
   const url = token ? new URL(sharePath(token), window.location.origin).toString() : null;
 
   const dirty = selectedMode !== (project?.shareMode ?? "snapshot") || minutes !== (project?.shareKeepLiveMinutes ?? 0) || refreshSnapshot;
+  // The switch shows only the saved state: it never claims "on" before the link works.
+  const enabled = project?.shareEnabled !== false;
   const toggle = async (on: boolean) => {
-    setEnabled(on);
-    if (!token) return;
+    if (!token || saving) return;
     if (on) { await save(true); return; }
     setSaving(true);
     try { await revokeShareLink({ projectId }); }
-    catch (error) { setEnabled(null); toast.error(convexErrorMessage(error, "Couldn't turn off the link")); }
+    catch (error) { toast.error(convexErrorMessage(error, "Couldn't turn off the link")); }
     finally { setSaving(false); }
   };
 
@@ -51,12 +51,11 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
         body: JSON.stringify(enableOnly ? { projectId, enableOnly: true } : { projectId, mode: selectedMode, minutes, updateSnapshot: refreshSnapshot }),
       });
       const result = await response.json();
-      if (!response.ok) { setEnabled(null); toast.error("Couldn't save the share link. Try again."); return; }
+      if (!response.ok) { toast.error("Couldn't save the share link. Try again."); return; }
       if (!enableOnly) setRefreshSnapshot(false);
-      setEnabled(null);
       if (result.status === "busy") toast.error("Preview is busy. Try again shortly.");
       else if (result.status === "error") toast.error("Couldn't start the preview. Try again.");
-    } catch { setEnabled(null); toast.error("Couldn't save the share link. Try again."); }
+    } catch { toast.error("Couldn't save the share link. Try again."); }
     finally { setSaving(false); }
   };
 
@@ -92,11 +91,12 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
             </span>
           </span>
           {token && <Switch
-            checked={enabled ?? (project?.shareEnabled !== false)}
+            checked={enabled}
             disabled={project === undefined || saving}
+            aria-busy={saving}
             onCheckedChange={toggle}
             aria-label="Anyone with the link can view"
-            title={(enabled ?? (project?.shareEnabled !== false)) ? "Turn off link" : "Turn on link"}
+            title={saving ? "Saving…" : enabled ? "Turn off link" : "Turn on link"}
           />}
         </label>
         <div className="flex flex-col gap-3">

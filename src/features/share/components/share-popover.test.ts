@@ -98,3 +98,20 @@ test.each(["mode", "snapshot refresh"])("off/on does not publish a staged %s dra
     ? { mode: "latest", minutes: 30, updateSnapshot: false }
     : { mode: "snapshot", minutes: 0, updateSnapshot: true });
 });
+
+test("the switch stays off while enabling is in flight and after a failed save", async () => {
+  mocks.project.shareToken = "a".repeat(32);
+  mocks.project.shareEnabled = false;
+  let finish!: (value: unknown) => void;
+  mocks.fetch.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  const switchIn = () => render().find(element => typeof element.props.onCheckedChange === "function")!;
+  const pending = (switchIn().props.onCheckedChange as (on: boolean) => Promise<void>)(true);
+  expect(switchIn().props).toMatchObject({ checked: false, disabled: true, "aria-busy": true });
+  finish({ ok: false, json: async () => ({ error: "nope" }) });
+  await pending;
+  expect(switchIn().props).toMatchObject({ checked: false, disabled: false, "aria-busy": false });
+  // A save that throws also leaves the saved (off) state.
+  mocks.fetch.mockRejectedValueOnce(new Error("offline"));
+  await (switchIn().props.onCheckedChange as (on: boolean) => Promise<void>)(true);
+  expect(switchIn().props).toMatchObject({ checked: false, disabled: false });
+});

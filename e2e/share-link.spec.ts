@@ -110,10 +110,14 @@ test.describe("website-only share link", () => {
       const revoked = await viewer.reload();
       expect(revoked?.status()).toBe(404);
       await expect(viewer.getByRole("heading", { level: 1, name: "Page not found" })).toBeVisible();
+      // Navigate only after the enable save has finished and the switch shows the saved state.
+      const enableSaved = page.waitForResponse(response => new URL(response.url()).pathname === "/api/share-link" && response.request().method() === "POST");
       await toggle.click();
+      expect((await enableSaved).ok()).toBe(true);
       await expect(toggle).toBeChecked();
+      await expect(toggle).toBeEnabled();
       await expect(linkInput).toHaveValue(link);
-      await viewer.goto(link);
+      await expect.poll(async () => (await viewer.goto(link))?.status(), { timeout: 15_000, intervals: [1_000, 2_000, 4_000] }).toBe(200);
       await expect(viewer.frameLocator(`iframe[title="${PROJECT_NAME}"]`).getByRole("heading", { name: "Shared website fixture" })).toBeVisible({ timeout: 150_000 });
       await expect(viewer).toHaveURL(link);
     } finally {
