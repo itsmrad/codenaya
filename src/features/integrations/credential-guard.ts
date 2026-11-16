@@ -6,6 +6,10 @@
  * must never log or return the matched text.
  */
 
+import { SECRET_NAME } from "@/lib/secret-name";
+
+import { classifyEnvKey } from "./env-keys";
+
 export const CREDENTIAL_TOKEN_PATTERNS: ReadonlyArray<{
   label: string;
   pattern: RegExp;
@@ -123,4 +127,9 @@ export function publicValueSecretRule(value: string): string | undefined {
   return CREDENTIAL_TOKEN_PATTERNS.find(({ label, pattern }) =>
     !PUBLIC_BY_DESIGN_RULES.has(label) && new RegExp(pattern.source, pattern.flags).test(trimmed),
   )?.label;
+}
+
+/** Warns about secret-looking names that the bundler will expose publicly. */
+export function publicNameLooksSecret(name: string): boolean {
+  return classifyEnvKey(name) === "public" && SECRET_NAME.test(name);
 }

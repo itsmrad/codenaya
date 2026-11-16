@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { detectCredential, publicValueSecretRule } from "./credential-guard";
+import { detectCredential, publicNameLooksSecret, publicValueSecretRule } from "./credential-guard";
 
 const fake = (...parts: string[]) => parts.join("");
 
@@ -87,5 +87,29 @@ describe("public env var values", () => {
     ["URL", "https://xyz.supabase.co"],
   ])("allows a %s", (_name, value) => {
     expect(publicValueSecretRule(value)).toBeUndefined();
+  });
+});
+
+describe("public env var names", () => {
+  it.each([
+    ["VITE_SUPABASE_SERVICE_ROLE_KEY", true],
+    ["NEXT_PUBLIC_API_SECRET", true],
+    ["VITE_PRIVATE_KEY", true],
+    ["VITE_API_URL", false],
+    ["NEXT_PUBLIC_SUPABASE_ANON_KEY", false],
+    ["VITE_STRIPE_PUBLISHABLE_KEY", false],
+    ["SERVICE_ROLE_KEY", false],
+    ["", false],
+    ["PUBLIC_API_SECRET", true],
+    ["REACT_APP_PRIVATE_KEY", true],
+    ["EXPO_PUBLIC_API_SECRET", true],
+    ["GATSBY_SERVICE_ROLE_KEY", true],
+    ["NUXT_PUBLIC_PRIVATE_KEY", true],
+    ["vite_private_key", false],
+    ["Next_PUBLIC_API_SECRET", false],
+    ["VITE_private_key", false],
+    ["VITE_api_SECRET", true],
+  ])("classifies %s as secret-looking: %s", (name, expected) => {
+    expect(publicNameLooksSecret(name)).toBe(expected);
   });
 });
