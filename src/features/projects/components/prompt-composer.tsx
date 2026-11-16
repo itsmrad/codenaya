@@ -84,7 +84,7 @@ const ComposerModelSelect = ({ disabled }: { disabled: boolean }) => {
   return (
     // Shrinks before Clear and Build do; the name truncates (vendor mark only in a narrow
     // composer), the tooltip keeps it readable.
-    <div className={cn(CELL, "min-w-0 shrink border-r")}>
+    <div className={cn(CELL, "min-w-0 flex-1")}>
       <AgentModelSelect
         value={agentModel}
         onValueChange={setAgentModel}
@@ -99,7 +99,7 @@ const ComposerModelSelect = ({ disabled }: { disabled: boolean }) => {
           </p>
         }
         // Fill the cell, so the whole cell hovers and clicks like Templates.
-        triggerClassName="h-full data-[size=sm]:h-full max-w-96 rounded-none @max-[480px]:[&_[data-slot=select-value]>span:last-child]:sr-only px-3 font-mono text-[10px] uppercase tracking-[0.12em] hover:bg-muted/50 dark:hover:bg-muted/50 aria-expanded:bg-muted/50"
+        triggerClassName="h-full data-[size=sm]:h-full w-full max-w-none rounded-none @max-[480px]:[&_[data-slot=select-value]>span:last-child]:sr-only px-3 font-mono text-[10px] uppercase tracking-[0.12em] hover:bg-muted/50 dark:hover:bg-muted/50 aria-expanded:bg-muted/50"
       />
     </div>
   );
@@ -225,7 +225,7 @@ export const PromptComposer = ({
 
           {/* Toolbar of cells; p-0! beats the addon's own padding so every cell centres. */}
           <PromptInputFooter className="h-11 items-stretch gap-0 border-t border-border p-0!">
-            <PromptInputTools data-testid="prompt-composer-tools" className="min-w-0 items-stretch gap-0">
+            <PromptInputTools data-testid="prompt-composer-tools" className="min-w-0 flex-1 items-stretch gap-0 [&>:last-child]:border-r-0">
               {showEnhance && (
                 <EnhancePromptButton
                   enhancer={enhancer}

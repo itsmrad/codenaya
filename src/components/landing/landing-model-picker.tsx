@@ -53,14 +53,14 @@ export const LandingModelPicker = () => {
   if (saved === undefined || !selected) return null;
 
   return (
-    <div ref={ref} className="relative flex">
+    <div ref={ref} className="relative flex min-w-0 flex-1">
       <button
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Model: ${selected.name}`}
         onClick={() => setOpen((value) => !value)}
-        className="flex h-full items-center gap-1.5 border-r border-border px-3 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground transition-colors hover:bg-muted/50 aria-expanded:bg-muted/50"
+        className="flex h-full w-full min-w-0 items-center gap-1.5 px-3 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground transition-colors hover:bg-muted/50 aria-expanded:bg-muted/50"
       >
         <span className="size-1.5 rounded-full bg-brand" />
         {/* Dot and chevron only in a narrow composer (@container), like the mode toggle; aria-label keeps the name. */}

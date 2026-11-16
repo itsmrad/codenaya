@@ -64,10 +64,7 @@ export const SERVER_DICTATION_LANGUAGES = [
   "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "uk",
 ] as const;
 
-/** More languages the picker offers, which only the browser can dictate. */
-export const BROWSER_DICTATION_LANGUAGES = ["ar", "hi", "id", "ja", "ko", "tr", "vi", "zh"] as const;
-
-/** The picker's default: the server model detects the language itself. */
+/** The server model detects the language itself. */
 export const DICTATION_AUTO = "auto";
 
 /** "pt-BR" → "pt". */

@@ -89,3 +89,19 @@ it("places the toolbar immediately after the textarea without a framework row or
   expect(find(tools[2], "mode-toggle")).toBeDefined();
   expect(find(tree, Select)).toBeUndefined();
 });
+
+it.each(["", "A kanban board"])("fills the toolbar through the model cell for prompt %j", (initialPrompt) => {
+  harness.resetCursor();
+  const tree = PromptComposer({ onSubmit: vi.fn(), initialPrompt });
+  const footer = find(tree, PromptInputFooter);
+  const cells = Children.toArray(footer.props.children as ReactNode) as ReactElement<Record<string, unknown>>[];
+  expect(cells).toHaveLength(2); // Tools and actions, no spacer cell.
+  expect(find(tree, PromptInputTools).props.className).toContain("flex-1");
+  expect(find(tree, PromptInputTools).props.className).toContain("[&>:last-child]:border-r-0");
+  const tools = Children.toArray(find(tree, PromptInputTools).props.children as ReactNode) as ReactElement<{ disabled: boolean }>[];
+  const modelCell = (tools.at(-1)!.type as (props: { disabled: boolean }) => ReactElement<Record<string, unknown>>)(tools.at(-1)!.props);
+  expect(modelCell.props.className).toContain("flex-1");
+  expect(modelCell.props.className).not.toContain("border-r");
+  const model = modelCell.props.children as ReactElement<{ triggerClassName: string }>;
+  expect(model.props.triggerClassName).toContain("w-full");
+});
