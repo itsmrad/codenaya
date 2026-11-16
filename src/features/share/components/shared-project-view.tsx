@@ -26,7 +26,9 @@ export const SharedProjectView = ({ token, initial }: { token: string; initial: 
     let timer: ReturnType<typeof setTimeout>;
     const poll = async (start: boolean) => {
       try {
-        const response = await fetch(`/api/public-preview/${token}`, { method: start ? "POST" : "GET", signal: controller.signal, cache: "no-store" });
+        const response = await fetch(`/api/public-preview/${token}`, { method: start ? "POST" : "GET", signal: controller.signal, cache: "no-store",
+          ...(start && attempt > 0 ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ retry: true }) } : {}),
+        });
         const retryAfter = Number(response.headers.get("Retry-After"));
         const result: Status = response.status === 429
           ? { status: "rate_limited", retryAfter: Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : undefined }

@@ -40,10 +40,20 @@ test("Update attaches to the existing unchanged build without booting", async ()
   mocks.prepare.mockResolvedValue({ state });
   mocks.heartbeat.mockResolvedValue(state);
   expect(await (await POST(request({ minutes: 30 }))).json()).toEqual({ status: "ready" });
-  expect(mocks.prepare).toHaveBeenCalledWith("same-slug");
+  expect(mocks.prepare).toHaveBeenCalledWith("same-slug", undefined, true);
   expect(mocks.after).not.toHaveBeenCalled();
 });
 test("only an actual owner-cap result returns busy", async () => {
   mocks.prepare.mockResolvedValue({ state: { status: "busy" } });
   expect(await (await POST(request({ minutes: 15 }))).json()).toEqual({ status: "busy" });
+});
+
+test("enable-only authenticates without applying drafts or preparing another build", async () => {
+  const response = await POST(new Request("http://localhost:3100/api/share-link", { method: "POST",
+    body: JSON.stringify({ projectId: "project", enableOnly: true, mode: "latest", minutes: 30, updateSnapshot: true }),
+  }));
+  expect(await response.json()).toEqual({ status: "saved" });
+  expect(mocks.action).toHaveBeenCalledWith(expect.anything(), { projectId: "project" }, { token: "jwt" });
+  expect(mocks.state).not.toHaveBeenCalled();
+  expect(mocks.prepare).not.toHaveBeenCalled();
 });

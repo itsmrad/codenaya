@@ -18,6 +18,22 @@ async function seed() {
 }
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
+test.each(["credentials", "ordinary"])("latest manifests omit logically deleted %s subtrees before cleanup", async name => {
+  const { t, id } = await seed();
+  const { folder, descendant } = await t.run(async ctx => {
+    await ctx.db.insert("files", { projectId: id, name: "index.html", type: "file", content: "safe", updatedAt: 1 });
+    const folder = await ctx.db.insert("files", { projectId: id, name, type: "folder", updatedAt: 1 });
+    const child = await ctx.db.insert("files", { projectId: id, parentId: folder, name: "public", type: "folder", updatedAt: 1 });
+    const descendant = await ctx.db.insert("files", { projectId: id, parentId: child, name: "config.json", type: "file", content: "private", updatedAt: 1 });
+    return { folder, descendant };
+  });
+  await t.withIdentity({ subject: "owner" }).mutation(api.files.deleteFile, { id: folder });
+  expect(await t.run(ctx => ctx.db.get("files", descendant))).not.toBeNull();
+  expect((await t.query(api.publicPreviews.manifest, { internalKey, token }))?.files).toEqual([
+    { path: "index.html", content: "safe", url: null },
+  ]);
+});
+
 describe("public preview reservations", () => {
   test("parallel starts claim a single lease, attach to one sandbox, and reject stale writes", async () => {
     const { t } = await seed();

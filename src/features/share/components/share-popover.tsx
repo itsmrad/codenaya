@@ -36,23 +36,23 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
   const toggle = async (on: boolean) => {
     setEnabled(on);
     if (!token) return;
-    if (on) { await save(); return; }
+    if (on) { await save(true); return; }
     setSaving(true);
     try { await revokeShareLink({ projectId }); }
     catch (error) { setEnabled(null); toast.error(convexErrorMessage(error, "Couldn't turn off the link")); }
     finally { setSaving(false); }
   };
 
-  const save = async () => {
+  const save = async (enableOnly = false) => {
     setSaving(true);
     try {
       const response = await fetch("/api/share-link", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, mode: selectedMode, minutes, updateSnapshot: refreshSnapshot }),
+        body: JSON.stringify(enableOnly ? { projectId, enableOnly: true } : { projectId, mode: selectedMode, minutes, updateSnapshot: refreshSnapshot }),
       });
       const result = await response.json();
       if (!response.ok) { setEnabled(null); toast.error("Couldn't save the share link. Try again."); return; }
-      setRefreshSnapshot(false);
+      if (!enableOnly) setRefreshSnapshot(false);
       setEnabled(null);
       if (result.status === "busy") toast.error("Preview is busy. Try again shortly.");
       else if (result.status === "error") toast.error("Couldn't start the preview. Try again.");

@@ -28,6 +28,7 @@ import { projectThemeValidator } from "./schema";
 import { countProjectBuilt } from "./stats";
 import { recordProjectEvent } from "./activationEvents";
 import { lastRunStatuses } from "../src/features/projects/utils/project-status";
+import { validShareToken } from "../src/features/share/preview-policy";
 
 /** Env vars and skill settings copied per duplicate; far above real usage. */
 const MAX_COPIED_ROWS = 500;
@@ -379,12 +380,9 @@ export const forkFromCheckpoint = mutation({
   },
 });
 
-/** A share token: 128 random bits as hex (#260). */
-const SHARE_TOKEN_PATTERN = /^[0-9a-f]{32}$/;
-
 /** The project a share token opens, unless the link was revoked or the project is being deleted. */
 export async function getSharedProject(ctx: QueryCtx, token: string) {
-  if (!SHARE_TOKEN_PATTERN.test(token)) return null;
+  if (!validShareToken(token)) return null;
   const project = await ctx.db
     .query("projects")
     .withIndex("by_shareToken", (q) => q.eq("shareToken", token))

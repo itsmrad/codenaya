@@ -5,7 +5,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api } from "../../../../convex/_generated/api";
 import schema from "../../../../convex/schema";
 import { GET, POST } from "@/app/api/public-preview/[token]/route";
-import { readPreviewInputs } from "./public-preview";
+import { bootPreview, readPreviewInputs } from "./public-preview";
+import { startProductionSite } from "./production-site";
 import { checkRateLimit, resetRateLimits } from "@/lib/rate-limit";
 
 const mocks = vi.hoisted(() => ({ query: vi.fn(), mutation: vi.fn(), kill: vi.fn(), connect: vi.fn(), create: vi.fn(), after: vi.fn() }));
@@ -101,4 +102,46 @@ test("frame origin configuration changes invalidate an existing warm proxy", asy
   const refreshed = await readPreviewInputs(token);
   expect(refreshed?.revision).not.toBe(inputs.revision);
   expect(refreshed?.manifest).toEqual(inputs.manifest);
+});
+
+test("a failed build stops automatic starts, frees capacity, and retries only on explicit intent", async () => {
+  const { t } = await running("latest");
+  await t.mutation(api.publicPreviews.update, { internalKey: key, token, lease: "old", release: true });
+  mocks.create.mockResolvedValue({ provider: "e2b", id: "failed-build", kill: mocks.kill });
+  vi.mocked(startProductionSite).mockRejectedValue(new Error("Build failed"));
+  expect(await (await POST(request(), context)).json()).toEqual({ status: "boot" });
+  await mocks.after.mock.calls[0][0]();
+  expect(mocks.create).toHaveBeenCalledTimes(1);
+  expect(mocks.kill).toHaveBeenCalledTimes(1);
+  for (let index = 0; index < 3; index++) {
+    expect(await (await GET(request(), context)).json()).toEqual({ status: "error" });
+    expect(await (await POST(request(), context)).json()).toEqual({ status: "error" });
+  }
+  expect(mocks.after).toHaveBeenCalledTimes(1);
+  // Remembering the error must not consume either owner slot after a confirmed kill.
+  for (const char of ["b", "c"]) {
+    const otherToken = char.repeat(32);
+    await t.run(ctx => ctx.db.insert("projects", { name: char, ownerId: "owner", updatedAt: 1, shareToken: otherToken }));
+    expect(await t.mutation(api.publicPreviews.claim, { internalKey: key, token: otherToken, lease: char, revision: "v1" })).toMatchObject({ status: "boot" });
+  }
+  for (const char of ["b", "c"]) await t.mutation(api.publicPreviews.update, { internalKey: key, token: char.repeat(32), lease: char, release: true });
+  const retry = new Request(request(), { body: JSON.stringify({ retry: true }) });
+  expect(await (await POST(retry, context)).json()).toEqual({ status: "boot" });
+  expect(mocks.after).toHaveBeenCalledTimes(2);
+  expect(mocks.create).toHaveBeenCalledTimes(1);
+});
+
+test("a failed cleanup reports error but retains the live reservation until its timeout", async () => {
+  const { t } = await running("latest");
+  await t.mutation(api.publicPreviews.update, { internalKey: key, token, lease: "old", release: true });
+  mocks.create.mockResolvedValue({ provider: "e2b", id: "failed-kill", kill: mocks.kill });
+  mocks.kill.mockRejectedValue(new Error("Kill failed"));
+  vi.mocked(startProductionSite).mockRejectedValue(new Error("Build failed"));
+  await POST(request(), context);
+  await expect(mocks.after.mock.calls[0][0]()).rejects.toThrow("Kill failed");
+  expect(await (await GET(request(), context)).json()).toEqual({ status: "error" });
+  const project = await t.run(ctx => ctx.db.query("projects").withIndex("by_shareToken", q => q.eq("shareToken", token)).unique());
+  expect(project?.publicPreview).toMatchObject({ sandboxId: "e2b:failed-kill", failed: true });
+  expect(project!.publicPreview!.until).toBeGreaterThan(Date.now());
+  expect(mocks.create).toHaveBeenCalledTimes(1);
 });

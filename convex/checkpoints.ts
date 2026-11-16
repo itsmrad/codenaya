@@ -44,7 +44,7 @@ const MAX_LABEL_LENGTH = 140;
 export const MAX_CHECKPOINT_FILES = 2000;
 
 /** Each file of a project with its slash-separated path from the root. */
-function withPaths(files: Doc<"files">[]) {
+export function withPaths(files: Doc<"files">[]) {
   const byId = new Map(files.map((file) => [file._id, file]));
   const paths = new Map<Id<"files">, string | undefined>();
   const pathOf = (file: Doc<"files">): string | undefined => {

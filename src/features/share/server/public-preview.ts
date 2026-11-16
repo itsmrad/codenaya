@@ -9,7 +9,7 @@ import { startProductionSite } from "./production-site";
 import { api } from "../../../../convex/_generated/api";
 
 const key = () => process.env.CODENAYA_CONVEX_INTERNAL_KEY!;
-export const previewState = (token: string, revision?: string) => convex.mutation(api.publicPreviews.claim, { internalKey: key(), token, lease: randomUUID(), revision });
+export const previewState = (token: string, revision?: string, retry?: boolean) => convex.mutation(api.publicPreviews.claim, { internalKey: key(), token, lease: randomUUID(), revision, retry });
 export type PreviewState = Awaited<ReturnType<typeof previewState>>;
 const update = (token: string, lease: string, extra: { sandboxId?: string; url?: string; ready?: boolean; release?: boolean; heartbeat?: boolean; failed?: boolean }) =>
   convex.mutation(api.publicPreviews.update, { internalKey: key(), token, lease, ...extra });
@@ -45,11 +45,11 @@ export async function readPreviewInputs(token: string) {
   return { manifest, revision };
 }
 
-export async function preparePreview(token: string, inputs?: Awaited<ReturnType<typeof readPreviewInputs>>): Promise<{ state: PreviewState; manifest?: NonNullable<FunctionReturnType<typeof api.publicPreviews.manifest>> }> {
+export async function preparePreview(token: string, inputs?: Awaited<ReturnType<typeof readPreviewInputs>>, retry?: boolean): Promise<{ state: PreviewState; manifest?: NonNullable<FunctionReturnType<typeof api.publicPreviews.manifest>> }> {
   const loaded = inputs === undefined ? await readPreviewInputs(token) : inputs;
   if (!loaded) return { state: { status: "missing" as const } };
   const { manifest, revision } = loaded;
-  let state = await previewState(token, revision);
+  let state = await previewState(token, revision, retry);
   if (state.status === "retire") {
     await retirePreview(token, state);
     state = await previewState(token, revision);
@@ -75,13 +75,11 @@ export async function bootPreview(token: string, prepared: Awaited<ReturnType<ty
     const url = await startProductionSite(sandbox, files, manifest.env, allowedOrigins);
     if (!await update(token, state.lease, { ready: true, url })) await sandbox.kill();
   } catch {
+    await update(token, state.lease, { failed: true });
     // A failed kill keeps the reservation until the provider's hard timeout.
     if (sandbox) {
       await sandbox.kill();
-      await update(token, state.lease, { release: true });
-    } else {
-      // A timed-out create may still have reached the provider: fail closed until its timeout.
-      await update(token, state.lease, { failed: true });
+      await update(token, state.lease, { release: true, failed: true });
     }
   }
 }

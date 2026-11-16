@@ -3,9 +3,8 @@ import { mutation, query } from "./_generated/server";
 import { getSharedProject } from "./projects";
 import { validateInternalKey } from "./internalKey";
 import { withContents } from "./fileContents";
-import { MAX_CHECKPOINT_FILES } from "./checkpoints";
+import { MAX_CHECKPOINT_FILES, withPaths } from "./checkpoints";
 import { isSecretFile } from "./secretFiles";
-import { getFilePath } from "../src/features/sandbox-preview/utils/file-tree";
 import { MAX_PUBLIC_PREVIEWS, previewDeadline, safePreviewPath } from "../src/features/share/preview-policy";
 
 /** Only Next's server can read the build inputs; no public code or env endpoint. */
@@ -26,8 +25,10 @@ export const manifest = query({
       entries = await ctx.db.query("checkpointFiles").withIndex("by_checkpoint_and_path", q => q.eq("checkpointId", checkpoint._id)).take(MAX_CHECKPOINT_FILES + 1);
     } else {
       const files = await ctx.db.query("files").withIndex("by_project", q => q.eq("projectId", project._id)).take(MAX_CHECKPOINT_FILES + 1);
-      const byId = new Map(files.map(file => [file._id, file]));
-      entries = (await withContents(ctx, project._id, files)).map(file => ({ ...file, path: getFilePath(file, byId) }));
+      if (files.length > MAX_CHECKPOINT_FILES) throw new Error("Project too large to preview");
+      const paths = new Map(withPaths(files).map(({ file, path }) => [file._id, path]));
+      entries = (await withContents(ctx, project._id, files.filter(file => paths.has(file._id))))
+        .map(file => ({ ...file, path: paths.get(file._id)! }));
     }
     if (entries.length > MAX_CHECKPOINT_FILES) throw new Error("Project too large to preview");
     const files = await Promise.all(entries.filter(file => file.type === "file" && safePreviewPath(file.path) &&
@@ -45,7 +46,7 @@ const stateResult = v.object({ status: v.union(v.literal("missing"), v.literal("
 
 /** Transactional per-link boot lock and owner cap, across all server instances. */
 export const claim = mutation({
-  args: { internalKey: v.string(), token: v.string(), lease: v.string(), revision: v.optional(v.string()) },
+  args: { internalKey: v.string(), token: v.string(), lease: v.string(), revision: v.optional(v.string()), retry: v.optional(v.boolean()) },
   returns: stateResult,
   handler: async (ctx, args): Promise<Infer<typeof stateResult>> => {
     validateInternalKey(args.internalKey);
@@ -53,6 +54,10 @@ export const claim = mutation({
     if (!project) return { status: "missing" as const };
     const now = Date.now();
     const active = project.publicPreview;
+    // Remember a failed build without reserving capacity for its killed sandbox.
+    if (active?.failed && !args.retry && (!args.revision || args.revision === active.revision)) {
+      return { status: "error" as const, ...active };
+    }
     if (active && active.until > now) {
       const desired = args.revision ?? active.desiredRevision;
       if (desired && desired !== active.revision) {
@@ -87,7 +92,9 @@ export const update = mutation({
     const active = project?.publicPreview;
     if (!project || !active || active.lease !== args.lease) return null;
     if (args.release) {
-      await ctx.db.patch("projects", project._id, { publicPreview: undefined });
+      await ctx.db.patch("projects", project._id, { publicPreview: args.failed
+        ? { lease: active.lease, revision: active.revision, ready: false, failed: true, until: 0 }
+        : undefined });
       return null;
     }
     const until = args.heartbeat ? previewDeadline(Date.now(), project.shareKeepLiveUntil) : active.until;

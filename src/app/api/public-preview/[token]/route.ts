@@ -27,6 +27,8 @@ export async function POST(request: Request, { params }: Context) {
   if (!validShareToken(token)) return json({ status: "missing" });
   try {
     let state = await previewState(token);
+    const input: unknown = state.status === "error" ? await request.json().catch(() => null) : null;
+    const retry = !!input && typeof input === "object" && "retry" in input && input.retry === true;
     let inputs: Awaited<ReturnType<typeof readPreviewInputs>> | undefined;
     if (state.status === "ready" || state.status === "wait") {
       inputs = await readPreviewInputs(token);
@@ -36,11 +38,11 @@ export async function POST(request: Request, { params }: Context) {
         // Unchanged attachments never consume boot allowance; a dead sandbox still does.
         if (state.status !== "boot") return json(state);
       }
-    } else if (state.status !== "boot" && state.status !== "retire") return json(state);
+    } else if (state.status !== "boot" && state.status !== "retire" && !(state.status === "error" && retry)) return json(state);
     const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
     const limit = checkRateLimit(ip, { scope: "public-preview-start", limit: 5, windowMs: 60_000 });
     if (!limit.allowed) return rateLimitedResponse(limit);
-    const prepared = await preparePreview(token, inputs);
+    const prepared = retry ? await preparePreview(token, inputs, true) : await preparePreview(token, inputs);
     if (prepared.state.status === "boot") after(() => bootPreview(token, prepared));
     return json(prepared.state.sandboxId ? await heartbeatPreview(token, prepared.state) : prepared.state);
   } catch { return Response.json({ status: "error" }, { status: 503 }); }

@@ -76,3 +76,25 @@ test("turning off an existing link is one explicit mutation", async () => {
   expect(mocks.mutation).toHaveBeenCalledTimes(1);
   expect(mocks.fetch).not.toHaveBeenCalled();
 });
+
+test.each(["mode", "snapshot refresh"])("off/on does not publish a staged %s draft", async draft => {
+  mocks.project.shareToken = "a".repeat(32);
+  if (draft === "mode") {
+    const selects = render().filter(element => typeof element.props.onValueChange === "function");
+    (selects[0].props.onValueChange as (value: string) => void)("latest");
+    (selects[1].props.onValueChange as (value: string) => void)("30");
+  } else {
+    const refresh = render().find(element => element.props.children === "Update shared version")!;
+    (refresh.props.onClick as () => void)();
+  }
+  const switchIn = () => render().find(element => typeof element.props.onCheckedChange === "function")!;
+  await (switchIn().props.onCheckedChange as (on: boolean) => Promise<void>)(false);
+  await (switchIn().props.onCheckedChange as (on: boolean) => Promise<void>)(true);
+  expect(JSON.parse(mocks.fetch.mock.calls[0][1].body)).toEqual({ projectId: "project", enableOnly: true });
+  // The draft is still local and requires its own explicit Update.
+  const update = render().find(element => element.props.children === "Update link")!;
+  await (update.props.onClick as () => Promise<void>)();
+  expect(JSON.parse(mocks.fetch.mock.calls[1][1].body)).toMatchObject(draft === "mode"
+    ? { mode: "latest", minutes: 30, updateSnapshot: false }
+    : { mode: "snapshot", minutes: 0, updateSnapshot: true });
+});
