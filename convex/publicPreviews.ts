@@ -40,8 +40,8 @@ export const manifest = query({
   },
 });
 
-const stateResult = v.object({ status: v.union(v.literal("missing"), v.literal("busy"), v.literal("boot"), v.literal("wait"), v.literal("ready"), v.literal("retire")),
-  desiredRevision: v.optional(v.string()), ready: v.optional(v.boolean()), revision: v.optional(v.string()), sandboxId: v.optional(v.string()), url: v.optional(v.string()), lease: v.optional(v.string()), until: v.optional(v.number()) });
+const stateResult = v.object({ status: v.union(v.literal("missing"), v.literal("busy"), v.literal("boot"), v.literal("wait"), v.literal("ready"), v.literal("retire"), v.literal("error")),
+  failed: v.optional(v.boolean()), desiredRevision: v.optional(v.string()), ready: v.optional(v.boolean()), revision: v.optional(v.string()), sandboxId: v.optional(v.string()), url: v.optional(v.string()), lease: v.optional(v.string()), until: v.optional(v.number()) });
 
 /** Transactional per-link boot lock and owner cap, across all server instances. */
 export const claim = mutation({
@@ -59,7 +59,7 @@ export const claim = mutation({
         if (active.sandboxId) return { status: "retire" as const, ...active };
         await ctx.db.patch("projects", project._id, { publicPreview: { ...active, desiredRevision: desired } });
       }
-      return { status: active.ready ? "ready" as const : "wait" as const, ...active };
+      return { status: active.failed ? "error" as const : active.ready ? "ready" as const : "wait" as const, ...active };
     }
     // An expired provider timeout is also proof that the old sandbox no longer counts.
     const owners = await ctx.db.query("projects").withIndex("by_owner", q => q.eq("ownerId", project.ownerId)).take(501);
@@ -77,7 +77,7 @@ export const claim = mutation({
 export const update = mutation({
   args: { internalKey: v.string(), token: v.string(), lease: v.string(),
     sandboxId: v.optional(v.string()), url: v.optional(v.string()), ready: v.optional(v.boolean()),
-    release: v.optional(v.boolean()), heartbeat: v.optional(v.boolean()) },
+    failed: v.optional(v.boolean()), release: v.optional(v.boolean()), heartbeat: v.optional(v.boolean()) },
   returns: v.union(v.null(), v.number()),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
@@ -91,7 +91,7 @@ export const update = mutation({
     const until = args.heartbeat ? previewDeadline(Date.now(), project.shareKeepLiveUntil) : active.until;
     await ctx.db.patch("projects", project._id, { publicPreview: { ...active, until,
       ...(args.sandboxId ? { sandboxId: args.sandboxId } : {}), ...(args.url ? { url: args.url } : {}),
-      ...(args.ready !== undefined ? { ready: args.ready } : {}),
+      ...(args.ready !== undefined ? { ready: args.ready } : {}), ...(args.failed ? { failed: true } : {}),
     } });
     return until;
   },

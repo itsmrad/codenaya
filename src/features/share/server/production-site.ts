@@ -34,7 +34,21 @@ export default async (phase, context) => {
   const build = await sandbox.run(framework === "next" ? "./node_modules/.bin/next build --webpack" : "./node_modules/.bin/vite build --sourcemap false", options);
   if (build.exitCode) throw new Error("Build failed");
   // Even a project config that opts into maps cannot expose them on the public server.
-  const clean = await sandbox.run("find dist .next .output public -type f -name '*.map' -delete 2>/dev/null; test -d dist -o -d .next -o -d .output", options);
+  await sandbox.writeFiles([{ path: "/home/user/codenaya-clean.mjs", data: `
+import { readdir, readFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+async function clean(dir) {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    if (entry.isSymbolicLink() || /\\.(map|tsx?|jsx)$/.test(entry.name)) { await rm(path, { force: true }); continue; }
+    if (entry.isDirectory()) { await clean(path); continue; }
+    if (/\\.[cm]?js$/.test(entry.name) && /sourceMappingURL\\s*=\\s*data:/.test(await readFile(path, 'utf8'))) throw new Error('Inline source map');
+  }
+}
+for (const dir of ${JSON.stringify(framework === "vite" ? ["dist"] : framework === "next" ? [".next/static", "public"] : ["dist/client", ".output/public"])}) await clean(dir);
+` }]);
+  const clean = await sandbox.run("node /home/user/codenaya-clean.mjs", options);
   if (clean.exitCode) throw new Error("Map cleanup failed");
   if (framework === "tanstack-start") await sandbox.writeFiles([{ path: "/home/user/codenaya-start.mjs", data: START_SERVER }]);
   const command = framework === "next" ? "./node_modules/.bin/next start --hostname 0.0.0.0 --port 3000" :

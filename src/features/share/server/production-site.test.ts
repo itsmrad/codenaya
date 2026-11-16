@@ -17,7 +17,7 @@ describe("public builds", () => {
     await startProductionSite(box, files(dependencies), { VITE_URL: "public" });
     expect(box.run).toHaveBeenCalledWith(expect.stringContaining(build), expect.anything());
     expect(box.start).toHaveBeenCalledWith(expect.stringContaining(start), expect.objectContaining({ envs: expect.objectContaining({ NODE_ENV: "production", VITE_URL: "public" }) }));
-    expect(box.run).toHaveBeenCalledWith(expect.stringContaining("-name '*.map' -delete"), expect.anything());
+    expect(box.run).toHaveBeenCalledWith(expect.stringContaining("node /home/user/codenaya-clean.mjs"), expect.anything());
     const commands = vi.mocked(box.run).mock.calls.map(([command]) => command).join("\n");
     expect(commands).not.toMatch(/npm run dev|vite dev|next dev/);
   });

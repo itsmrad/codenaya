@@ -10,7 +10,7 @@ import { api } from "../../../../convex/_generated/api";
 const key = () => process.env.CODENAYA_CONVEX_INTERNAL_KEY!;
 export const previewState = (token: string, revision?: string) => convex.mutation(api.publicPreviews.claim, { internalKey: key(), token, lease: randomUUID(), revision });
 export type PreviewState = Awaited<ReturnType<typeof previewState>>;
-const update = (token: string, lease: string, extra: { sandboxId?: string; url?: string; ready?: boolean; release?: boolean; heartbeat?: boolean }) =>
+const update = (token: string, lease: string, extra: { sandboxId?: string; url?: string; ready?: boolean; release?: boolean; heartbeat?: boolean; failed?: boolean }) =>
   convex.mutation(api.publicPreviews.update, { internalKey: key(), token, lease, ...extra });
 
 export async function retirePreview(token: string, state: PreviewState) {
@@ -66,7 +66,12 @@ export async function bootPreview(token: string, prepared: Awaited<ReturnType<ty
     if (!await update(token, state.lease, { ready: true, url })) await sandbox.kill();
   } catch {
     // A failed kill keeps the reservation until the provider's hard timeout.
-    if (sandbox) await sandbox.kill();
-    await update(token, state.lease, { release: true });
+    if (sandbox) {
+      await sandbox.kill();
+      await update(token, state.lease, { release: true });
+    } else {
+      // A timed-out create may still have reached the provider: fail closed until its timeout.
+      await update(token, state.lease, { failed: true });
+    }
   }
 }
