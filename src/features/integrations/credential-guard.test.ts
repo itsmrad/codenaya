@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { detectCredential, publicNameLooksSecret, publicValueSecretRule } from "./credential-guard";
+import {
+  DSN_PASSWORD_PATTERN,
+  detectCredential,
+  publicNameLooksSecret,
+  publicValueSecretRule,
+} from "./credential-guard";
 
 const fake = (...parts: string[]) => parts.join("");
 
@@ -111,5 +116,15 @@ describe("public env var names", () => {
     ["VITE_api_SECRET", true],
   ])("classifies %s as secret-looking: %s", (name, expected) => {
     expect(publicNameLooksSecret(name)).toBe(expected);
+  });
+});
+
+describe("DSN password pattern", () => {
+  it("stays linear on a long base64-like line (#300)", () => {
+    // Unbounded runs took tens of seconds here: every start re-scanned the rest.
+    const line = "a+".repeat(200_000);
+    const started = performance.now();
+    expect([...line.matchAll(DSN_PASSWORD_PATTERN)]).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(2000);
   });
 });

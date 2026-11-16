@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { convexErrorMessage } from "@/lib/convex-error";
+import { convexErrorMessage, getAppError } from "@/lib/convex-error";
 
 import {
   TECH_STACK_OPTIONS,
@@ -135,6 +135,11 @@ export const PublishDialog = ({
       toast.success("Published to showcase!");
       onOpenChange(false);
     } catch (err: unknown) {
+      // Too large for the server-side secret scan: the owner can still publish after confirming.
+      if (!acknowledgeSecretFindings && getAppError(err)?.reason === "scan_too_large") {
+        gate.confirmUnchecked(publishEntry);
+        return;
+      }
       toast.error(convexErrorMessage(err, "Failed to publish"));
     } finally {
       setSubmitting(false);
