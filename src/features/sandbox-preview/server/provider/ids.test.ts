@@ -13,7 +13,7 @@ describe("public sandbox ids", () => {
 
   it.each([
     "",
-    "blaxel:abc", // unknown provider
+    "other:abc", // unknown provider
     "E2B:abc", // providers are matched exactly
     "e2b:",
     ":abc",
@@ -33,6 +33,6 @@ describe("public sandbox ids", () => {
   it("keys a sandbox the same with or without its prefix, and nothing for a malformed id", () => {
     expect(canonicalSandboxIdOrNull("abc")).toBe("e2b:abc");
     expect(canonicalSandboxIdOrNull("e2b:abc")).toBe("e2b:abc");
-    expect(canonicalSandboxIdOrNull("blaxel:abc")).toBeNull();
+    expect(canonicalSandboxIdOrNull("other:abc")).toBeNull();
   });
 });

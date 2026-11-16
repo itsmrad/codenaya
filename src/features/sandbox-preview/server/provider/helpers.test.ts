@@ -45,7 +45,7 @@ describe("helpers over run", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("falls back to the boot's /proc tree roots without one, never PID 1, envd or a stray process", async () => {
+  it("falls back to the roots of the preview's marked /proc processes, never PID 1, envd or an unmarked one", async () => {
     const dev = ["CODENAYA_DEV_COMMAND=npm run dev", "PATH=/bin"];
     const line = (pid: number, ppid: number, envs: string[], ...argv: string[]) =>
       `${pid}\t${ppid}\t/\t${b64(...argv)}\t${envs.length ? b64(...envs) : ""}\n`;
@@ -56,8 +56,9 @@ describe("helpers over run", () => {
         line(7, 5, dev, "/bin/bash", "-l", "-c", "npm run dev") + // marked root
         line(8, 7, dev, "node", "vite") + // marked child: its root stands for it
         line(20, 1, ["PATH=/bin"], "sleep", "99") + // a stray root process
-        line(30, 5, ["PATH=/bin"], "/bin/bash", "-l", "-c", "npm install") + // the install
-        line(31, 30, ["PATH=/bin"], "npm", "install") +
+        line(25, 1, ["PATH=/bin"], "/bin/bash", "-l", "-c", "npm install") + // an install we didn't start
+        line(30, 5, ["CODENAYA_BOOT_COMMAND=install"], "/bin/bash", "-l", "-c", "bash setup.sh") + // the tagged install
+        line(31, 30, ["CODENAYA_BOOT_COMMAND=install"], "bash", "setup.sh") +
         line(40, 5, ["TARGET_PORT=3000"], "/bin/bash", "-l", "-c", "node /home/user/e2b-proxy.js"), // the proxy
     });
 

@@ -1,7 +1,7 @@
 import { parseProviderConfig } from "./provider/config";
 import { canonicalSandboxIdOrNull, parsePublicSandboxIdOrNull, toPublicSandboxId } from "./provider/ids";
 import { getProvider } from "./provider/registry";
-import type { Sandbox } from "./provider/types";
+import { type Sandbox, SandboxNotFoundError } from "./provider/types";
 
 interface OwnedSandbox {
   sandbox: Sandbox;
@@ -57,8 +57,8 @@ export const forgetSandbox = (sandboxId: string) => {
 /**
  * The sandbox when `userId` owns it, `null` when someone else does, the id is
  * malformed or its provider is not configured: all alike, so a caller can't probe
- * which providers or sandboxes exist. Rejects when the provider cannot reach it
- * (e.g. it already expired).
+ * which providers or sandboxes exist. A sandbox the provider no longer has
+ * (expired, killed) is null too; any other provider failure rejects.
  */
 export const getOwnedSandbox = async (
   sandboxId: string,
@@ -72,9 +72,15 @@ export const getOwnedSandbox = async (
 
   if (!owned) {
     if (!parseProviderConfig().configured[parsed.provider]) return null;
-    const sandbox = await getProvider(parsed.provider).connect(parsed.nativeId);
-    const sandboxInfo = await sandbox.info();
-    const ownerId = sandboxInfo.metadata?.userId;
+    let sandbox: Sandbox;
+    let ownerId: string | undefined;
+    try {
+      sandbox = await getProvider(parsed.provider).connect(parsed.nativeId);
+      ownerId = (await sandbox.info()).metadata?.userId;
+    } catch (error) {
+      if (error instanceof SandboxNotFoundError) return null;
+      throw error;
+    }
 
     if (ownerId !== userId) {
       return null;

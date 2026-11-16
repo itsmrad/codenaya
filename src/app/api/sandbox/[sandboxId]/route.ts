@@ -17,6 +17,7 @@ import {
   waitForReinstall,
 } from "@/features/sandbox-preview/server/sandbox-registry";
 import {
+  BOOT_INSTALL_ENVS,
   DevServerStartError,
   fallbackDevStart,
   installWithDevServerStopped,
@@ -240,6 +241,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
             const result = await sandbox
               .run(command, {
                 cwd: WORK_DIR,
+                envs: BOOT_INSTALL_ENVS,
                 timeoutMs: boundedTimeout(5 * 60 * 1000, budget.left()),
                 onStdout: observe,
                 onStderr: observe,

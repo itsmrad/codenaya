@@ -112,6 +112,11 @@ export class SandboxConfigError extends Error {
   name = "SandboxConfigError";
 }
 
+/** The provider has no such sandbox: it expired, was killed or never existed. */
+export class SandboxNotFoundError extends Error {
+  name = "SandboxNotFoundError";
+}
+
 /** The provider throttled us or the account is out of quota; routes report `rate_limit`. */
 export class SandboxRateLimitError extends Error {
   name = "SandboxRateLimitError";

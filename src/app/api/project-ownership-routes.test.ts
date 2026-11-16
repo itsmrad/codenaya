@@ -34,6 +34,7 @@ vi.mock("e2b", () => ({
   Sandbox: { create: mocks.sandboxCreate, connect: mocks.sandboxConnect },
   AuthenticationError: class extends Error {},
   RateLimitError: class extends Error {},
+  SandboxNotFoundError: class extends Error {},
 }));
 
 import { POST as sandboxPOST } from "./sandbox/route";

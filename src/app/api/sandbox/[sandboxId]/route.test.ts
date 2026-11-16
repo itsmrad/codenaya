@@ -58,7 +58,7 @@ describe("malformed sandbox ids (PR3c)", () => {
   const url = "http://localhost/api/sandbox/x";
   const files = JSON.stringify({ files: [{ path: "src/App.tsx", content: "x" }] });
 
-  it.each(["../sbx", "blaxel:sbx_1", "e2b:", "sbx 1"])("answers %j with the unknown-id 404 before any lookup", async (id) => {
+  it.each(["../sbx", "other:sbx_1", "e2b:", "sbx 1"])("answers %j with the unknown-id 404 before any lookup", async (id) => {
     const responses = [
       await DELETE(new Request(url, { method: "DELETE" }), at(id)),
       await POST(new Request(url, { method: "POST", body: '{"action":"recover-esbuild"}' }), at(id)),

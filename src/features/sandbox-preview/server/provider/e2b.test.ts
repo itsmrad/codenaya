@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => {
   class SandboxError extends Error {}
   class RateLimitError extends SandboxError {}
   class TimeoutError extends SandboxError {}
+  class SandboxNotFoundError extends SandboxError {}
   class CommandExitError extends SandboxError {
     constructor(
       readonly exitCode: number,
@@ -15,7 +16,7 @@ const mocks = vi.hoisted(() => {
     }
   }
   return {
-    errors: { AuthenticationError, RateLimitError, TimeoutError, CommandExitError },
+    errors: { AuthenticationError, RateLimitError, TimeoutError, SandboxNotFoundError, CommandExitError },
     create: vi.fn(),
     connect: vi.fn(),
     list: vi.fn(),
@@ -36,7 +37,7 @@ vi.mock("e2b", () => ({
 }));
 
 import { DEFAULT_E2B_TEMPLATE, createE2bProvider } from "./e2b";
-import { SandboxConfigError, SandboxRateLimitError, SandboxTimeoutError } from "./types";
+import { SandboxConfigError, SandboxNotFoundError, SandboxRateLimitError, SandboxTimeoutError } from "./types";
 
 const fakeE2bSandbox = () => ({
   sandboxId: "sbx1",
@@ -125,6 +126,7 @@ describe("E2B provider", () => {
     [new mocks.errors.AuthenticationError("bad key"), SandboxConfigError],
     [new mocks.errors.RateLimitError("slow down"), SandboxRateLimitError],
     [new mocks.errors.TimeoutError("sandbox timeout"), SandboxTimeoutError],
+    [new mocks.errors.SandboxNotFoundError("Paused sandbox sbx1 not found"), SandboxNotFoundError],
   ])("maps %o to the seam's error", async (error, Expected) => {
     mocks.create.mockRejectedValue(error);
 

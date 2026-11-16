@@ -1,4 +1,4 @@
-import { DEV_COMMAND_ENV, INSTALLING, PROXY_TARGET_ENV, killTreeCommand } from "../dev-server";
+import { BOOT_COMMAND_ENV, DEV_COMMAND_ENV, PROXY_TARGET_ENV, killTreeCommand } from "../dev-server";
 import { type RequestOptions, type RunOptions, type Sandbox, type SandboxCommand, SandboxExitError } from "./types";
 
 /**
@@ -52,10 +52,13 @@ export const parseProcesses = (stdout: string): SandboxProcess[] =>
 export const listProcesses = async (sandbox: Sandbox, opts: RequestOptions = {}) =>
   parseProcesses((await sandbox.run(LIST_PROCESSES, { ...opts, timeoutMs: 10_000 })).stdout);
 
-/** A command the boot starts: the dev server or proxy (by their marker), or an install. */
-const isBootCommand = ({ pid, cmd, args, envs }: SandboxProcess) =>
+/**
+ * A command the preview started, by the marker it set: the dev server, the proxy or
+ * the tagged install. Provenance, not command text: an unmarked `npm install` is not ours.
+ */
+const isBootCommand = ({ pid, cmd, envs }: SandboxProcess) =>
   pid !== 1 && !/(^|\/)envd$/.test(cmd) &&
-  Boolean(envs[DEV_COMMAND_ENV] || envs[PROXY_TARGET_ENV] || INSTALLING.test([cmd, ...args].join(" ")));
+  Boolean(envs[DEV_COMMAND_ENV] || envs[PROXY_TARGET_ENV] || envs[BOOT_COMMAND_ENV]);
 
 /**
  * The boot's commands among /proc's processes, one per tree: a boot command whose

@@ -8,6 +8,10 @@ import type { Sandbox, SandboxCommand } from "./provider/types";
  */
 export const DEV_COMMAND_ENV = "CODENAYA_DEV_COMMAND";
 
+/** Tags the install the preview runs, so a provider without its own command list can still find and stop it. */
+export const BOOT_COMMAND_ENV = "CODENAYA_BOOT_COMMAND";
+export const BOOT_INSTALL_ENVS = { [BOOT_COMMAND_ENV]: "install" };
+
 /** Written at boot by the POST route; its TARGET_PORT is the dev server's port. */
 export const PROXY_SCRIPT_PATH = "/home/user/e2b-proxy.js";
 
