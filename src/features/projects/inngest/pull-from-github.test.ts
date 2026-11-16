@@ -4,7 +4,7 @@ import { getFunctionName } from "convex/server";
 import { ConvexError } from "convex/values";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ mutation: vi.fn() }));
+const mocks = vi.hoisted(() => ({ mutation: vi.fn(), files: vi.fn() }));
 
 vi.mock("@clerk/nextjs/server", () => ({
   clerkClient: async () => ({
@@ -14,7 +14,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 vi.mock("@/lib/convex-client", () => ({
   convex: {
     // getOwnedProject and getProjectById: the user's linked project.
-    query: vi.fn(async () => ({
+    query: vi.fn(async (fn) => getFunctionName(fn).endsWith(":getProjectFiles") ? mocks.files() : ({
       _id: "p1",
       ownerId: "user_1",
       githubSync: { repo: "octocat/widgets", branch: "main", lastSyncedSha: "old", lastSyncedAt: 1 },
@@ -83,6 +83,7 @@ const written = () => calls().filter(([name]) => name === "applyPulledFiles" || 
 describe("pullFromGithub (#343)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.files.mockReturnValue([]);
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
     vi.stubGlobal("fetch", fetchMock);
     mocks.mutation.mockImplementation(async (fn) => {
@@ -153,29 +154,55 @@ describe("pullFromGithub (#343)", () => {
       { path: ".env.sample", type: "file", content: "SAMPLE_KEY=fake-sample" },
       { path: "app.ts", type: "file", content: "export {};" },
     ]);
+    expect(written()[0][1].tree).toEqual([
+      { path: ".env.example", type: "file" },
+      { path: ".env.sample", type: "file" },
+      { path: "app.ts", type: "file" },
+    ]);
     expect(JSON.stringify(calls())).not.toContain("fake-remote-");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps local dotenv files unchanged when their remote bodies are skipped (#812)", async () => {
+  it.each([false, true])("keeps every local dotenv file unchanged (remote dotenv present: %s) (#812)", async (remoteEnv) => {
     const local = new Map([
       [".env", "PRIVATE_KEY=fake-local-secret"],
       [".env.local", "LOCAL_KEY=fake-local-value"],
+      ["apps", ""],
+      ["apps/web", ""],
+      ["apps/web/.env", "NESTED_KEY=fake-local-nested"],
+      ["apps/web/.env.local", "NESTED_LOCAL_KEY=fake-local-nested-local"],
       ["old.ts", "old"],
+      [".env.example", "obsolete example"],
+      [".env.sample", "obsolete sample"],
     ]);
+    // The existing metadata-only query: no local dotenv bodies are fetched.
+    mocks.files.mockReturnValue([...local.keys()].map((path) => {
+      const slash = path.lastIndexOf("/");
+      return {
+        _id: path,
+        name: path.slice(slash + 1),
+        parentId: slash < 0 ? undefined : path.slice(0, slash),
+        type: path === "apps" || path === "apps/web" ? "folder" : "file",
+      };
+    }));
     serve([
-      { path: ".env", body: "PRIVATE_KEY=fake-remote-secret" },
-      { path: ".env.local", body: "LOCAL_KEY=fake-remote-local" },
+      ...(remoteEnv ? [
+        { path: ".env", body: "PRIVATE_KEY=fake-remote-secret" },
+        { path: ".env.local", body: "LOCAL_KEY=fake-remote-local" },
+      ] : []),
       { path: "app.ts", body: "export {};" },
     ]);
     mocks.mutation.mockImplementation(async (fn, args) => {
       const name = getFunctionName(fn);
       if (name.endsWith("createPullCheckpoint")) return "cp_1";
       if (name.endsWith("applyPulledFiles")) {
-        // Model the prune contract: paths absent from tree are deleted.
+        // Model applyTree: missing paths and descendants of removed folders are deleted.
         if (args.tree) {
           const keep = new Set(args.tree.map((entry: { path: string }) => entry.path));
-          for (const path of local.keys()) if (!keep.has(path)) local.delete(path);
+          const removed = [...local.keys()].filter((path) => !keep.has(path));
+          for (const path of local.keys()) {
+            if (removed.some((parent) => path === parent || path.startsWith(`${parent}/`))) local.delete(path);
+          }
         }
         for (const entry of args.entries) local.set(entry.path, entry.content);
       }
@@ -187,9 +214,28 @@ describe("pullFromGithub (#343)", () => {
     expect([...local]).toEqual([
       [".env", "PRIVATE_KEY=fake-local-secret"],
       [".env.local", "LOCAL_KEY=fake-local-value"],
+      ["apps", ""],
+      ["apps/web", ""],
+      ["apps/web/.env", "NESTED_KEY=fake-local-nested"],
+      ["apps/web/.env.local", "NESTED_LOCAL_KEY=fake-local-nested-local"],
       ["app.ts", "export {};"],
     ]);
     expect(JSON.stringify(calls())).not.toContain("fake-remote-");
+    expect(JSON.stringify(calls())).not.toContain("fake-local-");
+  });
+
+  it("refuses a remote file that would replace a local dotenv parent folder (#812)", async () => {
+    mocks.files.mockReturnValue([
+      { _id: "apps", name: "apps", type: "folder" },
+      { _id: "env", name: ".env", type: "file", parentId: "apps" },
+    ]);
+    serve([{ path: "apps", body: "remote file" }]);
+
+    await expect(runJob()).rejects.toMatchObject({
+      name: "NonRetriableError",
+      message: expect.stringMatching(/local dotenv/),
+    });
+    expect(written()).toEqual([]);
   });
 
   it("refuses for good on a retry when a run finished during the backoff", async () => {

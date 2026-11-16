@@ -7,6 +7,7 @@ import { getAppError } from "@/lib/convex-error";
 import { inngest } from "@/inngest/client";
 import { requireJobGithubToken } from "@/features/projects/server/github-token";
 import { readRepoArchive } from "@/features/projects/server/github-archive";
+import { buildFilePaths, planFolderCreation } from "@/features/projects/utils/github-tree";
 import { isRealEnvFile } from "@/features/projects/utils/inspect-imported-project";
 
 import { api } from "../../../../convex/_generated/api";
@@ -99,9 +100,27 @@ export const pullFromGithub = inngest.createFunction(
     // same tree again; unchanged files are left alone.
     await step.run("apply-files", async () => {
       const { folders, files, skipped } = await readRepoArchive(owner, repo, githubToken, sha, isRealEnvFile);
-      const excludedEnvPaths = skipped.filter(isRealEnvFile);
       const unsupported = skipped.filter((path) => !isRealEnvFile(path));
-      if (folders.length + files.length + excludedEnvPaths.length > MAX_PULL_ENTRIES) {
+      const tree = new Map<string, TreeEntry["type"]>([
+        ...folders.map((path) => [path, "folder"] as const),
+        ...files.map(({ path }) => [path, "file"] as const),
+      ]);
+      const localFiles = await convex.query(api.system.getProjectFiles, { internalKey, projectId });
+      const localEnvPaths = Object.entries(buildFilePaths(localFiles))
+        .filter(([path, file]) => file.type === "file" && isRealEnvFile(path))
+        .map(([path]) => path);
+      // Keep local secrets and their parents even when GitHub no longer has them (#812).
+      const preserved: { path: string; type: TreeEntry["type"] }[] = [
+        ...planFolderCreation([], localEnvPaths).map(({ path }) => ({ path, type: "folder" as const })),
+        ...localEnvPaths.map((path) => ({ path, type: "file" as const })),
+      ];
+      for (const { path, type } of preserved) {
+        if (tree.has(path) && tree.get(path) !== type) {
+          throw new NonRetriableError(`Pull would replace a local dotenv file or its parent: ${path}`);
+        }
+        tree.set(path, type);
+      }
+      if (tree.size > MAX_PULL_ENTRIES) {
         throw new NonRetriableError(
           `Repositories over ${MAX_PULL_ENTRIES} files and folders can't be pulled`
         );
@@ -132,12 +151,7 @@ export const pullFromGithub = inngest.createFunction(
           projectId,
           checkpointId,
           entries: [],
-          tree: [
-            ...folders.map((path) => ({ path, type: "folder" as const })),
-            ...files.map(({ path }) => ({ path, type: "file" as const })),
-            // Keep matching local dotenv files unchanged without importing remote bodies (#812).
-            ...excludedEnvPaths.map((path) => ({ path, type: "file" as const })),
-          ],
+          tree: [...tree].map(([path, type]) => ({ path, type })),
         })
         .catch(refusalIsFinal);
 
