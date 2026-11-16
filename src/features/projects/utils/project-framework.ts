@@ -15,11 +15,3 @@ export const readProjectFramework = (): FrameworkChoice => {
     return "auto";
   }
 };
-
-export const writeProjectFramework = (framework: FrameworkChoice) => {
-  try {
-    localStorage.setItem(KEY, framework);
-  } catch {
-    // Best-effort, like the model and dashboard choices.
-  }
-};

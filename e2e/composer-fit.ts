@@ -10,11 +10,24 @@ export const COMPOSER_WIDTHS = [375, 768, 1280, 1700];
 export const expectToolbarFits = async (scope: Locator, cell: string) => {
   // first(): the landing page also has the CTA composer further down.
   const card = scope.getByTestId("prompt-composer").first();
+  await expect(card.getByTestId("prompt-composer-framework")).toHaveCount(0);
+  await expect(card.getByRole("combobox", { name: "Framework", exact: true })).toHaveCount(0);
+  await expect(card.getByRole("combobox", { name: "Dictation language", exact: true })).toHaveCount(0);
   await card.getByRole("textbox", { name: "Describe what you want to build" }).fill("a kanban board app");
   await expect(async () => {
     const frame = await card.boundingBox();
     const submit = await card.getByRole("button", { name: "Create project" }).boundingBox();
     const toggle = await card.getByRole("radiogroup", { name: "Message mode" }).boundingBox();
+    // Removing selectors leaves the mode cell directly beside the preceding tool.
+    const gapBeforeMode = await card.getByRole("radiogroup", { name: "Message mode" }).evaluate((element) => {
+      const cell = element.parentElement!;
+      let previous = cell.previousElementSibling;
+      while (previous && (getComputedStyle(previous).position === "absolute" || getComputedStyle(previous).display === "none")) {
+        previous = previous.previousElementSibling;
+      }
+      return previous ? cell.getBoundingClientRect().left - previous.getBoundingClientRect().right : 0;
+    });
+    expect(Math.abs(gapBeforeMode)).toBeLessThanOrEqual(0.5);
     const reference = await card.getByRole("button", { name: cell }).boundingBox();
     // The Clear/Build group (incl. the char count) starts where the tools row must end.
     const actions = await card.getByTestId("prompt-composer-actions").boundingBox();

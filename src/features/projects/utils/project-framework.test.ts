@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { readProjectFramework, writeProjectFramework } from "./project-framework";
+import { readProjectFramework } from "./project-framework";
 
 beforeEach(() => {
   const storage = new Map<string, string>();
@@ -10,15 +10,15 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("defaults to Auto and remembers every choice, including an old saved vite", () => {
+it("defaults to Auto and reads legacy choices for template handoffs", () => {
   expect(readProjectFramework()).toBe("auto");
-  writeProjectFramework("next");
+  localStorage.setItem("codenaya:projectFramework", "next");
   expect(readProjectFramework()).toBe("next");
-  writeProjectFramework("tanstack-start");
+  localStorage.setItem("codenaya:projectFramework", "tanstack-start");
   expect(readProjectFramework()).toBe("tanstack-start");
-  writeProjectFramework("vite");
+  localStorage.setItem("codenaya:projectFramework", "vite");
   expect(readProjectFramework()).toBe("vite");
-  writeProjectFramework("auto");
+  localStorage.setItem("codenaya:projectFramework", "auto");
   expect(readProjectFramework()).toBe("auto");
 });
 
@@ -28,5 +28,4 @@ it("ignores invalid storage and tolerates blocked storage", () => {
   const blocked = () => { throw new Error("blocked"); };
   vi.stubGlobal("localStorage", { getItem: blocked, setItem: blocked });
   expect(readProjectFramework()).toBe("auto");
-  expect(() => writeProjectFramework("next")).not.toThrow();
 });
