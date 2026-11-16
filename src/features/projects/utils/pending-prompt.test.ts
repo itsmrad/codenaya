@@ -4,6 +4,7 @@ import {
   PENDING_PROMPT_KEY,
   clearPendingPrompt,
   peekPendingPrompt,
+  resetPendingPromptResume,
   resumePendingPrompt,
   savePendingPrompt,
 } from "./pending-prompt";
@@ -19,9 +20,81 @@ const memoryStorage = () => {
 
 describe("pending prompt", () => {
   beforeEach(() => vi.stubGlobal("localStorage", memoryStorage()));
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-  it.each(["vite", "next"] as const)("keeps %s with the draft across a failed creation", async (framework) => {
+  it("expires a draft after an hour without creating a project or renewing it on peek", async () => {
+    vi.useFakeTimers();
+    savePendingPrompt("A blog", "plan");
+    vi.advanceTimersByTime(60 * 60 * 1000);
+    expect(peekPendingPrompt()).toBe("A blog");
+    vi.advanceTimersByTime(1);
+    const create = vi.fn();
+    expect(await resumePendingPrompt(create)).toBeNull();
+    expect(create).not.toHaveBeenCalled();
+    expect(localStorage.getItem(PENDING_PROMPT_KEY)).toBeNull();
+  });
+
+  it.each([undefined, null, "yesterday", Date.now() + 24 * 60 * 60 * 1000])(
+    "drops an invalid, missing or future timestamp: %s", (savedAt) => {
+      localStorage.setItem(PENDING_PROMPT_KEY, JSON.stringify({ value: "A blog", savedAt }));
+      expect(peekPendingPrompt()).toBeNull();
+      expect(localStorage.getItem(PENDING_PROMPT_KEY)).toBeNull();
+    },
+  );
+
+  it("never turns an envelope without savedAt into prompt text", async () => {
+    localStorage.setItem(PENDING_PROMPT_KEY, JSON.stringify({ value: "A blog", mode: "plan", framework: "next" }));
+    const create = vi.fn();
+    expect(await resumePendingPrompt(create)).toBeNull();
+    expect(create).not.toHaveBeenCalled();
+    expect(localStorage.getItem(PENDING_PROMPT_KEY)).toBeNull();
+  });
+
+  it("a user change releases the resume lock without letting the old resume release the next one's", async () => {
+    savePendingPrompt("A's prompt");
+    let finishA!: (created: boolean) => void;
+    let finishB!: (created: boolean) => void;
+    const first = resumePendingPrompt(() => new Promise<boolean>((resolve) => { finishA = resolve; }));
+    resetPendingPromptResume();
+    clearPendingPrompt();
+    savePendingPrompt("B's prompt");
+    const second = resumePendingPrompt(() => new Promise<boolean>((resolve) => { finishB = resolve; }));
+    finishA(true);
+    await first;
+    expect(peekPendingPrompt()).toBe("B's prompt");
+    expect(await resumePendingPrompt(vi.fn())).toBeNull(); // B still holds the lock.
+    finishB(true);
+    expect(await second).toBe(true);
+    expect(peekPendingPrompt()).toBeNull();
+  });
+
+  it("keeps a typed prompt that looks like the legacy JSON literal", async () => {
+    const typed = '{"prompt":"A shop","mode":"plan"}';
+    savePendingPrompt(typed);
+    expect(peekPendingPrompt()).toBe(typed);
+    const create = vi.fn().mockResolvedValue(true);
+    await resumePendingPrompt(create);
+    expect(create).toHaveBeenCalledWith({ prompt: typed });
+  });
+
+  it("accepts the TanStack Start framework in the envelope", () => {
+    savePendingPrompt("A blog", undefined, "tanstack-start");
+    expect(JSON.parse(localStorage.getItem(PENDING_PROMPT_KEY)!).framework).toBe("tanstack-start");
+  });
+
+  it("migrates a legacy draft once, without renewing its expiry", () => {
+    vi.useFakeTimers();
+    localStorage.setItem(PENDING_PROMPT_KEY, "A legacy blog");
+    expect(peekPendingPrompt()).toBe("A legacy blog");
+    const migrated = localStorage.getItem(PENDING_PROMPT_KEY);
+    vi.advanceTimersByTime(1000);
+    expect(peekPendingPrompt()).toBe("A legacy blog");
+    expect(localStorage.getItem(PENDING_PROMPT_KEY)).toBe(migrated);
+    vi.advanceTimersByTime(60 * 60 * 1000);
+    expect(peekPendingPrompt()).toBeNull();
+  });
+
+  it.each(["vite", "next", "tanstack-start"] as const)("keeps %s with the draft across a failed creation", async (framework) => {
     savePendingPrompt("A blog", "plan", framework);
     const create = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     await resumePendingPrompt(create);
@@ -105,7 +178,7 @@ describe("pending prompt", () => {
 
   it("peeks without consuming and ignores blank drafts", async () => {
     savePendingPrompt(" A habit tracker ");
-    expect(localStorage.getItem(PENDING_PROMPT_KEY)).toBe(" A habit tracker ");
+    expect(JSON.parse(localStorage.getItem(PENDING_PROMPT_KEY)!)).toEqual({ value: " A habit tracker ", savedAt: expect.any(Number) });
     expect(peekPendingPrompt()).toBe("A habit tracker");
     expect(peekPendingPrompt()).toBe("A habit tracker");
     savePendingPrompt("   ");

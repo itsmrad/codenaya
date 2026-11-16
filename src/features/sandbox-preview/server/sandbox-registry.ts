@@ -1,15 +1,18 @@
-import { Sandbox } from "e2b";
+import { parsePublicSandboxIdOrNull } from "./provider/ids";
+import { getProvider } from "./provider/registry";
+import type { Sandbox } from "./provider/types";
 
 interface OwnedSandbox {
   sandbox: Sandbox;
   userId: string;
   /** Re-runs the install through the boot stream; only on the instance that booted it. */
   reinstall?: () => void;
+  reinstallDone?: () => Promise<void>;
 }
 
 /**
- * Connected E2B sandbox handles by sandbox id, so each preview file sync skips
- * `Sandbox.connect` + `getInfo` (~2s of the edit→preview latency, #179).
+ * Connected sandbox handles by public sandbox id, so each preview file sync skips
+ * `connect` + `info` (~2s of the edit→preview latency, #179).
  *
  * On `globalThis` because `next dev` may load each route in its own module
  * instance. The cache is per server instance: one that did not create the
@@ -24,8 +27,10 @@ export const rememberSandbox = (
   sandbox: Sandbox,
   userId: string,
   reinstall?: () => void,
+  reinstallDone?: () => Promise<void>,
 ) => {
-  sandboxes.set(sandbox.sandboxId, { sandbox, userId, reinstall });
+  // An E2B sandbox's public id is still its unprefixed native id (ADR 0015).
+  sandboxes.set(sandbox.id, { sandbox, userId, reinstall, reinstallDone });
 };
 
 /**
@@ -38,13 +43,17 @@ export const requestReinstall = (sandboxId: string) => {
   return Boolean(reinstall);
 };
 
+/** A sync must not acknowledge a queued stream install while Vite is stopped (#774). */
+export const waitForReinstall = (sandboxId: string) =>
+  sandboxes.get(sandboxId)?.reinstallDone?.() ?? Promise.resolve();
+
 export const forgetSandbox = (sandboxId: string) => {
   sandboxes.delete(sandboxId);
 };
 
 /**
- * The sandbox when `userId` owns it, `null` when someone else does. Rejects
- * when E2B cannot reach the sandbox (e.g. it already expired).
+ * The sandbox when `userId` owns it, `null` when someone else does or the id is
+ * malformed. Rejects when the provider cannot reach it (e.g. it already expired).
  */
 export const getOwnedSandbox = async (
   sandboxId: string,
@@ -53,8 +62,11 @@ export const getOwnedSandbox = async (
   let owned = sandboxes.get(sandboxId);
 
   if (!owned) {
-    const sandbox = await Sandbox.connect(sandboxId);
-    const sandboxInfo = await sandbox.getInfo();
+    // The id comes from the client: its prefix only picks the provider, the owner is checked below.
+    const parsed = parsePublicSandboxIdOrNull(sandboxId);
+    if (!parsed) return null;
+    const sandbox = await getProvider(parsed.provider).connect(parsed.nativeId);
+    const sandboxInfo = await sandbox.info();
     const ownerId = sandboxInfo.metadata?.userId;
 
     if (ownerId !== userId) {

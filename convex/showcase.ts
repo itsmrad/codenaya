@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { paginationOptsValidator, type PaginationResult } from "convex/server";
+import { paginationOptsValidator, paginationResultValidator, type PaginationResult } from "convex/server";
 
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -10,6 +10,7 @@ import { getOwnedProject } from "./projects";
 import { remixProject } from "./projectCopy";
 import { getUnclaimedStorage, releaseBlobs } from "./projectCascade";
 import { recordProjectEvent } from "./activationEvents";
+import schema from "./schema";
 
 // ─── Queries ───
 
@@ -106,15 +107,87 @@ const feedFilterArgs = {
   designStyle: v.optional(v.array(v.string())),
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const WEEK_MS = 7 * DAY_MS;
+const WEEKLY_EVENT_LIMIT = 500;
+const WEEKLY_PAGE_MAX = 50;
+const publicEntryValidator = schema.tables.showcaseProjects.validator
+  .omit("projectId", "ownerId", "previewImageId")
+  .extend({
+    _id: v.id("showcaseProjects"),
+    _creationTime: v.number(),
+    previewUrl: v.union(v.string(), v.null()),
+  });
+
+/** Shared bounded weekly scores; no counter writes or extra reads on the vote path. */
+const weeklyRanking = async (ctx: QueryCtx, now: number) => {
+  if (!Number.isFinite(now)) throw appError("INVALID_ARGUMENT", "Invalid ranking time");
+  // shortcut: samples the newest 500 events; materialize scores when traffic exceeds this window.
+  const events = await ctx.db.query("showcaseEvents")
+    .withIndex("by_createdAt", (q) => q.gte("createdAt", now - WEEK_MS).lte("createdAt", now))
+    .order("desc")
+    .take(WEEKLY_EVENT_LIMIT);
+  const seen = new Set<string>();
+  const scores = new Map<Id<"showcaseProjects">, number>();
+  for (const event of events) {
+    const key = JSON.stringify([event.showcaseProjectId, event.userId, event.kind, Math.floor(event.createdAt / DAY_MS)]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    scores.set(event.showcaseProjectId, (scores.get(event.showcaseProjectId) ?? 0) + (event.kind === "remix" ? 2 : 1));
+  }
+  const ranked = await Promise.all([...scores].map(async ([id, score]) => ({
+    item: await ctx.db.get("showcaseProjects", id), score,
+  })));
+  return ranked
+    .filter((row): row is { item: Doc<"showcaseProjects">; score: number } => row.item?.status === "published")
+    .sort((a, b) => b.score - a.score || b.item.publishedAt - a.item.publishedAt || a.item._id.localeCompare(b.item._id));
+};
+
+export const getTopCreators = query({
+  args: { now: v.number(), limit: v.optional(v.number()) },
+  returns: v.array(v.object({ name: v.string(), avatarUrl: v.union(v.string(), v.null()), score: v.number() })),
+  handler: async (ctx, args) => {
+    const ranked = await weeklyRanking(ctx, args.now);
+    const creators = new Map<string, { name: string; avatarUrl: string | null; score: number }>();
+    for (const { item, score } of ranked) {
+      const creator = creators.get(item.ownerId);
+      if (creator) creator.score += score;
+      else creators.set(item.ownerId, { name: item.ownerName, avatarUrl: item.ownerAvatarUrl ?? null, score });
+    }
+    const limit = Number.isFinite(args.limit ?? 5) ? Math.min(5, Math.max(1, Math.floor(args.limit ?? 5))) : 5;
+    return [...creators.values()].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).slice(0, limit);
+  },
+});
+
 export const list = query({
   args: {
     paginationOpts: paginationOptsValidator,
     ...feedFilterArgs,
+    now: v.optional(v.number()),
     sortBy: v.optional(
-      v.union(v.literal("newest"), v.literal("upvotes"), v.literal("imports"))
+      v.union(v.literal("newest"), v.literal("upvotes"), v.literal("imports"), v.literal("week"))
     ),
   },
+  returns: paginationResultValidator(publicEntryValidator),
   handler: async (ctx, args) => {
+    if (args.sortBy === "week") {
+      if (args.now === undefined) throw appError("INVALID_ARGUMENT", "Weekly ranking needs a time");
+      const ranked = (await weeklyRanking(ctx, args.now))
+        .map(({ item }) => item)
+        .filter((item) => (!args.category || item.category === args.category) && matchesTags(item, args));
+      const offset = args.paginationOpts.cursor === null ? 0 : Number(args.paginationOpts.cursor);
+      if (!Number.isInteger(offset) || offset < 0 || offset > WEEKLY_EVENT_LIMIT) {
+        throw appError("INVALID_ARGUMENT", "Invalid weekly cursor");
+      }
+      const requested = args.paginationOpts.numItems;
+      const size = Number.isFinite(requested) ? Math.min(WEEKLY_PAGE_MAX, Math.max(1, Math.floor(requested))) : WEEKLY_PAGE_MAX;
+      const end = offset + size;
+      return {
+        page: await Promise.all(ranked.slice(offset, end).map((item) => toPublicEntry(ctx, item))),
+        isDone: end >= ranked.length,
+        continueCursor: String(Math.min(end, ranked.length)),
+      };
+    }
     const results = await publishedInOrder(
       ctx,
       args.sortBy ?? "newest",
@@ -369,6 +442,7 @@ export const unpublish = mutation({
 });
 
 export const vote = mutation({
+  returns: v.union(v.literal("added"), v.literal("removed"), v.literal("switched")),
   args: {
     showcaseProjectId: v.id("showcaseProjects"),
     vote: v.union(v.literal("up"), v.literal("down")),
@@ -378,7 +452,7 @@ export const vote = mutation({
 
     const item = await ctx.db.get(args.showcaseProjectId);
     if (!item || item.status !== "published") {
-      throw new Error("Project not found");
+      throw appError("NOT_FOUND", "Project not found");
     }
 
     const existingVote = await ctx.db
@@ -420,6 +494,23 @@ export const vote = mutation({
         vote: args.vote,
         createdAt: Date.now(),
       });
+      if (args.vote === "up") {
+        // One event per user/entry/kind per UTC day, matching the scoring dedupe, so toggling cannot flood the window.
+        const now = Date.now();
+        const today = await ctx.db.query("showcaseEvents")
+          .withIndex("by_userId_and_showcaseProjectId_and_kind_and_createdAt", (q) =>
+            q.eq("userId", identity.subject).eq("showcaseProjectId", args.showcaseProjectId).eq("kind", "upvote")
+              .gte("createdAt", Math.floor(now / DAY_MS) * DAY_MS))
+          .first();
+        if (!today) {
+          await ctx.db.insert("showcaseEvents", {
+            showcaseProjectId: args.showcaseProjectId,
+            kind: "upvote",
+            userId: identity.subject,
+            createdAt: now,
+          });
+        }
+      }
       const field = args.vote === "up" ? "upvotes" : "downvotes";
       await ctx.db.patch(args.showcaseProjectId, {
         [field]: item[field] + 1,
@@ -477,6 +568,7 @@ export const incrementView = mutation({
 });
 
 export const importToWorkspace = mutation({
+  returns: v.id("projects"),
   args: { showcaseProjectId: v.id("showcaseProjects") },
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
@@ -508,6 +600,14 @@ export const importToWorkspace = mutation({
       )
       .unique();
     if (!counted) {
+      if (identity.subject !== showcaseItem.ownerId) {
+        await ctx.db.insert("showcaseEvents", {
+          showcaseProjectId: args.showcaseProjectId,
+          kind: "remix",
+          userId: identity.subject,
+          createdAt: now,
+        });
+      }
       await ctx.db.insert("showcaseImports", {
         showcaseProjectId: args.showcaseProjectId,
         userId: identity.subject,

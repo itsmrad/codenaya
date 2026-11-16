@@ -19,11 +19,15 @@ vi.mock("@/features/integrations/components/integrations-dialog", () => ({
 import { listVisibleProviders } from "@/features/integrations/catalog";
 import { IntegrationsSettings } from "./integrations-settings";
 
+// renderToStaticMarkup escapes these characters, e.g. "Weights & Biases".
+const ENTITIES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#x27;" };
+const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (char) => ENTITIES[char] ?? char);
+
 it("shows the full catalog when there are no connections", () => {
   const html = renderToStaticMarkup(createElement(IntegrationsSettings));
   expect(html).toContain("Browse integrations");
   for (const provider of listVisibleProviders()) {
-    expect(html).toContain(`aria-label="Connect ${provider.displayName}"`);
+    expect(html).toContain(`aria-label="Connect ${escapeHtml(provider.displayName)}"`);
   }
   expect(html).not.toContain("No connections yet");
 });

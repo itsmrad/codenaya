@@ -1,4 +1,3 @@
-import { AuthenticationError, CommandExitError, RateLimitError, type Sandbox } from "e2b";
 import { z } from "zod";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 import { parseJsonBody } from "@/lib/parse-json-body";
@@ -23,12 +22,18 @@ import {
   MAX_LIVE_SANDBOXES,
   WORK_DIR,
   atLiveSandboxCap,
-  createProjectSandbox,
   killProjectPreviews,
+  projectFileEntries,
   projectFilesSchema,
   stopSandboxCommands,
-  writeProjectFiles,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
+import { getDefaultProviderOrNull } from "@/features/sandbox-preview/server/provider/registry";
+import {
+  type Sandbox,
+  SandboxConfigError,
+  SandboxRateLimitError,
+} from "@/features/sandbox-preview/server/provider/types";
 import { recordSandboxRunning } from "@/features/sandbox-preview/server/record-sandbox-running";
 import {
   forgetSandbox,
@@ -46,21 +51,26 @@ import {
 import {
   DEV_COMMAND_ENV,
   PROXY_TARGET_ENV,
+  DEV_SERVER_ENVS,
+  DevServerStartError,
+  PROXY_SCRIPT_PATH,
   installWithDevServerStopped,
   isPortOpen,
+  runDevServer,
   type DevStart,
 } from "@/features/sandbox-preview/server/dev-server";
-import { rewriteProxyHeaders, shouldInjectBridge } from "@/features/sandbox-preview/server/preview-proxy";
+import {
+  createBridgeInjector,
+  rewriteProxyHeaders,
+  shouldInjectBridge,
+} from "@/features/sandbox-preview/server/preview-proxy";
 import { appendHostFlag, detectFrameworkFromFiles } from "@/features/sandbox-preview/utils/dev-command";
 import {
   missingReferencedFiles,
   undeclaredPackages,
 } from "@/features/sandbox-preview/utils/missing-references";
 import { nodeIncompatibility } from "@/features/sandbox-preview/utils/node-compat";
-import {
-  PREVIEW_BRIDGE_SCRIPT,
-  insertBridge,
-} from "@/features/sandbox-preview/utils/preview-bridge";
+import { PREVIEW_BRIDGE_SCRIPT } from "@/features/sandbox-preview/utils/preview-bridge";
 import type { SandboxErrorKind } from "@/features/sandbox-preview/utils/sandbox-error";
 import {
   recordBootPhase,
@@ -114,17 +124,6 @@ const SANDBOX_TIMEOUT_MS = 60 * 60 * 1000; // 1 hour (E2B free plan max)
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
- * Environment variables that force dev servers to bind to 0.0.0.0
- * instead of localhost. E2B port forwarding only works when the
- * server listens on all interfaces.
- */
-const DEV_SERVER_ENVS: Record<string, string> = {
-  HOST: "0.0.0.0",           // Create React App, Vite (some versions)
-  HOSTNAME: "0.0.0.0",       // Next.js
-  NEXT_TELEMETRY_DISABLED: "1",
-};
-
-/**
  * Regex patterns to detect the port from dev server stdout.
  * Matches URLs like:
  *   http://localhost:5173/
@@ -153,9 +152,9 @@ export async function POST(request: Request) {
     return rateLimitedResponse(rateLimit);
   }
 
-  const e2bApiKey = process.env.E2B_API_KEY?.trim();
+  const provider = getDefaultProviderOrNull();
 
-  if (!e2bApiKey) {
+  if (!provider) {
     return Response.json(
       {
         error:
@@ -201,12 +200,12 @@ export async function POST(request: Request) {
 
   // A new boot replaces this project's earlier preview, which may be an orphan.
   if (projectId && !resumeSandboxId) {
-    const killed = await killProjectPreviews(e2bApiKey, userId, projectId);
+    const killed = await killProjectPreviews(provider, userId, projectId);
     killed.forEach(forgetSandbox);
   }
 
   // A resumed boot reuses a sandbox the cap already counts.
-  if (!resumeSandboxId && (await atLiveSandboxCap(e2bApiKey, userId))) {
+  if (!resumeSandboxId && (await atLiveSandboxCap(provider, userId))) {
     return Response.json(
       {
         error:
@@ -313,27 +312,24 @@ export async function POST(request: Request) {
       let devStart: DevStart | undefined;
       const installCmd = settings?.installCommand || DEFAULT_INSTALL_COMMAND;
 
-      // E2B throws on a non-zero exit; the callers report it as an install
+      // A non-zero exit resolves; the callers report it as an install
       // failure, which the preview offers to fix (#491).
       const runInstall = (target: Sandbox, timeoutMs: number) =>
-        target.commands
-          .run(installCmd, {
-            cwd: WORK_DIR,
-            timeoutMs,
-            // Install may run postinstall scripts or a build that needs config.
-            envs: toProcessEnv(envEntries),
-            onStdout: (data) => send({ type: "output", data }),
-            onStderr: (data) => send({ type: "output", data }),
-          })
-          .catch((error: unknown) => {
-            if (error instanceof CommandExitError) return error;
-            throw error;
-          });
+        target.run(installCmd, {
+          cwd: WORK_DIR,
+          timeoutMs,
+          // Install may run postinstall scripts or a build that needs config.
+          envs: toProcessEnv(envEntries),
+          onStdout: (data) => send({ type: "output", data }),
+          onStderr: (data) => send({ type: "output", data }),
+        });
 
       // The first build boots the preview from its starter while the agent is
       // still writing, so dependencies it adds to package.json later have to be
       // installed here, with the output on this stream (#254).
+      let reinstallStartError: DevServerStartError | null = null;
       const reinstall = debounceSerial(async () => {
+        reinstallStartError = null;
         if (!sandbox) return;
         send({ type: "output", data: `\npackage.json changed.\n$ ${installCmd}\n` });
         try {
@@ -355,6 +351,10 @@ export async function POST(request: Request) {
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unknown error";
           send({ type: "output", data: `\nError: ${message}\n` });
+          if (error instanceof DevServerStartError) {
+            reinstallStartError = error;
+            send({ type: "error", message, code: "transient" });
+          }
         }
       }, REINSTALL_DEBOUNCE_MS);
 
@@ -396,28 +396,28 @@ export async function POST(request: Request) {
           await stopSandboxCommands(sandbox);
         } else {
           send({ type: "output", data: "Creating E2B sandbox...\n" });
-          sandbox = await createProjectSandbox({
-            apiKey: e2bApiKey,
+          sandbox = await provider.create({
             timeoutMs: SANDBOX_TIMEOUT_MS,
             // checkBuild finds the project's warm preview by these tags (#465).
             metadata: projectId ? { userId, projectId } : { userId },
-            network: {
-              maskRequestHost: "localhost:${PORT}",
-            },
+            localHostHeader: true,
           });
         }
 
         // File syncs reuse this handle instead of reconnecting (#179).
-        rememberSandbox(sandbox, userId, reinstall.schedule);
+        rememberSandbox(sandbox, userId, reinstall.schedule, async () => {
+          await reinstall.idle();
+          if (reinstallStartError) throw reinstallStartError;
+        });
 
         send({
           type: "output",
-          data: `Sandbox ${sandbox.sandboxId} ${resumeSandboxId ? "connected" : "created"}.\n`,
+          data: `Sandbox ${sandbox.id} ${resumeSandboxId ? "connected" : "created"}.\n`,
         });
 
         // --- Verify Node.js is available ---
         send({ type: "output", data: "Checking Node.js...\n" });
-        const nodeCheck = await sandbox.commands.run("node --version", {
+        const nodeCheck = await runOrThrow(sandbox, "node --version", {
           timeoutMs: 10_000,
         });
 
@@ -446,7 +446,7 @@ export async function POST(request: Request) {
         sendPhase("files");
         send({ type: "output", data: "Writing project files...\n" });
 
-        await writeProjectFiles(sandbox, files);
+        await sandbox.writeFiles(projectFileEntries(files));
 
         send({
           type: "output",
@@ -464,8 +464,8 @@ export async function POST(request: Request) {
         // server would hand the secrets to anyone requesting /.env (#262).
         if (envEntries.length > 0 && plan !== "static") {
           const dotenv = serialiseDotenv(envEntries);
-          await sandbox.files.write(`${WORK_DIR}/.env`, dotenv);
-          await sandbox.files.write(`${WORK_DIR}/.env.local`, dotenv);
+          await sandbox.writeFiles([{ path: `${WORK_DIR}/.env`, data: dotenv }]);
+          await sandbox.writeFiles([{ path: `${WORK_DIR}/.env.local`, data: dotenv }]);
 
           // Keys only. Naming the values here would print them to the terminal the
           // user is watching, which is exactly what the redactor exists to prevent.
@@ -532,11 +532,7 @@ export async function POST(request: Request) {
             [DEV_COMMAND_ENV]: devCmdWithHost,
           },
         };
-        await sandbox.commands.run(devCmdWithHost, {
-          cwd: WORK_DIR,
-          background: true,
-          timeoutMs: 0, // Prevent E2B from killing the dev server after the default 60s timeout
-          envs: devStart.envs,
+        await runDevServer(sandbox, devStart, {
           onStdout: (data) => {
             send({ type: "output", data });
             if (!detectedPort) {
@@ -568,11 +564,12 @@ export async function POST(request: Request) {
           );
         }
 
+        devStart.readyPort = localPort;
+
         // Start the proxy to bypass Vite allowedHosts and bind issues
         const proxyPort = await startE2bProxy(sandbox, localPort);
 
-        const host = sandbox.getHost(proxyPort);
-        const previewUrl = `https://${host}`;
+        const previewUrl = await sandbox.previewUrl(proxyPort);
 
         // E2B's edge needs a moment to route the newly opened port 4000 to the
         // public domain before the iframe can load it.
@@ -585,7 +582,7 @@ export async function POST(request: Request) {
         if (projectId && internalKey) void recordSandboxRunning(internalKey, projectId, bootHistory);
         send({
           type: "ready",
-          sandboxId: sandbox.sandboxId,
+          sandboxId: sandbox.id,
           previewUrl,
         });
 
@@ -621,7 +618,7 @@ export async function POST(request: Request) {
         if (sandbox && !handedOff && !request.signal.aborted && budget.left() <= 0) {
           handedOff = true;
           rememberSandbox(sandbox, userId);
-          send({ type: "resume", sandboxId: sandbox.sandboxId });
+          send({ type: "resume", sandboxId: sandbox.id });
           return;
         }
 
@@ -629,9 +626,9 @@ export async function POST(request: Request) {
           error instanceof Error ? error.message : "Unknown error";
 
         const code: SandboxErrorKind =
-          error instanceof AuthenticationError
+          error instanceof SandboxConfigError
             ? "config"
-            : error instanceof RateLimitError
+            : error instanceof SandboxRateLimitError
               ? "rate_limit"
               : "transient";
 
@@ -651,7 +648,7 @@ export async function POST(request: Request) {
       } finally {
         reinstall.cancel();
         if (sandbox && !handedOff) {
-          forgetSandbox(sandbox.sandboxId);
+          forgetSandbox(sandbox.id);
         }
 
         // Release any output the redactor is holding back, otherwise the last
@@ -762,6 +759,7 @@ async function startE2bProxy(sandbox: Sandbox, targetPort: number): Promise<numb
   const proxyCode = `
 const http = require('http');
 const net = require('net');
+const { Transform, pipeline } = require('stream');
 
 process.on('uncaughtException', (err) => console.error('E2B Proxy Uncaught Exception:', err));
 process.on('unhandledRejection', (reason) => console.error('E2B Proxy Unhandled Rejection:', reason));
@@ -769,7 +767,7 @@ process.on('unhandledRejection', (reason) => console.error('E2B Proxy Unhandled 
 const TARGET_PORT = parseInt(process.env.TARGET_PORT || "${targetPort}", 10);
 const PROXY_PORT = parseInt(process.env.PROXY_PORT || "${proxyPort}", 10);
 const BRIDGE = ${JSON.stringify(PREVIEW_BRIDGE_SCRIPT)};
-const insertBridge = ${String(insertBridge)};
+const createBridgeInjector = ${String(createBridgeInjector)};
 const rewriteProxyHeaders = ${String(rewriteProxyHeaders)};
 const shouldInjectBridge = ${String(shouldInjectBridge)};
 
@@ -785,21 +783,30 @@ const server = http.createServer((req, res) => {
   delete options.headers['accept-encoding'];
 
   const proxyReq = http.request(options, (proxyRes) => {
-    const headers = { ...proxyRes.headers };
+    const headers = Object.assign({}, proxyRes.headers);
     const isPage = shouldInjectBridge(req.method, proxyRes.statusCode, headers);
     if (!isPage) {
       res.writeHead(proxyRes.statusCode, headers);
       proxyRes.pipe(res, { end: true });
       return;
     }
-    const chunks = [];
-    proxyRes.on('data', (chunk) => chunks.push(chunk));
-    proxyRes.on('end', () => {
-      const html = insertBridge(Buffer.concat(chunks).toString('utf8'), BRIDGE);
-      delete headers['transfer-encoding'];
-      headers['content-length'] = Buffer.byteLength(html);
-      res.writeHead(proxyRes.statusCode, headers);
-      res.end(html);
+    delete headers['content-length'];
+    delete headers['transfer-encoding'];
+    res.writeHead(proxyRes.statusCode, headers);
+    const injector = createBridgeInjector(BRIDGE);
+    pipeline(proxyRes, new Transform({
+      transform(chunk, encoding, callback) {
+        for (const part of injector.push(chunk)) this.push(part);
+        callback();
+      },
+      flush(callback) {
+        for (const part of injector.flush()) this.push(part);
+        callback();
+      },
+    }), res, (err) => {
+      if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+        console.error('E2B Proxy Response Error:', err);
+      }
     });
   });
 
@@ -855,13 +862,12 @@ server.listen(PROXY_PORT, '0.0.0.0', () => {
 });
   `;
 
-  await sandbox.files.write("/home/user/e2b-proxy.js", proxyCode);
+  await sandbox.writeFiles([{ path: PROXY_SCRIPT_PATH, data: proxyCode }]);
   
-  await sandbox.commands.run("node /home/user/e2b-proxy.js", {
-    background: true,
+  // In the background with no time limit, so the provider doesn't stop the proxy.
+  await sandbox.start(`node ${PROXY_SCRIPT_PATH}`, {
     // Also listed with the process, so checkBuild can tell whether the dev server is still up.
     envs: { [PROXY_TARGET_ENV]: String(targetPort) },
-    timeoutMs: 0, // Prevent E2B from killing the proxy after the default 60s timeout
   });
 
   // Give proxy a split second to bind

@@ -1,17 +1,26 @@
-import { CommandExitError, TimeoutError } from "e2b";
 import { z } from "zod";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 import { parseJsonBody } from "@/lib/parse-json-body";
+import { checkRateLimit, rateLimitedResponse } from "@/lib/rate-limit";
+import { recoverEsbuild } from "@/features/sandbox-preview/server/recover-esbuild";
 import {
   DEFAULT_INSTALL_COMMAND,
+  projectFileEntries,
   projectFilesSchema,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { SandboxTimeoutError } from "@/features/sandbox-preview/server/provider/types";
 import {
   forgetSandbox,
   getOwnedSandbox,
   requestReinstall,
+  waitForReinstall,
 } from "@/features/sandbox-preview/server/sandbox-registry";
-import { installWithDevServerStopped } from "@/features/sandbox-preview/server/dev-server";
+import {
+  DevServerStartError,
+  fallbackDevStart,
+  installWithDevServerStopped,
+  proxyTargetPort,
+} from "@/features/sandbox-preview/server/dev-server";
 import {
   REINSTALL_DEBOUNCE_MS,
   debounceSerial,
@@ -31,7 +40,11 @@ export const maxDuration = 300;
 const patchSchema = z.object({
   files: projectFilesSchema,
   installCommand: z.string().optional(),
+  devCommand: z.string().optional(),
 });
+
+const recoverySchema = z.object({ action: z.literal("recover-esbuild") });
+const RECOVERY_RATE_LIMIT = { scope: "sandbox-esbuild-recovery", limit: 30, windowMs: 60_000 };
 
 type Install = () => Promise<InstallFailure | undefined>;
 
@@ -122,8 +135,7 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
 /**
  * POST /api/sandbox/[sandboxId]?_method=DELETE
  *
- * Supports navigator.sendBeacon() which can only send POST requests.
- * Used for cleanup during page unload (tab close, navigation away).
+ * Supports navigator.sendBeacon() cleanup and the recover-esbuild action (#776).
  */
 export async function POST(request: Request, { params }: RouteParams) {
   const url = new URL(request.url);
@@ -133,7 +145,24 @@ export async function POST(request: Request, { params }: RouteParams) {
     return DELETE(request, { params });
   }
 
-  return Response.json({ error: "Method not allowed" }, { status: 405 });
+  const { userId, unauthorized } = await requireUserId();
+  if (unauthorized) return unauthorized;
+  const limit = checkRateLimit(userId, RECOVERY_RATE_LIMIT);
+  if (!limit.allowed) return rateLimitedResponse(limit);
+  const { invalid } = await parseJsonBody(request, recoverySchema);
+  if (invalid) return invalid;
+  const { sandboxId } = await params;
+  try {
+    const sandbox = await getOwnedSandbox(sandboxId, userId);
+    if (!sandbox) return Response.json({ error: "Sandbox not found" }, { status: 404 });
+    // A package.json sync may be queued but not yet visible in commands.list().
+    const status = installQueues.has(sandboxId) ? "busy" : await recoverEsbuild(sandbox);
+    return Response.json({ status });
+  } catch {
+    // Never return E2B exception text: it can contain the command's environment.
+    console.warn("[sandbox-recovery] Dev server recovery failed");
+    return Response.json({ error: "Preview recovery failed" }, { status: 502 });
+  }
 }
 
 /**
@@ -161,7 +190,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     return invalid;
   }
 
-  const { files, installCommand } = data;
+  const { files, installCommand, devCommand } = data;
 
   const WORK_DIR = "/home/user/app";
 
@@ -173,54 +202,57 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     }
 
     // One request for the whole batch instead of one per file.
-    await sandbox.files.write(
-      files.map((file) => ({
-        path: `${WORK_DIR}/${file.path}`,
-        data: file.content,
-      }))
-    );
+    await sandbox.writeFiles(projectFileEntries(files, WORK_DIR));
 
     // The instance that booted the sandbox installs through the boot stream,
     // where the output reaches the terminal. Any other instance, or any sync
     // after that stream has ended (#492), installs here.
     let installFailed: InstallFailure | undefined;
-    if (
-      files.some((file) => file.path === "package.json") &&
-      !requestReinstall(sandboxId)
-    ) {
-      const command = installCommand || DEFAULT_INSTALL_COMMAND;
-      installFailed = await installAfterBurst(sandboxId, () =>
-        installWithDevServerStopped(sandbox, async () => {
-          // Retain only the safe npm code for a timeout; output and exception
-          // messages may include injected secrets, even ones since rotated (#498).
-          let tail = "";
-          let timeoutFailure: InstallFailure = { exitCode: 124 };
-          const observe = (chunk: string) => {
-            tail = (tail + chunk).slice(-8192);
-            const failure = installFailure({ exitCode: 124, stdout: tail, stderr: "" });
-            if (failure.code) timeoutFailure = failure;
-          };
-          const result = await sandbox.commands
-            .run(command, {
-              cwd: WORK_DIR,
-              timeoutMs: boundedTimeout(5 * 60 * 1000, budget.left()),
-              onStdout: observe,
-              onStderr: observe,
-            })
-            .catch((error: unknown) => {
-              // A non-zero exit is the app's failure, not a dead sandbox (#491).
-              if (error instanceof CommandExitError) return error;
-              if (error instanceof TimeoutError) return null;
-              throw error;
-            });
-          if (!result) return timeoutFailure;
-          return result.exitCode !== 0 ? installFailure(result) : undefined;
-        }),
-      );
+    if (files.some((file) => file.path === "package.json")) {
+      if (requestReinstall(sandboxId)) {
+        await waitForReinstall(sandboxId);
+      } else {
+        const command = installCommand || DEFAULT_INSTALL_COMMAND;
+        let failed: InstallFailure | undefined;
+        installFailed = await installAfterBurst(sandboxId, async () =>
+          installWithDevServerStopped(sandbox, async () => {
+            // Retain only the safe npm code for a timeout; output and exception
+            // messages may include injected secrets, even ones since rotated (#498).
+            let tail = "";
+            let timeoutFailure: InstallFailure = { exitCode: 124 };
+            const observe = (chunk: string) => {
+              tail = (tail + chunk).slice(-8192);
+              const failure = installFailure({ exitCode: 124, stdout: tail, stderr: "" });
+              if (failure.code) timeoutFailure = failure;
+            };
+            // A non-zero exit resolves: it is the app's failure, not a dead sandbox (#491).
+            const result = await sandbox
+              .run(command, {
+                cwd: WORK_DIR,
+                timeoutMs: boundedTimeout(5 * 60 * 1000, budget.left()),
+                onStdout: observe,
+                onStderr: observe,
+              })
+              .catch((error: unknown) => {
+                if (error instanceof SandboxTimeoutError) return null;
+                throw error;
+              });
+            failed = !result ? timeoutFailure : result.exitCode !== 0 ? installFailure(result) : undefined;
+            return failed;
+          }, {}, fallbackDevStart(files, devCommand, WORK_DIR, await proxyTargetPort(sandbox))).catch((error: unknown) => {
+            // The failed install is the primary error: the client offers its fix, then the next sync starts the server.
+            if (failed && error instanceof DevServerStartError) return failed;
+            throw error;
+          }),
+        );
+      }
     }
 
     return Response.json({ success: true, synced: files.length, installFailed });
   } catch (error) {
+    if (error instanceof DevServerStartError) {
+      return Response.json({ success: false, error: error.message, code: "dev_server_unavailable" }, { status: 503 });
+    }
     // The cached handle may belong to a sandbox that has since died.
     forgetSandbox(sandboxId);
 

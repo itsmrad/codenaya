@@ -619,7 +619,7 @@ const styles = StyleSheet.create({
   nameCell: { flex: 1, height: 48, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14 },
   name: { flexShrink: 1, fontSize: 17, letterSpacing: -0.2, fontFamily: font.medium },
   // No gap: it would sit inside each cell's rule and push its icon off centre.
-  strip: { height: 40, flexDirection: "row", alignItems: "center", paddingLeft: 16, borderBottomWidth: 1 },
+  strip: { height: 44, flexDirection: "row", alignItems: "center", paddingLeft: 16, borderBottomWidth: 1 },
   stripCell: { width: 44, alignSelf: "stretch", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderLeftWidth: 1 },
   stripWide: { width: undefined, paddingHorizontal: 16 },
   bar: { width: 2, height: 12 },

@@ -1,5 +1,4 @@
 import { type Tool, createAgent, createNetwork } from "@inngest/agent-kit";
-import type { Sandbox } from "e2b";
 
 import {
   BUILD_CHECK_UNFINISHED,
@@ -16,6 +15,8 @@ import { createEditFileTool } from "@/features/conversations/inngest/tools/edit-
 import { createReadFilesTool } from "@/features/conversations/inngest/tools/read-files";
 import { createWriteFilesTool } from "@/features/conversations/inngest/tools/write-files";
 import { type ProjectFile, WORK_DIR } from "@/features/sandbox-preview/server/project-sandbox";
+import { exists, remove, runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
+import type { Sandbox } from "@/features/sandbox-preview/server/provider/types";
 import type { Framework } from "@/features/sandbox-preview/utils/framework";
 import { convex } from "@/lib/convex-client";
 
@@ -176,7 +177,8 @@ export type VerifyAndFixOptions = {
 /** The project's files under `dir`: text ones with content, all by path. */
 const snapshot = async (sandbox: Sandbox, dir: string) => {
   // GNU find: "<bytes> <relative path>" per file.
-  const listing = await sandbox.commands.run(
+  const listing = await runOrThrow(
+    sandbox,
     `find . -type f ${[...SKIPPED_DIRS].map((dir) => `-not -path './${dir}/*'`).join(" ")} -printf '%s %P\\n'`,
     { cwd: dir, timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS },
   );
@@ -196,10 +198,7 @@ const snapshot = async (sandbox: Sandbox, dir: string) => {
     entries
       .filter(({ size }) => size <= MAX_TEXT_BYTES)
       .map(async ({ path }): Promise<ProjectFile | null> => {
-        const bytes = await sandbox.files.read(`${dir}/${path}`, {
-          format: "bytes",
-          requestTimeoutMs: SHORT_CALL_MS,
-        });
+        const bytes = await sandbox.readFile(`${dir}/${path}`, "bytes", { requestTimeoutMs: SHORT_CALL_MS });
         try {
           return { path, content: decoder.decode(bytes) };
         } catch {
@@ -218,6 +217,8 @@ const LOCATED = /^([\w@./-]+\.[\w]+)(?:\((\d+),\d+\)|:(\d+):\d+):?\s*(.+)$/;
 // next build: "./src/app/page.tsx:12:3" alone, then the message on the next line.
 const LOCATION_ONLY = /^(?:\.\/)?([\w@./-]+\.\w+)(?::(\d+):\d+)?$/;
 const NEXT_MESSAGE = /^(?:Type error|Module not found|Syntax error|Error): /;
+// Vite 8 (Rolldown/Oxc): "[UNRESOLVED_IMPORT] Could not resolve ...", then "╭─[ src/App.tsx:1:21 ]".
+const CODE_FRAME = /^\s*╭─\[ ([\w@./-]+\.\w+):(\d+):\d+ \]$/;
 
 /** checkBuild's failure text as structured errors; the whole body when no line names a file. */
 export const parseBuildErrors = (text: string): BuildError[] => {
@@ -237,6 +238,11 @@ export const parseBuildErrors = (text: string): BuildError[] => {
         message: next,
         kind: install ? "install" : next.startsWith("Type error") ? "type" : "build",
       }];
+    }
+    const frame = CODE_FRAME.exec(line);
+    const previous = body[index - 1]?.trim();
+    if (frame && previous) {
+      return [{ file: frame[1], line: Number(frame[2]), message: previous, kind: install ? "install" : "build" }];
     }
     const match = LOCATED.exec(line);
     if (!match) return [];
@@ -437,13 +443,13 @@ const mirror = async (
     const row = byPath.get(path);
     const target = `${dir}/${path}`;
     if (!row) {
-      if (await sandbox.files.exists(target, opts)) {
-        await sandbox.files.remove(target, opts);
+      if (await exists(sandbox, target, opts)) {
+        await remove(sandbox, target, opts);
         changed.push(path);
       }
     } else if (row.type === "file" && typeof row.content === "string") {
-      if ((await sandbox.files.read(target, opts).catch(() => undefined)) !== row.content) {
-        await sandbox.files.write(target, row.content, opts);
+      if ((await sandbox.readFile(target, "text", opts).catch(() => undefined)) !== row.content) {
+        await sandbox.writeFiles([{ path: target, data: row.content }], opts);
         changed.push(path);
       }
     }

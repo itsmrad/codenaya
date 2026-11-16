@@ -6,6 +6,18 @@ Production setup for the Next.js host, Convex, Clerk, E2B and Inngest. Variable 
 2. **Convex env.** On the production deployment, set `CLERK_JWT_ISSUER_DOMAIN` (the production Clerk instance), `CLERK_WEBHOOK_SECRET` (step 4) and `CODENAYA_CONVEX_INTERNAL_KEY` (same value as the host).
 3. **Convex deploy + backfill.** Deploy functions and schema with `npx convex deploy --cmd 'npm run build'` (needs `CONVEX_DEPLOY_KEY`; keep `npm run build` as plain `next build`). After the first deploy, backfill the landing-page project counter once: `npx convex run --prod stats:backfillProjectsBuilt '{}'`.
 4. **Clerk webhook.** In the production Clerk instance, add a webhook to `https://<prod-deployment>.convex.site/clerk-users-webhook` with events `user.created`, `user.updated`, `user.deleted`; put its signing secret in Convex as `CLERK_WEBHOOK_SECRET`. Enable "Delete account" under User & authentication > Account settings.
-5. **E2B template.** Run `npm run e2b:template` with the production `E2B_API_KEY` and optional `E2B_TEMPLATE` (build default: `codenaya-node22`), then set the same template name in `E2B_TEMPLATE` on the host. Without it previews use the `base` image, whose Node is too old for Vite 7. The template also warms the npm cache for the Next.js starter (ADR 0014); rebuild it when either starter's package.json changes.
+5. **E2B template.** Run `npm run e2b:template` with the production `E2B_API_KEY` and optional `E2B_TEMPLATE` (build and app default: `codenaya-node22`); set the same name on the host if customized. When unset the app warns and uses `codenaya-node22`; a missing template fails sandbox creation with E2B's not-found error. The template also warms the npm cache for the Next.js starter (ADR 0014); rebuild it when either starter's package.json changes.
 6. **Inngest Cloud.** Set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` on the host, leave `INNGEST_DEV` unset, and sync the app at `https://<your-domain>/api/inngest` (the Inngest Vercel integration does both automatically).
 
+
+## Sandbox provider selection (PR3a groundwork)
+
+`SANDBOX_PROVIDER` defaults to `e2b`; `SANDBOX_PROVIDER_FALLBACKS` is an
+ordered comma list, empty by default. Only `e2b` is supported today. Providers
+without their key (`E2B_API_KEY`) are skipped. Unknown ids are ignored with a
+warning that never includes environment values. These helpers are **not wired**
+into boot, cap or cleanup paths until PR3b; setting these variables has no effect yet.
+Session lifetime is bounded by one hour and the provider's `maxSessionMs`.
+
+TODO (privacy): update the subprocessor list BEFORE shipping any non-E2B adapter;
+the privacy page currently names E2B, and sandbox env secrets reach the provider.

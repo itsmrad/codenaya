@@ -17,6 +17,10 @@ import {
 import { HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN } from "./hidden-until-payment-provider";
 
 describe("provider catalog display metadata", () => {
+  it("contains exactly 68 vetted providers", () => {
+    expect(listProviders()).toHaveLength(68);
+  });
+
   it.each(listProviders())("has complete display metadata and a local logo for $id", (provider) => {
     expect(provider.displayName.trim()).not.toBe("");
     expect(provider.description.trim()).not.toBe("");
@@ -109,7 +113,7 @@ describe("provider catalog filters", () => {
     expect(filterProviders("  GITHUB  ").map(({ id }) => id)).toEqual(["github"]);
     expect(filterProviders("stack traces").map(({ id }) => id)).toEqual(["sentry"]);
     expect(filterProviders("DATABASE").map(({ id }) => id)).toEqual([
-      "supabase", "neon", "prisma", "upstash", "planetscale", "notion",
+      "supabase", "neon", "prisma", "upstash", "planetscale", "notion", "airtable",
     ]);
   });
 
@@ -128,14 +132,16 @@ describe("provider catalog filters", () => {
 
 it("pins the exact public documentation read lists", () => {
   const publicDocs = listProviders().filter((provider) => provider.authModes.includes("none"));
-  expect(publicDocs.map(({ id }) => id)).toEqual(["microsoft-learn", "cloudflare-docs"]);
+  expect(publicDocs.map(({ id }) => id)).toEqual(["microsoft-learn", "cloudflare-docs", "langfuse"]);
   expect(publicDocs.map(({ readOnlyTools }) => readOnlyTools)).toEqual([
     ["microsoft_docs_search", "microsoft_docs_fetch", "microsoft_code_sample_search"],
     ["search_cloudflare_documentation", "migrate_pages_to_workers_guide"],
+    ["searchLangfuseDocs", "getLangfuseDocsPage", "getLangfuseOverview"],
   ]);
   for (const provider of publicDocs) {
     expect(provider.authModes).toEqual(["none"]);
-    expect(provider.supportsReadOnly).toBe(true);
+    // Only a server with no write tool may advertise itself as read-only.
+    expect(provider.supportsReadOnly).toBe(provider.destructiveTools.length === 0);
     expect(provider.trustedHostnames).toEqual([new URL(provider.mcpUrl).hostname]);
     expect(provider.readOnlyTools?.filter((tool) => provider.destructiveTools.includes(tool))).toEqual([]);
   }

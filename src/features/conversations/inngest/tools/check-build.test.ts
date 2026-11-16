@@ -13,10 +13,11 @@ vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal)
   resolveProjectEnv: mocks.resolveEnv,
 }));
 
-import { CommandExitError, type CommandResult, type Sandbox, SandboxError, TimeoutError } from "e2b";
+import { CommandExitError, type CommandResult, type Sandbox as E2bSandbox, SandboxError, TimeoutError } from "e2b";
 import { getFunctionName } from "convex/server";
 
-import { DEV_COMMAND_ENV, PROXY_TARGET_ENV, killTreeCommand } from "@/features/sandbox-preview/server/dev-server";
+import { DEV_COMMAND_ENV, DEV_START_COMMAND, READ_DEV_PGID_COMMAND, PROXY_TARGET_ENV, killProjectNodesCommand, killTreeCommand } from "@/features/sandbox-preview/server/dev-server";
+import { createE2bProvider, fromE2bSandbox } from "@/features/sandbox-preview/server/provider/e2b";
 
 import { VITE_REACT_STARTER } from "../vite-starter";
 import {
@@ -26,14 +27,22 @@ import {
 } from "../../agent-steps";
 import { START_BUILD_ERROR, START_TYPE_ERROR } from "./start-build-output.fixture";
 import { buildCommand, checkProjectBuild, createCheckBuildTool, trimBuildOutput, warmSlow } from "./check-build";
-import { NEXT_MODULE_NOT_FOUND, NEXT_PRERENDER_ERROR, NEXT_TYPE_ERROR } from "./next-build-output.fixture";
+import {
+  NEXT16_MODULE_NOT_FOUND,
+  NEXT16_PRERENDER_ERROR,
+  NEXT16_SYNTAX_ERROR,
+  NEXT16_TYPE_ERROR,
+  NEXT_MODULE_NOT_FOUND,
+  NEXT_PRERENDER_ERROR,
+  NEXT_TYPE_ERROR,
+} from "./next-build-output.fixture";
 
 const starter = () => VITE_REACT_STARTER.map((file) => ({ ...file }));
 const check = (files = starter(), apiKey: string | null = "e2b_key") =>
   checkProjectBuild({
     files,
     paths: new Set(files.map((file) => file.path)),
-    apiKey: apiKey ?? undefined,
+    provider: apiKey ? createE2bProvider(apiKey) : undefined,
   });
 
 /** The structured lines `unfinished` logs, parsed. */
@@ -150,6 +159,17 @@ describe("trimBuildOutput for Next.js", () => {
     ]);
     expect(trimmed).not.toContain("/home/user/app/");
     expect(trimmed).not.toMatch(/Collecting page data|Generating static pages/);
+  });
+
+  it.each([
+    ["type error", NEXT16_TYPE_ERROR, ["Failed to type check.", "src/app/page.tsx(8,13): error TS2322: Type 'number' is not assignable to type 'string'."]],
+    ["missing module", NEXT16_MODULE_NOT_FOUND, ["> Build error occurred", "Error: Turbopack build failed with 1 error:", "./src/app/page.tsx:3:1", "Error: Module not found: Can't resolve '@/components/Hero'"]],
+    ["syntax error", NEXT16_SYNTAX_ERROR, ["> Build error occurred", "Error: Turbopack build failed with 1 error:", "./src/app/page.tsx:6:3", "Error: Expected ',', got ';'"]],
+    ["prerender failure", NEXT16_PRERENDER_ERROR, ['Error occurred prerendering page "/". Read more: https://nextjs.org/docs/messages/prerender-error', "Error: STRIPE_SECRET_KEY is not set", "    at <unknown> (src/app/page.tsx:2:45)"]],
+  ])("keeps a Next 16 (Turbopack) %s first and drops the build progress", (_, fixture, head) => {
+    const trimmed = trimBuildOutput(output(fixture), "/home/user/app", "next");
+    expect(trimmed.split("\n").slice(0, head.length)).toEqual(head);
+    expect(trimmed).not.toMatch(/Next\.js 16|next\.config\.ts took|Creating an optimized|Compiled successfully|TypeScript|Collecting page data|Generating static pages/);
   });
 
   it("puts errors printed after the route table first and drops the table and telemetry notice", () => {
@@ -288,7 +308,7 @@ describe("checkProjectBuild", () => {
     const result = await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      sandbox: sandbox as unknown as Sandbox,
+      sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
     });
 
     expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
@@ -308,7 +328,7 @@ describe("checkProjectBuild", () => {
     await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      sandbox: sandbox as unknown as Sandbox,
+      sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
       sourceDir: "/home/user/app",
     });
 
@@ -327,7 +347,7 @@ describe("checkProjectBuild", () => {
     const result = await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      sandbox: sandbox as unknown as Sandbox,
+      sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
     });
 
     expect(result).toBe("Error: Static checks failed: Invalid project file path.");
@@ -379,7 +399,7 @@ describe("checkProjectBuild", () => {
     await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      sandbox: sandbox as unknown as Sandbox,
+      sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
       sourceDir: "/home/user/app",
     });
     const [copy] = sandbox.commands.run.mock.calls.map(([command]) => command);
@@ -395,7 +415,7 @@ describe("checkProjectBuild", () => {
     await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      sandbox: sandbox as unknown as Sandbox,
+      sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
       sourceDir: "/home/user/app",
     });
     const [copy] = sandbox.commands.run.mock.calls.map(([command]) => command);
@@ -474,7 +494,7 @@ describe("checkProjectBuild", () => {
     Object.assign(fakeSandbox(new TimeoutError("Command timed out")), { sandboxId: "sbx_cold" });
     await check();
     expect(unfinishedLogs()).toEqual([
-      expect.objectContaining({ path: "cold", sandboxId: "sbx_cold", error: "TimeoutError", reason: "Command timed out" }),
+      expect.objectContaining({ path: "cold", sandboxId: "sbx_cold", error: "SandboxTimeoutError", reason: "Command timed out" }),
     ]);
   });
 });
@@ -488,7 +508,7 @@ describe("checkProjectBuild redaction (#465)", () => {
     const result = await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      apiKey: "e2b_key",
+      provider: createE2bProvider("e2b_key"),
       secrets: [SECRET],
     });
     expect(result).toMatch(/^Error: Build failed/);
@@ -508,7 +528,7 @@ describe("checkProjectBuild redaction (#465)", () => {
     const result = await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      apiKey: "e2b_key",
+      provider: createE2bProvider("e2b_key"),
       secrets: [key],
     });
     expect(result).toMatch(/^Error: Build failed/);
@@ -529,7 +549,7 @@ describe("checkProjectBuild redaction (#465)", () => {
     const result = await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      apiKey: "e2b_key",
+      provider: createE2bProvider("e2b_key"),
       secrets: [secret],
     });
     expect(result).toContain("[redacted]");
@@ -542,7 +562,7 @@ describe("checkProjectBuild redaction (#465)", () => {
     const result = await checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      apiKey: "e2b_key",
+      provider: createE2bProvider("e2b_key"),
       secrets: [SECRET],
     });
     expect(result).toMatch(/^Error: The build check could not finish/);
@@ -562,7 +582,7 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     return checkProjectBuild({
       files,
       paths: new Set(files.map((file) => file.path)),
-      apiKey: "e2b_key",
+      provider: createE2bProvider("e2b_key"),
       metadata: { projectId: "proj_1", purpose: "check-build" },
       preview: { projectId: "proj_1", ownerId: "user_1" },
       secrets,
@@ -677,7 +697,7 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
       const [cleanup, ...rest] = afterBuild(warm);
       expect(cleanup).toMatch(/^rm -rf \/home\/user\/check-build-/);
       expect(rest.slice(0, 3)).toEqual(Array(3).fill(expect.stringContaining("port:3000")));
-      expect(rest.slice(3)).toEqual([killTreeCommand(12), "npm run dev -- --hostname 0.0.0.0"]);
+      expect(rest.slice(3)).toEqual([READ_DEV_PGID_COMMAND, killTreeCommand(12), killProjectNodesCommand("/home/user/app"), DEV_START_COMMAND]);
       // Bounded like the rest of the cleanup, so a slow sandbox can't hold the step past its budget.
       expect(warm.commands.run.mock.calls.at(-2)?.[1]).toEqual({ timeoutMs: 10_000, requestTimeoutMs: 10_000 });
       expect(warm.commands.run.mock.calls.at(-1)?.[1]).toEqual({

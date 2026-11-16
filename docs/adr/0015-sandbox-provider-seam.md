@@ -85,3 +85,70 @@ registry before it gets an adapter.
   (`e2e/preview-e2b-*`) are the first run against the real service.
 - A new vendor means a new adapter, an image build script and per-vendor e2e secrets.
   Each vendor also becomes a subprocessor for the `.env` secrets written into its sandboxes.
+
+## PR2 status
+
+`check-build.ts`, `build-repair.ts`, `sandbox-repair.ts` and `swarm-sandbox.ts` now
+reach sandboxes only through the seam (`getDefaultProviderOrNull()`, `provider.create`,
+`list`, `connect`, `kill`, the snapshot methods, and `run`/`writeFiles`/`readFile` plus
+`runOrThrow`, `exists` and `remove` from `helpers.ts`). Metadata is unchanged:
+`purpose`, `projectId`, `runId` and `messageId`, and `userId` on the warm-preview lookup.
+The swarm stays off by default and needs a provider with all three snapshot methods.
+
+`e2bHandleOf(sandbox)` (in `e2b.ts`) hands back the raw E2B handle in two places only:
+- **The warm preview in `check-build.ts`.** The install poll uses `commands.list` and
+  `findPreviewDevServer`/`restartDevServerIfDown` from `dev-server.ts`, all of which are
+  typed to the E2B handle until PR1b moves `dev-server.ts`. Their E2B timeout handling
+  is unchanged.
+- **The swarm's envd-version gate** before a snapshot.
+
+Seam errors replace E2B's on these paths, so the `[check-build] unfinished` log now
+names `SandboxTimeoutError` rather than `TimeoutError`. The E2B adapter's `snapshot`
+calls the sandbox's own `createSnapshot`. Coverage is still the mocked `e2b` SDK and
+the agent e2e specs; there has been no live run.
+
+## PR3a status / selection and failover
+
+PR3a adds request-time env parsing, pure selection, process-local cooldowns and
+list/count fanout helpers under `provider/`, without changing any call sites.
+PR3b wires these after PR1b and PR2. Selection prefers the last live provider only
+when enabled, configured and healthy; empty fallbacks keep a single candidate.
+Config/auth and rate/quota failures cool down immediately for ten minutes; other
+create failures count as transient across boots, cooling down after two consecutive
+failures. Success or cooldown expiry resets the counter. There is no same-provider
+create retry (an ambiguous failure may already have created a sandbox), and at most
+one failover per boot. The original first error is rethrown unchanged if creation
+fails. An injected notice callback exposes the switch for future terminal wiring.
+Fanout includes enabled providers even during create cooldowns, carries provider ids
+for cleanup routing, and propagates list errors so a cap cannot undercount silently.
+Use the existing seam's `maxSessionMs` to cap lifetime at one hour.
+
+TODO (privacy): update the subprocessor list BEFORE any non-E2B adapter ships;
+the privacy page currently names E2B.
+
+## PR1b status
+
+The preview server paths now go through the seam:
+- `project-sandbox.ts` (the per-user cap, the project kill, and stopping a resumed boot's commands)
+- both sandbox routes
+- `sandbox-registry.ts`
+- `dev-server.ts` and `recover-esbuild.ts`
+
+`getOwnedSandbox` parses the client's id with `parsePublicSandboxIdOrNull`. It returns
+null for a malformed id or an unknown prefix, without connecting. Otherwise it connects
+through `getProvider(prefix)` and still checks `info().metadata.userId`. E2B ids stay
+unprefixed in responses until PR3b.
+
+Two optional `Sandbox` methods were added, both kept as they behave today:
+- **`listCommands`** (E2B: `commands.list`) returns envd-started command roots with the
+  envs exactly as passed at start. The dev server marker (`CODENAYA_DEV_COMMAND`)
+  and its restart rely on that, so a restart passes the same envs it was started with.
+  A provider without it falls back to the `/proc` view from `listProcesses`. That view
+  includes children and each process's whole inherited environment, so a restart from
+  it would pass more envs than the start did. No adapter uses the fallback yet.
+- **`killCommand`** (E2B: `commands.kill`) is only the fallback when the kill-tree
+  `run` itself fails while stopping a resumed boot's commands (#486).
+
+`findPreviewDevServer` and `restartDevServerIfDown` still accept the raw E2B handle that
+`check-build.ts` passes; PR2b drops that shim and `e2bHandleOf`. `createProjectSandbox`,
+`writeProjectFiles` and `SANDBOX_TEMPLATE` stay until the agent paths stop importing them.

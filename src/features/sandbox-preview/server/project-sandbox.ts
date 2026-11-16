@@ -1,7 +1,9 @@
 import { Sandbox, type SandboxOpts } from "e2b";
 import { z } from "zod";
 
-import { killTreeCommand } from "./dev-server";
+import { killTreeCommand, SHORT_CALL_MS, stopDevServers } from "./dev-server";
+import { listCommands } from "./provider/helpers";
+import type { Sandbox as SeamSandbox, SandboxProvider } from "./provider/types";
 
 /**
  * Sandbox setup shared by the preview route and the agent's checkBuild tool,
@@ -10,9 +12,13 @@ import { killTreeCommand } from "./dev-server";
 
 /**
  * The base image ships Node 20.9, too old for Vite 7 (#178). E2B_TEMPLATE
- * points at the Node 22 template built by `npm run e2b:template`.
+ * overrides the default Node 22 template built by `npm run e2b:template`.
  */
-export const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || "base";
+export const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || "codenaya-node22";
+
+if (!process.env.E2B_TEMPLATE?.trim()) {
+  console.warn("[project-sandbox] E2B_TEMPLATE unset; using codenaya-node22. Build it with npm run e2b:template");
+}
 
 /** Where project files are written inside the sandbox. */
 export const WORK_DIR = "/home/user/app";
@@ -47,12 +53,8 @@ export const MAX_LIVE_SANDBOXES = 3;
  */
 // ponytail: check-then-create, so simultaneous boots can overshoot by a few; the
 // sandbox rate limit bounds that. Use a Convex counter if it ever matters.
-export const atLiveSandboxCap = async (apiKey: string, userId: string) => {
-  const running = await Sandbox.list({
-    apiKey,
-    query: { metadata: { userId }, state: ["running"] },
-    limit: MAX_LIVE_SANDBOXES,
-  }).nextItems();
+export const atLiveSandboxCap = async (provider: SandboxProvider, userId: string) => {
+  const running = await provider.list({ metadata: { userId }, limit: MAX_LIVE_SANDBOXES });
   return running.length >= MAX_LIVE_SANDBOXES;
 };
 
@@ -64,22 +66,22 @@ export const atLiveSandboxCap = async (apiKey: string, userId: string) => {
 // shortcut: an orphan whose project is never reopened lives until the E2B
 // timeout (SANDBOX_TIMEOUT_MS). Use a renewable lease if that ever matters.
 export const killProjectPreviews = async (
-  apiKey: string,
+  provider: SandboxProvider,
   userId: string,
   projectId: string,
 ) => {
-  const running = await Sandbox.list({
-    apiKey,
-    query: { metadata: { userId, projectId }, state: ["running"] },
-    limit: MAX_LIVE_SANDBOXES,
-  }).nextItems();
-  await Promise.all(running.map(({ sandboxId }) => Sandbox.kill(sandboxId, { apiKey })));
-  return running.map(({ sandboxId }) => sandboxId);
+  const running = await provider.list({ metadata: { userId, projectId }, limit: MAX_LIVE_SANDBOXES });
+  await Promise.all(running.map(({ id }) => provider.kill(id)));
+  return running.map(({ id }) => id);
 };
 
 export const createProjectSandbox = (
   opts: Pick<SandboxOpts, "apiKey" | "timeoutMs" | "metadata" | "network" | "requestTimeoutMs">,
 ) => Sandbox.create(SANDBOX_TEMPLATE, opts);
+
+/** `files` under `dir`, as one `writeFiles` batch for the provider seam. */
+export const projectFileEntries = (files: ProjectFile[], dir = WORK_DIR) =>
+  files.map((file) => ({ path: `${dir}/${file.path}`, data: file.content }));
 
 /**
  * One batched upload; E2B creates the parent directories. `timeLeft` bounds
@@ -102,14 +104,20 @@ export const writeProjectFiles = async (
  * Stops every command an earlier boot left running (install, dev server,
  * proxy), so booting again on the same sandbox doesn't race it (#492).
  */
-export const stopSandboxCommands = async (sandbox: Sandbox) => {
-  const running = await sandbox.commands.list();
+export const stopSandboxCommands = async (sandbox: SeamSandbox) => {
+  const running = await listCommands(sandbox, { requestTimeoutMs: SHORT_CALL_MS });
+  try {
+    await stopDevServers(sandbox, running, WORK_DIR);
+  } catch {
+    // Best-effort cleanup: retry the listed trees below if group cleanup failed.
+  }
   await Promise.all(running.map(async (command) => {
     try {
-      await sandbox.commands.run(killTreeCommand(command.pid), { timeoutMs: 10_000 });
+      await sandbox.run(killTreeCommand(command.pid), { timeoutMs: 10_000 });
     } catch {
       // Best-effort cleanup must not prevent a resumed boot (#486).
-      await sandbox.commands.kill(command.pid, { requestTimeoutMs: 10_000 }).catch(() => {
+      const kill = sandbox.killCommand?.(command.pid, { requestTimeoutMs: 10_000 }) ?? Promise.reject();
+      await kill.catch(() => {
         console.warn("[project-sandbox] Failed to stop command", command.pid);
       });
     }

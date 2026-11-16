@@ -56,7 +56,7 @@ test.describe("not-found page", () => {
     await composer.press("Enter");
     // Same path as the landing composer: sign in, keeping the prompt.
     await expect(page).toHaveURL(/\/sign-in/);
-    expect(await page.evaluate((key) => localStorage.getItem(key), PENDING_PROMPT_KEY)).toBe(
+    expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!).value, PENDING_PROMPT_KEY)).toBe(
       "A habit tracker with streaks",
     );
   });

@@ -146,6 +146,7 @@ Verified on 2026-11-15 with unauthenticated MCP `initialize` and `tools/list`
 | --- | --- | --- |
 | Microsoft Learn | `microsoft_docs_search`, `microsoft_docs_fetch`, `microsoft_code_sample_search` | [Microsoft README](https://github.com/MicrosoftDocs/mcp), [developer reference](https://learn.microsoft.com/en-us/training/support/mcp-developer-reference) |
 | Cloudflare Docs | `search_cloudflare_documentation`, `migrate_pages_to_workers_guide` | [Cloudflare README](https://github.com/cloudflare/mcp-server-cloudflare/tree/main/apps/docs-ai-search), [tool source](https://github.com/cloudflare/mcp-server-cloudflare/blob/main/packages/mcp-common/src/shared-tools/docs-ai-search.tools.ts) |
+| Langfuse Docs (`https://langfuse.com/api/mcp`, batch C) | `searchLangfuseDocs`, `getLangfuseDocsPage`, `getLangfuseOverview`; `submitFeedback` is gated as a write | [Langfuse Docs MCP](https://langfuse.com/docs/docs-mcp), [MCP reference](https://mcp.reference.langfuse.com/) |
 
 Both servers currently expose documentation reads only (`supportsReadOnly: true`).
 Cloudflare's migration-guide tool retrieves instructions; it does not migrate an
@@ -190,6 +191,19 @@ The same mechanism serves any catalog provider without dynamic registration. Giv
 the entry `preRegisteredClient: { clientIdEnv, clientSecretEnv }` (variable names
 only) and, if its authorization server is cross-site, `trustedAuthorizationServerOrigins`.
 
+## Client-access prerequisites (Figma, Slack, Square)
+
+These three hosted servers admit only clients the vendor has approved. They are
+not in the catalog, and Connect is not offered, until the product owner completes
+the steps below and this section is updated to say admission is verified. Checked
+2026-11-15. Do not file the vendor applications from this repository.
+
+| Provider | Requirement (paraphrase) | Owner steps and decision |
+| --- | --- | --- |
+| Figma | Only clients listed in the [Figma MCP catalog](https://www.figma.com/mcp-catalog) can connect to the remote server. A developer connecting a new MCP client joins the [waitlist](https://form.asana.com/?k=kBG-ejRQTdY8x_H6a4vM3Q&d=10497086658021). [Remote server installation](https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/), checked 2026-11-15. | The product owner joins the waitlist and waits to be listed. **Not offered: needs vendor catalog admission.** |
+| Square | Square maintains an allowlist of MCP clients against malicious client registration, and asks to request an addition in the [developer forum](https://developer.squareup.com/forums/c/mcp/14). Remote instances only access production resources; sandbox is a local server. [Square MCP](https://developer.squareup.com/docs/mcp), checked 2026-11-15. | The product owner requests allowlisting. **Not offered: needs vendor allowlisting.** Remote Connect would be production-only. |
+| Slack | The client must be a registered Slack app with a fixed app id. Only directory-published apps or internal apps may use MCP; unlisted apps are prohibited. No dynamic client registration; OAuth is confidential (`client_id` and `client_secret`). Workspace admins approve the app. [Slack MCP server](https://docs.slack.dev/ai/mcp-server), checked 2026-11-15. | Confidential pre-registered client support is merged ([#539](https://github.com/itsmrad/codenaya/issues/539)). Still required: the product owner publishes a Marketplace app, or creates an internal app (that app serves only its own workspace), then sets the pre-registered client variables. **Not offered: needs a directory-published or internal Slack app.** |
+
 ## Community catalog (unreviewed)
 
 Below the vetted providers, the catalog shows a **Community** section: up to 500 of the
@@ -208,8 +222,10 @@ and nothing in it is trusted.
   owner-named domain (recognised single-label suffixes only; other domain vouches
   fail closed). Denylisted hosting/proxy domains cannot vouch. Entries matching vetted
   providers’ trusted hosts are omitted in favour of the vetted entry. URLs are
-  never scraped from READMEs. Everything else is `stdio` and shows
-  "Needs a local runtime (not supported yet)", disabled.
+  never scraped from READMEs. Everything else is `stdio` and stays in the JSON, but
+  the catalog, search, categories and counts omit it while
+  `SHOW_LOCAL_RUNTIME_COMMUNITY_SERVERS` is false. Flip that flag when stdio MCP
+  in the sandbox (#545) ships.
 - **Auth** is `api-key` when the registry remote declares headers, `oauth` when
   the remote publishes RFC 9728 protected-resource metadata (opt-in
   `--probe-oauth`: one unauthenticated GET per remote entry, paced), else
@@ -272,3 +288,9 @@ Verified from the [official sign-in docs](https://docs.firecrawl.dev/mcp-server)
 and [API-key docs](https://docs.firecrawl.dev/mcp-server/keyless#add-an-api-key)
 on 2026-11-15. Validation uses mocked MCP handshakes; no vendor calls or real
 credentials are needed.
+
+## Batch D1 OAuth providers
+
+Klaviyo, Granola, Kit, MailerLite, beehiiv, Prismic, GitBook, Scite, Snyk Evo, Axiom, Fathom, Help Scout, Omnisend, DatoCMS, Circleback, getimg.ai use OAuth discovery and dynamic client registration. Unauthenticated initialize returned 401 and protected-resource/authorization-server metadata advertised DCR on 2026-11-15. No registration, sign-in or tool calls were performed. Kit uses its account server (`https://app.kit.com/mcp`).
+
+All tools remain approval-gated, including tools advertising read-only hints; no URL-level read-only mode is claimed. Account roles, plans and usage charges still apply (see each catalog entry). BrowserStack was dropped because initialize and protected-resource metadata returned HTTP 403 during re-verification.

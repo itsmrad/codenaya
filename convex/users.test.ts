@@ -204,6 +204,12 @@ async function seedOwnedData(t: TestConvex, ownerId: string, files = 1) {
       publishedAt: now,
       updatedAt: now,
     });
+    await ctx.db.insert("showcaseEvents", {
+      showcaseProjectId: showcaseId,
+      userId: ownerId,
+      kind: "upvote",
+      createdAt: now,
+    });
     await ctx.db.insert("showcaseVotes", {
       showcaseProjectId: showcaseId,
       userId: ownerId,
@@ -267,6 +273,7 @@ const OWNED_TABLES = [
   "oauthFlowStates",
   "showcaseProjects",
   "showcaseVotes",
+  "showcaseEvents",
   "showcaseViews",
   "aiProviderKeys",
   "userAiPreferences",

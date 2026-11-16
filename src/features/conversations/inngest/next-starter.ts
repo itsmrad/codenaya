@@ -3,7 +3,7 @@ import { VITE_STARTER_UI } from "./vite-starter-ui";
 
 /** Only explicit framework names select Next; ordinary phrases like "next step" do not. */
 export const wantsNextJs = (prompt: string): boolean =>
-  /\b(?:next(?:\.js|\s+js|js)|next\s+15\s+app|app\s+router)\b/i.test(prompt);
+  /\b(?:next(?:\.js|\s+js|js)|next\s+1[56]\s+app|app\s+router)\b/i.test(prompt);
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -20,7 +20,7 @@ export const NEXT_APP_STARTER: ReadonlyArray<{ path: string; content: string }> 
       // Exact versions, newest within the known-good majors (npm view, 2026-11-15): a
       // range resolves today's newest, which an older cached packument may lack (ETARGET).
       dependencies: {
-        next: "15.5.29",
+        next: "16.4.6",
         react: "19.3.1",
         "react-dom": "19.3.1",
         "@hookform/resolvers": "7.0.6",
@@ -77,12 +77,12 @@ export default nextConfig;
         moduleResolution: "bundler",
         resolveJsonModule: true,
         isolatedModules: true,
-        jsx: "preserve",
+        jsx: "react-jsx",
         incremental: true,
         plugins: [{ name: "next" }],
         paths: { "@/*": ["./src/*"] },
       },
-      include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+      include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"],
       exclude: ["node_modules"],
     }),
   },

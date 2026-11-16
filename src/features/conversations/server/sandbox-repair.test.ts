@@ -60,19 +60,30 @@ vi.mock("@/features/conversations/inngest/tools/delete-files", () => ({
 }));
 
 import { createTool, openai } from "@inngest/agent-kit";
-import { CommandExitError, type Sandbox } from "e2b";
+import { CommandExitError, type Sandbox as E2bSandbox } from "e2b";
 import { z } from "zod";
+
+import { fromE2bSandbox } from "@/features/sandbox-preview/server/provider/e2b";
 
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { VITE_REACT_STARTER } from "../inngest/vite-starter";
 import { type RepairEvent, parseBuildErrors, repairTools, verifyAndFix } from "./sandbox-repair";
 import { trimBuildOutput } from "../inngest/tools/check-build";
 import {
+  NEXT16_MODULE_NOT_FOUND,
+  NEXT16_PRERENDER_ERROR,
+  NEXT16_SYNTAX_ERROR,
+  NEXT16_TYPE_ERROR,
   NEXT_MODULE_NOT_FOUND,
   NEXT_PRERENDER_ERROR,
   NEXT_TYPE_ERROR,
 } from "../inngest/tools/next-build-output.fixture";
 import { START_BUILD_ERROR, START_TYPE_ERROR } from "../inngest/tools/start-build-output.fixture";
+import {
+  VITE8_BUILD_JSX_ERROR,
+  VITE8_BUILD_SYNTAX_ERROR,
+  VITE8_BUILD_UNRESOLVED_IMPORT,
+} from "../inngest/tools/vite-build-output.fixture";
 
 /** Like the real tools: the work runs in a step with a fixed id, when there is a step. */
 function fakeTool<T>(name: string, handler: (input: T) => unknown) {
@@ -182,6 +193,14 @@ const fakeSandbox = ({
           builds.push(brokenIn(cwd));
           return answer(build(brokenIn(cwd), cwd, fs));
         }
+        // The provider helpers' exists and remove.
+        const quoted = /^(test -e|rm -rf --) '(.*)'$/.exec(command);
+        if (quoted) {
+          const path = quoted[2].replaceAll("'\\''", "'");
+          if (quoted[1] === "test -e") return answer({ exitCode: fs.has(path) ? 0 : 1 });
+          fs.delete(path);
+          return answer({ exitCode: 0 });
+        }
         if (command.startsWith("rm -rf ")) {
           const dir = command.slice("rm -rf ".length);
           for (const path of [...fs.keys()]) if (path.startsWith(`${dir}/`)) fs.delete(path);
@@ -225,7 +244,7 @@ const model = openai({ model: "stub-haiku", apiKey: "test-key", baseUrl: "http:/
 const run = (sandbox: ReturnType<typeof fakeSandbox>, options: Partial<Parameters<typeof verifyAndFix>[0]> = {}) => {
   const events: RepairEvent[] = [];
   return verifyAndFix({
-    sandbox: sandbox as unknown as Sandbox,
+    sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
     projectId: "proj_1" as Id<"projects">,
     internalKey: "internal",
     runId: "run_1",
@@ -326,7 +345,7 @@ describe("verifyAndFix", () => {
   it("connects a lazy sandbox only to check or sync, and reports each repair response", async () => {
     const sandbox = fakeSandbox();
     modelReplies(...fixApp());
-    const connect = vi.fn(async () => sandbox as unknown as Sandbox);
+    const connect = vi.fn(async () => fromE2bSandbox(sandbox as unknown as E2bSandbox));
     const responses: Array<string | undefined> = [];
 
     const { result } = await run(sandbox, {
@@ -742,6 +761,15 @@ describe("parseBuildErrors", () => {
     "Error: Build failed. Fix these errors, then call checkBuild again:\n" +
     trimBuildOutput(`${stderr}\n${stdout}`, "/home/user/app", "next");
 
+  it.each([
+    [VITE8_BUILD_UNRESOLVED_IMPORT, 1, "[UNRESOLVED_IMPORT] Could not resolve './components/Missing' in src/App.tsx"],
+    [VITE8_BUILD_SYNTAX_ERROR, 2, "[builtin:vite-transform] Unexpected token"],
+    [VITE8_BUILD_JSX_ERROR, 2, "[builtin:vite-transform] Expected corresponding JSX closing tag for 'h1'."],
+  ])("reads a Vite 8 build error from its code frame (line %#)", (output, line, message) => {
+    const text = "Error: Build failed. Fix these errors, then call checkBuild again:\n" + trimBuildOutput(output, "/home/user/app");
+    expect(parseBuildErrors(text)).toEqual([{ file: "src/App.tsx", line, message, kind: "build" }]);
+  });
+
   it("reads a Next.js type error from its location line and the message after it", () => {
     expect(parseBuildErrors(nextFailure(NEXT_TYPE_ERROR))).toEqual([
       { file: "src/app/page.tsx", line: 12, message: "Type error: Type 'number' is not assignable to type 'string'.", kind: "type" },
@@ -776,6 +804,20 @@ describe("parseBuildErrors", () => {
     const [error] = parseBuildErrors(startFailure(START_BUILD_ERROR));
     expect(error.kind).toBe("build");
     expect(error.message).toMatch(/^error during build:\n\[vite\]: Rollup failed to resolve import "@\/components\/Hero"/);
+  });
+
+  it.each([
+    [NEXT16_TYPE_ERROR, { file: "src/app/page.tsx", line: 8, message: "error TS2322: Type 'number' is not assignable to type 'string'.", kind: "type" }],
+    [NEXT16_MODULE_NOT_FOUND, { file: "src/app/page.tsx", line: 3, message: "Error: Module not found: Can't resolve '@/components/Hero'", kind: "build" }],
+    [NEXT16_SYNTAX_ERROR, { file: "src/app/page.tsx", line: 6, message: "Error: Expected ',', got ';'", kind: "build" }],
+  ])("reads a Next 16 (Turbopack) failure: %#", (fixture, error) => {
+    expect(parseBuildErrors(nextFailure(fixture))).toEqual([error]);
+  });
+
+  it("keeps a Next 16 prerender failure whole, with its source frame", () => {
+    const [error] = parseBuildErrors(nextFailure(NEXT16_PRERENDER_ERROR));
+    expect(error).toMatchObject({ kind: "build" });
+    expect(error.message).toMatch(/^Error occurred prerendering page "\/"[^\n]*\nError: STRIPE_SECRET_KEY is not set\n {4}at <unknown> \(src\/app\/page\.tsx:2:45\)/);
   });
 
   it("keeps a Next.js prerender failure whole: it names no source file", () => {

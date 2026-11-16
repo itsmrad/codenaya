@@ -544,6 +544,17 @@ export default defineSchema({
       filterFields: ["status", "category"],
     }),
 
+  showcaseEvents: defineTable({
+    showcaseProjectId: v.id("showcaseProjects"),
+    kind: v.union(v.literal("upvote"), v.literal("remix")),
+    userId: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_createdAt", ["createdAt"])
+    .index("by_userId", ["userId"])
+    .index("by_showcaseProjectId", ["showcaseProjectId"])
+    .index("by_userId_and_showcaseProjectId_and_kind_and_createdAt", ["userId", "showcaseProjectId", "kind", "createdAt"]),
+
   showcaseVotes: defineTable({
     showcaseProjectId: v.id("showcaseProjects"),
     userId: v.string(),

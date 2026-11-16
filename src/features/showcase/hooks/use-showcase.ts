@@ -1,8 +1,9 @@
+import { useEffect, useState } from "react";
 import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 
-export type ShowcaseSort = "newest" | "upvotes" | "imports";
+export type ShowcaseSort = "newest" | "upvotes" | "imports" | "week";
 
 export type ShowcaseFilters = {
   category?: string;
@@ -19,13 +20,14 @@ const FEED_PAGE_SIZE = 12;
 export const useShowcaseFeed = ({
   search,
   sortBy,
+  now,
   ...filters
-}: ShowcaseFilters & { search: string; sortBy: ShowcaseSort }) => {
+}: ShowcaseFilters & { search: string; sortBy: ShowcaseSort; now?: number }) => {
   const query = search.trim();
   const searching = query.length >= 2;
   const list = usePaginatedQuery(
     api.showcase.list,
-    searching ? "skip" : { sortBy, ...filters },
+    searching ? "skip" : { sortBy, ...(sortBy === "week" ? { now } : {}), ...filters },
     { initialNumItems: FEED_PAGE_SIZE }
   );
   const results = usePaginatedQuery(
@@ -36,6 +38,21 @@ export const useShowcaseFeed = ({
   const feed = searching ? results : list;
   return { ...feed, loadMore: () => feed.loadMore(FEED_PAGE_SIZE), searching };
 };
+
+/** Refresh the rolling window even when no new events arrive; only ticks while the weekly view is open. */
+export const useShowcaseRankingTime = (enabled: boolean) => {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, [enabled]);
+  return now;
+};
+
+/** Skipped unless the weekly view is open: each run reads up to 500 events. */
+export const useShowcaseTopCreators = (now: number, enabled: boolean) =>
+  useQuery(api.showcase.getTopCreators, enabled ? { now, limit: 5 } : "skip");
 
 export const useShowcaseById = (id: Id<"showcaseProjects"> | undefined) => {
   return useQuery(api.showcase.getById, id ? { id } : "skip");

@@ -1,5 +1,3 @@
-import { Sandbox } from "e2b";
-
 import {
   type AgentStep,
   BUILD_CHECK_UNFINISHED,
@@ -19,9 +17,11 @@ import {
   DEFAULT_INSTALL_COMMAND,
   type ProjectFile,
   WORK_DIR,
-  createProjectSandbox,
-  writeProjectFiles,
+  projectFileEntries,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
+import { getDefaultProviderOrNull } from "@/features/sandbox-preview/server/provider/registry";
+import type { Sandbox, SandboxProvider } from "@/features/sandbox-preview/server/provider/types";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
@@ -60,13 +60,10 @@ const REPAIR_PURPOSE = "build-repair";
  * (`stop-repair-sandboxes.ts`), which skips the run's own kill step.
  */
 export const killRepairSandboxes = async (runId: string) => {
-  const apiKey = process.env.E2B_API_KEY?.trim();
-  if (!apiKey) return;
-  const running = await Sandbox.list({
-    apiKey,
-    query: { metadata: { purpose: REPAIR_PURPOSE, runId }, state: ["running"] },
-  }).nextItems();
-  await Promise.all(running.map(({ sandboxId }) => Sandbox.kill(sandboxId, { apiKey })));
+  const provider = getDefaultProviderOrNull();
+  if (!provider) return;
+  const running = await provider.list({ metadata: { purpose: REPAIR_PURPOSE, runId } });
+  await Promise.all(running.map(({ id }) => provider.kill(id)));
 };
 
 /**
@@ -74,7 +71,7 @@ export const killRepairSandboxes = async (runId: string) => {
  * project the check does not build. Uploads too, so imports of them resolve.
  */
 const provision = async (
-  apiKey: string,
+  provider: SandboxProvider,
   { projectId, internalKey, runId }: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId">,
 ) => {
   const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
@@ -89,23 +86,22 @@ const provision = async (
   }
   // Any other project could never verify, so a repair would only spend.
   if (!projectFramework(files, [...files, ...uploads].map(({ path }) => path))) return null;
-  const sandbox = await createProjectSandbox({
-    apiKey,
+  const sandbox = await provider.create({
     timeoutMs: REPAIR_SANDBOX_TIMEOUT_MS,
     metadata: { projectId, runId, purpose: REPAIR_PURPOSE },
   });
   try {
-    await writeProjectFiles(sandbox, files);
+    await sandbox.writeFiles(projectFileEntries(files));
     for (const { path, url } of uploads) {
       const response = await fetch(url, { signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS) });
       if (!response.ok) throw new Error(`Could not read upload ${path} (${response.status})`);
-      await sandbox.files.write(`${WORK_DIR}/${path}`, await response.arrayBuffer());
+      await sandbox.writeFiles([{ path: `${WORK_DIR}/${path}`, data: await response.arrayBuffer() }]);
     }
   } catch (error) {
     await sandbox.kill().catch(() => {}); // Best effort: E2B reaps it anyway.
     throw error;
   }
-  return sandbox.sandboxId;
+  return sandbox.id;
 };
 
 const checkError = ({ errors = [], reason }: RepairEvent) =>
@@ -169,12 +165,12 @@ export const repairBuild = async ({
   /** Upserts the rows `build` returns into the run block, in a step. */
   recordSteps: (build: () => AgentStep[]) => Promise<void>;
 }): Promise<RepairResult | null> => {
-  const apiKey = process.env.E2B_API_KEY?.trim();
-  if (!apiKey) return null;
+  const provider = getDefaultProviderOrNull();
+  if (!provider) return null;
 
   const sandboxId = (await step("provision-repair-sandbox", async () => {
     try {
-      return await provision(apiKey, options);
+      return await provision(provider, options);
     } catch (error) {
       console.error("[build-repair] could not start the repair sandbox", error);
       return null;
@@ -184,12 +180,12 @@ export const repairBuild = async ({
 
   let connected: Promise<Sandbox> | undefined;
   const sandbox = () =>
-    (connected ??= Sandbox.connect(sandboxId, { apiKey, timeoutMs: REPAIR_SANDBOX_TIMEOUT_MS }));
+    (connected ??= provider.connect(sandboxId, { timeoutMs: REPAIR_SANDBOX_TIMEOUT_MS }));
 
   // Fills the npm cache, so the checks' own installs fit their budget.
   await step("install-repair-sandbox", async () => {
     try {
-      await (await sandbox()).commands.run(DEFAULT_INSTALL_COMMAND, {
+      await runOrThrow(await sandbox(), DEFAULT_INSTALL_COMMAND, {
         cwd: WORK_DIR,
         timeoutMs: INSTALL_TIMEOUT_MS,
         requestTimeoutMs: INSTALL_TIMEOUT_MS,
@@ -215,7 +211,7 @@ export const repairBuild = async ({
     await killRepairSandboxes(options.runId).catch(async (error) => {
       console.error("[build-repair] could not stop the repair sandboxes", error);
       // At least the one this run knows; best effort, E2B reaps it anyway.
-      await Sandbox.kill(sandboxId, { apiKey }).catch(() => {});
+      await provider.kill(sandboxId).catch(() => {});
     });
     return null;
   });

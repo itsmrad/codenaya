@@ -212,6 +212,19 @@ describe("unresolvedImports", () => {
     const files = [{ path: "src/App.tsx", content: 'import { cn } from "@/lib/utils";\n' }];
     expect(unresolvedImports(files)).toEqual(["@/lib/utils (imported by src/App.tsx)"]);
   });
+
+  it("accepts TanStack Start's ?url CSS import and its not-yet-generated route tree", () => {
+    const files = [
+      { path: "src/router.tsx", content: 'import { routeTree } from "./routeTree.gen";\n' },
+      { path: "src/routes/__root.tsx", content: 'import appCss from "../styles/app.css?url";\nimport raw from "../styles/app.css?raw";\n' },
+      { path: "src/styles/app.css", content: '@import "tailwindcss";' },
+    ];
+    expect(unresolvedImports(files)).toEqual([]);
+    expect(missingReferencedFiles(files)).toEqual([]);
+    expect(unresolvedImports([{ path: "src/routes/__root.tsx", content: 'import appCss from "../styles/missing.css?url";' }])).toEqual([
+      "../styles/missing.css?url (imported by src/routes/__root.tsx)",
+    ]);
+  });
 });
 
 describe("linksWithoutRoutes", () => {

@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
+import { useEsbuildRecovery } from "@/features/sandbox-preview/hooks/use-esbuild-recovery";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
 import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
 import { PreviewSelectToggle } from "./preview-select-toggle";
@@ -77,6 +78,7 @@ import {
   readPreviewMessage,
 } from "@/features/sandbox-preview/utils/preview-bridge";
 import { hookReloadDelay, isHookError } from "@/features/sandbox-preview/utils/hook-reload";
+import { needsRunEndReload } from "@/features/sandbox-preview/utils/run-end-reload";
 import {
   TRANSIENT_ERROR_IDLE_MS,
   transientErrorCover,
@@ -172,15 +174,17 @@ export const PreviewView = ({
   // The output when Clear was pressed; kept here so it outlives Hide logs (#480).
   const [clearedLogs, setClearedLogs] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const refreshKeyRef = useRef(refreshKey);
   const [device, setDevice] = usePreviewDevice();
   
   // URL dictates isolation mode via next.config.ts conditional headers
   const engineParam = searchParams.get("engine") as PreviewEngine | null;
   const requestedEngine = engineParam === "webcontainer" ? "webcontainer" : "sandbox";
-  const sandboxOnly = useMemo(
-    () => needsSandbox(detectFrameworkFromFiles(files ? buildFlatFileList(files) : [], project?.settings?.devCommand)),
+  const framework = useMemo(
+    () => detectFrameworkFromFiles(files ? buildFlatFileList(files) : [], project?.settings?.devCommand),
     [files, project?.settings?.devCommand],
   );
+  const sandboxOnly = needsSandbox(framework);
   const activeEngine = sandboxOnly ? "sandbox" : requestedEngine;
   const needsSandboxReload = sandboxOnly && requestedEngine === "webcontainer";
 
@@ -292,6 +296,12 @@ export const PreviewView = ({
   // A compile error is usually why the app also throws, so it goes first.
   const buildError = activeEngine === "sandbox" ? sandbox.appError : null;
   const appError = buildError ?? runtimeError;
+  const { serviceFailed, recovering: recoveringEsbuild } = useEsbuildRecovery({
+    sandboxId: activeEngine === "sandbox" && status === "running" ? sandbox.sandboxId : null,
+    framework,
+    error: appError,
+    recover: sandbox.recoverDevServer,
+  });
   const appErrorId = appError ? appErrorKey(appError) : null;
   const [dismissedErrorId, setDismissedErrorId] = useState<string | null>(null);
   const [fixAttempts, setFixAttempts] = useState<FixAttempts>({ errorId: null, count: 0 });
@@ -312,7 +322,7 @@ export const PreviewView = ({
     if (queuedFixRef.current) unqueueChatMessage(queuedFixRef.current);
   }, [unqueueChatMessage]);
   const fixAppError = useCallback(() => {
-    if (!appError || !appErrorId) return;
+    if (!appError || !appErrorId || serviceFailed) return;
     const message: QueuedMessage = {
       projectId,
       text: buildFixPrompt(appError, terminalOutputRef.current),
@@ -326,9 +336,9 @@ export const PreviewView = ({
     };
     queuedFixRef.current = message;
     queueChatMessage(message);
-  }, [appError, appErrorId, projectId, queueChatMessage, setFixAttempts]);
+  }, [appError, appErrorId, projectId, queueChatMessage, setFixAttempts, serviceFailed]);
   // The chat's run block says when a finished run left the preview broken.
-  const canFix = appErrorId !== null && attempts < MAX_FIX_ATTEMPTS;
+  const canFix = appErrorId !== null && !serviceFailed && attempts < MAX_FIX_ATTEMPTS;
   usePublishPreviewErrors(
     // One: the banner and its fix carry only the error shown (build first).
     previewUrl && appError ? 1 : 0,
@@ -394,7 +404,11 @@ export const PreviewView = ({
   }, [autoFixer, shownError, canFix, appErrorId, runActive, chatBlock, files, fixAppError]);
 
   const errorBanner =
-    shownError && appErrorId && !autoFixing && !coveringTransientError ? (
+    shownError && serviceFailed ? (
+      <div role="status" className="absolute inset-x-3 bottom-3 z-40 rounded-xl border bg-card/95 p-3 text-xs shadow-lg">
+        {recoveringEsbuild ? "Recovering preview…" : "Preview unavailable. Automatic recovery is temporarily paused. Check the logs for details."}
+      </div>
+    ) : shownError && appErrorId && !autoFixing && !coveringTransientError ? (
       <PreviewErrorBanner
         error={shownError}
         attempts={attempts}
@@ -425,17 +439,39 @@ export const PreviewView = ({
   // may have fixed a failed install: the stopped sandbox can't take the edit.
   const wasFirstBuild = useRef(firstBuild);
   const wasRunActive = useRef(runActive);
+  const previousRun = useRef(activeRun);
+  const [pendingRunReload, setPendingRunReload] = useState(false);
+  if (pendingRunReload && (runActive || status === "error")) setPendingRunReload(false);
   useEffect(() => {
     const firstBuildEnded = wasFirstBuild.current && !firstBuild;
+    const endedRun = activeRun === null ? previousRun.current : null;
     const fixRunEnded = wasRunActive.current && !runActive && appStartFailed && buildError;
     if (status === "error" && (firstBuildEnded || fixRunEnded)) restart();
     // Reload once against the finished files: HMR may have missed a write (#561), and a
     // runtime error may be from mid-build HMR (#486), reported again if real, before the auto-fix.
     // Still booting: the startup refresh covers it.
-    else if (firstBuildEnded && status === "running" && previewUrl) setRefreshKey((key) => key + 1);
+    else if (
+      (firstBuildEnded || endedRun) &&
+      needsRunEndReload(firstBuildEnded, endedRun?.steps ?? []) &&
+      status === "running" && previewUrl
+    ) setPendingRunReload(true);
+    if (activeRun !== undefined) previousRun.current = activeRun;
     wasFirstBuild.current = firstBuild;
     wasRunActive.current = runActive;
-  }, [firstBuild, runActive, appStartFailed, buildError, previewUrl, status, restart]);
+  }, [firstBuild, runActive, activeRun, appStartFailed, buildError, previewUrl, status, restart]);
+
+  useEffect(() => {
+    if (!pendingRunReload || runActive || status === "error") return;
+    // A run can finish before the last 300ms sync or its reinstall. Never navigate
+    // into the stopped dev server; a failed restart now surfaces an engine error.
+    if (status !== "running" || !previewUrl || (activeEngine === "sandbox" && sandbox.syncedFiles !== files)) return;
+    const armedKey = refreshKeyRef.current;
+    const timer = setTimeout(() => {
+      setRefreshKey((key) => key === armedKey ? key + 1 : key);
+      setPendingRunReload(false);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [pendingRunReload, runActive, status, previewUrl, activeEngine, sandbox.syncedFiles, files]);
 
   // The iframe's latest load, so first_preview_shown waits until it is visible.
   const [loadedPreview, setLoadedPreview] = useState<string | null>(null);
@@ -461,7 +497,7 @@ export const PreviewView = ({
   }, [previewUrl]);
   const hookError = isHookError(runtimeError);
   useEffect(() => {
-    if (!hookError) return;
+    if (!hookError || pendingRunReload) return;
     const delay = hookReloadDelay(hookReloads.current, lastReloadAt.current, Date.now());
     if (delay === null) return;
     const timer = setTimeout(() => {
@@ -469,7 +505,7 @@ export const PreviewView = ({
       setRefreshKey((key) => key + 1);
     }, delay);
     return () => clearTimeout(timer);
-  }, [hookError]);
+  }, [hookError, pendingRunReload]);
 
   // WebContainer needs the COOP/COEP headers
   // next.config.ts sets for `?engine=webcontainer`, so switching is a full page
@@ -558,20 +594,23 @@ export const PreviewView = ({
   // Automatically refresh the iframe shortly after the dev server announces it's running.
   // The first request to Vite often serves the index.html and CSS instantly but hangs 
   // compiling the JS bundle. An auto-refresh ensures the JS hydration catches up seamlessly.
+  // Server frameworks hydrate themselves; remounting can cancel a navigation or Server Action.
   // Skipped if another reload, e.g. a first build ending (#561), beat it: one reload, not two.
-  const refreshKeyRef = useRef(refreshKey);
+  const pendingRunReloadRef = useRef(pendingRunReload);
   useEffect(() => {
     refreshKeyRef.current = refreshKey;
-  }, [refreshKey]);
+    pendingRunReloadRef.current = pendingRunReload;
+  }, [refreshKey, pendingRunReload]);
   useEffect(() => {
-    if (status === "running" && previewUrl) {
+    if (!sandboxOnly && status === "running" && previewUrl) {
       const armedKey = refreshKeyRef.current;
       const timer = setTimeout(() => {
+        if (pendingRunReloadRef.current) return;
         setRefreshKey((k) => (k === armedKey ? k + 1 : k));
       }, 2500);
       return () => clearTimeout(timer);
     }
-  }, [status, previewUrl]);
+  }, [sandboxOnly, status, previewUrl]);
 
   return (
     <div className="h-full flex flex-col bg-transparent gap-3">

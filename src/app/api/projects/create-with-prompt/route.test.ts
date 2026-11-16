@@ -26,7 +26,9 @@ vi.mock("@/lib/message-processor", () => ({
 
 import { resetRateLimits } from "@/lib/rate-limit";
 import { NEXT_APP_STARTER } from "@/features/conversations/inngest/next-starter";
+import { TANSTACK_START_STARTER } from "@/features/conversations/inngest/tanstack-start-starter";
 import { VITE_REACT_STARTER } from "@/features/conversations/inngest/vite-starter";
+import { STARTER_TEMPLATE_IDS } from "@/features/templates/templates";
 import { POST } from "./route";
 
 const post = (body: unknown) =>
@@ -59,6 +61,11 @@ describe("POST /api/projects/create-with-prompt", () => {
     [{ prompt: "Use Next.js for a dashboard" }, NEXT_APP_STARTER],
     [{ prompt: "Build a dashboard", framework: "next" }, NEXT_APP_STARTER],
     [{ prompt: "Use Next.js", framework: "vite" }, VITE_REACT_STARTER],
+    [{ prompt: "Use TanStack Start for a dashboard" }, TANSTACK_START_STARTER],
+    [{ prompt: "TanStack Start or Next.js, your pick" }, TANSTACK_START_STARTER],
+    [{ prompt: "Build a dashboard", framework: "tanstack-start" }, TANSTACK_START_STARTER],
+    [{ prompt: "Use TanStack Start", framework: "next" }, NEXT_APP_STARTER],
+    [{ prompt: "Use TanStack Query for a dashboard" }, VITE_REACT_STARTER],
   ])("selects the starter for %j", async (body, starter) => {
     const res = await POST(post(body));
     expect(res.status).toBe(200);
@@ -73,22 +80,15 @@ describe("POST /api/projects/create-with-prompt", () => {
     expect(mocks.dispatch).not.toHaveBeenCalled();
   });
 
-  it("uses Next instead of a prompt-flow template's Vite placeholder when explicitly requested", async () => {
-    const res = await POST(post({ prompt: "Use Next.js for my blog", templateId: "blog" }));
-    expect(res.status).toBe(200);
-    expect(mocks.seed).toHaveBeenCalledWith(expect.objectContaining({ template: undefined, starter: NEXT_APP_STARTER }));
-    expect(mocks.dispatch).toHaveBeenCalledOnce();
-  });
-
-  it("seeds an instant template with no message, run or promo run (#362)", async () => {
-    const res = await POST(post({ templateId: "landing-page" }));
+  it.each(STARTER_TEMPLATE_IDS)("seeds the %s template with no message, run or promo run (#362)", async (templateId) => {
+    const res = await POST(post({ templateId }));
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ projectId: "p1" });
     expect(calledMutations()).toEqual(["system:createProjectWithConversation"]);
     expect(mocks.mutation.mock.calls[0][1]).not.toHaveProperty("firstBuildPending");
     expect(mocks.seed).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: "p1", template: expect.objectContaining({ id: "landing-page" }) }),
+      expect.objectContaining({ projectId: "p1", template: expect.objectContaining({ id: templateId }) }),
     );
     expect(mocks.requireModelChoice).not.toHaveBeenCalled();
     expect(mocks.takePromoRun).not.toHaveBeenCalled();
@@ -104,13 +104,5 @@ describe("POST /api/projects/create-with-prompt", () => {
     expect(await res.json()).toMatchObject({ code: "seed_failed" });
     expect(calledMutations()).not.toContain("system:createMessage");
     expect(mocks.dispatch).not.toHaveBeenCalled();
-  });
-
-  it("still runs the agent for a prompt-flow template", async () => {
-    const res = await POST(post({ templateId: "blog" }));
-
-    expect(res.status).toBe(200);
-    expect(calledMutations().filter((name) => name === "system:createMessage")).toHaveLength(2);
-    expect(mocks.dispatch).toHaveBeenCalledOnce();
   });
 });

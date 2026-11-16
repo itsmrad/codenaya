@@ -41,6 +41,7 @@ test.describe("chat panel overflow", () => {
         .getByRole("button", { name: /Worked for/ });
       const errorCount = header.getByText("· 1 error", { exact: true });
       await expect(errorCount).toBeVisible();
+      await expect(page.getByRole("status", { name: "Run outcome: Unresolved errors", exact: true })).toBeVisible();
       const countBox = (await errorCount.boundingBox())!;
       const chevronBox = (await header.locator("svg").last().boundingBox())!;
       expect(countBox.x + countBox.width).toBeLessThanOrEqual(chevronBox.x);

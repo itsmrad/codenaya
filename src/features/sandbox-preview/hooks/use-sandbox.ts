@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { EsbuildRecoveryStatus } from "../utils/esbuild-recovery";
 
 import {
   buildFlatFileList,
@@ -66,12 +67,15 @@ export const useSandbox = ({
     "idle" | "booting" | "installing" | "running" | "error"
   >("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [sandboxId, setSandboxId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<SandboxErrorKind | null>(null);
   const [restartKey, setRestartKey] = useState(0);
   const [terminalOutput, setTerminalOutput] = useState("");
   /** A compile error the dev server printed after boot (#223). */
   const [appError, setAppError] = useState<AppError | null>(null);
+  // Snapshot acknowledged by the sandbox, including an awaited PATCH reinstall.
+  const [syncedFiles, setSyncedFiles] = useState<Doc<"files">[] | undefined>();
   const [buildErrors] = useState(createBuildErrorDetector);
   const [bootHistory, setBootHistory] = useState<BootHistory>({});
   const [phase, setPhase] = useState<BootPhase | null>(null);
@@ -83,6 +87,7 @@ export const useSandbox = ({
     if (!enabled) {
       setStatus("idle");
       setPreviewUrl(null);
+      setSandboxId(null);
       setError(null);
       setErrorKind(null);
       setAppError(null);
@@ -95,6 +100,8 @@ export const useSandbox = ({
   const hasStartedRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const syncPromiseRef = useRef<Promise<void>>(Promise.resolve());
+  // Runs a debounced or retrying file sync now, so recovery can queue behind it (#776).
+  const flushSyncRef = useRef<(() => void) | null>(null);
   /** Path → content the sandbox already has, so a sync only sends real edits. */
   const syncedContentRef = useRef(new Map<string, string>());
   const bootFrameworkRef = useRef<ReturnType<typeof detectFrameworkFromFiles>>(null);
@@ -217,6 +224,7 @@ export const useSandbox = ({
                   case "ready":
                     ready = true;
                     sandboxIdRef.current = event.sandboxId;
+                    setSandboxId(event.sandboxId);
                     setPreviewUrl(event.previewUrl);
                     setStatus("running");
                     break;
@@ -226,6 +234,12 @@ export const useSandbox = ({
                     sandboxIdRef.current = event.sandboxId;
                     break;
                   case "error":
+                    if (ready) {
+                      setError(event.message);
+                      setErrorKind(classifySandboxError({ code: event.code }));
+                      setStatus("error");
+                      break;
+                    }
                     throw new SandboxStartError(
                       event.message,
                       classifySandboxError({ code: event.code }),
@@ -296,6 +310,7 @@ export const useSandbox = ({
     hasStartedRef.current = false;
     setStatus("idle");
     setPreviewUrl(null);
+    setSandboxId(null);
     setError(null);
     setErrorKind(null);
     setAppError(null);
@@ -317,7 +332,13 @@ export const useSandbox = ({
     let timeoutId: ReturnType<typeof setTimeout>;
     const isCurrent = () => !signal.aborted && sandboxIdRef.current === sandboxId;
 
+    let pending = false;
+    const schedule = (delay: number) => {
+      pending = true;
+      timeoutId = setTimeout(sync, delay);
+    };
     const sync = () => {
+      pending = false;
       // Calculate the diff after earlier writes finish, so a queued edit cannot
       // mistake an unacknowledged write for content the sandbox already has.
       syncPromiseRef.current = syncPromiseRef.current.then(async () => {
@@ -331,7 +352,10 @@ export const useSandbox = ({
           return;
         }
         const changedFiles = getChangedFiles(flatFiles, syncedContentRef.current);
-        if (changedFiles.length === 0) return;
+        if (changedFiles.length === 0) {
+          setSyncedFiles(files);
+          return;
+        }
 
         // The dev server reports the error again if this edit doesn't fix it.
         setAppError(null);
@@ -343,9 +367,17 @@ export const useSandbox = ({
             body: JSON.stringify({
               files: changedFiles,
               installCommand: settings?.installCommand,
+              devCommand: settings?.devCommand,
             }),
             signal,
           });
+          const body = await response.json().catch(() => null);
+          if (body?.code === "dev_server_unavailable" && isCurrent()) {
+            setError(body.error);
+            setErrorKind("transient");
+            setStatus("error");
+            return;
+          }
           if (!response.ok) throw new Error("File sync failed");
           if (!isCurrent()) return;
           // Acknowledge exactly the sent snapshot, never files edited in flight.
@@ -355,11 +387,13 @@ export const useSandbox = ({
 
           // After the boot stream ends, a failed reinstall reaches only this (#497).
           const failure = readInstallFailure(
-            await response.json().catch(() => null),
+            body,
             settings?.installCommand || "npm install",
           );
           // Not `cancelled`: edits during a slow reinstall must not hide its failure.
-          if (!isCurrent() || !failure) return;
+          if (!isCurrent()) return;
+          setSyncedFiles(files);
+          if (!failure) return;
           setTerminalOutput((prev) => `${prev}\npackage.json changed.\n${failure.output}`);
           const { error } = failure;
           if (error) setAppError((prev) => mergeAppError(prev, error));
@@ -370,7 +404,7 @@ export const useSandbox = ({
           }
           if (cancelled || !isCurrent()) return;
           if (failures < 3) {
-            timeoutId = setTimeout(sync, 1_000 * 2 ** failures++);
+            schedule(1_000 * 2 ** failures++);
           } else {
             setError("Couldn't sync preview files. Restart the preview to retry.");
             setErrorKind("transient");
@@ -380,12 +414,18 @@ export const useSandbox = ({
       });
     };
     // Debounce rapid file generations; a new files snapshot cancels old retries.
-    timeoutId = setTimeout(sync, 300);
+    schedule(300);
+    flushSyncRef.current = () => {
+      if (!pending) return;
+      clearTimeout(timeoutId);
+      sync();
+    };
     return () => {
       cancelled = true;
       clearTimeout(timeoutId);
+      flushSyncRef.current = null;
     };
-  }, [enabled, files, status, settings?.installCommand, buildErrors, restart]);
+  }, [enabled, files, status, settings?.installCommand, settings?.devCommand, buildErrors, restart]);
 
   // Cleanup sandbox on unmount or when disabled
   useEffect(() => {
@@ -434,12 +474,43 @@ export const useSandbox = ({
     };
   }, [killSandbox]);
 
+  // Source/package syncs finish first, so this tab cannot restart during its install (#776).
+  const recoverDevServer = useCallback(() => {
+    const sandboxId = sandboxIdRef.current;
+    const signal = abortControllerRef.current?.signal;
+    flushSyncRef.current?.();
+    const recovery = syncPromiseRef.current.then(async (): Promise<EsbuildRecoveryStatus> => {
+      if (!sandboxId || !signal || signal.aborted || sandboxIdRef.current !== sandboxId) return "unavailable";
+      const response = await fetch(`/api/sandbox/${sandboxId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "recover-esbuild" }),
+        signal,
+      });
+      if (!response.ok) throw new Error("Preview recovery failed");
+      const { status } = await response.json();
+      if (!["restarted", "busy", "limited", "unavailable"].includes(status)) throw new Error("Invalid recovery response");
+      if (status === "restarted" && !signal.aborted && sandboxIdRef.current === sandboxId) {
+        buildErrors.reset();
+        setAppError(null);
+        setTerminalOutput((prev) => `${prev}\nPreview dev server recovered automatically.\n`);
+      }
+      return status;
+    });
+    // A failed recovery must not block later file syncs.
+    syncPromiseRef.current = recovery.then(() => {}, () => {});
+    return recovery;
+  }, [buildErrors]);
+
   return {
+    sandboxId,
+    recoverDevServer,
     status,
     previewUrl,
     error,
     errorKind,
     appError,
+    syncedFiles,
     restart,
     terminalOutput,
     phase,

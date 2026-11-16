@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HTTPError } from "ky";
 
 import { peekPendingPrompt, savePendingPrompt } from "../utils/pending-prompt";
+import { resetProjectHandoff } from "../utils/project-handoff";
 import { createWithPromptBody, useCreateProjectFromPrompt } from "./use-create-project-from-prompt";
 
 const model = { modelId: "x-ai/grok-4.7" };
@@ -53,19 +54,35 @@ vi.mock("@/features/conversations/setup-questions", () => ({
   withSetupAnswers: (text: string) => text,
   withSetupDecisions: () => undefined,
 }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: mocks.toast }));
 vi.mock("ky", async (importOriginal) => ({
   ...await importOriginal<typeof import("ky")>(),
   default: { post: (...args: unknown[]) => mocks.post(...args) },
 }));
 
-const mocks = vi.hoisted(() => ({ ask: vi.fn(), post: vi.fn(), push: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  ask: vi.fn(), post: vi.fn(), push: vi.fn(),
+  toast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
+}));
 
 describe("createProject failure contract and submission lock", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.ask.mockResolvedValue(null);
     mocks.post.mockReturnValue({ json: async () => ({ projectId: "project-1" }) });
+  });
+
+  it("a success that finishes after a user change neither navigates nor toasts", async () => {
+    let finish!: (value: { projectId: string }) => void;
+    mocks.post.mockReturnValue({ json: () => new Promise((resolve) => { finish = resolve; }) });
+    const { createProject } = useCreateProjectFromPrompt();
+    const created = createProject("A blog");
+    await vi.waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    resetProjectHandoff();
+    finish({ projectId: "project-1" });
+    expect(await created).toBe(false);
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.toast.success).not.toHaveBeenCalled();
   });
 
   it("blocks concurrent calls before setup answers and during creation", async () => {
@@ -150,6 +167,20 @@ describe("createProject failure contract and submission lock", () => {
       expect(peekPendingPrompt()).not.toBeNull();
       expect(await createProject("A blog", undefined, true)).toBe(false);
       expect(peekPendingPrompt()).toBeNull();
+    });
+
+    it("a stale credential refusal leaves the next user's draft alone", async () => {
+      let fail!: (reason: unknown) => void;
+      mocks.post.mockReturnValue({ json: () => new Promise((_, reject) => { fail = reject; }) });
+      const { createProject } = useCreateProjectFromPrompt();
+      const created = createProject("A blog", undefined, true);
+      await vi.waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+      resetProjectHandoff();
+      savePendingPrompt("B's draft");
+      fail(refusal());
+      expect(await created).toBe(false);
+      expect(peekPendingPrompt()).toBe("B's draft");
+      expect(mocks.toast.error).not.toHaveBeenCalled();
     });
 
     it("keeps the draft for other failures", async () => {

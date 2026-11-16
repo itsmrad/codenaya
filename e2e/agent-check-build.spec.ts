@@ -7,7 +7,7 @@ import { EMPTY_CHAT_TITLE } from "./chat-fixtures";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
 import { userConvexClient } from "./convex-client";
-import { hasPreviewFixtureEnv, seedNextApp, seedPreviewProject } from "./preview-fixtures";
+import { hasPreviewFixtureEnv, killProjectSandboxes, seedNextApp, seedPreviewProject } from "./preview-fixtures";
 import { STUB_MODEL, type StubChatRequest, startStubProvider } from "./stub-provider";
 
 /**
@@ -37,6 +37,8 @@ test.describe.serial("agent checkBuild", () => {
   const label = `Check build ${Date.now()}`;
   let stub: Awaited<ReturnType<typeof startStubProvider>>;
   let page: Page;
+  /** Taken before afterEach closes `page`, so afterAll can still delete fixtures. */
+  let convex: Awaited<ReturnType<typeof userConvexClient>> | undefined;
   let keyId: Id<"aiProviderKeys"> | undefined;
   let projectId: Id<"projects"> | undefined;
   /** Picks the stub's tool calls; each test sets its own script. */
@@ -68,15 +70,29 @@ test.describe.serial("agent checkBuild", () => {
   });
 
   test.afterAll(async () => {
-    const user = page && (await userConvexClient(page));
-    if (keyId) {
+    const user = page?.isClosed() === false ? await userConvexClient(page) : convex;
+    if (user && keyId) {
       await user.mutation(api.aiProviders.remove, { keyId }).catch(() => {});
     }
-    if (projectId) {
+    if (user && projectId) {
       await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});
     }
-    await page?.close();
+    if (page?.isClosed() === false) await page.close();
     stub?.server.close();
+  });
+
+  /**
+   * The warm Next preview's project, whose sandbox afterEach frees.
+   * Earlier tests share `page` from beforeAll, so this stays unset for them.
+   */
+  let seeded: string | undefined;
+  test.afterEach(async () => {
+    if (!seeded) return;
+    convex = await userConvexClient(page);
+    // Closed first, so the preview can't boot a replacement for the killed sandbox.
+    await page.close();
+    await killProjectSandboxes(seeded);
+    seeded = undefined;
   });
 
   /** Runs one prompt in a fresh project on the stub model and opens its run block. */
@@ -202,6 +218,7 @@ test.describe.serial("agent checkBuild", () => {
     if (projectId) await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});
     // No project variables, so only the framework keeps checkBuild out of this preview's sandbox.
     projectId = await seedPreviewProject(page, "e2e-check-build-next-warm");
+    seeded = projectId;
     await seedNextApp(projectId, {
       pageSource: "export default function Page() { return <h1>Next preview before checkBuild</h1>; }\n",
     });

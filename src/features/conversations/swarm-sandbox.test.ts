@@ -119,7 +119,8 @@ describe("swarm sandboxes", () => {
     expect(opts).toMatchObject({ maxAttempts: 1, agentTaskId: "t1", runId: "m1", projectId: "p1", onResponse });
     expect(e2b.connect).not.toHaveBeenCalled();
     expect(typeof opts.sandbox).toBe("function");
-    if (typeof opts.sandbox === "function") await opts.sandbox();
+    e2b.connect.mockResolvedValue(fakeSandbox());
+    if (typeof opts.sandbox === "function") expect((await opts.sandbox()).id).toBe("sbx");
     expect(e2b.connect).toHaveBeenCalledWith("sbx", { apiKey: "e2b_key" });
     expect(opts.allowedPaths?.("src/pages/home.tsx")).toBe(true);
     expect(opts.allowedPaths?.("src/App.tsx")).toBe(false);

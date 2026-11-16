@@ -100,7 +100,7 @@ export async function releaseStorageIfUnreferenced(
 }
 
 /**
- * One batch of a showcase entry's teardown: votes, views, imports, then the entry
+ * One batch of a showcase entry's teardown: votes, views, imports, events, then the entry
  * and its preview image. Returns `true` once the entry is gone.
  */
 export async function deleteShowcaseBatch(
@@ -130,6 +130,12 @@ export async function deleteShowcaseBatch(
     )
     .take(CASCADE_BATCH_SIZE);
   if (await deleteRows(ctx, "showcaseImports", imports)) return false;
+
+  const events = await ctx.db
+    .query("showcaseEvents")
+    .withIndex("by_showcaseProjectId", (q) => q.eq("showcaseProjectId", showcase._id))
+    .take(CASCADE_BATCH_SIZE);
+  if (await deleteRows(ctx, "showcaseEvents", events)) return false;
 
   await ctx.db.delete("showcaseProjects", showcase._id);
   if (showcase.previewImageId) {
