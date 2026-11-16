@@ -75,7 +75,29 @@ describe("LowCreditsNotice", () => {
     expect(html).toContain("Only 7 credits left today (~12 needed to start).");
   });
 
-  it("does not show needed to start for Auto when at least 1 credit remains", () => {
+  it("warns for Auto when 15 remain and every route needs 20, ignoring the synthetic entry", () => {
+    const models = harness.models;
+    harness.usage.day = { left: 15, total: 60, percentLeft: 25 };
+    harness.models = [
+      { id: AUTO_MODEL_ID, name: "Auto", vendor: "Picks per task", vision: true, access: "everyone" },
+      ...models.map((model) => ({
+        ...model,
+        pricing: { mode: "blended" as const, usdPerMTok: 4 },
+      })),
+    ];
+    try {
+      expect(render(AUTO_MODEL_ID)).toContain("Only 15 credits left today (~20 needed to start).");
+    } finally {
+      harness.models = models;
+    }
+  });
+
+  it("stays hidden for Auto when a cheaper route covers 15 remaining credits", () => {
+    harness.usage.day = { left: 15, total: 60, percentLeft: 25 };
+    expect(render(AUTO_MODEL_ID)).toBe("");
+  });
+
+  it("does not show needed to start for Auto when a cheaper route is affordable", () => {
     harness.usage.isLow = true;
     harness.usage.day = { left: 7, total: 60, percentLeft: 12 };
     const html = render(AUTO_MODEL_ID);

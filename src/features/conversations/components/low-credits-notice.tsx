@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { AUTO_MODEL_ID } from "@/features/ai-providers/auto-route";
+import { AUTO_MODEL_ID, autoMinRunCredits } from "@/features/ai-providers/auto-route";
 import { usePlatformModelsOrCatalog } from "@/features/ai-providers/hooks/use-ai-providers";
 import { resolveCatalogModel } from "@/features/ai-providers/platform";
 import { minRunCredits } from "@/features/billing/credits";
@@ -25,7 +25,9 @@ export const LowCreditsNotice = ({ modelId }: { modelId?: string }) => {
     modelId && modelId !== AUTO_MODEL_ID
       ? resolveCatalogModel(platform, modelId)
       : undefined;
-  const needed = minRunCredits(model?.pricing);
+  const needed = modelId === AUTO_MODEL_ID
+    ? autoMinRunCredits(platform.models)
+    : minRunCredits(model?.pricing);
   const shortForModel = left < needed;
   if (!usage.isLow && !shortForModel) return null;
 
