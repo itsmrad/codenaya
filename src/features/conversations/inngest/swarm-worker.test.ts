@@ -528,8 +528,8 @@ describe("swarmWorker as a sub-orchestrator", () => {
     expect(payload.data.originalPrompt).toHaveLength(MAX_ORIGINAL_PROMPT_CHARS);
     expect(payload.data.originalPrompt).toMatch(/^\[truncated\] .*NEWEST REQUEST$/);
     expect(outcome.invocations).toEqual([
-      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_0", parentAgentTaskId: "t1", parentMessageId: "m1", ownerId: "user_1", depth: 2, originalPrompt: capOriginalPrompt(LONG_REQUEST) }) }, timeout: "10m" }),
-      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_1", parentAgentTaskId: "t1", depth: 2 }) }, timeout: "10m" }),
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_0", parentAgentTaskId: "t1", parentMessageId: "m1", ownerId: "user_1", depth: 2, originalPrompt: capOriginalPrompt(LONG_REQUEST) }) }, timeout: "9m" }),
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "child_1", parentAgentTaskId: "t1", depth: 2 }) }, timeout: "9m" }),
     ]);
     expect(outcome.data).toMatchObject({
       status: "done",
