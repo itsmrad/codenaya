@@ -64,6 +64,8 @@ const template = Template()
   .runCmd([...warmup(VITE_REACT_STARTER), ...warmup(NEXT_APP_STARTER), ...warmup(TANSTACK_START_STARTER)], { user: "user" });
 
 await Template.build(template, TEMPLATE_NAME, {
+  memoryMB: Number(process.env.E2B_TEMPLATE_MEMORY_MB || 2048),
+  cpuCount: Number(process.env.E2B_TEMPLATE_CPU || 2),
   onBuildLogs: defaultBuildLogger(),
 });
 
