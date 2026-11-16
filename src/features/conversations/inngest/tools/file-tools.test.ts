@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getFunctionName } from "convex/server";
 import { ConvexError } from "convex/values";
+import { repairTools } from "../../server/sandbox-repair";
 import { toolResultError } from "../../agent-steps";
 import { hasUncheckedWrites } from "../build-check-gate";
 
@@ -131,6 +132,33 @@ describe("path resolution", () => {
       expect(mocks.mutation).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    { name: "writeFiles", input: { files: [{ path: "src/App.tsx", content: "late" }] } },
+    { name: "editFile", input: { path: "src/App.tsx", edits: [{ oldText: "app", newText: "late" }] } },
+    { name: "deleteFiles", input: { paths: ["src/App.tsx"] } },
+  ])("fences a run-owned repair's $name even after its step has started", async ({ name, input }) => {
+    const messageId = "cancelled-message" as Id<"messages">;
+    const written: string[] = [];
+    const tool = repairTools({ ...opts, messageId, name: "repair", written }).find((tool) => tool.name === name)!;
+    // The server fence refuses the write even though the repair's AbortSignal is not aborted.
+    mocks.mutation.mockRejectedValueOnce(new Error("This run has stopped writing"));
+    expect(await tool.handler(input, ctx)).toContain("This run has stopped writing");
+    expect(mocks.mutation.mock.calls[0][1]).toMatchObject({ messageId });
+    expect(db.rows.find((row) => row.name === "App.tsx")?.content).toBe("app");
+    expect(written).toEqual([]);
+  });
+
+  it("passes the run fence into the write inside the tool step", async () => {
+    const messageId = "cancelled-message" as Id<"messages">;
+    mocks.mutation.mockRejectedValueOnce(new Error("This run has stopped writing"));
+    const result = await createUpdateFileTool({ ...opts, messageId }).handler(
+      { path: "src/App.tsx", content: "late" }, ctx,
+    );
+    expect(result).toContain("This run has stopped writing");
+    expect(mocks.mutation.mock.calls[0][1]).toMatchObject({ messageId });
+    expect(db.rows.find((row) => row.name === "App.tsx")?.content).toBe("app");
+  });
 
   it("updates, renames and deletes by path", async () => {
     expect(await createUpdateFileTool(opts).handler({ path: "src/App.tsx", content: "v2" }, ctx)).toBe(

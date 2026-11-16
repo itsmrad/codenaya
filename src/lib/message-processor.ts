@@ -101,6 +101,8 @@ export async function dispatchCancelMessage(opts: { messageId: Id<"messages"> })
  * Stops a processing message: asks the backend to cancel its run, then marks
  * the message cancelled. The status is written even when the backend is
  * unreachable, so an orphaned "processing" message can always be cleared.
+ * Run file mutations read this status transactionally: once cancelled, even
+ * an in-flight tool cannot commit another file write.
  */
 export async function cancelProcessingMessage(opts: {
   internalKey: string;

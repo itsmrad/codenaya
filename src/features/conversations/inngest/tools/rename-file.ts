@@ -10,6 +10,7 @@ import { findProjectFile, getProjectFiles, indexProjectFiles, lockedPathError } 
 interface RenameFileToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  messageId?: Id<"messages">;
 }
 
 // `fileId` is not offered to the model; it reads tool calls made before #292.
@@ -22,6 +23,7 @@ const paramsSchema = z.object({
 export const createRenameFileTool = ({
   projectId,
   internalKey,
+  messageId,
 }: RenameFileToolOptions) => {
   return createTool({
     name: "renameFile",
@@ -47,6 +49,7 @@ export const createRenameFileTool = ({
           if (locked) return `Error: ${locked}`;
 
           await convex.mutation(api.system.renameFile, {
+            messageId,
             internalKey,
             projectId,
             fileId: found.file._id,

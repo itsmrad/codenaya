@@ -154,7 +154,7 @@ export const swarmWorker = inngest.createFunction(
     let staticChecked = false;
     let staticFixNote = "";
     let repairNeeds = "";
-    const options = { internalKey, projectId, registry: createRegistryCheck() };
+    const options = { internalKey, projectId, messageId: parentMessageId, registry: createRegistryCheck() };
     const subOrchestrator = task.role === "sub-orchestrator" && depth < MAX_SWARM_DEPTH;
     // Shared by every worker of the run, so they share its cache; the task line goes after it.
     const sharedSystem = [CODING_AGENT_SYSTEM_PROMPT, subOrchestrator ? SWARM_SUBORCH_NOTE : SWARM_WORKER_NOTE, tree, planOverview,

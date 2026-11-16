@@ -101,6 +101,7 @@ export const folderEnsurer = (
   internalKey: string,
   projectId: Id<"projects">,
   folders: Map<string, Id<"files">>,
+  messageId?: Id<"messages">,
 ) => {
   const ensureFolder = async (path: string): Promise<Id<"files"> | undefined> => {
     if (!path) return undefined;
@@ -108,6 +109,7 @@ export const folderEnsurer = (
     if (known) return known;
     const { dir, name } = splitPath(path);
     const folderId = await convex.mutation(api.system.createFolder, {
+      messageId,
       internalKey,
       projectId,
       name,

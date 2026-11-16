@@ -158,7 +158,7 @@ export const repairBuild = async ({
   recordSteps,
   fallbackModel,
   ...options
-}: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId" | "model" | "onResponse" | "signal"> & {
+}: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId" | "messageId" | "model" | "onResponse" | "signal"> & {
   /** Takes over once the repairs on `model` (a cheap one) fail or change nothing. */
   fallbackModel?: VerifyAndFixOptions["model"];
   step: NonNullable<VerifyAndFixOptions["step"]>;

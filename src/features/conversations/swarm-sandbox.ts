@@ -268,6 +268,7 @@ export const selfCheckWorker = async ({
     projectId,
     internalKey,
     runId: messageId,
+    messageId,
     agentTaskId,
     model,
     maxAttempts: started.maxAttempts,

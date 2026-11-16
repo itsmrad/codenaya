@@ -694,14 +694,14 @@ export const processMessage = inngest.createFunction(
       createListFilesTool({ internalKey, projectId }),
       createReadFilesTool({ projectId, internalKey }),
       createSearchFilesTool({ projectId, internalKey }),
-      createWriteFilesTool({ projectId, internalKey, registry }),
-      createUpdateFileTool({ projectId, internalKey, registry }),
-      createEditFileTool({ projectId, internalKey, registry }),
-      createCreateFilesTool({ projectId, internalKey, registry }),
-      createCreateFolderTool({ projectId, internalKey }),
-      ...(app === "vite" ? [createScaffoldViteAppTool({ projectId, internalKey })] : []),
-      createRenameFileTool({ projectId, internalKey }),
-      createDeleteFilesTool({ projectId, internalKey }),
+      createWriteFilesTool({ projectId, internalKey, messageId, registry }),
+      createUpdateFileTool({ projectId, internalKey, messageId, registry }),
+      createEditFileTool({ projectId, internalKey, messageId, registry }),
+      createCreateFilesTool({ projectId, internalKey, messageId, registry }),
+      createCreateFolderTool({ projectId, internalKey, messageId }),
+      ...(app === "vite" ? [createScaffoldViteAppTool({ projectId, internalKey, messageId })] : []),
+      createRenameFileTool({ projectId, internalKey, messageId }),
+      createDeleteFilesTool({ projectId, internalKey, messageId }),
       createCheckBuildTool({ projectId, internalKey, ownerId: mcpOwnerId }),
       createScrapeUrlsTool(),
       ...(mcpOwnerId
@@ -1022,6 +1022,7 @@ export const processMessage = inngest.createFunction(
     const cheapRepair = utility && modelName(utility) !== modelName(codingModel) ? utility : undefined;
     const repair = repairNeeded && !outOfCredits()
       ? await repairBuild({
+          messageId,
           projectId,
           internalKey,
           runId,

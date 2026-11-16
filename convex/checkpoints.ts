@@ -6,6 +6,7 @@ import { runWrittenPaths } from "../src/features/conversations/agent-steps";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { validateInternalKey } from "./internalKey";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { projectChanges, validateComparisonPath } from "./checkpointComparison";
@@ -44,16 +45,22 @@ export const MAX_CHECKPOINT_FILES = 2000;
 /** Each file of a project with its slash-separated path from the root. */
 function withPaths(files: Doc<"files">[]) {
   const byId = new Map(files.map((file) => [file._id, file]));
-  const paths = new Map<Id<"files">, string>();
-  const pathOf = (file: Doc<"files">): string => {
-    const cached = paths.get(file._id);
-    if (cached !== undefined) return cached;
+  const paths = new Map<Id<"files">, string | undefined>();
+  const pathOf = (file: Doc<"files">): string | undefined => {
+    if (paths.has(file._id)) return paths.get(file._id);
     const parent = file.parentId ? byId.get(file.parentId) : undefined;
-    const path = parent ? `${pathOf(parent)}/${file.name}` : file.name;
+    const parentPath = parent && pathOf(parent);
+    // Removing a folder logically deletes its subtree before scheduled cleanup.
+    const path = file.parentId
+      ? parentPath === undefined ? undefined : `${parentPath}/${file.name}`
+      : file.name;
     paths.set(file._id, path);
     return path;
   };
-  return files.map((file) => ({ file, path: pathOf(file) }));
+  return files.flatMap((file) => {
+    const path = pathOf(file);
+    return path === undefined ? [] : [{ file, path }];
+  });
 }
 
 /** All of a project's files; refuses a project too big to snapshot whole. */
@@ -189,11 +196,15 @@ export async function applyTree(
     .map(({ path }) => path);
 
   const kept = new Map<string, Doc<"files">>();
-  for (const { file, path } of live) {
-    if (!isUnder(path, removed)) {
+  const paths = new Map(live.map(({ file, path }) => [file._id, path]));
+  for (const file of files) {
+    const path = paths.get(file._id);
+    if (path !== undefined && !isUnder(path, removed)) {
       kept.set(path, file);
       continue;
     }
+    // Reconcile orphaned delete batches too; recreated parents get fresh ids,
+    // so queued cleanup of the old subtree cannot touch the restored tree.
     await writeFileContent(ctx, file, undefined);
     await ctx.db.delete("files", file._id);
     if (file.storageId) await releaseStorageIfUnreferenced(ctx, file.storageId);
@@ -346,6 +357,37 @@ export const restore = mutation({
   handler: async (ctx, args) => {
     const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
     await assertNoRunningAgent(ctx, checkpoint.projectId, "restoring");
+    const undoCheckpointId = await createCheckpoint(ctx, {
+      projectId: checkpoint.projectId,
+      label: "Before restore",
+      keep: checkpoint._id,
+    });
+    await restoreCheckpoint(ctx, checkpoint);
+    return undoCheckpointId;
+  },
+});
+
+/** Server cancel route: restore only a stopped run owned by the authenticated user. */
+export const restoreStoppedRun = mutation({
+  args: {
+    internalKey: v.string(),
+    ownerId: v.string(),
+    messageId: v.id("messages"),
+  },
+  returns: v.union(v.id("checkpoints"), v.null()),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const message = await ctx.db.get("messages", args.messageId);
+    if (!message) throw appError("NOT_FOUND", "Message not found");
+    await getOwnedProject(ctx, message.projectId, args.ownerId);
+    await assertNoRunningAgent(ctx, message.projectId, "restoring");
+    if (message.status !== "cancelled") {
+      throw appError("CONFLICT", "Stop the run before restoring");
+    }
+    const checkpoint = await ctx.db.query("checkpoints")
+      .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
+      .first();
+    if (!checkpoint) return null;
     const undoCheckpointId = await createCheckpoint(ctx, {
       projectId: checkpoint.projectId,
       label: "Before restore",

@@ -13,6 +13,7 @@ import { syntaxErrorNote } from "./syntax-error";
 interface UpdateFileToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  messageId?: Id<"messages">;
   registry?: RegistryCheck;
 }
 
@@ -26,6 +27,7 @@ const paramsSchema = z.object({
 export const createUpdateFileTool = ({
   projectId,
   internalKey,
+  messageId,
   registry = createRegistryCheck(),
 }: UpdateFileToolOptions) => {
   return createTool({
@@ -59,6 +61,7 @@ export const createUpdateFileTool = ({
           const prepared = rewriteIcons(checkedContent, path);
           const { content } = prepared;
           await convex.mutation(api.system.updateFile, {
+            messageId,
             internalKey,
             projectId,
             fileId: file._id,

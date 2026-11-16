@@ -145,7 +145,9 @@ export const findSibling = async (
 /**
  * Deletes a file, or a folder and everything under it. A folder's contents go
  * in scheduled batches (`deleteFolderContents`), so a folder of any size stays
- * inside one transaction's limits (#212).
+ * inside one transaction's limits (#212). Root removal is the logical delete:
+ * checkpoints exclude orphan descendants and restore reconciles their rows
+ * before recreating the tree with new ids, safe from these queued batches.
  */
 export const deleteFileTree = async (ctx: MutationCtx, file: Doc<"files">) => {
   // Any file can hold a row (updateFile doesn't check the type), so always look.

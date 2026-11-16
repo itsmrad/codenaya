@@ -137,6 +137,8 @@ export type VerifyAndFixOptions = {
   /** For the Convex file tools the repair agent writes with. */
   internalKey: string;
   runId: string;
+  /** The assistant message owning these writes; independent repairs omit it. */
+  messageId?: Id<"messages">;
   /** Tells parallel workers' step and event ids apart. */
   agentTaskId?: string;
   /** The repair agent's model, built by the caller (`buildAgentKitModel`). */
@@ -320,10 +322,11 @@ const succeededPaths = (tool: string, targets: string[], result: unknown) => {
  * they changed are pushed to `written`, on replays too.
  */
 export const repairTools = ({
-  projectId, internalKey, name, signal, allowedPaths, written,
+  projectId, internalKey, messageId, name, signal, allowedPaths, written,
 }: {
   projectId: Id<"projects">;
   internalKey: string;
+  messageId?: Id<"messages">;
   name: string;
   signal?: AbortSignal;
   allowedPaths?: (path: string) => boolean;
@@ -358,9 +361,9 @@ export const repairTools = ({
   };
   return [
     scoped(createReadFilesTool({ projectId, internalKey })),
-    guarded(createWriteFilesTool({ projectId, internalKey })),
-    guarded(createEditFileTool({ projectId, internalKey })),
-    guarded(createDeleteFilesTool({ projectId, internalKey })),
+    guarded(createWriteFilesTool({ projectId, internalKey, messageId })),
+    guarded(createEditFileTool({ projectId, internalKey, messageId })),
+    guarded(createDeleteFilesTool({ projectId, internalKey, messageId })),
   ].map(decodeJsonArgs);
 };
 
@@ -370,10 +373,11 @@ export const repairTools = ({
  * `allowedPaths` are refused whole, as SWARM's own guard does.
  */
 const repair = async ({
-  projectId, internalKey, model, name, errors, paths, framework, sources = [], signal, allowedPaths, onResponse, written,
+  projectId, internalKey, messageId, model, name, errors, paths, framework, sources = [], signal, allowedPaths, onResponse, written,
 }: {
   projectId: Id<"projects">;
   internalKey: string;
+  messageId?: Id<"messages">;
   model: Model;
   name: string;
   errors: BuildError[];
@@ -390,7 +394,7 @@ const repair = async ({
     name,
     system: repairSystem(framework),
     model,
-    tools: repairTools({ projectId, internalKey, name, signal, allowedPaths, written }),
+    tools: repairTools({ projectId, internalKey, messageId, name, signal, allowedPaths, written }),
     lifecycle: {
       onResponse: async ({ result }) => {
         await onResponse?.(result.raw);
@@ -467,6 +471,7 @@ export const verifyAndFix = async ({
   projectId,
   internalKey,
   runId,
+  messageId,
   agentTaskId = "main",
   model,
   fallback,
@@ -547,7 +552,7 @@ export const verifyAndFix = async ({
     let crashed: string | undefined;
     try {
       written = await repair({
-        projectId, internalKey, model: escalation?.model ?? model, name: `${prefix}:repair:${attempt}`,
+        projectId, internalKey, messageId, model: escalation?.model ?? model, name: `${prefix}:repair:${attempt}`,
         errors: owned, paths: outcome.paths, framework: outcome.framework, sources: outcome.sources,
         signal, allowedPaths: (path) => path !== ROUTE_TREE && (allowedPaths?.(path) ?? true), onResponse: onResponse && ((raw) => onResponse(raw, onFallback)), written: wrote,
       });

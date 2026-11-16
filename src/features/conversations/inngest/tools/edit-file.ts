@@ -14,6 +14,7 @@ import { syntaxErrorNote } from "./syntax-error";
 interface EditFileToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  messageId?: Id<"messages">;
   registry?: RegistryCheck;
 }
 
@@ -94,7 +95,7 @@ export const applyEdits = (
   return { content: text };
 };
 
-export const createEditFileTool = ({ projectId, internalKey, registry = createRegistryCheck() }: EditFileToolOptions) => {
+export const createEditFileTool = ({ projectId, internalKey, messageId, registry = createRegistryCheck() }: EditFileToolOptions) => {
   return createTool({
     name: "editFile",
     description:
@@ -137,6 +138,7 @@ export const createEditFileTool = ({ projectId, internalKey, registry = createRe
           const prepared = rewriteIcons(checkedContent, path);
           result.content = prepared.content;
           await convex.mutation(api.system.updateFile, {
+            messageId,
             internalKey,
             projectId,
             fileId: file._id,
