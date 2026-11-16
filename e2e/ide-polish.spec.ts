@@ -112,7 +112,7 @@ test.describe("IDE polish", () => {
     expect(await longTitle.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     await expect(longTitle).toHaveCSS("text-overflow", "ellipsis");
     const titleBox = (await longTitle.boundingBox())!;
-    const navBox = (await page.locator("nav").boundingBox())!;
+    const navBox = (await page.locator("nav").filter({ has: longTitle }).boundingBox())!;
     expect(titleBox.x).toBeGreaterThanOrEqual(navBox.x);
     expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(navBox.x + navBox.width);
     expect(navBox.x + navBox.width).toBeLessThanOrEqual(375);
