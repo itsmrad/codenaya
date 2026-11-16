@@ -149,6 +149,12 @@ it("pins the exact public documentation read lists", () => {
 });
 
 describe("per-auth-mode MCP URLs (#543)", () => {
+  it.each(listProviders())("does not combine read-only paths with per-mode URLs for $id (#813)", (provider) => {
+    if (provider.scope.path?.kind === "readonly-path") {
+      expect(provider.urlByAuthMode).toBeUndefined();
+    }
+  });
+
   it.each(listProviders())("trusts every endpoint declared by $id", (provider) => {
     for (const url of [provider.mcpUrl, ...Object.values(provider.urlByAuthMode ?? {})]) {
       expect(provider.trustedHostnames).toContain(new URL(url).hostname);

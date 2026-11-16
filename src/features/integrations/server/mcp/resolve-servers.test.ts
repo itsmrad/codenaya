@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as catalog from "../../catalog";
+import type { ProviderDefinition } from "../../types";
 import {
   clearDekCache,
   getSecretSealer,
@@ -24,6 +26,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   resetSecretSealer();
 });
@@ -172,6 +175,57 @@ describe("resolveMcpServers", () => {
   });
 
   describe("failure isolation", () => {
+    it("skips a no-auth provider whose URL resolver throws and resolves the next server", async () => {
+      const good: ProviderDefinition = {
+        id: "fixture-good",
+        displayName: "Fixture",
+        description: "Test provider",
+        category: "test",
+        logo: "/fixture.svg",
+        mcpUrl: "https://fixture.example.test/mcp",
+        authModes: ["none"],
+        trustedHostnames: ["fixture.example.test"],
+        supportsReadOnly: false,
+        scope: { queryParams: [], headers: [] },
+        destructiveTools: [],
+      };
+      const bad: ProviderDefinition = {
+        ...good,
+        id: "fixture-bad",
+        urlByAuthMode: { none: "https://untrusted.example.test/mcp" },
+      };
+      vi.spyOn(catalog, "getProvider").mockImplementation((id) =>
+        [bad, good].find((provider) => provider.id === id),
+      );
+      const entries = [bad, good].map((provider) => ({
+        link: makeLink({ _id: `link_${provider.id}` }),
+        connection: {
+          _id: provider.id,
+          providerId: provider.id,
+          label: provider.displayName,
+          authMode: "none" as const,
+          serverUrl: provider.mcpUrl,
+          credentialRef: "",
+          kekProvider: "",
+          kekKeyId: "",
+          wrappedDek: "",
+          ciphertext: "",
+          iv: "",
+          authTag: "",
+        },
+      }));
+
+      const { servers, problems } = await resolveMcpServers(entries);
+
+      expect(servers.map((server) => server.userConnectionId)).toEqual([good.id]);
+      expect(servers[0].url).toBe(good.mcpUrl);
+      expect(problems).toEqual([{
+        projectConnectionId: `link_${bad.id}`,
+        providerId: bad.id,
+        reason: expect.stringContaining("trustedHostnames"),
+      }]);
+    });
+
     it("skips a connection whose credential cannot be decrypted", async () => {
       const good = await makeConnection({ _id: "good", credentialRef: "ref_ok" });
       const bad = await makeConnection({ _id: "bad", credentialRef: "ref_bad" });

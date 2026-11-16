@@ -169,13 +169,13 @@ export async function resolveMcpServers(
 
     // ── Open the credential ──
     const noAuth = connection.authMode === "none";
-    const noneProvider = noAuth ? getProvider(connection.providerId) : undefined;
-    if (noAuth && (!noneProvider?.authModes.includes("none") || connection.serverUrl !== resolveProviderMcpUrl(noneProvider, "none"))) {
-      fail("No-sign-in providers require their fixed catalog endpoint.");
-      continue;
-    }
     let credential: StoredCredential = { type: "api_key" };
     try {
+      const noneProvider = noAuth ? getProvider(connection.providerId) : undefined;
+      if (noAuth && (!noneProvider?.authModes.includes("none") || connection.serverUrl !== resolveProviderMcpUrl(noneProvider, "none"))) {
+        fail("No-sign-in providers require their fixed catalog endpoint.");
+        continue;
+      }
       if (!noAuth) {
         const opened = await getSecretSealer().open(
           {
