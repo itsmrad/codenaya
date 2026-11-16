@@ -20,13 +20,20 @@ beforeEach(() => {
 describe("owner preview page access", () => {
   it("returns an HTTP 404 for non-owners before streaming the page", async () => {
     mocks.owned.mockResolvedValue(null);
-    const response = await invoke(mocks.auth, new NextRequest("https://codenaya.com/projects/victim/preview"));
+    const response = await invoke(mocks.auth, new NextRequest("https://codenaya.com/p/victim/preview"));
     expect(response?.status).toBe(404);
     expect(mocks.owned).toHaveBeenCalledWith("victim", { userId: "viewer" });
   });
 
+  it("returns 404 when signed out", async () => {
+    mocks.auth.mockResolvedValue({ userId: null });
+    mocks.owned.mockResolvedValue(null);
+    const response = await invoke(mocks.auth, new NextRequest("https://codenaya.com/p/mine/preview"));
+    expect(response?.status).toBe(404);
+  });
+
   it("lets the owner reach the page", async () => {
     mocks.owned.mockResolvedValue({ project: { name: "Mine" }, userId: "viewer" });
-    expect(await invoke(mocks.auth, new NextRequest("https://codenaya.com/projects/mine/preview"))).toBeUndefined();
+    expect(await invoke(mocks.auth, new NextRequest("https://codenaya.com/p/mine/preview"))).toBeUndefined();
   });
 });

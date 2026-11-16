@@ -7,6 +7,7 @@ import { currentPreviewUrl } from "@/features/sandbox-preview/server/current-pre
 import { ownerPreviewProject } from "@/features/projects/server/owner-preview";
 
 export const instant = false;
+export const metadata = { robots: { index: false, follow: false }, referrer: "no-referrer" as const };
 
 async function PreviewContent({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;

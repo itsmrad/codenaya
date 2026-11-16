@@ -2,7 +2,7 @@ import { ExternalLinkIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function ownerPreviewUrl(origin: string, projectId: string) {
-  return `${origin}/projects/${projectId}/preview`;
+  return `${origin}/p/${encodeURIComponent(projectId)}/preview`;
 }
 
 /** The address and outbound link always use the same owner URL. */

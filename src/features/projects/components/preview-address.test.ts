@@ -7,6 +7,7 @@ describe("owner preview toolbar address", () => {
   it("shows and opens the same Codenaya URL while a sandbox is running", () => {
     const sandboxUrl = "https://4000-test.e2b.app";
     const url = ownerPreviewUrl("https://codenaya.com", "project123");
+    expect(url).toBe("https://codenaya.com/p/project123/preview");
     const html = renderToStaticMarkup(createElement(PreviewAddress, {
       url, running: Boolean(sandboxUrl), loadingLabel: null, waitingLabel: null,
     }));

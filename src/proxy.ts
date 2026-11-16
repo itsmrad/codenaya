@@ -14,7 +14,7 @@ const isAdminPage = createRouteMatcher(['/admin(.*)']);
 export default clerkMiddleware(
   async (auth, request) => {
     // Check before streaming so an inaccessible preview has a real HTTP 404.
-    const preview = /^\/projects\/([^/]+)\/preview\/?$/.exec(request.nextUrl.pathname);
+    const preview = /^\/p\/([^/]+)\/preview\/?$/.exec(request.nextUrl.pathname);
     if (preview && !(await ownerPreviewProject(preview[1], await auth()))) {
       return NextResponse.rewrite(new URL('/404', request.url), { status: 404 });
     }

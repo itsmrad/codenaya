@@ -2,6 +2,7 @@
 
 import {
   useState,
+  useSyncExternalStore,
   useEffect,
   useLayoutEffect,
   useCallback,
@@ -122,6 +123,8 @@ import { usePathname, useSearchParams } from "next/navigation";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 
+const subscribeOrigin = () => () => {};
+
 type PreviewEngine = "sandbox" | "webcontainer";
 
 const WAITING_FOR_BUILD = "Waiting for the first build...";
@@ -163,8 +166,7 @@ export const PreviewView = ({
   onOpenEnvVars: () => void;
   onElementPicked: () => void;
 }) => {
-  const [origin, setOrigin] = useState("");
-  useEffect(() => setOrigin(window.location.origin), []);
+  const origin = useSyncExternalStore(subscribeOrigin, () => window.location.origin, () => "");
   const ownerUrl = ownerPreviewUrl(origin, projectId);
   const pathname = usePathname();
   const searchParams = useSearchParams();
