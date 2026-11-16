@@ -6,7 +6,7 @@
  * must never log or return the matched text.
  */
 
-import { SECRET_NAME } from "@/lib/secret-name";
+import { SECRET_NAME } from "../../lib/secret-name";
 
 import { classifyEnvKey } from "./env-keys";
 
