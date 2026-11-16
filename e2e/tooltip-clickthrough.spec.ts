@@ -23,12 +23,13 @@ test.describe("composer tooltips", () => {
     await page.getByRole("button", { name: "New conversation" }).click();
     await expect(page.getByText(EMPTY_CHAT_TITLE)).toBeVisible();
 
+    // Filled first: the fill's focus would otherwise close the tooltip below.
+    await page.getByPlaceholder("Describe a change or ask a question…").fill("tooltip check");
     const trigger = page.getByRole("combobox", { name: "Agent model" });
     await trigger.focus();
     await expect(page.getByRole("tooltip")).toBeVisible();
 
-    // Not pointer-events: none on the controls; the tooltip's own box must not capture the click.
-    await page.getByPlaceholder("Describe a change or ask a question…").fill("tooltip check");
+    // The hit-target check fails if the tooltip's box sits over the button.
     await page.getByRole("button", { name: "Send" }).click({ trial: true });
     const swarm = page.getByRole("radiogroup", { name: "Message mode" }).getByRole("radio", { name: "Swarm" });
     await swarm.click();
