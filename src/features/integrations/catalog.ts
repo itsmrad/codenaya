@@ -1941,7 +1941,7 @@ const CATALOG = {
     mcpUrl: "https://mcp.beehiiv.com/mcp",
     authModes: ["oauth"],
     trustedHostnames: ["mcp.beehiiv.com"],
-    oauthScopes: ["read", "write", "openid", "email"],
+    oauthScopes: ["read", "openid", "email"],
     supportsReadOnly: false,
     scope: NO_URL_SCOPING,
     destructiveTools: [],
@@ -1984,7 +1984,7 @@ const CATALOG = {
     notes: "Write-capable; scoped to organization permissions. No URL-level read-only mode; all tools require approval.",
   },
 
-  // https://api.scite.ai/mcp
+  // MCP endpoint: https://api.scite.ai/mcp
   "scite": {
     id: "scite",
     displayName: "Scite",
