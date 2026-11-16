@@ -112,7 +112,7 @@ test.describe("IDE polish", () => {
     expect(await longTitle.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     await expect(longTitle).toHaveCSS("text-overflow", "ellipsis");
     const titleBox = (await longTitle.boundingBox())!;
-    const navBox = (await page.locator("nav").filter({ has: longTitle }).boundingBox())!;
+    const navBox = (await page.locator("nav").filter({ has: page.getByRole("button", { name: longName, exact: true }) }).boundingBox())!;
     expect(titleBox.x).toBeGreaterThanOrEqual(navBox.x);
     expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(navBox.x + navBox.width);
     expect(navBox.x + navBox.width).toBeLessThanOrEqual(375);
@@ -145,9 +145,12 @@ test.describe("IDE polish", () => {
     await page.keyboard.press("Escape");
     await more.click();
     await sheet.getByRole("button", { name: "Export", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Download ZIP", exact: true })).toBeVisible();
+    const zip = page.getByRole("button", { name: "Download ZIP", exact: true });
+    await expect(zip).toBeVisible();
     await page.keyboard.press("Escape");
+    await expect(zip).toBeHidden();
     await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
     await expect(more).toBeFocused();
   });
 

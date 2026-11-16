@@ -53,7 +53,7 @@ test.describe("chat agent model switcher", () => {
     await expect(platform.getByRole("option")).toHaveCount(expected);
     // The vendor is a muted tag beside the name, not part of the option text.
     const sonnet = platform.getByRole("option", { name: "Claude Sonnet 5.5" });
-    await expect(sonnet).toHaveAttribute("data-tag", "Anthropic");
+    await expect(sonnet).toHaveAttribute("data-tag", /^Anthropic( · ~\d+ cr)?$/);
     await sonnet.click();
     await expect(trigger).toHaveText("Claude Sonnet 5.5");
 
