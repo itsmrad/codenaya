@@ -53,4 +53,4 @@ Vite 7 and plugin-react 5 need Node `^20.19 || >=22.12` in **both** engines:
 Decision: don't change the manifest, prompt or `node-compat.ts` guard until `node -v`
 is recorded from the deployed E2B template and a WebContainer boot, and a Vite 7 starter
 is shown to build in both. A bump then updates the manifest and `node-compat.ts` together.
-The weekly `manifest-registry.yml` check only uses a Node 22.0.0 floor and doesn't certify either runtime.
+The weekly `manifest-registry.yml` check only uses a Node 22.12.0 floor and doesn't certify either runtime.

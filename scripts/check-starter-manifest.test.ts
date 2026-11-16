@@ -70,6 +70,18 @@ describe("checkStarterManifest", () => {
     expect(result.failures).toEqual(["missing@1.0.0 (next): npm view failed (E404)"]);
   });
 
+  it("treats auth errors as final and stops at the time budget", () => {
+    const e403 = Object.assign(new Error("Command failed"), { stderr: "npm error code E403\n" });
+    const pins = [{ name: "private", version: "1.0.0", users: ["vite"] }];
+    let calls = 0;
+    const denied = checkStarterManifest(() => { calls++; throw e403; }, pins, [0, 0]);
+    expect(calls).toBe(1);
+    expect(denied.failures).toEqual(["private@1.0.0 (vite): npm view failed (E403)"]);
+
+    const spent = checkStarterManifest(() => { throw new Error("unreachable"); }, pins, [0, 0], 0);
+    expect(spent.failures).toEqual(["private@1.0.0 (vite): npm view failed (time budget spent)"]);
+  });
+
   it("reads npm's error code from --json stdout, then stderr, then the spawn error", () => {
     expect(npmErrorCode({ stdout: '{"error":{"code":"E404"}}' })).toBe("E404");
     expect(npmErrorCode({ stdout: "", stderr: "npm error code ECONNRESET\nnpm error network" })).toBe("ECONNRESET");
