@@ -17,6 +17,7 @@ type ConfirmOptions = {
   title: string;
   message?: string;
   confirmLabel?: string;
+  cancelLabel?: string;
   /** Red confirm button, for deletes and other losses. */
   destructive?: boolean;
 };
@@ -91,7 +92,11 @@ export function DialogHost() {
           exiting={FadeOut.duration(120)}
           style={[StyleSheet.absoluteFill, styles.backdrop]}
         >
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => answer(false)} accessibilityLabel="Cancel" />
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => answer(false)}
+            accessibilityLabel={pending.cancelLabel ?? "Cancel"}
+          />
           <DialogCard
             label="Confirm"
             destructive={pending.destructive}
@@ -99,7 +104,7 @@ export function DialogHost() {
             actions={
               <>
                 <View style={styles.action}>
-                  <Button label="Cancel" variant="outline" onPress={() => answer(false)} />
+                  <Button label={pending.cancelLabel ?? "Cancel"} variant="outline" onPress={() => answer(false)} />
                 </View>
                 <View style={styles.action}>
                   <Button
