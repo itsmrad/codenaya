@@ -15,11 +15,9 @@ import { Allotment } from "allotment";
 import { motion, useReducedMotion } from "motion/react";
 import {
   ChevronDownIcon,
-  Loader2Icon,
   TerminalSquareIcon,
   AlertTriangleIcon,
   RefreshCwIcon,
-  ExternalLinkIcon,
   RotateCwIcon,
   ServerIcon,
   BoxIcon,
@@ -30,6 +28,7 @@ import {
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
 import { useEsbuildRecovery } from "@/features/sandbox-preview/hooks/use-esbuild-recovery";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
+import { PreviewAddress, ownerPreviewUrl } from "./preview-address";
 import { PreviewSelectToggle } from "./preview-select-toggle";
 import { OpenOnPhonePopover } from "@/features/sandbox-preview/components/open-on-phone-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
@@ -164,6 +163,9 @@ export const PreviewView = ({
   onOpenEnvVars: () => void;
   onElementPicked: () => void;
 }) => {
+  const [origin, setOrigin] = useState("");
+  useEffect(() => setOrigin(window.location.origin), []);
+  const ownerUrl = ownerPreviewUrl(origin, projectId);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   
@@ -717,58 +719,16 @@ export const PreviewView = ({
           <PreviewDeviceToggle device={device} onChange={setDevice} />
         </div>
 
-        {/* Narrow panels give the URL its own row. */}
-        <div className="order-last basis-full @md:order-none @md:basis-auto flex-1 min-w-0 h-9 flex items-center px-3 bg-muted/30 rounded-lg border border-border/50 text-xs text-muted-foreground truncate font-mono">
-          {isLoading && (
-            <div className="flex items-center gap-1.5">
-              <Loader2Icon className="size-3 animate-spin" />
-              {status === "booting" ? `Starting ${activeEngine}...` : "Installing..."}
-            </div>
-          )}
-          {previewUrl && <span className="truncate">{previewUrl}</span>}
-          {!isLoading && !previewUrl && !error && (
-            <span>{building ? WAITING_FOR_BUILD : "Ready to preview"}</span>
-          )}
-        </div>
+        <PreviewAddress
+          url={ownerUrl}
+          running={Boolean(previewUrl)}
+          loadingLabel={isLoading ? (status === "booting" ? `Starting ${activeEngine}...` : "Installing...") : null}
+          waitingLabel={!error ? (building ? WAITING_FOR_BUILD : "Ready to preview") : null}
+        />
 
         <div className="flex items-center gap-1 p-0.5 bg-muted/40 rounded-lg border border-border/50">
-          {/* A real link rather than window.open, so the browser treats it as a
-              plain navigation (no popup heuristics; middle-click and copy-link
-              work). The span carries the tooltip: a disabled button gets no hover. */}
-          <span
-            className="flex"
-            title={previewUrl ? "Open in new tab" : "Available once the preview is running"}
-          >
-            {previewUrl ? (
-              <Button
-                asChild
-                size="icon"
-                variant="ghost"
-                className="size-8 rounded-md hover:bg-muted"
-              >
-                <a
-                  href={previewUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Open in new tab"
-                >
-                  <ExternalLinkIcon className="size-4" />
-                </a>
-              </Button>
-            ) : (
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-8 rounded-md hover:bg-muted"
-                disabled
-                aria-label="Open in new tab"
-              >
-                <ExternalLinkIcon className="size-4" />
-              </Button>
-            )}
-          </span>
           <OpenOnPhonePopover
-            previewUrl={previewUrl}
+            previewUrl={previewUrl ? ownerUrl : null}
             status={status}
             activeEngine={activeEngine}
           />

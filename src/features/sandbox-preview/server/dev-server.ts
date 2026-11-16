@@ -187,6 +187,7 @@ export const installWithDevServerStopped = async <T>(
 
 /** Set on the preview proxy's process to the dev server port it forwards to. */
 export const PROXY_TARGET_ENV = "TARGET_PORT";
+export const PREVIEW_PROXY_PORT = 4000;
 
 /** The preview's dev server: the port its proxy forwards to, and how to start it again. */
 export type PreviewDevServer = { port: number; start: DevStart };

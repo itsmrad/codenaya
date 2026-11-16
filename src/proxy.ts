@@ -1,6 +1,8 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 
+import { ownerPreviewProject } from '@/features/projects/server/owner-preview';
+
 import { adminOrNull } from '@/features/admin/server/require-admin';
 import { SIGN_IN_URL, SIGN_UP_URL } from '@/features/auth/constants';
 
@@ -11,6 +13,11 @@ const isAdminPage = createRouteMatcher(['/admin(.*)']);
 // `auth.protect()` where to send signed-out visitors.
 export default clerkMiddleware(
   async (auth, request) => {
+    // Check before streaming so an inaccessible preview has a real HTTP 404.
+    const preview = /^\/projects\/([^/]+)\/preview\/?$/.exec(request.nextUrl.pathname);
+    if (preview && !(await ownerPreviewProject(preview[1], await auth()))) {
+      return NextResponse.rewrite(new URL('/404', request.url), { status: 404 });
+    }
     // /admin is the exception, only so non-admins get a real 404 status: with
     // Cache Components the layout's `notFound()` runs after the shell has
     // streamed as a 200. The layout still checks too.
