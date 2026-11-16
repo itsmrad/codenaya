@@ -41,7 +41,7 @@ async function clean(dir) {
   const entries = await readdir(dir, { withFileTypes: true }).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
   for (const entry of entries) {
     const path = join(dir, entry.name);
-    if (entry.isSymbolicLink() || /\\.(map|tsx?|jsx)$/.test(entry.name)) { await rm(path, { force: true }); continue; }
+    if (entry.isSymbolicLink() || /\\.(map|tsx?|jsx)$/.test(entry.name)) { await rm(path); continue; }
     if (entry.isDirectory()) { await clean(path); continue; }
     if (/\\.[cm]?js$/.test(entry.name) && /sourceMappingURL\\s*=\\s*data:/.test(await readFile(path, 'utf8'))) throw new Error('Inline source map');
   }

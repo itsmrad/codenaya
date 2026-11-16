@@ -14,6 +14,8 @@ const isAdminPage = createRouteMatcher(['/admin(.*)']);
 // `auth.protect()` where to send signed-out visitors.
 export default clerkMiddleware(
   async (auth, request) => {
+    const legacyShare = /^\/s\/([^/]+)\/?$/.exec(request.nextUrl.pathname);
+    if (legacyShare) return NextResponse.redirect(new URL(`/preview/${encodeURIComponent(legacyShare[1])}`, request.url), 308);
     const previewMatch = /^\/preview\/([^/]+)\/?$/.exec(request.nextUrl.pathname);
     if (previewMatch && (!validShareToken(previewMatch[1]) || !(await fetchQuery(api.projects.getShared, { token: previewMatch[1] })))) {
       return NextResponse.rewrite(new URL('/404', request.url), { status: 404, headers: { 'Cache-Control': 'no-store' } });

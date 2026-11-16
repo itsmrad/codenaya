@@ -26,6 +26,14 @@ const seedProject = async (page: Page) => {
   return projectId;
 };
 
+/** The responsive header keeps Share in the project menu on narrow screens. */
+const openShare = async (page: Page) => {
+  const more = page.getByRole("button", { name: "More actions", exact: true });
+  const menu = page.getByRole("dialog", { name: "Project menu", exact: true });
+  if (await more.isVisible() && !await menu.isVisible()) await more.click();
+  await page.getByRole("button", { name: "Share", exact: true }).click();
+};
+
 test.describe("website-only share link", () => {
   test.skip(
     !hasClerkCredentials() || !internalKey || !convexUrl,
@@ -38,7 +46,7 @@ test.describe("website-only share link", () => {
     const projectId = await seedProject(page);
 
     await page.goto(`/projects/${projectId}?engine=webcontainer`);
-    await page.getByRole("button", { name: "Share", exact: true }).click();
+    await openShare(page);
     const toggle = page.getByRole("switch", { name: "Anyone with the link can view" });
     await toggle.click();
     const linkInput = page.getByRole("textbox", { name: "Share link" });
@@ -55,15 +63,18 @@ test.describe("website-only share link", () => {
       await expect(viewer.getByText(/Shared by/)).toHaveCount(0);
       await expect(viewer.frameLocator(`iframe[title="${PROJECT_NAME}"]`).getByRole("heading", { name: "Shared website fixture" })).toBeVisible({ timeout: 150_000 });
       for (const width of [1440, 390]) {
-        await page.setViewportSize({ width, height: 900 });
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
         await page.keyboard.press("Escape");
-        await page.getByRole("button", { name: "Share", exact: true }).click();
+        await openShare(page);
         await expect(page.getByLabel("What to share")).toBeVisible();
         await page.screenshot({ path: test.info().outputPath(`share-popover-${width}.png`) });
-        await viewer.setViewportSize({ width, height: 900 });
+        await viewer.setViewportSize({ width, height: width === 390 ? 844 : 900 });
         await viewer.screenshot({ path: test.info().outputPath(`public-preview-${width}.png`) });
       }
-      // Legacy links reach the same website-only surface.
+      // Legacy links use an HTTP redirect, even before the React shell streams.
+      const legacy = await viewer.request.get(link.replace("/preview/", "/s/"), { maxRedirects: 0 });
+      expect(legacy.status()).toBe(308);
+      expect(legacy.headers().location).toBe(link);
       await viewer.goto(link.replace("/preview/", "/s/"));
       await expect(viewer).toHaveURL(link);
       await expect(viewer.getByRole("button", { name: "Remix", exact: true })).toBeVisible();

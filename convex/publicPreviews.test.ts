@@ -48,7 +48,7 @@ describe("public preview reservations", () => {
     await t.run(ctx => ctx.db.patch("projects", id, { shareKeepLiveUntil: now + 3_600_000 }));
     const state = await t.mutation(api.publicPreviews.claim, args);
     expect(state.until).toBe(now + 3_600_000);
-    await t.mutation(api.publicPreviews.update, { internalKey, token, lease: "first", ready: true });
+    await t.mutation(api.publicPreviews.update, { internalKey, token, lease: "first", sandboxId: "e2b:one", ready: true });
     expect(await t.mutation(api.publicPreviews.claim, args)).toMatchObject({ status: "ready" });
     expect(await t.mutation(api.publicPreviews.claim, { ...args, revision: "v2" })).toMatchObject({ status: "retire", lease: "first" });
     expect(await t.mutation(api.publicPreviews.update, { internalKey, token, lease: "first", heartbeat: true })).toBe(now + 3_600_000);
