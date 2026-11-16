@@ -52,6 +52,14 @@ describe("checkKnownGoodVersions", () => {
     expect(result.failures.join("\n")).toContain('"node":">=22.22"');
   });
 
+  it("skips the remaining entries once the time budget is spent", () => {
+    let calls = 0;
+    const result = checkKnownGoodVersions(() => { calls++; return {}; }, 0);
+    expect(calls).toBe(0);
+    expect(result.failures).toHaveLength(packageCount);
+    expect(result.failures[0]).toContain("skipped, time budget spent");
+  });
+
   it("ignores historical incompatible releases when the latest matching release works", () => {
     const result = checkKnownGoodVersions((spec: string) => spec.startsWith("react-dom@") ? [
       { version: "19.2.9", peerDependencies: { react: "^19" } },

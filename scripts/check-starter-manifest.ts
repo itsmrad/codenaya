@@ -47,10 +47,15 @@ export const npmErrorCode = (error: unknown): string => {
   return stderr?.match(/npm (?:error|ERR!) code (\S+)/)?.[1] ?? code ?? "unknown error";
 };
 
+// Auth and missing-package errors won't change on retry.
+const FINAL_CODES = new Set(["E404", "E401", "E403"]);
+
 const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** Fails on non-exact or unpublished pins; newer stable releases are info only. */
-export function checkStarterManifest(view = npmVersions, pins = starterPins(), retryDelaysMs = [2_000, 10_000]) {
+export function checkStarterManifest(view = npmVersions, pins = starterPins(), retryDelaysMs = [2_000, 10_000], budgetMs = 300_000) {
+  // One budget for the whole run, so a registry outage fails (and files the issue) before the job timeout.
+  const deadline = Date.now() + budgetMs;
   const failures: string[] = [];
   const info: string[] = [];
   for (const { name, version, users } of pins) {
@@ -60,16 +65,17 @@ export function checkStarterManifest(view = npmVersions, pins = starterPins(), r
       continue;
     }
     let versions: string[] | undefined;
-    let code = "";
-    // A registry blip shouldn't open the weekly issue; a 404 is final.
+    let code = "time budget spent";
+    // A registry blip shouldn't open the weekly issue.
     for (const delay of [0, ...retryDelaysMs]) {
+      if (Date.now() + delay >= deadline) break;
       if (delay) sleep(delay);
       try {
         versions = [view(name)].flat();
         break;
       } catch (error) {
         code = npmErrorCode(error);
-        if (code === "E404") break;
+        if (FINAL_CODES.has(code)) break;
       }
     }
     if (!versions) {
