@@ -128,10 +128,10 @@ describe("swarm sandboxes", () => {
     e2b.create.mockResolvedValue(fakeSandbox());
     expect(await selfCheck()).toEqual({ selfCheck: "scoped-ok", filesChanged: [] });
     expect(e2b.create).toHaveBeenCalledWith("snap", expect.objectContaining({
-      metadata: { projectId: "p1", messageId: "m1", purpose: "swarm-worker" }, timeoutMs: 9 * 60_000,
+      metadata: { projectId: "p1", messageId: "m1", purpose: "swarm-worker" }, timeoutMs: 8.5 * 60_000,
     }));
     const opts = mocks.verifyAndFix.mock.calls[0][0] as VerifyAndFixOptions;
-    expect(opts).toMatchObject({ maxAttempts: 1, agentTaskId: "t1", runId: "m1", projectId: "p1", onResponse });
+    expect(opts).toMatchObject({ maxAttempts: 2, agentTaskId: "t1", runId: "m1", projectId: "p1", onResponse });
     expect(e2b.connect).not.toHaveBeenCalled();
     expect(typeof opts.sandbox).toBe("function");
     e2b.connect.mockResolvedValue(fakeSandbox());
@@ -177,22 +177,22 @@ describe("swarm sandboxes", () => {
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
 
-  it("reserves every 4-minute verify plus slack, skipping when no repair fits", async () => {
+  it("reserves every 150 s verify plus slack, skipping when no repair fits", async () => {
     const minutesAgo = (minutes: number) => Date.now() - minutes * 60_000;
     expect(await selfCheck(minutesAgo(8.5))).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
-    expect(await selfCheck(minutesAgo(6.5), 10 * 60_000)).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
-    expect(await selfCheck(minutesAgo(4))).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
+    expect(await selfCheck(minutesAgo(4.5), 10 * 60_000)).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
     expect(await selfCheck(minutesAgo(3.5))).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
     for (const fn of Object.values(e2b)) expect(fn).not.toHaveBeenCalled();
     expect(mocks.mutation).not.toHaveBeenCalled();
     e2b.create.mockResolvedValue(fakeSandbox());
+    // A worker with its full 9-min budget (#649) gets both repairs.
+    await selfCheck();
+    expect(mocks.verifyAndFix.mock.calls[0][0]).toMatchObject({ maxAttempts: 2 });
+    expect(e2b.create.mock.calls[0][1].timeoutMs).toBe(8.5 * 60_000);
     await selfCheck(minutesAgo(2.5));
-    expect(mocks.verifyAndFix.mock.calls[0][0]).toMatchObject({ maxAttempts: 1 });
-    await selfCheck(minutesAgo(12.5), 25 * 60_000);
     expect(mocks.verifyAndFix.mock.calls[1][0]).toMatchObject({ maxAttempts: 1 });
-    await selfCheck(minutesAgo(11), 25 * 60_000);
-    expect(mocks.verifyAndFix.mock.calls[2][0]).toMatchObject({ maxAttempts: 2 });
-    expect(e2b.create.mock.calls[2][1].timeoutMs).toBe(13 * 60_000);
+    await selfCheck(minutesAgo(18.5), 25 * 60_000);
+    expect(mocks.verifyAndFix.mock.calls[2][0]).toMatchObject({ maxAttempts: 1 });
   });
 
   it("skips a worker already at its cost cap before claiming a slot or listing sandboxes", async () => {
@@ -210,8 +210,8 @@ describe("swarm sandboxes", () => {
       let signal: AbortSignal | undefined;
       mocks.verifyAndFix.mockImplementation(async (opts: VerifyAndFixOptions) => {
         signal = opts.signal;
-        // 12 min timeout, invoked now: the deadline is 8 min away.
-        await vi.advanceTimersByTimeAsync(8 * 60_000 - 1);
+        // 9 min timeout, invoked now: the deadline is 6.5 min away.
+        await vi.advanceTimersByTimeAsync(6.5 * 60_000 - 1);
         await opts.step!("verify:1", async () => {});
         expect(signal?.aborted).toBe(false);
         await vi.advanceTimersByTimeAsync(1);

@@ -40,8 +40,12 @@ const E2B_TEAM_SANDBOXES = 10;
 const SWARM_TEAM_BUDGET = 4;
 const DEFAULT_MAX_WORKER_SANDBOXES = 2;
 const FOUNDATION_TIMEOUT_MS = 5 * 60_000;
-/** Each verify can use the check's full 240 s budget, including the final recheck. */
-const CHECK_ROUND_MS = 4 * 60_000;
+/**
+ * One verify, including the final recheck: swarm builds take 115-130 s (check-build.ts).
+ * Sized so a worker inside WORKER_TIMEOUT_MS still self-checks (two rounds plus slack, 6 min);
+ * a slow check can still use its full 240 s budget and overrun.
+ */
+const CHECK_ROUND_MS = 150_000;
 /** Room for setup, syncing and model turns; a slow in-flight call can still overrun. */
 const SELF_CHECK_SLACK_MS = 60_000;
 /** Inside the foundation step's ~240 s, with room for create, write and snapshot. */
