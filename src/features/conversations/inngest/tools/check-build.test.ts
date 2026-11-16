@@ -322,6 +322,41 @@ describe("checkProjectBuild", () => {
     expect(e2b.connect).not.toHaveBeenCalled();
   });
 
+  it("times out an in-flight worker check before the 9-minute invoke deadline (#649)", async () => {
+    vi.useFakeTimers();
+    try {
+      const invokedAt = Date.now() - 6 * 60_000;
+      const deadline = invokedAt + 8 * 60_000;
+      const sandbox = sandboxWith(() => undefined);
+      sandbox.commands.run.mockImplementation(async (command, options) => {
+        if (command.startsWith("npm install")) vi.setSystemTime(Date.now() + 20_000);
+        if (command.includes("vite build")) {
+          const opts = options as { timeoutMs: number; requestTimeoutMs: number };
+          expect(opts.timeoutMs).toBe(100_000);
+          expect(opts.requestTimeoutMs).toBe(opts.timeoutMs);
+          return new Promise((_, reject) => setTimeout(() => reject(new TimeoutError("Command timed out")), opts.timeoutMs));
+        }
+        return { exitCode: 0, stdout: "", stderr: "" };
+      });
+      const files = starter();
+      const checking = checkProjectBuild({
+        files,
+        paths: new Set(files.map((file) => file.path)),
+        sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
+        sourceDir: "/home/user/app",
+        deadline,
+      });
+      await vi.runAllTimersAsync();
+
+      expect(await checking).toMatch(/^Error: The build check could not finish/);
+      expect(Date.now()).toBe(deadline);
+      expect(Date.now()).toBeLessThan(invokedAt + 9 * 60_000);
+      expect(sandbox.commands.run.mock.calls.at(-1)?.[0]).toMatch(/^rm -rf \/home\/user\/check-build-/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("first copies sourceDir into the check directory, without node_modules, .env files or the top-level dist", async () => {
     const sandbox = sandboxWith(() => undefined);
     const files = starter();
