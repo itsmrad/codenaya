@@ -3,6 +3,7 @@ import {
   CommandExitError,
   RateLimitError,
   Sandbox as E2bSandbox,
+  SandboxNotFoundError as E2bSandboxNotFoundError,
   TimeoutError,
 } from "e2b";
 
@@ -11,6 +12,7 @@ import {
   type RequestOptions,
   type Sandbox,
   SandboxConfigError,
+  SandboxNotFoundError,
   type SandboxProvider,
   SandboxRateLimitError,
   SandboxTimeoutError,
@@ -22,6 +24,7 @@ export const fromE2bError = (error: unknown): unknown => {
   if (error instanceof AuthenticationError) return new SandboxConfigError(message, { cause: error });
   if (error instanceof RateLimitError) return new SandboxRateLimitError(message, { cause: error });
   if (error instanceof TimeoutError) return new SandboxTimeoutError(message, { cause: error });
+  if (error instanceof E2bSandboxNotFoundError) return new SandboxNotFoundError(message, { cause: error });
   return error;
 };
 

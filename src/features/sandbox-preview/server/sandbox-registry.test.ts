@@ -14,7 +14,7 @@ vi.mock("./provider/config", async (importOriginal) => {
   return { ...actual, parseProviderConfig: (...args: unknown[]) => mocks.config(...args) };
 });
 
-import type { ProviderId, Sandbox } from "./provider/types";
+import { type ProviderId, type Sandbox, SandboxNotFoundError, SandboxRateLimitError } from "./provider/types";
 
 import {
   forgetSandbox,
@@ -84,7 +84,7 @@ describe("sandbox registry", () => {
     forgetSandbox("e2b:sbx_2");
   });
 
-  it.each(["blaxel:sbx_1", "e2b:", "../sbx", "sbx 1"])("refuses a malformed or unknown-provider id %j without connecting", async (id) => {
+  it.each(["other:sbx_1", "e2b:", "../sbx", "sbx 1"])("refuses a malformed or unknown-provider id %j without connecting", async (id) => {
     expect(await getOwnedSandbox(id, "user_a")).toBeNull();
     expect(mocks.getProvider).not.toHaveBeenCalled();
     expect(mocks.connect).not.toHaveBeenCalled();
@@ -96,14 +96,14 @@ describe("sandbox registry", () => {
       vi.stubEnv("E2B_API_KEY", "");
 
       expect(await getOwnedSandbox(id, "user_a")).toBeNull();
-      expect(await getOwnedSandbox("blaxel:sbx_9", "user_a")).toBeNull();
+      expect(await getOwnedSandbox("other:sbx_9", "user_a")).toBeNull();
       expect(mocks.getProvider).not.toHaveBeenCalled();
       expect(mocks.connect).not.toHaveBeenCalled();
     },
   );
 
   it("reads an unprefixed id as E2B's even when another provider comes first, so open previews keep working", async () => {
-    mocks.config.mockReturnValue({ primary: "blaxel" as ProviderId, fallbacks: ["e2b"], configured: { e2b: true } });
+    mocks.config.mockReturnValue({ primary: "other" as ProviderId, fallbacks: ["e2b"], configured: { e2b: true } });
     mocks.connect.mockResolvedValue(fakeSandbox("sbx_3", "user_a"));
 
     expect(await getOwnedSandbox("sbx_3", "user_a")).not.toBeNull();
@@ -123,6 +123,19 @@ describe("sandbox registry", () => {
     forgetSandbox("e2b:sbx_1");
     expect(requestReinstall("sbx_1")).toBe(false);
     expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it("answers a sandbox the provider no longer has like an unknown id, and rejects on any other failure", async () => {
+    mocks.connect.mockRejectedValueOnce(new SandboxNotFoundError("gone"));
+    expect(await getOwnedSandbox("sbx_4", "user_a")).toBeNull();
+
+    const expired = fakeSandbox("sbx_4", "user_a");
+    vi.mocked(expired.info).mockRejectedValueOnce(new SandboxNotFoundError("gone"));
+    mocks.connect.mockResolvedValueOnce(expired);
+    expect(await getOwnedSandbox("sbx_4", "user_a")).toBeNull();
+
+    mocks.connect.mockRejectedValueOnce(new SandboxRateLimitError("slow down"));
+    await expect(getOwnedSandbox("sbx_4", "user_a")).rejects.toBeInstanceOf(SandboxRateLimitError);
   });
 
   it("reconnects after the sandbox is forgotten", async () => {

@@ -17,6 +17,7 @@ import {
   waitForReinstall,
 } from "@/features/sandbox-preview/server/sandbox-registry";
 import {
+  BOOT_INSTALL_ENVS,
   DevServerStartError,
   fallbackDevStart,
   installWithDevServerStopped,
@@ -64,8 +65,11 @@ interface InstallQueue {
  */
 const installQueues = new Map<string, InstallQueue>();
 
-/** "abc" and "e2b:abc" are one sandbox, so they share one queue. */
+/** "abc" and "e2b:abc" are one sandbox, so they share one queue. Ids are validated first (see `notFound`). */
 const queueKey = (sandboxId: string) => canonicalSandboxIdOrNull(sandboxId) ?? sandboxId;
+
+/** The answer for a malformed, unknown or foreign id alike, so none can be told apart. */
+const notFound = () => Response.json({ error: "Sandbox not found" }, { status: 404 });
 
 const installAfterBurst = async (publicId: string, install: Install) => {
   const sandboxId = queueKey(publicId);
@@ -114,12 +118,13 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
   }
 
   const { sandboxId } = await params;
+  if (!canonicalSandboxIdOrNull(sandboxId)) return notFound();
 
   try {
     const sandbox = await getOwnedSandbox(sandboxId, userId);
 
     if (!sandbox) {
-      return Response.json({ error: "Sandbox not found" }, { status: 404 });
+      return notFound();
     }
 
     forgetSandbox(sandboxId);
@@ -157,9 +162,10 @@ export async function POST(request: Request, { params }: RouteParams) {
   const { invalid } = await parseJsonBody(request, recoverySchema);
   if (invalid) return invalid;
   const { sandboxId } = await params;
+  if (!canonicalSandboxIdOrNull(sandboxId)) return notFound();
   try {
     const sandbox = await getOwnedSandbox(sandboxId, userId);
-    if (!sandbox) return Response.json({ error: "Sandbox not found" }, { status: 404 });
+    if (!sandbox) return notFound();
     // A package.json sync may be queued but not yet visible in commands.list().
     const status = installQueues.has(queueKey(sandboxId)) ? "busy" : await recoverEsbuild(sandbox);
     return Response.json({ status });
@@ -196,6 +202,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   }
 
   const { files, installCommand, devCommand } = data;
+  if (!canonicalSandboxIdOrNull(sandboxId)) return notFound();
 
   const WORK_DIR = "/home/user/app";
 
@@ -203,7 +210,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const sandbox = await getOwnedSandbox(sandboxId, userId);
 
     if (!sandbox) {
-      return Response.json({ error: "Sandbox not found" }, { status: 404 });
+      return notFound();
     }
 
     // One request for the whole batch instead of one per file.
@@ -234,6 +241,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
             const result = await sandbox
               .run(command, {
                 cwd: WORK_DIR,
+                envs: BOOT_INSTALL_ENVS,
                 timeoutMs: boundedTimeout(5 * 60 * 1000, budget.left()),
                 onStdout: observe,
                 onStderr: observe,

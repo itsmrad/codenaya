@@ -10,7 +10,7 @@ Every cloud preview, `checkBuild`, build repair and swarm worker sandbox calls t
 `e2b` SDK directly, from about ten files (`project-sandbox.ts`, `api/sandbox/route.ts`,
 `api/sandbox/[sandboxId]/route.ts`, `sandbox-registry.ts`, `dev-server.ts`,
 `check-build.ts`, `build-repair.ts`, `sandbox-repair.ts`, `swarm-sandbox.ts`). We want
-to be able to move to another vendor (Blaxel, Daytona, ...) or fail over to one
+to be able to move to another vendor or fail over to one
 without rewriting those paths again. Two things the code relies on are
 security- or correctness-critical and must survive any vendor:
 
@@ -168,7 +168,7 @@ take only the seam's `Sandbox`.
 
 ## PR3b status
 
-**Still E2B-only.** `PROVIDER_IDS` is `["e2b"]`, and there is no Blaxel or Daytona
+**Still E2B-only.** `PROVIDER_IDS` is `["e2b"]`, and there is no other provider's
 adapter. With one provider, the only thing that differs is that a missing E2B key now
 gets the unknown-id answer instead of an error. Ids, cap counts, kills and creates are
 as before. The privacy page and SECURITY.md subprocessor text must change **before**

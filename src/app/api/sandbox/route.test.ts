@@ -36,6 +36,7 @@ vi.mock("e2b", () => ({
   AuthenticationError: class extends Error {},
   RateLimitError: class extends Error {},
   TimeoutError: class extends Error {},
+  SandboxNotFoundError: class extends Error {},
   CommandExitError: class extends Error {
     constructor(
       readonly result: { exitCode: number; stdout?: string; stderr: string; error: string },
@@ -291,6 +292,16 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
     ] : []);
     expect(mocks.sandboxCreate).not.toHaveBeenCalled();
     expect(mocks.sandboxList).not.toHaveBeenCalled();
+  });
+
+  it("answers a resume of a sandbox the provider no longer has like one it never had", async () => {
+    const { SandboxNotFoundError } = await import("e2b");
+    mocks.sandboxConnect.mockRejectedValue(new SandboxNotFoundError("Paused sandbox sbx_gone not found"));
+
+    const sent = await events(await boot({ resumeSandboxId: "sbx_gone" }));
+
+    expect(sent).toContainEqual(expect.objectContaining({ type: "error", message: "Sandbox not found" }));
+    expect(mocks.sandboxCreate).not.toHaveBeenCalled();
   });
 
   it("stops every earlier command tree before resuming, including unmarked install and proxy commands", async () => {

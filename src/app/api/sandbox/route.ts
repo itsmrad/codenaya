@@ -57,6 +57,7 @@ import {
 import {
   DEV_COMMAND_ENV,
   PROXY_TARGET_ENV,
+  BOOT_INSTALL_ENVS,
   DEV_SERVER_ENVS,
   DevServerStartError,
   PROXY_SCRIPT_PATH,
@@ -327,7 +328,7 @@ export async function POST(request: Request) {
           cwd: WORK_DIR,
           timeoutMs,
           // Install may run postinstall scripts or a build that needs config.
-          envs: toProcessEnv(envEntries),
+          envs: { ...toProcessEnv(envEntries), ...BOOT_INSTALL_ENVS },
           onStdout: (data) => send({ type: "output", data }),
           onStderr: (data) => send({ type: "output", data }),
         });
