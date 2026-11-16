@@ -12,9 +12,7 @@ const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
 /** The e2e user's fixture project with a minimal production Vite site, and no share link. */
 const seedProject = async (page: Page) => {
   const user = await userConvexClient(page);
-  const existing = (await user.query(api.projects.get, {})).find((p) => p.name === PROJECT_NAME);
-  const projectId = existing?._id ?? (await user.mutation(api.projects.create, { name: PROJECT_NAME }));
-  await user.mutation(api.projects.revokeShareLink, { projectId });
+  const projectId = await user.mutation(api.projects.create, { name: PROJECT_NAME });
 
   const system = new ConvexHttpClient(convexUrl!);
   await cleanupProject(system, internalKey!, projectId);
@@ -48,6 +46,8 @@ test.describe("website-only share link", () => {
     await page.goto(`/projects/${projectId}?engine=webcontainer`);
     await openShare(page);
     const toggle = page.getByRole("switch", { name: "Anyone with the link can view" });
+    await expect(toggle).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Generate link", exact: true })).toBeEnabled();
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
       await page.keyboard.press("Escape");
@@ -104,11 +104,18 @@ test.describe("website-only share link", () => {
       await expect(viewer.getByRole("button", { name: "Remix", exact: true })).toBeVisible();
 
       await toggle.click();
-      await expect(linkInput).toBeHidden();
+      await expect(toggle).not.toBeChecked();
+      await expect(linkInput).toHaveValue(link);
 
       const revoked = await viewer.reload();
       expect(revoked?.status()).toBe(404);
       await expect(viewer.getByRole("heading", { level: 1, name: "Page not found" })).toBeVisible();
+      await toggle.click();
+      await expect(toggle).toBeChecked();
+      await expect(linkInput).toHaveValue(link);
+      await viewer.goto(link);
+      await expect(viewer.frameLocator(`iframe[title="${PROJECT_NAME}"]`).getByRole("heading", { name: "Shared website fixture" })).toBeVisible({ timeout: 150_000 });
+      await expect(viewer).toHaveURL(link);
     } finally {
       await visitor.close();
     }

@@ -4,6 +4,7 @@ import { convex } from "@/lib/convex-client";
 import { createSandbox, getProvider } from "@/features/sandbox-preview/server/provider/registry";
 import { parsePublicSandboxIdOrNull, toPublicSandboxId } from "@/features/sandbox-preview/server/provider/ids";
 import { SandboxNotFoundError } from "@/features/sandbox-preview/server/provider/types";
+import { publicPreviewOrigins } from "./frame-origins";
 import { startProductionSite } from "./production-site";
 import { api } from "../../../../convex/_generated/api";
 
@@ -40,7 +41,7 @@ export async function readPreviewInputs(token: string) {
   const manifest = await convex.query(api.publicPreviews.manifest, { internalKey: key(), token });
   if (!manifest) return null;
   // Storage URLs rotate: use the persistent path/content and a stable URL pathname.
-  const revision = createHash("sha256").update(JSON.stringify({ ...manifest, files: manifest.files.map(file => ({ ...file, url: file.url ? new URL(file.url).pathname : null })) })).digest("hex");
+  const revision = createHash("sha256").update(JSON.stringify({ runtime: "frame-origins-v2", frameOrigins: publicPreviewOrigins(), ...manifest, files: manifest.files.map(file => ({ ...file, url: file.url ? new URL(file.url).pathname : null })) })).digest("hex");
   return { manifest, revision };
 }
 
@@ -56,11 +57,12 @@ export async function preparePreview(token: string, inputs?: Awaited<ReturnType<
   return { state, manifest };
 }
 
-export async function bootPreview(token: string, prepared: Awaited<ReturnType<typeof preparePreview>>, appOrigin?: string) {
+export async function bootPreview(token: string, prepared: Awaited<ReturnType<typeof preparePreview>>) {
   const { state, manifest } = prepared;
   if (state.status !== "boot" || !state.lease || !state.until || !manifest) return;
   let sandbox;
   try {
+    const allowedOrigins = publicPreviewOrigins();
     sandbox = await createSandbox({ timeoutMs: Math.max(1000, state.until - Date.now() - 1000), metadata: { publicShare: token }, localHostHeader: true, requestTimeoutMs: 15_000 });
     const sandboxId = toPublicSandboxId(sandbox.provider, sandbox.id);
     if (!await update(token, state.lease, { sandboxId })) { await sandbox.kill(); return; }
@@ -70,7 +72,7 @@ export async function bootPreview(token: string, prepared: Awaited<ReturnType<ty
       if (!response.ok) throw new Error("Asset unavailable");
       return { path: file.path, data: await response.arrayBuffer() };
     }));
-    const url = await startProductionSite(sandbox, files, manifest.env, appOrigin);
+    const url = await startProductionSite(sandbox, files, manifest.env, allowedOrigins);
     if (!await update(token, state.lease, { ready: true, url })) await sandbox.kill();
   } catch {
     // A failed kill keeps the reservation until the provider's hard timeout.

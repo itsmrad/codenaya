@@ -389,11 +389,11 @@ export async function getSharedProject(ctx: QueryCtx, token: string) {
     .query("projects")
     .withIndex("by_shareToken", (q) => q.eq("shareToken", token))
     .first();
-  return project && project.deletingAt === undefined ? project : null;
+  return project && project.deletingAt === undefined && project.shareEnabled !== false ? project : null;
 }
 
 /**
- * Turns on the project's read-only share link and returns its token; an
+ * Turns on the project's public website link and returns its token; an
  * existing link is kept. An action, because mutations run on seeded (replayable)
  * randomness and a token must be unpredictable.
  */
@@ -424,22 +424,20 @@ export const setShareToken = internalMutation({
   returns: v.string(),
   handler: async (ctx, args) => {
     const project = await getOwnedProject(ctx, args.projectId, args.ownerId);
-    if (project.shareToken) return project.shareToken;
-    await ctx.db.patch("projects", project._id, { shareToken: args.token });
-    return args.token;
+    const token = project.shareToken ?? args.token;
+    await ctx.db.patch("projects", project._id, { shareToken: token, shareEnabled: true });
+    return token;
   },
 });
 
-/** Turns the share link off: the old URL stops working, and a new link gets a new token. */
+/** Disable access while retaining the slug and version for an explicit re-enable. */
 export const revokeShareLink = mutation({
   args: { projectId: v.id("projects") },
   returns: v.null(),
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
-    const project = await getOwnedProject(ctx, args.projectId, identity.subject);
-    await ctx.db.patch("projects", args.projectId, { shareToken: undefined, shareCheckpointId: undefined, shareKeepLiveUntil: undefined });
-    const checkpoint = project.shareCheckpointId && await ctx.db.get("checkpoints", project.shareCheckpointId);
-    if (checkpoint) await deleteCheckpoint(ctx, checkpoint);
+    await getOwnedProject(ctx, args.projectId, identity.subject);
+    await ctx.db.patch("projects", args.projectId, { shareEnabled: false, shareKeepLiveUntil: undefined });
     return null;
   },
 });

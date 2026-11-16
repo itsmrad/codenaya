@@ -108,3 +108,12 @@ test("changed inputs with an exhausted IP budget never prepare or retire the pre
   expect(mocks.heartbeat).not.toHaveBeenCalled();
   expect(mocks.after).not.toHaveBeenCalled();
 });
+
+test("GET with a pending retirement stays light and cannot bypass the POST boot limiter", async () => {
+  mocks.state.mockResolvedValue({ status: "retire", sandboxId: "e2b:old", lease: "old" });
+  expect(await (await GET(request(), context)).json()).toEqual({ status: "boot" });
+  expect(mocks.prepare).not.toHaveBeenCalled();
+  expect(mocks.inputs).not.toHaveBeenCalled();
+  expect(mocks.heartbeat).not.toHaveBeenCalled();
+  expect(mocks.after).not.toHaveBeenCalled();
+});

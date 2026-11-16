@@ -2,13 +2,14 @@ import { detectFramework } from "@/features/sandbox-preview/utils/framework";
 import type { Sandbox } from "@/features/sandbox-preview/server/provider/types";
 import { offlineFirstInstall, WORK_DIR } from "@/features/sandbox-preview/server/project-sandbox";
 
+import { publicPreviewOrigins } from "./frame-origins";
 import { productionProxy } from "./production-proxy";
 import { START_SERVER } from "./start-server";
 
 type File = { path: string; data: string | ArrayBuffer };
 
 /** Fixed commands only: owner dev/install commands never run on the public path. */
-export async function startProductionSite(sandbox: Sandbox, files: File[], envs: Record<string, string>, appOrigin = "https://codenaya.tech") {
+export async function startProductionSite(sandbox: Sandbox, files: File[], envs: Record<string, string>, allowedOrigins = publicPreviewOrigins()) {
   const pkgFile = files.find(file => file.path === "package.json");
   if (!pkgFile || typeof pkgFile.data !== "string") throw new Error("Missing package.json");
   const pkg = JSON.parse(pkgFile.data);
@@ -62,7 +63,7 @@ for (const dir of ${JSON.stringify(framework === "vite" ? ["dist"] : framework =
   await sandbox.start(command, { cwd: WORK_DIR, envs: options.envs });
   const ready = await sandbox.run("for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:3000 && exit 0; sleep 1; done; exit 1", { timeoutMs: 70_000 });
   if (ready.exitCode) throw new Error("Site did not start");
-  await sandbox.writeFiles([{ path: "/home/user/codenaya-public-proxy.mjs", data: productionProxy(appOrigin) }]);
+  await sandbox.writeFiles([{ path: "/home/user/codenaya-public-proxy.mjs", data: productionProxy(allowedOrigins) }]);
   await sandbox.start("node /home/user/codenaya-public-proxy.mjs", { cwd: WORK_DIR });
   const proxyReady = await sandbox.run("for i in $(seq 1 10); do curl -fsS -o /dev/null http://127.0.0.1:4000 && exit 0; sleep 1; done; exit 1", { timeoutMs: 15_000 });
   if (proxyReady.exitCode) throw new Error("Public proxy did not start");

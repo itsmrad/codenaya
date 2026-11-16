@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     const current = await previewState(slug);
     if (!body.minutes && !current.sandboxId) return Response.json({ status: "saved" });
     const prepared = await preparePreview(slug);
-    if (prepared.state.status === "boot") after(() => bootPreview(slug, prepared, new URL(request.url).origin));
+    if (prepared.state.status === "boot") after(() => bootPreview(slug, prepared));
     const state = prepared.state.sandboxId ? await heartbeatPreview(slug, prepared.state) : prepared.state;
     return Response.json({ status: state.status });
   } catch { return Response.json({ status: "error" }); }

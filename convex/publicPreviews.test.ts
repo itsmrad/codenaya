@@ -130,7 +130,7 @@ test("deleting a project retains its capacity reservation until the sandbox expi
   });
 });
 
-test("replacing and revoking snapshots explicitly releases the old checkpoint", async () => {
+test("replacing snapshots releases the old checkpoint; disabling retains the shared version", async () => {
   const { t, id } = await seed();
   const owner = t.withIdentity({ subject: "owner" });
   const options = { projectId: id, mode: "snapshot" as const, minutes: 0 as const };
@@ -140,7 +140,10 @@ test("replacing and revoking snapshots explicitly releases the old checkpoint", 
   expect(await t.run(ctx => ctx.db.get("checkpoints", old))).toBeNull();
   const next = await t.run(async ctx => (await ctx.db.get("projects", id))!.shareCheckpointId!);
   await owner.mutation(api.projects.revokeShareLink, { projectId: id });
-  expect(await t.run(ctx => ctx.db.get("checkpoints", next))).toBeNull();
+  expect(await t.run(ctx => ctx.db.get("checkpoints", next))).not.toBeNull();
+  expect(await t.query(api.projects.getShared, { token })).toBeNull();
+  expect(await owner.action(api.projects.createShareLink, { projectId: id })).toBe(token);
+  expect(await t.query(api.projects.getShared, { token })).not.toBeNull();
 });
 
 test("Generate/Update preserves the slug, snapshot and running lease for lifetime-only changes", async () => {

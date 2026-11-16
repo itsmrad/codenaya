@@ -70,7 +70,7 @@ describe("share links (#260)", () => {
     expect(await t.query(api.projects.getShared, { token })).not.toBeNull();
   });
 
-  test("the token is unguessable and stable until revoked", async () => {
+  test("the token is unguessable and stable across disable and re-enable", async () => {
     const t = convexTest(schema, modules);
     const { projectId } = await seed(t);
 
@@ -80,7 +80,8 @@ describe("share links (#260)", () => {
 
     await alice(t).mutation(api.projects.revokeShareLink, { projectId });
     const next = await alice(t).action(api.projects.createShareLink, { projectId });
-    expect(next).not.toBe(token);
+    expect(next).toBe(token);
+    expect(await t.query(api.projects.getShared, { token })).not.toBeNull();
   });
 
   test("anonymous metadata never contains owner identity, files, or code; file reads are retired", async () => {

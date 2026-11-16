@@ -94,3 +94,11 @@ test("a changed latest with exhausted boot allowance leaves the running reservat
   expect(project?.publicPreview).toMatchObject({ lease: "old", sandboxId: "e2b:old", ready: true });
   expect(project?.publicPreview?.desiredRevision).toBeUndefined();
 });
+
+test("frame origin configuration changes invalidate an existing warm proxy", async () => {
+  const { inputs } = await running("latest");
+  vi.stubEnv("CODENAYA_PUBLIC_PREVIEW_ORIGINS", "http://localhost:3100,https://codenaya.tech,http://localhost:3216");
+  const refreshed = await readPreviewInputs(token);
+  expect(refreshed?.revision).not.toBe(inputs.revision);
+  expect(refreshed?.manifest).toEqual(inputs.manifest);
+});

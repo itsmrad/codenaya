@@ -35,7 +35,8 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
   const dirty = selectedMode !== (project?.shareMode ?? "snapshot") || minutes !== (project?.shareKeepLiveMinutes ?? 0) || refreshSnapshot;
   const toggle = async (on: boolean) => {
     setEnabled(on);
-    if (on || !token) return;
+    if (!token) return;
+    if (on) { await save(); return; }
     setSaving(true);
     try { await revokeShareLink({ projectId }); }
     catch (error) { setEnabled(null); toast.error(convexErrorMessage(error, "Couldn't turn off the link")); }
@@ -50,12 +51,12 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
         body: JSON.stringify({ projectId, mode: selectedMode, minutes, updateSnapshot: refreshSnapshot }),
       });
       const result = await response.json();
-      if (!response.ok) { toast.error("Couldn't save the share link. Try again."); return; }
+      if (!response.ok) { setEnabled(null); toast.error("Couldn't save the share link. Try again."); return; }
       setRefreshSnapshot(false);
       setEnabled(null);
       if (result.status === "busy") toast.error("Preview is busy. Try again shortly.");
       else if (result.status === "error") toast.error("Couldn't start the preview. Try again.");
-    } catch { toast.error("Couldn't save the share link. Try again."); }
+    } catch { setEnabled(null); toast.error("Couldn't save the share link. Try again."); }
     finally { setSaving(false); }
   };
 
@@ -90,12 +91,13 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
               The running website only, with Remix. No code, chat or secret env vars.
             </span>
           </span>
-          <Switch
-            checked={enabled ?? !!token}
+          {token && <Switch
+            checked={enabled ?? (project?.shareEnabled !== false)}
             disabled={project === undefined || saving}
             onCheckedChange={toggle}
             aria-label="Anyone with the link can view"
-          />
+            title={(enabled ?? (project?.shareEnabled !== false)) ? "Turn off link" : "Turn on link"}
+          />}
         </label>
         <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1.5 text-xs font-medium">
@@ -123,7 +125,7 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
           </label>
           <p className="text-xs text-muted-foreground">Links stay available until turned off. On-demand sites take ~30-60 s to start and stop after 10 min without visitors. Secret env vars aren’t included.</p>
         </div>
-        {(!token || dirty) && <Button size="sm" disabled={saving || !project || enabled === false} onClick={() => void save()}>{saving ? "Saving…" : token ? "Update link" : "Generate link"}</Button>}
+        {(!token || dirty) && <Button size="sm" disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : token ? "Update link" : "Generate link"}</Button>}
         {url && (
           <div className="flex items-center gap-1.5">
             <input

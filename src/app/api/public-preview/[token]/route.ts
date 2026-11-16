@@ -11,16 +11,13 @@ const json = (state: { status: string; url?: string }) => Response.json(
 );
 
 /** Polling and heartbeats never create a sandbox or read the build inputs. */
-export async function GET(request: Request, { params }: Context) {
+export async function GET(_request: Request, { params }: Context) {
   const { token } = await params;
   if (!validShareToken(token)) return json({ status: "missing" });
   try {
     const state = await previewState(token);
-    if (state.status === "retire") {
-      const prepared = await preparePreview(token);
-      if (prepared.state.status === "boot") after(() => bootPreview(token, prepared, new URL(request.url).origin));
-      return json(prepared.state);
-    }
+    // A pending replacement must re-enter the rate-limited POST path.
+    if (state.status === "retire") return json({ status: "boot" });
     return json(state.status === "ready" ? await heartbeatPreview(token, state) : state);
   } catch { return Response.json({ status: "error" }, { status: 503 }); }
 }
@@ -44,7 +41,7 @@ export async function POST(request: Request, { params }: Context) {
     const limit = checkRateLimit(ip, { scope: "public-preview-start", limit: 5, windowMs: 60_000 });
     if (!limit.allowed) return rateLimitedResponse(limit);
     const prepared = await preparePreview(token, inputs);
-    if (prepared.state.status === "boot") after(() => bootPreview(token, prepared, new URL(request.url).origin));
+    if (prepared.state.status === "boot") after(() => bootPreview(token, prepared));
     return json(prepared.state.sandboxId ? await heartbeatPreview(token, prepared.state) : prepared.state);
   } catch { return Response.json({ status: "error" }, { status: 503 }); }
 }

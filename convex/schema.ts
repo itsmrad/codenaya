@@ -346,6 +346,7 @@ export default defineSchema({
     deletingAt: v.optional(v.number()),
     // Website-only share link: 128 random bits, hex; legacy /s URLs redirect.
     shareToken: v.optional(v.string()),
+    shareEnabled: v.optional(v.boolean()),
     shareMode: v.optional(v.union(v.literal("snapshot"), v.literal("latest"))),
     shareCheckpointId: v.optional(v.id("checkpoints")),
     shareKeepLiveMinutes: v.optional(v.union(v.literal(0), v.literal(15), v.literal(30), v.literal(60))),

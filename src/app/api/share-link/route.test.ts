@@ -26,13 +26,13 @@ test("on-demand Generate saves once with owner auth without starting a sandbox",
   expect(mocks.action).toHaveBeenCalledWith(expect.anything(), { projectId: "project", options: { mode: "snapshot", minutes: 0, updateSnapshot: false } }, { token: "jwt" });
   expect(mocks.prepare).not.toHaveBeenCalled();
 });
-test("keep-live Generate schedules one boot with the app origin", async () => {
+test("keep-live Generate schedules one boot without deriving policy from the request origin", async () => {
   const prepared = { state: { status: "boot" } };
   mocks.prepare.mockResolvedValue(prepared);
   expect(await (await POST(request({ minutes: 15 }))).json()).toEqual({ status: "boot" });
   expect(mocks.after).toHaveBeenCalledTimes(1);
   await mocks.after.mock.calls[0][0]();
-  expect(mocks.boot).toHaveBeenCalledWith("same-slug", prepared, "http://localhost:3100");
+  expect(mocks.boot).toHaveBeenCalledWith("same-slug", prepared);
 });
 test("Update attaches to the existing unchanged build without booting", async () => {
   const state = { status: "ready", sandboxId: "e2b:one" };
