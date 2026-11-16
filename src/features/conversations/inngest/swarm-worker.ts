@@ -1,6 +1,8 @@
 import { createAgent, createNetwork } from "@inngest/agent-kit";
 import { NonRetriableError } from "inngest";
 
+import { localCandidates, RESOLVE_SUFFIXES } from "@/features/sandbox-preview/utils/missing-references";
+import { projectChecks } from "@/features/sandbox-preview/utils/project-checks";
 import { inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
 import { getAppError } from "@/lib/convex-error";
@@ -10,8 +12,9 @@ import { costUsd, creditsForCost, usageOfResponse } from "@/features/billing/cre
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../agent-models";
-import { type AgentStep, runWrittenPaths, stepsFromResponse, stepsFromToolResults, turnHeartbeat } from "../agent-steps";
+import { type AgentStep, buildPathIndex, runWrittenPaths, stepsFromResponse, stepsFromToolResults, turnHeartbeat } from "../agent-steps";
 import {
+  FOUNDATION_PLACEHOLDER_MAX_CHARS, isFoundationPath, ownsPath,
   CHILD_WORKER_TIMEOUT_MS, MAX_SUBORCH_USD, MAX_SWARM_AGENTS, MAX_SWARM_DEPTH, MAX_WORKER_USD,
   SUBORCH_MAX_STEPS, SUBORCH_TIMEOUT_MS, WORKER_MAX_STEPS, WORKER_TIMEOUT_MS,
 } from "../swarm";
@@ -42,6 +45,8 @@ export interface SwarmWorkerEvent {
   ownerId: string;
   model: AgentModelChoice;
   planOverview: string;
+  /** Other tasks in this plan; absent on events queued before static ownership checks. */
+  siblingOwnedPaths?: string[];
   /** The user's request (already capped), context only: the worker builds just its task. */
   originalPrompt?: string;
   /** 1 for the orchestrator's tasks (the default), 2 for a sub-orchestrator's. */
@@ -97,7 +102,7 @@ export const swarmWorker = inngest.createFunction(
     },
   },
   async ({ event, step }): Promise<SwarmWorkerResult> => {
-    const { parentMessageId, agentTaskId, projectId, ownerId, model, planOverview, originalPrompt, depth = 1 } = event.data as SwarmWorkerEvent;
+    const { parentMessageId, agentTaskId, projectId, ownerId, model, planOverview, siblingOwnedPaths, originalPrompt, depth = 1 } = event.data as SwarmWorkerEvent;
     const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
     if (!internalKey) throw new NonRetriableError("CODENAYA_CONVEX_INTERNAL_KEY is not configured");
 
@@ -146,6 +151,9 @@ export const swarmWorker = inngest.createFunction(
     let turn = 0;
     let cutOff = false;
     let unfinished = false;
+    let staticChecked = false;
+    let staticFixNote = "";
+    let repairNeeds = "";
     const options = { internalKey, projectId, registry: createRegistryCheck() };
     const subOrchestrator = task.role === "sub-orchestrator" && depth < MAX_SWARM_DEPTH;
     // Shared by every worker of the run, so they share its cache; the task line goes after it.
@@ -192,7 +200,9 @@ export const swarmWorker = inngest.createFunction(
         onStart: async ({ agent, prompt, history }) => {
           await recordSteps("worker-turn-start", []);
           const note = agent.name === SUMMARY_AGENT_NAME ? [{ type: "text" as const, role: "user" as const, content: creditStopped ? OUT_OF_CREDITS_NOTE : STEP_BUDGET_NOTE }] : [];
-          return { prompt, history: [...trimFileHistory(history ?? []), ...note], stop: false };
+          const fix = staticFixNote ? [{ type: "text" as const, role: "user" as const, content: staticFixNote }] : [];
+          staticFixNote = "";
+          return { prompt, history: [...trimFileHistory(history ?? []), ...note, ...fix], stop: false };
         },
         onResponse: async ({ agent, result }) => {
           decodeToolCalls(result.output);
@@ -204,8 +214,63 @@ export const swarmWorker = inngest.createFunction(
           if (cutOff) markCutOffCalls(result.output);
           return result;
         },
-        onFinish: async ({ result }) => {
+        onFinish: async ({ agent, result }) => {
           if (result.toolCalls.length) await recordSteps("worker-tool-results", stepsFromToolResults(result.toolCalls, Date.now()));
+          const finishing = result.output.some((m) => m.type === "text" && m.role === "assistant") &&
+            !result.output.some((m) => m.type === "tool_call") && !cutOff;
+          const written = new Set(runWrittenPaths([...recorded.values()]));
+          if (agent.name !== SUMMARY_AGENT_NAME && finishing && written.size && !staticChecked &&
+              turn < maxSteps - 1 && usage.costUsd < maxUsd && !outOfCredits()) {
+            staticChecked = true;
+            const problems = await step.run("worker-static-check", async () => {
+              try {
+                const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
+                const pathOf = buildPathIndex(rows);
+                const paths = new Set<string>();
+                const files: { path: string; content: string }[] = [];
+                for (const row of rows) {
+                  const path = row.type === "file" ? pathOf(row._id) : undefined;
+                  if (!path) continue;
+                  paths.add(path);
+                  if (typeof row.content === "string") files.push({ path, content: row.content });
+                }
+                const shared = (path: string) => (path.startsWith("src/") && isFoundationPath(path)) ||
+                  path.startsWith("src/data/") || path.startsWith("src/components/shared/");
+                const sibling = (path: string) => ownsPath(siblingOwnedPaths ?? [], path);
+                const own = (path: string) => ownsPath(task.ownedPaths, path);
+                // Retain the manifest for projectChecks' Next.js skip; withhold uncertain export targets.
+                const checkFiles = files.filter((f) => f.path === "package.json" || own(f.path) ||
+                  (depth === 1 && siblingOwnedPaths !== undefined && !sibling(f.path) && shared(f.path) &&
+                    f.content.length > FOUNDATION_PLACEHOLDER_MAX_CHARS));
+                const findings = projectChecks(checkFiles, paths, written);
+                const missing = findings.filter((f) => f.checkId === "import").map((f) => f.message).filter((message) => {
+                  const file = files.find((f) => written.has(f.path) && message.endsWith(` (imported by ${f.path})`));
+                  if (!file) return false;
+                  const specifier = message.slice(0, -` (imported by ${file.path})`.length);
+                  const targets = localCandidates(file.path, specifier)?.flatMap((candidate) =>
+                    RESOLVE_SUFFIXES.map((suffix) => candidate + suffix)).filter((path) => /^(src|public)\//.test(path)) ?? [];
+                  // Old events and nested plans cannot prove that an outside path has no owner.
+                  return targets.some(own) || (depth === 1 && siblingOwnedPaths !== undefined && targets.length > 0 &&
+                    targets.every((path) => !sibling(path) && !shared(path)));
+                });
+                const exports = findings.filter((f) => f.checkId === "export" &&
+                  [...written].some((path) => f.message.startsWith(`${path}:`) || f.message.startsWith(`${path} imports `)))
+                  .map((f) => f.message);
+                return [...missing, ...exports].slice(0, 10);
+              } catch {
+                // Advisory only: a failed snapshot must not prevent the handoff.
+                return [];
+              }
+            });
+            if (problems.length) {
+              const firstSummary = result.output.flatMap((m) => m.type === "text" && m.role === "assistant"
+                ? [typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("")] : []).join("\n");
+              repairNeeds = splitSuggestions(firstSummary).content.match(/^NEEDS:[\s\S]*/m)?.[0].trim() ?? "";
+              staticFixNote = `Fix these before finishing (within your owned paths; report missing shared contracts in NEEDS):\n- ${problems.join("\n- ")}\n` +
+                "Read the shared contract files you use (src/types/*, src/data/*, src/components/shared/*) ONCE; verify exact field/export names and that your page's export matches src/App.tsx. " +
+                "Give the FULL final summary again, including any NEEDS: lines for dependencies, shared edits, or integration requirements.";
+            }
+          }
           return result;
         },
       },
@@ -228,7 +293,7 @@ export const swarmWorker = inngest.createFunction(
           unfinished = true;
           return summaryAgent;
         }
-        if (last && hasText && !hasCalls && !cutOff) return undefined;
+        if (last && hasText && !hasCalls && !cutOff && !staticFixNote) return undefined;
         // BYOK is unpriced, so only the step cap bounds it.
         if (callCount >= maxSteps - 1 || usage.costUsd >= maxUsd) {
           unfinished = true;
@@ -242,7 +307,8 @@ export const swarmWorker = inngest.createFunction(
     const raw = result.state.results.at(-1)?.output.flatMap((m) => m.type === "text" && m.role === "assistant"
       ? [typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("")] : []).join("\n").trim() ?? "";
     // The shared prompt asks for follow-up chips (#256); a worker's are never shown.
-    const reply = splitSuggestions(raw).content || "The worker finished without a summary.";
+    let reply = splitSuggestions(raw).content || "The worker finished without a summary.";
+    if (repairNeeds && !/^NEEDS:/m.test(reply)) reply += `\n${repairNeeds}`;
     const repairBudget = new AbortController();
     if (usage.costUsd >= maxUsd || outOfCredits()) repairBudget.abort();
     let repairTurn = 0;

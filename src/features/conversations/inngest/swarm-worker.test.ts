@@ -56,6 +56,7 @@ const run = (inferences: Parameters<typeof drive>[1], extra: Record<string, unkn
     parentMessageId: "m1",
     agentTaskId: "t1",
     ownerId: "user_1",
+    siblingOwnedPaths: ["src/components/nav.tsx"],
     planOverview: "## Plan\n- pages: home page\n- nav: navigation",
     ...extra,
   }, { fn: swarmWorker, invokeResults });
@@ -136,6 +137,161 @@ describe("swarmWorker", () => {
       messageId: "m1", steps: [expect.objectContaining({ id: TURN_HEARTBEAT_ID })],
     })]);
     expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ agentTaskId: "t1", status: "done" })]);
+  });
+
+  const staticSnapshot = (content: string, shared = "export const site = {};", contract = "", manifest = "") => {
+    mocks.query.mockImplementation(async (ref) => getFunctionName(ref) === "system:getProjectFilesWithUrls" ? [
+      { _id: "manifest", name: "package.json", type: "file", content: manifest },
+      { _id: "layout", name: "src/app/layout.tsx", type: "file", content: "export default () => null;" },
+      { _id: "src", name: "src", type: "folder" },
+      { _id: "pages", name: "pages", type: "folder", parentId: "src" },
+      { _id: "home", name: "home.tsx", type: "file", parentId: "pages", content },
+      { _id: "data", name: "data.ts", type: "file", parentId: "pages", content: shared },
+      { _id: "types", name: "types.ts", type: "file", parentId: "src", content: contract },
+      // An unrelated broken file must not send this worker back to repair it.
+      { _id: "other", name: "other.ts", type: "file", parentId: "src", content: 'import "./missing";' },
+    ] : getFunctionName(ref) === "system:getProjectFiles" ? [] : null);
+  };
+
+  it.each([true, false])("prompts once for a missing import and finishes even if still broken (repaired: %s)", async (repaired) => {
+    const broken = 'import Missing from "@/components/Missing"; export default Missing;';
+    staticSnapshot(broken);
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content: broken }] }) },
+      { data: text("Built it.") },
+      ...(repaired ? [{ data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content: "export default () => null;" }] }) }] : []),
+      { data: text(repaired ? "Fixed the import." : "NEEDS: missing shared component.") },
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.data).toMatchObject({ status: "done", summary: repaired ? "Fixed the import." : "NEEDS: missing shared component." });
+    expect(outcome.inferenceBodies).toHaveLength(repaired ? 4 : 3);
+    const requests = outcome.inferenceBodies as Array<{ messages: Array<{ role: string; content: unknown }> }>;
+    const fix = requests[2].messages.at(-1);
+    expect(fix).toEqual({ role: "user", content: expect.stringContaining("Fix these before finishing") });
+    expect(fix?.content).toContain("@/components/Missing (imported by src/pages/home.tsx)");
+    expect(fix?.content).not.toContain("other.ts");
+    expect(fix?.content).toContain("Read the shared contract files you use");
+    expect(fix?.content).toContain("Give the FULL final summary again, including any NEEDS: lines");
+    expect(requests.filter((request) => String(request.messages.at(-1)?.content).startsWith("Fix these before finishing"))).toHaveLength(1);
+  });
+
+  it.each([false, true])("preserves the first NEEDS block unless the repair summary supplies one (repeated: %s)", async (repeated) => {
+    const content = 'import Missing from "./missing"; export default Missing;';
+    const needs = "NEEDS: add react-router-dom\n- Wire /home in src/App.tsx";
+    staticSnapshot(content);
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text(`Built it.\n${needs}`) },
+      { data: text(`Fixed it.${repeated ? `\n${needs}` : ""}`) },
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.data).toMatchObject({ summary: `Fixed it.\n${needs}` });
+    expect(mutationArgs("agentTasks:finishTask").at(-1)).toMatchObject({ summary: `Fixed it.\n${needs}` });
+    expect(outcome.inferenceBodies).toHaveLength(3);
+  });
+
+  it.each(["next", "vite"])("uses projectChecks' framework detection for %s", async (framework) => {
+    const content = 'import Missing from "./missing"; import { MissingExport } from "./data"; export default Missing;';
+    staticSnapshot(content, "export const present = {};", "", JSON.stringify({ dependencies: { [framework]: "1.0.0" } }));
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text("Built it.") },
+      ...(framework === "vite" ? [{ data: text("NEEDS: missing import.") }] : []),
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(framework === "next" ? 2 : 3);
+  });
+
+  it("finishes clean imports without another turn", async () => {
+    const content = 'import { site as data } from "./data"; export default () => data;';
+    staticSnapshot(content);
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text("Built it.") },
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(2);
+  });
+
+  it.each([
+    ['import { missing as data } from "./data";', "no such export"],
+    ['import data from "./data";', "no default export"],
+  ])("checks shared exports: %s", async (imports, diagnostic) => {
+    const content = `${imports} export default () => data;`;
+    staticSnapshot(content);
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text("Built it.") },
+      { data: text("NEEDS: shared data export.") },
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(3);
+    const requests = outcome.inferenceBodies as Array<{ messages: Array<{ content: unknown }> }>;
+    expect(requests[2].messages.at(-1)?.content).toContain(diagnostic);
+  });
+
+  it.each([
+    { target: "@/components/nav", retry: false },
+    { target: "./missing", retry: true },
+    { target: "../../public/missing.png", retry: true },
+    { target: "@/unowned/missing", retry: true },
+    { target: "@/types/missing", retry: false },
+    { target: "@/data/missing", retry: false },
+    { target: "@/components/shared/missing", retry: false },
+    { target: "@/App", retry: false },
+  ])("defers sibling/foundation imports but checks own/unowned: $target", async ({ target, retry }) => {
+    const content = `import Missing from "${target}"; export default Missing;`;
+    staticSnapshot(content);
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text("Built it.") },
+      ...(retry ? [{ data: text("NEEDS: missing import.") }] : []),
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(retry ? 3 : 2);
+  });
+
+  it.each(["", "// fully written sibling\n".repeat(20)])("defers sibling exports even when already on disk (%s)", async (stub) => {
+    const content = 'import { Missing } from "./data"; export default Missing;';
+    staticSnapshot(content, stub);
+    mocks.mutation.mockImplementation(async (ref, args) => getFunctionName(ref) === "agentTasks:startTask"
+      ? { ...TASK, ownedPaths: ["src/pages/home.tsx"] } : MUTATIONS[getFunctionName(ref)]?.(args) ?? null);
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text("Built it.") },
+    ], { siblingOwnedPaths: ["src/pages/data.ts"] });
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(2);
+  });
+
+  it.each([false, true])("checks shared exports only past the placeholder threshold (complete: %s)", async (complete) => {
+    const content = 'import { Missing } from "../types"; export default Missing;';
+    staticSnapshot(content, "", "export const present = {};" + (complete ? "// implemented\n".repeat(20) : ""));
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text("Built it.") },
+      ...(complete ? [{ data: text("NEEDS: shared type export.") }] : []),
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(complete ? 3 : 2);
+  });
+
+  it.each([undefined, 2])("defers outside missing imports without a complete top-level plan (depth: %s)", async (depth) => {
+    const content = 'import Missing from "@/unknown/Missing"; export default Missing;';
+    staticSnapshot(content);
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text("Built it.") },
+    ], depth === undefined ? { siblingOwnedPaths: undefined } : { depth });
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(2);
+  });
+
+  it("skips the static snapshot when nothing was written", async () => {
+    const outcome = await run([{ data: text("No changes needed.") }]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(1);
+    expect(mocks.query.mock.calls.some(([ref]) => getFunctionName(ref) === "system:getProjectFilesWithUrls")).toBe(false);
   });
 
   it("puts the user's original request in the system prompt, and none when absent", async () => {
