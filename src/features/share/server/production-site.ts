@@ -31,7 +31,11 @@ export default async (phase, context) => {
   return { ...config, productionBrowserSourceMaps: false, experimental: { ...config.experimental, serverSourceMaps: false } };
 };` }]);
   }
-  const build = await sandbox.run(framework === "next" ? "./node_modules/.bin/next build --webpack" : "./node_modules/.bin/vite build --sourcemap false", options);
+  // Next 15 uses webpack by default and does not accept Next 16's --webpack flag.
+  const nextHelp = framework === "next" ? await sandbox.run("./node_modules/.bin/next build --help", options) : null;
+  if (nextHelp?.exitCode) throw new Error("Cannot inspect Next build options");
+  const buildCommand = framework === "next" ? `./node_modules/.bin/next build${nextHelp?.stdout.includes("--webpack") ? " --webpack" : ""}` : "./node_modules/.bin/vite build --sourcemap false";
+  const build = await sandbox.run(buildCommand, options);
   if (build.exitCode) throw new Error("Build failed");
   // Even a project config that opts into maps cannot expose them on the public server.
   await sandbox.writeFiles([{ path: "/home/user/codenaya-clean.mjs", data: `

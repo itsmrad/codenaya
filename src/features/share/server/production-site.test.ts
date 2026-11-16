@@ -11,11 +11,15 @@ describe("public builds", () => {
   test.each([
     [{ vite: "8" }, "vite build --sourcemap false", "vite preview"],
     [{ next: "16" }, "next build --webpack", "next start"],
+    [{ next: "15" }, "next build", "next start"],
     [{ "@tanstack/react-start": "1" }, "vite build --sourcemap false", "node /home/user/codenaya-start.mjs"],
   ] as const)("runs production commands for %j", async (dependencies, build, start) => {
     const box = sandbox();
+    vi.mocked(box.run).mockImplementation(async command => ({
+      exitCode: 0, stdout: command.endsWith("build --help") && "next" in dependencies && dependencies.next === "16" ? "  --webpack  Use webpack" : "", stderr: "",
+    }));
     await startProductionSite(box, files(dependencies), { VITE_URL: "public" });
-    expect(box.run).toHaveBeenCalledWith(expect.stringContaining(build), expect.anything());
+    expect(box.run).toHaveBeenCalledWith(`./node_modules/.bin/${build}`, expect.anything());
     expect(box.start).toHaveBeenCalledWith(expect.stringContaining(start), expect.objectContaining({ envs: expect.objectContaining({ NODE_ENV: "production", VITE_URL: "public" }) }));
     expect(box.run).toHaveBeenCalledWith(expect.stringContaining("node /home/user/codenaya-clean.mjs"), expect.anything());
     const commands = vi.mocked(box.run).mock.calls.map(([command]) => command).join("\n");
