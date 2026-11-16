@@ -369,16 +369,17 @@ const highRiskSecretFindings = async (ctx: QueryCtx, projectId: Id<"projects">) 
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .take(MAX_PROJECT_FILES),
     // The one paginated read Convex allows per function: it stops at the budget.
+    // One row past the cap, so a project of exactly MAX_PROJECT_FILES files is done, not "too large".
     ctx.db
       .query("fileContents")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
-      .paginate({ cursor: null, numItems: MAX_PROJECT_FILES, maximumBytesRead: SCAN_BYTE_BUDGET }),
+      .paginate({ cursor: null, numItems: MAX_PROJECT_FILES + 1, maximumBytesRead: SCAN_BYTE_BUDGET }),
     ctx.db
       .query("projectEnvVars")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .take(MAX_ENV_VARS),
   ]);
-  if (!contentRows.isDone) return null;
+  if (!contentRows.isDone || contentRows.page.length > MAX_PROJECT_FILES) return null;
 
   const contentOf = new Map(contentRows.page.map((row) => [row.fileId, row.content]));
   const pathOf = buildPathIndex(fileRows);
