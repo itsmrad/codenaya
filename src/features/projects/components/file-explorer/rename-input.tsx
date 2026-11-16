@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { FileIcon, FolderIcon } from "@react-symbols/icons/utils";
 import { getItemPadding } from "./constants";
+import { onEntryKeyDown } from "./input-keys";
 import { cn } from "@/lib/utils";
 
 export const RenameInput = ({
@@ -52,14 +53,7 @@ export const RenameInput = ({
         onChange={(e) => setValue(e.target.value)}
         className="flex-1 bg-transparent text-sm outline-none focus:ring-1 focus:ring-inset focus:ring-ring"
         onBlur={handleSubmit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            handleSubmit();
-          }
-          if (e.key === "Escape") {
-            onCancel();
-          }
-        }}
+        onKeyDown={(e) => onEntryKeyDown(e, handleSubmit, onCancel)}
         onFocus={(e) => {
           if (type === "folder") {
             e.currentTarget.select();

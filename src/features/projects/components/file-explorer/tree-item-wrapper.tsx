@@ -14,6 +14,7 @@ import {
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
 
+import { entryFocusKey, useExplorerFocusTarget } from "./focus";
 import { getItemPadding } from "./constants";
 import { api } from "../../../../../convex/_generated/api";
 import { Doc } from "../../../../../convex/_generated/dataModel";
@@ -44,6 +45,7 @@ export const TreeItemWrapper = ({
   onCreateFile?: () => void;
   onCreateFolder?: () => void;
 }) => {
+  const rowRef = useExplorerFocusTarget(item._id);
   const setLocked = useMutation(api.files.setLocked);
   // #307: locks stop AI edits only; the user can still edit by hand.
   const toggleLock = () =>
@@ -55,6 +57,8 @@ export const TreeItemWrapper = ({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <button
+          ref={rowRef}
+          data-explorer-entry={isOptimisticFileId(item._id) ? undefined : entryFocusKey(item.parentId, item.name)}
           onClick={onClick}
           onDoubleClick={onDoubleClick}
           onKeyDown={(e) => {

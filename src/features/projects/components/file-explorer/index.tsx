@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useContext, useState } from "react"
 import { ChevronRightIcon, CopyMinusIcon, FilePlusCornerIcon, FolderPlusIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -18,12 +18,20 @@ import { useEditor } from "@/features/editor/hooks/use-editor";
 import { CreateInput } from "./create-input"
 import { LoadingRow } from "./loading-row"
 import { Tree } from "./tree"
+import { entryFocusKey, focusEntryWhenMounted, ExplorerFocusContext, useExplorerFocusController, useExplorerFocusTarget } from "./focus"
 
-export const FileExplorer = ({ 
-  projectId
-}: { 
-  projectId: Id<"projects">
-}) => {
+export const FileExplorer = ({ projectId }: { projectId: Id<"projects"> }) => {
+  const focus = useExplorerFocusController();
+  return (
+    <ExplorerFocusContext.Provider value={focus}>
+      <FileExplorerContents projectId={projectId} />
+    </ExplorerFocusContext.Provider>
+  );
+};
+
+const FileExplorerContents = ({ projectId }: { projectId: Id<"projects"> }) => {
+  const { requestFocus } = useContext(ExplorerFocusContext)!;
+  const createButtonRef = useExplorerFocusTarget(null);
   const [isOpen, setIsOpen] = useState(true);
   const [collapseKey, setCollapseKey] = useState(0);
   const [creating, setCreating] = useState<"file" | "folder" | null>(
@@ -42,6 +50,7 @@ export const FileExplorer = ({
   const handleCreate = async (name: string) => {
     const createType = creating;
     setCreating(null);
+    requestFocus(null);
 
     // Validate against siblings in rootFiles
     if (rootFiles) {
@@ -64,12 +73,14 @@ export const FileExplorer = ({
         });
         // Open the confirmed id, never the optimistic one (#266).
         if (fileId) openFile(fileId, { pinned: false });
+        focusEntryWhenMounted(entryFocusKey(undefined, name));
       } else if (createType === "folder") {
         await createFolder({
           projectId,
           name,
           parentId: undefined,
         });
+        focusEntryWhenMounted(entryFocusKey(undefined, name));
       }
     } catch (error) {
       toast.error(convexErrorMessage(error, `Couldn't create the ${createType}`));
@@ -102,6 +113,7 @@ export const FileExplorer = ({
           {/* From md up the actions overlay the name until hover/focus, so they take no width. */}
           <div className="opacity-100 md:opacity-0 group-hover/project:opacity-100 group-focus-within/project:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity duration-200 flex items-center gap-0.5 shrink-0 md:absolute md:right-1.5 md:top-1/2 md:-translate-y-1/2 md:rounded-md md:bg-[color-mix(in_oklab,var(--muted)_60%,var(--background))]">
             <Button
+              ref={createButtonRef}
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
@@ -154,7 +166,7 @@ export const FileExplorer = ({
                 type={creating}
                 level={0}
                 onSubmit={handleCreate}
-                onCancel={() => setCreating(null)}
+                onCancel={() => { setCreating(null); requestFocus(null); }}
               />
             )}
             {rootFiles?.length === 0 && !creating && (
@@ -166,6 +178,7 @@ export const FileExplorer = ({
               <Tree
                 key={`${item._id}-${collapseKey}`}
                 item={item}
+                siblings={rootFiles}
                 level={0}
                 projectId={projectId}
               />
