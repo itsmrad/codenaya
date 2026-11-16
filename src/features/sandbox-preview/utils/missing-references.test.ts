@@ -141,6 +141,59 @@ describe("undeclaredPackages", () => {
     ]);
   });
 
+  it("reads every import and export form, including multi-line ones", () => {
+    const files = withPackageJson({}, [
+      {
+        path: "src/components/booking-form.tsx",
+        content: [
+          'import DefaultExport from "default-pkg";',
+          'import { named } from "named-pkg";',
+          'import * as ns from "namespace-pkg";',
+          'import type { T } from "type-pkg";',
+          'import "side-effect-pkg";',
+          'export { thing } from "reexport-pkg";',
+          'export * from "@scope/star/sub/path";',
+          "import {",
+          "  a,",
+          "  b,",
+          '} from "multi-line-pkg";',
+        ].join("\n"),
+      },
+    ]);
+    expect(undeclaredPackages(files).map((line) => line.split(" ")[0])).toEqual([
+      "default-pkg",
+      "named-pkg",
+      "namespace-pkg",
+      "type-pkg",
+      "side-effect-pkg",
+      "reexport-pkg",
+      "@scope/star",
+      "multi-line-pkg",
+    ]);
+  });
+
+  it("doesn't read the word from in UI copy as an import (#858)", () => {
+    const files = withPackageJson({ dependencies: { react: "19" } }, [
+      {
+        path: "src/components/booking-form.tsx",
+        content: [
+          'import { useState } from "react";',
+          "export function BookingForm({ open }: { open: boolean }) {",
+          "  const note = `Open from` + (open ? `` : ` : `);",
+          "  return (",
+          "    <form>",
+          '      <p>{open ? "Open from" : "Closed"}</p>',
+          '      <p>Tune-ups from "$49", drop-offs from \'9am\'</p>',
+          "      <p>{note}</p>",
+          "    </form>",
+          "  );",
+          "}",
+        ].join("\n"),
+      },
+    ]);
+    expect(undeclaredPackages(files)).toEqual([]);
+  });
+
   it("ignores relative paths, aliases, builtins, comments and workspace packages", () => {
     const files = withPackageJson({}, [
       {
