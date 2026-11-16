@@ -70,7 +70,9 @@ test.describe("preview terminal", () => {
 
     // #480: a log viewer, not a shell. Clear empties it, and stays cleared
     // across Hide logs / Show logs.
-    await expect(page.getByText("Logs", { exact: true })).toBeVisible();
+    const logsHeader = page.getByRole("button", { name: "Hide logs", exact: true }).locator("..");
+    await expect(logsHeader).toBeVisible();
+    await expect(logsHeader).toContainText(/^Logs\b/);
     const rows = page.locator(".xterm-rows");
     await expect(rows).toContainText("VITE v5.4.0");
     await page.getByRole("button", { name: "Clear logs" }).click();
@@ -119,7 +121,7 @@ test.describe("preview terminal", () => {
       expect(navigations).toBe(0);
     };
 
-    const strip = page.getByRole("button", { name: "Show logs", exact: true });
+    const strip = page.getByRole("button", { name: /\bShow logs$/ });
     const toggle = page.getByRole("button", { name: "Toggle terminal" });
     const terminal = page.locator(".xterm");
     for (const width of [1440, 375]) {
