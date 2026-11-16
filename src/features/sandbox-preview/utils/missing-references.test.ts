@@ -161,6 +161,7 @@ describe("undeclaredPackages", () => {
           'export * as ns from "namespace-reexport-pkg";',
           'import{d as e}from"minified-pkg";',
           'import { "a b" as f } from "string-name-pkg";',
+          'import source wasm from "source-phase-pkg";',
         ].join("\n"),
       },
     ]);
@@ -177,6 +178,7 @@ describe("undeclaredPackages", () => {
       "namespace-reexport-pkg",
       "minified-pkg",
       "string-name-pkg",
+      "source-phase-pkg",
     ]);
   });
 
@@ -187,6 +189,17 @@ describe("undeclaredPackages", () => {
     // The old lazy scan took about a minute on this ~1.5 MB file.
     expect(performance.now() - start).toBeLessThan(500);
   });
+
+  it.each([
+    ["unclosed import lists", "import type {\n".repeat(75_000)],
+    ["a long run of spaces after import", `import${" ".repeat(40_000)}x`],
+  ])("scans %s in linear time", (_, content) => {
+    const start = performance.now();
+    expect(undeclaredPackages(withPackageJson({}, [{ path: "src/broken.ts", content }]))).toEqual([]);
+    expect(performance.now() - start).toBeLessThan(500);
+  });
+
+  // shortcut: a `}` inside a string-name import (`{ "a}b" as c }`) hides the package; upgrade if one shows up.
 
   it("doesn't read the word from in UI copy as an import (#858)", () => {
     const files = withPackageJson({ dependencies: { react: "19" } }, [
