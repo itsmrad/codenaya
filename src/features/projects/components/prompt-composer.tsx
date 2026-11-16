@@ -181,120 +181,122 @@ export const PromptComposer = ({
     // A window on the page grid: `+` marks on its corners, a mono label strip,
     // the prompt, and a toolbar of cells ending in the Build cell.
     // @container: the mode toggle shows its labels once the box is wide enough.
-    <div className={cn("group/composer @container relative isolate w-full text-left", className)}>
-      <GridCross className="-top-[5px] -left-[5px]" />
-      <GridCross className="-top-[5px] -right-[5px]" />
-      <GridCross className="-bottom-[5px] -left-[5px]" />
-      <GridCross className="-right-[5px] -bottom-[5px]" />
+    <div className={cn("group/composer @container isolate w-full text-left", className)}>
+      <div className="relative">
+        <GridCross className="-top-[5px] -left-[5px]" />
+        <GridCross className="-top-[5px] -right-[5px]" />
+        <GridCross className="-bottom-[5px] -left-[5px]" />
+        <GridCross className="-right-[5px] -bottom-[5px]" />
 
-      {/* `composer-orbit` (globals.css): an orange light circles the box while it has focus. */}
-      <div data-testid="prompt-composer" className="composer-window composer-orbit rounded-md border border-border bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04),0_16px_48px_-28px_rgb(0_0_0/0.3)] transition-[border-color] duration-300 focus-within:border-brand/30">
-        {/* Label strip */}
-        <div className="flex h-9 items-center justify-between gap-3 border-b border-border px-4 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          <span className="flex items-center gap-2.5">
-            <span aria-hidden className="h-3 w-0.5 bg-brand" />
-            <span>[ {isSubmitting ? "Creating project…" : "New project"} ]</span>
-          </span>
-          <span className="flex items-center gap-2 max-sm:hidden">
-            <span className={cn("size-1.5 rounded-full bg-brand", isBusy ? "animate-ping" : "animate-pulse")} />
-            ↵ Build · ⇧↵ New line
-          </span>
-        </div>
+        {/* `composer-orbit` (globals.css): an orange light circles the box while it has focus. */}
+        <div data-testid="prompt-composer" className="composer-window composer-orbit rounded-md border border-border bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04),0_16px_48px_-28px_rgb(0_0_0/0.3)] transition-[border-color] duration-300 focus-within:border-brand/30">
+          {/* Label strip */}
+          <div className="flex h-9 items-center justify-between gap-3 border-b border-border px-4 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            <span className="flex items-center gap-2.5">
+              <span aria-hidden className="h-3 w-0.5 bg-brand" />
+              <span>[ {isSubmitting ? "Creating project…" : "New project"} ]</span>
+            </span>
+            <span className="flex items-center gap-2 max-sm:hidden">
+              <span className={cn("size-1.5 rounded-full bg-brand", isBusy ? "animate-ping" : "animate-pulse")} />
+              ↵ Build · ⇧↵ New line
+            </span>
+          </div>
 
-        <PromptInput onSubmit={handleSubmit}>
-          <PromptInputBody>
-            <PromptInputTextarea
-              ref={textareaRef}
-              aria-label="Describe what you want to build"
-              placeholder={placeholder}
-              className="min-h-24 px-5 pt-4 pb-3 text-[15px]/7 placeholder:text-muted-foreground/55"
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(event) => {
-                if (isComposerPlanKey(event.nativeEvent, event.currentTarget) && !isBusy && mode !== "swarm") {
-                  event.preventDefault();
-                  setMode((current) => current === "plan" ? "build" : "plan");
-                }
-              }}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setIsFocused(false)}
-              value={input}
-              disabled={isBusy}
-              autoFocus={autoFocus}
-            />
-          </PromptInputBody>
+          <PromptInput onSubmit={handleSubmit}>
+            <PromptInputBody>
+              <PromptInputTextarea
+                ref={textareaRef}
+                aria-label="Describe what you want to build"
+                placeholder={placeholder}
+                className="min-h-24 px-5 pt-4 pb-3 text-[15px]/7 placeholder:text-muted-foreground/55"
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(event) => {
+                  if (isComposerPlanKey(event.nativeEvent, event.currentTarget) && !isBusy && mode !== "swarm") {
+                    event.preventDefault();
+                    setMode((current) => current === "plan" ? "build" : "plan");
+                  }
+                }}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setIsFocused(false)}
+                value={input}
+                disabled={isBusy}
+                autoFocus={autoFocus}
+              />
+            </PromptInputBody>
 
-          {/* Toolbar of cells; p-0! beats the addon's own padding so every cell centres. */}
-          <PromptInputFooter className="h-11 items-stretch gap-0 border-t border-border p-0!">
-            <PromptInputTools data-testid="prompt-composer-tools" className="min-w-0 flex-1 items-stretch gap-0 [&>:last-child]:border-r-0">
-              {showEnhance && (
-                <EnhancePromptButton
-                  enhancer={enhancer}
-                  value={input}
-                  disabled={isSubmitting}
-                  showLabel
-                  className={cn(TOOL, "h-full rounded-none [&_svg]:size-3.5")}
-                />
-              )}
-              {/* Signed-in composers only, like Enhance; not the landing page (#301). */}
-              {showEnhance && !isSubmitting && (
-                <PromptInputSpeechButton
-                  textareaRef={textareaRef}
-                  onTranscriptionChange={setInput}
-                  className={cn(TOOL, "h-full w-auto rounded-none has-[>svg]:px-3 [&_svg]:size-3.5")}
-                />
-              )}
-              {/* The chat's mode radios; Swarm only while the kill switch is on. */}
-              <div className={cn(CELL, "border-r")}>
-                <PlanModeToggle
-                  mode={mode}
-                  onModeChange={setMode}
-                  swarm={swarmEnabled}
-                  disabled={isSubmitting}
-                  size="sm"
-                />
-              </div>
-              {tools}
-              {showModelSelect && <ComposerModelSelect disabled={isSubmitting} />}
-            </PromptInputTools>
-
-            {/* shrink-0: the tools give way first, so Build never leaves the frame. */}
-            <div data-testid="prompt-composer-actions" className="flex shrink-0 items-stretch">
-              {input && (
-                <span
-                  className={cn(
-                    CELL,
-                    "border-l px-3 font-mono text-[10px] tabular-nums tracking-[0.12em] text-muted-foreground @max-[640px]:hidden",
-                  )}
-                >
-                  {input.length.toLocaleString("en-US")} CHARS
-                </span>
-              )}
-              {/* Always in the bar, like Enhance; disabled while there's nothing to clear. */}
-              <button
-                type="button"
-                aria-label="Clear prompt"
-                onClick={() => fill("")}
-                disabled={isBusy || !input}
-                className={cn(TOOL, "border-r-0 border-l")}
-              >
-                <XIcon className="size-3.5" />
-                <span className="max-sm:sr-only">Clear</span>
-              </button>
-              <PromptInputSubmit
-                disabled={!input.trim() || isBusy}
-                aria-label="Create project"
-                className="sheen h-full w-auto gap-2 rounded-none rounded-br-[5px] border-l border-border bg-brand px-4 font-mono text-[10px] uppercase tracking-[0.14em] text-brand-foreground hover:bg-brand/90 disabled:bg-muted/60 disabled:text-muted-foreground disabled:opacity-100 has-[>svg]:px-4"
-              >
-                <span className="max-sm:hidden">{isSubmitting ? "Building" : "Build"}</span>
-                {isSubmitting ? (
-                  <Loader2Icon className="size-3.5 animate-spin" />
-                ) : (
-                  <ArrowUpIcon className="size-3.5" />
+            {/* Toolbar of cells; p-0! beats the addon's own padding so every cell centres. */}
+            <PromptInputFooter className="h-11 items-stretch gap-0 border-t border-border p-0!">
+              <PromptInputTools data-testid="prompt-composer-tools" className="min-w-0 flex-1 items-stretch gap-0 [&>:last-child]:border-r-0">
+                {showEnhance && (
+                  <EnhancePromptButton
+                    enhancer={enhancer}
+                    value={input}
+                    disabled={isSubmitting}
+                    showLabel
+                    className={cn(TOOL, "h-full rounded-none [&_svg]:size-3.5")}
+                  />
                 )}
-              </PromptInputSubmit>
-            </div>
-          </PromptInputFooter>
-        </PromptInput>
+                {/* Signed-in composers only, like Enhance; not the landing page (#301). */}
+                {showEnhance && !isSubmitting && (
+                  <PromptInputSpeechButton
+                    textareaRef={textareaRef}
+                    onTranscriptionChange={setInput}
+                    className={cn(TOOL, "h-full w-auto rounded-none has-[>svg]:px-3 [&_svg]:size-3.5")}
+                  />
+                )}
+                {/* The chat's mode radios; Swarm only while the kill switch is on. */}
+                <div className={cn(CELL, "border-r")}>
+                  <PlanModeToggle
+                    mode={mode}
+                    onModeChange={setMode}
+                    swarm={swarmEnabled}
+                    disabled={isSubmitting}
+                    size="sm"
+                  />
+                </div>
+                {tools}
+                {showModelSelect && <ComposerModelSelect disabled={isSubmitting} />}
+              </PromptInputTools>
+
+              {/* shrink-0: the tools give way first, so Build never leaves the frame. */}
+              <div data-testid="prompt-composer-actions" className="flex shrink-0 items-stretch">
+                {input && (
+                  <span
+                    className={cn(
+                      CELL,
+                      "border-l px-3 font-mono text-[10px] tabular-nums tracking-[0.12em] text-muted-foreground @max-[640px]:hidden",
+                    )}
+                  >
+                    {input.length.toLocaleString("en-US")} CHARS
+                  </span>
+                )}
+                {/* Always in the bar, like Enhance; disabled while there's nothing to clear. */}
+                <button
+                  type="button"
+                  aria-label="Clear prompt"
+                  onClick={() => fill("")}
+                  disabled={isBusy || !input}
+                  className={cn(TOOL, "border-r-0 border-l")}
+                >
+                  <XIcon className="size-3.5" />
+                  <span className="max-sm:sr-only">Clear</span>
+                </button>
+                <PromptInputSubmit
+                  disabled={!input.trim() || isBusy}
+                  aria-label="Create project"
+                  className="sheen h-full w-auto gap-2 rounded-none rounded-br-[5px] border-l border-border bg-brand px-4 font-mono text-[10px] uppercase tracking-[0.14em] text-brand-foreground hover:bg-brand/90 disabled:bg-muted/60 disabled:text-muted-foreground disabled:opacity-100 has-[>svg]:px-4"
+                >
+                  <span className="max-sm:hidden">{isSubmitting ? "Building" : "Build"}</span>
+                  {isSubmitting ? (
+                    <Loader2Icon className="size-3.5 animate-spin" />
+                  ) : (
+                    <ArrowUpIcon className="size-3.5" />
+                  )}
+                </PromptInputSubmit>
+              </div>
+            </PromptInputFooter>
+          </PromptInput>
+        </div>
       </div>
       {showEnhance && showModelSelect && <ComposerLowCreditsNotice />}
     </div>
