@@ -276,7 +276,7 @@ describe("platformCatalog.save audit", () => {
 });
 
 describe("platformCatalog reads", () => {
-  test("getForUsers drops hidden models, routes and prices; null without a catalog", async () => {
+  test("getForUsers drops hidden models and routes; null without a catalog", async () => {
     const base = setup();
     const user = base.withIdentity({ subject: "user_x" });
     expect(await user.query(api.platformCatalog.getForUsers, {})).toBeNull();
@@ -288,8 +288,23 @@ describe("platformCatalog reads", () => {
     ]);
     expect(await user.query(api.platformCatalog.getForUsers, {})).toEqual({
       models: [
-        { id: "a", name: "A", vendor: "acme", vision: false, contextLength: 128_000, access: "everyone" },
-        { id: "opus", name: "OPUS", vendor: "acme", vision: false, access: "promo_counted" },
+        {
+          id: "a",
+          name: "A",
+          vendor: "acme",
+          vision: false,
+          contextLength: 128_000,
+          access: "everyone",
+          pricing: { mode: "blended", usdPerMTok: 8 },
+        },
+        {
+          id: "opus",
+          name: "OPUS",
+          vendor: "acme",
+          vision: false,
+          access: "promo_counted",
+          pricing: { mode: "blended", usdPerMTok: 8 },
+        },
       ],
       defaultModelId: "a",
     });
@@ -311,7 +326,16 @@ describe("platformCatalog reads", () => {
       model("opus", { access: "promo_counted" }),
     ]);
     expect(await base.query(api.platformCatalog.getForVisitors, {})).toEqual({
-      models: [{ id: "a", name: "A", vendor: "acme", vision: false, access: "everyone" }],
+      models: [
+        {
+          id: "a",
+          name: "A",
+          vendor: "acme",
+          vision: false,
+          access: "everyone",
+          pricing: { mode: "blended", usdPerMTok: 8 },
+        },
+      ],
       defaultModelId: "a",
     });
   });

@@ -32,6 +32,7 @@ const publicCatalogModelValidator = catalogModelValidator.pick(
   "vision",
   "contextLength",
   "access",
+  "pricing",
 );
 
 const catalogFields = {
@@ -55,15 +56,16 @@ const publicCatalogValidator = v.union(
   v.null(),
 );
 
-/** The kept models for pickers, without routes or prices. */
+/** The kept models for pickers, without provider routes or spend caps. */
 const toPublic = (catalog: Catalog, keep: (model: Catalog["models"][number]) => boolean) => ({
-  models: catalog.models.filter(keep).map(({ id, name, vendor, vision, contextLength, access }) => ({
+  models: catalog.models.filter(keep).map(({ id, name, vendor, vision, contextLength, access, pricing }) => ({
     id,
     name,
     vendor,
     vision,
     contextLength,
     access,
+    pricing,
   })),
   defaultModelId: catalog.defaultModelId,
 });
