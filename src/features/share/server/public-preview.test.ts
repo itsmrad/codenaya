@@ -5,11 +5,14 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api } from "../../../../convex/_generated/api";
 import schema from "../../../../convex/schema";
 import { GET, POST } from "@/app/api/public-preview/[token]/route";
+import { POST as saveShare } from "@/app/api/share-link/route";
 import { bootPreview, readPreviewInputs } from "./public-preview";
 import { startProductionSite } from "./production-site";
 import { checkRateLimit, resetRateLimits } from "@/lib/rate-limit";
 
-const mocks = vi.hoisted(() => ({ query: vi.fn(), mutation: vi.fn(), kill: vi.fn(), connect: vi.fn(), create: vi.fn(), after: vi.fn() }));
+const mocks = vi.hoisted(() => ({ query: vi.fn(), mutation: vi.fn(), kill: vi.fn(), connect: vi.fn(), create: vi.fn(), after: vi.fn(), auth: vi.fn(), action: vi.fn() }));
+vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
+vi.mock("convex/nextjs", () => ({ fetchAction: mocks.action }));
 vi.mock("@/lib/convex-client", () => ({ convex: { query: mocks.query, mutation: mocks.mutation } }));
 vi.mock("@/features/sandbox-preview/server/provider/registry", () => ({ createSandbox: mocks.create, getProvider: () => ({ kill: mocks.kill, connect: mocks.connect }) }));
 vi.mock("./production-site", () => ({ startProductionSite: vi.fn() }));
@@ -25,6 +28,7 @@ beforeEach(() => {
   vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", key);
   mocks.kill.mockResolvedValue(undefined);
   mocks.connect.mockResolvedValue({});
+  mocks.auth.mockResolvedValue({ userId: "owner", getToken: async () => "jwt" });
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -34,6 +38,7 @@ async function running(mode: "latest" | "snapshot") {
   mocks.mutation.mockImplementation(t.mutation);
   const projectId = await t.run(ctx => ctx.db.insert("projects", { name: "Site", ownerId: "owner", updatedAt: 1, shareToken: token }));
   const owner = t.withIdentity({ subject: "owner" });
+  mocks.action.mockImplementation(owner.action);
   const fileId = await owner.mutation(api.files.createFile, { projectId, name: "index.html", content: "A" });
   await owner.mutation(api.projects.configureShare, { projectId, mode, minutes: 0 });
   const inputs = (await readPreviewInputs(token))!;
@@ -144,4 +149,38 @@ test("a failed cleanup reports error but retains the live reservation until its 
   expect(project?.publicPreview).toMatchObject({ sandboxId: "e2b:failed-kill", failed: true });
   expect(project!.publicPreview!.until).toBeGreaterThan(Date.now());
   expect(mocks.create).toHaveBeenCalledTimes(1);
+  const retry = () => new Request(request(), { body: JSON.stringify({ retry: true }) });
+  expect((await POST(retry(), context)).status).toBe(503);
+  const afterRetry = await t.run(ctx => ctx.db.query("projects").withIndex("by_shareToken", q => q.eq("shareToken", token)).unique());
+  expect(afterRetry?.publicPreview?.until).toBe(project?.publicPreview?.until);
+  expect(mocks.connect).not.toHaveBeenCalled();
+  mocks.kill.mockResolvedValue(undefined);
+  mocks.create.mockResolvedValue({ provider: "e2b", id: "recovered", kill: mocks.kill });
+  vi.mocked(startProductionSite).mockResolvedValue("https://recovered.example");
+  expect(await (await POST(retry(), context)).json()).toEqual({ status: "boot" });
+  expect(mocks.after).toHaveBeenCalledTimes(2);
+  await mocks.after.mock.calls[1][0]();
+  expect(mocks.create).toHaveBeenCalledTimes(2);
+  expect(await (await GET(request(), context)).json()).toEqual({ status: "ready", url: "https://recovered.example" });
+});
+
+test("an on-demand owner publication recovers a failed snapshot with the newly saved version", async () => {
+  const { t, owner, fileId } = await running("snapshot");
+  const projectId = await t.run(async ctx => (await ctx.db.get("files", fileId))!.projectId);
+  await t.mutation(api.publicPreviews.update, { internalKey: key, token, lease: "old", release: true });
+  mocks.create.mockResolvedValue({ provider: "e2b", id: "failed-A", kill: mocks.kill });
+  vi.mocked(startProductionSite).mockRejectedValue(new Error("Build failed"));
+  await POST(request(), context);
+  await mocks.after.mock.calls[0][0]();
+  expect(await (await GET(request(), context)).json()).toEqual({ status: "error" });
+  await owner.mutation(api.files.updateFile, { id: fileId, content: "B" });
+  mocks.create.mockResolvedValue({ provider: "e2b", id: "fixed-B", kill: mocks.kill });
+  vi.mocked(startProductionSite).mockResolvedValue("https://fixed.example");
+  const response = await saveShare(new Request("https://example.com/api/share-link", { method: "POST",
+    body: JSON.stringify({ projectId, mode: "snapshot", minutes: 0, updateSnapshot: true }),
+  }));
+  expect(await response.json()).toEqual({ status: "boot" });
+  await mocks.after.mock.calls[1][0]();
+  expect(vi.mocked(startProductionSite).mock.calls.at(-1)![1]).toEqual([{ path: "index.html", data: "B" }]);
+  expect(await (await POST(request(), context)).json()).toEqual({ status: "ready", url: "https://fixed.example" });
 });

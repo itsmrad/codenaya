@@ -21,7 +21,7 @@ export async function retirePreview(token: string, state: PreviewState) {
 }
 
 export async function heartbeatPreview(token: string, state: PreviewState) {
-  if (!state.sandboxId || !state.lease) return state;
+  if (state.status !== "ready" || !state.sandboxId || !state.lease) return state;
   const id = parsePublicSandboxIdOrNull(state.sandboxId);
   if (!id) throw new Error("Invalid saved sandbox");
   const until = await update(token, state.lease, { heartbeat: true });
@@ -50,7 +50,7 @@ export async function preparePreview(token: string, inputs?: Awaited<ReturnType<
   if (!loaded) return { state: { status: "missing" as const } };
   const { manifest, revision } = loaded;
   let state = await previewState(token, revision, retry);
-  if (state.status === "retire") {
+  if (state.status === "retire" || (retry && state.status === "error" && state.sandboxId)) {
     await retirePreview(token, state);
     state = await previewState(token, revision);
   }
