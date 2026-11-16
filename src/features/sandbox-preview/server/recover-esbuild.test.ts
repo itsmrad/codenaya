@@ -63,6 +63,12 @@ describe("recoverEsbuild (#776)", () => {
   it.each([
     ["npm", ["install"]], ["pnpm", ["i"]], ["yarn", ["add", "react"]],
     ["bun", ["install"]], ["npm", ["ci"]], ["bash", ["-c", "cd /home/user/app && npm install"]],
+    ["npm", ["--prefix", "/home/user/app", "install"]],
+    ["pnpm", ["--dir", "/home/user/app", "install"]], ["pnpm", ["-C", "app", "add", "x"]],
+    ["yarn", ["--cwd", "app", "add", "x"]], ["pnpm", ["--filter", "app", "install"]],
+    ["npm", ["-w", "app", "ci"]], ["npm", ["--workspace", "app", "install"]],
+    ["npm", ["--silent", "--prefix=/home/user/app", "install"]],
+    ["bash", ["-c", 'pnpm --filter app --dir "/home/user/my app" install']],
   ])("waits for %s %j", async (cmd, args) => {
     const { sandbox, run } = fakeSandbox([dev, { ...dev, cmd, args, envs: {} }]);
     expect(await recoverEsbuild(sandbox)).toBe("busy");
@@ -72,6 +78,10 @@ describe("recoverEsbuild (#776)", () => {
   it.each([
     ["npm", ["run", "build:ci"]], ["pnpm", ["run", "add-x"]],
     ["yarn", ["run", "add", "ci"]], ["bun", ["run", "build", "install"]],
+    ["npm", ["run", "install-deps"]], ["npm", ["run", "build"]],
+    ["npm", ["--prefix", "app", "run", "install-deps"]],
+    ["pnpm", ["--filter", "app", "run", "build"]],
+    ["npm", ["--prefix", "install", "run", "build"]],
   ])("does not mistake %s %j for an install", async (cmd, args) => {
     const { sandbox } = fakeSandbox([dev, { ...dev, cmd, args, envs: {} }]);
     expect(await recoverEsbuild(sandbox)).toBe("restarted");

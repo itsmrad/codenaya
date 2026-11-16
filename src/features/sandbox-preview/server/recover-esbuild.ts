@@ -15,7 +15,17 @@ const globalForRecovery = globalThis as typeof globalThis & {
   __codenayaEsbuildRecovery?: Map<string, Recovery>;
 };
 const recoveries = (globalForRecovery.__codenayaEsbuildRecovery ??= new Map());
-const INSTALLING = /\b(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|ci)(?=\s|$)/;
+const isInstalling = (command: string): boolean => {
+  return [...command.matchAll(/\b(?:npm|pnpm|yarn|bun)\s+([^;&|\n]*)/g)].some(([, args]) => {
+    const tokens = args.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+    let index = 0;
+    while (tokens[index]?.startsWith("-")) {
+      const option = tokens[index++];
+      if (/^(?:--prefix|--dir|-C|--cwd|--filter|-w|--workspace)$/.test(option)) index++;
+    }
+    return /^(?:install|i|add|ci)$/.test(tokens[index] ?? "");
+  });
+};
 
 /** Reuse #661's marked-tree stop/start; never kill the proxy or unrelated commands. */
 export const recoverEsbuild = async (sandbox: Sandbox): Promise<EsbuildRecoveryStatus> => {
@@ -33,7 +43,7 @@ export const recoverEsbuild = async (sandbox: Sandbox): Promise<EsbuildRecoveryS
   let attempted = false;
   try {
     const commands = await listCommands(sandbox);
-    if (commands.some((command) => INSTALLING.test([command.cmd, ...command.args].join(" ")))) return "busy";
+    if (commands.some((command) => isInstalling([command.cmd, ...command.args].join(" ")))) return "busy";
     const running = commands.filter((command) => command.envs?.[DEV_COMMAND_ENV]);
     const [dev] = running;
     if (!dev) return "unavailable"; // #774 owns starting a missing dev command after installs.
