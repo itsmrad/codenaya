@@ -119,7 +119,7 @@ export const PublishDialog = ({
     await gate.guard(publishEntry);
   };
 
-  const publishEntry = async () => {
+  const publishEntry = async (acknowledgeSecretFindings: boolean) => {
     setSubmitting(true);
     try {
       await publish({
@@ -130,6 +130,7 @@ export const PublishDialog = ({
         techStack,
         designStyle,
         category,
+        acknowledgeSecretFindings,
       });
       toast.success("Published to showcase!");
       onOpenChange(false);
