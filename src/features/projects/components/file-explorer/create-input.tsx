@@ -12,17 +12,17 @@ export const CreateInput = ({
 }: {
   type: "file" | "folder",
   level: number,
-  onSubmit: (name: string) => void;
-  onCancel: () => void;
+  onSubmit: (name: string, restoreFocus: boolean) => void;
+  onCancel: (restoreFocus: boolean) => void;
 }) => {
   const [value, setValue] = useState("");
 
-  const handleSubmit = () => {
+  const handleSubmit = (restoreFocus = false) => {
     const trimmedValue = value.trim();
     if (trimmedValue) {
-      onSubmit(trimmedValue);
+      onSubmit(trimmedValue, restoreFocus);
     } else {
-      onCancel();
+      onCancel(restoreFocus);
     }
   }
 
@@ -48,7 +48,7 @@ export const CreateInput = ({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         className="flex-1 bg-transparent text-sm outline-none focus:ring-1 focus:ring-inset focus:ring-ring"
-        onBlur={handleSubmit}
+        onBlur={() => handleSubmit()}
         onKeyDown={(e) => onEntryKeyDown(e, handleSubmit, onCancel)}
       />
     </div>

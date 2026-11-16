@@ -1,4 +1,4 @@
-import { useContext, useState } from "react"
+import { useEffect, useRef, useContext, useState } from "react"
 import { ChevronRightIcon, CopyMinusIcon, FilePlusCornerIcon, FolderPlusIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -18,7 +18,7 @@ import { useEditor } from "@/features/editor/hooks/use-editor";
 import { CreateInput } from "./create-input"
 import { LoadingRow } from "./loading-row"
 import { Tree } from "./tree"
-import { entryFocusKey, focusEntryWhenMounted, ExplorerFocusContext, useExplorerFocusController, useExplorerFocusTarget } from "./focus"
+import { entryFocusKey, createEntryFocusRequest, focusEntryWhenMounted, ExplorerFocusContext, useExplorerFocusController, useExplorerFocusTarget } from "./focus"
 
 export const FileExplorer = ({ projectId }: { projectId: Id<"projects"> }) => {
   const focus = useExplorerFocusController();
@@ -32,6 +32,8 @@ export const FileExplorer = ({ projectId }: { projectId: Id<"projects"> }) => {
 const FileExplorerContents = ({ projectId }: { projectId: Id<"projects"> }) => {
   const { requestFocus } = useContext(ExplorerFocusContext)!;
   const createButtonRef = useExplorerFocusTarget(null);
+  const createFocus = useRef<AbortController | null>(null);
+  useEffect(() => () => createFocus.current?.abort(), []);
   const [isOpen, setIsOpen] = useState(true);
   const [collapseKey, setCollapseKey] = useState(0);
   const [creating, setCreating] = useState<"file" | "folder" | null>(
@@ -47,10 +49,11 @@ const FileExplorerContents = ({ projectId }: { projectId: Id<"projects"> }) => {
 
   const createFile = useCreateFile();
   const createFolder = useCreateFolder();
-  const handleCreate = async (name: string) => {
+  const handleCreate = async (name: string, restoreFocus: boolean) => {
+    const focusRequest = createEntryFocusRequest(restoreFocus);
+    createFocus.current = focusRequest;
     const createType = creating;
     setCreating(null);
-    requestFocus(null);
 
     // Validate against siblings in rootFiles
     if (rootFiles) {
@@ -58,6 +61,7 @@ const FileExplorerContents = ({ projectId }: { projectId: Id<"projects"> }) => {
         (f) => f.name === name && f.type === createType
       );
       if (exists) {
+        if (!focusRequest.signal.aborted) requestFocus(null);
         toast.error(createType === "file" ? "File already exists" : "Folder already exists");
         return;
       }
@@ -73,16 +77,17 @@ const FileExplorerContents = ({ projectId }: { projectId: Id<"projects"> }) => {
         });
         // Open the confirmed id, never the optimistic one (#266).
         if (fileId) openFile(fileId, { pinned: false });
-        focusEntryWhenMounted(entryFocusKey(undefined, name));
+        focusEntryWhenMounted(entryFocusKey(undefined, name), { signal: focusRequest.signal });
       } else if (createType === "folder") {
         await createFolder({
           projectId,
           name,
           parentId: undefined,
         });
-        focusEntryWhenMounted(entryFocusKey(undefined, name));
+        focusEntryWhenMounted(entryFocusKey(undefined, name), { signal: focusRequest.signal });
       }
     } catch (error) {
+      if (!focusRequest.signal.aborted) requestFocus(null);
       toast.error(convexErrorMessage(error, `Couldn't create the ${createType}`));
     }
   };
@@ -166,7 +171,7 @@ const FileExplorerContents = ({ projectId }: { projectId: Id<"projects"> }) => {
                 type={creating}
                 level={0}
                 onSubmit={handleCreate}
-                onCancel={() => { setCreating(null); requestFocus(null); }}
+                onCancel={(restoreFocus) => { setCreating(null); if (restoreFocus) requestFocus(null); }}
               />
             )}
             {rootFiles?.length === 0 && !creating && (
