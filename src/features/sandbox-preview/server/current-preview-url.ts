@@ -2,16 +2,27 @@ import { findPreviewDevServer, PREVIEW_PROXY_PORT, SHORT_CALL_MS } from "@/featu
 import { listAll } from "@/features/sandbox-preview/server/provider/fanout";
 import { getConfiguredProviders, getProvider } from "@/features/sandbox-preview/server/provider/registry";
 import { SandboxNotFoundError } from "@/features/sandbox-preview/server/provider/types";
+import { checkRateLimit, type RateLimitResult } from "@/lib/rate-limit";
+
+export class PreviewLookupRateLimitError extends Error {
+  constructor(readonly limit: RateLimitResult) { super("Too many preview lookups. Try again shortly."); }
+}
 
 /** Read the editor's existing live sandbox; never create or restart one here. */
 export async function currentPreviewUrl(projectId: string, userId: string) {
+  // This shared boundary covers both page navigations and API polling, after ownership checks.
+  const limit = checkRateLimit(userId, { scope: "owner-preview-lookup", limit: 30, windowMs: 60_000 });
+  if (!limit.allowed) throw new PreviewLookupRateLimitError(limit);
   const running = await listAll(getConfiguredProviders(), {
     metadata: { userId, projectId },
+    limit: 2,
     requestTimeoutMs: SHORT_CALL_MS,
   });
   for (const entry of running) {
     try {
-      const sandbox = await getProvider(entry.provider).connect(entry.id, { requestTimeoutMs: SHORT_CALL_MS });
+      const provider = getProvider(entry.provider);
+      if (!provider.inspect) continue;
+      const sandbox = await provider.inspect(entry.id, { requestTimeoutMs: SHORT_CALL_MS });
       if (await findPreviewDevServer(sandbox, SHORT_CALL_MS)) {
         return await sandbox.previewUrl(PREVIEW_PROXY_PORT);
       }

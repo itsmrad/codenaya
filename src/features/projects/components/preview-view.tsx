@@ -29,7 +29,7 @@ import {
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
 import { useEsbuildRecovery } from "@/features/sandbox-preview/hooks/use-esbuild-recovery";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
-import { PreviewAddress, ownerPreviewUrl } from "./preview-address";
+import { PreviewAddress, previewAddressUrl } from "./preview-address";
 import { PreviewSelectToggle } from "./preview-select-toggle";
 import { OpenOnPhonePopover } from "@/features/sandbox-preview/components/open-on-phone-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
@@ -167,7 +167,6 @@ export const PreviewView = ({
   onElementPicked: () => void;
 }) => {
   const origin = useSyncExternalStore(subscribeOrigin, () => window.location.origin, () => "");
-  const ownerUrl = ownerPreviewUrl(origin, projectId);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   
@@ -230,6 +229,7 @@ export const PreviewView = ({
 
   const activeInstance = activeEngine === "sandbox" ? sandbox : webcontainer;
   const { status, previewUrl, error, restart, terminalOutput } = activeInstance;
+  const addressUrl = previewAddressUrl(origin, projectId, activeEngine, previewUrl);
   // Select mode (#227) is off whenever the app isn't running, so a restart never leaves it on.
   const [selectChosen, setSelectChosen] = useState(false);
   if (selectChosen && (status !== "running" || !visible)) setSelectChosen(false);
@@ -722,7 +722,7 @@ export const PreviewView = ({
         </div>
 
         <PreviewAddress
-          url={ownerUrl}
+          url={addressUrl}
           running={Boolean(previewUrl)}
           loadingLabel={isLoading ? (status === "booting" ? `Starting ${activeEngine}...` : "Installing...") : null}
           waitingLabel={!error ? (building ? WAITING_FOR_BUILD : "Ready to preview") : null}
@@ -730,7 +730,7 @@ export const PreviewView = ({
 
         <div className="flex items-center gap-1 p-0.5 bg-muted/40 rounded-lg border border-border/50">
           <OpenOnPhonePopover
-            previewUrl={previewUrl ? ownerUrl : null}
+            previewUrl={previewUrl ? addressUrl : null}
             status={status}
             activeEngine={activeEngine}
           />

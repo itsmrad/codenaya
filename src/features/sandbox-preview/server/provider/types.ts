@@ -97,6 +97,8 @@ export interface SandboxProvider {
   create(opts: CreateOptions): Promise<Sandbox>;
   /** `timeoutMs` extends the sandbox's lifetime from now. */
   connect(id: string, opts?: RequestOptions & { timeoutMs?: number }): Promise<Sandbox>;
+  /** Observe an already-running sandbox without resuming it or changing its expiration. */
+  inspect?(id: string, opts?: RequestOptions): Promise<Sandbox>;
   /** Running sandboxes whose metadata matches every given tag; one page of up to `limit`. */
   list(query: { metadata?: SandboxMeta; limit?: number } & RequestOptions): Promise<ListedSandbox[]>;
   /** False when the sandbox was already gone. */

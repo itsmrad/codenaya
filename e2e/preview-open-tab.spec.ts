@@ -5,7 +5,7 @@ import { collectConsoleErrors } from "./console-errors";
 import { hasPreviewFixtureEnv, seedPreviewProject } from "./preview-fixtures";
 
 const PROJECT_NAME = "e2e-preview-open-tab";
-/** Stands in for the E2B host; both the iframe and the new tab are served by a route. */
+/** Stub sandbox content; the popup uses the real owned page with a stubbed polling response. */
 const PREVIEW_URL = "https://preview.e2e.test/";
 
 const LAYOUTS = [
@@ -56,6 +56,12 @@ test.describe("preview open in new tab", () => {
 
       await signIn(page);
       const projectId = await seedPreviewProject(page, PROJECT_NAME);
+      const ownerUrl = new URL(`/p/${projectId}/preview`, page.url()).href;
+      // Browser boot is stubbed, so there is no server-provider sandbox to discover.
+      // Keep the real server-rendered owner page/auth check and supply its client refresh.
+      await context.route(`**/api/projects/${projectId}/preview`, route => route.fulfill({
+        json: { name: PROJECT_NAME, previewUrl: PREVIEW_URL },
+      }));
       await page.goto(`/projects/${projectId}`);
       await page.getByRole("tab", { name: "Preview" }).click();
 
@@ -75,7 +81,12 @@ test.describe("preview open in new tab", () => {
       markReady();
       const link = page.getByRole("link", { name: "Open in new tab" });
       await expect(link).toBeVisible({ timeout: 30_000 });
-      await expect(link).toHaveAttribute("href", PREVIEW_URL);
+      await expect(link).toHaveAttribute("href", ownerUrl);
+      await expect(page.getByRole("textbox", { name: "Preview address", exact: true })).toHaveValue(ownerUrl);
+      await page.getByRole("button", { name: "Open on phone", exact: true }).click();
+      await expect(page.getByRole("textbox", { name: "Preview URL", exact: true })).toHaveValue(ownerUrl);
+      await expect(page.getByRole("link", { name: "Open preview in new tab", exact: true })).toHaveAttribute("href", ownerUrl);
+      await page.keyboard.press("Escape");
       await expect(link).toHaveAttribute("target", "_blank");
       await expect(link).toHaveAttribute("rel", "noopener noreferrer");
       await expect(refresh).toBeEnabled();
@@ -106,8 +117,11 @@ test.describe("preview open in new tab", () => {
       const popupEvent = context.waitForEvent("page");
       await link.click();
       const popup = await popupEvent;
-      await expect(popup).toHaveURL(PREVIEW_URL);
-      await expect(popup.getByRole("heading", { name: "Hello from the sandbox" })).toBeVisible();
+      await expect(popup).toHaveURL(ownerUrl);
+      await expect(popup.frameLocator('iframe[title="Preview"]').getByRole("heading", { name: "Hello from the sandbox" })).toBeVisible({ timeout: 30_000 });
+      if (layout.viewport.width === 1440 || layout.viewport.width === 390) {
+        await testInfo.attach(`owner-preview-${layout.viewport.width}`, { body: await popup.screenshot(), contentType: "image/png" });
+      }
 
       expect(errors).toEqual([]);
     });

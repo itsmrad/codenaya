@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), query: vi.fn(), current: vi.fn() }));
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/convex-client", () => ({ convex: { query: mocks.query } }));
-vi.mock("@/features/sandbox-preview/server/current-preview-url", () => ({ currentPreviewUrl: mocks.current }));
+vi.mock("@/features/sandbox-preview/server/current-preview-url", async original => ({ ...await original<typeof import("@/features/sandbox-preview/server/current-preview-url")>(), currentPreviewUrl: mocks.current }));
+import { PreviewLookupRateLimitError } from "@/features/sandbox-preview/server/current-preview-url";
 
 import { GET } from "./route";
 
@@ -20,6 +21,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("owner preview route", () => {
+  it("returns the standard 429 when the shared page/API lookup limit is exhausted", async () => {
+    mocks.query.mockResolvedValue({ name: "Mine" });
+    mocks.current.mockRejectedValue(new PreviewLookupRateLimitError({ allowed: false, remaining: 0, retryAfterSeconds: 15 }));
+    const response = await call();
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("15");
+  });
   it("returns 404 for non-owners before inspecting any sandbox", async () => {
     expect((await call()).status).toBe(404);
     expect(getFunctionName(mocks.query.mock.calls[0][0])).toBe("system:getOwnedProject");
