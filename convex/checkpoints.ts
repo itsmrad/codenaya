@@ -6,6 +6,7 @@ import { runWrittenPaths } from "../src/features/conversations/agent-steps";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { isSecretFile } from "./secretFiles";
 import { validateInternalKey } from "./internalKey";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
@@ -153,8 +154,9 @@ export async function createCheckpoint(
     // Every snapshot prunes, so at most one is over the cap, two when the
     // previous snapshot kept a checkpoint past it.
     .take(MAX_CHECKPOINTS_PER_PROJECT + 2);
+  const project = await ctx.db.get("projects", args.projectId);
   for (const checkpoint of stale.slice(MAX_CHECKPOINTS_PER_PROJECT)) {
-    if (checkpoint._id !== args.keep) await deleteCheckpoint(ctx, checkpoint);
+    if (checkpoint._id !== args.keep && checkpoint._id !== project?.shareCheckpointId) await deleteCheckpoint(ctx, checkpoint);
   }
 
   return checkpointId;
@@ -271,6 +273,7 @@ export async function copyCheckpointFiles(
   ctx: MutationCtx,
   checkpointId: Id<"checkpoints">,
   targetId: Id<"projects">,
+  keepSecretFiles = true,
 ) {
   const rows: Doc<"checkpointFiles">[] = [];
   let bytes = 0;
@@ -279,7 +282,7 @@ export async function copyCheckpointFiles(
     if (rows.length === MAX_CHECKPOINT_FILES || bytes > MAX_FORK_BYTES) {
       throw appError("LIMIT_EXCEEDED", "This checkpoint is too large to fork");
     }
-    rows.push(row);
+    if (keepSecretFiles || !row.path.split("/").some(isSecretFile)) rows.push(row);
   }
   await applyTree(ctx, targetId, rows);
   const files = await ctx.db.query("files")

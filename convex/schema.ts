@@ -346,6 +346,14 @@ export default defineSchema({
     deletingAt: v.optional(v.number()),
     // Set while a read-only share link (/s/<token>) is on (#260): 128 random bits, hex.
     shareToken: v.optional(v.string()),
+    shareMode: v.optional(v.union(v.literal("snapshot"), v.literal("latest"))),
+    shareCheckpointId: v.optional(v.id("checkpoints")),
+    shareKeepLiveUntil: v.optional(v.number()),
+    publicPreview: v.optional(v.object({
+      lease: v.string(), revision: v.string(), until: v.number(),
+      sandboxId: v.optional(v.string()), url: v.optional(v.string()),
+      ready: v.boolean(),
+    })),
   })
     .index("by_owner", ["ownerId"])
     .index("by_shareToken", ["shareToken"]),

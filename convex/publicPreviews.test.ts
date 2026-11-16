@@ -1,0 +1,88 @@
+// @vitest-environment edge-runtime
+/// <reference types="vite/client" />
+import { convexTest } from "convex-test";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { api } from "./_generated/api";
+import schema from "./schema";
+import { PREVIEW_IDLE_MS } from "../src/features/share/preview-policy";
+
+const modules = import.meta.glob("./**/*.ts");
+const internalKey = "preview-test-key";
+const token = "a".repeat(32);
+const args = { internalKey, token, lease: "first", revision: "v1" };
+async function seed() {
+  vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", internalKey);
+  const t = convexTest(schema, modules);
+  const id = await t.run(ctx => ctx.db.insert("projects", { ownerId: "owner", name: "Site", updatedAt: 1, shareToken: token }));
+  return { t, id };
+}
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+
+describe("public preview reservations", () => {
+  test("parallel starts claim a single lease, attach to one sandbox, and reject stale writes", async () => {
+    const { t } = await seed();
+    const results = await Promise.all([t.mutation(api.publicPreviews.claim, args), t.mutation(api.publicPreviews.claim, { ...args, lease: "second" })]);
+    expect(results.map(row => row.status).sort()).toEqual(["boot", "wait"]);
+    const lease = results.find(row => row.status === "boot")!.lease!;
+    expect(await t.mutation(api.publicPreviews.update, { internalKey, token, lease: "wrong", ready: true })).toBeNull();
+    await t.mutation(api.publicPreviews.update, { internalKey, token, lease, sandboxId: "e2b:one", url: "https://site.example", ready: true });
+    expect(await t.mutation(api.publicPreviews.claim, args)).toMatchObject({ status: "ready", sandboxId: "e2b:one", lease });
+  });
+
+  test("two per owner across different links; expired reservations free capacity", async () => {
+    const { t } = await seed();
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    for (const char of ["b", "c"]) await t.run(ctx => ctx.db.insert("projects", { ownerId: "owner", name: char, updatedAt: 1, shareToken: char.repeat(32) }));
+    await t.mutation(api.publicPreviews.claim, args);
+    await t.mutation(api.publicPreviews.claim, { ...args, token: "b".repeat(32) });
+    expect(await t.mutation(api.publicPreviews.claim, { ...args, token: "c".repeat(32) })).toEqual({ status: "busy" });
+    vi.mocked(Date.now).mockReturnValue(now + PREVIEW_IDLE_MS + 1);
+    expect(await t.mutation(api.publicPreviews.claim, { ...args, token: "c".repeat(32) })).toMatchObject({ status: "boot" });
+  });
+
+  test("heartbeat deadline respects idle and keep-live; only changed revisions retire", async () => {
+    const { t, id } = await seed();
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    await t.run(ctx => ctx.db.patch("projects", id, { shareKeepLiveUntil: now + 3_600_000 }));
+    const state = await t.mutation(api.publicPreviews.claim, args);
+    expect(state.until).toBe(now + 3_600_000);
+    await t.mutation(api.publicPreviews.update, { internalKey, token, lease: "first", ready: true });
+    expect(await t.mutation(api.publicPreviews.claim, args)).toMatchObject({ status: "ready" });
+    expect(await t.mutation(api.publicPreviews.claim, { ...args, revision: "v2" })).toMatchObject({ status: "retire", lease: "first" });
+    expect(await t.mutation(api.publicPreviews.update, { internalKey, token, lease: "first", heartbeat: true })).toBe(now + 3_600_000);
+    await t.run(ctx => ctx.db.patch("projects", id, { shareKeepLiveUntil: undefined }));
+    expect(await t.mutation(api.publicPreviews.update, { internalKey, token, lease: "first", heartbeat: true })).toBe(now + PREVIEW_IDLE_MS);
+  });
+
+  test("missing, malformed, disabled and deleting links cannot boot, and internal key is enforced", async () => {
+    const { t, id } = await seed();
+    await expect(t.mutation(api.publicPreviews.claim, { ...args, internalKey: "wrong" })).rejects.toThrow();
+    expect(await t.mutation(api.publicPreviews.claim, { ...args, token: "../bad" })).toEqual({ status: "missing" });
+    await t.withIdentity({ subject: "owner" }).mutation(api.projects.revokeShareLink, { projectId: id });
+    expect(await t.mutation(api.publicPreviews.claim, args)).toEqual({ status: "missing" });
+  });
+});
+
+test("snapshot Remix copies the shared version; private files and env vars never enter the manifest", async () => {
+  const { t, id } = await seed();
+  const fileId = await t.run(async ctx => {
+    const fileId = await ctx.db.insert("files", { projectId: id, name: "index.html", type: "file", updatedAt: 1, content: "snapshot" });
+    await ctx.db.insert("files", { projectId: id, name: ".env.local", type: "file", updatedAt: 1, content: "SECRET" });
+    for (const key of ["VITE_URL", "NEXT_PUBLIC_URL", "PRIVATE_URL"]) await ctx.db.insert("projectEnvVars", { projectId: id, ownerId: "owner", key, visibility: "public", plainValue: "value", maskedPreview: "value", source: "manual", updatedAt: 1 });
+    return fileId;
+  });
+  const owner = t.withIdentity({ subject: "owner" });
+  await expect(t.withIdentity({ subject: "other" }).mutation(api.projects.configureShare, { projectId: id, mode: "snapshot", minutes: 0 })).rejects.toThrow();
+  await owner.mutation(api.projects.configureShare, { projectId: id, mode: "snapshot", minutes: 0 });
+  await t.run(ctx => ctx.db.patch("files", fileId, { content: "new version" }));
+  const manifest = await t.query(api.publicPreviews.manifest, { internalKey, token });
+  expect(manifest).toMatchObject({ files: [{ path: "index.html", content: "snapshot" }], env: { VITE_URL: "value", NEXT_PUBLIC_URL: "value" } });
+  expect(JSON.stringify(manifest)).not.toMatch(/SECRET|PRIVATE_URL/);
+  const remixId = await t.withIdentity({ subject: "visitor" }).mutation(api.projects.remixShared, { token });
+  const copied = await t.run(ctx => ctx.db.query("fileContents").withIndex("by_project", q => q.eq("projectId", remixId)).take(10));
+  expect(copied.map(file => file.content)).toEqual(["snapshot"]);
+  await owner.mutation(api.projects.configureShare, { projectId: id, mode: "snapshot", minutes: 0, updateSnapshot: true });
+  expect((await t.query(api.publicPreviews.manifest, { internalKey, token }))?.files[0].content).toBe("new version");
+});

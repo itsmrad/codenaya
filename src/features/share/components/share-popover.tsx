@@ -15,11 +15,15 @@ import { sharePath } from "../utils";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
-/** The IDE's Share button (#260): turns the read-only link on or off and copies it. */
+/** Share only the running website, with owner-selected version and lifetime. */
 export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">; trigger?: React.ReactNode }) => {
   const project = useProject(projectId);
   const createShareLink = useAction(api.projects.createShareLink);
   const revokeShareLink = useMutation(api.projects.revokeShareLink);
+  const configureShare = useMutation(api.projects.configureShare);
+  const [mode, setMode] = useState<"snapshot" | "latest" | null>(null);
+  const [minutes, setMinutes] = useState<0 | 15 | 30 | 60>(0);
+  const selectedMode = mode ?? project?.shareMode ?? "snapshot";
   const [saving, setSaving] = useState(false);
 
   const token = project?.shareToken;
@@ -29,13 +33,34 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
   const toggle = async (on: boolean) => {
     setSaving(true);
     try {
-      if (on) await createShareLink({ projectId });
+      if (on) {
+        await configureShare({ projectId, mode: selectedMode, minutes });
+        const nextToken = await createShareLink({ projectId });
+        if (minutes) await startPreview(nextToken);
+      }
       else await revokeShareLink({ projectId });
     } catch (error) {
       toast.error(convexErrorMessage(error, on ? "Couldn't create the link" : "Couldn't turn off the link"));
     } finally {
       setSaving(false);
     }
+  };
+
+  const startPreview = async (nextToken: string) => {
+    const response = await fetch(`/api/public-preview/${nextToken}`, { method: "POST" });
+    const state = await response.json();
+    if (!response.ok || state.status === "busy") toast.error("Preview is busy. Try again shortly.");
+  };
+
+  const saveOptions = async (updateSnapshot = false, nextMode = selectedMode, nextMinutes = minutes) => {
+    if (!token) return;
+    setSaving(true);
+    try {
+      await configureShare({ projectId, mode: nextMode, minutes: nextMinutes, updateSnapshot });
+      await startPreview(token);
+    } catch (error) {
+      toast.error(convexErrorMessage(error, "Couldn't update the shared version"));
+    } finally { setSaving(false); }
   };
 
   const copyLink = async () => {
@@ -61,12 +86,12 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
           <span className="hidden @3xl:inline">Share</span>
         </button>}
       </PopoverTrigger>
-      <PopoverContent className="w-80 flex flex-col gap-3" align="end">
+      <PopoverContent className="w-80 max-w-[calc(100vw-1.5rem)] flex flex-col gap-4" align="end">
         <label className="flex items-center justify-between gap-3 text-sm">
           <span>
             <span className="block font-medium">Anyone with the link can view</span>
             <span className="block text-xs text-muted-foreground">
-              Read-only code, no chat or env vars. Turning it off breaks the link.
+              The running website only, with Remix. No code, chat or secret env vars.
             </span>
           </span>
           <Switch
@@ -76,6 +101,28 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
             aria-label="Anyone with the link can view"
           />
         </label>
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1.5 text-xs font-medium">
+            What to share
+            <select aria-label="What to share" className="h-9 rounded-md border bg-background px-2 text-sm font-normal" value={selectedMode} disabled={saving || !project}
+              onChange={event => { const next = event.target.value as "snapshot" | "latest"; setMode(next); void saveOptions(false, next); }}>
+              <option value="snapshot">This version (snapshot now)</option>
+              <option value="latest">Always the latest saved version</option>
+            </select>
+          </label>
+          {token && selectedMode === "snapshot" && <Button variant="outline" size="sm" disabled={saving} onClick={() => void saveOptions(true)}>Update shared version</Button>}
+          <label className="flex flex-col gap-1.5 text-xs font-medium">
+            How long it stays live
+            <select aria-label="How long it stays live" className="h-9 rounded-md border bg-background px-2 text-sm font-normal" value={minutes} disabled={saving || !project}
+              onChange={event => { const next = Number(event.target.value) as 0 | 15 | 30 | 60; setMinutes(next); void saveOptions(false, selectedMode, next); }}>
+              <option value={0}>Start on visit (no time limit)</option>
+              <option value={15}>Keep it live for 15 min</option>
+              <option value={30}>Keep it live for 30 min</option>
+              <option value={60}>Keep it live for 1 hour</option>
+            </select>
+          </label>
+          <p className="text-xs text-muted-foreground">Links stay available until turned off. On-demand sites take ~30-60 s to start and stop after 10 min without visitors. Secret env vars aren’t included.</p>
+        </div>
         {url && (
           <div className="flex items-center gap-1.5">
             <input

@@ -1,5 +1,5 @@
-/** The public, read-only page of a shared project (#260). */
-export const sharePath = (token: string) => `/s/${token}`;
+/** The public website preview of a shared project (#260). */
+export const sharePath = (token: string) => `/preview/${token}`;
 
 type TreeFile = { _id: string; parentId: string | null; name: string; type: "file" | "folder" };
 

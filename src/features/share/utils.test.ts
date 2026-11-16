@@ -4,7 +4,7 @@ import { childrenByParent, sharePath } from "./utils";
 
 describe("share utils", () => {
   it("builds the share page path", () => {
-    expect(sharePath("abc")).toBe("/s/abc");
+    expect(sharePath("abc")).toBe("/preview/abc");
   });
 
   it("groups files by parent, folders first, then by name", () => {
