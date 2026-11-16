@@ -86,3 +86,36 @@ test("snapshot Remix copies the shared version; private files and env vars never
   await owner.mutation(api.projects.configureShare, { projectId: id, mode: "snapshot", minutes: 0, updateSnapshot: true });
   expect((await t.query(api.publicPreviews.manifest, { internalKey, token }))?.files[0].content).toBe("new version");
 });
+
+test("updates requested during a boot retire only after the sandbox is attached", async () => {
+  const { t } = await seed();
+  await t.mutation(api.publicPreviews.claim, args);
+  expect(await t.mutation(api.publicPreviews.claim, { ...args, revision: "new" })).toMatchObject({ status: "wait" });
+  await t.mutation(api.publicPreviews.update, { internalKey, token, lease: "first", sandboxId: "e2b:old" });
+  const { revision: _revision, ...poll } = args;
+  expect(await t.mutation(api.publicPreviews.claim, poll)).toMatchObject({ status: "retire", sandboxId: "e2b:old" });
+});
+
+test("deleting a project retains its capacity reservation until the sandbox expires", async () => {
+  const { t, id } = await seed();
+  await t.mutation(api.publicPreviews.claim, args);
+  const { deleteProjectBatch } = await import("./projectCascade");
+  await t.run(async ctx => {
+    await ctx.db.patch("projects", id, { deletingAt: Date.now() });
+    expect(await deleteProjectBatch(ctx, id)).toBe(false);
+    expect(await ctx.db.get("projects", id)).not.toBeNull();
+  });
+});
+
+test("replacing and revoking snapshots explicitly releases the old checkpoint", async () => {
+  const { t, id } = await seed();
+  const owner = t.withIdentity({ subject: "owner" });
+  const options = { projectId: id, mode: "snapshot" as const, minutes: 0 as const };
+  await owner.mutation(api.projects.configureShare, options);
+  const old = await t.run(async ctx => (await ctx.db.get("projects", id))!.shareCheckpointId!);
+  await owner.mutation(api.projects.configureShare, { ...options, updateSnapshot: true });
+  expect(await t.run(ctx => ctx.db.get("checkpoints", old))).toBeNull();
+  const next = await t.run(async ctx => (await ctx.db.get("projects", id))!.shareCheckpointId!);
+  await owner.mutation(api.projects.revokeShareLink, { projectId: id });
+  expect(await t.run(ctx => ctx.db.get("checkpoints", next))).toBeNull();
+});

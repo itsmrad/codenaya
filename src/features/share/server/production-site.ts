@@ -2,6 +2,8 @@ import { detectFramework } from "@/features/sandbox-preview/utils/framework";
 import type { Sandbox } from "@/features/sandbox-preview/server/provider/types";
 import { offlineFirstInstall, WORK_DIR } from "@/features/sandbox-preview/server/project-sandbox";
 
+import { START_SERVER } from "./start-server";
+
 type File = { path: string; data: string | ArrayBuffer };
 
 /** Fixed commands only: owner dev/install commands never run on the public path. */
@@ -34,8 +36,9 @@ export default async (phase, context) => {
   // Even a project config that opts into maps cannot expose them on the public server.
   const clean = await sandbox.run("find dist .next .output public -type f -name '*.map' -delete 2>/dev/null; test -d dist -o -d .next -o -d .output", options);
   if (clean.exitCode) throw new Error("Map cleanup failed");
+  if (framework === "tanstack-start") await sandbox.writeFiles([{ path: "/home/user/codenaya-start.mjs", data: START_SERVER }]);
   const command = framework === "next" ? "./node_modules/.bin/next start --hostname 0.0.0.0 --port 3000" :
-    framework === "tanstack-start" ? "PORT=3000 HOST=0.0.0.0 node .output/server/index.mjs" :
+    framework === "tanstack-start" ? "if test -f .output/server/index.mjs; then PORT=3000 HOST=0.0.0.0 node .output/server/index.mjs; else node /home/user/codenaya-start.mjs; fi" :
       "./node_modules/.bin/vite preview --host 0.0.0.0 --port 3000 --strictPort";
   await sandbox.start(command, { cwd: WORK_DIR, envs: options.envs });
   const ready = await sandbox.run("for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:3000 && exit 0; sleep 1; done; exit 1", { timeoutMs: 70_000 });

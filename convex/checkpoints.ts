@@ -85,7 +85,7 @@ const checkpointRows = (ctx: QueryCtx, checkpointId: Id<"checkpoints">) =>
     .withIndex("by_checkpoint_and_path", (q) => q.eq("checkpointId", checkpointId));
 
 /** Deletes a checkpoint and any blob that only it was keeping alive. */
-async function deleteCheckpoint(
+export async function deleteCheckpoint(
   ctx: MutationCtx,
   checkpoint: Doc<"checkpoints">,
 ) {

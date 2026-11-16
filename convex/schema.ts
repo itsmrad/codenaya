@@ -348,9 +348,10 @@ export default defineSchema({
     shareToken: v.optional(v.string()),
     shareMode: v.optional(v.union(v.literal("snapshot"), v.literal("latest"))),
     shareCheckpointId: v.optional(v.id("checkpoints")),
+    shareKeepLiveMinutes: v.optional(v.union(v.literal(0), v.literal(15), v.literal(30), v.literal(60))),
     shareKeepLiveUntil: v.optional(v.number()),
     publicPreview: v.optional(v.object({
-      lease: v.string(), revision: v.string(), until: v.number(),
+      lease: v.string(), revision: v.string(), desiredRevision: v.optional(v.string()), until: v.number(),
       sandboxId: v.optional(v.string()), url: v.optional(v.string()),
       ready: v.boolean(),
     })),

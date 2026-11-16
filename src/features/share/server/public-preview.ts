@@ -1,3 +1,4 @@
+import type { FunctionReturnType } from "convex/server";
 import { createHash, randomUUID } from "node:crypto";
 import { convex } from "@/lib/convex-client";
 import { createSandbox, getProvider } from "@/features/sandbox-preview/server/provider/registry";
@@ -34,7 +35,7 @@ export async function heartbeatPreview(token: string, state: PreviewState) {
   }
 }
 
-export async function preparePreview(token: string) {
+export async function preparePreview(token: string): Promise<{ state: PreviewState; manifest?: NonNullable<FunctionReturnType<typeof api.publicPreviews.manifest>> }> {
   const manifest = await convex.query(api.publicPreviews.manifest, { internalKey: key(), token });
   if (!manifest) return { state: { status: "missing" as const } };
   // Storage URLs rotate: use the persistent path/content and a stable URL pathname.

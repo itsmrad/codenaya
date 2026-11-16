@@ -16,6 +16,11 @@ export async function GET(_request: Request, { params }: Context) {
   if (!validShareToken(token)) return json({ status: "missing" });
   try {
     const state = await previewState(token);
+    if (state.status === "retire") {
+      const prepared = await preparePreview(token);
+      if (prepared.state.status === "boot") after(() => bootPreview(token, prepared));
+      return json(prepared.state);
+    }
     return json(state.status === "ready" ? await heartbeatPreview(token, state) : state);
   } catch { return Response.json({ status: "error" }, { status: 503 }); }
 }

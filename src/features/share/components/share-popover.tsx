@@ -22,7 +22,8 @@ export const SharePopover = ({ projectId, trigger }: { projectId: Id<"projects">
   const revokeShareLink = useMutation(api.projects.revokeShareLink);
   const configureShare = useMutation(api.projects.configureShare);
   const [mode, setMode] = useState<"snapshot" | "latest" | null>(null);
-  const [minutes, setMinutes] = useState<0 | 15 | 30 | 60>(0);
+  const [chosenMinutes, setMinutes] = useState<0 | 15 | 30 | 60 | null>(null);
+  const minutes = chosenMinutes ?? project?.shareKeepLiveMinutes ?? 0;
   const selectedMode = mode ?? project?.shareMode ?? "snapshot";
   const [saving, setSaving] = useState(false);
 

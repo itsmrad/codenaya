@@ -10,7 +10,7 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
-import { copyCheckpointFiles, createCheckpoint } from "./checkpoints";
+import { copyCheckpointFiles, createCheckpoint, deleteCheckpoint } from "./checkpoints";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
@@ -431,8 +431,10 @@ export const revokeShareLink = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
-    await getOwnedProject(ctx, args.projectId, identity.subject);
-    await ctx.db.patch("projects", args.projectId, { shareToken: undefined });
+    const project = await getOwnedProject(ctx, args.projectId, identity.subject);
+    await ctx.db.patch("projects", args.projectId, { shareToken: undefined, shareCheckpointId: undefined, shareKeepLiveUntil: undefined });
+    const checkpoint = project.shareCheckpointId && await ctx.db.get("checkpoints", project.shareCheckpointId);
+    if (checkpoint) await deleteCheckpoint(ctx, checkpoint);
     return null;
   },
 });
@@ -467,9 +469,13 @@ export const configureShare = mutation({
       ? await createCheckpoint(ctx, { projectId: project._id, label: "Shared version" })
       : project.shareCheckpointId;
     await ctx.db.patch("projects", project._id, {
-      shareMode: args.mode, shareCheckpointId: args.mode === "snapshot" ? checkpointId : undefined,
+      shareMode: args.mode, shareKeepLiveMinutes: args.minutes, shareCheckpointId: args.mode === "snapshot" ? checkpointId : undefined,
       shareKeepLiveUntil: args.minutes ? Date.now() + args.minutes * 60_000 : undefined,
     });
+    if (project.shareCheckpointId && (args.mode === "latest" || checkpointId !== project.shareCheckpointId)) {
+      const old = await ctx.db.get("checkpoints", project.shareCheckpointId);
+      if (old) await deleteCheckpoint(ctx, old);
+    }
     return null;
   },
 });
@@ -518,10 +524,11 @@ export const deleteBatch = internalMutation({
     id: v.id("projects"),
   },
   handler: async (ctx, args) => {
-    if (!(await ctx.db.get("projects", args.id))) return;
+    const project = await ctx.db.get("projects", args.id);
+    if (!project) return;
 
     if (!(await deleteProjectBatch(ctx, args.id))) {
-      await ctx.scheduler.runAfter(0, internal.projects.deleteBatch, {
+      await ctx.scheduler.runAfter(Math.max(0, (project.publicPreview?.until ?? 0) - Date.now()), internal.projects.deleteBatch, {
         id: args.id,
       });
     }

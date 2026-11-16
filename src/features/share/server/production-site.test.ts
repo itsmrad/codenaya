@@ -11,7 +11,7 @@ describe("public builds", () => {
   test.each([
     [{ vite: "8" }, "vite build --sourcemap false", "vite preview"],
     [{ next: "16" }, "next build --webpack", "next start"],
-    [{ "@tanstack/react-start": "1" }, "vite build --sourcemap false", "node .output/server/index.mjs"],
+    [{ "@tanstack/react-start": "1" }, "vite build --sourcemap false", "node /home/user/codenaya-start.mjs"],
   ] as const)("runs production commands for %j", async (dependencies, build, start) => {
     const box = sandbox();
     await startProductionSite(box, files(dependencies), { VITE_URL: "public" });

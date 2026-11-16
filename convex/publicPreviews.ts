@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getSharedProject } from "./projects";
 import { validateInternalKey } from "./internalKey";
@@ -41,21 +41,23 @@ export const manifest = query({
 });
 
 const stateResult = v.object({ status: v.union(v.literal("missing"), v.literal("busy"), v.literal("boot"), v.literal("wait"), v.literal("ready"), v.literal("retire")),
-  sandboxId: v.optional(v.string()), url: v.optional(v.string()), lease: v.optional(v.string()), until: v.optional(v.number()) });
+  desiredRevision: v.optional(v.string()), ready: v.optional(v.boolean()), revision: v.optional(v.string()), sandboxId: v.optional(v.string()), url: v.optional(v.string()), lease: v.optional(v.string()), until: v.optional(v.number()) });
 
 /** Transactional per-link boot lock and owner cap, across all server instances. */
 export const claim = mutation({
   args: { internalKey: v.string(), token: v.string(), lease: v.string(), revision: v.optional(v.string()) },
   returns: stateResult,
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<Infer<typeof stateResult>> => {
     validateInternalKey(args.internalKey);
     const project = await getSharedProject(ctx, args.token);
     if (!project) return { status: "missing" as const };
     const now = Date.now();
     const active = project.publicPreview;
     if (active && active.until > now) {
-      if (args.revision && args.revision !== active.revision && active.ready) {
-        return { status: "retire" as const, ...active };
+      const desired = args.revision ?? active.desiredRevision;
+      if (desired && desired !== active.revision) {
+        if (active.sandboxId) return { status: "retire" as const, ...active };
+        await ctx.db.patch("projects", project._id, { publicPreview: { ...active, desiredRevision: desired } });
       }
       return { status: active.ready ? "ready" as const : "wait" as const, ...active };
     }
