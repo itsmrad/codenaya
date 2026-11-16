@@ -11,11 +11,15 @@ export const MAX_SUGGESTIONS = 4;
 export const MAX_SUGGESTION_CHARS = 100;
 
 // A block runs to its closing tag, or to the end of a cut-off reply. A code
-// fence the model wrapped around it goes too.
-const BLOCK = /(?:```\w*[ \t]*\n)?<suggestions>([\s\S]*?)(?:<\/suggestions>(?:[ \t]*\n?[ \t]*```)?|$)/gi;
+// fence the model wrapped around it goes too, but only when the fence opens
+// right before the block and closes right after it: an unrelated fence next to
+// it stays. Alternative 1 is the wrapped form, 2 the bare one.
+const BLOCK =
+  /```\w*[ \t]*\n<suggestions>((?:(?!<\/suggestions>)[\s\S])*)(?:<\/suggestions>[ \t]*\n?[ \t]*```|$)|<suggestions>([\s\S]*?)(?:<\/suggestions>|$)/gi;
 const FENCE_LINE = /^```/;
 // `[connect:supabase]`, `[connect: Supabase]`, `[publish]`: not a link, `[publish](url)`.
-const ACTION_TAG_SRC = String.raw`\[\s*(?:connect\s*:\s*[a-z0-9-]+|publish|env-vars)\s*\](?!\()`;
+// A connect tag names an integration, never a literal: `[connect: true]` is code.
+const ACTION_TAG_SRC = String.raw`\[\s*(?:connect\s*:\s*(?!(?:true|false|null|undefined)\s*\])[a-z0-9-]+|publish|env-vars)\s*\](?!\()`;
 const BARE_TAG = new RegExp(`^${ACTION_TAG_SRC}$`, "i");
 const ACTION_TAGS = new RegExp(`${ACTION_TAG_SRC}[ \\t]*`, "gi");
 const STRAY_TAG = /<\/?suggestions>/gi;
@@ -38,7 +42,7 @@ export const splitSuggestions = (
   reply: string,
   hidden: readonly string[] = HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN,
 ) => {
-  const lines = [...reply.matchAll(BLOCK)].flatMap((match) => match[1].split("\n"));
+  const lines = [...reply.matchAll(BLOCK)].flatMap((match) => (match[1] ?? match[2] ?? "").split("\n"));
   const prompts = lines
     .filter((line) => !FENCE_LINE.test(line.trim()))
     .map((line) => line.trim().replace(LIST_MARK, "").replace(QUOTES, "").trim())
@@ -53,16 +57,28 @@ export const splitSuggestions = (
 /**
  * Action tags only mean something in a chip. One the model wrote in the reply
  * body (say, in its next-steps bullets) is dropped and its label kept; a line
- * that was only a tag goes.
+ * that was only a tag goes. Code is left alone: fenced blocks and `inline
+ * spans` are shown as written.
  */
-const stripActionTags = (text: string) =>
-  text
+const stripActionTags = (text: string) => {
+  let fenced = false;
+  return text
     .split("\n")
     .flatMap((line) => {
-      const stripped = line.replace(ACTION_TAGS, "");
+      if (FENCE_LINE.test(line.trim())) {
+        fenced = !fenced;
+        return [line];
+      }
+      if (fenced) return [line];
+      // Odd parts are inline code spans.
+      const stripped = line
+        .split(/(`[^`]*`)/)
+        .map((part, index) => (index % 2 ? part : part.replace(ACTION_TAGS, "")))
+        .join("");
       return stripped === line || stripped.replace(LIST_MARK, "").trim() ? [stripped] : [];
     })
     .join("\n");
+};
 
 /** The IDE action a tagged chip opens. */
 export type SuggestionAction = { kind: "connect"; providerId: string } | { kind: "publish" } | { kind: "env-vars" };
