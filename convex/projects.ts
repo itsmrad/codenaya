@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 
-import { internal } from "./_generated/api";
-import type { Doc, Id } from "./_generated/dataModel";
+import { api, internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import {
   action,
   internalMutation,
@@ -10,15 +10,12 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
-import { copyCheckpointFiles } from "./checkpoints";
+import { copyCheckpointFiles, createCheckpoint, deleteCheckpoint } from "./checkpoints";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { deleteProjectBatch } from "./projectCascade";
 import { assertCanCopy, copyProjectFiles, remixProject } from "./projectCopy";
-import { getProjectFile, MAX_PROJECT_FILES } from "./files";
-import { readFileContent } from "./fileContents";
-import { isSecretFile } from "./secretFiles";
 import { userSkillKey } from "../src/features/skills/types";
 import { MAX_PROJECT_SKILLS } from "../src/features/skills/limits";
 import {
@@ -31,6 +28,7 @@ import { projectThemeValidator } from "./schema";
 import { countProjectBuilt } from "./stats";
 import { recordProjectEvent } from "./activationEvents";
 import { lastRunStatuses } from "../src/features/projects/utils/project-status";
+import { validShareToken } from "../src/features/share/preview-policy";
 
 /** Env vars and skill settings copied per duplicate; far above real usage. */
 const MAX_COPIED_ROWS = 500;
@@ -382,29 +380,31 @@ export const forkFromCheckpoint = mutation({
   },
 });
 
-/** A share token: 128 random bits as hex (#260). */
-const SHARE_TOKEN_PATTERN = /^[0-9a-f]{32}$/;
-
 /** The project a share token opens, unless the link was revoked or the project is being deleted. */
-async function getSharedProject(ctx: QueryCtx, token: string) {
-  if (!SHARE_TOKEN_PATTERN.test(token)) return null;
+export async function getSharedProject(ctx: QueryCtx, token: string) {
+  if (!validShareToken(token)) return null;
   const project = await ctx.db
     .query("projects")
     .withIndex("by_shareToken", (q) => q.eq("shareToken", token))
     .first();
-  return project && project.deletingAt === undefined ? project : null;
+  return project && project.deletingAt === undefined && project.shareEnabled !== false ? project : null;
 }
 
 /**
- * Turns on the project's read-only share link and returns its token; an
+ * Turns on the project's public website link and returns its token; an
  * existing link is kept. An action, because mutations run on seeded (replayable)
  * randomness and a token must be unpredictable.
  */
 export const createShareLink = action({
-  args: { projectId: v.id("projects") },
+  args: { projectId: v.id("projects"), options: v.optional(v.object({
+    mode: v.union(v.literal("snapshot"), v.literal("latest")),
+    minutes: v.union(v.literal(0), v.literal(15), v.literal(30), v.literal(60)),
+    updateSnapshot: v.optional(v.boolean()),
+  })) },
   returns: v.string(),
   handler: async (ctx, args): Promise<string> => {
     const identity = await verifyAuth(ctx);
+    if (args.options) await ctx.runMutation(api.projects.configureShare, { projectId: args.projectId, ...args.options });
     const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
       byte.toString(16).padStart(2, "0"),
     ).join("");
@@ -422,87 +422,62 @@ export const setShareToken = internalMutation({
   returns: v.string(),
   handler: async (ctx, args) => {
     const project = await getOwnedProject(ctx, args.projectId, args.ownerId);
-    if (project.shareToken) return project.shareToken;
-    await ctx.db.patch("projects", project._id, { shareToken: args.token });
-    return args.token;
+    const token = project.shareToken ?? args.token;
+    await ctx.db.patch("projects", project._id, { shareToken: token, shareEnabled: true });
+    return token;
   },
 });
 
-/** Secret files (#260 review): left out of a share's tree and file reads, as if they didn't exist. */
-const hiddenFromShare = (file: Doc<"files">) => file.type === "file" && isSecretFile(file.name);
-
-/** Turns the share link off: the old URL stops working, and a new link gets a new token. */
+/** Disable access while retaining the slug and version for an explicit re-enable. */
 export const revokeShareLink = mutation({
   args: { projectId: v.id("projects") },
   returns: v.null(),
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
     await getOwnedProject(ctx, args.projectId, identity.subject);
-    await ctx.db.patch("projects", args.projectId, { shareToken: undefined });
+    await ctx.db.patch("projects", args.projectId, { shareEnabled: false, shareKeepLiveUntil: undefined });
     return null;
   },
 });
 
-/**
- * Public: what a share link shows signed out (#260), or null for an unknown or
- * revoked token. Only the name, the owner's display name and the file tree:
- * never env vars, secret files (keys, dotenv, credentials), chat, integrations, settings or storage ids. The `returns`
- * validator rejects any other field.
- */
+/** Public metadata only. The former file endpoints deliberately disclose no code. */
 export const getShared = query({
   args: { token: v.string() },
-  returns: v.union(
-    v.null(),
-    v.object({
-      name: v.string(),
-      ownerName: v.string(),
-      files: v.array(
-        v.object({
-          _id: v.id("files"),
-          parentId: v.union(v.id("files"), v.null()),
-          name: v.string(),
-          type: v.union(v.literal("file"), v.literal("folder")),
-          binary: v.boolean(),
-        }),
-      ),
-    }),
-  ),
-  handler: async (ctx, args) => {
-    const project = await getSharedProject(ctx, args.token);
-    if (!project) return null;
-
-    const owner = await ctx.db
-      .query("users")
-      .withIndex("by_clerkUserId", (q) => q.eq("clerkUserId", project.ownerId))
-      .unique();
-    const files = await ctx.db
-      .query("files")
-      .withIndex("by_project", (q) => q.eq("projectId", project._id))
-      .take(MAX_PROJECT_FILES);
-
-    return {
-      name: project.name,
-      ownerName: owner?.name || "Anonymous",
-      files: files.filter((file) => !hiddenFromShare(file)).map((file) => ({
-        _id: file._id,
-        parentId: file.parentId ?? null,
-        name: file.name,
-        type: file.type,
-        binary: file.storageId !== undefined,
-      })),
-    };
+  returns: v.union(v.null(), v.object({ name: v.string() })),
+  handler: async (ctx, { token }) => {
+    const project = await getSharedProject(ctx, token);
+    return project ? { name: project.name } : null;
   },
 });
 
-/** Public: a shared project's file text (null content for a binary file), or null when not shared. */
+/** Retired, including for callers that still know a file id. */
 export const getSharedFile = query({
   args: { token: v.string(), fileId: v.id("files") },
-  returns: v.union(v.null(), v.object({ content: v.union(v.string(), v.null()) })),
+  returns: v.null(),
+  handler: async () => null,
+});
+
+export const configureShare = mutation({
+  args: { projectId: v.id("projects"), mode: v.union(v.literal("snapshot"), v.literal("latest")),
+    minutes: v.union(v.literal(0), v.literal(15), v.literal(30), v.literal(60)),
+    updateSnapshot: v.optional(v.boolean()) },
+  returns: v.null(),
   handler: async (ctx, args) => {
-    const project = await getSharedProject(ctx, args.token);
-    const file = project && (await getProjectFile(ctx, project._id, args.fileId));
-    if (!file || file.type !== "file" || hiddenFromShare(file)) return null;
-    return { content: file.storageId ? null : ((await readFileContent(ctx, file)) ?? "") };
+    const identity = await verifyAuth(ctx);
+    const project = await getOwnedProject(ctx, args.projectId, identity.subject);
+    const checkpointId = args.mode === "snapshot" &&
+      (args.updateSnapshot || !project.shareCheckpointId || project.shareMode !== "snapshot")
+      ? await createCheckpoint(ctx, { projectId: project._id, label: "Shared version" })
+      : project.shareCheckpointId;
+    await ctx.db.patch("projects", project._id, {
+      shareMode: args.mode, shareKeepLiveMinutes: args.minutes, shareCheckpointId: args.mode === "snapshot" ? checkpointId : undefined,
+      shareKeepLiveUntil: args.minutes ? Date.now() + args.minutes * 60_000 : undefined,
+    });
+    if (project.shareCheckpointId && (args.mode === "latest" || checkpointId !== project.shareCheckpointId)) {
+      const old = await ctx.db.get("checkpoints", project.shareCheckpointId);
+      if (old) await deleteCheckpoint(ctx, old);
+    }
+    return null;
   },
 });
 
@@ -514,7 +489,14 @@ export const remixShared = mutation({
     const identity = await verifyAuth(ctx);
     const project = await getSharedProject(ctx, args.token);
     if (!project) throw appError("NOT_FOUND", "Project not found");
-    return await remixProject(ctx, project._id, identity.subject, `${project.name} (imported)`);
+    if (project.shareMode !== "snapshot" || !project.shareCheckpointId) {
+      return await remixProject(ctx, project._id, identity.subject, `${project.name} (imported)`);
+    }
+    await assertCanCopy(ctx, identity.subject);
+    const id = await ctx.db.insert("projects", { name: `${project.name} (imported)`, ownerId: identity.subject, updatedAt: Date.now() });
+    await countProjectBuilt(ctx);
+    await copyCheckpointFiles(ctx, project.shareCheckpointId, id, false);
+    return id;
   },
 });
 
@@ -543,10 +525,11 @@ export const deleteBatch = internalMutation({
     id: v.id("projects"),
   },
   handler: async (ctx, args) => {
-    if (!(await ctx.db.get("projects", args.id))) return;
+    const project = await ctx.db.get("projects", args.id);
+    if (!project) return;
 
     if (!(await deleteProjectBatch(ctx, args.id))) {
-      await ctx.scheduler.runAfter(0, internal.projects.deleteBatch, {
+      await ctx.scheduler.runAfter(Math.max(0, (project.publicPreview?.until ?? 0) - Date.now()), internal.projects.deleteBatch, {
         id: args.id,
       });
     }

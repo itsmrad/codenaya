@@ -49,7 +49,7 @@ export const SecurityScanDialog = ({ pending, onDismiss }: SecurityScanDialogPro
   const continueAnyway = () => {
     if (!pending) return;
     close();
-    void pending.proceed();
+    void pending.proceed(true);
   };
 
   return (

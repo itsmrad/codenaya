@@ -1,5 +1,8 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
+import { fetchQuery } from 'convex/nextjs';
+import { api } from '../convex/_generated/api';
+import { validShareToken } from '@/features/share/preview-policy';
 
 import { ownerPreviewProject } from '@/features/projects/server/owner-preview';
 
@@ -13,6 +16,12 @@ const isAdminPage = createRouteMatcher(['/admin(.*)']);
 // `auth.protect()` where to send signed-out visitors.
 export default clerkMiddleware(
   async (auth, request) => {
+    const legacyShare = /^\/s\/([^/]+)\/?$/.exec(request.nextUrl.pathname);
+    if (legacyShare) return NextResponse.redirect(new URL(`/preview/${encodeURIComponent(legacyShare[1])}`, request.url), 308);
+    const previewMatch = /^\/preview\/([^/]+)\/?$/.exec(request.nextUrl.pathname);
+    if (previewMatch && (!validShareToken(previewMatch[1]) || !(await fetchQuery(api.projects.getShared, { token: previewMatch[1] })))) {
+      return NextResponse.rewrite(new URL('/404', request.url), { status: 404, headers: { 'Cache-Control': 'no-store' } });
+    }
     // Check before streaming so an inaccessible preview has a real HTTP 404.
     const preview = /^\/p\/([^/]+)\/preview\/?$/.exec(request.nextUrl.pathname);
     if (preview && !(await ownerPreviewProject(preview[1], await auth()))) {

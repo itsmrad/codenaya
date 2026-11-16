@@ -13,11 +13,17 @@ const NODE_FLOOR = "22.12.0";
 export function checkKnownGoodVersions(view = (spec) => JSON.parse(execFileSync(
   "npm", ["view", spec, "version", "peerDependencies", "engines", "--json"],
   { encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"] },
-))) {
+)), budgetMs = 300_000) {
+  // One budget for the whole run, so a registry outage fails (and files the issue) before the job timeout.
+  const deadline = Date.now() + budgetMs;
   const failures = [];
   let checked = 0;
   for (const [name, range] of Object.entries(KNOWN_GOOD_VERSIONS)) {
     const spec = `${name}@${range}`;
+    if (Date.now() >= deadline) {
+      failures.push(`${spec}: skipped, time budget spent`);
+      continue;
+    }
     try {
       const result = view(spec);
       // npm omits absent fields and emits bare version strings for metadata-free packages.

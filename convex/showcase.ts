@@ -11,6 +11,11 @@ import { remixProject } from "./projectCopy";
 import { getUnclaimedStorage, releaseBlobs } from "./projectCascade";
 import { recordProjectEvent } from "./activationEvents";
 import schema from "./schema";
+import { MAX_PROJECT_FILES } from "./files";
+import { withContents } from "./fileContents";
+import { buildPathIndex } from "../src/features/conversations/agent-steps";
+import { MAX_ENV_VARS } from "../src/features/integrations/env-keys";
+import { scanProject } from "../src/features/security/scan-project";
 
 // ─── Queries ───
 
@@ -345,6 +350,38 @@ const unlistedOwnerIds = () =>
     .map((id) => id.trim())
     .filter(Boolean);
 
+/**
+ * High-confidence findings of the pre-export secret scan (#300) on the project's
+ * stored files and public env vars. Publish runs it here so a client that skips
+ * the scan dialog still can't publish a key silently. Secret env values are
+ * sealed and can't be read in a mutation; the dialog's route scan covers them.
+ */
+const highRiskSecretFindings = async (ctx: QueryCtx, projectId: Id<"projects">) => {
+  const [fileDocs, envVars] = await Promise.all([
+    ctx.db
+      .query("files")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .take(MAX_PROJECT_FILES),
+    ctx.db
+      .query("projectEnvVars")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .take(MAX_ENV_VARS),
+  ]);
+  const files = await withContents(ctx, projectId, fileDocs);
+  const pathOf = buildPathIndex(files);
+  return scanProject(
+    files.flatMap((file) => {
+      const path = pathOf(file._id);
+      return file.type === "file" && !file.storageId && path ? [{ path, content: file.content }] : [];
+    }),
+    envVars.flatMap((row) =>
+      row.visibility === "public" && row.plainValue !== undefined
+        ? [{ key: row.key, value: row.plainValue, visibility: "public" as const }]
+        : [],
+    ),
+  ).filter((finding) => finding.severity === "high");
+};
+
 export const publish = mutation({
   args: {
     projectId: v.id("projects"),
@@ -354,11 +391,30 @@ export const publish = mutation({
     techStack: v.array(v.string()),
     designStyle: v.array(v.string()),
     category: v.string(),
+    /** The owner chose "Continue anyway" in the secret scan dialog (#300). */
+    acknowledgeSecretFindings: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
 
     await getOwnedProject(ctx, args.projectId, identity.subject);
+
+    if (!args.acknowledgeSecretFindings) {
+      const findings = await highRiskSecretFindings(ctx, args.projectId);
+      if (findings.length > 0) {
+        // Locations and rules only: the matched values never leave the scanner.
+        const where = findings
+          .slice(0, 3)
+          .map((f) => `${f.line === null ? f.file : `${f.file}:${f.line}`} (${f.rule})`)
+          .join(", ");
+        throw appError(
+          "CONFLICT",
+          `The security scan found ${findings.length} likely secret(s) in this project: ${where}` +
+            `${findings.length > 3 ? ", …" : ""}. Remove them, or choose "Continue anyway" to publish.`,
+          { reason: "secrets_found" },
+        );
+      }
+    }
     // A preview must be a fresh upload: an id something else holds would
     // publish someone else's blob under a public URL (#211).
     if (args.previewImageId) {

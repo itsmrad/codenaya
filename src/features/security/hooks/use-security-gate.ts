@@ -9,7 +9,8 @@ export interface SecurityGateState {
   findings: ScanFinding[];
   /** The scan itself could not run. */
   failed: boolean;
-  proceed: () => unknown;
+  /** `acknowledged` is true when the user chose "Continue anyway". */
+  proceed: (acknowledged: boolean) => unknown;
 }
 
 /**
@@ -20,14 +21,14 @@ export function useSecurityGate(projectId: Id<"projects">) {
   const [checking, setChecking] = useState(false);
   const [pending, setPending] = useState<SecurityGateState | null>(null);
 
-  const guard = async (proceed: () => unknown) => {
+  const guard = async (proceed: (acknowledged: boolean) => unknown) => {
     setChecking(true);
     try {
       const { findings } = await ky
         .post("/api/projects/security-scan", { json: { projectId } })
         .json<{ findings: ScanFinding[] }>();
       if (findings.length === 0) {
-        await proceed();
+        await proceed(false);
         return;
       }
       setPending({ projectId, findings, failed: false, proceed });

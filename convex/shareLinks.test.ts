@@ -70,7 +70,7 @@ describe("share links (#260)", () => {
     expect(await t.query(api.projects.getShared, { token })).not.toBeNull();
   });
 
-  test("the token is unguessable and stable until revoked", async () => {
+  test("the token is unguessable and stable across disable and re-enable", async () => {
     const t = convexTest(schema, modules);
     const { projectId } = await seed(t);
 
@@ -80,46 +80,16 @@ describe("share links (#260)", () => {
 
     await alice(t).mutation(api.projects.revokeShareLink, { projectId });
     const next = await alice(t).action(api.projects.createShareLink, { projectId });
-    expect(next).not.toBe(token);
+    expect(next).toBe(token);
+    expect(await t.query(api.projects.getShared, { token })).not.toBeNull();
   });
 
-  test("getShared returns only the name, owner name and file tree", async () => {
+  test("anonymous metadata never contains owner identity, files, or code; file reads are retired", async () => {
     const t = convexTest(schema, modules);
-    const { projectId, srcId, indexId, logoId } = await seed(t);
+    const { projectId, indexId } = await seed(t);
     const token = await alice(t).action(api.projects.createShareLink, { projectId });
-
-    // Signed out.
-    const shared = await t.query(api.projects.getShared, { token });
-
-    expect(Object.keys(shared!).sort()).toEqual(["files", "name", "ownerName"]);
-    expect(shared).toMatchObject({ name: "Todo app", ownerName: "Alice" });
-    for (const file of shared!.files) {
-      expect(Object.keys(file).sort()).toEqual(["_id", "binary", "name", "parentId", "type"]);
-    }
-    expect(shared!.files).toEqual(
-      expect.arrayContaining([
-        { _id: srcId, parentId: null, name: "src", type: "folder", binary: false },
-        { _id: indexId, parentId: srcId, name: "index.ts", type: "file", binary: false },
-        { _id: logoId, parentId: null, name: "logo.png", type: "file", binary: true },
-      ]),
-    );
-    const text = JSON.stringify(shared);
-    for (const secret of ["private instructions", "secret chat", "PUBLIC_URL", "alice@example.com", ALICE]) {
-      expect(text).not.toContain(secret);
-    }
-  });
-
-  test("getSharedFile returns a shared file's text and nothing from other projects", async () => {
-    const t = convexTest(schema, modules);
-    const { projectId, indexId, logoId } = await seed(t);
-    const other = await seed(t);
-    const token = await alice(t).action(api.projects.createShareLink, { projectId });
-
-    expect(await t.query(api.projects.getSharedFile, { token, fileId: indexId })).toEqual({
-      content: "export {};",
-    });
-    expect(await t.query(api.projects.getSharedFile, { token, fileId: logoId })).toEqual({ content: null });
-    expect(await t.query(api.projects.getSharedFile, { token, fileId: other.indexId })).toBeNull();
+    expect(await t.query(api.projects.getShared, { token })).toEqual({ name: "Todo app" });
+    expect(await t.query(api.projects.getSharedFile, { token, fileId: indexId })).toBeNull();
   });
 
   test("a revoked, unknown or deleted project's token returns null", async () => {
@@ -203,16 +173,9 @@ describe("share links (#260)", () => {
     });
     const token = await alice(t).action(api.projects.createShareLink, { projectId });
 
-    const shared = await t.query(api.projects.getShared, { token });
-    const names = shared!.files.map((f) => f.name);
-    expect(names).toContain(".env.example");
-    for (const name of [".env", ".env.local", "prod.env"]) expect(names).not.toContain(name);
-    for (const fileId of ids.excluded) {
+    for (const fileId of [...ids.excluded, ids.example]) {
       expect(await t.query(api.projects.getSharedFile, { token, fileId })).toBeNull();
     }
-    expect(await t.query(api.projects.getSharedFile, { token, fileId: ids.example })).toEqual({
-      content: "SECRET_IN_.env.example=1",
-    });
 
     const newId = await bob(t).mutation(api.projects.remixShared, { token });
     const copied = await t.run(async (ctx) => ({
@@ -261,9 +224,6 @@ describe("share links (#260)", () => {
     });
     const token = await alice(t).action(api.projects.createShareLink, { projectId });
 
-    const names = (await t.query(api.projects.getShared, { token }))!.files.map((f) => f.name);
-    expect(names).toContain("keys");
-    for (const name of secrets) expect(names).not.toContain(name);
     for (const fileId of secretIds) {
       expect(await t.query(api.projects.getSharedFile, { token, fileId })).toBeNull();
     }

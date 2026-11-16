@@ -6,13 +6,14 @@
  * isomorphic. Findings name the file, line and rule, never the matched text.
  */
 
-import { SECRET_NAME } from "@/lib/secret-name";
+// Relative imports: `convex/showcase.ts` bundles this scanner for publish.
+import { SECRET_NAME } from "../../lib/secret-name";
 
 import {
   CREDENTIAL_TOKEN_PATTERNS,
   DSN_PASSWORD_PATTERN,
-} from "@/features/integrations/credential-guard";
-import { PUBLIC_KEY_PREFIXES, isPublicByConvention } from "@/features/integrations/env-keys";
+} from "../integrations/credential-guard";
+import { PUBLIC_KEY_PREFIXES, isPublicByConvention } from "../integrations/env-keys";
 
 import { scanSupabaseSql } from "./supabase-exposure";
 
