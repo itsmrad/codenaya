@@ -35,8 +35,22 @@ const npmVersions = (name: string): string | string[] => JSON.parse(execFileSync
   { encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"] },
 ));
 
+/** npm's error code: E404 from its --json stdout or stderr, else the spawn error (ETIMEDOUT). */
+export const npmErrorCode = (error: unknown): string => {
+  const { stdout, stderr, code } = (error ?? {}) as { stdout?: string; stderr?: string; code?: string };
+  try {
+    const parsed = JSON.parse(stdout ?? "")?.error?.code;
+    if (parsed) return parsed;
+  } catch {
+    // Not JSON: fall back to stderr.
+  }
+  return stderr?.match(/npm (?:error|ERR!) code (\S+)/)?.[1] ?? code ?? "unknown error";
+};
+
+const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
 /** Fails on non-exact or unpublished pins; newer stable releases are info only. */
-export function checkStarterManifest(view = npmVersions, pins = starterPins()) {
+export function checkStarterManifest(view = npmVersions, pins = starterPins(), retryDelaysMs = [2_000, 10_000]) {
   const failures: string[] = [];
   const info: string[] = [];
   for (const { name, version, users } of pins) {
@@ -45,11 +59,21 @@ export function checkStarterManifest(view = npmVersions, pins = starterPins()) {
       failures.push(`${label}: not an exact version`);
       continue;
     }
-    let versions: string[];
-    try {
-      versions = [view(name)].flat();
-    } catch {
-      failures.push(`${label}: npm view failed`);
+    let versions: string[] | undefined;
+    let code = "";
+    // A registry blip shouldn't open the weekly issue; a 404 is final.
+    for (const delay of [0, ...retryDelaysMs]) {
+      if (delay) sleep(delay);
+      try {
+        versions = [view(name)].flat();
+        break;
+      } catch (error) {
+        code = npmErrorCode(error);
+        if (code === "E404") break;
+      }
+    }
+    if (!versions) {
+      failures.push(`${label}: npm view failed (${code})`);
       continue;
     }
     if (!versions.includes(version)) {
