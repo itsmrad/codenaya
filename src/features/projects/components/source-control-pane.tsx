@@ -13,7 +13,7 @@ import { type Checkpoint, useRunChanges } from "@/features/conversations/hooks/u
 import { api } from "../../../../convex/_generated/api";
 import type { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { GITHUB_SYNC_BRANCH } from "../constants";
-import { comparisonBaseline } from "../utils/source-control";
+import { checkpointMenuLabel, comparisonBaseline } from "../utils/source-control";
 
 /** Mounted only while its explorer pane is visible: comparisons read file content. */
 export function SourceControlPane({ project, projectId, disabled }: {
@@ -29,6 +29,7 @@ export function SourceControlPane({ project, projectId, disabled }: {
   const checkpoints: Checkpoint[] = history instanceof Error ? [] : history ?? [];
   const [selected, setSelected] = useState<string>();
   const baseline = comparisonBaseline(checkpoints, selected);
+  const baselineLabel = baseline ? checkpointMenuLabel(baseline) : undefined;
   const changes = useRunChanges(baseline?._id, "project");
   const [diff, setDiff] = useState<{ checkpointId: Id<"checkpoints">; path?: string; scope?: "project" }>();
   const [restoring, setRestoring] = useState<Checkpoint | null>(null);
@@ -61,9 +62,19 @@ export function SourceControlPane({ project, projectId, disabled }: {
         {baseline && <>
           <label id="comparison-label" className="mb-1 block text-muted-foreground">Current files compared with</label>
           <Select value={baseline._id} onValueChange={setSelected}>
-            <SelectTrigger aria-labelledby="comparison-label" className="h-auto min-h-8 w-full text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {checkpoints.map((checkpoint) => <SelectItem key={checkpoint._id} value={checkpoint._id}>{checkpoint.messageId ? "Before run" : "Snapshot"} · {checkpoint.label || "Untitled"} · {new Date(checkpoint._creationTime).toLocaleString()}</SelectItem>)}
+            <SelectTrigger aria-labelledby="comparison-label" title={baselineLabel?.title} className="min-w-0 w-full text-xs">
+              <SelectValue className="min-w-0 flex-1 text-left"><span className="truncate">{baselineLabel?.label} · {baselineLabel?.time}</span></SelectValue>
+            </SelectTrigger>
+            <SelectContent position="popper" align="start" sideOffset={4}
+              className="w-[var(--radix-select-trigger-width)] min-w-0 max-w-[calc(100vw-2rem)] max-h-[min(16rem,var(--radix-select-content-available-height))] [&_[data-radix-select-viewport]]:min-w-0">
+              {checkpoints.map((checkpoint) => {
+                const { label, time, title } = checkpointMenuLabel(checkpoint);
+                return <SelectItem key={checkpoint._id} value={checkpoint._id} textValue={label} title={title} aria-label={title}
+                  className="text-xs [&>span:last-child]:min-w-0 [&>span:last-child]:flex-1 max-[390px]:py-1 max-[390px]:pl-1.5">
+                  <span className="min-w-0 flex-1 truncate max-[390px]:line-clamp-2 max-[390px]:whitespace-normal max-[390px]:break-words">{label}</span>
+                  <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{time}</span>
+                </SelectItem>;
+              })}
             </SelectContent>
           </Select>
           <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">A added · M modified · D deleted. Renames appear as deletion + addition.</p>
