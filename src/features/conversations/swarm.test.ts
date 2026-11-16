@@ -3,9 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { guardFoundation, guardOwnedPaths } from "./inngest/lib/ownership-guard";
-import { MAX_BRIEF_CHARS, MAX_ORIGINAL_PROMPT_CHARS, capOriginalPrompt, classifySwarmPrompt, isFoundationPath, ownsPath, swarmPlanSchema, validatePlan } from "./swarm";
+import { STALLED_RUN_MS } from "./agent-steps";
+import { CHILD_WORKER_TIMEOUT_MS, MAX_BRIEF_CHARS, MAX_ORIGINAL_PROMPT_CHARS, WORKER_TIMEOUT_MS, capOriginalPrompt, classifySwarmPrompt, isFoundationPath, ownsPath, swarmPlanSchema, validatePlan } from "./swarm";
 
 const task = (id: string, ownedPaths: string[]) => ({ id, title: id, brief: `Build ${id}.`, ownedPaths });
+
+describe("worker timeouts (#649)", () => {
+  // The parent's last progress is at most seconds before step.invoke starts: a throttled heartbeat (20s).
+  it("fail a hung worker before its run is called stalled", () => {
+    for (const timeout of [WORKER_TIMEOUT_MS, CHILD_WORKER_TIMEOUT_MS]) {
+      expect(timeout).toBeLessThanOrEqual(STALLED_RUN_MS - 60_000);
+      expect(timeout).toBeGreaterThanOrEqual(5 * 60_000);
+    }
+  });
+});
 
 describe("swarmPlanSchema", () => {
   it("accepts an empty task list with a solo reason", () => {
