@@ -37,9 +37,10 @@ export const CREDENTIAL_TOKEN_PATTERNS: ReadonlyArray<{
 ];
 
 // Bounded runs: unbounded ones backtrack quadratically over a long base64 or
-// minified line, and real schemes, users and passwords are far shorter.
+// minified line. Real schemes and users are far shorter; generated passwords
+// (tokens, long random strings) can run to a few hundred characters.
 export const DSN_PASSWORD_PATTERN =
-  /\b([a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]{1,256}):([^\s@/]{1,256})@/gi;
+  /\b([a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]{1,256}):([^\s@/]{1,1024})@/gi;
 
 /**
  * A generic token is only considered a credential when it follows an explicit

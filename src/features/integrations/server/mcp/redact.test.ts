@@ -167,6 +167,14 @@ describe("connection-string passwords", () => {
     expect(result.matchedRules).toContain("dsn-password");
   });
 
+  it("redacts a long generated password (up to 1024 chars)", () => {
+    const password = "Pw9".repeat(300);
+    const result = redactSecrets(`postgresql://app:${password}@db.example.com/app`);
+
+    expect(result.text).not.toContain(password);
+    expect(result.matchedRules).toContain("dsn-password");
+  });
+
   it("handles mysql and mongodb schemes", () => {
     for (const dsn of [
       "mysql://root:hunter2pass@db.example.com:3306/app",
