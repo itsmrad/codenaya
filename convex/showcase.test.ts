@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
+import { MAX_PROJECT_FILES } from "./files";
 import schema from "./schema";
 import { relistEntries, setFeatured, unlistTestEntries } from "./showcase";
 import { deleteShowcaseBatch } from "./projectCascade";
@@ -240,15 +241,67 @@ describe("showcase.publish", () => {
       const t = convexTest(schema, modules);
       const bob = t.withIdentity({ subject: "user_bob", name: "Bob" });
       const projectId = await projectWith(t, "export {};", { VITE_STRIPE_SECRET: "x" });
-      await expect(bob.mutation(api.showcase.publish, { ...entry, projectId })).rejects.toThrow();
+      await expect(bob.mutation(api.showcase.publish, { ...entry, projectId })).rejects.toMatchObject({
+        data: { code: "CONFLICT", reason: "secrets_found" },
+      });
     });
 
-    test("publishes after the owner chose Continue anyway", async () => {
+    test("Continue anyway still scans and records the count, kept off the public entry", async () => {
       const t = convexTest(schema, modules);
       const bob = t.withIdentity({ subject: "user_bob", name: "Bob" });
       const projectId = await projectWith(t, `const key = "${stripeKey}";`);
       const id = await bob.mutation(api.showcase.publish, { ...entry, projectId, acknowledgeSecretFindings: true });
-      expect((await t.run((ctx) => ctx.db.get(id)))?.status).toBe("published");
+
+      const stored = await t.run((ctx) => ctx.db.get(id));
+      expect(stored?.status).toBe("published");
+      expect(stored?.secretScanAcknowledged).toEqual({ at: expect.any(Number), findings: 1 });
+      expect(JSON.stringify(stored)).not.toContain(stripeKey);
+      expect(await t.query(api.showcase.getById, { id })).not.toHaveProperty("secretScanAcknowledged");
+    });
+
+    test("acknowledging a clean project records nothing", async () => {
+      const t = convexTest(schema, modules);
+      const bob = t.withIdentity({ subject: "user_bob", name: "Bob" });
+      const projectId = await projectWith(t, "export {};");
+      const id = await bob.mutation(api.showcase.publish, { ...entry, projectId, acknowledgeSecretFindings: true });
+      expect((await t.run((ctx) => ctx.db.get(id)))?.secretScanAcknowledged).toBeUndefined();
+    });
+
+    test("a project of exactly MAX_PROJECT_FILES text files is still scanned", async () => {
+      const t = convexTest(schema, modules);
+      const bob = t.withIdentity({ subject: "user_bob", name: "Bob" });
+      const projectId = await projectWith(t, "export {};");
+      await t.run(async (ctx) => {
+        // pay.ts is one; the rest bring the count to the cap.
+        for (let i = 1; i < MAX_PROJECT_FILES; i++) {
+          const fileId = await ctx.db.insert("files", { projectId, name: `f${i}.ts`, type: "file", updatedAt: 0 });
+          await ctx.db.insert("fileContents", { fileId, projectId, content: "x" });
+        }
+      });
+      const id = await bob.mutation(api.showcase.publish, { ...entry, projectId });
+      expect((await t.run((ctx) => ctx.db.get(id)))?.secretScanAcknowledged).toBeUndefined();
+    });
+
+    test("a project too large to scan gets a clear error, and publishes once acknowledged", async () => {
+      const t = convexTest(schema, modules);
+      const bob = t.withIdentity({ subject: "user_bob", name: "Bob" });
+      const projectId = await projectWith(t, "export {};");
+      // Five ~900 KB files: past the scan's 4 MiB read budget.
+      await t.run(async (ctx) => {
+        for (let i = 0; i < 5; i++) {
+          const fileId = await ctx.db.insert("files", { projectId, name: `big${i}.js`, type: "file", updatedAt: 0 });
+          await ctx.db.insert("fileContents", { fileId, projectId, content: "x".repeat(900 * 1024) });
+        }
+      });
+
+      await expect(bob.mutation(api.showcase.publish, { ...entry, projectId })).rejects.toMatchObject({
+        data: { code: "LIMIT_EXCEEDED", reason: "scan_too_large" },
+      });
+      const id = await bob.mutation(api.showcase.publish, { ...entry, projectId, acknowledgeSecretFindings: true });
+      expect((await t.run((ctx) => ctx.db.get(id)))?.secretScanAcknowledged).toEqual({
+        at: expect.any(Number),
+        findings: null,
+      });
     });
 
     test("publishes a clean project, ignoring placeholders and medium findings", async () => {

@@ -246,6 +246,14 @@
   }
 }
 
+/* A tooltip is a hint, never a target. Radix puts it in a popper wrapper that takes pointer
+   events itself, so the wrapper is what must ignore them: above a wrapped toolbar row the
+   tooltip would otherwise swallow clicks meant for the controls under it (#606). Scoped to
+   tooltips: popovers and selects share the wrapper and must stay clickable. */
+[data-radix-popper-content-wrapper]:has([data-slot="tooltip-content"]) {
+  pointer-events: none;
+}
+
 /* Smooth scrolling via Lenis - body gets this class */
 html.lenis, html.lenis body {
   height: auto;

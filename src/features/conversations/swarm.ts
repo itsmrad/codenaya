@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { MAX_SWARM_AGENTS, MAX_SWARM_TASKS } from "../../../convex/swarm";
-import { normalizePath } from "./agent-steps";
+import { STALLED_RUN_MS, normalizePath } from "./agent-steps";
 
 export { MAX_SWARM_AGENTS, MAX_SWARM_TASKS };
 export const WORKER_MAX_STEPS = 20;
@@ -16,9 +16,13 @@ export const capOriginalPrompt = (text: string) =>
   text.length <= MAX_ORIGINAL_PROMPT_CHARS
     ? text
     : TRUNCATED_MARK + text.slice(-(MAX_ORIGINAL_PROMPT_CHARS - TRUNCATED_MARK.length));
-/** How long a worker may queue and run before it counts as failed (step.invoke's timeout). */
-export const WORKER_TIMEOUT_MS = 12 * 60_000;
-export const CHILD_WORKER_TIMEOUT_MS = 10 * 60_000;
+/**
+ * How long a worker may queue and run before it counts as failed (step.invoke's timeout).
+ * Under STALLED_RUN_MS: a hung worker is cancelled and its row failed before the run reads
+ * "Stopped responding", not left "Running" while the orchestrator waits on (#649).
+ */
+export const WORKER_TIMEOUT_MS = STALLED_RUN_MS - 60_000;
+export const CHILD_WORKER_TIMEOUT_MS = WORKER_TIMEOUT_MS;
 export const SUBORCH_TIMEOUT_MS = 25 * 60_000;
 /** A sub-orchestrator splits its owned paths among up to 3 workers of its own (depth 2). */
 export const MAX_SUBORCHESTRATORS = 2;

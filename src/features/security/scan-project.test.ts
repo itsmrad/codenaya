@@ -185,6 +185,26 @@ describe("scanProject", () => {
   });
 });
 
+describe("scan cost", () => {
+  // Publish runs this inside one Convex mutation (1 s of CPU) on up to 4 MiB of
+  // text. Measured ~150 ms locally for the cases below; the bound leaves CI headroom.
+  const line = "export const get = (id: string) => fetch(`${BASE_URL}/api/items?id=${id}`, { headers });\n";
+  const budgetMs = 800;
+
+  it.each([
+    ["many ordinary files", Array.from({ length: 200 }, (_, i) => ({
+      path: `src/f${i}.ts`,
+      content: line.repeat(Math.floor((4 * 1024 * 1024) / 200 / line.length)),
+    }))],
+    ["one minified 4 MiB line", [{ path: "dist/a.js", content: "a+b(c,d);".repeat(Math.floor((4 * 1024 * 1024) / 9)) }]],
+    ["colon-heavy URLs", [{ path: "src/u.ts", content: `https://u:${"p".repeat(900)};`.repeat(4000) }]],
+  ])("scans 4 MiB of %s well inside the limit", (_name, files) => {
+    const started = performance.now();
+    expect(scanProject(files, [])).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(budgetMs);
+  });
+});
+
 describe("fixRequestMessage", () => {
   it("lists each finding once and passes the chat credential guard", () => {
     const message = fixRequestMessage([

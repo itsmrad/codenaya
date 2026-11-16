@@ -543,6 +543,14 @@ export default defineSchema({
     ),
     /** Picked for the landing page strip; set with `showcase.setFeatured`. */
     featured: v.optional(v.boolean()),
+    /**
+     * Set when the owner published past the secret scan with "Continue anyway"
+     * (#300): how many high-confidence findings, or null when the project was
+     * too large to scan. Never the values; private to the owner.
+     */
+    secretScanAcknowledged: v.optional(
+      v.object({ at: v.number(), findings: v.union(v.number(), v.null()) }),
+    ),
     publishedAt: v.number(),
     updatedAt: v.number(),
   })

@@ -149,8 +149,10 @@ export type VerifyAndFixOptions = {
    * remaining repairs use `fallback.model`.
    */
   fallback?: { model: Model; after: number };
-  /** Repairs, 1 to MAX_REPAIR_ATTEMPTS; anything else is clamped, and NaN means the maximum. */
+  /** Repairs, 0 (check only) to MAX_REPAIR_ATTEMPTS; anything else is clamped, and NaN means the maximum. */
   maxAttempts?: number;
+  /** Each check finishes by this time (epoch ms), so it cannot outlive the caller's own timeout. */
+  deadline?: number;
   /** Keep the errors this worker owns; what it drops can only yield `scoped-ok`. */
   filterErrors?: (errors: BuildError[]) => BuildError[];
   /** The paths the repair may write, edit or delete; a call naming any other is refused whole. */
@@ -261,7 +263,7 @@ export const parseBuildErrors = (text: string): BuildError[] => {
     : [{ message: body.join("\n") || head, kind: install ? "install" : "build" }];
 };
 
-const verify = async (connect: () => Promise<Sandbox>, dir: string, secrets: string[]): Promise<CheckOutcome> => {
+const verify = async (connect: () => Promise<Sandbox>, dir: string, secrets: string[], deadline?: number): Promise<CheckOutcome> => {
   let sandbox;
   let snap;
   try {
@@ -271,7 +273,7 @@ const verify = async (connect: () => Promise<Sandbox>, dir: string, secrets: str
     const reason = `Could not read the sandbox's files (${error instanceof Error ? error.message : "unknown error"})`;
     return { status: "unverified", errors: [], paths: [], reason: redact(reason, secrets) };
   }
-  const text = await checkProjectBuild({ files: snap.files, paths: snap.paths, sandbox, sourceDir: dir, secrets });
+  const text = await checkProjectBuild({ files: snap.files, paths: snap.paths, sandbox, sourceDir: dir, secrets, deadline });
   const paths = [...snap.paths];
   if (text.startsWith(BUILD_VERIFIED)) return { status: "passed", errors: [], paths };
   // Anything else that is not an error (Build not checked) or an unfinished
@@ -476,6 +478,7 @@ export const verifyAndFix = async ({
   model,
   fallback,
   maxAttempts = MAX_REPAIR_ATTEMPTS,
+  deadline,
   filterErrors,
   allowedPaths,
   signal,
@@ -487,7 +490,7 @@ export const verifyAndFix = async ({
   const connect = typeof sandbox === "function" ? sandbox : async () => sandbox;
   const prefix = `${runId}:${agentTaskId}`;
   const cap = Number.isFinite(maxAttempts)
-    ? Math.min(Math.max(Math.trunc(maxAttempts), 1), MAX_REPAIR_ATTEMPTS)
+    ? Math.min(Math.max(Math.trunc(maxAttempts), 0), MAX_REPAIR_ATTEMPTS)
     : MAX_REPAIR_ATTEMPTS;
   const filesChanged = new Set<string>();
   let errors: BuildError[] = [];
@@ -519,7 +522,7 @@ export const verifyAndFix = async ({
     checked = undefined;
     if (!outcome) {
       await emit({ phase: "verify", attempt, status: "running" });
-      outcome = await durable(`verify:${attempt}`, () => verify(connect, dir, secrets));
+      outcome = await durable(`verify:${attempt}`, () => verify(connect, dir, secrets, deadline));
       errors = outcome.errors;
 
       if (outcome.status === "passed") {

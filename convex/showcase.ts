@@ -12,7 +12,6 @@ import { getUnclaimedStorage, releaseBlobs } from "./projectCascade";
 import { recordProjectEvent } from "./activationEvents";
 import schema from "./schema";
 import { MAX_PROJECT_FILES } from "./files";
-import { withContents } from "./fileContents";
 import { buildPathIndex } from "../src/features/conversations/agent-steps";
 import { MAX_ENV_VARS } from "../src/features/integrations/env-keys";
 import { scanProject } from "../src/features/security/scan-project";
@@ -66,7 +65,7 @@ const matchesTags = (item: Doc<"showcaseProjects">, tags: ShowcaseTags) =>
 const toPublicEntry = async (
   ctx: QueryCtx,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- left out on purpose
-  { projectId, ownerId, previewImageId, ...entry }: Doc<"showcaseProjects">
+  { projectId, ownerId, previewImageId, secretScanAcknowledged, ...entry }: Doc<"showcaseProjects">
 ) => {
   const previewUrl = previewImageId
     ? await ctx.storage.getUrl(previewImageId)
@@ -117,7 +116,7 @@ const WEEK_MS = 7 * DAY_MS;
 const WEEKLY_EVENT_LIMIT = 500;
 const WEEKLY_PAGE_MAX = 50;
 const publicEntryValidator = schema.tables.showcaseProjects.validator
-  .omit("projectId", "ownerId", "previewImageId")
+  .omit("projectId", "ownerId", "previewImageId", "secretScanAcknowledged")
   .extend({
     _id: v.id("showcaseProjects"),
     _creationTime: v.number(),
@@ -351,28 +350,45 @@ const unlistedOwnerIds = () =>
     .filter(Boolean);
 
 /**
+ * Text read by the publish scan. One mutation must read and scan it within
+ * Convex's transaction and time limits; a larger project gets a clear error.
+ */
+const SCAN_BYTE_BUDGET = 4 * 1024 * 1024;
+
+/**
  * High-confidence findings of the pre-export secret scan (#300) on the project's
- * stored files and public env vars. Publish runs it here so a client that skips
- * the scan dialog still can't publish a key silently. Secret env values are
- * sealed and can't be read in a mutation; the dialog's route scan covers them.
+ * stored files and public env vars, or null when the project is too large to
+ * scan in one mutation. Publish runs it here so a client that skips the scan
+ * dialog still can't publish a key silently. Secret env values are sealed and
+ * can't be read in a mutation; the dialog's route scan covers them.
  */
 const highRiskSecretFindings = async (ctx: QueryCtx, projectId: Id<"projects">) => {
-  const [fileDocs, envVars] = await Promise.all([
+  const [fileRows, contentRows, envVars] = await Promise.all([
     ctx.db
       .query("files")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .take(MAX_PROJECT_FILES),
+    // The one paginated read Convex allows per function: it stops at the budget.
+    // One row past the cap, so a project of exactly MAX_PROJECT_FILES files is done, not "too large".
+    ctx.db
+      .query("fileContents")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .paginate({ cursor: null, numItems: MAX_PROJECT_FILES + 1, maximumBytesRead: SCAN_BYTE_BUDGET }),
     ctx.db
       .query("projectEnvVars")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .take(MAX_ENV_VARS),
   ]);
-  const files = await withContents(ctx, projectId, fileDocs);
-  const pathOf = buildPathIndex(files);
+  if (!contentRows.isDone || contentRows.page.length > MAX_PROJECT_FILES) return null;
+
+  const contentOf = new Map(contentRows.page.map((row) => [row.fileId, row.content]));
+  const pathOf = buildPathIndex(fileRows);
   return scanProject(
-    files.flatMap((file) => {
+    fileRows.flatMap((file) => {
       const path = pathOf(file._id);
-      return file.type === "file" && !file.storageId && path ? [{ path, content: file.content }] : [];
+      return file.type === "file" && !file.storageId && path
+        ? [{ path, content: contentOf.get(file._id) ?? file.content }]
+        : [];
     }),
     envVars.flatMap((row) =>
       row.visibility === "public" && row.plainValue !== undefined
@@ -380,6 +396,36 @@ const highRiskSecretFindings = async (ctx: QueryCtx, projectId: Id<"projects">) 
         : [],
     ),
   ).filter((finding) => finding.severity === "high");
+};
+
+/**
+ * Refuses a publish the scan flags unless the owner chose "Continue anyway".
+ * Returns what to record on the entry when they did; never a secret value.
+ */
+const secretScanGate = async (ctx: QueryCtx, projectId: Id<"projects">, acknowledged: boolean) => {
+  const findings = await highRiskSecretFindings(ctx, projectId);
+  if (findings === null) {
+    if (acknowledged) return { at: Date.now(), findings: null };
+    throw appError(
+      "LIMIT_EXCEEDED",
+      "This project is too large to scan for secrets before publishing. " +
+        'Check it for keys yourself, then choose "Continue anyway" to publish.',
+      { reason: "scan_too_large" },
+    );
+  }
+  if (findings.length === 0) return undefined;
+  if (acknowledged) return { at: Date.now(), findings: findings.length };
+  // Locations and rules only: the matched values never leave the scanner.
+  const where = findings
+    .slice(0, 3)
+    .map((f) => `${f.line === null ? f.file : `${f.file}:${f.line}`} (${f.rule})`)
+    .join(", ");
+  throw appError(
+    "CONFLICT",
+    `The security scan found ${findings.length} likely secret(s) in this project: ${where}` +
+      `${findings.length > 3 ? ", …" : ""}. Remove them, or choose "Continue anyway" to publish.`,
+    { reason: "secrets_found" },
+  );
 };
 
 export const publish = mutation({
@@ -399,22 +445,6 @@ export const publish = mutation({
 
     await getOwnedProject(ctx, args.projectId, identity.subject);
 
-    if (!args.acknowledgeSecretFindings) {
-      const findings = await highRiskSecretFindings(ctx, args.projectId);
-      if (findings.length > 0) {
-        // Locations and rules only: the matched values never leave the scanner.
-        const where = findings
-          .slice(0, 3)
-          .map((f) => `${f.line === null ? f.file : `${f.file}:${f.line}`} (${f.rule})`)
-          .join(", ");
-        throw appError(
-          "CONFLICT",
-          `The security scan found ${findings.length} likely secret(s) in this project: ${where}` +
-            `${findings.length > 3 ? ", …" : ""}. Remove them, or choose "Continue anyway" to publish.`,
-          { reason: "secrets_found" },
-        );
-      }
-    }
     // A preview must be a fresh upload: an id something else holds would
     // publish someone else's blob under a public URL (#211).
     if (args.previewImageId) {
@@ -424,6 +454,13 @@ export const publish = mutation({
     if (await liveEntry(ctx, args.projectId)) {
       throw appError("CONFLICT", "Project is already published to showcase");
     }
+
+    // Always scanned, so `acknowledgeSecretFindings` alone skips nothing.
+    const secretScanAcknowledged = await secretScanGate(
+      ctx,
+      args.projectId,
+      args.acknowledgeSecretFindings === true,
+    );
 
     const now = Date.now();
     await recordProjectEvent(
@@ -455,6 +492,7 @@ export const publish = mutation({
         : ("published" as const),
       publishedAt: now,
       updatedAt: now,
+      secretScanAcknowledged,
     };
 
     // Republishing brings the unpublished entry back with the new listing,
