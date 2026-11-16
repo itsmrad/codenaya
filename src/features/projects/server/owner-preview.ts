@@ -14,4 +14,3 @@ export async function ownerPreviewProject(
   const { found } = await requireOwnedProject({ projectId, userId, internalKey });
   return found ? { project: found, userId } : null;
 }
-
