@@ -796,64 +796,64 @@ export const PreviewView = ({
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 relative">
-        {showTerminal ? (
+      <div className="flex-1 min-h-0 flex flex-col gap-1.5">
+        <div className="flex-1 min-h-0 relative">
+          {/* Resize the logs pane without moving or remounting the preview. */}
           <Allotment
-            key="preview-with-terminal"
             vertical
             defaultSizes={[300, 150]}
           >
             <Allotment.Pane minSize={100}>
-              <div className="size-full pb-1.5">
+              <div className={cn("size-full", showTerminal && "pb-1.5")}>
                 {content}
               </div>
             </Allotment.Pane>
 
-            <Allotment.Pane minSize={100} maxSize={500} preferredSize={200}>
-              <div className="size-full pt-1.5">
-                <motion.div
-                  initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.15, ease: "easeOut" }}
-                  className={cn(
-                    "size-full rounded-xl bg-background border border-border/50 shadow-sm overflow-hidden flex flex-col",
-                    status === "error" && "ring-1 ring-destructive/40",
-                  )}
-                >
-                  <div className="h-9 flex items-center pl-4 pr-1.5 text-xs font-medium gap-2 text-muted-foreground border-b border-border/50 shrink-0 bg-muted/20">
-                    <TerminalSquareIcon className="size-4" />
-                    {/* Read-only output, so it isn't called a terminal (#480). */}
-                    Logs
-                    <PreviewStatusBadge status={status} />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="ml-auto h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
-                      aria-expanded={true}
-                      onClick={toggleTerminal}
-                    >
-                      Hide logs
-                      <ChevronDownIcon className="size-3.5" />
-                    </Button>
-                  </div>
-                  <PreviewTerminal
-                    output={logsAfterClear(terminalOutput, clearedLogs)}
-                    onClear={() => setClearedLogs(terminalOutput)}
-                  />
-                </motion.div>
-              </div>
+            <Allotment.Pane minSize={100} maxSize={500} preferredSize={200} visible={showTerminal}>
+              {showTerminal && (
+                <div className="size-full pt-1.5">
+                  <motion.div
+                    initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    className={cn(
+                      "size-full rounded-xl bg-background border border-border/50 shadow-sm overflow-hidden flex flex-col",
+                      status === "error" && "ring-1 ring-destructive/40",
+                    )}
+                  >
+                    <div className="h-9 flex items-center pl-4 pr-1.5 text-xs font-medium gap-2 text-muted-foreground border-b border-border/50 shrink-0 bg-muted/20">
+                      <TerminalSquareIcon className="size-4" />
+                      {/* Read-only output, so it isn't called a terminal (#480). */}
+                      Logs
+                      <PreviewStatusBadge status={status} />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="ml-auto h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+                        aria-expanded={true}
+                        onClick={toggleTerminal}
+                      >
+                        Hide logs
+                        <ChevronDownIcon className="size-3.5" />
+                      </Button>
+                    </div>
+                    <PreviewTerminal
+                      output={logsAfterClear(terminalOutput, clearedLogs)}
+                      onClear={() => setClearedLogs(terminalOutput)}
+                    />
+                  </motion.div>
+                </div>
+              )}
             </Allotment.Pane>
           </Allotment>
-        ) : (
-          <div className="size-full flex flex-col gap-1.5">
-            <div className="flex-1 min-h-0">{content}</div>
-            <PreviewTerminalStrip
-              status={status}
-              output={terminalOutput}
-              placeholder={stripPlaceholder(Boolean(building), isLoading)}
-              onExpand={toggleTerminal}
-            />
-          </div>
+        </div>
+        {!showTerminal && (
+          <PreviewTerminalStrip
+            status={status}
+            output={terminalOutput}
+            placeholder={stripPlaceholder(Boolean(building), isLoading)}
+            onExpand={toggleTerminal}
+          />
         )}
       </div>
     </div>
