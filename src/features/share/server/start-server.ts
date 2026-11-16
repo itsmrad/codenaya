@@ -12,7 +12,7 @@ createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost:3000');
     const path = resolve(root, '.' + decodeURIComponent(url.pathname));
-    if (path.endsWith('.map') || !path.startsWith(root + sep)) { res.writeHead(404).end(); return; }
+    if (path.endsWith('.map') || (path !== root && !path.startsWith(root + sep))) { res.writeHead(404).end(); return; }
     if (req.method === 'GET' || req.method === 'HEAD') {
       const file = await stat(path).catch(() => null);
       if (file?.isFile() && (await realpath(path)).startsWith(root + sep)) {
