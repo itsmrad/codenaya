@@ -37,6 +37,8 @@ export interface SandboxInfo {
   metadata: SandboxMeta;
   /** When the provider kills the sandbox; the warm-preview lookup needs time left. */
   endAt: Date;
+  /** False when this sandbox's image cannot be snapshotted (E2B: envd older than 0.5.0); unknown when absent. */
+  canSnapshot?: boolean;
 }
 
 export interface ListedSandbox extends SandboxInfo {
@@ -113,6 +115,14 @@ export class SandboxConfigError extends Error {
 /** The provider throttled us or the account is out of quota; routes report `rate_limit`. */
 export class SandboxRateLimitError extends Error {
   name = "SandboxRateLimitError";
+}
+
+/** `runOrThrow`'s non-zero exit, with E2B's "exit status N" message and the result. */
+export class SandboxExitError extends Error {
+  name = "SandboxExitError";
+  constructor(readonly result: RunResult) {
+    super(`exit status ${result.exitCode}`);
+  }
 }
 
 /** A command, a request or the sandbox itself ran out of time. */

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createTool } from "@inngest/agent-kit";
-import { type Sandbox as E2bSandbox, SandboxError, TimeoutError } from "e2b";
+// The seam maps E2B's TimeoutError; an aborted request still arrives as E2B's own SandboxError.
+import { SandboxError } from "e2b";
 
 import {
   BUILD_CHECK_UNFINISHED,
@@ -20,8 +21,7 @@ import {
   offlineFirstInstall,
   projectFileEntries,
 } from "@/features/sandbox-preview/server/project-sandbox";
-import { e2bHandleOf } from "@/features/sandbox-preview/server/provider/e2b";
-import { runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
+import { listCommands, runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
 import { getDefaultProviderOrNull } from "@/features/sandbox-preview/server/provider/registry";
 import {
   type RunResult,
@@ -289,17 +289,17 @@ type WarmPreview = { projectId: string; ownerId: string };
  * An install the preview (or another check) runs: copying node_modules now could catch it half-written.
  * A request timeout is inconclusive while the preview is busy installing.
  */
-const installRunning = async (sandbox: E2bSandbox, deadline: number) => {
+const installRunning = async (sandbox: Sandbox, deadline: number) => {
   const requestTimeoutMs = within(deadline, SHORT_CALL_MS);
   const started = Date.now();
   try {
-    return (await sandbox.commands.list({ requestTimeoutMs })).some((proc) =>
+    return (await listCommands(sandbox, { requestTimeoutMs })).some((proc) =>
       INSTALLING.test([proc.cmd, ...proc.args].join(" ")),
     );
   } catch (error) {
     // E2B also uses TimeoutError for expired sandboxes; those must fall cold.
     const requestTimedOut =
-      (error instanceof TimeoutError && !error.message.includes("sandbox timeout")) ||
+      (error instanceof SandboxTimeoutError && !error.message.includes("sandbox timeout")) ||
       (error instanceof SandboxError && error.message.includes("The operation was aborted due to timeout"));
     if (requestTimedOut && Date.now() - started >= requestTimeoutMs - Math.min(1_000, requestTimeoutMs / 10)) {
       return true;
@@ -313,7 +313,7 @@ const installRunning = async (sandbox: E2bSandbox, deadline: number) => {
  * (or the list keeps timing out) after INSTALL_WAIT_MS or near the step deadline.
  * Each poll is bounded by the wait too.
  */
-const installFinished = async (sandbox: E2bSandbox, deadline: number) => {
+const installFinished = async (sandbox: Sandbox, deadline: number) => {
   const waitUntil = Math.min(Date.now() + INSTALL_WAIT_MS, deadline);
   try {
     while (await installRunning(sandbox, waitUntil)) {
@@ -364,9 +364,7 @@ const connectWarmSandbox = async (provider: SandboxProvider, { projectId, ownerI
     timeoutMs: WARM_MIN_TIME_LEFT_MS,
     requestTimeoutMs: within(deadline, SHORT_CALL_MS),
   });
-  // The process list and the dev server helpers still take the E2B handle (moved in PR1b).
-  const handle = e2bHandleOf(sandbox);
-  return handle && (await installFinished(handle, deadline)) ? { sandbox, handle } : null;
+  return (await installFinished(sandbox, deadline)) ? sandbox : null;
 };
 
 /**
@@ -392,25 +390,23 @@ const killBuildProcesses = (sandbox: Sandbox, dir: string) =>
 const checkInWarmSandbox = async (provider: SandboxProvider, preview: WarmPreview, job: BuildJob): Promise<string | null> => {
   const dir = `/home/user/check-build-${randomUUID().slice(0, 8)}`;
   let sandbox: Sandbox | null = null;
-  let handle: E2bSandbox | null = null;
   let building = false;
   let devServer: PreviewDevServer | null = null;
   try {
-    const warm = await connectWarmSandbox(provider, preview, job.deadline);
-    if (!warm) return null;
-    ({ sandbox, handle } = warm);
+    sandbox = await connectWarmSandbox(provider, preview, job.deadline);
+    if (!sandbox) return null;
     const before = await previewState(sandbox, job.deadline);
     if (before.includes(".env")) return null;
     await runOrThrow(sandbox, `mkdir -p ${dir} && cp -a ${WORK_DIR}/node_modules ${dir}/`, {
       timeoutMs: within(job.deadline, COPY_TIMEOUT_MS),
       requestTimeoutMs: within(job.deadline, COPY_TIMEOUT_MS),
     });
-    if ((await previewState(sandbox, job.deadline)) !== before || (await installRunning(handle, job.deadline))) {
+    if ((await previewState(sandbox, job.deadline)) !== before || (await installRunning(sandbox, job.deadline))) {
       return null;
     }
 
     // Not finding it only skips the restart below; the build still runs warm.
-    devServer = await findPreviewDevServer(handle, within(job.deadline, SHORT_CALL_MS)).catch(() => null);
+    devServer = await findPreviewDevServer(sandbox, within(job.deadline, SHORT_CALL_MS)).catch(() => null);
     building = true;
     return await buildIn(sandbox, dir, job, "warm");
   } catch (error) {
@@ -430,8 +426,8 @@ const checkInWarmSandbox = async (provider: SandboxProvider, preview: WarmPrevie
     await sandbox
       ?.run(`rm -rf ${dir}`, { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS })
       .catch(() => {});
-    if (sandbox && handle && devServer) {
-      const restarted = await restartDevServerIfDown(handle, devServer, SHORT_CALL_MS).catch((error) => {
+    if (sandbox && devServer) {
+      const restarted = await restartDevServerIfDown(sandbox, devServer, SHORT_CALL_MS).catch((error) => {
         console.error("[check-build] could not check the preview's dev server", sandbox?.id, error);
         return false;
       });

@@ -33,14 +33,14 @@ const call = async <T>(request: () => Promise<T>): Promise<T> => {
   }
 };
 
+/** The E2B handle behind each seam sandbox, for the snapshot call. */
 const handles = new WeakMap<Sandbox, E2bSandbox>();
 
-/**
- * The raw E2B handle behind a seam sandbox, or null for another provider.
- * shortcut: only for `dev-server.ts` (typed to the E2B handle until PR1b moves it)
- * and the swarm's envd-version gate; delete once nothing needs it.
- */
-export const e2bHandleOf = (sandbox: Sandbox) => handles.get(sandbox) ?? null;
+/** Snapshots need envd 0.5.0 or later in the template. */
+const supportsSnapshots = (version: string) => {
+  const [major, minor] = version.split(".").map(Number);
+  return major > 0 || minor >= 5;
+};
 
 /** The seam's view of an E2B sandbox. */
 export const fromE2bSandbox = (sandbox: E2bSandbox): Sandbox => {
@@ -78,8 +78,8 @@ const wrap = (sandbox: E2bSandbox): Sandbox => ({
     )) as Sandbox["readFile"],
   previewUrl: async (port) => `https://${sandbox.getHost(port)}`,
   info: async (opts) => {
-    const { metadata, endAt } = await call(() => sandbox.getInfo(opts));
-    return { metadata, endAt };
+    const { metadata, endAt, envdVersion } = await call(() => sandbox.getInfo(opts));
+    return { metadata, endAt, canSnapshot: envdVersion ? supportsSnapshots(envdVersion) : undefined };
   },
   kill: async (opts) => {
     await call(() => sandbox.kill(opts));

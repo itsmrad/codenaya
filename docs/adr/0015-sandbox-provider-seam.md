@@ -152,3 +152,16 @@ Two optional `Sandbox` methods were added, both kept as they behave today:
 `findPreviewDevServer` and `restartDevServerIfDown` still accept the raw E2B handle that
 `check-build.ts` passes; PR2b drops that shim and `e2bHandleOf`. `createProjectSandbox`,
 `writeProjectFiles` and `SANDBOX_TEMPLATE` stay until the agent paths stop importing them.
+
+## PR2b status
+
+`e2bHandleOf` and the `asSeam` shim are gone: `check-build.ts` and `dev-server.ts`
+take only the seam's `Sandbox`.
+- **Swarm envd gate:** it now reads `SandboxInfo.canSnapshot`, which E2B sets from the
+  template's envd version.
+- **Dead code removed:** `createProjectSandbox` and `writeProjectFiles`.
+  `SANDBOX_TEMPLATE` derives from `DEFAULT_E2B_TEMPLATE` in `e2b.ts`.
+- **`runOrThrow`** throws `SandboxExitError`, with E2B's "exit status N" message and the result.
+- **`exists`** also counts a dangling symlink, like E2B's `files.exists`.
+
+`check-build.ts` still imports E2B's `SandboxError`: an aborted request arrives unmapped.

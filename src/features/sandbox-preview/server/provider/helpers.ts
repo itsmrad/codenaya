@@ -1,5 +1,5 @@
 import { killTreeCommand } from "../dev-server";
-import type { RequestOptions, RunOptions, Sandbox } from "./types";
+import { type RequestOptions, type RunOptions, type Sandbox, type SandboxCommand, SandboxExitError } from "./types";
 
 /**
  * Helpers every provider gets for free: they need only `run`, so an adapter
@@ -58,24 +58,25 @@ export const listProcesses = async (sandbox: Sandbox, opts: RequestOptions = {})
  * environment, so a restart from it passes more envs than the start did.
  */
 // shortcut: no adapter lacks listCommands yet; keep only tree roots when one does.
-export const listCommands = (sandbox: Sandbox, opts?: RequestOptions) =>
+export const listCommands = (sandbox: Sandbox, opts?: RequestOptions): Promise<SandboxCommand[]> =>
   sandbox.listCommands ? sandbox.listCommands(opts) : listProcesses(sandbox, opts);
 
 /** SIGKILLs `pid` and everything under it (see killTreeCommand). */
 export const killTree = (sandbox: Sandbox, pid: number, opts: RequestOptions & { timeoutMs?: number } = {}) =>
   sandbox.run(killTreeCommand(pid), opts);
 
+/** True for a dangling symlink too, as E2B's files.exists is. */
 export const exists = async (sandbox: Sandbox, path: string, opts: RequestOptions = {}) =>
-  (await sandbox.run(`test -e ${quote(path)}`, opts)).exitCode === 0;
+  (await sandbox.run(`test -e ${quote(path)} || test -L ${quote(path)}`, opts)).exitCode === 0;
 
 export const remove = async (sandbox: Sandbox, path: string, opts: RequestOptions = {}) => {
   const result = await sandbox.run(`rm -rf -- ${quote(path)}`, opts);
   if (result.exitCode !== 0) throw new Error(`Could not remove ${path}: ${result.stderr.trim()}`);
 };
 
-/** `run`, but a non-zero exit throws, with E2B's own `commands.run` message ("exit status N"). */
+/** `run`, but a non-zero exit throws SandboxExitError, as E2B's own `commands.run` throws CommandExitError. */
 export const runOrThrow = async (sandbox: Sandbox, command: string, opts?: RunOptions) => {
   const result = await sandbox.run(command, opts);
-  if (result.exitCode !== 0) throw new Error(`exit status ${result.exitCode}`);
+  if (result.exitCode !== 0) throw new SandboxExitError(result);
   return result;
 };
