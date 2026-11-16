@@ -74,7 +74,7 @@ test.describe("website-only share link", () => {
       // Legacy links use an HTTP redirect, even before the React shell streams.
       const legacy = await viewer.request.get(link.replace("/preview/", "/s/"), { maxRedirects: 0 });
       expect(legacy.status()).toBe(308);
-      expect(legacy.headers().location).toBe(link);
+      expect(new URL(legacy.headers().location, legacy.url()).href).toBe(link);
       await viewer.goto(link.replace("/preview/", "/s/"));
       await expect(viewer).toHaveURL(link);
       await expect(viewer.getByRole("button", { name: "Remix", exact: true })).toBeVisible();
