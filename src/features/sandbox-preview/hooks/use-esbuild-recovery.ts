@@ -20,14 +20,16 @@ export const useEsbuildRecovery = ({ sandboxId, framework, error, recover }: {
   const serviceFailed = sandboxId !== null && isEsbuildServiceFailure(error, framework);
   const [recovering, setRecovering] = useState(false);
   const attempts = useRef<{ sandboxId: string; state: EsbuildRecoveryAttempts } | null>(null);
+  const waits = useRef({ sandboxId, count: 0 });
   useEffect(() => {
+    if (waits.current.sandboxId !== sandboxId || !serviceFailed) waits.current = { sandboxId, count: 0 };
     if (!serviceFailed || !sandboxId) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
-    let waits = 0;
     let retried = false;
     const attempt = async () => {
       if (cancelled) return;
+      if (waits.current.count > 15) { setRecovering(false); return; }
       const previous = attempts.current?.sandboxId === sandboxId ? attempts.current.state : undefined;
       const next = nextEsbuildRecovery(previous, Date.now());
       if (!next) {
@@ -45,7 +47,7 @@ export const useEsbuildRecovery = ({ sandboxId, framework, error, recover }: {
         if (cancelled) return;
         // An install already in flight owns the server; no restart happened, so no attempt is spent.
         if (status === "busy") attempts.current = previous ? { sandboxId, state: previous } : null;
-        if (status === "busy" && waits++ < 15) {
+        if (status === "busy" && waits.current.count++ < 15) {
           timer = setTimeout(attempt, 2_000);
         } else {
           setRecovering(false);

@@ -127,6 +127,27 @@ describe("sandbox dev server recovery (#776)", () => {
     expect(patch).toHaveBeenCalledTimes(1); // The flushed timer does not sync twice.
   });
 
+  it("uses the current abort signal after a sync wait and drops recovery after unmount", async () => {
+    const inflight = deferred<Response>();
+    patch.mockReturnValueOnce(inflight.promise);
+    edit("first");
+    await vi.advanceTimersByTimeAsync(300);
+    const oldSignal = patch.mock.calls[0][1]?.signal;
+    const recovery = render().recoverDevServer();
+    render().restart();
+    render();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(oldSignal?.aborted).toBe(true);
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ status: "restarted" }));
+    inflight.resolve(Response.json({ success: true }));
+    await expect(recovery).resolves.toBe("restarted");
+    const signal = vi.mocked(fetch).mock.calls.at(-1)?.[1]?.signal;
+    expect(signal).not.toBe(oldSignal);
+    expect(signal?.aborted).toBe(false);
+    hooks.unmount();
+    await expect(render().recoverDevServer()).resolves.toBe("unavailable");
+  });
+
   it("does not block later edits after a failed restart", async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new TypeError("offline"));
     await expect(render().recoverDevServer()).rejects.toThrow("offline");
