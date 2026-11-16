@@ -41,6 +41,14 @@ describe("pending template", () => {
     expect(takePendingTemplate()).toBeNull();
   });
 
+  it("ignores a framework picked before the selector was removed", () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    localStorage.setItem("codenaya:projectFramework", "next");
+    savePendingTemplate("blog");
+    expect(JSON.parse(localStorage.getItem(PENDING_TEMPLATE_KEY)!)).toEqual({ value: "blog", savedAt: expect.any(Number) });
+    expect(takePendingTemplate()?.framework).toBeUndefined();
+  });
+
   it("drops a template older than an hour, including after peeking", () => {
     vi.useFakeTimers();
     vi.stubGlobal("localStorage", memoryStorage());

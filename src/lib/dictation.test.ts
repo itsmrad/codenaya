@@ -6,6 +6,7 @@ import {
   dictationRouteOrNull,
   insertTranscript,
   isDictationKey,
+  isServerDictationLanguage,
   recorderErrorCode,
   transcribeErrorMessage,
 } from "./dictation";
@@ -120,5 +121,16 @@ describe("transcription errors", () => {
       "Your OpenRouter key was refused for transcription.",
     );
     expect(transcribeErrorMessage(502)).toBe("Transcription failed, try again.");
+  });
+});
+
+describe("isServerDictationLanguage", () => {
+  it.each(["bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr", "hu", "it",
+    "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk", "sl", "sv", "uk"])("keeps server routing for %s", (language) => {
+    expect(isServerDictationLanguage(language)).toBe(true);
+    expect(isServerDictationLanguage(`${language.toUpperCase()}-XX`)).toBe(true);
+  });
+  it.each(["ar", "hi", "id", "ja", "ko", "tr", "vi", "zh", ""])("uses browser routing for %s", (language) => {
+    expect(isServerDictationLanguage(language)).toBe(false);
   });
 });

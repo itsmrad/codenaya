@@ -37,10 +37,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  BROWSER_DICTATION_LANGUAGES,
   DICTATION_AUTO,
   DICTATION_SILENCE_MS,
-  SERVER_DICTATION_LANGUAGES,
   dictationErrorMessage,
   dictationRouteOrNull,
   insertTranscript,
@@ -1154,8 +1152,6 @@ const getSpeechRecognition = () =>
 
 const browserLanguage = () => navigator.language || "en-US";
 
-const PICKER_LANGUAGES = [...SERVER_DICTATION_LANGUAGES, ...BROWSER_DICTATION_LANGUAGES];
-
 type DictationStatus = "idle" | "listening" | "transcribing";
 
 /**
@@ -1182,7 +1178,6 @@ export const PromptInputSpeechButton = ({
     () => false
   );
   const canRecord = useSyncExternalStore(noopSubscribe, canRecordDictation, () => false);
-  const [picked, setPicked] = useState<string>(DICTATION_AUTO);
   // The server answered that it can't transcribe: the browser dictates instead.
   const [serverDown, setServerDown] = useState(false);
   const [status, setStatus] = useState<DictationStatus>("idle");
@@ -1350,12 +1345,12 @@ export const PromptInputSpeechButton = ({
       return;
     }
     if (uploadRef.current) return;
-    const route = routeFor(picked);
+    const route = routeFor(DICTATION_AUTO);
     if (!route) return;
     discardRef.current = false;
     if (route.engine === "server") record(route.language);
     else recognize(route.lang);
-  }, [picked, routeFor, record, recognize]);
+  }, [routeFor, record, recognize]);
 
   // abort(), not stop(): stop() still delivers a last result, which would land
   // in the box after it was sent and cleared.
@@ -1402,10 +1397,6 @@ export const PromptInputSpeechButton = ({
 
   if (!supported) return null;
 
-  const names = new Intl.DisplayNames([browserLanguage()], { type: "language" });
-  // The one line that says a language falls back to the browser's speech.
-  const itemLabel = (language: string, name: string) =>
-    canRecord && routeFor(language)?.engine === "browser" ? `${name} (browser speech)` : name;
   const transcribing = status === "transcribing";
 
   return (
@@ -1431,27 +1422,6 @@ export const PromptInputSpeechButton = ({
           <MicIcon className="size-4" />
         )}
       </PromptInputButton>
-      <PromptInputSelect value={picked} onValueChange={setPicked} disabled={busy}>
-        <PromptInputSelectTrigger
-          size="sm"
-          aria-label="Dictation language"
-          className={cn("h-8 w-auto gap-1 px-2 text-xs max-sm:hidden", className)}
-        >
-          <PromptInputSelectValue>
-            {picked === DICTATION_AUTO ? "Auto" : picked.toUpperCase()}
-          </PromptInputSelectValue>
-        </PromptInputSelectTrigger>
-        <PromptInputSelectContent>
-          <PromptInputSelectItem value={DICTATION_AUTO}>
-            {itemLabel(DICTATION_AUTO, "Auto-detect")}
-          </PromptInputSelectItem>
-          {PICKER_LANGUAGES.map((language) => (
-            <PromptInputSelectItem key={language} value={language}>
-              {itemLabel(language, names.of(language) ?? language)}
-            </PromptInputSelectItem>
-          ))}
-        </PromptInputSelectContent>
-      </PromptInputSelect>
       <span className="sr-only" role="status" aria-live="polite">
         {announcement}
       </span>

@@ -140,17 +140,19 @@ test.describe("voice dictation", () => {
     await expect(dictate).toHaveAttribute("aria-pressed", "false");
   });
 
-  test("a language the server doesn't know dictates with the browser's speech", async ({ page }) => {
+  test("Auto uses browser speech when the browser language is unsupported by the server", async ({ page }) => {
     await mockSpeechRecognition(page, { canRecord: true });
     await mockMicrophone(page);
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "language", { value: "ja-JP", configurable: true });
+    });
     const languages = await stubTranscribe(page, "unused");
     await signIn(page);
     await page.goto("/");
     const composer = dashboardComposer(page);
     const main = page.getByRole("main");
 
-    await main.getByRole("combobox", { name: "Dictation language" }).click();
-    await page.getByRole("option", { name: "Japanese (browser speech)" }).click();
+    await expect(main.getByRole("combobox", { name: "Dictation language" })).toHaveCount(0);
     await main.getByRole("button", { name: "Dictate" }).click();
     await page.evaluate(() => (window as DictationWindow).__speak?.("こんにちは"));
 

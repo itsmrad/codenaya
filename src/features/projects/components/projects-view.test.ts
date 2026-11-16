@@ -266,8 +266,8 @@ describe("landing prompt resume effect", () => {
     expect(composer(ProjectsView({}))?.initialMode).toBeUndefined();
   });
 
-  it("keeps the template id when a failed template start is retried from the composer", async () => {
-    harness.template.mockReturnValue({ id: "blog", prompt: "A blog" });
+  it.each([undefined, "next", "tanstack-start"] as const)("keeps the template id and framework (%s) when retried from the composer", async (framework) => {
+    harness.template.mockReturnValue({ id: "blog", prompt: "A blog", framework });
     harness.peekTemplate.mockReturnValue({ id: "blog", prompt: "A blog" });
     harness.create.mockResolvedValueOnce(false).mockResolvedValue(true);
     render()();
@@ -275,8 +275,9 @@ describe("landing prompt resume effect", () => {
     harness.render();
     const props = composer(ProjectsView({}))!;
     expect(props.initialPrompt).toBe("A blog");
-    await props.onSubmit("A blog", "build");
-    expect(harness.create).toHaveBeenLastCalledWith("A blog", "blog", false, "build", undefined);
+    expect(props.initialFramework).toBe(framework);
+    await props.onSubmit("A blog", "build", props.initialFramework);
+    expect(harness.create).toHaveBeenLastCalledWith("A blog", "blog", false, "build", framework);
   });
 
   it("drops a stale draft when a template wins, so no second project is created", async () => {

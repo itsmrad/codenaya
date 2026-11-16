@@ -92,7 +92,7 @@ export const AgentModelSelect = ({
             size="sm"
             aria-label="Agent model"
             className={cn(
-              "h-7 min-w-0 max-w-64 gap-1 rounded-md px-2 text-xs dark:bg-transparent dark:hover:bg-accent",
+              "h-7 w-56 min-w-0 max-w-full gap-1 rounded-md px-2 text-xs dark:bg-transparent dark:hover:bg-accent",
               triggerClassName,
             )}
           >

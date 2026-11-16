@@ -1,5 +1,5 @@
 import { readPendingStart, savePendingStart } from "@/lib/pending-intent";
-import { isProjectFramework, readProjectFramework, type ProjectFramework } from "@/features/projects/utils/project-framework";
+import { isProjectFramework, type ProjectFramework } from "@/features/projects/utils/project-framework";
 import { getStarterTemplate, type StarterTemplate } from "../templates";
 
 /**
@@ -10,9 +10,10 @@ import { getStarterTemplate, type StarterTemplate } from "../templates";
  */
 export const PENDING_TEMPLATE_KEY = "codenaya:pendingTemplate";
 
-export const savePendingTemplate = (templateId: string, framework = readProjectFramework()) => {
+// No saved framework choice: the prompt (or an explicit pick) decides.
+export const savePendingTemplate = (templateId: string, framework?: ProjectFramework) => {
   try {
-    savePendingStart(PENDING_TEMPLATE_KEY, templateId, { framework: framework === "auto" ? undefined : framework });
+    savePendingStart(PENDING_TEMPLATE_KEY, templateId, { framework });
   } catch {
     // Without storage the template is simply not resumed.
   }
