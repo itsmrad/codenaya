@@ -43,6 +43,42 @@ describe("splitSuggestions", () => {
     expect(splitSuggestions(reply, []).suggestions).toHaveLength(4);
   });
 
+  it("never shows an action tag written in the reply body (#859)", () => {
+    const reply =
+      "**Recommended next steps**\n- [connect:supabase] Connect Supabase to save entries\n- [publish]\n- Then [env-vars] set the email\n- Read [publish](https://example.com/docs)\n\n<suggestions>\n[publish] Publish the site\n</suggestions>";
+    expect(splitSuggestions(reply)).toEqual({
+      content:
+        "**Recommended next steps**\n- Connect Supabase to save entries\n- Then set the email\n- Read [publish](https://example.com/docs)",
+      suggestions: ["[publish] Publish the site"],
+    });
+  });
+
+  it("reads a tag with odd spacing or case, and gives a bare tag no chip", () => {
+    const { suggestions } = splitSuggestions(
+      "Done.\n<suggestions>\n[connect: Supabase] Save entries\n[ Publish ] Go live\n[publish]\nAdd a footer\n</suggestions>",
+    );
+    expect(suggestions.map((line) => parseSuggestion(line))).toEqual([
+      { label: "Save entries", action: { kind: "connect", providerId: "supabase" } },
+      { label: "Go live", action: { kind: "publish" } },
+      { label: "Add a footer", action: null },
+    ]);
+  });
+
+  it("hides a block wrapped in a code fence, closed or cut off", () => {
+    expect(splitSuggestions("Done.\n\n```\n<suggestions>\n[publish] Publish\n</suggestions>\n```")).toEqual({
+      content: "Done.",
+      suggestions: ["[publish] Publish"],
+    });
+    expect(splitSuggestions("Done.\n\n```text\n<suggestions>\n[publish] Publish\n```")).toEqual({
+      content: "Done.",
+      suggestions: ["[publish] Publish"],
+    });
+    expect(splitSuggestions("Done.\n<suggestions>\n[publish] Publish\n[connect:resend] Send em")).toEqual({
+      content: "Done.",
+      suggestions: ["[publish] Publish", "[connect:resend] Send em"],
+    });
+  });
+
   it("leaves a reply without a block alone", () => {
     expect(splitSuggestions("- Built it.")).toEqual({ content: "- Built it.", suggestions: [] });
   });
