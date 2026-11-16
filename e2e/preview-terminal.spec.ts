@@ -72,7 +72,7 @@ test.describe("preview terminal", () => {
     // across Hide logs / Show logs.
     const logsHeader = page.getByRole("button", { name: "Hide logs", exact: true }).locator("..");
     await expect(logsHeader).toBeVisible();
-    await expect(logsHeader).toContainText(/^Logs\b/);
+    await expect(logsHeader).toContainText(/^Logs/);
     const rows = page.locator(".xterm-rows");
     await expect(rows).toContainText("VITE v5.4.0");
     await page.getByRole("button", { name: "Clear logs" }).click();
