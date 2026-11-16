@@ -30,10 +30,10 @@ import {
   SandboxTimeoutError,
 } from "@/features/sandbox-preview/server/provider/types";
 import {
-  INSTALLING,
   SHORT_CALL_MS,
   type PreviewDevServer,
   findPreviewDevServer,
+  isBootInstall,
   restartDevServerIfDown,
 } from "@/features/sandbox-preview/server/dev-server";
 import { NETWORK_FAILURE } from "@/features/sandbox-preview/utils/app-error";
@@ -293,9 +293,7 @@ const installRunning = async (sandbox: Sandbox, deadline: number) => {
   const requestTimeoutMs = within(deadline, SHORT_CALL_MS);
   const started = Date.now();
   try {
-    return (await listCommands(sandbox, { requestTimeoutMs })).some((proc) =>
-      INSTALLING.test([proc.cmd, ...proc.args].join(" ")),
-    );
+    return (await listCommands(sandbox, { requestTimeoutMs })).some((proc) => isBootInstall(proc));
   } catch (error) {
     // E2B also uses TimeoutError for expired sandboxes; those must fall cold.
     const requestTimedOut =

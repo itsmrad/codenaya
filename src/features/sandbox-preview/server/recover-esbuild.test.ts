@@ -1,7 +1,7 @@
 import type { Sandbox as E2bSandbox } from "e2b";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fromE2bSandbox } from "./provider/e2b";
-import { DEV_COMMAND_ENV, DEV_START_COMMAND, READ_DEV_PGID_COMMAND, SHORT_CALL_MS, killDevServersCommand, killProjectNodesCommand } from "./dev-server";
+import { BOOT_INSTALL_ENVS, DEV_COMMAND_ENV, DEV_START_COMMAND, READ_DEV_PGID_COMMAND, SHORT_CALL_MS, killDevServersCommand, killProjectNodesCommand } from "./dev-server";
 import { recoverEsbuild } from "./recover-esbuild";
 import { ESBUILD_RECOVERY_COOLDOWN_MS } from "../utils/esbuild-recovery";
 
@@ -93,6 +93,12 @@ describe("recoverEsbuild (#776)", () => {
     expect(run).not.toHaveBeenCalled();
     list.mockResolvedValue([dev]);
     expect(await recoverEsbuild(sandbox)).toBe("restarted");
+  });
+
+  it("treats a tagged custom install as busy too", async () => {
+    const { sandbox, run } = fakeSandbox([dev, { pid: 6, cmd: "bash", args: ["-c", "bash setup.sh"], envs: BOOT_INSTALL_ENVS, cwd: dev.cwd }]);
+    expect(await recoverEsbuild(sandbox)).toBe("busy");
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("reserves before listing commands so simultaneous errors cannot restart twice", async () => {

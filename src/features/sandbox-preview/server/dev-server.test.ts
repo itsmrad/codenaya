@@ -19,6 +19,8 @@ import {
   fallbackDevStart,
   findPreviewDevServer,
   installWithDevServerStopped,
+  isBootInstall,
+  BOOT_INSTALL_ENVS,
   isPortOpen,
   killTreeCommand,
   proxyTargetPort,
@@ -399,5 +401,29 @@ describe("dev server process groups", () => {
       [killProjectNodesCommand("/home/user/app"), bounds],
     ]);
     expect(run).toHaveBeenLastCalledWith(DEV_START_COMMAND, expect.objectContaining({ envs: { [DEV_COMMAND_ENV]: "npm run dev" } }));
+  });
+});
+
+describe("isBootInstall", () => {
+  const bash = (line: string, envs: Record<string, string> = {}) => ({ cmd: "/bin/bash", args: ["-l", "-c", line], envs });
+
+  it("counts a tagged install, even a custom one", () => {
+    expect(isBootInstall(bash("bash setup.sh", BOOT_INSTALL_ENVS))).toBe(true);
+  });
+
+  it("still counts an untagged npm install by its text, as before the tag", () => {
+    expect(isBootInstall(bash("npm install --prefer-offline"))).toBe(true);
+    expect(isBootInstall({ cmd: "npm", args: ["ci"], envs: {} })).toBe(true);
+  });
+
+  it("does not count an unrelated command or the marked dev server", () => {
+    expect(isBootInstall(bash("node server.js"))).toBe(false);
+    expect(isBootInstall(bash("npm run dev", { [DEV_COMMAND_ENV]: "npm run dev" }))).toBe(false);
+    expect(isBootInstall(bash("bash setup.sh", { CODENAYA_BOOT_COMMAND: "dev" }))).toBe(false);
+  });
+
+  it("uses the caller's text match for untagged commands", () => {
+    expect(isBootInstall(bash("make deps"), (line) => line.includes("make deps"))).toBe(true);
+    expect(isBootInstall(bash("npm install"), () => false)).toBe(false);
   });
 });

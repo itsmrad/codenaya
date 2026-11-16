@@ -202,6 +202,16 @@ export const findPreviewDevServer = async (sandbox: Sandbox, requestTimeoutMs?: 
 /** An install a preview or a check runs; it stops and restarts the dev server itself (#486). */
 export const INSTALLING = /\b(?:npm|pnpm|yarn|bun)\b.*\s(?:install|i|add|ci)(?:\s|$)/;
 
+/**
+ * Whether a listed command is an install: tagged with BOOT_INSTALL_ENVS (a custom
+ * `bash setup.sh` too), or matching `matchesText`, for installs started before the tag.
+ */
+export const isBootInstall = (
+  command: Pick<SandboxCommand, "cmd" | "args" | "envs">,
+  matchesText: (line: string) => boolean = (line) => INSTALLING.test(line),
+) =>
+  command.envs?.[BOOT_COMMAND_ENV] === BOOT_INSTALL_ENVS[BOOT_COMMAND_ENV] || matchesText([command.cmd, ...command.args].join(" "));
+
 const PORT_PROBES = 3;
 const PORT_PROBE_GAP_MS = 500;
 
@@ -218,7 +228,7 @@ export const restartDevServerIfDown = async (sandbox: Sandbox, { port, start }: 
     if (await isPortOpen(sandbox, port)) return false;
   }
   const running = await listCommands(sandbox, { requestTimeoutMs: timeoutMs });
-  if (running.some((command) => INSTALLING.test([command.cmd, ...command.args].join(" ")))) return false;
+  if (running.some((command) => isBootInstall(command))) return false;
   await stopDevServers(sandbox, running, start.cwd, timeoutMs);
   await startDevServer(sandbox, start, { requestTimeoutMs: timeoutMs });
   return true;

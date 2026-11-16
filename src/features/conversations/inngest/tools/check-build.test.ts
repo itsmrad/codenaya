@@ -16,7 +16,7 @@ vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal)
 import { CommandExitError, type CommandResult, type Sandbox as E2bSandbox, SandboxError, TimeoutError } from "e2b";
 import { getFunctionName } from "convex/server";
 
-import { DEV_COMMAND_ENV, DEV_START_COMMAND, READ_DEV_PGID_COMMAND, PROXY_TARGET_ENV, killProjectNodesCommand, killTreeCommand } from "@/features/sandbox-preview/server/dev-server";
+import { BOOT_INSTALL_ENVS, DEV_COMMAND_ENV, DEV_START_COMMAND, READ_DEV_PGID_COMMAND, PROXY_TARGET_ENV, killProjectNodesCommand, killTreeCommand } from "@/features/sandbox-preview/server/dev-server";
 import { createE2bProvider, fromE2bSandbox } from "@/features/sandbox-preview/server/provider/e2b";
 
 import { VITE_REACT_STARTER } from "../vite-starter";
@@ -817,6 +817,19 @@ describe("checkProjectBuild in the warm preview sandbox (#465)", () => {
     expectCold(await result, warm);
     expect(commandsOf(warm).filter((run) => !run.startsWith("rm -rf"))).toEqual([]);
     // Polled every 2.5 s, the last one before 60 s.
+    expect(warm.commands.list).toHaveBeenCalledTimes(24);
+  });
+
+  it("uses a new sandbox while the preview's tagged custom install still runs after the wait", async () => {
+    vi.useFakeTimers();
+    listed({});
+    const warm = warmSandbox(undefined, [DEV_SERVER, { ...installing("bash setup.sh"), envs: BOOT_INSTALL_ENVS }]);
+    fakeSandbox();
+
+    const result = warmCheck();
+    await vi.runAllTimersAsync();
+
+    expectCold(await result, warm);
     expect(warm.commands.list).toHaveBeenCalledTimes(24);
   });
 
