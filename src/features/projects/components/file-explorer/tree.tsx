@@ -28,7 +28,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-import { folderFocusKey, ExplorerFocusContext, useExplorerFocusTarget } from "./focus";
+import { entryFocusKey, focusEntryWhenMounted, ExplorerFocusContext, useExplorerFocusTarget } from "./focus";
 import { nextFocusAfterDelete } from "./next-focus";
 import { getItemPadding } from "./constants";
 import { LoadingRow } from "./loading-row";
@@ -119,17 +119,15 @@ export const Tree = ({
           parentId: item._id,
         });
         // Open the confirmed id, never the optimistic one (#266).
-        if (fileId) {
-          openFile(fileId, { pinned: false });
-          requestFocus(fileId);
-        }
+        if (fileId) openFile(fileId, { pinned: false });
+        focusEntryWhenMounted(entryFocusKey(item._id, name));
       } else if (createType === "folder") {
         await createFolder({
           projectId,
           name,
           parentId: item._id,
         });
-        requestFocus(folderFocusKey(item._id, name));
+        focusEntryWhenMounted(entryFocusKey(item._id, name));
       }
     } catch (error) {
       toast.error(convexErrorMessage(error, `Couldn't create the ${createType}`));

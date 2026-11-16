@@ -18,7 +18,7 @@ import { useEditor } from "@/features/editor/hooks/use-editor";
 import { CreateInput } from "./create-input"
 import { LoadingRow } from "./loading-row"
 import { Tree } from "./tree"
-import { folderFocusKey, ExplorerFocusContext, useExplorerFocusController, useExplorerFocusTarget } from "./focus"
+import { entryFocusKey, focusEntryWhenMounted, ExplorerFocusContext, useExplorerFocusController, useExplorerFocusTarget } from "./focus"
 
 export const FileExplorer = ({ projectId }: { projectId: Id<"projects"> }) => {
   const focus = useExplorerFocusController();
@@ -72,17 +72,15 @@ const FileExplorerContents = ({ projectId }: { projectId: Id<"projects"> }) => {
           parentId: undefined,
         });
         // Open the confirmed id, never the optimistic one (#266).
-        if (fileId) {
-          openFile(fileId, { pinned: false });
-          requestFocus(fileId);
-        }
+        if (fileId) openFile(fileId, { pinned: false });
+        focusEntryWhenMounted(entryFocusKey(undefined, name));
       } else if (createType === "folder") {
         await createFolder({
           projectId,
           name,
           parentId: undefined,
         });
-        requestFocus(folderFocusKey(undefined, name));
+        focusEntryWhenMounted(entryFocusKey(undefined, name));
       }
     } catch (error) {
       toast.error(convexErrorMessage(error, `Couldn't create the ${createType}`));
