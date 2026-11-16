@@ -1,7 +1,7 @@
 import { createAgent, createNetwork } from "@inngest/agent-kit";
 import { NonRetriableError } from "inngest";
 
-import { localCandidates, RESOLVE_SUFFIXES, unresolvedImports } from "@/features/sandbox-preview/utils/missing-references";
+import { localCandidates, RESOLVE_SUFFIXES } from "@/features/sandbox-preview/utils/missing-references";
 import { projectChecks } from "@/features/sandbox-preview/utils/project-checks";
 import { inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
@@ -153,6 +153,7 @@ export const swarmWorker = inngest.createFunction(
     let unfinished = false;
     let staticChecked = false;
     let staticFixNote = "";
+    let repairNeeds = "";
     const options = { internalKey, projectId, registry: createRegistryCheck() };
     const subOrchestrator = task.role === "sub-orchestrator" && depth < MAX_SWARM_DEPTH;
     // Shared by every worker of the run, so they share its cache; the task line goes after it.
@@ -237,21 +238,23 @@ export const swarmWorker = inngest.createFunction(
                   path.startsWith("src/data/") || path.startsWith("src/components/shared/");
                 const sibling = (path: string) => ownsPath(siblingOwnedPaths ?? [], path);
                 const own = (path: string) => ownsPath(task.ownedPaths, path);
-                const missing = files.filter((f) => written.has(f.path)).flatMap((file) =>
-                  unresolvedImports([file], paths).filter((message) => {
-                    const specifier = message.slice(0, -` (imported by ${file.path})`.length);
-                    const targets = localCandidates(file.path, specifier)?.flatMap((candidate) =>
-                      RESOLVE_SUFFIXES.map((suffix) => candidate + suffix)).filter((path) => /^(src|public)\//.test(path)) ?? [];
-                    // Old events and nested plans cannot prove that an outside path has no owner.
-                    return targets.some(own) || (depth === 1 && siblingOwnedPaths !== undefined && targets.length > 0 &&
-                      targets.every((path) => !sibling(path) && !shared(path)));
-                  }));
-                // Withhold uncertain targets' contents so the existing export checker defers them.
-                const exportFiles = files.filter((f) => own(f.path) ||
+                // Retain the manifest for projectChecks' Next.js skip; withhold uncertain export targets.
+                const checkFiles = files.filter((f) => f.path === "package.json" || own(f.path) ||
                   (depth === 1 && siblingOwnedPaths !== undefined && !sibling(f.path) && shared(f.path) &&
                     f.content.length > FOUNDATION_PLACEHOLDER_MAX_CHARS));
-                const exports = projectChecks(exportFiles, paths, written, { references: false })
-                  .filter((f) => f.checkId === "export" && [...written].some((path) => f.message.startsWith(`${path}:`) || f.message.startsWith(`${path} imports `)))
+                const findings = projectChecks(checkFiles, paths, written);
+                const missing = findings.filter((f) => f.checkId === "import").map((f) => f.message).filter((message) => {
+                  const file = files.find((f) => written.has(f.path) && message.endsWith(` (imported by ${f.path})`));
+                  if (!file) return false;
+                  const specifier = message.slice(0, -` (imported by ${file.path})`.length);
+                  const targets = localCandidates(file.path, specifier)?.flatMap((candidate) =>
+                    RESOLVE_SUFFIXES.map((suffix) => candidate + suffix)).filter((path) => /^(src|public)\//.test(path)) ?? [];
+                  // Old events and nested plans cannot prove that an outside path has no owner.
+                  return targets.some(own) || (depth === 1 && siblingOwnedPaths !== undefined && targets.length > 0 &&
+                    targets.every((path) => !sibling(path) && !shared(path)));
+                });
+                const exports = findings.filter((f) => f.checkId === "export" &&
+                  [...written].some((path) => f.message.startsWith(`${path}:`) || f.message.startsWith(`${path} imports `)))
                   .map((f) => f.message);
                 return [...missing, ...exports].slice(0, 10);
               } catch {
@@ -259,7 +262,14 @@ export const swarmWorker = inngest.createFunction(
                 return [];
               }
             });
-            if (problems.length) staticFixNote = `Fix these before finishing (within your owned paths; report missing shared contracts in NEEDS):\n- ${problems.join("\n- ")}`;
+            if (problems.length) {
+              const firstSummary = result.output.flatMap((m) => m.type === "text" && m.role === "assistant"
+                ? [typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("")] : []).join("\n");
+              repairNeeds = splitSuggestions(firstSummary).content.match(/^NEEDS:[\s\S]*/m)?.[0].trim() ?? "";
+              staticFixNote = `Fix these before finishing (within your owned paths; report missing shared contracts in NEEDS):\n- ${problems.join("\n- ")}\n` +
+                "Read the shared contract files you use (src/types/*, src/data/*, src/components/shared/*) ONCE; verify exact field/export names and that your page's export matches src/App.tsx. " +
+                "Give the FULL final summary again, including any NEEDS: lines for dependencies, shared edits, or integration requirements.";
+            }
           }
           return result;
         },
@@ -297,7 +307,8 @@ export const swarmWorker = inngest.createFunction(
     const raw = result.state.results.at(-1)?.output.flatMap((m) => m.type === "text" && m.role === "assistant"
       ? [typeof m.content === "string" ? m.content : m.content.map((c) => c.text).join("")] : []).join("\n").trim() ?? "";
     // The shared prompt asks for follow-up chips (#256); a worker's are never shown.
-    const reply = splitSuggestions(raw).content || "The worker finished without a summary.";
+    let reply = splitSuggestions(raw).content || "The worker finished without a summary.";
+    if (repairNeeds && !/^NEEDS:/m.test(reply)) reply += `\n${repairNeeds}`;
     const repairBudget = new AbortController();
     if (usage.costUsd >= maxUsd || outOfCredits()) repairBudget.abort();
     let repairTurn = 0;

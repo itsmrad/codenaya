@@ -121,10 +121,6 @@ describe("swarmWorker", () => {
     expect(shared.text).toContain("Read only files you must import from; shared types and stubs are listed in the tree.");
     expect(shared.text).toContain("Avoid per-file edit/read loops. Do not re-read what you wrote.");
     expect(shared.text).toContain("Do not run checkBuild or any build: the orchestrator integrates and checks the complete project.");
-    expect(shared.text).toContain("read the shared contract files you use (src/types/*, src/data/*, src/components/shared/*) ONCE");
-    expect(shared.text).toContain("every field/export has that exact name");
-    expect(shared.text).toContain("default/named export matches src/App.tsx and the route table already on disk");
-    expect(shared.text).toContain("say so in your summary instead of inventing it");
     expect(shared.text).toContain("Stop once your files are written. Finish with a one-line summary");
     expect(shared.text).not.toContain("Owned paths:");
     expect(taskLine).not.toHaveProperty("cache_control");
@@ -143,8 +139,10 @@ describe("swarmWorker", () => {
     expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ agentTaskId: "t1", status: "done" })]);
   });
 
-  const staticSnapshot = (content: string, shared = "export const site = {};", contract = "") => {
+  const staticSnapshot = (content: string, shared = "export const site = {};", contract = "", manifest = "") => {
     mocks.query.mockImplementation(async (ref) => getFunctionName(ref) === "system:getProjectFilesWithUrls" ? [
+      { _id: "manifest", name: "package.json", type: "file", content: manifest },
+      { _id: "layout", name: "src/app/layout.tsx", type: "file", content: "export default () => null;" },
       { _id: "src", name: "src", type: "folder" },
       { _id: "pages", name: "pages", type: "folder", parentId: "src" },
       { _id: "home", name: "home.tsx", type: "file", parentId: "pages", content },
@@ -172,7 +170,36 @@ describe("swarmWorker", () => {
     expect(fix).toEqual({ role: "user", content: expect.stringContaining("Fix these before finishing") });
     expect(fix?.content).toContain("@/components/Missing (imported by src/pages/home.tsx)");
     expect(fix?.content).not.toContain("other.ts");
+    expect(fix?.content).toContain("Read the shared contract files you use");
+    expect(fix?.content).toContain("Give the FULL final summary again, including any NEEDS: lines");
     expect(requests.filter((request) => String(request.messages.at(-1)?.content).startsWith("Fix these before finishing"))).toHaveLength(1);
+  });
+
+  it.each([false, true])("preserves the first NEEDS block unless the repair summary supplies one (repeated: %s)", async (repeated) => {
+    const content = 'import Missing from "./missing"; export default Missing;';
+    const needs = "NEEDS: add react-router-dom\n- Wire /home in src/App.tsx";
+    staticSnapshot(content);
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text(`Built it.\n${needs}`) },
+      { data: text(`Fixed it.${repeated ? `\n${needs}` : ""}`) },
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.data).toMatchObject({ summary: `Fixed it.\n${needs}` });
+    expect(mutationArgs("agentTasks:finishTask").at(-1)).toMatchObject({ summary: `Fixed it.\n${needs}` });
+    expect(outcome.inferenceBodies).toHaveLength(3);
+  });
+
+  it.each(["next", "vite"])("uses projectChecks' framework detection for %s", async (framework) => {
+    const content = 'import Missing from "./missing"; import { MissingExport } from "./data"; export default Missing;';
+    staticSnapshot(content, "export const present = {};", "", JSON.stringify({ dependencies: { [framework]: "1.0.0" } }));
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text("Built it.") },
+      ...(framework === "vite" ? [{ data: text("NEEDS: missing import.") }] : []),
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(framework === "next" ? 2 : 3);
   });
 
   it("finishes clean imports without another turn", async () => {
