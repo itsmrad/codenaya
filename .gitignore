@@ -80,3 +80,6 @@ graphify-out/
 
 # community MCP catalog generator cache (network responses)
 /scripts/mcp-catalog/.cache/
+
+# Local orchestration notes (agent prompts, rules, decisions); never committed
+/claude
