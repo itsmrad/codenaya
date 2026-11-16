@@ -45,6 +45,23 @@ const QUICK_START = [
 
 const SECTIONS: { id: string; title: string; content: ReactNode }[] = [
   {
+    id: "moving-projects",
+    title: "Moving a project from another builder",
+    content: (
+      <>
+        <p>Sync your project to GitHub, then use Import from GitHub on the dashboard.
+          Codenaya detects common builder markers and environment variable names from
+          source code, example env files and environment sections in the README.</p>
+        <p>The import notice opens Environment Variables with the missing names ready to fill in.
+          Copy the required values from your provider settings. Real dotenv files are excluded;
+          imported values are never pre-filled. Public prefixes such as VITE_ expose values in
+          the browser, so use only publishable keys there.</p>
+        <p>Your hosted backend and its data stay with the existing provider. For Supabase,
+          use the integration link in the notice to connect it. Restart the preview after saving variables.</p>
+      </>
+    ),
+  },
+  {
     id: "getting-started",
     title: "Getting started",
     content: (

@@ -257,6 +257,11 @@ export const githubSyncValidator = v.object({
   syncBranchAt: v.optional(v.number()),
 });
 
+export const importInfoValidator = v.object({
+  source: v.optional(v.literal("other-builder")),
+  envVarNames: v.array(v.string()),
+});
+
 export default defineSchema({
   /**
    * First-party product events on the way from sign-up to a first preview
@@ -296,6 +301,7 @@ export default defineSchema({
     // and cleared by the first run that writes files (#338). Unset on older
     // projects, where "no package.json yet" still marks the first build.
     firstBuildPending: v.optional(v.boolean()),
+    importInfo: v.optional(importInfoValidator),
     importStatus: v.optional(
       v.union(
         v.literal("importing"),

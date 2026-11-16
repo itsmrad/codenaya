@@ -64,6 +64,7 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { PreviewView } from "./preview-view";
 import { ExportPopover } from "./export-popover";
 import { SharePopover } from "@/features/share/components/share-popover";
+import { ImportNotice } from "./import-notice";
 import { EnvVarsDialog } from "./env-vars-dialog";
 import { useDownloadZip } from "../hooks/use-download-zip";
 import { useChatPanelStore } from "../store/use-chat-panel-store";
@@ -332,6 +333,7 @@ export const ProjectIdView = ({
         />
       )}
     <div className="@container/ide h-full flex flex-col gap-2">
+      {project && <ImportNotice project={project} onAddVariables={() => setEnvVarsOpen(true)} />}
       {/* ─── Unified Navbar ─── */}
       <nav className="shrink-0 h-11 flex items-center gap-1.5 px-2 @3xl:gap-3 @3xl:px-3 rounded-xl bg-card border border-border/60 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.04)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.03)]">
         {/* Left: Brand + Project Name + Save */}

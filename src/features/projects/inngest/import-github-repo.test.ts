@@ -92,6 +92,23 @@ describe("importGithubRepo", () => {
     );
   });
 
+  it("persists names-only inspection and never imports real dotenv files (#310)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(tarball([
+      { path: ".bolt/", type: "Directory" },
+      { path: "src/main.ts", body: "import.meta.env.VITE_SUPABASE_URL; process.env.API_KEY" },
+      { path: ".env.example", body: "VITE_SUPABASE_URL=fake-example-url" },
+      { path: ".env", body: "DO_NOT_IMPORT=fake-private-value" },
+      { path: ".env.local", body: "DO_NOT_IMPORT=fake-private-value" },
+    ])));
+    await runJob();
+    expect(created(".env")).toEqual([]);
+    expect(created(".env.local")).toEqual([]);
+    expect(created(".env.example")).toHaveLength(1);
+    expect(mocks.mutation.mock.calls.find(([, args]) => args.status === "completed")?.[1]).toMatchObject({
+      importInfo: { source: "other-builder", envVarNames: ["API_KEY", "VITE_SUPABASE_URL"] },
+    });
+  });
+
   it("imports a public repo from one unauthenticated archive request (#364)", async () => {
     await expect(runJob()).resolves.toMatchObject({ success: true });
 
