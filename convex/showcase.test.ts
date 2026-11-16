@@ -202,6 +202,64 @@ describe("showcase.publish", () => {
     const id = await bob.mutation(api.showcase.publish, { ...entry, projectId, previewImageId: fresh });
     expect((await t.run((ctx) => ctx.db.get(id)))?.previewImageId).toBe(fresh);
   });
+
+  describe("secret scan (#300)", () => {
+    const stripeKey = ["sk", "live", "51HxQ2kLm9Np3Rt7Vw0Yz4Ab"].join("_");
+
+    /** Bob's project with `src/lib/pay.ts` holding `line`, plus optional public env vars. */
+    const projectWith = async (t: T, line: string, env: Record<string, string> = {}) =>
+      await t.run(async (ctx) => {
+        const projectId = await ctx.db.insert("projects", { name: "Todo", ownerId: "user_bob", updatedAt: 0 });
+        const src = await ctx.db.insert("files", { projectId, name: "src", type: "folder", updatedAt: 0 });
+        const lib = await ctx.db.insert("files", { projectId, parentId: src, name: "lib", type: "folder", updatedAt: 0 });
+        const fileId = await ctx.db.insert("files", { projectId, parentId: lib, name: "pay.ts", type: "file", updatedAt: 0 });
+        await ctx.db.insert("fileContents", { fileId, projectId, content: `// pay\n${line}\n` });
+        for (const [key, plainValue] of Object.entries(env)) {
+          await ctx.db.insert("projectEnvVars", {
+            projectId, ownerId: "user_bob", key, visibility: "public", plainValue, maskedPreview: plainValue, source: "manual", updatedAt: 0,
+          });
+        }
+        return projectId;
+      });
+
+    test("refuses a hard-coded key, naming file:line and rule but never the value", async () => {
+      const t = convexTest(schema, modules);
+      const bob = t.withIdentity({ subject: "user_bob", name: "Bob" });
+      const projectId = await projectWith(t, `const key = "${stripeKey}";`);
+
+      const error = await bob.mutation(api.showcase.publish, { ...entry, projectId }).catch((e: Error) => e);
+      expect(error).toBeInstanceOf(Error);
+      const message = JSON.stringify((error as { data?: unknown }).data);
+      expect(message).toContain("src/lib/pay.ts:2 (stripe)");
+      expect(message).toContain("secrets_found");
+      expect(message).not.toContain(stripeKey);
+      expect(await t.run((ctx) => ctx.db.query("showcaseProjects").take(1))).toEqual([]);
+    });
+
+    test("refuses a secret-named public env var", async () => {
+      const t = convexTest(schema, modules);
+      const bob = t.withIdentity({ subject: "user_bob", name: "Bob" });
+      const projectId = await projectWith(t, "export {};", { VITE_STRIPE_SECRET: "x" });
+      await expect(bob.mutation(api.showcase.publish, { ...entry, projectId })).rejects.toThrow();
+    });
+
+    test("publishes after the owner chose Continue anyway", async () => {
+      const t = convexTest(schema, modules);
+      const bob = t.withIdentity({ subject: "user_bob", name: "Bob" });
+      const projectId = await projectWith(t, `const key = "${stripeKey}";`);
+      const id = await bob.mutation(api.showcase.publish, { ...entry, projectId, acknowledgeSecretFindings: true });
+      expect((await t.run((ctx) => ctx.db.get(id)))?.status).toBe("published");
+    });
+
+    test("publishes a clean project, ignoring placeholders and medium findings", async () => {
+      const t = convexTest(schema, modules);
+      const bob = t.withIdentity({ subject: "user_bob", name: "Bob" });
+      // A placeholder key and a service-role mention (medium) don't block.
+      const projectId = await projectWith(t, `const key = "sk_live_${"x".repeat(20)}"; // service_role`);
+      const id = await bob.mutation(api.showcase.publish, { ...entry, projectId });
+      expect((await t.run((ctx) => ctx.db.get(id)))?.status).toBe("published");
+    });
+  });
 });
 
 describe("showcase.getFeatured", () => {
