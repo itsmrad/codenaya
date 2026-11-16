@@ -344,10 +344,21 @@ export default defineSchema({
     // Set when the owner deletes the project. The project is hidden at once
     // while `projects.deleteBatch` removes its data in the background.
     deletingAt: v.optional(v.number()),
-    // Set while a read-only share link (/s/<token>) is on (#260): 128 random bits, hex.
+    // Website-only share link: 128 random bits, hex; legacy /s URLs redirect.
     shareToken: v.optional(v.string()),
+    shareEnabled: v.optional(v.boolean()),
+    shareMode: v.optional(v.union(v.literal("snapshot"), v.literal("latest"))),
+    shareCheckpointId: v.optional(v.id("checkpoints")),
+    shareKeepLiveMinutes: v.optional(v.union(v.literal(0), v.literal(15), v.literal(30), v.literal(60))),
+    shareKeepLiveUntil: v.optional(v.number()),
+    publicPreview: v.optional(v.object({
+      lease: v.string(), revision: v.string(), desiredRevision: v.optional(v.string()), until: v.number(),
+      sandboxId: v.optional(v.string()), url: v.optional(v.string()),
+      ready: v.boolean(), failed: v.optional(v.boolean()),
+    })),
   })
     .index("by_owner", ["ownerId"])
+    .index("by_ownerId_and_publicPreview_until", ["ownerId", "publicPreview.until"])
     .index("by_shareToken", ["shareToken"]),
 
   /**

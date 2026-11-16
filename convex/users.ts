@@ -216,7 +216,9 @@ export const purgeUserData = internalMutation({
     }
     const finished = await purgeUserDataBatch(ctx, clerkUserId);
     if (!finished) {
-      await ctx.scheduler.runAfter(0, internal.users.purgeUserData, {
+      const project = await ctx.db.query("projects").withIndex("by_owner", q => q.eq("ownerId", clerkUserId)).first();
+      const delay = Math.max(0, (project?.publicPreview?.until ?? 0) - Date.now());
+      await ctx.scheduler.runAfter(delay, internal.users.purgeUserData, {
         clerkUserId,
       });
     }

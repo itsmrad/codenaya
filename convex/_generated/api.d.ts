@@ -34,6 +34,7 @@ import type * as platformCatalog from "../platformCatalog.js";
 import type * as projectCascade from "../projectCascade.js";
 import type * as projectCopy from "../projectCopy.js";
 import type * as projectNotes from "../projectNotes.js";
+import type * as publicPreviews from "../publicPreviews.js";
 import type * as projects from "../projects.js";
 import type * as promoClaims from "../promoClaims.js";
 import type * as showcase from "../showcase.js";
@@ -79,6 +80,7 @@ declare const fullApi: ApiFromModules<{
   projectCopy: typeof projectCopy;
   projectNotes: typeof projectNotes;
   projects: typeof projects;
+  publicPreviews: typeof publicPreviews;
   promoClaims: typeof promoClaims;
   showcase: typeof showcase;
   skills: typeof skills;

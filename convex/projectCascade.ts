@@ -163,6 +163,8 @@ export async function deleteProjectBatch(
   ctx: MutationCtx,
   projectId: Id<"projects">,
 ): Promise<boolean> {
+  const project = await ctx.db.get("projects", projectId);
+  if (project?.publicPreview && project.publicPreview.until > Date.now()) return false;
   const contents = await ctx.db
     .query("fileContents")
     .withIndex("by_project", (q) => q.eq("projectId", projectId))
