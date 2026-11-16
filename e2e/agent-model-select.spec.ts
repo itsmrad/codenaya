@@ -1,8 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-import { AGENT_MODELS } from "../src/features/conversations/agent-models";
+import { api } from "../convex/_generated/api";
+import { envCatalog, platformProviderId } from "../src/features/ai-providers/platform";
+import { platformModels } from "../src/features/ai-providers/hooks/use-ai-providers";
 import { hasClerkCredentials, signIn } from "./clerk-auth";
 import { collectConsoleErrors } from "./console-errors";
+import { userConvexClient } from "./convex-client";
 
 const projectId = process.env.E2E_PROJECT_ID;
 
@@ -43,7 +46,11 @@ test.describe("chat agent model switcher", () => {
     await trigger.click();
     // Scoped to the platform group: the user's own keys add groups of their own.
     const platform = page.getByRole("group", { name: "Codenaya" });
-    await expect(platform.getByRole("option")).toHaveCount(AGENT_MODELS.length);
+    // The picker's own list: the saved catalog (plus Auto), else the env's curated one. It grows
+    // with the catalog, so the count is derived, not hard-coded (#606).
+    const catalog = await (await userConvexClient(page)).query(api.platformCatalog.getForUsers, {});
+    const expected = platformModels(catalog ?? envCatalog(platformProviderId())).models.length;
+    await expect(platform.getByRole("option")).toHaveCount(expected);
     // The vendor is a muted tag beside the name, not part of the option text.
     const sonnet = platform.getByRole("option", { name: "Claude Sonnet 5.5" });
     await expect(sonnet).toHaveAttribute("data-tag", "Anthropic");

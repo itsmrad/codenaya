@@ -66,11 +66,18 @@ test.describe("IDE polish", () => {
       const usesSheet = await more.isVisible();
       if (usesSheet) await more.click();
       await page.getByRole("button", { name: "Export", exact: true }).click();
-      const box = (await page.locator("[data-slot=popover-content]").boundingBox())!;
+      const popover = page.locator("[data-slot=popover-content]");
+      const box = (await popover.boundingBox())!;
       expect(box.x).toBeGreaterThanOrEqual(8);
       expect(box.x + box.width).toBeLessThanOrEqual(width - 8);
+      // One Escape per layer, each awaited: a second Escape sent while the
+      // popover is still closing is swallowed and leaves the sheet open (#606).
       await page.keyboard.press("Escape");
-      if (usesSheet) await page.keyboard.press("Escape");
+      await expect(popover).toBeHidden();
+      if (usesSheet) {
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("dialog", { name: "Project menu" })).toBeHidden();
+      }
     }
 
     // At 375 the form is taller than the dialog; the footer must not scroll away.
