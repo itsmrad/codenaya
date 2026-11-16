@@ -2,7 +2,7 @@
 
 import ky, { HTTPError } from "ky";
 import { z } from "zod";
-import { Fragment, useState } from "react";
+import { Fragment, useId, useState } from "react";
 import { toast } from "sonner";
 import { useForm } from "@tanstack/react-form";
 import {
@@ -17,7 +17,7 @@ import {
   classifyEnvKey,
   isValidEnvKey,
 } from "@/features/integrations/env-keys";
-import { publicValueSecretRule } from "@/features/integrations/credential-guard";
+import { publicNameLooksSecret, publicValueSecretRule } from "@/features/integrations/credential-guard";
 import {
   useDeleteEnvVar,
   useEnvVars,
@@ -47,6 +47,7 @@ import { useProject } from "../hooks/use-projects";
 import { missingEnvVarsMessage } from "../utils/import-notice";
 
 const MASK = "••••••••";
+const PUBLIC_NAME_WARNING = "This name looks like a secret, but its public prefix means it will be visible in the browser. Use a name without the prefix and store it as a secret.";
 
 const formSchema = z.object({
   key: z
@@ -70,6 +71,8 @@ interface EnvVarsDialogProps {
 }
 
 export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogProps) => {
+  const warningIdBase = useId();
+  const keyWarningId = `${warningIdBase}-key-warning`;
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
 
   const project = useProject(projectId);
@@ -167,7 +170,7 @@ export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogPr
                 className="max-h-56 overflow-y-auto divide-y rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {missingNames.map((name) => (
-                  <div key={name} className="flex items-center gap-2 p-2 text-xs">
+                  <div key={name} className="flex flex-wrap items-center gap-2 p-2 text-xs">
                     {/* <wbr> after each "_" so long names wrap at underscores, not mid-word. */}
                     <span className="min-w-0 flex-1 break-words font-mono">
                       {name.split("_").map((part, i) => (
@@ -182,11 +185,16 @@ export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogPr
                       ))}
                     </span>
                     <Badge variant="outline">{classifyEnvKey(name) === "public" ? "Public" : "Secret"}</Badge>
-                    <Button size="sm" variant="ghost" aria-label={`Set ${name}`} onClick={() => {
+                    <Button size="sm" variant="ghost" aria-label={`Set ${name}`} aria-describedby={publicNameLooksSecret(name) ? `${warningIdBase}-detected-${name}` : undefined} onClick={() => {
                       form.setFieldValue("key", name);
                       form.setFieldValue("value", "");
                       document.getElementById("env-var-value")?.focus();
                     }}>Set value</Button>
+                    {publicNameLooksSecret(name) && (
+                      <p id={`${warningIdBase}-detected-${name}`} role="note" className="w-full text-amber-700 dark:text-amber-400">
+                        {PUBLIC_NAME_WARNING}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -311,10 +319,16 @@ export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogPr
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
                       aria-invalid={isInvalid}
+                      aria-describedby={publicNameLooksSecret(key) ? keyWarningId : undefined}
                       placeholder="NEXT_PUBLIC_API_URL"
                       className="font-mono"
                       autoComplete="off"
                     />
+                    {publicNameLooksSecret(key) && (
+                      <p id={keyWarningId} role="note" className="text-xs text-amber-700 dark:text-amber-400">
+                        {PUBLIC_NAME_WARNING}
+                      </p>
+                    )}
                     {isInvalid ? (
                       <FieldError errors={field.state.meta.errors} />
                     ) : (

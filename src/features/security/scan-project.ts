@@ -6,6 +6,8 @@
  * isomorphic. Findings name the file, line and rule, never the matched text.
  */
 
+import { SECRET_NAME } from "@/lib/secret-name";
+
 import {
   CREDENTIAL_TOKEN_PATTERNS,
   DSN_PASSWORD_PATTERN,
@@ -40,9 +42,8 @@ export interface ScanEnvVar {
 /** Shorter stored values ("true", "3000") would match all over the code. */
 const MIN_STORED_SECRET_LENGTH = 8;
 
-const SECRET_NAME = /SECRET|SERVICE_ROLE|PRIVATE/;
 const PUBLIC_SECRET_NAME = new RegExp(
-  `\\b(?:${PUBLIC_KEY_PREFIXES.join("|")})\\w*(?:SECRET|SERVICE_ROLE|PRIVATE)\\w*`,
+  `\\b(?:${PUBLIC_KEY_PREFIXES.join("|")})\\w*(?:${SECRET_NAME.source})\\w*`,
 );
 const SERVICE_ROLE = /service_role|SUPABASE_SERVICE/i;
 const CLIENT_SOURCE = /(?:^|\/)src\//;
