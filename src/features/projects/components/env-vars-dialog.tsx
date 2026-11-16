@@ -2,7 +2,7 @@
 
 import ky, { HTTPError } from "ky";
 import { z } from "zod";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { toast } from "sonner";
 import { useForm } from "@tanstack/react-form";
 import {
@@ -159,18 +159,44 @@ export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogPr
               {missingEnvVarsMessage(missingNames.length)}{" "}
               Select a name and enter its value to save it.
             </p>
-            <div className="max-h-40 overflow-y-auto divide-y rounded-md border">
-              {missingNames.map((name) => (
-                <div key={name} className="flex items-center gap-2 p-2 text-xs">
-                  <span className="min-w-0 flex-1 break-all font-mono">{name}</span>
-                  <Badge variant="outline">{classifyEnvKey(name) === "public" ? "Public" : "Secret"}</Badge>
-                  <Button size="sm" variant="ghost" aria-label={`Set ${name}`} onClick={() => {
-                    form.setFieldValue("key", name);
-                    form.setFieldValue("value", "");
-                    document.getElementById("env-var-value")?.focus();
-                  }}>Set value</Button>
-                </div>
-              ))}
+            <div className="relative">
+              <div
+                tabIndex={0}
+                role="region"
+                aria-label="Detected environment variable names"
+                className="max-h-56 overflow-y-auto divide-y rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {missingNames.map((name) => (
+                  <div key={name} className="flex items-center gap-2 p-2 text-xs">
+                    {/* <wbr> after each "_" so long names wrap at underscores, not mid-word. */}
+                    <span className="min-w-0 flex-1 break-words font-mono">
+                      {name.split("_").map((part, i) => (
+                        <Fragment key={i}>
+                          {i > 0 && (
+                            <>
+                              _<wbr />
+                            </>
+                          )}
+                          {part}
+                        </Fragment>
+                      ))}
+                    </span>
+                    <Badge variant="outline">{classifyEnvKey(name) === "public" ? "Public" : "Secret"}</Badge>
+                    <Button size="sm" variant="ghost" aria-label={`Set ${name}`} onClick={() => {
+                      form.setFieldValue("key", name);
+                      form.setFieldValue("value", "");
+                      document.getElementById("env-var-value")?.focus();
+                    }}>Set value</Button>
+                  </div>
+                ))}
+              </div>
+              {/* shortcut: fade stays visible at the end of the scroll, drop it once a scroll-end hook exists. */}
+              {missingNames.length > 4 && (
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-x-px bottom-px h-8 rounded-b-md bg-gradient-to-t from-background to-transparent"
+                />
+              )}
             </div>
           </div>
         )}
