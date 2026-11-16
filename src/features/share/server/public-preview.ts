@@ -48,7 +48,7 @@ export async function preparePreview(token: string): Promise<{ state: PreviewSta
   return { state, manifest };
 }
 
-export async function bootPreview(token: string, prepared: Awaited<ReturnType<typeof preparePreview>>) {
+export async function bootPreview(token: string, prepared: Awaited<ReturnType<typeof preparePreview>>, appOrigin?: string) {
   const { state, manifest } = prepared;
   if (state.status !== "boot" || !state.lease || !state.until || !manifest) return;
   let sandbox;
@@ -62,7 +62,7 @@ export async function bootPreview(token: string, prepared: Awaited<ReturnType<ty
       if (!response.ok) throw new Error("Asset unavailable");
       return { path: file.path, data: await response.arrayBuffer() };
     }));
-    const url = await startProductionSite(sandbox, files, manifest.env);
+    const url = await startProductionSite(sandbox, files, manifest.env, appOrigin);
     if (!await update(token, state.lease, { ready: true, url })) await sandbox.kill();
   } catch {
     // A failed kill keeps the reservation until the provider's hard timeout.

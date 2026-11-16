@@ -20,6 +20,8 @@ describe("public builds", () => {
     }));
     await startProductionSite(box, files(dependencies), { VITE_URL: "public" });
     expect(box.run).toHaveBeenCalledWith(`./node_modules/.bin/${build}`, expect.anything());
+    expect(box.previewUrl).toHaveBeenCalledWith(4000);
+    expect(box.writeFiles).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ path: "/home/user/codenaya-public-proxy.mjs", data: expect.stringContaining("frame-ancestors") })]));
     expect(box.start).toHaveBeenCalledWith(expect.stringContaining(start), expect.objectContaining({ envs: expect.objectContaining({ NODE_ENV: "production", VITE_URL: "public" }) }));
     expect(box.run).toHaveBeenCalledWith(expect.stringContaining("node /home/user/codenaya-clean.mjs"), expect.anything());
     const commands = vi.mocked(box.run).mock.calls.map(([command]) => command).join("\n");

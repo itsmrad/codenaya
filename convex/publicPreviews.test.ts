@@ -119,3 +119,16 @@ test("replacing and revoking snapshots explicitly releases the old checkpoint", 
   await owner.mutation(api.projects.revokeShareLink, { projectId: id });
   expect(await t.run(ctx => ctx.db.get("checkpoints", next))).toBeNull();
 });
+
+test("Generate/Update preserves the slug, snapshot and running lease for lifetime-only changes", async () => {
+  const { t, id } = await seed();
+  const owner = t.withIdentity({ subject: "owner" });
+  const options = { mode: "snapshot" as const, minutes: 0 as const };
+  expect(await owner.action(api.projects.createShareLink, { projectId: id, options })).toBe(token);
+  const checkpoint = await t.run(async ctx => (await ctx.db.get("projects", id))!.shareCheckpointId);
+  await t.mutation(api.publicPreviews.claim, args);
+  await t.mutation(api.publicPreviews.update, { internalKey, token, lease: "first", sandboxId: "e2b:one", ready: true });
+  expect(await owner.action(api.projects.createShareLink, { projectId: id, options: { ...options, minutes: 30 } })).toBe(token);
+  expect(await t.run(async ctx => (await ctx.db.get("projects", id))!.shareCheckpointId)).toBe(checkpoint);
+  expect(await t.mutation(api.publicPreviews.claim, args)).toMatchObject({ status: "ready", sandboxId: "e2b:one", lease: "first" });
+});

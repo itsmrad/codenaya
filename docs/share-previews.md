@@ -11,3 +11,11 @@ Use the existing SandboxProvider interface. Fixed production build/start command
 A lightweight heartbeat refreshes one provider timeout to the later of ten minutes from now or the keep-live deadline. With no heartbeat, the provider kills the sandbox. No cleanup cron is needed, and the share token itself never expires. Latest saved inputs are resolved on visits; already-open pages attach to the same generation. Start requests reuse the existing process-local per-IP limiter; cross-instance enforcement inherits its documented limitation.
 
 Verification: Convex tests cover cap/reuse/leases, updates during boot, tombstones, deadlines, snapshot replacement/Remix and secret filtering. Server tests cover framework commands and build failures. Playwright seeds a Vite site, visits signed out, checks `/s` redirection and disabled-link 404, and captures public-page/popover screenshots at 1440 and 390. Run through CI/BUILDGATE only. This feature remains HOLD-FOR-USER until dev verification.
+
+Share options are drafts until Generate link / Update link is clicked. One authenticated
+request saves them and warms the sandbox only for keep-live or an already running site.
+Updates preserve the slug and reuse the production build when its content is unchanged.
+The public shell embeds the production site through its sandbox's port-4000 proxy,
+which permits framing by the app origin and removes upstream X-Frame-Options.
+The address bar stays on `/preview/<slug>`; the sandbox host is still visible in
+DevTools. A full same-origin proxy is a later option if needed.

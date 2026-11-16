@@ -50,7 +50,7 @@ export const SharedProjectView = ({ token, initial }: { token: string; initial: 
         {!unavailable && <Button size="sm" className="ml-auto h-7 shrink-0 text-xs" onClick={remix} disabled={isRemixing}>{isRemixing ? "Remixing…" : "Remix"}</Button>}
       </header>
       {!unavailable && site.status === "ready" && site.url ? (
-        <iframe title={project?.name ?? "Site preview"} src={site.url} className="flex-1 w-full border-0" sandbox="allow-scripts allow-forms allow-same-origin allow-popups" referrerPolicy="no-referrer" />
+        <iframe title={project?.name ?? "Site preview"} src={site.url} className="min-h-0 flex-1 w-full border-0" allow="fullscreen" sandbox="allow-scripts allow-forms allow-same-origin allow-popups" referrerPolicy="no-referrer" />
       ) : (
         <div role="status" className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center">
           {unavailable ? <p>This share link is unavailable.</p> : site.status === "busy" ? <><p>Busy, try again shortly.</p><Button variant="outline" onClick={() => setAttempt(n => n + 1)}>Try again</Button></> : site.status === "error" ? <><p>We couldn’t start this site.</p><Button variant="outline" onClick={() => setAttempt(n => n + 1)}>Try again</Button></> : <><Spinner className="size-5 text-muted-foreground" /><p className="text-sm">Starting the site… ~30-60 s on first visit</p></>}

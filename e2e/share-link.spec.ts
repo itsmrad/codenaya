@@ -21,7 +21,7 @@ const seedProject = async (page: Page) => {
   for (const [name, content] of Object.entries({
     "package.json": JSON.stringify({ name: "public-preview-test", version: "1.0.0", type: "module", dependencies: { vite: "^8.0.0" } }),
     "vite.config.js": "export default {}",
-    "index.html": "<!doctype html><html><body><h1>Shared website fixture</h1></body></html>",
+    "index.html": "<!doctype html><html><body><h1>Shared website fixture</h1><a href='#details'>Site navigation</a><p id='details'>Details</p></body></html>",
   })) await system.mutation(api.system.createFile, { internalKey: internalKey!, projectId, name, content });
   return projectId;
 };
@@ -48,10 +48,29 @@ test.describe("website-only share link", () => {
     await page.goto(`/projects/${projectId}?engine=webcontainer`);
     await openShare(page);
     const toggle = page.getByRole("switch", { name: "Anyone with the link can view" });
-    await toggle.click();
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await page.keyboard.press("Escape");
+      await openShare(page);
+      await page.screenshot({ path: test.info().outputPath(`share-before-generate-${width}.png`) });
+    }
+    let saves = 0;
+    page.on("request", request => { if (new URL(request.url()).pathname === "/api/share-link") saves++; });
+    await page.getByRole("combobox", { name: "What to share" }).click();
+    await page.getByRole("option", { name: "Always the latest saved version" }).click();
+    expect(saves).toBe(0);
+    await page.getByRole("button", { name: "Generate link", exact: true }).click();
     const linkInput = page.getByRole("textbox", { name: "Share link" });
     await expect(linkInput).toHaveValue(/\/preview\/[0-9a-f]{32}$/);
     const link = await linkInput.inputValue();
+    expect(saves).toBe(1);
+    await page.getByRole("combobox", { name: "What to share" }).click();
+    await page.getByRole("option", { name: "This version (snapshot now)" }).click();
+    expect(saves).toBe(1);
+    await page.getByRole("button", { name: "Update link", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Update link", exact: true })).toBeHidden();
+    expect(saves).toBe(2);
+    await expect(linkInput).toHaveValue(link);
 
     const visitor = await browser.newContext();
     try {
@@ -62,6 +81,11 @@ test.describe("website-only share link", () => {
       await expect(viewer.getByRole("navigation", { name: "Files" })).toHaveCount(0);
       await expect(viewer.getByText(/Shared by/)).toHaveCount(0);
       await expect(viewer.frameLocator(`iframe[title="${PROJECT_NAME}"]`).getByRole("heading", { name: "Shared website fixture" })).toBeVisible({ timeout: 150_000 });
+      await viewer.frameLocator(`iframe[title="${PROJECT_NAME}"]`).getByRole("link", { name: "Site navigation" }).click();
+      await expect(viewer).toHaveURL(link);
+      const frame = viewer.locator(`iframe[title="${PROJECT_NAME}"]`);
+      await expect(frame).toHaveAttribute("sandbox", "allow-scripts allow-forms allow-same-origin allow-popups");
+      await expect(viewer.locator("body")).not.toContainText("e2b.app");
       for (const width of [1440, 390]) {
         await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
         await page.keyboard.press("Escape");

@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
   action,
@@ -398,10 +398,15 @@ export async function getSharedProject(ctx: QueryCtx, token: string) {
  * randomness and a token must be unpredictable.
  */
 export const createShareLink = action({
-  args: { projectId: v.id("projects") },
+  args: { projectId: v.id("projects"), options: v.optional(v.object({
+    mode: v.union(v.literal("snapshot"), v.literal("latest")),
+    minutes: v.union(v.literal(0), v.literal(15), v.literal(30), v.literal(60)),
+    updateSnapshot: v.optional(v.boolean()),
+  })) },
   returns: v.string(),
   handler: async (ctx, args): Promise<string> => {
     const identity = await verifyAuth(ctx);
+    if (args.options) await ctx.runMutation(api.projects.configureShare, { projectId: args.projectId, ...args.options });
     const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
       byte.toString(16).padStart(2, "0"),
     ).join("");

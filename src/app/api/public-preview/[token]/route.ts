@@ -11,14 +11,14 @@ const json = (state: { status: string; url?: string }) => Response.json(
 );
 
 /** Polling and heartbeats never create a sandbox or read the build inputs. */
-export async function GET(_request: Request, { params }: Context) {
+export async function GET(request: Request, { params }: Context) {
   const { token } = await params;
   if (!validShareToken(token)) return json({ status: "missing" });
   try {
     const state = await previewState(token);
     if (state.status === "retire") {
       const prepared = await preparePreview(token);
-      if (prepared.state.status === "boot") after(() => bootPreview(token, prepared));
+      if (prepared.state.status === "boot") after(() => bootPreview(token, prepared, new URL(request.url).origin));
       return json(prepared.state);
     }
     return json(state.status === "ready" ? await heartbeatPreview(token, state) : state);
@@ -33,7 +33,7 @@ export async function POST(request: Request, { params }: Context) {
   if (!limit.allowed) return rateLimitedResponse(limit);
   try {
     const prepared = await preparePreview(token);
-    if (prepared.state.status === "boot") after(() => bootPreview(token, prepared));
+    if (prepared.state.status === "boot") after(() => bootPreview(token, prepared, new URL(request.url).origin));
     return json(prepared.state.sandboxId ? await heartbeatPreview(token, prepared.state) : prepared.state);
   } catch { return Response.json({ status: "error" }, { status: 503 }); }
 }
