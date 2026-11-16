@@ -21,20 +21,46 @@ export const isFocusLost = (
 const defaultFind = (key: string) =>
   document.querySelector<HTMLElement>(`[data-explorer-entry="${CSS.escape(key)}"]`);
 
+let currentEntryFocus: AbortController | undefined;
+
+// Start before awaiting creation so late responses cannot revive an old request.
+export const createEntryFocusRequest = (restoreFocus: boolean) => {
+  currentEntryFocus?.abort();
+  const request = new AbortController();
+  currentEntryFocus = request;
+  if (!restoreFocus) request.abort();
+  return request;
+};
+
 /** Focuses the confirmed row for `key` as soon as it is in the DOM (it appears when the server's row replaces the optimistic one). */
 export const focusEntryWhenMounted = (
   key: string,
-  find: (key: string) => HTMLElement | null = defaultFind,
-  raf: (callback: () => void) => unknown = (callback) => requestAnimationFrame(callback),
-  maxFrames = 180,
+  {
+    find = defaultFind,
+    raf = (callback) => requestAnimationFrame(callback),
+    maxFrames = 180,
+    shouldFocus = () => isFocusLost(document.activeElement, document.body),
+    signal,
+  }: {
+    find?: (key: string) => HTMLElement | null;
+    raf?: (callback: () => void) => unknown;
+    maxFrames?: number;
+    shouldFocus?: () => boolean;
+    signal?: AbortSignal;
+  } = {},
 ) => {
   let frames = 0;
+  let cancelled = false;
+  const cancel = () => { cancelled = true; };
   const tick = () => {
+    if (cancelled || signal?.aborted) return;
     const element = find(key);
-    if (element) element.focus();
-    else if (++frames < maxFrames) raf(tick);
+    if (element) {
+      if (shouldFocus()) element.focus();
+    } else if (++frames < maxFrames) raf(tick);
   };
   tick();
+  return cancel;
 };
 
 export function useExplorerFocusController() {

@@ -1,4 +1,4 @@
-import { useContext, useRef, useState } from "react";
+import { useEffect, useContext, useRef, useState } from "react";
 
 import { ChevronRightIcon } from "lucide-react";
 import { FileIcon, FolderIcon } from "@react-symbols/icons/utils";
@@ -28,7 +28,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-import { entryFocusKey, focusEntryWhenMounted, ExplorerFocusContext, useExplorerFocusTarget } from "./focus";
+import { entryFocusKey, createEntryFocusRequest, focusEntryWhenMounted, ExplorerFocusContext, useExplorerFocusTarget } from "./focus";
 import { nextFocusAfterDelete } from "./next-focus";
 import { getItemPadding } from "./constants";
 import { LoadingRow } from "./loading-row";
@@ -54,6 +54,8 @@ export const Tree = ({
   const { requestFocus } = useContext(ExplorerFocusContext)!;
   const rowRef = useExplorerFocusTarget(item._id);
   const deleteFocus = useRef<string | null | undefined>(undefined);
+  const createFocus = useRef<AbortController | null>(null);
+  useEffect(() => () => createFocus.current?.abort(), []);
   const [isOpen, setIsOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [creating, setCreating] = useState<"file" | "folder" | null>(null);
@@ -79,9 +81,9 @@ export const Tree = ({
     enabled: item.type === "folder" && isOpen,
   });
 
-  const handleRename = async (newName: string) => {
+  const handleRename = async (newName: string, restoreFocus: boolean) => {
     setIsRenaming(false);
-    requestFocus(item._id);
+    if (restoreFocus) requestFocus(item._id);
 
     if (newName === item.name) {
       return;
@@ -94,10 +96,11 @@ export const Tree = ({
     }
   };
 
-  const handleCreate = async (name: string) => {
+  const handleCreate = async (name: string, restoreFocus: boolean) => {
+    const focusRequest = createEntryFocusRequest(restoreFocus);
+    createFocus.current = focusRequest;
     const createType = creating;
     setCreating(null);
-    requestFocus(item._id);
 
     // Validate against siblings in folderContents
     if (folderContents) {
@@ -105,6 +108,7 @@ export const Tree = ({
         (f) => f.name === name && f.type === createType
       );
       if (exists) {
+        if (!focusRequest.signal.aborted) requestFocus(item._id);
         toast.error(createType === "file" ? "File already exists" : "Folder already exists");
         return;
       }
@@ -120,16 +124,17 @@ export const Tree = ({
         });
         // Open the confirmed id, never the optimistic one (#266).
         if (fileId) openFile(fileId, { pinned: false });
-        focusEntryWhenMounted(entryFocusKey(item._id, name));
+        focusEntryWhenMounted(entryFocusKey(item._id, name), { signal: focusRequest.signal });
       } else if (createType === "folder") {
         await createFolder({
           projectId,
           name,
           parentId: item._id,
         });
-        focusEntryWhenMounted(entryFocusKey(item._id, name));
+        focusEntryWhenMounted(entryFocusKey(item._id, name), { signal: focusRequest.signal });
       }
     } catch (error) {
+      if (!focusRequest.signal.aborted) requestFocus(item._id);
       toast.error(convexErrorMessage(error, `Couldn't create the ${createType}`));
     }
   };
@@ -205,7 +210,7 @@ export const Tree = ({
           defaultValue={fileName}
           level={level}
           onSubmit={handleRename}
-          onCancel={() => { setIsRenaming(false); requestFocus(item._id); }}
+          onCancel={(restoreFocus) => { setIsRenaming(false); if (restoreFocus) requestFocus(item._id); }}
         />
       );
     }
@@ -273,7 +278,7 @@ export const Tree = ({
               type={creating}
               level={level + 1}
               onSubmit={handleCreate}
-              onCancel={() => { setCreating(null); requestFocus(item._id); }}
+              onCancel={(restoreFocus) => { setCreating(null); if (restoreFocus) requestFocus(item._id); }}
             />
             {folderContents?.map((subItem) => (
               <Tree
@@ -300,7 +305,7 @@ export const Tree = ({
           isOpen={isOpen}
           level={level}
           onSubmit={handleRename}
-          onCancel={() => { setIsRenaming(false); requestFocus(item._id); }}
+          onCancel={(restoreFocus) => { setIsRenaming(false); if (restoreFocus) requestFocus(item._id); }}
         />
         {isOpen && (
           <>

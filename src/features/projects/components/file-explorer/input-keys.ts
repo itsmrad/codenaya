@@ -5,13 +5,14 @@
  * (toggling the parent folder shut, or opening a second create input).
  */
 export const onEntryKeyDown = (
-  event: { key: string; preventDefault: () => void },
-  submit: () => void,
-  cancel: () => void,
+  event: { key: string; preventDefault: () => void; isComposing?: boolean; keyCode?: number; nativeEvent?: { isComposing?: boolean } },
+  submit: (restoreFocus: boolean) => void,
+  cancel: (restoreFocus: boolean) => void,
 ) => {
   if (event.key === "Enter") {
+    if (event.isComposing || event.nativeEvent?.isComposing || event.keyCode === 229) return;
     event.preventDefault();
-    submit();
+    submit(true);
   }
-  if (event.key === "Escape") cancel();
+  if (event.key === "Escape") cancel(true);
 };

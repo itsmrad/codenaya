@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { entryFocusKey, focusEntryWhenMounted, isFocusLost } from "./focus";
+import { entryFocusKey, createEntryFocusRequest, focusEntryWhenMounted, isFocusLost } from "./focus";
 
 const runner = () => {
   const queue: (() => void)[] = [];
@@ -11,7 +11,7 @@ describe("focusEntryWhenMounted", () => {
     const focus = vi.fn();
     let mounted = false;
     const { raf, step } = runner();
-    focusEntryWhenMounted("k", () => (mounted ? ({ focus } as unknown as HTMLElement) : null), raf);
+    focusEntryWhenMounted("k", { find: () => (mounted ? ({ focus } as unknown as HTMLElement) : null), raf, shouldFocus: () => true });
     expect(focus).not.toHaveBeenCalled();
     step(); step(); // still the optimistic row: no confirmed row yet
     mounted = true;
@@ -23,17 +23,73 @@ describe("focusEntryWhenMounted", () => {
 
   it("focuses at once when the confirmed row is already there", () => {
     const focus = vi.fn();
-    focusEntryWhenMounted("k", () => ({ focus }) as unknown as HTMLElement, () => { throw new Error("no polling"); });
+    focusEntryWhenMounted("k", { find: () => ({ focus }) as unknown as HTMLElement, raf: () => { throw new Error("no polling"); }, shouldFocus: () => true });
     expect(focus).toHaveBeenCalledTimes(1);
   });
 
   it("gives up after maxFrames when the row never appears", () => {
     const { raf, step } = runner();
     const find = vi.fn(() => null);
-    focusEntryWhenMounted("k", find, raf, 3);
+    focusEntryWhenMounted("k", { find, raf, maxFrames: 3 });
     for (let i = 0; i < 10; i++) step();
     expect(find).toHaveBeenCalledTimes(3);
   });
+
+  it("keeps focus on another control when the created row appears", () => {
+    const focus = vi.fn();
+    let mounted = false;
+    let focusLost = true;
+    const { raf, step } = runner();
+    focusEntryWhenMounted("k", {
+      find: () => mounted ? ({ focus } as unknown as HTMLElement) : null,
+      raf,
+      shouldFocus: () => focusLost,
+    });
+    focusLost = false;
+    mounted = true;
+    step();
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it("stops a cancelled poll", () => {
+    const { raf, step } = runner();
+    const find = vi.fn(() => null);
+    const cancel = focusEntryWhenMounted("k", { find, raf });
+    cancel();
+    step();
+    expect(find).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels a previous poll and ignores its late server response", () => {
+    const { raf, step } = runner();
+    const oldRequest = createEntryFocusRequest(true);
+    const find = vi.fn(() => null);
+    focusEntryWhenMounted("old", { find, raf, signal: oldRequest.signal });
+    createEntryFocusRequest(true);
+    step();
+    focusEntryWhenMounted("old", { find, raf, signal: oldRequest.signal });
+    expect(find).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a response after its component unmounts", () => {
+    const request = createEntryFocusRequest(true);
+    request.abort(); // effect cleanup, including while creation is awaiting the server
+    const find = vi.fn(() => null);
+    focusEntryWhenMounted("k", { find, signal: request.signal });
+    expect(find).not.toHaveBeenCalled();
+  });
+
+  it("does not restore focus for a blur completion, even with body focused", () => {
+    const request = createEntryFocusRequest(false);
+    const focus = vi.fn();
+    focusEntryWhenMounted("k", {
+      find: () => ({ focus }) as unknown as HTMLElement,
+      shouldFocus: () => isFocusLost(null, {}),
+      signal: request.signal,
+    });
+    expect(focus).not.toHaveBeenCalled();
+  });
+
 });
 
 describe("entryFocusKey", () => {
