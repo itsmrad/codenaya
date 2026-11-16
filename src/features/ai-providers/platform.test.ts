@@ -72,6 +72,18 @@ describe("envCatalog", () => {
       hidden: true,
     });
   });
+
+  it("runs titles and editor AI on Haiku 5.5 on the OpenRouter and native Anthropic routes (#320)", () => {
+    expect(utilityModel(envCatalog("openrouter"))).toMatchObject({
+      provider: "openrouter",
+      providerModelId: "anthropic/claude-haiku-5.5",
+    });
+    expect(utilityModel(envCatalog("anthropic"))).toMatchObject({
+      provider: "anthropic",
+      providerModelId: "claude-haiku-5-5",
+      hidden: false,
+    });
+  });
 });
 
 describe("resolveCatalogModel", () => {

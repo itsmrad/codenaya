@@ -106,7 +106,7 @@ Open bugs only. Gaps found in code without an issue are listed on the flow itsel
   returns `null` without it). Both go through `withEditorModel`
   (`ai-providers/server/editor-model.ts`): the user's default BYOK key if set, otherwise the
   platform provider's small model via `platformEditorModel()`
-  (`ai-providers/server/platform-model.ts`; OpenRouter: `openai/gpt-5.4-mini`).
+  (`ai-providers/server/platform-model.ts`; the catalog's utility model, Claude Haiku 5.5 by default: `anthropic/claude-haiku-5.5` on OpenRouter, `claude-haiku-5-5` on Anthropic).
 - Env: the active platform provider's key (`NEXT_PUBLIC_AI_PROVIDER`, default `openrouter`; ADR 0005) (503 JSON error without it and without a default BYOK key).
 - E2E: `editor-ai.spec.ts`, `quick-edit.spec.ts`.
 
