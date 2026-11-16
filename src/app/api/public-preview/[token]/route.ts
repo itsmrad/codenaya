@@ -28,10 +28,14 @@ export async function GET(request: Request, { params }: Context) {
 export async function POST(request: Request, { params }: Context) {
   const { token } = await params;
   if (!validShareToken(token)) return json({ status: "missing" });
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
-  const limit = checkRateLimit(ip, { scope: "public-preview-start", limit: 5, windowMs: 60_000 });
-  if (!limit.allowed) return rateLimitedResponse(limit);
   try {
+    let state = await previewState(token);
+    if (state.status === "ready") state = await heartbeatPreview(token, state);
+    // Attaching to a live preview or waiting on its boot never consumes a start attempt.
+    if (state.status !== "boot" && state.status !== "retire") return json(state);
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
+    const limit = checkRateLimit(ip, { scope: "public-preview-start", limit: 5, windowMs: 60_000 });
+    if (!limit.allowed) return rateLimitedResponse(limit);
     const prepared = await preparePreview(token);
     if (prepared.state.status === "boot") after(() => bootPreview(token, prepared, new URL(request.url).origin));
     return json(prepared.state.sandboxId ? await heartbeatPreview(token, prepared.state) : prepared.state);

@@ -10,7 +10,7 @@ import { sharePath } from "../utils";
 import { api } from "../../../../convex/_generated/api";
 
 export type SharedProject = { name: string };
-type Status = { status: string; url?: string };
+type Status = { status: string; url?: string; retryAfter?: number };
 
 export const SharedProjectView = ({ token, initial }: { token: string; initial: SharedProject }) => {
   const live = useQuery(api.projects.getShared, { token });
@@ -27,7 +27,10 @@ export const SharedProjectView = ({ token, initial }: { token: string; initial: 
     const poll = async (start: boolean) => {
       try {
         const response = await fetch(`/api/public-preview/${token}`, { method: start ? "POST" : "GET", signal: controller.signal, cache: "no-store" });
-        const result: Status = response.status === 429 ? { status: "busy" } : await response.json();
+        const retryAfter = Number(response.headers.get("Retry-After"));
+        const result: Status = response.status === 429
+          ? { status: "rate_limited", retryAfter: Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : undefined }
+          : await response.json();
         if (controller.signal.aborted) return;
         setSite(result);
         if (["ready", "wait", "boot"].includes(result.status)) {
@@ -53,7 +56,7 @@ export const SharedProjectView = ({ token, initial }: { token: string; initial: 
         <iframe title={project?.name ?? "Site preview"} src={site.url} className="min-h-0 flex-1 w-full border-0" allow="fullscreen" sandbox="allow-scripts allow-forms allow-same-origin allow-popups" referrerPolicy="no-referrer" />
       ) : (
         <div role="status" className="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center">
-          {unavailable ? <p>This share link is unavailable.</p> : site.status === "busy" ? <><p>Busy, try again shortly.</p><Button variant="outline" onClick={() => setAttempt(n => n + 1)}>Try again</Button></> : site.status === "error" ? <><p>We couldn’t start this site.</p><Button variant="outline" onClick={() => setAttempt(n => n + 1)}>Try again</Button></> : <><Spinner className="size-5 text-muted-foreground" /><p className="text-sm">Starting the site… ~30-60 s on first visit</p></>}
+          {unavailable ? <p>This share link is unavailable.</p> : site.status === "rate_limited" ? <><p>{site.retryAfter ? `Too many requests, try again in ${site.retryAfter} seconds.` : "Too many requests, try again in a minute."}</p><Button variant="outline" onClick={() => setAttempt(n => n + 1)}>Try again</Button></> : site.status === "busy" ? <><p>Busy, try again shortly.</p><Button variant="outline" onClick={() => setAttempt(n => n + 1)}>Try again</Button></> : site.status === "error" ? <><p>We couldn’t start this site.</p><Button variant="outline" onClick={() => setAttempt(n => n + 1)}>Try again</Button></> : <><Spinner className="size-5 text-muted-foreground" /><p className="text-sm">Starting the site… ~30-60 s on first visit</p></>}
         </div>
       )}
     </main>
