@@ -131,7 +131,9 @@ test.describe("preview terminal", () => {
       await expect.poll(async () => (await preview.boundingBox())!.height).toBeLessThan(collapsedHeight);
       await expectStablePreview();
 
-      const sash = page.locator(".split-view-vertical > .sash-container > .sash");
+      // The phone's inactive editor also keeps a vertical split mounted.
+      const split = preview.locator("xpath=ancestor::*[contains(@class, 'split-view-vertical')][1]");
+      const sash = split.locator(":scope > .sash-container > .sash");
       const handle = (await sash.boundingBox())!;
       const expandedHeight = (await preview.boundingBox())!.height;
       await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
@@ -143,8 +145,8 @@ test.describe("preview terminal", () => {
       await sash.dblclick();
       await expectStablePreview();
 
-      // Click the chevron itself to cover the logs header's collapse path.
-      await page.getByRole("button", { name: "Hide logs", exact: true }).locator("svg").click();
+      // Collapse from the logs header.
+      await page.getByRole("button", { name: "Hide logs", exact: true }).click();
       await expect(strip).toBeVisible();
       await expect.poll(async () => (await preview.boundingBox())!.height).toBeCloseTo(collapsedHeight, 0);
       await expectStablePreview();
