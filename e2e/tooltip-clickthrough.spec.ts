@@ -29,10 +29,17 @@ test.describe("composer tooltips", () => {
     await trigger.focus();
     await expect(page.getByRole("tooltip")).toBeVisible();
 
-    // The hit-target check fails if the tooltip's box sits over the button.
-    await page.getByRole("button", { name: "Send" }).click({ trial: true });
+    // `click()` retries until the tooltip closes, which would pass either way. So hit the point
+    // the tooltip covers directly, with no retry: first assert what is under it, then click it.
     const swarm = page.getByRole("radiogroup", { name: "Message mode" }).getByRole("radio", { name: "Swarm" });
-    await swarm.click();
+    const box = (await swarm.boundingBox())!;
+    const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+    const tooltip = (await page.locator('[data-slot="tooltip-content"]').boundingBox())!;
+    // Guards the premise: the tooltip's box really is over the radio, so this can fail.
+    expect(x >= tooltip.x && x <= tooltip.x + tooltip.width).toBe(true);
+    expect(y >= tooltip.y && y <= tooltip.y + tooltip.height).toBe(true);
+    expect(await swarm.evaluate((el, [px, py]) => el.contains(document.elementFromPoint(px, py)), [x, y])).toBe(true);
+    await page.mouse.click(x, y);
     await expect(swarm).toBeChecked();
   });
 });
