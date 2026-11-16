@@ -45,16 +45,24 @@ describe("helpers over run", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("falls back to the /proc tree roots without one: no PID 1, no children, inherited envs included", async () => {
-    const line = (pid: number, ppid: number, ...argv: string[]) => `${pid}\t${ppid}\t/\t${b64(...argv)}\t${b64("M=1", "PATH=/bin")}\n`;
+  it("falls back to the boot's /proc tree roots without one, never PID 1, envd or a stray process", async () => {
+    const dev = ["CODENAYA_DEV_COMMAND=npm run dev", "PATH=/bin"];
+    const line = (pid: number, ppid: number, envs: string[], ...argv: string[]) =>
+      `${pid}\t${ppid}\t/\t${b64(...argv)}\t${envs.length ? b64(...envs) : ""}\n`;
     const { sandbox, run } = fakeSandbox({
-      stdout: line(1, 0, "/sbin/init") + line(7, 1, "bash", "-c", "npm run dev") + line(8, 7, "node", "vite") + line(20, 999, "sleep", "9"),
+      stdout:
+        line(1, 0, [], "/sbin/init") +
+        line(5, 1, dev, "/usr/bin/envd") + // not PID 1, and even marked: never a command
+        line(7, 5, dev, "/bin/bash", "-l", "-c", "npm run dev") + // marked root
+        line(8, 7, dev, "node", "vite") + // marked child: its root stands for it
+        line(20, 1, ["PATH=/bin"], "sleep", "99") + // a stray root process
+        line(30, 5, ["PATH=/bin"], "/bin/bash", "-l", "-c", "npm install") + // the install
+        line(31, 30, ["PATH=/bin"], "npm", "install") +
+        line(40, 5, ["TARGET_PORT=3000"], "/bin/bash", "-l", "-c", "node /home/user/e2b-proxy.js"), // the proxy
     });
 
-    expect(await listCommands(sandbox)).toEqual([
-      { pid: 7, ppid: 1, cmd: "bash", args: ["-c", "npm run dev"], cwd: "/", envs: { M: "1", PATH: "/bin" } },
-      { pid: 20, ppid: 999, cmd: "sleep", args: ["9"], cwd: "/", envs: { M: "1", PATH: "/bin" } },
-    ]);
+    expect((await listCommands(sandbox)).map(({ pid }) => pid)).toEqual([7, 30, 40]);
+    expect((await listCommands(sandbox))[0]).toMatchObject({ ppid: 5, envs: { CODENAYA_DEV_COMMAND: "npm run dev", PATH: "/bin" } });
     expect(run).toHaveBeenCalledWith(expect.stringContaining("/proc/[0-9]*"), { timeoutMs: 10_000 });
   });
 

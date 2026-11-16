@@ -73,9 +73,11 @@ export const killProjectPreviews = async (
   userId: string,
   projectId: string,
 ) => {
-  const running = await listAll(providers, { metadata: { userId, projectId }, limit: MAX_LIVE_SANDBOXES });
   const byId = new Map(providers.map((provider) => [provider.id, provider]));
-  await Promise.all(running.map(({ provider, id }) => byId.get(provider)!.kill(id)));
+  // Only sandboxes a given provider listed can be killed through it; anything else is left alone.
+  const running = (await listAll(providers, { metadata: { userId, projectId }, limit: MAX_LIVE_SANDBOXES }))
+    .filter(({ provider }) => byId.has(provider));
+  await Promise.all(running.map(({ provider, id }) => byId.get(provider)?.kill(id)));
   return running.map(({ provider, id }) => toPublicSandboxId(provider, id));
 };
 

@@ -3,7 +3,7 @@ const mocks = vi.hoisted(() => ({ auth: vi.fn(), getOwnedSandbox: vi.fn(), recov
 vi.mock("@/features/auth/server/require-user-id", () => ({ requireUserId: mocks.auth }));
 vi.mock("@/features/sandbox-preview/server/sandbox-registry", () => ({ getOwnedSandbox: mocks.getOwnedSandbox }));
 vi.mock("@/features/sandbox-preview/server/recover-esbuild", () => ({ recoverEsbuild: mocks.recoverEsbuild }));
-import { POST } from "./route";
+import { DELETE, PATCH, POST } from "./route";
 import { resetRateLimits } from "@/lib/rate-limit";
 
 const params = { params: Promise.resolve({ sandboxId: "sbx_1" }) };
@@ -50,5 +50,33 @@ describe("POST sandbox esbuild recovery (#776)", () => {
       expect(await response.text()).not.toContain("private-command-env");
       expect(warning).toHaveBeenCalledWith("[sandbox-recovery] Dev server recovery failed");
     } finally { warning.mockRestore(); }
+  });
+});
+
+describe("malformed sandbox ids (PR3c)", () => {
+  const at = (sandboxId: string) => ({ params: Promise.resolve({ sandboxId }) });
+  const url = "http://localhost/api/sandbox/x";
+  const files = JSON.stringify({ files: [{ path: "src/App.tsx", content: "x" }] });
+
+  it.each(["../sbx", "blaxel:sbx_1", "e2b:", "sbx 1"])("answers %j with the unknown-id 404 before any lookup", async (id) => {
+    const responses = [
+      await DELETE(new Request(url, { method: "DELETE" }), at(id)),
+      await POST(new Request(url, { method: "POST", body: '{"action":"recover-esbuild"}' }), at(id)),
+      await PATCH(new Request(url, { method: "PATCH", body: files }), at(id)),
+    ];
+
+    for (const response of responses) {
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: "Sandbox not found" });
+    }
+    expect(mocks.getOwnedSandbox).not.toHaveBeenCalled();
+    expect(mocks.recoverEsbuild).not.toHaveBeenCalled();
+  });
+
+  it("answers a well-formed id nobody owns with the same 404", async () => {
+    mocks.getOwnedSandbox.mockResolvedValue(null);
+    const response = await DELETE(new Request(url, { method: "DELETE" }), at("sbx_9"));
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "Sandbox not found" });
   });
 });

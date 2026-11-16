@@ -4,9 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DEFAULT_INSTALL_COMMAND } from "./project-sandbox";
+import { DEFAULT_INSTALL_COMMAND, MAX_LIVE_SANDBOXES, atLiveSandboxCap, killProjectPreviews } from "./project-sandbox";
+import { listAll } from "./provider/fanout";
+import type { ListedSandbox, ProviderId, SandboxProvider } from "./provider/types";
 
 vi.mock("e2b", () => ({ Sandbox: {} }));
+vi.mock("./provider/fanout", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./provider/fanout")>();
+  return { ...actual, listAll: vi.fn(actual.listAll) };
+});
 
 /** Runs the install command in bash against a fake `npm` that exits with `codes` in turn. */
 const installWith = (...codes: number[]) => {
@@ -82,5 +88,43 @@ describe("sandbox template", () => {
     expect(buildScript).toContain(
       `const TEMPLATE_NAME = process.env.E2B_TEMPLATE?.trim() || "${SANDBOX_TEMPLATE}";`,
     );
+  });
+});
+
+describe("previews across providers", () => {
+  const listed = (...ids: string[]): ListedSandbox[] => ids.map((id) => ({ id, metadata: {}, endAt: new Date(0) }));
+  const fakeProvider = (id: string, running: ListedSandbox[]) =>
+    ({ id: id as ProviderId, list: vi.fn(async () => running), kill: vi.fn(async () => true) }) as unknown as SandboxProvider;
+
+  it("caps a user at MAX_LIVE_SANDBOXES in total, not per provider", async () => {
+    expect(MAX_LIVE_SANDBOXES).toBe(3);
+    const a = fakeProvider("e2b", listed("a1", "a2"));
+    const b = fakeProvider("other", listed("b1"));
+
+    expect(await atLiveSandboxCap([a, b], "u1")).toBe(true);
+    expect(await atLiveSandboxCap([a, fakeProvider("other", [])], "u1")).toBe(false);
+    expect(a.list).toHaveBeenCalledWith({ metadata: { userId: "u1" }, limit: MAX_LIVE_SANDBOXES });
+  });
+
+  it("kills the project's previews on every provider, each through its own provider", async () => {
+    const a = fakeProvider("e2b", listed("a1"));
+    const b = fakeProvider("other", listed("b1", "b2"));
+
+    expect(await killProjectPreviews([a, b], "u1", "p1")).toEqual(["e2b:a1", "other:b1", "other:b2"]);
+    expect(a.kill).toHaveBeenCalledWith("a1");
+    expect(b.kill).toHaveBeenCalledTimes(2);
+    expect(a.kill).not.toHaveBeenCalledWith("b1");
+  });
+
+  it("skips a listed sandbox whose provider was not given, instead of throwing", async () => {
+    const a = fakeProvider("e2b", []);
+    vi.mocked(listAll).mockResolvedValueOnce([
+      { id: "a1", metadata: {}, endAt: new Date(0), provider: "e2b" },
+      { id: "x1", metadata: {}, endAt: new Date(0), provider: "gone" as ProviderId },
+    ]);
+
+    expect(await killProjectPreviews([a], "u1", "p1")).toEqual(["e2b:a1"]);
+    expect(a.kill).toHaveBeenCalledTimes(1);
+    expect(a.kill).toHaveBeenCalledWith("a1");
   });
 });
