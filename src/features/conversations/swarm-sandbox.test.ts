@@ -177,22 +177,27 @@ describe("swarm sandboxes", () => {
     expect(mocks.mutation).not.toHaveBeenCalled();
   });
 
-  it("reserves every 150 s verify plus slack, skipping when no repair fits", async () => {
+  it("reserves every 150 s verify plus slack, checking without repairs when only one verify fits", async () => {
     const minutesAgo = (minutes: number) => Date.now() - minutes * 60_000;
     expect(await selfCheck(minutesAgo(8.5))).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
-    expect(await selfCheck(minutesAgo(4.5), 10 * 60_000)).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
-    expect(await selfCheck(minutesAgo(3.5))).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
+    expect(await selfCheck(minutesAgo(6))).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
+    expect(await selfCheck(minutesAgo(7), 10 * 60_000)).toEqual({ selfCheck: "skipped (time budget)", filesChanged: [] });
     for (const fn of Object.values(e2b)) expect(fn).not.toHaveBeenCalled();
     expect(mocks.mutation).not.toHaveBeenCalled();
     e2b.create.mockResolvedValue(fakeSandbox());
-    // A worker with its full 9-min budget (#649) gets both repairs.
-    await selfCheck();
-    expect(mocks.verifyAndFix.mock.calls[0][0]).toMatchObject({ maxAttempts: 2 });
+    // A worker with its full 9-min budget (#649) gets both repairs; every check ends a minute before the invoke timeout.
+    const now = Date.now();
+    await selfCheck(now);
+    expect(mocks.verifyAndFix.mock.calls[0][0]).toMatchObject({ maxAttempts: 2, deadline: now + 8 * 60_000 });
     expect(e2b.create.mock.calls[0][1].timeoutMs).toBe(8.5 * 60_000);
     await selfCheck(minutesAgo(2.5));
     expect(mocks.verifyAndFix.mock.calls[1][0]).toMatchObject({ maxAttempts: 1 });
+    // A typical 3-6 min worker still gets a check, without repairs.
+    await selfCheck(minutesAgo(4));
+    expect(mocks.verifyAndFix.mock.calls[2][0]).toMatchObject({ maxAttempts: 0 });
+    expect(e2b.create.mock.calls[2][1].timeoutMs).toBe(210_000);
     await selfCheck(minutesAgo(18.5), 25 * 60_000);
-    expect(mocks.verifyAndFix.mock.calls[2][0]).toMatchObject({ maxAttempts: 1 });
+    expect(mocks.verifyAndFix.mock.calls[3][0]).toMatchObject({ maxAttempts: 1 });
   });
 
   it("skips a worker already at its cost cap before claiming a slot or listing sandboxes", async () => {

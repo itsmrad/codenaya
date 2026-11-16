@@ -42,8 +42,7 @@ const DEFAULT_MAX_WORKER_SANDBOXES = 2;
 const FOUNDATION_TIMEOUT_MS = 5 * 60_000;
 /**
  * One verify, including the final recheck: swarm builds take 115-130 s (check-build.ts).
- * Sized so a worker inside WORKER_TIMEOUT_MS still self-checks (two rounds plus slack, 6 min);
- * a slow check can still use its full 240 s budget and overrun.
+ * A slower check stops at the worker's own deadline (`deadline` below), not its 240 s budget.
  */
 const CHECK_ROUND_MS = 150_000;
 /** Room for setup, syncing and model turns; a slow in-flight call can still overrun. */
@@ -183,9 +182,9 @@ const startWorkerSandbox = async ({
   // A worker already at its cost cap leaves the slot to the others.
   if (signal?.aborted) return { skipped: "cost budget" };
   const remaining = invokedAt + timeoutMs - Date.now();
+  // Each repair needs one more verify; with room for one verify only, it checks without repairing.
   const maxAttempts = Math.min(SELF_CHECK_ATTEMPTS, Math.floor((remaining - SELF_CHECK_SLACK_MS) / CHECK_ROUND_MS) - 1);
-  // verifyAndFix always allows at least one repair, which needs two verifies plus slack.
-  if (maxAttempts < 1) return { skipped: "time budget" };
+  if (maxAttempts < 0) return { skipped: "time budget" };
   let sandbox: Sandbox | undefined;
   try {
     const budget = await overBudget(provider);
@@ -276,6 +275,8 @@ export const selfCheckWorker = async ({
     agentTaskId,
     model,
     maxAttempts: started.maxAttempts,
+    // A check in flight stops before step.invoke's timeout, so the worker still returns its report.
+    deadline: invokedAt + timeoutMs - SELF_CHECK_SLACK_MS,
     filterErrors: ownedErrors(ownedPaths),
     allowedPaths: owns,
     onEvent,
