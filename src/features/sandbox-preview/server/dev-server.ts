@@ -1,12 +1,6 @@
-import type { Sandbox as E2bSandbox } from "e2b";
 import { appendHostFlag, detectFrameworkFromFiles } from "../utils/dev-command";
-import { fromE2bSandbox } from "./provider/e2b";
 import { listCommands, runOrThrow } from "./provider/helpers";
 import type { Sandbox, SandboxCommand } from "./provider/types";
-
-/** check-build still passes the raw E2B handle to the two helpers it uses. */
-// shortcut: PR2b drops this once check-build passes the seam's Sandbox.
-const asSeam = (sandbox: Sandbox | E2bSandbox): Sandbox => ("commands" in sandbox ? fromE2bSandbox(sandbox) : sandbox);
 
 /**
  * Set on the dev server's process to its own command line, so any server
@@ -194,8 +188,8 @@ export const PROXY_TARGET_ENV = "TARGET_PORT";
 export type PreviewDevServer = { port: number; start: DevStart };
 
 /** This sandbox's preview dev server, or null when it has no marked dev server and proxy. */
-export const findPreviewDevServer = async (sandbox: Sandbox | E2bSandbox, requestTimeoutMs?: number) => {
-  const running = await listCommands(asSeam(sandbox), { requestTimeoutMs });
+export const findPreviewDevServer = async (sandbox: Sandbox, requestTimeoutMs?: number) => {
+  const running = await listCommands(sandbox, { requestTimeoutMs });
   const port = Number(running.find((command) => command.envs?.[PROXY_TARGET_ENV])?.envs[PROXY_TARGET_ENV]);
   const dev = running.find((command) => command.envs?.[DEV_COMMAND_ENV]);
   return port && dev ? { port, start: devStartOf(dev) } : null;
@@ -214,8 +208,7 @@ const PORT_PROBE_GAP_MS = 500;
  * preview then answers 502. Left alone while an install runs: that has it stopped
  * on purpose and starts it after. Each call is bounded by `timeoutMs`. True when it restarted.
  */
-export const restartDevServerIfDown = async (raw: Sandbox | E2bSandbox, { port, start }: PreviewDevServer, timeoutMs: number) => {
-  const sandbox = asSeam(raw);
+export const restartDevServerIfDown = async (sandbox: Sandbox, { port, start }: PreviewDevServer, timeoutMs: number) => {
   for (let probe = 0; probe < PORT_PROBES; probe++) {
     if (probe) await new Promise((resolve) => setTimeout(resolve, PORT_PROBE_GAP_MS));
     if (await isPortOpen(sandbox, port)) return false;

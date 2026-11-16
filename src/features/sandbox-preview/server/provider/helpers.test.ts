@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { exists, killTree, listCommands, listProcesses, parseProcesses, remove } from "./helpers";
-import type { Sandbox } from "./types";
+import { exists, killTree, listCommands, listProcesses, parseProcesses, remove, runOrThrow } from "./helpers";
+import { type Sandbox, SandboxExitError } from "./types";
 
 const b64 = (...parts: string[]) => Buffer.from(parts.map((part) => `${part}\0`).join("")).toString("base64");
 
@@ -74,11 +74,20 @@ describe("helpers over run", () => {
     expect(run.mock.calls[0][0]).toContain("tree 42");
   });
 
-  it("tells whether a path exists, quoting it", async () => {
+  it("tells whether a path exists, a dangling symlink included, quoting it", async () => {
     const { sandbox, run } = fakeSandbox({ exitCode: 1 });
 
     expect(await exists(sandbox, "/app/it's here")).toBe(false);
-    expect(run).toHaveBeenCalledWith(`test -e '/app/it'\\''s here'`, {});
+    expect(run).toHaveBeenCalledWith(`test -e '/app/it'\\''s here' || test -L '/app/it'\\''s here'`, {});
+  });
+
+  it("throws a non-zero exit as SandboxExitError with the result, E2B's message kept", async () => {
+    const result = { exitCode: 2, stdout: "out", stderr: "err" };
+    const failing = runOrThrow(fakeSandbox(result).sandbox, "false");
+
+    await expect(failing).rejects.toBeInstanceOf(SandboxExitError);
+    await expect(failing).rejects.toMatchObject({ message: "exit status 2", name: "SandboxExitError", result });
+    expect(await runOrThrow(fakeSandbox({ stdout: "ok" }).sandbox, "true")).toMatchObject({ exitCode: 0, stdout: "ok" });
   });
 
   it("removes a path and throws when rm fails", async () => {

@@ -90,6 +90,21 @@ describe("swarm sandboxes", () => {
     expect(mutated("agentTasks:setSeedSnapshot")).toEqual([{ internalKey: "key", messageId: "m1", snapshotId: "snap" }]);
   });
 
+  it("writes the project's files, or creates the directory for an install when it has none", async () => {
+    const empty = fakeSandbox();
+    e2b.create.mockResolvedValue(empty);
+    await seedSwarmSnapshot(ids);
+    expect(empty.commands.run).toHaveBeenCalledWith("mkdir -p /home/user/app");
+    expect(empty.files.write).not.toHaveBeenCalled();
+
+    mocks.query.mockResolvedValue([{ _id: "f1", type: "file", name: "package.json", content: "{}" }]);
+    const full = fakeSandbox();
+    e2b.create.mockResolvedValue(full);
+    await seedSwarmSnapshot(ids);
+    expect(full.files.write).toHaveBeenCalledWith([{ path: "/home/user/app/package.json", data: "{}" }]);
+    expect(full.commands.run).not.toHaveBeenCalledWith("mkdir -p /home/user/app");
+  });
+
   it("skips the snapshot on an envd too old for snapshots, still killing the sandbox", async () => {
     const sandbox = fakeSandbox();
     sandbox.getInfo.mockResolvedValue({ envdVersion: "0.4.9" });

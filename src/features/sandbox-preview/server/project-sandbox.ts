@@ -1,7 +1,7 @@
-import { Sandbox, type SandboxOpts } from "e2b";
 import { z } from "zod";
 
 import { killTreeCommand, SHORT_CALL_MS, stopDevServers } from "./dev-server";
+import { DEFAULT_E2B_TEMPLATE } from "./provider/e2b";
 import { listCommands } from "./provider/helpers";
 import type { Sandbox as SeamSandbox, SandboxProvider } from "./provider/types";
 
@@ -14,10 +14,10 @@ import type { Sandbox as SeamSandbox, SandboxProvider } from "./provider/types";
  * The base image ships Node 20.9, too old for Vite 7 (#178). E2B_TEMPLATE
  * overrides the default Node 22 template built by `npm run e2b:template`.
  */
-export const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || "codenaya-node22";
+export const SANDBOX_TEMPLATE = process.env.E2B_TEMPLATE?.trim() || DEFAULT_E2B_TEMPLATE;
 
 if (!process.env.E2B_TEMPLATE?.trim()) {
-  console.warn("[project-sandbox] E2B_TEMPLATE unset; using codenaya-node22. Build it with npm run e2b:template");
+  console.warn(`[project-sandbox] E2B_TEMPLATE unset; using ${DEFAULT_E2B_TEMPLATE}. Build it with npm run e2b:template`);
 }
 
 /** Where project files are written inside the sandbox. */
@@ -75,30 +75,9 @@ export const killProjectPreviews = async (
   return running.map(({ id }) => id);
 };
 
-export const createProjectSandbox = (
-  opts: Pick<SandboxOpts, "apiKey" | "timeoutMs" | "metadata" | "network" | "requestTimeoutMs">,
-) => Sandbox.create(SANDBOX_TEMPLATE, opts);
-
 /** `files` under `dir`, as one `writeFiles` batch for the provider seam. */
 export const projectFileEntries = (files: ProjectFile[], dir = WORK_DIR) =>
   files.map((file) => ({ path: `${dir}/${file.path}`, data: file.content }));
-
-/**
- * One batched upload; E2B creates the parent directories. `timeLeft` bounds
- * each request by what is left of the caller's budget.
- */
-export const writeProjectFiles = async (
-  sandbox: Sandbox,
-  files: ProjectFile[],
-  dir = WORK_DIR,
-  timeLeft?: () => number,
-) => {
-  await sandbox.files.makeDir(dir, { requestTimeoutMs: timeLeft?.() });
-  await sandbox.files.write(
-    files.map((file) => ({ path: `${dir}/${file.path}`, data: file.content })),
-    { requestTimeoutMs: timeLeft?.() },
-  );
-};
 
 /**
  * Stops every command an earlier boot left running (install, dev server,

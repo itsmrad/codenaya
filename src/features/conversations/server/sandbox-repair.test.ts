@@ -194,9 +194,9 @@ const fakeSandbox = ({
           return answer(build(brokenIn(cwd), cwd, fs));
         }
         // The provider helpers' exists and remove.
-        const quoted = /^(test -e|rm -rf --) '(.*)'$/.exec(command);
+        const quoted = /^(test -e|rm -rf --) '([^']*)'/.exec(command);
         if (quoted) {
-          const path = quoted[2].replaceAll("'\\''", "'");
+          const path = quoted[2];
           if (quoted[1] === "test -e") return answer({ exitCode: fs.has(path) ? 0 : 1 });
           fs.delete(path);
           return answer({ exitCode: 0 });

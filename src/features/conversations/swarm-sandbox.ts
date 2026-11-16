@@ -11,7 +11,7 @@ import {
   WORK_DIR,
   projectFileEntries,
 } from "@/features/sandbox-preview/server/project-sandbox";
-import { e2bHandleOf } from "@/features/sandbox-preview/server/provider/e2b";
+import { runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
 import { getDefaultProvider, getDefaultProviderOrNull } from "@/features/sandbox-preview/server/provider/registry";
 import {
   type Sandbox,
@@ -84,12 +84,6 @@ const overBudget = async (provider: SandboxProvider) => {
   return undefined;
 };
 
-/** Snapshots need envd 0.5.0 or later in the template. */
-const supportsSnapshots = (version: string) => {
-  const [major, minor] = version.split(".").map(Number);
-  return major > 0 || minor >= 5;
-};
-
 /** The project's text files from Convex, by path. */
 const projectTextFiles = async (internalKey: string, projectId: Id<"projects">) => {
   const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
@@ -126,10 +120,11 @@ export const seedSwarmSnapshot = async ({
     sandbox = await createSwarmSandbox(
       provider, null, { projectId, messageId, purpose: "swarm-foundation" }, FOUNDATION_TIMEOUT_MS,
     );
-    // E2B only: the template's envd must be new enough to snapshot.
-    const handle = e2bHandleOf(sandbox);
-    if (handle && !supportsSnapshots((await handle.getInfo({ requestTimeoutMs: CALL_TIMEOUT_MS })).envdVersion)) return null;
-    await sandbox.writeFiles(projectFileEntries(await projectTextFiles(internalKey, projectId)));
+    if ((await sandbox.info({ requestTimeoutMs: CALL_TIMEOUT_MS })).canSnapshot === false) return null;
+    const files = await projectTextFiles(internalKey, projectId);
+    // An empty batch writes nothing, so the install still needs its directory.
+    if (files.length) await sandbox.writeFiles(projectFileEntries(files));
+    else await runOrThrow(sandbox, `mkdir -p ${WORK_DIR}`);
     const install = await sandbox.run(DEFAULT_INSTALL_COMMAND, {
       cwd: WORK_DIR, timeoutMs: INSTALL_TIMEOUT_MS, requestTimeoutMs: INSTALL_TIMEOUT_MS,
     });

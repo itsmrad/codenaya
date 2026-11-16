@@ -35,7 +35,7 @@ vi.mock("e2b", () => ({
   },
 }));
 
-import { DEFAULT_E2B_TEMPLATE, createE2bProvider, e2bHandleOf } from "./e2b";
+import { DEFAULT_E2B_TEMPLATE, createE2bProvider } from "./e2b";
 import { SandboxConfigError, SandboxRateLimitError, SandboxTimeoutError } from "./types";
 
 const fakeE2bSandbox = () => ({
@@ -148,12 +148,14 @@ describe("E2B provider", () => {
       return { e2b, sandbox: await provider.connect("sbx1") };
     };
 
-    it("keeps the raw handle for the seam's E2B-only callers", async () => {
-      const { e2b, sandbox } = await connect();
+    it.each([["0.5.2", true], ["1.0.0", true], ["0.4.9", false], [undefined, undefined]])(
+      "says whether envd %s can snapshot", async (envdVersion, canSnapshot) => {
+        const { e2b, sandbox } = await connect();
+        e2b.getInfo.mockResolvedValue({ metadata: {}, endAt: new Date(0), envdVersion });
 
-      expect(e2bHandleOf(sandbox)).toBe(e2b);
-      expect(e2bHandleOf({ ...sandbox })).toBeNull();
-    });
+        expect((await sandbox.info()).canSnapshot).toBe(canSnapshot);
+      },
+    );
 
     it("resolves a non-zero exit with its code and output", async () => {
       const { e2b, sandbox } = await connect();
@@ -185,7 +187,6 @@ describe("E2B provider", () => {
       e2b.commands.kill.mockResolvedValue(true);
       e2b.commands.run.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
 
-      expect(e2bHandleOf(sandbox)).toBe(e2b);
       expect(await sandbox.listCommands!()).toEqual([command]);
       expect(e2b.commands.list).toHaveBeenCalledWith();
       await sandbox.listCommands!({ requestTimeoutMs: 5 });
