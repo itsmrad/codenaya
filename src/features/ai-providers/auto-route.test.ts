@@ -4,9 +4,11 @@ import { AGENT_MODELS } from "../conversations/agent-models";
 import { buildPlanMessage } from "../conversations/plan-mode";
 import type { ModelAccess } from "./catalog";
 import {
+  AUTO_MODEL,
   EDIT_MAX_CHARS,
   MODEL_ROUTES,
   type RunTask,
+  autoMinRunCredits,
   autoRouteModel,
   classifyRun,
 } from "./auto-route";
@@ -154,5 +156,49 @@ describe("autoRouteModel", () => {
         expect(autoRouteModel(models, "build", empty)?.id).toBe("anthropic/claude-sonnet-5.5");
       }
     });
+  });
+});
+
+describe("autoMinRunCredits", () => {
+  const model = (id: string, usdPerMTok?: number) => ({
+    id,
+    access: "everyone" as const,
+    vision: false,
+    ...(usdPerMTok === undefined ? {} : {
+      pricing: { mode: "blended" as const, usdPerMTok },
+    }),
+  });
+
+  it("uses the cheapest pickable route, ignoring Auto, hidden and promo entries", () => {
+    expect(autoMinRunCredits([
+      AUTO_MODEL,
+      model("expensive", 8),
+      model("cheap", 2),
+      model("middle", 4),
+      { ...model("hidden"), hidden: true },
+      { ...model("promo"), access: "promo_counted" },
+    ])).toBe(10);
+  });
+
+  it("counts an unpriced route as 1 credit", () => {
+    expect(autoMinRunCredits([model("priced", 4), model("unpriced")])).toBe(1);
+  });
+
+  it("falls back to 1 with no candidates or a catalog that has not loaded", () => {
+    expect(autoMinRunCredits([])).toBe(1);
+    expect(autoMinRunCredits(undefined)).toBe(1);
+    expect(autoMinRunCredits([AUTO_MODEL, { ...model("hidden"), hidden: true }])).toBe(1);
+  });
+
+  it("needs 20 when 15 remain and every route needs at least 20", () => {
+    const needed = autoMinRunCredits([model("first", 4), model("second", 4)]);
+    expect(needed).toBe(20);
+    expect(15 < needed).toBe(true);
+  });
+
+  it("uses the cheaper affordable route when one exists", () => {
+    const needed = autoMinRunCredits([model("expensive", 4), model("affordable", 1)]);
+    expect(needed).toBe(5);
+    expect(15 < needed).toBe(false);
   });
 });

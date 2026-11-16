@@ -1,3 +1,4 @@
+import { minRunCredits } from "../billing/credits";
 import { buildPlanMessage } from "../conversations/plan-mode";
 import { type ModelPricing, type PublicCatalogModel, blendedUsdPerMTok, pickableModels } from "./catalog";
 
@@ -76,6 +77,13 @@ type RoutableModel = Pick<PublicCatalogModel, "id" | "access" | "vision"> & {
   hidden?: boolean;
   pricing?: ModelPricing;
 };
+
+/** Cheapest text Auto fallback, before the server filters by the remaining balance. */
+export function autoMinRunCredits(models: readonly RoutableModel[] = []): number {
+  // Pickers prepend the synthetic Auto entry, which is not a priced route.
+  const candidates = pickableModels(models).filter((model) => model.id !== AUTO_MODEL_ID);
+  return candidates.length ? Math.min(...candidates.map((model) => minRunCredits(model.pricing))) : 1;
+}
 
 /** A model's blended price; capability's stand-in (unpriced, as client-side, is $0). */
 const priceOf = (model: RoutableModel) => (model.pricing ? blendedUsdPerMTok(model.pricing) : 0);
