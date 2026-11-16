@@ -589,6 +589,30 @@ describe("verifyAndFix", () => {
     expect(convexFiles.has("src/routeTree.gen.ts")).toBe(false);
   });
 
+  it("checks without repairing when maxAttempts is 0", async () => {
+    const sandbox = fakeSandbox();
+    const requests = modelReplies();
+
+    const { result } = await run(sandbox, { maxAttempts: 0 });
+
+    expect(result).toMatchObject({ status: "failed", attempts: 0, filesChanged: [] });
+    expect(result.errors[0]).toMatchObject({ file: "src/App.tsx" });
+    expect(requests).toHaveLength(0);
+    expect(sandbox.builds).toHaveLength(1);
+  });
+
+  it("stops a check at the caller's deadline instead of its own 240 s budget (#649)", async () => {
+    const sandbox = fakeSandbox();
+    const requests = modelReplies();
+
+    const { result } = await run(sandbox, { deadline: Date.now() - 1 });
+
+    expect(result).toMatchObject({ status: "unverified", attempts: 0 });
+    expect(result.reason).toMatch(/could not finish/);
+    expect(sandbox.builds).toHaveLength(0);
+    expect(requests).toHaveLength(0);
+  });
+
   it.each([
     ["the check cannot finish", () => fakeSandbox({ install: () => new Error("sandbox connection reset") })],
     ["the sandbox's files cannot be listed", () => fakeSandbox({ find: () => new Error("sandbox gone") })],

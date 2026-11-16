@@ -470,6 +470,8 @@ type CheckOptions = {
   sourceDir?: string;
   /** The project's secret values, redacted from whatever the check returns. */
   secrets?: string[];
+  /** Finish by this time (epoch ms) when it is sooner than the step's own budget, e.g. a caller's invoke timeout. */
+  deadline?: number;
 };
 
 /**
@@ -490,6 +492,7 @@ export const checkProjectBuild = async ({
   sandbox: suppliedSandbox,
   sourceDir,
   secrets = [],
+  deadline = Infinity,
 }: CheckOptions): Promise<string> => {
   const problems = [
     ...missingReferencedFiles(files),
@@ -511,7 +514,7 @@ export const checkProjectBuild = async ({
     return `${BUILD_NOT_CHECKED}\nStatic checks passed. checkBuild only builds Vite and Next.js projects, so this one was not built.` + notes;
   }
 
-  const job: BuildJob = { files, paths, deadline: Date.now() + STEP_BUDGET_MS, secrets, notes, framework };
+  const job: BuildJob = { files, paths, deadline: Math.min(Date.now() + STEP_BUDGET_MS, deadline), secrets, notes, framework };
   if (suppliedSandbox) {
     // Snapshot files must stay inside this check's directory.
     if (!files.every(({ path }) => isSafeProjectPath(path))) {

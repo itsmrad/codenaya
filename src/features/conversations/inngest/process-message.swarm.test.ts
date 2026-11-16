@@ -128,7 +128,7 @@ describe("processMessage swarm mode", () => {
     // Each owned path's parent folders exist before any worker starts; the path itself is its owner's.
     expect(mutationArgs("system:createFolder").map(({ name }) => name)).toEqual(["src", "components"]);
     expect(outcome.invocations).toEqual([
-      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_0", parentMessageId: "m1", ownerId: "user_1", siblingOwnedPaths: ["src/components/nav.tsx"] }) }, timeout: "12m" }),
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_0", parentMessageId: "m1", ownerId: "user_1", siblingOwnedPaths: ["src/components/nav.tsx"] }) }, timeout: "9m" }),
       expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_1", siblingOwnedPaths: ["src/pages"] }) } }),
     ]);
 
@@ -167,7 +167,7 @@ describe("processMessage swarm mode", () => {
     ]);
     expect(outcome.invocations).toEqual([
       expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_0", depth: 1 }) }, timeout: "25m" }),
-      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_1", depth: 1 }) }, timeout: "12m" }),
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_1", depth: 1 }) }, timeout: "9m" }),
     ]);
     expect(toolResults(outcome.inferenceBodies)[0]).toContain("Files written: src/pages/home.tsx, src/pages/about.tsx");
   });
