@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parsePublicSandboxIdOrNull, toPublicSandboxId } from "./ids";
+import { canonicalSandboxIdOrNull, clientSandboxId, parsePublicSandboxIdOrNull, toPublicSandboxId } from "./ids";
 
 describe("public sandbox ids", () => {
   it("round-trips a prefixed id", () => {
@@ -23,5 +23,16 @@ describe("public sandbox ids", () => {
     `e2b:${"a".repeat(129)}`,
   ])("rejects %j", (id) => {
     expect(parsePublicSandboxIdOrNull(id)).toBeNull();
+  });
+
+  it("gives the client E2B's id unprefixed until another provider can host a sandbox", () => {
+    expect(clientSandboxId({ provider: "e2b", id: "abc" }, false)).toBe("abc");
+    expect(clientSandboxId({ provider: "e2b", id: "abc" }, true)).toBe("e2b:abc");
+  });
+
+  it("keys a sandbox the same with or without its prefix, and nothing for a malformed id", () => {
+    expect(canonicalSandboxIdOrNull("abc")).toBe("e2b:abc");
+    expect(canonicalSandboxIdOrNull("e2b:abc")).toBe("e2b:abc");
+    expect(canonicalSandboxIdOrNull("blaxel:abc")).toBeNull();
   });
 });

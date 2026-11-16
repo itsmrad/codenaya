@@ -45,14 +45,15 @@ describe("helpers over run", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("falls back to every /proc process, children and inherited envs included, without one", async () => {
+  it("falls back to the /proc tree roots without one: no PID 1, no children, inherited envs included", async () => {
+    const line = (pid: number, ppid: number, ...argv: string[]) => `${pid}\t${ppid}\t/\t${b64(...argv)}\t${b64("M=1", "PATH=/bin")}\n`;
     const { sandbox, run } = fakeSandbox({
-      stdout: `7\t1\t/\t${b64("bash", "-c", "npm run dev")}\t${b64("M=1", "PATH=/bin")}\n8\t7\t/\t${b64("node", "vite")}\t${b64("M=1", "PATH=/bin")}\n`,
+      stdout: line(1, 0, "/sbin/init") + line(7, 1, "bash", "-c", "npm run dev") + line(8, 7, "node", "vite") + line(20, 999, "sleep", "9"),
     });
 
     expect(await listCommands(sandbox)).toEqual([
       { pid: 7, ppid: 1, cmd: "bash", args: ["-c", "npm run dev"], cwd: "/", envs: { M: "1", PATH: "/bin" } },
-      { pid: 8, ppid: 7, cmd: "node", args: ["vite"], cwd: "/", envs: { M: "1", PATH: "/bin" } },
+      { pid: 20, ppid: 999, cmd: "sleep", args: ["9"], cwd: "/", envs: { M: "1", PATH: "/bin" } },
     ]);
     expect(run).toHaveBeenCalledWith(expect.stringContaining("/proc/[0-9]*"), { timeoutMs: 10_000 });
   });

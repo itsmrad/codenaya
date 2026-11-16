@@ -28,7 +28,13 @@ import {
   stopSandboxCommands,
 } from "@/features/sandbox-preview/server/project-sandbox";
 import { runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
-import { getDefaultProviderOrNull } from "@/features/sandbox-preview/server/provider/registry";
+import { parseProviderConfig } from "@/features/sandbox-preview/server/provider/config";
+import { clientSandboxId, toPublicSandboxId } from "@/features/sandbox-preview/server/provider/ids";
+import {
+  createSandbox,
+  getConfiguredProviders,
+  isMultiProvider,
+} from "@/features/sandbox-preview/server/provider/registry";
 import {
   type Sandbox,
   SandboxConfigError,
@@ -152,9 +158,11 @@ export async function POST(request: Request) {
     return rateLimitedResponse(rateLimit);
   }
 
-  const provider = getDefaultProviderOrNull();
+  // Read per request: the cap, the kill and the lookup span every configured provider.
+  const providerConfig = parseProviderConfig();
+  const providers = getConfiguredProviders(providerConfig);
 
-  if (!provider) {
+  if (!providers.length) {
     return Response.json(
       {
         error:
@@ -200,12 +208,12 @@ export async function POST(request: Request) {
 
   // A new boot replaces this project's earlier preview, which may be an orphan.
   if (projectId && !resumeSandboxId) {
-    const killed = await killProjectPreviews(provider, userId, projectId);
+    const killed = await killProjectPreviews(providers, userId, projectId);
     killed.forEach(forgetSandbox);
   }
 
   // A resumed boot reuses a sandbox the cap already counts.
-  if (!resumeSandboxId && (await atLiveSandboxCap(provider, userId))) {
+  if (!resumeSandboxId && (await atLiveSandboxCap(providers, userId))) {
     return Response.json(
       {
         error:
@@ -396,12 +404,12 @@ export async function POST(request: Request) {
           await stopSandboxCommands(sandbox);
         } else {
           send({ type: "output", data: "Creating E2B sandbox...\n" });
-          sandbox = await provider.create({
+          sandbox = await createSandbox({
             timeoutMs: SANDBOX_TIMEOUT_MS,
             // checkBuild finds the project's warm preview by these tags (#465).
             metadata: projectId ? { userId, projectId } : { userId },
             localHostHeader: true,
-          });
+          }, (notice) => send({ type: "output", data: `${notice}\n` }), providerConfig);
         }
 
         // File syncs reuse this handle instead of reconnecting (#179).
@@ -582,7 +590,7 @@ export async function POST(request: Request) {
         if (projectId && internalKey) void recordSandboxRunning(internalKey, projectId, bootHistory);
         send({
           type: "ready",
-          sandboxId: sandbox.id,
+          sandboxId: clientSandboxId(sandbox, isMultiProvider(providerConfig)),
           previewUrl,
         });
 
@@ -618,7 +626,7 @@ export async function POST(request: Request) {
         if (sandbox && !handedOff && !request.signal.aborted && budget.left() <= 0) {
           handedOff = true;
           rememberSandbox(sandbox, userId);
-          send({ type: "resume", sandboxId: sandbox.id });
+          send({ type: "resume", sandboxId: clientSandboxId(sandbox, isMultiProvider(providerConfig)) });
           return;
         }
 
@@ -648,7 +656,7 @@ export async function POST(request: Request) {
       } finally {
         reinstall.cancel();
         if (sandbox && !handedOff) {
-          forgetSandbox(sandbox.id);
+          forgetSandbox(toPublicSandboxId(sandbox.provider, sandbox.id));
         }
 
         // Release any output the redactor is holding back, otherwise the last
