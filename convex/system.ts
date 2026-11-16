@@ -18,6 +18,7 @@ import { closeOpenTasks } from "./agentTasks";
 import { MAX_CHECKPOINT_FILES, createCheckpoint } from "./checkpoints";
 import { runsSince, syncedAt } from "./githubSync";
 import { appError } from "./errors";
+import { assertRunWriting } from "./runWrites";
 import { validateInternalKey } from "./internalKey";
 import { mergeMessageSteps } from "./messageSteps";
 import {
@@ -153,6 +154,7 @@ export const updateMessageContent = mutation({
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    if ((await ctx.db.get("messages", args.messageId))?.status === "cancelled") return;
 
     // A run the loop guard stopped (#452) did not succeed either.
     await recordRunFinished(
@@ -210,6 +212,7 @@ export const updateMessageStatus = mutation({
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    if ((await ctx.db.get("messages", args.messageId))?.status === "cancelled") return;
 
     if (args.status !== "processing") {
       await recordRunFinished(
@@ -379,12 +382,14 @@ export const getFileById = query({
 export const updateFile = mutation({
   args: {
     internalKey: v.string(),
+    messageId: v.optional(v.id("messages")),
     projectId: v.id("projects"),
     fileId: v.id("files"),
     content: v.string(),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertRunWriting(ctx, args.projectId, args.messageId);
 
     const file = await getProjectFile(ctx, args.projectId, args.fileId);
 
@@ -404,6 +409,7 @@ export const updateFile = mutation({
 export const createFile = mutation({
   args: {
     internalKey: v.string(),
+    messageId: v.optional(v.id("messages")),
     projectId: v.id("projects"),
     name: v.string(),
     content: v.string(),
@@ -411,6 +417,7 @@ export const createFile = mutation({
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertRunWriting(ctx, args.projectId, args.messageId);
     await assertProjectFolder(ctx, args.projectId, args.parentId);
 
     if (await findSibling(ctx, { ...args, type: "file" })) {
@@ -437,6 +444,7 @@ export const createFile = mutation({
 export const createFiles = mutation({
   args: {
     internalKey: v.string(),
+    messageId: v.optional(v.id("messages")),
     projectId: v.id("projects"),
     parentId: v.optional(v.id("files")),
     files: v.array(
@@ -448,6 +456,7 @@ export const createFiles = mutation({
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertRunWriting(ctx, args.projectId, args.messageId);
     await assertProjectFolder(ctx, args.projectId, args.parentId);
 
     const results: { name: string; fileId: string; error?: string }[] = [];
@@ -500,12 +509,14 @@ export const createFiles = mutation({
 export const createFolder = mutation({
   args: {
     internalKey: v.string(),
+    messageId: v.optional(v.id("messages")),
     projectId: v.id("projects"),
     name: v.string(),
     parentId: v.optional(v.id("files")),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertRunWriting(ctx, args.projectId, args.messageId);
     await assertProjectFolder(ctx, args.projectId, args.parentId);
 
     if (await findSibling(ctx, { ...args, type: "folder" })) {
@@ -530,12 +541,14 @@ export const createFolder = mutation({
 export const renameFile = mutation({
   args: {
     internalKey: v.string(),
+    messageId: v.optional(v.id("messages")),
     projectId: v.id("projects"),
     fileId: v.id("files"),
     newName: v.string(),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertRunWriting(ctx, args.projectId, args.messageId);
 
     const file = await getProjectFile(ctx, args.projectId, args.fileId);
     if (!file) {
@@ -562,11 +575,13 @@ export const renameFile = mutation({
 export const deleteFile = mutation({
   args: {
     internalKey: v.string(),
+    messageId: v.optional(v.id("messages")),
     projectId: v.id("projects"),
     fileId: v.id("files"),
   },
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
+    await assertRunWriting(ctx, args.projectId, args.messageId);
 
     const file = await getProjectFile(ctx, args.projectId, args.fileId);
     if (!file) {

@@ -10,6 +10,7 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 interface CreateFolderToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  messageId?: Id<"messages">;
 }
 
 const paramsSchema = z.object({
@@ -20,6 +21,7 @@ const paramsSchema = z.object({
 export const createCreateFolderTool = ({
   projectId,
   internalKey,
+  messageId,
 }: CreateFolderToolOptions) => {
   return createTool({
     name: "createFolder",
@@ -64,6 +66,7 @@ export const createCreateFolderTool = ({
           let folderId;
           try {
             folderId = await convex.mutation(api.system.createFolder, {
+              messageId,
               internalKey,
               projectId,
               name,

@@ -132,6 +132,17 @@ describe("path resolution", () => {
     },
   );
 
+  it("passes the run fence into the write inside the tool step", async () => {
+    const messageId = "cancelled-message" as Id<"messages">;
+    mocks.mutation.mockRejectedValueOnce(new Error("This run has stopped writing"));
+    const result = await createUpdateFileTool({ ...opts, messageId }).handler(
+      { path: "src/App.tsx", content: "late" }, ctx,
+    );
+    expect(result).toContain("This run has stopped writing");
+    expect(mocks.mutation.mock.calls[0][1]).toMatchObject({ messageId });
+    expect(db.rows.find((row) => row.name === "App.tsx")?.content).toBe("app");
+  });
+
   it("updates, renames and deletes by path", async () => {
     expect(await createUpdateFileTool(opts).handler({ path: "src/App.tsx", content: "v2" }, ctx)).toBe(
       'File "src/App.tsx" updated successfully',

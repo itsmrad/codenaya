@@ -12,6 +12,7 @@ import { syntaxErrorNote } from "./syntax-error";
 interface CreateFilesToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  messageId?: Id<"messages">;
   registry?: RegistryCheck;
 }
 
@@ -30,6 +31,7 @@ const paramsSchema = z.object({
 export const createCreateFilesTool = ({
   projectId,
   internalKey,
+  messageId,
   registry = createRegistryCheck(),
 }: CreateFilesToolOptions) => {
   return createTool({
@@ -92,6 +94,7 @@ export const createCreateFilesTool = ({
           const prepared = checkedFiles.map((file) => ({ ...file, ...rewriteIcons(file.content, file.name) }));
           const files = prepared.map(({ name, content }) => ({ name, content }));
           const results = await convex.mutation(api.system.createFiles, {
+            messageId,
             internalKey,
             projectId,
             parentId: resolvedParentId,

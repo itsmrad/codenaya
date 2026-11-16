@@ -95,7 +95,7 @@ export const createDelegateTasksTool = ({
         const paths = plan.tasks.flatMap((task) => task.ownedPaths);
         const locked = paths.map((path) => lockedPathError(index, path, true)).find(Boolean);
         if (locked) return locked;
-        const ensureFolder = folderEnsurer(internalKey, projectId, folderPaths(index));
+        const ensureFolder = folderEnsurer(internalKey, projectId, folderPaths(index), messageId);
         for (const path of paths) await ensureFolder(splitPath(path).dir);
         return null;
       });

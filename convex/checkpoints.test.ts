@@ -104,6 +104,75 @@ describe("checkpoints", () => {
     vi.useRealTimers();
   });
 
+  test("stop and undo restores only after cancellation, fences late writes, and supports Undo", async () => {
+    const { t, alice } = setup();
+    const { projectId, conversationId, index } = await seedProject(t);
+    const messageId = await addRun(t, projectId, conversationId);
+    await snapshot(t, projectId, messageId);
+    const before = await tree(t, projectId);
+    await t.run((ctx) => ctx.db.patch("messages", messageId, { status: "processing" }));
+    const args = { internalKey: INTERNAL_KEY, ownerId: ALICE, messageId };
+    const write = { internalKey: INTERNAL_KEY, projectId, messageId, fileId: index, content: "changed" };
+    await t.mutation(api.system.updateFile, write);
+    await expect(t.mutation(api.checkpoints.restoreStoppedRun, args)).rejects.toThrow(/Stop/);
+    expect(await tree(t, projectId)).not.toEqual(before);
+    await t.mutation(api.system.updateMessageStatus, {
+      internalKey: INTERNAL_KEY, messageId, status: "cancelled",
+    });
+    const otherRun = await addRun(t, projectId, conversationId);
+    await t.run((ctx) => ctx.db.patch("messages", otherRun, { status: "processing" }));
+    await expect(t.mutation(api.checkpoints.restoreStoppedRun, args)).rejects.toThrow(/Stop/);
+    await t.run((ctx) => ctx.db.patch("messages", otherRun, { status: "cancelled" }));
+    const stopped = await tree(t, projectId);
+    const undoCheckpointId = await t.mutation(api.checkpoints.restoreStoppedRun, args);
+    expect(await tree(t, projectId)).toEqual(before);
+    await expect(t.mutation(api.system.updateFile, write)).rejects.toThrow(/stopped writing/);
+    await t.mutation(api.system.updateMessageContent, { internalKey: INTERNAL_KEY, messageId, content: "late" });
+    await t.mutation(api.system.updateMessageStatus, { internalKey: INTERNAL_KEY, messageId, status: "processing" });
+    expect((await t.run((ctx) => ctx.db.get("messages", messageId)))?.status).toBe("cancelled");
+    expect(await tree(t, projectId)).toEqual(before);
+    expect(undoCheckpointId).not.toBeNull();
+    await alice.mutation(api.checkpoints.restore, { checkpointId: undoCheckpointId! });
+    expect(await tree(t, projectId)).toEqual(stopped);
+  });
+
+  test("stop and undo refuses a non-owner and does nothing without a checkpoint", async () => {
+    const { t } = setup();
+    const { projectId, conversationId } = await seedProject(t);
+    const messageId = await addRun(t, projectId, conversationId);
+    await t.run((ctx) => ctx.db.patch("messages", messageId, { status: "cancelled" }));
+    const before = await tree(t, projectId);
+    await expect(t.mutation(api.checkpoints.restoreStoppedRun, {
+      internalKey: INTERNAL_KEY, ownerId: BOB, messageId,
+    })).rejects.toThrow();
+    expect(await t.mutation(api.checkpoints.restoreStoppedRun, {
+      internalKey: INTERNAL_KEY, ownerId: ALICE, messageId,
+    })).toBeNull();
+    expect(await tree(t, projectId)).toEqual(before);
+  });
+
+  test("plain Stop fences every file mutation and a different project's message", async () => {
+    const { t } = setup();
+    const { projectId, conversationId, index } = await seedProject(t);
+    const messageId = await addRun(t, projectId, conversationId);
+    await t.run((ctx) => ctx.db.patch("messages", messageId, { status: "cancelled" }));
+    const before = await tree(t, projectId);
+    const args = { internalKey: INTERNAL_KEY, projectId, messageId };
+    const writes = [
+      () => t.mutation(api.system.createFile, { ...args, name: "late.ts", content: "late" }),
+      () => t.mutation(api.system.createFiles, { ...args, files: [{ name: "late.ts", content: "late" }] }),
+      () => t.mutation(api.system.createFolder, { ...args, name: "late" }),
+      () => t.mutation(api.system.renameFile, { ...args, fileId: index, newName: "late.ts" }),
+      () => t.mutation(api.system.deleteFile, { ...args, fileId: index }),
+    ];
+    for (const write of writes) await expect(write()).rejects.toThrow(/stopped writing/);
+    const other = await seedProject(t);
+    await t.run((ctx) => ctx.db.patch("messages", messageId, { status: "processing" }));
+    await expect(t.mutation(api.system.createFolder, { ...args, projectId: other.projectId, name: "late" }))
+      .rejects.toThrow(/stopped writing/);
+    expect(await tree(t, projectId)).toEqual(before);
+  });
+
   test("restores adds, edits, deletes and folders in one round-trip", async () => {
     vi.useFakeTimers();
     const { t, alice } = setup();

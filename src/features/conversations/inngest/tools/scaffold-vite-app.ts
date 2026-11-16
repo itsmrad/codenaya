@@ -50,6 +50,7 @@ const upgradeKeptFiles = async (
   projectId: Id<"projects">,
   index: ProjectIndex,
   kept: string[],
+  messageId?: Id<"messages">,
 ) => {
   const notes: string[] = [];
   // package.json last: the preview reinstalls when it changes.
@@ -93,7 +94,7 @@ const upgradeKeptFiles = async (
       continue;
     }
 
-    await convex.mutation(api.system.updateFile, { internalKey, projectId, fileId: current._id, content: next });
+    await convex.mutation(api.system.updateFile, { messageId, internalKey, projectId, fileId: current._id, content: next });
     notes.push(`Updated ${path}: ${change}.`);
   }
   return notes;
@@ -102,11 +103,13 @@ const upgradeKeptFiles = async (
 interface ScaffoldViteAppToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  messageId?: Id<"messages">;
 }
 
 export const createScaffoldViteAppTool = ({
   projectId,
   internalKey,
+  messageId,
 }: ScaffoldViteAppToolOptions) => {
   return createTool({
     name: "scaffoldViteApp",
@@ -120,7 +123,7 @@ export const createScaffoldViteAppTool = ({
       try {
         return await toolStep?.run("scaffold-vite-app", async () => {
           const index = indexProjectFiles(await getProjectFiles(internalKey, projectId));
-          const ensureFolder = folderEnsurer(internalKey, projectId, folderPaths(index));
+          const ensureFolder = folderEnsurer(internalKey, projectId, folderPaths(index), messageId);
 
           const byDir = new Map<string, { name: string; content: string }[]>();
           const locked: string[] = [];
@@ -159,6 +162,7 @@ export const createScaffoldViteAppTool = ({
               continue;
             }
             const results = await convex.mutation(api.system.createFiles, {
+              messageId,
               internalKey,
               projectId,
               parentId,
@@ -183,7 +187,7 @@ export const createScaffoldViteAppTool = ({
               : `Scaffolded the Vite + React starter. Created: ${created.join(", ") || "nothing"}.`,
             kept.length > 0 ? `Kept existing: ${kept.join(", ")}.` : "",
             // Not when blocked: an incomplete starter must not get a package.json bump and reinstall.
-            ...(blocked ? [] : await upgradeKeptFiles(internalKey, projectId, index, kept)),
+            ...(blocked ? [] : await upgradeKeptFiles(internalKey, projectId, index, kept, messageId)),
             locked.length > 0 ? `Not written, locked by the user: ${locked.join(", ")}. Don't modify them.` : "",
             blocked
               ? "Tell the user the Vite starter needs these paths unlocked."

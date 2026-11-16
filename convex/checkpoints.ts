@@ -6,6 +6,7 @@ import { runWrittenPaths } from "../src/features/conversations/agent-steps";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { validateInternalKey } from "./internalKey";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { projectChanges, validateComparisonPath } from "./checkpointComparison";
@@ -346,6 +347,37 @@ export const restore = mutation({
   handler: async (ctx, args) => {
     const checkpoint = await getOwnedCheckpoint(ctx, args.checkpointId);
     await assertNoRunningAgent(ctx, checkpoint.projectId, "restoring");
+    const undoCheckpointId = await createCheckpoint(ctx, {
+      projectId: checkpoint.projectId,
+      label: "Before restore",
+      keep: checkpoint._id,
+    });
+    await restoreCheckpoint(ctx, checkpoint);
+    return undoCheckpointId;
+  },
+});
+
+/** Server cancel route: restore only a stopped run owned by the authenticated user. */
+export const restoreStoppedRun = mutation({
+  args: {
+    internalKey: v.string(),
+    ownerId: v.string(),
+    messageId: v.id("messages"),
+  },
+  returns: v.union(v.id("checkpoints"), v.null()),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const message = await ctx.db.get("messages", args.messageId);
+    if (!message) throw appError("NOT_FOUND", "Message not found");
+    await getOwnedProject(ctx, message.projectId, args.ownerId);
+    await assertNoRunningAgent(ctx, message.projectId, "restoring");
+    if (message.status !== "cancelled") {
+      throw appError("CONFLICT", "Stop the run before restoring");
+    }
+    const checkpoint = await ctx.db.query("checkpoints")
+      .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
+      .first();
+    if (!checkpoint) return null;
     const undoCheckpointId = await createCheckpoint(ctx, {
       projectId: checkpoint.projectId,
       label: "Before restore",

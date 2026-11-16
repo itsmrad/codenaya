@@ -28,6 +28,8 @@ test.describe.serial("checkpoints", () => {
 
   const apiKey = `sk-e2e-checkpoint-${Date.now()}-wxyz`;
   const label = `Checkpoint run ${Date.now()}`;
+  let stopAndUndoRun = false;
+  let releaseReply: (() => void) | undefined;
   let stub: Awaited<ReturnType<typeof startStubProvider>>;
   let page: Page;
   let keyId: Id<"aiProviderKeys">;
@@ -41,10 +43,16 @@ test.describe.serial("checkpoints", () => {
   test.beforeAll(async ({ browser }) => {
     stub = await startStubProvider(apiKey, {
       reply: STUB_REPLY,
-      toolCall: {
+      toolCall: () => ({
         name: "createFiles",
-        arguments: { parentId: "", files: [{ name: ADDED_FILE, content: "export {};\n" }] },
-      },
+        arguments: { parentId: "", files: [
+          { name: ADDED_FILE, content: "export {};\n" },
+          ...(stopAndUndoRun ? [{ name: "second-added.ts", content: "export const second = true;\n" }] : []),
+        ] },
+      }),
+      hold: (request) => stopAndUndoRun && request.tools?.length && request.messages.some((m) => m.role === "tool")
+        ? new Promise<void>((resolve) => { releaseReply = resolve; })
+        : undefined,
     });
     page = await browser.newPage();
     await signIn(page);
@@ -77,6 +85,7 @@ test.describe.serial("checkpoints", () => {
     if (keyId) await user.mutation(api.aiProviders.remove, { keyId }).catch(() => {});
     if (projectId) await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});
     await page?.close();
+    releaseReply?.();
     stub?.server.close();
   });
 
@@ -124,4 +133,37 @@ test.describe.serial("checkpoints", () => {
 
     expect(errors.filter((error) => !error.includes("webcontainer-api.io"))).toEqual([]);
   });
+
+  test("Stop & undo restores a processing run without confirmation", async () => {
+    test.setTimeout(180_000);
+    await page.getByRole("dialog", { name: "Version history" }).press("Escape");
+    const files = async () => {
+      const client = await userConvexClient(page);
+      return (await client.query(api.files.getFilesWithUrls, { projectId }))
+        .map(({ name, type, content }) => ({ name, type, content }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    };
+    const before = await files();
+    await expect(page.getByRole("button", { name: "Stop & undo", exact: true })).toHaveCount(0);
+    stopAndUndoRun = true;
+    try {
+      const input = page.getByPlaceholder("Describe a change or ask a question…");
+      await input.fill("Add several files for the stop and undo test");
+      await input.press("Enter");
+      await expect.poll(fileNames, { timeout: 120_000 }).toContain("second-added.ts");
+      // Keep the provider's reply pending: cancellation must also fence its late completion.
+      await expect.poll(() => Boolean(releaseReply)).toBe(true);
+      const controls = page.getByRole("button", { name: "Stop & undo", exact: true });
+      await expect(controls).toHaveCount(2);
+      await controls.last().click();
+      await expect(page.getByRole("alertdialog")).toHaveCount(0);
+      await expect(page.getByText("Run stopped and restored", { exact: true })).toBeVisible();
+      await expect.poll(files).toEqual(before);
+      await expect(controls).toHaveCount(0);
+    } finally {
+      stopAndUndoRun = false;
+      releaseReply?.();
+    }
+  });
+
 });

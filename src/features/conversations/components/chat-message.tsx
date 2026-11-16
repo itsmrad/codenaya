@@ -239,6 +239,8 @@ interface AssistantMessageProps {
   onRestore?: () => void;
   /** The checkpoint taken before this run; null once pruned (#225). */
   checkpointId?: Id<"checkpoints"> | null;
+  onStopAndUndo?: () => void;
+  stoppingAndUndoing?: boolean;
   /** An agent run is in progress, so files can't be reverted. */
   revertDisabled?: boolean;
   /** A plan-mode reply (#120): sends the plan, as is or edited (#527), as the next build message. */
@@ -269,6 +271,8 @@ export const AssistantMessage = ({
   onDiagnose,
   onSuggestion,
   checkpointId,
+  onStopAndUndo,
+  stoppingAndUndoing,
   revertDisabled,
 }: AssistantMessageProps) => {
   const [copied, setCopied] = useState(false);
@@ -340,6 +344,8 @@ export const AssistantMessage = ({
       stalled={stalled}
       onOpenFile={onOpenFile}
       previewErrors={isLast ? { ...previewErrors, sending: fixSending } : undefined}
+      onStopAndUndo={onStopAndUndo}
+      stoppingAndUndoing={stoppingAndUndoing}
       checkpointId={checkpointId}
       revertDisabled={revertDisabled}
       messageId={message._id}

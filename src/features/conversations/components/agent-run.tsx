@@ -511,6 +511,8 @@ interface AgentRunProps {
    * Null once it was pruned; undefined while checkpoints load.
    */
   checkpointId?: Id<"checkpoints"> | null;
+  onStopAndUndo?: () => void;
+  stoppingAndUndoing?: boolean;
   /** An agent run is in progress, so files can't be reverted. */
   revertDisabled?: boolean;
   /** The run's message, for its cost once it finishes (#526). */
@@ -531,6 +533,8 @@ export const AgentRun = ({
   onOpenFile,
   previewErrors,
   checkpointId,
+  onStopAndUndo,
+  stoppingAndUndoing,
   revertDisabled = false,
   messageId,
 }: AgentRunProps) => {
@@ -675,6 +679,18 @@ export const AgentRun = ({
             </>
           )}
         </CollapsibleTrigger>
+        {status === "processing" && checkpointId && onStopAndUndo && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="mr-1.5 h-7 shrink-0 px-2 text-xs"
+            disabled={stoppingAndUndoing}
+            onClick={onStopAndUndo}
+          >
+            {stoppingAndUndoing ? "Restoring…" : "Stop & undo"}
+          </Button>
+        )}
         {/* Beside the trigger: a button can't sit inside another button. */}
         {previewNote && previewErrors?.fix && (
           <Button

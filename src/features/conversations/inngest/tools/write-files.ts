@@ -23,6 +23,7 @@ import { WRITE_BATCH_FILES, WRITE_BATCH_LINES } from "../constants";
 interface WriteFilesToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  messageId?: Id<"messages">;
   registry?: RegistryCheck;
 }
 
@@ -35,7 +36,7 @@ const paramsSchema = z.object({
     .min(1, "Provide at least one file to write"),
 });
 
-export const createWriteFilesTool = ({ projectId, internalKey, registry = createRegistryCheck() }: WriteFilesToolOptions) => {
+export const createWriteFilesTool = ({ projectId, internalKey, messageId, registry = createRegistryCheck() }: WriteFilesToolOptions) => {
   return createTool({
     name: "writeFiles",
     description:
@@ -59,7 +60,7 @@ export const createWriteFilesTool = ({ projectId, internalKey, registry = create
       try {
         return await toolStep?.run("write-files", async () => {
           const index = indexProjectFiles(await getProjectFiles(internalKey, projectId));
-          const ensureFolder = folderEnsurer(internalKey, projectId, folderPaths(index));
+          const ensureFolder = folderEnsurer(internalKey, projectId, folderPaths(index), messageId);
 
           const failed: string[] = [];
           // Everything is checked before the first write. A path listed twice
@@ -137,6 +138,7 @@ export const createWriteFilesTool = ({ projectId, internalKey, registry = create
           const created: string[] = [];
           const createIn = async (dir: string, files: { name: string; content: string }[]) => {
             const results = await convex.mutation(api.system.createFiles, {
+              messageId,
               internalKey,
               projectId,
               parentId: await ensureFolder(dir),
@@ -158,7 +160,7 @@ export const createWriteFilesTool = ({ projectId, internalKey, registry = create
             if (dir) await createIn(dir, files);
           }
           for (const { fileId, content } of updates) {
-            await convex.mutation(api.system.updateFile, { internalKey, projectId, fileId, content });
+            await convex.mutation(api.system.updateFile, { messageId, internalKey, projectId, fileId, content });
           }
           const rootFiles = createsByDir.get("");
           if (rootFiles) await createIn("", rootFiles);

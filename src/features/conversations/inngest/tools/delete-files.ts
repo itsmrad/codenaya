@@ -10,6 +10,7 @@ import { findProjectFile, getProjectFiles, indexProjectFiles, lockedPathError } 
 interface DeleteFilesToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  messageId?: Id<"messages">;
 }
 
 // `fileIds` is not offered to the model; it reads tool calls made before #292.
@@ -23,6 +24,7 @@ const paramsSchema = z
 export const createDeleteFilesTool = ({
   projectId,
   internalKey,
+  messageId,
 }: DeleteFilesToolOptions) => {
   return createTool({
     name: "deleteFiles",
@@ -58,6 +60,7 @@ export const createDeleteFilesTool = ({
           const results: string[] = [];
           for (const { file, path } of targets) {
             await convex.mutation(api.system.deleteFile, {
+              messageId,
               internalKey,
               projectId,
               fileId: file._id,

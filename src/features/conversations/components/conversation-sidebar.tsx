@@ -94,7 +94,7 @@ import { useRunStalled } from "./agent-run";
 import { ChatEmptyState } from "./chat-empty-state";
 import { chatStarters } from "../chat-starters";
 import { type CancelSource, cancelRun, ESC_CONFIRM_MS, escapeToStop } from "../run-cancel";
-import { type Checkpoint, useCheckpoints } from "../hooks/use-checkpoints";
+import { type Checkpoint, undoAction, useRestoreCheckpoint, useCheckpoints } from "../hooks/use-checkpoints";
 import {
   CheckpointHistoryDialog,
   RestoreCheckpointDialog,
@@ -185,6 +185,9 @@ export const ConversationSidebar = ({
   const [checkpointHistoryOpen, setCheckpointHistoryOpen] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<Checkpoint | null>(null);
   const checkpoints = useCheckpoints(projectId);
+  const restoreCheckpoint = useRestoreCheckpoint();
+  const [stoppingAndUndoing, setStoppingAndUndoing] = useState(false);
+  const stopUndoPending = useRef(false);
   const checkpointByMessage = useMemo(
     () => new Map(checkpoints?.map((checkpoint) => [checkpoint.messageId, checkpoint])),
     [checkpoints],
@@ -283,6 +286,34 @@ export const ConversationSidebar = ({
       await cancelRun(projectId, source, processingSinceRef.current);
     } catch {
       toast.error("Unable to cancel request");
+    }
+  };
+
+  const handleStopAndUndo = async () => {
+    if (!processingMessage || stopUndoPending.current) return;
+    stopUndoPending.current = true;
+    setStoppingAndUndoing(true);
+    try {
+      const { undoCheckpointId } = await ky.post("/api/messages/cancel", {
+        json: { projectId, messageId: processingMessage._id, source: "button", undo: true },
+      }).json<{ undoCheckpointId: Id<"checkpoints"> | null }>();
+      if (!undoCheckpointId) {
+        toast.error("Run stopped, but its checkpoint is no longer available");
+        return;
+      }
+      toast.success("Run stopped and restored", {
+        action: undoAction(() => {
+          restoreCheckpoint({ checkpointId: undoCheckpointId }).then(
+            () => toast.success("Restore undone"),
+            () => toast.error("Couldn't undo the restore"),
+          );
+        }),
+      });
+    } catch {
+      toast.error("Couldn't stop and restore the run");
+    } finally {
+      stopUndoPending.current = false;
+      setStoppingAndUndoing(false);
     }
   };
 
@@ -741,6 +772,12 @@ export const ConversationSidebar = ({
                   checkpointId={
                     checkpoints && (checkpointByMessage.get(message._id)?._id ?? null)
                   }
+                  onStopAndUndo={
+                    message._id === processingMessage?._id && checkpointByMessage.has(message._id)
+                      ? () => void handleStopAndUndo()
+                      : undefined
+                  }
+                  stoppingAndUndoing={stoppingAndUndoing}
                   revertDisabled={isProcessing}
                   onRestore={
                     checkpointByMessage.has(message._id) && !isProcessing
@@ -901,6 +938,16 @@ export const ConversationSidebar = ({
                   newline
                 </span>
                 {/* Its own button, not the form's submit, so Enter never stops a run (#257). */}
+                {isProcessing && processingMessage && checkpointByMessage.has(processingMessage._id) && (
+                  <InputGroupButton
+                    type="button"
+                    size="sm"
+                    disabled={stoppingAndUndoing}
+                    onClick={() => void handleStopAndUndo()}
+                  >
+                    {stoppingAndUndoing ? "Restoring…" : "Stop & undo"}
+                  </InputGroupButton>
+                )}
                 {isProcessing && (
                   <Tooltip>
                     <TooltipTrigger asChild>

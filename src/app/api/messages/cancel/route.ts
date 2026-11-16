@@ -11,6 +11,8 @@ import { api } from "../../../../../convex/_generated/api";
 
 const requestSchema = z.object({
   projectId: z.string(),
+  undo: z.boolean().optional(),
+  messageId: z.string().optional(),
   // What stopped the run, for diagnosing unintended cancels (#608).
   source: z.enum(["esc", "button"]).optional(),
 });
@@ -28,7 +30,7 @@ export async function POST(request: Request) {
     return invalid;
   }
 
-  const { projectId, source } = data;
+  const { projectId, source, undo, messageId } = data;
 
   const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
 
@@ -68,6 +70,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, cancelled: false });
   }
 
+  // An undo targets the displayed run, never a newer run that raced the click.
+  const undoMessage = undo ? processingMessages.find((msg) => msg._id === messageId) : undefined;
+  if (undo && !undoMessage) {
+    return NextResponse.json({ error: "The run is no longer processing" }, { status: 409 });
+  }
+
   // Cancel all processing messages
   const cancelledIds = await Promise.all(
     processingMessages.map(async (msg) => {
@@ -77,7 +85,16 @@ export async function POST(request: Request) {
     })
   );
 
+  const undoCheckpointId = undoMessage
+    ? await convex.mutation(api.checkpoints.restoreStoppedRun, {
+        internalKey,
+        ownerId: userId,
+        messageId: undoMessage._id,
+      })
+    : null;
+
   return NextResponse.json({
+    undoCheckpointId,
     success: true,
     cancelled: true,
     messageIds: cancelledIds,
