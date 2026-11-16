@@ -56,6 +56,7 @@ test("first Generate is enabled without a toggle; disabled existing links can re
   const generate = tree.find(element => element.props.children === "Generate link")!;
   expect(generate.props.disabled).toBe(false);
   await (generate.props.onClick as () => Promise<void>)();
+  await vi.waitFor(() => expect(render().find(element => element.props.children === "Generate link")?.props.disabled).toBe(false));
   expect(mocks.fetch).toHaveBeenCalledTimes(1);
 
   mocks.project.shareToken = "a".repeat(32);
