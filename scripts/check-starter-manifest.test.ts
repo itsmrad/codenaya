@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { WEBCONTAINER_VITE_PINS } from "../src/features/webcontainer-preview/utils/vite-pin";
 import { checkStarterManifest, starterPins } from "./check-starter-manifest";
 
 describe("checkStarterManifest", () => {
@@ -8,12 +9,13 @@ describe("checkStarterManifest", () => {
     const users = new Set(pins.flatMap((pin) => pin.users));
     expect([...users].sort()).toEqual(["next", "start", "vite", "webcontainer"]);
     expect(pins).toContainEqual({ name: "next", version: expect.any(String), users: ["next"] });
-    expect(pins.filter((pin) => pin.name === "vite").map((pin) => pin.users)).toEqual([["vite", "start"], ["webcontainer"]]);
+    expect(pins).toContainEqual({ name: "vite", version: WEBCONTAINER_VITE_PINS.vite, users: ["webcontainer"] });
 
-    // Registry mock: exactly the pinned versions exist.
+    // Registry mock: exactly the pinned versions exist. The WebContainer's older
+    // vite/plugin-react pins see the starters' newer ones as info, not failures.
     const result = checkStarterManifest((name) => pins.filter((pin) => pin.name === name).map((pin) => pin.version));
     expect(result.failures).toEqual([]);
-    expect(result.info).toEqual([]);
+    expect(result.info.every((line) => line.includes("(webcontainer)"))).toBe(true);
     expect(result.summary).toContain(`${pins.length} exact pins; 0 failures`);
   });
 
