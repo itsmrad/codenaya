@@ -154,9 +154,13 @@ describe("undeclaredPackages", () => {
           'export { thing } from "reexport-pkg";',
           'export * from "@scope/star/sub/path";',
           "import {",
-          "  a,",
+          "  a, // don't; really",
           "  b,",
           '} from "multi-line-pkg";',
+          'import D, { c } from "default-and-named-pkg";',
+          'export * as ns from "namespace-reexport-pkg";',
+          'import{d as e}from"minified-pkg";',
+          'import { "a b" as f } from "string-name-pkg";',
         ].join("\n"),
       },
     ]);
@@ -169,7 +173,19 @@ describe("undeclaredPackages", () => {
       "reexport-pkg",
       "@scope/star",
       "multi-line-pkg",
+      "default-and-named-pkg",
+      "namespace-reexport-pkg",
+      "minified-pkg",
+      "string-name-pkg",
     ]);
+  });
+
+  it("scans a big ASI-style data file in linear time", () => {
+    const content = Array.from({ length: 75_000 }, (_, i) => `export const a${i} = ${i}`).join("\n");
+    const start = performance.now();
+    expect(undeclaredPackages(withPackageJson({}, [{ path: "src/data.ts", content }]))).toEqual([]);
+    // The old lazy scan took about a minute on this ~1.5 MB file.
+    expect(performance.now() - start).toBeLessThan(500);
   });
 
   it("doesn't read the word from in UI copy as an import (#858)", () => {

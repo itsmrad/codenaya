@@ -93,8 +93,11 @@ export const missingReferencedFiles = (files: ProjectFile[]): string[] => {
 
 const SOURCE_FILE = /\.(?:[cm]?[jt]sx?)$/;
 // `from` counts only after an import/export clause, not in UI copy like "Open from" (#858).
+// The clause is spelled out (`D, { a } from`, `* as ns from`) rather than scanned up to
+// `from`, which is quadratic on big ASI-style files. UI copy like `export from "Settings"`
+// still matches; rare enough to leave.
 const IMPORT_SPECIFIER =
-  /(?:\b(?:import|export)\b[^;"'`]*?\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'`]([^"'`\n]+)["'`]/g;
+  /(?:\b(?:import|export)\b\s*(?:type\s+)?(?:[\w$]+\s*,?\s*)?(?:\{[^}]*\}|\*(?:\s*as\s+[\w$]+)?)?\s*\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'`]([^"'`\n]+)["'`]/g;
 // Tailwind v4 CSS pulls packages in too: `@import "tw-animate-css"`, `@plugin "@tailwindcss/typography"`.
 const CSS_IMPORT = /@(?:import|plugin)\s+(?:url\(\s*)?["']([^"'\n]+)["']/g;
 const BUILTINS = new Set(builtinModules);
