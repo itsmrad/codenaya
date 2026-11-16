@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { entryFocusKey, focusEntryWhenMounted } from "./focus";
+import { entryFocusKey, focusEntryWhenMounted, isFocusLost } from "./focus";
 
 const runner = () => {
   const queue: (() => void)[] = [];
@@ -41,5 +41,20 @@ describe("entryFocusKey", () => {
     expect(entryFocusKey(undefined, "a.ts")).not.toBe(entryFocusKey("folder", "a.ts"));
     expect(entryFocusKey(undefined, "a.ts")).toBe(entryFocusKey(undefined, "a.ts"));
     expect(entryFocusKey("p", "a|b")).not.toBe(entryFocusKey("p|a", "b"));
+  });
+});
+
+describe("isFocusLost", () => {
+  const el = (connected: boolean, insideDialog: boolean) =>
+    ({ isConnected: connected, closest: () => (insideDialog ? {} : null) }) as unknown as Element;
+  const body = {};
+  it("treats no focus, body, a removed node or a closing dialog/menu as lost", () => {
+    expect(isFocusLost(null, body)).toBe(true);
+    expect(isFocusLost(body as unknown as Element, body)).toBe(true);
+    expect(isFocusLost(el(false, false), body)).toBe(true);
+    expect(isFocusLost(el(true, true), body)).toBe(true);
+  });
+  it("keeps focus that already sits on another element", () => {
+    expect(isFocusLost(el(true, false), body)).toBe(false);
   });
 });

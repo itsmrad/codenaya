@@ -8,6 +8,16 @@ type FocusRequest = { id: string | null };
 export const entryFocusKey = (parentId: string | undefined, name: string) =>
   JSON.stringify([parentId ?? null, name]);
 
+/**
+ * Restoring focus must not steal it: only act when focus was lost (nothing
+ * focused, or it sat in the dialog/menu that just closed). A click elsewhere
+ * or an entry that already took focus keeps it.
+ */
+export const isFocusLost = (
+  active: Pick<Element, "isConnected" | "closest"> | null,
+  body: unknown,
+) => !active || active === body || !active.isConnected || active.closest('[role="alertdialog"], [role="dialog"], [role="menu"]') !== null;
+
 const defaultFind = (key: string) =>
   document.querySelector<HTMLElement>(`[data-explorer-entry="${CSS.escape(key)}"]`);
 
@@ -42,7 +52,7 @@ export function useExplorerFocusController() {
     const target = pending.current;
     if (button && target && target.id === id) {
       pending.current = null;
-      button.focus();
+      if (isFocusLost(document.activeElement, document.body)) button.focus();
     }
   }, []);
   return { request, requestFocus, focusIfRequested };
