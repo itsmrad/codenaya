@@ -529,10 +529,6 @@ html.lenis, html.lenis body {
 
 /* ─── Finishing touches ─── */
 
-::selection {
-  background-color: color-mix(in oklab, var(--brand) 28%, transparent);
-}
-
 /* A faint light that follows the cursor across a grid cell (SpotlightTracker). */
 .spotlight {
   position: relative;

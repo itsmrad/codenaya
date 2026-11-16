@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Allotment } from "allotment";
 import Link from "next/link";
+import { useTheme } from "next-themes";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronDownIcon,
@@ -17,6 +18,7 @@ import {
   LoaderIcon,
   MessageSquareIcon,
   MoreHorizontalIcon,
+  MoonIcon,
   PanelLeftOpenIcon,
   PlugIcon,
   PlusIcon,
@@ -24,6 +26,7 @@ import {
   SettingsIcon,
   Share2Icon,
   SparklesIcon,
+  SunIcon,
   UserIcon,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
@@ -275,6 +278,19 @@ export const ProjectIdView = ({
   const zipExport = useDownloadZip(projectId);
   const { isHidden: isChatHidden, setHidden: setChatHidden } = useChatPanelStore();
   const router = useRouter();
+  const { resolvedTheme, setTheme } = useTheme();
+  const themeToggle = (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+      aria-label="Toggle theme"
+      title="Toggle theme"
+    >
+      <MoonIcon aria-hidden="true" className="dark:hidden" />
+      <SunIcon aria-hidden="true" className="hidden dark:block" />
+    </Button>
+  );
 
   const openCode = () => {
     setCodeOpened(true);
@@ -489,6 +505,7 @@ export const ProjectIdView = ({
           </button>
           <ExportPopover projectId={projectId} fallbackAnchorRef={actionsTrigger} />
           <SharePopover projectId={projectId} />
+          {themeToggle}
           <HelpMenu className="size-8" />
           <div className="w-px h-4 bg-border/40" />
           <UserMenu avatarClassName="size-6" />
@@ -499,6 +516,7 @@ export const ProjectIdView = ({
               Publish
             </Button>
           )}
+          {themeToggle}
           <Sheet open={actionsOpen} onOpenChange={setActionsOpen}>
             <SheetTrigger asChild>
               <Button ref={actionsTrigger} variant="ghost" size="icon-sm" aria-label="More actions">
