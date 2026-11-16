@@ -25,7 +25,7 @@ test.describe("preview open in new tab", () => {
     test(`is disabled until the sandbox is ready, then opens it (${layout.name})`, async ({
       page,
       context,
-    }) => {
+    }, testInfo) => {
       test.setTimeout(120_000);
       await page.setViewportSize(layout.viewport);
       const errors = collectConsoleErrors(page);
@@ -79,6 +79,15 @@ test.describe("preview open in new tab", () => {
       await expect(link).toHaveAttribute("target", "_blank");
       await expect(link).toHaveAttribute("rel", "noopener noreferrer");
       await expect(refresh).toBeEnabled();
+
+      await expect(page.getByRole("button", { name: "Preview settings", exact: true })).toHaveCount(0);
+      await expect(page.getByText("Preview Settings", { exact: true })).toHaveCount(0);
+      if (layout.viewport.width === 1440 || layout.viewport.width === 390) {
+        await testInfo.attach(`preview-toolbar-${layout.viewport.width}`, {
+          body: await page.screenshot(),
+          contentType: "image/png",
+        });
+      }
 
       const frame = page.getByTitle("Preview", { exact: true });
       await expect(frame).toBeVisible();

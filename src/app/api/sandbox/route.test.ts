@@ -456,6 +456,39 @@ describe("POST /api/sandbox after ready (#492)", () => {
     forgetSandbox("sbx_ready_burst");
   });
 
+  it.each([
+    ["vite", { scripts: { dev: "vite" } }, "npm run dev -- --host 0.0.0.0"],
+    ["next", { dependencies: { next: "16" }, scripts: { dev: "next dev" } }, "npm run dev -- -H 0.0.0.0"],
+    ["tanstack-start", { dependencies: { "@tanstack/react-start": "1" }, scripts: { dev: "vite dev --port 3000" } }, "npm run dev -- --host 0.0.0.0"],
+  ])("boots %s with detected commands and no user settings", async (framework, pkg, command) => {
+    const sandboxId = `sbx_automatic_${framework}`;
+    const boot = bootableSandbox(sandboxId);
+    mocks.sandboxCreate.mockResolvedValue(boot.sandbox);
+    const client = new AbortController();
+    const res = await POST(new Request("http://localhost/api/sandbox", {
+      method: "POST",
+      body: JSON.stringify({ files: [
+        { path: "package.json", content: JSON.stringify(pkg) },
+        { path: framework === "next" ? "next.config.ts" : "vite.config.ts", content: "" },
+      ] }),
+      signal: client.signal,
+    }));
+    const reader = res.body!.getReader();
+    try {
+      await vi.waitFor(() => expect(boot.pendingInstalls()).toBe(1));
+      boot.finishInstall();
+      await readUntil(reader, "ready");
+      expect(boot.run).toHaveBeenCalledWith(DEFAULT_INSTALL_COMMAND, expect.any(Object));
+      expect(boot.run).toHaveBeenCalledWith(DEV_START_COMMAND, expect.objectContaining({
+        envs: expect.objectContaining({ [DEV_COMMAND_ENV]: command }),
+      }));
+    } finally {
+      client.abort();
+      await drain(reader);
+      forgetSandbox(sandboxId);
+    }
+  });
+
   it("installs a burst of package.json syncs once, with the dev server stopped, and starts it once after (#486)", async () => {
     const { sandbox, stats, run, finishInstall, pendingInstalls, client, reader } =
       await bootToReady("sbx_ready_burst");

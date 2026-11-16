@@ -30,7 +30,6 @@ import {
 import { useSandbox } from "@/features/sandbox-preview/hooks/use-sandbox";
 import { useEsbuildRecovery } from "@/features/sandbox-preview/hooks/use-esbuild-recovery";
 import { useWebContainer } from "@/features/webcontainer-preview/hooks/use-webcontainer";
-import { PreviewSettingsPopover } from "@/features/sandbox-preview/components/preview-settings-popover";
 import { PreviewSelectToggle } from "./preview-select-toggle";
 import { OpenOnPhonePopover } from "@/features/sandbox-preview/components/open-on-phone-popover";
 import { PreviewTerminal } from "@/features/sandbox-preview/components/preview-terminal";
@@ -105,7 +104,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
-import { useProject, useRecordFirstPreviewShown } from "../hooks/use-projects";
+import { useRecordFirstPreviewShown } from "../hooks/use-projects";
 import { useFilesWithContent } from "../hooks/use-files";
 import { isPreviewOnScreen, markPreviewOpened } from "../utils/first-run";
 import { previewEngineUrl } from "../utils/preview-engine";
@@ -168,7 +167,6 @@ export const PreviewView = ({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   
-  const project = useProject(projectId);
   const files = useFilesWithContent(projectId);
   const [terminalChoice, setTerminalChoice] = usePreviewTerminal();
   // The output when Clear was pressed; kept here so it outlives Hide logs (#480).
@@ -181,8 +179,8 @@ export const PreviewView = ({
   const engineParam = searchParams.get("engine") as PreviewEngine | null;
   const requestedEngine = engineParam === "webcontainer" ? "webcontainer" : "sandbox";
   const framework = useMemo(
-    () => detectFrameworkFromFiles(files ? buildFlatFileList(files) : [], project?.settings?.devCommand),
-    [files, project?.settings?.devCommand],
+    () => detectFrameworkFromFiles(files ? buildFlatFileList(files) : []),
+    [files],
   );
   const sandboxOnly = needsSandbox(framework);
   const activeEngine = sandboxOnly ? "sandbox" : requestedEngine;
@@ -213,7 +211,6 @@ export const PreviewView = ({
     files,
     enabled: activeEngine === "sandbox" && !holdSandbox && !needsSandboxReload,
     projectId,
-    settings: project?.settings,
   });
 
   // WebContainer runs in this page, so it receives only variables already destined
@@ -225,7 +222,6 @@ export const PreviewView = ({
     files,
     enabled: activeEngine === "webcontainer" && !holdWebContainer,
     publicEnv,
-    settings: project?.settings,
   });
 
   const activeInstance = activeEngine === "sandbox" ? sandbox : webcontainer;
@@ -797,14 +793,6 @@ export const PreviewView = ({
           >
             <KeyRoundIcon className="size-4" />
           </Button>
-          <div className="px-1 flex items-center">
-            <PreviewSettingsPopover
-              projectId={projectId}
-              initialValues={project?.settings}
-              files={files}
-              onSave={restart}
-            />
-          </div>
         </div>
       </div>
 

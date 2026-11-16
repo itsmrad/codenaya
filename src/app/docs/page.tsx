@@ -130,9 +130,8 @@ const SECTIONS: { id: string; title: string; content: ReactNode }[] = [
           </li>
         </ul>
         <p>
-          Preview settings let you change the install and start commands when your project does
-          not use the defaults. If the preview fails to start, check the terminal output below it
-          and ask the agent to fix the error.
+          Preview commands are selected automatically from your project. If the preview fails to
+          start, check the terminal output below it and ask the agent to fix the error.
         </p>
       </>
     ),

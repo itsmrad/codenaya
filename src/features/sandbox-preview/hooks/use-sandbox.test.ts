@@ -88,6 +88,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("boots and syncs files without manual command settings", async () => {
+  const boot = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "POST");
+  expect(JSON.parse(String(boot?.[1]?.body))).toEqual({
+    files: [{ path: "App.tsx", content: "boot" }],
+  });
+  edit("updated");
+  await vi.advanceTimersByTimeAsync(300);
+  expect(JSON.parse(String(patch.mock.calls[0][1]?.body))).toEqual({
+    files: [{ path: "App.tsx", content: "updated" }],
+  });
+});
+
 describe("sandbox dev server recovery (#776)", () => {
   it("waits for the current package sync before restarting and serializes the next edit", async () => {
     const inflight = deferred<Response>();
