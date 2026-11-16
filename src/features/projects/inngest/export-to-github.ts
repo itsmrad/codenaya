@@ -6,6 +6,7 @@ import { convex } from "@/lib/convex-client";
 import { inngest } from "@/inngest/client";
 import { requireJobGithubToken } from "@/features/projects/server/github-token";
 import { buildFilePaths } from "@/features/projects/utils/github-tree";
+import { getInstructionsExportFile } from "@/features/projects/instructions";
 
 import { api } from "../../../../convex/_generated/api";
 import { Doc, Id } from "../../../../convex/_generated/dataModel";
@@ -121,6 +122,12 @@ export const exportToGithub = inngest.createFunction(
       throw new NonRetriableError("No files to export");
     }
 
+    // The project instructions ship as AGENTS.md when set (#299)
+    const instructionsFile = await step.run("fetch-project-instructions", async () => {
+      const project = await convex.query(api.system.getProjectById, { internalKey, projectId });
+      return getInstructionsExportFile(project?.instructions, Object.keys(filePaths));
+    });
+
     // Create blobs for each file
     const treeItems = await step.run("create-blobs", async () => {
       const items: {
@@ -161,6 +168,16 @@ export const exportToGithub = inngest.createFunction(
           type: "blob",
           sha: blob.sha,
         });
+      }
+
+      if (instructionsFile) {
+        const { data: blob } = await octokit.rest.git.createBlob({
+          owner: user.login,
+          repo: repoName,
+          content: instructionsFile.content,
+          encoding: "utf-8",
+        });
+        items.push({ path: instructionsFile.path, mode: "100644", type: "blob", sha: blob.sha });
       }
 
       return items;

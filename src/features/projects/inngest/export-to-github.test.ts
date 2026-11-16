@@ -64,8 +64,12 @@ const runJob = () =>
     step: { run: (_name: string, fn: () => unknown) => fn(), sleep: async () => {} },
   });
 
-const projectFiles = (files: ProjectFile[]) =>
-  mocks.query.mockResolvedValue(files.map((file) => ({ updatedAt: 100, ...file })));
+const projectFiles = (files: ProjectFile[], instructions?: string) =>
+  mocks.query.mockImplementation(async (ref) =>
+    getFunctionName(ref) === "system:getProjectById"
+      ? { instructions }
+      : files.map((file) => ({ updatedAt: 100, ...file })),
+  );
 
 describe("exportToGithub", () => {
   beforeEach(() => {
@@ -74,6 +78,24 @@ describe("exportToGithub", () => {
     mocks.createBlob.mockImplementation(async ({ content }) => ({ data: { sha: `sha:${content}` } }));
     mocks.createTree.mockResolvedValue({ data: { sha: "tree" } });
     mocks.createCommit.mockResolvedValue({ data: { sha: "commit" } });
+  });
+
+  it("commits the project instructions as AGENTS.md, unless the project has its own", async () => {
+    projectFiles([{ _id: "a", name: "README.md", type: "file", content: "# hi" }], "Use green.");
+    await runJob();
+    expect(mocks.createBlob.mock.calls.map(([a]) => a.content)).toEqual(["# hi", "Use green.\n"]);
+    expect(mocks.createTree.mock.calls[0][0].tree.map((i: { path: string }) => i.path)).toEqual([
+      "README.md",
+      "AGENTS.md",
+    ]);
+
+    vi.clearAllMocks();
+    mocks.createBlob.mockImplementation(async ({ content }) => ({ data: { sha: `sha:${content}` } }));
+    mocks.createTree.mockResolvedValue({ data: { sha: "tree" } });
+    mocks.createCommit.mockResolvedValue({ data: { sha: "commit" } });
+    projectFiles([{ _id: "a", name: "AGENTS.md", type: "file", content: "mine" }], "Use green.");
+    await runJob();
+    expect(mocks.createBlob.mock.calls.map(([a]) => a.content)).toEqual(["mine"]);
   });
 
   it("commits text as UTF-8 and binary as base64 at their full paths", async () => {
