@@ -7,6 +7,8 @@ import { getAppError } from "@/lib/convex-error";
 import { inngest } from "@/inngest/client";
 import { requireJobGithubToken } from "@/features/projects/server/github-token";
 import { readRepoArchive } from "@/features/projects/server/github-archive";
+import { buildFilePaths, planFolderCreation } from "@/features/projects/utils/github-tree";
+import { isRealEnvFile } from "@/features/projects/utils/inspect-imported-project";
 
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -97,8 +99,28 @@ export const pullFromGithub = inngest.createFunction(
     // One step: the archive can't be passed between steps. A retry writes the
     // same tree again; unchanged files are left alone.
     await step.run("apply-files", async () => {
-      const { folders, files, skipped } = await readRepoArchive(owner, repo, githubToken, sha);
-      if (folders.length + files.length > MAX_PULL_ENTRIES) {
+      const { folders, files, skipped } = await readRepoArchive(owner, repo, githubToken, sha, isRealEnvFile);
+      const unsupported = skipped.filter((path) => !isRealEnvFile(path));
+      const tree = new Map<string, TreeEntry["type"]>([
+        ...folders.map((path) => [path, "folder"] as const),
+        ...files.map(({ path }) => [path, "file"] as const),
+      ]);
+      const localFiles = await convex.query(api.system.getProjectFiles, { internalKey, projectId });
+      const localEnvPaths = Object.entries(buildFilePaths(localFiles))
+        .filter(([path, file]) => file.type === "file" && isRealEnvFile(path))
+        .map(([path]) => path);
+      // Keep local secrets and their parents even when GitHub no longer has them (#812).
+      const preserved: { path: string; type: TreeEntry["type"] }[] = [
+        ...planFolderCreation([], localEnvPaths).map(({ path }) => ({ path, type: "folder" as const })),
+        ...localEnvPaths.map((path) => ({ path, type: "file" as const })),
+      ];
+      for (const { path, type } of preserved) {
+        if (tree.has(path) && tree.get(path) !== type) {
+          throw new NonRetriableError(`Pull would replace a local dotenv file or its parent: ${path}`);
+        }
+        tree.set(path, type);
+      }
+      if (tree.size > MAX_PULL_ENTRIES) {
         throw new NonRetriableError(
           `Repositories over ${MAX_PULL_ENTRIES} files and folders can't be pulled`
         );
@@ -110,12 +132,12 @@ export const pullFromGithub = inngest.createFunction(
       for (const file of files) {
         if (await isBinaryFile(file.content)) continue;
         const content = file.content.toString("utf-8");
-        if (Buffer.byteLength(content) > MAX_TEXT_FILE_BYTES) skipped.push(file.path);
+        if (Buffer.byteLength(content) > MAX_TEXT_FILE_BYTES) unsupported.push(file.path);
         else texts.set(file.path, content);
       }
-      if (skipped.length > 0) {
-        const named = skipped.slice(0, 5).join(", ");
-        const more = skipped.length > 5 ? ` and ${skipped.length - 5} more` : "";
+      if (unsupported.length > 0) {
+        const named = unsupported.slice(0, 5).join(", ");
+        const more = unsupported.length > 5 ? ` and ${unsupported.length - 5} more` : "";
         throw new NonRetriableError(
           `These files can't be pulled (symlinks, or text over ${MAX_TEXT_FILE_BYTES / 1024} KB): ${named}${more}`
         );
@@ -129,10 +151,7 @@ export const pullFromGithub = inngest.createFunction(
           projectId,
           checkpointId,
           entries: [],
-          tree: [
-            ...folders.map((path) => ({ path, type: "folder" as const })),
-            ...files.map(({ path }) => ({ path, type: "file" as const })),
-          ],
+          tree: [...tree].map(([path, type]) => ({ path, type })),
         })
         .catch(refusalIsFinal);
 
