@@ -92,11 +92,14 @@ export const missingReferencedFiles = (files: ProjectFile[]): string[] => {
 };
 
 const SOURCE_FILE = /\.(?:[cm]?[jt]sx?)$/;
+// `from` counts only after an import/export clause, not in UI copy like "Open from" (#858).
 const IMPORT_SPECIFIER =
-  /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'`]([^"'`\n]+)["'`]/g;
+  /(?:\b(?:import|export)\b[^;"'`]*?\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'`]([^"'`\n]+)["'`]/g;
 // Tailwind v4 CSS pulls packages in too: `@import "tw-animate-css"`, `@plugin "@tailwindcss/typography"`.
 const CSS_IMPORT = /@(?:import|plugin)\s+(?:url\(\s*)?["']([^"'\n]+)["']/g;
 const BUILTINS = new Set(builtinModules);
+// npm's name rules (legacy names may have capitals).
+const NPM_NAME = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i;
 
 /** `react-dom/client` → `react-dom`, `@radix-ui/react-slot/x` → `@radix-ui/react-slot`. */
 const packageName = (specifier: string): string | null => {
@@ -104,7 +107,8 @@ const packageName = (specifier: string): string | null => {
   if (/^(?:\.|\/|@\/|~|#|[a-z]+:)/i.test(specifier)) return null;
   const parts = specifier.split("?")[0].split("/");
   const name = specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
-  return BUILTINS.has(name) ? null : name;
+  // UI copy like `"Open from" : "Closed"` also looks like an import: skip what no package could be named (#858).
+  return BUILTINS.has(name) || !NPM_NAME.test(name) ? null : name;
 };
 
 /**
