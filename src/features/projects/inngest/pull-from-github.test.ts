@@ -135,6 +135,63 @@ describe("pullFromGithub (#343)", () => {
     expect(written().every(([, args]) => args.checkpointId === "cp_1")).toBe(true);
   });
 
+  it("skips real dotenv bodies while pulling example files and ordinary files (#812)", async () => {
+    serve([
+      { path: ".env", body: "PRIVATE_KEY=fake-remote-secret" },
+      { path: ".env.local", body: "LOCAL_KEY=fake-remote-local" },
+      { path: ".env.production", body: "PROD_KEY=fake-remote-production" },
+      { path: ".env.template", body: "TEMPLATE_KEY=fake-remote-template" },
+      { path: ".env.example", body: "EXAMPLE_KEY=fake-example" },
+      { path: ".env.sample", body: "SAMPLE_KEY=fake-sample" },
+      { path: "app.ts", body: "export {};" },
+    ]);
+
+    await expect(runJob()).resolves.toMatchObject({ success: true });
+
+    expect(written()[1][1].entries).toEqual([
+      { path: ".env.example", type: "file", content: "EXAMPLE_KEY=fake-example" },
+      { path: ".env.sample", type: "file", content: "SAMPLE_KEY=fake-sample" },
+      { path: "app.ts", type: "file", content: "export {};" },
+    ]);
+    expect(JSON.stringify(calls())).not.toContain("fake-remote-");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps local dotenv files unchanged when their remote bodies are skipped (#812)", async () => {
+    const local = new Map([
+      [".env", "PRIVATE_KEY=fake-local-secret"],
+      [".env.local", "LOCAL_KEY=fake-local-value"],
+      ["old.ts", "old"],
+    ]);
+    serve([
+      { path: ".env", body: "PRIVATE_KEY=fake-remote-secret" },
+      { path: ".env.local", body: "LOCAL_KEY=fake-remote-local" },
+      { path: "app.ts", body: "export {};" },
+    ]);
+    mocks.mutation.mockImplementation(async (fn, args) => {
+      const name = getFunctionName(fn);
+      if (name.endsWith("createPullCheckpoint")) return "cp_1";
+      if (name.endsWith("applyPulledFiles")) {
+        // Model the prune contract: paths absent from tree are deleted.
+        if (args.tree) {
+          const keep = new Set(args.tree.map((entry: { path: string }) => entry.path));
+          for (const path of local.keys()) if (!keep.has(path)) local.delete(path);
+        }
+        for (const entry of args.entries) local.set(entry.path, entry.content);
+      }
+      return null;
+    });
+
+    await runJob();
+
+    expect([...local]).toEqual([
+      [".env", "PRIVATE_KEY=fake-local-secret"],
+      [".env.local", "LOCAL_KEY=fake-local-value"],
+      ["app.ts", "export {};"],
+    ]);
+    expect(JSON.stringify(calls())).not.toContain("fake-remote-");
+  });
+
   it("refuses for good on a retry when a run finished during the backoff", async () => {
     const changed = new ConvexError({
       code: "CONFLICT",

@@ -7,6 +7,7 @@ import { getAppError } from "@/lib/convex-error";
 import { inngest } from "@/inngest/client";
 import { requireJobGithubToken } from "@/features/projects/server/github-token";
 import { readRepoArchive } from "@/features/projects/server/github-archive";
+import { isRealEnvFile } from "@/features/projects/utils/inspect-imported-project";
 
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -97,8 +98,10 @@ export const pullFromGithub = inngest.createFunction(
     // One step: the archive can't be passed between steps. A retry writes the
     // same tree again; unchanged files are left alone.
     await step.run("apply-files", async () => {
-      const { folders, files, skipped } = await readRepoArchive(owner, repo, githubToken, sha);
-      if (folders.length + files.length > MAX_PULL_ENTRIES) {
+      const { folders, files, skipped } = await readRepoArchive(owner, repo, githubToken, sha, isRealEnvFile);
+      const excludedEnvPaths = skipped.filter(isRealEnvFile);
+      const unsupported = skipped.filter((path) => !isRealEnvFile(path));
+      if (folders.length + files.length + excludedEnvPaths.length > MAX_PULL_ENTRIES) {
         throw new NonRetriableError(
           `Repositories over ${MAX_PULL_ENTRIES} files and folders can't be pulled`
         );
@@ -110,12 +113,12 @@ export const pullFromGithub = inngest.createFunction(
       for (const file of files) {
         if (await isBinaryFile(file.content)) continue;
         const content = file.content.toString("utf-8");
-        if (Buffer.byteLength(content) > MAX_TEXT_FILE_BYTES) skipped.push(file.path);
+        if (Buffer.byteLength(content) > MAX_TEXT_FILE_BYTES) unsupported.push(file.path);
         else texts.set(file.path, content);
       }
-      if (skipped.length > 0) {
-        const named = skipped.slice(0, 5).join(", ");
-        const more = skipped.length > 5 ? ` and ${skipped.length - 5} more` : "";
+      if (unsupported.length > 0) {
+        const named = unsupported.slice(0, 5).join(", ");
+        const more = unsupported.length > 5 ? ` and ${unsupported.length - 5} more` : "";
         throw new NonRetriableError(
           `These files can't be pulled (symlinks, or text over ${MAX_TEXT_FILE_BYTES / 1024} KB): ${named}${more}`
         );
@@ -132,6 +135,8 @@ export const pullFromGithub = inngest.createFunction(
           tree: [
             ...folders.map((path) => ({ path, type: "folder" as const })),
             ...files.map(({ path }) => ({ path, type: "file" as const })),
+            // Keep matching local dotenv files unchanged without importing remote bodies (#812).
+            ...excludedEnvPaths.map((path) => ({ path, type: "file" as const })),
           ],
         })
         .catch(refusalIsFinal);
