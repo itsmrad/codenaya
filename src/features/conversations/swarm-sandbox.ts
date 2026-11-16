@@ -1,5 +1,3 @@
-import { CommandExitError, RateLimitError, Sandbox } from "e2b";
-
 import {
   type BuildError,
   type RepairEvent,
@@ -10,10 +8,17 @@ import {
   DEFAULT_INSTALL_COMMAND,
   MAX_LIVE_SANDBOXES,
   type ProjectFile,
-  SANDBOX_TEMPLATE,
   WORK_DIR,
-  writeProjectFiles,
+  projectFileEntries,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { e2bHandleOf } from "@/features/sandbox-preview/server/provider/e2b";
+import { getDefaultProvider, getDefaultProviderOrNull } from "@/features/sandbox-preview/server/provider/registry";
+import {
+  type Sandbox,
+  type SandboxMeta,
+  type SandboxProvider,
+  SandboxRateLimitError,
+} from "@/features/sandbox-preview/server/provider/types";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../convex/_generated/api";
@@ -49,9 +54,20 @@ type Purpose = "swarm-foundation" | "swarm-worker";
 
 export type SelfCheck = { selfCheck: string; filesChanged: string[] };
 
-/** The kill switch (default off) and an E2B key; read inside a step, so replays keep the first answer. */
-const e2bKey = () =>
-  process.env.SWARM_WORKER_SANDBOXES === "true" ? process.env.E2B_API_KEY?.trim() || undefined : undefined;
+type SnapshotProvider = SandboxProvider & Required<Pick<SandboxProvider, "snapshot" | "createFromSnapshot" | "deleteSnapshot">>;
+
+const hasSnapshots = (provider: SandboxProvider | null): provider is SnapshotProvider =>
+  !!(provider?.snapshot && provider.createFromSnapshot && provider.deleteSnapshot);
+
+/**
+ * The kill switch (default off) and a configured provider that snapshots; read
+ * inside a step, so replays keep the first answer.
+ */
+const swarmProvider = () => {
+  if (process.env.SWARM_WORKER_SANDBOXES !== "true") return null;
+  const provider = getDefaultProviderOrNull();
+  return hasSnapshots(provider) ? provider : null;
+};
 
 export const maxWorkerSandboxes = () => {
   const max = Number(process.env.SWARM_MAX_WORKER_SANDBOXES?.trim() || NaN);
@@ -60,8 +76,8 @@ export const maxWorkerSandboxes = () => {
 
 /** Why a new swarm sandbox may not start now, or undefined when it may. Previews always win. */
 // ponytail: check-then-create, so parallel swarms can overshoot by a sandbox or two; E2B's own limit still holds.
-const overBudget = async (apiKey: string) => {
-  const running = await Sandbox.list({ apiKey, query: { state: ["running"] }, limit: 100 }).nextItems();
+const overBudget = async (provider: SandboxProvider) => {
+  const running = await provider.list({ limit: 100 });
   const swarm = running.filter(({ metadata }) => metadata?.purpose?.startsWith("swarm-")).length;
   if (swarm >= SWARM_TEAM_BUDGET) return "sandbox budget in use";
   if (running.length + MAX_LIVE_SANDBOXES >= E2B_TEAM_SANDBOXES) return "previews need the sandboxes";
@@ -84,13 +100,13 @@ const projectTextFiles = async (internalKey: string, projectId: Id<"projects">) 
   });
 };
 
-/** From the preview template, or from a snapshot of it. */
-const createSwarmSandbox = (
-  apiKey: string,
-  from: string,
-  metadata: { projectId: string; messageId: string; purpose: Purpose },
-  timeoutMs: number,
-) => Sandbox.create(from, { apiKey, metadata, timeoutMs, requestTimeoutMs: CALL_TIMEOUT_MS });
+type SwarmMeta = SandboxMeta & { projectId: string; messageId: string; purpose: Purpose };
+
+/** From the preview template (no snapshot id), or from a snapshot of it. */
+const createSwarmSandbox = (provider: SnapshotProvider, snapshotId: string | null, metadata: SwarmMeta, timeoutMs: number) => {
+  const opts = { metadata, timeoutMs, requestTimeoutMs: CALL_TIMEOUT_MS };
+  return snapshotId !== null ? provider.createFromSnapshot(snapshotId, opts) : provider.create(opts);
+};
 
 /**
  * The foundation, run as one step beside the workers: installs the current
@@ -101,28 +117,30 @@ const createSwarmSandbox = (
 export const seedSwarmSnapshot = async ({
   internalKey, projectId, messageId,
 }: { internalKey: string; projectId: Id<"projects">; messageId: Id<"messages"> }) => {
-  const apiKey = e2bKey();
-  if (!apiKey || maxWorkerSandboxes() === 0) return null;
+  const provider = swarmProvider();
+  if (!provider || maxWorkerSandboxes() === 0) return null;
   let sandbox: Sandbox | undefined;
   let snapshotId: string | undefined;
   try {
-    if (await overBudget(apiKey)) return null;
+    if (await overBudget(provider)) return null;
     sandbox = await createSwarmSandbox(
-      apiKey, SANDBOX_TEMPLATE, { projectId, messageId, purpose: "swarm-foundation" }, FOUNDATION_TIMEOUT_MS,
+      provider, null, { projectId, messageId, purpose: "swarm-foundation" }, FOUNDATION_TIMEOUT_MS,
     );
-    const { envdVersion } = await sandbox.getInfo({ requestTimeoutMs: CALL_TIMEOUT_MS });
-    if (!supportsSnapshots(envdVersion)) return null;
-    await writeProjectFiles(sandbox, await projectTextFiles(internalKey, projectId));
-    await sandbox.commands.run(DEFAULT_INSTALL_COMMAND, {
+    // E2B only: the template's envd must be new enough to snapshot.
+    const handle = e2bHandleOf(sandbox);
+    if (handle && !supportsSnapshots((await handle.getInfo({ requestTimeoutMs: CALL_TIMEOUT_MS })).envdVersion)) return null;
+    await sandbox.writeFiles(projectFileEntries(await projectTextFiles(internalKey, projectId)));
+    const install = await sandbox.run(DEFAULT_INSTALL_COMMAND, {
       cwd: WORK_DIR, timeoutMs: INSTALL_TIMEOUT_MS, requestTimeoutMs: INSTALL_TIMEOUT_MS,
     });
-    snapshotId = (await sandbox.createSnapshot({ requestTimeoutMs: CALL_TIMEOUT_MS })).snapshotId;
+    // A failed install is the integration build's to report.
+    if (install.exitCode !== 0) return null;
+    snapshotId = await provider.snapshot(sandbox, { requestTimeoutMs: CALL_TIMEOUT_MS });
     await convex.mutation(api.agentTasks.setSeedSnapshot, { internalKey, messageId, snapshotId });
     return snapshotId;
   } catch (error) {
-    // A failed install is the integration build's to report.
-    if (!(error instanceof CommandExitError)) console.error("[swarm-sandbox] foundation failed", projectId, error);
-    if (snapshotId) await Sandbox.deleteSnapshot(snapshotId, { apiKey }).catch((cleanupError) => {
+    console.error("[swarm-sandbox] foundation failed", projectId, error);
+    if (snapshotId) await provider.deleteSnapshot(snapshotId).catch((cleanupError) => {
       console.error("[swarm-sandbox] snapshot cleanup failed", projectId, cleanupError);
     });
     return null;
@@ -134,15 +152,14 @@ export const seedSwarmSnapshot = async ({
 /** After every worker settled: kills the swarm's leftover sandboxes and deletes its snapshot. Never throws. */
 // shortcut: a cancelled run never gets here, so its snapshot stays; sweep old snapshots if that adds up.
 export const cleanupSwarmSandboxes = async ({ messageId, snapshotId }: { messageId: string; snapshotId: string }) => {
-  const apiKey = process.env.E2B_API_KEY?.trim();
-  if (!apiKey) return;
+  const provider = getDefaultProviderOrNull();
+  if (!provider) return;
   try {
-    const running = await Sandbox.list({ apiKey, query: { metadata: { messageId }, state: ["running"] }, limit: 100 })
-      .nextItems();
+    const running = await provider.list({ metadata: { messageId }, limit: 100 });
     await Promise.all(running
       .filter(({ metadata }) => metadata?.purpose?.startsWith("swarm-"))
-      .map(({ sandboxId }) => Sandbox.kill(sandboxId, { apiKey }).catch(() => false)));
-    await Sandbox.deleteSnapshot(snapshotId, { apiKey });
+      .map(({ id }) => provider.kill(id).catch(() => false)));
+    await provider.deleteSnapshot?.(snapshotId);
   } catch (error) {
     console.error("[swarm-sandbox] cleanup failed", messageId, error);
   }
@@ -162,8 +179,8 @@ const startWorkerSandbox = async ({
   timeoutMs: number;
   signal?: AbortSignal;
 }): Promise<StartResult> => {
-  const apiKey = e2bKey();
-  if (!apiKey) return { off: true };
+  const provider = swarmProvider();
+  if (!provider) return { off: true };
   // A worker already at its cost cap leaves the slot to the others.
   if (signal?.aborted) return { skipped: "cost budget" };
   const remaining = invokedAt + timeoutMs - Date.now();
@@ -172,7 +189,7 @@ const startWorkerSandbox = async ({
   if (maxAttempts < 1) return { skipped: "time budget" };
   let sandbox: Sandbox | undefined;
   try {
-    const budget = await overBudget(apiKey);
+    const budget = await overBudget(provider);
     if (budget) return { skipped: budget };
     const claim = await convex.mutation(api.agentTasks.claimSelfCheck, {
       internalKey, agentTaskId, max: maxWorkerSandboxes(),
@@ -180,16 +197,16 @@ const startWorkerSandbox = async ({
     if (claim.skipped !== undefined) return { skipped: claim.skipped };
     // E2B expires it after the reserved check budget even if cleanup is lost.
     sandbox = await createSwarmSandbox(
-      apiKey, claim.seedSnapshotId, { projectId, messageId, purpose: "swarm-worker" },
+      provider, claim.seedSnapshotId, { projectId, messageId, purpose: "swarm-worker" },
       (maxAttempts + 1) * CHECK_ROUND_MS + SELF_CHECK_SLACK_MS,
     );
     // shortcut: files deleted since the snapshot stay in the sandbox; rare within one swarm.
-    await writeProjectFiles(sandbox, await projectTextFiles(internalKey, projectId));
-    return { sandboxId: sandbox.sandboxId, maxAttempts };
+    await sandbox.writeFiles(projectFileEntries(await projectTextFiles(internalKey, projectId)));
+    return { sandboxId: sandbox.id, maxAttempts };
   } catch (error) {
     console.error("[swarm-sandbox] worker start failed", projectId, error);
     await sandbox?.kill().catch(() => {});
-    return { skipped: error instanceof RateLimitError ? "E2B rate limit" : "sandbox unavailable" };
+    return { skipped: error instanceof SandboxRateLimitError ? "E2B rate limit" : "sandbox unavailable" };
   }
 };
 
@@ -252,7 +269,7 @@ export const selfCheckWorker = async ({
   const deadlineAt = invokedAt + timeoutMs - CHECK_ROUND_MS;
   const repairSignal = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
   const result = await verifyAndFix({
-    sandbox: () => Sandbox.connect(started.sandboxId, { apiKey: process.env.E2B_API_KEY?.trim() }),
+    sandbox: () => getDefaultProvider().connect(started.sandboxId),
     projectId,
     internalKey,
     runId: messageId,
@@ -270,7 +287,7 @@ export const selfCheckWorker = async ({
     },
   });
   await step.run("self-check-stop", async () => {
-    await Sandbox.kill(started.sandboxId, { apiKey: process.env.E2B_API_KEY?.trim() }).catch(() => false);
+    await getDefaultProviderOrNull()?.kill(started.sandboxId).catch(() => false);
   });
   const ownedLeft = ownedErrors(ownedPaths)(result.errors).length;
   if (result.status === "unverified" && result.reason && !repairSignal.aborted) {

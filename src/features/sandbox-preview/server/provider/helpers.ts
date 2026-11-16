@@ -1,5 +1,5 @@
 import { killTreeCommand } from "../dev-server";
-import type { RequestOptions, Sandbox } from "./types";
+import type { RequestOptions, RunOptions, Sandbox } from "./types";
 
 /**
  * Helpers every provider gets for free: they need only `run`, so an adapter
@@ -62,4 +62,11 @@ export const exists = async (sandbox: Sandbox, path: string, opts: RequestOption
 export const remove = async (sandbox: Sandbox, path: string, opts: RequestOptions = {}) => {
   const result = await sandbox.run(`rm -rf -- ${quote(path)}`, opts);
   if (result.exitCode !== 0) throw new Error(`Could not remove ${path}: ${result.stderr.trim()}`);
+};
+
+/** `run`, but a non-zero exit throws, with E2B's own `commands.run` message ("exit status N"). */
+export const runOrThrow = async (sandbox: Sandbox, command: string, opts?: RunOptions) => {
+  const result = await sandbox.run(command, opts);
+  if (result.exitCode !== 0) throw new Error(`exit status ${result.exitCode}`);
+  return result;
 };

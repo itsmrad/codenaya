@@ -60,8 +60,10 @@ vi.mock("@/features/conversations/inngest/tools/delete-files", () => ({
 }));
 
 import { createTool, openai } from "@inngest/agent-kit";
-import { CommandExitError, type Sandbox } from "e2b";
+import { CommandExitError, type Sandbox as E2bSandbox } from "e2b";
 import { z } from "zod";
+
+import { fromE2bSandbox } from "@/features/sandbox-preview/server/provider/e2b";
 
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { VITE_REACT_STARTER } from "../inngest/vite-starter";
@@ -191,6 +193,14 @@ const fakeSandbox = ({
           builds.push(brokenIn(cwd));
           return answer(build(brokenIn(cwd), cwd, fs));
         }
+        // The provider helpers' exists and remove.
+        const quoted = /^(test -e|rm -rf --) '(.*)'$/.exec(command);
+        if (quoted) {
+          const path = quoted[2].replaceAll("'\\''", "'");
+          if (quoted[1] === "test -e") return answer({ exitCode: fs.has(path) ? 0 : 1 });
+          fs.delete(path);
+          return answer({ exitCode: 0 });
+        }
         if (command.startsWith("rm -rf ")) {
           const dir = command.slice("rm -rf ".length);
           for (const path of [...fs.keys()]) if (path.startsWith(`${dir}/`)) fs.delete(path);
@@ -234,7 +244,7 @@ const model = openai({ model: "stub-haiku", apiKey: "test-key", baseUrl: "http:/
 const run = (sandbox: ReturnType<typeof fakeSandbox>, options: Partial<Parameters<typeof verifyAndFix>[0]> = {}) => {
   const events: RepairEvent[] = [];
   return verifyAndFix({
-    sandbox: sandbox as unknown as Sandbox,
+    sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
     projectId: "proj_1" as Id<"projects">,
     internalKey: "internal",
     runId: "run_1",
@@ -335,7 +345,7 @@ describe("verifyAndFix", () => {
   it("connects a lazy sandbox only to check or sync, and reports each repair response", async () => {
     const sandbox = fakeSandbox();
     modelReplies(...fixApp());
-    const connect = vi.fn(async () => sandbox as unknown as Sandbox);
+    const connect = vi.fn(async () => fromE2bSandbox(sandbox as unknown as E2bSandbox));
     const responses: Array<string | undefined> = [];
 
     const { result } = await run(sandbox, {

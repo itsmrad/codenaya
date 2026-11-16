@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("e2b", () => ({ Sandbox: {} }));
 
-import { getDefaultProvider, getProvider } from "./registry";
+import { getDefaultProvider, getDefaultProviderOrNull, getProvider } from "./registry";
 import { SandboxConfigError } from "./types";
 
 describe("sandbox provider registry", () => {
@@ -15,6 +15,7 @@ describe("sandbox provider registry", () => {
 
     expect(getProvider("e2b").id).toBe("e2b");
     expect(getDefaultProvider().id).toBe("e2b");
+    expect(getDefaultProviderOrNull()?.id).toBe("e2b");
   });
 
   it("treats a provider without a key as not configured", () => {
@@ -22,5 +23,6 @@ describe("sandbox provider registry", () => {
 
     expect(() => getDefaultProvider()).toThrow(SandboxConfigError);
     expect(() => getDefaultProvider()).toThrow("E2B_API_KEY is not set");
+    expect(getDefaultProviderOrNull()).toBeNull();
   });
 });

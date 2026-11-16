@@ -33,6 +33,22 @@ const call = async <T>(request: () => Promise<T>): Promise<T> => {
   }
 };
 
+const handles = new WeakMap<Sandbox, E2bSandbox>();
+
+/**
+ * The raw E2B handle behind a seam sandbox, or null for another provider.
+ * shortcut: only for `dev-server.ts` (typed to the E2B handle until PR1b moves it)
+ * and the swarm's envd-version gate; delete once nothing needs it.
+ */
+export const e2bHandleOf = (sandbox: Sandbox) => handles.get(sandbox) ?? null;
+
+/** The seam's view of an E2B sandbox. */
+export const fromE2bSandbox = (sandbox: E2bSandbox): Sandbox => {
+  const wrapped = wrap(sandbox);
+  handles.set(wrapped, sandbox);
+  return wrapped;
+};
+
 const wrap = (sandbox: E2bSandbox): Sandbox => ({
   provider: "e2b",
   id: sandbox.sandboxId,
@@ -72,6 +88,12 @@ const wrap = (sandbox: E2bSandbox): Sandbox => ({
 /** Sandbox lifetime cap on the E2B plan we run on. */
 const E2B_MAX_SESSION_MS = 60 * 60 * 1000;
 
+/**
+ * The Node 22 template `npm run e2b:template` builds, used when E2B_TEMPLATE is unset.
+ * Never `base`: it ships Node 20.9, too old for Vite 7 (#178).
+ */
+export const DEFAULT_E2B_TEMPLATE = "codenaya-node22";
+
 /** The E2B adapter. `apiKey` is read by the registry per request. */
 export const createE2bProvider = (apiKey: string): SandboxProvider => {
   const create = (from: string, { timeoutMs, metadata, requestTimeoutMs, localHostHeader }: Omit<CreateOptions, "image">) =>
@@ -83,14 +105,14 @@ export const createE2bProvider = (apiKey: string): SandboxProvider => {
         requestTimeoutMs,
         ...(localHostHeader && { network: { maskRequestHost: "localhost:${PORT}" } }),
       }),
-    ).then(wrap);
+    ).then(fromE2bSandbox);
 
   return {
     id: "e2b",
     maxSessionMs: E2B_MAX_SESSION_MS,
-    // The base image ships Node 20.9, too old for Vite 7 (#178); E2B_TEMPLATE names the Node 22 one.
-    create: ({ image, ...opts }) => create(image ?? (process.env.E2B_TEMPLATE?.trim() || "base"), opts),
-    connect: (id, opts) => call(() => E2bSandbox.connect(id, { ...opts, apiKey })).then(wrap),
+    // Read per call, like project-sandbox's SANDBOX_TEMPLATE (which also warns once when it is unset).
+    create: ({ image, ...opts }) => create(image ?? (process.env.E2B_TEMPLATE?.trim() || DEFAULT_E2B_TEMPLATE), opts),
+    connect: (id, opts) => call(() => E2bSandbox.connect(id, { ...opts, apiKey })).then(fromE2bSandbox),
     list: async ({ metadata, limit, requestTimeoutMs }) => {
       const running = await call(() =>
         E2bSandbox.list({ apiKey, requestTimeoutMs, limit, query: { metadata, state: ["running"] } }).nextItems(),
@@ -98,8 +120,11 @@ export const createE2bProvider = (apiKey: string): SandboxProvider => {
       return running.map(({ sandboxId, metadata, endAt }) => ({ id: sandboxId, metadata, endAt }));
     },
     kill: (id, opts) => call(() => E2bSandbox.kill(id, { ...opts, apiKey })),
-    snapshot: async (sandbox, opts) =>
-      (await call(() => E2bSandbox.createSnapshot(sandbox.id, { ...opts, apiKey }))).snapshotId,
+    snapshot: async (sandbox, opts) => {
+      const handle = handles.get(sandbox);
+      if (!handle) throw new Error("Not an E2B sandbox");
+      return (await call(() => handle.createSnapshot(opts))).snapshotId;
+    },
     createFromSnapshot: (snapshotId, opts) => create(snapshotId, opts),
     deleteSnapshot: (snapshotId, opts) => call(() => E2bSandbox.deleteSnapshot(snapshotId, { ...opts, apiKey })),
   };

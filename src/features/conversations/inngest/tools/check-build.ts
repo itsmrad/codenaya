@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createTool } from "@inngest/agent-kit";
-import { CommandExitError, type CommandResult, Sandbox, SandboxError, TimeoutError } from "e2b";
+import { type Sandbox as E2bSandbox, SandboxError, TimeoutError } from "e2b";
 
 import {
   BUILD_CHECK_UNFINISHED,
@@ -17,10 +17,18 @@ import {
   MAX_LIVE_SANDBOXES,
   type ProjectFile,
   WORK_DIR,
-  createProjectSandbox,
   offlineFirstInstall,
-  writeProjectFiles,
+  projectFileEntries,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { e2bHandleOf } from "@/features/sandbox-preview/server/provider/e2b";
+import { runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
+import { getDefaultProviderOrNull } from "@/features/sandbox-preview/server/provider/registry";
+import {
+  type RunResult,
+  type Sandbox,
+  type SandboxProvider,
+  SandboxTimeoutError,
+} from "@/features/sandbox-preview/server/provider/types";
 import {
   INSTALLING,
   SHORT_CALL_MS,
@@ -160,20 +168,9 @@ export const redact = (text: string, secrets: readonly string[]) => {
   return redactor.push(text) + redactor.flush();
 };
 
-/** E2B throws on a non-zero exit; the result is what the caller reports. */
-const run = async (
-  sandbox: Sandbox,
-  command: string,
-  timeoutMs: number,
-  cwd: string,
-): Promise<CommandResult> => {
-  try {
-    return await sandbox.commands.run(command, { cwd, timeoutMs, requestTimeoutMs: timeoutMs });
-  } catch (error) {
-    if (error instanceof CommandExitError) return error;
-    throw error;
-  }
-};
+/** The result, with its exit code, is what the caller reports. */
+const run = (sandbox: Sandbox, command: string, timeoutMs: number, cwd: string) =>
+  sandbox.run(command, { cwd, timeoutMs, requestTimeoutMs: timeoutMs });
 
 /**
  * Errors first: Vite writes progress to stdout and the failure to stderr
@@ -182,7 +179,7 @@ const run = async (
  * after it, since dropping colour codes, `\r` and paths can rejoin one.
  * Known errors anywhere in the output get their cause and fix appended.
  */
-const failureOutput = (result: CommandResult, dir: string, secrets: readonly string[], framework: Framework) => {
+const failureOutput = (result: RunResult, dir: string, secrets: readonly string[], framework: Framework) => {
   const output = redact(`${result.stderr}\n${result.stdout}`, secrets);
   return redact(withErrorHints(trimBuildOutput(output, dir, framework), output), secrets);
 };
@@ -202,7 +199,7 @@ const unfinished = (error: unknown, secrets: readonly string[] = [], { path, dea
       path,
       elapsedMs: deadline && Date.now() - (deadline - STEP_BUDGET_MS),
       budgetLeftMs: deadline && deadline - Date.now(),
-      sandboxId: sandbox?.sandboxId,
+      sandboxId: sandbox?.id,
       error: error instanceof Error ? error.constructor.name : typeof error,
       reason: reason.slice(0, 200),
     }),
@@ -243,7 +240,7 @@ const buildIn = async (
   const buildDeadline = Math.min(Date.now() + CHECK_TIMEOUT_MS, deadline);
   const timeLeft = () => within(buildDeadline, CHECK_TIMEOUT_MS);
 
-  await writeProjectFiles(sandbox, files, dir, timeLeft);
+  await sandbox.writeFiles(projectFileEntries(files, dir), { requestTimeoutMs: timeLeft() });
 
   const install = await run(sandbox, offlineFirstInstall("--no-audit --no-fund --loglevel=error"), timeLeft(), dir);
   if (install.exitCode !== 0) {
@@ -292,7 +289,7 @@ type WarmPreview = { projectId: string; ownerId: string };
  * An install the preview (or another check) runs: copying node_modules now could catch it half-written.
  * A request timeout is inconclusive while the preview is busy installing.
  */
-const installRunning = async (sandbox: Sandbox, deadline: number) => {
+const installRunning = async (sandbox: E2bSandbox, deadline: number) => {
   const requestTimeoutMs = within(deadline, SHORT_CALL_MS);
   const started = Date.now();
   try {
@@ -316,7 +313,7 @@ const installRunning = async (sandbox: Sandbox, deadline: number) => {
  * (or the list keeps timing out) after INSTALL_WAIT_MS or near the step deadline.
  * Each poll is bounded by the wait too.
  */
-const installFinished = async (sandbox: Sandbox, deadline: number) => {
+const installFinished = async (sandbox: E2bSandbox, deadline: number) => {
   const waitUntil = Math.min(Date.now() + INSTALL_WAIT_MS, deadline);
   try {
     while (await installRunning(sandbox, waitUntil)) {
@@ -349,13 +346,12 @@ const previewState = async (sandbox: Sandbox, deadline: number) =>
  * The query filters by the tags the preview route sets; they are checked again
  * here because they decide whose sandbox this runs in.
  */
-const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPreview, deadline: number) => {
-  const running = await Sandbox.list({
-    apiKey,
-    query: { metadata: { userId: ownerId, projectId }, state: ["running"] },
+const connectWarmSandbox = async (provider: SandboxProvider, { projectId, ownerId }: WarmPreview, deadline: number) => {
+  const running = await provider.list({
+    metadata: { userId: ownerId, projectId },
     limit: MAX_LIVE_SANDBOXES,
     requestTimeoutMs: within(deadline, SHORT_CALL_MS),
-  }).nextItems();
+  });
   const info = running.find(
     (sandbox) =>
       sandbox.metadata.userId === ownerId &&
@@ -364,12 +360,13 @@ const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPr
   );
   if (!info) return null;
 
-  const sandbox = await Sandbox.connect(info.sandboxId, {
-    apiKey,
+  const sandbox = await provider.connect(info.id, {
     timeoutMs: WARM_MIN_TIME_LEFT_MS,
     requestTimeoutMs: within(deadline, SHORT_CALL_MS),
   });
-  return (await installFinished(sandbox, deadline)) ? sandbox : null;
+  // The process list and the dev server helpers still take the E2B handle (moved in PR1b).
+  const handle = e2bHandleOf(sandbox);
+  return handle && (await installFinished(handle, deadline)) ? { sandbox, handle } : null;
 };
 
 /**
@@ -378,7 +375,7 @@ const connectWarmSandbox = async (apiKey: string, { projectId, ownerId }: WarmPr
  * The dev server runs in WORK_DIR, so it is left alone.
  */
 const killBuildProcesses = (sandbox: Sandbox, dir: string) =>
-  sandbox.commands
+  sandbox
     .run(`for p in /proc/[0-9]*; do case "$(readlink "$p/cwd")" in ${dir}|${dir}/*) kill -9 "\${p##*/}";; esac; done; true`, {
       timeoutMs: SHORT_CALL_MS,
       requestTimeoutMs: SHORT_CALL_MS,
@@ -392,34 +389,36 @@ const killBuildProcesses = (sandbox: Sandbox, dir: string) =>
  * preview's `.env` is not read, as on the cold path. Never kills the sandbox,
  * and starts the preview's dev server again if the build took it down.
  */
-const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: BuildJob): Promise<string | null> => {
+const checkInWarmSandbox = async (provider: SandboxProvider, preview: WarmPreview, job: BuildJob): Promise<string | null> => {
   const dir = `/home/user/check-build-${randomUUID().slice(0, 8)}`;
   let sandbox: Sandbox | null = null;
+  let handle: E2bSandbox | null = null;
   let building = false;
   let devServer: PreviewDevServer | null = null;
   try {
-    sandbox = await connectWarmSandbox(apiKey, preview, job.deadline);
-    if (!sandbox) return null;
+    const warm = await connectWarmSandbox(provider, preview, job.deadline);
+    if (!warm) return null;
+    ({ sandbox, handle } = warm);
     const before = await previewState(sandbox, job.deadline);
     if (before.includes(".env")) return null;
-    await sandbox.commands.run(`mkdir -p ${dir} && cp -a ${WORK_DIR}/node_modules ${dir}/`, {
+    await runOrThrow(sandbox, `mkdir -p ${dir} && cp -a ${WORK_DIR}/node_modules ${dir}/`, {
       timeoutMs: within(job.deadline, COPY_TIMEOUT_MS),
       requestTimeoutMs: within(job.deadline, COPY_TIMEOUT_MS),
     });
-    if ((await previewState(sandbox, job.deadline)) !== before || (await installRunning(sandbox, job.deadline))) {
+    if ((await previewState(sandbox, job.deadline)) !== before || (await installRunning(handle, job.deadline))) {
       return null;
     }
 
     // Not finding it only skips the restart below; the build still runs warm.
-    devServer = await findPreviewDevServer(sandbox, within(job.deadline, SHORT_CALL_MS)).catch(() => null);
+    devServer = await findPreviewDevServer(handle, within(job.deadline, SHORT_CALL_MS)).catch(() => null);
     building = true;
     return await buildIn(sandbox, dir, job, "warm");
   } catch (error) {
     // A slow warm build may be the preview's own load (leftovers, the dev server), so a new sandbox gets a try.
-    if (building && (error instanceof TimeoutError || error instanceof OutOfTime)) {
+    if (building && (error instanceof SandboxTimeoutError || error instanceof OutOfTime)) {
       if (sandbox) await killBuildProcesses(sandbox, dir);
       markWarmSlow(preview.projectId);
-      console.error("[check-build] warm build timed out, trying a new sandbox", sandbox?.sandboxId, error);
+      console.error("[check-build] warm build timed out, trying a new sandbox", sandbox?.id, error);
       return null;
     }
     if (error instanceof OutOfTime) return unfinished(error, [], { path: "warm", deadline: job.deadline, sandbox });
@@ -429,14 +428,14 @@ const checkInWarmSandbox = async (apiKey: string, preview: WarmPreview, job: Bui
     // Never kill: this is the user's live preview. Each call is bounded by
     // SHORT_CALL_MS, best effort, and inside the margin STEP_BUDGET_MS leaves.
     await sandbox
-      ?.commands.run(`rm -rf ${dir}`, { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS })
+      ?.run(`rm -rf ${dir}`, { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS })
       .catch(() => {});
-    if (sandbox && devServer) {
-      const restarted = await restartDevServerIfDown(sandbox, devServer, SHORT_CALL_MS).catch((error) => {
-        console.error("[check-build] could not check the preview's dev server", sandbox?.sandboxId, error);
+    if (sandbox && handle && devServer) {
+      const restarted = await restartDevServerIfDown(handle, devServer, SHORT_CALL_MS).catch((error) => {
+        console.error("[check-build] could not check the preview's dev server", sandbox?.id, error);
         return false;
       });
-      if (restarted) console.warn("[check-build] the warm build took the preview's dev server down; restarted it", sandbox.sandboxId);
+      if (restarted) console.warn("[check-build] the warm build took the preview's dev server down; restarted it", sandbox.id);
     }
   }
 };
@@ -459,12 +458,13 @@ export const isSafeProjectPath = (path: string) =>
 type CheckOptions = {
   files: ProjectFile[];
   paths: Set<string>;
-  apiKey?: string;
+  /** Where a new sandbox or the warm preview is found; none means no build. */
+  provider?: SandboxProvider;
   metadata?: Record<string, string>;
   preview?: WarmPreview;
   /**
    * Build in this caller-owned sandbox, in a directory of its own: no lookup,
-   * no new sandbox, never killed. Takes precedence over `preview` and `apiKey`.
+   * no new sandbox, never killed. Takes precedence over `preview` and `provider`.
    */
   sandbox?: Sandbox;
   /**
@@ -490,7 +490,7 @@ type CheckOptions = {
 export const checkProjectBuild = async ({
   files,
   paths,
-  apiKey,
+  provider,
   metadata,
   preview,
   sandbox: suppliedSandbox,
@@ -528,7 +528,8 @@ export const checkProjectBuild = async ({
       if (sourceDir) {
         const timeoutMs = within(job.deadline, COPY_TIMEOUT_MS);
         // Anchored like the snapshot's skip list: a nested dist, such as public/dist, is project files.
-        await suppliedSandbox.commands.run(
+        await runOrThrow(
+          suppliedSandbox,
           `mkdir -p ${dir} && tar -C '${sourceDir}' --exclude=node_modules --exclude=.git --exclude=./dist ` +
             (GENERATED_PATHS[framework] ?? []).map((path) => `--exclude=./${path} `).join("") +
             `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
@@ -540,13 +541,13 @@ export const checkProjectBuild = async ({
       return unfinished(error, secrets, { path: "given", deadline: job.deadline, sandbox: suppliedSandbox });
     } finally {
       // Never kill: the caller owns this sandbox. Only our directory goes.
-      await suppliedSandbox.commands
+      await suppliedSandbox
         .run(`rm -rf ${dir}`, { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS })
         .catch(() => {});
     }
   }
 
-  if (!apiKey) {
+  if (!provider) {
     return notBuilt("No build sandbox is configured") + notes;
   }
 
@@ -554,7 +555,7 @@ export const checkProjectBuild = async ({
   const warmPreview = framework === "next" || framework === "tanstack-start" ? undefined : preview;
   if (warmPreview) {
     if (!warmWasSlow(warmPreview.projectId)) {
-      const warm = await checkInWarmSandbox(apiKey, warmPreview, job);
+      const warm = await checkInWarmSandbox(provider, warmPreview, job);
       if (warm) return warm;
     }
     if (job.deadline - Date.now() < MIN_COLD_BUILD_MS) {
@@ -566,10 +567,9 @@ export const checkProjectBuild = async ({
 
   let sandbox: Sandbox;
   try {
-    sandbox = await createProjectSandbox({
-      apiKey,
+    sandbox = await provider.create({
       timeoutMs: SANDBOX_TIMEOUT_MS,
-      metadata,
+      metadata: metadata ?? {},
       requestTimeoutMs: within(job.deadline, CREATE_TIMEOUT_MS),
     });
   } catch (error) {
@@ -630,7 +630,7 @@ export const createCheckBuildTool = ({
           return await checkProjectBuild({
             files,
             paths,
-            apiKey: process.env.E2B_API_KEY?.trim(),
+            provider: getDefaultProviderOrNull() ?? undefined,
             metadata: { projectId, purpose: "check-build" },
             secrets,
             // The preview's sandbox has these variables in .env, where install
