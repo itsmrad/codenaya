@@ -8,6 +8,7 @@ import {
   projectFileEntries,
   projectFilesSchema,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { canonicalSandboxIdOrNull } from "@/features/sandbox-preview/server/provider/ids";
 import { SandboxTimeoutError } from "@/features/sandbox-preview/server/provider/types";
 import {
   forgetSandbox,
@@ -63,7 +64,11 @@ interface InstallQueue {
  */
 const installQueues = new Map<string, InstallQueue>();
 
-const installAfterBurst = async (sandboxId: string, install: Install) => {
+/** "abc" and "e2b:abc" are one sandbox, so they share one queue. */
+const queueKey = (sandboxId: string) => canonicalSandboxIdOrNull(sandboxId) ?? sandboxId;
+
+const installAfterBurst = async (publicId: string, install: Install) => {
+  const sandboxId = queueKey(publicId);
   let entry = installQueues.get(sandboxId);
   if (!entry) {
     const created: InstallQueue = {
@@ -156,7 +161,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     const sandbox = await getOwnedSandbox(sandboxId, userId);
     if (!sandbox) return Response.json({ error: "Sandbox not found" }, { status: 404 });
     // A package.json sync may be queued but not yet visible in commands.list().
-    const status = installQueues.has(sandboxId) ? "busy" : await recoverEsbuild(sandbox);
+    const status = installQueues.has(queueKey(sandboxId)) ? "busy" : await recoverEsbuild(sandbox);
     return Response.json({ status });
   } catch {
     // Never return E2B exception text: it can contain the command's environment.

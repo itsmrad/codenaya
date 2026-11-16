@@ -165,3 +165,29 @@ take only the seam's `Sandbox`.
 - **`exists`** also counts a dangling symlink, like E2B's `files.exists`.
 
 `check-build.ts` still imports E2B's `SandboxError`: an aborted request arrives unmapped.
+
+## PR3b status
+
+**Still E2B-only.** `PROVIDER_IDS` is `["e2b"]`, and there is no Blaxel or Daytona
+adapter. With one provider, the only thing that differs is that a missing E2B key now
+gets the unknown-id answer instead of an error. Ids, cap counts, kills and creates are
+as before. The privacy page and SECURITY.md subprocessor text must change **before**
+any non-E2B adapter is enabled.
+
+The boot path is wired for more than one provider:
+- **Create.** `createSandbox` makes one create on `SANDBOX_PROVIDER` when
+  `SANDBOX_PROVIDER_FALLBACKS` is empty, with no cooldown. Otherwise it goes through
+  `createWithFailover` with a process-local cooldown, and prints the failover notice
+  to the boot terminal.
+- **Cap and kill.** The per-user cap and the project kill fan out over every
+  configured provider (`listAll`, with the same per-provider `limit`).
+- **Public ids.** The client gets E2B's id unprefixed unless fallbacks are set
+  (`clientSandboxId`). An unprefixed id always means E2B, even when E2B isn't first.
+- **Lookup.** The cache and the install queues key every id canonically
+  (`<provider>:<id>`). `getOwnedSandbox` connects only on a configured provider and
+  answers `null` otherwise, the same as for an unknown id, so nothing can probe which
+  providers exist. The `info().metadata.userId` owner check is unchanged.
+- **`/proc` fallback.** `listCommands`' fallback keeps only tree roots and never PID 1.
+
+Not yet: the agent paths (check-build, build-repair, swarm) create and look up on the
+default provider only, and there is no sticky provider per project.

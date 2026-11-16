@@ -1,10 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ connect: vi.fn(), getProvider: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  connect: vi.fn(),
+  getProvider: vi.fn(),
+  config: vi.fn(),
+  realConfig: undefined as unknown as (...args: unknown[]) => unknown,
+}));
 
 vi.mock("./provider/registry", () => ({ getProvider: mocks.getProvider }));
+vi.mock("./provider/config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./provider/config")>();
+  mocks.realConfig = actual.parseProviderConfig as (...args: unknown[]) => unknown;
+  return { ...actual, parseProviderConfig: (...args: unknown[]) => mocks.config(...args) };
+});
 
-import type { Sandbox } from "./provider/types";
+import type { ProviderId, Sandbox } from "./provider/types";
 
 import {
   forgetSandbox,
@@ -23,8 +33,12 @@ const fakeSandbox = (sandboxId: string, ownerId?: string) =>
 
 describe("sandbox registry", () => {
   beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("E2B_API_KEY", "e2b_key");
+    vi.stubEnv("SANDBOX_PROVIDER_FALLBACKS", "");
     mocks.connect.mockReset();
     mocks.getProvider.mockReset().mockReturnValue({ connect: mocks.connect });
+    mocks.config.mockReset().mockImplementation((...args: unknown[]) => mocks.realConfig(...args));
     forgetSandbox("sbx_1");
   });
 
@@ -73,6 +87,41 @@ describe("sandbox registry", () => {
   it.each(["blaxel:sbx_1", "e2b:", "../sbx", "sbx 1"])("refuses a malformed or unknown-provider id %j without connecting", async (id) => {
     expect(await getOwnedSandbox(id, "user_a")).toBeNull();
     expect(mocks.getProvider).not.toHaveBeenCalled();
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it.each(["e2b:sbx_9", "sbx_9"])(
+    "refuses %j on an unconfigured provider exactly like an unknown id, without probing it",
+    async (id) => {
+      vi.stubEnv("E2B_API_KEY", "");
+
+      expect(await getOwnedSandbox(id, "user_a")).toBeNull();
+      expect(await getOwnedSandbox("blaxel:sbx_9", "user_a")).toBeNull();
+      expect(mocks.getProvider).not.toHaveBeenCalled();
+      expect(mocks.connect).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reads an unprefixed id as E2B's even when another provider comes first, so open previews keep working", async () => {
+    mocks.config.mockReturnValue({ primary: "blaxel" as ProviderId, fallbacks: ["e2b"], configured: { e2b: true } });
+    mocks.connect.mockResolvedValue(fakeSandbox("sbx_3", "user_a"));
+
+    expect(await getOwnedSandbox("sbx_3", "user_a")).not.toBeNull();
+    expect(mocks.getProvider).toHaveBeenCalledWith("e2b");
+    expect(mocks.connect).toHaveBeenCalledWith("sbx_3");
+    forgetSandbox("sbx_3");
+  });
+
+  it("caches one entry per sandbox whether or not the id carries the prefix", async () => {
+    const sandbox = fakeSandbox("sbx_1");
+    const reinstall = vi.fn();
+    rememberSandbox(sandbox, "user_a", reinstall);
+
+    expect(await getOwnedSandbox("e2b:sbx_1", "user_a")).toBe(sandbox);
+    expect(requestReinstall("e2b:sbx_1")).toBe(true);
+    expect(reinstall).toHaveBeenCalledOnce();
+    forgetSandbox("e2b:sbx_1");
+    expect(requestReinstall("sbx_1")).toBe(false);
     expect(mocks.connect).not.toHaveBeenCalled();
   });
 

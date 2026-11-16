@@ -1,4 +1,5 @@
-import { parsePublicSandboxIdOrNull } from "./provider/ids";
+import { parseProviderConfig } from "./provider/config";
+import { canonicalSandboxIdOrNull, parsePublicSandboxIdOrNull, toPublicSandboxId } from "./provider/ids";
 import { getProvider } from "./provider/registry";
 import type { Sandbox } from "./provider/types";
 
@@ -29,42 +30,48 @@ export const rememberSandbox = (
   reinstall?: () => void,
   reinstallDone?: () => Promise<void>,
 ) => {
-  // An E2B sandbox's public id is still its unprefixed native id (ADR 0015).
-  sandboxes.set(sandbox.id, { sandbox, userId, reinstall, reinstallDone });
+  sandboxes.set(toPublicSandboxId(sandbox.provider, sandbox.id), { sandbox, userId, reinstall, reinstallDone });
 };
 
 /**
  * Asks the instance that booted the sandbox to re-run its install, so the
  * output reaches the preview terminal. `false` when this instance didn't boot it.
  */
+/** The cache entry for a client id, prefixed or not. */
+const cached = (sandboxId: string) => sandboxes.get(canonicalSandboxIdOrNull(sandboxId) ?? "");
+
 export const requestReinstall = (sandboxId: string) => {
-  const reinstall = sandboxes.get(sandboxId)?.reinstall;
+  const reinstall = cached(sandboxId)?.reinstall;
   reinstall?.();
   return Boolean(reinstall);
 };
 
 /** A sync must not acknowledge a queued stream install while Vite is stopped (#774). */
 export const waitForReinstall = (sandboxId: string) =>
-  sandboxes.get(sandboxId)?.reinstallDone?.() ?? Promise.resolve();
+  cached(sandboxId)?.reinstallDone?.() ?? Promise.resolve();
 
 export const forgetSandbox = (sandboxId: string) => {
-  sandboxes.delete(sandboxId);
+  sandboxes.delete(canonicalSandboxIdOrNull(sandboxId) ?? "");
 };
 
 /**
- * The sandbox when `userId` owns it, `null` when someone else does or the id is
- * malformed. Rejects when the provider cannot reach it (e.g. it already expired).
+ * The sandbox when `userId` owns it, `null` when someone else does, the id is
+ * malformed or its provider is not configured: all alike, so a caller can't probe
+ * which providers or sandboxes exist. Rejects when the provider cannot reach it
+ * (e.g. it already expired).
  */
 export const getOwnedSandbox = async (
   sandboxId: string,
   userId: string,
 ): Promise<Sandbox | null> => {
-  let owned = sandboxes.get(sandboxId);
+  // The id comes from the client: its prefix only picks the provider, the owner is checked below.
+  const parsed = parsePublicSandboxIdOrNull(sandboxId);
+  if (!parsed) return null;
+  const key = toPublicSandboxId(parsed.provider, parsed.nativeId);
+  let owned = sandboxes.get(key);
 
   if (!owned) {
-    // The id comes from the client: its prefix only picks the provider, the owner is checked below.
-    const parsed = parsePublicSandboxIdOrNull(sandboxId);
-    if (!parsed) return null;
+    if (!parseProviderConfig().configured[parsed.provider]) return null;
     const sandbox = await getProvider(parsed.provider).connect(parsed.nativeId);
     const sandboxInfo = await sandbox.info();
     const ownerId = sandboxInfo.metadata?.userId;
@@ -74,7 +81,7 @@ export const getOwnedSandbox = async (
     }
 
     owned = { sandbox, userId: ownerId };
-    sandboxes.set(sandboxId, owned);
+    sandboxes.set(key, owned);
   }
 
   return owned.userId === userId ? owned.sandbox : null;
