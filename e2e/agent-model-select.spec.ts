@@ -28,8 +28,9 @@ test.describe("chat agent model switcher", () => {
     // The full model name fits at the default panel width (#217).
     const name = trigger.locator('[data-slot="select-value"]');
     await expect(name).not.toBeEmpty();
+    // Measure the name's own span: it clips itself, so the value wrapper never overflows (#668).
     // The measurement rides in the message so a red run says what overflowed (#606).
-    const fit = await name.evaluate((el) => ({
+    const fit = await name.locator(".truncate").evaluate((el) => ({
       text: el.textContent,
       scrollWidth: el.scrollWidth,
       clientWidth: el.clientWidth,
