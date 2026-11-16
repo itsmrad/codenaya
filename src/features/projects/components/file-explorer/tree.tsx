@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useContext, useRef, useState } from "react";
 
 import { ChevronRightIcon } from "lucide-react";
 import { FileIcon, FolderIcon } from "@react-symbols/icons/utils";
@@ -28,6 +28,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+import { folderFocusKey, ExplorerFocusContext, useExplorerFocusTarget } from "./focus";
+import { nextFocusAfterDelete } from "./next-focus";
 import { getItemPadding } from "./constants";
 import { LoadingRow } from "./loading-row";
 import { CreateInput } from "./create-input";
@@ -37,16 +39,21 @@ import { Doc, Id } from "../../../../../convex/_generated/dataModel";
 
 export const Tree = ({
   item,
+  siblings,
   level = 0,
   projectId,
   lockedAbove = false,
 }: {
   item: Doc<"files">;
+  siblings: Doc<"files">[];
   level?: number;
   projectId: Id<"projects">;
   /** A folder above this item is locked from AI edits (#307). */
   lockedAbove?: boolean;
 }) => {
+  const { requestFocus } = useContext(ExplorerFocusContext)!;
+  const rowRef = useExplorerFocusTarget(item._id);
+  const deleteFocus = useRef<string | null | undefined>(undefined);
   const [isOpen, setIsOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [creating, setCreating] = useState<"file" | "folder" | null>(null);
@@ -74,6 +81,7 @@ export const Tree = ({
 
   const handleRename = async (newName: string) => {
     setIsRenaming(false);
+    requestFocus(item._id);
 
     if (newName === item.name) {
       return;
@@ -89,6 +97,7 @@ export const Tree = ({
   const handleCreate = async (name: string) => {
     const createType = creating;
     setCreating(null);
+    requestFocus(item._id);
 
     // Validate against siblings in folderContents
     if (folderContents) {
@@ -110,13 +119,17 @@ export const Tree = ({
           parentId: item._id,
         });
         // Open the confirmed id, never the optimistic one (#266).
-        if (fileId) openFile(fileId, { pinned: false });
+        if (fileId) {
+          openFile(fileId, { pinned: false });
+          requestFocus(fileId);
+        }
       } else if (createType === "folder") {
         await createFolder({
           projectId,
           name,
           parentId: item._id,
         });
+        requestFocus(folderFocusKey(item._id, name));
       }
     } catch (error) {
       toast.error(convexErrorMessage(error, `Couldn't create the ${createType}`));
@@ -131,6 +144,7 @@ export const Tree = ({
   // #259: confirm first, and offer Undo, which restores the snapshot the
   // delete took.
   const handleDelete = () => {
+    deleteFocus.current = nextFocusAfterDelete(siblings, item._id);
     setConfirmingDelete(false);
     deleteFile({ id: item._id }).then(
       // Null when the project is too big to snapshot: no Undo then.
@@ -149,13 +163,21 @@ export const Tree = ({
             : undefined,
         });
       },
-      (error) => toast.error(convexErrorMessage(error, `Couldn't delete ${item.name}`)),
+      (error) => {
+        deleteFocus.current = item._id;
+        requestFocus(item._id);
+        toast.error(convexErrorMessage(error, `Couldn't delete ${item.name}`));
+      },
     );
   };
 
   const deleteDialog = (
     <AlertDialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
-      <AlertDialogContent>
+      <AlertDialogContent onCloseAutoFocus={(event) => {
+        // The optimistic delete can unmount this dialog before its exit finishes.
+        event.preventDefault();
+        requestFocus(deleteFocus.current === undefined ? item._id : deleteFocus.current);
+      }}>
         <AlertDialogHeader>
           <AlertDialogTitle>
             {item.type === "folder"
@@ -185,7 +207,7 @@ export const Tree = ({
           defaultValue={fileName}
           level={level}
           onSubmit={handleRename}
-          onCancel={() => setIsRenaming(false)}
+          onCancel={() => { setIsRenaming(false); requestFocus(item._id); }}
         />
       );
     }
@@ -208,7 +230,7 @@ export const Tree = ({
           }
         }}
         onRename={() => setIsRenaming(true)}
-        onDelete={() => setConfirmingDelete(true)}
+        onDelete={() => { deleteFocus.current = undefined; setConfirmingDelete(true); }}
       >
         <FileIcon fileName={fileName} autoAssign className="size-4" />
         <span className="truncate text-sm" title={fileName}>{fileName}</span>
@@ -239,6 +261,7 @@ export const Tree = ({
     return (
       <>
         <button
+          ref={rowRef}
           onClick={() => setIsOpen((value) => !value)}
           className="group flex items-center gap-1 h-5.5 hover:bg-accent/30 w-full"
           style={{ paddingLeft: getItemPadding(level, false) }}
@@ -252,12 +275,13 @@ export const Tree = ({
               type={creating}
               level={level + 1}
               onSubmit={handleCreate}
-              onCancel={() => setCreating(null)}
+              onCancel={() => { setCreating(null); requestFocus(item._id); }}
             />
             {folderContents?.map((subItem) => (
               <Tree
                 key={subItem._id}
                 item={subItem}
+                siblings={folderContents}
                 level={level + 1}
                 lockedAbove={lockedAbove || item.locked === true}
                 projectId={projectId}
@@ -278,7 +302,7 @@ export const Tree = ({
           isOpen={isOpen}
           level={level}
           onSubmit={handleRename}
-          onCancel={() => setIsRenaming(false)}
+          onCancel={() => { setIsRenaming(false); requestFocus(item._id); }}
         />
         {isOpen && (
           <>
@@ -287,6 +311,7 @@ export const Tree = ({
               <Tree
                 key={subItem._id}
                 item={subItem}
+                siblings={folderContents}
                 level={level + 1}
                 lockedAbove={lockedAbove || item.locked === true}
                 projectId={projectId}
@@ -306,7 +331,7 @@ export const Tree = ({
         level={level}
         onClick={() => setIsOpen((value) => !value)}
         onRename={() => setIsRenaming(true)}
-        onDelete={() => setConfirmingDelete(true)}
+        onDelete={() => { deleteFocus.current = undefined; setConfirmingDelete(true); }}
         onCreateFile={() => startCreating("file")}
         onCreateFolder={() => startCreating("folder")}
       >
@@ -320,6 +345,7 @@ export const Tree = ({
             <Tree
               key={subItem._id}
               item={subItem}
+              siblings={folderContents}
               level={level + 1}
               lockedAbove={lockedAbove || item.locked === true}
               projectId={projectId}
