@@ -66,11 +66,18 @@ test.describe("IDE polish", () => {
       const usesSheet = await more.isVisible();
       if (usesSheet) await more.click();
       await page.getByRole("button", { name: "Export", exact: true }).click();
-      const box = (await page.locator("[data-slot=popover-content]").boundingBox())!;
+      const popover = page.locator("[data-slot=popover-content]");
+      const box = (await popover.boundingBox())!;
       expect(box.x).toBeGreaterThanOrEqual(8);
       expect(box.x + box.width).toBeLessThanOrEqual(width - 8);
+      // One Escape per layer, each awaited: a second Escape sent while the
+      // popover is still closing is swallowed and leaves the sheet open (#606).
       await page.keyboard.press("Escape");
-      if (usesSheet) await page.keyboard.press("Escape");
+      await expect(popover).toBeHidden();
+      if (usesSheet) {
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("dialog", { name: "Project menu" })).toBeHidden();
+      }
     }
 
     // At 375 the form is taller than the dialog; the footer must not scroll away.
@@ -105,7 +112,7 @@ test.describe("IDE polish", () => {
     expect(await longTitle.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     await expect(longTitle).toHaveCSS("text-overflow", "ellipsis");
     const titleBox = (await longTitle.boundingBox())!;
-    const navBox = (await page.locator("nav").boundingBox())!;
+    const navBox = (await page.locator("nav").filter({ has: page.getByRole("button", { name: longName, exact: true }) }).boundingBox())!;
     expect(titleBox.x).toBeGreaterThanOrEqual(navBox.x);
     expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(navBox.x + navBox.width);
     expect(navBox.x + navBox.width).toBeLessThanOrEqual(375);
@@ -138,9 +145,12 @@ test.describe("IDE polish", () => {
     await page.keyboard.press("Escape");
     await more.click();
     await sheet.getByRole("button", { name: "Export", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Download ZIP", exact: true })).toBeVisible();
+    const zip = page.getByRole("button", { name: "Download ZIP", exact: true });
+    await expect(zip).toBeVisible();
     await page.keyboard.press("Escape");
+    await expect(zip).toBeHidden();
     await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
     await expect(more).toBeFocused();
   });
 
