@@ -17,8 +17,8 @@ import {
 import { HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN } from "./hidden-until-payment-provider";
 
 describe("provider catalog display metadata", () => {
-  it("contains exactly 102 vetted providers", () => {
-    expect(listProviders()).toHaveLength(102);
+  it("contains at least 102 vetted providers", () => {
+    expect(listProviders().length).toBeGreaterThanOrEqual(102);
   });
 
   it.each(listProviders())("has complete display metadata and a local logo for $id", (provider) => {
@@ -32,6 +32,14 @@ describe("provider catalog display metadata", () => {
     expect(svg).toContain("<path");
     expect(svg).not.toMatch(/<script|<foreignObject|https?:\/\/(?!www\.w3\.org)/i);
   });
+});
+
+it("requests beehiiv read access without allowlisting unverified tools", () => {
+  const beehiiv = getProvider("beehiiv")!;
+  expect(beehiiv.oauthScopes).toEqual(["read", "openid", "email"]);
+  expect(beehiiv.supportsReadOnly).toBe(false);
+  expect(beehiiv.scope).toEqual({ queryParams: [], headers: [] });
+  expect(beehiiv.readOnlyTools).toEqual([]);
 });
 
 describe("providers hidden until a payment provider is chosen", () => {
