@@ -1022,6 +1022,7 @@ export const processMessage = inngest.createFunction(
     const cheapRepair = utility && modelName(utility) !== modelName(codingModel) ? utility : undefined;
     const repair = repairNeeded && !outOfCredits()
       ? await repairBuild({
+          messageId,
           projectId,
           internalKey,
           runId,

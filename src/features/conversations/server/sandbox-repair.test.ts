@@ -25,7 +25,7 @@ vi.mock("@/features/conversations/inngest/tools/read-files", () => ({
     ),
 }));
 vi.mock("@/features/conversations/inngest/tools/write-files", () => ({
-  createWriteFilesTool: () =>
+  createWriteFilesTool: vi.fn(() =>
     fakeTool("writeFiles", ({ files }: { files: Array<{ path: string; content: string }> }) => {
       // Paths under locked/ fail, as a locked file does (#307).
       const ok = files.filter(({ path }) => !path.startsWith("locked/"));
@@ -37,10 +37,10 @@ vi.mock("@/features/conversations/inngest/tools/write-files", () => ({
         `Updated: ${ok.map(({ path }) => path).join(", ")}.`,
         failed.length ? `Failed: ${failed.join(", ")}.` : "",
       ].filter(Boolean).join(" ");
-    }),
+    })),
 }));
 vi.mock("@/features/conversations/inngest/tools/edit-file", () => ({
-  createEditFileTool: () =>
+  createEditFileTool: vi.fn(() =>
     fakeTool("editFile", ({ path, edits }: { path: string; edits: Array<{ oldText: string; newText: string }> }) => {
       let content = convexFiles.get(path) ?? "";
       for (const { oldText, newText } of edits) {
@@ -49,14 +49,14 @@ vi.mock("@/features/conversations/inngest/tools/edit-file", () => ({
       }
       convexFiles.set(path, content);
       return `Edited ${path}`;
-    }),
+    })),
 }));
 vi.mock("@/features/conversations/inngest/tools/delete-files", () => ({
-  createDeleteFilesTool: () =>
+  createDeleteFilesTool: vi.fn(() =>
     fakeTool("deleteFiles", ({ paths }: { paths: string[] }) => {
       paths.forEach((path) => convexFiles.delete(path));
       return `Deleted ${paths.join(", ")}`;
-    }),
+    })),
 }));
 
 import { createTool, openai } from "@inngest/agent-kit";
@@ -68,6 +68,9 @@ import { fromE2bSandbox } from "@/features/sandbox-preview/server/provider/e2b";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { VITE_REACT_STARTER } from "../inngest/vite-starter";
 import { type RepairEvent, parseBuildErrors, repairTools, verifyAndFix } from "./sandbox-repair";
+import { createWriteFilesTool } from "../inngest/tools/write-files";
+import { createEditFileTool } from "../inngest/tools/edit-file";
+import { createDeleteFilesTool } from "../inngest/tools/delete-files";
 import { trimBuildOutput } from "../inngest/tools/check-build";
 import {
   NEXT16_MODULE_NOT_FOUND,
@@ -291,6 +294,18 @@ afterEach(() => {
 });
 
 describe("verifyAndFix", () => {
+  it.each([undefined, "assistant-message" as Id<"messages">])(
+    "threads the optional message id %s through verify and repair without using runId",
+    async (messageId) => {
+      const sandbox = fakeSandbox();
+      modelReplies(...fixApp());
+      await run(sandbox, { runId: "inngest-run", messageId });
+      for (const factory of [createWriteFilesTool, createEditFileTool, createDeleteFilesTool]) {
+        expect(factory).toHaveBeenCalledWith(expect.objectContaining({ messageId }));
+      }
+    },
+  );
+
   it.each([
     {
       kind: "type",

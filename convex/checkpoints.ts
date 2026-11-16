@@ -45,16 +45,22 @@ export const MAX_CHECKPOINT_FILES = 2000;
 /** Each file of a project with its slash-separated path from the root. */
 function withPaths(files: Doc<"files">[]) {
   const byId = new Map(files.map((file) => [file._id, file]));
-  const paths = new Map<Id<"files">, string>();
-  const pathOf = (file: Doc<"files">): string => {
-    const cached = paths.get(file._id);
-    if (cached !== undefined) return cached;
+  const paths = new Map<Id<"files">, string | undefined>();
+  const pathOf = (file: Doc<"files">): string | undefined => {
+    if (paths.has(file._id)) return paths.get(file._id);
     const parent = file.parentId ? byId.get(file.parentId) : undefined;
-    const path = parent ? `${pathOf(parent)}/${file.name}` : file.name;
+    const parentPath = parent && pathOf(parent);
+    // Removing a folder logically deletes its subtree before scheduled cleanup.
+    const path = file.parentId
+      ? parentPath === undefined ? undefined : `${parentPath}/${file.name}`
+      : file.name;
     paths.set(file._id, path);
     return path;
   };
-  return files.map((file) => ({ file, path: pathOf(file) }));
+  return files.flatMap((file) => {
+    const path = pathOf(file);
+    return path === undefined ? [] : [{ file, path }];
+  });
 }
 
 /** All of a project's files; refuses a project too big to snapshot whole. */
@@ -190,11 +196,15 @@ export async function applyTree(
     .map(({ path }) => path);
 
   const kept = new Map<string, Doc<"files">>();
-  for (const { file, path } of live) {
-    if (!isUnder(path, removed)) {
+  const paths = new Map(live.map(({ file, path }) => [file._id, path]));
+  for (const file of files) {
+    const path = paths.get(file._id);
+    if (path !== undefined && !isUnder(path, removed)) {
       kept.set(path, file);
       continue;
     }
+    // Reconcile orphaned delete batches too; recreated parents get fresh ids,
+    // so queued cleanup of the old subtree cannot touch the restored tree.
     await writeFileContent(ctx, file, undefined);
     await ctx.db.delete("files", file._id);
     if (file.storageId) await releaseStorageIfUnreferenced(ctx, file.storageId);
