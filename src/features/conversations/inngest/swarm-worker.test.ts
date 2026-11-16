@@ -56,6 +56,7 @@ const run = (inferences: Parameters<typeof drive>[1], extra: Record<string, unkn
     parentMessageId: "m1",
     agentTaskId: "t1",
     ownerId: "user_1",
+    siblingOwnedPaths: ["src/components/nav.tsx"],
     planOverview: "## Plan\n- pages: home page\n- nav: navigation",
     ...extra,
   }, { fn: swarmWorker, invokeResults });
@@ -142,12 +143,13 @@ describe("swarmWorker", () => {
     expect(mutationArgs("agentTasks:finishTask")).toEqual([expect.objectContaining({ agentTaskId: "t1", status: "done" })]);
   });
 
-  const staticSnapshot = (content: string, shared = "export const site = {};") => {
+  const staticSnapshot = (content: string, shared = "export const site = {};", contract = "") => {
     mocks.query.mockImplementation(async (ref) => getFunctionName(ref) === "system:getProjectFilesWithUrls" ? [
       { _id: "src", name: "src", type: "folder" },
       { _id: "pages", name: "pages", type: "folder", parentId: "src" },
       { _id: "home", name: "home.tsx", type: "file", parentId: "pages", content },
-      { _id: "data", name: "data.ts", type: "file", parentId: "src", content: shared },
+      { _id: "data", name: "data.ts", type: "file", parentId: "pages", content: shared },
+      { _id: "types", name: "types.ts", type: "file", parentId: "src", content: contract },
       // An unrelated broken file must not send this worker back to repair it.
       { _id: "other", name: "other.ts", type: "file", parentId: "src", content: 'import "./missing";' },
     ] : getFunctionName(ref) === "system:getProjectFiles" ? [] : null);
@@ -174,7 +176,7 @@ describe("swarmWorker", () => {
   });
 
   it("finishes clean imports without another turn", async () => {
-    const content = 'import { site as data } from "../data"; export default () => data;';
+    const content = 'import { site as data } from "./data"; export default () => data;';
     staticSnapshot(content);
     const outcome = await run([
       { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
@@ -185,8 +187,8 @@ describe("swarmWorker", () => {
   });
 
   it.each([
-    ['import { missing as data } from "../data";', "no such export"],
-    ['import data from "../data";', "no default export"],
+    ['import { missing as data } from "./data";', "no such export"],
+    ['import data from "./data";', "no default export"],
   ])("checks shared exports: %s", async (imports, diagnostic) => {
     const content = `${imports} export default () => data;`;
     staticSnapshot(content);
@@ -199,6 +201,63 @@ describe("swarmWorker", () => {
     expect(outcome.inferenceBodies).toHaveLength(3);
     const requests = outcome.inferenceBodies as Array<{ messages: Array<{ content: unknown }> }>;
     expect(requests[2].messages.at(-1)?.content).toContain(diagnostic);
+  });
+
+  it.each([
+    { target: "@/components/nav", retry: false },
+    { target: "./missing", retry: true },
+    { target: "../../public/missing.png", retry: true },
+    { target: "@/unowned/missing", retry: true },
+    { target: "@/types/missing", retry: false },
+    { target: "@/data/missing", retry: false },
+    { target: "@/components/shared/missing", retry: false },
+    { target: "@/App", retry: false },
+  ])("defers sibling/foundation imports but checks own/unowned: $target", async ({ target, retry }) => {
+    const content = `import Missing from "${target}"; export default Missing;`;
+    staticSnapshot(content);
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text("Built it.") },
+      ...(retry ? [{ data: text("NEEDS: missing import.") }] : []),
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(retry ? 3 : 2);
+  });
+
+  it.each(["", "// fully written sibling\n".repeat(20)])("defers sibling exports even when already on disk (%s)", async (stub) => {
+    const content = 'import { Missing } from "./data"; export default Missing;';
+    staticSnapshot(content, stub);
+    mocks.mutation.mockImplementation(async (ref, args) => getFunctionName(ref) === "agentTasks:startTask"
+      ? { ...TASK, ownedPaths: ["src/pages/home.tsx"] } : MUTATIONS[getFunctionName(ref)]?.(args) ?? null);
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text("Built it.") },
+    ], { siblingOwnedPaths: ["src/pages/data.ts"] });
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(2);
+  });
+
+  it.each([false, true])("checks shared exports only past the placeholder threshold (complete: %s)", async (complete) => {
+    const content = 'import { Missing } from "../types"; export default Missing;';
+    staticSnapshot(content, "", "export const present = {};" + (complete ? "// implemented\n".repeat(20) : ""));
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text("Built it.") },
+      ...(complete ? [{ data: text("NEEDS: shared type export.") }] : []),
+    ]);
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(complete ? 3 : 2);
+  });
+
+  it.each([undefined, 2])("defers outside missing imports without a complete top-level plan (depth: %s)", async (depth) => {
+    const content = 'import Missing from "@/unknown/Missing"; export default Missing;';
+    staticSnapshot(content);
+    const outcome = await run([
+      { data: toolCall("writeFiles", { files: [{ path: "src/pages/home.tsx", content }] }) },
+      { data: text("Built it.") },
+    ], depth === undefined ? { siblingOwnedPaths: undefined } : { depth });
+    expect(outcome.finalType).toBe("function-resolved");
+    expect(outcome.inferenceBodies).toHaveLength(2);
   });
 
   it("skips the static snapshot when nothing was written", async () => {

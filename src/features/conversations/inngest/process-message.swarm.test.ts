@@ -128,8 +128,8 @@ describe("processMessage swarm mode", () => {
     // Each owned path's parent folders exist before any worker starts; the path itself is its owner's.
     expect(mutationArgs("system:createFolder").map(({ name }) => name)).toEqual(["src", "components"]);
     expect(outcome.invocations).toEqual([
-      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_0", parentMessageId: "m1", ownerId: "user_1" }) }, timeout: "12m" }),
-      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_1" }) } }),
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_0", parentMessageId: "m1", ownerId: "user_1", siblingOwnedPaths: ["src/components/nav.tsx"] }) }, timeout: "12m" }),
+      expect.objectContaining({ payload: { data: expect.objectContaining({ agentTaskId: "task_1", siblingOwnedPaths: ["src/pages"] }) } }),
     ]);
 
     const [report] = toolResults(outcome.inferenceBodies);

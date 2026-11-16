@@ -159,6 +159,7 @@ export const createDelegateTasksTool = ({
               ownerId,
               model,
               planOverview,
+              siblingOwnedPaths: plan.tasks.filter((other) => other.id !== task.id).flatMap((other) => other.ownedPaths),
               ...(originalPrompt ? { originalPrompt: capOriginalPrompt(originalPrompt) } : {}),
               depth: depth + 1,
             } satisfies SwarmWorkerEvent,

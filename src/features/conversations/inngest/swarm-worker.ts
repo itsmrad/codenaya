@@ -1,7 +1,7 @@
 import { createAgent, createNetwork } from "@inngest/agent-kit";
 import { NonRetriableError } from "inngest";
 
-import { unresolvedImports } from "@/features/sandbox-preview/utils/missing-references";
+import { localCandidates, RESOLVE_SUFFIXES, unresolvedImports } from "@/features/sandbox-preview/utils/missing-references";
 import { projectChecks } from "@/features/sandbox-preview/utils/project-checks";
 import { inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
@@ -14,6 +14,7 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 import type { AgentModelChoice } from "../agent-models";
 import { type AgentStep, buildPathIndex, runWrittenPaths, stepsFromResponse, stepsFromToolResults, turnHeartbeat } from "../agent-steps";
 import {
+  FOUNDATION_PLACEHOLDER_MAX_CHARS, isFoundationPath, ownsPath,
   CHILD_WORKER_TIMEOUT_MS, MAX_SUBORCH_USD, MAX_SWARM_AGENTS, MAX_SWARM_DEPTH, MAX_WORKER_USD,
   SUBORCH_MAX_STEPS, SUBORCH_TIMEOUT_MS, WORKER_MAX_STEPS, WORKER_TIMEOUT_MS,
 } from "../swarm";
@@ -44,6 +45,8 @@ export interface SwarmWorkerEvent {
   ownerId: string;
   model: AgentModelChoice;
   planOverview: string;
+  /** Other tasks in this plan; absent on events queued before static ownership checks. */
+  siblingOwnedPaths?: string[];
   /** The user's request (already capped), context only: the worker builds just its task. */
   originalPrompt?: string;
   /** 1 for the orchestrator's tasks (the default), 2 for a sub-orchestrator's. */
@@ -99,7 +102,7 @@ export const swarmWorker = inngest.createFunction(
     },
   },
   async ({ event, step }): Promise<SwarmWorkerResult> => {
-    const { parentMessageId, agentTaskId, projectId, ownerId, model, planOverview, originalPrompt, depth = 1 } = event.data as SwarmWorkerEvent;
+    const { parentMessageId, agentTaskId, projectId, ownerId, model, planOverview, siblingOwnedPaths, originalPrompt, depth = 1 } = event.data as SwarmWorkerEvent;
     const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
     if (!internalKey) throw new NonRetriableError("CODENAYA_CONVEX_INTERNAL_KEY is not configured");
 
@@ -230,11 +233,27 @@ export const swarmWorker = inngest.createFunction(
                   paths.add(path);
                   if (typeof row.content === "string") files.push({ path, content: row.content });
                 }
-                // Exclude the manifest: export checks need no framework/package heuristics.
-                const exports = projectChecks(files.filter((f) => f.path !== "package.json"), paths, written, { references: false })
+                const shared = (path: string) => (path.startsWith("src/") && isFoundationPath(path)) ||
+                  path.startsWith("src/data/") || path.startsWith("src/components/shared/");
+                const sibling = (path: string) => ownsPath(siblingOwnedPaths ?? [], path);
+                const own = (path: string) => ownsPath(task.ownedPaths, path);
+                const missing = files.filter((f) => written.has(f.path)).flatMap((file) =>
+                  unresolvedImports([file], paths).filter((message) => {
+                    const specifier = message.slice(0, -` (imported by ${file.path})`.length);
+                    const targets = localCandidates(file.path, specifier)?.flatMap((candidate) =>
+                      RESOLVE_SUFFIXES.map((suffix) => candidate + suffix)).filter((path) => /^(src|public)\//.test(path)) ?? [];
+                    // Old events and nested plans cannot prove that an outside path has no owner.
+                    return targets.some(own) || (depth === 1 && siblingOwnedPaths !== undefined && targets.length > 0 &&
+                      targets.every((path) => !sibling(path) && !shared(path)));
+                  }));
+                // Withhold uncertain targets' contents so the existing export checker defers them.
+                const exportFiles = files.filter((f) => own(f.path) ||
+                  (depth === 1 && siblingOwnedPaths !== undefined && !sibling(f.path) && shared(f.path) &&
+                    f.content.length > FOUNDATION_PLACEHOLDER_MAX_CHARS));
+                const exports = projectChecks(exportFiles, paths, written, { references: false })
                   .filter((f) => f.checkId === "export" && [...written].some((path) => f.message.startsWith(`${path}:`) || f.message.startsWith(`${path} imports `)))
                   .map((f) => f.message);
-                return [...unresolvedImports(files.filter((f) => written.has(f.path)), paths), ...exports].slice(0, 10);
+                return [...missing, ...exports].slice(0, 10);
               } catch {
                 // Advisory only: a failed snapshot must not prevent the handoff.
                 return [];
