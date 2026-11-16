@@ -41,6 +41,29 @@ describe("public preview reservations", () => {
     expect(await t.mutation(api.publicPreviews.claim, { ...args, token: "c".repeat(32) })).toMatchObject({ status: "boot" });
   });
 
+  test("501 idle projects do not consume capacity; later active reservations still enforce the cap", async () => {
+    const { t } = await seed();
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    await t.run(async ctx => {
+      for (let index = 0; index < 500; index++) {
+        await ctx.db.insert("projects", { ownerId: "owner", name: `Idle ${index}`, updatedAt: 1 });
+      }
+    });
+    expect(await t.mutation(api.publicPreviews.claim, args)).toMatchObject({ status: "boot" });
+    await t.mutation(api.publicPreviews.update, { internalKey, token, lease: "first", release: true });
+    // Reservations beyond the old 501-row cutoff must still count, including tombstones.
+    await t.run(async ctx => {
+      for (const offset of [1, 2]) {
+        await ctx.db.insert("projects", { ownerId: "owner", name: `Active ${offset}`, updatedAt: 1,
+          deletingAt: now, publicPreview: { lease: `late-${offset}`, revision: "v1", ready: false, until: now + offset * 60_000 } });
+      }
+    });
+    expect(await t.mutation(api.publicPreviews.claim, args)).toEqual({ status: "busy" });
+    vi.mocked(Date.now).mockReturnValue(now + 60_000);
+    expect(await t.mutation(api.publicPreviews.claim, args)).toMatchObject({ status: "boot" });
+  });
+
   test("heartbeat deadline respects idle and keep-live; only changed revisions retire", async () => {
     const { t, id } = await seed();
     const now = Date.now();

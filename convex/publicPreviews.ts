@@ -62,8 +62,10 @@ export const claim = mutation({
       return { status: active.failed ? "error" as const : active.ready ? "ready" as const : "wait" as const, ...active };
     }
     // An expired provider timeout is also proof that the old sandbox no longer counts.
-    const owners = await ctx.db.query("projects").withIndex("by_owner", q => q.eq("ownerId", project.ownerId)).take(501);
-    if (owners.length > 500 || owners.filter(row => row.publicPreview && row.publicPreview.until > now).length >= MAX_PUBLIC_PREVIEWS) {
+    const reservations = await ctx.db.query("projects")
+      .withIndex("by_ownerId_and_publicPreview_until", q => q.eq("ownerId", project.ownerId).gt("publicPreview.until", now))
+      .take(MAX_PUBLIC_PREVIEWS);
+    if (reservations.length >= MAX_PUBLIC_PREVIEWS) {
       return { status: "busy" as const };
     }
     if (!args.revision) return { status: "boot" as const };

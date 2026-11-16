@@ -357,6 +357,7 @@ export default defineSchema({
     })),
   })
     .index("by_owner", ["ownerId"])
+    .index("by_ownerId_and_publicPreview_until", ["ownerId", "publicPreview.until"])
     .index("by_shareToken", ["shareToken"]),
 
   /**
