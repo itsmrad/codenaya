@@ -1,4 +1,3 @@
-import { CommandExitError, TimeoutError } from "e2b";
 import { z } from "zod";
 import { requireUserId } from "@/features/auth/server/require-user-id";
 import { parseJsonBody } from "@/lib/parse-json-body";
@@ -6,8 +5,10 @@ import { checkRateLimit, rateLimitedResponse } from "@/lib/rate-limit";
 import { recoverEsbuild } from "@/features/sandbox-preview/server/recover-esbuild";
 import {
   DEFAULT_INSTALL_COMMAND,
+  projectFileEntries,
   projectFilesSchema,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { SandboxTimeoutError } from "@/features/sandbox-preview/server/provider/types";
 import {
   forgetSandbox,
   getOwnedSandbox,
@@ -201,12 +202,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     }
 
     // One request for the whole batch instead of one per file.
-    await sandbox.files.write(
-      files.map((file) => ({
-        path: `${WORK_DIR}/${file.path}`,
-        data: file.content,
-      }))
-    );
+    await sandbox.writeFiles(projectFileEntries(files, WORK_DIR));
 
     // The instance that booted the sandbox installs through the boot stream,
     // where the output reaches the terminal. Any other instance, or any sync
@@ -229,7 +225,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
               const failure = installFailure({ exitCode: 124, stdout: tail, stderr: "" });
               if (failure.code) timeoutFailure = failure;
             };
-            const result = await sandbox.commands
+            // A non-zero exit resolves: it is the app's failure, not a dead sandbox (#491).
+            const result = await sandbox
               .run(command, {
                 cwd: WORK_DIR,
                 timeoutMs: boundedTimeout(5 * 60 * 1000, budget.left()),
@@ -237,9 +234,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
                 onStderr: observe,
               })
               .catch((error: unknown) => {
-                // A non-zero exit is the app's failure, not a dead sandbox (#491).
-                if (error instanceof CommandExitError) return error;
-                if (error instanceof TimeoutError) return null;
+                if (error instanceof SandboxTimeoutError) return null;
                 throw error;
               });
             failed = !result ? timeoutFailure : result.exitCode !== 0 ? installFailure(result) : undefined;

@@ -52,6 +52,15 @@ export const parseProcesses = (stdout: string): SandboxProcess[] =>
 export const listProcesses = async (sandbox: Sandbox, opts: RequestOptions = {}) =>
   parseProcesses((await sandbox.run(LIST_PROCESSES, { ...opts, timeoutMs: 10_000 })).stdout);
 
+/**
+ * The commands running in the sandbox. Without the provider's own list, every
+ * process from /proc stands in: children too, each with its whole inherited
+ * environment, so a restart from it passes more envs than the start did.
+ */
+// shortcut: no adapter lacks listCommands yet; keep only tree roots when one does.
+export const listCommands = (sandbox: Sandbox, opts?: RequestOptions) =>
+  sandbox.listCommands ? sandbox.listCommands(opts) : listProcesses(sandbox, opts);
+
 /** SIGKILLs `pid` and everything under it (see killTreeCommand). */
 export const killTree = (sandbox: Sandbox, pid: number, opts: RequestOptions & { timeoutMs?: number } = {}) =>
   sandbox.run(killTreeCommand(pid), opts);

@@ -53,7 +53,8 @@ const wrap = (sandbox: E2bSandbox): Sandbox => ({
   provider: "e2b",
   id: sandbox.sandboxId,
   run: (command, opts) =>
-    call(() => sandbox.commands.run(command, opts)).catch((error: unknown) => {
+    // No options means E2B's defaults, as a direct `commands.run(command)` gets.
+    call(() => (opts ? sandbox.commands.run(command, opts) : sandbox.commands.run(command))).catch((error: unknown) => {
       // E2B throws on a non-zero exit; the seam reports it as a result.
       if (error instanceof CommandExitError) {
         return { exitCode: error.exitCode, stdout: error.stdout, stderr: error.stderr };
@@ -67,7 +68,7 @@ const wrap = (sandbox: E2bSandbox): Sandbox => ({
   },
   writeFiles: async (files, opts) => {
     // E2B creates the parent directories of a batch write.
-    if (files.length) await call(() => sandbox.files.write(files, opts));
+    if (files.length) await call(() => (opts ? sandbox.files.write(files, opts) : sandbox.files.write(files)));
   },
   readFile: ((path: string, format: "text" | "bytes", opts?: RequestOptions) =>
     call<string | Uint8Array>(() =>
@@ -83,6 +84,9 @@ const wrap = (sandbox: E2bSandbox): Sandbox => ({
   kill: async (opts) => {
     await call(() => sandbox.kill(opts));
   },
+  // envd's own list: each command's root process, with the envs it was started with.
+  listCommands: (opts) => call(() => (opts ? sandbox.commands.list(opts) : sandbox.commands.list())),
+  killCommand: (pid, opts) => call(() => sandbox.commands.kill(pid, opts)),
 });
 
 /** Sandbox lifetime cap on the E2B plan we run on. */

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ connect: vi.fn() }));
+const mocks = vi.hoisted(() => ({ connect: vi.fn(), getProvider: vi.fn() }));
 
-vi.mock("e2b", () => ({ Sandbox: { connect: mocks.connect } }));
+vi.mock("./provider/registry", () => ({ getProvider: mocks.getProvider }));
 
-import type { Sandbox } from "e2b";
+import type { Sandbox } from "./provider/types";
 
 import {
   forgetSandbox,
@@ -16,13 +16,15 @@ import {
 
 const fakeSandbox = (sandboxId: string, ownerId?: string) =>
   ({
-    sandboxId,
-    getInfo: vi.fn().mockResolvedValue({ metadata: { userId: ownerId } }),
+    provider: "e2b",
+    id: sandboxId,
+    info: vi.fn().mockResolvedValue({ metadata: { userId: ownerId } }),
   }) as unknown as Sandbox;
 
 describe("sandbox registry", () => {
   beforeEach(() => {
     mocks.connect.mockReset();
+    mocks.getProvider.mockReset().mockReturnValue({ connect: mocks.connect });
     forgetSandbox("sbx_1");
   });
 
@@ -48,7 +50,7 @@ describe("sandbox registry", () => {
     expect(await getOwnedSandbox("sbx_1", "user_a")).toBe(sandbox);
     expect(await getOwnedSandbox("sbx_1", "user_a")).toBe(sandbox);
     expect(mocks.connect).toHaveBeenCalledTimes(1);
-    expect(sandbox.getInfo).toHaveBeenCalledTimes(1);
+    expect(sandbox.info).toHaveBeenCalledTimes(1);
   });
 
   it("does not cache a sandbox the caller does not own", async () => {
@@ -57,6 +59,21 @@ describe("sandbox registry", () => {
     expect(await getOwnedSandbox("sbx_1", "user_b")).toBeNull();
     expect(await getOwnedSandbox("sbx_1", "user_b")).toBeNull();
     expect(mocks.connect).toHaveBeenCalledTimes(2);
+  });
+
+  it("routes a prefixed id to its provider by the native id, and still checks the owner", async () => {
+    mocks.connect.mockResolvedValue(fakeSandbox("sbx_2", "user_a"));
+
+    expect(await getOwnedSandbox("e2b:sbx_2", "user_b")).toBeNull();
+    expect(mocks.getProvider).toHaveBeenCalledWith("e2b");
+    expect(mocks.connect).toHaveBeenCalledWith("sbx_2");
+    forgetSandbox("e2b:sbx_2");
+  });
+
+  it.each(["blaxel:sbx_1", "e2b:", "../sbx", "sbx 1"])("refuses a malformed or unknown-provider id %j without connecting", async (id) => {
+    expect(await getOwnedSandbox(id, "user_a")).toBeNull();
+    expect(mocks.getProvider).not.toHaveBeenCalled();
+    expect(mocks.connect).not.toHaveBeenCalled();
   });
 
   it("reconnects after the sandbox is forgotten", async () => {

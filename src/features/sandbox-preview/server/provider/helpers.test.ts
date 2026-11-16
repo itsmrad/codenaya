@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { exists, killTree, listProcesses, parseProcesses, remove } from "./helpers";
+import { exists, killTree, listCommands, listProcesses, parseProcesses, remove } from "./helpers";
 import type { Sandbox } from "./types";
 
 const b64 = (...parts: string[]) => Buffer.from(parts.map((part) => `${part}\0`).join("")).toString("base64");
@@ -35,6 +35,28 @@ describe("parseProcesses", () => {
 });
 
 describe("helpers over run", () => {
+  it("lists commands from the provider's own list when it has one", async () => {
+    const { sandbox, run } = fakeSandbox();
+    const commands = [{ pid: 7, cmd: "/bin/bash", args: [], envs: { A: "1" } }];
+    const own = Object.assign(sandbox, { listCommands: vi.fn(async () => commands) });
+
+    expect(await listCommands(own, { requestTimeoutMs: 5 })).toBe(commands);
+    expect(own.listCommands).toHaveBeenCalledWith({ requestTimeoutMs: 5 });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("falls back to every /proc process, children and inherited envs included, without one", async () => {
+    const { sandbox, run } = fakeSandbox({
+      stdout: `7\t1\t/\t${b64("bash", "-c", "npm run dev")}\t${b64("M=1", "PATH=/bin")}\n8\t7\t/\t${b64("node", "vite")}\t${b64("M=1", "PATH=/bin")}\n`,
+    });
+
+    expect(await listCommands(sandbox)).toEqual([
+      { pid: 7, ppid: 1, cmd: "bash", args: ["-c", "npm run dev"], cwd: "/", envs: { M: "1", PATH: "/bin" } },
+      { pid: 8, ppid: 7, cmd: "node", args: ["vite"], cwd: "/", envs: { M: "1", PATH: "/bin" } },
+    ]);
+    expect(run).toHaveBeenCalledWith(expect.stringContaining("/proc/[0-9]*"), { timeoutMs: 10_000 });
+  });
+
   it("lists processes with a bounded run", async () => {
     const { sandbox, run } = fakeSandbox({ stdout: `7\t1\t/\t${b64("sh")}\t\n` });
 

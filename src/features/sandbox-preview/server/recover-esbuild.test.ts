@@ -1,5 +1,6 @@
-import type { Sandbox } from "e2b";
+import type { Sandbox as E2bSandbox } from "e2b";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { fromE2bSandbox } from "./provider/e2b";
 import { DEV_COMMAND_ENV, DEV_START_COMMAND, READ_DEV_PGID_COMMAND, SHORT_CALL_MS, killDevServersCommand, killProjectNodesCommand } from "./dev-server";
 import { recoverEsbuild } from "./recover-esbuild";
 import { ESBUILD_RECOVERY_COOLDOWN_MS } from "../utils/esbuild-recovery";
@@ -11,7 +12,7 @@ let sequence = 0;
 const fakeSandbox = (processes: Array<{ pid: number; cmd: string; args: string[]; envs: Record<string, string>; cwd?: string }> = [dev]) => {
   const run = vi.fn<(...args: unknown[]) => Promise<{ exitCode: number; stdout: string }>>(async () => ({ exitCode: 0, stdout: "" }));
   const list = vi.fn(async () => processes);
-  const sandbox = { sandboxId: `recovery-${sequence++}`, commands: { list, run } } as unknown as Sandbox;
+  const sandbox = fromE2bSandbox({ sandboxId: `recovery-${sequence++}`, commands: { list, run } } as unknown as E2bSandbox);
   return { sandbox, run, list };
 };
 afterEach(() => vi.useRealTimers());

@@ -3,8 +3,10 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
-import type { Sandbox } from "e2b";
+import type { Sandbox as E2bSandbox } from "e2b";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { fromE2bSandbox } from "./provider/e2b";
 
 import {
   DEV_COMMAND_ENV,
@@ -33,10 +35,9 @@ const bounds = { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS };
 
 const fakeSandbox = (processes: Array<{ pid: number; envs: Record<string, string>; cwd?: string; cmd?: string; args?: string[] }>) => {
   const run = vi.fn<(...args: unknown[]) => Promise<object>>(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
-  const sandbox = {
-    commands: { list: vi.fn(async () => processes.map((process) => ({ cmd: "/bin/bash", args: [], ...process }))), run },
-  } as unknown as Sandbox;
-  return { sandbox, run };
+  const list = vi.fn(async () => processes.map((process) => ({ cmd: "/bin/bash", args: [], ...process })));
+  const sandbox = fromE2bSandbox({ commands: { list, run } } as unknown as E2bSandbox);
+  return { sandbox, run, list };
 };
 
 describe("isPortOpen", () => {
@@ -160,8 +161,8 @@ describe("installWithDevServerStopped (#486)", () => {
   });
 
   it("does not start a second dev server when another instance started one during the install", async () => {
-    const { sandbox, run } = fakeSandbox([]);
-    vi.mocked(sandbox.commands.list).mockResolvedValueOnce([]).mockResolvedValue([{ ...dev, cmd: "/bin/bash", args: [] }] as never);
+    const { sandbox, run, list } = fakeSandbox([]);
+    list.mockResolvedValueOnce([]).mockResolvedValue([{ ...dev, cmd: "/bin/bash", args: [] }] as never);
     run.mockResolvedValue({ stdout: "open\n" });
     await installWithDevServerStopped(sandbox, async () => undefined, {}, { command: "npm run dev", envs: dev.envs, readyPort: 5173 });
     // No second start, but its readiness is still awaited.
@@ -201,7 +202,7 @@ describe("fallbackDevStart (#774)", () => {
 describe("proxyTargetPort (#774)", () => {
   it("reads the port the boot's proxy forwards to, or nothing", async () => {
     const read = vi.fn(async () => 'const TARGET_PORT = parseInt(process.env.TARGET_PORT || "5180", 10);');
-    const sandbox = { files: { read } } as unknown as Sandbox;
+    const sandbox = fromE2bSandbox({ files: { read } } as unknown as E2bSandbox);
     await expect(proxyTargetPort(sandbox)).resolves.toBe(5180);
     read.mockRejectedValue(new Error("not found"));
     await expect(proxyTargetPort(sandbox)).resolves.toBeUndefined();
@@ -247,12 +248,12 @@ describe("restarting the preview's dev server after a check build", () => {
   });
 
   it("stops what is left of a dead dev server, e.g. a `next dev` parent whose server was OOM-killed, and starts it the same way, bounded", async () => {
-    const { sandbox, run } = fakeSandbox([proxy, dev]);
+    const { sandbox, run, list } = fakeSandbox([proxy, dev]);
 
     await expect(restartDevServerIfDown(sandbox, preview, 10_000)).resolves.toBe(true);
 
     expect(probes(run)).toBe(3);
-    expect(sandbox.commands.list).toHaveBeenCalledWith({ requestTimeoutMs: 10_000 });
+    expect(list).toHaveBeenCalledWith({ requestTimeoutMs: 10_000 });
     expect(run.mock.calls.slice(3)).toEqual([
       [READ_DEV_PGID_COMMAND, bounds],
       [killTreeCommand(12), bounds],
@@ -375,7 +376,7 @@ describe("dev server process groups", () => {
   it.each([true, false])("reinstall kills the persisted group when its parent is listed: %s", async (listed) => {
     const dev = { pid: 12, cwd: "/home/user/app", envs: { [DEV_COMMAND_ENV]: "npm run dev" } };
     const { sandbox, run } = fakeSandbox(listed ? [dev] : []);
-    run.mockResolvedValueOnce({ stdout: "42\n" });
+    run.mockResolvedValueOnce({ exitCode: 0, stdout: "42\n" });
     const install = vi.fn(async () => {
       expect(run.mock.calls.slice(0, 3)).toEqual([
         [READ_DEV_PGID_COMMAND, bounds],
@@ -390,7 +391,7 @@ describe("dev server process groups", () => {
 
   it("restart kills a persisted group after the parent has disappeared from E2B", async () => {
     const { sandbox, run } = fakeSandbox([]);
-    run.mockImplementation(async (command) => ({ stdout: command === READ_DEV_PGID_COMMAND ? "42\n" : "" }));
+    run.mockImplementation(async (command) => ({ exitCode: 0, stdout: command === READ_DEV_PGID_COMMAND ? "42\n" : "" }));
     await restartDevServerIfDown(sandbox, { port: 3000, start: { command: "npm run dev", envs: {}, cwd: "/home/user/app" } }, SHORT_CALL_MS);
     expect(run.mock.calls.slice(3, 6)).toEqual([
       [READ_DEV_PGID_COMMAND, bounds],
