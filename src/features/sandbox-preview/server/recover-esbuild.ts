@@ -1,4 +1,4 @@
-import { DEV_COMMAND_ENV, runDevServer, stopDevServers, SHORT_CALL_MS } from "./dev-server";
+import { DEV_COMMAND_ENV, isBootInstall, runDevServer, stopDevServers, SHORT_CALL_MS } from "./dev-server";
 import { detectFrameworkFromFiles } from "../utils/dev-command";
 import { listCommands, runOrThrow } from "./provider/helpers";
 import type { Sandbox } from "./provider/types";
@@ -43,7 +43,7 @@ export const recoverEsbuild = async (sandbox: Sandbox): Promise<EsbuildRecoveryS
   let attempted = false;
   try {
     const commands = await listCommands(sandbox);
-    if (commands.some((command) => isInstalling([command.cmd, ...command.args].join(" ")))) return "busy";
+    if (commands.some((command) => isBootInstall(command, isInstalling))) return "busy";
     const running = commands.filter((command) => command.envs?.[DEV_COMMAND_ENV]);
     const [dev] = running;
     if (!dev) return "unavailable"; // #774 owns starting a missing dev command after installs.
