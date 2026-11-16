@@ -4,6 +4,8 @@ import { fetchQuery } from 'convex/nextjs';
 import { api } from '../convex/_generated/api';
 import { validShareToken } from '@/features/share/preview-policy';
 
+import { ownerPreviewProject } from '@/features/projects/server/owner-preview';
+
 import { adminOrNull } from '@/features/admin/server/require-admin';
 import { SIGN_IN_URL, SIGN_UP_URL } from '@/features/auth/constants';
 
@@ -19,6 +21,11 @@ export default clerkMiddleware(
     const previewMatch = /^\/preview\/([^/]+)\/?$/.exec(request.nextUrl.pathname);
     if (previewMatch && (!validShareToken(previewMatch[1]) || !(await fetchQuery(api.projects.getShared, { token: previewMatch[1] })))) {
       return NextResponse.rewrite(new URL('/404', request.url), { status: 404, headers: { 'Cache-Control': 'no-store' } });
+    }
+    // Check before streaming so an inaccessible preview has a real HTTP 404.
+    const preview = /^\/p\/([^/]+)\/preview\/?$/.exec(request.nextUrl.pathname);
+    if (preview && !(await ownerPreviewProject(preview[1], await auth()))) {
+      return NextResponse.rewrite(new URL('/404', request.url), { status: 404 });
     }
     // /admin is the exception, only so non-admins get a real 404 status: with
     // Cache Components the layout's `notFound()` runs after the shell has

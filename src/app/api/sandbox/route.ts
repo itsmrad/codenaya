@@ -57,6 +57,7 @@ import {
 import {
   DEV_COMMAND_ENV,
   PROXY_TARGET_ENV,
+  PREVIEW_PROXY_PORT,
   BOOT_INSTALL_ENVS,
   DEV_SERVER_ENVS,
   DevServerStartError,
@@ -585,7 +586,7 @@ export async function POST(request: Request) {
         send({ type: "output", data: "\nConfiguring external network routing...\n" });
         await waitForPublicUrl(previewUrl);
 
-        send({ type: "output", data: `\nServer ready at ${previewUrl}\n` });
+        send({ type: "output", data: "\nPreview server ready\n" });
         send({ type: "status", status: "running" });
         sendPhase("ready");
         if (projectId && internalKey) void recordSandboxRunning(internalKey, projectId, bootHistory);
@@ -764,7 +765,7 @@ async function waitForPublicUrl(url: string, maxWaitMs = 3000): Promise<void> {
  * to the user's config files or package.json!
  */
 async function startE2bProxy(sandbox: Sandbox, targetPort: number): Promise<number> {
-  const proxyPort = 4000;
+  const proxyPort = PREVIEW_PROXY_PORT;
   const proxyCode = `
 const http = require('http');
 const net = require('net');

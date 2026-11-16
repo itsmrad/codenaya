@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => {
     errors: { AuthenticationError, RateLimitError, TimeoutError, SandboxNotFoundError, CommandExitError },
     create: vi.fn(),
     connect: vi.fn(),
+    attach: vi.fn(),
+    fullInfo: vi.fn(),
     list: vi.fn(),
     kill: vi.fn(),
     deleteSnapshot: vi.fn(),
@@ -27,13 +29,14 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("e2b", () => ({
   ...mocks.errors,
-  Sandbox: {
+  Sandbox: Object.assign(vi.fn(function (opts: unknown) { return mocks.attach(opts); }), {
     create: mocks.create,
     connect: mocks.connect,
+    getFullInfo: mocks.fullInfo,
     list: mocks.list,
     kill: mocks.kill,
     deleteSnapshot: mocks.deleteSnapshot,
-  },
+  }),
 }));
 
 import { DEFAULT_E2B_TEMPLATE, createE2bProvider } from "./e2b";
@@ -120,6 +123,24 @@ describe("E2B provider", () => {
     expect(mocks.connect).toHaveBeenCalledWith("sbx1", { timeoutMs: 10, apiKey: "key_1" });
     expect(await provider.kill("sbx1")).toBe(false);
     expect(mocks.kill).toHaveBeenCalledWith("sbx1", { apiKey: "key_1" });
+  });
+
+  it("inspects a running sandbox without a connect/resume or timeout mutation", async () => {
+    const endAt = new Date(Date.now() + 30_000);
+    mocks.fullInfo.mockResolvedValue({ state: "running", endAt, envdVersion: "0.5.2", sandboxDomain: "e2b.app", envdAccessToken: "envd-test" });
+    mocks.attach.mockReturnValue(fakeE2bSandbox());
+    expect((await provider.inspect!("sbx1", { requestTimeoutMs: 5000 })).id).toBe("sbx1");
+    expect(mocks.fullInfo).toHaveBeenCalledWith("sbx1", { apiKey: "key_1", requestTimeoutMs: 5000 });
+    expect(mocks.attach).toHaveBeenCalledWith({ apiKey: "key_1", requestTimeoutMs: 5000, sandboxId: "sbx1", envdVersion: "0.5.2", sandboxDomain: "e2b.app", envdAccessToken: "envd-test" });
+    expect(mocks.connect).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it.each(["paused", "expired"])("does not attach to or resume a %s sandbox", async state => {
+    mocks.fullInfo.mockResolvedValue({ state: state === "paused" ? "paused" : "running", endAt: new Date(Date.now() + (state === "expired" ? -1 : 30_000)) });
+    await expect(provider.inspect!("sbx1")).rejects.toBeInstanceOf(SandboxNotFoundError);
+    expect(mocks.attach).not.toHaveBeenCalled();
+    expect(mocks.connect).not.toHaveBeenCalled();
   });
 
   it.each([

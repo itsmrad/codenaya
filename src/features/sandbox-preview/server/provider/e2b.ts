@@ -120,6 +120,14 @@ export const createE2bProvider = (apiKey: string): SandboxProvider => {
     // Read per call, like project-sandbox's SANDBOX_TEMPLATE (which also warns once when it is unset).
     create: ({ image, ...opts }) => create(image ?? (process.env.E2B_TEMPLATE?.trim() || DEFAULT_E2B_TEMPLATE), opts),
     connect: (id, opts) => call(() => E2bSandbox.connect(id, { ...opts, apiKey })).then(fromE2bSandbox),
+    inspect: async (id, opts) => {
+      // getFullInfo is GET-only; connect would extend the timeout or resume a paused sandbox.
+      const info = await call(() => E2bSandbox.getFullInfo(id, { ...opts, apiKey }));
+      if (info.state !== "running" || info.endAt.getTime() <= Date.now()) throw new SandboxNotFoundError("Preview is not running");
+      return fromE2bSandbox(new E2bSandbox({ ...opts, apiKey, sandboxId: id,
+        envdVersion: info.envdVersion, envdAccessToken: info.envdAccessToken, sandboxDomain: info.sandboxDomain,
+      }));
+    },
     list: async ({ metadata, limit, requestTimeoutMs }) => {
       const running = await call(() =>
         E2bSandbox.list({ apiKey, requestTimeoutMs, limit, query: { metadata, state: ["running"] } }).nextItems(),
