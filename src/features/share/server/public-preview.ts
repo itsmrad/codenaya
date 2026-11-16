@@ -35,11 +35,19 @@ export async function heartbeatPreview(token: string, state: PreviewState) {
   }
 }
 
-export async function preparePreview(token: string): Promise<{ state: PreviewState; manifest?: NonNullable<FunctionReturnType<typeof api.publicPreviews.manifest>> }> {
+/** Read-only: checking saved inputs must not reserve or retire a sandbox. */
+export async function readPreviewInputs(token: string) {
   const manifest = await convex.query(api.publicPreviews.manifest, { internalKey: key(), token });
-  if (!manifest) return { state: { status: "missing" as const } };
+  if (!manifest) return null;
   // Storage URLs rotate: use the persistent path/content and a stable URL pathname.
   const revision = createHash("sha256").update(JSON.stringify({ ...manifest, files: manifest.files.map(file => ({ ...file, url: file.url ? new URL(file.url).pathname : null })) })).digest("hex");
+  return { manifest, revision };
+}
+
+export async function preparePreview(token: string, inputs?: Awaited<ReturnType<typeof readPreviewInputs>>): Promise<{ state: PreviewState; manifest?: NonNullable<FunctionReturnType<typeof api.publicPreviews.manifest>> }> {
+  const loaded = inputs === undefined ? await readPreviewInputs(token) : inputs;
+  if (!loaded) return { state: { status: "missing" as const } };
+  const { manifest, revision } = loaded;
   let state = await previewState(token, revision);
   if (state.status === "retire") {
     await retirePreview(token, state);
