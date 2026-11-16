@@ -2,7 +2,7 @@
 
 import ky, { HTTPError } from "ky";
 import { z } from "zod";
-import { Fragment, useState } from "react";
+import { Fragment, useId, useState } from "react";
 import { toast } from "sonner";
 import { useForm } from "@tanstack/react-form";
 import {
@@ -71,6 +71,8 @@ interface EnvVarsDialogProps {
 }
 
 export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogProps) => {
+  const warningIdBase = useId();
+  const keyWarningId = `${warningIdBase}-key-warning`;
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
 
   const project = useProject(projectId);
@@ -183,13 +185,13 @@ export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogPr
                       ))}
                     </span>
                     <Badge variant="outline">{classifyEnvKey(name) === "public" ? "Public" : "Secret"}</Badge>
-                    <Button size="sm" variant="ghost" aria-label={`Set ${name}`} onClick={() => {
+                    <Button size="sm" variant="ghost" aria-label={`Set ${name}`} aria-describedby={publicNameLooksSecret(name) ? `${warningIdBase}-detected-${name}` : undefined} onClick={() => {
                       form.setFieldValue("key", name);
                       form.setFieldValue("value", "");
                       document.getElementById("env-var-value")?.focus();
                     }}>Set value</Button>
                     {publicNameLooksSecret(name) && (
-                      <p role="note" className="w-full text-amber-700 dark:text-amber-400">
+                      <p id={`${warningIdBase}-detected-${name}`} role="note" className="w-full text-amber-700 dark:text-amber-400">
                         {PUBLIC_NAME_WARNING}
                       </p>
                     )}
@@ -317,13 +319,13 @@ export const EnvVarsDialog = ({ projectId, open, onOpenChange }: EnvVarsDialogPr
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
                       aria-invalid={isInvalid}
-                      aria-describedby={publicNameLooksSecret(key) ? "env-var-key-warning" : undefined}
+                      aria-describedby={publicNameLooksSecret(key) ? keyWarningId : undefined}
                       placeholder="NEXT_PUBLIC_API_URL"
                       className="font-mono"
                       autoComplete="off"
                     />
                     {publicNameLooksSecret(key) && (
-                      <p id="env-var-key-warning" role="note" className="text-xs text-amber-700 dark:text-amber-400">
+                      <p id={keyWarningId} role="note" className="text-xs text-amber-700 dark:text-amber-400">
                         {PUBLIC_NAME_WARNING}
                       </p>
                     )}
