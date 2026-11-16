@@ -10,10 +10,11 @@ const start = { background: true, timeoutMs: 0, requestTimeoutMs: SHORT_CALL_MS 
 const dev = { pid: 12, cmd: "bash", args: ["-c", "npm run dev"], envs: { [DEV_COMMAND_ENV]: "npm run dev -- --host", HOST: "0.0.0.0" }, cwd: "/home/user/app" };
 let sequence = 0;
 const fakeSandbox = (processes: Array<{ pid: number; cmd: string; args: string[]; envs: Record<string, string>; cwd?: string }> = [dev]) => {
-  const run = vi.fn<(...args: unknown[]) => Promise<{ exitCode: number; stdout: string }>>(async () => ({ exitCode: 0, stdout: "" }));
+  const run = vi.fn<(...args: unknown[]) => Promise<{ exitCode: number; stdout: string }>>(async (command) => ({ exitCode: 0, stdout: command === "ls -1" ? "package.json\nvite.config.ts\n" : "" }));
   const list = vi.fn(async () => processes);
-  const sandbox = fromE2bSandbox({ sandboxId: `recovery-${sequence++}`, commands: { list, run } } as unknown as E2bSandbox);
-  return { sandbox, run, list };
+  const read = vi.fn(async () => JSON.stringify({ scripts: { dev: "vite" } }));
+  const sandbox = fromE2bSandbox({ files: { read }, sandboxId: `recovery-${sequence++}`, commands: { list, run } } as unknown as E2bSandbox);
+  return { sandbox, run, list, read };
 };
 afterEach(() => vi.useRealTimers());
 
@@ -22,20 +23,58 @@ describe("recoverEsbuild (#776)", () => {
     const { sandbox, run } = fakeSandbox([dev, { ...dev, pid: 30 }, { ...dev, pid: 2, envs: {} }]);
     expect(await recoverEsbuild(sandbox)).toBe("restarted");
     expect(run.mock.calls).toEqual([
+      ["ls -1", { cwd: dev.cwd, ...bounds }],
       [READ_DEV_PGID_COMMAND, bounds],
       [killDevServersCommand([12, 30]), bounds],
       [killProjectNodesCommand(dev.cwd), bounds],
       [DEV_START_COMMAND, { cwd: dev.cwd, envs: dev.envs, ...start }],
     ]);
     expect(await recoverEsbuild(sandbox)).toBe("limited");
-    expect(run).toHaveBeenCalledTimes(4);
+    expect(run).toHaveBeenCalledTimes(5);
   });
 
-  it("restarts a Next dev server with its own marked command, not a Vite one", async () => {
-    const next = { ...dev, envs: { [DEV_COMMAND_ENV]: "npm run dev -- -H 0.0.0.0", HOSTNAME: "0.0.0.0" } };
-    const { sandbox, run } = fakeSandbox([next]);
+  it.each([
+    [{ dependencies: { next: "16", vite: "8" } }, "npm run dev", "unavailable"],
+    [{ scripts: { dev: "next dev" } }, "npm run dev", "unavailable"],
+    [{}, "next dev -H 0.0.0.0", "unavailable"],
+    [{ dependencies: { "@tanstack/react-start": "1" } }, "npm run dev", "restarted"],
+  ])("gates recovery using the project framework: %j", async (pkg, command, status) => {
+    const { sandbox, run, read } = fakeSandbox([{ ...dev, envs: { [DEV_COMMAND_ENV]: command } }]);
+    read.mockResolvedValue(JSON.stringify(pkg));
+    expect(await recoverEsbuild(sandbox)).toBe(status);
+    expect(run.mock.calls.some(([cmd]) => cmd === DEV_START_COMMAND)).toBe(status === "restarted");
+  });
+
+  it("rejects a Next config even alongside a Vite config", async () => {
+    const { sandbox, run } = fakeSandbox();
+    run.mockResolvedValueOnce({ exitCode: 0, stdout: "package.json\nvite.config.ts\nnext.config.mjs\n" });
+    expect(await recoverEsbuild(sandbox)).toBe("unavailable");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not restart an unknown framework or spend its attempt", async () => {
+    const { sandbox, run } = fakeSandbox();
+    run.mockResolvedValueOnce({ exitCode: 0, stdout: "package.json\n" });
+    expect(await recoverEsbuild(sandbox)).toBe("unavailable");
+    expect(run).toHaveBeenCalledTimes(1);
     expect(await recoverEsbuild(sandbox)).toBe("restarted");
-    expect(run).toHaveBeenLastCalledWith(DEV_START_COMMAND, { cwd: next.cwd, envs: next.envs, ...start });
+  });
+
+  it.each([
+    ["npm", ["install"]], ["pnpm", ["i"]], ["yarn", ["add", "react"]],
+    ["bun", ["install"]], ["npm", ["ci"]], ["bash", ["-c", "cd /home/user/app && npm install"]],
+  ])("waits for %s %j", async (cmd, args) => {
+    const { sandbox, run } = fakeSandbox([dev, { ...dev, cmd, args, envs: {} }]);
+    expect(await recoverEsbuild(sandbox)).toBe("busy");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["npm", ["run", "build:ci"]], ["pnpm", ["run", "add-x"]],
+    ["yarn", ["run", "add", "ci"]], ["bun", ["run", "build", "install"]],
+  ])("does not mistake %s %j for an install", async (cmd, args) => {
+    const { sandbox } = fakeSandbox([dev, { ...dev, cmd, args, envs: {} }]);
+    expect(await recoverEsbuild(sandbox)).toBe("restarted");
   });
 
   it("does nothing during an install and does not spend its attempt", async () => {
@@ -54,20 +93,23 @@ describe("recoverEsbuild (#776)", () => {
     expect(await recoverEsbuild(sandbox)).toBe("busy");
     resolve([dev]);
     expect(await first).toBe("restarted");
-    expect(run).toHaveBeenCalledTimes(4);
+    expect(run).toHaveBeenCalledTimes(5);
   });
 
   it("limits failed stop/start attempts too, and stops after three", async () => {
     vi.useFakeTimers();
     const { sandbox, run } = fakeSandbox();
-    run.mockRejectedValue(new Error("unreachable"));
+    run.mockImplementation(async (command) => {
+      if (command === "ls -1") return { exitCode: 0, stdout: "package.json\nvite.config.ts\n" };
+      throw new Error("unreachable");
+    });
     for (let i = 0; i < 3; i++) {
       await expect(recoverEsbuild(sandbox)).rejects.toThrow("unreachable");
       expect(await recoverEsbuild(sandbox)).toBe("limited");
       vi.advanceTimersByTime(ESBUILD_RECOVERY_COOLDOWN_MS);
     }
     expect(await recoverEsbuild(sandbox)).toBe("limited");
-    expect(run).toHaveBeenCalledTimes(3);
+    expect(run).toHaveBeenCalledTimes(6);
   });
 
   it("leaves a missing dev command to the install path (#774)", async () => {

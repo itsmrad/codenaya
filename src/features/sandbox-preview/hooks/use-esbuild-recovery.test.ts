@@ -35,9 +35,9 @@ import { useEsbuildRecovery as runRecoveryHook } from "./use-esbuild-recovery";
 
 const error: AppError = { kind: "build", message: "The service is no longer running: write EPIPE", file: "esbuild/lib/main.js:718" };
 const recover = vi.fn<() => Promise<EsbuildRecoveryStatus>>();
-const render = (props: { error?: AppError | null } = {}) => {
+const render = (props: { error?: AppError | null; recover?: () => Promise<EsbuildRecoveryStatus>; sandboxId?: string } = {}) => {
   hooks.render();
-  const result = runRecoveryHook({ sandboxId: "sbx", framework: "vite", error: "error" in props ? props.error! : error, recover });
+  const result = runRecoveryHook({ sandboxId: props.sandboxId ?? "sbx", framework: "vite", error: "error" in props ? props.error! : error, recover: props.recover ?? recover });
   hooks.commit();
   return result;
 };
@@ -55,6 +55,24 @@ describe("useEsbuildRecovery (#776)", () => {
     expect(recover).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(ESBUILD_RECOVERY_COOLDOWN_MS * 2);
     expect(recover).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the busy wait cap across effect reruns and resets it for a new sandbox", async () => {
+    recover.mockResolvedValue("busy");
+    for (let i = 0; i < 20; i++) {
+      render({ recover: () => recover() });
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(recover).toHaveBeenCalledTimes(16);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(recover).toHaveBeenCalledTimes(16);
+    render({ sandboxId: "new" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recover).toHaveBeenCalledTimes(17);
+    render({ error: null });
+    render();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recover).toHaveBeenCalledTimes(18);
   });
 
   it("retries a failed request once after the cooldown", async () => {

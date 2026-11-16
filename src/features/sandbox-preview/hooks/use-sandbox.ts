@@ -477,9 +477,9 @@ export const useSandbox = ({
   // Source/package syncs finish first, so this tab cannot restart during its install (#776).
   const recoverDevServer = useCallback(() => {
     const sandboxId = sandboxIdRef.current;
-    const signal = abortControllerRef.current?.signal;
     flushSyncRef.current?.();
     const recovery = syncPromiseRef.current.then(async (): Promise<EsbuildRecoveryStatus> => {
+      const signal = abortControllerRef.current?.signal;
       if (!sandboxId || !signal || signal.aborted || sandboxIdRef.current !== sandboxId) return "unavailable";
       const response = await fetch(`/api/sandbox/${sandboxId}`, {
         method: "POST",
