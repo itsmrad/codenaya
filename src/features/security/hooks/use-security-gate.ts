@@ -41,5 +41,9 @@ export function useSecurityGate(projectId: Id<"projects">) {
     }
   };
 
-  return { checking, guard, pending, dismiss: () => setPending(null) };
+  /** Asks before `proceed` when a check couldn't run, e.g. publish's server scan. */
+  const confirmUnchecked = (proceed: (acknowledged: boolean) => unknown) =>
+    setPending({ projectId, findings: [], failed: true, proceed });
+
+  return { checking, guard, confirmUnchecked, pending, dismiss: () => setPending(null) };
 }
