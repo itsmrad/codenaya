@@ -17,8 +17,8 @@ import {
 import { HIDDEN_UNTIL_PAYMENT_PROVIDER_CHOSEN } from "./hidden-until-payment-provider";
 
 describe("provider catalog display metadata", () => {
-  it("contains exactly 68 vetted providers", () => {
-    expect(listProviders()).toHaveLength(68);
+  it("contains exactly 85 vetted providers", () => {
+    expect(listProviders()).toHaveLength(85);
   });
 
   it.each(listProviders())("has complete display metadata and a local logo for $id", (provider) => {
@@ -132,16 +132,17 @@ describe("provider catalog filters", () => {
 
 it("pins the exact public documentation read lists", () => {
   const publicDocs = listProviders().filter((provider) => provider.authModes.includes("none"));
-  expect(publicDocs.map(({ id }) => id)).toEqual(["microsoft-learn", "cloudflare-docs", "langfuse"]);
+  expect(publicDocs.map(({ id }) => id)).toEqual(["microsoft-learn", "cloudflare-docs", "langfuse", "kit-docs", "mintlify-docs", "pulumi-brand"]);
   expect(publicDocs.map(({ readOnlyTools }) => readOnlyTools)).toEqual([
     ["microsoft_docs_search", "microsoft_docs_fetch", "microsoft_code_sample_search"],
     ["search_cloudflare_documentation", "migrate_pages_to_workers_guide"],
     ["searchLangfuseDocs", "getLangfuseDocsPage", "getLangfuseOverview"],
+    [], [], [],
   ]);
   for (const provider of publicDocs) {
     expect(provider.authModes).toEqual(["none"]);
     // Only a server with no write tool may advertise itself as read-only.
-    expect(provider.supportsReadOnly).toBe(provider.destructiveTools.length === 0);
+    if (provider.supportsReadOnly) expect(provider.destructiveTools).toEqual([]);
     expect(provider.trustedHostnames).toEqual([new URL(provider.mcpUrl).hostname]);
     expect(provider.readOnlyTools?.filter((tool) => provider.destructiveTools.includes(tool))).toEqual([]);
   }

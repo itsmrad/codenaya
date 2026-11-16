@@ -294,3 +294,9 @@ credentials are needed.
 Klaviyo, Granola, Kit, MailerLite, beehiiv, Prismic, GitBook, Scite, Snyk Evo, Axiom, Fathom, Help Scout, Omnisend, DatoCMS, Circleback, getimg.ai use OAuth discovery and dynamic client registration. Unauthenticated initialize returned 401 and protected-resource/authorization-server metadata advertised DCR on 2026-11-15. No registration, sign-in or tool calls were performed. Kit uses its account server (`https://app.kit.com/mcp`).
 
 All tools remain approval-gated, including tools advertising read-only hints; no URL-level read-only mode is claimed. Account roles, plans and usage charges still apply (see each catalog entry). BrowserStack was dropped because initialize and protected-resource metadata returned HTTP 403 during re-verification.
+
+## Batch D2 API-key and public reference providers
+
+Google Maps, Perplexity, Brevo, Better Stack, CircleCI, Kagi, Jina AI, You.com, Pulumi, Supermetrics, ReadMe, Reka, Precip and Cleanvoice use API keys. Each catalog entry supplies the documented header and prefix; paste the key alone. Google Maps uses `X-Goog-Api-Key`, Reka uses `X-Reka-API-Key`, Cleanvoice uses `X-API-Key`, and the others use `Authorization: Bearer <key>`. Kit Docs, Mintlify Docs and Pulumi Brand use no authentication and are separate reference servers.
+
+Unauthenticated initialize matched the documented open handshake or authentication challenge for all 17 endpoints on 2026-11-16. No credentials, sign-in or tool calls were used. All tools remain approval-gated, including tools advertising read-only hints; account permissions, plans and usage charges apply. Open initialization does not establish free or unauthenticated tool access.

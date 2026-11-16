@@ -61,3 +61,20 @@ cloudflare-browser.svg: a copy of cloudflare.svg (Simple Icons, CC0 1.0 Universa
 descope.svg and langfuse.svg: original single-path monograms (not vendor logos), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
 
 klaviyo.svg, granola.svg, kit.svg, mailerlite.svg, beehiiv.svg, prismic.svg, gitbook.svg, scite.svg, snyk-evo.svg, axiom.svg, fathom.svg, help-scout.svg, omnisend.svg, datocms.svg, circleback.svg, getimg-ai.svg: original pixel initials monograms (not vendor logos), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+google-maps.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+perplexity.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+brevo.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+kit-docs.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+better-stack.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+circleci.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+kagi.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+jina-ai.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+you-com.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+mintlify-docs.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+pulumi.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+pulumi-brand.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+supermetrics.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+readme.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+reka.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+precip.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+cleanvoice.svg: original single-letter monogram (not vendor logo), CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
