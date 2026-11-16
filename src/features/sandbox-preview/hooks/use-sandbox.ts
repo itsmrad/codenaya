@@ -51,17 +51,12 @@ interface UseSandboxProps {
    * Optional so the hook still works for a preview with no project context.
    */
   projectId?: Id<"projects">;
-  settings?: {
-    installCommand?: string;
-    devCommand?: string;
-  };
 }
 
 export const useSandbox = ({
   files,
   enabled,
   projectId,
-  settings,
 }: UseSandboxProps) => {
   const [status, setStatus] = useState<
     "idle" | "booting" | "installing" | "running" | "error"
@@ -159,7 +154,6 @@ export const useSandbox = ({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               files: flatFiles,
-              settings,
               projectId,
               resumeSandboxId,
             }),
@@ -292,8 +286,6 @@ export const useSandbox = ({
     enabled,
     files,
     restartKey,
-    settings?.devCommand,
-    settings?.installCommand,
   ]);
 
   // Restart: kill existing sandbox and trigger a fresh boot
@@ -366,8 +358,6 @@ export const useSandbox = ({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               files: changedFiles,
-              installCommand: settings?.installCommand,
-              devCommand: settings?.devCommand,
             }),
             signal,
           });
@@ -386,10 +376,7 @@ export const useSandbox = ({
           }
 
           // After the boot stream ends, a failed reinstall reaches only this (#497).
-          const failure = readInstallFailure(
-            body,
-            settings?.installCommand || "npm install",
-          );
+          const failure = readInstallFailure(body, "npm install");
           // Not `cancelled`: edits during a slow reinstall must not hide its failure.
           if (!isCurrent()) return;
           setSyncedFiles(files);
@@ -425,7 +412,7 @@ export const useSandbox = ({
       clearTimeout(timeoutId);
       flushSyncRef.current = null;
     };
-  }, [enabled, files, status, settings?.installCommand, settings?.devCommand, buildErrors, restart]);
+  }, [enabled, files, status, buildErrors, restart]);
 
   // Cleanup sandbox on unmount or when disabled
   useEffect(() => {

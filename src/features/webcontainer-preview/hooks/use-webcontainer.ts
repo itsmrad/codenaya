@@ -51,17 +51,12 @@ interface UseWebContainerProps {
    * instead, which runs server-side.
    */
   publicEnv?: Array<{ key: string; value: string }>;
-  settings?: {
-    installCommand?: string;
-    devCommand?: string;
-  };
 };
 
 export const useWebContainer = ({
   files,
   enabled,
   publicEnv,
-  settings,
 }: UseWebContainerProps) => {
   const [status, setStatus] = useState<
     "idle" | "booting" | "installing" | "running" | "error"
@@ -107,7 +102,6 @@ export const useWebContainer = ({
 
         const plan = bootPlan(
           buildFlatFileList(files).map((file) => file.path),
-          settings?.devCommand,
         );
         if (plan === "none") {
           throw new Error(NOTHING_TO_PREVIEW);
@@ -169,7 +163,7 @@ export const useWebContainer = ({
           appendOutput("No package.json found, serving index.html statically.\n");
         } else {
           // Parse install command (default: npm install)
-          const installCmd = settings?.installCommand || "npm install";
+          const installCmd = "npm install";
           const [installBin, ...installArgs] = installCmd.split(" ");
           appendOutput(`$ ${installCmd}\n`)
           const installProcess = await container.spawn(installBin, installArgs);
@@ -197,7 +191,7 @@ export const useWebContainer = ({
         const devCmd =
           plan === "static"
             ? STATIC_SERVE_COMMAND
-            : settings?.devCommand || "npm run dev";
+            : "npm run dev";
         const [devBin, ...devArgs] = devCmd.split(" ");
         appendOutput(`\n$ ${devCmd}\n`);
         const devProcess = await container.spawn(devBin, devArgs);
@@ -225,8 +219,6 @@ export const useWebContainer = ({
     files,
     publicEnv,
     restartKey,
-    settings?.devCommand,
-    settings?.installCommand,
   ]);
 
   // Sync file changes (hot-reload)

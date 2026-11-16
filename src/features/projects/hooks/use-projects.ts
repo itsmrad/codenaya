@@ -55,10 +55,6 @@ export const useRenameProject = () => {
   )
 };
 
-export const useUpdateProjectSettings = () => {
-  return useMutation(api.projects.updateSettings);
-};
-
 export const useUpdateProjectInstructions = () => {
   return useMutation(api.projects.updateInstructions);
 };
