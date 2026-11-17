@@ -4,6 +4,7 @@ import { creditsForCost, currentUsage } from "../src/features/billing/credits";
 import type { Doc } from "./_generated/dataModel";
 import { type MutationCtx, type QueryCtx, mutation, query } from "./_generated/server";
 import { verifyAuth } from "./auth";
+import { spendPaidCredits } from "./billingGrants";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { addModelSpend } from "./modelSpend";
@@ -88,7 +89,9 @@ async function chargeAccount(ctx: MutationCtx, userId: string, credits: number, 
   const usage = currentUsage(account, now);
   const next = { ...usage, periodUsed: usage.periodUsed + credits, dayUsed: usage.dayUsed + credits };
   if (account) {
-    await ctx.db.patch("creditAccounts", account._id, next);
+    // Billing-enabled accounts (ADR 0016) also spend paid lots in this same transaction.
+    const debt = account.paidCreditsVersion === undefined ? 0 : await spendPaidCredits(ctx, userId, credits, now);
+    await ctx.db.patch("creditAccounts", account._id, debt > 0 ? { ...next, creditDebt: (account.creditDebt ?? 0) + debt } : next);
   } else {
     await ctx.db.insert("creditAccounts", { userId, plan: "free", ...next });
   }
