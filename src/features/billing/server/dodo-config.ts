@@ -70,6 +70,7 @@ function readReturnUrl(env: Env, deployment: DodoDeployment): string {
         origin.protocol === "https:");
   if (
     !allowedOrigin || origin.username || origin.password ||
+    origin.hostname.endsWith(".") ||
     appUrl !== origin.origin ||
     returnUrl !== `${origin.origin}/settings/billing/return` ||
     target.origin !== origin.origin

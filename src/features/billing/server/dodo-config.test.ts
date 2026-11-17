@@ -142,12 +142,13 @@ describe("Dodo config", () => {
   });
   it.each([
     "https://codena.tech", "https://preview.codena.tech", "http://dev.example.test",
+    "https://codena.tech.", "https://preview.codena.tech.",
     "https://dev.example.test/path", "https://user:password@dev.example.test", "file:///tmp",
   ])("rejects nonisolated or malformed test origin %s", (origin) => {
     expect(() => readDodoConfig("next", "preview", { ...nextEnv, NEXT_PUBLIC_APP_URL: origin,
       DODO_PAYMENTS_RETURN_URL: `${origin}/settings/billing/return` })).toThrow();
   });
-  it.each(["http://127.0.0.1:3000", "http://[::1]:3000", "https://dev.example.test"])(
+  it.each(["http://127.0.0.1:3000", "http://[::1]:3000", "https://dev.example.test", "http://localhost:3100"])(
     "accepts isolated test origin %s", (origin) => {
       expect(readDodoConfig("next", "staging", { ...nextEnv, NEXT_PUBLIC_APP_URL: origin,
         DODO_PAYMENTS_RETURN_URL: `${origin}/settings/billing/return` })).not.toBeNull();
