@@ -966,6 +966,34 @@ export default defineSchema({
     .index("by_project_and_key", ["projectId", "key"]),
 
   /**
+   * Values redacted from MCP tool results, held so the agent can store one as an
+   * env var by ref (`setEnvVarFromRef`) without seeing it. Bound to the project,
+   * owner and run that produced it. Sealed even when public; expires after an
+   * hour and is pruned by the approvals cron.
+   */
+  mcpEnvRefs: defineTable({
+    refId: v.string(),
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+    messageId: v.id("messages"),
+    // Decided by the server from the redaction rule, never by the model.
+    visibility: v.union(v.literal("public"), v.literal("secret")),
+    providerId: v.string(),
+    toolName: v.string(),
+    rule: v.string(),
+    // Sealed value, anchored on `refId`.
+    kekProvider: v.string(),
+    kekKeyId: v.string(),
+    wrappedDek: v.string(),
+    ciphertext: v.string(),
+    iv: v.string(),
+    authTag: v.string(),
+    expiresAt: v.number(),
+  })
+    .index("by_refId", ["refId"])
+    .index("by_expiresAt", ["expiresAt"]),
+
+  /**
    * In-flight OAuth authorization codes. Short-lived; pruned by cron.
    *
    * The PKCE code verifier is sealed rather than stored plainly: it is the

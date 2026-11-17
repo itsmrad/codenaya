@@ -30,6 +30,7 @@ import { createDeleteFilesTool } from './tools/delete-files';
 import { createWriteFilesTool } from './tools/write-files';
 import { buildProjectTreePromptSection, getProjectFiles } from './tools/paths';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
+import { createSetEnvVarFromRefTool } from './tools/set-env-var-from-ref';
 import { createLoadSkillTool } from './tools/load-skill';
 import { createScaffoldViteAppTool } from './tools/scaffold-vite-app';
 import { createCheckBuildTool } from './tools/check-build';
@@ -73,6 +74,7 @@ import {
 import {
   createConvexApprovalGate,
   createConvexAuditSink,
+  createConvexEnvRefStore,
 } from '@/features/integrations/server/mcp/convex-approval';
 import {
   oauthConnectionNeedsRefresh,
@@ -501,6 +503,10 @@ export const processMessage = inngest.createFunction(
             ? createConvexApprovalGate(mcpContext)
             : undefined,
           audit: mcpContext ? createConvexAuditSink(mcpContext) : undefined,
+          // Redacted values become refs bound to this run, for setEnvVarFromRef.
+          storeEnvRefs: mcpOwnerId
+            ? createConvexEnvRefStore({ internalKey, projectId, ownerId: mcpOwnerId, messageId })
+            : undefined,
           // Correlates the `[mcp]` log lines with this Inngest run.
           runId,
         });
@@ -713,6 +719,10 @@ export const processMessage = inngest.createFunction(
       createDeleteFilesTool({ projectId, internalKey, messageId }),
       createCheckBuildTool({ projectId, internalKey, ownerId: mcpOwnerId }),
       createScrapeUrlsTool(),
+      // Refs come only from MCP results, so the tool exists only alongside them.
+      ...(mcpOwnerId && mcpTools.length > 0
+        ? [createSetEnvVarFromRefTool({ projectId, ownerId: mcpOwnerId, messageId, internalKey })]
+        : []),
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
       ...swarm.tools,

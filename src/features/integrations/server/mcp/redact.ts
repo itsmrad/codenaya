@@ -52,6 +52,21 @@ const MIN_EXACT_MATCH_LENGTH = 8;
  */
 const MAX_REDACTION_DEPTH = 32;
 
+/**
+ * Public configuration that becomes an env ref, but only where refs are minted
+ * (MCP tool results). Elsewhere it stays visible: it is not a secret.
+ */
+const PUBLIC_REF_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
+  { label: "supabase-url", pattern: /\bhttps:\/\/[a-z0-9]{20}\.supabase\.co\b/g },
+  { label: "supabase-publishable", pattern: /\bsb_publishable_[A-Za-z0-9_-]{16,}\b/g },
+];
+
+/**
+ * Replacement for a redacted span, given its text and rule. Known values (the
+ * MCP credential, stored secrets) never reach it; they always get the placeholder.
+ */
+export type RefMinter = (value: string, rule: string) => string;
+
 export interface RedactionResult {
   text: string;
   /** How many spans were replaced. Zero means the payload was clean. */
@@ -79,10 +94,13 @@ function escapeRegExp(value: string): string {
  * itself, plus every stored secret env var. These are matched exactly, which is
  * both precise and the highest-value case: it is exactly these values that must
  * never be echoed back.
+ * @param toRef When given, pattern matches become env refs instead of the
+ * placeholder, and public Supabase config is replaced too.
  */
 export function redactSecrets(
   text: string,
   knownSecrets: readonly string[] = [],
+  toRef?: RefMinter,
 ): RedactionResult {
   let result = text;
   let redactionCount = 0;
@@ -105,7 +123,10 @@ export function redactSecrets(
     }
   }
 
-  for (const { label, pattern } of CREDENTIAL_TOKEN_PATTERNS) {
+  const patterns = toRef
+    ? [...CREDENTIAL_TOKEN_PATTERNS, ...PUBLIC_REF_PATTERNS]
+    : CREDENTIAL_TOKEN_PATTERNS;
+  for (const { label, pattern } of patterns) {
     // Fresh RegExp each call: the module-level literals carry /g state via
     // lastIndex, and reusing them across calls skips matches unpredictably.
     const scoped = new RegExp(pattern.source, pattern.flags);
@@ -113,7 +134,7 @@ export function redactSecrets(
     if (matches) {
       redactionCount += matches.length;
       matchedRules.add(label);
-      result = result.replace(scoped, REDACTION_PLACEHOLDER);
+      result = result.replace(scoped, (match) => toRef?.(match, label) ?? REDACTION_PLACEHOLDER);
     }
   }
 
@@ -122,7 +143,11 @@ export function redactSecrets(
   if (dsnMatches) {
     redactionCount += dsnMatches.length;
     matchedRules.add("dsn-password");
-    result = result.replace(dsn, `$1:${REDACTION_PLACEHOLDER}@`);
+    result = result.replace(
+      dsn,
+      (_match, prefix: string, password: string) =>
+        `${prefix}:${toRef?.(password, "dsn-password") ?? REDACTION_PLACEHOLDER}@`,
+    );
   }
 
   return {
@@ -147,6 +172,7 @@ export function redactSecrets(
 export function redactJsonValue(
   value: unknown,
   knownSecrets: readonly string[] = [],
+  toRef?: RefMinter,
 ): { value: unknown; redactionCount: number; matchedRules: string[] } {
   let redactionCount = 0;
   const matchedRules = new Set<string>();
@@ -158,7 +184,7 @@ export function redactJsonValue(
 
   const walk = (input: unknown, depth: number): unknown => {
     if (typeof input === "string") {
-      const outcome = redactSecrets(input, knownSecrets);
+      const outcome = redactSecrets(input, knownSecrets, toRef);
       redactionCount += outcome.redactionCount;
       outcome.matchedRules.forEach((rule) => matchedRules.add(rule));
       return outcome.text;

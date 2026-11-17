@@ -20,7 +20,8 @@ Use this for apps that need accounts, login or saved per-user data in a Vite + R
 
 Vite reads \`import.meta.env.VITE_SUPABASE_URL\` and \`import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY\`. Next.js reads \`process.env.NEXT_PUBLIC_SUPABASE_URL\` and \`process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY\`.
 
-- If they are not set, build everything below anyway, and in Notes ask the user to open **Environment Variables** in the project and add the two values from their Supabase dashboard (the **Connect** dialog, or Project Settings → API Keys). Don't guess them.
+- If they are not set and the Supabase integration is connected (see "Connected integrations"), read the project URL and publishable key with its tools. They come back as public \`[env-ref:...]\` refs (one stands for the project URL); store each with \`setEnvVarFromRef\`.
+- If they are still not set, build everything below anyway, and in Notes ask the user to open **Environment Variables** in the project and add the two values from their Supabase dashboard (the **Connect** dialog, or Project Settings → API Keys). Don't guess them.
 
 For Vite only, type them in \`src/vite-env.d.ts\`:
 

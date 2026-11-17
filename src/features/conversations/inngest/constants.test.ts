@@ -242,7 +242,8 @@ describe("envVarsPromptSection", () => {
     expect(section).toContain("tell the user its exact name");
     expect(section).toContain("Environment Variables panel");
     expect(section).toContain("Never ask for a value in chat, repeat one, write one into a file");
-    expect(section).not.toContain("setEnvVar");
+    expect(section).toContain("store it with setEnvVarFromRef");
+    expect(section).not.toMatch(/\bsetEnvVar\b/);
   });
 
   it("says when none are set, and lists nothing when the names are unknown", () => {

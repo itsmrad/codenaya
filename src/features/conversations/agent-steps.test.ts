@@ -122,6 +122,11 @@ describe("describeToolCall", () => {
     expect(JSON.stringify(steps)).not.toContain("CANARY_VALUE_123");
   });
 
+  it("shows only the variable name for setEnvVarFromRef", () => {
+    const call = { name: "setEnvVarFromRef", input: { name: "VITE_SUPABASE_URL", ref: "ref_0123" } };
+    expect(describeToolCall(call, pathOf)).toEqual(["VITE_SUPABASE_URL"]);
+  });
+
   it("names the loaded skill", () => {
     expect(
       describeToolCall({ name: "loadSkill", input: { name: "seo-metadata" } }, pathOf),
