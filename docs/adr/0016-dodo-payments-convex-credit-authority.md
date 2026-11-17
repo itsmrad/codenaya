@@ -56,7 +56,12 @@ the trusted deployment explicitly (`development`, `preview`, `staging`,
 | --- | --- | --- |
 | Both | `DODO_PAYMENTS_ENVIRONMENT`, `DODO_PAYMENTS_BUSINESS_ID` | None |
 | Next | `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_PRO_PRODUCT_ID`, `DODO_PAYMENTS_RETURN_URL`, `NEXT_PUBLIC_APP_URL` | `DODO_PAYMENTS_BRAND_ID` |
-| Convex receiver | `DODO_PAYMENTS_WEBHOOK_KEY` | `DODO_PAYMENTS_WEBHOOK_KEY_PREVIOUS` |
+| Convex receiver | `DODO_PAYMENTS_WEBHOOK_KEY`, `CODENAYA_DEPLOYMENT` | `DODO_PAYMENTS_WEBHOOK_KEY_PREVIOUS` |
+
+The Convex receiver learns its trusted deployment only from the non-secret,
+Convex-only `CODENAYA_DEPLOYMENT` (`development`, `preview`, `staging` or
+`production`), required on each Convex deployment that receives webhooks. Absent,
+invalid or `PLACEHOLDER_*` values fail closed; the same deployment/mode rule applies.
 
 `CODENAYA_BILLING_ENABLED` defaults to disabled unless exactly `true`; disabled
 Next config returns null. Enabling it also requires `CREDIT_LIMITS_ENFORCED=true`.
