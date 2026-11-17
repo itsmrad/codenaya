@@ -298,36 +298,6 @@ describe("internal-key writes verify ownership from the database (#239)", () => 
     ).rejects.toThrow("Connection not found");
   });
 
-  test.each(["NEXT_PUBLIC_KEY", "VITE_KEY"])("public env writes reject secrets for %s (#684)", async (key) => {
-    const { t, projectId } = await setup();
-    const scope = { internalKey: INTERNAL_KEY, projectId, ownerId: ALICE, key };
-    const value = ["sk", "_test_", "FAKE0123456789abcdef"].join("");
-    const rejected = {
-      data: {
-        code: "INVALID_ARGUMENT",
-        message: "This looks like a secret key and would be published in the browser bundle. Use a name without a public prefix and store it as a secret instead.",
-      },
-    };
-
-    await expect(
-      t.mutation(api.system.setPublicEnvVarInternal, { ...scope, value })
-    ).rejects.toMatchObject(rejected);
-    expect(await t.run((ctx) => ctx.db.query("projectEnvVars").collect())).toEqual([]);
-
-    const publishable = ["pk", "_test_", "FAKE0123456789abcdef"].join("");
-    const id = await t.mutation(api.system.setPublicEnvVarInternal, { ...scope, value: publishable });
-    const before = await t.run((ctx) => ctx.db.get("projectEnvVars", id));
-    expect(before).toMatchObject({ plainValue: publishable, maskedPreview: publishable });
-    await expect(
-      t.mutation(api.system.setPublicEnvVarInternal, { ...scope, value })
-    ).rejects.toMatchObject(rejected);
-    expect(await t.run((ctx) => ctx.db.get("projectEnvVars", id))).toEqual(before);
-
-    await expect(
-      t.mutation(api.system.setPublicEnvVarInternal, { ...scope, internalKey: "wrong-key", value })
-    ).rejects.toMatchObject({ data: { code: "UNAUTHENTICATED" } });
-  });
-
   test("env-var writes refuse an ownerId that isn't the project owner (#211)", async () => {
     const { t, projectId } = await setupTwoTenants();
     const scope = { internalKey: INTERNAL_KEY, projectId, key: "API_URL" };
@@ -342,12 +312,16 @@ describe("internal-key writes verify ownership from the database (#239)", () => 
         ...sealed,
       })
     ).rejects.toThrow("Project not found");
-    await expect(
-      t.mutation(api.system.setPublicEnvVarInternal, { ...scope, ownerId: BOB, value: "x" })
-    ).rejects.toThrow("Project not found");
     expect(await t.run((ctx) => ctx.db.query("projectEnvVars").collect())).toEqual([]);
 
-    await t.mutation(api.system.setPublicEnvVarInternal, { ...scope, ownerId: ALICE, value: "x" });
+    await t.mutation(api.system.setSecretEnvVar, {
+      ...scope,
+      ownerId: ALICE,
+      secretRef: "ref",
+      maskedPreview: "x",
+      source: "manual",
+      ...sealed,
+    });
     const rows = await t.run((ctx) => ctx.db.query("projectEnvVars").collect());
     expect(rows.map((row) => row.ownerId)).toEqual([ALICE]);
   });

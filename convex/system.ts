@@ -1,7 +1,6 @@
 import { v } from "convex/values";
 
 import { MAX_ENV_KEY_LENGTH, MAX_ENV_VARS, isValidEnvKey } from "../src/features/integrations/env-keys";
-import { publicValueSecretRule } from "../src/features/integrations/credential-guard";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import {
@@ -1829,87 +1828,6 @@ export const getOwnedConversation = query({
     if (!conversation) return null;
     const project = await ownedProjectOrNull(ctx, conversation.projectId, args.userId);
     return project ? conversation : null;
-  },
-});
-
-
-/**
- * Create or replace a public environment variable from the server.
- *
- * The `envVars.setPublicEnvVar` counterpart is client-callable and authenticates
- * the user; this one is `internalKey`-gated for the agent, which acts on the
- * project owner's behalf and has no user session.
- *
- * Public values are stored in plaintext because they are public by definition — a
- * `NEXT_PUBLIC_` variable is inlined into client JavaScript by the bundler whatever
- * we do here, so encrypting it would add a decrypt step to every preview boot while
- * protecting nothing.
- */
-export const setPublicEnvVarInternal = mutation({
-  args: {
-    internalKey: v.string(),
-    projectId: v.id("projects"),
-    ownerId: v.string(),
-    key: v.string(),
-    value: v.string(),
-  },
-  returns: v.id("projectEnvVars"),
-  handler: async (ctx, args) => {
-    validateInternalKey(args.internalKey);
-
-    // The row's ownerId decides who may delete it later (`envVars.deleteEnvVar`),
-    // so it must be the project's real owner (#211).
-    if (!(await ownedProjectOrNull(ctx, args.projectId, args.ownerId))) {
-      throw appError("NOT_FOUND", "Project not found");
-    }
-
-    if (publicValueSecretRule(args.value)) {
-      throw appError(
-        "INVALID_ARGUMENT",
-        "This looks like a secret key and would be published in the browser bundle. " +
-          "Use a name without a public prefix and store it as a secret instead.",
-      );
-    }
-
-    const existing = await ctx.db
-      .query("projectEnvVars")
-      .withIndex("by_project_and_key", (q) =>
-        q.eq("projectId", args.projectId).eq("key", args.key)
-      )
-      .first();
-
-    const now = Date.now();
-
-    if (existing) {
-      await ctx.db.patch("projectEnvVars", existing._id, {
-        visibility: "public" as const,
-        plainValue: args.value,
-        maskedPreview: args.value,
-        // Clear any sealed payload from when this key was a secret, so the row does
-        // not carry two competing values.
-        secretRef: undefined,
-        kekProvider: undefined,
-        kekKeyId: undefined,
-        wrappedDek: undefined,
-        ciphertext: undefined,
-        iv: undefined,
-        authTag: undefined,
-        source: "integration" as const,
-        updatedAt: now,
-      });
-      return existing._id;
-    }
-
-    return await ctx.db.insert("projectEnvVars", {
-      projectId: args.projectId,
-      ownerId: args.ownerId,
-      key: args.key,
-      visibility: "public" as const,
-      plainValue: args.value,
-      maskedPreview: args.value,
-      source: "integration" as const,
-      updatedAt: now,
-    });
   },
 });
 
