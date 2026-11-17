@@ -855,6 +855,7 @@ export default defineSchema({
     cancelAt: v.optional(v.number()),
     graceUntil: v.optional(v.number()),
     observedAt: v.optional(v.number()),
+    cancellationRecoveryRequired: v.optional(v.boolean()),
   })
     .index("by_mode_and_subscriptionId", ["mode", "subscriptionId"])
     .index("by_customerRef_and_status", ["customerRef", "status"]),
@@ -878,7 +879,8 @@ export default defineSchema({
     .index("by_customerRef_and_state", ["customerRef", "state"]),
 
   billingEvents: defineTable({
-    customerRef: v.id("billingCustomers"),
+    // Absent for a verified receipt whose customer is not mapped yet; stored quarantined.
+    customerRef: v.optional(v.id("billingCustomers")),
     mode: billingModeValidator,
     webhookId: v.string(),
     eventType: v.string(),

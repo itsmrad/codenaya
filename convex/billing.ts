@@ -19,12 +19,18 @@ async function requireCustomer(ctx: QueryCtx, customerRef: Id<"billingCustomers"
   return customer;
 }
 
-async function requireActiveOwner(ctx: QueryCtx, customer: Pick<Doc<"billingCustomers">, "userId" | "deletedAt" | "hold">) {
+async function ownerDeleted(ctx: QueryCtx, customer: Pick<Doc<"billingCustomers">, "userId" | "deletedAt">) {
   const user = await getUser(ctx, customer.userId);
-  if (!user || user.deletedAt !== undefined || customer.deletedAt !== undefined || customer.hold) {
-    throw appError("FORBIDDEN", "Billing owner is unavailable");
-  }
+  return !user || user.deletedAt !== undefined || customer.deletedAt !== undefined;
 }
+
+async function requireActiveOwner(ctx: QueryCtx, customer: Pick<Doc<"billingCustomers">, "userId" | "deletedAt" | "hold">) {
+  if (customer.hold || await ownerDeleted(ctx, customer)) throw appError("FORBIDDEN", "Billing owner is unavailable");
+}
+
+const requireMode = (actual: Doc<"billingCustomers">["mode"], expected: Doc<"billingCustomers">["mode"]) => {
+  if (actual !== expected) throw conflict();
+};
 
 // Only trusted internal callers pass normalized, verified Clerk tokenIdentifier + subject.
 export const ensureCustomer = internalMutation({
@@ -33,6 +39,9 @@ export const ensureCustomer = internalMutation({
   handler: async (ctx, args) => {
     requireText(args.ownerTokenIdentifier);
     requireText(args.userId);
+    if (!args.ownerTokenIdentifier.endsWith(`|${args.userId}`)) {
+      throw appError("INVALID_ARGUMENT", "Billing owner token does not match its subject");
+    }
     await requireActiveOwner(ctx, args);
     const existing = await ctx.db.query("billingCustomers")
       .withIndex("by_mode_and_ownerTokenIdentifier", q => q.eq("mode", args.mode).eq("ownerTokenIdentifier", args.ownerTokenIdentifier)).unique();
@@ -56,11 +65,12 @@ export const bindCustomer = internalMutation({
   handler: async (ctx, { customerRef, customerId }) => {
     requireText(customerId);
     const customer = await requireCustomer(ctx, customerRef);
-    await requireActiveOwner(ctx, customer);
     const existing = await ctx.db.query("billingCustomers")
       .withIndex("by_mode_and_customerId", q => q.eq("mode", customer.mode).eq("customerId", customerId)).unique();
     if ((existing && existing._id !== customerRef) || (customer.customerId && customer.customerId !== customerId)) throw conflict();
-    await ctx.db.patch("billingCustomers", customerRef, { customerId, creationState: "ready" });
+    // A late ID for a deleted or held owner is kept for recovery but never reopens the customer.
+    const live = !customer.hold && !(await ownerDeleted(ctx, customer));
+    await ctx.db.patch("billingCustomers", customerRef, live ? { customerId, creationState: "ready" } : { customerId });
     return null;
   },
 });
@@ -94,28 +104,32 @@ export const reservePurchase = internalMutation({
 });
 
 export const bindSubscription = internalMutation({
-  args: { customerRef: v.id("billingCustomers"), subscriptionId: v.string(), productId: v.string() },
+  args: { customerRef: v.id("billingCustomers"), mode: billingModeValidator, subscriptionId: v.string(), productId: v.string() },
   returns: v.id("billingSubscriptions"),
   handler: async (ctx, args) => {
     requireText(args.subscriptionId);
     requireText(args.productId);
     const customer = await requireCustomer(ctx, args.customerRef);
+    requireMode(customer.mode, args.mode);
+    const late = await ownerDeleted(ctx, customer);
     const existing = await ctx.db.query("billingSubscriptions")
-      .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", customer.mode).eq("subscriptionId", args.subscriptionId)).unique();
+      .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", args.mode).eq("subscriptionId", args.subscriptionId)).unique();
     if (existing) {
       if (existing.customerRef !== args.customerRef || existing.productId !== args.productId) throw conflict();
+      if (late) await ctx.db.patch("billingSubscriptions", existing._id, { cancellationRecoveryRequired: true });
       return existing._id;
     }
-    return await ctx.db.insert("billingSubscriptions", { ...args, mode: customer.mode, status: "pending" });
+    return await ctx.db.insert("billingSubscriptions", { ...args, status: "pending", ...(late ? { cancellationRecoveryRequired: true } : {}) });
   },
 });
 
 export const bindPurchase = internalMutation({
-  args: { purchaseRef: v.id("billingPurchases"), ...billingResourceIdsValidator.fields, expiresAt: v.optional(v.number()) },
+  args: { purchaseRef: v.id("billingPurchases"), mode: billingModeValidator, ...billingResourceIdsValidator.fields, expiresAt: v.optional(v.number()) },
   returns: v.null(),
-  handler: async (ctx, { purchaseRef, ...ids }) => {
+  handler: async (ctx, { purchaseRef, mode, ...ids }) => {
     const purchase = await ctx.db.get("billingPurchases", purchaseRef);
     if (!purchase) throw appError("NOT_FOUND", "Billing purchase not found");
+    requireMode(purchase.mode, mode);
     const customer = await requireCustomer(ctx, purchase.customerRef);
     for (const field of ["sessionId", "paymentId", "subscriptionId", "expiresAt"] as const) {
       const value = ids[field];
@@ -136,10 +150,9 @@ export const bindPurchase = internalMutation({
         .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", purchase.mode).eq("subscriptionId", ids.subscriptionId!)).unique();
       if (!subscription || subscription.customerRef !== customer._id || subscription.productId !== purchase.terms.productId) throw conflict();
     }
-    const user = await getUser(ctx, customer.userId);
     await ctx.db.patch("billingPurchases", purchaseRef, {
       ...ids,
-      ...(!user || user.deletedAt !== undefined || customer.deletedAt !== undefined ? { cancellationRecoveryRequired: true } : {}),
+      ...(await ownerDeleted(ctx, customer) ? { cancellationRecoveryRequired: true } : {}),
     });
     return null;
   },
@@ -147,7 +160,7 @@ export const bindPurchase = internalMutation({
 
 export const recordReceipt = internalMutation({
   args: {
-    customerRef: v.id("billingCustomers"), webhookId: v.string(), eventType: v.string(),
+    customerRef: v.optional(v.id("billingCustomers")), mode: billingModeValidator, webhookId: v.string(), eventType: v.string(),
     bodyDigest: v.string(), occurredAt: v.number(), ...billingResourceIdsValidator.fields,
   },
   returns: v.id("billingEvents"),
@@ -157,26 +170,32 @@ export const recordReceipt = internalMutation({
     if (!/^[a-f0-9]{64}$/.test(args.bodyDigest) || !Number.isFinite(args.occurredAt)) {
       throw appError("INVALID_ARGUMENT", "Invalid normalized billing receipt");
     }
-    const parent = await requireCustomer(ctx, args.customerRef);
+    const parent = args.customerRef === undefined ? null : await requireCustomer(ctx, args.customerRef);
+    if (parent) requireMode(parent.mode, args.mode);
     const existing = await ctx.db.query("billingEvents")
-      .withIndex("by_mode_and_webhookId", q => q.eq("mode", parent.mode).eq("webhookId", args.webhookId)).unique();
+      .withIndex("by_mode_and_webhookId", q => q.eq("mode", args.mode).eq("webhookId", args.webhookId)).unique();
     if (existing) {
       if (existing.bodyDigest !== args.bodyDigest && existing.state !== "quarantined") {
-        const originalParent = await requireCustomer(ctx, existing.customerRef);
         await ctx.db.patch("billingEvents", existing._id, { state: "quarantined" });
-        await ctx.db.patch("billingCustomers", originalParent._id, {
-          inputRevision: originalParent.inputRevision + 1,
-          unresolvedReceipts: originalParent.unresolvedReceipts + (existing.state === "processed" || existing.state === "ignored" ? 1 : 0),
-        });
+        if (existing.customerRef) {
+          const originalParent = await requireCustomer(ctx, existing.customerRef);
+          await ctx.db.patch("billingCustomers", originalParent._id, {
+            inputRevision: originalParent.inputRevision + 1,
+            unresolvedReceipts: originalParent.unresolvedReceipts + (existing.state === "processed" || existing.state === "ignored" ? 1 : 0),
+          });
+        }
       }
       return existing._id;
     }
     const now = Date.now();
+    // An unmapped verified receipt is never discarded: it waits quarantined for reconciliation.
     const eventRef = await ctx.db.insert("billingEvents", {
-      ...args, mode: parent.mode, receivedAt: now, state: "pending", attempts: 0,
-      nextAttemptAt: now, generation: parent.generation,
+      ...args, receivedAt: now, state: parent ? "pending" : "quarantined", attempts: 0,
+      nextAttemptAt: now, generation: parent?.generation ?? 0,
     });
-    await ctx.db.patch("billingCustomers", parent._id, { inputRevision: parent.inputRevision + 1, unresolvedReceipts: parent.unresolvedReceipts + 1 });
+    if (parent) {
+      await ctx.db.patch("billingCustomers", parent._id, { inputRevision: parent.inputRevision + 1, unresolvedReceipts: parent.unresolvedReceipts + 1 });
+    }
     return eventRef;
   },
 });

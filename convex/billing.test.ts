@@ -12,7 +12,8 @@ const setup = () => convexTest(schema, modules);
 type TestBackend = ReturnType<typeof setup>;
 const identity = { ownerTokenIdentifier: "https://clerk.synthetic|user_alice", userId: "user_alice" };
 const terms = { sku: "pro_monthly" as const, catalogVersion: "synthetic-v1", productId: "product_pro", quantity: 1, credits: 2000 };
-const receipt = { webhookId: "wh_synthetic", eventType: "payment.succeeded", bodyDigest: "a".repeat(64), occurredAt: 123 };
+const mode = "test_mode" as const;
+const receipt = { mode, webhookId: "wh_synthetic", eventType: "payment.succeeded", bodyDigest: "a".repeat(64), occurredAt: 123 };
 
 async function customer(t: TestBackend, userId = identity.userId, mode: "test_mode" | "live_mode" = "test_mode") {
   await t.run(async ctx => {
@@ -54,7 +55,7 @@ describe("billing identity and additive schema", () => {
     expect(await t.run(ctx => ctx.db.query("billingCustomers").take(2))).toEqual([]);
   });
 
-  test("concurrent customer creation is one durable owner lock", async () => {
+  test("repeated customer creation is one durable owner lock", async () => {
     const t = setup();
     await t.run(ctx => ctx.db.insert("users", { clerkUserId: identity.userId, updatedAt: 1 }));
     const refs = await Promise.all(Array.from({ length: 3 }, () => t.mutation(internal.billing.ensureCustomer, { mode: "test_mode", ...identity })));
@@ -63,6 +64,9 @@ describe("billing identity and additive schema", () => {
     await expect(t.mutation(internal.billing.ensureCustomer, {
       mode: "test_mode", ...identity, ownerTokenIdentifier: "https://other.synthetic|user_alice",
     })).rejects.toThrow("conflicts");
+    await expect(t.mutation(internal.billing.ensureCustomer, {
+      mode: "test_mode", ...identity, ownerTokenIdentifier: "https://clerk.synthetic|user_bob",
+    })).rejects.toThrow("does not match");
   });
 
   test("provider customer IDs cannot cross owners or change after binding", async () => {
@@ -77,7 +81,7 @@ describe("billing identity and additive schema", () => {
     await t.mutation(internal.billing.bindCustomer, { customerRef: bound, customerId: "cus_shared" });
   });
 
-  test.each(["absent", "deleted"])("%s users cannot create or bind billing customers", async state => {
+  test.each(["absent", "deleted"])("%s users cannot create billing customers or reopen a late binding", async state => {
     const t = setup();
     await expect(t.mutation(internal.billing.ensureCustomer, { mode: "test_mode", ...identity })).rejects.toThrow("unavailable");
     const customerRef = await customer(t);
@@ -86,19 +90,35 @@ describe("billing identity and additive schema", () => {
       if (state === "absent") await ctx.db.delete("users", user!._id);
       else await ctx.db.patch("users", user!._id, { deletedAt: 0 });
     });
-    await expect(t.mutation(internal.billing.bindCustomer, { customerRef, customerId: "cus_deleted" })).rejects.toThrow("unavailable");
+    await t.mutation(internal.billing.bindCustomer, { customerRef, customerId: "cus_deleted" });
     await expect(t.mutation(internal.billing.ensureCustomer, { mode: "test_mode", ...identity })).rejects.toThrow("unavailable");
-    expect((await readCustomer(t, customerRef))?.customerId).toBeUndefined();
+    expect(await readCustomer(t, customerRef)).toMatchObject({ customerId: "cus_deleted", creationState: "preparing" });
+    await expect(reserve(t, customerRef)).rejects.toThrow("unavailable");
   });
 
-  test("a billing tombstone cannot resurrect or relink to a different owner", async () => {
+  test("a deleted user blocks checkout before its billing customer is tombstoned", async () => {
     const t = setup();
-    const alice = await readyCustomer(t);
-    await t.run(ctx => ctx.db.patch("billingCustomers", alice, { deletedAt: 0, generation: 1 }));
+    const customerRef = await readyCustomer(t);
+    await t.run(async ctx => {
+      const user = await ctx.db.query("users").withIndex("by_clerkUserId", q => q.eq("clerkUserId", identity.userId)).unique();
+      await ctx.db.patch("users", user!._id, { deletedAt: 0 });
+    });
+    expect((await readCustomer(t, customerRef))?.deletedAt).toBeUndefined();
+    await expect(reserve(t, customerRef)).rejects.toThrow("unavailable");
+    expect(await t.run(ctx => ctx.db.query("billingPurchases").take(1))).toEqual([]);
+  });
+
+  test.each([{ deletedAt: 0, generation: 1 }, { hold: true }])("a %o billing customer keeps a late ID without reopening or relinking", async state => {
+    const t = setup();
+    const alice = await customer(t);
+    await t.run(ctx => ctx.db.patch("billingCustomers", alice, state));
     await expect(t.mutation(internal.billing.ensureCustomer, { mode: "test_mode", ...identity })).rejects.toThrow("unavailable");
-    await expect(t.mutation(internal.billing.bindCustomer, { customerRef: alice, customerId: "cus_relinked" })).rejects.toThrow("unavailable");
+    for (let i = 0; i < 2; i++) await t.mutation(internal.billing.bindCustomer, { customerRef: alice, customerId: "cus_late" });
+    expect(await readCustomer(t, alice)).toMatchObject({ ...state, customerId: "cus_late", creationState: "preparing" });
+    await expect(t.mutation(internal.billing.bindCustomer, { customerRef: alice, customerId: "cus_relinked" })).rejects.toThrow("conflicts");
     const bob = await customer(t, "user_bob");
-    await expect(t.mutation(internal.billing.bindCustomer, { customerRef: bob, customerId: `cus_${identity.userId}` })).rejects.toThrow("conflicts");
+    await expect(t.mutation(internal.billing.bindCustomer, { customerRef: bob, customerId: "cus_late" })).rejects.toThrow("conflicts");
+    await expect(reserve(t, alice)).rejects.toThrow("unavailable");
   });
 
   test("ordinary user purge removes usage while retaining financial tombstones and receipts", async () => {
@@ -106,7 +126,7 @@ describe("billing identity and additive schema", () => {
     const customerRef = await readyCustomer(t);
     const purchaseRef = await reserve(t, customerRef);
     const eventRef = await t.mutation(internal.billing.recordReceipt, { customerRef, ...receipt });
-    const subscriptionRef = await t.mutation(internal.billing.bindSubscription, { customerRef, subscriptionId: "sub_retained", productId: terms.productId });
+    const subscriptionRef = await t.mutation(internal.billing.bindSubscription, { customerRef, mode, subscriptionId: "sub_retained", productId: terms.productId });
     await t.run(async ctx => {
       await ctx.db.patch("billingCustomers", customerRef, { deletedAt: 1, generation: 1 });
       await ctx.db.insert("creditAccounts", { userId: identity.userId, plan: "free", periodStartsAt: 1, periodUsed: 1, dayStartsAt: 1, dayUsed: 1 });
@@ -125,7 +145,7 @@ describe("billing purchase and subscription bindings", () => {
     const t = setup();
     const customerRef = await readyCustomer(t);
     const purchaseRef = await reserve(t, customerRef);
-    const subscriptionRef = await t.mutation(internal.billing.bindSubscription, { customerRef, subscriptionId: "sub_synthetic", productId: terms.productId });
+    const subscriptionRef = await t.mutation(internal.billing.bindSubscription, { customerRef, mode, subscriptionId: "sub_synthetic", productId: terms.productId });
     const eventRef = await t.mutation(internal.billing.recordReceipt, { customerRef, ...receipt });
     const rows = await t.run(async ctx => ({
       purchase: await ctx.db.get("billingPurchases", purchaseRef),
@@ -173,9 +193,10 @@ describe("billing purchase and subscription bindings", () => {
       await ctx.db.patch("billingCustomers", customerRef, { deletedAt: 1, generation: 1 });
       await ctx.db.patch("billingPurchases", purchaseRef, { state: "terminal" });
     });
-    await t.mutation(internal.billing.bindSubscription, { customerRef, subscriptionId: "sub_late", productId: terms.productId });
-    await t.mutation(internal.billing.bindPurchase, { purchaseRef, sessionId: "session_late", paymentId: "payment_late", subscriptionId: "sub_late", expiresAt: 2 });
-    await t.mutation(internal.billing.bindPurchase, { purchaseRef });
+    await t.mutation(internal.billing.bindSubscription, { customerRef, mode, subscriptionId: "sub_late", productId: terms.productId });
+    await t.mutation(internal.billing.bindPurchase, { purchaseRef, mode, sessionId: "session_late", paymentId: "payment_late", subscriptionId: "sub_late", expiresAt: 2 });
+    await t.mutation(internal.billing.bindPurchase, { purchaseRef, mode });
+    expect(await t.run(ctx => ctx.db.query("billingSubscriptions").take(2))).toMatchObject([{ subscriptionId: "sub_late", cancellationRecoveryRequired: true }]);
     expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).toMatchObject({
       state: "terminal", sessionId: "session_late", paymentId: "payment_late", subscriptionId: "sub_late", expiresAt: 2,
       cancellationRecoveryRequired: true, terms,
@@ -189,11 +210,11 @@ describe("billing purchase and subscription bindings", () => {
     const bob = await readyCustomer(t, "user_bob");
     const purchaseRef = await reserve(t, alice);
     const bobPurchase = await reserve(t, bob, "bob_intent");
-    await t.mutation(internal.billing.bindPurchase, { purchaseRef, sessionId: "session_shared", paymentId: "payment_shared" });
+    await t.mutation(internal.billing.bindPurchase, { purchaseRef, mode, sessionId: "session_shared", paymentId: "payment_shared" });
     for (const ids of [{ sessionId: "session_shared" }, { paymentId: "payment_shared" }]) {
-      await expect(t.mutation(internal.billing.bindPurchase, { purchaseRef: bobPurchase, ...ids })).rejects.toThrow("conflicts");
+      await expect(t.mutation(internal.billing.bindPurchase, { purchaseRef: bobPurchase, mode, ...ids })).rejects.toThrow("conflicts");
     }
-    await expect(t.mutation(internal.billing.bindPurchase, { purchaseRef, sessionId: "replacement", paymentId: "new_payment" })).rejects.toThrow("conflicts");
+    await expect(t.mutation(internal.billing.bindPurchase, { purchaseRef, mode, sessionId: "replacement", paymentId: "new_payment" })).rejects.toThrow("conflicts");
     expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).toMatchObject({ sessionId: "session_shared", paymentId: "payment_shared" });
     expect(await t.run(ctx => ctx.db.get("billingPurchases", bobPurchase))).not.toHaveProperty("paymentId");
   });
@@ -202,19 +223,19 @@ describe("billing purchase and subscription bindings", () => {
     const t = setup();
     const alice = await readyCustomer(t);
     const bob = await readyCustomer(t, "user_bob");
-    const args = { customerRef: alice, subscriptionId: "sub_shared", productId: terms.productId };
+    const args = { customerRef: alice, mode, subscriptionId: "sub_shared", productId: terms.productId };
     const subscriptionRef = await t.mutation(internal.billing.bindSubscription, args);
     expect(await t.mutation(internal.billing.bindSubscription, args)).toBe(subscriptionRef);
     await expect(t.mutation(internal.billing.bindSubscription, { ...args, customerRef: bob })).rejects.toThrow("conflicts");
     await expect(t.mutation(internal.billing.bindSubscription, { ...args, productId: "other" })).rejects.toThrow("conflicts");
     const purchaseRef = await reserve(t, bob, "intent_bob");
-    await expect(t.mutation(internal.billing.bindPurchase, { purchaseRef, subscriptionId: "sub_shared" })).rejects.toThrow("conflicts");
-    await expect(t.mutation(internal.billing.bindPurchase, { purchaseRef, subscriptionId: "sub_unknown" })).rejects.toThrow("conflicts");
+    await expect(t.mutation(internal.billing.bindPurchase, { purchaseRef, mode, subscriptionId: "sub_shared" })).rejects.toThrow("conflicts");
+    await expect(t.mutation(internal.billing.bindPurchase, { purchaseRef, mode, subscriptionId: "sub_unknown" })).rejects.toThrow("conflicts");
   });
 });
 
 describe("billing receipts and shared revision fence", () => {
-  test("concurrent receipt duplicates insert once and advance the parent once", async () => {
+  test("repeated receipt duplicates insert once and advance the parent once", async () => {
     const t = setup();
     const customerRef = await readyCustomer(t);
     const refs = await Promise.all(Array.from({ length: 4 }, () => t.mutation(internal.billing.recordReceipt, { customerRef, ...receipt })));
@@ -260,12 +281,40 @@ describe("billing receipts and shared revision fence", () => {
     for (const mode of ["test_mode", "live_mode"] as const) {
       const customerRef = await readyCustomer(t, identity.userId, mode);
       const purchaseRef = await reserve(t, customerRef);
-      await t.mutation(internal.billing.bindSubscription, { customerRef, subscriptionId: "sub_same", productId: terms.productId });
-      await t.mutation(internal.billing.bindPurchase, { purchaseRef, paymentId: "payment_same", sessionId: "session_same", subscriptionId: "sub_same" });
-      await t.mutation(internal.billing.recordReceipt, { customerRef, ...receipt });
+      await t.mutation(internal.billing.bindSubscription, { customerRef, mode, subscriptionId: "sub_same", productId: terms.productId });
+      await t.mutation(internal.billing.bindPurchase, { purchaseRef, mode, paymentId: "payment_same", sessionId: "session_same", subscriptionId: "sub_same" });
+      await t.mutation(internal.billing.recordReceipt, { customerRef, ...receipt, mode });
       expect(await readCustomer(t, customerRef)).toMatchObject({ mode, inputRevision: 1 });
     }
     expect(await t.run(ctx => ctx.db.query("billingEvents").take(3))).toHaveLength(2);
+  });
+
+  test("a verified receipt for an unmapped customer is kept quarantined and deduplicated", async () => {
+    const t = setup();
+    const customerRef = await readyCustomer(t);
+    const eventRef = await t.mutation(internal.billing.recordReceipt, { ...receipt, paymentId: "payment_unmapped" });
+    expect(await t.mutation(internal.billing.recordReceipt, receipt)).toBe(eventRef);
+    expect(await t.mutation(internal.billing.recordReceipt, { ...receipt, bodyDigest: "b".repeat(64) })).toBe(eventRef);
+    const event = await t.run(ctx => ctx.db.get("billingEvents", eventRef));
+    expect(event).toMatchObject({ mode, state: "quarantined", bodyDigest: receipt.bodyDigest, paymentId: "payment_unmapped" });
+    expect(event).not.toHaveProperty("customerRef");
+    expect(await readCustomer(t, customerRef)).toMatchObject({ inputRevision: 0, unresolvedReceipts: 0 });
+    const liveRef = await t.mutation(internal.billing.recordReceipt, { ...receipt, mode: "live_mode" });
+    expect(liveRef).not.toBe(eventRef);
+    expect(await t.run(ctx => ctx.db.query("billingEvents").take(3))).toHaveLength(2);
+  });
+
+  test("an explicit mode must match the customer for receipts and bindings", async () => {
+    const t = setup();
+    const customerRef = await readyCustomer(t);
+    const purchaseRef = await reserve(t, customerRef);
+    const other = "live_mode" as const;
+    await expect(t.mutation(internal.billing.recordReceipt, { customerRef, ...receipt, mode: other })).rejects.toThrow("conflicts");
+    await expect(t.mutation(internal.billing.bindSubscription, { customerRef, mode: other, subscriptionId: "sub_x", productId: terms.productId })).rejects.toThrow("conflicts");
+    await expect(t.mutation(internal.billing.bindPurchase, { purchaseRef, mode: other, paymentId: "payment_x" })).rejects.toThrow("conflicts");
+    expect(await t.run(ctx => ctx.db.query("billingEvents").take(1))).toEqual([]);
+    expect(await t.run(ctx => ctx.db.query("billingSubscriptions").take(1))).toEqual([]);
+    expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).not.toHaveProperty("paymentId");
   });
 
   test("unknown child association and deletion still dirty the parent coordinator", async () => {
