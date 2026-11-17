@@ -160,6 +160,19 @@ export const catalogModelValidator = v.object({
 
 /** A credit account's plan (ADR 0011); see `PLANS` in `features/billing/plans.ts`. */
 export const planIdValidator = v.union(v.literal("free"), v.literal("pro"));
+export const billingModeValidator = v.union(v.literal("test_mode"), v.literal("live_mode"));
+export const billingPurchaseTermsValidator = v.object({
+  sku: v.union(v.literal("pro_monthly"), v.literal("top_up")),
+  catalogVersion: v.string(),
+  productId: v.string(),
+  quantity: v.number(),
+  credits: v.number(),
+});
+export const billingResourceIdsValidator = v.object({
+  sessionId: v.optional(v.string()),
+  paymentId: v.optional(v.string()),
+  subscriptionId: v.optional(v.string()),
+});
 /** Who pays for a run (ADR 0011). Only "platform" runs cost credits. */
 export const runSourceValidator = v.union(v.literal("platform"), v.literal("promo"), v.literal("byok"));
 
@@ -806,6 +819,80 @@ export default defineSchema({
   })
     .index("by_userId", ["userId"])
     .index("by_githubUserId", ["githubUserId"]),
+
+  // Financial tombstones survive the ordinary user/usage purge (ADR 0016).
+  billingCustomers: defineTable({
+    mode: billingModeValidator,
+    ownerTokenIdentifier: v.string(),
+    userId: v.string(),
+    customerId: v.optional(v.string()),
+    creationState: v.union(v.literal("preparing"), v.literal("unknown"), v.literal("ready")),
+    creationLeaseId: v.optional(v.string()),
+    deletedAt: v.optional(v.number()),
+    hold: v.optional(v.boolean()),
+    activeSubscriptionRef: v.optional(v.id("billingSubscriptions")),
+    pendingPurchaseRef: v.optional(v.id("billingPurchases")),
+    // One coordinator for every subscription, purchase and receipt on this customer.
+    generation: v.number(),
+    inputRevision: v.number(),
+    unresolvedReceipts: v.number(),
+    leaseId: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+  })
+    .index("by_mode_and_ownerTokenIdentifier", ["mode", "ownerTokenIdentifier"])
+    .index("by_mode_and_customerId", ["mode", "customerId"])
+    .index("by_mode_and_userId", ["mode", "userId"]),
+
+  billingSubscriptions: defineTable({
+    customerRef: v.id("billingCustomers"),
+    mode: billingModeValidator,
+    subscriptionId: v.string(),
+    productId: v.string(),
+    status: v.union(v.literal("pending"), v.literal("active"), v.literal("cancelled"), v.literal("expired"), v.literal("quarantined")),
+    paidThrough: v.optional(v.number()),
+    serviceStart: v.optional(v.number()),
+    serviceEnd: v.optional(v.number()),
+    cancelAt: v.optional(v.number()),
+    graceUntil: v.optional(v.number()),
+    observedAt: v.optional(v.number()),
+  })
+    .index("by_mode_and_subscriptionId", ["mode", "subscriptionId"])
+    .index("by_customerRef_and_status", ["customerRef", "status"]),
+
+  billingPurchases: defineTable({
+    customerRef: v.id("billingCustomers"),
+    mode: billingModeValidator,
+    intentId: v.string(),
+    terms: billingPurchaseTermsValidator,
+    ...billingResourceIdsValidator.fields,
+    expiresAt: v.optional(v.number()),
+    state: v.union(v.literal("preparing"), v.literal("unknown"), v.literal("open"), v.literal("processing"), v.literal("settled"), v.literal("terminal"), v.literal("quarantined")),
+    cancellationRecoveryRequired: v.optional(v.boolean()),
+    principalMinor: v.optional(v.number()),
+    currency: v.optional(v.string()),
+    reversedMinor: v.optional(v.number()),
+  })
+    .index("by_mode_and_intentId", ["mode", "intentId"])
+    .index("by_mode_and_paymentId", ["mode", "paymentId"])
+    .index("by_mode_and_sessionId", ["mode", "sessionId"])
+    .index("by_customerRef_and_state", ["customerRef", "state"]),
+
+  billingEvents: defineTable({
+    customerRef: v.id("billingCustomers"),
+    mode: billingModeValidator,
+    webhookId: v.string(),
+    eventType: v.string(),
+    ...billingResourceIdsValidator.fields,
+    occurredAt: v.number(),
+    receivedAt: v.number(),
+    bodyDigest: v.string(),
+    state: v.union(v.literal("pending"), v.literal("processing"), v.literal("processed"), v.literal("quarantined"), v.literal("ignored")),
+    attempts: v.number(),
+    nextAttemptAt: v.number(),
+    generation: v.number(),
+  })
+    .index("by_mode_and_webhookId", ["mode", "webhookId"])
+    .index("by_state_and_nextAttemptAt", ["state", "nextAttemptAt"]),
 
   /**
    * A user's credit usage this month and today (ADR 0011). Created on the first
