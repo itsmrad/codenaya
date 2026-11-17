@@ -83,9 +83,14 @@ async function sha256Hex(text: string) {
 
 describe("POST /billing/webhook", () => {
   beforeEach(() => {
+    // Vitest's edge-runtime env defines `window`, which the server-only config guard rejects.
+    vi.stubGlobal("window", undefined);
     for (const [name, value] of Object.entries(receiverEnv)) vi.stubEnv(name, value);
   });
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
 
   test("stores a mapped financial event as a pending minimal receipt", async () => {
     const t = setup();
