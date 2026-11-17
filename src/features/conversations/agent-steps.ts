@@ -159,6 +159,7 @@ export const describeToolCall = (
     case "scrapeUrls":
       targets = strings(input.urls).map(urlLabel);
       break;
+    // Removed tool; runs recorded before then still render. The key only, never the value.
     case "setEnvVar":
       targets = str(input.key) ? [str(input.key)] : [];
       break;

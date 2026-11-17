@@ -61,8 +61,8 @@ const formSchema = z.object({
  * Settings dialog for a project's environment variables.
  *
  * Public variables (NEXT_PUBLIC_*, VITE_*, …) go straight to Convex. Secrets are
- * sealed server-side by `/api/env-vars`, mirroring the agent's `setEnvVar` tool,
- * and are never sent back to the browser — only their masked preview is shown.
+ * sealed server-side by `/api/env-vars` and are never sent back to the browser —
+ * only their masked preview is shown. This is the only place values are entered.
  */
 interface EnvVarsDialogProps {
   projectId: Id<"projects">;

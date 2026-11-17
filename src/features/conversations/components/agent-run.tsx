@@ -78,6 +78,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   renameFile: { icon: FileSymlinkIcon, running: "Renaming", done: "Renamed" },
   deleteFiles: { icon: FileX2Icon, running: "Deleting", done: "Deleted" },
   scrapeUrls: { icon: GlobeIcon, running: "Fetching", done: "Fetched" },
+  // Removed tool, kept so older runs still render; their steps record the key only.
   setEnvVar: { icon: KeyRoundIcon, running: "Setting env", done: "Set env" },
   loadSkill: { icon: BookOpenIcon, running: "Loading skill", done: "Used skill" },
   delegateTasks: { icon: UsersIcon, running: "Delegating", done: "Delegated" },

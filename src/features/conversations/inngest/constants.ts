@@ -601,3 +601,13 @@ In delegateTasks, a large task (at most 2) can have role "sub-orchestrator": it 
 
 export const OUT_OF_CREDITS_NOTE = "This run stopped because you ran out of credits. Summarize the work completed and anything left unfinished. Do not call tools.";
 export const OUT_OF_CREDITS_REPLY = "This run stopped because you ran out of credits. Add your own key in Settings → AI providers, or wait for your credits to reset.";
+
+/**
+ * The project's environment variable names, for the system prompt. Values never
+ * reach the model: the owner types them in the Environment Variables panel.
+ * `names` is undefined when they could not be read.
+ */
+export const envVarsPromptSection = (names: readonly string[] | undefined) => `
+
+## Environment variables
+${names === undefined ? "" : names.length ? `Set in this project (names only): ${names.join(", ")}.\n` : "None are set in this project yet.\n"}You never see, ask for, or store values. When the app needs a variable that is not set, read it in code by name and tell the user its exact name, what it is for, and to add it in the project's Environment Variables panel (the [env-vars] chip opens it). Never ask for a value in chat, repeat one, write one into a file, or invent one.`;

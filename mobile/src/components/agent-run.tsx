@@ -52,6 +52,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   renameFile: { icon: FileSymlink, running: "Renaming", done: "Renamed", writes: true },
   deleteFiles: { icon: FileX2, running: "Deleting", done: "Deleted", writes: true },
   scrapeUrls: { icon: Globe, running: "Fetching", done: "Fetched" },
+  // Removed tool, kept so older runs still render; their steps record the key only.
   setEnvVar: { icon: KeyRound, running: "Setting env", done: "Set env" },
   loadSkill: { icon: BookOpen, running: "Loading skill", done: "Used skill" },
   checkBuild: { icon: Terminal, running: "Checking build", done: "Checked build" },
