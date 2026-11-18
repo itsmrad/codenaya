@@ -3,7 +3,7 @@ import { NonRetriableError } from "inngest";
 
 import { localCandidates, RESOLVE_SUFFIXES } from "@/features/sandbox-preview/utils/missing-references";
 import { projectChecks } from "@/features/sandbox-preview/utils/project-checks";
-import { inngest } from "@/inngest/client";
+import { INNGEST_PLAN_CONCURRENCY_LIMIT, inngest } from "@/inngest/client";
 import { convex } from "@/lib/convex-client";
 import { getAppError } from "@/lib/convex-error";
 import { resolveWorkerModel } from "@/features/ai-providers/server/resolve-run-model";
@@ -79,7 +79,8 @@ export const swarmWorker = inngest.createFunction(
     id: "swarm-worker",
     // Room for every agent of processMessage's 2 runs per owner: step.invoke's timeout counts queue time.
     // The limit counts executing steps, and a sub-orchestrator waiting on step.invoke holds none.
-    concurrency: [{ key: "event.data.ownerId", limit: 2 * MAX_SWARM_AGENTS }],
+    // shortcut: capped at the plan limit, so extra workers queue; raise it with the Inngest plan.
+    concurrency: [{ key: "event.data.ownerId", limit: Math.min(2 * MAX_SWARM_AGENTS, INNGEST_PLAN_CONCURRENCY_LIMIT) }],
     // `event` is this run's trigger, `async` the cancel event. A cancel skips
     // onFailure; the board shows the task cancelled from its parent message.
     // `agent-task/cancel`: the orchestrator stops a worker whose step.invoke timed out.
