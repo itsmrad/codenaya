@@ -15,6 +15,7 @@ import type * as aiProviders from "../aiProviders.js";
 import type * as auth from "../auth.js";
 import type * as billing from "../billing.js";
 import type * as billingGrants from "../billingGrants.js";
+import type * as billingWebhook from "../billingWebhook.js";
 import type * as chatImages from "../chatImages.js";
 import type * as checkpointComparison from "../checkpointComparison.js";
 import type * as checkpoints from "../checkpoints.js";
@@ -62,6 +63,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   billing: typeof billing;
   billingGrants: typeof billingGrants;
+  billingWebhook: typeof billingWebhook;
   chatImages: typeof chatImages;
   checkpointComparison: typeof checkpointComparison;
   checkpoints: typeof checkpoints;

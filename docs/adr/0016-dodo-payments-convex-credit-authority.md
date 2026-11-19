@@ -56,7 +56,12 @@ the trusted deployment explicitly (`development`, `preview`, `staging`,
 | --- | --- | --- |
 | Both | `DODO_PAYMENTS_ENVIRONMENT`, `DODO_PAYMENTS_BUSINESS_ID` | None |
 | Next | `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_PRO_PRODUCT_ID`, `DODO_PAYMENTS_RETURN_URL`, `NEXT_PUBLIC_APP_URL` | `DODO_PAYMENTS_BRAND_ID` |
-| Convex receiver | `DODO_PAYMENTS_WEBHOOK_KEY` | `DODO_PAYMENTS_WEBHOOK_KEY_PREVIOUS` |
+| Convex receiver | `DODO_PAYMENTS_WEBHOOK_KEY`, `CODENAYA_DEPLOYMENT` | `DODO_PAYMENTS_WEBHOOK_KEY_PREVIOUS` |
+
+The Convex receiver learns its trusted deployment only from the non-secret,
+Convex-only `CODENAYA_DEPLOYMENT` (`development`, `preview`, `staging` or
+`production`), required on each Convex deployment that receives webhooks. Absent,
+invalid or `PLACEHOLDER_*` values fail closed; the same deployment/mode rule applies.
 
 `CODENAYA_BILLING_ENABLED` defaults to disabled unless exactly `true`; disabled
 Next config returns null. Enabling it also requires `CREDIT_LIMITS_ENFORCED=true`.
@@ -66,10 +71,10 @@ absent, so placeholders can never enable a configured consumer. Optional placeho
 are absent too. Receiver config stays available while checkout is disabled so
 refunds, disputes and cancellations can still be processed.
 
-Production requires exact `live_mode`, trusted `NEXT_PUBLIC_APP_URL=https://codena.tech`
-and `DODO_PAYMENTS_RETURN_URL=https://codena.tech/settings/billing/return`.
+Production requires exact `live_mode`, trusted `NEXT_PUBLIC_APP_URL=https://www.codenaya.tech`
+and `DODO_PAYMENTS_RETURN_URL=https://www.codenaya.tech/settings/billing/return`.
 Development, preview and staging require exact `test_mode` and an isolated trusted
-origin outside `codena.tech` and its subdomains. Nonlocal test origins require HTTPS;
+origin outside `codenaya.tech` and its subdomains. Nonlocal test origins require HTTPS;
 HTTP is permitted only on localhost or loopback. The return URL must match that
 origin and the fixed `/settings/billing/return` path exactly, without credentials,
 query or fragment. The return UI is a later stage; its URL is not proof of payment.
