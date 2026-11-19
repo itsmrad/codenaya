@@ -5,7 +5,7 @@ import type { Sandbox } from "@/features/sandbox-preview/server/provider/types";
 import {
   MAX_IMAGE_URLS,
   PROBE_SOURCE,
-  brokenImagesError,
+  brokenImagesWarning,
   brokenReason,
   brokenRemoteImages,
   remoteImageUrls,
@@ -15,20 +15,21 @@ const DEAD = "https://images.unsplash.com/photo-1579584425555-c3ce17fd4399?w=800
 const LIVE = "https://images.unsplash.com/photo-1579584425555-c3ce17fd4351?w=800";
 
 describe("remoteImageUrls", () => {
-  it("finds remote images in page sources, with the first file using each", () => {
+  it("finds remote images in page sources, with every file using each", () => {
     const urls = remoteImageUrls([
       { path: "src/pages/Menu.tsx", content: `<img src="${DEAD}" alt="Sushi" /><img src="${LIVE}" />` },
       { path: "src/index.css", content: ".hero { background: url(https://cdn.example.com/hero.webp); }" },
       { path: "index.html", content: '<meta property="og:image" content="https://example.com/og.png">' },
       { path: "src/data.ts", content: `const srcSet = "https://picsum.photos/seed/a/400/300 1x, https://picsum.photos/seed/a/800/600 2x"; ${DEAD}` },
+      { path: "src/data/team.json", content: `[{ "photo": "${DEAD}" }]` },
     ]);
-    expect([...urls]).toEqual([
-      [DEAD, "src/pages/Menu.tsx"],
-      [LIVE, "src/pages/Menu.tsx"],
-      ["https://cdn.example.com/hero.webp", "src/index.css"],
-      ["https://example.com/og.png", "index.html"],
-      ["https://picsum.photos/seed/a/400/300", "src/data.ts"],
-      ["https://picsum.photos/seed/a/800/600", "src/data.ts"],
+    expect([...urls].map(([url, paths]) => [url, [...paths]])).toEqual([
+      [DEAD, ["src/pages/Menu.tsx", "src/data.ts", "src/data/team.json"]],
+      [LIVE, ["src/pages/Menu.tsx"]],
+      ["https://cdn.example.com/hero.webp", ["src/index.css"]],
+      ["https://example.com/og.png", ["index.html"]],
+      ["https://picsum.photos/seed/a/400/300", ["src/data.ts"]],
+      ["https://picsum.photos/seed/a/800/600", ["src/data.ts"]],
     ]);
   });
 
@@ -36,6 +37,10 @@ describe("remoteImageUrls", () => {
     const urls = remoteImageUrls([
       { path: "src/App.tsx", content: '<a href="https://unsplash.com/photos/abc">Credit</a> fetch("https://api.example.com/items")' },
       { path: "src/Card.tsx", content: "<img src={`https://images.unsplash.com/${id}`} />" },
+      // Bare hosts and URLs that code completes at runtime.
+      { path: "index.html", content: '<link rel="preconnect" href="https://images.unsplash.com"><link rel="dns-prefetch" href="https://picsum.photos/">' },
+      { path: "src/photos.ts", content: 'const PICSUM = "https://picsum.photos"; const src = "https://images.unsplash.com/photo-" + id + "?w=" + width;' },
+      { path: "src/sizes.ts", content: 'const url = "https://images.unsplash.com/photo-1579584425555-c3ce17fd4351?w=" + w; const q = "https://i.pravatar.cc/150?u=x&"' },
       { path: "README.md", content: "![shot](https://example.com/shot.png)" },
       { path: "package.json", content: '"homepage": "https://example.com/logo.png"' },
     ]);
@@ -82,7 +87,10 @@ describe("brokenReason", () => {
   it("counts only definite failures as broken", () => {
     expect(brokenReason([DEAD, 404, "text/html"])).toBe("HTTP 404");
     expect(brokenReason([DEAD, 410, ""])).toBe("HTTP 410");
-    expect(brokenReason([DEAD, 200, "text/html"])).toBe("not an image (text/html)");
+    expect(brokenReason([DEAD, 200, "text/html; charset=utf-8"])).toBe("not an image (text/html; charset=utf-8)");
+    expect(brokenReason([DEAD, 200, "application/json"])).toBe("not an image (application/json)");
+    // Served as a download or untyped: a browser may still show it.
+    for (const type of ["application/octet-stream", "binary/octet-stream", ""]) expect(brokenReason([LIVE, 200, type])).toBeUndefined();
     expect(brokenReason([LIVE, 206, "image/jpeg"])).toBeUndefined();
     // Network failures, timeouts, server errors and refusals may be flakiness or bot blocking.
     for (const status of [0, 403, 429, 500, 503]) expect(brokenReason([LIVE, status, ""])).toBeUndefined();
@@ -90,6 +98,7 @@ describe("brokenReason", () => {
 });
 
 describe("brokenRemoteImages", () => {
+  const files = (...paths: string[]) => new Set(paths);
   const sandboxAnswering = (run: Sandbox["run"]) => ({ run: vi.fn(run) }) as unknown as Sandbox & { run: ReturnType<typeof vi.fn> };
 
   it("probes in the sandbox and lists the broken images with their files", async () => {
@@ -99,9 +108,9 @@ describe("brokenRemoteImages", () => {
       stdout: `${JSON.stringify([[DEAD, 404, "text/html"], [LIVE, 200, "image/jpeg"]])}\n`,
     }));
     const urls = new Map([
-      [DEAD, "src/pages/Menu.tsx"],
-      [LIVE, "src/pages/Menu.tsx"],
-      ["https://source.unsplash.com/800x600/?sushi", "src/pages/Home.tsx"],
+      [DEAD, files("src/pages/Menu.tsx", "src/data/menu.json")],
+      [LIVE, files("src/pages/Menu.tsx")],
+      ["https://source.unsplash.com/800x600/?sushi", files("src/pages/Home.tsx")],
     ]);
 
     const broken = await brokenRemoteImages(sandbox, urls, 60_000);
@@ -109,6 +118,7 @@ describe("brokenRemoteImages", () => {
     expect(broken).toEqual([
       "src/pages/Home.tsx: https://source.unsplash.com/800x600/?sushi (the host is shut down)",
       `src/pages/Menu.tsx: ${DEAD} (HTTP 404)`,
+      `src/data/menu.json: ${DEAD} (HTTP 404)`,
     ]);
     const [command, opts] = sandbox.run.mock.calls[0];
     expect(command).toMatch(/^node -e '/);
@@ -122,20 +132,20 @@ describe("brokenRemoteImages", () => {
     const sandbox = sandboxAnswering(async () => {
       throw new Error("command timed out");
     });
-    expect(await brokenRemoteImages(sandbox, new Map([[DEAD, "src/App.tsx"]]), 60_000)).toEqual([]);
+    expect(await brokenRemoteImages(sandbox, new Map([[DEAD, files("src/App.tsx")]]), 60_000)).toEqual([]);
   });
 
   it("quotes URLs safely for the shell", async () => {
     const sandbox = sandboxAnswering(async () => ({ exitCode: 0, stderr: "", stdout: "[]" }));
-    await brokenRemoteImages(sandbox, new Map([["https://a.test/it's.png", "src/App.tsx"]]), 60_000);
+    await brokenRemoteImages(sandbox, new Map([["https://a.test/it's.png", files("src/App.tsx")]]), 60_000);
     expect(sandbox.run.mock.calls[0][0]).toContain(`it'\\''s.png`);
   });
 });
 
-it("brokenImagesError asks for replacements and another check", () => {
-  const error = brokenImagesError([`src/App.tsx: ${DEAD} (HTTP 404)`]);
-  expect(error).toMatch(/^Error: Broken images:/);
-  expect(error).toContain(`- src/App.tsx: ${DEAD} (HTTP 404)`);
-  expect(error).toContain("picsum.photos/seed/");
-  expect(error).toContain("call checkBuild again");
+it("brokenImagesWarning is a labelled warning, never an error", () => {
+  const warning = brokenImagesWarning([`src/App.tsx: ${DEAD} (HTTP 404)`]);
+  expect(warning).toMatch(/^\nWarning: broken remote images/);
+  expect(warning).not.toMatch(/\bError\b/);
+  expect(warning).toContain(`- src/App.tsx: ${DEAD} (HTTP 404)`);
+  expect(warning).toContain("picsum.photos/seed/");
 });

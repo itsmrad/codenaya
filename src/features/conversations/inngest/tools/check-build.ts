@@ -48,7 +48,7 @@ import {
 import { projectChecks } from "@/features/sandbox-preview/utils/project-checks";
 import { convex } from "@/lib/convex-client";
 
-import { brokenImagesError, brokenRemoteImages, remoteImageUrls } from "./remote-images";
+import { brokenImagesWarning, brokenRemoteImages, remoteImageUrls } from "./remote-images";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
@@ -262,9 +262,8 @@ const buildIn = async (
   }
 
   const broken = await brokenImages;
-  if (broken.length > 0) return redact(brokenImagesError(broken), secrets);
-
-  return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.` + notes;
+  const warning = broken.length > 0 ? redact(brokenImagesWarning(broken), secrets) : "";
+  return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.` + notes + warning;
 };
 
 /** How long a project's check skips its warm preview after the warm build timed out. */

@@ -27,7 +27,7 @@ import {
 } from "../../agent-steps";
 import { START_BUILD_ERROR, START_TYPE_ERROR } from "./start-build-output.fixture";
 import { buildCommand, checkProjectBuild, createCheckBuildTool, trimBuildOutput, warmSlow } from "./check-build";
-import { brokenImagesError } from "./remote-images";
+import { brokenImagesWarning } from "./remote-images";
 import {
   NEXT16_MODULE_NOT_FOUND,
   NEXT16_PRERENDER_ERROR,
@@ -340,9 +340,11 @@ describe("checkProjectBuild", () => {
       return { sandbox, result };
     };
 
-    it("turns a passing build with a dead image into an error to fix", async () => {
+    it("appends a dead image to a passing build as a warning, not an error", async () => {
       const { sandbox, result } = checkWithProbe(JSON.stringify([[DEAD, 404, "text/html"]]));
-      expect(await result).toBe(brokenImagesError([`src/App.tsx: ${DEAD} (HTTP 404)`]));
+      const text = await result;
+      expect(text.split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect(text.endsWith(brokenImagesWarning([`src/App.tsx: ${DEAD} (HTTP 404)`]))).toBe(true);
       const commands = sandbox.commands.run.mock.calls.map(([command]) => command);
       expect(commands.some((command) => command.includes("vite build"))).toBe(true);
     });
