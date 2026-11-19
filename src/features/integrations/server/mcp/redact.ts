@@ -65,7 +65,7 @@ const PUBLIC_REF_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
 const DSN_TAIL = "[^\\s\"'<>`]{0,2048}";
 /** Sentence punctuation that follows a URL in prose rather than belonging to it. */
 const TRAILING_PUNCTUATION = /[.,;:!?)\]}]+$/;
-const BEARER_PREFIX = /^(Bearer\s+)(.+)$/is;
+const BEARER_PREFIX = /^(Bearer\s+)(.+)$/i;
 
 /**
  * Replacement for a redacted span, given its text and rule. Known values (the
