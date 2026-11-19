@@ -61,6 +61,12 @@ const PUBLIC_REF_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
   { label: "supabase-publishable", pattern: /\bsb_publishable_[A-Za-z0-9_-]{16,}\b/g },
 ];
 
+/** Host, port, path and query after a DSN's `user:password@`, bounded like the pattern itself. */
+const DSN_TAIL = "[^\\s\"'<>`]{0,2048}";
+/** Sentence punctuation that follows a URL in prose rather than belonging to it. */
+const TRAILING_PUNCTUATION = /[.,;:!?)\]}]+$/;
+const BEARER_PREFIX = /^(Bearer\s+)(.+)$/is;
+
 /**
  * Replacement for a redacted span, given its text and rule. Known values (the
  * MCP credential, stored secrets) never reach it; they always get the placeholder.
@@ -134,21 +140,34 @@ export function redactSecrets(
     if (matches) {
       redactionCount += matches.length;
       matchedRules.add(label);
-      result = result.replace(scoped, (match) => toRef?.(match, label) ?? REDACTION_PLACEHOLDER);
+      result = result.replace(scoped, (match) => {
+        if (!toRef) return REDACTION_PLACEHOLDER;
+        // A bearer ref holds the token only, not the "Bearer " scheme word.
+        const bearer = label === "bearer" ? BEARER_PREFIX.exec(match) : null;
+        return bearer ? `${bearer[1]}${toRef(bearer[2], label)}` : toRef(match, label);
+      });
     }
   }
 
-  const dsn = new RegExp(DSN_PASSWORD_PATTERN.source, DSN_PASSWORD_PATTERN.flags);
+  // With refs, the whole connection string becomes the ref: its password alone
+  // would be stored as a broken DATABASE_URL.
+  const dsn = new RegExp(
+    toRef ? `${DSN_PASSWORD_PATTERN.source}${DSN_TAIL}` : DSN_PASSWORD_PATTERN.source,
+    DSN_PASSWORD_PATTERN.flags,
+  );
   const dsnMatches = result.match(dsn);
   if (dsnMatches) {
     redactionCount += dsnMatches.length;
     matchedRules.add("dsn-password");
-    result = result.replace(
-      dsn,
-      (_match, prefix: string, password: string) =>
-        // A known secret already replaced above is the placeholder now; never ref the placeholder.
-        `${prefix}:${(password !== REDACTION_PLACEHOLDER && toRef?.(password, "dsn-password")) || REDACTION_PLACEHOLDER}@`,
-    );
+    result = result.replace(dsn, (match: string, prefix: string, password: string) => {
+      const tail = match.slice(prefix.length + password.length + 2);
+      // A known secret already replaced above is the placeholder now; never ref the placeholder.
+      if (!toRef || password === REDACTION_PLACEHOLDER) {
+        return `${prefix}:${REDACTION_PLACEHOLDER}@${tail}`;
+      }
+      const url = match.replace(TRAILING_PUNCTUATION, "");
+      return `${toRef(url, "dsn-password")}${match.slice(url.length)}`;
+    });
   }
 
   return {

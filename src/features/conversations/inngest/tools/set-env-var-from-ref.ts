@@ -35,6 +35,8 @@ const paramsSchema = z.object({
   overwrite: z.boolean().optional(),
 });
 
+const REF_ID = /\bref_[0-9a-f]{32}\b/;
+
 /** Every unexpected failure looks like this, so no error text can carry a value. */
 const GENERIC_ERROR = "Error: could not set the variable. You may retry on a later turn.";
 
@@ -61,13 +63,16 @@ export const createSetEnvVarFromRefTool = ({
       const parsed = paramsSchema.safeParse(params);
       if (!parsed.success) return `Error: ${parsed.error.issues[0].message}`;
 
-      const { name, ref, overwrite = false } = parsed.data;
+      const { name, overwrite = false } = parsed.data;
       if (!isValidEnvKey(name)) {
         return (
           `Error: "${name}" is not a valid environment variable name. ` +
           `Use letters, digits and underscores, starting with a letter or underscore.`
         );
       }
+      // Accept the whole [env-ref:…] token too; models often pass it verbatim.
+      const ref = REF_ID.exec(parsed.data.ref)?.[0];
+      if (!ref) return "Error: ref must look like ref_ followed by 32 hex characters.";
       const visibility = classifyEnvKey(name);
 
       const run = async (): Promise<string> => {

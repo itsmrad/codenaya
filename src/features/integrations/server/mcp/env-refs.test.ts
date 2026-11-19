@@ -75,12 +75,23 @@ describe("redaction with a minter", () => {
     expect(refs).toEqual([]);
   });
 
-  it("refs only a DSN's password", () => {
+  it("refs a whole DSN, so it can be stored as DATABASE_URL, without trailing punctuation", () => {
     const { toRef, refs } = createEnvRefMinter();
-    const result = redactJsonValue("postgres://app:pa55word-xyz@db.example.com/app", [], toRef);
+    const result = redactJsonValue("Use postgres://app:pa55word-xyz@db.example.com:5432/app.", [], toRef);
 
-    expect(result.value).toBe(`postgres://app:[env-ref:${refs[0].refId} secret]@db.example.com/app`);
-    expect(refs[0]).toMatchObject({ value: "pa55word-xyz", rule: "dsn-password" });
+    expect(result.value).toBe(`Use [env-ref:${refs[0].refId} secret].`);
+    expect(refs[0]).toMatchObject({
+      value: "postgres://app:pa55word-xyz@db.example.com:5432/app",
+      rule: "dsn-password",
+    });
+  });
+
+  it("refs a bearer token without the scheme word", () => {
+    const { toRef, refs } = createEnvRefMinter();
+    const result = redactJsonValue("Authorization: Bearer abcdefghijklmnop1234", [], toRef);
+
+    expect(result.value).toBe(`Authorization: Bearer [env-ref:${refs[0].refId} secret]`);
+    expect(refs[0]).toMatchObject({ value: "abcdefghijklmnop1234", rule: "bearer" });
   });
 
   it("never refs a DSN password that was already redacted as a known value", () => {

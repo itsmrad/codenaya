@@ -188,4 +188,15 @@ describe("setEnvVarFromRef", () => {
     expect(await setFromRef({ name: "not valid", ref: "ref_x" })).toMatch(/^Error: "not valid" is not a valid/);
     expect(step.run).not.toHaveBeenCalled();
   });
+
+  it("accepts the whole [env-ref:…] token and rejects a malformed ref before any step", async () => {
+    const ref = await storeRef("https://abcdefghijklmnopqrst.supabase.co", "public");
+
+    expect(await setFromRef({ name: "VITE_SUPABASE_URL", ref: `[env-ref:${ref} public]` })).toBe(
+      "Set VITE_SUPABASE_URL (public)",
+    );
+    vi.clearAllMocks();
+    expect(await setFromRef({ name: "API_KEY", ref: "ref_x" })).toMatch(/^Error: ref must look like/);
+    expect(step.run).not.toHaveBeenCalled();
+  });
 });
