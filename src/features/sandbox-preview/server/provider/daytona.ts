@@ -454,7 +454,7 @@ export const createDaytonaProvider = (apiKey: string): SandboxProvider => {
           Object.entries(metadata ?? {}).every(([key, value]) => labels[key] === value);
         const listed: ListedSandbox[] = [];
         // A new sandbox is missing from the list for about 5 s, so the per-user cap can briefly
-        // undercount. E2B lags comparably; accepted.
+        // undercount; accepted. E2B's lag is unmeasured.
         for await (const sandbox of daytona().list({ labels: metadata, states: ["started"], limit })) {
           // The server's state filter still returns a killed sandbox, as destroying, for 1–3 s.
           if (sandbox.state !== "started" || !matches(sandbox.labels)) continue;

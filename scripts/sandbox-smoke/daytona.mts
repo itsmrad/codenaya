@@ -464,16 +464,24 @@ try {
       expect(missing === "DaytonaFileNotFoundError 404", `missing read: ${missing}`);
       return `measured: upload makes parent dirs: ${made}`;
     });
-    await measure("4d raw: the session shell, and whether deleteSession kills its command", async () => {
+    await measure("4d raw: the session shell, and whether deleteSession kills its command, also in run's end-marker shape", async () => {
       const { process: processes } = await raw.get(sandbox.id);
-      await processes.createSession("smoke-del");
-      const shell = (await processes.executeSessionCommand("smoke-del", { command: "readlink /proc/$$/exe" })).stdout?.trim();
-      await processes.executeSessionCommand("smoke-del", { command: "sleep 301", runAsync: true });
-      const running = async () => (await listProcesses(sandbox)).some((process) => /sleep$/.test(process.cmd) && process.args[0] === "301");
-      expect(await until(running, 5_000), "sleep 301 never started");
-      await processes.deleteSession("smoke-del");
-      const killed = await until(async () => !(await running()), 5_000);
-      return `session shell ${shell}; deleteSession kills its command: ${Boolean(killed)}`;
+      const shell = await processes.createSession("smoke-shell")
+        .then(() => processes.executeSessionCommand("smoke-shell", { command: "readlink /proc/$$/exe" }))
+        .then((response) => response.stdout?.trim(), (error) => statusOf(error));
+      const deleteKills = async (sessionId: string, command: string, arg: string) => {
+        const running = async () => (await listProcesses(sandbox)).some((process) => /sleep$/.test(process.cmd) && process.args[0] === arg);
+        await processes.createSession(sessionId);
+        await processes.executeSessionCommand(sessionId, { command, runAsync: true });
+        expect(await until(running, 5_000), `sleep ${arg} never started`);
+        await processes.deleteSession(sessionId);
+        return Boolean(await until(async () => !(await running()), 5_000));
+      };
+      const plain = await deleteKills("smoke-del", "sleep 301", "301");
+      // run's wrapper since #920: no exec, so timeout (its own process group) is a child of the shell. A 60 s cap bounds a leak.
+      const runShape = `bash -c 'env -- timeout -k 5 60s bash -c "sleep 302"; s=$?; printf %s%s a b; exit $s'`;
+      const marked = await deleteKills("smoke-del-run", runShape, "302");
+      return `session shell ${shell}; deleteSession kills its command: ${plain}; in run's shape: ${marked}`;
     });
     await check("4e VERCEL=1 child: serverless upload, read and log stream", async () => {
       // Async, so a signal isn't held up; the child's stderr is dropped, never logged.
@@ -496,7 +504,14 @@ try {
       expect(await provider.kill(sandbox.id) === true, "kill did not report true");
       // list is eventually consistent: record how long it keeps a killed sandbox, and in what state.
       const killedAt = Date.now();
-      const lagged = (await provider.list({ metadata: { runId, slot: "a" } })).length;
+      // Each raw item's own state under the adapter's server filter, next to what provider.list returns (#920 review).
+      const seen: string[] = [];
+      for (let index = 0; index < 5; index++) {
+        const items: string[] = [];
+        for await (const item of raw.list({ labels: { runId, slot: "a" }, states: ["started"] })) items.push(String(item.state));
+        seen.push(`raw [${items.join(",")}] adapter ${(await provider.list({ metadata: { runId, slot: "a" } })).length} @${Date.now() - killedAt}ms`);
+      }
+      const lagged = seen.join("; ");
       const lagState = await raw.get(sandbox.id).then((got) => got.state, (error) => statusOf(error));
       expect(await until(async () => !(await provider.list({ metadata: { runId, slot: "a" } })).length, 30_000, 1000), "still listed 30 s on");
       const listLag = `listed right after kill: ${lagged} (get(): ${lagState}); empty after ${Date.now() - killedAt} ms`;

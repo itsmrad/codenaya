@@ -487,18 +487,37 @@ describe("Daytona provider", () => {
       it("streams up to the end marker, even split across chunks, and drops what follows it", async () => {
         const { daytona, sandbox } = await connect();
         daytona.process.getSessionCommandLogs.mockImplementation(async (_sessionId, _cmdId, onStdout, onStderr) => {
-          if (!onStdout || !onStderr) return { output: "", stdout: "x__y\n__codenaya_run_end__\n", stderr: "__codenaya_run_end__\n" };
+          if (!onStdout || !onStderr) return { output: "", stdout: "x__y\n__codenaya_run_end__\n", stderr: "e__codenaya_run_end__\n" };
           for (const chunk of ["x_", "_y\n__", "codenaya_", "run_end__", "\n"]) onStdout(chunk);
-          onStderr("__codenaya_run_end__\n");
+          for (const chunk of ["e__cod", "enaya_run_", "end__\n"]) onStderr(chunk);
         });
         let streamed = "";
-        const onStderr = vi.fn();
+        let streamedErr = "";
 
-        const result = await sandbox.run("printf 'x__y\\n'", { onStdout: (chunk) => { streamed += chunk; }, onStderr });
+        const result = await sandbox.run("printf 'x__y\\n'", {
+          onStdout: (chunk) => { streamed += chunk; },
+          onStderr: (chunk) => { streamedErr += chunk; },
+        });
 
-        expect(result).toEqual({ exitCode: 0, stdout: "x__y\n", stderr: "" });
+        expect(result).toEqual({ exitCode: 0, stdout: "x__y\n", stderr: "e" });
         expect(streamed).toBe("x__y\n");
-        expect(onStderr).not.toHaveBeenCalled();
+        expect(streamedErr).toBe("e");
+      });
+
+      it("releases a held tail when the stream ends without the marker", async () => {
+        const { daytona, sandbox } = await connect();
+        daytona.process.getSessionCommandLogs.mockImplementation(async (_sessionId, _cmdId, onStdout) => {
+          if (!onStdout) throw new Error("logs unavailable");
+          // The stream drops after output that ends like the marker's start.
+          onStdout("a__cod");
+          return undefined;
+        });
+        let streamed = "";
+
+        const result = await sandbox.run("npm run build", { onStdout: (chunk) => { streamed += chunk; } });
+
+        expect(streamed).toBe("a__cod");
+        expect(result.stdout).toBe("a__cod");
       });
 
       it("waits out a dropped stream for the exit code, and falls back to the streamed output", async () => {
