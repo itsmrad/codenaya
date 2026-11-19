@@ -83,6 +83,14 @@ describe("redaction with a minter", () => {
     expect(refs[0]).toMatchObject({ value: "pa55word-xyz", rule: "dsn-password" });
   });
 
+  it("never refs a DSN password that was already redacted as a known value", () => {
+    const { toRef, refs } = createEnvRefMinter();
+    const result = redactJsonValue("postgres://app:known-pa55word-xyz@db.example.com/app", ["known-pa55word-xyz"], toRef);
+
+    expect(result.value).toBe(`postgres://app:${REDACTION_PLACEHOLDER}@db.example.com/app`);
+    expect(refs).toHaveLength(0);
+  });
+
   it("leaves Supabase config visible where no refs are minted", () => {
     expect(redactJsonValue(SUPABASE_URL).value).toBe(SUPABASE_URL);
   });

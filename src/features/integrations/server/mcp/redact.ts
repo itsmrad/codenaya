@@ -146,7 +146,8 @@ export function redactSecrets(
     result = result.replace(
       dsn,
       (_match, prefix: string, password: string) =>
-        `${prefix}:${toRef?.(password, "dsn-password") ?? REDACTION_PLACEHOLDER}@`,
+        // A known secret already replaced above is the placeholder now; never ref the placeholder.
+        `${prefix}:${(password !== REDACTION_PLACEHOLDER && toRef?.(password, "dsn-password")) || REDACTION_PLACEHOLDER}@`,
     );
   }
 
