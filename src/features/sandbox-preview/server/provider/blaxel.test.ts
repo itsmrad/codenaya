@@ -264,6 +264,107 @@ describe("Blaxel provider", () => {
   });
 
   describe("sandbox", () => {
+    const connect = async () => {
+      const blaxel = {
+        ...instance(),
+        process: { exec: vi.fn() },
+        fs: { writeTree: vi.fn(), writeBinary: vi.fn(), read: vi.fn(), readBinary: vi.fn() },
+        previews: { createIfNotExists: vi.fn() },
+      };
+      mocks.get.mockResolvedValue(blaxel);
+      return { blaxel, sandbox: await provider.connect("cn-abc") };
+    };
+    const done = (result: object) => ({ status: "completed", exitCode: 0, stdout: "", stderr: "", ...result });
+
+    it("runs with cwd, envs and output callbacks, and resolves a non-zero exit as a result", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.process.exec.mockResolvedValue(done({ status: "failed", exitCode: 2, stdout: "out", stderr: "err" }));
+      const onStdout = vi.fn();
+
+      expect(await sandbox.run("npm install", { cwd: "/app", envs: { A: "1" }, timeoutMs: 1_500, onStdout })).toEqual({
+        exitCode: 2, stdout: "out", stderr: "err",
+      });
+      expect(blaxel.process.exec).toHaveBeenCalledWith({
+        command: "npm install", workingDir: "/app", env: { A: "1" }, waitForCompletion: true, timeout: 2,
+        onStdout, onStderr: expect.any(Function),
+      });
+    });
+
+    it("always streams, defaults to E2B's 60s and takes 0 as no limit", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.process.exec.mockResolvedValue(done({}));
+
+      await sandbox.run("true");
+      expect(blaxel.process.exec).toHaveBeenLastCalledWith(expect.objectContaining({
+        timeout: 60, onStdout: expect.any(Function), onStderr: expect.any(Function),
+      }));
+      await sandbox.run("true", { timeoutMs: 0 });
+      expect(blaxel.process.exec).toHaveBeenLastCalledWith(expect.objectContaining({ timeout: 0 }));
+    });
+
+    it("throws SandboxTimeoutError when its timeout killed the command, but not without one", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.process.exec.mockResolvedValue(done({ status: "killed", exitCode: 137 }));
+
+      await expect(sandbox.run("sleep 99", { timeoutMs: 1_000 })).rejects.toBeInstanceOf(SandboxTimeoutError);
+      expect((await sandbox.run("sleep 99", { timeoutMs: 0 })).exitCode).toBe(137);
+    });
+
+    it("maps errors from the sandbox's calls", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.process.exec.mockRejectedValue(new mocks.errors.ResponseError(504));
+
+      await expect(sandbox.run("npm test")).rejects.toBeInstanceOf(SandboxTimeoutError);
+    });
+
+    it("starts in the background with a numeric pid and no keepAlive or timeout", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.process.exec.mockResolvedValue({ pid: "42", status: "running" });
+
+      expect(await sandbox.start("npm run dev", { cwd: "/app", envs: { A: "1" } })).toEqual({ pid: 42 });
+      expect(blaxel.process.exec).toHaveBeenCalledWith({
+        command: "npm run dev", workingDir: "/app", env: { A: "1" }, waitForCompletion: false, onStdout: undefined, onStderr: undefined,
+      });
+    });
+
+    it("writes text in one tree request, bytes one by one, and skips an empty list", async () => {
+      const { blaxel, sandbox } = await connect();
+      const bytes = new Uint8Array([1, 2]).buffer;
+
+      await sandbox.writeFiles([{ path: "/app/a.ts", data: "a" }, { path: "/app/b/c.ts", data: "c" }, { path: "/app/logo.png", data: bytes }]);
+      await sandbox.writeFiles([]);
+
+      expect(blaxel.fs.writeTree).toHaveBeenCalledTimes(1);
+      expect(blaxel.fs.writeTree).toHaveBeenCalledWith([{ path: "app/a.ts", content: "a" }, { path: "app/b/c.ts", content: "c" }], "/");
+      expect(blaxel.fs.writeBinary).toHaveBeenCalledTimes(1);
+      expect(blaxel.fs.writeBinary).toHaveBeenCalledWith("/app/logo.png", new Uint8Array([1, 2]));
+    });
+
+    it("reads text, and bytes from a Blob, rethrowing a missing file as is", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.fs.read.mockResolvedValue("x");
+      blaxel.fs.readBinary.mockResolvedValue(new Blob([new Uint8Array([7, 8])]));
+
+      expect(await sandbox.readFile("/a", "text")).toBe("x");
+      expect(await sandbox.readFile("/a", "bytes")).toEqual(new Uint8Array([7, 8]));
+      const missing = new mocks.errors.ResponseError(404);
+      blaxel.fs.read.mockRejectedValue(missing);
+      await expect(sandbox.readFile("/gone", "text")).rejects.toBe(missing);
+    });
+
+    it("creates one public preview per port and retries after a failure", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.previews.createIfNotExists
+        .mockRejectedValueOnce(new mocks.errors.ResponseError(500))
+        .mockResolvedValue({ url: "https://abc.us-was-1.preview.bl.run" });
+
+      await expect(sandbox.previewUrl(4000)).rejects.toThrow();
+      expect(await sandbox.previewUrl(4000)).toBe("https://abc.us-was-1.preview.bl.run");
+      expect(await sandbox.previewUrl(4000)).toBe("https://abc.us-was-1.preview.bl.run");
+      expect(blaxel.previews.createIfNotExists).toHaveBeenCalledTimes(2);
+      expect(blaxel.previews.createIfNotExists).toHaveBeenCalledWith({ port: 4000, name: "p4000", public: true });
+    });
+
     it("reads fresh info from the labels and the date policy, and kills even when already gone", async () => {
       mocks.get.mockResolvedValueOnce(instance()).mockResolvedValueOnce(instance({ labels: { userId: "u1" }, endAt: NOW + 5_000 }));
       mocks.delete.mockRejectedValue(new mocks.errors.ResponseError(404));
