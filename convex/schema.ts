@@ -899,7 +899,9 @@ export default defineSchema({
 
   /**
    * A paid credit lot (ADR 0016), unique per (mode, sourceKey). `quantity` never
-   * changes; charges raise `consumed` (`convex/billingGrants.ts`).
+   * changes; charges raise `consumed`, a rollover raises its source's
+   * `transferred`, and debt paid at grant time is `debtOffset`
+   * (`convex/billingGrants.ts`).
    */
   billingGrants: defineTable({
     mode: billingModeValidator,
@@ -915,9 +917,17 @@ export default defineSchema({
     expiresAt: v.number(),
     serviceStart: v.optional(v.number()),
     serviceEnd: v.optional(v.number()),
+    transferred: v.optional(v.number()),
+    debtOffset: v.optional(v.number()),
+    // A rollover's source period lot, for later refund attribution.
+    sourceGrantRef: v.optional(v.id("billingGrants")),
+    // Set by every write that leaves nothing unspent, so spent lots stop counting
+    // toward MAX_ACTIVE_LOTS. Revocations must set it too.
+    exhausted: v.optional(v.literal(true)),
   })
     .index("by_mode_and_sourceKey", ["mode", "sourceKey"])
-    .index("by_userId_and_mode_and_kind_and_expiresAt", ["userId", "mode", "kind", "expiresAt"]),
+    .index("by_userId_and_mode_and_kind_and_expiresAt", ["userId", "mode", "kind", "expiresAt"])
+    .index("by_userId_and_mode_and_kind_and_exhausted_and_expiresAt", ["userId", "mode", "kind", "exhausted", "expiresAt"]),
 
   /**
    * A user's credit usage this month and today (ADR 0011). Created on the first
@@ -937,6 +947,11 @@ export default defineSchema({
     paidCreditsMode: v.optional(billingModeValidator),
     // Charged credits no paid lot covered; usage is never dropped instead.
     creditDebt: v.optional(v.number()),
+    // A billing-enabled account's Free allocation for one UTC month, apart from
+    // the usage counters above (`features/billing/free-allocation.ts`).
+    freeMonthStartsAt: v.optional(v.number()),
+    freeUsed: v.optional(v.number()),
+    freeDebtOffset: v.optional(v.number()),
   }).index("by_userId", ["userId"]),
 
   /**

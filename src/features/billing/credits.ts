@@ -103,7 +103,8 @@ export interface CreditUsage {
   dayUsed: number;
 }
 
-const startOfMonth = (now: number) => {
+/** The UTC calendar month containing `now`, which Free allowances reset on. */
+export const startOfUtcMonth = (now: number) => {
   const date = new Date(now);
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
 };
@@ -120,7 +121,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * reset lazily, on the next read or charge, so there is no reset cron.
  */
 export function currentUsage(usage: CreditUsage | null, now: number): CreditUsage {
-  const periodStartsAt = startOfMonth(now);
+  const periodStartsAt = startOfUtcMonth(now);
   const dayStartsAt = startOfDay(now);
   return {
     periodStartsAt,
