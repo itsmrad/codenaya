@@ -1,7 +1,7 @@
 // @vitest-environment edge-runtime
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { assertBillingFence } from "./billing";
@@ -33,6 +33,9 @@ const reserve = (t: TestBackend, customerRef: Id<"billingCustomers">, intentId =
   t.mutation(internal.billing.reservePurchase, { customerRef, intentId, terms });
 const readCustomer = (t: TestBackend, customerRef: Id<"billingCustomers">) =>
   t.run(ctx => ctx.db.get("billingCustomers", customerRef));
+// Mapped receipts schedule processing; fake timers keep those runs from firing mid- or post-test.
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
 const assertClean = async (t: TestBackend, customerRef: Id<"billingCustomers">) => {
   const captured = await t.query(internal.billing.getFence, { customerRef });
   return t.run(ctx => assertBillingFence(ctx, customerRef, captured));

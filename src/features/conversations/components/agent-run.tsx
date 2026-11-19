@@ -149,19 +149,26 @@ const rowLabel = (row: Row, live: boolean) => {
   return verb;
 };
 
+/** Shared by every file chip so run logs, swarm rows and changed files read alike. */
+const CHIP = "inline-flex min-w-0 items-center rounded-[6px] bg-muted/60 text-[11.5px] text-foreground/90 shadow-[inset_0_0_0_1px_var(--border)]";
+
 interface FileChipProps {
   path: string;
   onOpen?: (path: string) => void;
   /** A skill, URL or env var name rather than a project file. */
   label?: boolean;
+  /** Show the whole path, for swarm rows. */
+  full?: boolean;
 }
 
-const FileChip = ({ path, onOpen, label = false }: FileChipProps) => {
+export const FileChip = ({ path, onOpen, label = false, full = false }: FileChipProps) => {
   const className = cn(
-    "inline-flex h-5.5 min-w-0 max-w-[55%] @sm:max-w-[60%] items-center rounded-[6px] bg-muted/60 px-1.5 text-[11.5px] text-foreground/90 shadow-[inset_0_0_0_1px_var(--border)]",
+    CHIP,
+    "h-5.5 px-1.5",
+    full ? "max-w-full" : "max-w-[55%] @sm:max-w-[60%]",
     label ? "font-sans" : "font-mono",
   );
-  const name = <span className="truncate">{label ? path : basename(path)}</span>;
+  const name = <span className="truncate">{label || full ? path : basename(path)}</span>;
   return onOpen ? (
     <button
       type="button"
@@ -455,7 +462,8 @@ const ChangedFiles = ({
           disabled={!onOpenFile}
           onClick={() => onOpenFile?.(path)}
           className={cn(
-            "inline-flex h-7 min-w-0 max-w-full items-center rounded-md bg-muted/60 px-2 font-mono text-[11.5px] text-foreground/90 shadow-[inset_0_0_0_1px_var(--border)] transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:hover:bg-muted/60 motion-reduce:transition-none",
+            CHIP,
+            "h-7 max-w-full px-2 font-mono transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:hover:bg-muted/60 motion-reduce:transition-none",
             animate &&
               "animate-in fade-in-0 zoom-in-95 fill-mode-both duration-250 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:animate-none",
           )}
@@ -468,7 +476,7 @@ const ChangedFiles = ({
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="h-7 rounded-md px-1.5 font-mono text-[11.5px] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+          className="h-7 rounded-md px-1.5 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
         >
           +{more} more
         </button>

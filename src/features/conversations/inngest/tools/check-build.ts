@@ -21,7 +21,7 @@ import {
   offlineFirstInstall,
   projectFileEntries,
 } from "@/features/sandbox-preview/server/project-sandbox";
-import { listCommands, runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
+import { listCommands, remove, runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
 import { getDefaultProviderOrNull } from "@/features/sandbox-preview/server/provider/registry";
 import {
   type RunResult,
@@ -52,6 +52,7 @@ import { brokenImagesWarning, brokenRemoteImages, remoteImageUrls } from "./remo
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { isSecretPath, withoutSecretFiles } from "../../../../../convex/secretFiles";
 
 interface CheckBuildToolOptions {
   projectId: Id<"projects">;
@@ -470,7 +471,7 @@ type CheckOptions = {
   sandbox?: Sandbox;
   /**
    * With `sandbox`: the project's directory there, copied into the check first
-   * (without node_modules, .git, the top-level build output and .env files), so files
+   * (without node_modules, .git, the top-level build output and secret files), so files
    * `files` leaves out, such as uploads, are built too. `files` is then
    * written over the copy.
    */
@@ -536,9 +537,13 @@ export const checkProjectBuild = async ({
           suppliedSandbox,
           `mkdir -p ${dir} && tar -C '${sourceDir}' --exclude=node_modules --exclude=.git --exclude=./dist ` +
             (GENERATED_PATHS[framework] ?? []).map((path) => `--exclude=./${path} `).join("") +
-            `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
+            `-cf - . | tar -C ${dir} -xf -`,
           { timeoutMs, requestTimeoutMs: timeoutMs },
         );
+        // The secret-file policy, not tar globs, decides what the build may not see.
+        const opts = { cwd: dir, timeoutMs, requestTimeoutMs: timeoutMs };
+        const copied = await runOrThrow(suppliedSandbox, "find . \\( -type f -o -type l \\) -printf '%P\\n'", opts);
+        for (const path of copied.stdout.split("\n").filter(isSecretPath)) await remove(suppliedSandbox, `${dir}/${path}`, opts);
       }
       return await buildIn(suppliedSandbox, dir, job, "given");
     } catch (error) {
@@ -632,7 +637,8 @@ export const createCheckBuildTool = ({
           }
 
           return await checkProjectBuild({
-            files,
+            // Names stay in `paths` for the static checks; no sandbox gets a secret file's content.
+            files: withoutSecretFiles(files),
             paths,
             provider: getDefaultProviderOrNull() ?? undefined,
             metadata: { projectId, purpose: "check-build" },

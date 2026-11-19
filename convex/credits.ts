@@ -1,10 +1,12 @@
 import { v } from "convex/values";
 
 import { creditsForCost, currentUsage } from "../src/features/billing/credits";
+import { currentFreeAllocation, freeRemaining } from "../src/features/billing/free-allocation";
+import { isInPaidPeriod } from "../src/features/billing/grants";
 import type { Doc } from "./_generated/dataModel";
 import { type MutationCtx, type QueryCtx, mutation, query } from "./_generated/server";
 import { verifyAuth } from "./auth";
-import { spendPaidCredits } from "./billingGrants";
+import { readPeriodLots, spendPaidCredits } from "./billingGrants";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { addModelSpend } from "./modelSpend";
@@ -91,14 +93,42 @@ async function chargeAccount(ctx: MutationCtx, userId: string, credits: number, 
   if (account) {
     // Billing-enabled accounts (ADR 0016: version and mode set) also spend paid lots in this same transaction.
     const { paidCreditsVersion, paidCreditsMode } = account;
-    const debt =
+    const billing =
       paidCreditsVersion === undefined || paidCreditsMode === undefined
-        ? 0
-        : await spendPaidCredits(ctx, userId, paidCreditsMode, credits, now);
-    await ctx.db.patch("creditAccounts", account._id, debt > 0 ? { ...next, creditDebt: (account.creditDebt ?? 0) + debt } : next);
+        ? {}
+        : await chargePaidCredits(ctx, account, paidCreditsMode, credits, now);
+    await ctx.db.patch("creditAccounts", account._id, { ...next, ...billing });
   } else {
     await ctx.db.insert("creditAccounts", { userId, plan: "free", ...next });
   }
+}
+
+/**
+ * A billing-enabled account's fields after a charge. In a paid period the
+ * charge goes to paid lots. On Free it spends the month's Free allocation
+ * first (whose first touch pays off debt once), then retained lots. What
+ * neither covers becomes debt.
+ */
+async function chargePaidCredits(
+  ctx: MutationCtx,
+  account: Doc<"creditAccounts">,
+  mode: Doc<"billingGrants">["mode"],
+  credits: number,
+  now: number,
+) {
+  const debt = account.creditDebt ?? 0;
+  if (isInPaidPeriod(await readPeriodLots(ctx, account.userId, mode, now), now)) {
+    return { creditDebt: debt + (await spendPaidCredits(ctx, account.userId, mode, credits, now)) };
+  }
+  const { allocation, debt: debtLeft } = currentFreeAllocation(account, debt, now);
+  const fromFree = Math.min(credits, freeRemaining(allocation));
+  const shortfall = await spendPaidCredits(ctx, account.userId, mode, credits - fromFree, now);
+  return {
+    creditDebt: debtLeft + shortfall,
+    freeMonthStartsAt: allocation.monthStartsAt,
+    freeUsed: allocation.used + fromFree,
+    freeDebtOffset: allocation.debtOffset,
+  };
 }
 
 /**

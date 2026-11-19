@@ -1,6 +1,7 @@
 import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, type QueryCtx } from "./_generated/server";
+import { scheduleCustomer } from "./billingQueue";
 import { appError } from "./errors";
 import { billingModeValidator, billingPurchaseTermsValidator, billingResourceIdsValidator } from "./schema";
 
@@ -178,7 +179,7 @@ export const recordReceipt = internalMutation({
       .withIndex("by_mode_and_webhookId", q => q.eq("mode", args.mode).eq("webhookId", args.webhookId)).unique();
     if (existing) {
       if (existing.bodyDigest !== args.bodyDigest && existing.state !== "quarantined") {
-        await ctx.db.patch("billingEvents", existing._id, { state: "quarantined" });
+        await ctx.db.patch("billingEvents", existing._id, { state: "quarantined", quarantineReason: "digest_mismatch" });
         if (existing.customerRef) {
           const originalParent = await requireCustomer(ctx, existing.customerRef);
           await ctx.db.patch("billingCustomers", originalParent._id, {
@@ -193,10 +194,11 @@ export const recordReceipt = internalMutation({
     // An unmapped verified receipt is never discarded: it waits quarantined for reconciliation.
     const eventRef = await ctx.db.insert("billingEvents", {
       ...args, receivedAt: now, state: ignored ? "ignored" : parent ? "pending" : "quarantined", attempts: 0,
-      nextAttemptAt: now, generation: parent?.generation ?? 0,
+      nextAttemptAt: now, generation: parent?.generation ?? 0, ...(parent || ignored ? {} : { quarantineReason: "unmapped" as const }),
     });
     if (parent && !ignored) {
       await ctx.db.patch("billingCustomers", parent._id, { inputRevision: parent.inputRevision + 1, unresolvedReceipts: parent.unresolvedReceipts + 1 });
+      await scheduleCustomer(ctx, parent._id);
     }
     return eventRef;
   },
