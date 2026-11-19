@@ -454,7 +454,7 @@ describe("swarmWorker", () => {
     }
   });
 
-  it("is cancelled with its parent message or on its own timeout, with room for two swarms' agents per owner", () => {
+  it("is cancelled with its parent message or on its own timeout, with per-owner concurrency at the plan limit", () => {
     const { opts } = swarmWorker as unknown as { opts: { cancelOn: unknown; concurrency: unknown } };
     expect(opts.cancelOn).toEqual([
       { event: "message/cancel", if: "event.data.parentMessageId == async.data.messageId" },
@@ -466,7 +466,7 @@ describe("swarmWorker", () => {
     // One cancelOn entry per event name.
     const events = (opts.cancelOn as Array<{ event: string }>).map(({ event }) => event);
     expect(new Set(events).size).toBe(events.length);
-    expect(opts.concurrency).toEqual([{ key: "event.data.ownerId", limit: 16 }]);
+    expect(opts.concurrency).toEqual([{ key: "event.data.ownerId", limit: 5 }]);
   });
 });
 
