@@ -59,6 +59,15 @@ const fileSteps = (now: number) => [
   })),
 ];
 
+/** The transcript scroller scrolls vertically only: no horizontal scrollbar, ever. */
+export const chatScrollsHorizontally = (page: Page) =>
+  page.locator('[role="log"]').evaluate((log) => {
+    const scroller = Array.from(log.querySelectorAll("*")).find(
+      (element) => /auto|scroll/.test(getComputedStyle(element).overflowY),
+    );
+    return !scroller || getComputedStyle(scroller).overflowX !== "hidden";
+  });
+
 /**
  * Seeds a fresh conversation (it becomes the active one) with long user
  * messages, a finished run with an error step and a live run with many reads.

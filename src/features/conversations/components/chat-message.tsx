@@ -353,7 +353,7 @@ export const AssistantMessage = ({
   );
 
   return (
-    <div className="group/msg flex w-full flex-col gap-3">
+    <div className="group/msg flex w-full min-w-0 flex-col gap-3">
       {message.mode === "swarm" ? (
         <SwarmBoard message={message} tasks={tasks} onOpenFile={onOpenFile}>
           {run || undefined}
