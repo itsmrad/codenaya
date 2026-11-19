@@ -168,8 +168,8 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error:
-          "E2B_API_KEY is not configured on the Codenaya server. Add it to the " +
-          "hosting environment and restart or redeploy the app.",
+          "No sandbox provider is configured on the Codenaya server. Add its keys " +
+          "(see .env.example) to the hosting environment and restart or redeploy the app.",
         code: "config" satisfies SandboxErrorKind,
       },
       { status: 503 },

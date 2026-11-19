@@ -19,16 +19,30 @@ is skipped, even when listed. Unknown ids are ignored with a warning that never
 includes environment values. Session lifetime is bounded by one hour and the
 provider's `maxSessionMs`.
 
-With fallbacks set, a preview boot that hits a rate limit, a quota or a config
-error continues on the next provider (at most two per boot), and the failed one
-cools down for 10 minutes. A timeout does that only on its second boot in a row.
-The per-user cap, project kills and sandbox lookups span every configured
-provider. The agent paths (check-build, build repair, swarm) still use E2B only.
+With fallbacks set, a preview boot (share previews included) that hits a rate
+limit, a quota or a config error continues on the next provider (at most two per
+boot), and the failed one cools down for 10 minutes. A timeout does that only on
+its second boot in a row. The per-user cap, project kills and sandbox lookups span
+every configured provider. The agent paths (check-build, build repair, swarm)
+still use E2B only.
+
+**Keys, not the list, put a provider in the fan-out.** With `BL_API_KEY` and
+`BL_WORKSPACE` set, every boot's cap check and project kill, and every preview
+lookup, calls Blaxel's list even when `blaxel` is not in the fallbacks. A Blaxel
+outage then fails every boot, E2B ones included (a hang costs about 60 s before
+a 500). Runbook:
+- Set `BL_*` on a host only when Blaxel is meant to be live there.
+- In a Blaxel outage, remove the `BL_*` keys; taking `blaxel` out of
+  `SANDBOX_PROVIDER_FALLBACKS` is not enough.
+- Removing the keys while a share preview runs on Blaxel makes that share link
+  error until its lease ends.
 
 Intended production order: `SANDBOX_PROVIDER_FALLBACKS=blaxel,daytona`, with
-Daytona last resort only. Below Daytona Tier 3, its previews show a warning page
-the preview iframe cannot skip, and outbound traffic is limited to an allowlist.
-Until a Daytona adapter is registered, `daytona` is ignored with the warning above.
+Daytona last resort only. Because a boot tries at most two providers, Daytona is
+reached only while E2B or Blaxel is cooling down. Below Daytona Tier 3, its
+previews show a warning page the preview iframe cannot skip, and outbound traffic
+is limited to an allowlist. Until a Daytona adapter is registered, `daytona` is
+ignored with the warning above.
 
 TODO (privacy): update the subprocessor list BEFORE shipping any non-E2B adapter;
 the privacy page currently names E2B, and sandbox env secrets reach the provider.

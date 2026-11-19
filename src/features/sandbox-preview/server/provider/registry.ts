@@ -13,9 +13,8 @@ import { type CreateOptions, PROVIDER_IDS, type ProviderId, SandboxConfigError, 
 export const getProvider = (id: ProviderId): SandboxProvider => {
   switch (id) {
     case "e2b": {
-      const apiKey = process.env.E2B_API_KEY?.trim();
-      if (!apiKey) throw new SandboxConfigError("E2B_API_KEY is not set");
-      return createE2bProvider(apiKey);
+      if (!isProviderConfigured("e2b")) throw new SandboxConfigError("E2B_API_KEY is not set");
+      return createE2bProvider(process.env.E2B_API_KEY!.trim());
     }
     case "blaxel": {
       if (!isProviderConfigured("blaxel")) throw new SandboxConfigError("BL_API_KEY and BL_WORKSPACE must be set");

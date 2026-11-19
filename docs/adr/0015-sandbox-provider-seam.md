@@ -197,7 +197,9 @@ default provider only, and there is no sticky provider per project.
 `blaxel` is registered (`PROVIDER_IDS = ["e2b", "blaxel"]`). It counts as configured
 only when both `BL_API_KEY` and `BL_WORKSPACE` are set (`PROVIDER_KEYS` in `config.ts`,
 which the registry checks too). Defaults are unchanged: `SANDBOX_PROVIDER` is `e2b` and
-the fallbacks are empty, so nothing reaches Blaxel until it is listed.
+the fallbacks are empty, so no sandbox is created on Blaxel until it is listed. Setting
+the keys alone still puts Blaxel in the cap, project-kill and lookup fan-out, so a Blaxel
+outage fails every boot while the keys are set (runbook in docs/DEPLOYMENT.md).
 - **Ids.** The native id is the sandbox name, `cn-` plus 20 lowercase alphanumerics.
   It passes `NATIVE_ID` unchanged and always reaches the client prefixed (`blaxel:cn-…`).
 - **Ownership.** `metadata` is stored as Blaxel labels. `list` filters them exactly on

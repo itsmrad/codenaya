@@ -107,6 +107,32 @@ describe("sandbox provider registry", () => {
     expect(await countLive(getConfiguredProviders(config), { userId: "u1" })).toBe(2);
   });
 
+  it("with Blaxel keyed but not listed, creates once on E2B unprefixed, yet the cap and kill fan-out list Blaxel", async () => {
+    stubKeys("e2b", "blaxel");
+    const blaxel = fakeBlaxel();
+    mocks.createBlaxelProvider.mockReturnValue(blaxel);
+    mocks.create.mockResolvedValue(handle("sbx_1"));
+    mocks.list.mockReturnValue({ nextItems: async () => [] });
+
+    const sandbox = await createSandbox({ timeoutMs: 1, metadata: {} });
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    expect(blaxel.create).not.toHaveBeenCalled();
+    expect(clientSandboxId(sandbox, isMultiProvider())).toBe("sbx_1");
+    expect(await countLive(getConfiguredProviders(), { userId: "u1" })).toBe(1);
+    expect(blaxel.list).toHaveBeenCalledWith({ metadata: { userId: "u1" } });
+  });
+
+  // Current behaviour (fail closed): a keyed Blaxel that can't list blocks every boot's cap check.
+  it("fails the cap check when Blaxel's list fails, even with E2B healthy", async () => {
+    stubKeys("e2b", "blaxel");
+    const blaxel = fakeBlaxel();
+    vi.mocked(blaxel.list).mockRejectedValue(new Error("blaxel down"));
+    mocks.createBlaxelProvider.mockReturnValue(blaxel);
+    mocks.list.mockReturnValue({ nextItems: async () => [] });
+
+    await expect(countLive(getConfiguredProviders(), { userId: "u1" })).rejects.toThrow("blaxel down");
+  });
+
   describe("with one provider and no fallbacks (today's production)", () => {
     it("keeps ids unprefixed and lists, counts and kills on that provider alone, as before", async () => {
       vi.stubEnv("E2B_API_KEY", "key_1");
@@ -138,7 +164,7 @@ describe("sandbox provider registry", () => {
 
   it("creates through failover and its cooldown once fallbacks are set", async () => {
     vi.stubEnv("E2B_API_KEY", "key_1");
-    const config = { primary: "e2b" as const, fallbacks: ["e2b" as const], configured: { e2b: true, blaxel: false } };
+    const config = { ...parseProviderConfig(), fallbacks: ["e2b" as const] };
     mocks.create.mockRejectedValue(new RateLimitError("slow down"));
 
     expect(isMultiProvider(config)).toBe(true);
