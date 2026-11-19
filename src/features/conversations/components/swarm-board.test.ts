@@ -6,7 +6,7 @@ import type { Doc, Id } from "../../../../convex/_generated/dataModel";
 import type { SwarmTask } from "../swarm-status";
 import { SwarmBoard } from "./swarm-board";
 
-vi.mock("./agent-run", () => ({ AgentRunLog: () => null }));
+vi.mock("./agent-run", () => ({ AgentRunLog: () => null, FileChip: ({ path }: { path: string }) => path }));
 vi.mock("@/hooks/use-now", () => ({ useNow: () => 1000 }));
 
 const message: Doc<"messages"> = {
@@ -63,5 +63,15 @@ describe("SwarmBoard", () => {
     expect(html.indexOf("Sub-orchestrator: Page sections")).toBeLessThan(html.indexOf("Worker: Hero section"));
     expect(html.indexOf("Worker: Hero section")).toBeLessThan(html.indexOf("Worker: Footer"));
     expect(html).toContain('aria-expanded="true"');
+  });
+
+  it("renders a nested worker's full written path and drops the nested top divider", () => {
+    const path = "src/components/sections/hero/deeply/nested/hero-section.tsx";
+    const step = { id: "s1", kind: "tool", tool: "writeFiles", status: "done", targets: [path] } as SwarmTask["steps"][number];
+    const lead = { ...worker(), taskId: "lead", title: "Page sections", role: "sub-orchestrator" as const };
+    const html = board([lead, { ...worker(), parentTaskId: "lead", steps: [step] }]);
+    const nested = html.slice(html.indexOf('aria-label="Page sections workers"'));
+    expect(nested).toContain(path);
+    expect(nested).not.toContain("border-t");
   });
 });
