@@ -28,7 +28,22 @@ test("embedding origins come from validated deployment configuration, not the re
 
 test("default embedding origins include the canonical www production host", () => {
   vi.stubEnv("CODENAYA_PUBLIC_PREVIEW_ORIGINS", undefined);
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", undefined);
   expect(publicPreviewOrigins()).toEqual([...origins, "https://www.codenaya.tech"]);
+});
+
+test("default embedding origins include the deployment's own app origin and ignore an invalid one", () => {
+  vi.stubEnv("CODENAYA_PUBLIC_PREVIEW_ORIGINS", undefined);
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://example.test/");
+  expect(publicPreviewOrigins()).toEqual([...origins, "https://www.codenaya.tech", "https://example.test"]);
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://www.codenaya.tech/app");
+  expect(publicPreviewOrigins()).toEqual([...origins, "https://www.codenaya.tech"]);
+  for (const value of ["not a url", "http://0.0.0.0:3100"]) {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", value);
+    expect(publicPreviewOrigins()).toEqual([...origins, "https://www.codenaya.tech"]);
+  }
+  vi.stubEnv("CODENAYA_PUBLIC_PREVIEW_ORIGINS", "https://only.example");
+  expect(publicPreviewOrigins()).toEqual(["https://only.example"]);
 });
 
 test("the serialized proxy serves real HTTP frame headers and body", async () => {
