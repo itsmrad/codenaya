@@ -893,9 +893,15 @@ export default defineSchema({
     attempts: v.number(),
     nextAttemptAt: v.number(),
     generation: v.number(),
-    quarantineReason: v.optional(v.union(v.literal("unmapped"), v.literal("digest_mismatch"), v.literal("retries_exhausted"))),
+    // "unsupported": a provider fact reconciliation cannot act on (unreadable, another customer's); for support.
+    quarantineReason: v.optional(v.union(v.literal("unmapped"), v.literal("digest_mismatch"), v.literal("retries_exhausted"), v.literal("unsupported"))),
+    // The payload's provider customer id, kept only on an unmapped receipt so a later binding can attach it.
+    providerCustomerId: v.optional(v.string()),
   })
     .index("by_mode_and_webhookId", ["mode", "webhookId"])
+    .index("by_mode_and_providerCustomerId_and_state", ["mode", "providerCustomerId", "state"])
+    .index("by_mode_and_paymentId_and_state", ["mode", "paymentId", "state"])
+    .index("by_customerRef_and_state_and_eventType", ["customerRef", "state", "eventType"])
     .index("by_state_and_nextAttemptAt", ["state", "nextAttemptAt"])
     .index("by_customerRef_and_state_and_nextAttemptAt", ["customerRef", "state", "nextAttemptAt"]),
 

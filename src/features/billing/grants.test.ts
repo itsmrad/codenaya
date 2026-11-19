@@ -113,18 +113,20 @@ describe("isInPaidPeriod", () => {
 });
 
 describe("paid credits gate", () => {
-  // Stage 5 will enable accounts; until then only the schema declares these
-  // fields, and the charge and grant helpers only read them.
-  it("nothing outside tests enables paid credits on an account", () => {
+  // The gate is lifted for fulfillment only: convex/billingFulfill.ts enables an
+  // account when it grants a settled payment. Everything else only reads the
+  // fields, and the charge path (credits.ts) never writes them.
+  it("only fulfillment enables paid credits on an account", () => {
     const mentions = ["convex", "src"].flatMap((dir) =>
       readdirSync(dir, { recursive: true, encoding: "utf8" })
         .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file) && !file.includes("_generated"))
         .map((file) => join(dir, file))
         .filter((path) => /paidCredits(Version|Mode)/.test(readFileSync(path, "utf8"))),
     );
-    expect(mentions.sort()).toEqual(["convex/billingGrants.ts", "convex/credits.ts", "convex/schema.ts"]);
+    expect(mentions.sort()).toEqual(["convex/billingFulfill.ts", "convex/billingGrants.ts", "convex/credits.ts", "convex/schema.ts"]);
     for (const reader of ["convex/billingGrants.ts", "convex/credits.ts"]) {
       expect(readFileSync(reader, "utf8")).not.toMatch(/paidCredits(Version|Mode)\s*:/);
     }
+    expect(readFileSync("convex/billingFulfill.ts", "utf8")).toMatch(/paidCreditsVersion: 1 as const, paidCreditsMode:/);
   });
 });
