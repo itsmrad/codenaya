@@ -8,15 +8,16 @@ const END = Date.parse("2026-12-01T00:00:00Z");
 const CREATED = Date.parse("2026-11-01T00:00:05Z");
 const catalog = { proProductId: "prod_pro", topUpProductId: "prod_topup" };
 
+// SDK 2.63.0: `product_cart` lists one-time products only, so a pure Pro charge has an empty cart.
 const proPayment = (overrides: Partial<ProviderPayment> = {}): ProviderPayment => ({
   paymentId: "pay_1", businessId: "bus_1", customerId: "cus_alice", status: "succeeded",
-  subscriptionId: "sub_1", cart: [{ productId: "prod_pro", quantity: 1 }],
+  subscriptionId: "sub_1", cart: [],
   totalMinor: 2000, taxMinor: 0, currency: "USD", createdAt: CREATED, chargeType: "new",
   servicePeriods: [{ subscriptionId: "sub_1", start: START, end: END, prorationFactor: "1" }],
   ...overrides,
 });
 const subscription = (overrides: Partial<ProviderSubscription> = {}): ProviderSubscription => ({
-  subscriptionId: "sub_1", customerId: "cus_alice", productId: "prod_pro", status: "active",
+  subscriptionId: "sub_1", customerId: "cus_alice", productId: "prod_pro", quantity: 1, status: "active",
   previousBillingAt: START, nextBillingAt: END, cancelAtNextBillingDate: false, ...overrides,
 });
 const topUp = (overrides: Partial<ProviderPayment> = {}) => proPayment({
@@ -40,6 +41,10 @@ describe("decideSettlement", () => {
     const renewal = decide(proPayment({ chargeType: "renewal" }));
     expect(renewal).toEqual(first);
   });
+  it("accepts the Pro product listed once in the cart", () => {
+    expect(decide(proPayment({ cart: [{ productId: "prod_pro", quantity: 1 }] })))
+      .toMatchObject({ kind: "period", productId: "prod_pro", credits: PLANS.pro.monthlyCredits });
+  });
   it("picks the period of the payment's own subscription", () => {
     expect(decide(proPayment({ servicePeriods: [
       { subscriptionId: "sub_other", start: 1, end: 2, prorationFactor: "1" },
@@ -61,11 +66,24 @@ describe("decideSettlement", () => {
   });
   it.each([
     ["an empty cart", []],
-    ["two lines", [{ productId: "prod_pro", quantity: 1 }, { productId: "prod_topup", quantity: 1 }]],
-    ["quantity 2", [{ productId: "prod_pro", quantity: 2 }]],
+    ["two lines", [{ productId: "prod_topup", quantity: 1 }, { productId: "prod_topup", quantity: 1 }]],
+    ["quantity 2", [{ productId: "prod_topup", quantity: 2 }]],
     ["quantity 0", [{ productId: "prod_topup", quantity: 0 }]],
-  ])("quarantines %s", (_, cart) => {
+  ])("quarantines a one-time payment with %s", (_, cart) => {
+    expect(decide(topUp({ cart }), null)).toEqual({ kind: "quarantine", paymentId: "pay_1", reason: "cart" });
+  });
+  it.each([
+    ["a bundled one-time product", [{ productId: "prod_pro", quantity: 1 }, { productId: "prod_topup", quantity: 1 }]],
+    ["Pro with quantity 2", [{ productId: "prod_pro", quantity: 2 }]],
+    ["the top-up product", [{ productId: "prod_topup", quantity: 1 }]],
+  ])("quarantines a subscription charge with %s in the cart, never a top-up", (_, cart) => {
     expect(decide(proPayment({ cart }))).toEqual({ kind: "quarantine", paymentId: "pay_1", reason: "cart" });
+    expect(decide(proPayment({ cart, chargeType: undefined }))).toMatchObject({ kind: "quarantine", reason: "cart" });
+    expect(decide(proPayment({ cart, subscriptionId: undefined }))).toMatchObject({ kind: "quarantine", reason: "cart" });
+  });
+  it.each([2, 0, undefined])("quarantines a Pro subscription with quantity %s", (quantity) => {
+    expect(decide(proPayment(), subscription({ quantity })))
+      .toEqual({ kind: "quarantine", paymentId: "pay_1", reason: "cart" });
   });
   it.each([
     ["a zero amount", { totalMinor: 0 }],
@@ -86,7 +104,12 @@ describe("decideSettlement", () => {
       .toEqual({ kind: "quarantine", paymentId: "pay_1", reason: "unknown_product" });
   });
   it("quarantines an unknown product", () => {
-    expect(decide(proPayment({ cart: [{ productId: "prod_other", quantity: 1 }] })))
+    expect(decide(topUp({ cart: [{ productId: "prod_other", quantity: 1 }] }), null))
+      .toEqual({ kind: "quarantine", paymentId: "pay_1", reason: "unknown_product" });
+    // Pro bought without a subscription is not a one-time product.
+    expect(decide(topUp({ cart: [{ productId: "prod_pro", quantity: 1 }] }), null))
+      .toEqual({ kind: "quarantine", paymentId: "pay_1", reason: "unknown_product" });
+    expect(decide(proPayment(), subscription({ productId: "prod_other" })))
       .toEqual({ kind: "quarantine", paymentId: "pay_1", reason: "unknown_product" });
   });
 
@@ -95,7 +118,6 @@ describe("decideSettlement", () => {
     ["no subscription read", proPayment(), null],
     ["another subscription", proPayment(), subscription({ subscriptionId: "sub_2" })],
     ["a subscription owned by someone else", proPayment(), subscription({ customerId: "cus_bob" })],
-    ["a subscription for another product", proPayment(), subscription({ productId: "prod_topup" })],
   ])("quarantines a Pro payment with %s", (_, payment, sub) => {
     expect(decide(payment, sub)).toEqual({ kind: "quarantine", paymentId: "pay_1", reason: "subscription_mismatch" });
   });
@@ -108,8 +130,23 @@ describe("decideSettlement", () => {
       .toEqual({ kind: "no_grant", paymentId: "pay_1", reason: "not_full_period" });
   });
   it("excludes a usage-only renewal that has no service period", () => {
-    expect(decide(proPayment({ chargeType: "renewal", servicePeriods: [] })))
+    expect(decide(proPayment({ chargeType: "renewal", servicePeriods: [], includesUsage: true })))
       .toEqual({ kind: "no_grant", paymentId: "pay_1", reason: "not_full_period" });
+  });
+  it.each([false, undefined])("keeps a renewal with no period and includes_usage %s pending", (includesUsage) => {
+    expect(decide(proPayment({ chargeType: "renewal", servicePeriods: [], includesUsage })))
+      .toEqual({ kind: "pending", paymentId: "pay_1", reason: "service_period_unknown" });
+  });
+  it.each([
+    ["a zero-amount", { totalMinor: 0, cart: [], chargeType: undefined, servicePeriods: [] }],
+    ["a nonzero", { totalMinor: 100, chargeType: undefined, servicePeriods: [] }],
+    ["a failed", { status: "failed" as const }],
+    ["a cart-listed", { cart: [{ productId: "prod_topup", quantity: 3 }] }],
+  ])("records %s card update as a final non-grant", (_, overrides) => {
+    expect(decide(proPayment({ isUpdatePaymentMethod: true, ...overrides })))
+      .toEqual({ kind: "no_grant", paymentId: "pay_1", reason: "payment_method_update" });
+    expect(decide(proPayment({ isUpdatePaymentMethod: true, ...overrides, customerId: "cus_bob" })))
+      .toMatchObject({ kind: "quarantine", reason: "customer_mismatch" });
   });
   it.each([undefined, "usage", "NEW"])("keeps a missing or unknown charge type pending (%s)", (chargeType) => {
     expect(decide(proPayment({ chargeType }))).toEqual({ kind: "pending", paymentId: "pay_1", reason: "charge_type_unknown" });

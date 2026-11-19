@@ -38,8 +38,14 @@ const respond = (status: number, text?: string) => new Response(text ?? null, { 
 function readReceiver() {
   const config = readConvexBillingConfig("convex-receiver");
   if (!config) return null;
-  const keys = [config.webhookKey, config.webhookKeyPrevious].filter((key): key is string => !!key);
-  return { mode: config.environment, businessId: config.businessId, verifiers: keys.map(key => new Webhook(key)) };
+  try {
+    const keys = [config.webhookKey, config.webhookKeyPrevious].filter((key): key is string => !!key);
+    return { mode: config.environment, businessId: config.businessId, verifiers: keys.map(key => new Webhook(key)) };
+  } catch (error) {
+    // An undecodable or empty signing key is misconfiguration; the verifier's error never includes the key.
+    console.error("[billingWebhook] receiver not configured:", error instanceof Error ? error.message : "unknown error");
+    return null;
+  }
 }
 
 function signedHeaders(headers: Headers): SignedHeaders | null {

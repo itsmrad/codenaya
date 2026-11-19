@@ -16,15 +16,16 @@ const paymentBody = (overrides: Record<string, unknown> = {}) => ({
   currency: "USD", created_at: "2026-11-01T00:00:05Z",
   customer: { customer_id: "cus_alice", email: "alice@example.com", name: "Alice" },
   subscription_id: "sub_1", checkout_session_id: "cks_1",
-  product_cart: [{ product_id: "prod_pro", quantity: 1 }],
-  charge_type: "new",
+  // A subscription charge lists one-time products only.
+  product_cart: null,
+  charge_type: "new", includes_usage: false, is_update_payment_method: false,
   service_periods: [{
     subscription_id: "sub_1", starts_at: "2026-11-01T00:00:00Z", ends_at: "2026-12-01T00:00:00Z", proration_factor: "1",
   }],
   ...overrides,
 });
 const subscriptionBody = (overrides: Record<string, unknown> = {}) => ({
-  subscription_id: "sub_1", status: "active", product_id: "prod_pro",
+  subscription_id: "sub_1", status: "active", product_id: "prod_pro", quantity: 1,
   customer: { customer_id: "cus_alice", email: "alice@example.com", name: "Alice" },
   previous_billing_date: "2026-11-01T00:00:00Z", next_billing_date: "2026-12-01T00:00:00Z",
   cancel_at_next_billing_date: false, ...overrides,
@@ -58,30 +59,40 @@ describe("Dodo reads", () => {
     const subscriptionFetch = fetchReturning(json(subscriptionBody()));
     await fetchSubscription({ ...config, environment }, "sub_1", subscriptionFetch);
     expect(fetchImpl).toHaveBeenCalledWith(`${host}/payments/pay_1`, expect.objectContaining({
-      method: "GET", redirect: "error", headers: expect.objectContaining({ Authorization: `Bearer ${KEY}` }),
+      method: "GET", redirect: "manual", headers: expect.objectContaining({ Authorization: `Bearer ${KEY}` }),
     }));
     expect(subscriptionFetch.mock.calls[0][0]).toBe(`${host}/subscriptions/sub_1`);
-    expect(subscriptionFetch.mock.calls[0][1]).toMatchObject({ redirect: "error", signal: expect.any(AbortSignal) });
+    expect(subscriptionFetch.mock.calls[0][1]).toMatchObject({ redirect: "manual", signal: expect.any(AbortSignal) });
   });
 
   it("normalizes a payment with parsed dates", async () => {
     expect(await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody())))).toEqual({
       paymentId: "pay_1", businessId: "bus_1", customerId: "cus_alice", status: "succeeded",
-      subscriptionId: "sub_1", sessionId: "cks_1", cart: [{ productId: "prod_pro", quantity: 1 }],
+      subscriptionId: "sub_1", sessionId: "cks_1", cart: [],
       totalMinor: 2000, taxMinor: 180, currency: "USD", createdAt: Date.parse("2026-11-01T00:00:05Z"),
       chargeType: "new",
       servicePeriods: [{
         subscriptionId: "sub_1", start: Date.parse("2026-11-01T00:00:00Z"), end: Date.parse("2026-12-01T00:00:00Z"),
         prorationFactor: "1",
       }],
+      includesUsage: false, isUpdatePaymentMethod: false,
+    });
+    const read = await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody({
+      product_cart: [{ product_id: "prod_topup", quantity: 2 }], includes_usage: true, is_update_payment_method: true,
+    }))));
+    expect(read).toMatchObject({
+      cart: [{ productId: "prod_topup", quantity: 2 }], includesUsage: true, isUpdatePaymentMethod: true,
     });
   });
   it("keeps unknown or missing provider facts unknown rather than guessed", async () => {
     const payment = await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody({
       status: "requires_customer_action", tax: null, currency: null, charge_type: null, subscription_id: null,
       checkout_session_id: undefined, product_cart: null, service_periods: undefined,
+      includes_usage: "true", is_update_payment_method: undefined,
     }))));
     expect(payment).toMatchObject({ status: "other", taxMinor: undefined, currency: "", cart: [] });
+    expect(payment.includesUsage).toBeUndefined();
+    expect(payment.isUpdatePaymentMethod).toBeUndefined();
     expect(payment.chargeType).toBeUndefined();
     expect(payment.subscriptionId).toBeUndefined();
     expect(payment.servicePeriods).toBeUndefined();
@@ -95,11 +106,25 @@ describe("Dodo reads", () => {
       expect(read.servicePeriods).toBeUndefined();
     }
   });
+  it.each(["Nov 1 2026", "2026", "2026-11-01", "2026-11-01T00:00:00", "2026-13-01T00:00:00Z", "1730419200000"])(
+    "accepts only ISO-8601 dates with a zone (%s is absent)", async (date) => {
+      const read = await fetchSubscription(config, "sub_1", fetchReturning(json(subscriptionBody({ previous_billing_date: date }))));
+      expect(read.previousBillingAt).toBeUndefined();
+      expect(await failure(fetchPayment(config, "pay_1", fetchReturning(json(paymentBody({ created_at: date }))))))
+        .toMatchObject({ retryable: false });
+    },
+  );
+  it("accepts ISO-8601 dates with fractions and offsets", async () => {
+    const read = await fetchSubscription(config, "sub_1", fetchReturning(json(subscriptionBody({
+      previous_billing_date: "2026-11-01T05:30:00.123456+05:30",
+    }))));
+    expect(read.previousBillingAt).toBe(Date.parse("2026-11-01T00:00:00.123Z"));
+  });
   it("normalizes a subscription and treats an invalid date as absent", async () => {
     expect(await fetchSubscription(config, "sub_1", fetchReturning(json(subscriptionBody({
       status: "past_due", next_billing_date: "soon", cancel_at_next_billing_date: true,
     }))))).toEqual({
-      subscriptionId: "sub_1", customerId: "cus_alice", productId: "prod_pro", status: "other",
+      subscriptionId: "sub_1", customerId: "cus_alice", productId: "prod_pro", quantity: 1, status: "other",
       previousBillingAt: Date.parse("2026-11-01T00:00:00Z"), nextBillingAt: undefined, cancelAtNextBillingDate: true,
     });
   });
@@ -112,11 +137,27 @@ describe("Dodo reads", () => {
     const error = await failure(fetchSubscription(config, "sub_1", fetchReturning(json({ message: KEY }, status))));
     expect(error).toMatchObject({ retryable: false, status });
   });
-  it("treats a network failure or refused redirect as retryable", async () => {
+  it("treats a network failure as retryable", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => {
-      throw new TypeError(`fetch failed: redirect to https://test.dodopayments.com/payments/pay_1?key=${KEY}`);
+      throw new TypeError(`fetch failed: https://test.dodopayments.com/payments/pay_1?key=${KEY}`);
     });
     expect(await failure(fetchPayment(config, "pay_1", fetchImpl))).toMatchObject({ retryable: true });
+  });
+  it.each([301, 302, 307, 308])("never follows a %s redirect and treats it as permanent", async (status) => {
+    const redirect = new Response(null, { status, headers: { location: "https://evil.test/payments/pay_1" } });
+    const fetchImpl = fetchReturning(redirect);
+    expect(await failure(fetchPayment(config, "pay_1", fetchImpl))).toMatchObject({ retryable: false, status });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+  it("treats an opaque redirect as permanent", async () => {
+    const opaque = { ok: false, status: 0, type: "opaqueredirect", body: null, headers: new Headers() } as unknown as Response;
+    expect(await failure(fetchPayment(config, "pay_1", fetchReturning(opaque)))).toMatchObject({ retryable: false });
+  });
+  it.each([503, 404])("cancels the body of an HTTP %s response", async (status) => {
+    const cancel = vi.fn();
+    const body = new ReadableStream({ pull: controller => controller.enqueue(new TextEncoder().encode(KEY)), cancel });
+    await failure(fetchPayment(config, "pay_1", fetchReturning(new Response(body, { status }))));
+    expect(cancel).toHaveBeenCalled();
   });
   it("aborts a read that exceeds the timeout", async () => {
     vi.useFakeTimers();
@@ -157,6 +198,7 @@ describe("Dodo reads", () => {
   it.each([
     ["another subscription id", subscriptionBody({ subscription_id: "sub_2" })],
     ["a missing product", subscriptionBody({ product_id: undefined })],
+    ["a non-integer quantity", subscriptionBody({ quantity: 1.5 })],
     ["a non-boolean cancel flag", subscriptionBody({ cancel_at_next_billing_date: "false" })],
   ])("treats a subscription with %s as permanent", async (_, body) => {
     expect(await failure(fetchSubscription(config, "sub_1", fetchReturning(json(body))))).toMatchObject({ retryable: false });

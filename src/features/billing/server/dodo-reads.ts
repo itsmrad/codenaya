@@ -11,6 +11,8 @@ const PROVIDER_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const CURRENCY = /^[A-Z]{3}$/;
 const CHARGE_TYPE = /^[a-z_]{1,32}$/;
 const PRORATION_FACTOR = /^\d{1,6}(\.\d{1,12})?$/;
+// ISO-8601 with an explicit zone only; Date.parse alone also accepts loose text like "Nov 1 2026".
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/;
 // The host comes from the validated mode alone (ADR 0016: no base-URL override).
 const BASE_URL: Record<DodoEnvironment, string> = {
   test_mode: "https://test.dodopayments.com",
@@ -43,8 +45,17 @@ function safeInteger(value: unknown): number {
 }
 /** ISO date to epoch ms; undefined when absent or invalid. */
 function epochMs(value: unknown): number | undefined {
-  const ms = typeof value === "string" && value.length <= 64 ? Date.parse(value) : NaN;
+  const ms = typeof value === "string" && ISO_DATE.test(value) ? Date.parse(value) : NaN;
   return Number.isFinite(ms) ? ms : undefined;
+}
+const optionalBoolean = (value: unknown) => (typeof value === "boolean" ? value : undefined);
+
+async function discard(response: Response) {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Best-effort cleanup: the body may already be locked or closed.
+  }
 }
 const customerId = (body: Json) => providerId(isRecord(body.customer) ? body.customer.customer_id : undefined);
 
@@ -57,15 +68,20 @@ async function readJson(config: DodoReconcilerConfig, path: string, fetchImpl: t
       response = await fetchImpl(`${BASE_URL[config.environment]}${path}`, {
         method: "GET",
         headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/json" },
-        redirect: "error",
+        // Never followed: a redirect is classified permanent below.
+        redirect: "manual",
         signal: controller.signal,
       });
     } catch {
-      // Network failure, refused redirect or timeout: transient by definition.
+      // Network failure or timeout: transient by definition.
       throw new DodoReadError(true);
     }
     const { status } = response;
-    if (!response.ok) throw new DodoReadError(!PERMANENT_STATUSES.has(status), status);
+    if (!response.ok) {
+      await discard(response);
+      const redirected = response.type === "opaqueredirect" || (status >= 300 && status < 400);
+      throw new DodoReadError(!redirected && !PERMANENT_STATUSES.has(status), status || undefined);
+    }
     let bytes: Uint8Array | null;
     try {
       bytes = await readBoundedBody(response, MAX_PROVIDER_BODY_BYTES);
@@ -73,7 +89,10 @@ async function readJson(config: DodoReconcilerConfig, path: string, fetchImpl: t
       // The stream broke or the timeout fired mid-body.
       throw new DodoReadError(true, status);
     }
-    if (!bytes) throw new DodoReadError(false, status);
+    if (!bytes) {
+      await discard(response);
+      throw new DodoReadError(false, status);
+    }
     try {
       const body: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
       if (isRecord(body)) return body;
@@ -134,6 +153,8 @@ export async function fetchPayment(
     createdAt,
     chargeType: typeof chargeType === "string" && CHARGE_TYPE.test(chargeType) ? chargeType : undefined,
     servicePeriods: servicePeriods(body.service_periods),
+    includesUsage: optionalBoolean(body.includes_usage),
+    isUpdatePaymentMethod: optionalBoolean(body.is_update_payment_method),
   };
 }
 
@@ -148,6 +169,7 @@ export async function fetchSubscription(
     subscriptionId,
     customerId: customerId(body),
     productId: providerId(body.product_id),
+    quantity: body.quantity == null ? undefined : safeInteger(body.quantity),
     status: typeof status === "string" && SUBSCRIPTION_STATUSES.has(status)
       ? status as ProviderSubscription["status"] : "other",
     previousBillingAt: epochMs(body.previous_billing_date),
