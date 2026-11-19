@@ -12,6 +12,8 @@ import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 
 import type { McpApprovalGate, McpAuditSink } from "../../adapters/agentkit";
+import { getSecretSealer, secretContext } from "../crypto";
+import type { EnvRefStore } from "./env-refs";
 import {
   digestArgs,
   refusalMessage,
@@ -164,6 +166,35 @@ export function createConvexAuditSink(ctx: ConvexMcpContext): McpAuditSink {
       // The join key back to the approval row, the step ids and the log lines.
       mcpInvocationId: entry.invocationId,
       projectConnectionId: entry.projectConnectionId as Id<"projectConnections">,
+    });
+  };
+}
+
+/**
+ * Seal each ref's value (AAD bound to the ref id) and store only ciphertext,
+ * bound to this project, owner and run.
+ */
+export function createConvexEnvRefStore(
+  ctx: ConvexMcpContext & { ownerId: string; messageId: Id<"messages"> },
+): EnvRefStore {
+  return async (refs, source) => {
+    const sealer = getSecretSealer();
+    const sealed = await Promise.all(
+      refs.map(async ({ refId, visibility, rule, value }) => ({
+        refId,
+        visibility,
+        rule,
+        ...(await sealer.seal(value, secretContext("mcpEnvRefs", refId, "value"))),
+      })),
+    );
+    await convex.mutation(api.envRefs.createEnvRefs, {
+      internalKey: ctx.internalKey,
+      projectId: ctx.projectId,
+      ownerId: ctx.ownerId,
+      messageId: ctx.messageId,
+      providerId: source.providerId,
+      toolName: source.toolName,
+      refs: sealed,
     });
   };
 }

@@ -107,14 +107,20 @@ const PUBLIC_BY_DESIGN_RULES = new Set(["google", "jwt", "bearer"]);
 
 const JWT_PAYLOAD = /^eyJ[A-Za-z0-9_-]+\.([A-Za-z0-9_-]+)\.[A-Za-z0-9_-]+$/;
 
-function isServiceRoleJwt(value: string): boolean {
+/** A JWT's decoded claims, or `undefined` when the value is not a parseable JWT. */
+export function jwtClaims(value: string): Record<string, unknown> | undefined {
   const payload = JWT_PAYLOAD.exec(value)?.[1];
-  if (!payload) return false;
+  if (!payload) return undefined;
   try {
-    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))).role === "service_role";
+    const claims: unknown = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    return claims && typeof claims === "object" ? (claims as Record<string, unknown>) : undefined;
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+function isServiceRoleJwt(value: string): boolean {
+  return jwtClaims(value)?.role === "service_role";
 }
 
 /**

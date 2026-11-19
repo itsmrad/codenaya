@@ -47,6 +47,7 @@ import { createTool, type Tool } from "@inngest/agent-kit";
 
 import { callMcpTool } from "../server/mcp/call-tool";
 import type { DiscoveredTool } from "../server/mcp/discover-tools";
+import type { EnvRefStore } from "../server/mcp/env-refs";
 import {
   createInvocationTracker,
   scopeRunner,
@@ -107,6 +108,8 @@ export interface CreateMcpToolsOptions {
   toolsByConnection: Map<string, DiscoveredTool[]>;
   /** Union of secrets to strip from results. */
   knownSecrets: readonly string[];
+  /** Mints env refs from redacted results; see `call-tool.ts`. */
+  storeEnvRefs?: EnvRefStore;
   approvalGate?: McpApprovalGate;
   audit?: McpAuditSink;
   /**
@@ -185,6 +188,7 @@ export function createMcpToolsForAgentKit(
     servers,
     toolsByConnection,
     knownSecrets,
+    storeEnvRefs,
     approvalGate,
     audit,
     runId,
@@ -343,6 +347,7 @@ export function createMcpToolsForAgentKit(
             tool,
             args: callArgs,
             knownSecrets,
+            storeEnvRefs,
             runner,
             claim,
             trace,
@@ -416,11 +421,12 @@ async function runMcpCall(params: {
   tool: DiscoveredTool;
   args: Record<string, unknown>;
   knownSecrets: readonly string[];
+  storeEnvRefs?: EnvRefStore;
   runner?: McpStepRunner;
   claim?: () => Promise<boolean>;
   trace: (stage: string, detail?: Record<string, unknown>) => void;
 }): Promise<McpCallOutcome> {
-  const { server, tool, args, knownSecrets, runner, claim, trace } = params;
+  const { server, tool, args, knownSecrets, storeEnvRefs, runner, claim, trace } = params;
 
   const alreadyApplied =
     `Not performed: "${tool.name}" on ${server.displayName} was already issued ` +
@@ -447,6 +453,7 @@ async function runMcpCall(params: {
       toolName: tool.name,
       args,
       knownSecrets,
+      storeEnvRefs,
     });
 
     trace("responded", {

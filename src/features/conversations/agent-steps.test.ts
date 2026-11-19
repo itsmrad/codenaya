@@ -20,6 +20,7 @@ import {
   runWaitHint,
   runWrittenPaths,
   sanitizeAgentText,
+  stepsFromResponse,
   toolResultError,
   turnHeartbeat,
   writtenFilePaths,
@@ -108,13 +109,22 @@ describe("describeToolCall", () => {
     ]);
   });
 
-  it("never exposes env var values", () => {
-    expect(
-      describeToolCall(
-        { name: "setEnvVar", input: { key: "API_URL", value: "secret" } },
-        pathOf,
-      ),
-    ).toEqual(["API_URL"]);
+  // setEnvVar is gone, but runs recorded before then still render as "Set env <KEY>".
+  it("never exposes env var values from a historical setEnvVar call", () => {
+    const call = { id: "e", name: "setEnvVar", input: { key: "API_URL", value: "CANARY_VALUE_123" } };
+    expect(describeToolCall(call, pathOf)).toEqual(["API_URL"]);
+    const response = {
+      output: [{ type: "tool_call", role: "assistant", stop_reason: "tool", tools: [{ type: "tool", ...call }] }],
+      raw: "{}",
+    } as Parameters<typeof stepsFromResponse>[0];
+    const steps = stepsFromResponse(response, 0, 0, pathOf);
+    expect(steps).toMatchObject([{ kind: "tool", tool: "setEnvVar", targets: ["API_URL"] }]);
+    expect(JSON.stringify(steps)).not.toContain("CANARY_VALUE_123");
+  });
+
+  it("shows only the variable name for setEnvVarFromRef", () => {
+    const call = { name: "setEnvVarFromRef", input: { name: "VITE_SUPABASE_URL", ref: "ref_0123" } };
+    expect(describeToolCall(call, pathOf)).toEqual(["VITE_SUPABASE_URL"]);
   });
 
   it("names the loaded skill", () => {

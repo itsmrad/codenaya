@@ -5,11 +5,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { withEditorModel } from "@/features/ai-providers/server/editor-model";
+import { isSecretPath } from "../../../../convex/secretFiles";
 import {
   SUGGESTION_RATE_LIMIT,
   checkRateLimit,
   rateLimitedResponse,
 } from "@/lib/rate-limit";
+
+const MAX_FILE_NAME_LENGTH = 1024;
 
 const suggestionSchema = z.object({
   suggestion: z
@@ -89,6 +92,12 @@ export async function POST(request: Request) {
       nextLines,
       lineNumber,
     } = data;
+
+    // A secret file's content never goes to the model; it just gets no ghost text.
+    // No real file name is this long, and the cap bounds the name matching.
+    if (fileName.length > MAX_FILE_NAME_LENGTH || isSecretPath(fileName)) {
+      return NextResponse.json({ suggestion: "" });
+    }
 
     const prompt = SUGGESTION_PROMPT
       .replace("{fileName}", fileName)

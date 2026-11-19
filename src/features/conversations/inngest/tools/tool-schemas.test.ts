@@ -15,7 +15,7 @@ import { createRenameFileTool } from "./rename-file";
 import { createScaffoldViteAppTool } from "./scaffold-vite-app";
 import { createScrapeUrlsTool } from "./scrape-urls";
 import { createSearchFilesTool } from "./search-files";
-import { createSetEnvVarTool } from "./set-env-var";
+import { createSetEnvVarFromRefTool } from "./set-env-var-from-ref";
 import { createUpdateFileTool } from "./update-file";
 import { createWriteFilesTool } from "./write-files";
 
@@ -36,7 +36,7 @@ const agentTools: Tool.Any[] = [
   createDeleteFilesTool(opts),
   createCheckBuildTool(opts),
   createScrapeUrlsTool(),
-  createSetEnvVarTool(opts),
+  createSetEnvVarFromRefTool({ ...opts, messageId: "m1" as Id<"messages"> }),
   createLoadSkillTool({ skills: [{ name: "s", description: "d", body: "b", source: "builtin" }] }),
 ];
 

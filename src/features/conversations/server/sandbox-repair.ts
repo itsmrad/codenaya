@@ -22,6 +22,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
+import { isSecretPath } from "../../../../convex/secretFiles";
 
 /**
  * Build check and model repair for one caller-owned sandbox (SWARM workers,
@@ -76,9 +77,8 @@ const SKIPPED_DIRS = new Set([
 ]);
 /** Written by `vite build`: a repair edit would be overwritten, so repairs may not touch it. */
 const ROUTE_TREE = "src/routeTree.gen.ts";
-const isEnvFile = (path: string) => /(^|\/)\.env(\.|$)/.test(path);
 const readable = (path: string) =>
-  isSafeProjectPath(path) && !SKIPPED_DIRS.has(path.split("/")[0]) && !isEnvFile(path);
+  isSafeProjectPath(path) && !SKIPPED_DIRS.has(path.split("/")[0]) && !isSecretPath(path);
 
 export type BuildErrorKind = "static" | "install" | "type" | "build";
 export type BuildError = { file?: string; line?: number; message: string; kind: BuildErrorKind };
