@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ALL_BUILTIN_SKILLS } from "../builtin";
 import { buildSkillsPromptSection, buildSupabaseHintSection, formatSkill } from "./prompt";
 import type { AgentSkill } from "./resolve-skills";
 
@@ -75,18 +76,21 @@ describe("buildSupabaseHintSection (#228)", () => {
     expect(section).toContain("login, sign-up, accounts, or data saved across devices or users");
     expect(section).not.toContain("saving data");
     expect(section).toContain("offer the built-in supabase-auth-db skill");
-    expect(section).toContain("Otherwise ask the user to add them in the project's Environment Variables dialog");
+    expect(section).toContain("If they are not set, ask the user to add them in the project's Environment Variables dialog");
     expect(section).toContain("Never guess or invent them");
     expect(section).not.toContain("loadSkill");
   });
 
-  it("reads the values through a connected Supabase integration instead of asking", () => {
+  it("names the variables for the user to add, never storing values itself", () => {
     const section = buildSupabaseHintSection([findSkills]);
 
-    expect(section).toContain(
-      "If the Supabase integration is connected, read VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY",
-    );
-    expect(section).toContain("with its tools and store them with setEnvVar");
+    expect(section).toContain("The app reads VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY");
+    expect(section).toContain("never ask for them in chat");
+    expect(section).not.toContain("setEnvVar");
+  });
+
+  it("leaves no built-in skill telling the agent to store values", () => {
+    for (const skill of ALL_BUILTIN_SKILLS) expect(skill.body).not.toContain("setEnvVar");
   });
 
   it("loads the skill when the project has it enabled", () => {

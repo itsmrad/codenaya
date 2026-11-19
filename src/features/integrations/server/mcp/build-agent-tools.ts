@@ -287,16 +287,16 @@ export function buildIntegrationsPromptSection(
       ...connectedSummaries.map((summary) => `- ${summary}`),
       "",
       "Never copy a credential, connection string or API key returned by these " +
-        "tools into a project file. Store it with setEnvVar and reference it via " +
-        "process.env instead. Values shown as " +
+        "tools into a project file or repeat it in a reply. Values shown as " +
         "[redacted-by-codenaya] were removed for safety — do not attempt to " +
         "reconstruct or guess them.",
       "The credential that authenticates this MCP connection is managed by the " +
-        "server. Never request it, place it in an MCP config file, or pass it to " +
-        "setEnvVar; invoke the connected tool directly.",
+        "server. Never request it, place it in an MCP config file, or put it in an " +
+        "environment variable; invoke the connected tool directly.",
       "",
-      "After provisioning something, store its configuration with setEnvVar so the " +
-        "preview can connect. Use a NEXT_PUBLIC_ / VITE_ prefix only for values that " +
+      "After provisioning something, read its configuration in code from environment " +
+        "variables and tell the user which variable names to add in the project's " +
+        "Environment Variables panel. Use a NEXT_PUBLIC_ / VITE_ prefix only for values that " +
         "are genuinely safe in a browser bundle (a project URL, an anon key); " +
         "everything else — service-role keys, database URLs, secret API keys — must " +
         "use an unprefixed name so it is encrypted and withheld from the in-browser " +

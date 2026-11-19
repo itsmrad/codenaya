@@ -14,6 +14,7 @@ import {
   OUT_OF_CREDITS_NOTE,
   OUT_OF_CREDITS_REPLY,
   SWARM_DELEGATE_NUDGE,
+  envVarsPromptSection,
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { createSearchFilesTool } from './tools/search-files';
@@ -29,7 +30,6 @@ import { createDeleteFilesTool } from './tools/delete-files';
 import { createWriteFilesTool } from './tools/write-files';
 import { buildProjectTreePromptSection, getProjectFiles } from './tools/paths';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
-import { createSetEnvVarTool } from './tools/set-env-var';
 import { createLoadSkillTool } from './tools/load-skill';
 import { createScaffoldViteAppTool } from './tools/scaffold-vite-app';
 import { createCheckBuildTool } from './tools/check-build';
@@ -383,7 +383,7 @@ export const processMessage = inngest.createFunction(
       projectConnectionId: string;
       toolBaseline: Array<{ name: string; digest: string }>;
     }> = [];
-    // Project owner, needed by setEnvVar and the approval gate. Resolved from the
+    // Project owner, needed by checkBuild and the approval gate. Resolved from the
     // project row so those act on behalf of whoever owns the work.
     let mcpOwnerId: string | undefined;
     let projectInstructions: string | undefined;
@@ -391,8 +391,8 @@ export const processMessage = inngest.createFunction(
     let projectTheme: ProjectTheme | undefined;
 
     try {
-      // Fetched unconditionally: the owner is needed by setEnvVar, which is useful
-      // whether or not this project has any MCP connections.
+      // Fetched unconditionally: checkBuild needs the owner whether or not this
+      // project has any MCP connections.
       const project = await convex.query(api.system.getProjectById, {
         internalKey,
         projectId,
@@ -605,6 +605,14 @@ export const processMessage = inngest.createFunction(
     const firstBuildNote = recoveryNote ?? STARTER_NOTES[app].firstBuild;
     // Start's rules ride only on Start runs; the static prompt stays lean for every other app.
     const startApp = app === "tanstack-start";
+    // Names only: the rows carry values, which must not reach the model.
+    const envVarNames = await convex
+      .query(api.system.getEnvVarsForSandbox, { internalKey, projectId })
+      .then((rows) => rows.map(({ key }) => key))
+      .catch((error) => {
+        console.error("[env-vars] could not read the project's variable names", error);
+        return undefined;
+      });
     const systemPrompt = [
       CODING_AGENT_SYSTEM_PROMPT,
       startApp ? TANSTACK_START_NOTE : "",
@@ -612,6 +620,7 @@ export const processMessage = inngest.createFunction(
       buildSkillsPromptSection(skills),
       buildSupabaseHintSection(skills),
       buildIntegrationsPromptSection(mcpSummaries, mcpWarnings),
+      envVarsPromptSection(envVarNames),
       projectTree,
       buildSkillsPromptSection([], forced, unavailable),
       planMode ? PLAN_MODE_PROMPT : "",
@@ -704,9 +713,6 @@ export const processMessage = inngest.createFunction(
       createDeleteFilesTool({ projectId, internalKey, messageId }),
       createCheckBuildTool({ projectId, internalKey, ownerId: mcpOwnerId }),
       createScrapeUrlsTool(),
-      ...(mcpOwnerId
-        ? [createSetEnvVarTool({ projectId, ownerId: mcpOwnerId, internalKey })]
-        : []),
       ...(skills.length > 0 ? [createLoadSkillTool({ skills })] : []),
       ...mcpTools,
       ...swarm.tools,

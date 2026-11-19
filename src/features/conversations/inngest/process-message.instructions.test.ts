@@ -21,12 +21,14 @@ import { CODING_AGENT_SYSTEM_PROMPT } from "./constants";
 import { drive, text } from "./process-message.driver";
 
 let project: { ownerId: string; instructions?: string };
+let envVars: () => unknown = () => [];
 
 const QUERIES: Record<string, () => unknown> = {
   "system:getConversationById": () => ({ title: "Existing chat" }),
   "system:getRecentMessages": () => [],
   "system:getProjectById": () => project,
   "system:getProjectMcpConnections": () => [],
+  "system:getEnvVarsForSandbox": () => envVars(),
   "system:getProjectFiles": () => [],
   "system:getProjectSkills": () => [
     {
@@ -60,6 +62,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   mocks.query.mockImplementation(async (ref) => QUERIES[getFunctionName(ref)]?.());
   mocks.mutation.mockResolvedValue(null);
+  envVars = () => [];
 });
 
 describe("processMessage project instructions", () => {
@@ -86,5 +89,34 @@ describe("processMessage project instructions", () => {
 
     expect(prompt).not.toContain("## Project instructions");
     expect(prompt).toContain(`${CODING_AGENT_SYSTEM_PROMPT}\n\n## Available skills`);
+  });
+});
+
+describe("processMessage environment variables", () => {
+  it("lists the project's variable names but never their values", async () => {
+    project = { ownerId: "user_1" };
+    envVars = () => [
+      { key: "VITE_API_URL", visibility: "public", plainValue: "CANARY_VALUE_123", maskedPreview: "CANARY_VALUE_123" },
+      { key: "STRIPE_SECRET_KEY", visibility: "secret", maskedPreview: "CANARY_MASK_456", ciphertext: "CANARY_CIPHER_789" },
+    ];
+
+    const prompt = await systemPrompt();
+
+    expect(prompt).toContain("Set in this project (names only): VITE_API_URL, STRIPE_SECRET_KEY.");
+    expect(prompt).not.toMatch(/CANARY_/);
+    expect(prompt).not.toContain("setEnvVar");
+  });
+
+  it("still gives the names-only guidance when the names can't be read", async () => {
+    project = { ownerId: "user_1" };
+    envVars = () => {
+      throw new Error("Convex unavailable");
+    };
+
+    const prompt = await systemPrompt();
+
+    expect(prompt).toContain("## Environment variables");
+    expect(prompt).not.toContain("Set in this project");
+    expect(prompt).toContain("Environment Variables panel");
   });
 });
