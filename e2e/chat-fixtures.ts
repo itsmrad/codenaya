@@ -65,7 +65,11 @@ export const chatScrollsHorizontally = (page: Page) =>
     const scroller = Array.from(log.querySelectorAll("*")).find(
       (element) => /auto|scroll/.test(getComputedStyle(element).overflowY),
     );
-    return !scroller || getComputedStyle(scroller).overflowX !== "hidden";
+    return (
+      !scroller ||
+      getComputedStyle(scroller).overflowX !== "hidden" ||
+      scroller.scrollWidth > scroller.clientWidth + 1
+    );
   });
 
 /**

@@ -31,7 +31,7 @@ export const ConversationContent = ({
     // The transcript scrolls vertically only: wide content wraps or scrolls in
     // its own box instead of adding a horizontal scrollbar to the panel.
     scrollClassName="overflow-x-hidden"
-    className={cn("flex min-w-0 flex-col gap-8 p-4", className)}
+    className={cn("flex flex-col gap-8 p-4", className)}
     {...props}
   />
 );
