@@ -204,6 +204,8 @@ export const repairBuild = async ({
   const result = await verifyAndFix({
     ...options,
     sandbox,
+    // `provision` writes project files only, never variables or secret files: no value to print.
+    secrets: [],
     ...(fallbackModel
       ? { fallback: { model: fallbackModel, after: MAX_SERVER_REPAIRS }, maxAttempts: MAX_SERVER_REPAIRS + 1 }
       : { maxAttempts: MAX_SERVER_REPAIRS }),

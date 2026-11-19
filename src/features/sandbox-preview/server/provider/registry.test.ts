@@ -13,6 +13,7 @@ import { countLive, listAll } from "./fanout";
 import { clientSandboxId } from "./ids";
 import {
   createSandbox,
+  fanoutHealth,
   getConfiguredProviders,
   getDefaultProvider,
   getDefaultProviderOrNull,
@@ -61,6 +62,16 @@ describe("sandbox provider registry", () => {
       );
       expect(await countLive(providers, { userId: "u1" })).toBe(1);
       expect(mocks.list).toHaveBeenCalledWith(expect.objectContaining({ limit: 3, query: { metadata: { userId: "u1" }, state: ["running"] } }));
+
+      // The fan-out policy changes nothing for the primary: one list, today's query, failures propagate.
+      mocks.list.mockClear();
+      const health = fanoutHealth();
+      expect(health.primary).toBe("e2b");
+      expect(await countLive(providers, { userId: "u1" }, { ...health, skip: "cooling" })).toBe(1);
+      expect(mocks.list).toHaveBeenCalledTimes(1);
+      expect(mocks.list.mock.lastCall?.[0].requestTimeoutMs).toBeUndefined();
+      mocks.list.mockReturnValue({ nextItems: async () => { throw new Error("e2b down"); } });
+      await expect(listAll(providers, { metadata: { userId: "u1" } }, { ...health, skip: "failing" })).rejects.toThrow();
     });
 
     it("creates once on the primary, with no cooldown after a rate limit", async () => {

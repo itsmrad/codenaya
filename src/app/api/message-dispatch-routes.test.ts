@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   mutation: vi.fn(),
   platform: vi.fn(),
   inngestSend: vi.fn(),
+  resolveEnv: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
@@ -16,6 +17,10 @@ vi.mock("@/lib/convex-client", async () => {
     convex: { query: withEnvPlatform(mocks.query, mocks.platform), mutation: mocks.mutation },
   };
 });
+vi.mock("@/features/integrations/server/env/resolve-env", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/integrations/server/env/resolve-env")>()),
+  resolveProjectEnv: mocks.resolveEnv,
+}));
 vi.mock("@/inngest/client", () => ({
   inngest: { send: mocks.inngestSend },
 }));
@@ -41,6 +46,8 @@ import {
 import { PROMO_ENDS_AT } from "@/features/promotions/github-promo";
 import { SWARM_OFF_ERROR } from "@/features/conversations/server/swarm-off";
 import { autoRouteModel } from "@/features/ai-providers/auto-route";
+import { REDACTION_UNAVAILABLE_NOTICE } from "@/features/integrations/server/env/stream-redactor";
+import { buildFixPrompt } from "@/features/sandbox-preview/utils/app-error";
 
 const post = (body: unknown) =>
   new Request("http://localhost/api", {
@@ -447,5 +454,74 @@ describe("cancelling processing messages while the backend is down", () => {
 
     expect(res.status).toBe(502);
     cancelledStuckMessage();
+  });
+});
+
+describe("POST /api/messages with a preview fix prompt", () => {
+  const CANARY = "dummy-canary-fix-prompt-0001";
+  const forms = [CANARY, Buffer.from(CANARY).toString("base64"), Buffer.from(CANARY).toString("hex")];
+  // Overlay text from the preview sandbox, and terminal lines the stream already redacted.
+  const fix = buildFixPrompt(
+    { kind: "runtime", message: `bad DSN ${forms[0]}`, stack: `at ${forms[1]}\nat ${forms[2]}` },
+    "API_KEY=[redacted]\n",
+  );
+  const send = (message: string) => messagesPOST(post({ conversationId: "c1", message }));
+  const stored = () => mocks.mutation.mock.calls.find(([, args]) => args.role === "user")?.[1].content as string;
+  const dispatched = () => mocks.inngestSend.mock.calls[0][0].data.message as string;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    resetRateLimits();
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "test-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.auth.mockResolvedValue({ userId: "user_1" });
+    const answers: Record<string, () => unknown> = {
+      "system:getOwnedConversation": () => ({ _id: "c1", projectId: "p1" }),
+      "system:getProcessingMessages": () => [],
+      "system:getEnvVarsForSandbox": () => [{ _id: "env_1", key: "DATABASE_URL", visibility: "secret" }],
+    };
+    mocks.query.mockImplementation(async (ref) => answers[getFunctionName(ref)]?.());
+    mocks.mutation.mockImplementation(async (_ref, args) => (args.role === "assistant" ? "m_assistant" : null));
+    mocks.inngestSend.mockResolvedValue({ ids: ["evt_1"] });
+    mocks.resolveEnv.mockResolvedValue({ publicEntries: [], secretEntries: [{ key: "DATABASE_URL", value: CANARY }], failedKeys: [] });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("stores and dispatches it with the project's values masked, raw, base64 or hex", async () => {
+    expect((await send(fix)).status).toBe(200);
+
+    for (const text of [stored(), dispatched()]) {
+      expect(text).toContain("bad DSN [redacted]");
+      for (const form of forms) expect(text).not.toContain(form);
+    }
+  });
+
+  it("leaves the placeholders it already holds intact", async () => {
+    mocks.resolveEnv.mockResolvedValue({ publicEntries: [], secretEntries: [{ key: "SHORT", value: "act" }], failedKeys: [] });
+
+    await send(fix);
+
+    expect(stored()).toContain("API_KEY=[redacted]");
+  });
+
+  it("sends the notice instead when the project's values cannot be opened", async () => {
+    mocks.resolveEnv.mockRejectedValue(new Error("CODENAYA_LOCAL_KEK is not set"));
+
+    await send(fix);
+
+    expect(stored()).toBe(REDACTION_UNAVAILABLE_NOTICE);
+    expect(dispatched()).toBe(REDACTION_UNAVAILABLE_NOTICE);
+  });
+
+  it("leaves any other message as it is, without opening the values", async () => {
+    await send(`Use ${CANARY} as the title`);
+
+    expect(stored()).toBe(`Use ${CANARY} as the title`);
+    expect(mocks.resolveEnv).not.toHaveBeenCalled();
   });
 });
