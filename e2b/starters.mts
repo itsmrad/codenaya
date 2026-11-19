@@ -1,6 +1,6 @@
 /**
  * Starter loading and npm-cache warmup shared by the sandbox image builds
- * (e2b/build-template.mts, blaxel/build-template.mts).
+ * (e2b/build-template.mts, blaxel/build-template.mts, daytona/build-snapshot.mts).
  */
 import * as nodeModule from "node:module";
 

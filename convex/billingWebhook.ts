@@ -1,13 +1,13 @@
 import { v } from "convex/values";
 import { Webhook } from "svix";
 
-import { readDodoConfig, type DodoDeployment } from "../src/features/billing/server/dodo-config";
+import { readBoundedBody } from "../src/features/billing/server/bounded-body";
 import { internal } from "./_generated/api";
 import { httpAction, internalQuery } from "./_generated/server";
+import { LOG_PREFIX, readConvexBillingConfig } from "./billingEnv";
 import { billingModeValidator } from "./schema";
 
 export const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
-const DEPLOYMENTS: readonly string[] = ["development", "preview", "staging", "production"] satisfies DodoDeployment[];
 // Exact Dodo event types (SDK 2.63.0) that move money or access, each with the resource id its
 // payload always carries. Every other authenticated type, even a new one in a known family, is ignored.
 const FINANCIAL_EVENTS = new Map<string, "paymentId" | "subscriptionId">([
@@ -36,46 +36,16 @@ const respond = (status: number, text?: string) => new Response(text ?? null, { 
 
 /** Mode, business and verifiers come only from this deployment's env; null fails closed. */
 function readReceiver() {
-  const deployment = process.env.CODENAYA_DEPLOYMENT;
-  if (!deployment || !DEPLOYMENTS.includes(deployment)) {
-    console.error("[billingWebhook] receiver not configured: CODENAYA_DEPLOYMENT is missing or invalid.");
-    return null;
-  }
+  const config = readConvexBillingConfig("convex-receiver");
+  if (!config) return null;
   try {
-    const config = readDodoConfig("convex-receiver", deployment as DodoDeployment);
     const keys = [config.webhookKey, config.webhookKeyPrevious].filter((key): key is string => !!key);
     return { mode: config.environment, businessId: config.businessId, verifiers: keys.map(key => new Webhook(key)) };
   } catch (error) {
-    // Config errors name the variable only, never its value.
-    console.error("[billingWebhook] receiver not configured:", error instanceof Error ? error.message : "unknown error");
+    // An undecodable or empty signing key is misconfiguration; the verifier's error never includes the key.
+    console.error(`${LOG_PREFIX["convex-receiver"]} not configured:`, error instanceof Error ? error.message : "unknown error");
     return null;
   }
-}
-
-/** Reads at most MAX_WEBHOOK_BODY_BYTES; null when the body is larger. */
-async function readBoundedBody(request: Request): Promise<Uint8Array<ArrayBuffer> | null> {
-  if (Number(request.headers.get("content-length")) > MAX_WEBHOOK_BODY_BYTES) return null;
-  if (!request.body) return new Uint8Array();
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_WEBHOOK_BODY_BYTES) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const body = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
 }
 
 function signedHeaders(headers: Headers): SignedHeaders | null {
@@ -158,7 +128,7 @@ export const receiveDodoWebhook = httpAction(async (ctx, request) => {
     // Non-2xx so Dodo retries once the deployment is configured.
     return respond(503, "Webhook not configured");
   }
-  const bytes = await readBoundedBody(request);
+  const bytes = await readBoundedBody(request, MAX_WEBHOOK_BODY_BYTES);
   if (!bytes) return respond(413, "Payload too large");
   const headers = signedHeaders(request.headers);
   const body = decodeUtf8(bytes);
