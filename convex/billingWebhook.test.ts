@@ -249,6 +249,9 @@ describe("POST /billing/webhook", () => {
     ["development with live mode", { DODO_PAYMENTS_ENVIRONMENT: "live_mode" }],
     ["absent webhook key", { DODO_PAYMENTS_WEBHOOK_KEY: undefined }],
     ["placeholder webhook key", { DODO_PAYMENTS_WEBHOOK_KEY: "PLACEHOLDER_WEBHOOK_KEY" }],
+    ["undecodable webhook key", { DODO_PAYMENTS_WEBHOOK_KEY: "whsec_not*base64!" }],
+    ["empty decoded webhook key", { DODO_PAYMENTS_WEBHOOK_KEY: "whsec_" }],
+    ["undecodable previous webhook key", { DODO_PAYMENTS_WEBHOOK_KEY_PREVIOUS: "whsec_not*base64!" }],
     ["absent business", { DODO_PAYMENTS_BUSINESS_ID: undefined }],
   ])("fails closed with 503 for %s", async (_, overrides: Record<string, string | undefined>) => {
     const t = setup();
@@ -259,5 +262,6 @@ describe("POST /billing/webhook", () => {
     const logged = log.mock.calls.flat().join(" ");
     expect(logged).toMatch(/^\[billingWebhook\] receiver not configured/);
     expect(logged).not.toContain(KEY);
+    for (const value of Object.values(overrides)) if (value?.startsWith("whsec_")) expect(logged).not.toContain(value);
   });
 });
