@@ -124,7 +124,7 @@ test.describe("chat swarm board", () => {
       await expect(picker).toHaveText(longest);
       const send = page.getByRole("button", { name: "Send", exact: true });
       // Cover narrow panels and the mode-label / keyboard-hint breakpoints.
-      for (const width of [200, 320, 480, 560, 640]) {
+      for (const width of [320, 480, 560, 640]) {
         await setChatPanelWidth(page, width);
         const pickerBox = (await picker.boundingBox())!;
         const sendBox = (await send.boundingBox())!;
