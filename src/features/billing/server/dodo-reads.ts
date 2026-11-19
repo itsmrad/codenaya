@@ -7,7 +7,7 @@ import type { DodoEnvironment, DodoReconcilerConfig } from "./dodo-config";
 export const DODO_READ_TIMEOUT_MS = 15_000;
 export const MAX_PROVIDER_BODY_BYTES = 256 * 1024;
 const MAX_LIST_ITEMS = 20;
-const PROVIDER_ID = /^[A-Za-z0-9_-]{1,128}$/;
+export const PROVIDER_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const CURRENCY = /^[A-Z]{3}$/;
 const CHARGE_TYPE = /^[a-z_]{1,32}$/;
 const PRORATION_FACTOR = /^\d{1,6}(\.\d{1,12})?$/;
@@ -18,7 +18,8 @@ const BASE_URL: Record<DodoEnvironment, string> = {
   test_mode: "https://test.dodopayments.com",
   live_mode: "https://live.dodopayments.com",
 };
-const PERMANENT_STATUSES = new Set([400, 401, 403, 404, 422]);
+/** Definite answers: the provider refused the request, so nothing was read or created. */
+export const PERMANENT_STATUSES = new Set([400, 401, 403, 404, 422]);
 const PAYMENT_STATUSES = new Set(["succeeded", "processing", "failed", "cancelled"]);
 const SUBSCRIPTION_STATUSES = new Set(["pending", "active", "on_hold", "paused", "cancelled", "failed", "expired"]);
 
@@ -29,8 +30,8 @@ export class DodoReadError extends Error {
   }
 }
 
-type Json = Record<string, unknown>;
-const isRecord = (value: unknown): value is Json =>
+export type Json = Record<string, unknown>;
+export const isRecord = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const malformed = () => new DodoReadError(false);
 
@@ -59,15 +60,25 @@ async function discard(response: Response) {
 }
 const customerId = (body: Json) => providerId(isRecord(body.customer) ? body.customer.customer_id : undefined);
 
-async function readJson(config: DodoReconcilerConfig, path: string, fetchImpl: typeof fetch): Promise<Json> {
+/**
+ * One attempt, never retried here. A POST when `body` is given (the checkout creates);
+ * a redirect is never followed and surfaces as a DodoReadError without a permanent status.
+ */
+export async function readJson(
+  config: { environment: DodoEnvironment; apiKey: string }, path: string, fetchImpl: typeof fetch, body?: Json,
+): Promise<Json> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DODO_READ_TIMEOUT_MS);
   try {
     let response: Response;
     try {
       response = await fetchImpl(`${BASE_URL[config.environment]}${path}`, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${config.apiKey}`, Accept: "application/json" },
+        method: body ? "POST" : "GET",
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`, Accept: "application/json",
+          ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
         // Never followed: a redirect is classified permanent below.
         redirect: "manual",
         signal: controller.signal,
@@ -94,8 +105,8 @@ async function readJson(config: DodoReconcilerConfig, path: string, fetchImpl: t
       throw new DodoReadError(false, status);
     }
     try {
-      const body: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-      if (isRecord(body)) return body;
+      const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+      if (isRecord(parsed)) return parsed;
     } catch {
       // Falls through to the permanent error below.
     }

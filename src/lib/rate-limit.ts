@@ -295,6 +295,12 @@ export const WAITLIST_RATE_LIMIT: RateLimitConfig = {
   windowMs: 10 * 60_000,
 };
 
+/** Starting a checkout may create a Dodo customer and session; per user. */
+export const BILLING_CHECKOUT_RATE_LIMIT: RateLimitConfig = {
+  scope: "billing-checkout",
+  limit: 5,
+  windowMs: 60_000,
+};
 
 /** Standard 429 response with a `Retry-After` header. */
 export function rateLimitedResponse(result: RateLimitResult): Response {

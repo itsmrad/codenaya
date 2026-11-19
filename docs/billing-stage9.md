@@ -1,9 +1,8 @@
 # Checkout bridge (stage 9)
 
-Implements the Convex side of ADR 0016's checkout: the server-only bridge a
-Next route calls to start a Pro or top-up checkout. Billing stays off
-(`CODENAYA_BILLING_ENABLED` unset), and nothing calls the bridge yet; the Next
-route (`POST /api/billing/checkout`) builds on it.
+Implements ADR 0016's checkout: the server-only Convex bridge and the Next
+route that calls it to start a Pro or top-up checkout. Billing stays off
+(`CODENAYA_BILLING_ENABLED` unset), so the route answers 404 until enabled.
 
 ## Bridge (`convex/billingCheckout.ts`)
 
@@ -55,6 +54,40 @@ ID counts as a lost response. No path binds a `paymentId`: only settlement does.
 The lock is released only by settlement, a definite `not_created`, or (later
 stages) provider evidence or an audited operator action; never by time or the
 browser.
+
+## Route (`POST /api/billing/checkout`)
+
+Browser input is only `{ sku: "pro_monthly" | "top_up" }`; the answer is
+`200 { url }` (Dodo's hosted checkout) or `{ error, code }`, always with
+`Cache-Control: no-store`. Order: signed-in (401), same origin (403
+`cross_origin`), JSON (415), per-user rate limit `BILLING_CHECKOUT_RATE_LIMIT`
+(5/min, 429); billing disabled → 404; enabled but `CODENAYA_DEPLOYMENT` missing
+or config invalid → 503 `billing_unavailable`; body (400); top-up while
+top-ups are off → 404. Then at most two `prepareCheckout` steps:
+
+- `create_customer`: the Clerk primary email and name (server-side) go to
+  `POST /customers` (none → lease released, 409 `email_required`); the result is
+  recorded and the loop continues (lost or refused → 502 `checkout_unavailable`).
+- `create_checkout`: `POST /checkouts` with the server-chosen product,
+  quantity 1, the bound customer, the fixed `DODO_PAYMENTS_RETURN_URL`,
+  `metadata { purchaseId: intentId, purpose: sku }` and
+  `feature_flags.allow_discount_code: false`. Created with an allowed URL →
+  200; created without one → 502 `checkout_unavailable`; lost → 502
+  `checkout_unknown`; definite 4xx → 502 `checkout_failed`.
+- `resume` → 200; `pending` → 409 `checkout_pending`; `refused` → 409 with its
+  code, or 503 for `unavailable`; `FORBIDDEN` → 403 `billing_on_hold`.
+
+Each create is one attempt (`src/features/billing/server/dodo-checkout.ts`,
+reusing the read transport: mode host, 15 s timeout, no redirects, bounded
+body). A definite 400/401/403/404/422 is `not_created`; anything else is
+`unknown` and keeps the lock. If recording a result in Convex fails after a
+create, the route answers 502 `checkout_unknown` and never creates again.
+Logs carry refs and outcome kinds only.
+
+Next needs `CODENAYA_DEPLOYMENT` (`development` locally, `production` on
+Vercel Production, unset on Preview) besides the existing billing variables.
+`DODO_PAYMENTS_BRAND_ID` stays accepted but is not sent: the checkout create in
+`dodopayments` 2.63.0 has no brand field.
 
 ## Shared changes
 
