@@ -29,7 +29,7 @@ import {
 } from "@/features/sandbox-preview/server/project-sandbox";
 import { runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
 import { parseProviderConfig } from "@/features/sandbox-preview/server/provider/config";
-import { clientSandboxId, toPublicSandboxId } from "@/features/sandbox-preview/server/provider/ids";
+import { canonicalSandboxIdOrNull, clientSandboxId, toPublicSandboxId } from "@/features/sandbox-preview/server/provider/ids";
 import {
   createSandbox,
   getConfiguredProviders,
@@ -42,8 +42,10 @@ import {
 } from "@/features/sandbox-preview/server/provider/types";
 import { recordSandboxRunning } from "@/features/sandbox-preview/server/record-sandbox-running";
 import {
+  REVOKED_RUNTIME_MESSAGE,
   RuntimeAdmissionError,
   admitSecretRuntime,
+  killRevokedRuntimes,
 } from "@/features/sandbox-preview/server/runtime-fence";
 import {
   forgetSandbox,
@@ -209,6 +211,16 @@ export async function POST(request: Request) {
 
     if (notFound) {
       return notFound;
+    }
+
+    // Retry kills of this project's outdated previews first: one whose kill
+    // failed blocks admission, and one being resumed must not be.
+    const swept = await killRevokedRuntimes(internalKey, { projectId });
+    if (resumeSandboxId && swept.sandboxIds.includes(canonicalSandboxIdOrNull(resumeSandboxId) ?? "")) {
+      return Response.json(
+        { error: REVOKED_RUNTIME_MESSAGE, code: "transient" satisfies SandboxErrorKind },
+        { status: 409 },
+      );
     }
   }
 

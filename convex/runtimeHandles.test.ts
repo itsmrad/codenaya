@@ -35,7 +35,13 @@ async function setup() {
   const admit = (handleId: Id<"runtimeHandles">) =>
     t.mutation(api.runtimeHandles.admitRuntime, { internalKey: INTERNAL_KEY, handleId });
   const state = (handleId: Id<"runtimeHandles">) => t.run(async (ctx) => (await ctx.db.get("runtimeHandles", handleId))?.state);
-  return { t, projectId, alice, setSecret, read, register, admit, state };
+  const deleteVar = (key = "API_KEY", ownerId = ALICE) =>
+    t.mutation(api.envVars.deleteEnvVar, { internalKey: INTERNAL_KEY, projectId, ownerId, key });
+  const revoked = (scope: { projectId?: Id<"projects">; sandboxId?: string } = {}) =>
+    t.query(api.runtimeHandles.listRevokedHandles, { internalKey: INTERNAL_KEY, ...scope });
+  const recordKill = (handleId: Id<"runtimeHandles">, killed: boolean) =>
+    t.mutation(api.runtimeHandles.recordKill, { internalKey: INTERNAL_KEY, handleId, killed });
+  return { t, projectId, alice, setSecret, read, register, admit, state, deleteVar, revoked, recordKill };
 }
 
 describe("runtime admission fence", () => {
@@ -58,11 +64,11 @@ describe("runtime admission fence", () => {
   });
 
   test("a delete after the read and before register refuses admission", async () => {
-    const { setSecret, read, alice, register, admit, state } = await setup();
-    const id = await setSecret();
+    const { setSecret, read, deleteVar, register, admit, state } = await setup();
+    await setSecret();
     const { generation } = (await read())!;
 
-    await alice.mutation(api.envVars.deleteEnvVar, { id });
+    await deleteVar();
     const handleId = await register(generation);
 
     expect(await admit(handleId)).toBe(false);
@@ -70,11 +76,11 @@ describe("runtime admission fence", () => {
   });
 
   test("a delete between register and admit marks the pending handle stale and refuses it", async () => {
-    const { setSecret, read, alice, register, admit, state } = await setup();
-    const id = await setSecret();
+    const { setSecret, read, deleteVar, register, admit, state } = await setup();
+    await setSecret();
     const handleId = await register((await read())!.generation);
 
-    await alice.mutation(api.envVars.deleteEnvVar, { id });
+    await deleteVar();
     expect(await state(handleId)).toBe("stale");
     expect(await admit(handleId)).toBe(false);
   });
@@ -121,18 +127,49 @@ describe("runtime admission fence", () => {
     expect(await state(handleId)).toBe("stale");
   });
 
-  test("a fresh boot replaces every earlier handle; a resume replaces only its own sandbox's", async () => {
-    const { register, admit, state } = await setup();
+  test("a fresh boot drops every earlier handle and a resume only its own sandbox's, without revoking them", async () => {
+    const { register, admit, state, revoked } = await setup();
     const first = await register(0, "e2b:sbx_a");
     await admit(first);
     const second = await register(0, "e2b:sbx_b", false);
     await admit(second);
 
     const resumed = await register(0, "e2b:sbx_a", false);
-    expect([await state(first), await state(second)]).toEqual(["stale", "running"]);
+    expect([await state(first), await state(second)]).toEqual([null, "running"]);
 
     await register(0, "e2b:sbx_c");
-    expect([await state(second), await state(resumed)]).toEqual(["stale", "stale"]);
+    expect([await state(second), await state(resumed)]).toEqual([null, null]);
+    // Another tab's preview is never killed for a newer boot, only for an env change.
+    expect(await revoked()).toEqual([]);
+  });
+
+  test("a failed kill denies the project's secret runtime until a later kill succeeds", async () => {
+    const { setSecret, read, register, admit, state, revoked, recordKill, projectId } = await setup();
+    const old = await register(0, "e2b:sbx_old");
+    await admit(old);
+    await setSecret();
+    expect(await revoked({ projectId })).toEqual([{ _id: old, sandboxId: "e2b:sbx_old" }]);
+    expect(await revoked({ sandboxId: "e2b:sbx_old" })).toHaveLength(1);
+    expect(await revoked({ sandboxId: "e2b:sbx_new" })).toEqual([]);
+
+    await recordKill(old, false);
+    expect(await state(old)).toBe("revoke_failed");
+    const blocked = await register((await read())!.generation, "e2b:sbx_new");
+    expect(await admit(blocked)).toBe(false);
+
+    // The sweep finds it again; a kill that succeeds (or finds it gone) removes it.
+    expect(await revoked()).toEqual(expect.arrayContaining([{ _id: old, sandboxId: "e2b:sbx_old" }]));
+    await recordKill(old, true);
+    expect(await state(old)).toBeNull();
+    expect(await admit(await register((await read())!.generation, "e2b:sbx_new"))).toBe(true);
+  });
+
+  test("recordKill leaves a live handle alone", async () => {
+    const { register, admit, state, recordKill } = await setup();
+    const handleId = await register(0);
+    await admit(handleId);
+    await recordKill(handleId, true);
+    expect(await state(handleId)).toBe("running");
   });
 
   test("admits a handle once", async () => {
@@ -156,5 +193,30 @@ describe("runtime admission fence", () => {
       t.query(api.runtimeHandles.getBootManifest, { internalKey: "wrong", projectId }),
     ).rejects.toThrow("Invalid internal key");
     expect(await register(0)).toBeTruthy();
+  });
+});
+
+describe("env changes that must go through a killing route", () => {
+  test("deleteEnvVar is internal-key only and owner-checked", async () => {
+    const { t, projectId, setSecret, deleteVar } = await setup();
+    await setSecret();
+
+    await expect(deleteVar("API_KEY", BOB)).rejects.toThrow("Unauthorized access to this project");
+    await expect(
+      t.mutation(api.envVars.deleteEnvVar, { internalKey: "wrong", projectId, ownerId: ALICE, key: "API_KEY" }),
+    ).rejects.toThrow("Invalid internal key");
+    await expect(deleteVar("MISSING")).rejects.toThrow("Environment variable not found");
+    await deleteVar();
+    expect(await t.run((ctx) => ctx.db.query("projectEnvVars").collect())).toEqual([]);
+  });
+
+  test("setPublicEnvVar refuses to turn an existing secret public", async () => {
+    const { alice, projectId, setSecret, read } = await setup();
+    await setSecret("VITE_TOKEN");
+
+    await expect(
+      alice.mutation(api.envVars.setPublicEnvVar, { projectId, key: "VITE_TOKEN", value: "x" }),
+    ).rejects.toMatchObject({ data: { code: "CONFLICT" } });
+    expect((await read())!.records).toMatchObject([{ key: "VITE_TOKEN", visibility: "secret" }]);
   });
 });

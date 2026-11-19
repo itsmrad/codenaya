@@ -104,7 +104,10 @@ beforeEach(() => {
   resetRateLimits();
   vi.stubEnv("E2B_API_KEY", "e2b-test");
   mocks.auth.mockResolvedValue({ userId: "user_1" });
-  // The runtime fence: register answers a handle, admit admits.
+  // The runtime fence: no revoked runtimes, register answers a handle, admit admits.
+  mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
+    "sandboxId" in args ? [] : undefined,
+  );
   mocks.mutation.mockImplementation(async (_ref, args: Record<string, unknown>) =>
     "handleId" in args ? true : "handle_1",
   );
@@ -200,7 +203,7 @@ describe("POST /api/sandbox tags (#465)", () => {
   it("tags a project's preview with its owner and project, so checkBuild can find it", async () => {
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
     mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
-      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : { generation: 0, records: [] },
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : "sandboxId" in args ? [] : { generation: 0, records: [] },
     );
 
     await (await boot("proj_1")).text();
@@ -352,7 +355,7 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
   ])("%s, when its variables cannot be loaded", async (_case, resumeSandboxId, hidden) => {
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
     mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
-      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : { generation: 0, records: [] },
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : "sandboxId" in args ? [] : { generation: 0, records: [] },
     );
     mocks.resolveProjectEnv.mockRejectedValue(new Error("CODENAYA_LOCAL_KEK is not set"));
     mocks.sandboxConnect.mockResolvedValue(fakeSandbox("sbx_resume_env"));
@@ -620,7 +623,7 @@ describe("POST /api/sandbox replaces the project's earlier preview (#492)", () =
   beforeEach(() => {
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
     mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
-      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : { generation: 0, records: [] },
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : "sandboxId" in args ? [] : { generation: 0, records: [] },
     );
     mocks.sandboxCreate.mockRejectedValue(new Error("stop after create"));
   });
@@ -710,7 +713,7 @@ describe("POST /api/sandbox install failure (#491)", () => {
   it("never sends an injected secret the install printed, in output or the error event", async () => {
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
     mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
-      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : { generation: 0, records: [] },
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : "sandboxId" in args ? [] : { generation: 0, records: [] },
     );
     mocks.resolveProjectEnv.mockResolvedValue({
       publicEntries: [],
@@ -731,7 +734,7 @@ describe("POST /api/sandbox install failure (#491)", () => {
   it("redacts a value split across stdout chunks with a stderr chunk in between", async () => {
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
     mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
-      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : { generation: 0, records: [] },
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : "sandboxId" in args ? [] : { generation: 0, records: [] },
     );
     mocks.resolveProjectEnv.mockResolvedValue({ publicEntries: [], secretEntries: [{ key: "API_KEY", value: SECRET }], failedKeys: [] });
     mocks.sandboxList.mockReturnValue({ nextItems: async () => [] });
@@ -754,7 +757,7 @@ describe("POST /api/sandbox install failure (#491)", () => {
   it("redacts a value split across dev-server stdout chunks with the route's own line in between", async () => {
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
     mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
-      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : { generation: 0, records: [] },
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : "sandboxId" in args ? [] : { generation: 0, records: [] },
     );
     mocks.resolveProjectEnv.mockResolvedValue({ publicEntries: [], secretEntries: [{ key: "API_KEY", value: SECRET }], failedKeys: [] });
     mocks.sandboxList.mockReturnValue({ nextItems: async () => [] });
@@ -791,7 +794,7 @@ describe("POST /api/sandbox install failure (#491)", () => {
   it("removes a resumed sandbox's earlier .env when no variable resolves", async () => {
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
     mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
-      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : { generation: 0, records: [] },
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : "sandboxId" in args ? [] : { generation: 0, records: [] },
     );
     mocks.resolveProjectEnv.mockResolvedValue({ publicEntries: [], secretEntries: [], failedKeys: [] });
     const run = vi.fn(async (command: string) => {
@@ -815,7 +818,7 @@ describe("POST /api/sandbox install failure (#491)", () => {
   it("sends the failed-install line before the error event, even when a multiline secret holds it back", async () => {
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
     mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
-      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : { generation: 0, records: [] },
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : "sandboxId" in args ? [] : { generation: 0, records: [] },
     );
     // A secret with a newline stops the redactor releasing completed lines early.
     const pem = `-----BEGIN PRIVATE KEY-----\n${"x".repeat(200)}\n-----END PRIVATE KEY-----`;
@@ -1065,7 +1068,7 @@ describe("POST /api/sandbox runtime admission fence", () => {
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
     mocks.sandboxList.mockReturnValue({ nextItems: async () => [] });
     mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
-      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : { generation: 3, records: [] },
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : "sandboxId" in args ? [] : { generation: 3, records: [] },
     );
     mocks.resolveProjectEnv.mockResolvedValue({ publicEntries: [], secretEntries: [{ key: "API_KEY", value: SECRET }], failedKeys: [] });
   });
@@ -1124,5 +1127,56 @@ describe("POST /api/sandbox runtime admission fence", () => {
 
     expect(mocks.mutation).not.toHaveBeenCalled();
     expect(order).toEqual(["write .env", "install"]);
+  });
+});
+
+describe("POST /api/sandbox revoked runtimes", () => {
+  beforeEach(() => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
+    mocks.sandboxList.mockReturnValue({ nextItems: async () => [] });
+  });
+
+  it("kills the project's revoked previews and refuses to resume one", async () => {
+    mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
+      "userId" in args
+        ? { _id: "proj_1", ownerId: "user_1" }
+        : "sandboxId" in args
+          ? [{ _id: "handle_old", sandboxId: "e2b:sbx_stale" }]
+          : { generation: 1, records: [] },
+    );
+    mocks.sandboxKill.mockResolvedValue(true);
+
+    const res = await POST(request("POST", JSON.stringify({
+      files: [{ path: "index.html", content: "" }], projectId: "proj_1", resumeSandboxId: "sbx_stale",
+    })));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("environment variables changed") });
+    expect(mocks.sandboxKill).toHaveBeenCalledWith("sbx_stale", expect.anything());
+    expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), { internalKey: "internal", handleId: "handle_old", killed: true });
+    expect(mocks.sandboxConnect).not.toHaveBeenCalled();
+  });
+
+  it("refuses to sync into a revoked preview, which a restarted dev server would load the old values into", async () => {
+    mocks.query.mockImplementation(async () => [{ _id: "handle_old", sandboxId: "e2b:sbx_patch_stale" }]);
+    mocks.sandboxKill.mockResolvedValue(false);
+    const write = vi.fn();
+    mocks.sandboxConnect.mockResolvedValue({
+      sandboxId: "sbx_patch_stale",
+      getInfo: async () => ({ metadata: { userId: "user_1" } }),
+      files: { write },
+      commands: { run: vi.fn(), list: vi.fn(async () => []) },
+    });
+
+    const res = await PATCH(
+      request("PATCH", JSON.stringify({ files: [{ path: "package.json", content: "{}" }] })),
+      { params: Promise.resolve({ sandboxId: "sbx_patch_stale" }) },
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "env_changed" });
+    expect(write).not.toHaveBeenCalled();
+    // Already gone counts as killed.
+    expect(mocks.mutation).toHaveBeenCalledWith(expect.anything(), { internalKey: "internal", handleId: "handle_old", killed: true });
   });
 });

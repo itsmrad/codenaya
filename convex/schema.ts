@@ -1116,8 +1116,18 @@ export default defineSchema({
     // Public sandbox id (`provider:id`), so a sweep can kill it through the seam.
     sandboxId: v.string(),
     generation: v.number(),
-    state: v.union(v.literal("pending"), v.literal("running"), v.literal("stale")),
-  }).index("by_projectId_and_state", ["projectId", "state"]),
+    // stale: outdated by an env change, to be killed. revoke_failed: its kill
+    // failed; the project's secret runtime is denied until a kill succeeds.
+    state: v.union(
+      v.literal("pending"),
+      v.literal("running"),
+      v.literal("stale"),
+      v.literal("revoke_failed"),
+    ),
+  })
+    .index("by_projectId_and_state", ["projectId", "state"])
+    .index("by_sandboxId_and_state", ["sandboxId", "state"])
+    .index("by_state", ["state"]),
 
   /**
    * Values redacted from MCP tool results, held so the agent can store one as an

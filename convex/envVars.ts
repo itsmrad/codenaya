@@ -11,6 +11,7 @@ import { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
+import { validateInternalKey } from "./internalKey";
 import { getOwnedProject } from "./projects";
 import { bumpEnvGeneration } from "./runtimeHandles";
 
@@ -212,6 +213,15 @@ export const setPublicEnvVar = mutation({
       )
       .first();
 
+    // A secret's running previews are killed by the route that changes it, so
+    // the browser may not turn one public here.
+    if (existing?.visibility === "secret") {
+      throw appError(
+        "CONFLICT",
+        `"${key}" is stored as a secret. Delete it first, then add it as a public variable.`,
+      );
+    }
+
     const now = Date.now();
     await bumpEnvGeneration(ctx, args.projectId);
 
@@ -249,20 +259,27 @@ export const setPublicEnvVar = mutation({
   },
 });
 
+/**
+ * Deletes one variable. `internalKey` only: `DELETE /api/env-vars` calls it and
+ * then kills the previews that still hold the value.
+ */
 export const deleteEnvVar = mutation({
-  args: { id: v.id("projectEnvVars") },
+  args: { internalKey: v.string(), projectId: v.id("projects"), ownerId: v.string(), key: v.string() },
+  returns: v.null(),
   handler: async (ctx, args) => {
-    const identity = await verifyAuth(ctx);
+    validateInternalKey(args.internalKey);
+    await getOwnedProject(ctx, args.projectId, args.ownerId);
 
-    const row = await ctx.db.get("projectEnvVars", args.id);
+    const row = await ctx.db
+      .query("projectEnvVars")
+      .withIndex("by_project_and_key", (q) => q.eq("projectId", args.projectId).eq("key", args.key))
+      .first();
     if (!row) {
       throw appError("NOT_FOUND", "Environment variable not found");
     }
-    if (row.ownerId !== identity.subject) {
-      throw appError("FORBIDDEN", "Unauthorized to delete this environment variable");
-    }
 
-    await ctx.db.delete("projectEnvVars", args.id);
-    await bumpEnvGeneration(ctx, row.projectId);
+    await ctx.db.delete("projectEnvVars", row._id);
+    await bumpEnvGeneration(ctx, args.projectId);
+    return null;
   },
 });

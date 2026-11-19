@@ -27,6 +27,11 @@ import schema from "./schema";
 const MAX_LIVE_HANDLES = 20;
 
 const LIVE_STATES = ["pending", "running"] as const;
+/** Handles whose sandbox must be killed. */
+const REVOKED_STATES = ["stale", "revoke_failed"] as const;
+
+/** Revoked handles one sweep reads per state; the cron takes the rest a minute later. */
+const SWEEP_BATCH = 25;
 
 async function liveHandles(ctx: QueryCtx, projectId: Id<"projects">) {
   const pages = await Promise.all(
@@ -83,10 +88,10 @@ export const getBootManifest = query({
 /**
  * Records a boot that is about to receive secrets, before it receives any.
  *
- * Earlier live handles it replaces are marked stale, not dropped, so a later
- * sweep still confirms their sandbox is gone: a fresh boot (`replacesPreviews`)
- * has just killed every earlier preview of the project, and a resume replaces
- * its own sandbox's earlier boot.
+ * It drops the earlier live handles it replaces: a fresh boot
+ * (`replacesPreviews`) has just killed every earlier preview of the project, and
+ * a resume replaces its own sandbox's earlier boot. Dropped, not marked stale:
+ * stale means "kill", and only an env change may kill another tab's preview.
  */
 export const registerRuntime = mutation({
   args: {
@@ -105,7 +110,7 @@ export const registerRuntime = mutation({
     const live = await liveHandles(ctx, args.projectId);
     const replaced = live.filter((handle) => args.replacesPreviews || handle.sandboxId === args.sandboxId);
     for (const handle of replaced) {
-      await ctx.db.patch("runtimeHandles", handle._id, { state: "stale" });
+      await ctx.db.delete("runtimeHandles", handle._id);
     }
     if (live.length - replaced.length >= MAX_LIVE_HANDLES) {
       throw appError("LIMIT_EXCEEDED", "Too many previews of this project are starting at once");
@@ -122,9 +127,9 @@ export const registerRuntime = mutation({
 
 /**
  * Lets a registered boot start using its secrets: true only while the handle is
- * pending, the project is live and its envGeneration is still the handle's. A
- * refused handle is marked stale, so its sandbox is killed even if the boot's
- * own kill fails.
+ * pending, the project is live, its envGeneration is still the handle's, and no
+ * earlier runtime of the project failed to be killed. A refused handle is marked
+ * stale, so its sandbox is killed even if the boot's own kill fails.
  */
 export const admitRuntime = mutation({
   args: { internalKey: v.string(), handleId: v.id("runtimeHandles") },
@@ -135,13 +140,65 @@ export const admitRuntime = mutation({
     if (!handle) return false;
 
     const project = await ctx.db.get("projects", handle.projectId);
+    const unrevoked = await ctx.db
+      .query("runtimeHandles")
+      .withIndex("by_projectId_and_state", (q) => q.eq("projectId", handle.projectId).eq("state", "revoke_failed"))
+      .first();
     const admitted =
       handle.state === "pending" &&
       project !== null &&
       project.deletingAt === undefined &&
-      (project.envGeneration ?? 0) === handle.generation;
+      (project.envGeneration ?? 0) === handle.generation &&
+      unrevoked === null;
 
     await ctx.db.patch("runtimeHandles", handle._id, { state: admitted ? "running" : "stale" });
     return admitted;
+  },
+});
+
+/**
+ * Handles whose sandbox must be killed, for one sandbox, one project, or (the
+ * cron) any. `internalKey` only; at most SWEEP_BATCH per state.
+ */
+export const listRevokedHandles = query({
+  args: {
+    internalKey: v.string(),
+    projectId: v.optional(v.id("projects")),
+    sandboxId: v.optional(v.string()),
+  },
+  returns: v.array(v.object({ _id: v.id("runtimeHandles"), sandboxId: v.string() })),
+  handler: async (ctx, { internalKey, projectId, sandboxId }) => {
+    validateInternalKey(internalKey);
+    const pages = await Promise.all(
+      REVOKED_STATES.map((state) => {
+        const handles = ctx.db.query("runtimeHandles");
+        if (sandboxId !== undefined) {
+          return handles
+            .withIndex("by_sandboxId_and_state", (q) => q.eq("sandboxId", sandboxId).eq("state", state))
+            .take(SWEEP_BATCH);
+        }
+        if (projectId !== undefined) {
+          return handles
+            .withIndex("by_projectId_and_state", (q) => q.eq("projectId", projectId).eq("state", state))
+            .take(SWEEP_BATCH);
+        }
+        return handles.withIndex("by_state", (q) => q.eq("state", state)).take(SWEEP_BATCH);
+      }),
+    );
+    return pages.flat().map(({ _id, sandboxId }) => ({ _id, sandboxId }));
+  },
+});
+
+/** A revoked handle's kill: done removes it, a failure leaves it revoke_failed for the next sweep. */
+export const recordKill = mutation({
+  args: { internalKey: v.string(), handleId: v.id("runtimeHandles"), killed: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    const handle = await ctx.db.get("runtimeHandles", args.handleId);
+    if (!handle || (handle.state !== "stale" && handle.state !== "revoke_failed")) return null;
+    if (args.killed) await ctx.db.delete("runtimeHandles", handle._id);
+    else await ctx.db.patch("runtimeHandles", handle._id, { state: "revoke_failed" });
+    return null;
   },
 });
