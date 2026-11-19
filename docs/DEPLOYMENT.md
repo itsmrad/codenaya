@@ -44,5 +44,19 @@ previews show a warning page the preview iframe cannot skip, and outbound traffi
 is limited to an allowlist. Until a Daytona adapter is registered, `daytona` is
 ignored with the warning above.
 
+A provider with its keys set is listed by the cap, project kill and preview lookup
+even when it is not in `SANDBOX_PROVIDER_FALLBACKS`. Each non-primary list gets 5 s.
+If it fails or times out, that provider goes into the ten-minute failover cooldown.
+The kill and the lookup skip it, and the cap skips it while it is cooling down. The
+primary still fails closed. A non-primary kill or inspect that fails is treated
+the same way. The cooldown is per server instance (per warm function on Vercel):
+each instance learns about an outage on its own, a cold start begins with nothing
+cooling, and every failure restarts the ten minutes, so the cap skip lasts as long
+as the outage. Accepted risk: during such an outage a user can go over the 3-preview
+cap by the sandboxes they have on the failing provider (at most 3, each live at most
+one hour), and a hanging fallback adds about 5 s to every preview lookup (ADR 0015,
+"Fan-out resilience"). To take a provider out during an outage, remove its keys,
+not just its fallback entry.
+
 TODO (privacy): update the subprocessor list BEFORE shipping any non-E2B adapter;
 the privacy page currently names E2B, and sandbox env secrets reach the provider.

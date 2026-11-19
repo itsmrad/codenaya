@@ -2,6 +2,7 @@ import { createBlaxelProvider } from "./blaxel";
 import { isProviderConfigured, parseProviderConfig } from "./config";
 import { createE2bProvider } from "./e2b";
 import { createProviderCooldown, createWithFailover } from "./failover";
+import type { FanoutHealth } from "./fanout";
 import { selectProviders } from "./select";
 import { type CreateOptions, PROVIDER_IDS, type ProviderId, SandboxConfigError, type SandboxProvider } from "./types";
 
@@ -48,6 +49,9 @@ export const isMultiProvider = (config = parseProviderConfig()) => config.fallba
 
 /** Process-local, like the rate limiter: a provider that failed a boot is skipped for a while. */
 const cooldown = createProviderCooldown();
+
+/** What the cap, kill and lookup fan-outs need to tolerate a failing non-primary provider. */
+export const fanoutHealth = (config = parseProviderConfig()): FanoutHealth => ({ primary: config.primary, cooldown });
 
 /**
  * A new sandbox on SANDBOX_PROVIDER. With SANDBOX_PROVIDER_FALLBACKS set, through

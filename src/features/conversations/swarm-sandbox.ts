@@ -275,6 +275,8 @@ export const selfCheckWorker = async ({
     messageId,
     agentTaskId,
     model,
+    // Started from project files only, never variables or secret files: no value to print.
+    secrets: [],
     maxAttempts: started.maxAttempts,
     // A check in flight stops before step.invoke's timeout, so the worker still returns its report.
     deadline: invokedAt + timeoutMs - SELF_CHECK_SLACK_MS,
