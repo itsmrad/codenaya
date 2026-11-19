@@ -1,5 +1,5 @@
 import { BOOT_COMMAND_ENV, DEV_COMMAND_ENV, PROXY_TARGET_ENV, killTreeCommand } from "../dev-server";
-import { type RequestOptions, type RunOptions, type Sandbox, type SandboxCommand, SandboxExitError } from "./types";
+import { type RequestOptions, type RunOptions, type Sandbox, type SandboxCommand, SandboxExitError, SandboxTimeoutError } from "./types";
 
 /**
  * Helpers every provider gets for free: they need only `run`, so an adapter
@@ -99,4 +99,13 @@ export const runOrThrow = async (sandbox: Sandbox, command: string, opts?: RunOp
   const result = await sandbox.run(command, opts);
   if (result.exitCode !== 0) throw new SandboxExitError(result);
   return result;
+};
+
+/** Rejects with a SandboxTimeoutError after `ms`. The underlying request is not aborted. */
+export const withDeadline = <T>(promise: Promise<T>, ms: number, what = "request"): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new SandboxTimeoutError(`${what} timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 };
