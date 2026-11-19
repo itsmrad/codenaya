@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 // Public: Google OAuth consent and Clerk production need a reachable privacy URL.
 const PrivacyPage = () => {
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="October 7, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 19, 2026">
       <section>
         <p>
           This policy explains what Codenaya (&ldquo;we&rdquo;, &ldquo;us&rdquo;) collects when you
@@ -49,9 +49,9 @@ const PrivacyPage = () => {
       <section>
         <h2>Sandboxes</h2>
         <p>
-          Live previews and the terminal run your project code in isolated sandboxes hosted by
-          E2B, Blaxel and Daytona. Sandboxes are temporary and are shut down when they are no
-          longer in use.
+          Live previews and the terminal run your project code in isolated sandboxes hosted by one
+          of our sandbox providers (E2B, Blaxel or Daytona). Sandboxes are temporary and are shut
+          down when they are no longer in use.
         </p>
       </section>
 
