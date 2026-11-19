@@ -55,14 +55,19 @@ the trusted deployment explicitly (`development`, `preview`, `staging`,
 | Consumer | Required configuration | Optional configuration |
 | --- | --- | --- |
 | Both | `DODO_PAYMENTS_ENVIRONMENT`, `DODO_PAYMENTS_BUSINESS_ID` | None |
-| Next | `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_PRO_PRODUCT_ID`, `DODO_PAYMENTS_RETURN_URL`, `NEXT_PUBLIC_APP_URL` | `DODO_PAYMENTS_BRAND_ID` |
+| Next | `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_PRO_PRODUCT_ID`, `DODO_PAYMENTS_RETURN_URL`, `NEXT_PUBLIC_APP_URL`, `CODENAYA_DEPLOYMENT` | `DODO_PAYMENTS_BRAND_ID` |
 | Convex receiver | `DODO_PAYMENTS_WEBHOOK_KEY`, `CODENAYA_DEPLOYMENT` | `DODO_PAYMENTS_WEBHOOK_KEY_PREVIOUS` |
 | Convex reconciler | `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_PRO_PRODUCT_ID`, `CODENAYA_DEPLOYMENT` | `DODO_PAYMENTS_TOP_UP_PRODUCT_ID` |
 
-The Convex receiver learns its trusted deployment only from the non-secret,
-Convex-only `CODENAYA_DEPLOYMENT` (`development`, `preview`, `staging` or
+The Convex receiver learns its trusted deployment only from the non-secret
+`CODENAYA_DEPLOYMENT` (`development`, `preview`, `staging` or
 `production`), required on each Convex deployment that receives webhooks. Absent,
 invalid or `PLACEHOLDER_*` values fail closed; the same deployment/mode rule applies.
+The Next checkout route (stage 9) reads the same non-secret `CODENAYA_DEPLOYMENT`
+from the Next runtime per request (`parseDeployment`), never `VERCEL_ENV` or
+`NODE_ENV`: local development `development`, Vercel Production `production`, and unset
+on Preview so checkout fails closed there. It matters only while billing is enabled;
+disabled checkout answers 404 whatever the deployment.
 
 `CODENAYA_BILLING_ENABLED` defaults to disabled unless exactly `true`; disabled
 Next config returns null. Enabling it also requires `CREDIT_LIMITS_ENFORCED=true`.
