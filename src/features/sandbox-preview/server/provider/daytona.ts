@@ -4,6 +4,7 @@ import { posix } from "node:path";
 import {
   Daytona,
   DaytonaAuthenticationError,
+  DaytonaBadRequestError,
   DaytonaCommandAlreadyCompletedError,
   DaytonaConnectionTimeoutError,
   DaytonaFileAccessDeniedError,
@@ -100,6 +101,20 @@ const DAYTONA_MAX_SESSION_MS = 60 * 60 * 1000;
 export const ttlMinutes = (timeoutMs: number) =>
   Math.min(Math.max(1, Math.ceil(timeoutMs / 60_000)), DAYTONA_MAX_SESSION_MS / 60_000);
 
+/**
+ * `connect`'s lifetime extension. Extend-only, as E2B's connect is: `setTtl` re-anchors
+ * from now, so it could also shorten a live preview. Never past createdAt + 1 h, the
+ * cost guard's hard end, so repeated connects can't keep a sandbox alive; an unknown
+ * creation time never extends.
+ */
+const extendTtl = async (sandbox: DaytonaSandbox, timeoutMs: number) => {
+  const now = Date.now();
+  const maxMinutes = Math.floor((Date.parse(sandbox.createdAt ?? "") + DAYTONA_MAX_SESSION_MS - now) / 60_000);
+  const minutes = Math.min(Math.ceil(timeoutMs / 60_000), maxMinutes);
+  if (!(minutes >= 1) || now + minutes * 60_000 <= (Date.parse(sandbox.autoDestroyAt ?? "") || 0)) return;
+  await sandbox.setTtl(minutes);
+};
+
 /** The label `create` adds for its code interpreter; not one of ours. */
 const TOOLBOX_LANGUAGE_LABEL = "code-toolbox-language";
 
@@ -110,42 +125,59 @@ const toInfo = ({ labels, autoDestroyAt }: Pick<DaytonaSandbox, "labels" | "auto
   return { metadata, endAt: new Date(autoDestroyAt ?? 0) };
 };
 
-/**
- * `command` in bash after `steps`, with `cwd` and `envs` set first: a session
- * request has neither. `exec` keeps the shell's pid for the command.
- */
-const shellCommand = (command: string, { cwd, envs }: Pick<RunOptions, "cwd" | "envs">, ...steps: string[]) =>
-  `bash -c ${quote([
-    ...(cwd ? [`cd ${quote(cwd)}`] : []),
-    ...Object.entries(envs ?? {}).map(([key, value]) => `export ${key}=${quote(value)}`),
-    ...steps,
-    `exec bash -c ${quote(command)}`,
-  ].join(" && "))}`;
+const noop = () => {};
 
-/** Retries `read` every 100 ms for up to 2 s, until it returns a value. */
-const poll = async <T>(read: () => Promise<T | undefined>): Promise<T | undefined> => {
-  for (let attempt = 0; attempt < 20; attempt++) {
+/**
+ * `command` in bash, after `cd cwd` and `steps`. A session request has no cwd or env.
+ * `env` takes any variable name (the /proc restart path passes a whole inherited
+ * environment) and, like `exec`, keeps the shell's pid; `timeout` goes between them.
+ */
+const shellCommand = (
+  command: string,
+  { cwd, envs }: Pick<RunOptions, "cwd" | "envs">,
+  { steps = [], timeoutS }: { steps?: string[]; timeoutS?: number } = {},
+) => {
+  const exec = [
+    "exec env --",
+    ...Object.entries(envs ?? {}).map(([key, value]) => quote(`${key}=${value}`)),
+    ...(timeoutS ? [`timeout -k 5 ${timeoutS}s`] : []),
+    `bash -c ${quote(command)}`,
+  ];
+  return `bash -c ${quote([...(cwd ? [`cd ${quote(cwd)}`] : []), ...steps, exec.join(" ")].join(" && "))}`;
+};
+
+/** Retries `read` every `intervalMs` until it returns a value or `budgetMs` runs out. */
+const poll = async <T>(read: () => Promise<T | undefined>, budgetMs: number, intervalMs = 100) => {
+  const end = Date.now() + budgetMs;
+  for (;;) {
     const value = await read();
-    if (value !== undefined) return value;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (value !== undefined || Date.now() >= end) return value;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  return undefined;
 };
 
 /** Where `start` records each command's pid; session commands report only a command id. */
 const PID_DIR = "/tmp/.codenaya";
 
-const noop = () => {};
+/** The exits of a command coreutils `timeout` stopped: TERM, then KILL after the grace period. */
+const TIMED_OUT_EXIT_CODES = new Set([124, 137]);
+
+/** How much longer than the command's own limit `run` waits, so `timeout` and its 5 s kill fire first. */
+const RUN_WAIT_PAD_MS = 10_000;
 
 /** The seam's view of a Daytona sandbox. */
 const wrap = (sandbox: DaytonaSandbox): Sandbox => {
   const { process: processes, fs } = sandbox;
 
-  /** The daemon may record the exit code just after the log stream closes, so it is polled briefly. */
-  const exitCodeOf = async (sessionId: string, cmdId: string) => {
+  /** The daemon records the exit code just after the log stream closes, or long after a dropped one. */
+  const exitCodeOf = async (sessionId: string, cmdId: string, budgetMs: number) => {
     // `?? undefined`: a running command's exit code may come back as null.
-    const exitCode = await poll(async () => (await processes.getSessionCommand(sessionId, cmdId)).exitCode ?? undefined);
-    if (exitCode === undefined) throw new Error("Daytona did not report the command's exit code");
+    const exitCode = await poll(
+      async () => (await processes.getSessionCommand(sessionId, cmdId)).exitCode ?? undefined,
+      budgetMs,
+      250,
+    );
+    if (exitCode === undefined) throw new SandboxTimeoutError("Daytona did not report the command's exit code in time");
     return exitCode;
   };
 
@@ -153,32 +185,47 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => {
   // timeoutMs defaults to 60s, as E2B's commands.run does; 0 means no limit.
   const run = (command: string, { cwd, envs, timeoutMs = 60_000, onStdout, onStderr, requestTimeoutMs }: RunOptions = {}) =>
     call(async (): Promise<RunResult> => {
+      const startedAt = Date.now();
+      // Always explicit: without one the client's 30 s default would cut the wait short.
+      const waitMs = (timeoutMs || DAYTONA_MAX_SESSION_MS) + RUN_WAIT_PAD_MS;
+      const remainingMs = () => Math.max(1, startedAt + waitMs - Date.now());
       const sessionId = `cn-run-${randomUUID()}`;
       await withDeadline(processes.createSession(sessionId), requestTimeoutMs);
       try {
-        const request = { command: shellCommand(command, { cwd, envs }) };
+        // The session wait is only HTTP, so `timeout` is what stops the command itself.
+        const request = { command: shellCommand(command, { cwd, envs }, { timeoutS: seconds(timeoutMs) }) };
+        let result: RunResult;
         if (!onStdout && !onStderr) {
-          // The synchronous response carries the exit code and both streams; its timeout is the HTTP wait.
-          const result = await processes.executeSessionCommand(sessionId, request, seconds(timeoutMs));
-          const exitCode = result.exitCode ?? (await exitCodeOf(sessionId, result.cmdId));
-          return { exitCode, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+          // The response carries the exit code and both streams. timeoutMs bounds it, not requestTimeoutMs.
+          const response = await processes.executeSessionCommand(sessionId, request, seconds(waitMs));
+          const exitCode = response.exitCode ?? (await exitCodeOf(sessionId, response.cmdId, remainingMs()));
+          result = { exitCode, stdout: response.stdout ?? "", stderr: response.stderr ?? "" };
+        } else {
+          const pending = processes.executeSessionCommand(sessionId, { ...request, runAsync: true });
+          const { cmdId } = await withDeadline(pending, requestTimeoutMs);
+          const streamed = { stdout: "", stderr: "" };
+          await withDeadline(
+            processes.getSessionCommandLogs(
+              sessionId,
+              cmdId,
+              (chunk) => { streamed.stdout += chunk; onStdout?.(chunk); },
+              (chunk) => { streamed.stderr += chunk; onStderr?.(chunk); },
+            ),
+            remainingMs(),
+          );
+          // The stream also ends on a dropped socket, so the exit code is polled for the rest of the wait.
+          const exitCode = await exitCodeOf(sessionId, cmdId, remainingMs());
+          // The full logs, in case the stream dropped early; the streamed output if they fail.
+          const { stdout, stderr } = await processes.getSessionCommandLogs(sessionId, cmdId).catch(() => streamed);
+          result = { exitCode, stdout, stderr };
         }
-        const pending = processes.executeSessionCommand(sessionId, { ...request, runAsync: true });
-        const { cmdId } = await withDeadline(pending, requestTimeoutMs);
-        const output = { stdout: "", stderr: "" };
-        await withDeadline(
-          processes.getSessionCommandLogs(
-            sessionId,
-            cmdId,
-            (chunk) => { output.stdout += chunk; onStdout?.(chunk); },
-            (chunk) => { output.stderr += chunk; onStderr?.(chunk); },
-          ),
-          timeoutMs,
-        );
-        return { exitCode: await exitCodeOf(sessionId, cmdId), ...output };
+        if (timeoutMs && TIMED_OUT_EXIT_CODES.has(result.exitCode) && Date.now() - startedAt >= timeoutMs) {
+          throw new SandboxTimeoutError(`Command timed out after ${timeoutMs} ms`);
+        }
+        return result;
       } finally {
-        // Also ends a command that outlived its timeout, if the daemon kills a deleted session's processes.
-        await processes.deleteSession(sessionId).catch(noop);
+        // Not awaited: a stalled delete must not hold up the result.
+        processes.deleteSession(sessionId).catch(noop);
       }
     });
 
@@ -194,16 +241,16 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => {
         const sessionId = `cn-start-${id}`;
         await processes.createSession(sessionId);
         const { cmdId } = await processes.executeSessionCommand(sessionId, {
-          command: shellCommand(command, { cwd, envs }, `mkdir -p ${PID_DIR}`, `echo $$ > ${pidFile}`),
+          command: shellCommand(command, { cwd, envs }, { steps: [`mkdir -p ${PID_DIR}`, `echo $$ > ${pidFile}`] }),
           runAsync: true,
         });
         if (onStdout || onStderr) {
           // Streams until the command exits; a dropped socket only ends the output.
           processes.getSessionCommandLogs(sessionId, cmdId, onStdout ?? noop, onStderr ?? noop).catch(noop);
         }
-        const pid = await poll(() =>
-          fs.downloadFile(pidFile).then((data) => Number(data.toString("utf8").trim()) || undefined, () => undefined),
-        );
+        const readPid = () =>
+          fs.downloadFile(pidFile, 5).then((data) => Number(data.toString("utf8").trim()) || undefined, () => undefined);
+        const pid = await poll(readPid, 2_000);
         if (!pid) throw new Error("Daytona did not report the started command's pid");
         return { pid };
       }, requestTimeoutMs),
@@ -232,7 +279,11 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => {
         await sandbox.refreshData();
         return toInfo(sandbox);
       }, requestTimeoutMs),
-    kill: ({ requestTimeoutMs } = {}) => call(() => sandbox.delete(seconds(requestTimeoutMs)), requestTimeoutMs),
+    // Already gone resolves, as E2B's kill does.
+    kill: ({ requestTimeoutMs } = {}) =>
+      call(() => sandbox.delete(seconds(requestTimeoutMs)), requestTimeoutMs).catch((error: unknown) => {
+        if (!(error instanceof SandboxNotFoundError)) throw error;
+      }),
     // No listCommands/killCommand: helpers.ts falls back to /proc.
   };
   return seam;
@@ -245,15 +296,18 @@ const DEFAULT_DAYTONA_API_URL = "https://app.daytona.io/api";
 
 let cached: { key: string; client: Daytona } | undefined;
 
+/** The SDK's own default is 24 h; E2B's is 30 s. Long waits pass their own timeout. */
+const DAYTONA_REQUEST_TIMEOUT_MS = 30_000;
+
 /**
- * One client per key and endpoint. The endpoint is always passed, so the SDK never
- * resolves it from a `.env` file in cwd (it throws when that is ambiguous).
+ * One client per key and endpoint. The endpoint is always passed, so the SDK's
+ * dotenv-ambiguity check can't throw.
  */
 const clientFor = (apiKey: string) => {
   const apiUrl = process.env.DAYTONA_API_URL?.trim() || DEFAULT_DAYTONA_API_URL;
   const target = process.env.DAYTONA_TARGET?.trim() || undefined;
   const key = JSON.stringify([apiKey, apiUrl, target]);
-  if (cached?.key !== key) cached = { key, client: new Daytona({ apiKey, apiUrl, target }) };
+  if (cached?.key !== key) cached = { key, client: new Daytona({ apiKey, apiUrl, target, requestTimeoutMs: DAYTONA_REQUEST_TIMEOUT_MS }) };
   return cached.client;
 };
 
@@ -268,34 +322,51 @@ export const createDaytonaProvider = (apiKey: string): SandboxProvider => {
     return sandbox;
   };
 
+  /**
+   * Best effort: a create we stopped waiting for, or one the SDK timed out after its
+   * POST, still bills and counts toward the user's sandbox cap until its TTL.
+   */
+  const deleteOrphan = (error: unknown, pending: Promise<DaytonaSandbox>) => {
+    if (error instanceof SandboxTimeoutError) pending.then((sandbox) => sandbox.delete(), noop).catch(noop);
+    if (error instanceof DaytonaTimeoutError && error.sandboxId) {
+      daytona().get(error.sandboxId).then((sandbox) => sandbox.delete()).catch(noop);
+    }
+  };
+
   return {
     id: DAYTONA_ID,
     maxSessionMs: DAYTONA_MAX_SESSION_MS,
     // localHostHeader needs nothing here: the in-sandbox proxy rewrites Host itself.
-    create: ({ image, timeoutMs, metadata, requestTimeoutMs }) =>
-      call(
-        () =>
-          daytona().create(
-            {
-              // Read per call, like E2B_TEMPLATE.
-              snapshot: image ?? (process.env.DAYTONA_SNAPSHOT?.trim() || DEFAULT_DAYTONA_SNAPSHOT),
-              // A copy: create adds its language label to the object it is given.
-              labels: { ...metadata },
-              public: true,
-              // Off: a background dev server is not activity, so an idle preview would stop after 15 min.
-              autoStopInterval: 0,
-              ephemeral: true,
-              ttlMinutes: ttlMinutes(timeoutMs),
-            },
-            { timeout: seconds(requestTimeoutMs) },
-          ),
-        requestTimeoutMs,
-      ).then(wrap),
+    create: async ({ image, timeoutMs, metadata, requestTimeoutMs }) => {
+      const pending = daytona().create(
+        {
+          // Read per call, like E2B_TEMPLATE.
+          snapshot: image ?? (process.env.DAYTONA_SNAPSHOT?.trim() || DEFAULT_DAYTONA_SNAPSHOT),
+          // A copy: create adds its language label to the object it is given.
+          labels: { ...metadata },
+          public: true,
+          // Off: a background dev server is not activity, so an idle preview would stop after 15 min.
+          autoStopInterval: 0,
+          ephemeral: true,
+          ttlMinutes: ttlMinutes(timeoutMs),
+        },
+        { timeout: seconds(requestTimeoutMs) },
+      );
+      try {
+        return wrap(await withDeadline(pending, requestTimeoutMs));
+      } catch (error) {
+        deleteOrphan(error, pending);
+        // An unknown snapshot is a 400 or a 404: config, so failover cools Daytona down and moves on.
+        if (error instanceof DaytonaBadRequestError || error instanceof DaytonaNotFoundError) {
+          throw new SandboxConfigError(error.message, { cause: error });
+        }
+        throw fromDaytonaError(error);
+      }
+    },
     connect: (id, { timeoutMs, requestTimeoutMs } = {}) =>
       call(async () => {
         const sandbox = await getRunning(id);
-        // setTtl re-anchors the deadline from now, as E2B's connect extends the timeout.
-        if (timeoutMs) await sandbox.setTtl(ttlMinutes(timeoutMs));
+        if (timeoutMs) await extendTtl(sandbox, timeoutMs);
         return wrap(sandbox);
       }, requestTimeoutMs),
     inspect: (id, { requestTimeoutMs } = {}) =>
@@ -308,8 +379,12 @@ export const createDaytonaProvider = (apiKey: string): SandboxProvider => {
     // The SDK pages on its own (`limit` is its page size), so this stops at `limit`; without one it reads every page.
     list: ({ metadata, limit, requestTimeoutMs }) =>
       call(async () => {
+        // Callers kill what this returns, so the server's label filter is checked again here.
+        const matches = (labels: Record<string, string> = {}) =>
+          Object.entries(metadata ?? {}).every(([key, value]) => labels[key] === value);
         const listed: ListedSandbox[] = [];
         for await (const sandbox of daytona().list({ labels: metadata, states: ["started"], limit })) {
+          if (!matches(sandbox.labels)) continue;
           listed.push({ id: sandbox.id, ...toInfo(sandbox) });
           if (limit && listed.length >= limit) break;
         }
@@ -318,7 +393,10 @@ export const createDaytonaProvider = (apiKey: string): SandboxProvider => {
     // delete returns once Daytona accepts it; list filters on started, so the sandbox drops out at once.
     kill: (id, { requestTimeoutMs } = {}) =>
       call(async () => {
-        await (await daytona().get(id)).delete(seconds(requestTimeoutMs));
+        const sandbox = await daytona().get(id);
+        // Already being deleted (another tab's kill): deleting again may 409.
+        if (sandbox.state === "destroyed" || sandbox.state === "destroying") return false;
+        await sandbox.delete(seconds(requestTimeoutMs));
         return true;
       }, requestTimeoutMs).catch((error: unknown) => {
         if (error instanceof SandboxNotFoundError) return false;
