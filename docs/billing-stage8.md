@@ -18,16 +18,21 @@ skips them. A later stage applies these rules when it commits.
    `floor(credits × reversed / total)` over the cumulative amount, exact on a
    full reversal. A succeeded refund without an amount counts as the full total
    only when it is not partial.
-3. **Fail closed.** A counted entry without a usable amount, or in a currency
-   other than the payment's (an absent currency included), makes the reversal
-   `unknown`: no reversal and no grant for that payment until a later read is
-   known.
+3. **Fail closed.** A refund in an unrecognised status, or a counted entry
+   without a usable amount or in a currency other than the payment's (an absent
+   currency included), makes the reversal `unknown`. Dodo documents no unit for
+   a dispute amount, so it is usable only when it equals the payment's gross
+   total as minor units (`"2000"`) or as major units (`"20"`, `"20.00"` for USD
+   20.00): a full dispute. In this stage nothing consults the decision yet; when
+   reversals commit, an unknown reversal applies nothing and blocks that
+   payment's grant until a later read is known or an operator resolves it.
 4. **Dispute holds.** An opened, challenged, expired or unrecognised dispute
    holds the customer; won, cancelled, lost and accepted release it. Holds are
    per dispute.
 5. **Discount guard.** Settlement quarantines a would-be period or top-up grant
    (reason `discount`) when the payment carries a discount (`discount_id`, or
-   the first of `discounts`), or when a USD total is below the list price in
+   the first of `discounts`; an unreadable one counts as a discount without
+   failing the read), or when a USD total is below the list price in
    `plans.ts`. Totals include tax, so an undiscounted USD payment is never below
    the list price. This is defence in depth: checkout (stage 9) disables
    discount codes.

@@ -53,11 +53,16 @@ describe("reversal rules", () => {
     // An empty payment currency never matches an empty entry currency.
     expect(countedMinor({ amountMinor: 5, currency: "" }, { totalMinor: 10, currency: "" })).toBeNull();
   });
-  it.each(["failed", "pending", "review", "other"] as const)("never counts a %s refund", (status) => {
+  it.each(["failed", "pending", "review"] as const)("never counts a %s refund", (status) => {
     // Not counted, so its odd amount or currency is never validated.
     const decision = decide([refund({ status, amountMinor: null, currency: "EUR" })]);
     expect(decision).toMatchObject({ kind: "known", refunds: [{ refundId: "ref_1", counted: 0 }] });
     expect(reversed(decision)).toBe(0);
+  });
+  it("treats a refund in an unrecognised status as unknown, never a known zero", () => {
+    expect(decide([refund({ status: "other" })])).toEqual({ kind: "unknown", reason: "status" });
+    expect(decide([refund(), refund({ refundId: "ref_2", status: "other", amountMinor: null })]))
+      .toEqual({ kind: "unknown", reason: "status" });
   });
   it.each([
     ["opened", true, 0], ["challenged", true, 0], ["expired", true, 0], ["other", true, 0],

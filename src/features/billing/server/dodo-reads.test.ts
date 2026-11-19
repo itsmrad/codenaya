@@ -161,6 +161,19 @@ describe("Dodo reads", () => {
     });
   });
   it.each([
+    ["2000", "USD", 2000], ["20.00", "USD", 2000], ["20", "USD", 2000], ["20.0", "USD", 2000],
+    ["2000", "JPY", 2000], ["20.000", "KWD", 20000],
+    ["5.00", "USD", null], ["500", "USD", null], ["20.001", "USD", null], ["20.00", "JPY", null],
+    ["1x", "USD", null], ["-2000", "USD", null], ["2e3", "USD", null], [" 2000", "USD", null], ["", "USD", null],
+    [2000, "USD", null], [null, "USD", null], ["2000", null, null],
+  ])("counts dispute amount %j in %s only as the full total (%s)", async (amount, currency, expected) => {
+    const total = currency === "KWD" ? 20000 : 2000;
+    const read = await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody({
+      total_amount: total, currency, disputes: [disputeItem({ amount, currency })],
+    }))));
+    expect(read.adjustments?.disputes[0].amountMinor).toBe(expected);
+  });
+  it.each([
     ["a missing refund list", { refunds: undefined }],
     ["a null dispute list", { disputes: null }],
     ["a non-list", { refunds: {} }],
@@ -194,8 +207,11 @@ describe("Dodo reads", () => {
     expect((await read({ discounts: [{ discount_id: "dsc_2", code: "SAVE" }] })).discountId).toBe("dsc_2");
     expect((await read({ discounts: [] })).discountId).toBeUndefined();
     expect((await read({ discount_id: undefined, discounts: null })).discountId).toBeUndefined();
-    for (const overrides of [{ discount_id: "dsc/1" }, { discounts: [{ code: "SAVE" }] }, { discounts: "dsc_1" }]) {
-      expect(await failure(read(overrides))).toMatchObject({ retryable: false });
+    // An unreadable discount is still a discount, and the payment's refunds stay readable.
+    for (const overrides of [{ discount_id: "dsc/1" }, { discount_id: 7 }, { discounts: [{ code: "SAVE" }] }, { discounts: "dsc_1" }]) {
+      const payment = await read({ ...overrides, refunds: [refundItem()] });
+      expect(payment.discountId).toBe("malformed");
+      expect(payment.adjustments?.refunds).toHaveLength(1);
     }
   });
   it("normalizes a subscription and treats an invalid date as absent", async () => {

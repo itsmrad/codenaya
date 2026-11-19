@@ -51,21 +51,26 @@ export function revocationTarget(credits: number, reversedMinor: number, totalMi
 }
 
 export type ReversalDecision =
-  | { kind: "unknown"; reason: "missing" | "amount" | "currency" }
+  | { kind: "unknown"; reason: "missing" | "status" | "amount" | "currency" }
   | {
     kind: "known";
     refunds: (ProviderRefund & { counted: number })[];
     disputes: (ProviderDispute & { counted: number; hold: boolean })[];
   };
 
-/** Validates every entry that counts; `counted` is 0 for entries that do not count. */
+/**
+ * Validates every entry that counts; `counted` is 0 for entries that do not count. An unrecognised
+ * refund status is unknown, never a known zero: a new terminal status must not leave refunded
+ * credits spendable. (An unrecognised dispute status already fails closed by holding.)
+ */
 export function decideReversal(
   payment: Pick<ProviderPayment, "totalMinor" | "currency" | "adjustments">,
 ): ReversalDecision {
   const { adjustments } = payment;
   if (!adjustments || adjustments.refunds.length > MAX_ADJUSTMENTS_PER_PAYMENT ||
     adjustments.disputes.length > MAX_ADJUSTMENTS_PER_PAYMENT) return { kind: "unknown", reason: "missing" };
-  let unknown: "amount" | "currency" | undefined;
+  let unknown: "status" | "amount" | "currency" | undefined = adjustments.refunds.some(refund => refund.status === "other")
+    ? "status" : undefined;
   const count = (counts: boolean, entry: Parameters<typeof countedMinor>[0]) => {
     if (!counts) return 0;
     const minor = countedMinor(entry, payment);

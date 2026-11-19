@@ -26,7 +26,12 @@ const PAYMENT_STATUSES = new Set(["succeeded", "processing", "failed", "cancelle
 const SUBSCRIPTION_STATUSES = new Set(["pending", "active", "on_hold", "paused", "cancelled", "failed", "expired"]);
 const REFUND_STATUSES = new Set(["succeeded", "failed", "pending", "review"]);
 const DISPUTE_STATUSES = new Set(["opened", "challenged", "won", "lost", "accepted", "cancelled", "expired"]);
-const DISPUTE_AMOUNT = /^\d{1,15}$/;
+const MINOR_AMOUNT = /^\d{1,15}$/;
+const MAJOR_AMOUNT = /^(\d{1,12})(?:\.(\d{1,3}))?$/;
+// ISO 4217 minor-unit exponents other than 2.
+const ZERO_DECIMAL = new Set(["BIF", "CLP", "DJF", "GNF", "ISK", "JPY", "KMF", "KRW", "PYG", "RWF", "UGX", "UYI", "VND", "VUV", "XAF", "XOF", "XPF"]);
+const THREE_DECIMAL = new Set(["BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND"]);
+const MALFORMED_DISCOUNT = "malformed";
 
 export class DodoReadError extends Error {
   constructor(readonly retryable: boolean, readonly status?: number) {
@@ -128,13 +133,15 @@ function servicePeriods(value: unknown): ProviderPayment["servicePeriods"] {
   return periods;
 }
 
-// SDK 2.63.0 deprecates `discount_id` for `discounts`; either one marks the payment discounted.
+// SDK 2.63.0 deprecates `discount_id` for `discounts`; either one marks the payment discounted. An
+// unreadable discount is still a discount: it quarantines the grant without failing the whole read,
+// so the payment's refunds and disputes are still processed.
 function discountId(body: Json): string | undefined {
-  const legacy = optionalId(body.discount_id);
-  if (legacy !== undefined || body.discounts == null) return legacy;
-  if (!Array.isArray(body.discounts)) throw malformed();
-  const [first] = body.discounts;
-  return first === undefined ? undefined : providerId(isRecord(first) ? first.discount_id : undefined);
+  const { discount_id: legacy, discounts } = body;
+  if (legacy == null && (discounts == null || (Array.isArray(discounts) && discounts.length === 0))) return undefined;
+  const first: unknown = Array.isArray(discounts) ? discounts[0] : undefined;
+  const id = legacy ?? (isRecord(first) ? first.discount_id : undefined);
+  return typeof id === "string" && PROVIDER_ID.test(id) ? id : MALFORMED_DISCOUNT;
 }
 
 function refund(item: Json): ProviderRefund | undefined {
@@ -148,14 +155,34 @@ function refund(item: Json): ProviderRefund | undefined {
   };
 }
 
-function dispute(item: Json): ProviderDispute | undefined {
+type PaymentRef = { paymentId: string; businessId: string; totalMinor: number; currency: string };
+
+/**
+ * SDK 2.63.0 documents `Dispute.amount` only as a string, with no unit. It is counted only when it
+ * unambiguously equals the payment's gross total, as minor units ("2000") or as major units in the
+ * payment's currency ("20" or "20.00" for USD 2000): a full dispute. Anything else is unknown, so the
+ * reversal stays unknown until an operator resolves it, never a guessed partial amount.
+ */
+function disputeAmount(value: unknown, payment: PaymentRef): number | null {
+  const { totalMinor, currency } = payment;
+  if (typeof value !== "string" || currency === "") return null;
+  if (MINOR_AMOUNT.test(value) && Number(value) === totalMinor) return totalMinor;
+  const major = MAJOR_AMOUNT.exec(value);
+  const digits = ZERO_DECIMAL.has(currency) ? 0 : THREE_DECIMAL.has(currency) ? 3 : 2;
+  const fraction = major?.[2] ?? "";
+  if (!major || fraction.length > digits) return null;
+  const minor = Number(major[1]) * 10 ** digits + Number(fraction.padEnd(digits, "0") || "0");
+  return minor === totalMinor ? totalMinor : null;
+}
+
+function dispute(item: Json, payment: PaymentRef): ProviderDispute | undefined {
   const { dispute_id: id, dispute_status: status, amount } = item;
   if (typeof id !== "string" || !PROVIDER_ID.test(id)) return undefined;
   const bare = typeof status === "string" && status.startsWith("dispute_") ? status.slice("dispute_".length) : "";
   return {
     disputeId: id,
     status: DISPUTE_STATUSES.has(bare) ? bare as ProviderDispute["status"] : "other",
-    amountMinor: typeof amount === "string" && DISPUTE_AMOUNT.test(amount) ? Number(amount) : null,
+    amountMinor: disputeAmount(amount, payment),
     currency: currencyCode(item.currency),
   };
 }
@@ -164,7 +191,8 @@ function dispute(item: Json): ProviderDispute | undefined {
  * The payment's whole current refund and dispute lists; unknown (undefined), never empty, when
  * missing, oversize or malformed. An entry of another payment or business fails the whole read.
  */
-function adjustments(body: Json, paymentId: string, businessId: string): ProviderPayment["adjustments"] {
+function adjustments(body: Json, payment: PaymentRef): ProviderPayment["adjustments"] {
+  const { paymentId, businessId } = payment;
   function list<T>(value: unknown, normalize: (item: Json) => T | undefined): T[] | undefined {
     if (!Array.isArray(value) || value.length > MAX_ADJUSTMENTS_PER_PAYMENT) return undefined;
     const items: T[] = [];
@@ -177,7 +205,7 @@ function adjustments(body: Json, paymentId: string, businessId: string): Provide
     return items.length === value.length ? items : undefined;
   }
   const refunds = list(body.refunds, refund);
-  const disputes = list(body.disputes, dispute);
+  const disputes = list(body.disputes, item => dispute(item, payment));
   return refunds && disputes ? { refunds, disputes } : undefined;
 }
 
@@ -198,7 +226,9 @@ export async function fetchPayment(
   if (body.payment_id !== paymentId || body.business_id !== config.businessId) throw malformed();
   const createdAt = epochMs(body.created_at);
   if (createdAt === undefined) throw malformed();
-  const { status, currency, charge_type: chargeType } = body;
+  const { status, charge_type: chargeType } = body;
+  const totalMinor = safeInteger(body.total_amount);
+  const currency = currencyCode(body.currency);
   return {
     paymentId,
     businessId: config.businessId,
@@ -207,9 +237,9 @@ export async function fetchPayment(
     subscriptionId: optionalId(body.subscription_id),
     sessionId: optionalId(body.checkout_session_id),
     cart: cartLines(body.product_cart),
-    totalMinor: safeInteger(body.total_amount),
+    totalMinor,
     taxMinor: body.tax == null ? undefined : safeInteger(body.tax),
-    currency: currencyCode(currency),
+    currency,
     createdAt,
     // Absent only when the provider sent none; anything unrecognisable stays visibly unknown.
     chargeType: chargeType == null ? undefined
@@ -218,7 +248,7 @@ export async function fetchPayment(
     includesUsage: optionalBoolean(body.includes_usage),
     isUpdatePaymentMethod: optionalBoolean(body.is_update_payment_method),
     discountId: discountId(body),
-    adjustments: adjustments(body, paymentId, config.businessId),
+    adjustments: adjustments(body, { paymentId, businessId: config.businessId, totalMinor, currency }),
   };
 }
 
