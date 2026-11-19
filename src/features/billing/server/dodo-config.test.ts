@@ -200,8 +200,9 @@ describe("Dodo config", () => {
     expect(warn).not.toHaveBeenCalled();
     expect(errorLog).not.toHaveBeenCalled();
   });
-  it("refuses browser use", () => {
+  it("refuses browser use for Next but not for the Convex receiver", () => {
     vi.stubGlobal("window", {});
     expect(() => readDodoConfig("next", "development", nextEnv)).toThrow("server-only");
+    expect(readDodoConfig("convex-receiver", "development", receiverEnv)).toMatchObject({ webhookKey: "synthetic-signing-key" });
   });
 });

@@ -37,12 +37,17 @@ const respond = (status: number, text?: string) => new Response(text ?? null, { 
 /** Mode, business and verifiers come only from this deployment's env; null fails closed. */
 function readReceiver() {
   const deployment = process.env.CODENAYA_DEPLOYMENT;
-  if (!deployment || !DEPLOYMENTS.includes(deployment)) return null;
+  if (!deployment || !DEPLOYMENTS.includes(deployment)) {
+    console.error("[billingWebhook] receiver not configured: CODENAYA_DEPLOYMENT is missing or invalid.");
+    return null;
+  }
   try {
     const config = readDodoConfig("convex-receiver", deployment as DodoDeployment);
     const keys = [config.webhookKey, config.webhookKeyPrevious].filter((key): key is string => !!key);
     return { mode: config.environment, businessId: config.businessId, verifiers: keys.map(key => new Webhook(key)) };
-  } catch {
+  } catch (error) {
+    // Config errors name the variable only, never its value.
+    console.error("[billingWebhook] receiver not configured:", error instanceof Error ? error.message : "unknown error");
     return null;
   }
 }
@@ -151,7 +156,6 @@ export const receiveDodoWebhook = httpAction(async (ctx, request) => {
   const receiver = readReceiver();
   if (!receiver) {
     // Non-2xx so Dodo retries once the deployment is configured.
-    console.error("Dodo webhook receiver is not configured");
     return respond(503, "Webhook not configured");
   }
   const bytes = await readBoundedBody(request);
@@ -169,7 +173,11 @@ export const receiveDodoWebhook = httpAction(async (ctx, request) => {
     return respond(400, "Invalid payload");
   }
   const event = normalize(payload, receiver.businessId);
-  if (!event) return respond(400, "Invalid payload");
+  if (!event) {
+    const type = isRecord(payload) && typeof payload.type === "string" && EVENT_TYPE.test(payload.type) ? payload.type : "unknown";
+    console.error("[billingWebhook] rejected a verified delivery with an invalid payload:", type);
+    return respond(400, "Invalid payload");
+  }
 
   const { financial, customerId, ...fields } = event;
   const customerRef = customerId === undefined ? null

@@ -92,13 +92,14 @@ async function sha256Hex(text: string) {
 
 describe("POST /billing/webhook", () => {
   beforeEach(() => {
-    // Vitest's edge-runtime env defines `window`, which the server-only config guard rejects.
-    vi.stubGlobal("window", undefined);
+    // The receiver must work even where the runtime defines `window` (the guard is Next-only).
+    vi.stubGlobal("window", {});
     for (const [name, value] of Object.entries(receiverEnv)) vi.stubEnv(name, value);
   });
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   test("stores a mapped financial event as a pending minimal receipt", async () => {
@@ -146,6 +147,17 @@ describe("POST /billing/webhook", () => {
       expect(await counters(t)).toEqual({ inputRevision: 0, unresolvedReceipts: 0 });
     },
   );
+
+  test("records an unsupported event from an unmapped customer as ignored, not quarantined", async () => {
+    const t = setup();
+    await mappedCustomer(t);
+    const request = signed(event({ type: "payment.foo" }, { customer: { customer_id: "cus_unmapped" } }));
+    expect((await t.fetch(PATH, request)).status).toBe(200);
+    const [row] = await receipts(t);
+    expect(row).toMatchObject({ state: "ignored", eventType: "payment.foo" });
+    expect(row.customerRef).toBeUndefined();
+    expect(await counters(t)).toEqual({ inputRevision: 0, unresolvedReceipts: 0 });
+  });
 
   test.each(FINANCIAL_EVENTS)("%s requires %s before any write", async (type, idField) => {
     const t = setup();
@@ -239,6 +251,10 @@ describe("POST /billing/webhook", () => {
     const t = setup();
     await mappedCustomer(t);
     for (const [name, value] of Object.entries(overrides)) vi.stubEnv(name, value);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     await expectRejected(t, signed(event()), 503);
+    const logged = log.mock.calls.flat().join(" ");
+    expect(logged).toMatch(/^\[billingWebhook\] receiver not configured/);
+    expect(logged).not.toContain(KEY);
   });
 });

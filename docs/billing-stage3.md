@@ -18,10 +18,15 @@ Order of checks, each without writes until the last step:
 5. Mode comes from config, never the payload. The provider customer is looked up by
    `(mode, customerId)`; `internal.billing.recordReceipt` stores the webhook id, event
    type, occurrence time, SHA-256 digest of the raw bytes and resource IDs only.
-   Mapped financial events (`payment.*`, `subscription.*`, `refund.*`, `dispute.*`) are
-   `pending`; unmapped ones are `quarantined`; other event types are `ignored`. A
-   durable receipt, including a duplicate, returns 200. No raw payload, email,
-   signature or URL is stored or logged.
+   Financial events are an exact allow-list of the Dodo SDK's payment, subscription,
+   refund and dispute types (`FINANCIAL_EVENTS`); a new type in those families is not
+   financial. Each must carry its resource id (`payment_id` for payment, refund and
+   dispute events; `subscription_id` for subscription events) or the delivery returns
+   400 without writes. Mapped financial events are `pending`; unmapped ones are
+   `quarantined`. Dispute payloads carry no customer, so disputes stay quarantined
+   until reconciliation maps them through their payment. Every other event type is
+   `ignored`. A durable receipt, including a duplicate, returns 200. No raw payload,
+   email, signature or URL is stored or logged.
 
 Known gap for stage 5: a receipt first stored unmapped (quarantined) and redelivered
 after the customer is mapped has the same digest, so it stays a no-op. Reconciliation

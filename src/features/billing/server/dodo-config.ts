@@ -90,7 +90,7 @@ export function readDodoConfig(
 export function readDodoConfig(
   consumer: "next" | "convex-receiver", deployment: DodoDeployment, env: Env = process.env,
 ): DodoNextConfig | DodoReceiverConfig | null {
-  if (typeof window !== "undefined") throw new Error("Billing configuration is server-only.");
+  if (consumer === "next" && typeof window !== "undefined") throw new Error("Billing configuration is server-only.");
   if (consumer !== "next" && consumer !== "convex-receiver") {
     throw new Error("Unknown billing configuration consumer.");
   }
