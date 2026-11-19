@@ -1,3 +1,9 @@
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -45,16 +51,39 @@ vi.mock("@daytona/sdk", () => ({
 
 import { createDaytonaProvider, ttlMinutes, withDeadline } from "./daytona";
 import {
-  SandboxConfigError, SandboxNotFoundError, SandboxRateLimitError, SandboxTimeoutError,
+  SandboxConfigError, SandboxExitError, SandboxNotFoundError, SandboxRateLimitError, SandboxTimeoutError,
 } from "./types";
 
 const AUTO_DESTROY_AT = "2099-01-01T00:00:00.000Z";
+
+type Request = { command: string; runAsync?: boolean };
+type ExecResult = { cmdId: string; exitCode?: number; stdout?: string; stderr?: string };
+type OnChunk = (chunk: string) => void;
+type Logs = { output: string; stdout: string; stderr: string };
 
 const fakeDaytonaSandbox = (overrides: Record<string, unknown> = {}) => ({
   id: "sbx-1",
   state: "started",
   labels: { userId: "u1", "code-toolbox-language": "python" },
   autoDestroyAt: AUTO_DESTROY_AT,
+  process: {
+    createSession: vi.fn<(sessionId: string) => Promise<void>>(async () => {}),
+    executeSessionCommand: vi.fn<(sessionId: string, request: Request, timeout?: number) => Promise<ExecResult>>(
+      async () => ({ cmdId: "cmd-1", exitCode: 0, stdout: "", stderr: "" }),
+    ),
+    getSessionCommand: vi.fn<(sessionId: string, cmdId: string) => Promise<{ id: string; exitCode?: number }>>(
+      async () => ({ id: "cmd-1", exitCode: 0 }),
+    ),
+    // With callbacks it follows the stream; without, it returns the full logs.
+    getSessionCommandLogs: vi.fn<(sessionId: string, cmdId: string, onStdout?: OnChunk, onStderr?: OnChunk) => Promise<Logs | undefined>>(
+      async (_sessionId, _cmdId, onStdout) => (onStdout ? undefined : { output: "", stdout: "", stderr: "" }),
+    ),
+    deleteSession: vi.fn<(sessionId: string) => Promise<void>>(async () => {}),
+  },
+  fs: {
+    uploadFiles: vi.fn<(files: { source: Buffer; destination: string }[], timeout?: number) => Promise<void>>(async () => {}),
+    downloadFile: vi.fn<(path: string, timeout?: number) => Promise<Buffer>>(async () => Buffer.from("")),
+  },
   getPreviewLink: vi.fn(async (port: number) => ({ url: `https://${port}-sbx-1.proxy.daytona.works`, token: "preview-token" })),
   setTtl: vi.fn<(minutes: number) => Promise<void>>(async () => {}),
   refreshData: vi.fn(async () => {}),
@@ -356,6 +385,219 @@ describe("Daytona provider", () => {
       await expect(sandbox.kill()).resolves.toBeUndefined();
       expect(sandbox.listCommands).toBeUndefined();
       expect(sandbox.killCommand).toBeUndefined();
+    });
+
+    describe("run", () => {
+      it("sets cwd and envs, quotes and odd names included, as bash reads them back", async () => {
+        const { daytona, sandbox } = await connect();
+        const cwd = mkdtempSync(join(tmpdir(), "it's "));
+        try {
+          await sandbox.run(`printf '%s|%s|%s' "$PWD" "$A" "$(env | grep '^X%%=')"`, {
+            cwd,
+            envs: { A: "x'y $HOME", "X%%": "1" },
+            // No limit, so no GNU `timeout` is needed where the test runs; the wrapper is asserted below.
+            timeoutMs: 0,
+          });
+
+          const { command } = daytona.process.executeSessionCommand.mock.calls[0][1];
+          expect(spawnSync("bash", ["-c", command], { encoding: "utf8" }).stdout).toBe(`${cwd}|x'y $HOME|X%%=1`);
+        } finally {
+          rmSync(cwd, { recursive: true, force: true });
+        }
+      });
+
+      it("resolves a non-zero exit with separate stdout and stderr, in its own session", async () => {
+        const { daytona, sandbox } = await connect();
+        daytona.process.executeSessionCommand.mockResolvedValue({ cmdId: "cmd-1", exitCode: 2, stdout: "out", stderr: "err" });
+
+        expect(await sandbox.run("npm install")).toEqual({ exitCode: 2, stdout: "out", stderr: "err" });
+        const [sessionId, request, timeout] = daytona.process.executeSessionCommand.mock.calls[0];
+        expect(daytona.process.createSession).toHaveBeenCalledWith(sessionId);
+        // E2B's default command timeout, enforced in the sandbox; the HTTP wait outlasts it.
+        expect(request).toEqual({ command: expect.stringContaining("timeout -k 5 60s bash -c") });
+        expect(request.command).toContain("npm install");
+        expect(timeout).toBe(70);
+        expect(daytona.process.deleteSession).toHaveBeenCalledWith(sessionId);
+      });
+
+      it("stops the command in the sandbox at timeoutMs, and 0 means no limit", async () => {
+        const { daytona, sandbox } = await connect();
+        daytona.process.executeSessionCommand.mockRejectedValue(new mocks.errors.DaytonaConnectionTimeoutError("timeout of 12000ms exceeded"));
+
+        await expect(sandbox.run("sleep 99", { timeoutMs: 1_500 })).rejects.toBeInstanceOf(SandboxTimeoutError);
+        const [, request, timeout] = daytona.process.executeSessionCommand.mock.calls[0];
+        expect(request.command).toContain("timeout -k 5 2s");
+        expect(timeout).toBe(12);
+        expect(daytona.process.deleteSession).toHaveBeenCalled();
+
+        await sandbox.run("true", { timeoutMs: 0 }).catch(() => {});
+        const [, unlimited, wait] = daytona.process.executeSessionCommand.mock.calls[1];
+        expect(unlimited.command).not.toContain("timeout -k");
+        // Still explicit: the client's 30 s default would cut it short.
+        expect(wait).toBe(3_610);
+      });
+
+      it("reads timeout's exit after the deadline as a timeout, and an early 124 as a result", async () => {
+        const { daytona, sandbox } = await connect();
+        daytona.process.executeSessionCommand.mockImplementation(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return { cmdId: "cmd-1", exitCode: 124, stdout: "", stderr: "" };
+        });
+
+        await expect(sandbox.run("npm run build", { timeoutMs: 1 })).rejects.toBeInstanceOf(SandboxTimeoutError);
+        expect(await sandbox.run("exit 124")).toMatchObject({ exitCode: 124 });
+      });
+
+      it("streams output to the callbacks and resolves with the full logs and the exit code", async () => {
+        const { daytona, sandbox } = await connect();
+        daytona.process.executeSessionCommand.mockResolvedValue({ cmdId: "cmd-9" });
+        daytona.process.getSessionCommandLogs.mockImplementation(async (_sessionId, _cmdId, onStdout, onStderr) => {
+          if (!onStdout || !onStderr) return { output: "", stdout: "full-out", stderr: "full-err" };
+          onStdout("a");
+          onStderr("b");
+          onStdout("c");
+        });
+        daytona.process.getSessionCommand.mockResolvedValue({ id: "cmd-9", exitCode: 3 });
+        const onStdout = vi.fn();
+        const onStderr = vi.fn();
+
+        expect(await sandbox.run("npm run build", { onStdout, onStderr })).toEqual({ exitCode: 3, stdout: "full-out", stderr: "full-err" });
+        expect(daytona.process.executeSessionCommand.mock.calls[0][1]).toMatchObject({ runAsync: true });
+        expect(daytona.process.getSessionCommandLogs.mock.calls[0].slice(0, 2)).toEqual([expect.any(String), "cmd-9"]);
+        expect(onStdout.mock.calls).toEqual([["a"], ["c"]]);
+        expect(onStderr.mock.calls).toEqual([["b"]]);
+        expect(daytona.process.deleteSession).toHaveBeenCalled();
+      });
+
+      it("waits out a dropped stream for the exit code, and falls back to the streamed output", async () => {
+        const { daytona, sandbox } = await connect();
+        daytona.process.getSessionCommandLogs.mockImplementation(async (_sessionId, _cmdId, onStdout) => {
+          if (!onStdout) throw new Error("logs unavailable");
+          onStdout("partial");
+          return undefined;
+        });
+        daytona.process.getSessionCommand.mockResolvedValueOnce({ id: "cmd-1" }).mockResolvedValue({ id: "cmd-1", exitCode: 0 });
+
+        expect(await sandbox.run("npm run build", { onStdout: () => {} })).toEqual({ exitCode: 0, stdout: "partial", stderr: "" });
+        expect(daytona.process.getSessionCommand).toHaveBeenCalledTimes(2);
+      });
+
+      it("times a streamed command out after its wait", async () => {
+        const { daytona, sandbox } = await connect();
+        daytona.process.getSessionCommandLogs.mockReturnValue(new Promise(() => {}));
+        vi.useFakeTimers();
+        try {
+          const rejection = expect(sandbox.run("sleep 99", { timeoutMs: 10, onStdout: () => {} })).rejects.toBeInstanceOf(SandboxTimeoutError);
+          await vi.advanceTimersByTimeAsync(10_100);
+          await rejection;
+          expect(daytona.process.deleteSession).toHaveBeenCalled();
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+    });
+
+    it("starts a command in a session it keeps, and returns the pid from the pid file", async () => {
+      const { daytona, sandbox } = await connect();
+      daytona.fs.downloadFile
+        .mockRejectedValueOnce(new mocks.errors.DaytonaFileNotFoundError("not yet"))
+        .mockResolvedValueOnce(Buffer.from("42\n"));
+      const onStdout = vi.fn();
+
+      expect(await sandbox.start("npm run dev", { cwd: "/app", envs: { A: "1" }, onStdout })).toEqual({ pid: 42 });
+      const [sessionId, request, timeout] = daytona.process.executeSessionCommand.mock.calls[0];
+      expect(sessionId).toMatch(/^cn-start-/);
+      expect(request).toMatchObject({ runAsync: true });
+      expect(request.command).toContain("echo $$ > /tmp/.codenaya/");
+      // No time limit on a started command.
+      expect(request.command).not.toContain("timeout -k");
+      expect(timeout).toBeUndefined();
+      expect(daytona.fs.downloadFile.mock.calls[0]).toEqual([expect.stringMatching(/^\/tmp\/\.codenaya\/.+\.pid$/), 5]);
+      expect(daytona.process.getSessionCommandLogs).toHaveBeenCalledWith(sessionId, "cmd-1", onStdout, expect.any(Function));
+      expect(daytona.process.deleteSession).not.toHaveBeenCalled();
+    });
+
+    it("fails a start whose pid never appears", async () => {
+      const { daytona, sandbox } = await connect();
+      daytona.fs.downloadFile.mockRejectedValue(new mocks.errors.DaytonaFileNotFoundError("missing"));
+      vi.useFakeTimers();
+      try {
+        const rejection = expect(sandbox.start("false")).rejects.toThrow("Daytona did not report the started command's pid");
+        // The poll's whole 5 s budget, without waiting for it.
+        await vi.advanceTimersByTimeAsync(5_100);
+        await rejection;
+        expect(daytona.process.deleteSession).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("writes files in one upload of Buffers after one mkdir of their unique parents", async () => {
+      const { daytona, sandbox } = await connect();
+      const bytes = new Uint8Array([0, 255, 10]);
+
+      await sandbox.writeFiles([
+        { path: "/app/a.ts", data: "a" },
+        { path: "/app/b/c.ts", data: "/etc/passwd" },
+        { path: "/app/b/d.bin", data: bytes.buffer },
+      ]);
+
+      expect(daytona.process.executeSessionCommand).toHaveBeenCalledTimes(2);
+      const { command } = daytona.process.executeSessionCommand.mock.calls[0][1];
+      expect(command).toContain("mkdir -p --");
+      expect(command.split("/app/b").length - 1).toBe(1);
+      expect(daytona.fs.uploadFiles).toHaveBeenCalledTimes(1);
+      const [uploads, timeout] = daytona.fs.uploadFiles.mock.calls[0];
+      // The SDK's own default is 30 min.
+      expect(timeout).toBe(120);
+      // The checksum manifest rides in the same batch and is checked after it.
+      const manifest = uploads[3];
+      expect(manifest.destination).toMatch(/^\/tmp\/\.codenaya\/upload-.+\.sha256$/);
+      expect(String(manifest.source)).toBe(
+        `${createHash("sha256").update("a").digest("hex")}  /app/a.ts\n` +
+          `${createHash("sha256").update("/etc/passwd").digest("hex")}  /app/b/c.ts\n` +
+          `${createHash("sha256").update(bytes).digest("hex")}  /app/b/d.bin\n`,
+      );
+      expect(daytona.process.executeSessionCommand.mock.calls[1][1].command).toContain("sha256sum --check --quiet");
+      // A string source would be read as a local file path.
+      expect(uploads.every(({ source }) => Buffer.isBuffer(source))).toBe(true);
+      expect(uploads.map(({ source, destination }) => [destination, String(source)]).slice(0, 2)).toEqual([
+        ["/app/a.ts", "a"],
+        ["/app/b/c.ts", "/etc/passwd"],
+      ]);
+      expect(new Uint8Array(uploads[2].source)).toEqual(bytes);
+    });
+
+    it("fails a write whose upload didn't land, as the serverless SDK path won't say", async () => {
+      const { daytona, sandbox } = await connect();
+      daytona.process.executeSessionCommand
+        .mockResolvedValueOnce({ cmdId: "cmd-1", exitCode: 0, stdout: "", stderr: "" })
+        .mockResolvedValueOnce({ cmdId: "cmd-2", exitCode: 1, stdout: "/app/.env: FAILED", stderr: "" });
+
+      await expect(sandbox.writeFiles([{ path: "/app/.env", data: "A=1" }])).rejects.toBeInstanceOf(SandboxExitError);
+    });
+
+    it("skips an empty write and fails when the parents can't be made", async () => {
+      const { daytona, sandbox } = await connect();
+
+      await sandbox.writeFiles([]);
+      expect(daytona.process.createSession).not.toHaveBeenCalled();
+      expect(daytona.fs.uploadFiles).not.toHaveBeenCalled();
+
+      daytona.process.executeSessionCommand.mockResolvedValue({ cmdId: "cmd-1", exitCode: 1, stdout: "", stderr: "denied" });
+      await expect(sandbox.writeFiles([{ path: "/root/x", data: "x" }])).rejects.toBeInstanceOf(SandboxExitError);
+      expect(daytona.fs.uploadFiles).not.toHaveBeenCalled();
+    });
+
+    it("reads text and bytes", async () => {
+      const { daytona, sandbox } = await connect();
+      daytona.fs.downloadFile.mockResolvedValue(Buffer.from("héllo"));
+
+      expect(await sandbox.readFile("/app/a.txt", "text")).toBe("héllo");
+      // Bounded even without a budget: the SDK's own default is 30 min.
+      expect(daytona.fs.downloadFile).toHaveBeenLastCalledWith("/app/a.txt", 30);
+      expect(await sandbox.readFile("/app/a.txt", "bytes", { requestTimeoutMs: 2_000 })).toEqual(new Uint8Array(Buffer.from("héllo")));
+      expect(daytona.fs.downloadFile).toHaveBeenLastCalledWith("/app/a.txt", 2);
     });
   });
 });

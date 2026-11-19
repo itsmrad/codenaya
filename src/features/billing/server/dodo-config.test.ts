@@ -206,3 +206,55 @@ describe("Dodo config", () => {
     expect(readDodoConfig("convex-receiver", "development", receiverEnv)).toMatchObject({ webhookKey: "synthetic-signing-key" });
   });
 });
+
+describe("Dodo reconciler config", () => {
+  const reconcilerEnv = {
+    DODO_PAYMENTS_ENVIRONMENT: "test_mode",
+    DODO_PAYMENTS_BUSINESS_ID: "test-business",
+    DODO_PAYMENTS_API_KEY: "synthetic-api-key",
+    DODO_PAYMENTS_PRO_PRODUCT_ID: "test-pro",
+    DODO_PAYMENTS_TOP_UP_PRODUCT_ID: "test-topup",
+  };
+
+  it("returns only the read credentials and catalog", () => {
+    expect(readDodoConfig("convex-reconciler", "development", { ...reconcilerEnv, ...receiverEnv })).toEqual({
+      environment: "test_mode", businessId: "test-business", apiKey: "synthetic-api-key",
+      proProductId: "test-pro", topUpProductId: "test-topup",
+    });
+  });
+  for (const name of [
+    "DODO_PAYMENTS_ENVIRONMENT", "DODO_PAYMENTS_BUSINESS_ID", "DODO_PAYMENTS_API_KEY", "DODO_PAYMENTS_PRO_PRODUCT_ID",
+  ]) {
+    it.each(absent)(`rejects absent reconciler ${name} (%s)`, (value) => {
+      expect(() => readDodoConfig("convex-reconciler", "development", { ...reconcilerEnv, [name]: value }))
+        .toThrow(name);
+    });
+  }
+  it.each(absent)("treats an absent top-up product as not configured (%s)", (value) => {
+    expect(readDodoConfig("convex-reconciler", "development", {
+      ...reconcilerEnv, DODO_PAYMENTS_TOP_UP_PRODUCT_ID: value,
+    })).toMatchObject({ topUpProductId: undefined });
+  });
+  it.each([undefined, "false"])("stays configured while checkout is disabled (%s)", (flag) => {
+    expect(readDodoConfig("convex-reconciler", "development", {
+      ...reconcilerEnv, CODENAYA_BILLING_ENABLED: flag, CREDIT_LIMITS_ENFORCED: undefined,
+    })).toMatchObject({ apiKey: "synthetic-api-key" });
+  });
+  it.each(["development", "preview", "staging", "production"] as const)(
+    "%s accepts only the deployment's mode", (deployment) => {
+      const environment = deployment === "production" ? "live_mode" : "test_mode";
+      const wrong = environment === "live_mode" ? "test_mode" : "live_mode";
+      expect(readDodoConfig("convex-reconciler", deployment, { ...reconcilerEnv, DODO_PAYMENTS_ENVIRONMENT: environment }))
+        .toMatchObject({ environment });
+      expect(() => readDodoConfig("convex-reconciler", deployment, { ...reconcilerEnv, DODO_PAYMENTS_ENVIRONMENT: wrong }))
+        .toThrow("incompatible");
+    },
+  );
+  it("prohibits base URL overrides and works without a browser guard", () => {
+    expect(() => readDodoConfig("convex-reconciler", "development", {
+      ...reconcilerEnv, DODO_PAYMENTS_BASE_URL: "https://untrusted.test",
+    })).toThrow("overrides");
+    vi.stubGlobal("window", {});
+    expect(readDodoConfig("convex-reconciler", "development", reconcilerEnv)).toMatchObject({ proProductId: "test-pro" });
+  });
+});
