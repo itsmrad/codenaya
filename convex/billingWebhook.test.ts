@@ -92,6 +92,8 @@ async function sha256Hex(text: string) {
 
 describe("POST /billing/webhook", () => {
   beforeEach(() => {
+    // Mapped receipts schedule processing; fake timers keep those runs from firing after the test.
+    vi.useFakeTimers();
     // The receiver must work even where the runtime defines `window` (the guard is Next-only).
     vi.stubGlobal("window", {});
     for (const [name, value] of Object.entries(receiverEnv)) vi.stubEnv(name, value);
@@ -100,6 +102,7 @@ describe("POST /billing/webhook", () => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   test("stores a mapped financial event as a pending minimal receipt", async () => {
