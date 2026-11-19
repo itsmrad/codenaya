@@ -52,14 +52,17 @@ vi.mock("@blaxel/core", () => ({
   },
 }));
 
-import { DEFAULT_BLAXEL_IMAGE, createBlaxelProvider, fromBlaxelError, newSandboxName } from "./blaxel";
+import { createBlaxelProvider, fromBlaxelError, newSandboxName } from "./blaxel";
 import { SandboxConfigError, SandboxNotFoundError, SandboxRateLimitError, SandboxTimeoutError } from "./types";
 
 const NOW = Date.parse("2026-11-19T12:00:00Z");
 const iso = (ms: number) => new Date(ms).toISOString();
 
-const instance = ({ name = "cn-abc", labels = {} as Record<string, string>, status = "DEPLOYED", endAt = NOW + 60_000 } = {}) => ({
-  metadata: { name, labels },
+const instance = ({
+  name = "cn-abc", labels = {} as Record<string, string>, status = "DEPLOYED", endAt = NOW + 60_000,
+  createdAt = iso(NOW - 10 * 60_000) as string | null,
+} = {}) => ({
+  metadata: { name, labels, createdAt: createdAt ?? undefined },
   status,
   spec: { lifecycle: { expirationPolicies: [{ type: "date", value: iso(endAt), action: "delete" }] } },
   expiresIn: undefined,
@@ -112,11 +115,10 @@ describe("Blaxel provider", () => {
     mocks.create.mockImplementation(async ({ name }) => instance({ name }));
 
     await provider.create({ timeoutMs: 1, requestTimeoutMs: 1_500, metadata: {} });
-    expect(DEFAULT_BLAXEL_IMAGE).toBe("codenaya-node22");
     expect(mocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ image: "codenaya-node22", region: "us-was-1" }), { timeout: 2 });
 
     await provider.create({ image: "other", timeoutMs: 1, metadata: {} });
-    expect(mocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ image: "other" }), { timeout: undefined });
+    expect(mocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ image: "other" }), { timeout: 30 });
   });
 
   it("throws on its own deadline and deletes the sandbox the create still makes", async () => {
@@ -146,8 +148,50 @@ describe("Blaxel provider", () => {
     mocks.create.mockImplementation(async ({ name }) => instance({ name, labels: { userId: "user1" } }));
     mocks.delete.mockResolvedValue({});
 
-    await expect(provider.create({ timeoutMs: 1, metadata: { userId: "user_1" } })).rejects.toThrow("labels");
+    const rejection = provider.create({ timeoutMs: 1, metadata: { userId: "user_1" } });
+    await expect(rejection).rejects.toThrow("labels");
+    await expect(rejection).rejects.toBeInstanceOf(SandboxConfigError);
     expect(mocks.delete).toHaveBeenCalledWith(mocks.create.mock.calls[0][0].name);
+  });
+
+  it.each([
+    ["404", new mocks.errors.ResponseError(404)],
+    ["raw IMAGE_NOT_FOUND", { code: "IMAGE_NOT_FOUND", message: "no image", status_code: 404 }],
+    ["raw INVALID_REGION", { code: "INVALID_REGION", message: "bad region", status_code: 400 }],
+  ])("maps a create-time %s to SandboxConfigError so the boot fails over", async (_, error) => {
+    mocks.create.mockRejectedValue(error);
+
+    await expect(provider.create({ timeoutMs: 1, metadata: {} })).rejects.toBeInstanceOf(SandboxConfigError);
+  });
+
+  it("bounds a request without requestTimeoutMs by 30 s, and 0 by none", async () => {
+    mocks.get.mockReturnValue(new Promise(() => {}));
+
+    const rejection = provider.connect("cn-abc");
+    const expectation = expect(rejection).rejects.toBeInstanceOf(SandboxTimeoutError);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expectation;
+
+    let settled = false;
+    void provider.inspect!("cn-abc", { requestTimeoutMs: 0 }).finally(() => (settled = true)).catch(() => {});
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(settled).toBe(false);
+  });
+
+  it.each([
+    ["55 min old: only to its hour", 55, NOW + 5 * 60_000],
+    ["61 min old: not at all", 61, undefined],
+    ["of unknown age: not at all", undefined, undefined],
+  ])("extends a sandbox %s", async (_, ageMinutes, endAt) => {
+    mocks.get.mockResolvedValue(instance({
+      endAt: NOW + 60_000, createdAt: ageMinutes === undefined ? null : iso(NOW - ageMinutes * 60_000),
+    }));
+    mocks.updateLifecycle.mockResolvedValue(instance());
+
+    await provider.connect("cn-abc", { timeoutMs: 10 * 60_000 });
+
+    if (endAt === undefined) expect(mocks.updateLifecycle).not.toHaveBeenCalled();
+    else expect(mocks.updateLifecycle).toHaveBeenCalledWith("cn-abc", { expirationPolicies: [{ type: "date", value: iso(endAt), action: "delete" }] });
   });
 
   it("extends the lifetime on connect but never shortens it", async () => {
@@ -218,9 +262,11 @@ describe("Blaxel provider", () => {
   });
 
   it("kills by name and answers false when the sandbox was already gone", async () => {
-    mocks.delete.mockResolvedValueOnce({}).mockRejectedValueOnce(new mocks.errors.ResponseError(404));
+    mocks.delete.mockResolvedValueOnce({}).mockRejectedValueOnce(new mocks.errors.ResponseError(404))
+      .mockRejectedValueOnce({ code: "SANDBOX_DELETION_IN_PROGRESS", message: "deleting", status_code: 409 });
 
     expect(await provider.kill("cn-abc")).toBe(true);
+    expect(await provider.kill("cn-abc")).toBe(false);
     expect(await provider.kill("cn-abc")).toBe(false);
     expect(mocks.delete).toHaveBeenCalledWith("cn-abc");
   });
@@ -240,7 +286,7 @@ describe("Blaxel provider", () => {
     ["raw generic 404", { error: "sandbox not found", code: 404 }, SandboxNotFoundError],
     ["raw SANDBOX_DELETED", { code: "SANDBOX_DELETED", message: "deleted", status_code: 409 }, SandboxNotFoundError],
   ])("maps %s to the seam's error, keeping the message and cause", (_, error, Expected) => {
-    const mapped = fromBlaxelError(error, true);
+    const mapped = fromBlaxelError(error, "sandbox");
 
     expect(mapped).toBeInstanceOf(Expected);
     expect(mapped).toMatchObject({ message: mocks.helpers.getBlaxelErrorMessage(error) ?? (error as Error).message, cause: error });
@@ -250,7 +296,7 @@ describe("Blaxel provider", () => {
     const notFound = new mocks.errors.ResponseError(404);
     expect(fromBlaxelError(notFound)).toBe(notFound);
     const boom = new Error("boom");
-    expect(fromBlaxelError(boom, true)).toBe(boom);
+    expect(fromBlaxelError(boom, "sandbox")).toBe(boom);
     const raw = { error: "internal", code: 500 };
     expect(fromBlaxelError(raw)).toMatchObject({ message: "internal", cause: raw });
     expect(fromBlaxelError(raw)).toBeInstanceOf(Error);
