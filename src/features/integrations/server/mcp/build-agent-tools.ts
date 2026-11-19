@@ -34,6 +34,7 @@ import {
 } from "../../adapters/agentkit";
 import { describeDrift } from "./fingerprint";
 import { discoverTools, type DiscoveredTool } from "./discover-tools";
+import type { EnvRefStore } from "./env-refs";
 import { redactSecrets } from "./redact";
 import {
   collectKnownSecrets,
@@ -63,6 +64,8 @@ export interface BuildMcpToolsOptions {
   }>;
   approvalGate?: McpApprovalGate;
   audit?: McpAuditSink;
+  /** Turns redacted values into env refs for `setEnvVarFromRef`. */
+  storeEnvRefs?: EnvRefStore;
   /** Workflow run id, used only to correlate log lines. */
   runId?: string;
 }
@@ -95,7 +98,7 @@ export function isMcpAuthenticationFailure(error: string): boolean {
 export async function buildMcpAgentTools(
   options: BuildMcpToolsOptions,
 ): Promise<McpToolBuildResult> {
-  const { entries, approvalGate, audit, runId } = options;
+  const { entries, approvalGate, audit, storeEnvRefs, runId } = options;
 
   const warnings: string[] = [];
   const connectedSummaries: string[] = [];
@@ -230,6 +233,7 @@ export async function buildMcpAgentTools(
     servers: usableServers,
     toolsByConnection,
     knownSecrets,
+    storeEnvRefs,
     approvalGate,
     audit,
     runId,
@@ -294,9 +298,13 @@ export function buildIntegrationsPromptSection(
         "server. Never request it, place it in an MCP config file, or put it in an " +
         "environment variable; invoke the connected tool directly.",
       "",
+      "Values shown as [env-ref:ref_<id> public|secret] stand for a value you cannot " +
+        "see; a public ref from a Supabase tool may be the project URL or publishable key. " +
+        "Store one with setEnvVarFromRef under the variable name the app reads. Never " +
+        "try to reconstruct the value behind a ref.",
       "After provisioning something, read its configuration in code from environment " +
-        "variables and tell the user which variable names to add in the project's " +
-        "Environment Variables panel. Use a NEXT_PUBLIC_ / VITE_ prefix only for values that " +
+        "variables. For anything without a ref, tell the user which variable names to add " +
+        "in the project's Environment Variables panel. Use a NEXT_PUBLIC_ / VITE_ prefix only for values that " +
         "are genuinely safe in a browser bundle (a project URL, an anon key); " +
         "everything else — service-role keys, database URLs, secret API keys — must " +
         "use an unprefixed name so it is encrypted and withheld from the in-browser " +

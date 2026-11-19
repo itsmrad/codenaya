@@ -86,11 +86,12 @@ describe("buildSupabaseHintSection (#228)", () => {
 
     expect(section).toContain("The app reads VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY");
     expect(section).toContain("never ask for them in chat");
-    expect(section).not.toContain("setEnvVar");
+    expect(section).toContain("the URL ref stands for the project URL); store each with setEnvVarFromRef");
+    expect(section).not.toMatch(/\bsetEnvVar\b/);
   });
 
   it("leaves no built-in skill telling the agent to store values", () => {
-    for (const skill of ALL_BUILTIN_SKILLS) expect(skill.body).not.toContain("setEnvVar");
+    for (const skill of ALL_BUILTIN_SKILLS) expect(skill.body).not.toMatch(/\bsetEnvVar\b/);
   });
 
   it("loads the skill when the project has it enabled", () => {

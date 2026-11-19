@@ -160,7 +160,10 @@ describe("buildIntegrationsPromptSection", () => {
     expect(section).toContain("tell the user which variable names to add");
     expect(section).toContain("Environment Variables panel");
     expect(section).toContain("or repeat it in a reply");
-    expect(section).not.toContain("setEnvVar");
+    expect(section).toContain("[env-ref:ref_<id> public|secret]");
+    expect(section).toContain("may be the project URL");
+    expect(section).toContain("Store one with setEnvVarFromRef");
+    expect(section).not.toMatch(/\bsetEnvVar\b/);
   });
 });
 

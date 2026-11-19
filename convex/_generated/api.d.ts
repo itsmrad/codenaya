@@ -22,6 +22,7 @@ import type * as checkpoints from "../checkpoints.js";
 import type * as conversations from "../conversations.js";
 import type * as credits from "../credits.js";
 import type * as crons from "../crons.js";
+import type * as envRefs from "../envRefs.js";
 import type * as envVars from "../envVars.js";
 import type * as errors from "../errors.js";
 import type * as fileContents from "../fileContents.js";
@@ -70,6 +71,7 @@ declare const fullApi: ApiFromModules<{
   conversations: typeof conversations;
   credits: typeof credits;
   crons: typeof crons;
+  envRefs: typeof envRefs;
   envVars: typeof envVars;
   errors: typeof errors;
   fileContents: typeof fileContents;

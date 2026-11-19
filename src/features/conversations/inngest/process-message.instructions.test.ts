@@ -104,7 +104,7 @@ describe("processMessage environment variables", () => {
 
     expect(prompt).toContain("Set in this project (names only): VITE_API_URL, STRIPE_SECRET_KEY.");
     expect(prompt).not.toMatch(/CANARY_/);
-    expect(prompt).not.toContain("setEnvVar");
+    expect(prompt).not.toMatch(/\bsetEnvVar\b/);
   });
 
   it("still gives the names-only guidance when the names can't be read", async () => {

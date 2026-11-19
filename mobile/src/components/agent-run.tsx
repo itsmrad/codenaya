@@ -54,6 +54,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   scrapeUrls: { icon: Globe, running: "Fetching", done: "Fetched" },
   // Removed tool, kept so older runs still render; their steps record the key only.
   setEnvVar: { icon: KeyRound, running: "Setting env", done: "Set env" },
+  setEnvVarFromRef: { icon: KeyRound, running: "Setting env", done: "Set env" },
   loadSkill: { icon: BookOpen, running: "Loading skill", done: "Used skill" },
   checkBuild: { icon: Terminal, running: "Checking build", done: "Checked build" },
 };
@@ -194,6 +195,7 @@ const TINTS: Record<string, string> = {
   listFiles: "#f59e0b",
   scrapeUrls: "#0ea5e9",
   setEnvVar: "#eab308",
+  setEnvVarFromRef: "#eab308",
   loadSkill: "#14b8a6",
 };
 
