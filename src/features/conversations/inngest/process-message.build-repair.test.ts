@@ -164,6 +164,8 @@ describe("processMessage repair after the run", () => {
       projectId: "p1",
       internalKey: "ik",
       runId: "run-under-test",
+      // Its sandbox gets project files only, so there is no value to redact.
+      secrets: [],
       // The utility model's repairs first; the run's own model takes over after them.
       maxAttempts: MAX_SERVER_REPAIRS + 1,
       model: { options: { model: "anthropic/claude-haiku-5.5" } },

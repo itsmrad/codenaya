@@ -121,6 +121,17 @@ function suppressingRedactor(): StreamRedactor {
 }
 
 /**
+ * Redact one whole text, not a stream. Pass only the variable part (command
+ * output, an error message, file content), never a fixed prefix the caller or a
+ * reader checks with `startsWith`: a short value could occur in it. `null`
+ * (values unknown) hides the text behind the notice.
+ */
+export function redact(text: string, secrets: readonly string[] | null): string {
+  const redactor = createStreamRedactor(secrets);
+  return redactor.push(text) + redactor.flush();
+}
+
+/**
  * Create a redactor for a fixed set of secret values.
  *
  * Pass `null` when the values could not be loaded: the redactor then fails closed

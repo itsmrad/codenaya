@@ -131,7 +131,8 @@ describe("swarm sandboxes", () => {
       metadata: { projectId: "p1", messageId: "m1", purpose: "swarm-worker" }, timeoutMs: 8.5 * 60_000,
     }));
     const opts = mocks.verifyAndFix.mock.calls[0][0] as VerifyAndFixOptions;
-    expect(opts).toMatchObject({ maxAttempts: 2, agentTaskId: "t1", runId: "m1", projectId: "p1", onResponse });
+    // Its sandbox is started from project files only, so there is no value to redact.
+    expect(opts).toMatchObject({ maxAttempts: 2, agentTaskId: "t1", runId: "m1", projectId: "p1", onResponse, secrets: [] });
     expect(e2b.connect).not.toHaveBeenCalled();
     expect(typeof opts.sandbox).toBe("function");
     e2b.connect.mockResolvedValue(fakeSandbox());
