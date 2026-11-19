@@ -25,6 +25,15 @@ const receiverEnv = {
   DODO_PAYMENTS_WEBHOOK_KEY: KEY,
 };
 
+// Dodo SDK 2.63.0 financial events and the payload id each one must carry.
+const FINANCIAL_EVENTS: [string, string][] = [
+  ...["succeeded", "failed", "processing", "cancelled"].map(s => [`payment.${s}`, "payment_id"]),
+  ...["active", "renewed", "on_hold", "paused", "unpaused", "past_due", "plan_changed", "updated",
+    "update_payment_method", "cancelled", "failed", "expired"].map(s => [`subscription.${s}`, "subscription_id"]),
+  ...["succeeded", "failed"].map(s => [`refund.${s}`, "payment_id"]),
+  ...["opened", "challenged", "accepted", "cancelled", "expired", "won", "lost"].map(s => [`dispute.${s}`, "payment_id"]),
+] as [string, string][];
+
 const event = (overrides: Record<string, unknown> = {}, data: Record<string, unknown> = {}) => ({
   business_id: BUSINESS,
   type: "payment.succeeded",
@@ -127,12 +136,27 @@ describe("POST /billing/webhook", () => {
     expect(await counters(t)).toEqual({ inputRevision: 1, unresolvedReceipts: 1 });
   });
 
-  test("records an unsupported authenticated event as ignored without dirtying the customer", async () => {
+  test.each(["credit.added", "payment.foo", "subscription.trial_ended", "refund.pending", "dispute.reopened"])(
+    "records unsupported authenticated %s as ignored without dirtying the customer",
+    async type => {
+      const t = setup();
+      await mappedCustomer(t);
+      expect((await t.fetch(PATH, signed(event({ type })))).status).toBe(200);
+      expect(await receipts(t)).toMatchObject([{ state: "ignored", eventType: type }]);
+      expect(await counters(t)).toEqual({ inputRevision: 0, unresolvedReceipts: 0 });
+    },
+  );
+
+  test.each(FINANCIAL_EVENTS)("%s requires %s before any write", async (type, idField) => {
     const t = setup();
     await mappedCustomer(t);
-    expect((await t.fetch(PATH, signed(event({ type: "credit.added" })))).status).toBe(200);
-    expect(await receipts(t)).toMatchObject([{ state: "ignored", eventType: "credit.added" }]);
-    expect(await counters(t)).toEqual({ inputRevision: 0, unresolvedReceipts: 0 });
+    const ids = { payment_id: "pay_synthetic", subscription_id: "sub_synthetic" };
+    for (const missing of [undefined, null, ""]) {
+      await expectRejected(t, signed(event({ type }, { ...ids, [idField]: missing })));
+    }
+    expect((await t.fetch(PATH, signed(event({ type }, ids)))).status).toBe(200);
+    expect(await receipts(t)).toMatchObject([{ state: "pending", eventType: type }]);
+    expect(await counters(t)).toEqual({ inputRevision: 1, unresolvedReceipts: 1 });
   });
 
   test("accepts the previous key only while it is configured", async () => {

@@ -8,8 +8,15 @@ import { billingModeValidator } from "./schema";
 
 export const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 const DEPLOYMENTS: readonly string[] = ["development", "preview", "staging", "production"] satisfies DodoDeployment[];
-// Families that move money or access; every other authenticated event is recorded as ignored.
-const FINANCIAL_EVENT_PREFIXES = ["payment.", "subscription.", "refund.", "dispute."];
+// Exact Dodo event types (SDK 2.63.0) that move money or access, each with the resource id its
+// payload always carries. Every other authenticated type, even a new one in a known family, is ignored.
+const FINANCIAL_EVENTS = new Map<string, "paymentId" | "subscriptionId">([
+  ...["succeeded", "failed", "processing", "cancelled"].map(s => [`payment.${s}`, "paymentId"] as const),
+  ...["active", "renewed", "on_hold", "paused", "unpaused", "past_due", "plan_changed", "updated",
+    "update_payment_method", "cancelled", "failed", "expired"].map(s => [`subscription.${s}`, "subscriptionId"] as const),
+  ...["succeeded", "failed"].map(s => [`refund.${s}`, "paymentId"] as const),
+  ...["opened", "challenged", "accepted", "cancelled", "expired", "won", "lost"].map(s => [`dispute.${s}`, "paymentId"] as const),
+]);
 const EVENT_TYPE = /^[a-z_]{1,32}(\.[a-z_]{1,32}){1,3}$/;
 const PROVIDER_ID = /^[A-Za-z0-9_-]{1,128}$/;
 // Strict header shapes also reject duplicated headers, which arrive comma-joined.
@@ -116,15 +123,14 @@ function normalize(payload: unknown, businessId: string): NormalizedEvent | null
     subscriptionId: data.subscription_id,
     sessionId: data.checkout_session_id,
   };
-  const event: NormalizedEvent = {
-    eventType: type, occurredAt, financial: FINANCIAL_EVENT_PREFIXES.some(prefix => type.startsWith(prefix)),
-  };
+  const requiredId = FINANCIAL_EVENTS.get(type);
+  const event: NormalizedEvent = { eventType: type, occurredAt, financial: requiredId !== undefined };
   for (const [field, value] of Object.entries(ids) as [keyof typeof ids, unknown][]) {
     if (value == null) continue;
     if (typeof value !== "string" || !PROVIDER_ID.test(value)) return null;
     event[field] = value;
   }
-  return event;
+  return requiredId && !event[requiredId] ? null : event;
 }
 
 export const customerRefByProviderId = internalQuery({
