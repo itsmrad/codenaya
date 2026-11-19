@@ -1,4 +1,5 @@
 import {
+  CreditCardIcon,
   GaugeIcon,
   KeyRoundIcon,
   LayoutPanelLeftIcon,
@@ -15,6 +16,7 @@ export const ACCOUNT_SETTINGS_URL = "/settings/account";
 export const AI_PROVIDERS_SETTINGS_URL = "/settings/ai-providers";
 export const SKILLS_SETTINGS_URL = "/settings/skills";
 export const USAGE_SETTINGS_URL = "/settings/usage";
+export const BILLING_SETTINGS_URL = "/settings/billing";
 export const WORKSPACE_SETTINGS_URL = "/settings/workspace";
 
 
@@ -28,6 +30,7 @@ export const SETTINGS_NAV: SectionNavItem[] = [
   { href: AI_PROVIDERS_SETTINGS_URL, label: "AI providers", icon: KeyRoundIcon },
   { href: SKILLS_SETTINGS_URL, label: "Skills", icon: ScrollTextIcon },
   { href: USAGE_SETTINGS_URL, label: "Usage", icon: GaugeIcon },
+  { href: BILLING_SETTINGS_URL, label: "Billing", icon: CreditCardIcon },
   { href: "/settings/integrations", label: "Integrations", icon: PlugIcon },
   { href: WORKSPACE_SETTINGS_URL, label: "Workspace", icon: LayoutPanelLeftIcon },
   { href: "/settings/appearance", label: "Appearance", icon: PaletteIcon },
