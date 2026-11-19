@@ -45,6 +45,7 @@ import type * as projectNotes from "../projectNotes.js";
 import type * as publicPreviews from "../publicPreviews.js";
 import type * as projects from "../projects.js";
 import type * as promoClaims from "../promoClaims.js";
+import type * as runtimeHandles from "../runtimeHandles.js";
 import type * as showcase from "../showcase.js";
 import type * as skills from "../skills.js";
 import type * as stats from "../stats.js";
@@ -98,6 +99,7 @@ declare const fullApi: ApiFromModules<{
   projects: typeof projects;
   publicPreviews: typeof publicPreviews;
   promoClaims: typeof promoClaims;
+  runtimeHandles: typeof runtimeHandles;
   showcase: typeof showcase;
   skills: typeof skills;
   stats: typeof stats;
