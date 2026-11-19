@@ -24,7 +24,9 @@ const { STARTER_WARMUP_COMMANDS }: { STARTER_WARMUP_COMMANDS: string[] } = await
 );
 
 const IMAGE_NAME = process.env.BLAXEL_IMAGE?.trim() || "codenaya-node22";
-// Non-root sandboxes ship by default only in us-pdx-1 and us-was-1.
+// Region the image is built in. Non-root sandboxes ship by default only in
+// us-pdx-1 and us-was-1. The SDK sends no region for the build sandbox
+// itself, so the platform picks where that one deploys.
 const REGION = process.env.BL_REGION?.trim() || "us-was-1";
 
 // The builder slims images by default, which deletes compilers (gcc, g++,
@@ -47,7 +49,6 @@ try {
   // Builds by deploying a sandbox named after the image.
   const sandbox = await image.build({
     name: IMAGE_NAME,
-    memory: 4096,
     buildMemory: 8192,
     buildRegion: REGION,
     timeout: 20 * 60_000,
@@ -57,6 +58,7 @@ try {
 } finally {
   rmSync(contextDir, { recursive: true, force: true });
   // The build sandbox is not needed after the build; deleting it keeps the image.
+  // The build overwrites, and this deletes, any sandbox already named IMAGE_NAME.
   await SandboxInstance.delete(IMAGE_NAME).then(
     () => console.log(`Deleted build sandbox "${IMAGE_NAME}".`),
     (error: unknown) => console.warn(`Could not delete build sandbox "${IMAGE_NAME}":`, error),
