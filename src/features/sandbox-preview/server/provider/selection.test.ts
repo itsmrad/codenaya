@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { parseProviderConfig, sandboxTimeoutMs, type SandboxProviderConfig } from "./config";
 import { createProviderCooldown, createWithFailover } from "./failover";
-import { countLive, listAll } from "./fanout";
+import { countLive, FALLBACK_LIST_TIMEOUT_MS, listAll } from "./fanout";
 import { selectProviders } from "./select";
 import {
   type CreateOptions, type ProviderId, type Sandbox, type SandboxProvider,
@@ -206,5 +206,63 @@ describe("enabled provider fanout", () => {
     const error = new SandboxTimeoutError("list failed");
     vi.mocked(provider.list).mockRejectedValue(error);
     await expect(countLive([provider], opts.metadata)).rejects.toBe(error);
+  });
+});
+
+describe("fanout with a failing non-primary provider", () => {
+  const entry = { id: "e1", metadata: opts.metadata, endAt: new Date(1000) };
+  const setup = (now?: () => number) => {
+    const primary = fakeProvider();
+    vi.mocked(primary.list).mockResolvedValue([entry]);
+    const failing = fakeProvider(second);
+    vi.mocked(failing.list).mockRejectedValue(new Error("fallback down"));
+    return { providers: [primary, failing], health: { primary: "e2b" as ProviderId, cooldown: createProviderCooldown(now) } };
+  };
+
+  it("lookups skip it and cool it down", async () => {
+    const { providers, health } = setup();
+    expect(await listAll(providers, { metadata: opts.metadata }, { ...health, skip: "failing" })).toEqual([{ ...entry, provider: "e2b" }]);
+    expect(health.cooldown.isCoolingDown(second)).toBe(true);
+    expect(selectProviders(config, health.cooldown)).toEqual(["e2b", third]);
+  });
+
+  it("the cap fails closed until it is cooling, skips it while cooling, and fails closed after expiry", async () => {
+    let now = 0;
+    const { providers, health } = setup(() => now);
+    const cap = { ...health, skip: "cooling" as const };
+    await expect(countLive(providers, opts.metadata, cap)).rejects.toThrow("fallback down");
+    expect(health.cooldown.isCoolingDown(second)).toBe(true);
+    expect(await countLive(providers, opts.metadata, cap)).toBe(1);
+    now += 600_000;
+    await expect(countLive(providers, opts.metadata, cap)).rejects.toThrow("fallback down");
+    expect(await countLive(providers, opts.metadata, cap)).toBe(1);
+  });
+
+  it("gives a hanging fallback 5 s, passed down as requestTimeoutMs, then skips and cools it", async () => {
+    vi.useFakeTimers();
+    try {
+      const { providers, health } = setup();
+      vi.mocked(providers[1].list).mockReturnValue(new Promise(() => {}));
+      const query = { metadata: opts.metadata, limit: 3, requestTimeoutMs: 10_000 };
+      const lookup = listAll(providers, query, { ...health, skip: "failing" });
+      await vi.advanceTimersByTimeAsync(FALLBACK_LIST_TIMEOUT_MS);
+      expect(await lookup).toEqual([{ ...entry, provider: "e2b" }]);
+      expect(providers[0].list).toHaveBeenCalledWith(query);
+      expect(providers[1].list).toHaveBeenCalledWith({ ...query, requestTimeoutMs: FALLBACK_LIST_TIMEOUT_MS });
+      expect(health.cooldown.isCoolingDown(second)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["failing", "cooling"] as const)("the primary still fails closed and is not cooled by a list (%s)", async (skip) => {
+    const { providers, health } = setup();
+    const error = new SandboxTimeoutError("primary down");
+    vi.mocked(providers[0].list).mockRejectedValue(error);
+    vi.mocked(providers[1].list).mockResolvedValue([]);
+    await expect(listAll(providers, {}, { ...health, skip })).rejects.toBe(error);
+    expect(health.cooldown.isCoolingDown("e2b")).toBe(false);
+    health.cooldown.coolDown("e2b");
+    await expect(listAll(providers, {}, { ...health, skip })).rejects.toBe(error);
   });
 });

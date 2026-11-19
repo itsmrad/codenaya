@@ -1,6 +1,6 @@
 import { findPreviewDevServer, PREVIEW_PROXY_PORT, SHORT_CALL_MS } from "@/features/sandbox-preview/server/dev-server";
 import { listAll } from "@/features/sandbox-preview/server/provider/fanout";
-import { getConfiguredProviders, getProvider } from "@/features/sandbox-preview/server/provider/registry";
+import { fanoutHealth, getConfiguredProviders, getProvider } from "@/features/sandbox-preview/server/provider/registry";
 import { SandboxNotFoundError } from "@/features/sandbox-preview/server/provider/types";
 import { checkRateLimit, type RateLimitResult } from "@/lib/rate-limit";
 
@@ -17,7 +17,7 @@ export async function currentPreviewUrl(projectId: string, userId: string) {
     metadata: { userId, projectId },
     limit: 2,
     requestTimeoutMs: SHORT_CALL_MS,
-  });
+  }, { ...fanoutHealth(), skip: "failing" });
   for (const entry of running) {
     try {
       const provider = getProvider(entry.provider);

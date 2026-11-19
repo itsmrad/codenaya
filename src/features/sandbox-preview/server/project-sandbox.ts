@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { killTreeCommand, SHORT_CALL_MS, stopDevServers } from "./dev-server";
 import { DEFAULT_E2B_TEMPLATE } from "./provider/e2b";
-import { listAll } from "./provider/fanout";
+import { type FanoutHealth, listAll } from "./provider/fanout";
 import { listCommands } from "./provider/helpers";
 import { toPublicSandboxId } from "./provider/ids";
 import type { Sandbox as SeamSandbox, SandboxProvider } from "./provider/types";
@@ -55,9 +55,11 @@ export const MAX_LIVE_SANDBOXES = 3;
  */
 // ponytail: check-then-create, so simultaneous boots can overshoot by a few; the
 // sandbox rate limit bounds that. Use a Convex counter if it ever matters.
-export const atLiveSandboxCap = async (providers: readonly SandboxProvider[], userId: string) => {
+// A non-primary provider whose list fails is left out only while it is cooling down,
+// so during its outage a user can go over the cap by their sandboxes on it (ADR 0015).
+export const atLiveSandboxCap = async (providers: readonly SandboxProvider[], userId: string, health?: FanoutHealth) => {
   // Each provider returns at most the cap, so the sum still answers "at the cap" exactly.
-  const running = await listAll(providers, { metadata: { userId }, limit: MAX_LIVE_SANDBOXES });
+  const running = await listAll(providers, { metadata: { userId }, limit: MAX_LIVE_SANDBOXES }, health && { ...health, skip: "cooling" });
   return running.length >= MAX_LIVE_SANDBOXES;
 };
 
@@ -67,15 +69,17 @@ export const atLiveSandboxCap = async (providers: readonly SandboxProvider[], us
  * on it or hitting the cap (#492). Returns the killed sandboxes' prefixed ids.
  */
 // shortcut: an orphan whose project is never reopened lives until the E2B
-// timeout (SANDBOX_TIMEOUT_MS). Use a renewable lease if that ever matters.
+// timeout (SANDBOX_TIMEOUT_MS). Use a renewable lease if that ever matters. Best
+// effort: a non-primary provider whose list fails is skipped, its sandboxes expire.
 export const killProjectPreviews = async (
   providers: readonly SandboxProvider[],
   userId: string,
   projectId: string,
+  health?: FanoutHealth,
 ) => {
   const byId = new Map(providers.map((provider) => [provider.id, provider]));
   // Only sandboxes a given provider listed can be killed through it; anything else is left alone.
-  const running = (await listAll(providers, { metadata: { userId, projectId }, limit: MAX_LIVE_SANDBOXES }))
+  const running = (await listAll(providers, { metadata: { userId, projectId }, limit: MAX_LIVE_SANDBOXES }, health && { ...health, skip: "failing" }))
     .filter(({ provider }) => byId.has(provider));
   await Promise.all(running.map(({ provider, id }) => byId.get(provider)?.kill(id)));
   return running.map(({ provider, id }) => toPublicSandboxId(provider, id));

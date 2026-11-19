@@ -32,6 +32,7 @@ import { parseProviderConfig } from "@/features/sandbox-preview/server/provider/
 import { clientSandboxId, toPublicSandboxId } from "@/features/sandbox-preview/server/provider/ids";
 import {
   createSandbox,
+  fanoutHealth,
   getConfiguredProviders,
   isMultiProvider,
 } from "@/features/sandbox-preview/server/provider/registry";
@@ -163,6 +164,7 @@ export async function POST(request: Request) {
   // Read per request: the cap, the kill and the lookup span every configured provider.
   const providerConfig = parseProviderConfig();
   const providers = getConfiguredProviders(providerConfig);
+  const health = fanoutHealth(providerConfig);
 
   if (!providers.length) {
     return Response.json(
@@ -210,12 +212,12 @@ export async function POST(request: Request) {
 
   // A new boot replaces this project's earlier preview, which may be an orphan.
   if (projectId && !resumeSandboxId) {
-    const killed = await killProjectPreviews(providers, userId, projectId);
+    const killed = await killProjectPreviews(providers, userId, projectId, health);
     killed.forEach(forgetSandbox);
   }
 
   // A resumed boot reuses a sandbox the cap already counts.
-  if (!resumeSandboxId && (await atLiveSandboxCap(providers, userId))) {
+  if (!resumeSandboxId && (await atLiveSandboxCap(providers, userId, health))) {
     return Response.json(
       {
         error:
