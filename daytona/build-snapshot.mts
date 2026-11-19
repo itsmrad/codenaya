@@ -10,8 +10,10 @@
  *
  * Usage (needs DAYTONA_API_KEY; builds into that key's organization):
  *   npm run daytona:snapshot
- * Uses DAYTONA_SNAPSHOT (default: codenaya-node22-v1, the app's default) and
- * DAYTONA_API_URL (default: https://app.daytona.io/api).
+ * Uses DAYTONA_SNAPSHOT (default: codenaya-node22-v1, the app's default),
+ * DAYTONA_API_URL (default: https://app.daytona.io/api) and DAYTONA_TARGET
+ * (region; default: the organization's). Use the app's DAYTONA_TARGET, so the
+ * snapshot lands in the region its sandboxes boot in.
  */
 import { Daytona, DaytonaNotFoundError } from "@daytona/sdk";
 
@@ -28,20 +30,34 @@ const SNAPSHOT_NAME = process.env.DAYTONA_SNAPSHOT?.trim() || DEFAULT_SNAPSHOT;
 const apiKey = process.env.DAYTONA_API_KEY?.trim();
 if (!apiKey) throw new Error("DAYTONA_API_KEY is not set");
 
-// The endpoint is always passed, as in the adapter, so the SDK's dotenv-ambiguity check can't throw.
-const daytona = new Daytona({ apiKey, apiUrl: process.env.DAYTONA_API_URL?.trim() || "https://app.daytona.io/api" });
+// Built like the adapter's client. The endpoint is always passed, so the SDK's dotenv-ambiguity check can't throw.
+const daytona = new Daytona({
+  apiKey,
+  apiUrl: process.env.DAYTONA_API_URL?.trim() || "https://app.daytona.io/api",
+  target: process.env.DAYTONA_TARGET?.trim() || undefined,
+});
 
 const existing = await daytona.snapshot.get(SNAPSHOT_NAME).catch((error: unknown) => {
   if (error instanceof DaytonaNotFoundError) return undefined;
   throw error;
 });
 if (existing) {
+  const failed = existing.state === "error" || existing.state === "build_failed";
   throw new Error(
     `Daytona snapshot "${SNAPSHOT_NAME}" already exists (${existing.state}). ` +
-      "Set DAYTONA_SNAPSHOT to a new name to build another; this script never overwrites one.",
+      (failed
+        ? "Delete it (dashboard or daytona.snapshot.delete) to retry this name; "
+        : "Set DAYTONA_SNAPSHOT to a new name to build another; ") +
+      "this script never overwrites one.",
   );
 }
 
+// 20 min, like blaxel:template. The SDK's own timeout covers only the create
+// request, not the build it then polls, so a timer bounds the whole build.
+const buildDeadline = setTimeout(() => {
+  console.error(`Build of "${SNAPSHOT_NAME}" did not finish in 20 min; check its state in the Daytona dashboard.`);
+  process.exit(1);
+}, 20 * 60_000);
 const startedAt = Date.now();
 const snapshot = await daytona.snapshot.create(
   {
@@ -52,6 +68,7 @@ const snapshot = await daytona.snapshot.create(
   },
   { onLogs: (chunk) => console.log(chunk) },
 );
+clearTimeout(buildDeadline);
 
 console.log(
   `Built Daytona snapshot "${snapshot.name}" (${snapshot.state}) in ${Math.round((Date.now() - startedAt) / 1000)}s. ` +
