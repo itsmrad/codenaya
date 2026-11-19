@@ -3,7 +3,16 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { allocateCredits, type GrantLot, lotRemaining } from "./grants";
+import {
+  allocateCredits,
+  type GrantLot,
+  isInPaidPeriod,
+  lotRemaining,
+  lotUnspent,
+  ROLLOVER_CAP,
+  rolloverQuantity,
+  topUpExpiresAt,
+} from "./grants";
 
 const NOW = 1_000;
 const lot = (_id: string, kind: GrantLot["kind"], quantity: number, extra: Partial<GrantLot> = {}): GrantLot => ({
@@ -62,9 +71,50 @@ describe("allocateCredits", () => {
   });
 });
 
+describe("lot balances", () => {
+  it("subtracts transfers and debt offsets, and nothing remains once expired", () => {
+    const half = lot("t", "top_up", 100, { consumed: 10, revoked: 5, transferred: 20, debtOffset: 30 });
+    expect(lotUnspent(half)).toBe(35);
+    expect(lotRemaining(half, NOW)).toBe(35);
+    expect(lotRemaining(half, NOW + 100)).toBe(0);
+    expect(lotUnspent(lot("t", "top_up", 10, { consumed: 8, debtOffset: 5 }))).toBe(0);
+  });
+
+  it("rolls over the unspent balance even after expiry, capped", () => {
+    expect(rolloverQuantity(lot("p", "current_period", 2000, { consumed: 500, expiresAt: NOW - 1 }))).toBe(1500);
+    expect(rolloverQuantity(lot("p", "current_period", 5000))).toBe(ROLLOVER_CAP);
+    expect(ROLLOVER_CAP).toBe(2000);
+  });
+});
+
+describe("topUpExpiresAt", () => {
+  it.each([
+    ["2026-05-14T08:30:15.250Z", "2027-05-14T08:30:15.250Z"],
+    ["2027-01-31T10:00:00.000Z", "2028-01-31T10:00:00.000Z"],
+    ["2028-02-29T10:00:00.000Z", "2029-02-28T10:00:00.000Z"],
+    ["2026-12-31T23:59:59.999Z", "2027-12-31T23:59:59.999Z"],
+  ])("%s expires at %s", (settled, expires) => {
+    expect(new Date(topUpExpiresAt(Date.parse(settled))).toISOString()).toBe(expires);
+  });
+});
+
+describe("isInPaidPeriod", () => {
+  const period = (extra: Partial<GrantLot> & { serviceStart?: number }) => ({
+    ...lot("p", "current_period", 10), serviceStart: NOW - 50, ...extra,
+  });
+  it("needs an unexpired, started period lot, spent or not", () => {
+    expect(isInPaidPeriod([period({ serviceStart: NOW })], NOW)).toBe(true);
+    expect(isInPaidPeriod([period({ consumed: 10 })], NOW)).toBe(true);
+    expect(isInPaidPeriod([period({ serviceStart: NOW + 1 })], NOW)).toBe(false);
+    expect(isInPaidPeriod([period({ expiresAt: NOW })], NOW)).toBe(false);
+    expect(isInPaidPeriod([{ ...period({}), kind: "top_up" }], NOW)).toBe(false);
+    expect(isInPaidPeriod([], NOW)).toBe(false);
+  });
+});
+
 describe("paid credits gate", () => {
-  // Free-allocation-first and grant-side debt offset aren't built yet: until
-  // they land, only the schema declares these fields and only the charge reads them.
+  // Stage 5 will enable accounts; until then only the schema declares these
+  // fields, and the charge and grant helpers only read them.
   it("nothing outside tests enables paid credits on an account", () => {
     const mentions = ["convex", "src"].flatMap((dir) =>
       readdirSync(dir, { recursive: true, encoding: "utf8" })
@@ -72,7 +122,9 @@ describe("paid credits gate", () => {
         .map((file) => join(dir, file))
         .filter((path) => /paidCredits(Version|Mode)/.test(readFileSync(path, "utf8"))),
     );
-    expect(mentions.sort()).toEqual(["convex/credits.ts", "convex/schema.ts"]);
-    expect(readFileSync("convex/credits.ts", "utf8")).not.toMatch(/paidCredits(Version|Mode)\s*:/);
+    expect(mentions.sort()).toEqual(["convex/billingGrants.ts", "convex/credits.ts", "convex/schema.ts"]);
+    for (const reader of ["convex/billingGrants.ts", "convex/credits.ts"]) {
+      expect(readFileSync(reader, "utf8")).not.toMatch(/paidCredits(Version|Mode)\s*:/);
+    }
   });
 });
