@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_REDACTED_BYTES,
+  MAX_REDACTED_VALUES,
+  REDACTION_UNAVAILABLE_NOTICE,
   STREAM_REDACTION_PLACEHOLDER,
   createStreamRedactor,
 } from "./stream-redactor";
@@ -19,7 +22,7 @@ const SECRET = "sbp_supersecretvalue1234567890";
 const DSN = "postgresql://user:hunter2password@db.example.com:5432/app";
 
 /** Feed a whole string through in fixed-size chunks. */
-function streamThrough(text: string, chunkSize: number, secrets: string[]) {
+function streamThrough(text: string, chunkSize: number, secrets: string[] | null) {
   const redactor = createStreamRedactor(secrets);
   let output = "";
   for (let i = 0; i < text.length; i += chunkSize) {
@@ -105,11 +108,131 @@ describe("createStreamRedactor", () => {
     expect(out).not.toContain(secret);
   });
 
-  it("ignores values too short to redact safely", () => {
-    // Replacing every 4-character match would make the terminal unreadable while
-    // protecting almost nothing.
-    const text = "port 3000 ready\n";
-    expect(streamThrough(text, 4, ["3000"])).toBe(text);
+  it("redacts a short value", () => {
+    expect(streamThrough("port 3000 ready\n", 4, ["3000"])).toBe(
+      `port ${STREAM_REDACTION_PLACEHOLDER} ready\n`,
+    );
+  });
+
+  it("redacts a 3-character value and its encodings", () => {
+    const forms = ["abc", "YWJj", "616263", "616263".toUpperCase()];
+    const out = streamThrough(`${forms.join(" ")}\n`, 3, ["abc"]);
+    expect(out).toBe(`${Array(forms.length).fill(STREAM_REDACTION_PLACEHOLDER).join(" ")}\n`);
+  });
+
+  it("skips 1-2 character and whitespace-only values, and their encodings", () => {
+    // "1" is hex 31 and base64 MQ; " " is hex 20 and base64 IA.
+    const text = "exit 1 at 31 MQ== MQ  IA== 20 ok\n";
+    expect(streamThrough(text, 5, ["1", " ", "ab", "   ", "\n\t"])).toBe(text);
+  });
+
+  it("redacts the exact value, surrounding whitespace included, and its trimmed form", () => {
+    const value = "  dummy-canary-padded\n";
+    expect(streamThrough(`a=${value}b\n`, 4, [value])).toBe(`a=${STREAM_REDACTION_PLACEHOLDER}b\n`);
+    expect(streamThrough("a=dummy-canary-padded;\n", 4, [value])).toBe(`a=${STREAM_REDACTION_PLACEHOLDER};\n`);
+  });
+
+  describe("encodings", () => {
+    // Chosen so base64 has "+", "/" and padding, and percent-encoding differs from the value.
+    const VALUE = "dummy?canary>>/ü";
+    const bytes = Buffer.from(VALUE, "utf8");
+    const base64 = bytes.toString("base64");
+    const forms = {
+      "base64": base64,
+      "base64 without padding": base64.replace(/=+$/, ""),
+      "url-safe base64": bytes.toString("base64url"),
+      "url-safe base64 with padding": base64.replace(/\+/g, "-").replace(/\//g, "_"),
+      "percent-encoding": encodeURIComponent(VALUE),
+      "lower-case hex": bytes.toString("hex"),
+      "upper-case hex": bytes.toString("hex").toUpperCase(),
+    };
+
+    it("covers forms that really differ", () => {
+      expect(base64).toMatch(/[+/].*=$/);
+      expect(new Set(Object.values(forms)).size).toBe(Object.keys(forms).length);
+    });
+
+    it.each(Object.entries(forms))("redacts the %s form", (_name, form) => {
+      expect(streamThrough(`v=${form};\n`, 3, [VALUE])).toBe(`v=${STREAM_REDACTION_PLACEHOLDER};\n`);
+    });
+  });
+
+  describe("overlapping values", () => {
+    it("takes the longest value starting at a position, even split across chunks", () => {
+      const redactor = createStreamRedactor(["abc", "abcdef"]);
+      const out = redactor.push("x abc") + redactor.push("def y") + redactor.flush();
+      expect(out).toBe(`x ${STREAM_REDACTION_PLACEHOLDER} y`);
+    });
+
+    it("takes a value starting earlier over a shorter one inside it", () => {
+      expect(streamThrough("xabcd\n", 1, ["abc", "xabcd"])).toBe(`${STREAM_REDACTION_PLACEHOLDER}\n`);
+    });
+  });
+
+  it("gives the one-shot result for every way of cutting the stream in two or three", () => {
+    const PEM = "-----BEGIN KEY-----\nDUMMYKEYAAAA\n-----END KEY-----";
+    const secrets = ["abc", "abcdef", "xabcd", " dummy-pad ", PEM, "dummy-secret-one"];
+    const text =
+      `boot abcdef xabcde ${Buffer.from("dummy-secret-one").toString("base64")}\n` +
+      `key=${PEM} %20dummy-pad end\nabcd`;
+    const oneShot = streamThrough(text, text.length, secrets);
+    expect(oneShot).not.toMatch(/abc|dummy|DUMMY/);
+
+    for (let i = 0; i <= text.length; i++) {
+      for (let j = i; j <= text.length; j++) {
+        const redactor = createStreamRedactor(secrets);
+        const out =
+          redactor.push(text.slice(0, i)) +
+          redactor.push(text.slice(i, j)) +
+          redactor.push(text.slice(j)) +
+          redactor.flush();
+        if (out !== oneShot) expect(out, `cut at ${i} and ${j}`).toBe(oneShot);
+      }
+    }
+    expect(streamThrough(text, 1, secrets)).toBe(oneShot);
+  });
+
+  it("hides a partial value left at the end of the stream", () => {
+    const redactor = createStreamRedactor([SECRET]);
+    const out = redactor.push(`done\nkey=${SECRET.slice(0, -3)}`) + redactor.flush();
+    expect(out).toBe(`done\nkey=${STREAM_REDACTION_PLACEHOLDER}`);
+  });
+
+  it("keeps a 1-2 character tail that only starts a value", () => {
+    // SECRET starts "sb": ordinary words ending in "s" must survive.
+    expect(streamThrough("added packages", 4, [SECRET])).toBe("added packages");
+    expect(streamThrough("added sb", 4, [SECRET])).toBe("added sb");
+    expect(streamThrough("added sbp", 4, [SECRET])).toBe(`added ${STREAM_REDACTION_PLACEHOLDER}`);
+  });
+
+  describe("failing closed", () => {
+    const expectSuppressed = (secrets: string[] | null) => {
+      const redactor = createStreamRedactor(secrets);
+      expect(redactor.push(`raw ${SECRET}\n`)).toBe(REDACTION_UNAVAILABLE_NOTICE);
+      expect(redactor.push("more output\n")).toBe("");
+      expect(redactor.flush()).toBe("");
+    };
+
+    it("hides the output when the values could not be loaded", () => {
+      expectSuppressed(null);
+    });
+
+    it("hides the output when the values cannot be encoded", () => {
+      // A lone surrogate makes encodeURIComponent throw.
+      expectSuppressed([SECRET, "dummy\uD800value"]);
+    });
+
+    it("hides the output past the value count cap", () => {
+      expectSuppressed(Array.from({ length: MAX_REDACTED_VALUES + 1 }, (_, i) => `dummy-value-${i}`));
+    });
+
+    it("hides the output past the byte cap", () => {
+      expectSuppressed(["x".repeat(MAX_REDACTED_BYTES + 1)]);
+    });
+
+    it("says why once, even when nothing is pushed", () => {
+      expect(streamThrough("", 1, null)).toBe(REDACTION_UNAVAILABLE_NOTICE);
+    });
   });
 
   it("is a pass-through when there are no secrets", () => {
@@ -118,9 +241,9 @@ describe("createStreamRedactor", () => {
     expect(redactor.flush()).toBe("");
   });
 
-  it("is a pass-through when all secrets are too short", () => {
-    const redactor = createStreamRedactor(["abc", "de"]);
-    expect(redactor.push("abc de")).toBe("abc de");
+  it("is a pass-through when all secrets are below the floor", () => {
+    const redactor = createStreamRedactor(["ab", "d", "   ", ""]);
+    expect(redactor.push("ab d   ")).toBe("ab d   ");
   });
 
   it("releases buffered text on flush", () => {
