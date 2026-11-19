@@ -1,4 +1,5 @@
-const DEFAULT_ORIGINS = "http://localhost:3100,https://codenaya.tech";
+// Production is served from www (the apex 308-redirects there); CSP host-sources match exact hosts.
+const DEFAULT_ORIGINS = "http://localhost:3100,https://codenaya.tech,https://www.codenaya.tech";
 
 /** Deployment configuration only: never trust request Host/Origin for an embedding policy. */
 export function publicPreviewOrigins(config = process.env.CODENAYA_PUBLIC_PREVIEW_ORIGINS ?? DEFAULT_ORIGINS): string[] {

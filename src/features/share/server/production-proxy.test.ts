@@ -26,6 +26,11 @@ test("embedding origins come from validated deployment configuration, not the re
   }
 });
 
+test("default embedding origins include the canonical www production host", () => {
+  vi.stubEnv("CODENAYA_PUBLIC_PREVIEW_ORIGINS", undefined);
+  expect(publicPreviewOrigins()).toEqual([...origins, "https://www.codenaya.tech"]);
+});
+
 test("the serialized proxy serves real HTTP frame headers and body", async () => {
   const upstream = createServer((_request, response) => {
     response.writeHead(200, { "x-frame-options": "DENY", "content-security-policy": "default-src 'self'; frame-ancestors 'none'", "content-type": "text/html" });

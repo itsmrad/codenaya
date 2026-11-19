@@ -24,8 +24,9 @@ DevTools. A full same-origin proxy is a later option if needed.
 ## Frame-origin configuration
 
 `CODENAYA_PUBLIC_PREVIEW_ORIGINS` is a comma-separated list of exact origins, for
-example `http://localhost:3100,https://codenaya.tech`. When unset, those two trusted
-origins are the default. HTTP is accepted only for loopback hosts; credentials,
+example `http://localhost:3100,https://codenaya.tech`. When unset, the default is
+`http://localhost:3100`, `https://codenaya.tech` and `https://www.codenaya.tech`
+(production serves from www; the apex redirects there). HTTP is accepted only for loopback hosts; credentials,
 paths, query strings, fragments and wildcard/CSP expressions are rejected. Include
 the isolated gate's origin explicitly (for example `http://localhost:3216`) in its
 frontend process environment. Never derive this policy from request URLs, Host,
