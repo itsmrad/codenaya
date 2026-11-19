@@ -10,6 +10,10 @@ import { parseJsonBody } from "@/lib/parse-json-body";
 import { BILLING_CHECKOUT_RATE_LIMIT, checkRateLimit, rateLimitedResponse } from "@/lib/rate-limit";
 import { isJson, isSameOrigin } from "@/lib/request-guards";
 
+// Worst case: Clerk, four Convex calls and two 15 s Dodo creates. A kill between a create and its
+// record would leave work for support, so the budget is explicit, not the platform default.
+export const maxDuration = 60;
+
 const requestSchema = z.object({ sku: z.enum(["pro_monthly", "top_up"]) }).strict();
 
 /** One customer create, then one checkout create: at most two Convex decisions per request. */
@@ -31,8 +35,9 @@ function checkoutConfig(): DodoNextConfig | null | "unavailable" {
   }
   try {
     return readDodoConfig("next", deployment);
-  } catch {
-    console.error(`${LOG} not configured: invalid billing configuration.`);
+  } catch (error) {
+    // Config errors name the variable only, never its value.
+    console.error(`${LOG} not configured:`, error instanceof Error ? error.message : "unknown error");
     return "unavailable";
   }
 }
@@ -80,6 +85,7 @@ async function startCheckout(request: Request): Promise<Response> {
         { internalKey, mode: config.environment, sku, productId }, call);
     } catch (error) {
       const code = getAppError(error)?.code;
+      if (code === "UNAUTHENTICATED") return reply(401, { error: "Unauthorized" });
       if (code === "FORBIDDEN") return reply(403, { error: "Billing is on hold", code: "billing_on_hold" });
       console.error(`${LOG} prepare failed`, code ?? "unknown");
       return failed("checkout_unavailable");
@@ -96,12 +102,21 @@ async function startCheckout(request: Request): Promise<Response> {
           : reply(409, { error: "Checkout is not available for this account", code: next.code });
       case "create_customer": {
         const { customerRef, leaseId } = next;
-        const identity = await customerIdentity();
+        // Before anything reaches Dodo, a failure is a definite "not created": release the lease
+        // so the owner is not left `unknown` (support-only) by a Clerk outage or a missing email.
+        const releaseLease = () => fetchMutation(api.billingCheckout.recordCustomerResult,
+          { internalKey, customerRef, leaseId, result: { kind: "not_created" } }, call);
+        let identity;
+        try {
+          identity = await customerIdentity();
+        } catch {
+          console.error(`${LOG} customer identity unavailable`, customerRef);
+          await releaseLease().catch(() => undefined);
+          return failed("checkout_unavailable");
+        }
         if (!identity) {
-          // Nothing was sent to Dodo, so the lease is released as a definite no.
           try {
-            await fetchMutation(api.billingCheckout.recordCustomerResult,
-              { internalKey, customerRef, leaseId, result: { kind: "not_created" } }, call);
+            await releaseLease();
           } catch {
             return failed("checkout_unavailable");
           }
@@ -150,7 +165,14 @@ async function startCheckout(request: Request): Promise<Response> {
 
 /** Starts (or resumes) the signed-in user's Dodo checkout for `{ sku }`; answers `{ url }`. */
 export async function POST(request: Request) {
-  const response = await startCheckout(request);
+  let response: Response;
+  try {
+    response = await startCheckout(request);
+  } catch {
+    // Unexpected (Clerk, token): fixed text only, never the error.
+    console.error(`${LOG} unexpected failure`);
+    response = reply(500, { error: "Checkout could not be started" });
+  }
   response.headers.set("Cache-Control", "no-store");
   return response;
 }

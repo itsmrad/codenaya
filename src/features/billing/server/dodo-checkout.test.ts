@@ -80,8 +80,12 @@ describe("createDodoCheckout", () => {
     ["a foreign host", "https://evil.test/session/cks_1"],
     ["http", `http://${CHECKOUT_HOSTS.test_mode}/session/cks_1`],
     ["the live host in test mode", `https://${CHECKOUT_HOSTS.live_mode}/session/cks_1`],
-  ])("withholds a checkout URL on %s but keeps the session", async (_label, url) => {
+  ])("withholds a checkout URL on %s but keeps the session, logging only the host", async (_label, url) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const result = await createDodoCheckout(config, checkoutInput, fetchReturning(json({ session_id: "cks_1", checkout_url: url })));
     expect(result).toEqual({ kind: "created", value: { sessionId: "cks_1" } });
+    expect(log).toHaveBeenCalledWith("[billingCheckout] checkout URL withheld", "cks_1", new URL(url).hostname);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("/session/");
+    log.mockRestore();
   });
 });

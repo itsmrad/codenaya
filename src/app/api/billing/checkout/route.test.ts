@@ -150,7 +150,23 @@ describe("POST /api/billing/checkout", () => {
       expect(res.status).toBe(503);
       expect(await res.json()).toEqual({ error: "Billing is unavailable", code: "billing_unavailable" });
       expect(mocks.fetchMutation).not.toHaveBeenCalled();
-      expect(JSON.stringify(logs)).not.toContain("DODO_PAYMENTS_ENVIRONMENT");
+      expectNoSecretsLogged();
+    });
+
+    it("logs which variable is missing, never a value", async () => {
+      vi.stubEnv("DODO_PAYMENTS_API_KEY", "");
+      expect((await post()).status).toBe(503);
+      expect(JSON.stringify(logs)).toContain("DODO_PAYMENTS_API_KEY");
+      expect(JSON.stringify(logs)).not.toContain("bus_1");
+    });
+
+    it("answers 500 with no-store and no internal text when something unexpected throws", async () => {
+      mocks.auth.mockRejectedValue(new Error("clerk exploded: secret detail"));
+      const res = await post();
+      expect(res.status).toBe(500);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      expect(await res.json()).toEqual({ error: "Checkout could not be started" });
+      expect(JSON.stringify(logs)).not.toContain("secret detail");
     });
   });
 
@@ -228,6 +244,35 @@ describe("POST /api/billing/checkout", () => {
     expect(await res.json()).toMatchObject({ code: "billing_on_hold" });
   });
 
+  it("401s when Convex rejects the caller's token or key", async () => {
+    mocks.convex["billingCheckout:prepareCheckout"]
+      .mockRejectedValue(new ConvexError({ code: "UNAUTHENTICATED", message: "Not signed in" }));
+    expect((await post()).status).toBe(401);
+  });
+
+  it("releases the lease when the Clerk user read fails, without calling Dodo", async () => {
+    mocks.convex["billingCheckout:prepareCheckout"].mockResolvedValue(createCustomer);
+    mocks.currentUser.mockRejectedValue(new Error("clerk 429"));
+    const res = await post();
+    expect(res.status).toBe(502);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toMatchObject({ code: "checkout_unavailable" });
+    expect(recorded("recordCustomerResult")).toEqual([
+      { internalKey: "internal", customerRef: "cust_ref", leaseId: "lease_1", result: { kind: "not_created" } },
+    ]);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it("still answers 502 when releasing the lease after a Clerk failure also fails", async () => {
+    mocks.convex["billingCheckout:prepareCheckout"].mockResolvedValue(createCustomer);
+    mocks.convex["billingCheckout:recordCustomerResult"].mockRejectedValue(new Error("convex down"));
+    mocks.currentUser.mockRejectedValue(new Error("clerk 429"));
+    const res = await post();
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ code: "checkout_unavailable" });
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
   it("releases the lease and asks for an email when the user has none, without calling Dodo", async () => {
     mocks.convex["billingCheckout:prepareCheckout"].mockResolvedValue(createCustomer);
     mocks.currentUser.mockResolvedValue({ primaryEmailAddress: null, fullName: "Alice A" });
@@ -271,6 +316,9 @@ describe("POST /api/billing/checkout", () => {
     expect(await res.json()).toMatchObject({ code: "checkout_unavailable" });
     expect(recorded("recordCheckoutResult")[0]).toMatchObject({ result: { kind: "created", sessionId: "cks_1" } });
     expect(JSON.stringify(recorded("recordCheckoutResult"))).not.toContain("evil.test");
+    // Only the host is logged, so a mismatch is diagnosable without leaking the session link.
+    expect(JSON.stringify(logs)).toContain("evil.test");
+    expect(JSON.stringify(logs)).not.toContain("/pay");
   });
 
   it("answers checkout_unknown when recording a created session fails, without a second create", async () => {

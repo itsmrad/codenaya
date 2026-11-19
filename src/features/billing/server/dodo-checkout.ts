@@ -24,6 +24,14 @@ async function create<T>(
   return value ? { kind: "created", value } : { kind: "unknown" };
 }
 
+function urlHost(url: string): string {
+  try {
+    return new URL(url).hostname || "no host";
+  } catch {
+    return "unparseable";
+  }
+}
+
 const providerId = (value: unknown) => (typeof value === "string" && PROVIDER_ID.test(value) ? value : null);
 
 export function createDodoCustomer(
@@ -52,9 +60,10 @@ export function createDodoCheckout(
     const sessionId = providerId(response.session_id);
     if (!sessionId) return null;
     const url = response.checkout_url;
-    // A URL off the mode's checkout host is never handed to the browser; the session still counts.
-    return typeof url === "string" && isDodoCheckoutUrl(config.environment, url)
-      ? { sessionId, checkoutUrl: url }
-      : { sessionId };
+    if (typeof url === "string" && isDodoCheckoutUrl(config.environment, url)) return { sessionId, checkoutUrl: url };
+    // Never handed to the browser; the session still counts. Log the host only (never the
+    // path or query, which name the session) so a host mismatch is diagnosable.
+    console.error("[billingCheckout] checkout URL withheld", sessionId, typeof url === "string" ? urlHost(url) : "none");
+    return { sessionId };
   });
 }
