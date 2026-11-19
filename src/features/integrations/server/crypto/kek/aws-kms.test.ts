@@ -89,8 +89,10 @@ describe("createAwsKmsEnvKek", () => {
     expect(await provider.unwrapDek(wrapped, ARN_A)).toEqual(DEK);
 
     const context = { projectId: "project_1", envKey: "DB_URL", purpose: ENV_KMS_PURPOSE };
-    expect(kms.state.encrypts[0]).toMatchObject({ KeyId: ARN_A, EncryptionContext: context });
-    expect(kms.state.decrypts[0]).toMatchObject({ KeyId: ARN_A, EncryptionContext: context });
+    expect(kms.state.encrypts[0].KeyId).toBe(ARN_A);
+    expect(kms.state.encrypts[0].EncryptionContext).toEqual(context);
+    expect(kms.state.decrypts[0].KeyId).toBe(ARN_A);
+    expect(kms.state.decrypts[0].EncryptionContext).toEqual(context);
   });
 
   it("refuses an ARN outside the key set without calling KMS", async () => {
@@ -147,17 +149,72 @@ describe("createAwsKmsEnvKek", () => {
   });
 });
 
-describe("helpers", () => {
-  it("parses the region from a key ARN", () => {
-    expect(regionOfKeyArn(ARN_B)).toBe("eu-west-1");
+describe("SDK client", () => {
+  it("fails a stalled KMS call at the deadline without exposing the DEK", async () => {
+    vi.useFakeTimers();
+    try {
+      const send = vi
+        .spyOn(KMSClient.prototype, "send")
+        .mockImplementation((() => new Promise(() => {})) as never);
+      const result = createAwsKmsEnvKek(keySet(ARN_A))(DEST)
+        .wrapDek(DEK)
+        .catch((error: Error) => error);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      const error = await result;
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).name).toBe("TimeoutError");
+      expect(String(error)).not.toContain(DEK.toString("base64"));
+      const options = send.mock.calls[0][1] as { abortSignal: AbortSignal };
+      expect(options.abortSignal.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("configures explicit credentials and a 5 s deadline", () => {
+  it("pins the endpoint to the ARN's region despite ambient endpoint env", async () => {
+    vi.stubEnv("AWS_ENDPOINT_URL", "https://attacker.example");
+    vi.stubEnv("AWS_ENDPOINT_URL_KMS", "https://attacker.example");
+    const send = vi
+      .spyOn(KMSClient.prototype, "send")
+      .mockImplementation((async () => ({ KeyId: ARN_B, CiphertextBlob: Buffer.from("w") })) as never);
+
+    await createAwsKmsEnvKek(keySet(ARN_B))(DEST).wrapDek(DEK);
+    const client = send.mock.contexts[0] as KMSClient;
+    expect((await client.config.endpoint!()).hostname).toBe("kms.eu-west-1.amazonaws.com");
+  });
+
+  it("throws on request timeout instead of only warning", () => {
     const config = kmsClientConfig("ap-south-1", { accessKeyId: "a", secretAccessKey: "b" });
     expect(config).toMatchObject({
       credentials: { accessKeyId: "a", secretAccessKey: "b" },
       maxAttempts: 2,
-      requestHandler: { requestTimeout: 5000, connectionTimeout: 5000 },
+      requestHandler: { requestTimeout: 5000, connectionTimeout: 5000, throwOnRequestTimeout: true },
     });
+  });
+});
+
+describe("regionOfKeyArn", () => {
+  it.each([
+    [ARN_B, "eu-west-1"],
+    [`arn:aws:kms:us-east-1:111111111111:key/mrk-${"0123456789abcdef".repeat(2)}`, "us-east-1"],
+  ])("accepts %s", (arn, region) => {
+    expect(regionOfKeyArn(arn)).toBe(region);
+  });
+
+  it.each([
+    "arn:aws:kms:ap-south-1:111111111111:alias/env",
+    ARN_A.replace("arn:aws:", "arn:aws-cn:"),
+    ARN_A.replace("aaaaaaaa", "AAAAAAAA"),
+    "arn:aws:kms:ap-south-1:111111111111:key/---",
+    ` ${ARN_A}`,
+    "",
+  ])("rejects %j", (arn) => {
+    expect(() => regionOfKeyArn(arn)).toThrow(/not a full AWS KMS key ARN/);
+  });
+
+  it("trims the configured current ARN and drops empty list entries", () => {
+    stubConfig({ ...CREDS, ENV_VARS_KMS_KEY_ARN: ` ${ARN_A} `, ENV_VARS_KMS_PREVIOUS_KEY_ARNS: `,,${ARN_B},` });
+    expect(readEnvKmsKeySetFromEnv()).toMatchObject({ currentArn: ARN_A, previousArns: [ARN_B] });
   });
 });

@@ -38,10 +38,15 @@ export const ENV_KMS_PURPOSE = "codenaya-project-env-v1";
 
 const REQUEST_TIMEOUT_MS = 5_000;
 const MAX_ATTEMPTS = 2;
+/** Hard bound on one call across both attempts, whatever the handler does. */
+const CALL_DEADLINE_MS = REQUEST_TIMEOUT_MS * MAX_ATTEMPTS;
 
-/** A full key ARN. Aliases are rejected because they are mutable. */
+/**
+ * A full key ARN in the standard `aws` partition (the endpoint is pinned to
+ * amazonaws.com). Aliases are rejected because they are mutable.
+ */
 const KEY_ARN_PATTERN =
-  /^arn:aws(?:-[a-z]+)*:kms:([a-z]{2}(?:-[a-z]+)+-\d+):\d{12}:key\/[A-Za-z0-9-]+$/;
+  /^arn:aws:kms:([a-z]{2}(?:-[a-z]+)+-\d+):\d{12}:key\/(?:mrk-[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/;
 
 export interface EnvKmsKeySet {
   /** Wraps every new DEK. */
@@ -126,21 +131,43 @@ export function kmsClientConfig(
 ): KMSClientConfig {
   return {
     region,
+    // Pinned so ambient AWS_ENDPOINT_URL* or profile settings cannot redirect a DEK.
+    endpoint: `https://kms.${region}.amazonaws.com`,
+    ignoreConfiguredEndpointUrls: true,
     // Explicit credentials so the SDK never falls back to the default chain.
     credentials,
     maxAttempts: MAX_ATTEMPTS,
     requestHandler: {
       connectionTimeout: REQUEST_TIMEOUT_MS,
       requestTimeout: REQUEST_TIMEOUT_MS,
+      // Without this the SDK only logs a warning when requestTimeout passes.
+      throwOnRequestTimeout: true,
     },
   };
+}
+
+/** Reject after the deadline and abort the SDK call, even if it ignores the signal. */
+function withDeadline<T>(run: (abortSignal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error("AWS KMS request exceeded its deadline.");
+      error.name = "TimeoutError";
+      controller.abort(error);
+      reject(error);
+    }, CALL_DEADLINE_MS);
+  });
+  return Promise.race([run(controller.signal), deadline]).finally(() => clearTimeout(timer));
 }
 
 const defaultKmsClient: KmsClientFactory = (region, credentials) => {
   const client = new KMSClient(kmsClientConfig(region, credentials));
   return {
-    encrypt: (input) => client.send(new EncryptCommand(input)),
-    decrypt: (input) => client.send(new DecryptCommand(input)),
+    encrypt: (input) =>
+      withDeadline((abortSignal) => client.send(new EncryptCommand(input), { abortSignal })),
+    decrypt: (input) =>
+      withDeadline((abortSignal) => client.send(new DecryptCommand(input), { abortSignal })),
   };
 };
 

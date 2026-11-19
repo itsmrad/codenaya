@@ -61,10 +61,10 @@ export async function openEnvManifest(
     }
     return { ok: true, secretEntries };
   } catch (error) {
-    // Message only: crypto and KMS errors carry no values.
+    // The error class only (e.g. TimeoutError, AccessDeniedException), never its details.
     console.error(
       "[env] secret manifest unavailable",
-      error instanceof Error ? error.message : error,
+      error instanceof Error ? error.name : "unknown error",
     );
     return { ok: false, keys: secrets.map((record) => record.key) };
   }
