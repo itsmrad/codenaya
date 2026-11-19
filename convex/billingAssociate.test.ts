@@ -133,6 +133,20 @@ describe("associating unmapped receipts", () => {
     expect(await grants(t)).toEqual([]);
   });
 
+  test("an unmapped refund attached at bindCustomer blocks that customer's positives", async () => {
+    const t = setup();
+    const alice = await unbound(t);
+    // For another payment: only the customer-wide negative check can see it once attached.
+    const refund = await receive(t, { providerCustomerId: "cus_user_alice", eventType: "refund.succeeded", paymentId: "pay_0" });
+    await bind(t, alice);
+    expect(await read(t, refund)).toMatchObject({ customerRef: alice, state: "pending" });
+    await checkout(t, alice);
+    const payment = await receive(t, { customerRef: alice, paymentId: "pay_1" });
+    expect(await reconcile(t, alice)).toBe("blocked");
+    expect(await grants(t)).toEqual([]);
+    expect([(await read(t, payment))?.state, (await read(t, refund))?.state]).toEqual(["pending", "pending"]);
+  });
+
   test("a payment-keyed association skips a row whose provider customer is someone else", async () => {
     const t = setup();
     const alice = await unbound(t);
