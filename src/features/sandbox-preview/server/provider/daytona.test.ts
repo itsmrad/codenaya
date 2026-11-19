@@ -271,11 +271,9 @@ describe("Daytona provider", () => {
     await expect(provider.inspect!("sbx-1")).rejects.toBeInstanceOf(SandboxNotFoundError);
   });
 
-  it("lists started sandboxes by labels, checks labels and state again, stops at the limit and drops the SDK's own label", async () => {
+  it("lists started sandboxes by labels, checks them again, stops at the limit and drops the SDK's own label", async () => {
     mocks.list.mockReturnValue(listOf([
       fakeDaytonaSandbox(),
-      // Killed moments ago: the server's state filter still returns it for 1–3 s.
-      fakeDaytonaSandbox({ id: "sbx-killed", state: "destroying" }),
       // A looser server-side match is dropped, and doesn't count toward the limit.
       fakeDaytonaSandbox({ id: "sbx-other", labels: { userId: "u2" } }),
       fakeDaytonaSandbox({ id: "sbx-2", autoDestroyAt: undefined }),

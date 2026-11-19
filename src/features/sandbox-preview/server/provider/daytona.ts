@@ -280,7 +280,9 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => {
         }
         return result;
       } finally {
-        // Not awaited: a stalled delete must not hold up the result.
+        // Not awaited: a stalled delete must not hold up the result. It doesn't stop a command
+        // still running after a failed wait: `timeout` puts it in its own process group, which
+        // the session delete doesn't reach (smoke 4d). Its own timeoutMs still ends it.
         processes.deleteSession(sessionId).catch(noop);
       }
     });
@@ -453,17 +455,18 @@ export const createDaytonaProvider = (apiKey: string): SandboxProvider => {
         const matches = (labels: Record<string, string> = {}) =>
           Object.entries(metadata ?? {}).every(([key, value]) => labels[key] === value);
         const listed: ListedSandbox[] = [];
-        // A new sandbox is missing from the list for about 5 s, so the per-user cap can briefly
-        // undercount; accepted. E2B's lag is unmeasured.
+        // The list lags, both ways; accepted, and E2B's lag is unmeasured. A new sandbox is missing
+        // for about 5 s, so the per-user cap can briefly undercount. A killed one is still listed,
+        // and its row still says started, for about 2 s (smoke 7a), so it can briefly overcount.
+        // connect and kill read the live state, so acting on such a row is safe.
         for await (const sandbox of daytona().list({ labels: metadata, states: ["started"], limit })) {
-          // The server's state filter still returns a killed sandbox, as destroying, for 1–3 s.
-          if (sandbox.state !== "started" || !matches(sandbox.labels)) continue;
+          if (!matches(sandbox.labels)) continue;
           listed.push({ id: sandbox.id, ...toInfo(sandbox) });
           if (limit && listed.length >= limit) break;
         }
         return listed;
       }, requestTimeoutMs),
-    // delete returns once Daytona accepts it; the sandbox is destroying for 1–3 s, and list skips it.
+    // delete returns once Daytona accepts it: get() then says destroying, but list keeps it for about 2 s.
     kill: (id, { requestTimeoutMs } = {}) =>
       call(async () => {
         const sandbox = await daytona().get(id);

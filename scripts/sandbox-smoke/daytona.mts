@@ -457,7 +457,6 @@ try {
     });
     await check("4c raw: uploadFiles into a missing dir; readFile of a missing file", async () => {
       const fs = (await raw.get(sandbox.id)).fs;
-      // test -f, not stdout: run's stdout gains a trailing newline (bug A).
       const made = await fs.uploadFiles([{ source: Buffer.from("x"), destination: "/home/user/nodir/sub/x.txt" }]).then(
         async () => (await sandbox.run("test -f /home/user/nodir/sub/x.txt")).exitCode === 0, (error) => `rejected (${statusOf(error)})`);
       const missing = await sandbox.readFile("/home/user/nope.txt", "text").then(() => "no error", (error) => statusOf(error));
