@@ -175,21 +175,37 @@ const untilEndMark = (emit: (chunk: string) => void) => {
  * `env` takes any variable name (the /proc restart path passes a whole inherited
  * environment) and, like `exec`, keeps the shell's pid; `timeout` goes between them.
  * `endMark` prints the end marker after the command instead, and keeps its exit code.
+ * `pidFile` gets the pid that `env` and `timeout` exec into: `timeout` leads its own process
+ * group, so that pid is the group's id (see `killGroup`). The wrapper removes it when done.
  */
 const shellCommand = (
   command: string,
   { cwd, envs }: Pick<RunOptions, "cwd" | "envs">,
-  { steps = [], timeoutS, endMark = false }: { steps?: string[]; timeoutS?: number; endMark?: boolean } = {},
+  { steps = [], timeoutS, endMark = false, pidFile }: { steps?: string[]; timeoutS?: number; endMark?: boolean; pidFile?: string } = {},
 ) => {
   const exec = [
-    endMark ? "env --" : "exec env --",
+    "env --",
     ...Object.entries(envs ?? {}).map(([key, value]) => quote(`${key}=${value}`)),
     ...(timeoutS ? [`timeout -k 5 ${timeoutS}s`] : []),
     `bash -c ${quote(command)}`,
   ];
-  const script = [...(cwd ? [`cd ${quote(cwd)}`] : []), ...steps, exec.join(" ")].join(" && ");
-  return `bash -c ${quote(endMark ? `${script}; s=$?; ${printEndMark}; ${printEndMark} >&2; exit $s` : script)}`;
+  // endMark needs the shell after the command, so it can't exec; a pid file's subshell can.
+  const line = pidFile ? `(echo $BASHPID > ${pidFile} && exec ${exec.join(" ")})` : `${endMark ? "" : "exec "}${exec.join(" ")}`;
+  const script = [...(cwd ? [`cd ${quote(cwd)}`] : []), ...steps, line].join(" && ");
+  const cleanup = pidFile ? `rm -f ${pidFile}; ` : "";
+  return `bash -c ${quote(endMark ? `${script}; s=$?; ${cleanup}${printEndMark}; ${printEndMark} >&2; exit $s` : script)}`;
 };
+
+/**
+ * Stops the process group whose id is in `pidFile`: TERM, then KILL after 2 s. It waits up to
+ * 2 s for the file, in case the command starts after the wait was given up. Only a pid above 1,
+ * so never init or every process (`kill -- -1`).
+ */
+const killGroup = (pidFile: string) =>
+  `bash -c ${quote(
+    `for i in $(seq 20); do [ -s ${pidFile} ] && break; sleep 0.1; done; p=$(cat ${pidFile} 2>/dev/null); rm -f ${pidFile}; ` +
+      `[ "$p" -gt 1 ] 2>/dev/null || exit 0; kill -TERM -- -$p 2>/dev/null || exit 0; sleep 2; kill -KILL -- -$p 2>/dev/null; exit 0`,
+  )}`;
 
 /** Retries `read` every `intervalMs` until it returns a value or `budgetMs` runs out. */
 const poll = async <T>(read: () => Promise<T | undefined>, budgetMs: number, intervalMs = 100) => {
@@ -217,6 +233,9 @@ const TIMED_OUT_EXIT_CODES = new Set([124, 137]);
 /** How much longer than the command's own limit `run` waits, so `timeout` and its 5 s kill fire first. */
 const RUN_WAIT_PAD_MS = 10_000;
 
+/** `killGroup`'s own limit: its file wait and grace period, and some slack. */
+const KILL_GROUP_TIMEOUT_S = 15;
+
 /** The seam's view of a Daytona sandbox. */
 const wrap = (sandbox: DaytonaSandbox): Sandbox => {
   const { process: processes, fs } = sandbox;
@@ -242,10 +261,14 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => {
       const waitMs = (timeoutMs || DAYTONA_MAX_SESSION_MS) + RUN_WAIT_PAD_MS;
       const remainingMs = () => Math.max(1, startedAt + waitMs - Date.now());
       const sessionId = `cn-run-${randomUUID()}`;
+      const pidFile = `${PID_DIR}/${sessionId}.pid`;
+      let waited = false;
       await withDeadline(processes.createSession(sessionId), requestTimeoutMs);
       try {
         // The session wait is only HTTP, so `timeout` is what stops the command itself.
-        const request = { command: shellCommand(command, { cwd, envs }, { timeoutS: seconds(timeoutMs), endMark: true }) };
+        const request = {
+          command: shellCommand(command, { cwd, envs }, { steps: [`mkdir -p ${PID_DIR}`], timeoutS: seconds(timeoutMs), endMark: true, pidFile }),
+        };
         let result: RunResult;
         if (!onStdout && !onStderr) {
           // The response carries the exit code and both streams. timeoutMs bounds it, not requestTimeoutMs.
@@ -275,14 +298,16 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => {
           const logs = await processes.getSessionCommandLogs(sessionId, cmdId).catch(() => streamed);
           result = { exitCode, stdout: beforeEndMark(logs.stdout || streamed.stdout), stderr: beforeEndMark(logs.stderr || streamed.stderr) };
         }
+        waited = true;
         if (timeoutMs && TIMED_OUT_EXIT_CODES.has(result.exitCode) && Date.now() - startedAt >= timeoutMs) {
           throw new SandboxTimeoutError(`Command timed out after ${timeoutMs} ms`);
         }
         return result;
       } finally {
-        // Not awaited: a stalled delete must not hold up the result. It doesn't stop a command
-        // still running after a failed wait: `timeout` puts it in its own process group, which
-        // the session delete doesn't reach (smoke 4d). Its own timeoutMs still ends it.
+        // Not awaited: a stalled cleanup must not hold up the caller. The session delete doesn't
+        // reach `timeout`'s own process group (smoke 4d), so a failed wait also kills that group.
+        // Without a timeoutMs there is no such group, and the delete alone stops the command.
+        if (!waited) processes.executeCommand(killGroup(pidFile), undefined, undefined, KILL_GROUP_TIMEOUT_S).catch(noop);
         processes.deleteSession(sessionId).catch(noop);
       }
     });
