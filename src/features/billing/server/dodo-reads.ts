@@ -151,7 +151,9 @@ export async function fetchPayment(
     taxMinor: body.tax == null ? undefined : safeInteger(body.tax),
     currency: typeof currency === "string" && CURRENCY.test(currency) ? currency : "",
     createdAt,
-    chargeType: typeof chargeType === "string" && CHARGE_TYPE.test(chargeType) ? chargeType : undefined,
+    // Absent only when the provider sent none; anything unrecognisable stays visibly unknown.
+    chargeType: chargeType == null ? undefined
+      : typeof chargeType === "string" && CHARGE_TYPE.test(chargeType) ? chargeType : "other",
     servicePeriods: servicePeriods(body.service_periods),
     includesUsage: optionalBoolean(body.includes_usage),
     isUpdatePaymentMethod: optionalBoolean(body.is_update_payment_method),

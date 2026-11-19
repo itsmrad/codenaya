@@ -120,6 +120,14 @@ describe("Dodo reads", () => {
     }))));
     expect(read.previousBillingAt).toBe(Date.parse("2026-11-01T00:00:00.123Z"));
   });
+  it.each(["NEW", "x".repeat(40), 42, true, {}])("keeps an unrecognised charge type unknown, not absent (%s)", async (charge) => {
+    const read = await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody({ charge_type: charge }))));
+    expect(read.chargeType).toBe("other");
+  });
+  it("normalizes an unrecognised but well-formed charge type as itself", async () => {
+    const read = await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody({ charge_type: "usage_settlement" }))));
+    expect(read.chargeType).toBe("usage_settlement");
+  });
   it("normalizes a subscription and treats an invalid date as absent", async () => {
     expect(await fetchSubscription(config, "sub_1", fetchReturning(json(subscriptionBody({
       status: "past_due", next_billing_date: "soon", cancel_at_next_billing_date: true,

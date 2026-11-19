@@ -148,6 +148,12 @@ describe("decideSettlement", () => {
     expect(decide(proPayment({ isUpdatePaymentMethod: true, ...overrides, customerId: "cus_bob" })))
       .toMatchObject({ kind: "quarantine", reason: "customer_mismatch" });
   });
+  it.each(["usage", "other", "NEW"])("keeps an unknown charge type pending, even on a one-time top-up line (%s)", (chargeType) => {
+    // e.g. a multi-subscription payment: no subscription_id, one one-time line, a new charge type.
+    expect(decide(topUp({ chargeType }), null))
+      .toEqual({ kind: "pending", paymentId: "pay_1", reason: "charge_type_unknown" });
+    expect(decide(topUp({ chargeType: undefined }), null)).toMatchObject({ kind: "top_up", credits: TOP_UP.credits });
+  });
   it.each([undefined, "usage", "NEW"])("keeps a missing or unknown charge type pending (%s)", (chargeType) => {
     expect(decide(proPayment({ chargeType }))).toEqual({ kind: "pending", paymentId: "pay_1", reason: "charge_type_unknown" });
   });

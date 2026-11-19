@@ -4,7 +4,7 @@ import { Webhook } from "svix";
 import { readBoundedBody } from "../src/features/billing/server/bounded-body";
 import { internal } from "./_generated/api";
 import { httpAction, internalQuery } from "./_generated/server";
-import { readConvexBillingConfig } from "./billingEnv";
+import { LOG_PREFIX, readConvexBillingConfig } from "./billingEnv";
 import { billingModeValidator } from "./schema";
 
 export const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
@@ -43,7 +43,7 @@ function readReceiver() {
     return { mode: config.environment, businessId: config.businessId, verifiers: keys.map(key => new Webhook(key)) };
   } catch (error) {
     // An undecodable or empty signing key is misconfiguration; the verifier's error never includes the key.
-    console.error("[billingWebhook] receiver not configured:", error instanceof Error ? error.message : "unknown error");
+    console.error(`${LOG_PREFIX["convex-receiver"]} not configured:`, error instanceof Error ? error.message : "unknown error");
     return null;
   }
 }

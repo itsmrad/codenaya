@@ -3,7 +3,7 @@ import {
 } from "../src/features/billing/server/dodo-config";
 
 const DEPLOYMENTS: readonly string[] = ["development", "preview", "staging", "production"] satisfies DodoDeployment[];
-const LOG_PREFIX = {
+export const LOG_PREFIX = {
   "convex-receiver": "[billingWebhook] receiver",
   "convex-reconciler": "[billingReconcile] reconciler",
 } as const;

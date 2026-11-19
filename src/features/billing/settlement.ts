@@ -15,7 +15,7 @@ export type ProviderPayment = {
   /** SDK `product_cart`: the one-time products only; empty for a pure subscription charge. */
   cart: { productId: string; quantity: number }[];
   totalMinor: number; taxMinor?: number; currency: string; createdAt: number;
-  /** SDK `charge_type`: `new`, `renewal`, `plan_change` or `on_demand`; absent for a one-time payment. */
+  /** SDK `charge_type`: `new`, `renewal`, `plan_change` or `on_demand`; absent for a one-time payment, `other` if unparseable. */
   chargeType?: string;
   /** SDK `service_periods`; absent when the field was missing or malformed (unknown, not empty). */
   servicePeriods?: { subscriptionId: string; start: number; end: number; prorationFactor: string }[];
@@ -59,8 +59,13 @@ export function decideSettlement(input: {
   }
   // Unknown statuses ("requires …", partial captures) stay recorded and are never granted.
   if (payment.status !== "succeeded") return { kind: "processing", paymentId };
+  // An unrecognised charge type is unknown, not absent: never let it reach the one-time top-up path.
+  const { chargeType } = payment;
+  if (chargeType !== undefined && !PERIOD_CHARGES.has(chargeType) && !NON_PERIOD_CHARGES.has(chargeType)) {
+    return { kind: "pending", paymentId, reason: "charge_type_unknown" };
+  }
   // Anything that names a subscription takes the period path, so it can never mint a top-up.
-  return payment.chargeType === undefined && payment.subscriptionId === undefined
+  return chargeType === undefined && payment.subscriptionId === undefined
     ? decideOneTime(payment, catalog)
     : decidePeriod(payment, subscription, catalog);
 }
