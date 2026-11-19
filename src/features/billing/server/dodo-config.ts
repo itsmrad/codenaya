@@ -1,7 +1,7 @@
 // Server consumers only. Read per request; never return this config to a client or log it.
 type Env = Readonly<Record<string, string | undefined>>;
 export type DodoDeployment = "development" | "preview" | "staging" | "production";
-type DodoEnvironment = "test_mode" | "live_mode";
+export type DodoEnvironment = "test_mode" | "live_mode";
 
 type DodoCommonConfig = {
   environment: DodoEnvironment;
@@ -18,6 +18,12 @@ export type DodoNextConfig = DodoCommonConfig & {
 export type DodoReceiverConfig = DodoCommonConfig & {
   webhookKey: string;
   webhookKeyPrevious?: string;
+};
+
+export type DodoReconcilerConfig = DodoCommonConfig & {
+  apiKey: string;
+  proProductId: string;
+  topUpProductId?: string;
 };
 
 function configured(env: Env, name: string): string | undefined {
@@ -61,11 +67,11 @@ function readReturnUrl(env: Env, deployment: DodoDeployment): string {
   } catch {
     throw new Error("Billing URLs must be absolute trusted URLs.");
   }
-  const productionOrigin = "https://codena.tech";
+  const productionOrigin = "https://www.codenaya.tech";
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname);
   const allowedOrigin = deployment === "production"
     ? origin.origin === productionOrigin
-    : origin.hostname !== "codena.tech" && !origin.hostname.endsWith(".codena.tech") &&
+    : origin.hostname !== "codenaya.tech" && !origin.hostname.endsWith(".codenaya.tech") &&
       (local ? origin.protocol === "http:" || origin.protocol === "https:" :
         origin.protocol === "https:");
   if (
@@ -80,7 +86,10 @@ function readReturnUrl(env: Env, deployment: DodoDeployment): string {
   return returnUrl;
 }
 
-/** Checkout disabled => null, even with placeholders. Receiver remains available for reversals. */
+/**
+ * Checkout disabled => null, even with placeholders. Receiver and reconciler remain available
+ * so reversals and already settled money are still processed.
+ */
 export function readDodoConfig(
   consumer: "next", deployment: DodoDeployment, env?: Env,
 ): DodoNextConfig | null;
@@ -88,10 +97,13 @@ export function readDodoConfig(
   consumer: "convex-receiver", deployment: DodoDeployment, env?: Env,
 ): DodoReceiverConfig;
 export function readDodoConfig(
-  consumer: "next" | "convex-receiver", deployment: DodoDeployment, env: Env = process.env,
-): DodoNextConfig | DodoReceiverConfig | null {
-  if (typeof window !== "undefined") throw new Error("Billing configuration is server-only.");
-  if (consumer !== "next" && consumer !== "convex-receiver") {
+  consumer: "convex-reconciler", deployment: DodoDeployment, env?: Env,
+): DodoReconcilerConfig;
+export function readDodoConfig(
+  consumer: "next" | "convex-receiver" | "convex-reconciler", deployment: DodoDeployment, env: Env = process.env,
+): DodoNextConfig | DodoReceiverConfig | DodoReconcilerConfig | null {
+  if (consumer === "next" && typeof window !== "undefined") throw new Error("Billing configuration is server-only.");
+  if (consumer !== "next" && consumer !== "convex-receiver" && consumer !== "convex-reconciler") {
     throw new Error("Unknown billing configuration consumer.");
   }
   if (consumer === "next" && env.CODENAYA_BILLING_ENABLED !== "true") return null;
@@ -104,6 +116,14 @@ export function readDodoConfig(
       ...common,
       webhookKey: required(env, "DODO_PAYMENTS_WEBHOOK_KEY"),
       webhookKeyPrevious: configured(env, "DODO_PAYMENTS_WEBHOOK_KEY_PREVIOUS"),
+    };
+  }
+  if (consumer === "convex-reconciler") {
+    return {
+      ...common,
+      apiKey: required(env, "DODO_PAYMENTS_API_KEY"),
+      proProductId: required(env, "DODO_PAYMENTS_PRO_PRODUCT_ID"),
+      topUpProductId: configured(env, "DODO_PAYMENTS_TOP_UP_PRODUCT_ID"),
     };
   }
   if (env.CREDIT_LIMITS_ENFORCED !== "true") {

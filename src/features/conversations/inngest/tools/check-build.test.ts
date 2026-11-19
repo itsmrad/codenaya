@@ -27,6 +27,7 @@ import {
 } from "../../agent-steps";
 import { START_BUILD_ERROR, START_TYPE_ERROR } from "./start-build-output.fixture";
 import { buildCommand, checkProjectBuild, createCheckBuildTool, trimBuildOutput, warmSlow } from "./check-build";
+import { brokenImagesWarning } from "./remote-images";
 import {
   NEXT16_MODULE_NOT_FOUND,
   NEXT16_PRERENDER_ERROR,
@@ -322,6 +323,39 @@ describe("checkProjectBuild", () => {
     expect(e2b.connect).not.toHaveBeenCalled();
   });
 
+  describe("remote images", () => {
+    const DEAD = "https://images.unsplash.com/photo-1579584425555-c3ce17fd4399?w=800";
+    const withImage = () => [
+      ...starter().filter((file) => file.path !== "src/App.tsx"),
+      { path: "src/App.tsx", content: `export default function App() { return <img src="${DEAD}" alt="Sushi" />; }` },
+    ];
+    const checkWithProbe = (stdout: string) => {
+      const sandbox = sandboxWith((command) => (command.startsWith("node -e") ? { exitCode: 0, stdout } : undefined));
+      const files = withImage();
+      const result = checkProjectBuild({
+        files,
+        paths: new Set(files.map((file) => file.path)),
+        sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
+      });
+      return { sandbox, result };
+    };
+
+    it("appends a dead image to a passing build as a warning, not an error", async () => {
+      const { sandbox, result } = checkWithProbe(JSON.stringify([[DEAD, 404, "text/html"]]));
+      const text = await result;
+      expect(text.split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect(text.endsWith(brokenImagesWarning([`src/App.tsx: ${DEAD} (HTTP 404)`]))).toBe(true);
+      const commands = sandbox.commands.run.mock.calls.map(([command]) => command);
+      expect(commands.some((command) => command.includes("vite build"))).toBe(true);
+    });
+
+    it("passes when the images load or the probe is inconclusive", async () => {
+      expect((await checkWithProbe(JSON.stringify([[DEAD, 200, "image/jpeg"]])).result).split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect((await checkWithProbe(JSON.stringify([[DEAD, 0, ""]])).result).split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect((await checkWithProbe("not json").result).split("\n")[0]).toBe(BUILD_VERIFIED);
+    });
+  });
+
   it("times out an in-flight worker check before the 9-minute invoke deadline (#649)", async () => {
     vi.useFakeTimers();
     try {
@@ -357,8 +391,10 @@ describe("checkProjectBuild", () => {
     }
   });
 
-  it("first copies sourceDir into the check directory, without node_modules, .env files or the top-level dist", async () => {
-    const sandbox = sandboxWith(() => undefined);
+  it("first copies sourceDir into the check directory, without node_modules, secret files or the top-level dist", async () => {
+    const sandbox = sandboxWith((command) =>
+      command.startsWith("find ") ? { exitCode: 0, stdout: "src/App.tsx\n.env\nsub/.ENV.local\n.env.example\n" } : undefined,
+    );
     const files = starter();
     await checkProjectBuild({
       files,
@@ -367,13 +403,14 @@ describe("checkProjectBuild", () => {
       sourceDir: "/home/user/app",
     });
 
-    const [copy, install] = sandbox.commands.run.mock.calls.map(([command]) => command);
+    const [copy, find, ...rest] = sandbox.commands.run.mock.calls.map(([command]) => command);
     const dir = (sandbox.commands.run.mock.calls[1][1] as { cwd: string }).cwd;
     expect(copy).toBe(
       `mkdir -p ${dir} && tar -C '/home/user/app' --exclude=node_modules --exclude=.git --exclude=./dist ` +
-        `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
+        `-cf - . | tar -C ${dir} -xf -`,
     );
-    expect(install).toMatch(/^npm install/);
+    expect(find).toMatch(/^find \./);
+    expect(rest.slice(0, 3)).toEqual([`rm -rf -- '${dir}/.env'`, `rm -rf -- '${dir}/sub/.ENV.local'`, expect.stringMatching(/^npm install/)]);
   });
 
   it("refuses snapshot paths that would leave a given sandbox's check directory", async () => {
@@ -438,7 +475,7 @@ describe("checkProjectBuild", () => {
       sourceDir: "/home/user/app",
     });
     const [copy] = sandbox.commands.run.mock.calls.map(([command]) => command);
-    expect(copy).toContain("--exclude=./dist --exclude=./.next --exclude=./out --exclude=./next-env.d.ts --exclude=.env ");
+    expect(copy).toContain("--exclude=./dist --exclude=./.next --exclude=./out --exclude=./next-env.d.ts -cf ");
   });
 
   it("leaves TanStack Start build output out of the sourceDir copy", async () => {
@@ -454,7 +491,7 @@ describe("checkProjectBuild", () => {
       sourceDir: "/home/user/app",
     });
     const [copy] = sandbox.commands.run.mock.calls.map(([command]) => command);
-    expect(copy).toContain("--exclude=./dist --exclude=./.output --exclude=./.tanstack --exclude=./.nitro --exclude=./.vinxi --exclude=.env ");
+    expect(copy).toContain("--exclude=./dist --exclude=./.output --exclude=./.tanstack --exclude=./.nitro --exclude=./.vinxi -cf ");
   });
 
   it("installs, type checks and builds, then kills the sandbox", async () => {
@@ -1349,6 +1386,20 @@ describe("checkBuild tool (#465)", () => {
     const result = await runTool(undefined, () => vi.stubEnv("E2B_API_KEY", ""));
 
     expect(result?.split("\n")[0]).toBe(STATIC_CHECKS_PASSED);
+  });
+
+  it("never sends a secret file's content to the sandbox", async () => {
+    const sandbox = fakeSandbox();
+
+    await runTool(undefined, () => mocks.query.mockImplementation(async (ref) =>
+      getFunctionName(ref) === "system:getEnvVarsForSandbox"
+        ? null
+        : rowsOf([...starter(), { path: ".env.local", content: "API_KEY=CANARY_VALUE_123" }])));
+
+    const written = JSON.stringify(sandbox.files.write.mock.calls);
+    expect(written).toContain("package.json");
+    expect(written).not.toContain(".env.local");
+    expect(written).not.toContain("CANARY_VALUE_123");
   });
 
   it("looks for the owner's warm preview when the project has no variables", async () => {

@@ -52,14 +52,17 @@ vi.mock("@blaxel/core", () => ({
   },
 }));
 
-import { DEFAULT_BLAXEL_IMAGE, createBlaxelProvider, fromBlaxelError, newSandboxName } from "./blaxel";
+import { createBlaxelProvider, fromBlaxelError, newSandboxName } from "./blaxel";
 import { SandboxConfigError, SandboxNotFoundError, SandboxRateLimitError, SandboxTimeoutError } from "./types";
 
 const NOW = Date.parse("2026-11-19T12:00:00Z");
 const iso = (ms: number) => new Date(ms).toISOString();
 
-const instance = ({ name = "cn-abc", labels = {} as Record<string, string>, status = "DEPLOYED", endAt = NOW + 60_000 } = {}) => ({
-  metadata: { name, labels },
+const instance = ({
+  name = "cn-abc", labels = {} as Record<string, string>, status = "DEPLOYED", endAt = NOW + 60_000,
+  createdAt = iso(NOW - 10 * 60_000) as string | null,
+} = {}) => ({
+  metadata: { name, labels, createdAt: createdAt ?? undefined },
   status,
   spec: { lifecycle: { expirationPolicies: [{ type: "date", value: iso(endAt), action: "delete" }] } },
   expiresIn: undefined,
@@ -112,11 +115,10 @@ describe("Blaxel provider", () => {
     mocks.create.mockImplementation(async ({ name }) => instance({ name }));
 
     await provider.create({ timeoutMs: 1, requestTimeoutMs: 1_500, metadata: {} });
-    expect(DEFAULT_BLAXEL_IMAGE).toBe("codenaya-node22");
     expect(mocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ image: "codenaya-node22", region: "us-was-1" }), { timeout: 2 });
 
     await provider.create({ image: "other", timeoutMs: 1, metadata: {} });
-    expect(mocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ image: "other" }), { timeout: undefined });
+    expect(mocks.create).toHaveBeenLastCalledWith(expect.objectContaining({ image: "other" }), { timeout: 30 });
   });
 
   it("throws on its own deadline and deletes the sandbox the create still makes", async () => {
@@ -146,8 +148,50 @@ describe("Blaxel provider", () => {
     mocks.create.mockImplementation(async ({ name }) => instance({ name, labels: { userId: "user1" } }));
     mocks.delete.mockResolvedValue({});
 
-    await expect(provider.create({ timeoutMs: 1, metadata: { userId: "user_1" } })).rejects.toThrow("labels");
+    const rejection = provider.create({ timeoutMs: 1, metadata: { userId: "user_1" } });
+    await expect(rejection).rejects.toThrow("labels");
+    await expect(rejection).rejects.toBeInstanceOf(SandboxConfigError);
     expect(mocks.delete).toHaveBeenCalledWith(mocks.create.mock.calls[0][0].name);
+  });
+
+  it.each([
+    ["404", new mocks.errors.ResponseError(404)],
+    ["raw IMAGE_NOT_FOUND", { code: "IMAGE_NOT_FOUND", message: "no image", status_code: 404 }],
+    ["raw INVALID_REGION", { code: "INVALID_REGION", message: "bad region", status_code: 400 }],
+  ])("maps a create-time %s to SandboxConfigError so the boot fails over", async (_, error) => {
+    mocks.create.mockRejectedValue(error);
+
+    await expect(provider.create({ timeoutMs: 1, metadata: {} })).rejects.toBeInstanceOf(SandboxConfigError);
+  });
+
+  it("bounds a request without requestTimeoutMs by 30 s, and 0 by none", async () => {
+    mocks.get.mockReturnValue(new Promise(() => {}));
+
+    const rejection = provider.connect("cn-abc");
+    const expectation = expect(rejection).rejects.toBeInstanceOf(SandboxTimeoutError);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expectation;
+
+    let settled = false;
+    void provider.inspect!("cn-abc", { requestTimeoutMs: 0 }).finally(() => (settled = true)).catch(() => {});
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(settled).toBe(false);
+  });
+
+  it.each([
+    ["55 min old: only to its hour", 55, NOW + 5 * 60_000],
+    ["61 min old: not at all", 61, undefined],
+    ["of unknown age: not at all", undefined, undefined],
+  ])("extends a sandbox %s", async (_, ageMinutes, endAt) => {
+    mocks.get.mockResolvedValue(instance({
+      endAt: NOW + 60_000, createdAt: ageMinutes === undefined ? null : iso(NOW - ageMinutes * 60_000),
+    }));
+    mocks.updateLifecycle.mockResolvedValue(instance());
+
+    await provider.connect("cn-abc", { timeoutMs: 10 * 60_000 });
+
+    if (endAt === undefined) expect(mocks.updateLifecycle).not.toHaveBeenCalled();
+    else expect(mocks.updateLifecycle).toHaveBeenCalledWith("cn-abc", { expirationPolicies: [{ type: "date", value: iso(endAt), action: "delete" }] });
   });
 
   it("extends the lifetime on connect but never shortens it", async () => {
@@ -218,9 +262,11 @@ describe("Blaxel provider", () => {
   });
 
   it("kills by name and answers false when the sandbox was already gone", async () => {
-    mocks.delete.mockResolvedValueOnce({}).mockRejectedValueOnce(new mocks.errors.ResponseError(404));
+    mocks.delete.mockResolvedValueOnce({}).mockRejectedValueOnce(new mocks.errors.ResponseError(404))
+      .mockRejectedValueOnce({ code: "SANDBOX_DELETION_IN_PROGRESS", message: "deleting", status_code: 409 });
 
     expect(await provider.kill("cn-abc")).toBe(true);
+    expect(await provider.kill("cn-abc")).toBe(false);
     expect(await provider.kill("cn-abc")).toBe(false);
     expect(mocks.delete).toHaveBeenCalledWith("cn-abc");
   });
@@ -240,7 +286,7 @@ describe("Blaxel provider", () => {
     ["raw generic 404", { error: "sandbox not found", code: 404 }, SandboxNotFoundError],
     ["raw SANDBOX_DELETED", { code: "SANDBOX_DELETED", message: "deleted", status_code: 409 }, SandboxNotFoundError],
   ])("maps %s to the seam's error, keeping the message and cause", (_, error, Expected) => {
-    const mapped = fromBlaxelError(error, true);
+    const mapped = fromBlaxelError(error, "sandbox");
 
     expect(mapped).toBeInstanceOf(Expected);
     expect(mapped).toMatchObject({ message: mocks.helpers.getBlaxelErrorMessage(error) ?? (error as Error).message, cause: error });
@@ -250,7 +296,7 @@ describe("Blaxel provider", () => {
     const notFound = new mocks.errors.ResponseError(404);
     expect(fromBlaxelError(notFound)).toBe(notFound);
     const boom = new Error("boom");
-    expect(fromBlaxelError(boom, true)).toBe(boom);
+    expect(fromBlaxelError(boom, "sandbox")).toBe(boom);
     const raw = { error: "internal", code: 500 };
     expect(fromBlaxelError(raw)).toMatchObject({ message: "internal", cause: raw });
     expect(fromBlaxelError(raw)).toBeInstanceOf(Error);
@@ -286,8 +332,38 @@ describe("Blaxel provider", () => {
       });
       expect(blaxel.process.exec).toHaveBeenCalledWith({
         command: "npm install", workingDir: "/app", env: { A: "1" }, waitForCompletion: true, timeout: 2,
-        onStdout, onStderr: expect.any(Function),
+        onStdout: expect.any(Function), onStderr: expect.any(Function),
       });
+    });
+
+    it("builds the output from the streamed lines, which reach the callbacks with their newlines", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.process.exec.mockImplementation(async ({ onStdout, onStderr }) => {
+        onStdout("a");
+        onStdout("b");
+        onStderr("warn");
+        return done({ stdout: "b", stderr: "" });
+      });
+      const onStdout = vi.fn();
+
+      expect(await sandbox.run("ls", { onStdout })).toEqual({ exitCode: 0, stdout: "a\nb\n", stderr: "warn\n" });
+      expect(onStdout.mock.calls).toEqual([["a\n"], ["b\n"]]);
+    });
+
+    it("bounds the request by the command's limit plus 30 s, and not at all without a limit", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.process.exec.mockReturnValue(new Promise(() => {}));
+
+      let unlimited = false;
+      void sandbox.run("npm run build", { timeoutMs: 0 }).finally(() => (unlimited = true)).catch(() => {});
+      const rejection = sandbox.run("npm install");
+      const expectation = expect(rejection).rejects.toBeInstanceOf(SandboxTimeoutError);
+      await vi.advanceTimersByTimeAsync(89_999);
+      expect(unlimited).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expectation;
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(unlimited).toBe(false);
     });
 
     it("always streams, defaults to E2B's 60s and takes 0 as no limit", async () => {
@@ -302,12 +378,18 @@ describe("Blaxel provider", () => {
       expect(blaxel.process.exec).toHaveBeenLastCalledWith(expect.objectContaining({ timeout: 0 }));
     });
 
-    it("throws SandboxTimeoutError when its timeout killed the command, but not without one", async () => {
+    it("throws SandboxTimeoutError only when the command's own limit killed it", async () => {
       const { blaxel, sandbox } = await connect();
-      blaxel.process.exec.mockResolvedValue(done({ status: "killed", exitCode: 137 }));
+      blaxel.process.exec.mockImplementation(async ({ timeout }) => {
+        vi.advanceTimersByTime(timeout * 1000);
+        return done({ status: "killed", exitCode: 137 });
+      });
 
       await expect(sandbox.run("sleep 99", { timeoutMs: 1_000 })).rejects.toBeInstanceOf(SandboxTimeoutError);
       expect((await sandbox.run("sleep 99", { timeoutMs: 0 })).exitCode).toBe(137);
+      // Killed by something else (killTree) before its limit: a result.
+      blaxel.process.exec.mockResolvedValue(done({ status: "killed", exitCode: 137 }));
+      expect((await sandbox.run("sleep 99", { timeoutMs: 60_000 })).exitCode).toBe(137);
     });
 
     it("maps errors from the sandbox's calls", async () => {
@@ -325,6 +407,21 @@ describe("Blaxel provider", () => {
       expect(blaxel.process.exec).toHaveBeenCalledWith({
         command: "npm run dev", workingDir: "/app", env: { A: "1" }, waitForCompletion: false, onStdout: undefined, onStderr: undefined,
       });
+    });
+
+    it("hands start's output lines to the callbacks with their newlines", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.process.exec.mockImplementation(async ({ onStdout, onStderr }) => {
+        onStdout("ready in 300ms");
+        onStderr("warn");
+        return { pid: "7", status: "running" };
+      });
+      const onStdout = vi.fn();
+      const onStderr = vi.fn();
+
+      await sandbox.start("npm run dev", { onStdout, onStderr });
+      expect(onStdout).toHaveBeenCalledWith("ready in 300ms\n");
+      expect(onStderr).toHaveBeenCalledWith("warn\n");
     });
 
     it("writes text in one tree request, bytes one by one, and skips an empty list", async () => {

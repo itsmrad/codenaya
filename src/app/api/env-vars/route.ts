@@ -30,8 +30,8 @@ import { Id } from "../../../../convex/_generated/dataModel";
  * Public variables do not come here: the browser writes them directly through
  * `envVars.setPublicEnvVar`. A secret has to be sealed with `node:crypto` under a
  * KEK that deliberately does not exist in Convex's environment, so this route
- * seals it and hands only ciphertext to Convex — the same path the agent's
- * `setEnvVar` tool uses.
+ * seals it and hands only ciphertext to Convex. The agent never sets values: it
+ * tells the user which names to add here.
  */
 
 const requestSchema = z.object({

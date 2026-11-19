@@ -78,7 +78,7 @@ Open bugs only. Gaps found in code without an issue are listed on the flow itsel
   → `POST /api/messages`, `POST /api/messages/cancel` → Inngest `process-message`
   (AgentKit; at most 2 runs per owner). Tools in `features/conversations/inngest/tools/*`:
   list, read, create, update, rename, delete files, create folder, `scaffoldViteApp`,
-  `checkBuild`, `scrapeUrls`, `setEnvVar`, `loadSkill`, plus MCP tools (F12). Finish gate in
+  `checkBuild`, `scrapeUrls`, `loadSkill`, plus MCP tools (F12). Finish gate in
   `inngest/build-check-gate.ts`; `checkBuild` runs `tsc --noEmit` and `vite build` in E2B for
   Vite projects (static checks only without `E2B_API_KEY`) → `convex/system.ts` writes.
   Platform models are the admin's selection in /admin for the active provider (ADR 0006), else
@@ -190,11 +190,11 @@ Open bugs only. Gaps found in code without an issue are listed on the flow itsel
 **F13. Project environment variables**: Works
 - Steps: preview toolbar → Environment variables → list, add, edit or delete. Keys with a
   public prefix (`NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` and others in `classifyEnvKey`) are stored
-  as public; everything else is a sealed secret that can't be revealed. The agent can also
-  call `setEnvVar`. Public vars reach WebContainer; all vars reach E2B. The preview shows how
+  as public; everything else is a sealed secret that can't be revealed. The agent sees the
+  names only and tells the user which to add; it never sets values. Public vars reach WebContainer; all vars reach E2B. The preview shows how
   many secrets were withheld.
 - Code: `env-vars-dialog.tsx`, `POST /api/env-vars` (secrets), `convex/envVars.ts`,
-  `inngest/tools/set-env-var.ts`, `integrations/env-keys.ts`, `system.setSecretEnvVar`,
+  `envVarsPromptSection` (inngest/constants.ts), `integrations/env-keys.ts`, `system.setSecretEnvVar`,
   `server/env/resolve-env.ts`.
 - Env: the KEK vars from F12 for secrets.
 - E2E: `env-vars.spec.ts` (public var only).

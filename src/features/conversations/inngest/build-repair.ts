@@ -25,6 +25,7 @@ import type { Sandbox, SandboxProvider } from "@/features/sandbox-preview/server
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
+import { withoutSecretFiles } from "../../../../convex/secretFiles";
 import { BUILD_FAILED_NOTE, BUILD_REPAIRED_NOTE, BUILD_UNVERIFIED_NOTE } from "./build-check-gate";
 import { isSafeProjectPath, projectFramework } from "./tools/check-build";
 
@@ -69,6 +70,7 @@ export const killRepairSandboxes = async (runId: string) => {
 /**
  * The project from Convex, in a new sandbox: returns its id, or null for a
  * project the check does not build. Uploads too, so imports of them resolve.
+ * Never secret files: install scripts and builds there run agent-written code.
  */
 const provision = async (
   provider: SandboxProvider,
@@ -76,14 +78,16 @@ const provision = async (
 ) => {
   const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
   const pathOf = buildPathIndex(rows);
-  const files: ProjectFile[] = [];
-  const uploads: Array<{ path: string; url: string }> = [];
+  const all: ProjectFile[] = [];
+  const allUploads: Array<{ path: string; url: string }> = [];
   for (const row of rows) {
     const path = row.type === "file" ? pathOf(row._id) : undefined;
     if (!path || !isSafeProjectPath(path)) continue;
-    if (typeof row.content === "string") files.push({ path, content: row.content });
-    else if (row.storageUrl) uploads.push({ path, url: row.storageUrl });
+    if (typeof row.content === "string") all.push({ path, content: row.content });
+    else if (row.storageUrl) allUploads.push({ path, url: row.storageUrl });
   }
+  const files = withoutSecretFiles(all);
+  const uploads = withoutSecretFiles(allUploads);
   // Any other project could never verify, so a repair would only spend.
   if (!projectFramework(files, [...files, ...uploads].map(({ path }) => path))) return null;
   const sandbox = await provider.create({
