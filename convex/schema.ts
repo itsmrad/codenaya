@@ -168,6 +168,7 @@ export const billingPurchaseTermsValidator = v.object({
   quantity: v.number(),
   credits: v.number(),
 });
+export const billingGrantKindValidator = v.union(v.literal("current_period"), v.literal("rollover"), v.literal("top_up"));
 export const billingResourceIdsValidator = v.object({
   sessionId: v.optional(v.string()),
   paymentId: v.optional(v.string()),
@@ -897,6 +898,28 @@ export default defineSchema({
     .index("by_state_and_nextAttemptAt", ["state", "nextAttemptAt"]),
 
   /**
+   * A paid credit lot (ADR 0016), unique per (mode, sourceKey). `quantity` never
+   * changes; charges raise `consumed` (`convex/billingGrants.ts`).
+   */
+  billingGrants: defineTable({
+    mode: billingModeValidator,
+    sourceKey: v.string(),
+    customerRef: v.id("billingCustomers"),
+    // The customer's Clerk subject, which keys creditAccounts.
+    userId: v.string(),
+    purchaseRef: v.optional(v.id("billingPurchases")),
+    kind: billingGrantKindValidator,
+    quantity: v.number(),
+    consumed: v.number(),
+    revoked: v.number(),
+    expiresAt: v.number(),
+    serviceStart: v.optional(v.number()),
+    serviceEnd: v.optional(v.number()),
+  })
+    .index("by_mode_and_sourceKey", ["mode", "sourceKey"])
+    .index("by_userId_and_mode_and_kind_and_expiresAt", ["userId", "mode", "kind", "expiresAt"]),
+
+  /**
    * A user's credit usage this month and today (ADR 0011). Created on the first
    * metered run; none means nothing used. Periods reset lazily on the next read
    * or charge (`currentUsage` in `features/billing/credits.ts`).
@@ -908,6 +931,12 @@ export default defineSchema({
     periodUsed: v.number(),
     dayStartsAt: v.number(),
     dayUsed: v.number(),
+    // Set only on billing-enabled accounts (ADR 0016): their charges also spend billingGrants.
+    paidCreditsVersion: v.optional(v.literal(1)),
+    // The billing mode whose lots those charges spend; set together with paidCreditsVersion.
+    paidCreditsMode: v.optional(billingModeValidator),
+    // Charged credits no paid lot covered; usage is never dropped instead.
+    creditDebt: v.optional(v.number()),
   }).index("by_userId", ["userId"]),
 
   /**
