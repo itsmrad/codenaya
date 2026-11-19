@@ -50,7 +50,8 @@ const PrivacyPage = () => {
         <h2>Sandboxes</h2>
         <p>
           Live previews and the terminal run your project code in isolated sandboxes hosted by
-          E2B. Sandboxes are temporary and are shut down when they are no longer in use.
+          E2B, Blaxel and Daytona. Sandboxes are temporary and are shut down when they are no
+          longer in use.
         </p>
       </section>
 
