@@ -20,9 +20,12 @@ import { BOOT_INSTALL_ENVS, DEV_COMMAND_ENV, DEV_START_COMMAND, READ_DEV_PGID_CO
 import { createE2bProvider, fromE2bSandbox } from "@/features/sandbox-preview/server/provider/e2b";
 
 import { VITE_REACT_STARTER } from "../vite-starter";
+import { REDACTION_UNAVAILABLE_NOTICE } from "@/features/integrations/server/env/stream-redactor";
+
 import {
   BUILD_NOT_CHECKED,
   BUILD_VERIFIED,
+  STATIC_CHECKS_FAILED,
   STATIC_CHECKS_PASSED,
 } from "../../agent-steps";
 import { START_BUILD_ERROR, START_TYPE_ERROR } from "./start-build-output.fixture";
@@ -640,6 +643,58 @@ describe("checkProjectBuild redaction (#465)", () => {
     expect(result).toMatch(/^Error: The build check could not finish/);
     expect(result).not.toContain(SECRET);
     expect(JSON.stringify(unfinishedLogs())).not.toContain(SECRET);
+  });
+});
+
+describe("checkProjectBuild redaction wiring", () => {
+  const CANARY = "dummy-canary-check-build-0001";
+  const encoded = [CANARY, Buffer.from(CANARY).toString("base64"), Buffer.from(CANARY).toString("hex")];
+  const build = (secrets: readonly string[] | null, files = starter()) =>
+    checkProjectBuild({ files, paths: new Set(files.map((file) => file.path)), provider: createE2bProvider("e2b_key"), secrets });
+
+  it("masks a value printed raw, as base64 or as hex, in build errors", async () => {
+    fakeSandbox({ exitCode: 0 }, { exitCode: 1, stderr: encoded.map((form, i) => `error ${i}: ${form}`).join("\n") });
+    const result = await build([CANARY]);
+    expect(result).toMatch(/^Error: Build failed/);
+    expect(result).toContain("error 1: [redacted]");
+    for (const form of encoded) expect(result).not.toContain(form);
+  });
+
+  it("masks an encoded value in an unfinished check's reason and its log", async () => {
+    fakeSandbox(new TimeoutError(`Command timed out: ${encoded[1]}`));
+    const result = await build([CANARY]);
+    expect(result).toMatch(/^Error: The build check could not finish/);
+    expect(JSON.stringify([result, unfinishedLogs()])).not.toContain(encoded[1]);
+  });
+
+  it("hides the output behind the notice, keeping the result's prefix, when the values are unknown", async () => {
+    fakeSandbox({ exitCode: 0 }, { exitCode: 1, stderr: `vite.config.ts: ${CANARY}` });
+    const result = await build(null);
+    expect(result).toMatch(/^Error: Build failed/);
+    expect(result).toContain(REDACTION_UNAVAILABLE_NOTICE);
+    expect(result).not.toContain("vite.config.ts");
+  });
+
+  it("keeps the static-check prefix when a 3-character value occurs in it", async () => {
+    const files = [...starter(), { path: "src/pages/Home.tsx", content: 'import { Chart } from "../components/Statistics";\n' }];
+    expect(STATIC_CHECKS_FAILED).toContain("tic");
+    const result = await build(["tic"], files);
+    expect(result.startsWith(`${STATIC_CHECKS_FAILED}:`)).toBe(true);
+    expect(result).toContain("../components/Statis[redacted]s");
+  });
+
+  it("redacts once, so a value inside the placeholder leaves it intact", async () => {
+    fakeSandbox({ exitCode: 0 }, { exitCode: 1, stderr: "error: act now" });
+    const result = await build(["act"]);
+    expect(result).toContain("error: [redacted] now");
+    expect(result).not.toContain("[red[redacted]");
+  });
+
+  it("masks a multi-line value whose lines trimming brings back together", async () => {
+    fakeSandbox({ exitCode: 0 }, { exitCode: 1, stderr: "dummy-line-one\n\ndummy-line-two" });
+    const result = await build(["dummy-line-one\ndummy-line-two"]);
+    expect(result).toContain("[redacted]");
+    expect(result).not.toContain("dummy-line-two");
   });
 });
 
@@ -1379,6 +1434,22 @@ describe("checkBuild tool (#465)", () => {
     expect(result?.split("\n")[0]).toBe(BUILD_VERIFIED);
     expect(e2b.list).not.toHaveBeenCalled();
     expect(e2b.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["the secrets cannot be opened", () => mocks.resolveEnv.mockRejectedValue(new Error("CODENAYA_LOCAL_KEK is not set"))],
+    ["reading the variables fails", () => mocks.query.mockImplementation(async (ref) => {
+      if (getFunctionName(ref) === "system:getEnvVarsForSandbox") throw new Error("Convex unavailable");
+      return rowsOf(starter());
+    })],
+  ])("hides a failing build's output when %s", async (_case, arrange) => {
+    fakeSandbox({ exitCode: 0 }, { exitCode: 1, stdout: `vite.config.ts: DATABASE_URL=${SECRET}` });
+
+    const result = await runTool([{ _id: "env_1", key: "DATABASE_URL", visibility: "secret" }], arrange);
+
+    expect(result).toMatch(/^Error: Build failed/);
+    expect(result).toContain(REDACTION_UNAVAILABLE_NOTICE);
+    expect(result).not.toContain("DATABASE_URL");
   });
 
   it("keeps the static-check result when the variables come back missing", async () => {

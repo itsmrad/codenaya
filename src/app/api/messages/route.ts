@@ -10,6 +10,8 @@ import {
 
 import { convex } from "@/lib/convex-client";
 import { detectCredential } from "@/features/integrations/credential-guard";
+import { resolveProjectEnv, secretValuesFrom } from "@/features/integrations/server/env/resolve-env";
+import { STREAM_REDACTION_PLACEHOLDER, redact } from "@/features/integrations/server/env/stream-redactor";
 import {
   isAutoChoice,
   modelChoiceSchema,
@@ -30,6 +32,7 @@ import {
 import { PLAN_MODE, SWARM_MODE } from "@/features/conversations/plan-mode";
 import { swarmOffResponse } from "@/features/conversations/server/swarm-off";
 import { requireOwnedConversation } from "@/features/projects/server/require-owned-project";
+import { FIX_PROMPT_START } from "@/features/sandbox-preview/utils/app-error";
 
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -47,6 +50,25 @@ const requestSchema = z.object({
   // A fix request ("Fix with AI" #223, loop-breaker retry #306): Auto routes it to the fix model.
   source: z.literal("fix").optional(),
 });
+
+/**
+ * A preview fix prompt carries the dev server's error overlay, rendered in a
+ * sandbox that holds the project's values, so it is redacted before it is stored
+ * or reaches the agent. Its terminal lines are already redacted: the text between
+ * their placeholders is matched, so a short value cannot match inside one. A
+ * project whose values cannot be opened gets the notice instead.
+ */
+const redactFixPrompt = async (message: string, internalKey: string, projectId: Id<"projects">) => {
+  const values = await convex
+    .query(api.system.getEnvVarsForSandbox, { internalKey, projectId })
+    .then((records) => resolveProjectEnv(records))
+    .then(secretValuesFrom, (error) => {
+      console.error("[messages] could not open the project's secrets to redact a fix", error);
+      return null;
+    });
+  if (values === null) return redact(message, null);
+  return message.split(STREAM_REDACTION_PLACEHOLDER).map((part) => redact(part, values)).join(STREAM_REDACTION_PLACEHOLDER);
+};
 
 export async function POST(request: Request) {
   const { userId, unauthorized } = await requireUserId();
@@ -172,13 +194,17 @@ export async function POST(request: Request) {
       );
     }
 
+    const content = message.startsWith(FIX_PROMPT_START)
+      ? await redactFixPrompt(message, internalKey, projectId)
+      : message;
+
     // Create user message
     await convex.mutation(api.system.createMessage, {
       internalKey,
       conversationId: conversation._id,
       projectId,
       role: "user",
-      content: message,
+      content,
       // Only sent with images: only the sender's own uploads can be attached.
       ...(images?.length
         ? { images: images as Id<"_storage">[], ownerId: userId }
@@ -208,7 +234,7 @@ export async function POST(request: Request) {
       conversationId: conversation._id,
       projectId,
       ownerId: userId,
-      message,
+      message: content,
       model: runModel,
       mode,
     });
