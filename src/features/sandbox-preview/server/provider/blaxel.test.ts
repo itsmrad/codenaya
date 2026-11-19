@@ -332,8 +332,38 @@ describe("Blaxel provider", () => {
       });
       expect(blaxel.process.exec).toHaveBeenCalledWith({
         command: "npm install", workingDir: "/app", env: { A: "1" }, waitForCompletion: true, timeout: 2,
-        onStdout, onStderr: expect.any(Function),
+        onStdout: expect.any(Function), onStderr: expect.any(Function),
       });
+    });
+
+    it("builds the output from the streamed lines, which reach the callbacks with their newlines", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.process.exec.mockImplementation(async ({ onStdout, onStderr }) => {
+        onStdout("a");
+        onStdout("b");
+        onStderr("warn");
+        return done({ stdout: "b", stderr: "" });
+      });
+      const onStdout = vi.fn();
+
+      expect(await sandbox.run("ls", { onStdout })).toEqual({ exitCode: 0, stdout: "a\nb\n", stderr: "warn\n" });
+      expect(onStdout.mock.calls).toEqual([["a\n"], ["b\n"]]);
+    });
+
+    it("bounds the request by the command's limit plus 30 s, and not at all without a limit", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.process.exec.mockReturnValue(new Promise(() => {}));
+
+      let unlimited = false;
+      void sandbox.run("npm run build", { timeoutMs: 0 }).finally(() => (unlimited = true)).catch(() => {});
+      const rejection = sandbox.run("npm install");
+      const expectation = expect(rejection).rejects.toBeInstanceOf(SandboxTimeoutError);
+      await vi.advanceTimersByTimeAsync(89_999);
+      expect(unlimited).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expectation;
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(unlimited).toBe(false);
     });
 
     it("always streams, defaults to E2B's 60s and takes 0 as no limit", async () => {
@@ -348,12 +378,18 @@ describe("Blaxel provider", () => {
       expect(blaxel.process.exec).toHaveBeenLastCalledWith(expect.objectContaining({ timeout: 0 }));
     });
 
-    it("throws SandboxTimeoutError when its timeout killed the command, but not without one", async () => {
+    it("throws SandboxTimeoutError only when the command's own limit killed it", async () => {
       const { blaxel, sandbox } = await connect();
-      blaxel.process.exec.mockResolvedValue(done({ status: "killed", exitCode: 137 }));
+      blaxel.process.exec.mockImplementation(async ({ timeout }) => {
+        vi.advanceTimersByTime(timeout * 1000);
+        return done({ status: "killed", exitCode: 137 });
+      });
 
       await expect(sandbox.run("sleep 99", { timeoutMs: 1_000 })).rejects.toBeInstanceOf(SandboxTimeoutError);
       expect((await sandbox.run("sleep 99", { timeoutMs: 0 })).exitCode).toBe(137);
+      // Killed by something else (killTree) before its limit: a result.
+      blaxel.process.exec.mockResolvedValue(done({ status: "killed", exitCode: 137 }));
+      expect((await sandbox.run("sleep 99", { timeoutMs: 60_000 })).exitCode).toBe(137);
     });
 
     it("maps errors from the sandbox's calls", async () => {
@@ -371,6 +407,21 @@ describe("Blaxel provider", () => {
       expect(blaxel.process.exec).toHaveBeenCalledWith({
         command: "npm run dev", workingDir: "/app", env: { A: "1" }, waitForCompletion: false, onStdout: undefined, onStderr: undefined,
       });
+    });
+
+    it("hands start's output lines to the callbacks with their newlines", async () => {
+      const { blaxel, sandbox } = await connect();
+      blaxel.process.exec.mockImplementation(async ({ onStdout, onStderr }) => {
+        onStdout("ready in 300ms");
+        onStderr("warn");
+        return { pid: "7", status: "running" };
+      });
+      const onStdout = vi.fn();
+      const onStderr = vi.fn();
+
+      await sandbox.start("npm run dev", { onStdout, onStderr });
+      expect(onStdout).toHaveBeenCalledWith("ready in 300ms\n");
+      expect(onStderr).toHaveBeenCalledWith("warn\n");
     });
 
     it("writes text in one tree request, bytes one by one, and skips an empty list", async () => {

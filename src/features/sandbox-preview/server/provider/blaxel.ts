@@ -129,7 +129,9 @@ const kill = async (name: string, { requestTimeoutMs }: RequestOptions = {}) => 
 
 /** E2B's default command timeout, so a `run` without `timeoutMs` behaves the same on both. */
 const DEFAULT_RUN_TIMEOUT_MS = 60_000;
-const noop = () => {};
+
+/** The SDK hands output over one line at a time with its newline stripped; E2B's chunks keep theirs. */
+const lines = (onData?: (data: string) => void) => onData && ((line: string) => onData(`${line}\n`));
 
 /** The seam's view of a Blaxel sandbox. */
 const wrap = (sandbox: SandboxInstance): Sandbox => {
@@ -139,6 +141,10 @@ const wrap = (sandbox: SandboxInstance): Sandbox => {
     provider: BLAXEL_ID,
     id: name,
     run: async (command, { cwd, envs, timeoutMs = DEFAULT_RUN_TIMEOUT_MS, onStdout, onStderr, requestTimeoutMs } = {}) => {
+      // The output comes from the streamed lines, not the result, which may hold only its tail.
+      let stdout = "";
+      let stderr = "";
+      const startedAt = Date.now();
       const result = await call(
         () =>
           sandbox.process.exec({
@@ -149,20 +155,31 @@ const wrap = (sandbox: SandboxInstance): Sandbox => {
             timeout: Math.ceil(timeoutMs / 1000),
             // Always stream: a held, silent request is cut by Blaxel's edge after
             // 120s, while a streamed one gets keepalives.
-            onStdout: onStdout ?? noop,
-            onStderr: onStderr ?? noop,
+            onStdout: (line) => {
+              stdout += `${line}\n`;
+              onStdout?.(`${line}\n`);
+            },
+            onStderr: (line) => {
+              stderr += `${line}\n`;
+              onStderr?.(`${line}\n`);
+            },
           }),
-        requestTimeoutMs,
+        // The request outlives the command: its own budget, else the command's limit plus 30 s.
+        requestTimeoutMs ?? (timeoutMs && timeoutMs + BLAXEL_REQUEST_TIMEOUT_MS),
       );
-      // A non-zero exit is a result; only the command's own timeout is an error.
-      if (timeoutMs && result.status === "killed") throw new SandboxTimeoutError(`Command timed out after ${timeoutMs}ms`);
-      return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+      // A non-zero exit is a result. `killed` is a timeout only once the command's own limit
+      // has passed; anything else that killed it (killTree) leaves a result.
+      if (timeoutMs && result.status === "killed" && Date.now() - startedAt >= timeoutMs) {
+        throw new SandboxTimeoutError(`Command timed out after ${timeoutMs}ms`);
+      }
+      // Nothing streamed (the server answered without streaming): the result is all there is.
+      return { exitCode: result.exitCode, stdout: stdout || result.stdout, stderr: stderr || result.stderr };
     },
     start: async (command, { cwd, envs, onStdout, onStderr, requestTimeoutMs } = {}) => {
       // No timeout means none (Blaxel's default 0). Never keepAlive: it blocks standby, which costs.
       // With callbacks the SDK follows the output until the process exits.
       const started = await call(
-        () => sandbox.process.exec({ command, workingDir: cwd, env: envs, waitForCompletion: false, onStdout, onStderr }),
+        () => sandbox.process.exec({ command, workingDir: cwd, env: envs, waitForCompletion: false, onStdout: lines(onStdout), onStderr: lines(onStderr) }),
         requestTimeoutMs,
       );
       return { pid: Number(started.pid) };
