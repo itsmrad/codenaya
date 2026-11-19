@@ -14,6 +14,7 @@ import type * as agentTasks from "../agentTasks.js";
 import type * as aiProviders from "../aiProviders.js";
 import type * as auth from "../auth.js";
 import type * as billing from "../billing.js";
+import type * as billingEnv from "../billingEnv.js";
 import type * as billingGrants from "../billingGrants.js";
 import type * as billingWebhook from "../billingWebhook.js";
 import type * as chatImages from "../chatImages.js";
@@ -63,6 +64,7 @@ declare const fullApi: ApiFromModules<{
   aiProviders: typeof aiProviders;
   auth: typeof auth;
   billing: typeof billing;
+  billingEnv: typeof billingEnv;
   billingGrants: typeof billingGrants;
   billingWebhook: typeof billingWebhook;
   chatImages: typeof chatImages;
