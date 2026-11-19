@@ -271,9 +271,11 @@ describe("Daytona provider", () => {
     await expect(provider.inspect!("sbx-1")).rejects.toBeInstanceOf(SandboxNotFoundError);
   });
 
-  it("lists started sandboxes by labels, checks them again, stops at the limit and drops the SDK's own label", async () => {
+  it("lists started sandboxes by labels, checks labels and state again, stops at the limit and drops the SDK's own label", async () => {
     mocks.list.mockReturnValue(listOf([
       fakeDaytonaSandbox(),
+      // Killed moments ago: the server's state filter still returns it for 1–3 s.
+      fakeDaytonaSandbox({ id: "sbx-killed", state: "destroying" }),
       // A looser server-side match is dropped, and doesn't count toward the limit.
       fakeDaytonaSandbox({ id: "sbx-other", labels: { userId: "u2" } }),
       fakeDaytonaSandbox({ id: "sbx-2", autoDestroyAt: undefined }),
@@ -400,10 +402,23 @@ describe("Daytona provider", () => {
           });
 
           const { command } = daytona.process.executeSessionCommand.mock.calls[0][1];
-          expect(spawnSync("bash", ["-c", command], { encoding: "utf8" }).stdout).toBe(`${cwd}|x'y $HOME|X%%=1`);
+          expect(spawnSync("bash", ["-c", command], { encoding: "utf8" }).stdout).toBe(`${cwd}|x'y $HOME|X%%=1__codenaya_run_end__`);
         } finally {
           rmSync(cwd, { recursive: true, force: true });
         }
+      });
+
+      it("returns output byte-exact, without the newline Daytona's session logs add", async () => {
+        const { daytona, sandbox } = await connect();
+        // The command as bash runs it, plus the newline Daytona ends unterminated output with.
+        daytona.process.executeSessionCommand.mockImplementation(async (_sessionId, { command }) => {
+          const ran = spawnSync("bash", ["-c", command], { encoding: "utf8" });
+          return { cmdId: "cmd-1", exitCode: ran.status ?? -1, stdout: `${ran.stdout}\n`, stderr: `${ran.stderr}\n` };
+        });
+
+        // No limit, so no GNU `timeout` is needed where the test runs.
+        expect(await sandbox.run("printf x", { timeoutMs: 0 })).toEqual({ exitCode: 0, stdout: "x", stderr: "" });
+        expect(await sandbox.run("printf 'x\\n'; printf e >&2; exit 3", { timeoutMs: 0 })).toEqual({ exitCode: 3, stdout: "x\n", stderr: "e" });
       });
 
       it("resolves a non-zero exit with separate stdout and stderr, in its own session", async () => {
@@ -467,6 +482,23 @@ describe("Daytona provider", () => {
         expect(onStdout.mock.calls).toEqual([["a"], ["c"]]);
         expect(onStderr.mock.calls).toEqual([["b"]]);
         expect(daytona.process.deleteSession).toHaveBeenCalled();
+      });
+
+      it("streams up to the end marker, even split across chunks, and drops what follows it", async () => {
+        const { daytona, sandbox } = await connect();
+        daytona.process.getSessionCommandLogs.mockImplementation(async (_sessionId, _cmdId, onStdout, onStderr) => {
+          if (!onStdout || !onStderr) return { output: "", stdout: "x__y\n__codenaya_run_end__\n", stderr: "__codenaya_run_end__\n" };
+          for (const chunk of ["x_", "_y\n__", "codenaya_", "run_end__", "\n"]) onStdout(chunk);
+          onStderr("__codenaya_run_end__\n");
+        });
+        let streamed = "";
+        const onStderr = vi.fn();
+
+        const result = await sandbox.run("printf 'x__y\\n'", { onStdout: (chunk) => { streamed += chunk; }, onStderr });
+
+        expect(result).toEqual({ exitCode: 0, stdout: "x__y\n", stderr: "" });
+        expect(streamed).toBe("x__y\n");
+        expect(onStderr).not.toHaveBeenCalled();
       });
 
       it("waits out a dropped stream for the exit code, and falls back to the streamed output", async () => {

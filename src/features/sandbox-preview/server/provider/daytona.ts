@@ -128,22 +128,67 @@ const toInfo = ({ labels, autoDestroyAt }: Pick<DaytonaSandbox, "labels" | "auto
 const noop = () => {};
 
 /**
+ * What `run` prints to both streams after the command. Daytona's session logs can end
+ * with a newline the command never printed (`printf x` reads back as "x\n"), so `run`
+ * cuts each stream at the marker and only the command's own bytes are left. The shell
+ * prints it from two halves, so it never appears whole in a command line `/proc` shows.
+ */
+const END_MARK_HALVES = ["__codenaya_", "run_end__"];
+const END_MARK = END_MARK_HALVES.join("");
+const printEndMark = `printf %s%s ${END_MARK_HALVES.join(" ")}`;
+
+/** `text` up to the end marker; all of it when the marker never came (a dropped stream). */
+const beforeEndMark = (text: string) => {
+  const end = text.lastIndexOf(END_MARK);
+  return end < 0 ? text : text.slice(0, end);
+};
+
+/** Passes chunks to `emit` up to the end marker, holding back a tail that may be its start. */
+const untilEndMark = (emit: (chunk: string) => void) => {
+  let held = "";
+  let ended = false;
+  return {
+    write: (chunk: string) => {
+      if (ended) return;
+      const text = held + chunk;
+      const end = text.indexOf(END_MARK);
+      if (end >= 0) {
+        ended = true;
+        held = "";
+        if (end) emit(text.slice(0, end));
+        return;
+      }
+      let keep = Math.min(text.length, END_MARK.length - 1);
+      while (keep && !END_MARK.startsWith(text.slice(-keep))) keep--;
+      held = text.slice(text.length - keep);
+      if (text.length > keep) emit(text.slice(0, text.length - keep));
+    },
+    flush: () => {
+      if (held) emit(held);
+      held = "";
+    },
+  };
+};
+
+/**
  * `command` in bash, after `cd cwd` and `steps`. A session request has no cwd or env.
  * `env` takes any variable name (the /proc restart path passes a whole inherited
  * environment) and, like `exec`, keeps the shell's pid; `timeout` goes between them.
+ * `endMark` prints the end marker after the command instead, and keeps its exit code.
  */
 const shellCommand = (
   command: string,
   { cwd, envs }: Pick<RunOptions, "cwd" | "envs">,
-  { steps = [], timeoutS }: { steps?: string[]; timeoutS?: number } = {},
+  { steps = [], timeoutS, endMark = false }: { steps?: string[]; timeoutS?: number; endMark?: boolean } = {},
 ) => {
   const exec = [
-    "exec env --",
+    endMark ? "env --" : "exec env --",
     ...Object.entries(envs ?? {}).map(([key, value]) => quote(`${key}=${value}`)),
     ...(timeoutS ? [`timeout -k 5 ${timeoutS}s`] : []),
     `bash -c ${quote(command)}`,
   ];
-  return `bash -c ${quote([...(cwd ? [`cd ${quote(cwd)}`] : []), ...steps, exec.join(" ")].join(" && "))}`;
+  const script = [...(cwd ? [`cd ${quote(cwd)}`] : []), ...steps, exec.join(" ")].join(" && ");
+  return `bash -c ${quote(endMark ? `${script}; s=$?; ${printEndMark}; ${printEndMark} >&2; exit $s` : script)}`;
 };
 
 /** Retries `read` every `intervalMs` until it returns a value or `budgetMs` runs out. */
@@ -200,31 +245,35 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => {
       await withDeadline(processes.createSession(sessionId), requestTimeoutMs);
       try {
         // The session wait is only HTTP, so `timeout` is what stops the command itself.
-        const request = { command: shellCommand(command, { cwd, envs }, { timeoutS: seconds(timeoutMs) }) };
+        const request = { command: shellCommand(command, { cwd, envs }, { timeoutS: seconds(timeoutMs), endMark: true }) };
         let result: RunResult;
         if (!onStdout && !onStderr) {
           // The response carries the exit code and both streams. timeoutMs bounds it, not requestTimeoutMs.
           const response = await processes.executeSessionCommand(sessionId, request, seconds(waitMs));
           const exitCode = response.exitCode ?? (await exitCodeOf(sessionId, response.cmdId, remainingMs()));
-          result = { exitCode, stdout: response.stdout ?? "", stderr: response.stderr ?? "" };
+          result = { exitCode, stdout: beforeEndMark(response.stdout ?? ""), stderr: beforeEndMark(response.stderr ?? "") };
         } else {
           const pending = processes.executeSessionCommand(sessionId, { ...request, runAsync: true });
           const { cmdId } = await withDeadline(pending, requestTimeoutMs);
           const streamed = { stdout: "", stderr: "" };
+          const out = untilEndMark(onStdout ?? noop);
+          const err = untilEndMark(onStderr ?? noop);
           await withDeadline(
             processes.getSessionCommandLogs(
               sessionId,
               cmdId,
-              (chunk) => { streamed.stdout += chunk; onStdout?.(chunk); },
-              (chunk) => { streamed.stderr += chunk; onStderr?.(chunk); },
+              (chunk) => { streamed.stdout += chunk; out.write(chunk); },
+              (chunk) => { streamed.stderr += chunk; err.write(chunk); },
             ),
             remainingMs(),
           );
+          out.flush();
+          err.flush();
           // The stream also ends on a dropped socket, so the exit code is polled for the rest of the wait.
           const exitCode = await exitCodeOf(sessionId, cmdId, remainingMs());
           // The full logs, in case the stream dropped early; the streamed output if they fail.
           const logs = await processes.getSessionCommandLogs(sessionId, cmdId).catch(() => streamed);
-          result = { exitCode, stdout: logs.stdout || streamed.stdout, stderr: logs.stderr || streamed.stderr };
+          result = { exitCode, stdout: beforeEndMark(logs.stdout || streamed.stdout), stderr: beforeEndMark(logs.stderr || streamed.stderr) };
         }
         if (timeoutMs && TIMED_OUT_EXIT_CODES.has(result.exitCode) && Date.now() - startedAt >= timeoutMs) {
           throw new SandboxTimeoutError(`Command timed out after ${timeoutMs} ms`);
@@ -404,14 +453,17 @@ export const createDaytonaProvider = (apiKey: string): SandboxProvider => {
         const matches = (labels: Record<string, string> = {}) =>
           Object.entries(metadata ?? {}).every(([key, value]) => labels[key] === value);
         const listed: ListedSandbox[] = [];
+        // A new sandbox is missing from the list for about 5 s, so the per-user cap can briefly
+        // undercount. E2B lags comparably; accepted.
         for await (const sandbox of daytona().list({ labels: metadata, states: ["started"], limit })) {
-          if (!matches(sandbox.labels)) continue;
+          // The server's state filter still returns a killed sandbox, as destroying, for 1–3 s.
+          if (sandbox.state !== "started" || !matches(sandbox.labels)) continue;
           listed.push({ id: sandbox.id, ...toInfo(sandbox) });
           if (limit && listed.length >= limit) break;
         }
         return listed;
       }, requestTimeoutMs),
-    // delete returns once Daytona accepts it; list filters on started, so the sandbox drops out at once.
+    // delete returns once Daytona accepts it; the sandbox is destroying for 1–3 s, and list skips it.
     kill: (id, { requestTimeoutMs } = {}) =>
       call(async () => {
         const sandbox = await daytona().get(id);
