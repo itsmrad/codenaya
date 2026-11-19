@@ -5,7 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
-import { findProjectFile, getProjectFiles, indexProjectFiles, lockedPathError } from "./paths";
+import { findProjectFile, getProjectFiles, indexProjectFiles, isSecretPath, lockedPathError, secretPathError } from "./paths";
 
 interface RenameFileToolOptions {
   projectId: Id<"projects">;
@@ -39,6 +39,8 @@ export const createRenameFileTool = ({
       }
 
       const { newName } = parsed.data;
+      // Into a protected name too, or a file the agent wrote would become one.
+      if (isSecretPath(newName)) return secretPathError(newName);
 
       try {
         return await toolStep?.run("rename-file", async () => {

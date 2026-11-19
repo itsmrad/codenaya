@@ -13,7 +13,9 @@ import { useChatPanelStore } from "../store/use-chat-panel-store";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 
-const MIN_SIDEBAR_WIDTH = 200;
+// Narrower than this the chat is unusable, so the pane snaps shut (at half this
+// width, Allotment's snap rule) and the toolbar's "Show chat panel" reopens it.
+const MIN_SIDEBAR_WIDTH = 320;
 const MAX_SIDEBAR_WIDTH = 800;
 const DEFAULT_CONVERSATION_SIDEBAR_WIDTH = 400;
 const DEFAULT_MAIN_SIZE = 1000;
@@ -47,6 +49,10 @@ export const ProjectIdLayout = ({
             DEFAULT_CONVERSATION_SIDEBAR_WIDTH,
             DEFAULT_MAIN_SIZE,
           ]}
+          // Dragging the chat shut hides it like "Toggle chat panel" does.
+          onVisibleChange={(index, visible) => {
+            if (index === 0) setChatHidden(!visible);
+          }}
         >
           <Allotment.Pane
             snap

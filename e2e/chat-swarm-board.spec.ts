@@ -67,18 +67,18 @@ test.describe("chat swarm board", () => {
       await swarm.cancel();
       await expect(row("Footer")).toContainText("Cancelled");
       await expect(row("Hero section")).toContainText("Done");
-      for (const theme of ["light", "dark"]) {
-        await page.evaluate((value) => document.documentElement.classList.toggle("dark", value === "dark"), theme);
-        await test.info().attach(`swarm-board-${theme}`, { body: await board.screenshot(), contentType: "image/png" });
-      }
-      await page.setViewportSize({ width: 375, height: 812 });
-      // Mobile chat is a tab; the desktop's selected Preview view can hide it.
-      await page.getByRole("tab", { name: "Chat", exact: true }).click();
-      for (const theme of ["light", "dark"]) {
-        await page.evaluate((value) => document.documentElement.classList.toggle("dark", value === "dark"), theme);
-        await expect(nested.getByRole("button", { name: /Hero section/ })).toBeVisible();
-        expect(await board.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-        await test.info().attach(`swarm-board-375-${theme}`, { body: await board.screenshot(), contentType: "image/png" });
+      for (const [width, height] of [[1280, 900], [390, 844]]) {
+        await page.setViewportSize({ width, height });
+        // Mobile chat is a tab; the desktop's selected Preview view can hide it.
+        if (width < 768) await page.getByRole("tab", { name: "Chat", exact: true }).click();
+        for (const theme of ["light", "dark"]) {
+          await page.evaluate((value) => document.documentElement.classList.toggle("dark", value === "dark"), theme);
+          await expect(nested.getByRole("button", { name: /Hero section/ })).toBeVisible();
+          // Hovered nested row: the tile, guide line and chips must all stay inside the card.
+          await row("Hero section").hover();
+          expect(await board.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+          await test.info().attach(`swarm-board-${width}-${theme}`, { body: await board.screenshot(), contentType: "image/png" });
+        }
       }
     } finally {
       await user.mutation(api.projects.remove, { id: projectId }).catch(() => {});
@@ -124,7 +124,7 @@ test.describe("chat swarm board", () => {
       await expect(picker).toHaveText(longest);
       const send = page.getByRole("button", { name: "Send", exact: true });
       // Cover narrow panels and the mode-label / keyboard-hint breakpoints.
-      for (const width of [200, 320, 480, 560, 640]) {
+      for (const width of [320, 480, 560, 640]) {
         await setChatPanelWidth(page, width);
         const pickerBox = (await picker.boundingBox())!;
         const sendBox = (await send.boundingBox())!;

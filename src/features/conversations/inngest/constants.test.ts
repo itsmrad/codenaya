@@ -7,6 +7,7 @@ import {
   SWARM_SUBORCH_NOTE,
   SWARM_WORKER_NOTE,
   TANSTACK_START_NOTE,
+  envVarsPromptSection,
 } from "./constants";
 import { KNOWN_GOOD_VERSIONS } from "./known-good-versions";
 
@@ -230,5 +231,23 @@ describe("coding agent prompt consistency (#293)", () => {
     expect(CODING_AGENT_SYSTEM_PROMPT).toContain("reveals may only translate");
     expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/initial=\{\{\s*opacity:\s*0/);
     expect(CODING_AGENT_SYSTEM_PROMPT).not.toMatch(/hidden:\s*\{[^}]*opacity:\s*0/);
+  });
+});
+
+describe("envVarsPromptSection", () => {
+  it("lists names only and tells the agent to ask for names, never values", () => {
+    const section = envVarsPromptSection(["VITE_API_URL", "STRIPE_SECRET_KEY"]);
+    expect(section).toContain("## Environment variables");
+    expect(section).toContain("Set in this project (names only): VITE_API_URL, STRIPE_SECRET_KEY.");
+    expect(section).toContain("tell the user its exact name");
+    expect(section).toContain("Environment Variables panel");
+    expect(section).toContain("Never ask for a value in chat, repeat one, write one into a file");
+    expect(section).toContain("store it with setEnvVarFromRef");
+    expect(section).not.toMatch(/\bsetEnvVar\b/);
+  });
+
+  it("says when none are set, and lists nothing when the names are unknown", () => {
+    expect(envVarsPromptSection([])).toContain("None are set in this project yet.");
+    expect(envVarsPromptSection(undefined)).not.toMatch(/Set in this project|None are set/);
   });
 });

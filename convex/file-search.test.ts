@@ -143,3 +143,17 @@ test("regex checks only the first 4,000 characters per line and reports the cuto
   expect(literal).not.toContain("Search truncated");
   expect(literal).not.toContain("Regex search checked only");
 });
+
+test("skips secret files entirely: no lines and no truncation that would count them", async () => {
+  const { search, t, projectId } = await setup();
+  await t.run(async (ctx) => {
+    for (const name of [".env", ".ENV.local", "prod.env"]) {
+      const id = await ctx.db.insert("files", { projectId, name, type: "file", updatedAt: 0 });
+      await insertFileContent(ctx, id, projectId, "API_KEY=CANARY_VALUE_123");
+    }
+    const id = await ctx.db.insert("files", { projectId, name: ".env.example", type: "file", updatedAt: 0 });
+    await insertFileContent(ctx, id, projectId, "API_KEY=CANARY_VALUE_123");
+  });
+  expect(await search({ pattern: "CANARY_VALUE_123", maxResults: 1 })).toBe(".env.example:1: API_KEY=CANARY_VALUE_123");
+  expect(await search({ pattern: "CANARY", pathGlob: "*.env*" })).toBe(".env.example:1: API_KEY=CANARY_VALUE_123");
+});
