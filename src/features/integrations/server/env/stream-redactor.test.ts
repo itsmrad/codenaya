@@ -249,6 +249,12 @@ describe("createStreamRedactor", () => {
     expect(redactor.push("ready on :3000\n")).toBe("ready on :3000\n");
   });
 
+  it("does not match 3-character base64 fragments inside ordinary words", () => {
+    // "key" at a 1-byte offset in base64 leaves the fragment "tle".
+    expect(streamThrough("title\n", 4, ["key"])).toBe("title\n");
+    expect(streamThrough("key\n", 4, ["key"])).toBe(`${STREAM_REDACTION_PLACEHOLDER}\n`);
+  });
+
   it("redacts a value base64-encoded inside a longer string, as in Basic auth", () => {
     const value = "dummy-basic-secret";
     for (const user of ["", "u", "us", "use"]) {

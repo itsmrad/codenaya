@@ -69,7 +69,9 @@ function encodingsOf(value: string): string[] {
     Buffer.concat([Buffer.alloc(offset), bytes])
       .toString("base64")
       .slice(Math.ceil((8 * offset) / 6), Math.floor((8 * (offset + bytes.length)) / 6)),
-  );
+  )
+    // A 3-character fragment turns up inside ordinary words ("key" yields "tle").
+    .filter((part) => part.length >= 4);
   return [
     value,
     base64,
