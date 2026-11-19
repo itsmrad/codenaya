@@ -298,9 +298,19 @@ export const getFence = internalQuery({
   },
 });
 
-// Future positive financial commits must call this inside the committing mutation.
-export async function assertBillingFence(ctx: QueryCtx, customerRef: Id<"billingCustomers">, captured: Infer<typeof fenceValidator>) {
+/**
+ * A grant's fence inside the committing mutation: unchanged generation and revision, and an
+ * owner neither held nor deleted. Fulfillment checks unresolved negatives itself, so pending
+ * positives left for later claims never block a grant.
+ */
+export async function assertGrantFence(ctx: QueryCtx, customerRef: Id<"billingCustomers">, captured: Infer<typeof fenceValidator>) {
   const customer = await requireCustomer(ctx, customerRef);
   await requireActiveOwner(ctx, customer);
-  if (customer.generation !== captured.generation || customer.inputRevision !== captured.inputRevision || customer.unresolvedReceipts !== 0) throw conflict();
+  if (customer.generation !== captured.generation || customer.inputRevision !== captured.inputRevision) throw conflict();
+  return customer;
+}
+
+/** The grant fence plus no unresolved receipt at all. */
+export async function assertBillingFence(ctx: QueryCtx, customerRef: Id<"billingCustomers">, captured: Infer<typeof fenceValidator>) {
+  if ((await assertGrantFence(ctx, customerRef, captured)).unresolvedReceipts !== 0) throw conflict();
 }

@@ -901,6 +901,7 @@ export default defineSchema({
     .index("by_mode_and_webhookId", ["mode", "webhookId"])
     .index("by_mode_and_providerCustomerId_and_state", ["mode", "providerCustomerId", "state"])
     .index("by_mode_and_paymentId_and_state", ["mode", "paymentId", "state"])
+    .index("by_customerRef_and_state_and_eventType", ["customerRef", "state", "eventType"])
     .index("by_state_and_nextAttemptAt", ["state", "nextAttemptAt"])
     .index("by_customerRef_and_state_and_nextAttemptAt", ["customerRef", "state", "nextAttemptAt"]),
 

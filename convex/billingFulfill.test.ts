@@ -80,7 +80,8 @@ async function reconcile(t: T, customerRef: Id<"billingCustomers">, facts: Facts
   const result = await t.mutation(internal.billingFulfill.commitReconciliation, {
     customerRef, fence: { generation: claim.generation, inputRevision: claim.inputRevision },
     receiptRefs: claim.receipts.filter(r => !/^(refund|dispute)\./.test(r.eventType)).map(r => r.eventRef),
-    payments: (facts.payments ?? []) as never, subscriptions: (facts.subscriptions ?? []) as never,
+    payments: (facts.payments ?? []).filter(p => claim.receipts.some(r => r.paymentId === p.paymentId)) as never,
+    subscriptions: (facts.subscriptions ?? []) as never,
   });
   await t.mutation(internal.billingQueue.releaseCustomer, { customerRef, generation: claim.generation });
   return result;
@@ -220,28 +221,25 @@ describe("fence", () => {
     expect(await account(t)).toBeNull();
   });
 
-  test("a backlog commits non-positive outcomes first, then grants exactly once on a later claim", async () => {
+  test("more than one claim of pending positives drains to grants over successive claims", async () => {
     const t = setup();
     const alice = await customer(t);
     await checkout(t, alice);
-    await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
-    for (let i = 0; i < 29; i++) await receive(t, alice, "subscription.updated", { subscriptionId: "sub_1" });
-    const facts = { payments: [paid(period("pay_1"), { sessionId: "cks_1" })], subscriptions: [sub()] };
-    expect(await reconcile(t, alice, facts)).toBe("blocked");
-    expect(await grants(t)).toEqual([]);
-    expect(await read(t, alice)).toMatchObject({ unresolvedReceipts: 6 });
-    vi.setSystemTime(NOW + 5 * 60_000);
-    expect(await reconcile(t, alice, facts)).toBe("committed");
-    expect(await grants(t)).toHaveLength(1);
+    const day = (i: number) => ({ serviceStart: NOW - (40 - i) * DAY, serviceEnd: NOW - (39 - i) * DAY });
+    const payments = Array.from({ length: 30 }, (_, i) => paid(period(`pay_${i}`, day(i))));
+    for (const { paymentId } of payments) await receive(t, alice, "payment.succeeded", { paymentId });
+    expect(await reconcile(t, alice, { payments, subscriptions: [sub()] })).toBe("committed");
+    expect(await grants(t)).toHaveLength(25);
+    expect(await reconcile(t, alice, { payments, subscriptions: [sub()] })).toBe("committed");
+    expect(await grants(t)).toHaveLength(30);
     expect(await read(t, alice)).toMatchObject({ unresolvedReceipts: 0 });
-    expect((await rows(t, "billingEvents")).every(e => e.state === "processed")).toBe(true);
   });
 });
 
 describe("excluded payments", () => {
   test.each([
     ["usage or proration", { kind: "no_grant", paymentId: "pay_1", reason: "not_full_period" }, "preparing", "processed"],
-    ["zero amount", { kind: "quarantine", paymentId: "pay_1", reason: "amount" }, "quarantined", "processed"],
+    ["zero amount", { kind: "quarantine", paymentId: "pay_1", reason: "amount" }, "preparing", "processed"],
     ["missing period", { kind: "pending", paymentId: "pay_1", reason: "service_period_unknown" }, "preparing", "pending"],
   ])("%s grants nothing", async (_name, decision, purchaseState, receiptState) => {
     const t = setup();
@@ -261,10 +259,12 @@ describe("excluded payments", () => {
     const purchaseRef = await checkout(t, alice, "top_up");
     await receive(t, alice, "payment.processing", { paymentId: "pay_1" });
     await reconcile(t, alice, { payments: [paid({ kind: "processing", paymentId: "pay_1" }, { sessionId: "cks_1" })] });
-    expect(await read(t, purchaseRef)).toMatchObject({ state: "processing", paymentId: "pay_1" });
+    // Only a settlement binds the payment to the checkout.
+    expect(await read(t, purchaseRef)).toMatchObject({ state: "preparing" });
+    expect(await read(t, purchaseRef)).not.toHaveProperty("paymentId");
     await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
     vi.setSystemTime(NOW + 5 * 60_000);
-    expect(await reconcile(t, alice, { payments: [paid(topUp("pay_1"))] })).toBe("committed");
+    expect(await reconcile(t, alice, { payments: [paid(topUp("pay_1"), { sessionId: "cks_1" })] })).toBe("committed");
     expect(await grants(t)).toEqual([["top_up", "top_up:pay_1:0", 1000, Date.UTC(2027, 10, 10, 12)]]);
     expect(await read(t, purchaseRef)).toMatchObject({ state: "settled" });
   });
@@ -432,9 +432,11 @@ describe("reconcileClaim", () => {
     previous_billing_date: iso(P1.serviceStart), next_billing_date: iso(P1.serviceEnd), cancel_at_next_billing_date: false,
   };
   /** Answers each Dodo path from `bodies`, or with `status`. */
-  const stubFetch = (bodies: (path: string) => unknown, status = 200) => {
+  const stubFetch = (bodies: (path: string) => unknown, statusOf: number | ((path: string) => number) = 200) => {
     const fetchMock = vi.fn(async (url: string) => {
-      const body = status === 200 ? bodies(new URL(url).pathname) : { error: "synthetic" };
+      const path = new URL(url).pathname;
+      const status = typeof statusOf === "number" ? statusOf : statusOf(path);
+      const body = status === 200 ? bodies(path) : { error: "synthetic" };
       return new Response(JSON.stringify(body), { status });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -488,6 +490,29 @@ describe("reconcileClaim", () => {
     expect(await grants(t)).toEqual([]);
   });
 
+  test.each([[404], [401], [503]])("a %i read keeps only its own receipt pending, never quarantines, and the rest commits", async status => {
+    withEnv();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await checkout(t, alice, "top_up");
+    stubFetch(
+      path => ({ ...paymentBody(path.split("/")[2]), status: "processing", subscription_id: null, charge_type: null }),
+      path => (path === "/payments/pay_bad" ? status : 200),
+    );
+    const bad = await receive(t, alice, "payment.succeeded", { paymentId: "pay_bad", sessionId: "cks_1" });
+    const good = await receive(t, alice, "payment.processing", { paymentId: "pay_good" });
+    await run(t, alice);
+    expect(await read(t, bad)).toMatchObject({ state: "pending", attempts: 1 });
+    expect(await read(t, good)).toMatchObject({ state: "processed" });
+    expect(await read(t, purchaseRef)).toMatchObject({ state: "preparing" });
+    expect(await read(t, purchaseRef)).not.toHaveProperty("paymentId");
+    expect(errors).toHaveBeenCalledWith("[billingReconcile] provider read failed", {
+      customerRef: alice, kind: "payment", id: "pay_bad", status, retryable: status === 503,
+    });
+    expect(JSON.stringify(errors.mock.calls)).not.toMatch(/sk_synthetic|dodopayments/);
+  });
+
   test("caps provider reads per claim and leaves the rest pending", async () => {
     withEnv();
     const t = setup();
@@ -525,10 +550,136 @@ describe("isolation", () => {
     const alicePurchase = await checkout(t, alice, "top_up");
     const before = JSON.stringify([await read(t, alicePurchase), await read(t, alice)]);
     const eventRef = await receive(t, bob, "payment.succeeded", { paymentId: "pay_1", sessionId: "cks_1" });
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    await reconcile(t, bob, { payments: [paid(topUp("pay_1"), { sessionId: "cks_1" })] });
+    const bobPurchase = await t.mutation(internal.billing.reservePurchase, {
+      customerRef: bob, intentId: "intent_bob", terms: { sku: "top_up", catalogVersion: "2026-11-17", productId: TOP_UP, quantity: 1, credits: 1000 },
+    });
+    await t.mutation(internal.billing.bindPurchase, { purchaseRef: bobPurchase, mode: "test_mode", sessionId: "cks_bob" });
+    await receive(t, bob, "payment.succeeded", { paymentId: "pay_bob", sessionId: "cks_bob" });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await reconcile(t, bob, { payments: [paid(topUp("pay_1"), { sessionId: "cks_1" }), paid(topUp("pay_bob"), { sessionId: "cks_bob" })] })).toBe("committed");
     expect(JSON.stringify([await read(t, alicePurchase), await read(t, alice)])).toBe(before);
-    expect(await read(t, eventRef)).toMatchObject({ state: "quarantined", quarantineReason: "unsupported" });
+    // Final and alerted, so it never freezes Bob's own grants.
+    expect(await read(t, eventRef)).toMatchObject({ state: "processed" });
+    expect(errors).toHaveBeenCalledWith("[billingFulfill] payment matches another customer's purchase", { customerRef: bob, paymentId: "pay_1" });
+    expect(await grants(t)).toEqual([["top_up", "top_up:pay_bob:0", 1000, expect.any(Number)]]);
+  });
+});
+
+describe("review regressions", () => {
+  const quiet = () => vi.spyOn(console, "error").mockImplementation(() => {});
+
+  test("a failed attempt then a successful retry in the same checkout session grants once", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await checkout(t, alice, "top_up");
+    await receive(t, alice, "payment.failed", { paymentId: "pay_a", sessionId: "cks_1" });
+    await reconcile(t, alice, { payments: [paid({ kind: "no_grant", paymentId: "pay_a", reason: "failed" }, { sessionId: "cks_1" })] });
+    expect(await read(t, purchaseRef)).not.toHaveProperty("paymentId");
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_b", sessionId: "cks_1" });
+    vi.setSystemTime(NOW + 5 * 60_000);
+    expect(await reconcile(t, alice, { payments: [paid(topUp("pay_b"), { sessionId: "cks_1" })] })).toBe("committed");
+    expect(await read(t, purchaseRef)).toMatchObject({ state: "settled", paymentId: "pay_b" });
+    expect(await grants(t)).toEqual([["top_up", "top_up:pay_b:0", 1000, expect.any(Number)]]);
+  });
+
+  test("a zero-amount charge with no purchase of its own is final and does not block a grant", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    await checkout(t, alice, "top_up");
+    const zero = await receive(t, alice, "payment.succeeded", { paymentId: "pay_zero" });
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
+    const result = await reconcile(t, alice, {
+      payments: [paid({ kind: "quarantine", paymentId: "pay_zero", reason: "amount" }), paid(topUp("pay_1"), { sessionId: "cks_1" })],
+    });
+    expect(result).toBe("committed");
+    expect(await read(t, zero)).toMatchObject({ state: "processed" });
+    expect((await rows(t, "billingPurchases")).map(p => p.paymentId)).toEqual(["pay_1"]);
+    expect(await grants(t)).toHaveLength(1);
+  });
+
+  test("a cancelled subscription still paid through blocks a second paid subscription", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    await checkout(t, alice);
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
+    await reconcile(t, alice, { payments: [paid(period("pay_1"), { sessionId: "cks_1" })], subscriptions: [sub({ status: "cancelled" })] });
+    expect((await rows(t, "billingSubscriptions"))[0]).toMatchObject({ status: "cancelled", paidThrough: P1.serviceEnd });
+    await t.mutation(internal.billing.bindSubscription, { customerRef: alice, mode: "test_mode", subscriptionId: "sub_2", productId: PRO });
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_2" });
+    const errors = quiet();
+    const overlap = { serviceStart: NOW, serviceEnd: NOW + 30 * DAY };
+    expect(await reconcile(t, alice, { payments: [paid(period("pay_2", overlap, "sub_2"))] })).toBe("committed");
+    expect(await grants(t)).toHaveLength(1);
+    expect((await rows(t, "billingPurchases")).map(p => [p.intentId, p.state])).toContainEqual(["renewal:pay_2", "quarantined"]);
+    expect(errors).toHaveBeenCalledWith("[billingFulfill] purchase quarantined", expect.objectContaining({ paymentId: "pay_2", reason: "duplicate" }));
+  });
+
+  test("two payments for one checkout in one commit settle it once; the second is quarantined, not rebound", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await checkout(t, alice, "top_up");
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_1", sessionId: "cks_1" });
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_2", sessionId: "cks_1" });
+    const errors = quiet();
+    expect(await reconcile(t, alice, {
+      payments: [paid(topUp("pay_1"), { sessionId: "cks_1" }), paid({ ...topUp("pay_2"), settledAt: NOW + 1 }, { sessionId: "cks_1" })],
+    })).toBe("committed");
+    expect(await read(t, purchaseRef)).toMatchObject({ state: "settled", paymentId: "pay_1" });
+    expect((await rows(t, "billingPurchases")).map(p => [p.intentId, p.state])).toEqual([["intent_1", "settled"], ["unmatched:pay_2", "quarantined"]]);
+    expect(await grants(t)).toEqual([["top_up", "top_up:pay_1:0", 1000, expect.any(Number)]]);
+    expect(errors).toHaveBeenCalledWith("[billingFulfill] purchase quarantined", expect.objectContaining({ paymentId: "pay_2", reason: "duplicate_checkout" }));
+  });
+
+  test("a pending refund for any of the customer's payments still blocks grants", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    await checkout(t, alice, "top_up");
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
+    await receive(t, alice, "refund.succeeded", { paymentId: "pay_other" });
+    expect(await reconcile(t, alice, { payments: [paid(topUp("pay_1"), { sessionId: "cks_1" })] })).toBe("blocked");
     expect(await grants(t)).toEqual([]);
+  });
+
+  test("replaying a settled payment never reactivates a cancelled subscription", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    await checkout(t, alice);
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
+    await reconcile(t, alice, { payments: [paid(period("pay_1"), { sessionId: "cks_1" })], subscriptions: [sub()] });
+    await receive(t, alice, "subscription.cancelled", { subscriptionId: "sub_1" });
+    vi.setSystemTime(NOW + 5 * 60_000);
+    await reconcile(t, alice, { subscriptions: [sub({ status: "cancelled" })] });
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
+    vi.setSystemTime(NOW + 10 * 60_000);
+    await reconcile(t, alice, { payments: [paid(period("pay_1"))] });
+    expect((await rows(t, "billingSubscriptions"))[0]).toMatchObject({ status: "cancelled", paidThrough: P1.serviceEnd });
+  });
+
+  test("a cancellation is kept when fulfillment first binds the subscription in the same commit", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await t.mutation(internal.billing.reservePurchase, {
+      customerRef: alice, intentId: "intent_1", terms: { sku: "pro_monthly", catalogVersion: "2026-11-17", productId: PRO, quantity: 1, credits: 2000 },
+    });
+    await t.mutation(internal.billing.bindPurchase, { purchaseRef, mode: "test_mode", sessionId: "cks_1" });
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
+    await receive(t, alice, "subscription.cancelled", { subscriptionId: "sub_1" });
+    await reconcile(t, alice, {
+      payments: [paid(period("pay_1"), { sessionId: "cks_1" })], subscriptions: [sub({ status: "cancelled", cancelAtNextBillingDate: true })],
+    });
+    expect(await grants(t)).toHaveLength(1);
+    expect((await rows(t, "billingSubscriptions"))[0]).toMatchObject({ status: "cancelled", cancelAt: P1.serviceEnd, paidThrough: P1.serviceEnd });
+  });
+
+  test("the grant uses the purchase's immutable credits, not today's catalog", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await t.mutation(internal.billing.reservePurchase, {
+      customerRef: alice, intentId: "intent_old", terms: { sku: "top_up", catalogVersion: "2026-01-01", productId: TOP_UP, quantity: 1, credits: 1200 },
+    });
+    await t.mutation(internal.billing.bindPurchase, { purchaseRef, mode: "test_mode", sessionId: "cks_old" });
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
+    await reconcile(t, alice, { payments: [paid(topUp("pay_1"), { sessionId: "cks_old" })] });
+    expect(await grants(t)).toEqual([["top_up", "top_up:pay_1:0", 1200, expect.any(Number)]]);
   });
 });
