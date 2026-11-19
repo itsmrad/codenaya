@@ -20,6 +20,17 @@ describe("currentFreeAllocation", () => {
     expect(currentFreeAllocation(null, 0, NOW)).toEqual({ allocation: { monthStartsAt: NOV, used: 0, debtOffset: 0 }, debt: 0 });
   });
 
+  it("the first allocation since enablement starts from this month's legacy usage", () => {
+    const legacy = (periodUsed: number, periodStartsAt = NOV) => ({ periodStartsAt, periodUsed });
+    expect(freeRemaining(currentFreeAllocation(legacy(300), 0, NOW).allocation)).toBe(0);
+    expect(freeRemaining(currentFreeAllocation(legacy(450), 0, NOW).allocation)).toBe(0);
+    expect(currentFreeAllocation(legacy(120), 0, NOW).allocation).toEqual({ monthStartsAt: NOV, used: 120, debtOffset: 0 });
+    expect(currentFreeAllocation(legacy(120), 500, NOW)).toEqual({ allocation: { monthStartsAt: NOV, used: 120, debtOffset: 180 }, debt: 320 });
+    // Last month's legacy usage, or a later month with stored Free state, starts fresh.
+    expect(currentFreeAllocation(legacy(300, Date.UTC(2026, 9, 1)), 0, NOW).allocation.used).toBe(0);
+    expect(currentFreeAllocation({ ...legacy(300), freeMonthStartsAt: Date.UTC(2026, 9, 1) }, 0, NOW).allocation.used).toBe(0);
+  });
+
   it("500 debt leaves 200 debt and no Free credits", () => {
     const { allocation, debt } = currentFreeAllocation(null, 500, NOW);
     expect(debt).toBe(200);

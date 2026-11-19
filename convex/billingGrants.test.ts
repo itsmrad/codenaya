@@ -19,7 +19,7 @@ const mode = "test_mode" as const;
 const setup = () => convexTest(schema, modules);
 type TestConvex = ReturnType<typeof setup>;
 
-type AccountFields = { creditDebt?: number; freeMonthStartsAt?: number; freeUsed?: number; freeDebtOffset?: number };
+type AccountFields = { periodUsed?: number; creditDebt?: number; freeMonthStartsAt?: number; freeUsed?: number; freeDebtOffset?: number };
 /** October's Free allocation already spent, so charges go straight to lots. */
 const FREE_SPENT: AccountFields = { freeMonthStartsAt: Date.UTC(2026, 9, 1), freeUsed: 300, freeDebtOffset: 0 };
 
@@ -107,6 +107,10 @@ describe("insertGrant", () => {
     const customerRef = await seed(t);
     await expect(grant(t, customerRef, " ", { kind: "top_up", quantity: 1000 })).rejects.toThrow(/Invalid/);
     await expect(grant(t, customerRef, "k", { kind: "top_up", quantity: 0.5 })).rejects.toThrow(/Invalid/);
+    const source = await grant(t, customerRef, "src", { kind: "current_period", quantity: 10 });
+    await expect(
+      t.run((ctx) => insertGrant(ctx, { mode, sourceKey: "k", customerRef, kind: "top_up", quantity: 1, expiresAt: NOW + DAY, sourceGrantRef: source })),
+    ).rejects.toThrow(/Invalid/);
     await expect(
       t.run((ctx) => insertGrant(ctx, { mode, sourceKey: "k", customerRef, kind: "current_period", quantity: 1, expiresAt: NOW + DAY })),
     ).rejects.toThrow(/Invalid/);
@@ -485,6 +489,47 @@ describe("Free allocation first", () => {
     await charge(t, await seedMessage(t), 2.1); // 315: 300 Free, 15 from the top-up
     expect(await lotBy(t, "top")).toMatchObject({ consumed: 15 });
     expect(await rawAccount(t)).toMatchObject({ freeMonthStartsAt: Date.UTC(2026, 9, 1), freeUsed: 300, freeDebtOffset: 0, creditDebt: 0 });
+  });
+
+  test("enabling mid-month after 300 legacy credits grants no more Free that month", async () => {
+    const t = setup();
+    const customerRef = await seed(t, true, "free", { periodUsed: 300 });
+    await grant(t, customerRef, "top", { kind: "top_up", quantity: 500 });
+    await charge(t, await seedMessage(t), 0.1); // 15, all from the top-up
+    expect(await lotBy(t, "top")).toMatchObject({ consumed: 15 });
+    expect(await rawAccount(t)).toMatchObject({ periodUsed: 315, freeMonthStartsAt: Date.UTC(2026, 9, 1), freeUsed: 300 });
+  });
+
+  test("enabling mid-month after 120 legacy credits leaves 180 Free", async () => {
+    const t = setup();
+    const customerRef = await seed(t, true, "free", { periodUsed: 120 });
+    await grant(t, customerRef, "top", { kind: "top_up", quantity: 500 });
+    await charge(t, await seedMessage(t), 2.1); // 315: 180 Free, 135 from the top-up
+    expect(await lotBy(t, "top")).toMatchObject({ consumed: 135 });
+    expect(await rawAccount(t)).toMatchObject({ freeUsed: 300, creditDebt: 0 });
+  });
+
+  test("legacy usage from an earlier month doesn't reduce this month's Free", async () => {
+    const t = setup();
+    const customerRef = await seed(t, true, "free", { periodUsed: 300 });
+    await grant(t, customerRef, "top", { kind: "top_up", quantity: 500, expiresAt: NOW + 60 * DAY });
+    vi.setSystemTime(Date.UTC(2026, 10, 2));
+    await charge(t, await seedMessage(t), 0.1); // 15 Free
+    expect(await lotBy(t, "top")).toMatchObject({ consumed: 0 });
+    expect(await rawAccount(t)).toMatchObject({ freeMonthStartsAt: Date.UTC(2026, 10, 1), freeUsed: 15, periodUsed: 15 });
+  });
+
+  test("a non-billing account with legacy usage is charged exactly as before", async () => {
+    const t = setup();
+    const customerRef = await seed(t, false, "free");
+    await t.run(async (ctx) => ctx.db.patch("creditAccounts", (await ctx.db.query("creditAccounts").first())!._id, { periodUsed: 300 }));
+    await grant(t, customerRef, "top", { kind: "top_up", quantity: 500 });
+    await charge(t, await seedMessage(t), 0.1);
+    expect(await rawAccount(t)).toEqual({
+      _id: expect.any(String), _creationTime: expect.any(Number), userId: ALICE, plan: "free", periodStartsAt: Date.UTC(2026, 9, 1),
+      periodUsed: 315, dayStartsAt: Date.UTC(2026, 9, 29), dayUsed: 15,
+    });
+    expect(await lotBy(t, "top")).toMatchObject({ consumed: 0 });
   });
 
   test("a new month offsets debt once, and charges beyond it become debt", async () => {

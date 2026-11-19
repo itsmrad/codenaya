@@ -34,8 +34,9 @@ export const grantTermsValidator = v.object({
 type GrantTerms = Infer<typeof grantTermsValidator>;
 const TERM_FIELDS = Object.keys(grantTermsValidator.fields) as (keyof GrantTerms)[];
 
-const validTerms = ({ sourceKey, kind, quantity, expiresAt, serviceStart, serviceEnd }: GrantTerms) =>
+const validTerms = ({ sourceKey, kind, quantity, expiresAt, serviceStart, serviceEnd, sourceGrantRef }: GrantTerms) =>
   sourceKey.trim() !== "" &&
+  (sourceGrantRef === undefined || kind === "rollover") &&
   Number.isSafeInteger(quantity) &&
   quantity > 0 &&
   Number.isFinite(expiresAt) &&

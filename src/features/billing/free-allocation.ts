@@ -16,11 +16,17 @@ export interface FreeAllocation {
 
 /**
  * The account's allocation for `now`'s UTC month. A new month starts at used 0
- * and pays off up to the whole allocation of debt, once: a month already
+ * and pays off debt with what is left of the allocation, once: a month already
  * stored keeps its values. Returns the debt left after that offset.
  */
 export function currentFreeAllocation(
-  stored: { freeMonthStartsAt?: number; freeUsed?: number; freeDebtOffset?: number } | null,
+  stored: {
+    freeMonthStartsAt?: number;
+    freeUsed?: number;
+    freeDebtOffset?: number;
+    periodStartsAt?: number;
+    periodUsed?: number;
+  } | null,
   debt: number,
   now: number,
 ): { allocation: FreeAllocation; debt: number } {
@@ -28,8 +34,14 @@ export function currentFreeAllocation(
   if (stored?.freeMonthStartsAt === monthStartsAt) {
     return { allocation: { monthStartsAt, used: stored.freeUsed ?? 0, debtOffset: stored.freeDebtOffset ?? 0 }, debt };
   }
-  const debtOffset = Math.min(debt, PLANS.free.monthlyCredits);
-  return { allocation: { monthStartsAt, used: 0, debtOffset }, debt: debt - debtOffset };
+  // The first allocation since enablement starts from what the legacy counters
+  // already charged this month, so enabling never grants a second 300.
+  const used =
+    stored?.freeMonthStartsAt === undefined && stored?.periodStartsAt === monthStartsAt
+      ? Math.min(PLANS.free.monthlyCredits, stored.periodUsed ?? 0)
+      : 0;
+  const debtOffset = Math.min(debt, PLANS.free.monthlyCredits - used);
+  return { allocation: { monthStartsAt, used, debtOffset }, debt: debt - debtOffset };
 }
 
 export const freeRemaining = (allocation: FreeAllocation) =>
