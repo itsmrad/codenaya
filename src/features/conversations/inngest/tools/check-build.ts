@@ -48,6 +48,8 @@ import {
 import { projectChecks } from "@/features/sandbox-preview/utils/project-checks";
 import { convex } from "@/lib/convex-client";
 
+import { brokenImagesError, brokenRemoteImages, remoteImageUrls } from "./remote-images";
+
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
 
@@ -241,6 +243,9 @@ const buildIn = async (
   const timeLeft = () => within(buildDeadline, CHECK_TIMEOUT_MS);
 
   await sandbox.writeFiles(projectFileEntries(files, dir), { requestTimeoutMs: timeLeft() });
+  // Probed alongside the install and build; never rejects.
+  const imageUrls = remoteImageUrls(files);
+  const brokenImages = imageUrls.size > 0 ? brokenRemoteImages(sandbox, imageUrls, timeLeft()) : Promise.resolve([]);
 
   const install = await run(sandbox, offlineFirstInstall("--no-audit --no-fund --loglevel=error"), timeLeft(), dir);
   if (install.exitCode !== 0) {
@@ -255,6 +260,9 @@ const buildIn = async (
   if (build.exitCode !== 0) {
     return `Error: Build failed. Fix these errors, then call checkBuild again:\n${failureOutput(build, dir, secrets, framework)}`;
   }
+
+  const broken = await brokenImages;
+  if (broken.length > 0) return redact(brokenImagesError(broken), secrets);
 
   return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.` + notes;
 };

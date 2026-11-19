@@ -15,6 +15,7 @@ import {
   unverifiedBuildNote,
 } from "./build-check-gate";
 import { OUTPUT_LIMIT_ERROR } from "./lib/output-limit";
+import { brokenImagesError } from "./tools/remote-images";
 
 const call = (name: string, data = "ok") => ({ tool: { name }, content: { data } });
 const turn = (...toolCalls: ReturnType<typeof call>[]) => ({ toolCalls });
@@ -31,6 +32,16 @@ describe("needsBuildRepair", () => {
     expect(needsBuildRepair([turn(call("createFiles"), notBuilt)])).toBe(false);
     expect(needsBuildRepair([turn(call("createFiles"), unfinishedCheck())])).toBe(false);
     expect(needsBuildRepair([turn(call("readFiles"), failedCheck())])).toBe(false);
+  });
+});
+
+describe("broken images from checkBuild", () => {
+  it("get a repair turn like a failed build", () => {
+    const brokenImages = call("checkBuild", brokenImagesError(["src/App.tsx: https://images.unsplash.com/photo-1 (HTTP 404)"]));
+    const gate = createBuildCheckGate();
+    expect(gate.shouldContinue([turn(call("createFiles"), brokenImages)])).toBe(true);
+    expect(gate.takeNudge()).toBe(BUILD_REPAIR_NUDGE);
+    expect(needsBuildRepair([turn(call("createFiles"), brokenImages)])).toBe(true);
   });
 });
 
