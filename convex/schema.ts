@@ -893,9 +893,11 @@ export default defineSchema({
     attempts: v.number(),
     nextAttemptAt: v.number(),
     generation: v.number(),
+    quarantineReason: v.optional(v.union(v.literal("unmapped"), v.literal("digest_mismatch"), v.literal("retries_exhausted"))),
   })
     .index("by_mode_and_webhookId", ["mode", "webhookId"])
-    .index("by_state_and_nextAttemptAt", ["state", "nextAttemptAt"]),
+    .index("by_state_and_nextAttemptAt", ["state", "nextAttemptAt"])
+    .index("by_customerRef_and_state_and_nextAttemptAt", ["customerRef", "state", "nextAttemptAt"]),
 
   /**
    * A paid credit lot (ADR 0016), unique per (mode, sourceKey). `quantity` never
