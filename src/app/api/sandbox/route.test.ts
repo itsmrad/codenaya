@@ -79,6 +79,7 @@ import {
   forgetSandbox,
   requestReinstall,
 } from "@/features/sandbox-preview/server/sandbox-registry";
+import { REDACTION_UNAVAILABLE_NOTICE } from "@/features/integrations/server/env/stream-redactor";
 import { PATCH } from "./[sandboxId]/route";
 
 const cleanupBounds = { timeoutMs: SHORT_CALL_MS, requestTimeoutMs: SHORT_CALL_MS };
@@ -338,6 +339,25 @@ describe("POST /api/sandbox past its time budget (#492)", () => {
       ["node --version", { timeoutMs: 10_000 }],
     ]);
     expect(sandbox.commands.kill).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["hides the output of a resumed sandbox, which may still hold an earlier .env", "sbx_resume_env", true],
+    ["shows the output of a new sandbox, which was given none", undefined, false],
+  ])("%s, when its variables cannot be loaded", async (_case, resumeSandboxId, hidden) => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
+    mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : [],
+    );
+    mocks.resolveProjectEnv.mockRejectedValue(new Error("CODENAYA_LOCAL_KEK is not set"));
+    mocks.sandboxConnect.mockResolvedValue(fakeSandbox("sbx_resume_env"));
+    mocks.sandboxCreate.mockResolvedValue(fakeSandbox("sbx_new_env"));
+
+    const sent = await events(await boot({ projectId: "proj_1", resumeSandboxId }));
+
+    const output = sent.filter((event) => event.type === "output").map((event) => event.data);
+    if (hidden) expect(new Set(output)).toEqual(new Set([REDACTION_UNAVAILABLE_NOTICE]));
+    else expect(output.join("")).toContain("Sandbox sbx_new_env created.");
   });
 
   it("refuses to resume another user's sandbox", async () => {
@@ -701,6 +721,29 @@ describe("POST /api/sandbox install failure (#491)", () => {
     expect(body).toContain('"type":"error"');
     expect(body).toContain("[redacted]");
     expect(body).not.toContain(SECRET);
+  });
+
+  it("redacts a value split across stdout chunks with a stderr chunk in between", async () => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
+    mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : [],
+    );
+    mocks.resolveProjectEnv.mockResolvedValue({ publicEntries: [], secretEntries: [{ key: "API_KEY", value: SECRET }], failedKeys: [] });
+    mocks.sandboxList.mockReturnValue({ nextItems: async () => [] });
+    const run = vi.fn(async (command: string, opts?: { onStdout?: (data: string) => void; onStderr?: (data: string) => void }) => {
+      if (command === "node --version") return { exitCode: 0, stdout: "v22.0.0\n", stderr: "" };
+      opts?.onStdout?.(`API_KEY=${SECRET.slice(0, 12)}`);
+      opts?.onStderr?.("npm warn deprecated\n");
+      opts?.onStdout?.(`${SECRET.slice(12)}\n`);
+      throw new (CommandExitError as unknown as new (result: object) => Error)({ exitCode: 1, stderr: "", error: "exit status 1" });
+    });
+    mocks.sandboxCreate.mockResolvedValue({ sandboxId: "sbx_1", commands: { run }, files: { makeDir: vi.fn(), write: vi.fn() }, kill: vi.fn() });
+
+    const body = await (await POST(request("POST", JSON.stringify({ files, projectId: "proj_1" })))).text();
+
+    expect(body).toContain("API_KEY=[redacted]");
+    expect(body).not.toContain(SECRET.slice(0, 12));
+    expect(body).not.toContain(SECRET.slice(12));
   });
 
   it("sends the failed-install line before the error event, even when a multiline secret holds it back", async () => {

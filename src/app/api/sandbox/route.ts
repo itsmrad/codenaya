@@ -238,7 +238,8 @@ export async function POST(request: Request) {
       // Non-fatal: a project whose integrations are broken should still get a
       // preview, just without those variables. `envWarnings` tells the user which.
       let envEntries: Array<{ key: string; value: string }> = [];
-      let secretValues: string[] = [];
+      /** From the same resolution as `envEntries`; null hides the output. */
+      let secretValues: string[] | null = [];
       const envWarnings: string[] = [];
 
       if (projectId && internalKey) {
@@ -264,6 +265,9 @@ export async function POST(request: Request) {
           }
         } catch (error) {
           console.error("[sandbox] env resolution failed", error);
+          // Nothing is injected now (`envEntries` stays empty), but a resumed
+          // sandbox can still hold an earlier boot's `.env`.
+          if (resumeSandboxId) secretValues = null;
           envWarnings.push(
             "Environment variables could not be loaded for this preview.",
           );
@@ -275,15 +279,17 @@ export async function POST(request: Request) {
       // connection commonly embeds a full DSN — without redaction, injecting
       // secrets into the sandbox would deliver them straight to the browser.
       const redactor = createStreamRedactor(secretValues);
+      // Its own for stderr: a stderr chunk between two stdout chunks would split a value both carry part of.
+      const stderrRedactor = createStreamRedactor(secretValues);
 
-      const send = (data: Record<string, unknown>) => {
+      const send = (data: Record<string, unknown>, through = redactor) => {
         try {
           // Only the free-text `data` field can contain process output; status and
           // url fields are ours. Redacting just that field keeps JSON structure
           // intact, which redacting the serialised envelope would not.
           const safe =
             typeof data.data === "string"
-              ? { ...data, data: redactor.push(data.data) }
+              ? { ...data, data: through.push(data.data) }
               : data;
 
           // A fully-redacted chunk can reduce to an empty string, which is not
@@ -304,9 +310,11 @@ export async function POST(request: Request) {
         send({ type: "phase", phase, at });
       };
 
-      /** Release anything the redactor is holding back. */
+      const sendStderr = (data: string) => send({ type: "output", data }, stderrRedactor);
+
+      /** Release anything the redactors are holding back. */
       const flushRedactor = () => {
-        const tail = redactor.flush();
+        const tail = redactor.flush() + stderrRedactor.flush();
         if (tail === "") return;
         try {
           controller.enqueue(
@@ -331,7 +339,7 @@ export async function POST(request: Request) {
           // Install may run postinstall scripts or a build that needs config.
           envs: { ...toProcessEnv(envEntries), ...BOOT_INSTALL_ENVS },
           onStdout: (data) => send({ type: "output", data }),
-          onStderr: (data) => send({ type: "output", data }),
+          onStderr: sendStderr,
         });
 
       // The first build boots the preview from its starter while the agent is
@@ -350,7 +358,7 @@ export async function POST(request: Request) {
             () => runInstall(target, boundedTimeout(INSTALL_TIMEOUT_MS, budget.closeLeft())),
             {
               onStdout: (data) => send({ type: "output", data }),
-              onStderr: (data) => send({ type: "output", data }),
+              onStderr: sendStderr,
             },
             devStart,
           );
@@ -550,7 +558,7 @@ export async function POST(request: Request) {
             }
           },
           onStderr: (data) => {
-            send({ type: "output", data });
+            sendStderr(data);
             if (!detectedPort) {
               detectedPort = parsePortFromOutput(data);
             }

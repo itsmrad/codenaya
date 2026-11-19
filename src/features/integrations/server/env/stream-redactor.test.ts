@@ -6,6 +6,7 @@ import {
   REDACTION_UNAVAILABLE_NOTICE,
   STREAM_REDACTION_PLACEHOLDER,
   createStreamRedactor,
+  redact,
 } from "./stream-redactor";
 
 /**
@@ -392,5 +393,19 @@ describe("createStreamRedactor", () => {
   it("handles an empty chunk", () => {
     const redactor = createStreamRedactor([SECRET]);
     expect(() => redactor.push("")).not.toThrow();
+  });
+});
+
+describe("redact", () => {
+  const canary = "dummy-canary-redact-0001";
+  const forms = [canary, Buffer.from(canary).toString("base64"), Buffer.from(canary).toString("hex")];
+
+  it("masks a value printed raw, as base64 or as hex", () => {
+    const out = redact(forms.map((form) => `got ${form}\n`).join(""), [canary]);
+    expect(out).toBe(`got ${STREAM_REDACTION_PLACEHOLDER}\n`.repeat(3));
+  });
+
+  it("hides the whole text when the values are unknown", () => {
+    expect(redact(`got ${canary}`, null)).toBe(REDACTION_UNAVAILABLE_NOTICE);
   });
 });
