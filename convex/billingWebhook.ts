@@ -157,7 +157,8 @@ export const receiveDodoWebhook = httpAction(async (ctx, request) => {
     mode: receiver.mode,
     webhookId: headers["webhook-id"],
     bodyDigest: await sha256Hex(bytes),
-    ...(customerRef ? { customerRef } : {}),
+    // An unmapped receipt keeps its provider customer id so binding that customer later attaches it.
+    ...(customerRef ? { customerRef } : customerId !== undefined ? { providerCustomerId: customerId } : {}),
     ...(financial ? {} : { ignored: true }),
   });
   return respond(200);

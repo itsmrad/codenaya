@@ -119,6 +119,7 @@ describe("POST /billing/webhook", () => {
       bodyDigest: await sha256Hex(request.body),
     });
     expect(JSON.stringify(row)).not.toMatch(/alice@example\.com|Alice"|cus_user_alice|v1,/);
+    expect(row.providerCustomerId).toBeUndefined();
     expect(await counters(t)).toEqual({ inputRevision: 1, unresolvedReceipts: 1 });
   });
 
@@ -126,7 +127,7 @@ describe("POST /billing/webhook", () => {
     const t = setup();
     expect((await t.fetch(PATH, signed(event({ type: "refund.succeeded" })))).status).toBe(200);
     const [row] = await receipts(t);
-    expect(row).toMatchObject({ state: "quarantined", eventType: "refund.succeeded", paymentId: "pay_synthetic" });
+    expect(row).toMatchObject({ state: "quarantined", eventType: "refund.succeeded", paymentId: "pay_synthetic", providerCustomerId: "cus_user_alice" });
     expect(row.customerRef).toBeUndefined();
   });
 

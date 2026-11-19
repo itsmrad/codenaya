@@ -1,4 +1,5 @@
 import { v, type Infer } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { scheduleCustomer } from "./billingQueue";
@@ -72,6 +73,8 @@ export const bindCustomer = internalMutation({
     // A late ID for a deleted or held owner is kept for recovery but never reopens the customer.
     const live = !customer.hold && !(await ownerDeleted(ctx, customer));
     await ctx.db.patch("billingCustomers", customerRef, live ? { customerId, creationState: "ready" } : { customerId });
+    // Also for a deleted or held owner: its early receipts still need processing for suppression and recovery.
+    await associateUnmappedReceipts(ctx, customer, { providerCustomerId: customerId });
     return null;
   },
 });
@@ -160,6 +163,7 @@ export const bindPurchase = internalMutation({
       ...ids,
       ...(await ownerDeleted(ctx, customer) ? { cancellationRecoveryRequired: true } : {}),
     });
+    if (ids.paymentId !== undefined) await associateUnmappedReceipts(ctx, customer, { paymentId: ids.paymentId });
     return null;
   },
 });
@@ -168,11 +172,13 @@ export const recordReceipt = internalMutation({
   args: {
     customerRef: v.optional(v.id("billingCustomers")), mode: billingModeValidator, webhookId: v.string(), eventType: v.string(),
     bodyDigest: v.string(), occurredAt: v.number(), ...billingResourceIdsValidator.fields,
+    // Stored only on an unmapped receipt, as the trusted key a later customer binding attaches it by.
+    providerCustomerId: v.optional(v.string()),
     // Authenticated but unsupported event types: stored for dedupe, never processed or counted.
     ignored: v.optional(v.boolean()),
   },
   returns: v.id("billingEvents"),
-  handler: async (ctx, { ignored, ...args }) => {
+  handler: async (ctx, { ignored, providerCustomerId, ...args }) => {
     requireText(args.webhookId);
     requireText(args.eventType);
     if (!/^[a-f0-9]{64}$/.test(args.bodyDigest) || !Number.isFinite(args.occurredAt)) {
@@ -183,7 +189,15 @@ export const recordReceipt = internalMutation({
     const existing = await ctx.db.query("billingEvents")
       .withIndex("by_mode_and_webhookId", q => q.eq("mode", args.mode).eq("webhookId", args.webhookId)).unique();
     if (existing) {
-      if (existing.bodyDigest !== args.bodyDigest && existing.state !== "quarantined") {
+      const unmapped = existing.state === "quarantined" && existing.customerRef === undefined;
+      if (unmapped) {
+        // A replay after mapping (same digest) attaches the row; a differing one stays unmapped for an operator.
+        if (existing.bodyDigest !== args.bodyDigest) {
+          if (existing.quarantineReason !== "digest_mismatch") await ctx.db.patch("billingEvents", existing._id, { quarantineReason: "digest_mismatch" });
+        } else if (parent) {
+          await attachReceipts(ctx, parent._id, [existing]);
+        }
+      } else if (existing.bodyDigest !== args.bodyDigest && existing.state !== "quarantined") {
         await ctx.db.patch("billingEvents", existing._id, { state: "quarantined", quarantineReason: "digest_mismatch" });
         if (existing.customerRef) {
           const originalParent = await requireCustomer(ctx, existing.customerRef);
@@ -199,13 +213,79 @@ export const recordReceipt = internalMutation({
     // An unmapped verified receipt is never discarded: it waits quarantined for reconciliation.
     const eventRef = await ctx.db.insert("billingEvents", {
       ...args, receivedAt: now, state: ignored ? "ignored" : parent ? "pending" : "quarantined", attempts: 0,
-      nextAttemptAt: now, generation: parent?.generation ?? 0, ...(parent || ignored ? {} : { quarantineReason: "unmapped" as const }),
+      nextAttemptAt: now, generation: parent?.generation ?? 0,
+      ...(parent || ignored ? {} : { quarantineReason: "unmapped" as const, ...(providerCustomerId ? { providerCustomerId } : {}) }),
     });
     if (parent && !ignored) {
       await ctx.db.patch("billingCustomers", parent._id, { inputRevision: parent.inputRevision + 1, unresolvedReceipts: parent.unresolvedReceipts + 1 });
       await scheduleCustomer(ctx, parent._id);
     }
     return eventRef;
+  },
+});
+
+export const MAX_ASSOCIATE_BATCH = 50;
+const associateByValidator = v.union(v.object({ providerCustomerId: v.string() }), v.object({ paymentId: v.string() }));
+type AssociateBy = Infer<typeof associateByValidator>;
+
+/**
+ * Attaches unmapped quarantined receipts to the customer. An unmapped row becomes pending; a
+ * digest_mismatch row stays quarantined for an operator but is counted, so it keeps positives fenced.
+ * A row whose stored provider customer differs from the customer's never attaches.
+ */
+async function attachReceipts(ctx: MutationCtx, customerRef: Id<"billingCustomers">, rows: Doc<"billingEvents">[]) {
+  // Re-read: callers such as bindCustomer may have just patched the customer.
+  const customer = await requireCustomer(ctx, customerRef);
+  const owned = rows.filter(row => row.customerRef === undefined && row.state === "quarantined" && row.mode === customer.mode &&
+    (row.providerCustomerId === undefined || row.providerCustomerId === customer.customerId));
+  if (!owned.length) return 0;
+  const now = Date.now();
+  let pending = 0;
+  for (const row of owned) {
+    const retry = row.quarantineReason === "unmapped";
+    if (retry) pending += 1;
+    await ctx.db.patch("billingEvents", row._id, {
+      customerRef, ...(retry ? { state: "pending" as const, quarantineReason: undefined, attempts: 0, nextAttemptAt: now } : {}),
+    });
+  }
+  await ctx.db.patch("billingCustomers", customerRef, {
+    inputRevision: customer.inputRevision + 1, unresolvedReceipts: customer.unresolvedReceipts + owned.length,
+  });
+  if (pending) await scheduleCustomer(ctx, customerRef);
+  console.info("[billing] associated unmapped receipts", { customerRef, attached: owned.length, pending });
+  return owned.length;
+}
+
+/**
+ * Attaches unmapped quarantined receipts found by a trusted key (our own customer or purchase
+ * binding, never metadata or email) to `customer`. Returns how many. A full batch continues after
+ * its last row, so a large backlog drains and skipped rows never stall it.
+ */
+export async function associateUnmappedReceipts(
+  ctx: MutationCtx, customer: Doc<"billingCustomers">, by: AssociateBy, after?: number,
+): Promise<number> {
+  const rows = await ("paymentId" in by
+    ? ctx.db.query("billingEvents").withIndex("by_mode_and_paymentId_and_state", q => {
+      const range = q.eq("mode", customer.mode).eq("paymentId", by.paymentId).eq("state", "quarantined");
+      return after === undefined ? range : range.gt("_creationTime", after);
+    })
+    : ctx.db.query("billingEvents").withIndex("by_mode_and_providerCustomerId_and_state", q => {
+      const range = q.eq("mode", customer.mode).eq("providerCustomerId", by.providerCustomerId).eq("state", "quarantined");
+      return after === undefined ? range : range.gt("_creationTime", after);
+    })).take(MAX_ASSOCIATE_BATCH);
+  if (rows.length === MAX_ASSOCIATE_BATCH) {
+    await ctx.scheduler.runAfter(0, internal.billing.associateMoreUnmapped, { customerRef: customer._id, by, after: rows[rows.length - 1]._creationTime });
+  }
+  return await attachReceipts(ctx, customer._id, rows);
+}
+
+export const associateMoreUnmapped = internalMutation({
+  args: { customerRef: v.id("billingCustomers"), by: associateByValidator, after: v.number() },
+  returns: v.null(),
+  handler: async (ctx, { customerRef, by, after }) => {
+    const customer = await ctx.db.get("billingCustomers", customerRef);
+    if (customer) await associateUnmappedReceipts(ctx, customer, by, after);
+    return null;
   },
 });
 

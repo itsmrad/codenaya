@@ -34,3 +34,24 @@ decides a grant.
   provider, and `paidThrough` never shrinks.
 - **Receipts.** A receipt is processed when all its resources reached a final outcome.
   Unreadable or other-customer facts quarantine it as `unsupported`, still counted unresolved.
+
+## Early receipts (5c)
+
+A verified receipt whose provider customer is not mapped yet is stored `quarantined`
+(`unmapped`) with its payload's `providerCustomerId`. Dodo saw a 2xx and will not redeliver, and
+a replay of the same event is a duplicate, so `associateUnmappedReceipts` (`convex/billing.ts`)
+attaches these rows through our own bindings only, never metadata or email:
+
+- `bindCustomer` attaches by provider customer id, also for a deleted or held owner, whose
+  receipts still need processing for suppression and recovery.
+- `bindPurchase` attaches by payment id when it binds one. A row whose stored provider customer
+  differs from the customer's never attaches.
+- A same-digest redelivery that now maps attaches the existing row. A different digest marks an
+  unmapped row `digest_mismatch` and leaves it unmapped.
+- `commitReconciliation` attaches by payment id for each positive payment (whose read showed this
+  customer) before any grant. If anything attached, no positive commits in that transaction.
+
+An attached `unmapped` row becomes pending; a `digest_mismatch` row stays quarantined for an
+operator. Both are counted in `unresolvedReceipts`, and the customer's `inputRevision` moves once,
+so positives stay fenced until they resolve. Batches of 50 continue through
+`associateMoreUnmapped` after the last row seen.

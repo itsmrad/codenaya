@@ -6,7 +6,7 @@ import { topUpExpiresAt } from "../src/features/billing/grants";
 import { BILLING_CATALOG_VERSION } from "../src/features/billing/settlement";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
-import { assertBillingFence, bindSubscriptionRow, ownerDeleted } from "./billing";
+import { assertBillingFence, associateUnmappedReceipts, bindSubscriptionRow, ownerDeleted } from "./billing";
 import { insertGrant, rollOverIntoPeriod } from "./billingGrants";
 
 /**
@@ -102,13 +102,21 @@ function receiptOutcome(receipt: Doc<"billingEvents">, payments: Map<string, Out
   return parts.includes("pending") ? "pending" : parts.includes("quarantined") ? "quarantined" : "processed";
 }
 
-/** The fence conditions that do not depend on which receipts this commit marks. */
+/**
+ * The fence conditions that do not depend on which receipts this commit marks. A positive's
+ * payment read showed this customer, so its unmapped receipts are attached first; any attachment
+ * leaves new unresolved receipts, so no positive commits in this transaction.
+ */
 async function positivesMayCommit(ctx: Ctx, customer: Customer, plans: PaymentPlan[]) {
-  if (customer.hold) return false;
+  let attached = 0;
+  for (const { fact } of plans.filter(plan => plan.positive)) {
+    attached += await associateUnmappedReceipts(ctx, customer, { paymentId: fact.paymentId });
+  }
+  if (attached || customer.hold) return false;
   const account = await ctx.db.query("creditAccounts").withIndex("by_userId", q => q.eq("userId", customer.userId)).unique();
   if (account?.paidCreditsMode !== undefined && account.paidCreditsMode !== customer.mode) return false;
   for (const { fact } of plans.filter(plan => plan.positive)) {
-    // An unmapped refund or dispute blocks its payment, whose receipts then stay pending and keep the fence closed.
+    // An unmapped refund or dispute left (another provider customer's) blocks; its payment's receipts stay pending.
     const rows = await ctx.db.query("billingEvents")
       .withIndex("by_mode_and_paymentId_and_state", q => q.eq("mode", customer.mode).eq("paymentId", fact.paymentId).eq("state", "quarantined"))
       .take(MAX_UNMAPPED_CHECK);
@@ -244,7 +252,7 @@ async function applySubscription(ctx: Ctx, plan: SubscriptionPlan, now: number) 
   });
 }
 
-async function markReceipts(ctx: Ctx, customer: Customer, receipts: Doc<"billingEvents">[], outcomes: Outcome[]) {
+async function markReceipts(ctx: Ctx, customerRef: Customer["_id"], receipts: Doc<"billingEvents">[], outcomes: Outcome[]) {
   let processed = 0;
   for (const [index, receipt] of receipts.entries()) {
     if (outcomes[index] === "processed") {
@@ -256,7 +264,10 @@ async function markReceipts(ctx: Ctx, customer: Customer, receipts: Doc<"billing
       console.error("[billingFulfill] receipt quarantined", { eventRef: receipt._id, eventType: receipt.eventType });
     }
   }
-  if (processed) await ctx.db.patch("billingCustomers", customer._id, { unresolvedReceipts: customer.unresolvedReceipts - processed });
+  if (!processed) return;
+  // Re-read: an association earlier in this commit may have raised the count.
+  const customer = (await ctx.db.get("billingCustomers", customerRef))!;
+  await ctx.db.patch("billingCustomers", customerRef, { unresolvedReceipts: customer.unresolvedReceipts - processed });
 }
 
 const sortKey = ({ fact: { decision: d } }: PaymentPlan) => (d.kind === "period" ? d.serviceStart : d.kind === "top_up" ? d.settledAt : 0);
@@ -299,7 +310,7 @@ export const commitReconciliation = internalMutation({
       if (await applyPayment(ctx, customer, plan, deleted, now)) granted = true;
     }
     for (const plan of subscriptions) await applySubscription(ctx, plan, now);
-    await markReceipts(ctx, customer, receipts, outcomesWhen(allowed));
+    await markReceipts(ctx, customer._id, receipts, outcomesWhen(allowed));
     // Defence in depth: the checks above guarantee this passes, so a throw is a bug and rolls back.
     if (granted) await assertBillingFence(ctx, customer._id, args.fence);
     const blocked = !allowed && payments.some(plan => plan.positive);
