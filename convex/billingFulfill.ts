@@ -6,18 +6,22 @@ import { topUpExpiresAt } from "../src/features/billing/grants";
 import { BILLING_CATALOG_VERSION } from "../src/features/billing/settlement";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
-import { assertBillingFence, bindSubscriptionRow, ownerDeleted } from "./billing";
+import { assertGrantFence, bindSubscriptionRow, ownerDeleted } from "./billing";
 import { insertGrant, rollOverIntoPeriod } from "./billingGrants";
 
 /**
  * Fenced fulfillment of reconciled Dodo facts (ADR 0016). One transaction settles each
  * payment and its grant together, projects subscriptions and marks receipts. A business
  * outcome never throws: that would roll back the batch's other outcomes. Positives
- * (grants for a live owner) commit only when the customer's fence would close at zero.
+ * (grants for a live owner) commit only under an unchanged fence with no unresolved
+ * refund or dispute for the customer; pending positives left for later claims never block.
  */
 
 export const MAX_UNMAPPED_CHECK = 20;
-const MAX_ACTIVE_SUBSCRIPTIONS = 10;
+const MAX_SUBSCRIPTIONS_PER_STATUS = 10;
+// Every status that can carry paidThrough: a cancelled subscription stays paid until its period ends.
+const PAID_STATUSES = ["active", "cancelled", "expired", "quarantined"] as const;
+const NEGATIVE_PREFIXES = ["refund.", "dispute."];
 const NEGATIVE_EVENT = /^(refund|dispute)\./;
 const PROVIDER_EVENT = /^(payment|subscription)\./;
 
@@ -28,18 +32,14 @@ export const settlementDecisionValidator = v.union(
   }),
   v.object({ kind: v.literal("top_up"), paymentId: v.string(), productId: v.string(), credits: v.number(), settledAt: v.number() }),
   v.object({ kind: v.union(v.literal("pending"), v.literal("no_grant"), v.literal("quarantine")), paymentId: v.string(), reason: v.string() }),
-  // "unreadable": a permanent read error, recorded for support and never granted.
-  v.object({ kind: v.union(v.literal("processing"), v.literal("unreadable")), paymentId: v.string() }),
+  v.object({ kind: v.literal("processing"), paymentId: v.string() }),
 );
 
-export const subscriptionFactValidator = v.union(
-  v.object({
-    subscriptionId: v.string(), customerId: v.string(), productId: v.string(), quantity: v.optional(v.number()),
-    status: v.string(), previousBillingAt: v.optional(v.number()), nextBillingAt: v.optional(v.number()),
-    cancelAtNextBillingDate: v.boolean(),
-  }),
-  v.object({ subscriptionId: v.string(), unreadable: v.literal(true) }),
-);
+export const subscriptionFactValidator = v.object({
+  subscriptionId: v.string(), customerId: v.string(), productId: v.string(), quantity: v.optional(v.number()),
+  status: v.string(), previousBillingAt: v.optional(v.number()), nextBillingAt: v.optional(v.number()),
+  cancelAtNextBillingDate: v.boolean(),
+});
 
 const paymentFactValidator = v.object({
   paymentId: v.string(), decision: settlementDecisionValidator, sessionId: v.optional(v.string()),
@@ -56,7 +56,7 @@ type Period = Extract<Positive, { kind: "period" }>;
 /** What happens to a receipt: final and done, final for support, or retried. */
 type Outcome = "processed" | "quarantined" | "pending";
 type PaymentPlan = { fact: PaymentFact; purchase: Purchase | null; outcome: Outcome; positive: boolean };
-type SubscriptionPlan = { fact: SubscriptionFact; row: Doc<"billingSubscriptions"> | null; outcome: Outcome };
+type SubscriptionPlan = { fact: SubscriptionFact; outcome: Outcome };
 
 const subscriptionRow = (ctx: Ctx, mode: Customer["mode"], subscriptionId: string) => ctx.db.query("billingSubscriptions")
   .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", mode).eq("subscriptionId", subscriptionId)).unique();
@@ -71,24 +71,31 @@ async function findPurchase(ctx: Ctx, mode: Customer["mode"], { paymentId, sessi
 }
 
 async function planPayment(ctx: Ctx, customer: Customer, fact: PaymentFact, deleted: boolean): Promise<PaymentPlan> {
+  const { decision: d } = fact;
   const found = await findPurchase(ctx, customer.mode, fact);
   // Another customer's purchase is never written from this customer's commit.
   const foreign = found !== null && found.customerRef !== customer._id;
   const plan = { fact, purchase: foreign ? null : found, positive: false };
-  switch (fact.decision.kind) {
+  switch (d.kind) {
     case "pending": return { ...plan, outcome: "pending" };
     case "processing": case "no_grant": return { ...plan, outcome: "processed" };
-    case "quarantine": case "unreadable":
-      return { ...plan, outcome: plan.purchase && plan.purchase.state !== "settled" ? "processed" : "quarantined" };
-    default: return { ...plan, outcome: foreign ? "quarantined" : "processed", positive: !foreign && !deleted };
+    case "quarantine":
+      if (plan.purchase?.paymentId === d.paymentId && plan.purchase.state !== "settled") return { ...plan, outcome: "processed" };
+      // A zero-amount charge with no purchase of its own never mints: final, recorded only.
+      return { ...plan, outcome: d.reason === "amount" ? "processed" : "quarantined" };
   }
+  if (foreign) {
+    // Final: it can never grant this customer anything, so it must not hold their fence.
+    console.error("[billingFulfill] payment matches another customer's purchase", { customerRef: customer._id, paymentId: d.paymentId });
+    return { ...plan, outcome: "processed" };
+  }
+  return { ...plan, outcome: "processed", positive: !deleted };
 }
 
 async function planSubscription(ctx: Ctx, customer: Customer, fact: SubscriptionFact): Promise<SubscriptionPlan> {
-  if ("unreadable" in fact) return { fact, row: null, outcome: "quarantined" };
   const row = await subscriptionRow(ctx, customer.mode, fact.subscriptionId);
   const foreign = fact.customerId !== customer.customerId || (row !== null && row.customerRef !== customer._id);
-  return { fact, row: foreign ? null : row, outcome: foreign ? "quarantined" : "processed" };
+  return { fact, outcome: foreign ? "quarantined" : "processed" };
 }
 
 /** A receipt is final only when every resource it names reached a final outcome. */
@@ -102,17 +109,25 @@ function receiptOutcome(receipt: Doc<"billingEvents">, payments: Map<string, Out
   return parts.includes("pending") ? "pending" : parts.includes("quarantined") ? "quarantined" : "processed";
 }
 
-/** The fence conditions that do not depend on which receipts this commit marks. */
+/** Whether positives may commit; decided before any write. The fence itself is checked by the caller. */
 async function positivesMayCommit(ctx: Ctx, customer: Customer, plans: PaymentPlan[]) {
   if (customer.hold) return false;
   const account = await ctx.db.query("creditAccounts").withIndex("by_userId", q => q.eq("userId", customer.userId)).unique();
   if (account?.paidCreditsMode !== undefined && account.paidCreditsMode !== customer.mode) return false;
+  // Any refund or dispute of this customer that is pending or quarantined (dead-lettered, collided) blocks.
+  for (const state of ["pending", "quarantined"] as const) {
+    for (const prefix of NEGATIVE_PREFIXES) {
+      const negative = await ctx.db.query("billingEvents").withIndex("by_customerRef_and_state_and_eventType", q =>
+        q.eq("customerRef", customer._id).eq("state", state).gte("eventType", prefix).lt("eventType", `${prefix.slice(0, -1)}/`)).first();
+      if (negative) return false;
+    }
+  }
   for (const { fact } of plans.filter(plan => plan.positive)) {
-    // An unmapped refund or dispute blocks its payment, whose receipts then stay pending and keep the fence closed.
     const rows = await ctx.db.query("billingEvents")
       .withIndex("by_mode_and_paymentId_and_state", q => q.eq("mode", customer.mode).eq("paymentId", fact.paymentId).eq("state", "quarantined"))
       .take(MAX_UNMAPPED_CHECK);
-    if (rows.some(row => row.customerRef === undefined && NEGATIVE_EVENT.test(row.eventType))) return false;
+    // A full read may hide an unmapped negative: fail closed.
+    if (rows.length === MAX_UNMAPPED_CHECK || rows.some(row => row.customerRef === undefined && NEGATIVE_EVENT.test(row.eventType))) return false;
   }
   return true;
 }
@@ -131,11 +146,12 @@ async function enableAccount(ctx: Ctx, customer: Customer, now: number) {
   else await ctx.db.insert("creditAccounts", { userId: customer.userId, plan: "free", ...currentUsage(null, now), ...fields });
 }
 
-async function projectPeriod(ctx: Ctx, customer: Customer, d: Period, now: number) {
+/** A replay only raises paidThrough: it never reactivates a cancelled or expired row. */
+async function projectPeriod(ctx: Ctx, customer: Customer, d: Period, now: number, replay: boolean) {
   const ref = await bindSubscriptionRow(ctx, { customerRef: customer._id, mode: customer.mode, subscriptionId: d.subscriptionId, productId: d.productId });
   const row = (await ctx.db.get("billingSubscriptions", ref))!;
   // paidThrough never shrinks; an old period applied late leaves the current state alone.
-  const latest = d.serviceEnd >= (row.paidThrough ?? 0);
+  const latest = !replay && d.serviceEnd >= (row.paidThrough ?? 0);
   await ctx.db.patch("billingSubscriptions", ref, {
     paidThrough: Math.max(row.paidThrough ?? 0, d.serviceEnd), observedAt: now,
     ...(latest ? { status: "active" as const, serviceStart: d.serviceStart, serviceEnd: d.serviceEnd } : {}),
@@ -147,8 +163,13 @@ const termsMatch = (purchase: Purchase, d: Positive) =>
   purchase.terms.sku === (d.kind === "period" ? "pro_monthly" : "top_up") && purchase.terms.productId === d.productId &&
   (d.kind !== "period" || purchase.subscriptionId === undefined || purchase.subscriptionId === d.subscriptionId);
 
+async function quarantinePurchase(ctx: Ctx, purchase: Purchase, paymentId: string, reason: string) {
+  await ctx.db.patch("billingPurchases", purchase._id, { state: "quarantined", ...(purchase.paymentId ? {} : { paymentId }) });
+  console.error("[billingFulfill] purchase quarantined", { purchaseRef: purchase._id, paymentId, reason });
+}
+
 /** A server-created renewal for an owned subscription; anything else is recorded quarantined for support. */
-async function createPurchase(ctx: Ctx, customer: Customer, d: Positive, owned: boolean, deleted: boolean) {
+async function createPurchase(ctx: Ctx, customer: Customer, d: Positive, owned: boolean, deleted: boolean, reason: string) {
   const terms = {
     sku: d.kind === "period" ? "pro_monthly" as const : "top_up" as const,
     catalogVersion: BILLING_CATALOG_VERSION, productId: d.productId, quantity: 1, credits: d.credits,
@@ -158,41 +179,52 @@ async function createPurchase(ctx: Ctx, customer: Customer, d: Positive, owned: 
     paymentId: d.paymentId, ...(d.kind === "period" ? { subscriptionId: d.subscriptionId } : {}),
     state: owned ? "open" : "quarantined", ...(deleted ? { cancellationRecoveryRequired: true } : {}),
   });
+  if (!owned) console.error("[billingFulfill] purchase quarantined", { purchaseRef: ref, paymentId: d.paymentId, reason });
   return (await ctx.db.get("billingPurchases", ref))!;
 }
 
-/** A grant for this business key from another purchase, or another paid subscription overlapping the period. */
+/** A grant for this business key from another purchase, or another subscription still paid through the period. */
 async function isDuplicate(ctx: Ctx, customer: Customer, d: Positive, purchase: Purchase, sourceKey: string) {
   const grant = await ctx.db.query("billingGrants")
     .withIndex("by_mode_and_sourceKey", q => q.eq("mode", customer.mode).eq("sourceKey", sourceKey)).unique();
   if (grant && grant.purchaseRef !== purchase._id) return true;
   if (d.kind !== "period") return false;
-  const active = await ctx.db.query("billingSubscriptions")
-    .withIndex("by_customerRef_and_status", q => q.eq("customerRef", customer._id).eq("status", "active"))
-    .take(MAX_ACTIVE_SUBSCRIPTIONS);
-  return active.some(row => row.subscriptionId !== d.subscriptionId && (row.paidThrough ?? 0) > d.serviceStart);
+  for (const status of PAID_STATUSES) {
+    const rows = await ctx.db.query("billingSubscriptions")
+      .withIndex("by_customerRef_and_status", q => q.eq("customerRef", customer._id).eq("status", status))
+      .take(MAX_SUBSCRIPTIONS_PER_STATUS + 1);
+    // Past the bound an overlapping subscription may be unread: fail closed for support.
+    if (rows.length > MAX_SUBSCRIPTIONS_PER_STATUS) return true;
+    if (rows.some(row => row.subscriptionId !== d.subscriptionId && (row.paidThrough ?? 0) > d.serviceStart)) return true;
+  }
+  return false;
 }
 
 /** Settles one positive payment with its grant. Returns whether a grant was inserted. */
 async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positive, deleted: boolean, now: number) {
   const row = d.kind === "period" ? await subscriptionRow(ctx, customer.mode, d.subscriptionId) : null;
   const rowMismatch = row !== null && (row.customerRef !== customer._id || row.productId !== d.productId);
-  const purchase = plan.purchase ?? await createPurchase(ctx, customer, d, row !== null && !rowMismatch, deleted);
+  // Re-read: an earlier payment in this commit may already have settled this checkout.
+  const current = plan.purchase && await ctx.db.get("billingPurchases", plan.purchase._id);
+  const taken = current?.paymentId !== undefined && current.paymentId !== d.paymentId;
+  const purchase = current && !taken ? current
+    : await createPurchase(ctx, customer, d, !taken && row !== null && !rowMismatch, deleted, taken ? "duplicate_checkout" : "no_purchase");
   if (purchase.state === "quarantined") return false;
   // A replay: one grant per payment, even if a later read reports another period.
   if (purchase.state === "settled") {
-    if (d.kind === "period" && !deleted && !rowMismatch) await projectPeriod(ctx, customer, d, now);
+    if (d.kind === "period" && !deleted && !rowMismatch) await projectPeriod(ctx, customer, d, now, true);
     return false;
   }
-  const ids = purchase.paymentId ? {} : { paymentId: d.paymentId };
   const sourceKey = d.kind === "period" ? `period:${d.subscriptionId}:${d.serviceStart}:${d.serviceEnd}` : `top_up:${d.paymentId}:0`;
-  if (rowMismatch || !termsMatch(purchase, d) || (!deleted && await isDuplicate(ctx, customer, d, purchase, sourceKey))) {
-    await ctx.db.patch("billingPurchases", purchase._id, { ...ids, state: "quarantined" });
+  const reason = rowMismatch ? "subscription_mismatch" : !termsMatch(purchase, d) ? "terms"
+    : !deleted && await isDuplicate(ctx, customer, d, purchase, sourceKey) ? "duplicate" : null;
+  if (reason) {
+    await quarantinePurchase(ctx, purchase, d.paymentId, reason);
     return false;
   }
   const { fact } = plan;
   await ctx.db.patch("billingPurchases", purchase._id, {
-    ...ids, state: "settled", currency: fact.currency,
+    paymentId: d.paymentId, state: "settled", currency: fact.currency,
     ...(d.kind === "period" ? { subscriptionId: d.subscriptionId } : {}),
     ...(fact.totalMinor !== undefined && fact.taxMinor !== undefined ? { principalMinor: fact.totalMinor - fact.taxMinor } : {}),
     ...(deleted ? { cancellationRecoveryRequired: true } : {}),
@@ -201,7 +233,8 @@ async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positi
   if (deleted) return false; // recorded for recovery; no credit account is created or enabled
   // Before insertGrant, so the new grant pays off the enabled account's debt.
   await enableAccount(ctx, customer, now);
-  const terms = { mode: customer.mode, sourceKey, customerRef: customer._id, purchaseRef: purchase._id, quantity: d.credits };
+  // The purchase's immutable terms, not today's catalog, set the amount.
+  const terms = { mode: customer.mode, sourceKey, customerRef: customer._id, purchaseRef: purchase._id, quantity: purchase.terms.credits };
   if (d.kind === "top_up") {
     await insertGrant(ctx, { ...terms, kind: "top_up", expiresAt: topUpExpiresAt(d.settledAt) });
     return true;
@@ -211,36 +244,37 @@ async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positi
     ...terms, kind: "current_period", expiresAt: d.serviceEnd, serviceStart: d.serviceStart, serviceEnd: d.serviceEnd,
   });
   await rollOverIntoPeriod(ctx, grantRef, now);
-  await projectPeriod(ctx, customer, d, now);
+  await projectPeriod(ctx, customer, d, now, false);
   return true;
 }
 
 async function applyPayment(ctx: Ctx, customer: Customer, plan: PaymentPlan, deleted: boolean, now: number) {
   const { decision: d } = plan.fact;
   if (d.kind === "period" || d.kind === "top_up") return await settle(ctx, customer, plan, d, deleted, now);
-  const { purchase } = plan;
-  if (!purchase) return false;
-  const ids = purchase.paymentId ? {} : { paymentId: d.paymentId };
-  if (d.kind === "quarantine" || d.kind === "unreadable") {
-    await ctx.db.patch("billingPurchases", purchase._id, { ...ids, state: "quarantined" });
+  const purchase = plan.purchase && await ctx.db.get("billingPurchases", plan.purchase._id);
+  // Only a settlement binds a payment to a checkout: a failed attempt leaves the session to its retry.
+  if (purchase?.paymentId !== d.paymentId) return false;
+  if (d.kind === "quarantine") {
+    if (purchase.state !== "settled") await quarantinePurchase(ctx, purchase, d.paymentId, d.reason);
   } else if (d.kind === "processing" && ["preparing", "unknown", "open"].includes(purchase.state)) {
-    await ctx.db.patch("billingPurchases", purchase._id, { ...ids, state: "processing" });
+    await ctx.db.patch("billingPurchases", purchase._id, { state: "processing" });
   } else if (d.kind === "no_grant" && (d.reason === "failed" || d.reason === "cancelled") && !["settled", "quarantined", "terminal"].includes(purchase.state)) {
     // The checkout lock (pendingPurchaseRef) is released by a later stage, not here.
-    await ctx.db.patch("billingPurchases", purchase._id, { ...ids, state: "terminal" });
+    await ctx.db.patch("billingPurchases", purchase._id, { state: "terminal" });
   }
   return false;
 }
 
 const ENDED_STATUS = new Map([["cancelled", "cancelled"], ["expired", "expired"], ["failed", "expired"]] as const);
 
-async function applySubscription(ctx: Ctx, plan: SubscriptionPlan, now: number) {
-  if (!plan.row || "unreadable" in plan.fact) return;
-  const { status, cancelAtNextBillingDate, nextBillingAt } = plan.fact;
-  const ended = ENDED_STATUS.get(status as "failed");
-  await ctx.db.patch("billingSubscriptions", plan.row._id, {
+async function applySubscription(ctx: Ctx, customer: Customer, { fact, outcome }: SubscriptionPlan, now: number) {
+  // Re-read: fulfillment in this commit may have just bound the row.
+  const row = outcome === "processed" ? await subscriptionRow(ctx, customer.mode, fact.subscriptionId) : null;
+  if (row?.customerRef !== customer._id) return;
+  const ended = ENDED_STATUS.get(fact.status as "failed");
+  await ctx.db.patch("billingSubscriptions", row._id, {
     observedAt: now, ...(ended ? { status: ended } : {}),
-    ...(!cancelAtNextBillingDate ? { cancelAt: undefined } : nextBillingAt !== undefined ? { cancelAt: nextBillingAt } : {}),
+    ...(!fact.cancelAtNextBillingDate ? { cancelAt: undefined } : fact.nextBillingAt !== undefined ? { cancelAt: fact.nextBillingAt } : {}),
   });
 }
 
@@ -251,9 +285,9 @@ async function markReceipts(ctx: Ctx, customer: Customer, receipts: Doc<"billing
       processed += 1;
       await ctx.db.patch("billingEvents", receipt._id, { state: "processed" });
     } else if (outcomes[index] === "quarantined") {
-      // Still counted in unresolvedReceipts: support resolves it before positives resume.
+      // Still counted in unresolvedReceipts for support; only a negative one blocks grants.
       await ctx.db.patch("billingEvents", receipt._id, { state: "quarantined", quarantineReason: "unsupported" });
-      console.error("[billingFulfill] receipt quarantined", { eventRef: receipt._id, eventType: receipt.eventType });
+      console.error("[billingFulfill] receipt quarantined", { eventRef: receipt._id, eventType: receipt.eventType, reason: "unsupported" });
     }
   }
   if (processed) await ctx.db.patch("billingCustomers", customer._id, { unresolvedReceipts: customer.unresolvedReceipts - processed });
@@ -285,23 +319,19 @@ export const commitReconciliation = internalMutation({
     for (const fact of args.payments) payments.push(await planPayment(ctx, customer, fact, deleted));
     const subscriptions: SubscriptionPlan[] = [];
     for (const fact of args.subscriptions) subscriptions.push(await planSubscription(ctx, customer, fact));
-    const subscriptionOutcomes = new Map(subscriptions.map(plan => [plan.fact.subscriptionId, plan.outcome]));
-    const outcomesWhen = (allowed: boolean) => {
-      const paymentOutcomes = new Map(payments.map(p => [p.fact.paymentId, p.positive && !allowed ? "pending" as const : p.outcome]));
-      return receipts.map(receipt => receiptOutcome(receipt, paymentOutcomes, subscriptionOutcomes));
-    };
     // Decided before any write: skipped positives stay pending while everything else commits.
-    const allowed = await positivesMayCommit(ctx, customer, payments) &&
-      customer.unresolvedReceipts === outcomesWhen(true).filter(outcome => outcome === "processed").length;
+    const allowed = await positivesMayCommit(ctx, customer, payments);
+    const paymentOutcomes = new Map(payments.map(p => [p.fact.paymentId, p.positive && !allowed ? "pending" as const : p.outcome]));
+    const subscriptionOutcomes = new Map(subscriptions.map(plan => [plan.fact.subscriptionId, plan.outcome]));
     let granted = false;
     for (const plan of payments.sort((a, b) => sortKey(a) - sortKey(b))) {
       if (plan.outcome !== "processed" || (plan.positive && !allowed)) continue;
       if (await applyPayment(ctx, customer, plan, deleted, now)) granted = true;
     }
-    for (const plan of subscriptions) await applySubscription(ctx, plan, now);
-    await markReceipts(ctx, customer, receipts, outcomesWhen(allowed));
-    // Defence in depth: the checks above guarantee this passes, so a throw is a bug and rolls back.
-    if (granted) await assertBillingFence(ctx, customer._id, args.fence);
+    for (const plan of subscriptions) await applySubscription(ctx, customer, plan, now);
+    await markReceipts(ctx, customer, receipts, receipts.map(receipt => receiptOutcome(receipt, paymentOutcomes, subscriptionOutcomes)));
+    // Defence in depth: checked above, so a throw is a bug and rolls the commit back.
+    if (granted) await assertGrantFence(ctx, customer._id, args.fence);
     const blocked = !allowed && payments.some(plan => plan.positive);
     if (blocked) console.warn("[billingFulfill] positives blocked", { customerRef: customer._id });
     return blocked ? "blocked" : "committed";
