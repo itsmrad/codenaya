@@ -20,6 +20,10 @@ export function createProviderCooldown(now: () => number = Date.now) {
   return {
     ...view,
     succeeded(id: ProviderId) { states.delete(id); },
+    /** A failed fan-out list: cool now, whatever the error, and restart the clock if already cooling. */
+    coolDown(id: ProviderId) {
+      states.set(id, { failures: (states.get(id)?.failures ?? 0) + 1, until: now() + COOLDOWN_MS });
+    },
     failed(id: ProviderId, error: unknown): boolean {
       // Only typed timeouts are known transient failures today. Permanent/unknown
       // errors leave outage evidence intact; only success or expiry resets it.

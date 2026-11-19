@@ -54,6 +54,7 @@ export async function bumpEnvGeneration(ctx: MutationCtx, projectId: Id<"project
   const project = await ctx.db.get("projects", projectId);
   if (!project) return;
   await ctx.db.patch("projects", projectId, { envGeneration: (project.envGeneration ?? 0) + 1 });
+  // Complete only because registerRuntime keeps live handles under MAX_LIVE_HANDLES.
   for (const handle of await liveHandles(ctx, projectId)) {
     await ctx.db.patch("runtimeHandles", handle._id, { state: "stale" });
   }
@@ -88,10 +89,11 @@ export const getBootManifest = query({
 /**
  * Records a boot that is about to receive secrets, before it receives any.
  *
- * It drops the earlier live handles it replaces: a fresh boot
- * (`replacesPreviews`) has just killed every earlier preview of the project, and
- * a resume replaces its own sandbox's earlier boot. Dropped, not marked stale:
- * stale means "kill", and only an env change may kill another tab's preview.
+ * Earlier live handles it replaces leave the live set. A fresh boot
+ * (`replacesPreviews`) has tried to kill every earlier preview of the project,
+ * so their handles are marked stale and the sweep confirms they are gone. A
+ * resume replaces its own sandbox's earlier boot, so that handle is dropped:
+ * marking it stale would get the resumed sandbox killed.
  */
 export const registerRuntime = mutation({
   args: {
@@ -110,7 +112,8 @@ export const registerRuntime = mutation({
     const live = await liveHandles(ctx, args.projectId);
     const replaced = live.filter((handle) => args.replacesPreviews || handle.sandboxId === args.sandboxId);
     for (const handle of replaced) {
-      await ctx.db.delete("runtimeHandles", handle._id);
+      if (handle.sandboxId === args.sandboxId) await ctx.db.delete("runtimeHandles", handle._id);
+      else await ctx.db.patch("runtimeHandles", handle._id, { state: "stale" });
     }
     if (live.length - replaced.length >= MAX_LIVE_HANDLES) {
       throw appError("LIMIT_EXCEEDED", "Too many previews of this project are starting at once");
@@ -126,33 +129,40 @@ export const registerRuntime = mutation({
 });
 
 /**
- * Lets a registered boot start using its secrets: true only while the handle is
- * pending, the project is live, its envGeneration is still the handle's, and no
- * earlier runtime of the project failed to be killed. A refused handle is marked
- * stale, so its sandbox is killed even if the boot's own kill fails.
+ * Lets a registered boot start using its secrets: "admitted" only while the
+ * handle is pending, the project is live, its envGeneration is still the
+ * handle's, and no earlier runtime of the project failed to be killed. A
+ * refused handle is marked stale, so its sandbox is killed even if the boot's
+ * own kill fails. The other answers say why, for the boot's error message.
  */
 export const admitRuntime = mutation({
   args: { internalKey: v.string(), handleId: v.id("runtimeHandles") },
-  returns: v.boolean(),
+  returns: v.union(v.literal("admitted"), v.literal("replaced"), v.literal("blocked"), v.literal("outdated")),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     const handle = await ctx.db.get("runtimeHandles", args.handleId);
-    if (!handle) return false;
+    if (!handle) return "outdated";
 
     const project = await ctx.db.get("projects", handle.projectId);
-    const unrevoked = await ctx.db
-      .query("runtimeHandles")
-      .withIndex("by_projectId_and_state", (q) => q.eq("projectId", handle.projectId).eq("state", "revoke_failed"))
-      .first();
-    const admitted =
-      handle.state === "pending" &&
+    const current =
       project !== null &&
       project.deletingAt === undefined &&
-      (project.envGeneration ?? 0) === handle.generation &&
-      unrevoked === null;
+      (project.envGeneration ?? 0) === handle.generation;
+    // An earlier runtime whose kill failed may still hold values this boot must not join.
+    const blocked =
+      (await ctx.db
+        .query("runtimeHandles")
+        .withIndex("by_projectId_and_state", (q) => q.eq("projectId", handle.projectId).eq("state", "revoke_failed"))
+        .first()) !== null;
 
-    await ctx.db.patch("runtimeHandles", handle._id, { state: admitted ? "running" : "stale" });
-    return admitted;
+    if (current && !blocked && handle.state === "pending") {
+      await ctx.db.patch("runtimeHandles", handle._id, { state: "running" });
+      return "admitted";
+    }
+    await ctx.db.patch("runtimeHandles", handle._id, { state: "stale" });
+    if (blocked) return "blocked";
+    // A newer fresh boot staled it while the env stayed as read.
+    return current && handle.state === "stale" ? "replaced" : "outdated";
   },
 });
 

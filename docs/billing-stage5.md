@@ -46,3 +46,27 @@ receipts stay pending until stage 8. Event names and order are never trusted: on
 - **Receipts.** A receipt is processed when all its resources reached a final outcome. Other
   mismatches quarantine it as `unsupported`: counted unresolved for support, but only a refund or
   dispute blocks grants.
+
+## Early receipts (5c)
+
+A verified receipt whose provider customer is not mapped yet is stored `quarantined`
+(`unmapped`) with its payload's `providerCustomerId`. Dodo saw a 2xx and will not redeliver, and
+a replay of the same event is a duplicate, so `associateUnmappedReceipts` (`convex/billing.ts`)
+attaches these rows through our own bindings only, never metadata or email:
+
+- `bindCustomer` attaches by provider customer id, also for a deleted or held owner, whose
+  receipts still need processing for suppression and recovery.
+- `bindPurchase` attaches by payment id when it binds one. A row whose stored provider customer
+  differs from the customer's never attaches.
+- `recordReceipt` maps a new receipt in its own transaction, by the payload's provider customer or,
+  when the payload has none, by the purchase already bound to its payment, so a binding that
+  commits while the receiver is working is never missed.
+- A same-digest redelivery that now maps attaches the existing row. A different digest marks an
+  unmapped row `digest_mismatch` and leaves it unmapped.
+- `commitReconciliation` attaches by payment id for each positive payment (whose read showed this
+  customer) before any grant. If anything attached, no positive commits in that transaction.
+
+An attached `unmapped` row becomes pending; a `digest_mismatch` row stays quarantined for an
+operator. Both are counted in `unresolvedReceipts` and move the customer's `inputRevision` once,
+and an attached refund or dispute (pending or quarantined) blocks the customer's grants. Batches
+of 50 continue through `associateMoreUnmapped`, which pages through the index range.

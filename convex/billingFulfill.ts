@@ -6,7 +6,7 @@ import { topUpExpiresAt } from "../src/features/billing/grants";
 import { BILLING_CATALOG_VERSION } from "../src/features/billing/settlement";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
-import { assertGrantFence, bindSubscriptionRow, ownerDeleted } from "./billing";
+import { assertGrantFence, associateUnmappedReceipts, bindSubscriptionRow, ownerDeleted } from "./billing";
 import { insertGrant, rollOverIntoPeriod } from "./billingGrants";
 
 /**
@@ -110,9 +110,17 @@ function receiptOutcome(receipt: Doc<"billingEvents">, payments: Map<string, Out
   return parts.includes("pending") ? "pending" : parts.includes("quarantined") ? "quarantined" : "processed";
 }
 
-/** Whether positives may commit; decided before any write. The fence itself is checked by the caller. */
+/**
+ * Whether positives may commit; decided before any grant. The fence itself is checked by the caller.
+ * A positive's payment read showed this customer, so its unmapped receipts are attached first; any
+ * attachment moves the fence and adds unresolved receipts, so no positive commits in this transaction.
+ */
 async function positivesMayCommit(ctx: Ctx, customer: Customer, plans: PaymentPlan[]) {
-  if (customer.hold) return false;
+  let attached = 0;
+  for (const { fact } of plans.filter(plan => plan.positive)) {
+    attached += await associateUnmappedReceipts(ctx, customer, { paymentId: fact.paymentId });
+  }
+  if (attached || customer.hold) return false;
   const account = await ctx.db.query("creditAccounts").withIndex("by_userId", q => q.eq("userId", customer.userId)).unique();
   if (account?.paidCreditsMode !== undefined && account.paidCreditsMode !== customer.mode) return false;
   // Any refund or dispute of this customer that is unresolved (pending, processing, dead-lettered, collided) blocks.
@@ -293,7 +301,10 @@ async function markReceipts(ctx: Ctx, customer: Customer, receipts: Doc<"billing
       console.error("[billingFulfill] receipt quarantined", { eventRef: receipt._id, eventType: receipt.eventType, reason: "unsupported" });
     }
   }
-  if (processed) await ctx.db.patch("billingCustomers", customer._id, { unresolvedReceipts: customer.unresolvedReceipts - processed });
+  if (!processed) return;
+  // Re-read: an association earlier in this commit may have raised the count.
+  const { unresolvedReceipts } = (await ctx.db.get("billingCustomers", customer._id))!;
+  await ctx.db.patch("billingCustomers", customer._id, { unresolvedReceipts: unresolvedReceipts - processed });
 }
 
 const sortKey = ({ fact: { decision: d } }: PaymentPlan) => (d.kind === "period" ? d.serviceStart : d.kind === "top_up" ? d.settledAt : 0);

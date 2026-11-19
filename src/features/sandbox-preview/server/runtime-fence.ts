@@ -6,13 +6,18 @@ import { canonicalSandboxIdOrNull, parsePublicSandboxIdOrNull, toPublicSandboxId
 import { getProvider } from "./provider/registry";
 import type { Sandbox } from "./provider/types";
 
-/** The project's env changed (or it was deleted) after the boot read it. */
+/** The boot read an env that changed since (or a deleted project), was replaced by a newer boot, or is blocked by an unkilled runtime. */
 export class RuntimeAdmissionError extends Error {
   name = "RuntimeAdmissionError";
-  constructor() {
+  constructor(reason: "replaced" | "blocked" | "outdated") {
     super(
-      "The project's environment variables changed while the preview was starting. " +
-        "Start the preview again.",
+      reason === "replaced"
+        ? "A newer preview of this project started, so this one stopped."
+        : reason === "blocked"
+          ? "An earlier preview of this project with outdated environment variables could not be " +
+            "stopped yet. Try again in a minute."
+          : "The project's environment variables changed while the preview was starting. " +
+            "Start the preview again.",
     );
   }
 }
@@ -37,9 +42,8 @@ export async function admitSecretRuntime(args: {
     ...rest,
     sandboxId: toPublicSandboxId(sandbox.provider, sandbox.id),
   });
-  if (!(await convex.mutation(api.runtimeHandles.admitRuntime, { internalKey, handleId }))) {
-    throw new RuntimeAdmissionError();
-  }
+  const admission = await convex.mutation(api.runtimeHandles.admitRuntime, { internalKey, handleId });
+  if (admission !== "admitted") throw new RuntimeAdmissionError(admission);
 }
 
 /** Kills one sandbox by public id. A sandbox already gone counts as killed. */

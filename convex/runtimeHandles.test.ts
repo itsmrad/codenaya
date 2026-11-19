@@ -54,7 +54,7 @@ describe("runtime admission fence", () => {
     const manifest = await read();
     expect(manifest).toMatchObject({ generation: 0, records: [{ key: "API_KEY" }] });
     const handleId = await register(manifest!.generation);
-    expect(await admit(handleId)).toBe(true);
+    expect(await admit(handleId)).toBe("admitted");
     expect(await state(handleId)).toBe("running");
 
     // An edit while it runs outdates it.
@@ -71,7 +71,7 @@ describe("runtime admission fence", () => {
     await deleteVar();
     const handleId = await register(generation);
 
-    expect(await admit(handleId)).toBe(false);
+    expect(await admit(handleId)).toBe("outdated");
     expect(await state(handleId)).toBe("stale");
   });
 
@@ -82,7 +82,7 @@ describe("runtime admission fence", () => {
 
     await deleteVar();
     expect(await state(handleId)).toBe("stale");
-    expect(await admit(handleId)).toBe(false);
+    expect(await admit(handleId)).toBe("outdated");
   });
 
   test.each([
@@ -96,7 +96,7 @@ describe("runtime admission fence", () => {
     const s = await setup();
     await s.setSecret();
     const handleId = await s.register((await s.read())!.generation);
-    expect(await s.admit(handleId)).toBe(true);
+    expect(await s.admit(handleId)).toBe("admitted");
 
     await change(s);
 
@@ -111,7 +111,7 @@ describe("runtime admission fence", () => {
     await alice.mutation(api.projects.remove, { id: projectId });
 
     expect(await state(handleId)).toBe("stale");
-    expect(await admit(handleId)).toBe(false);
+    expect(await admit(handleId)).toBe("outdated");
     expect(await read()).toBeNull();
     await expect(register(1)).rejects.toThrow("Project not found");
   });
@@ -120,27 +120,29 @@ describe("runtime admission fence", () => {
     const { t, setSecret, read, register, admit, state } = await setup();
     await setSecret();
     const handleId = await register((await read())!.generation);
-    expect(await admit(handleId)).toBe(true);
+    expect(await admit(handleId)).toBe("admitted");
 
     await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
 
     expect(await state(handleId)).toBe("stale");
   });
 
-  test("a fresh boot drops every earlier handle and a resume only its own sandbox's, without revoking them", async () => {
+  test("a resume drops only its own sandbox's earlier handle; a fresh boot revokes every other preview", async () => {
     const { register, admit, state, revoked } = await setup();
     const first = await register(0, "e2b:sbx_a");
     await admit(first);
     const second = await register(0, "e2b:sbx_b", false);
     await admit(second);
 
+    // Revoking it would get the resumed sandbox killed.
     const resumed = await register(0, "e2b:sbx_a", false);
     expect([await state(first), await state(second)]).toEqual([null, "running"]);
-
-    await register(0, "e2b:sbx_c");
-    expect([await state(second), await state(resumed)]).toEqual([null, null]);
-    // Another tab's preview is never killed for a newer boot, only for an env change.
     expect(await revoked()).toEqual([]);
+
+    // A fresh boot has tried to kill the others; the sweep confirms it.
+    await register(0, "e2b:sbx_c");
+    expect([await state(second), await state(resumed)]).toEqual(["stale", "stale"]);
+    expect((await revoked()).map((handle) => handle.sandboxId).sort()).toEqual(["e2b:sbx_a", "e2b:sbx_b"]);
   });
 
   test("a failed kill denies the project's secret runtime until a later kill succeeds", async () => {
@@ -155,13 +157,13 @@ describe("runtime admission fence", () => {
     await recordKill(old, false);
     expect(await state(old)).toBe("revoke_failed");
     const blocked = await register((await read())!.generation, "e2b:sbx_new");
-    expect(await admit(blocked)).toBe(false);
+    expect(await admit(blocked)).toBe("blocked");
 
     // The sweep finds it again; a kill that succeeds (or finds it gone) removes it.
     expect(await revoked()).toEqual(expect.arrayContaining([{ _id: old, sandboxId: "e2b:sbx_old" }]));
     await recordKill(old, true);
     expect(await state(old)).toBeNull();
-    expect(await admit(await register((await read())!.generation, "e2b:sbx_new"))).toBe(true);
+    expect(await admit(await register((await read())!.generation, "e2b:sbx_new"))).toBe("admitted");
   });
 
   test("recordKill leaves a live handle alone", async () => {
@@ -172,11 +174,30 @@ describe("runtime admission fence", () => {
     expect(await state(handleId)).toBe("running");
   });
 
+  test("a boot replaced by a newer one while the env stayed as read is told so", async () => {
+    const { register, admit } = await setup();
+    const first = await register(0, "e2b:sbx_a");
+    expect(await admit(await register(0, "e2b:sbx_b"))).toBe("admitted");
+    expect(await admit(first)).toBe("replaced");
+  });
+
+  test("refuses a resume once the project holds MAX_LIVE_HANDLES other live handles", async () => {
+    const { t, projectId, register } = await setup();
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 20; i++) {
+        await ctx.db.insert("runtimeHandles", { projectId, sandboxId: `e2b:sbx_${i}`, generation: 0, state: "running" });
+      }
+    });
+    await expect(register(0, "e2b:sbx_new", false)).rejects.toThrow("Too many previews");
+    // A fresh boot replaces them all.
+    expect(await register(0, "e2b:sbx_new")).toBeTruthy();
+  });
+
   test("admits a handle once", async () => {
     const { register, admit } = await setup();
     const handleId = await register(0);
-    expect(await admit(handleId)).toBe(true);
-    expect(await admit(handleId)).toBe(false);
+    expect(await admit(handleId)).toBe("admitted");
+    expect(await admit(handleId)).toBe("outdated");
   });
 
   test("only the project owner can register, and only with the internal key", async () => {
