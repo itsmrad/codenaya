@@ -36,6 +36,12 @@ export const STREAM_REDACTION_PLACEHOLDER = "[redacted]";
 /** Replaces all output when the values to redact are unknown or too many to match. */
 export const REDACTION_UNAVAILABLE_NOTICE = "[output hidden: secret redaction unavailable]";
 
+/**
+ * Shortest value, and shortest trailing partial value, that is redacted. Shorter
+ * ones have near-zero entropy, and redacting them would destroy unrelated output.
+ */
+export const MIN_REDACTED_LENGTH = 3;
+
 /** Bounds on the value inventory; past either, output is suppressed rather than matched. */
 export const MAX_REDACTED_VALUES = 256;
 export const MAX_REDACTED_BYTES = 64 * 1024;
@@ -75,8 +81,7 @@ function matcherOrNull(secrets: readonly string[]): { known: string[]; pattern: 
   if (secrets.length > MAX_REDACTED_VALUES || bytes > MAX_REDACTED_BYTES) return null;
   // Exact bytes, plus the trimmed form an app may print a padded value in.
   const values = [...new Set(secrets.flatMap((value) => [value, value.trim()]))]
-    // Near-zero entropy, and redacting them would destroy unrelated output.
-    .filter((value) => value.length > 2 && value.trim() !== "");
+    .filter((value) => value.length >= MIN_REDACTED_LENGTH && value.trim() !== "");
   // Longest first, so the regex alternation takes the longest match at a position.
   const known = [...new Set(values.flatMap(encodingsOf))].sort((a, b) => b.length - a.length);
   return { known, pattern: new RegExp(known.map(escapeRegExp).join("|"), "g") };
@@ -156,8 +161,7 @@ export function createStreamRedactor(
 
   /** Where a trailing partial prefix of a pattern starts, or -1 when the text ends clear of one. */
   const partialPrefixStart = (text: string): number => {
-    // Under 3 characters, as with values, reveals next to nothing and would eat ordinary text.
-    for (let i = Math.max(0, text.length - holdBack); i <= text.length - 3; i++) {
+    for (let i = Math.max(0, text.length - holdBack); i <= text.length - MIN_REDACTED_LENGTH; i++) {
       const tail = text.slice(i);
       if (known.some((value) => value.startsWith(tail))) return i;
     }

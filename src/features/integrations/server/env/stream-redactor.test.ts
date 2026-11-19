@@ -203,6 +203,13 @@ describe("createStreamRedactor", () => {
     expect(streamThrough("added packages", 4, [SECRET])).toBe("added packages");
     expect(streamThrough("added sb", 4, [SECRET])).toBe("added sb");
     expect(streamThrough("added sbp", 4, [SECRET])).toBe(`added ${STREAM_REDACTION_PLACEHOLDER}`);
+    expect(streamThrough("listening on 3", 4, ["3dummy-canary"])).toBe("listening on 3");
+  });
+
+  it("redacts a value saved with a trailing newline when it is printed trimmed", () => {
+    expect(streamThrough("token=dummy-canary-nl;\n", 5, ["dummy-canary-nl\n"])).toBe(
+      `token=${STREAM_REDACTION_PLACEHOLDER};\n`,
+    );
   });
 
   describe("failing closed", () => {
