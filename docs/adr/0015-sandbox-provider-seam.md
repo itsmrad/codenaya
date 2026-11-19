@@ -191,3 +191,22 @@ The boot path is wired for more than one provider:
 
 Not yet: the agent paths (check-build, build-repair, swarm) create and look up on the
 default provider only, and there is no sticky provider per project.
+
+## Blaxel status
+
+`blaxel` is registered (`PROVIDER_IDS = ["e2b", "blaxel"]`). It counts as configured
+only when both `BL_API_KEY` and `BL_WORKSPACE` are set (`PROVIDER_KEYS` in `config.ts`,
+which the registry checks too). Defaults are unchanged: `SANDBOX_PROVIDER` is `e2b` and
+the fallbacks are empty, so nothing reaches Blaxel until it is listed.
+- **Ids.** The native id is the sandbox name, `cn-` plus 20 lowercase alphanumerics.
+  It passes `NATIVE_ID` unchanged and always reaches the client prefixed (`blaxel:cn-…`).
+- **Ownership.** `metadata` is stored as Blaxel labels. `list` filters them exactly on
+  our side, because Blaxel's `q` search is a substring match.
+- **Lifetime.** A `date` expiration policy deletes the sandbox at `endAt` even if our
+  kill fails. `connect({ timeoutMs })` only extends it.
+- **`/proc` fallback.** Blaxel has no `listCommands`, so it is the first adapter on the
+  `/proc` view. A dev-server restart from it passes the whole inherited environment.
+- **Order.** The intended production order is `blaxel,daytona`, with Daytona last resort
+  (warning page and egress allowlist below its Tier 3).
+- **Privacy.** The privacy page and SECURITY.md subprocessor text must name Blaxel
+  **before** it is listed in production. That wording is a separate, lead-owned change.

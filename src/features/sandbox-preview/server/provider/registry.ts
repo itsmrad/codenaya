@@ -1,4 +1,5 @@
-import { parseProviderConfig } from "./config";
+import { createBlaxelProvider } from "./blaxel";
+import { isProviderConfigured, parseProviderConfig } from "./config";
 import { createE2bProvider } from "./e2b";
 import { createProviderCooldown, createWithFailover } from "./failover";
 import { selectProviders } from "./select";
@@ -15,6 +16,10 @@ export const getProvider = (id: ProviderId): SandboxProvider => {
       const apiKey = process.env.E2B_API_KEY?.trim();
       if (!apiKey) throw new SandboxConfigError("E2B_API_KEY is not set");
       return createE2bProvider(apiKey);
+    }
+    case "blaxel": {
+      if (!isProviderConfigured("blaxel")) throw new SandboxConfigError("BL_API_KEY and BL_WORKSPACE must be set");
+      return createBlaxelProvider();
     }
   }
 };
