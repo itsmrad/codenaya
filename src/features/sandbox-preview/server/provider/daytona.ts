@@ -49,7 +49,7 @@ const PASS_THROUGH = [
 ];
 
 /** Translates Daytona's errors into the seam's; anything else is rethrown as is. */
-export const fromDaytonaError = (error: unknown): unknown => {
+const fromDaytonaError = (error: unknown): unknown => {
   const message = error instanceof Error ? error.message : String(error);
   if (PASS_THROUGH.some((type) => error instanceof type)) return error;
   // Forbidden covers the deprecated DaytonaAuthorizationError, a subclass.
@@ -326,11 +326,13 @@ export const createDaytonaProvider = (apiKey: string): SandboxProvider => {
    * Best effort: a create we stopped waiting for, or one the SDK timed out after its
    * POST, still bills and counts toward the user's sandbox cap until its TTL.
    */
+  const deleteById = async (error: unknown) => {
+    if (error instanceof DaytonaTimeoutError && error.sandboxId) await (await daytona().get(error.sandboxId)).delete();
+  };
   const deleteOrphan = (error: unknown, pending: Promise<DaytonaSandbox>) => {
-    if (error instanceof SandboxTimeoutError) pending.then((sandbox) => sandbox.delete(), noop).catch(noop);
-    if (error instanceof DaytonaTimeoutError && error.sandboxId) {
-      daytona().get(error.sandboxId).then((sandbox) => sandbox.delete()).catch(noop);
-    }
+    // Our deadline usually wins, and the SDK's own timeout, with the id, arrives later.
+    if (error instanceof SandboxTimeoutError) pending.then((sandbox) => sandbox.delete(), deleteById).catch(noop);
+    else deleteById(error).catch(noop);
   };
 
   return {

@@ -48,7 +48,7 @@ vi.mock("@daytona/sdk", () => ({
   Daytona: vi.fn(function (config: unknown) { return mocks.client(config); }),
 }));
 
-import { DEFAULT_DAYTONA_SNAPSHOT, createDaytonaProvider, ttlMinutes, withDeadline } from "./daytona";
+import { createDaytonaProvider, ttlMinutes, withDeadline } from "./daytona";
 import {
   SandboxConfigError, SandboxExitError, SandboxNotFoundError, SandboxRateLimitError, SandboxTimeoutError,
 } from "./types";
@@ -140,7 +140,6 @@ describe("Daytona provider", () => {
     process.env.DAYTONA_SNAPSHOT = "other";
     await provider.create({ image: "snap-2", timeoutMs: 1, metadata: {} });
 
-    expect(DEFAULT_DAYTONA_SNAPSHOT).toBe("codenaya-node22-v1");
     expect(mocks.create.mock.calls[0][0]).toMatchObject({ snapshot: "codenaya-node22-v1" });
     expect(mocks.create.mock.calls[0][1]).toEqual({ timeout: undefined });
     expect(mocks.create.mock.calls[1][0]).toMatchObject({ snapshot: "snap-2" });
@@ -171,6 +170,19 @@ describe("Daytona provider", () => {
     finish(daytona);
 
     await vi.waitFor(() => expect(daytona.delete).toHaveBeenCalled());
+  });
+
+  it("deletes the sandbox an SDK create timeout reports after the deadline", async () => {
+    const daytona = fakeDaytonaSandbox({ id: "sbx-9" });
+    let fail: (error: unknown) => void = () => {};
+    mocks.create.mockReturnValue(new Promise((_resolve, reject) => { fail = reject; }));
+    mocks.get.mockResolvedValue(daytona);
+
+    await expect(provider.create({ timeoutMs: 1, metadata: {}, requestTimeoutMs: 10 })).rejects.toBeInstanceOf(SandboxTimeoutError);
+    fail(Object.assign(new mocks.errors.DaytonaTimeoutError("not started in time"), { sandboxId: "sbx-9" }));
+
+    await vi.waitFor(() => expect(daytona.delete).toHaveBeenCalled());
+    expect(mocks.get).toHaveBeenCalledWith("sbx-9");
   });
 
   it("deletes the sandbox an SDK create timeout left behind", async () => {
