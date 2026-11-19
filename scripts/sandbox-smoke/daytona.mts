@@ -7,14 +7,17 @@
  * what the seam hides (state, auto-stop, sessions, a second delete). Guards: at most 3
  * sandboxes, one at a time, each with a TTL of 15 minutes or less (Daytona deletes it even
  * if this script dies) and killed by id in a finally. Every create, kill and check goes to
- * SANDBOX_SMOKE_LOG (JSONL). It stops once the logged estimate, across runs, would pass $1.
+ * SANDBOX_SMOKE_LOG (JSONL). It stops once the logged estimate, across that file's runs, would pass $1
+ * (the cap is per log file). The dev check is a proxy: a dev Convex URL means an `infisical --env dev`
+ * shell, so the Daytona key is the dev org's; the API host is logged at start.
  */
 import { Daytona } from "@daytona/sdk";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { VITE_REACT_STARTER } from "../../src/features/conversations/inngest/vite-starter";
 import {
@@ -45,7 +48,8 @@ if (!apiKey) refuse("DAYTONA_API_KEY must be set");
 
 const provider = createDaytonaProvider(apiKey);
 // Raw reads only; the same endpoint the adapter defaults to.
-const raw = new Daytona({ apiKey, apiUrl: env.DAYTONA_API_URL?.trim() || "https://app.daytona.io/api" });
+const apiUrl = env.DAYTONA_API_URL?.trim() || "https://app.daytona.io/api";
+const raw = new Daytona({ apiKey, apiUrl });
 const errorName = (error: unknown) => error instanceof Error ? error.name : typeof error;
 const statusOf = (error: unknown) => `${errorName(error)} ${(error as { statusCode?: number }).statusCode ?? "-"}`;
 
@@ -66,14 +70,16 @@ const USD_PER_HOUR = 0.1332;
 const CAP_USD = 1;
 const LIFETIME_MS = 15 * 60_000;
 const MAX_SANDBOXES = 3;
+const SLOT_B_MS = 10 * 60_000;
 const WORST_CASE_USD = (LIFETIME_MS / 3_600_000) * USD_PER_HOUR;
 const LOG = resolve(env.SANDBOX_SMOKE_LOG ?? "claude/handoffs/sandbox/daytona-smoke.jsonl");
 const BUDGET = resolve(env.SANDBOX_SMOKE_BUDGET ?? "claude/budget.json");
 const APP = "/home/user/app";
 
-const runId = `smoke-${Date.now().toString(36)}`;
 const ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const alphanumeric = (length: number) => Array.from(randomBytes(length), (byte) => ALPHANUMERIC[byte % 62]).join("");
+// The sweep is scoped to this label, so it is unique per run.
+const runId = `smoke-${Date.now().toString(36)}-${alphanumeric(6)}`;
 // Real-shaped labels: a Clerk id (mixed case, underscore) and a long URL-safe share token.
 const meta = {
   userId: `user_${alphanumeric(27)}`, projectId: "smoke_project", purpose: "smoke", runId,
@@ -83,12 +89,18 @@ const meta = {
 type Row = Record<string, unknown> & { event?: string; id?: string; estUsd?: number; est_usd?: number };
 mkdirSync(dirname(LOG), { recursive: true });
 const log = (row: Row) => appendFileSync(LOG, `${JSON.stringify({ at: new Date().toISOString(), runId, ...row })}\n`);
-const rows = (): Row[] => existsSync(LOG) ? readFileSync(LOG, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
-/** Each logged sandbox at its kill's estimate, or the full lifetime if never killed; plus older rows' own estimates. */
+/** The log's rows; a line cut short by a crash mid-append is skipped. */
+const rows = (): Row[] => !existsSync(LOG) ? [] : readFileSync(LOG, "utf8").split("\n").flatMap((line) => {
+  try { return line ? [JSON.parse(line)] : []; } catch { return []; }
+});
+/**
+ * Each logged sandbox at its kill's estimate, or the full lifetime if never killed; a failed
+ * create too (it may have left one behind); plus older rows' own estimates.
+ */
 const estimateUsd = (only?: string) => {
   const logged = rows().filter((row) => !only || row.runId === only);
   const killed = new Map(logged.filter((row) => row.event === "kill").map((row) => [row.id, row.estUsd ?? WORST_CASE_USD]));
-  const legacy = logged.reduce((sum, row) => sum + (row.event ? 0 : row.est_usd ?? 0), 0);
+  const legacy = logged.reduce((sum, row) => sum + (row.event === "create-failed" ? WORST_CASE_USD : row.event ? 0 : row.est_usd ?? 0), 0);
   return logged.filter((row) => row.event === "create").reduce((sum, row) => sum + (killed.get(row.id) ?? WORST_CASE_USD), legacy);
 };
 const round = (usd: number) => Math.round(usd * 1e6) / 1e6;
@@ -109,48 +121,103 @@ function expect(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-const results: { name: string; pass: boolean; detail: string }[] = [];
-const record = (name: string, pass: boolean, detail = "") => {
-  results.push({ name, pass, detail: detail.slice(0, 400) });
-  log({ event: "check", name, pass, detail: detail.slice(0, 400) });
-  console.log(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? `: ${detail.slice(0, 400)}` : ""}`);
+type Kind = "check" | "measure";
+const results: { name: string; kind: Kind; pass: boolean; detail: string }[] = [];
+const record = (name: string, pass: boolean, detail = "", kind: Kind = "check") => {
+  const text = detail.slice(0, 400);
+  results.push({ name, kind, pass, detail: text });
+  log({ event: kind, name, pass, detail: text });
+  console.log(`${!pass ? "FAIL" : kind === "measure" ? "MEAS" : "PASS"}  ${name}${text ? `: ${text}` : ""}`);
 };
-async function check(name: string, body: () => Promise<string | void>) {
+const attempt = async (kind: Kind, name: string, body: () => Promise<string | void>) => {
   try {
-    record(name, true, (await body()) ?? "");
+    record(name, true, (await body()) ?? "", kind);
   } catch (error) {
-    record(name, false, error instanceof Error ? `${error.name}: ${error.message}` : String(error));
+    record(name, false, error instanceof Error ? `${error.name}: ${error.message}` : String(error), kind);
   }
-}
+};
+/** A verdict: it passes only when every assertion in `body` holds. */
+const check = (name: string, body: () => Promise<string | void>) => attempt("check", name, body);
+/** An observation, not a verdict: it is recorded as MEAS and fails only if it could not be taken. */
+const measure = (name: string, body: () => Promise<string | void>) => attempt("measure", name, body);
 
 let created = 0;
 const live = new Set<string>();
+const everCreated = new Set<string>();
 async function withSandbox(slot: string, timeoutMs: number, body: (sandbox: Sandbox) => Promise<void>) {
   if (created >= MAX_SANDBOXES) throw new Error(`Refusing a sandbox past the limit of ${MAX_SANDBOXES}`);
   if (estimateUsd() + WORST_CASE_USD > CAP_USD) throw new Error(`Logged estimate would pass $${CAP_USD}`);
   created++;
+  // Logged before the call, so an interrupted or failed create still counts and the label sweep looks for it.
+  log({ event: "create-intent", slot, ttlMs: timeoutMs });
   const createdAt = Date.now();
   const sandbox = await provider.create({ timeoutMs, metadata: { ...meta, slot } }).catch((error: unknown) => {
     log({ event: "create-failed", slot, error: statusOf(error) });
     throw error;
   });
   live.add(sandbox.id);
+  everCreated.add(sandbox.id);
   log({ event: "create", id: sandbox.id, slot, ttlMs: timeoutMs });
   try {
     await body(sandbox);
   } finally {
     const killed = await provider.kill(sandbox.id).catch((error) => `kill failed: ${statusOf(error)}`);
     live.delete(sandbox.id);
-    const activeSeconds = Math.min((Date.now() - createdAt) / 1000, timeoutMs / 1000 + 60);
+    const activeSeconds = Math.min((Date.now() - createdAt) / 1000, LIFETIME_MS / 1000 + 60);
     // An unconfirmed kill keeps the worst case: the TTL deletes it.
     const estUsd = round(typeof killed === "boolean" ? (activeSeconds / 3600) * USD_PER_HOUR : WORST_CASE_USD);
     log({ event: "kill", id: sandbox.id, slot, createdAt: new Date(createdAt).toISOString(), killed, activeSeconds, estUsd });
   }
 }
+/**
+ * Deletes whatever this run left: every labelled sandbox in any state (raw list, no state
+ * filter) and every id it created, read back one by one. The count of leftovers, or null
+ * when the sweep itself failed, which is never reported as clean.
+ */
+async function sweep(): Promise<number | null> {
+  try {
+    const ids = new Set(everCreated);
+    for await (const listed of raw.list({ labels: { runId } })) if (listed.labels?.runId === runId) ids.add(listed.id);
+    let leftovers = 0;
+    for (const id of ids) {
+      const state = await raw.get(id).then((got) => got.state ?? "unknown", (error) => statusOf(error));
+      if (state.endsWith(" 404") || state === "destroyed" || state === "destroying") continue;
+      leftovers++;
+      const deleted = await raw.get(id).then((got) => got.delete()).then(() => true, (error) => statusOf(error));
+      log({ event: "sweep-kill", id, state, deleted });
+    }
+    return leftovers;
+  } catch (error) {
+    log({ event: "sweep-failed", error: statusOf(error) });
+    return null;
+  }
+}
+
+/** Sweep, summary and budget entry, once, on every exit path (a signal can land mid-finish); the exit code. */
+let finishing: Promise<number> | undefined;
+const finish = () => (finishing ??= wrapUp());
+async function wrapUp() {
+  const leftovers = await sweep();
+  if (leftovers !== 0) record("sweep", false, leftovers === null ? "the sweep failed: leftovers unknown" : `${leftovers} leftover(s) deleted`);
+  const runUsd = round(estimateUsd(runId));
+  const failed = results.filter((result) => !result.pass).map((result) => result.name);
+  const checks = results.filter((result) => result.kind === "check");
+  const passed = checks.filter((result) => result.pass).length;
+  const measured = results.length - checks.length;
+  log({ event: "summary", sandboxes: created, leftovers, passed, checks: checks.length, measured, failed, runUsd, totalUsd: round(estimateUsd()) });
+  console.log(`\n${passed}/${checks.length} checks passed, ${measured} measurement(s); ${created} sandbox(es); ` +
+    `leftovers ${leftovers ?? "unknown"}; this run ≈ $${runUsd}; logged total ≈ $${round(estimateUsd())}. Log: ${LOG}`);
+  appendBudget(runUsd);
+  return failed.length ? 1 : 0;
+}
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, async () => {
-    console.error(`${signal}: killing ${live.size} live sandbox(es)`);
+    console.error(`${signal}: killing ${live.size} live sandbox(es), then sweeping`);
+    log({ event: "interrupted", signal });
     await Promise.allSettled([...live].map((id) => provider.kill(id)));
+    await finish();
+    // The SDK's sockets can keep the event loop alive.
     process.exit(130);
   });
 }
@@ -186,8 +253,10 @@ function openHmr(url: URL) {
   });
   return {
     close: () => socket.close(),
-    async next(type: string, timeoutMs: number) {
-      if (await until(() => messages.some((message) => message.type === type), timeoutMs, 200)) return;
+    /** Where `next` starts looking, so a message from before an edit can't satisfy it. */
+    mark: () => messages.length,
+    async next(type: string, timeoutMs: number, from = 0) {
+      if (await until(() => messages.slice(from).some((message) => message.type === type), timeoutMs, 200)) return;
       throw new Error(`no "${type}" message; got [${messages.map((message) => message.type).join(",")}]`);
     },
   };
@@ -238,6 +307,7 @@ function appendBudget(usd: number) {
   }
 }
 
+log({ event: "start", apiHost: new URL(apiUrl).host });
 try {
   await check("7b a bad DAYTONA_API_KEY raises SandboxConfigError", async () => {
     const error = await createDaytonaProvider("dtn_smoke_invalid_key").list({ metadata: { runId }, limit: 1 }).catch((caught: unknown) => caught);
@@ -271,7 +341,7 @@ try {
       const started = Date.now();
       const streamed = await sandbox.run("echo out; echo err >&2; exit 3", { onStdout: () => {} });
       expect(streamed.exitCode === 3 && streamed.stdout.trim() === "out" && streamed.stderr.trim() === "err", `streamed ${JSON.stringify(streamed)}`);
-      return `streamed run returned in ${Date.now() - started} ms (the log follow closes on exit)`;
+      return `measured: the streamed run returned in ${Date.now() - started} ms (the log follow closes on exit)`;
     });
     await check("2b timeoutMs 2000 on sleep 5 throws SandboxTimeoutError and the process is gone", async () => {
       const started = Date.now();
@@ -306,7 +376,7 @@ try {
       const streamed = (await sandbox.run("printf x", { onStdout: () => {} })).stdout;
       expect(sync === "x" && streamed === "x", `sync ${JSON.stringify(sync)}, streamed ${JSON.stringify(streamed)}`);
     });
-    await check("2e run latency p50 over 10, and 3 concurrent runs", async () => {
+    await measure("2e run latency p50 over 10, and 3 concurrent runs", async () => {
       const times: number[] = [];
       for (let index = 0; index < 10; index++) {
         const started = Date.now();
@@ -325,6 +395,9 @@ try {
         { timeoutMs: 60_000 },
       );
       expect(/ user \/home\/user v22\./.test(stdout) && !stdout.includes("missing"), stdout);
+      // Tier-1 egress: the allowlist has npm, not arbitrary hosts.
+      expect(/registry\.npmjs\.org\/ 200/.test(stdout), `npm not reachable: ${stdout}`);
+      expect(!/example\.com\/ 200|httpbin\.org\/get 200/.test(stdout), `egress is not allowlisted: ${stdout}`);
       return stdout.replaceAll("\n", "; ");
     });
 
@@ -362,16 +435,18 @@ try {
       await sandbox.writeFiles(Array.from({ length: 1000 }, (_, index) => ({ path: `/home/user/many/d${index % 10}/f${index}.txt`, data: `${index}` })));
       const count = (await sandbox.run("find /home/user/many -type f | wc -l")).stdout.trim();
       expect(count === "1000", `${count} files`);
-      return `${Date.now() - started} ms`;
+      return `measured: ${Date.now() - started} ms`;
     });
     await check("4c raw: uploadFiles into a missing dir; readFile of a missing file", async () => {
       const fs = (await raw.get(sandbox.id)).fs;
+      // test -f, not stdout: run's stdout gains a trailing newline (bug A).
       const made = await fs.uploadFiles([{ source: Buffer.from("x"), destination: "/home/user/nodir/sub/x.txt" }]).then(
-        async () => (await sandbox.run("cat /home/user/nodir/sub/x.txt")).stdout === "x", (error) => statusOf(error));
+        async () => (await sandbox.run("test -f /home/user/nodir/sub/x.txt")).exitCode === 0, (error) => `rejected (${statusOf(error)})`);
       const missing = await sandbox.readFile("/home/user/nope.txt", "text").then(() => "no error", (error) => statusOf(error));
-      return `upload makes parent dirs: ${made}; missing read: ${missing}`;
+      expect(missing === "DaytonaFileNotFoundError 404", `missing read: ${missing}`);
+      return `measured: upload makes parent dirs: ${made}`;
     });
-    await check("4d raw: the session shell, and whether deleteSession kills its command", async () => {
+    await measure("4d raw: the session shell, and whether deleteSession kills its command", async () => {
       const { process: processes } = await raw.get(sandbox.id);
       await processes.createSession("smoke-del");
       const shell = (await processes.executeSessionCommand("smoke-del", { command: "readlink /proc/$$/exe" })).stdout?.trim();
@@ -383,16 +458,23 @@ try {
       return `session shell ${shell}; deleteSession kills its command: ${Boolean(killed)}`;
     });
     await check("4e VERCEL=1 child: serverless upload, read and log stream", async () => {
-      const output = execFileSync(process.execPath, [...process.execArgv, fileURLToPath(import.meta.url), "--serverless-probe", sandbox.id], {
-        env: { ...env, VERCEL: "1" }, encoding: "utf8", timeout: 120_000,
-      });
-      const probe = JSON.parse(output.trim().split("\n").at(-1) ?? "{}");
-      expect(probe.text === "sl ✓" && probe.bytes === 256 && probe.exit === 0, output.slice(-300));
+      // Async, so a signal isn't held up; the child's stderr is dropped, never logged.
+      const args = [...process.execArgv, fileURLToPath(import.meta.url), "--serverless-probe", sandbox.id];
+      const last = (stdout = "") => stdout.trim().split("\n").at(-1)?.slice(0, 200) ?? "";
+      const output = await promisify(execFile)(process.execPath, args, { env: { ...env, VERCEL: "1" }, encoding: "utf8", timeout: 120_000 }).then(
+        ({ stdout }) => last(stdout),
+        (error: { code?: unknown; signal?: unknown; stdout?: string }) => {
+          throw new Error(`child exit ${error.code ?? "-"}, signal ${error.signal ?? "-"}; last stdout: ${last(error.stdout)}`);
+        },
+      );
+      const probe = JSON.parse(output || "{}");
+      expect(probe.text === "sl ✓" && probe.bytes === 256 && probe.exit === 0, output);
       return `streamed ${JSON.stringify(probe.streamed)}`;
     });
 
-    await check("7a kill; list is empty; connect throws NotFound; a second delete", async () => {
-      const stale = await raw.get(sandbox.id);
+    let stale: Awaited<ReturnType<typeof raw.get>> | undefined;
+    await check("7a kill; list empties; connect throws NotFound", async () => {
+      stale = await raw.get(sandbox.id);
       expect(await provider.kill(sandbox.id) === true, "kill did not report true");
       // list is eventually consistent: record how long it keeps a killed sandbox, and in what state.
       const killedAt = Date.now();
@@ -402,6 +484,10 @@ try {
       const listLag = `listed right after kill: ${lagged} (get(): ${lagState}); empty after ${Date.now() - killedAt} ms`;
       const connect = await provider.connect(sandbox.id).then(() => "connected", (error) => error);
       expect(connect instanceof SandboxNotFoundError, `connect after kill: ${statusOf(connect)}`);
+      return `measured: ${listLag}`;
+    });
+    await measure("7c a second delete and kill, and get() while it goes", async () => {
+      expect(stale, "no sandbox object (7a failed)");
       const secondDelete = await stale.delete().then(() => "resolved", (error) => statusOf(error));
       const secondKill = await provider.kill(sandbox.id);
       // How get() sees the sandbox while it goes, and when it 404s.
@@ -412,11 +498,11 @@ try {
         if (states.at(-1) !== state) states.push(`${state}@${Math.round((Date.now() - started) / 1000)}s`);
         return !state.includes("started") && !state.includes("destroying") && state !== "stopping";
       }, 60_000, 2000);
-      return `${listLag}; raw second delete: ${secondDelete}; second provider.kill: ${secondKill}; get(): ${states.join(" > ")}`;
+      return `raw second delete: ${secondDelete}; second provider.kill: ${secondKill}; get(): ${states.join(" > ")}`;
     });
   });
 
-  await withSandbox("b", 10 * 60_000, async (sandbox) => {
+  await withSandbox("b", SLOT_B_MS, async (sandbox) => {
     let previewUrl = "";
     await check("5a the Vite starter boots behind the :4000 proxy; previewUrl answers a server-side fetch", async () => {
       await sandbox.writeFiles(VITE_REACT_STARTER.map((file) => ({ path: `${APP}/${file.path}`, data: file.content })));
@@ -435,6 +521,9 @@ try {
         return response && response.status < 500 ? response.status : undefined;
       }, 30_000, 1000);
       expect(status === 200, `status ${status}`);
+      // The interstitial is a 200 too, so check it is the Vite page.
+      const page = await describe(previewUrl, {});
+      expect(page.vite, `not the Vite page: ${JSON.stringify(page)}`);
       return `host ${new URL(previewUrl).hostname.replace(/^[^.]+/, "<port-id>")}`;
     });
     await check("5b interstitial: browser vs plain fetch vs the skip header; X-Frame-Options and CSP", async () => {
@@ -442,7 +531,8 @@ try {
       const browser = await describe(previewUrl, BROWSER);
       const plain = await describe(previewUrl, {});
       const skipped = await describe(previewUrl, { ...BROWSER, "x-daytona-skip-preview-warning": "true" });
-      expect(skipped.vite, `the skip header did not reach Vite: ${JSON.stringify(skipped)}`);
+      expect(browser.daytona && !browser.vite, `a browser request did not get the interstitial: ${JSON.stringify(browser)}`);
+      expect(plain.vite && skipped.vite, `a plain fetch or the skip header did not reach Vite`);
       return `browser ${JSON.stringify(browser)} | plain ${JSON.stringify(plain)} | skip ${JSON.stringify(skipped)}`;
     });
     await check("5c HMR WebSocket through the preview: connects and pushes an update", async () => {
@@ -457,8 +547,9 @@ try {
         await hmr.next("connected", 15_000);
         const app = VITE_REACT_STARTER.find((file) => file.path === "src/App.tsx");
         expect(app, "the starter has no src/App.tsx");
+        const from = hmr.mark();
         await sandbox.writeFiles([{ path: `${APP}/src/App.tsx`, data: `${app.content}\n// smoke edit\n` }]);
-        await hmr.next("update", 20_000).catch(() => hmr.next("full-reload", 1));
+        await hmr.next("update", 20_000, from).catch(() => hmr.next("full-reload", 1, from));
       } finally {
         hmr.close();
       }
@@ -477,13 +568,18 @@ try {
 
     await check("6a connect({ timeoutMs }) extends, never shortens, stays within 15 min of now", async () => {
       const before = (await sandbox.info()).endAt.getTime();
+      // The backstop holds: never past 15 minutes from creation (slot b starts with SLOT_B_MS).
+      const hardEnd = before - SLOT_B_MS + LIFETIME_MS;
       await provider.connect(sandbox.id, { timeoutMs: 60_000 });
       const shorter = (await sandbox.info()).endAt.getTime();
       expect(shorter === before, `a 1-minute connect moved endAt by ${shorter - before} ms`);
-      await provider.connect(sandbox.id, { timeoutMs: LIFETIME_MS });
+      // Whole minutes, rounded down: the adapter rounds up.
+      const minutes = Math.floor((hardEnd - Date.now()) / 60_000);
+      expect(Date.now() + minutes * 60_000 > before, "no room to extend within the backstop");
+      await provider.connect(sandbox.id, { timeoutMs: minutes * 60_000 });
       const after = (await sandbox.info()).endAt.getTime();
-      expect(after > before && after <= Date.now() + LIFETIME_MS + 60_000, `endAt moved ${after - before} ms`);
-      return `+${Math.round((after - before) / 1000)} s; the createdAt + 1 h clamp is unit-tested only (a live check would lift the 15-min backstop)`;
+      expect(after > before && after <= hardEnd + 5_000, `endAt moved ${after - before} ms; ${after - hardEnd} ms past the backstop`);
+      return `measured: +${Math.round((after - before) / 1000)} s; the createdAt + 1 h clamp is unit-tested only (a live check would lift the backstop)`;
     });
     await check("6b after 60 s idle, the preview and a run still answer; auto-stop is off", async () => {
       expect(previewUrl, "no preview (5a failed)");
@@ -502,25 +598,18 @@ try {
   await withSandbox("c", 60_000, async (sandbox) => {
     await check("6c a 1-minute TTL hard-deletes a started sandbox", async () => {
       const endAt = (await sandbox.info()).endAt.getTime();
+      expect(endAt > Date.now(), `endAt ${new Date(endAt).toISOString()} is not in the future`);
       // A new sandbox takes a few seconds to appear in list, so wait for it before waiting for it to go.
       expect(await until(async () => (await provider.list({ metadata: { runId, slot: "c" } })).length, 30_000, 1000), "never listed");
       const gone = await until(() => raw.get(sandbox.id).then(() => false, (error) => statusOf(error).includes("404")), 4 * 60_000, 5000);
       expect(gone, "get() still finds it 4 minutes on");
+      expect(Date.now() >= endAt - 5_000, `deleted ${Math.round((endAt - Date.now()) / 1000)} s before endAt: not by the TTL`);
       return `404 ${Math.round((Date.now() - endAt) / 1000)} s after endAt`;
     });
   });
 } catch (error) {
   record("run", false, error instanceof Error ? error.message : String(error));
 } finally {
-  // Belt and braces: anything this run still lists goes too.
-  const leftovers = await provider.list({ metadata: { runId } }).catch(() => []);
-  for (const { id } of leftovers) log({ event: "sweep-kill", id, killed: await provider.kill(id).catch((error) => statusOf(error)) });
-  const runUsd = round(estimateUsd(runId));
-  const failed = results.filter((result) => !result.pass).map((result) => result.name);
-  log({ event: "summary", sandboxes: created, leftovers: leftovers.length, failed, runUsd, totalUsd: round(estimateUsd()) });
-  console.log(`\n${results.length - failed.length}/${results.length} checks passed; ${created} sandbox(es); ` +
-    `${leftovers.length} leftover(s) killed; this run ≈ $${runUsd}; logged total ≈ $${round(estimateUsd())}. Log: ${LOG}`);
-  appendBudget(runUsd);
   // The SDK's sockets can keep the event loop alive.
-  process.exit(failed.length ? 1 : 0);
+  process.exit(await finish());
 }
