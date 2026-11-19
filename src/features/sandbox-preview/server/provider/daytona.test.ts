@@ -456,6 +456,7 @@ describe("Daytona provider", () => {
         daytona.process.getSessionCommandLogs.mockImplementation(async (_sessionId, _cmdId, onStdout) => {
           if (!onStdout) throw new Error("logs unavailable");
           onStdout("partial");
+          return undefined;
         });
         daytona.process.getSessionCommand.mockResolvedValueOnce({ id: "cmd-1" }).mockResolvedValue({ id: "cmd-1", exitCode: 0 });
 

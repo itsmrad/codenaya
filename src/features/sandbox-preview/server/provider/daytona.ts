@@ -216,8 +216,8 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => {
           // The stream also ends on a dropped socket, so the exit code is polled for the rest of the wait.
           const exitCode = await exitCodeOf(sessionId, cmdId, remainingMs());
           // The full logs, in case the stream dropped early; the streamed output if they fail.
-          const { stdout, stderr } = await processes.getSessionCommandLogs(sessionId, cmdId).catch(() => streamed);
-          result = { exitCode, stdout, stderr };
+          const logs = await processes.getSessionCommandLogs(sessionId, cmdId).catch(() => streamed);
+          result = { exitCode, stdout: logs.stdout ?? streamed.stdout, stderr: logs.stderr ?? streamed.stderr };
         }
         if (timeoutMs && TIMED_OUT_EXIT_CODES.has(result.exitCode) && Date.now() - startedAt >= timeoutMs) {
           throw new SandboxTimeoutError(`Command timed out after ${timeoutMs} ms`);
