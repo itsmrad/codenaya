@@ -15,53 +15,19 @@
  *   npm run e2b:template
  * Uses E2B_TEMPLATE (default: codenaya-node22); set the same value in the app.
  */
-import * as nodeModule from "node:module";
-
 import { Template, defaultBuildLogger } from "e2b";
+
+// Computed, like the starter imports in starters.mts: Node runs the .mts
+// directly, and tsc doesn't reject the extension.
+const { STARTER_WARMUP_COMMANDS }: { STARTER_WARMUP_COMMANDS: string[] } = await import(
+  new URL("./starters.mts", import.meta.url).href
+);
 
 const TEMPLATE_NAME = process.env.E2B_TEMPLATE?.trim() || "codenaya-node22";
 
-// The starter's own imports are extensionless, as the bundler resolves them;
-// plain Node needs the .ts added. Typed here: @types/node predates
-// registerHooks (Node 22.15+).
-type Resolve = (specifier: string, context: object) => unknown;
-const { registerHooks } = nodeModule as unknown as {
-  registerHooks: (hooks: {
-    resolve: (specifier: string, context: object, nextResolve: Resolve) => unknown;
-  }) => void;
-};
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    try {
-      return nextResolve(specifier, context);
-    } catch (error) {
-      if (/^\.\.?\//.test(specifier) && !/\.[cm]?[jt]s$/.test(specifier)) {
-        return nextResolve(`${specifier}.ts`, context);
-      }
-      throw error;
-    }
-  },
-});
-
-// A computed specifier: Node runs the .ts file directly, and tsc doesn't
-// reject the .ts extension (no allowImportingTsExtensions in tsconfig).
-const starterDir = "../src/features/conversations/inngest";
-const { VITE_REACT_STARTER } = await import(new URL(`${starterDir}/vite-starter.ts`, import.meta.url).href);
-const { NEXT_APP_STARTER } = await import(new URL(`${starterDir}/next-starter.ts`, import.meta.url).href);
-const { TANSTACK_START_STARTER } = await import(new URL(`${starterDir}/tanstack-start-starter.ts`, import.meta.url).href);
-const warmup = (starter: Array<{ path: string; content: string }>) => {
-  const packageJson = starter.find((file) => file.path === "package.json")!.content;
-  return [
-    "mkdir -p /home/user/.starter-warmup",
-    `echo ${Buffer.from(packageJson).toString("base64")} | base64 -d > /home/user/.starter-warmup/package.json`,
-    "cd /home/user/.starter-warmup && npm install --no-audit --no-fund",
-    "rm -rf /home/user/.starter-warmup",
-  ];
-};
-
 const template = Template()
   .fromNodeImage("22")
-  .runCmd([...warmup(VITE_REACT_STARTER), ...warmup(NEXT_APP_STARTER), ...warmup(TANSTACK_START_STARTER)], { user: "user" });
+  .runCmd(STARTER_WARMUP_COMMANDS, { user: "user" });
 
 await Template.build(template, TEMPLATE_NAME, {
   memoryMB: Number(process.env.E2B_TEMPLATE_MEMORY_MB || 2048),
