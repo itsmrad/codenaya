@@ -1,8 +1,7 @@
 import {
-  readDodoConfig, type DodoDeployment, type DodoReceiverConfig, type DodoReconcilerConfig,
+  parseDeployment, readDodoConfig, type DodoReceiverConfig, type DodoReconcilerConfig,
 } from "../src/features/billing/server/dodo-config";
 
-const DEPLOYMENTS: readonly string[] = ["development", "preview", "staging", "production"] satisfies DodoDeployment[];
 export const LOG_PREFIX = {
   "convex-receiver": "[billingWebhook] receiver",
   "convex-reconciler": "[billingReconcile] reconciler",
@@ -18,15 +17,15 @@ export function readConvexBillingConfig(consumer: "convex-reconciler"): DodoReco
 export function readConvexBillingConfig(
   consumer: "convex-receiver" | "convex-reconciler",
 ): DodoReceiverConfig | DodoReconcilerConfig | null {
-  const deployment = process.env.CODENAYA_DEPLOYMENT;
-  if (!deployment || !DEPLOYMENTS.includes(deployment)) {
+  const deployment = parseDeployment(process.env.CODENAYA_DEPLOYMENT);
+  if (!deployment) {
     console.error(`${LOG_PREFIX[consumer]} not configured: CODENAYA_DEPLOYMENT is missing or invalid.`);
     return null;
   }
   try {
     return consumer === "convex-receiver"
-      ? readDodoConfig(consumer, deployment as DodoDeployment)
-      : readDodoConfig(consumer, deployment as DodoDeployment);
+      ? readDodoConfig(consumer, deployment)
+      : readDodoConfig(consumer, deployment);
   } catch (error) {
     // Config errors name the variable only, never its value.
     console.error(`${LOG_PREFIX[consumer]} not configured:`, error instanceof Error ? error.message : "unknown error");
