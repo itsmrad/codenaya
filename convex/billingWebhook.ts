@@ -1,11 +1,9 @@
-import { v } from "convex/values";
 import { Webhook } from "svix";
 
 import { readBoundedBody } from "../src/features/billing/server/bounded-body";
 import { internal } from "./_generated/api";
-import { httpAction, internalQuery } from "./_generated/server";
+import { httpAction } from "./_generated/server";
 import { LOG_PREFIX, readConvexBillingConfig } from "./billingEnv";
-import { billingModeValidator } from "./schema";
 
 export const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 // Exact Dodo event types (SDK 2.63.0) that move money or access, each with the resource id its
@@ -108,16 +106,6 @@ function normalize(payload: unknown, businessId: string): NormalizedEvent | null
   return requiredId && !event[requiredId] ? null : event;
 }
 
-export const customerRefByProviderId = internalQuery({
-  args: { mode: billingModeValidator, customerId: v.string() },
-  returns: v.union(v.id("billingCustomers"), v.null()),
-  handler: async (ctx, { mode, customerId }) => {
-    const customer = await ctx.db.query("billingCustomers")
-      .withIndex("by_mode_and_customerId", q => q.eq("mode", mode).eq("customerId", customerId)).unique();
-    return customer?._id ?? null;
-  },
-});
-
 /**
  * Dodo Standard Webhooks receiver. Verifies before any parse or write, then durably
  * records a minimal receipt. 2xx means recorded, never fulfilled.
@@ -150,15 +138,13 @@ export const receiveDodoWebhook = httpAction(async (ctx, request) => {
   }
 
   const { financial, customerId, ...fields } = event;
-  const customerRef = customerId === undefined ? null
-    : await ctx.runQuery(internal.billingWebhook.customerRefByProviderId, { mode: receiver.mode, customerId });
   await ctx.runMutation(internal.billing.recordReceipt, {
     ...fields,
     mode: receiver.mode,
     webhookId: headers["webhook-id"],
     bodyDigest: await sha256Hex(bytes),
-    // An unmapped receipt keeps its provider customer id so binding that customer later attaches it.
-    ...(customerRef ? { customerRef } : customerId !== undefined ? { providerCustomerId: customerId } : {}),
+    // Mapped inside recordReceipt's transaction; kept on the receipt only while unmapped.
+    ...(customerId !== undefined ? { providerCustomerId: customerId } : {}),
     ...(financial ? {} : { ignored: true }),
   });
   return respond(200);

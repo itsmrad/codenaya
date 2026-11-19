@@ -71,16 +71,61 @@ const sub = (userId = "user_alice") => ({
 });
 
 /** Claims and commits a period for `paymentId` over every claimed receipt except refunds and disputes, as the reconciler does. */
-async function reconcile(t: T, customerRef: Id<"billingCustomers">, paymentId = "pay_1", userId = "user_alice") {
+async function reconcile(t: T, customerRef: Id<"billingCustomers">, paymentId = "pay_1", userId = "user_alice", payments: object[] = [period(paymentId)]) {
   const claim = (await t.mutation(internal.billingQueue.claimCustomer, { customerRef }))!;
   const result = await t.mutation(internal.billingFulfill.commitReconciliation, {
     customerRef, fence: { generation: claim.generation, inputRevision: claim.inputRevision },
     receiptRefs: claim.receipts.filter(r => !/^(refund|dispute)\./.test(r.eventType)).map(r => r.eventRef),
-    payments: [period(paymentId)], subscriptions: [sub(userId)],
+    payments: payments as never, subscriptions: [sub(userId)],
   });
   await t.mutation(internal.billingQueue.releaseCustomer, { customerRef, generation: claim.generation });
   return result;
 }
+
+/** Runs scheduled continuations by hand (the scheduler's other jobs stay queued) until none is new; returns how many ran. */
+async function drainContinuations(t: T) {
+  const ran = new Set<string>();
+  for (;;) {
+    const next = (await scheduled(t, "associateMoreUnmapped")).find(job => !ran.has(job._id));
+    if (!next) return ran.size;
+    ran.add(next._id);
+    await t.mutation(internal.billing.associateMoreUnmapped, next.args[0] as never);
+  }
+}
+
+describe("mapping at receipt time", () => {
+  test("a receipt recorded after bindCustomer committed is mapped, though the receiver saw no customer", async () => {
+    const t = setup();
+    const alice = await unbound(t);
+    await bind(t, alice);
+    // The receiver passes only the payload's provider customer id; recordReceipt maps it in its own transaction.
+    const refund = await receive(t, { providerCustomerId: "cus_user_alice", eventType: "refund.succeeded", paymentId: "pay_0" });
+    const row = await read(t, refund);
+    expect(row).toMatchObject({ customerRef: alice, state: "pending" });
+    expect(row?.providerCustomerId).toBeUndefined();
+    expect(await read(t, alice)).toMatchObject({ inputRevision: 1, unresolvedReceipts: 1 });
+    await checkout(t, alice);
+    await receive(t, { customerRef: alice, paymentId: "pay_1" });
+    expect(await reconcile(t, alice)).toBe("blocked");
+    expect(await grants(t)).toEqual([]);
+  });
+
+  test("a refund with no customer in its payload maps through the purchase bound to its payment and blocks grants", async () => {
+    const t = setup();
+    const alice = await unbound(t);
+    await bind(t, alice);
+    const purchaseRef = await checkout(t, alice);
+    await t.mutation(internal.billing.bindPurchase, { purchaseRef, mode: "test_mode", paymentId: "pay_1" });
+    const refund = await receive(t, { eventType: "refund.succeeded", paymentId: "pay_1" });
+    expect(await read(t, refund)).toMatchObject({ customerRef: alice, state: "pending" });
+    // Another mode's purchase never maps it.
+    const otherMode = await receive(t, { eventType: "refund.succeeded", paymentId: "pay_1", mode: "live_mode" });
+    expect((await read(t, otherMode))?.customerRef).toBeUndefined();
+    await receive(t, { customerRef: alice, paymentId: "pay_1" });
+    expect(await reconcile(t, alice)).toBe("blocked");
+    expect(await grants(t)).toEqual([]);
+  });
+});
 
 describe("associating unmapped receipts", () => {
   test("binding the customer attaches its early receipt and dirties the fence", async () => {
@@ -249,12 +294,46 @@ describe("associating unmapped receipts", () => {
     await bind(t, alice);
     expect(await read(t, alice)).toMatchObject({ inputRevision: 1, unresolvedReceipts: MAX_ASSOCIATE_BATCH });
 
-    const continuations = await scheduled(t, "associateMoreUnmapped");
-    expect(continuations).toHaveLength(1);
-    await t.mutation(internal.billing.associateMoreUnmapped, continuations[0].args[0] as never);
-    // A partial batch schedules no further continuation.
-    expect(await scheduled(t, "associateMoreUnmapped")).toHaveLength(1);
+    expect(await drainContinuations(t)).toBe(1);
     expect(await read(t, alice)).toMatchObject({ inputRevision: 2, unresolvedReceipts: total });
     expect((await events(t)).every(row => row.customerRef === alice && row.state === "pending")).toBe(true);
+  });
+
+  test("the continuation pages past rows that stay quarantined in its range", async () => {
+    const t = setup();
+    const alice = await unbound(t);
+    // A full first batch of digest_mismatch rows: attached but still quarantined, so they stay in the index range.
+    for (let i = 0; i < MAX_ASSOCIATE_BATCH; i++) {
+      await receive(t, { providerCustomerId: "cus_user_alice", webhookId: `wh_mismatch_${i}` });
+      await receive(t, { providerCustomerId: "cus_user_alice", webhookId: `wh_mismatch_${i}`, digest: "b" });
+    }
+    const late = await receive(t, { providerCustomerId: "cus_user_alice" });
+    await bind(t, alice);
+    expect(await read(t, late)).toMatchObject({ state: "quarantined", quarantineReason: "unmapped" });
+
+    expect(await drainContinuations(t)).toBeGreaterThanOrEqual(1);
+    expect(await read(t, late)).toMatchObject({ customerRef: alice, state: "pending" });
+    expect(await read(t, alice)).toMatchObject({ unresolvedReceipts: MAX_ASSOCIATE_BATCH + 1 });
+    const rows = await events(t);
+    expect(rows.filter(row => row.state === "quarantined" && row.quarantineReason === "digest_mismatch" && row.customerRef === alice))
+      .toHaveLength(MAX_ASSOCIATE_BATCH);
+  });
+
+  test("when one of two positives attaches a receipt, neither grants in that commit", async () => {
+    const t = setup();
+    const alice = await unbound(t);
+    await bind(t, alice);
+    await checkout(t, alice);
+    const P2 = { serviceStart: P1.serviceEnd, serviceEnd: Date.UTC(2027, 0, 1) };
+    // Not a negative: only the attachment itself withholds the grants.
+    const early = await receive(t, { paymentId: "pay_2" });
+    const first = await receive(t, { customerRef: alice, paymentId: "pay_1" });
+    const second = await receive(t, { customerRef: alice, paymentId: "pay_2" });
+    const pay2 = { paymentId: "pay_2", currency: "USD", totalMinor: 2000, taxMinor: 180, decision: { ...period("pay_2").decision, ...P2, settledAt: P2.serviceStart } };
+    expect(await reconcile(t, alice, "pay_1", "user_alice", [period("pay_1"), pay2])).toBe("blocked");
+    expect(await grants(t)).toEqual([]);
+    expect(await read(t, early)).toMatchObject({ customerRef: alice, state: "pending" });
+    expect([(await read(t, first))?.state, (await read(t, second))?.state]).toEqual(["pending", "pending"]);
+    expect(await t.run(ctx => ctx.db.query("billingPurchases").take(5))).toHaveLength(1);
   });
 });
