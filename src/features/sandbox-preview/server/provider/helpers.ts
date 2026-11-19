@@ -22,7 +22,7 @@ export interface SandboxProcess {
   envs: Record<string, string>;
 }
 
-const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+export const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 
 /** One line per process: pid, ppid, cwd, then base64 of the NUL-separated cmdline and environ. */
 const LIST_PROCESSES =
