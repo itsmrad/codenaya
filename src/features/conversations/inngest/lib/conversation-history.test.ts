@@ -95,6 +95,25 @@ describe("priorTurns", () => {
     expect(priorTurns(messages, current._id)).toEqual(unfinished("Build a pizzeria site"));
   });
 
+  // Runs recorded before setEnvVar was removed: their tool calls must not reach the model again.
+  it("replays only reply text, never a historical setEnvVar call or its value", () => {
+    const current = reply("", "processing");
+    const stored = {
+      ...reply("Stored your API URL."),
+      steps: [{ id: "e", kind: "tool", tool: "setEnvVar", targets: ["API_URL"], status: "done", startedAt: 0 }],
+      toolCalls: [{ name: "setEnvVar", input: { key: "API_URL", value: "CANARY_VALUE_123" } }],
+    };
+    const messages = [user("Set the API URL"), stored, user("Next"), current];
+
+    const turns = priorTurns(messages, current._id);
+
+    expect(turns).toEqual([
+      { type: "text", role: "user", content: "Set the API URL" },
+      { type: "text", role: "assistant", content: "Stored your API URL." },
+    ]);
+    expect(JSON.stringify(turns)).not.toMatch(/CANARY_VALUE_123|setEnvVar/);
+  });
+
   it("drops a reply whose request fell outside the window, and keeps image-only requests", () => {
     const current = reply("", "processing");
     const messages = [reply("Orphan"), user(""), reply("Described the image."), user("Next"), current];

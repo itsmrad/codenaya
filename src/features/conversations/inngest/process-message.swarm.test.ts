@@ -111,6 +111,7 @@ describe("processMessage swarm mode", () => {
     expect(outcome.finalType).toBe("function-resolved");
     const [first] = codingRequests(outcome.inferenceBodies);
     expect(first.tools?.map((tool) => tool.function.name)).toContain("delegateTasks");
+    expect(first.tools?.map((tool) => tool.function.name)).not.toContain("setEnvVar");
     expect(String(first.messages[0].content)).toContain("## Swarm mode");
     // The orchestrator sees the real multi-page request, and no blanket "too small to split" escape hatch.
     expect(JSON.stringify(first.messages)).toContain(PIZZERIA);

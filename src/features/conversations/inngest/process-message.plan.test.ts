@@ -47,7 +47,6 @@ const WRITE_TOOLS = [
   "scaffoldViteApp",
   "renameFile",
   "deleteFiles",
-  "setEnvVar",
 ];
 
 interface ChatBody {
@@ -102,6 +101,8 @@ describe("processMessage in plan mode", () => {
 
     const body = codingRequest(outcome.inferenceBodies);
     expect(toolNames(body)).toEqual(expect.arrayContaining(WRITE_TOOLS));
+    // Values are entered by the owner in the Environment Variables panel, never by the agent.
+    expect(toolNames(body)).not.toContain("setEnvVar");
     expect(String(body.messages[0].content)).not.toContain("## Ask / Plan mode");
     expect(mutationNames()).toContain("system:createProjectCheckpoint");
   });

@@ -78,7 +78,9 @@ const TOOL_META: Record<string, ToolMeta> = {
   renameFile: { icon: FileSymlinkIcon, running: "Renaming", done: "Renamed" },
   deleteFiles: { icon: FileX2Icon, running: "Deleting", done: "Deleted" },
   scrapeUrls: { icon: GlobeIcon, running: "Fetching", done: "Fetched" },
+  // Removed tool, kept so older runs still render; their steps record the key only.
   setEnvVar: { icon: KeyRoundIcon, running: "Setting env", done: "Set env" },
+  setEnvVarFromRef: { icon: KeyRoundIcon, running: "Setting env", done: "Set env" },
   loadSkill: { icon: BookOpenIcon, running: "Loading skill", done: "Used skill" },
   delegateTasks: { icon: UsersIcon, running: "Delegating", done: "Delegated" },
   checkBuild: { icon: HammerIcon, running: "Checking build", done: "Checked build" },
@@ -180,7 +182,7 @@ const FileChip = ({ path, onOpen, label = false }: FileChipProps) => {
 const CHIP_LIMIT = 6;
 
 /** Tools whose targets are not project files: their chips never open. */
-const NON_FILE_TOOLS = new Set(["searchFiles", "scrapeUrls", "setEnvVar", "loadSkill", "checkBuild", "delegateTasks"]);
+const NON_FILE_TOOLS = new Set(["searchFiles", "scrapeUrls", "setEnvVar", "setEnvVarFromRef", "loadSkill", "checkBuild", "delegateTasks"]);
 
 const isFileTool = (tool = "") => !NON_FILE_TOOLS.has(tool) && !tool.includes("__");
 

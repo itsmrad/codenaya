@@ -12,7 +12,7 @@ Use this when the user wants to take payments: a buy button, a paid download, a 
 ## Rules (never break these)
 
 - The **secret key** (\`sk_test_...\`, \`sk_live_...\`), restricted keys (\`rk_...\`) and the **webhook signing secret** (\`whsec_...\`) never go in client code, in any \`VITE_\`/\`NEXT_PUBLIC_\` variable, or in any file. Only the publishable key (\`pk_...\`) may reach the browser.
-- Never ask the user to paste a key into chat. Secrets go in the project's **Environment Variables** dialog (or \`setEnvVar\` with a non-public name when the value comes from a tool).
+- Never ask the user to paste a key into chat. Secrets go in the project's **Environment Variables** dialog, which the user fills in: tell them the variable names, and never handle the values yourself.
 - Never trust a price or amount from the browser. The client says *what* to buy; the server maps that to a Stripe Price ID from its own list.
 - Grant access or ship goods only after a verified webhook (or a server-side session lookup), never because the user landed on the success page.
 - Build and test in a Stripe **sandbox** (test keys, test card 4242 4242 4242 4242, any future date, any CVC). Switching to live keys is a step the user takes explicitly; never do it for them.
