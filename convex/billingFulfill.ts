@@ -8,6 +8,7 @@ import type { Doc } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { assertGrantFence, associateUnmappedReceipts, bindSubscriptionRow, ownerDeleted } from "./billing";
 import { insertGrant, rollOverIntoPeriod } from "./billingGrants";
+import { markPollDue } from "./billingPoll";
 
 /**
  * Fenced fulfillment of reconciled Dodo facts (ADR 0016). One transaction settles each
@@ -241,6 +242,8 @@ async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positi
     ...(deleted ? { cancellationRecoveryRequired: true } : {}),
   });
   if (customer.pendingPurchaseRef === purchase._id) await ctx.db.patch("billingCustomers", customer._id, { pendingPurchaseRef: undefined });
+  // Polled for a while after any settlement, top-ups too, so a missed refund or dispute is still found.
+  await markPollDue(ctx, customer._id, true);
   if (deleted) return false; // recorded for recovery; no credit account is created or enabled
   // Before insertGrant, so the new grant pays off the enabled account's debt.
   await enableAccount(ctx, customer, now);

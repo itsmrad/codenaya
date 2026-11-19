@@ -206,61 +206,66 @@ async function receiptParent(ctx: QueryCtx, mode: Doc<"billingCustomers">["mode"
   return purchase && await ctx.db.get("billingCustomers", purchase.customerRef);
 }
 
-export const recordReceipt = internalMutation({
-  args: {
-    customerRef: v.optional(v.id("billingCustomers")), mode: billingModeValidator, webhookId: v.string(), eventType: v.string(),
-    bodyDigest: v.string(), occurredAt: v.number(), ...billingResourceIdsValidator.fields,
-    // The payload's provider customer: mapped here, else stored on the unmapped receipt for a later binding.
-    providerCustomerId: v.optional(v.string()),
-    // Authenticated but unsupported event types: stored for dedupe, never processed or counted.
-    ignored: v.optional(v.boolean()),
-  },
-  returns: v.id("billingEvents"),
-  handler: async (ctx, { ignored, providerCustomerId, customerRef, ...args }) => {
-    requireText(args.webhookId);
-    requireText(args.eventType);
-    if (!/^[a-f0-9]{64}$/.test(args.bodyDigest) || !Number.isFinite(args.occurredAt)) {
-      throw appError("INVALID_ARGUMENT", "Invalid normalized billing receipt");
-    }
-    const parent = customerRef !== undefined ? await requireCustomer(ctx, customerRef)
-      : await receiptParent(ctx, args.mode, providerCustomerId, args.paymentId);
-    if (parent) requireMode(parent.mode, args.mode);
-    const existing = await ctx.db.query("billingEvents")
-      .withIndex("by_mode_and_webhookId", q => q.eq("mode", args.mode).eq("webhookId", args.webhookId)).unique();
-    if (existing) {
-      const unmapped = existing.state === "quarantined" && existing.customerRef === undefined;
-      if (unmapped) {
-        // A replay after mapping (same digest) attaches the row; a differing one stays unmapped for an operator.
-        if (existing.bodyDigest !== args.bodyDigest) {
-          if (existing.quarantineReason !== "digest_mismatch") await ctx.db.patch("billingEvents", existing._id, { quarantineReason: "digest_mismatch" });
-        } else if (parent) {
-          await attachReceipts(ctx, parent._id, [existing]);
-        }
-      } else if (existing.bodyDigest !== args.bodyDigest && existing.state !== "quarantined") {
-        await ctx.db.patch("billingEvents", existing._id, { state: "quarantined", quarantineReason: "digest_mismatch" });
-        if (existing.customerRef) {
-          const originalParent = await requireCustomer(ctx, existing.customerRef);
-          await ctx.db.patch("billingCustomers", originalParent._id, {
-            inputRevision: originalParent.inputRevision + 1,
-            unresolvedReceipts: originalParent.unresolvedReceipts + (existing.state === "processed" || existing.state === "ignored" ? 1 : 0),
-          });
-        }
+const recordReceiptArgs = v.object({
+  customerRef: v.optional(v.id("billingCustomers")), mode: billingModeValidator, webhookId: v.string(), eventType: v.string(),
+  bodyDigest: v.string(), occurredAt: v.number(), ...billingResourceIdsValidator.fields,
+  // The payload's provider customer: mapped here, else stored on the unmapped receipt for a later binding.
+  providerCustomerId: v.optional(v.string()),
+  // Authenticated but unsupported event types: stored for dedupe, never processed or counted.
+  ignored: v.optional(v.boolean()),
+});
+
+/** Shared by `recordReceipt` and polling's synthetic receipts; deduped by (mode, webhookId). */
+export async function recordReceiptRow(ctx: MutationCtx, { ignored, providerCustomerId, customerRef, ...args }: Infer<typeof recordReceiptArgs>) {
+  requireText(args.webhookId);
+  requireText(args.eventType);
+  if (!/^[a-f0-9]{64}$/.test(args.bodyDigest) || !Number.isFinite(args.occurredAt)) {
+    throw appError("INVALID_ARGUMENT", "Invalid normalized billing receipt");
+  }
+  const parent = customerRef !== undefined ? await requireCustomer(ctx, customerRef)
+    : await receiptParent(ctx, args.mode, providerCustomerId, args.paymentId);
+  if (parent) requireMode(parent.mode, args.mode);
+  const existing = await ctx.db.query("billingEvents")
+    .withIndex("by_mode_and_webhookId", q => q.eq("mode", args.mode).eq("webhookId", args.webhookId)).unique();
+  if (existing) {
+    const unmapped = existing.state === "quarantined" && existing.customerRef === undefined;
+    if (unmapped) {
+      // A replay after mapping (same digest) attaches the row; a differing one stays unmapped for an operator.
+      if (existing.bodyDigest !== args.bodyDigest) {
+        if (existing.quarantineReason !== "digest_mismatch") await ctx.db.patch("billingEvents", existing._id, { quarantineReason: "digest_mismatch" });
+      } else if (parent) {
+        await attachReceipts(ctx, parent._id, [existing]);
       }
-      return existing._id;
+    } else if (existing.bodyDigest !== args.bodyDigest && existing.state !== "quarantined") {
+      await ctx.db.patch("billingEvents", existing._id, { state: "quarantined", quarantineReason: "digest_mismatch" });
+      if (existing.customerRef) {
+        const originalParent = await requireCustomer(ctx, existing.customerRef);
+        await ctx.db.patch("billingCustomers", originalParent._id, {
+          inputRevision: originalParent.inputRevision + 1,
+          unresolvedReceipts: originalParent.unresolvedReceipts + (existing.state === "processed" || existing.state === "ignored" ? 1 : 0),
+        });
+      }
     }
-    const now = Date.now();
-    // An unmapped verified receipt is never discarded: it waits quarantined for reconciliation.
-    const eventRef = await ctx.db.insert("billingEvents", {
-      ...args, ...(parent ? { customerRef: parent._id } : {}), receivedAt: now, state: ignored ? "ignored" : parent ? "pending" : "quarantined", attempts: 0,
-      nextAttemptAt: now, generation: parent?.generation ?? 0,
-      ...(parent || ignored ? {} : { quarantineReason: "unmapped" as const, ...(providerCustomerId ? { providerCustomerId } : {}) }),
-    });
-    if (parent && !ignored) {
-      await ctx.db.patch("billingCustomers", parent._id, { inputRevision: parent.inputRevision + 1, unresolvedReceipts: parent.unresolvedReceipts + 1 });
-      await scheduleCustomer(ctx, parent._id);
-    }
-    return eventRef;
-  },
+    return existing._id;
+  }
+  const now = Date.now();
+  // An unmapped verified receipt is never discarded: it waits quarantined for reconciliation.
+  const eventRef = await ctx.db.insert("billingEvents", {
+    ...args, ...(parent ? { customerRef: parent._id } : {}), receivedAt: now, state: ignored ? "ignored" : parent ? "pending" : "quarantined", attempts: 0,
+    nextAttemptAt: now, generation: parent?.generation ?? 0,
+    ...(parent || ignored ? {} : { quarantineReason: "unmapped" as const, ...(providerCustomerId ? { providerCustomerId } : {}) }),
+  });
+  if (parent && !ignored) {
+    await ctx.db.patch("billingCustomers", parent._id, { inputRevision: parent.inputRevision + 1, unresolvedReceipts: parent.unresolvedReceipts + 1 });
+    await scheduleCustomer(ctx, parent._id);
+  }
+  return eventRef;
+}
+
+export const recordReceipt = internalMutation({
+  args: recordReceiptArgs,
+  returns: v.id("billingEvents"),
+  handler: recordReceiptRow,
 });
 
 export const MAX_ASSOCIATE_BATCH = 50;
