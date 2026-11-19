@@ -24,7 +24,7 @@ const seed = (t: TestConvex, versioned = true, plan: "free" | "pro" = "pro") =>
   t.run(async (ctx) => {
     await ctx.db.insert("creditAccounts", {
       userId: ALICE, plan, periodStartsAt: Date.UTC(2026, 9, 1), periodUsed: 0,
-      dayStartsAt: Date.UTC(2026, 9, 29), dayUsed: 0, ...(versioned ? { paidCreditsVersion: 1 as const } : {}),
+      dayStartsAt: Date.UTC(2026, 9, 29), dayUsed: 0, ...(versioned ? { paidCreditsVersion: 1 as const, paidCreditsMode: mode } : {}),
     });
     return await ctx.db.insert("billingCustomers", {
       mode, ownerTokenIdentifier: `https://clerk.synthetic|${ALICE}`, userId: ALICE,
@@ -53,10 +53,19 @@ const seedMessage = (t: TestConvex) =>
   });
 
 /** Records a platform run whose running cost is `costUsd`: 150 credits per dollar. */
-const charge = (t: TestConvex, messageId: Id<"messages">, costUsd: number) =>
+const charge = (t: TestConvex, messageId: Id<"messages">, costUsd: number, agentTaskId?: Id<"agentTasks">) =>
   t.mutation(api.credits.recordRunUsage, {
-    internalKey: INTERNAL_KEY, messageId, source: "platform", inputTokens: 1000, outputTokens: 100, costUsd,
+    internalKey: INTERNAL_KEY, messageId, agentTaskId, source: "platform", inputTokens: 1000, outputTokens: 100, costUsd,
   });
+
+const seedWorker = (t: TestConvex, messageId: Id<"messages">) =>
+  t.run(async (ctx) =>
+    ctx.db.insert("agentTasks", {
+      messageId, projectId: (await ctx.db.get("messages", messageId))!.projectId, taskId: "t1", role: "worker",
+      title: "Worker", brief: "Do it", ownedPaths: [], modelId: "gpt-5.6-luna", model: "GPT-5.6 Luna",
+      status: "running", steps: [], updatedAt: 1,
+    }),
+  );
 
 const consumed = (t: TestConvex) =>
   t.run(async (ctx) => (await ctx.db.query("billingGrants").take(200)).map((row) => [row.sourceKey, row.consumed]));
@@ -168,7 +177,85 @@ describe("paid credit allocation in recordRunUsage", () => {
     expect(await consumed(t)).toEqual([["top", 3]]);
   });
 
-  test("past the top-up cap, a charge the read lots cover succeeds and one they can't fails whole", async () => {
+  test("interleaved runs spend the same lots once, in order", async () => {
+    const t = setup();
+    const customerRef = await seed(t);
+    await grant(t, customerRef, "cur", { kind: "current_period", quantity: 5 });
+    await grant(t, customerRef, "top", { kind: "top_up", quantity: 10 });
+    const a = await seedMessage(t);
+    const b = await seedMessage(t);
+
+    await charge(t, a, 0.02); // 3
+    await charge(t, b, 0.02); // 3
+    await charge(t, a, 0.04); // 3 more
+    await charge(t, b, 0.04); // 3 more
+
+    expect(await consumed(t)).toEqual([["cur", 5], ["top", 7]]);
+    expect(await rawAccount(t)).toMatchObject({ periodUsed: 12 });
+    expect((await rawAccount(t))!.creditDebt).toBeUndefined();
+  });
+
+  test("a swarm worker's own ledger row spends lots too", async () => {
+    const t = setup();
+    const customerRef = await seed(t);
+    await grant(t, customerRef, "top", { kind: "top_up", quantity: 20 });
+    const messageId = await seedMessage(t);
+    await charge(t, messageId, 0.04); // 6
+    await charge(t, messageId, 0.02, await seedWorker(t, messageId)); // 3 on the worker's row
+    expect(await consumed(t)).toEqual([["top", 9]]);
+    expect(await rawAccount(t)).toMatchObject({ periodUsed: 9 });
+  });
+
+  test("spends only lots of the account's billing mode", async () => {
+    const t = setup();
+    const customerRef = await seed(t);
+    const liveRef = await t.run((ctx) =>
+      ctx.db.insert("billingCustomers", {
+        mode: "live_mode", ownerTokenIdentifier: `https://clerk.synthetic|${ALICE}`, userId: ALICE,
+        creationState: "ready", generation: 0, inputRevision: 0, unresolvedReceipts: 0,
+      }),
+    );
+    await t.run((ctx) =>
+      insertGrant(ctx, { mode: "live_mode", sourceKey: "live", customerRef: liveRef, kind: "top_up", quantity: 100, expiresAt: NOW + DAY }),
+    );
+    await grant(t, customerRef, "test", { kind: "top_up", quantity: 2 });
+    await charge(t, await seedMessage(t), 0.04); // 6
+    expect(await consumed(t)).toEqual([["live", 0], ["test", 2]]);
+    expect(await rawAccount(t)).toMatchObject({ periodUsed: 6, creditDebt: 4 });
+  });
+
+  test("debt outlives a calendar period reset", async () => {
+    const t = setup();
+    const customerRef = await seed(t);
+    await grant(t, customerRef, "cur", { kind: "current_period", quantity: 2, expiresAt: Date.UTC(2026, 10, 1) });
+    await charge(t, await seedMessage(t), 0.04); // 6: 4 uncovered
+
+    vi.setSystemTime(Date.UTC(2026, 10, 2));
+    await charge(t, await seedMessage(t), 0.02); // 3, lot expired
+    expect(await rawAccount(t)).toMatchObject({ periodStartsAt: Date.UTC(2026, 10, 1), periodUsed: 3, creditDebt: 7 });
+  });
+
+  test.each(["current_period", "rollover"] as const)(
+    "a capped %s kind spends its read lots, never later kinds, and records the rest as debt",
+    async (kind) => {
+      const t = setup();
+      const customerRef = await seed(t);
+      for (let i = 1; i <= MAX_ACTIVE_LOTS[kind] + 1; i++) {
+        await grant(t, customerRef, `${kind}_${i}`, { kind, quantity: 2, expiresAt: NOW + i * DAY });
+      }
+      await grant(t, customerRef, "top", { kind: "top_up", quantity: 100 });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await charge(t, await seedMessage(t), 0.04); // 6: the 2 read lots cover 4
+
+      expect(await consumed(t)).toEqual([[`${kind}_1`, 2], [`${kind}_2`, 2], [`${kind}_3`, 0], ["top", 0]]);
+      expect(await rawAccount(t)).toMatchObject({ periodUsed: 6, creditDebt: 2 });
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`userId=${ALICE} .*kind=${kind}`)));
+      warn.mockRestore();
+    },
+  );
+
+  test("past the top-up cap, the read lots are spent and the rest becomes debt with full usage", async () => {
     const t = setup();
     const customerRef = await seed(t);
     for (let i = 0; i <= MAX_ACTIVE_LOTS.top_up; i++) {
@@ -178,9 +265,12 @@ describe("paid credit allocation in recordRunUsage", () => {
     const spent = (await consumed(t)).filter(([, n]) => n === 1).map(([key]) => key);
     expect(spent).toEqual(["top_000", "top_001", "top_002", "top_003", "top_004", "top_005"]);
 
-    const big = await seedMessage(t);
-    await expect(charge(t, big, 1)).rejects.toThrow(/Too many active paid credit lots/);
-    expect(await t.run((ctx) => ctx.db.query("creditLedger").collect())).toHaveLength(1);
-    expect(await rawAccount(t)).toMatchObject({ periodUsed: 6 });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await charge(t, await seedMessage(t), 1); // 150: the other 94 read lots cover 94
+    expect((await consumed(t)).filter(([, n]) => n === 1)).toHaveLength(MAX_ACTIVE_LOTS.top_up);
+    expect(await t.run((ctx) => ctx.db.query("creditLedger").collect())).toHaveLength(2);
+    expect(await rawAccount(t)).toMatchObject({ periodUsed: 156, creditDebt: 56 });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/kind=top_up/));
+    warn.mockRestore();
   });
 });

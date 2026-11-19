@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { allocateCredits, type GrantLot, lotRemaining } from "./grants";
@@ -56,5 +59,20 @@ describe("allocateCredits", () => {
   it("returns what the lots can't cover as the shortfall", () => {
     expect(spent([lot("cur", "current_period", 4)], 10)).toEqual({ takes: [["cur", 4]], shortfall: 6 });
     expect(spent([], 10)).toEqual({ takes: [], shortfall: 10 });
+  });
+});
+
+describe("paid credits gate", () => {
+  // Free-allocation-first and grant-side debt offset aren't built yet: until
+  // they land, only the schema declares these fields and only the charge reads them.
+  it("nothing outside tests enables paid credits on an account", () => {
+    const mentions = ["convex", "src"].flatMap((dir) =>
+      readdirSync(dir, { recursive: true, encoding: "utf8" })
+        .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file) && !file.includes("_generated"))
+        .map((file) => join(dir, file))
+        .filter((path) => /paidCredits(Version|Mode)/.test(readFileSync(path, "utf8"))),
+    );
+    expect(mentions.sort()).toEqual(["convex/credits.ts", "convex/schema.ts"]);
+    expect(readFileSync("convex/credits.ts", "utf8")).not.toMatch(/paidCredits(Version|Mode)\s*:/);
   });
 });

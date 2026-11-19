@@ -917,7 +917,7 @@ export default defineSchema({
     serviceEnd: v.optional(v.number()),
   })
     .index("by_mode_and_sourceKey", ["mode", "sourceKey"])
-    .index("by_userId_and_kind_and_expiresAt", ["userId", "kind", "expiresAt"]),
+    .index("by_userId_and_mode_and_kind_and_expiresAt", ["userId", "mode", "kind", "expiresAt"]),
 
   /**
    * A user's credit usage this month and today (ADR 0011). Created on the first
@@ -933,6 +933,8 @@ export default defineSchema({
     dayUsed: v.number(),
     // Set only on billing-enabled accounts (ADR 0016): their charges also spend billingGrants.
     paidCreditsVersion: v.optional(v.literal(1)),
+    // The billing mode whose lots those charges spend; set together with paidCreditsVersion.
+    paidCreditsMode: v.optional(billingModeValidator),
     // Charged credits no paid lot covered; usage is never dropped instead.
     creditDebt: v.optional(v.number()),
   }).index("by_userId", ["userId"]),

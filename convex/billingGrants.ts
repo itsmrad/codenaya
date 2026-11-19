@@ -65,28 +65,41 @@ export async function insertGrant(ctx: MutationCtx, terms: GrantTerms): Promise<
 }
 
 /**
- * Spends `credits` of new usage on `userId`'s unexpired lots and returns the
- * shortfall, which the caller records as debt. Reads at most cap + 1 lots per
- * kind. Lots past a cap expire no earlier than those read, so they matter only
- * once the read ones run out; then the charge fails rather than skip spendable
- * credits or invent debt, and support consolidates the lots.
+ * Spends `credits` of new usage on `userId`'s unexpired `mode` lots and returns
+ * the shortfall, which the caller records as debt. Reads at most cap + 1 lots
+ * per kind, in spending order. Lots past a cap expire no earlier than those
+ * read, so a capped kind spends its read lots and stops there: no later kind is
+ * spent while it may hold unread credits. What remains becomes debt, logged so
+ * support can consolidate the lots and reverse it. Never throws for overflow:
+ * that would roll back the usage row, and callers ignore a failed charge.
  */
-export async function spendPaidCredits(ctx: MutationCtx, userId: string, credits: number, now: number) {
+export async function spendPaidCredits(
+  ctx: MutationCtx,
+  userId: string,
+  mode: Doc<"billingGrants">["mode"],
+  credits: number,
+  now: number,
+) {
   const lots: Doc<"billingGrants">[] = [];
-  let capped = false;
+  let capped: GrantKind | undefined;
   for (const kind of Object.keys(MAX_ACTIVE_LOTS) as GrantKind[]) {
     const cap = MAX_ACTIVE_LOTS[kind];
     const rows = await ctx.db
       .query("billingGrants")
-      .withIndex("by_userId_and_kind_and_expiresAt", (q) =>
-        q.eq("userId", userId).eq("kind", kind).gt("expiresAt", now),
+      .withIndex("by_userId_and_mode_and_kind_and_expiresAt", (q) =>
+        q.eq("userId", userId).eq("mode", mode).eq("kind", kind).gt("expiresAt", now),
       )
       .take(cap + 1);
-    capped ||= rows.length > cap;
     lots.push(...rows.slice(0, cap));
+    if (rows.length > cap) {
+      capped = kind;
+      break;
+    }
   }
   const { takes, shortfall } = allocateCredits(lots, credits, now);
-  if (shortfall > 0 && capped) throw appError("LIMIT_EXCEEDED", "Too many active paid credit lots");
+  if (capped && shortfall > 0) {
+    console.warn(`Paid credit lots over cap: userId=${userId} mode=${mode} kind=${capped}; ${shortfall} credits recorded as debt`);
+  }
   for (const take of takes) {
     await ctx.db.patch("billingGrants", take.lot._id, { consumed: take.lot.consumed + take.credits });
   }
