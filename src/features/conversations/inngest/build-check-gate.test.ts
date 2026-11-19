@@ -15,6 +15,7 @@ import {
   unverifiedBuildNote,
 } from "./build-check-gate";
 import { OUTPUT_LIMIT_ERROR } from "./lib/output-limit";
+import { brokenImagesWarning } from "./tools/remote-images";
 
 const call = (name: string, data = "ok") => ({ tool: { name }, content: { data } });
 const turn = (...toolCalls: ReturnType<typeof call>[]) => ({ toolCalls });
@@ -31,6 +32,21 @@ describe("needsBuildRepair", () => {
     expect(needsBuildRepair([turn(call("createFiles"), notBuilt)])).toBe(false);
     expect(needsBuildRepair([turn(call("createFiles"), unfinishedCheck())])).toBe(false);
     expect(needsBuildRepair([turn(call("readFiles"), failedCheck())])).toBe(false);
+  });
+});
+
+describe("a broken-image warning from checkBuild", () => {
+  it("is not counted as a failed build", () => {
+    const warned = call(
+      "checkBuild",
+      "Build verified\nDependencies installed, and the type check and production build passed." +
+        brokenImagesWarning(["src/App.tsx: https://images.unsplash.com/photo-1 (HTTP 404)"]),
+    );
+    const run = [turn(call("createFiles"), warned)];
+    expect(createBuildCheckGate().shouldContinue(run)).toBe(false);
+    expect(hasUncheckedWrites(run)).toBe(false);
+    expect(needsBuildRepair(run)).toBe(false);
+    expect(unverifiedBuildNote(run)).toBeUndefined();
   });
 });
 

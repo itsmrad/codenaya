@@ -23,6 +23,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { withoutSecretFiles } from "../../../convex/secretFiles";
 import { type AgentStep, buildPathIndex } from "./agent-steps";
 import { WORKER_TIMEOUT_MS, ownsPath } from "./swarm";
 
@@ -87,14 +88,14 @@ const overBudget = async (provider: SandboxProvider) => {
   return undefined;
 };
 
-/** The project's text files from Convex, by path. */
+/** The project's text files from Convex, by path, without secret files. */
 const projectTextFiles = async (internalKey: string, projectId: Id<"projects">) => {
   const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
   const pathOf = buildPathIndex(rows);
-  return rows.flatMap((row): ProjectFile[] => {
+  return withoutSecretFiles(rows.flatMap((row): ProjectFile[] => {
     const path = row.type === "file" ? pathOf(row._id) : undefined;
     return path && typeof row.content === "string" ? [{ path, content: row.content }] : [];
-  });
+  }));
 };
 
 type SwarmMeta = SandboxMeta & { projectId: string; messageId: string; purpose: Purpose };

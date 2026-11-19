@@ -25,6 +25,7 @@ import {
   releaseStorageIfUnreferenced,
 } from "./projectCascade";
 import { getOwnedProject } from "./projects";
+import { isSecretPath } from "./secretFiles";
 import { recordPackageJsonReady } from "./activationEvents";
 import { Doc, Id } from "./_generated/dataModel";
 
@@ -500,7 +501,8 @@ export const searchFiles = query({
     let regexLinesTruncated = false;
     for (const file of page.page) {
       const path = pathOf(file._id);
-      if (file.type !== "file" || file.storageId || !path || (glob && !glob.matcher(path).matches())) continue;
+      // Secret files are skipped before their content is read: no lines, no counts.
+      if (file.type !== "file" || file.storageId || !path || isSecretPath(path) || (glob && !glob.matcher(path).matches())) continue;
       if (lookups === MAX_SEARCH_CONTENT_LOOKUPS) { truncated = true; break; }
       lookups++;
       const content = await readFileContent(ctx, file);

@@ -28,9 +28,11 @@ export function buildSupabaseHintSection(skills: readonly AgentSkill[]): string 
         ? `call loadSkill("${SUPABASE_SKILL}") and follow it.`
         : `offer the built-in ${SUPABASE_SKILL} skill (Supabase auth and a database with Row Level Security): ` +
           "tell the user to turn it on from Skills in the project bar."),
-    "If the Supabase integration is connected, read VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY " +
-      "(the publishable or anon key, never the secret or service_role key) with its tools and store them with setEnvVar. " +
-      "Otherwise ask the user to add them in the project's Environment Variables dialog. " +
+    "The app reads VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY " +
+      "(the publishable or anon key, never the secret or service_role key). " +
+      "When the Supabase integration is connected, read them with its tools: the URL and key come back as " +
+      "public [env-ref:...] refs (the URL ref stands for the project URL); store each with setEnvVarFromRef. " +
+      "If they are not set, ask the user to add them in the project's Environment Variables dialog. " +
       "Never guess or invent them, and never ask for them in chat.",
   ].join("\n");
 }

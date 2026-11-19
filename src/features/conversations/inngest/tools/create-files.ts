@@ -8,6 +8,7 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
 import { checkPackageVersions } from "./package-versions";
 import { syntaxErrorNote } from "./syntax-error";
+import { isSecretPath, secretPathError } from "./paths";
 
 interface CreateFilesToolOptions {
   projectId: Id<"projects">;
@@ -60,6 +61,8 @@ export const createCreateFilesTool = ({
       }
 
       const { parentId } = parsed.data;
+      const secret = parsed.data.files.find((file) => isSecretPath(file.name));
+      if (secret) return secretPathError(secret.name);
       const checked = parsed.data.files.map((file) => ({
         file,
         ...checkPackageVersions(file.name, file.content),

@@ -11,8 +11,10 @@ import {
   getProjectFiles,
   indexProjectFiles,
   invalidPathError,
+  isSecretPath,
   lockedPathError,
   normalizePath,
+  secretPathError,
   splitPath,
 } from "./paths";
 import { createRegistryCheck, postWriteNote, getIconRewriter, type RegistryCheck } from "./post-write-checks";
@@ -70,6 +72,8 @@ export const createWriteFilesTool = ({ projectId, internalKey, messageId, regist
             const path = normalizePath(raw);
             if (path === undefined) {
               failed.push(invalidPathError(raw).replace(/^Error: /, ""));
+            } else if (isSecretPath(path)) {
+              failed.push(secretPathError(path).replace(/^Error: /, ""));
             } else if (raw.trim().endsWith("/")) {
               failed.push(`${path}/ (ends in "/", so it names a folder; write to a file path)`);
             } else {
