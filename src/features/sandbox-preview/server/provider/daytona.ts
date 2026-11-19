@@ -1,6 +1,7 @@
 import {
   Daytona,
   DaytonaAuthenticationError,
+  DaytonaBadRequestError,
   DaytonaCommandAlreadyCompletedError,
   DaytonaConnectionTimeoutError,
   DaytonaFileAccessDeniedError,
@@ -93,6 +94,20 @@ const DAYTONA_MAX_SESSION_MS = 60 * 60 * 1000;
 export const ttlMinutes = (timeoutMs: number) =>
   Math.min(Math.max(1, Math.ceil(timeoutMs / 60_000)), DAYTONA_MAX_SESSION_MS / 60_000);
 
+/**
+ * `connect`'s lifetime extension. Extend-only, as E2B's connect is: `setTtl` re-anchors
+ * from now, so it could also shorten a live preview. Never past createdAt + 1 h, the
+ * cost guard's hard end, so repeated connects can't keep a sandbox alive; an unknown
+ * creation time never extends.
+ */
+const extendTtl = async (sandbox: DaytonaSandbox, timeoutMs: number) => {
+  const now = Date.now();
+  const maxMinutes = Math.floor((Date.parse(sandbox.createdAt ?? "") + DAYTONA_MAX_SESSION_MS - now) / 60_000);
+  const minutes = Math.min(Math.ceil(timeoutMs / 60_000), maxMinutes);
+  if (!(minutes >= 1) || now + minutes * 60_000 <= (Date.parse(sandbox.autoDestroyAt ?? "") || 0)) return;
+  await sandbox.setTtl(minutes);
+};
+
 /** The label `create` adds for its code interpreter; not one of ours. */
 const TOOLBOX_LANGUAGE_LABEL = "code-toolbox-language";
 
@@ -102,6 +117,8 @@ const toInfo = ({ labels, autoDestroyAt }: Pick<DaytonaSandbox, "labels" | "auto
   delete metadata[TOOLBOX_LANGUAGE_LABEL];
   return { metadata, endAt: new Date(autoDestroyAt ?? 0) };
 };
+
+const noop = () => {};
 
 const notImplemented = async (): Promise<never> => {
   throw new Error("not implemented");
@@ -124,7 +141,11 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => ({
       await sandbox.refreshData();
       return toInfo(sandbox);
     }, requestTimeoutMs),
-  kill: ({ requestTimeoutMs } = {}) => call(() => sandbox.delete(seconds(requestTimeoutMs)), requestTimeoutMs),
+  // Already gone resolves, as E2B's kill does.
+  kill: ({ requestTimeoutMs } = {}) =>
+    call(() => sandbox.delete(seconds(requestTimeoutMs)), requestTimeoutMs).catch((error: unknown) => {
+      if (!(error instanceof SandboxNotFoundError)) throw error;
+    }),
   // No listCommands/killCommand: helpers.ts falls back to /proc.
 });
 
@@ -135,15 +156,18 @@ const DEFAULT_DAYTONA_API_URL = "https://app.daytona.io/api";
 
 let cached: { key: string; client: Daytona } | undefined;
 
+/** The SDK's own default is 24 h; E2B's is 30 s. Long waits pass their own timeout. */
+const DAYTONA_REQUEST_TIMEOUT_MS = 30_000;
+
 /**
- * One client per key and endpoint. The endpoint is always passed, so the SDK never
- * resolves it from a `.env` file in cwd (it throws when that is ambiguous).
+ * One client per key and endpoint. The endpoint is always passed, so the SDK's
+ * dotenv-ambiguity check can't throw.
  */
 const clientFor = (apiKey: string) => {
   const apiUrl = process.env.DAYTONA_API_URL?.trim() || DEFAULT_DAYTONA_API_URL;
   const target = process.env.DAYTONA_TARGET?.trim() || undefined;
   const key = JSON.stringify([apiKey, apiUrl, target]);
-  if (cached?.key !== key) cached = { key, client: new Daytona({ apiKey, apiUrl, target }) };
+  if (cached?.key !== key) cached = { key, client: new Daytona({ apiKey, apiUrl, target, requestTimeoutMs: DAYTONA_REQUEST_TIMEOUT_MS }) };
   return cached.client;
 };
 
@@ -158,34 +182,51 @@ export const createDaytonaProvider = (apiKey: string): SandboxProvider => {
     return sandbox;
   };
 
+  /**
+   * Best effort: a create we stopped waiting for, or one the SDK timed out after its
+   * POST, still bills and counts toward the user's sandbox cap until its TTL.
+   */
+  const deleteOrphan = (error: unknown, pending: Promise<DaytonaSandbox>) => {
+    if (error instanceof SandboxTimeoutError) pending.then((sandbox) => sandbox.delete(), noop).catch(noop);
+    if (error instanceof DaytonaTimeoutError && error.sandboxId) {
+      daytona().get(error.sandboxId).then((sandbox) => sandbox.delete()).catch(noop);
+    }
+  };
+
   return {
     id: DAYTONA_ID,
     maxSessionMs: DAYTONA_MAX_SESSION_MS,
     // localHostHeader needs nothing here: the in-sandbox proxy rewrites Host itself.
-    create: ({ image, timeoutMs, metadata, requestTimeoutMs }) =>
-      call(
-        () =>
-          daytona().create(
-            {
-              // Read per call, like E2B_TEMPLATE.
-              snapshot: image ?? (process.env.DAYTONA_SNAPSHOT?.trim() || DEFAULT_DAYTONA_SNAPSHOT),
-              // A copy: create adds its language label to the object it is given.
-              labels: { ...metadata },
-              public: true,
-              // Off: a background dev server is not activity, so an idle preview would stop after 15 min.
-              autoStopInterval: 0,
-              ephemeral: true,
-              ttlMinutes: ttlMinutes(timeoutMs),
-            },
-            { timeout: seconds(requestTimeoutMs) },
-          ),
-        requestTimeoutMs,
-      ).then(wrap),
+    create: async ({ image, timeoutMs, metadata, requestTimeoutMs }) => {
+      const pending = daytona().create(
+        {
+          // Read per call, like E2B_TEMPLATE.
+          snapshot: image ?? (process.env.DAYTONA_SNAPSHOT?.trim() || DEFAULT_DAYTONA_SNAPSHOT),
+          // A copy: create adds its language label to the object it is given.
+          labels: { ...metadata },
+          public: true,
+          // Off: a background dev server is not activity, so an idle preview would stop after 15 min.
+          autoStopInterval: 0,
+          ephemeral: true,
+          ttlMinutes: ttlMinutes(timeoutMs),
+        },
+        { timeout: seconds(requestTimeoutMs) },
+      );
+      try {
+        return wrap(await withDeadline(pending, requestTimeoutMs));
+      } catch (error) {
+        deleteOrphan(error, pending);
+        // An unknown snapshot is a 400 or a 404: config, so failover cools Daytona down and moves on.
+        if (error instanceof DaytonaBadRequestError || error instanceof DaytonaNotFoundError) {
+          throw new SandboxConfigError(error.message, { cause: error });
+        }
+        throw fromDaytonaError(error);
+      }
+    },
     connect: (id, { timeoutMs, requestTimeoutMs } = {}) =>
       call(async () => {
         const sandbox = await getRunning(id);
-        // setTtl re-anchors the deadline from now, as E2B's connect extends the timeout.
-        if (timeoutMs) await sandbox.setTtl(ttlMinutes(timeoutMs));
+        if (timeoutMs) await extendTtl(sandbox, timeoutMs);
         return wrap(sandbox);
       }, requestTimeoutMs),
     inspect: (id, { requestTimeoutMs } = {}) =>
@@ -198,8 +239,12 @@ export const createDaytonaProvider = (apiKey: string): SandboxProvider => {
     // The SDK pages on its own (`limit` is its page size), so this stops at `limit`; without one it reads every page.
     list: ({ metadata, limit, requestTimeoutMs }) =>
       call(async () => {
+        // Callers kill what this returns, so the server's label filter is checked again here.
+        const matches = (labels: Record<string, string> = {}) =>
+          Object.entries(metadata ?? {}).every(([key, value]) => labels[key] === value);
         const listed: ListedSandbox[] = [];
         for await (const sandbox of daytona().list({ labels: metadata, states: ["started"], limit })) {
+          if (!matches(sandbox.labels)) continue;
           listed.push({ id: sandbox.id, ...toInfo(sandbox) });
           if (limit && listed.length >= limit) break;
         }
@@ -208,7 +253,10 @@ export const createDaytonaProvider = (apiKey: string): SandboxProvider => {
     // delete returns once Daytona accepts it; list filters on started, so the sandbox drops out at once.
     kill: (id, { requestTimeoutMs } = {}) =>
       call(async () => {
-        await (await daytona().get(id)).delete(seconds(requestTimeoutMs));
+        const sandbox = await daytona().get(id);
+        // Already being deleted (another tab's kill): deleting again may 409.
+        if (sandbox.state === "destroyed" || sandbox.state === "destroying") return false;
+        await sandbox.delete(seconds(requestTimeoutMs));
         return true;
       }, requestTimeoutMs).catch((error: unknown) => {
         if (error instanceof SandboxNotFoundError) return false;

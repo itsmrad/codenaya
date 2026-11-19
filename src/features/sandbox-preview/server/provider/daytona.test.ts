@@ -1,14 +1,18 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   class DaytonaError extends Error {}
   class DaytonaAuthenticationError extends DaytonaError {}
   class DaytonaForbiddenError extends DaytonaError {}
   class DaytonaAuthorizationError extends DaytonaForbiddenError {}
+  class DaytonaBadRequestError extends DaytonaError {}
+  class DaytonaValidationError extends DaytonaBadRequestError {}
   class DaytonaNotFoundError extends DaytonaError {}
   class DaytonaGoneError extends DaytonaError {}
   class DaytonaRateLimitError extends DaytonaError {}
-  class DaytonaTimeoutError extends DaytonaError {}
+  class DaytonaTimeoutError extends DaytonaError {
+    sandboxId?: string;
+  }
   class DaytonaQueueTimeoutError extends DaytonaTimeoutError {}
   class DaytonaConnectionError extends DaytonaError {}
   class DaytonaConnectionTimeoutError extends DaytonaConnectionError {}
@@ -22,7 +26,7 @@ const mocks = vi.hoisted(() => {
   const list = vi.fn();
   return {
     errors: {
-      DaytonaAuthenticationError, DaytonaForbiddenError, DaytonaAuthorizationError, DaytonaNotFoundError,
+      DaytonaAuthenticationError, DaytonaBadRequestError, DaytonaValidationError, DaytonaForbiddenError, DaytonaAuthorizationError, DaytonaNotFoundError,
       DaytonaGoneError, DaytonaRateLimitError, DaytonaTimeoutError, DaytonaQueueTimeoutError,
       DaytonaConnectionTimeoutError, DaytonaFileNotFoundError, DaytonaFileAccessDeniedError,
       DaytonaProcessNotFoundError, DaytonaSessionEndedError, DaytonaCommandAlreadyCompletedError,
@@ -80,7 +84,9 @@ describe("Daytona provider", () => {
     await memo.connect("sbx-1");
 
     expect(mocks.client).toHaveBeenCalledTimes(1);
-    expect(mocks.client).toHaveBeenCalledWith({ apiKey: "key_memo", apiUrl: "https://app.daytona.io/api", target: "eu" });
+    expect(mocks.client).toHaveBeenCalledWith({
+      apiKey: "key_memo", apiUrl: "https://app.daytona.io/api", target: "eu", requestTimeoutMs: 30_000,
+    });
   });
 
   it("creates a public, ephemeral sandbox from DAYTONA_SNAPSHOT with labels, auto-stop off and a TTL", async () => {
@@ -121,21 +127,80 @@ describe("Daytona provider", () => {
 
       expect(ttlMinutes(timeoutMs)).toBe(minutes);
       expect(mocks.create.mock.calls[0][0]).toMatchObject({ ttlMinutes: minutes, autoStopInterval: 0, ephemeral: true });
-      expect(provider.maxSessionMs).toBe(60 * 60 * 1000);
     },
   );
 
-  it("connects to a started sandbox and re-anchors its TTL, bounded to an hour", async () => {
+  it("cost guard: caps a session at one hour", () => {
+    expect(provider.maxSessionMs).toBe(60 * 60 * 1000);
+  });
+
+  it("deletes a sandbox whose create it stopped waiting for", async () => {
     const daytona = fakeDaytonaSandbox();
+    let finish: (sandbox: unknown) => void = () => {};
+    mocks.create.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+
+    await expect(provider.create({ timeoutMs: 1, metadata: {}, requestTimeoutMs: 10 })).rejects.toBeInstanceOf(SandboxTimeoutError);
+    finish(daytona);
+
+    await vi.waitFor(() => expect(daytona.delete).toHaveBeenCalled());
+  });
+
+  it("deletes the sandbox an SDK create timeout left behind", async () => {
+    const daytona = fakeDaytonaSandbox({ id: "sbx-9" });
+    mocks.create.mockRejectedValue(Object.assign(new mocks.errors.DaytonaTimeoutError("create timed out"), { sandboxId: "sbx-9" }));
     mocks.get.mockResolvedValue(daytona);
 
-    expect((await provider.connect("sbx-1", { timeoutMs: 30 * 60_000 })).id).toBe("sbx-1");
-    expect(mocks.get).toHaveBeenCalledWith("sbx-1");
-    expect(daytona.setTtl).toHaveBeenCalledWith(30);
-    await provider.connect("sbx-1", { timeoutMs: 5 * 60 * 60_000 });
-    expect(daytona.setTtl).toHaveBeenLastCalledWith(60);
-    await provider.connect("sbx-1");
-    expect(daytona.setTtl).toHaveBeenCalledTimes(2);
+    await expect(provider.create({ timeoutMs: 1, metadata: {} })).rejects.toBeInstanceOf(SandboxTimeoutError);
+
+    await vi.waitFor(() => expect(daytona.delete).toHaveBeenCalled());
+    expect(mocks.get).toHaveBeenCalledWith("sbx-9");
+  });
+
+  it.each([
+    new mocks.errors.DaytonaValidationError("snapshot not found"),
+    new mocks.errors.DaytonaNotFoundError("snapshot not found"),
+  ])("treats a create's %o as config, so failover moves on", async (error) => {
+    mocks.create.mockRejectedValue(error);
+
+    await expect(provider.create({ timeoutMs: 1, metadata: {} })).rejects.toBeInstanceOf(SandboxConfigError);
+  });
+
+  describe("connect's lifetime extension", () => {
+    const NOW = Date.parse("2026-11-19T12:00:00.000Z");
+    const minutes = (n: number) => new Date(NOW + n * 60_000).toISOString();
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it.each([
+      ["extends a sandbox with 2 min left", -10, 2, 30, 30],
+      ["never shortens one with 50 min left", -10, 50, 5, undefined],
+      ["caps it at an hour from creation", -55, 2, 30, 5],
+      ["never extends one created over an hour ago", -61, 2, 30, undefined],
+      ["caps a long request at the hour", -10, 2, 5 * 60, 50],
+    ])("%s", async (_name, createdAgo, left, timeoutMin, expected) => {
+      const daytona = fakeDaytonaSandbox({ createdAt: minutes(createdAgo), autoDestroyAt: minutes(left) });
+      mocks.get.mockResolvedValue(daytona);
+
+      expect((await provider.connect("sbx-1", { timeoutMs: timeoutMin * 60_000 })).id).toBe("sbx-1");
+
+      expect(mocks.get).toHaveBeenCalledWith("sbx-1");
+      if (expected === undefined) expect(daytona.setTtl).not.toHaveBeenCalled();
+      else expect(daytona.setTtl).toHaveBeenCalledWith(expected);
+    });
+
+    it("never extends without a creation time or a timeout", async () => {
+      const daytona = fakeDaytonaSandbox({ createdAt: undefined, autoDestroyAt: minutes(1) });
+      mocks.get.mockResolvedValue(daytona);
+
+      await provider.connect("sbx-1", { timeoutMs: 30 * 60_000 });
+      await provider.connect("sbx-1");
+
+      expect(daytona.setTtl).not.toHaveBeenCalled();
+    });
   });
 
   it.each(["stopped", "destroying", "error"])("treats a %s sandbox as gone on connect", async (state) => {
@@ -165,9 +230,11 @@ describe("Daytona provider", () => {
     await expect(provider.inspect!("sbx-1")).rejects.toBeInstanceOf(SandboxNotFoundError);
   });
 
-  it("lists started sandboxes by labels, stops at the limit and drops the SDK's own label", async () => {
+  it("lists started sandboxes by labels, checks them again, stops at the limit and drops the SDK's own label", async () => {
     mocks.list.mockReturnValue(listOf([
       fakeDaytonaSandbox(),
+      // A looser server-side match is dropped, and doesn't count toward the limit.
+      fakeDaytonaSandbox({ id: "sbx-other", labels: { userId: "u2" } }),
       fakeDaytonaSandbox({ id: "sbx-2", autoDestroyAt: undefined }),
       fakeDaytonaSandbox({ id: "sbx-3" }),
     ]));
@@ -200,6 +267,14 @@ describe("Daytona provider", () => {
     expect(await provider.kill("sbx-1")).toBe(false);
   });
 
+  it.each(["destroying", "destroyed"])("says false for a %s sandbox without deleting it again", async (state) => {
+    const daytona = fakeDaytonaSandbox({ state });
+    mocks.get.mockResolvedValue(daytona);
+
+    expect(await provider.kill("sbx-1")).toBe(false);
+    expect(daytona.delete).not.toHaveBeenCalled();
+  });
+
   it.each([
     [new mocks.errors.DaytonaAuthenticationError("bad key"), SandboxConfigError],
     [new mocks.errors.DaytonaForbiddenError("forbidden"), SandboxConfigError],
@@ -211,9 +286,9 @@ describe("Daytona provider", () => {
     [new mocks.errors.DaytonaNotFoundError("Sandbox not found"), SandboxNotFoundError],
     [new mocks.errors.DaytonaGoneError("Sandbox destroyed"), SandboxNotFoundError],
   ])("maps %o to the seam's error", async (error, Expected) => {
-    mocks.create.mockRejectedValue(error);
+    mocks.get.mockRejectedValue(error);
 
-    const rejection = provider.create({ timeoutMs: 1, metadata: {} });
+    const rejection = provider.connect("sbx-1");
 
     await expect(rejection).rejects.toBeInstanceOf(Expected);
     await expect(rejection).rejects.toMatchObject({ message: error.message, cause: error });
@@ -264,6 +339,9 @@ describe("Daytona provider", () => {
       expect(daytona.refreshData).toHaveBeenCalled();
       await sandbox.kill({ requestTimeoutMs: 5_000 });
       expect(daytona.delete).toHaveBeenCalledWith(5);
+      // Already gone resolves, as E2B's kill does.
+      daytona.delete.mockRejectedValueOnce(new mocks.errors.DaytonaNotFoundError("gone"));
+      await expect(sandbox.kill()).resolves.toBeUndefined();
       expect(sandbox.listCommands).toBeUndefined();
       expect(sandbox.killCommand).toBeUndefined();
     });
