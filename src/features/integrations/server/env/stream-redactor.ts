@@ -63,12 +63,21 @@ function encodingsOf(value: string): string[] {
   const base64 = bytes.toString("base64");
   const base64Url = bytes.toString("base64url");
   const hex = bytes.toString("hex");
+  // The characters that encode only the value's bytes when it sits at each byte
+  // alignment inside a longer base64 string, as in Basic auth (`user:value`).
+  const embedded = [0, 1, 2].map((offset) =>
+    Buffer.concat([Buffer.alloc(offset), bytes])
+      .toString("base64")
+      .slice(Math.ceil((8 * offset) / 6), Math.floor((8 * (offset + bytes.length)) / 6)),
+  );
   return [
     value,
     base64,
     base64.replace(/=+$/, ""),
     base64Url,
     base64Url.padEnd(base64.length, "="),
+    ...embedded,
+    ...embedded.map((part) => part.replace(/\+/g, "-").replace(/\//g, "_")),
     encodeURIComponent(value),
     hex,
     hex.toUpperCase(),
@@ -83,8 +92,19 @@ function matcherOrNull(secrets: readonly string[]): { known: string[]; pattern: 
   const values = [...new Set(secrets.flatMap((value) => [value, value.trim()]))]
     .filter((value) => value.length >= MIN_REDACTED_LENGTH && value.trim() !== "");
   // Longest first, so the regex alternation takes the longest match at a position.
-  const known = [...new Set(values.flatMap(encodingsOf))].sort((a, b) => b.length - a.length);
-  return { known, pattern: new RegExp(known.map(escapeRegExp).join("|"), "g") };
+  const known = [...new Set(values.flatMap(encodingsOf))]
+    .filter((form) => form.length >= MIN_REDACTED_LENGTH)
+    .sort((a, b) => b.length - a.length);
+  const pattern = new RegExp(known.map(escapeRegExp).join("|"), "g");
+  // V8 compiles lazily: surface "Regular expression too large" (whose message
+  // quotes every value) here, inside the caller's try, not at the first exec.
+  pattern.test("");
+  return { known, pattern };
+}
+
+/** Logs a redaction failure by the error's name only: its message could quote a value. */
+function logFailure(what: string, error: unknown) {
+  console.error(`[stream-redactor] ${what}`, error instanceof Error ? error.name : typeof error);
 }
 
 /** Hides everything, saying why once, for a stream whose secrets cannot be matched. */
@@ -102,9 +122,9 @@ function suppressingRedactor(): StreamRedactor {
  * Create a redactor for a fixed set of secret values.
  *
  * Pass `null` when the values could not be loaded: the redactor then fails closed
- * and suppresses the output, as it does when the inventory exceeds its bounds.
- * Returns a pass-through when there is nothing to redact, so a project with no
- * secrets pays no per-chunk cost.
+ * and suppresses the output, as it does when the inventory exceeds its bounds or
+ * matching fails. Never throws. Returns a pass-through when there is nothing to
+ * redact, so a project with no secrets pays no per-chunk cost.
  */
 export function createStreamRedactor(
   secrets: readonly string[] | null,
@@ -113,8 +133,7 @@ export function createStreamRedactor(
   try {
     matcher = secrets === null ? null : matcherOrNull(secrets);
   } catch (error) {
-    // Only the error's name: its message could quote a value.
-    console.error("[stream-redactor] could not build the redaction patterns", error instanceof Error ? error.name : typeof error);
+    logFailure("could not build the redaction patterns", error);
   }
   if (matcher === null) return suppressingRedactor();
   const { known, pattern } = matcher;
@@ -131,35 +150,50 @@ export function createStreamRedactor(
   const holdBack = known[0].length - 1;
 
   /**
-   * Whether a completed line can be released before the hold-back window.
+   * How far a completed line must still be held back.
    *
-   * When no pattern contains a newline, no match can span one, so every match
-   * starting before the last newline is already decided — which keeps the terminal
-   * responsive. A multi-line secret (a PEM key) disables this, or its first line
-   * would be released verbatim.
+   * A pattern with no newline, or one only at its end, cannot span the last
+   * newline, so the text up to it is decided and released at once — which keeps
+   * the terminal responsive. Only a raw multi-line value (a PEM key; encodings
+   * never hold a newline) can, so its length minus one stays held.
    */
-  const newlineReleaseSafe = !known.some((value) => value.includes("\n"));
+  const multiLineHold =
+    Math.max(1, ...known.filter((value) => value.slice(0, -1).includes("\n")).map((value) => value.length)) - 1;
 
   /** Raw, not-yet-emitted input. Never holds placeholder text. */
   let buffer = "";
+  /** How many leading characters of `buffer` an emitted placeholder already covers. */
+  let masked = 0;
 
   /**
-   * Redact every match in `text` that starts before `decided`. A match starting
-   * there is final: no pattern starting there can reach past the input seen so far.
-   * Returns the redacted text up to `cursor`, the end of the last match.
+   * Mask every occurrence of every pattern that starts before `decided` — where
+   * none can reach past the input seen so far — one placeholder per run of
+   * overlapping occurrences, so a shorter match cannot leave a longer value's
+   * tail raw. Emits the text up to `decided` and keeps the rest buffered.
    */
-  const redactMatches = (text: string, decided: number) => {
+  const release = (decided: number, atEnd: boolean): string => {
+    // The stream ended inside what may be a secret: that partial prefix is masked too.
+    const partial = atEnd ? partialPrefixStart(buffer) : -1;
+    const matchesBefore = partial === -1 ? decided : partial;
     let out = "";
-    let cursor = 0;
+    let at = masked; // text before `at` is emitted or masked
     pattern.lastIndex = 0;
-    for (let match = pattern.exec(text); match && match.index < decided; match = pattern.exec(text)) {
-      out += text.slice(cursor, match.index) + STREAM_REDACTION_PLACEHOLDER;
-      cursor = pattern.lastIndex;
+    for (let match = pattern.exec(buffer); match && match.index < matchesBefore; match = pattern.exec(buffer)) {
+      if (match.index >= at) out += buffer.slice(at, match.index) + STREAM_REDACTION_PLACEHOLDER;
+      at = Math.max(at, match.index + match[0].length);
+      pattern.lastIndex = match.index + 1;
     }
-    return { out, cursor };
+    if (partial !== -1) {
+      if (partial >= at) out += buffer.slice(at, partial) + STREAM_REDACTION_PLACEHOLDER;
+      at = buffer.length;
+    }
+    out += buffer.slice(at, decided);
+    masked = Math.max(0, at - decided);
+    buffer = buffer.slice(decided);
+    return out;
   };
 
-  /** Where a trailing partial prefix of a pattern starts, or -1 when the text ends clear of one. */
+  /** Where the earliest trailing partial prefix of a pattern starts, or -1 when the text ends clear of one. */
   const partialPrefixStart = (text: string): number => {
     for (let i = Math.max(0, text.length - holdBack); i <= text.length - MIN_REDACTED_LENGTH; i++) {
       const tail = text.slice(i);
@@ -168,26 +202,35 @@ export function createStreamRedactor(
     return -1;
   };
 
-  return {
-    push(chunk: string): string {
-      buffer += chunk;
-      const byLength = buffer.length - holdBack;
-      const byNewline = newlineReleaseSafe ? buffer.lastIndexOf("\n") + 1 : 0;
-      const decided = Math.max(byLength, byNewline);
-      const { out, cursor } = redactMatches(buffer, decided);
-      const end = Math.max(cursor, decided);
-      const emit = out + buffer.slice(cursor, end);
-      buffer = buffer.slice(end);
-      return emit;
-    },
+  /** A failure while matching hides the rest of the stream rather than throwing. */
+  const hidden = suppressingRedactor();
+  let failed = false;
+  const guarded = (run: () => string): string => {
+    if (!failed) {
+      try {
+        return run();
+      } catch (error) {
+        logFailure("redaction failed; hiding the rest of the output", error);
+        failed = true;
+        buffer = "";
+      }
+    }
+    return hidden.push("");
+  };
 
-    flush(): string {
-      const { out, cursor } = redactMatches(buffer, buffer.length);
-      const rest = buffer.slice(cursor);
-      buffer = "";
-      // The stream ended inside what may be a secret: hide that partial prefix too.
-      const partial = partialPrefixStart(rest);
-      return out + (partial === -1 ? rest : rest.slice(0, partial) + STREAM_REDACTION_PLACEHOLDER);
-    },
+  return {
+    push: (chunk) =>
+      guarded(() => {
+        buffer += chunk;
+        const byLength = buffer.length - holdBack;
+        const byNewline = Math.min(buffer.lastIndexOf("\n") + 1, buffer.length - multiLineHold);
+        return release(Math.max(0, byLength, byNewline), false);
+      }),
+    flush: () =>
+      guarded(() => {
+        const out = release(buffer.length, true);
+        masked = 0;
+        return out;
+      }),
   };
 }

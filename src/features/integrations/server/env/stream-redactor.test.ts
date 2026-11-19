@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   MAX_REDACTED_BYTES,
@@ -20,6 +20,26 @@ import {
 
 const SECRET = "sbp_supersecretvalue1234567890";
 const DSN = "postgresql://user:hunter2password@db.example.com:5432/app";
+
+/**
+ * An independent reference: mask the union of every occurrence of `forms`, plus a
+ * trailing partial one, with one placeholder per run of overlapping occurrences.
+ */
+function maskOccurrences(text: string, forms: string[]) {
+  const spans: Array<[number, number]> = [];
+  for (const form of forms) {
+    for (let i = text.indexOf(form); i !== -1; i = text.indexOf(form, i + 1)) spans.push([i, i + form.length]);
+  }
+  const partial = [...text].findIndex((_, i) => text.length - i >= 3 && forms.some((form) => form.startsWith(text.slice(i))));
+  if (partial !== -1) spans.push([partial, text.length]);
+  let out = "";
+  let at = 0;
+  for (const [start, end] of spans.sort((a, b) => a[0] - b[0])) {
+    if (start >= at) out += text.slice(at, start) + STREAM_REDACTION_PLACEHOLDER;
+    at = Math.max(at, end);
+  }
+  return out + text.slice(at);
+}
 
 /** Feed a whole string through in fixed-size chunks. */
 function streamThrough(text: string, chunkSize: number, secrets: string[] | null) {
@@ -167,29 +187,41 @@ describe("createStreamRedactor", () => {
     it("takes a value starting earlier over a shorter one inside it", () => {
       expect(streamThrough("xabcd\n", 1, ["abc", "xabcd"])).toBe(`${STREAM_REDACTION_PLACEHOLDER}\n`);
     });
+
+    it("masks the whole of a longer value whose start an earlier, shorter one covers", () => {
+      expect(streamThrough("id=abcdLONGSECRETTAIL;\n", 4, ["abcdL", "LONGSECRETTAIL"])).toBe(
+        `id=${STREAM_REDACTION_PLACEHOLDER};\n`,
+      );
+    });
   });
 
-  it("gives the one-shot result for every way of cutting the stream in two or three", () => {
+  describe("matches an independent reference for every way of cutting the stream in three", () => {
+    const encoded = Buffer.from("dummy-secret-one").toString("base64");
+    const secrets = ["abc", "abcdef", "xabcd", " dummy-pad ", "dummy-secret-one", "abcdL", "LONGSECRETTAIL"];
+    const forms = [...secrets, "dummy-pad", encoded];
+    const lines = `boot abcdef xabcde ${encoded}\nid=abcdLONGSECRETTAIL; %20dummy-pad end\nabcd`;
     const PEM = "-----BEGIN KEY-----\nDUMMYKEYAAAA\n-----END KEY-----";
-    const secrets = ["abc", "abcdef", "xabcd", " dummy-pad ", PEM, "dummy-secret-one"];
-    const text =
-      `boot abcdef xabcde ${Buffer.from("dummy-secret-one").toString("base64")}\n` +
-      `key=${PEM} %20dummy-pad end\nabcd`;
-    const oneShot = streamThrough(text, text.length, secrets);
-    expect(oneShot).not.toMatch(/abc|dummy|DUMMY/);
 
-    for (let i = 0; i <= text.length; i++) {
-      for (let j = i; j <= text.length; j++) {
-        const redactor = createStreamRedactor(secrets);
-        const out =
-          redactor.push(text.slice(0, i)) +
-          redactor.push(text.slice(i, j)) +
-          redactor.push(text.slice(j)) +
-          redactor.flush();
-        if (out !== oneShot) expect(out, `cut at ${i} and ${j}`).toBe(oneShot);
+    it.each([
+      ["with completed lines released early", lines, secrets, forms],
+      ["with a multi-line value holding lines back", `key=${PEM}\n${lines}`, [...secrets, PEM], [...forms, PEM]],
+    ])("%s", (_case, text, values, expectedForms) => {
+      const expected = maskOccurrences(text, expectedForms);
+      expect(expected).not.toMatch(/abc|dummy|DUMMY|SECRET/);
+
+      for (let i = 0; i <= text.length; i++) {
+        for (let j = i; j <= text.length; j++) {
+          const redactor = createStreamRedactor(values);
+          const out =
+            redactor.push(text.slice(0, i)) +
+            redactor.push(text.slice(i, j)) +
+            redactor.push(text.slice(j)) +
+            redactor.flush();
+          if (out !== expected) expect(out, `cut at ${i} and ${j}`).toBe(expected);
+        }
       }
-    }
-    expect(streamThrough(text, 1, secrets)).toBe(oneShot);
+      expect(streamThrough(text, 1, values)).toBe(expected);
+    });
   });
 
   it("hides a partial value left at the end of the stream", () => {
@@ -210,6 +242,22 @@ describe("createStreamRedactor", () => {
     expect(streamThrough("token=dummy-canary-nl;\n", 5, ["dummy-canary-nl\n"])).toBe(
       `token=${STREAM_REDACTION_PLACEHOLDER};\n`,
     );
+  });
+
+  it("still releases a completed line at once when a value ends in a newline", () => {
+    const redactor = createStreamRedactor(["dummy-canary-nl-value\n"]);
+    expect(redactor.push("ready on :3000\n")).toBe("ready on :3000\n");
+  });
+
+  it("redacts a value base64-encoded inside a longer string, as in Basic auth", () => {
+    const value = "dummy-basic-secret";
+    for (const user of ["", "u", "us", "use"]) {
+      const header = `Authorization: Basic ${Buffer.from(`${user}:${value}`).toString("base64")}\n`;
+      const encoded = streamThrough(header, 7, [value]).slice("Authorization: Basic ".length, -1);
+      expect(encoded, `user "${user}"`).toContain(STREAM_REDACTION_PLACEHOLDER);
+      // Only the few characters that mix in the neighbouring bytes, and padding, survive.
+      expect(encoded.replace(STREAM_REDACTION_PLACEHOLDER, "").length, `user "${user}"`).toBeLessThan(10);
+    }
   });
 
   describe("failing closed", () => {
@@ -239,6 +287,36 @@ describe("createStreamRedactor", () => {
 
     it("says why once, even when nothing is pushed", () => {
       expect(streamThrough("", 1, null)).toBe(REDACTION_UNAVAILABLE_NOTICE);
+    });
+
+    describe("without ever throwing or logging a value", () => {
+      afterEach(() => {
+        vi.restoreAllMocks();
+      });
+
+      it("hides the output when one value's pattern is too large for the regex engine", () => {
+        // V8 reports this at the first match, not when the RegExp is created, and
+        // its message quotes the whole pattern.
+        const log = vi.spyOn(console, "error").mockImplementation(() => {});
+        expectSuppressed([`DUMMYCANARY${"x".repeat(17_000)}`]);
+        expect(JSON.stringify(log.mock.calls)).not.toContain("DUMMYCANARY");
+      });
+
+      it("hides the rest of the output when matching fails midway", () => {
+        const log = vi.spyOn(console, "error").mockImplementation(() => {});
+        const redactor = createStreamRedactor([SECRET]);
+        expect(redactor.push("before\n")).toBe("before\n");
+        const exec = vi.spyOn(RegExp.prototype, "exec").mockImplementation(() => {
+          throw new Error(`failure quoting ${SECRET}`);
+        });
+        const failed = redactor.push(`raw ${SECRET}\n`);
+        exec.mockRestore();
+        expect(failed).toBe(REDACTION_UNAVAILABLE_NOTICE);
+        // Latched: matching works again, but the stream stays hidden.
+        expect(redactor.push("after\n")).toBe("");
+        expect(redactor.flush()).toBe("");
+        expect(JSON.stringify(log.mock.calls)).not.toContain(SECRET);
+      });
     });
   });
 
