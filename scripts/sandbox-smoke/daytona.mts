@@ -94,14 +94,18 @@ const rows = (): Row[] => !existsSync(LOG) ? [] : readFileSync(LOG, "utf8").spli
   try { return line ? [JSON.parse(line)] : []; } catch { return []; }
 });
 /**
- * Each logged sandbox at its kill's estimate, or the full lifetime if never killed; a failed
- * create too (it may have left one behind); plus older rows' own estimates.
+ * Each logged sandbox at its kill's estimate, or the full lifetime if never killed; a failed or
+ * interrupted create too (an intent with no create row; either may have left one behind);
+ * plus older rows' own estimates.
  */
 const estimateUsd = (only?: string) => {
   const logged = rows().filter((row) => !only || row.runId === only);
   const killed = new Map(logged.filter((row) => row.event === "kill").map((row) => [row.id, row.estUsd ?? WORST_CASE_USD]));
   const legacy = logged.reduce((sum, row) => sum + (row.event === "create-failed" ? WORST_CASE_USD : row.event ? 0 : row.est_usd ?? 0), 0);
-  return logged.filter((row) => row.event === "create").reduce((sum, row) => sum + (killed.get(row.id) ?? WORST_CASE_USD), legacy);
+  const answered = new Set(logged.filter((row) => row.event === "create" || row.event === "create-failed").map((row) => `${row.runId}/${row.slot}`));
+  const interrupted = logged.filter((row) => row.event === "create-intent" && !answered.has(`${row.runId}/${row.slot}`)).length;
+  return logged.filter((row) => row.event === "create")
+    .reduce((sum, row) => sum + (killed.get(row.id) ?? WORST_CASE_USD), legacy + interrupted * WORST_CASE_USD);
 };
 const round = (usd: number) => Math.round(usd * 1e6) / 1e6;
 
@@ -144,7 +148,10 @@ const measure = (name: string, body: () => Promise<string | void>) => attempt("m
 let created = 0;
 const live = new Set<string>();
 const everCreated = new Set<string>();
+/** Set first thing on a signal or crash, so the main flow can't start another sandbox while the handler sweeps. */
+let aborting = false;
 async function withSandbox(slot: string, timeoutMs: number, body: (sandbox: Sandbox) => Promise<void>) {
+  if (aborting) throw new Error("Aborting: no new sandbox");
   if (created >= MAX_SANDBOXES) throw new Error(`Refusing a sandbox past the limit of ${MAX_SANDBOXES}`);
   if (estimateUsd() + WORST_CASE_USD > CAP_USD) throw new Error(`Logged estimate would pass $${CAP_USD}`);
   created++;
@@ -213,12 +220,23 @@ async function wrapUp() {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, async () => {
+    aborting = true;
     console.error(`${signal}: killing ${live.size} live sandbox(es), then sweeping`);
     log({ event: "interrupted", signal });
     await Promise.allSettled([...live].map((id) => provider.kill(id)));
     await finish();
     // The SDK's sockets can keep the event loop alive.
     process.exit(130);
+  });
+}
+// A crash outside the main try goes through the same memoised wrap-up.
+for (const event of ["uncaughtException", "unhandledRejection"] as const) {
+  process.once(event, async (error: unknown) => {
+    aborting = true;
+    record("crash", false, `${event}: ${statusOf(error)}`);
+    await Promise.allSettled([...live].map((id) => provider.kill(id)));
+    await finish();
+    process.exit(1);
   });
 }
 
