@@ -131,7 +131,16 @@ export const pruneMcpApprovals = internalMutation({
       }
     }
 
-    return { markedExpired, deleted };
+    // Env refs (`mcpEnvRefs`) live an hour; nothing reads one after that.
+    const expiredRefs = await ctx.db
+      .query("mcpEnvRefs")
+      .withIndex("by_expiresAt", (q) => q.lt("expiresAt", now))
+      .take(BATCH_SIZE);
+    for (const row of expiredRefs) {
+      await ctx.db.delete("mcpEnvRefs", row._id);
+    }
+
+    return { markedExpired, deleted, deletedEnvRefs: expiredRefs.length };
   },
 });
 

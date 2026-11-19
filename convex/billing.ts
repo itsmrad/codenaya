@@ -162,9 +162,11 @@ export const recordReceipt = internalMutation({
   args: {
     customerRef: v.optional(v.id("billingCustomers")), mode: billingModeValidator, webhookId: v.string(), eventType: v.string(),
     bodyDigest: v.string(), occurredAt: v.number(), ...billingResourceIdsValidator.fields,
+    // Authenticated but unsupported event types: stored for dedupe, never processed or counted.
+    ignored: v.optional(v.boolean()),
   },
   returns: v.id("billingEvents"),
-  handler: async (ctx, args) => {
+  handler: async (ctx, { ignored, ...args }) => {
     requireText(args.webhookId);
     requireText(args.eventType);
     if (!/^[a-f0-9]{64}$/.test(args.bodyDigest) || !Number.isFinite(args.occurredAt)) {
@@ -190,10 +192,10 @@ export const recordReceipt = internalMutation({
     const now = Date.now();
     // An unmapped verified receipt is never discarded: it waits quarantined for reconciliation.
     const eventRef = await ctx.db.insert("billingEvents", {
-      ...args, receivedAt: now, state: parent ? "pending" : "quarantined", attempts: 0,
+      ...args, receivedAt: now, state: ignored ? "ignored" : parent ? "pending" : "quarantined", attempts: 0,
       nextAttemptAt: now, generation: parent?.generation ?? 0,
     });
-    if (parent) {
+    if (parent && !ignored) {
       await ctx.db.patch("billingCustomers", parent._id, { inputRevision: parent.inputRevision + 1, unresolvedReceipts: parent.unresolvedReceipts + 1 });
     }
     return eventRef;

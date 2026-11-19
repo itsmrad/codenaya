@@ -108,7 +108,7 @@ describe("Dodo config", () => {
   it.each(["development", "preview", "staging", "production"] as const)(
     "%s accepts only the deployment's mode for both consumers", (deployment) => {
       const environment = deployment === "production" ? "live_mode" : "test_mode";
-      const origin = deployment === "production" ? "https://codena.tech" : "https://billing-dev.example.test";
+      const origin = deployment === "production" ? "https://www.codenaya.tech" : "https://billing-dev.example.test";
       const env = { ...nextEnv, ...receiverEnv, DODO_PAYMENTS_ENVIRONMENT: environment,
         NEXT_PUBLIC_APP_URL: origin, DODO_PAYMENTS_RETURN_URL: `${origin}/settings/billing/return` };
       expect(readDodoConfig("next", deployment, env)).toMatchObject({ environment });
@@ -141,8 +141,8 @@ describe("Dodo config", () => {
     expect(() => readDodoConfig("next", "development", { ...nextEnv, DODO_PAYMENTS_RETURN_URL: returnUrl })).toThrow();
   });
   it.each([
-    "https://codena.tech", "https://preview.codena.tech", "http://dev.example.test",
-    "https://codena.tech.", "https://preview.codena.tech.",
+    "https://codenaya.tech", "https://www.codenaya.tech", "https://preview.codenaya.tech", "http://dev.example.test",
+    "https://codenaya.tech.", "https://www.codenaya.tech.", "https://preview.codenaya.tech.",
     "https://dev.example.test/path", "https://user:password@dev.example.test", "file:///tmp",
   ])("rejects nonisolated or malformed test origin %s", (origin) => {
     expect(() => readDodoConfig("next", "preview", { ...nextEnv, NEXT_PUBLIC_APP_URL: origin,
@@ -154,7 +154,7 @@ describe("Dodo config", () => {
         DODO_PAYMENTS_RETURN_URL: `${origin}/settings/billing/return` })).not.toBeNull();
     },
   );
-  it.each(["http://codena.tech", "https://www.codena.tech", "https://codena.tech:8443", "http://localhost:3000"])(
+  it.each(["http://www.codenaya.tech", "https://codenaya.tech", "https://www.codenaya.tech:8443", "http://localhost:3000"])(
     "rejects noncanonical production origin %s", (origin) => {
       expect(() => readDodoConfig("next", "production", { ...nextEnv,
         DODO_PAYMENTS_ENVIRONMENT: "live_mode", NEXT_PUBLIC_APP_URL: origin,
@@ -200,8 +200,9 @@ describe("Dodo config", () => {
     expect(warn).not.toHaveBeenCalled();
     expect(errorLog).not.toHaveBeenCalled();
   });
-  it("refuses browser use", () => {
+  it("refuses browser use for Next but not for the Convex receiver", () => {
     vi.stubGlobal("window", {});
     expect(() => readDodoConfig("next", "development", nextEnv)).toThrow("server-only");
+    expect(readDodoConfig("convex-receiver", "development", receiverEnv)).toMatchObject({ webhookKey: "synthetic-signing-key" });
   });
 });

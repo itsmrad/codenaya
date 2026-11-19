@@ -13,8 +13,13 @@
  * `redactJsonValue` first. A single early `return` that skips it would put a
  * credential into the conversation permanently, so the redaction happens once, at
  * the boundary, rather than at each call site.
+ *
+ * Given a `storeEnvRefs`, the same pass turns redacted spans into env refs
+ * (`env-refs.ts`): sealed and stored here, inside the caller's step, so the
+ * model sees only the ref and no value leaves this function.
  */
 
+import { createEnvRefMinter, type EnvRefStore } from "./env-refs";
 import { redactJsonValue } from "./redact";
 import { openMcpClient } from "./discover-tools";
 import type { ResolvedMcpServer } from "./resolve-servers";
@@ -93,6 +98,8 @@ export interface CallMcpToolOptions {
   args: Record<string, unknown>;
   /** Secret values to strip from the result, from `collectKnownSecrets`. */
   knownSecrets: readonly string[];
+  /** Turns redacted spans into env refs for this run; omitted, they stay placeholders. */
+  storeEnvRefs?: EnvRefStore;
   timeoutMs?: number;
 }
 
@@ -112,14 +119,25 @@ export async function callMcpTool(
     toolName,
     args,
     knownSecrets,
+    storeEnvRefs,
     timeoutMs = CALL_TIMEOUT_MS,
   } = options;
 
   const startedAt = Date.now();
 
   /** Single exit point, so no path can skip redaction. */
-  const finish = (value: unknown, ok: boolean): CallToolOutcome => {
-    const redacted = redactJsonValue(value, knownSecrets);
+  const finish = async (value: unknown, ok: boolean): Promise<CallToolOutcome> => {
+    const minter = storeEnvRefs ? createEnvRefMinter() : undefined;
+    let redacted = redactJsonValue(value, knownSecrets, minter?.toRef);
+    if (storeEnvRefs && minter && minter.refs.length > 0) {
+      try {
+        await storeEnvRefs(minter.refs, { providerId: server.providerId, toolName });
+      } catch (error) {
+        // Unstored refs would dangle, so fall back to plain placeholders. Name only: never the payload.
+        console.warn("[mcp] could not store env refs", error instanceof Error ? error.name : "unknown");
+        redacted = redactJsonValue(value, knownSecrets);
+      }
+    }
     const asText =
       typeof redacted.value === "string"
         ? redacted.value
@@ -159,7 +177,7 @@ export async function callMcpTool(
     // MCP signals tool-level failure with isError rather than a transport error.
     // Surfaced as text so the model can adjust its arguments and try again.
     if (result.isError) {
-      return finish(
+      return await finish(
         `Error from ${server.displayName} tool "${toolName}": ${text}`,
         false,
       );
@@ -168,10 +186,10 @@ export async function callMcpTool(
     // structuredContent is preferred when present — it is the machine-readable
     // form and avoids re-parsing prose.
     if (result.structuredContent !== undefined) {
-      return finish(result.structuredContent, true);
+      return await finish(result.structuredContent, true);
     }
 
-    return finish(text.length > 0 ? text : "(the tool returned no output)", true);
+    return await finish(text.length > 0 ? text : "(the tool returned no output)", true);
   } catch (error) {
     return finish(
       `Error: ${server.displayName} tool "${toolName}" failed ` +

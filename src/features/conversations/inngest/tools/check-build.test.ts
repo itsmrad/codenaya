@@ -27,6 +27,7 @@ import {
 } from "../../agent-steps";
 import { START_BUILD_ERROR, START_TYPE_ERROR } from "./start-build-output.fixture";
 import { buildCommand, checkProjectBuild, createCheckBuildTool, trimBuildOutput, warmSlow } from "./check-build";
+import { brokenImagesWarning } from "./remote-images";
 import {
   NEXT16_MODULE_NOT_FOUND,
   NEXT16_PRERENDER_ERROR,
@@ -320,6 +321,39 @@ describe("checkProjectBuild", () => {
     expect(e2b.create).not.toHaveBeenCalled();
     expect(e2b.list).not.toHaveBeenCalled();
     expect(e2b.connect).not.toHaveBeenCalled();
+  });
+
+  describe("remote images", () => {
+    const DEAD = "https://images.unsplash.com/photo-1579584425555-c3ce17fd4399?w=800";
+    const withImage = () => [
+      ...starter().filter((file) => file.path !== "src/App.tsx"),
+      { path: "src/App.tsx", content: `export default function App() { return <img src="${DEAD}" alt="Sushi" />; }` },
+    ];
+    const checkWithProbe = (stdout: string) => {
+      const sandbox = sandboxWith((command) => (command.startsWith("node -e") ? { exitCode: 0, stdout } : undefined));
+      const files = withImage();
+      const result = checkProjectBuild({
+        files,
+        paths: new Set(files.map((file) => file.path)),
+        sandbox: fromE2bSandbox(sandbox as unknown as E2bSandbox),
+      });
+      return { sandbox, result };
+    };
+
+    it("appends a dead image to a passing build as a warning, not an error", async () => {
+      const { sandbox, result } = checkWithProbe(JSON.stringify([[DEAD, 404, "text/html"]]));
+      const text = await result;
+      expect(text.split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect(text.endsWith(brokenImagesWarning([`src/App.tsx: ${DEAD} (HTTP 404)`]))).toBe(true);
+      const commands = sandbox.commands.run.mock.calls.map(([command]) => command);
+      expect(commands.some((command) => command.includes("vite build"))).toBe(true);
+    });
+
+    it("passes when the images load or the probe is inconclusive", async () => {
+      expect((await checkWithProbe(JSON.stringify([[DEAD, 200, "image/jpeg"]])).result).split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect((await checkWithProbe(JSON.stringify([[DEAD, 0, ""]])).result).split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect((await checkWithProbe("not json").result).split("\n")[0]).toBe(BUILD_VERIFIED);
+    });
   });
 
   it("times out an in-flight worker check before the 9-minute invoke deadline (#649)", async () => {

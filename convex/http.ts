@@ -3,6 +3,7 @@ import { Webhook } from "svix";
 
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
+import { receiveDodoWebhook } from "./billingWebhook";
 
 const http = httpRouter();
 
@@ -122,5 +123,8 @@ http.route({
     return new Response(null, { status: 200 });
   }),
 });
+
+// Dodo Standard Webhooks receiver; see convex/billingWebhook.ts.
+http.route({ path: "/billing/webhook", method: "POST", handler: receiveDodoWebhook });
 
 export default http;
