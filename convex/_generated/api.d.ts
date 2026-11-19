@@ -18,6 +18,7 @@ import type * as billingCheckout from "../billingCheckout.js";
 import type * as billingEnv from "../billingEnv.js";
 import type * as billingFulfill from "../billingFulfill.js";
 import type * as billingGrants from "../billingGrants.js";
+import type * as billingPoll from "../billingPoll.js";
 import type * as billingQueue from "../billingQueue.js";
 import type * as billingReconcile from "../billingReconcile.js";
 import type * as billingWebhook from "../billingWebhook.js";
@@ -72,6 +73,7 @@ declare const fullApi: ApiFromModules<{
   billingEnv: typeof billingEnv;
   billingFulfill: typeof billingFulfill;
   billingGrants: typeof billingGrants;
+  billingPoll: typeof billingPoll;
   billingQueue: typeof billingQueue;
   billingReconcile: typeof billingReconcile;
   billingWebhook: typeof billingWebhook;

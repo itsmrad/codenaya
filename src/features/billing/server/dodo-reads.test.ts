@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DodoReconcilerConfig } from "./dodo-config";
 import {
-  DODO_READ_TIMEOUT_MS, DodoReadError, MAX_PROVIDER_BODY_BYTES, fetchPayment, fetchSubscription,
+  DODO_READ_TIMEOUT_MS, DodoReadError, MAX_PROVIDER_BODY_BYTES, fetchCheckoutSession, fetchPayment, fetchSubscription,
+  listCustomerResources,
 } from "./dodo-reads";
 
 const KEY = "synthetic-reconciler-key";
@@ -218,5 +219,48 @@ describe("Dodo reads", () => {
       expect(await failure(fetchSubscription(config, id, fetchImpl))).toMatchObject({ retryable: false });
     }
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("Dodo list and checkout reads", () => {
+  const SINCE = Date.parse("2026-11-01T00:00:00Z");
+  const item = (overrides: Record<string, unknown> = {}) => ({
+    payment_id: "pay_1", refund_id: "ref_1", dispute_id: "dsp_1", subscription_id: "sub_1", status: "succeeded",
+    dispute_status: "dispute_opened", created_at: "2026-11-02T00:00:00Z", customer: { customer_id: "cus_alice" }, ...overrides,
+  });
+
+  it("lists one bounded page by customer and creation time, keeping ids and status only", async () => {
+    const fetchImpl = fetchReturning(json({ items: [item(), item({ refund_id: "ref_2", status: "Weird Status" })] }));
+    const page = await listCustomerResources(config, "refunds", "cus_alice", SINCE, fetchImpl);
+    expect(fetchImpl.mock.calls[0]![0]).toBe(
+      "https://test.dodopayments.com/refunds?customer_id=cus_alice&created_at_gte=2026-11-01T00%3A00%3A00.000Z&page_size=20");
+    expect(page).toEqual({
+      full: false,
+      items: [
+        { id: "ref_1", status: "succeeded", createdAt: Date.parse("2026-11-02T00:00:00Z"), paymentId: "pay_1" },
+        { id: "ref_2", status: "other", createdAt: Date.parse("2026-11-02T00:00:00Z"), paymentId: "pay_1" },
+      ],
+    });
+    const disputes = await listCustomerResources(config, "disputes", "cus_alice", SINCE, fetchReturning(json({ items: [item()] })));
+    expect(disputes.items[0]).toMatchObject({ id: "dsp_1", status: "dispute_opened", paymentId: "pay_1" });
+  });
+
+  it("flags a full page and fails closed on another customer's item or a malformed list", async () => {
+    const full = await listCustomerResources(config, "payments", "cus_alice", SINCE,
+      fetchReturning(json({ items: Array.from({ length: 20 }, (_, i) => item({ payment_id: `pay_${i}` })) })));
+    expect(full.full).toBe(true);
+    await failure(listCustomerResources(config, "subscriptions", "cus_alice", SINCE, fetchReturning(json({ items: [item({ customer: { customer_id: "cus_bob" } })] }))));
+    await failure(listCustomerResources(config, "payments", "cus_alice", SINCE, fetchReturning(json({ items: Array(21).fill(item()) }))));
+    await failure(listCustomerResources(config, "payments", "cus_alice", SINCE, fetchReturning(json({ items: [item({ created_at: "soon" })] }))));
+    expect((await failure(listCustomerResources(config, "payments", "cus_alice", SINCE, fetchReturning(json({}, 503)))))).toMatchObject({ retryable: true });
+  });
+
+  it("reads a checkout session's creation time and payment", async () => {
+    const fetchImpl = fetchReturning(json({ id: "cks_1", created_at: "2026-11-02T00:00:00Z", payment_id: null, payment_status: null }));
+    expect(await fetchCheckoutSession(config, "cks_1", fetchImpl)).toEqual({ createdAt: Date.parse("2026-11-02T00:00:00Z") });
+    expect(fetchImpl.mock.calls[0]![0]).toBe("https://test.dodopayments.com/checkouts/cks_1");
+    expect(await fetchCheckoutSession(config, "cks_1", fetchReturning(json({ id: "cks_1", created_at: "2026-11-02T00:00:00Z", payment_id: "pay_1", payment_status: "processing" }))))
+      .toMatchObject({ paymentId: "pay_1", paymentStatus: "processing" });
+    await failure(fetchCheckoutSession(config, "cks_1", fetchReturning(json({ id: "cks_2", created_at: "2026-11-02T00:00:00Z" }))));
   });
 });

@@ -65,12 +65,61 @@ browser.
 - Schema (additive): `billingPurchases.checkoutUrl`,
   `billingCustomers.creationLeasedAt`.
 
+## Provider polling (`convex/billingPoll.ts`)
+
+A 15-minute cron (`selectPollTargets`) picks at most 20 due customers of this
+deployment's mode (`by_mode_and_nextPollAt`) and schedules one `pollCustomer`
+action each. The action makes at most 6 provider reads: the customer's
+payments, refunds, disputes and subscriptions created since
+`(lastPolledAt or creation, or the held purchase if older) − 3 days` (first
+page, 20 items), and `GET /checkouts/{id}` for a held `open`/`terminal`
+purchase. `recordPollFindings` then records **synthetic receipts** through the
+same `recordReceiptRow` helper the webhook uses, so every money effect still
+runs through the queue and the fenced commit:
+
+- a succeeded payment no purchase has bound (`payment.poll`);
+- a succeeded refund or any dispute (`refund.poll`, `dispute.poll`; they stay
+  fenced like their webhooks until reversal handling lands);
+- a subscription with no local row, or that the provider shows ended while the
+  local row is not (`subscription.poll`).
+
+`webhookId` is `poll:<kind>:<id>:<status>` with the digest of that text, so a
+resource is recorded once per observed status. Nothing is recorded while an
+unresolved (pending or quarantined) receipt for the same payment exists. A
+failed payment is never recorded; a poll never extends `paidThrough`.
+
+**Who is polled.** A held lock or a subscription within 48 h of `paidThrough`:
+every 15 min. An active subscription, or a customer whose reversal watch
+(`watchUntil`, 120 days after any settlement, top-ups included) is open: every
+6 h. Nobody else (`nextPollAt` cleared). Checkout results and settlements make
+the customer due; `lastPolledAt` advances only after a complete poll (no read
+failure, no full page).
+
+**Lock release.** The provider exposes no checkout expiry, so release uses its
+documented default: a session expires 24 h after creation
+(`CHECKOUT_SESSION_TTL_MS`, from the session read's `created_at`). The lock is
+released (purchase `terminal`, `pendingPurchaseRef` cleared) only when the
+poll was complete, the held purchase is still `open`/`terminal` with the same
+session and no bound payment, the session is past 24 h (or a later
+`expiresAt`), the session shows no payment or only a failed/cancelled one, no
+unbound succeeded payment was listed, and, for Pro, no
+`pending`/`active`/`on_hold`/`paused` subscription was created since the
+purchase (with a 5-minute clock-skew margin). `preparing`, `unknown`,
+`processing` and `settled` purchases are never released here. A payment that
+arrives after a release still settles once against the released purchase by
+its session ID.
+
 ## Residual risks
 
 - Checkout hosts are `test.checkout.dodopayments.com` (test) and
   `checkout.dodopayments.com` (live), per the provider docs; the SDK does not
   pin them. A different host fails closed (URL dropped, session kept, lock
   held) until confirmed against a test-mode checkout.
-- The provider exposes no checkout expiry, so `expiresAt` is normally absent
-  and a held lock waits for settlement, a definite failure, or later recovery.
+- The provider exposes no checkout expiry; lock release relies on its
+  documented 24 h session default plus a fresh session read. If that default
+  changed, a lock could be released while the hosted page still accepts
+  payment; such a payment still settles against the released purchase, and a
+  second Pro checkout meanwhile is caught by the duplicate-period guard.
+- Only the first page (20) of each list is read; a fuller page is logged and
+  keeps the lock until later polls narrow the window.
 - An `unknown` customer or purchase needs support until the recovery stage.

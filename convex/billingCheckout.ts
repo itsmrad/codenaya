@@ -12,6 +12,7 @@ import { bindCustomerRow, bindPurchaseRow, ensureCustomerRow, reservePurchaseRow
 import { readConvexBillingConfig } from "./billingEnv";
 import { MAX_SUBSCRIPTIONS_PER_STATUS } from "./billingFulfill";
 import { countActiveLots, MAX_ACTIVE_LOTS, readPeriodLots } from "./billingGrants";
+import { markPollDue } from "./billingPoll";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { billingModeValidator } from "./schema";
@@ -209,6 +210,7 @@ export const recordCheckoutResult = mutation({
         console.error("[billingCheckout] checkout URL not on the allowed host; dropped", { purchaseRef });
       }
       await ctx.db.patch("billingPurchases", purchaseRef, { state: "open", ...(trusted ? { checkoutUrl: url } : {}) });
+      await markPollDue(ctx, customer._id, false);
     } else if (purchase.state === "unknown") {
       // A session may exist: only a late `created` changes an unknown purchase, and the lock stays.
       console.warn("[billingCheckout] ignored result for unknown purchase", { purchaseRef, kind: result.kind });
@@ -218,6 +220,7 @@ export const recordCheckoutResult = mutation({
     } else {
       await ctx.db.patch("billingPurchases", purchaseRef, { state: "unknown" });
       console.warn("[billingCheckout] checkout creation outcome unknown; lock kept", { purchaseRef });
+      await markPollDue(ctx, customer._id, false);
     }
     return null;
   },

@@ -841,10 +841,16 @@ export default defineSchema({
     unresolvedReceipts: v.number(),
     leaseId: v.optional(v.string()),
     leaseExpiresAt: v.optional(v.number()),
+    // Provider polling (convex/billingPoll.ts): when it is next due, the last complete read, and
+    // until when a settled customer stays polled for refunds and disputes.
+    nextPollAt: v.optional(v.number()),
+    lastPolledAt: v.optional(v.number()),
+    watchUntil: v.optional(v.number()),
   })
     .index("by_mode_and_ownerTokenIdentifier", ["mode", "ownerTokenIdentifier"])
     .index("by_mode_and_customerId", ["mode", "customerId"])
-    .index("by_mode_and_userId", ["mode", "userId"]),
+    .index("by_mode_and_userId", ["mode", "userId"])
+    .index("by_mode_and_nextPollAt", ["mode", "nextPollAt"]),
 
   billingSubscriptions: defineTable({
     customerRef: v.id("billingCustomers"),
