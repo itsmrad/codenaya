@@ -391,8 +391,10 @@ describe("checkProjectBuild", () => {
     }
   });
 
-  it("first copies sourceDir into the check directory, without node_modules, .env files or the top-level dist", async () => {
-    const sandbox = sandboxWith(() => undefined);
+  it("first copies sourceDir into the check directory, without node_modules, secret files or the top-level dist", async () => {
+    const sandbox = sandboxWith((command) =>
+      command.startsWith("find ") ? { exitCode: 0, stdout: "src/App.tsx\n.env\nsub/.ENV.local\n.env.example\n" } : undefined,
+    );
     const files = starter();
     await checkProjectBuild({
       files,
@@ -401,13 +403,14 @@ describe("checkProjectBuild", () => {
       sourceDir: "/home/user/app",
     });
 
-    const [copy, install] = sandbox.commands.run.mock.calls.map(([command]) => command);
+    const [copy, find, ...rest] = sandbox.commands.run.mock.calls.map(([command]) => command);
     const dir = (sandbox.commands.run.mock.calls[1][1] as { cwd: string }).cwd;
     expect(copy).toBe(
       `mkdir -p ${dir} && tar -C '/home/user/app' --exclude=node_modules --exclude=.git --exclude=./dist ` +
-        `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
+        `-cf - . | tar -C ${dir} -xf -`,
     );
-    expect(install).toMatch(/^npm install/);
+    expect(find).toMatch(/^find \./);
+    expect(rest.slice(0, 3)).toEqual([`rm -rf -- '${dir}/.env'`, `rm -rf -- '${dir}/sub/.ENV.local'`, expect.stringMatching(/^npm install/)]);
   });
 
   it("refuses snapshot paths that would leave a given sandbox's check directory", async () => {
@@ -472,7 +475,7 @@ describe("checkProjectBuild", () => {
       sourceDir: "/home/user/app",
     });
     const [copy] = sandbox.commands.run.mock.calls.map(([command]) => command);
-    expect(copy).toContain("--exclude=./dist --exclude=./.next --exclude=./out --exclude=./next-env.d.ts --exclude=.env ");
+    expect(copy).toContain("--exclude=./dist --exclude=./.next --exclude=./out --exclude=./next-env.d.ts -cf ");
   });
 
   it("leaves TanStack Start build output out of the sourceDir copy", async () => {
@@ -488,7 +491,7 @@ describe("checkProjectBuild", () => {
       sourceDir: "/home/user/app",
     });
     const [copy] = sandbox.commands.run.mock.calls.map(([command]) => command);
-    expect(copy).toContain("--exclude=./dist --exclude=./.output --exclude=./.tanstack --exclude=./.nitro --exclude=./.vinxi --exclude=.env ");
+    expect(copy).toContain("--exclude=./dist --exclude=./.output --exclude=./.tanstack --exclude=./.nitro --exclude=./.vinxi -cf ");
   });
 
   it("installs, type checks and builds, then kills the sandbox", async () => {
@@ -1383,6 +1386,20 @@ describe("checkBuild tool (#465)", () => {
     const result = await runTool(undefined, () => vi.stubEnv("E2B_API_KEY", ""));
 
     expect(result?.split("\n")[0]).toBe(STATIC_CHECKS_PASSED);
+  });
+
+  it("never sends a secret file's content to the sandbox", async () => {
+    const sandbox = fakeSandbox();
+
+    await runTool(undefined, () => mocks.query.mockImplementation(async (ref) =>
+      getFunctionName(ref) === "system:getEnvVarsForSandbox"
+        ? null
+        : rowsOf([...starter(), { path: ".env.local", content: "API_KEY=CANARY_VALUE_123" }])));
+
+    const written = JSON.stringify(sandbox.files.write.mock.calls);
+    expect(written).toContain("package.json");
+    expect(written).not.toContain(".env.local");
+    expect(written).not.toContain("CANARY_VALUE_123");
   });
 
   it("looks for the owner's warm preview when the project has no variables", async () => {

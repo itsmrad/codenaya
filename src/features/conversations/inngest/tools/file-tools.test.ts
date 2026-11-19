@@ -26,7 +26,7 @@ import { createCreateFilesTool } from "./create-files";
 import { createDeleteFilesTool } from "./delete-files";
 import { createCreateFolderTool } from "./create-folder";
 import { createListFilesTool } from "./list-files";
-import { buildProjectTreePromptSection, MAX_PROMPT_TREE_ENTRIES, type ProjectFile } from "./paths";
+import { buildProjectTreePromptSection, MAX_PROMPT_TREE_ENTRIES, normalizePath, type ProjectFile } from "./paths";
 import { createReadFilesTool } from "./read-files";
 import { createRenameFileTool } from "./rename-file";
 import { createEditFileTool } from "./edit-file";
@@ -665,9 +665,11 @@ describe("locked paths (#307)", () => {
 
 describe("secret files", () => {
   const CANARY = "CANARY_VALUE_123";
-  const refusal = (path: string) =>
-    `Error: "${path}" is protected. This file holds environment values and is managed in the Environment Variables panel.`;
+  const REFUSAL = "is protected. This file holds secrets and is managed outside the agent's tools.";
+  const refusal = (path: string) => `Error: "${path}" ${REFUSAL}`;
   const bypasses = [".env", ".ENV", "./.env", "a/../.env", "sub/.env.local", ".env.production", "sub\\.env.local", ".env ", ".env."];
+  // Paths the tools can't even parse ("a/../.env") are refused as invalid before the policy runs.
+  const expected = (path: string) => (normalizePath(path) === undefined ? "Invalid path" : REFUSAL);
 
   beforeEach(() => {
     db.rows.push(
@@ -681,6 +683,7 @@ describe("secret files", () => {
   it.each(bypasses)("readFiles refuses %j without its content", async (path) => {
     const result = (await createReadFilesTool(opts).handler({ paths: [path] }, ctx)) as string;
     expect(result).toMatch(/^Error: /);
+    expect(result).toContain(expected(path));
     expect(result).not.toContain(CANARY);
   });
 
@@ -692,21 +695,34 @@ describe("secret files", () => {
   });
 
   it.each(bypasses)("every write tool refuses %j before writing", async (path) => {
-    const results = [
+    const byPath = [
       await createWriteFilesTool(opts).handler({ files: [{ path, content: "LEAK=1" }] }, ctx),
       await createUpdateFileTool(opts).handler({ path, content: "LEAK=1" }, ctx),
       await createEditFileTool(opts).handler({ path, edits: [{ oldText: CANARY, newText: "x" }] }, ctx),
       await createDeleteFilesTool(opts).handler({ paths: [path] }, ctx),
       await createRenameFileTool(opts).handler({ path, newName: "leak.txt" }, ctx),
+    ] as string[];
+    // These take a bare name, matched by the policy alone.
+    const byName = [
       await createCreateFilesTool(opts).handler({ parentId: "", files: [{ name: path, content: "LEAK=1" }] }, ctx),
       await createCreateFolderTool(opts).handler({ name: path, parentId: "" }, ctx),
       await createRenameFileTool(opts).handler({ path: "src/App.tsx", newName: path }, ctx),
     ] as string[];
-    for (const result of results) {
-      expect(result).toMatch(/^Error: |Failed: /);
+    for (const result of byPath) expect(result).toContain(expected(path));
+    for (const result of byName) expect(result).toContain(REFUSAL);
+    for (const result of [...byPath, ...byName]) {
+      expect(result).toMatch(/^Error: /);
       expect(result).not.toContain(CANARY);
     }
     expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
+  it("refuses to delete a folder that holds a secret file", async () => {
+    expect(await createDeleteFilesTool(opts).handler({ paths: ["sub"] }, ctx)).toBe(
+      `${refusal("sub/.env.local")} Nothing was deleted.`,
+    );
+    expect(mocks.mutation).not.toHaveBeenCalled();
+    expect(filePaths()).toContain("sub/.env.local");
   });
 
   it("leaves other files writable", async () => {
@@ -716,6 +732,7 @@ describe("secret files", () => {
     expect(await createRenameFileTool(opts).handler({ path: ".env.example", newName: ".env.sample" }, ctx)).toBe(
       'Renamed ".env.example" to ".env.sample" successfully',
     );
+    expect(await createDeleteFilesTool(opts).handler({ paths: ["src"] }, ctx)).not.toContain(REFUSAL);
   });
 
   it("lists the names in the prompt, never the content", () => {

@@ -12,6 +12,8 @@ import {
   rateLimitedResponse,
 } from "@/lib/rate-limit";
 
+const MAX_FILE_NAME_LENGTH = 1024;
+
 const suggestionSchema = z.object({
   suggestion: z
     .string()
@@ -92,7 +94,8 @@ export async function POST(request: Request) {
     } = data;
 
     // A secret file's content never goes to the model; it just gets no ghost text.
-    if (isSecretPath(fileName)) {
+    // No real file name is this long, and the cap bounds the name matching.
+    if (fileName.length > MAX_FILE_NAME_LENGTH || isSecretPath(fileName)) {
       return NextResponse.json({ suggestion: "" });
     }
 

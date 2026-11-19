@@ -169,7 +169,12 @@ describe("editor AI input caps (#242)", () => {
     expect(mocks.generateObject).not.toHaveBeenCalled();
   });
 
-  it.each([".env", "sub/.ENV.local", ".env.production "])("suggestion never sends %j to the model", async (fileName) => {
+  it.each([
+    [".env", ".env"],
+    ["a nested .ENV.local", "sub/.ENV.local"],
+    ["a trailing space", ".env.production "],
+    ["a 100k-character name", `a${". ".repeat(50_000)}`],
+  ])("suggestion never sends %s to the model", async (_label, fileName) => {
     const res = await suggestionPOST(
       post({
         fileName,

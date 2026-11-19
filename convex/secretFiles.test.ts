@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isSecretFile, isSecretPath } from "./secretFiles";
+import { isSecretFile, isSecretPath, withoutSecretFiles } from "./secretFiles";
 
 describe("isSecretFile", () => {
   it.each([
@@ -33,4 +33,19 @@ describe("isSecretPath", () => {
     "allows %j",
     (path) => expect(isSecretPath(path)).toBe(false),
   );
+
+  it("handles long runs of trailing dots and spaces in linear time", () => {
+    const started = performance.now();
+    expect(isSecretPath(`a${". ".repeat(50_000)}`)).toBe(false);
+    expect(isSecretPath(`${". ".repeat(50_000)}x`)).toBe(false);
+    expect(isSecretPath(`.env${" .".repeat(50_000)}`)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+});
+
+describe("withoutSecretFiles", () => {
+  it("drops secret files and keeps the rest in order", () => {
+    const files = [{ path: "src/App.tsx" }, { path: "sub/.env.local" }, { path: ".env.example" }, { path: "keys/tls.pem" }];
+    expect(withoutSecretFiles(files)).toEqual([{ path: "src/App.tsx" }, { path: ".env.example" }]);
+  });
 });
