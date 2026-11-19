@@ -22,7 +22,17 @@ const paymentBody = (overrides: Record<string, unknown> = {}) => ({
   service_periods: [{
     subscription_id: "sub_1", starts_at: "2026-11-01T00:00:00Z", ends_at: "2026-12-01T00:00:00Z", proration_factor: "1",
   }],
+  // Required arrays on the SDK `Payment` retrieve type; `discount_id` is nullable.
+  refunds: [], disputes: [], discount_id: null,
   ...overrides,
+});
+const refundItem = (overrides: Record<string, unknown> = {}) => ({
+  refund_id: "ref_1", payment_id: "pay_1", business_id: "bus_1", status: "succeeded", amount: 500, currency: "USD",
+  is_partial: true, created_at: "2026-11-02T00:00:00Z", reason: "customer request", ...overrides,
+});
+const disputeItem = (overrides: Record<string, unknown> = {}) => ({
+  dispute_id: "dsp_1", payment_id: "pay_1", business_id: "bus_1", amount: "2000", currency: "USD",
+  dispute_status: "dispute_opened", dispute_stage: "dispute", created_at: "2026-11-03T00:00:00Z", ...overrides,
 });
 const subscriptionBody = (overrides: Record<string, unknown> = {}) => ({
   subscription_id: "sub_1", status: "active", product_id: "prod_pro", quantity: 1,
@@ -75,7 +85,8 @@ describe("Dodo reads", () => {
         subscriptionId: "sub_1", start: Date.parse("2026-11-01T00:00:00Z"), end: Date.parse("2026-12-01T00:00:00Z"),
         prorationFactor: "1",
       }],
-      includesUsage: false, isUpdatePaymentMethod: false,
+      includesUsage: false, isUpdatePaymentMethod: false, discountId: undefined,
+      adjustments: { refunds: [], disputes: [] },
     });
     const read = await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody({
       product_cart: [{ product_id: "prod_topup", quantity: 2 }], includes_usage: true, is_update_payment_method: true,
@@ -127,6 +138,65 @@ describe("Dodo reads", () => {
   it("normalizes an unrecognised but well-formed charge type as itself", async () => {
     const read = await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody({ charge_type: "usage_settlement" }))));
     expect(read.chargeType).toBe("usage_settlement");
+  });
+  it("normalizes the payment's refunds and disputes", async () => {
+    const read = await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody({
+      refunds: [refundItem(), refundItem({ refund_id: "ref_2", status: "requires_review", amount: null, currency: null, is_partial: false })],
+      disputes: [
+        disputeItem(),
+        disputeItem({ dispute_id: "dsp_2", dispute_status: "dispute_lost", amount: "1x", currency: "usd" }),
+        disputeItem({ dispute_id: "dsp_3", dispute_status: "won", amount: "1".repeat(16) }),
+      ],
+    }))));
+    expect(read.adjustments).toEqual({
+      refunds: [
+        { refundId: "ref_1", status: "succeeded", amountMinor: 500, currency: "USD", isPartial: true },
+        { refundId: "ref_2", status: "other", amountMinor: null, currency: "", isPartial: false },
+      ],
+      disputes: [
+        { disputeId: "dsp_1", status: "opened", amountMinor: 2000, currency: "USD" },
+        { disputeId: "dsp_2", status: "lost", amountMinor: null, currency: "" },
+        { disputeId: "dsp_3", status: "other", amountMinor: null, currency: "USD" },
+      ],
+    });
+  });
+  it.each([
+    ["a missing refund list", { refunds: undefined }],
+    ["a null dispute list", { disputes: null }],
+    ["a non-list", { refunds: {} }],
+    ["21 refunds", { refunds: Array.from({ length: 21 }, (_, i) => refundItem({ refund_id: `ref_${i}` })) }],
+    ["21 disputes", { disputes: Array.from({ length: 21 }, (_, i) => disputeItem({ dispute_id: `dsp_${i}` })) }],
+    ["a non-object entry", { refunds: [refundItem(), "ref_2"] }],
+    ["a malformed refund id", { refunds: [refundItem({ refund_id: "ref/1" })] }],
+    ["a fractional refund amount", { refunds: [refundItem({ amount: 5.5 })] }],
+    ["a negative refund amount", { refunds: [refundItem({ amount: -1 })] }],
+    ["a string refund amount", { refunds: [refundItem({ amount: "500" })] }],
+    ["a missing partial flag", { refunds: [refundItem({ is_partial: undefined })] }],
+    ["a missing dispute id", { disputes: [disputeItem({ dispute_id: undefined })] }],
+  ])("keeps the adjustments unknown for %s", async (_, overrides) => {
+    const read = await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody(overrides))));
+    expect(read.adjustments).toBeUndefined();
+    expect(read.status).toBe("succeeded");
+  });
+  it.each([
+    ["another payment's refund", { refunds: [refundItem({ payment_id: "pay_2" })] }],
+    ["another business's refund", { refunds: [refundItem({ business_id: "bus_other" })] }],
+    ["another payment's dispute", { disputes: [disputeItem({ payment_id: undefined })] }],
+    ["another business's dispute after a malformed one", { disputes: ["x", disputeItem({ business_id: "bus_other" })] }],
+  ])("treats a payment listing %s as permanent", async (_, overrides) => {
+    expect(await failure(fetchPayment(config, "pay_1", fetchReturning(json(paymentBody(overrides))))))
+      .toMatchObject({ retryable: false });
+  });
+  it("normalizes the discount id, legacy or stacked", async () => {
+    const read = (overrides: Record<string, unknown>) =>
+      fetchPayment(config, "pay_1", fetchReturning(json(paymentBody(overrides))));
+    expect((await read({ discount_id: "dsc_1" })).discountId).toBe("dsc_1");
+    expect((await read({ discounts: [{ discount_id: "dsc_2", code: "SAVE" }] })).discountId).toBe("dsc_2");
+    expect((await read({ discounts: [] })).discountId).toBeUndefined();
+    expect((await read({ discount_id: undefined, discounts: null })).discountId).toBeUndefined();
+    for (const overrides of [{ discount_id: "dsc/1" }, { discounts: [{ code: "SAVE" }] }, { discounts: "dsc_1" }]) {
+      expect(await failure(read(overrides))).toMatchObject({ retryable: false });
+    }
   });
   it("normalizes a subscription and treats an invalid date as absent", async () => {
     expect(await fetchSubscription(config, "sub_1", fetchReturning(json(subscriptionBody({

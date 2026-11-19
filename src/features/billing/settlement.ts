@@ -4,6 +4,7 @@
  * pending or quarantine, never a grant.
  */
 import { PLANS, TOP_UP } from "./plans";
+import type { ProviderDispute, ProviderRefund } from "./reversals";
 
 export const BILLING_CATALOG_VERSION = "2026-11-17";
 
@@ -23,6 +24,10 @@ export type ProviderPayment = {
   includesUsage?: boolean;
   /** SDK `is_update_payment_method`: the payment only updates a subscription's card. */
   isUpdatePaymentMethod?: boolean;
+  /** SDK `discount_id` (or the first of `discounts`): any discount on the payment. */
+  discountId?: string;
+  /** Absent when the provider sent no list or a malformed one (unknown, never empty). */
+  adjustments?: { refunds: ProviderRefund[]; disputes: ProviderDispute[] };
 };
 
 /** Normalized `GET /subscriptions/{id}`. */
@@ -38,7 +43,7 @@ export type SettlementDecision =
   | { kind: "processing"; paymentId: string }
   | { kind: "pending"; paymentId: string; reason: "service_period_unknown" | "charge_type_unknown" }
   | { kind: "no_grant"; paymentId: string; reason: "failed" | "cancelled" | "not_full_period" | "payment_method_update" }
-  | { kind: "quarantine"; paymentId: string; reason: "customer_mismatch" | "cart" | "amount" | "unknown_product" | "subscription_mismatch" };
+  | { kind: "quarantine"; paymentId: string; reason: "customer_mismatch" | "cart" | "amount" | "unknown_product" | "subscription_mismatch" | "discount" };
 
 type Catalog = { proProductId: string; topUpProductId?: string };
 
@@ -72,6 +77,10 @@ export function decideSettlement(input: {
 
 // A zero-priced or discounted-to-zero purchase never mints credits.
 const hasAmount = (payment: ProviderPayment) => payment.totalMinor > 0 && payment.currency !== "";
+// Defence in depth (checkout disables discount codes): totals include tax, so an undiscounted USD
+// payment is never below the list price. Other currencies rely on the discount id alone.
+const discounted = (payment: ProviderPayment, listPriceUsd: number) =>
+  payment.discountId !== undefined || (payment.currency === "USD" && payment.totalMinor < listPriceUsd * 100);
 
 function decideOneTime(payment: ProviderPayment, catalog: Catalog): SettlementDecision {
   const { paymentId } = payment;
@@ -81,6 +90,7 @@ function decideOneTime(payment: ProviderPayment, catalog: Catalog): SettlementDe
   if (!catalog.topUpProductId || line.productId !== catalog.topUpProductId) {
     return { kind: "quarantine", paymentId, reason: "unknown_product" };
   }
+  if (discounted(payment, TOP_UP.priceUsd)) return { kind: "quarantine", paymentId, reason: "discount" };
   // Provider time keeps the derived top-up expiry identical on replay.
   return { kind: "top_up", paymentId, productId: line.productId, credits: TOP_UP.credits, settledAt: payment.createdAt };
 }
@@ -124,6 +134,7 @@ function decideServicePeriod(payment: ProviderPayment, subscriptionId: string, p
   const factor = Number(period.prorationFactor);
   if (factor > 0 && factor < 1) return { kind: "no_grant", paymentId, reason: "not_full_period" };
   if (factor !== 1) return { kind: "pending", paymentId, reason: "service_period_unknown" };
+  if (discounted(payment, PLANS.pro.priceUsdPerMonth)) return { kind: "quarantine", paymentId, reason: "discount" };
   return {
     kind: "period", paymentId, subscriptionId, productId,
     serviceStart: period.start, serviceEnd: period.end, credits: PLANS.pro.monthlyCredits, settledAt: payment.createdAt,

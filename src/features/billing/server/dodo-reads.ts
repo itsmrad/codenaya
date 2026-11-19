@@ -1,5 +1,8 @@
 // Server-only Dodo reads for reconciliation. Errors carry a fixed message and the HTTP status
 // only: never the key, URL or body. Field names follow the dodopayments SDK 2.63.0 types.
+import {
+  MAX_ADJUSTMENTS_PER_PAYMENT, type ProviderDispute, type ProviderRefund,
+} from "../reversals";
 import type { ProviderPayment, ProviderSubscription } from "../settlement";
 import { readBoundedBody } from "./bounded-body";
 import type { DodoEnvironment, DodoReconcilerConfig } from "./dodo-config";
@@ -21,6 +24,9 @@ const BASE_URL: Record<DodoEnvironment, string> = {
 const PERMANENT_STATUSES = new Set([400, 401, 403, 404, 422]);
 const PAYMENT_STATUSES = new Set(["succeeded", "processing", "failed", "cancelled"]);
 const SUBSCRIPTION_STATUSES = new Set(["pending", "active", "on_hold", "paused", "cancelled", "failed", "expired"]);
+const REFUND_STATUSES = new Set(["succeeded", "failed", "pending", "review"]);
+const DISPUTE_STATUSES = new Set(["opened", "challenged", "won", "lost", "accepted", "cancelled", "expired"]);
+const DISPUTE_AMOUNT = /^\d{1,15}$/;
 
 export class DodoReadError extends Error {
   constructor(readonly retryable: boolean, readonly status?: number) {
@@ -49,6 +55,7 @@ function epochMs(value: unknown): number | undefined {
   return Number.isFinite(ms) ? ms : undefined;
 }
 const optionalBoolean = (value: unknown) => (typeof value === "boolean" ? value : undefined);
+const currencyCode = (value: unknown) => (typeof value === "string" && CURRENCY.test(value) ? value : "");
 
 async function discard(response: Response) {
   try {
@@ -121,6 +128,59 @@ function servicePeriods(value: unknown): ProviderPayment["servicePeriods"] {
   return periods;
 }
 
+// SDK 2.63.0 deprecates `discount_id` for `discounts`; either one marks the payment discounted.
+function discountId(body: Json): string | undefined {
+  const legacy = optionalId(body.discount_id);
+  if (legacy !== undefined || body.discounts == null) return legacy;
+  if (!Array.isArray(body.discounts)) throw malformed();
+  const [first] = body.discounts;
+  return first === undefined ? undefined : providerId(isRecord(first) ? first.discount_id : undefined);
+}
+
+function refund(item: Json): ProviderRefund | undefined {
+  const { refund_id: id, status, amount, is_partial: isPartial } = item;
+  const amountOk = amount == null || (typeof amount === "number" && Number.isSafeInteger(amount) && amount >= 0);
+  if (typeof id !== "string" || !PROVIDER_ID.test(id) || !amountOk || typeof isPartial !== "boolean") return undefined;
+  return {
+    refundId: id,
+    status: typeof status === "string" && REFUND_STATUSES.has(status) ? status as ProviderRefund["status"] : "other",
+    amountMinor: amount ?? null, currency: currencyCode(item.currency), isPartial,
+  };
+}
+
+function dispute(item: Json): ProviderDispute | undefined {
+  const { dispute_id: id, dispute_status: status, amount } = item;
+  if (typeof id !== "string" || !PROVIDER_ID.test(id)) return undefined;
+  const bare = typeof status === "string" && status.startsWith("dispute_") ? status.slice("dispute_".length) : "";
+  return {
+    disputeId: id,
+    status: DISPUTE_STATUSES.has(bare) ? bare as ProviderDispute["status"] : "other",
+    amountMinor: typeof amount === "string" && DISPUTE_AMOUNT.test(amount) ? Number(amount) : null,
+    currency: currencyCode(item.currency),
+  };
+}
+
+/**
+ * The payment's whole current refund and dispute lists; unknown (undefined), never empty, when
+ * missing, oversize or malformed. An entry of another payment or business fails the whole read.
+ */
+function adjustments(body: Json, paymentId: string, businessId: string): ProviderPayment["adjustments"] {
+  function list<T>(value: unknown, normalize: (item: Json) => T | undefined): T[] | undefined {
+    if (!Array.isArray(value) || value.length > MAX_ADJUSTMENTS_PER_PAYMENT) return undefined;
+    const items: T[] = [];
+    for (const item of value) {
+      if (isRecord(item) && (item.payment_id !== paymentId || item.business_id !== businessId)) throw malformed();
+      const normalized = isRecord(item) ? normalize(item) : undefined;
+      if (normalized !== undefined) items.push(normalized);
+    }
+    // Every entry's owner is checked before a malformed one makes the list unknown.
+    return items.length === value.length ? items : undefined;
+  }
+  const refunds = list(body.refunds, refund);
+  const disputes = list(body.disputes, dispute);
+  return refunds && disputes ? { refunds, disputes } : undefined;
+}
+
 function cartLines(value: unknown): ProviderPayment["cart"] {
   if (value == null) return [];
   if (!Array.isArray(value) || value.length > MAX_LIST_ITEMS) throw malformed();
@@ -149,7 +209,7 @@ export async function fetchPayment(
     cart: cartLines(body.product_cart),
     totalMinor: safeInteger(body.total_amount),
     taxMinor: body.tax == null ? undefined : safeInteger(body.tax),
-    currency: typeof currency === "string" && CURRENCY.test(currency) ? currency : "",
+    currency: currencyCode(currency),
     createdAt,
     // Absent only when the provider sent none; anything unrecognisable stays visibly unknown.
     chargeType: chargeType == null ? undefined
@@ -157,6 +217,8 @@ export async function fetchPayment(
     servicePeriods: servicePeriods(body.service_periods),
     includesUsage: optionalBoolean(body.includes_usage),
     isUpdatePaymentMethod: optionalBoolean(body.is_update_payment_method),
+    discountId: discountId(body),
+    adjustments: adjustments(body, paymentId, config.businessId),
   };
 }
 
