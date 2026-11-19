@@ -127,19 +127,87 @@ const kill = async (name: string, { requestTimeoutMs }: RequestOptions = {}) => 
   }
 };
 
-const notYet = () => Promise.reject(new Error("Blaxel sandbox commands and files are not implemented yet"));
+/** E2B's default command timeout, so a `run` without `timeoutMs` behaves the same on both. */
+const DEFAULT_RUN_TIMEOUT_MS = 60_000;
+
+/** The SDK hands output over one line at a time with its newline stripped; E2B's chunks keep theirs. */
+const lines = (onData?: (data: string) => void) => onData && ((line: string) => onData(`${line}\n`));
 
 /** The seam's view of a Blaxel sandbox. */
 const wrap = (sandbox: SandboxInstance): Sandbox => {
   const name = sandbox.metadata.name;
+  const previews = new Map<number, Promise<string>>();
   return {
     provider: BLAXEL_ID,
     id: name,
-    run: notYet,
-    start: notYet,
-    writeFiles: notYet,
-    readFile: notYet,
-    previewUrl: notYet,
+    run: async (command, { cwd, envs, timeoutMs = DEFAULT_RUN_TIMEOUT_MS, onStdout, onStderr, requestTimeoutMs } = {}) => {
+      // The output comes from the streamed lines, not the result, which may hold only its tail.
+      let stdout = "";
+      let stderr = "";
+      const startedAt = Date.now();
+      const result = await call(
+        () =>
+          sandbox.process.exec({
+            command,
+            workingDir: cwd,
+            env: envs,
+            waitForCompletion: true,
+            timeout: Math.ceil(timeoutMs / 1000),
+            // Always stream: a held, silent request is cut by Blaxel's edge after
+            // 120s, while a streamed one gets keepalives.
+            onStdout: (line) => {
+              stdout += `${line}\n`;
+              onStdout?.(`${line}\n`);
+            },
+            onStderr: (line) => {
+              stderr += `${line}\n`;
+              onStderr?.(`${line}\n`);
+            },
+          }),
+        // The request outlives the command: its own budget, else the command's limit plus 30 s.
+        requestTimeoutMs ?? (timeoutMs && timeoutMs + BLAXEL_REQUEST_TIMEOUT_MS),
+      );
+      // A non-zero exit is a result. `killed` is a timeout only once the command's own limit
+      // has passed; anything else that killed it (killTree) leaves a result.
+      if (timeoutMs && result.status === "killed" && Date.now() - startedAt >= timeoutMs) {
+        throw new SandboxTimeoutError(`Command timed out after ${timeoutMs}ms`);
+      }
+      // Nothing streamed (the server answered without streaming): the result is all there is.
+      return { exitCode: result.exitCode, stdout: stdout || result.stdout, stderr: stderr || result.stderr };
+    },
+    start: async (command, { cwd, envs, onStdout, onStderr, requestTimeoutMs } = {}) => {
+      // No timeout means none (Blaxel's default 0). Never keepAlive: it blocks standby, which costs.
+      // With callbacks the SDK follows the output until the process exits.
+      const started = await call(
+        () => sandbox.process.exec({ command, workingDir: cwd, env: envs, waitForCompletion: false, onStdout: lines(onStdout), onStderr: lines(onStderr) }),
+        requestTimeoutMs,
+      );
+      return { pid: Number(started.pid) };
+    },
+    writeFiles: async (files, { requestTimeoutMs } = {}) => {
+      // Parents are created. Text goes in one request; writeBinary takes a string as a local path, so bytes go one by one.
+      const text = files.flatMap(({ path, data }) => (typeof data === "string" ? [{ path: path.replace(/^\/+/, ""), content: data }] : []));
+      const bytes = files.filter((file): file is { path: string; data: ArrayBuffer } => typeof file.data !== "string");
+      await Promise.all([
+        ...(text.length ? [call(() => sandbox.fs.writeTree(text, "/"), requestTimeoutMs)] : []),
+        ...bytes.map(({ path, data }) => call(() => sandbox.fs.writeBinary(path, new Uint8Array(data)), requestTimeoutMs)),
+      ]);
+    },
+    readFile: ((path: string, format: "text" | "bytes", { requestTimeoutMs }: RequestOptions = {}) =>
+      call<string | Uint8Array>(
+        async () => (format === "bytes" ? new Uint8Array(await (await sandbox.fs.readBinary(path)).arrayBuffer()) : sandbox.fs.read(path)),
+        requestTimeoutMs,
+      )) as Sandbox["readFile"],
+    // Public, as E2B's URLs are: the iframe can't send a token header. The URL's hash keeps it unguessable.
+    previewUrl: (port) => {
+      let url = previews.get(port);
+      if (!url) {
+        url = call(() => sandbox.previews.createIfNotExists({ port, name: `p${port}`, public: true })).then((preview) => preview.url);
+        url.catch(() => previews.delete(port));
+        previews.set(port, url);
+      }
+      return url;
+    },
     // Read fresh: the owner check and the warm-preview lookup need current labels and endAt.
     info: async ({ requestTimeoutMs } = {}) => infoOf(await call(() => SandboxInstance.get(name), requestTimeoutMs, "sandbox")),
     kill: async (opts) => {
