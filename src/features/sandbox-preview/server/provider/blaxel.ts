@@ -14,7 +14,6 @@ import {
 import { PREVIEW_PROXY_PORT } from "../dev-server";
 import {
   type ListedSandbox,
-  type ProviderId,
   type RequestOptions,
   type Sandbox,
   SandboxConfigError,
@@ -24,9 +23,6 @@ import {
   SandboxRateLimitError,
   SandboxTimeoutError,
 } from "./types";
-
-// Not in PROVIDER_IDS until the adapter is registered; this is its one cast until then.
-const BLAXEL_ID = "blaxel" as string as ProviderId;
 
 /** The Node 22 image, used when BLAXEL_IMAGE is unset. */
 export const DEFAULT_BLAXEL_IMAGE = "codenaya-node22";
@@ -138,7 +134,7 @@ const wrap = (sandbox: SandboxInstance): Sandbox => {
   const name = sandbox.metadata.name;
   const previews = new Map<number, Promise<string>>();
   return {
-    provider: BLAXEL_ID,
+    provider: "blaxel",
     id: name,
     run: async (command, { cwd, envs, timeoutMs = DEFAULT_RUN_TIMEOUT_MS, onStdout, onStderr, requestTimeoutMs } = {}) => {
       // The output comes from the streamed lines, not the result, which may hold only its tail.
@@ -217,12 +213,12 @@ const wrap = (sandbox: SandboxInstance): Sandbox => {
 };
 
 /**
- * The Blaxel adapter; nothing registers it yet. The SDK reads BL_WORKSPACE and BL_API_KEY
+ * The Blaxel adapter. The SDK reads BL_WORKSPACE and BL_API_KEY
  * itself, and at import time also reads ./.env and ./blaxel.toml from the cwd, whose values
  * win over process.env (and ~/.blaxel/config.yaml).
  */
 export const createBlaxelProvider = (): SandboxProvider => ({
-  id: BLAXEL_ID,
+  id: "blaxel",
   maxSessionMs: BLAXEL_MAX_SESSION_MS,
   // localHostHeader is ignored: our :4000 proxy rewrites Host itself.
   create: async ({ image, timeoutMs, metadata, requestTimeoutMs = BLAXEL_REQUEST_TIMEOUT_MS }) => {

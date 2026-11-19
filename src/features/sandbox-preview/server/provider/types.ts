@@ -1,10 +1,10 @@
 /**
  * The vendor-neutral sandbox seam (ADR 0015). Callers depend on these types;
- * only `e2b.ts` (and future adapters) import a vendor SDK.
+ * only the adapters (`e2b.ts`, `blaxel.ts`) import a vendor SDK.
  */
 
 /** Every provider with an adapter. A public sandbox id must name one of these. */
-export const PROVIDER_IDS = ["e2b"] as const;
+export const PROVIDER_IDS = ["e2b", "blaxel"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 /**

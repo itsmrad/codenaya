@@ -1,14 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ create: vi.fn(), list: vi.fn() }));
+const mocks = vi.hoisted(() => ({ create: vi.fn(), list: vi.fn(), createBlaxelProvider: vi.fn() }));
 
 vi.mock("e2b", async (importOriginal) => ({
   ...(await importOriginal<typeof import("e2b")>()),
   Sandbox: { create: mocks.create, list: mocks.list },
 }));
 
+// The adapter's own tests mock @blaxel/core; here only its wiring matters.
+vi.mock("./blaxel", () => ({ createBlaxelProvider: mocks.createBlaxelProvider }));
+
 import { RateLimitError } from "e2b";
 
+import { PROVIDER_KEYS, parseProviderConfig } from "./config";
+import { createProviderCooldown, createWithFailover } from "./failover";
 import { countLive, listAll } from "./fanout";
 import { clientSandboxId } from "./ids";
 import {
@@ -20,11 +25,30 @@ import {
   getProvider,
   isMultiProvider,
 } from "./registry";
-import { SandboxConfigError, SandboxRateLimitError } from "./types";
+import { selectProviders } from "./select";
+import { type SandboxProvider, SandboxConfigError, SandboxRateLimitError } from "./types";
 
 const handle = (sandboxId: string) => ({ sandboxId });
+const blaxelSandbox = { provider: "blaxel" as const, id: "cn-a1b2c3d4e5f6g7h8i9j0" };
+const fakeBlaxel = (): SandboxProvider => ({
+  id: "blaxel", maxSessionMs: 3_600_000,
+  create: vi.fn().mockResolvedValue(blaxelSandbox),
+  connect: vi.fn(),
+  list: vi.fn().mockResolvedValue([{ id: blaxelSandbox.id, metadata: { userId: "u1" }, endAt: new Date(0) }]),
+  kill: vi.fn(),
+});
+const stubKeys = (...ids: (keyof typeof PROVIDER_KEYS)[]) => {
+  for (const id of ids) for (const key of PROVIDER_KEYS[id]) vi.stubEnv(key, `${key}_value`);
+};
 
 describe("sandbox provider registry", () => {
+  // No key or provider choice leaks in from the shell (infisical run sets real ones).
+  beforeEach(() => {
+    for (const key of Object.values(PROVIDER_KEYS).flat()) vi.stubEnv(key, "");
+    vi.stubEnv("SANDBOX_PROVIDER", "");
+    vi.stubEnv("SANDBOX_PROVIDER_FALLBACKS", "");
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetAllMocks();
@@ -45,6 +69,77 @@ describe("sandbox provider registry", () => {
     expect(() => getDefaultProvider()).toThrow("E2B_API_KEY is not set");
     expect(getDefaultProviderOrNull()).toBeNull();
     expect(getConfiguredProviders()).toEqual([]);
+  });
+
+  it("keeps Blaxel dark unless both BL_API_KEY and BL_WORKSPACE are set", () => {
+    vi.stubEnv("BL_API_KEY", "bl_key");
+
+    expect(() => getProvider("blaxel")).toThrow(SandboxConfigError);
+    expect(getConfiguredProviders()).toEqual([]);
+    expect(mocks.createBlaxelProvider).not.toHaveBeenCalled();
+
+    vi.stubEnv("BL_WORKSPACE", "workspace");
+    mocks.createBlaxelProvider.mockReturnValue(fakeBlaxel());
+    stubKeys("e2b");
+    expect(getProvider("blaxel").id).toBe("blaxel");
+    expect(getConfiguredProviders().map(({ id }) => id)).toEqual(["e2b", "blaxel"]);
+  });
+
+  it("fails over from an E2B rate limit to Blaxel, and counts sandboxes on both", async () => {
+    stubKeys("e2b", "blaxel");
+    vi.stubEnv("SANDBOX_PROVIDER_FALLBACKS", "blaxel");
+    const blaxel = fakeBlaxel();
+    mocks.createBlaxelProvider.mockReturnValue(blaxel);
+    mocks.create.mockRejectedValue(new RateLimitError("slow down"));
+    mocks.list.mockReturnValue({ nextItems: async () => [{ sandboxId: "sbx_1", metadata: { userId: "u1" }, endAt: new Date(0) }] });
+    const onNotice = vi.fn();
+    // createSandbox's own path, with a fresh cooldown so later tests still reach E2B.
+    const config = parseProviderConfig();
+    const cooldown = createProviderCooldown();
+    const providers = selectProviders(config, cooldown).map(getProvider);
+
+    const sandbox = await createWithFailover({ timeoutMs: 1, metadata: {} }, { providers, cooldown, onNotice });
+    expect(sandbox).toBe(blaxelSandbox);
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    expect(cooldown.isCoolingDown("e2b")).toBe(true);
+    expect(onNotice).toHaveBeenCalledExactlyOnceWith("E2B unavailable, continuing on blaxel...");
+    expect(isMultiProvider(config)).toBe(true);
+    expect(clientSandboxId(sandbox, isMultiProvider(config))).toBe(`blaxel:${blaxelSandbox.id}`);
+    expect(await countLive(getConfiguredProviders(config), { userId: "u1" })).toBe(2);
+  });
+
+  it("with Blaxel keyed but not listed, creates once on E2B unprefixed, yet the cap and kill fan-out list Blaxel", async () => {
+    stubKeys("e2b", "blaxel");
+    const blaxel = fakeBlaxel();
+    mocks.createBlaxelProvider.mockReturnValue(blaxel);
+    mocks.create.mockResolvedValue(handle("sbx_1"));
+    mocks.list.mockReturnValue({ nextItems: async () => [] });
+
+    const sandbox = await createSandbox({ timeoutMs: 1, metadata: {} });
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    expect(blaxel.create).not.toHaveBeenCalled();
+    expect(clientSandboxId(sandbox, isMultiProvider())).toBe("sbx_1");
+    expect(await countLive(getConfiguredProviders(), { userId: "u1" })).toBe(1);
+    expect(blaxel.list).toHaveBeenCalledWith({ metadata: { userId: "u1" } });
+  });
+
+  it("fails the cap closed on a failing Blaxel list until Blaxel is cooling, while kill and lookup skip it", async () => {
+    stubKeys("e2b", "blaxel");
+    const blaxel = fakeBlaxel();
+    vi.mocked(blaxel.list).mockRejectedValue(new Error("blaxel down"));
+    mocks.createBlaxelProvider.mockReturnValue(blaxel);
+    mocks.list.mockReturnValue({ nextItems: async () => [{ sandboxId: "sbx_1", metadata: { userId: "u1" }, endAt: new Date(0) }] });
+    const providers = getConfiguredProviders();
+    // Fresh cooldowns, so the registry's shared one doesn't leak into later tests.
+    const cap = { ...fanoutHealth(), cooldown: createProviderCooldown(), skip: "cooling" as const };
+
+    await expect(countLive(providers, { userId: "u1" }, cap)).rejects.toThrow("blaxel down");
+    expect(cap.cooldown.isCoolingDown("blaxel")).toBe(true);
+    expect(await countLive(providers, { userId: "u1" }, cap)).toBe(1);
+
+    const killOrLookup = { ...fanoutHealth(), cooldown: createProviderCooldown(), skip: "failing" as const };
+    expect((await listAll(providers, { metadata: { userId: "u1" } }, killOrLookup)).map(({ provider }) => provider)).toEqual(["e2b"]);
+    expect(killOrLookup.cooldown.isCoolingDown("blaxel")).toBe(true);
   });
 
   describe("with one provider and no fallbacks (today's production)", () => {
@@ -88,7 +183,7 @@ describe("sandbox provider registry", () => {
 
   it("creates through failover and its cooldown once fallbacks are set", async () => {
     vi.stubEnv("E2B_API_KEY", "key_1");
-    const config = { primary: "e2b" as const, fallbacks: ["e2b" as const], configured: { e2b: true } };
+    const config = { ...parseProviderConfig(), fallbacks: ["e2b" as const] };
     mocks.create.mockRejectedValue(new RateLimitError("slow down"));
 
     expect(isMultiProvider(config)).toBe(true);

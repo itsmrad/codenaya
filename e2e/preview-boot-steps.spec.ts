@@ -11,7 +11,7 @@ const at = Date.now();
 const INSTALLING = [
   { type: "status", status: "booting" },
   { type: "phase", phase: "create", at: at - 5000 },
-  { type: "output", data: "Creating E2B sandbox...\n" },
+  { type: "output", data: "Creating sandbox...\n" },
   { type: "phase", phase: "files", at: at - 2000 },
   { type: "status", status: "installing" },
   { type: "phase", phase: "install", at },

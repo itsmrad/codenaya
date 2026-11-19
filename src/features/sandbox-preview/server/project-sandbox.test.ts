@@ -133,7 +133,7 @@ describe("previews across providers", () => {
 
 describe("an E2B boot while a fallback provider's list fails", () => {
   const fallback = "test-fallback" as ProviderId;
-  const config = { primary: "e2b" as const, fallbacks: [fallback], configured: { e2b: true, ...Object.fromEntries([[fallback, true]]) } };
+  const config = { primary: "e2b" as const, fallbacks: [fallback], configured: { e2b: true, [fallback]: true } as Record<ProviderId, boolean> };
   const listed = (id: string): ListedSandbox => ({ id, metadata: {}, endAt: new Date(0) });
   const sandbox = { id: "new", provider: "e2b" } as Sandbox;
   const fakeProvider = (id: ProviderId, list: SandboxProvider["list"]) =>

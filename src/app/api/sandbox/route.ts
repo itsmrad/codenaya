@@ -170,8 +170,8 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error:
-          "E2B_API_KEY is not configured on the Codenaya server. Add it to the " +
-          "hosting environment and restart or redeploy the app.",
+          "No sandbox provider is configured on the Codenaya server. Add its keys " +
+          "(see .env.example) to the hosting environment and restart or redeploy the app.",
         code: "config" satisfies SandboxErrorKind,
       },
       { status: 503 },
@@ -422,7 +422,7 @@ export async function POST(request: Request) {
           if (!sandbox) throw new Error("Sandbox not found");
           await stopSandboxCommands(sandbox);
         } else {
-          send({ type: "output", data: "Creating E2B sandbox...\n" });
+          send({ type: "output", data: "Creating sandbox...\n" });
           sandbox = await createSandbox({
             timeoutMs: SANDBOX_TIMEOUT_MS,
             // checkBuild finds the project's warm preview by these tags (#465).
@@ -597,7 +597,7 @@ export async function POST(request: Request) {
         devStart.readyPort = localPort;
 
         // Start the proxy to bypass Vite allowedHosts and bind issues
-        const proxyPort = await startE2bProxy(sandbox, localPort);
+        const proxyPort = await startPreviewProxy(sandbox, localPort);
 
         const previewUrl = await sandbox.previewUrl(proxyPort);
 
@@ -784,7 +784,7 @@ async function waitForPublicUrl(url: string, maxWaitMs = 3000): Promise<void> {
  * This completely avoids the Vite `allowedHosts` block and requires ZERO changes
  * to the user's config files or package.json!
  */
-async function startE2bProxy(sandbox: Sandbox, targetPort: number): Promise<number> {
+async function startPreviewProxy(sandbox: Sandbox, targetPort: number): Promise<number> {
   const proxyPort = PREVIEW_PROXY_PORT;
   const proxyCode = `
 const http = require('http');
