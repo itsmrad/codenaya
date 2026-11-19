@@ -26,3 +26,18 @@ export const isSecretFile = (name: string) => {
   const lower = name.toLowerCase();
   return !SHAREABLE_ENV_FILE.test(lower) && SECRET_FILE_PATTERNS.some((pattern) => pattern.test(lower));
 };
+
+/**
+ * Whether a project path names a secret file (by its last segment), however
+ * it is spelled: `\` separators, `./` or empty segments, case, and the
+ * trailing dots and spaces Windows ignores. The agent may see such a file's
+ * name, never its content.
+ */
+export const isSecretPath = (path: string) => {
+  const name = path.split(/[\\/]/).filter((segment) => segment && segment !== ".").pop() ?? "";
+  return isSecretFile(name.trim().replace(/[. ]+$/, ""));
+};
+
+/** What the agent gets instead of a secret file's content: never the content itself. */
+export const SECRET_FILE_REFUSAL =
+  "This file holds environment values and is managed in the Environment Variables panel.";

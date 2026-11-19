@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isSecretFile } from "./secretFiles";
+import { isSecretFile, isSecretPath } from "./secretFiles";
 
 describe("isSecretFile", () => {
   it.each([
@@ -21,4 +21,16 @@ describe("isSecretFile", () => {
     "credentials.ts", "service-account.md", "my_id_rsa_notes.txt",
     "my_id_ecdsa_notes.txt", "p12.ts", "keystore.ts", "pfx.md", "git-credentials.md", "pgpass.txt", "my-credentials",
   ])("keeps %s", (name) => expect(isSecretFile(name)).toBe(false));
+});
+
+describe("isSecretPath", () => {
+  it.each([
+    ".env", ".ENV", "./.env", "a/../.env", "sub/.env.local", ".env.production", ".env.template", "sub\\.env.local",
+    "sub//.env", "/.env", ".env ", ".env.", ".env. .", " .env", "sub/./.env", "keys/server.pem",
+  ])("protects %j", (path) => expect(isSecretPath(path)).toBe(true));
+
+  it.each([".env.example", "sub/.env.sample", "src/env.ts", ".env/..", "src/App.tsx", "credentials/index.ts"])(
+    "allows %j",
+    (path) => expect(isSecretPath(path)).toBe(false),
+  );
 });

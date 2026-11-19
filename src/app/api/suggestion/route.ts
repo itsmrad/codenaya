@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { withEditorModel } from "@/features/ai-providers/server/editor-model";
+import { isSecretPath } from "../../../../convex/secretFiles";
 import {
   SUGGESTION_RATE_LIMIT,
   checkRateLimit,
@@ -89,6 +90,11 @@ export async function POST(request: Request) {
       nextLines,
       lineNumber,
     } = data;
+
+    // A secret file's content never goes to the model; it just gets no ghost text.
+    if (isSecretPath(fileName)) {
+      return NextResponse.json({ suggestion: "" });
+    }
 
     const prompt = SUGGESTION_PROMPT
       .replace("{fileName}", fileName)

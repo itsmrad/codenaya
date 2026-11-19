@@ -662,3 +662,66 @@ describe("locked paths (#307)", () => {
     );
   });
 });
+
+describe("secret files", () => {
+  const CANARY = "CANARY_VALUE_123";
+  const refusal = (path: string) =>
+    `Error: "${path}" is protected. This file holds environment values and is managed in the Environment Variables panel.`;
+  const bypasses = [".env", ".ENV", "./.env", "a/../.env", "sub/.env.local", ".env.production", "sub\\.env.local", ".env ", ".env."];
+
+  beforeEach(() => {
+    db.rows.push(
+      { _id: "env", name: ".env", type: "file", content: `API_KEY=${CANARY}` },
+      { _id: "sub", name: "sub", type: "folder" },
+      { _id: "envLocal", name: ".env.local", type: "file", parentId: "sub", content: CANARY },
+      { _id: "example", name: ".env.example", type: "file", content: "API_KEY=" },
+    );
+  });
+
+  it.each(bypasses)("readFiles refuses %j without its content", async (path) => {
+    const result = (await createReadFilesTool(opts).handler({ paths: [path] }, ctx)) as string;
+    expect(result).toMatch(/^Error: /);
+    expect(result).not.toContain(CANARY);
+  });
+
+  it("refuses by the path an id resolves to, and still reads the other files", async () => {
+    expect(await createReadFilesTool(opts).handler({ fileIds: ["envLocal"] } as never, ctx)).toBe(refusal("sub/.env.local"));
+    const result = (await createReadFilesTool(opts).handler({ paths: [".env", ".env.example", "src/App.tsx"] }, ctx)) as string;
+    expect(result).toBe(`${JSON.stringify([{ path: ".env.example", content: "API_KEY=" }, { path: "src/App.tsx", content: "app" }])}\n${refusal(".env")}`);
+    expect(await createUpdateFileTool(opts).handler({ fileId: "env", content: "x" } as never, ctx)).toBe(refusal(".env"));
+  });
+
+  it.each(bypasses)("every write tool refuses %j before writing", async (path) => {
+    const results = [
+      await createWriteFilesTool(opts).handler({ files: [{ path, content: "LEAK=1" }] }, ctx),
+      await createUpdateFileTool(opts).handler({ path, content: "LEAK=1" }, ctx),
+      await createEditFileTool(opts).handler({ path, edits: [{ oldText: CANARY, newText: "x" }] }, ctx),
+      await createDeleteFilesTool(opts).handler({ paths: [path] }, ctx),
+      await createRenameFileTool(opts).handler({ path, newName: "leak.txt" }, ctx),
+      await createCreateFilesTool(opts).handler({ parentId: "", files: [{ name: path, content: "LEAK=1" }] }, ctx),
+      await createCreateFolderTool(opts).handler({ name: path, parentId: "" }, ctx),
+      await createRenameFileTool(opts).handler({ path: "src/App.tsx", newName: path }, ctx),
+    ] as string[];
+    for (const result of results) {
+      expect(result).toMatch(/^Error: |Failed: /);
+      expect(result).not.toContain(CANARY);
+    }
+    expect(mocks.mutation).not.toHaveBeenCalled();
+  });
+
+  it("leaves other files writable", async () => {
+    expect(await createWriteFilesTool(opts).handler({ files: [{ path: "src/env.ts", content: "x" }] }, ctx)).toContain(
+      "Created: src/env.ts.",
+    );
+    expect(await createRenameFileTool(opts).handler({ path: ".env.example", newName: ".env.sample" }, ctx)).toBe(
+      'Renamed ".env.example" to ".env.sample" successfully',
+    );
+  });
+
+  it("lists the names in the prompt, never the content", () => {
+    const tree = buildProjectTreePromptSection(db.rows as unknown as ProjectFile[]);
+    expect(tree).toContain("\n.env\n");
+    expect(tree).toContain("sub/.env.local");
+    expect(tree).not.toContain(CANARY);
+  });
+});

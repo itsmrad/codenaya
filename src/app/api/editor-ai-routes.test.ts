@@ -169,6 +169,22 @@ describe("editor AI input caps (#242)", () => {
     expect(mocks.generateObject).not.toHaveBeenCalled();
   });
 
+  it.each([".env", "sub/.ENV.local", ".env.production "])("suggestion never sends %j to the model", async (fileName) => {
+    const res = await suggestionPOST(
+      post({
+        fileName,
+        code: "API_KEY=CANARY_VALUE_123",
+        currentLine: "API_KEY=",
+        textBeforeCursor: "API_KEY=",
+        textAfterCursor: "",
+        lineNumber: 1,
+      }),
+    );
+
+    expect(await res.json()).toEqual({ suggestion: "" });
+    expect(mocks.generateObject).not.toHaveBeenCalled();
+  });
+
   it("quick-edit scrapes at most MAX_SCRAPE_URLS URLs and truncates each page", async () => {
     const scrape = vi.fn(async () => ({ markdown: "~".repeat(MAX_SCRAPED_CHARS) + "TAIL" }));
     mocks.getFirecrawl.mockReturnValue({ scrape });
