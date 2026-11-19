@@ -746,6 +746,67 @@ describe("POST /api/sandbox install failure (#491)", () => {
     expect(body).not.toContain(SECRET.slice(12));
   });
 
+  it("redacts a value split across dev-server stdout chunks with the route's own line in between", async () => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
+    mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : [],
+    );
+    mocks.resolveProjectEnv.mockResolvedValue({ publicEntries: [], secretEntries: [{ key: "API_KEY", value: SECRET }], failedKeys: [] });
+    mocks.sandboxList.mockReturnValue({ nextItems: async () => [] });
+    let devStdout: ((data: string) => void) | undefined;
+    const run = vi.fn(async (command: string, opts?: { envs?: Record<string, string>; onStdout?: (data: string) => void }) => {
+      if (command === "node --version") return { exitCode: 0, stdout: "v22.0.0\n", stderr: "" };
+      if (opts?.envs?.[DEV_COMMAND_ENV]) {
+        devStdout = opts.onStdout;
+        devStdout?.(`API_KEY=${SECRET.slice(0, 12)}`);
+        return { pid: 41 };
+      }
+      // The port probe comes after "Waiting for dev server..."; anything after it ends the boot.
+      if (command.startsWith("node -e ") && devStdout) {
+        devStdout(`${SECRET.slice(12)}\n`);
+        devStdout = undefined;
+        return { exitCode: 0, stdout: "open", stderr: "" };
+      }
+      if (run.mock.calls.some(([earlier]) => earlier.startsWith("node -e "))) throw new Error("stop after the dev server's output");
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    const write = vi.fn(async () => {
+      if (run.mock.calls.some(([earlier]) => earlier.startsWith("node -e "))) throw new Error("stop after the dev server's output");
+    });
+    mocks.sandboxCreate.mockResolvedValue({ sandboxId: "sbx_1", commands: { run, list: vi.fn(async () => []) }, files: { makeDir: vi.fn(), write }, kill: vi.fn() });
+
+    const body = await (await POST(request("POST", JSON.stringify({ files: [{ path: "index.html", content: "" }], projectId: "proj_1" })))).text();
+
+    expect(body).toContain("Waiting for dev server");
+    expect(body).toContain("API_KEY=[redacted]");
+    expect(body).not.toContain(SECRET.slice(0, 12));
+    expect(body).not.toContain(SECRET.slice(12));
+  });
+
+  it("removes a resumed sandbox's earlier .env when no variable resolves", async () => {
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
+    mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>
+      "userId" in args ? { _id: "proj_1", ownerId: "user_1" } : [],
+    );
+    mocks.resolveProjectEnv.mockResolvedValue({ publicEntries: [], secretEntries: [], failedKeys: [] });
+    const run = vi.fn(async (command: string) => {
+      if (command === "node --version") return { exitCode: 0, stdout: "v22.0.0\n", stderr: "" };
+      if (command.startsWith("rm -f ")) throw new Error("stop after the cleanup");
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    mocks.sandboxConnect.mockResolvedValue({
+      sandboxId: "sbx_resume_rm",
+      getInfo: async () => ({ metadata: { userId: "user_1" } }),
+      commands: { run, list: vi.fn(async () => []), kill: vi.fn() },
+      files: { makeDir: vi.fn(), write: vi.fn() },
+      kill: vi.fn(),
+    });
+
+    await (await POST(request("POST", JSON.stringify({ files, projectId: "proj_1", resumeSandboxId: "sbx_resume_rm" })))).text();
+
+    expect(run.mock.calls.map(([command]) => command)).toContain("rm -f /home/user/app/.env /home/user/app/.env.local");
+  });
+
   it("sends the failed-install line before the error event, even when a multiline secret holds it back", async () => {
     vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "internal");
     mocks.query.mockImplementation(async (_ref, args: Record<string, unknown>) =>

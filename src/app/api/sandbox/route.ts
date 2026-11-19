@@ -278,9 +278,15 @@ export async function POST(request: Request) {
       // output routinely echoes configuration, and a stack trace from a failed
       // connection commonly embeds a full DSN — without redaction, injecting
       // secrets into the sandbox would deliver them straight to the browser.
-      const redactor = createStreamRedactor(secretValues);
-      // Its own for stderr: a stderr chunk between two stdout chunks would split a value both carry part of.
-      const stderrRedactor = createStreamRedactor(secretValues);
+      //
+      // One per writer (the route's own text, stdout, stderr): a chunk from one
+      // landing between two chunks of another would split a value they carry.
+      // Hidden output shares one, so its notice is shown once.
+      const hidden = secretValues === null ? createStreamRedactor(null) : null;
+      const newRedactor = () => hidden ?? createStreamRedactor(secretValues);
+      const redactor = newRedactor();
+      const stdoutRedactor = newRedactor();
+      const stderrRedactor = newRedactor();
 
       const send = (data: Record<string, unknown>, through = redactor) => {
         try {
@@ -310,11 +316,12 @@ export async function POST(request: Request) {
         send({ type: "phase", phase, at });
       };
 
+      const sendStdout = (data: string) => send({ type: "output", data }, stdoutRedactor);
       const sendStderr = (data: string) => send({ type: "output", data }, stderrRedactor);
 
       /** Release anything the redactors are holding back. */
       const flushRedactor = () => {
-        const tail = redactor.flush() + stderrRedactor.flush();
+        const tail = stdoutRedactor.flush() + stderrRedactor.flush() + redactor.flush();
         if (tail === "") return;
         try {
           controller.enqueue(
@@ -338,7 +345,7 @@ export async function POST(request: Request) {
           timeoutMs,
           // Install may run postinstall scripts or a build that needs config.
           envs: { ...toProcessEnv(envEntries), ...BOOT_INSTALL_ENVS },
-          onStdout: (data) => send({ type: "output", data }),
+          onStdout: sendStdout,
           onStderr: sendStderr,
         });
 
@@ -357,7 +364,7 @@ export async function POST(request: Request) {
             // May run past the stream budget, so it is bounded by the close.
             () => runInstall(target, boundedTimeout(INSTALL_TIMEOUT_MS, budget.closeLeft())),
             {
-              onStdout: (data) => send({ type: "output", data }),
+              onStdout: sendStdout,
               onStderr: sendStderr,
             },
             devStart,
@@ -493,6 +500,9 @@ export async function POST(request: Request) {
               `Injected ${envEntries.length} environment variable(s): ` +
               `${envEntries.map((e) => e.key).join(", ")}\n\n`,
           });
+        } else if (resumeSandboxId) {
+          // An earlier boot's files hold values that are no longer the project's.
+          await runOrThrow(sandbox, `rm -f ${WORK_DIR}/.env ${WORK_DIR}/.env.local`);
         }
 
         for (const warning of envWarnings) {
@@ -552,7 +562,7 @@ export async function POST(request: Request) {
         };
         await runDevServer(sandbox, devStart, {
           onStdout: (data) => {
-            send({ type: "output", data });
+            sendStdout(data);
             if (!detectedPort) {
               detectedPort = parsePortFromOutput(data);
             }

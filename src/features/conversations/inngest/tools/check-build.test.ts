@@ -1436,11 +1436,16 @@ describe("checkBuild tool (#465)", () => {
     expect(e2b.create).toHaveBeenCalledTimes(1);
   });
 
-  it("hides a failing build's output when the secrets cannot be opened", async () => {
+  it.each([
+    ["the secrets cannot be opened", () => mocks.resolveEnv.mockRejectedValue(new Error("CODENAYA_LOCAL_KEK is not set"))],
+    ["reading the variables fails", () => mocks.query.mockImplementation(async (ref) => {
+      if (getFunctionName(ref) === "system:getEnvVarsForSandbox") throw new Error("Convex unavailable");
+      return rowsOf(starter());
+    })],
+  ])("hides a failing build's output when %s", async (_case, arrange) => {
     fakeSandbox({ exitCode: 0 }, { exitCode: 1, stdout: `vite.config.ts: DATABASE_URL=${SECRET}` });
 
-    const result = await runTool([{ _id: "env_1", key: "DATABASE_URL", visibility: "secret" }], () =>
-      mocks.resolveEnv.mockRejectedValue(new Error("CODENAYA_LOCAL_KEK is not set")));
+    const result = await runTool([{ _id: "env_1", key: "DATABASE_URL", visibility: "secret" }], arrange);
 
     expect(result).toMatch(/^Error: Build failed/);
     expect(result).toContain(REDACTION_UNAVAILABLE_NOTICE);

@@ -353,11 +353,14 @@ export const codeBlock = (text: string) => {
   return `${fence}\n${text}\n${fence}`;
 };
 
+/** How every fix prompt starts: the messages route redacts the overlay text these carry. */
+export const FIX_PROMPT_START = "The preview shows a ";
+
 /** The chat message "Fix with AI" sends. */
 export const buildFixPrompt = (error: AppError, terminalOutput: string) => {
   const where = error.file ? ` in ${error.file}${error.line ? `:${error.line}` : ""}` : "";
   const parts = [
-    `The preview shows a ${error.kind} error${where}. Find the cause and fix it.`,
+    `${FIX_PROMPT_START}${error.kind} error${where}. Find the cause and fix it.`,
     `Error:\n${codeBlock(error.message)}`,
   ];
   if (error.stack) parts.push(`Stack:\n${codeBlock(error.stack)}`);
