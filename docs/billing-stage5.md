@@ -17,7 +17,7 @@ receipts stay pending until stage 8. Event names and order are never trusted: on
 - **Stale.** A changed generation or revision, or a receipt that is not this customer's and
   pending, returns `stale` with no writes.
 - **Fenced positives.** A grant for a live owner commits only under that unchanged fence, with
-  no hold, no pending or quarantined refund or dispute for the customer, no unmapped refund or
+  no hold, no unresolved (pending, processing or quarantined) refund or dispute for the customer, no unmapped refund or
   dispute naming the payment (a full bounded read blocks), and no account enabled in the other
   mode. Pending positives left for later claims do not block, so a backlog drains. A blocked
   payment writes nothing and keeps its receipts pending while everything else commits
@@ -25,8 +25,9 @@ receipts stay pending until stage 8. Event names and order are never trusted: on
 - **Exactly once.** A payment matches its purchase by payment id, then by an unbound checkout
   session. Only a settlement binds a payment to a checkout, so a declined attempt leaves the
   session to its retry. A Pro payment for an owned subscription with no purchase gets a
-  server-created `renewal:<payment>` purchase; any other unmatched payment, including a second
-  payment for an already settled checkout, is recorded quarantined. A settled purchase never
+  server-created `renewal:<payment>` purchase (also when it carries an already settled checkout's
+  session); any other unmatched payment, including a second top-up for a settled checkout, is
+  recorded quarantined. A settled purchase never
   grants again. A grant from another purchase for the same period, or another subscription still
   paid through it (active, cancelled or expired), quarantines the purchase. Every purchase
   quarantine is logged with ids and reason.
@@ -36,7 +37,8 @@ receipts stay pending until stage 8. Event names and order are never trusted: on
   rollover; top-ups expire 12 months after settlement. The plan stays as it is. A deleted
   owner's purchase settles with `cancellationRecoveryRequired` and grants nothing.
 - **Non-grant outcomes.** Processing, failed and cancelled update only a purchase already bound
-  to that payment. A zero-amount charge with no purchase of its own is final and records nothing.
+  to that payment. A charge whose total is zero or less, with no purchase of its own, is final and records nothing;
+  a positive total with a bad currency stays quarantined and visible.
   A payment matching another customer's purchase is final and alerted: it never writes that
   purchase and never holds this customer's fence.
 - **Subscriptions.** Cancelled, expired and failed statuses end the row, `cancelAt` follows the

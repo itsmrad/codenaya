@@ -81,8 +81,9 @@ async function planPayment(ctx: Ctx, customer: Customer, fact: PaymentFact, dele
     case "processing": case "no_grant": return { ...plan, outcome: "processed" };
     case "quarantine":
       if (plan.purchase?.paymentId === d.paymentId && plan.purchase.state !== "settled") return { ...plan, outcome: "processed" };
-      // A zero-amount charge with no purchase of its own never mints: final, recorded only.
-      return { ...plan, outcome: d.reason === "amount" ? "processed" : "quarantined" };
+      // A zero-amount charge with no purchase of its own never mints: final. A positive total with a bad
+      // currency is a real payment, so it stays quarantined and visible.
+      return { ...plan, outcome: d.reason === "amount" && fact.totalMinor !== undefined && fact.totalMinor <= 0 ? "processed" : "quarantined" };
   }
   if (foreign) {
     // Final: it can never grant this customer anything, so it must not hold their fence.
@@ -114,8 +115,9 @@ async function positivesMayCommit(ctx: Ctx, customer: Customer, plans: PaymentPl
   if (customer.hold) return false;
   const account = await ctx.db.query("creditAccounts").withIndex("by_userId", q => q.eq("userId", customer.userId)).unique();
   if (account?.paidCreditsMode !== undefined && account.paidCreditsMode !== customer.mode) return false;
-  // Any refund or dispute of this customer that is pending or quarantined (dead-lettered, collided) blocks.
-  for (const state of ["pending", "quarantined"] as const) {
+  // Any refund or dispute of this customer that is unresolved (pending, processing, dead-lettered, collided) blocks.
+  // "processing" is never written for receipts today; it is read anyway so a future writer cannot bypass this.
+  for (const state of ["pending", "processing", "quarantined"] as const) {
     for (const prefix of NEGATIVE_PREFIXES) {
       const negative = await ctx.db.query("billingEvents").withIndex("by_customerRef_and_state_and_eventType", q =>
         q.eq("customerRef", customer._id).eq("state", state).gte("eventType", prefix).lt("eventType", `${prefix.slice(0, -1)}/`)).first();
@@ -207,8 +209,9 @@ async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positi
   // Re-read: an earlier payment in this commit may already have settled this checkout.
   const current = plan.purchase && await ctx.db.get("billingPurchases", plan.purchase._id);
   const taken = current?.paymentId !== undefined && current.paymentId !== d.paymentId;
+  // A renewal that carries its checkout's session is still owned; the source key catches a same-period duplicate.
   const purchase = current && !taken ? current
-    : await createPurchase(ctx, customer, d, !taken && row !== null && !rowMismatch, deleted, taken ? "duplicate_checkout" : "no_purchase");
+    : await createPurchase(ctx, customer, d, row !== null && !rowMismatch, deleted, taken ? "duplicate_checkout" : "no_purchase");
   if (purchase.state === "quarantined") return false;
   // A replay: one grant per payment, even if a later read reports another period.
   if (purchase.state === "settled") {

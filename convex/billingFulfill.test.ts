@@ -241,12 +241,13 @@ describe("excluded payments", () => {
     ["usage or proration", { kind: "no_grant", paymentId: "pay_1", reason: "not_full_period" }, "preparing", "processed"],
     ["zero amount", { kind: "quarantine", paymentId: "pay_1", reason: "amount" }, "preparing", "processed"],
     ["missing period", { kind: "pending", paymentId: "pay_1", reason: "service_period_unknown" }, "preparing", "pending"],
-  ])("%s grants nothing", async (_name, decision, purchaseState, receiptState) => {
+  ])("%s grants nothing", async (name, decision, purchaseState, receiptState) => {
     const t = setup();
     const alice = await customer(t);
     const purchaseRef = await checkout(t, alice);
     const eventRef = await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
-    expect(await reconcile(t, alice, { payments: [paid(decision, { sessionId: "cks_1" })], subscriptions: [sub()] })).toBe("committed");
+    const total = name === "zero amount" ? { totalMinor: 0, taxMinor: 0 } : {};
+    expect(await reconcile(t, alice, { payments: [paid(decision, { sessionId: "cks_1", ...total })], subscriptions: [sub()] })).toBe("committed");
     expect(await grants(t)).toEqual([]);
     expect(await account(t)).toBeNull();
     expect(await read(t, purchaseRef)).toMatchObject({ state: purchaseState });
@@ -589,12 +590,51 @@ describe("review regressions", () => {
     const zero = await receive(t, alice, "payment.succeeded", { paymentId: "pay_zero" });
     await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
     const result = await reconcile(t, alice, {
-      payments: [paid({ kind: "quarantine", paymentId: "pay_zero", reason: "amount" }), paid(topUp("pay_1"), { sessionId: "cks_1" })],
+      payments: [paid({ kind: "quarantine", paymentId: "pay_zero", reason: "amount" }, { totalMinor: 0, taxMinor: 0 }), paid(topUp("pay_1"), { sessionId: "cks_1" })],
     });
     expect(result).toBe("committed");
     expect(await read(t, zero)).toMatchObject({ state: "processed" });
     expect((await rows(t, "billingPurchases")).map(p => p.paymentId)).toEqual(["pay_1"]);
     expect(await grants(t)).toHaveLength(1);
+  });
+
+  test("a paid charge with a missing currency stays quarantined and logged, never silently final", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    const eventRef = await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
+    const errors = quiet();
+    await reconcile(t, alice, { payments: [paid({ kind: "quarantine", paymentId: "pay_1", reason: "amount" }, { currency: undefined })] });
+    expect(await read(t, eventRef)).toMatchObject({ state: "quarantined", quarantineReason: "unsupported" });
+    expect(errors).toHaveBeenCalledWith("[billingFulfill] receipt quarantined", { eventRef, eventType: "payment.succeeded", reason: "unsupported" });
+    expect(await grants(t)).toEqual([]);
+  });
+
+  test("a first period and its renewal carrying the checkout session in one commit both grant", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    await checkout(t, alice);
+    for (const paymentId of ["pay_1", "pay_2"]) await receive(t, alice, "payment.succeeded", { paymentId, sessionId: "cks_1" });
+    expect(await reconcile(t, alice, {
+      payments: [paid(period("pay_1"), { sessionId: "cks_1" }), paid(period("pay_2", P2), { sessionId: "cks_1" })], subscriptions: [sub()],
+    })).toBe("committed");
+    expect((await rows(t, "billingPurchases")).map(p => [p.intentId, p.state, p.paymentId])).toEqual([
+      ["intent_1", "settled", "pay_1"], ["renewal:pay_2", "settled", "pay_2"],
+    ]);
+    expect((await grants(t)).map(g => g[0])).toEqual(["current_period", "current_period", "rollover"]);
+  });
+
+  test.each([
+    ["a quarantined refund", "refund.succeeded", "quarantined"],
+    ["a dispute", "dispute.opened", "pending"],
+  ] as const)("%s blocks grants", async (_name, eventType, state) => {
+    const t = setup();
+    const alice = await customer(t);
+    await checkout(t, alice, "top_up");
+    const negative = await receive(t, alice, eventType, { paymentId: "pay_other" });
+    if (state === "quarantined") await t.run(ctx => ctx.db.patch("billingEvents", negative, { state, quarantineReason: "retries_exhausted" }));
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
+    expect(await reconcile(t, alice, { payments: [paid(topUp("pay_1"), { sessionId: "cks_1" })] })).toBe("blocked");
+    expect(await grants(t)).toEqual([]);
   });
 
   test("a cancelled subscription still paid through blocks a second paid subscription", async () => {
