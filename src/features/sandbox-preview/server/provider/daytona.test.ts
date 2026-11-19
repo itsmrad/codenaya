@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -391,7 +392,12 @@ describe("Daytona provider", () => {
         const { daytona, sandbox } = await connect();
         const cwd = mkdtempSync(join(tmpdir(), "it's "));
         try {
-          await sandbox.run(`printf '%s|%s|%s' "$PWD" "$A" "$(env | grep '^X%%=')"`, { cwd, envs: { A: "x'y $HOME", "X%%": "1" } });
+          await sandbox.run(`printf '%s|%s|%s' "$PWD" "$A" "$(env | grep '^X%%=')"`, {
+            cwd,
+            envs: { A: "x'y $HOME", "X%%": "1" },
+            // No limit, so no GNU `timeout` is needed where the test runs; the wrapper is asserted below.
+            timeoutMs: 0,
+          });
 
           const { command } = daytona.process.executeSessionCommand.mock.calls[0][1];
           expect(spawnSync("bash", ["-c", command], { encoding: "utf8" }).stdout).toBe(`${cwd}|x'y $HOME|X%%=1`);
@@ -517,9 +523,10 @@ describe("Daytona provider", () => {
       vi.useFakeTimers();
       try {
         const rejection = expect(sandbox.start("false")).rejects.toThrow("Daytona did not report the started command's pid");
-        // The poll's whole 2 s budget, without waiting for it.
-        await vi.advanceTimersByTimeAsync(2_100);
+        // The poll's whole 5 s budget, without waiting for it.
+        await vi.advanceTimersByTimeAsync(5_100);
         await rejection;
+        expect(daytona.process.deleteSession).toHaveBeenCalled();
       } finally {
         vi.useRealTimers();
       }
@@ -535,12 +542,23 @@ describe("Daytona provider", () => {
         { path: "/app/b/d.bin", data: bytes.buffer },
       ]);
 
-      expect(daytona.process.executeSessionCommand).toHaveBeenCalledTimes(1);
+      expect(daytona.process.executeSessionCommand).toHaveBeenCalledTimes(2);
       const { command } = daytona.process.executeSessionCommand.mock.calls[0][1];
       expect(command).toContain("mkdir -p --");
       expect(command.split("/app/b").length - 1).toBe(1);
       expect(daytona.fs.uploadFiles).toHaveBeenCalledTimes(1);
-      const [uploads] = daytona.fs.uploadFiles.mock.calls[0];
+      const [uploads, timeout] = daytona.fs.uploadFiles.mock.calls[0];
+      // The SDK's own default is 30 min.
+      expect(timeout).toBe(120);
+      // The checksum manifest rides in the same batch and is checked after it.
+      const manifest = uploads[3];
+      expect(manifest.destination).toMatch(/^\/tmp\/\.codenaya\/upload-.+\.sha256$/);
+      expect(String(manifest.source)).toBe(
+        `${createHash("sha256").update("a").digest("hex")}  /app/a.ts\n` +
+          `${createHash("sha256").update("/etc/passwd").digest("hex")}  /app/b/c.ts\n` +
+          `${createHash("sha256").update(bytes).digest("hex")}  /app/b/d.bin\n`,
+      );
+      expect(daytona.process.executeSessionCommand.mock.calls[1][1].command).toContain("sha256sum --check --quiet");
       // A string source would be read as a local file path.
       expect(uploads.every(({ source }) => Buffer.isBuffer(source))).toBe(true);
       expect(uploads.map(({ source, destination }) => [destination, String(source)]).slice(0, 2)).toEqual([
@@ -548,6 +566,15 @@ describe("Daytona provider", () => {
         ["/app/b/c.ts", "/etc/passwd"],
       ]);
       expect(new Uint8Array(uploads[2].source)).toEqual(bytes);
+    });
+
+    it("fails a write whose upload didn't land, as the serverless SDK path won't say", async () => {
+      const { daytona, sandbox } = await connect();
+      daytona.process.executeSessionCommand
+        .mockResolvedValueOnce({ cmdId: "cmd-1", exitCode: 0, stdout: "", stderr: "" })
+        .mockResolvedValueOnce({ cmdId: "cmd-2", exitCode: 1, stdout: "/app/.env: FAILED", stderr: "" });
+
+      await expect(sandbox.writeFiles([{ path: "/app/.env", data: "A=1" }])).rejects.toBeInstanceOf(SandboxExitError);
     });
 
     it("skips an empty write and fails when the parents can't be made", async () => {
@@ -567,6 +594,8 @@ describe("Daytona provider", () => {
       daytona.fs.downloadFile.mockResolvedValue(Buffer.from("héllo"));
 
       expect(await sandbox.readFile("/app/a.txt", "text")).toBe("héllo");
+      // Bounded even without a budget: the SDK's own default is 30 min.
+      expect(daytona.fs.downloadFile).toHaveBeenLastCalledWith("/app/a.txt", 30);
       expect(await sandbox.readFile("/app/a.txt", "bytes", { requestTimeoutMs: 2_000 })).toEqual(new Uint8Array(Buffer.from("héllo")));
       expect(daytona.fs.downloadFile).toHaveBeenLastCalledWith("/app/a.txt", 2);
     });

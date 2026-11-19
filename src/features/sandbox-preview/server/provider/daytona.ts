@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { posix } from "node:path";
 
 import {
@@ -156,8 +156,15 @@ const poll = async <T>(read: () => Promise<T | undefined>, budgetMs: number, int
   }
 };
 
-/** Where `start` records each command's pid; session commands report only a command id. */
+/** Where `start` records each command's pid (session commands report only a command id), and upload manifests go. */
 const PID_DIR = "/tmp/.codenaya";
+
+/**
+ * File calls without a budget: the SDK's own default is 30 min, which outlasts any
+ * caller. A whole-project upload gets longer than a single read.
+ */
+const READ_TIMEOUT_S = 30;
+const UPLOAD_TIMEOUT_S = 120;
 
 /** The exits of a command coreutils `timeout` stopped: TERM, then KILL after the grace period. */
 const TIMED_OUT_EXIT_CODES = new Set([124, 137]);
@@ -217,7 +224,7 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => {
           const exitCode = await exitCodeOf(sessionId, cmdId, remainingMs());
           // The full logs, in case the stream dropped early; the streamed output if they fail.
           const logs = await processes.getSessionCommandLogs(sessionId, cmdId).catch(() => streamed);
-          result = { exitCode, stdout: logs.stdout ?? streamed.stdout, stderr: logs.stderr ?? streamed.stderr };
+          result = { exitCode, stdout: logs.stdout || streamed.stdout, stderr: logs.stderr || streamed.stderr };
         }
         if (timeoutMs && TIMED_OUT_EXIT_CODES.has(result.exitCode) && Date.now() - startedAt >= timeoutMs) {
           throw new SandboxTimeoutError(`Command timed out after ${timeoutMs} ms`);
@@ -250,14 +257,18 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => {
         }
         const readPid = () =>
           fs.downloadFile(pidFile, 5).then((data) => Number(data.toString("utf8").trim()) || undefined, () => undefined);
-        const pid = await poll(readPid, 2_000);
-        if (!pid) throw new Error("Daytona did not report the started command's pid");
+        const pid = await poll(readPid, 5_000);
+        if (!pid) {
+          // Best effort: whether deleting the session also stops its command is unverified.
+          processes.deleteSession(sessionId).catch(noop);
+          throw new Error("Daytona did not report the started command's pid");
+        }
         return { pid };
       }, requestTimeoutMs),
     writeFiles: async (files, opts = {}) => {
       if (!files.length) return;
       // Whether the upload creates parent directories is unverified, so one mkdir makes them first.
-      const dirs = [...new Set(files.map(({ path }) => posix.dirname(path)))];
+      const dirs = [...new Set([PID_DIR, ...files.map(({ path }) => posix.dirname(path))])];
       await runOrThrow(seam, `mkdir -p -- ${dirs.map(quote).join(" ")}`, opts);
       const uploads = files.map(({ path, data }) => ({
         // A string source is a local file path to the SDK, so the data is always a Buffer.
@@ -265,10 +276,18 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => {
         source: typeof data === "string" ? Buffer.from(data, "utf8") : Buffer.from(data),
         destination: path,
       }));
-      await call(() => fs.uploadFiles(uploads, seconds(opts.requestTimeoutMs)), opts.requestTimeoutMs);
+      // On a serverless runtime (VERCEL=1) the SDK uploads with a fetch whose status it never
+      // checks, so a manifest of checksums rides in the same batch and is checked after it.
+      // A dropped batch fails too: its manifest is missing.
+      const manifest = `${PID_DIR}/upload-${randomUUID()}.sha256`;
+      const sums = uploads.map(({ source, destination }) => `${createHash("sha256").update(source).digest("hex")}  ${destination}\n`);
+      uploads.push({ source: Buffer.from(sums.join(""), "utf8"), destination: manifest });
+      const timeoutS = seconds(opts.requestTimeoutMs) ?? UPLOAD_TIMEOUT_S;
+      await call(() => fs.uploadFiles(uploads, timeoutS), opts.requestTimeoutMs);
+      await runOrThrow(seam, `sha256sum --check --quiet -- ${quote(manifest)} && rm -f -- ${quote(manifest)}`, opts);
     },
     readFile: (async (path: string, format: "text" | "bytes", opts: RequestOptions = {}) => {
-      const data = await call(() => fs.downloadFile(path, seconds(opts.requestTimeoutMs)), opts.requestTimeoutMs);
+      const data = await call(() => fs.downloadFile(path, seconds(opts.requestTimeoutMs) ?? READ_TIMEOUT_S), opts.requestTimeoutMs);
       return format === "bytes" ? new Uint8Array(data) : data.toString("utf8");
     }) as Sandbox["readFile"],
     // The sandbox is public, so the URL needs no token. Never return or log `.token`:
