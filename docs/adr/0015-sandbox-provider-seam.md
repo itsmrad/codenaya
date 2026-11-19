@@ -228,8 +228,11 @@ default provider only, and there is no sticky provider per project.
 only when both `BL_API_KEY` and `BL_WORKSPACE` are set (`PROVIDER_KEYS` in `config.ts`,
 which the registry checks too). Defaults are unchanged: `SANDBOX_PROVIDER` is `e2b` and
 the fallbacks are empty, so no sandbox is created on Blaxel until it is listed. Setting
-the keys alone still puts Blaxel in the cap, project-kill and lookup fan-out, so a Blaxel
-outage fails every boot while the keys are set (runbook in docs/DEPLOYMENT.md).
+the keys alone still puts Blaxel in the cap, project-kill and lookup fan-out. As a
+non-primary provider, a failing Blaxel list there is handled as under "Fan-out
+resilience": bounded to 5 s and cooled; kill and lookup skip it, the cap skips it only
+while it is cooling, and E2B as primary still fails closed. To drop Blaxel entirely,
+remove its keys (runbook in docs/DEPLOYMENT.md).
 - **Ids.** The native id is the sandbox name, `cn-` plus 20 lowercase alphanumerics.
   It passes `NATIVE_ID` unchanged and always reaches the client prefixed (`blaxel:cn-…`).
 - **Ownership.** `metadata` is stored as Blaxel labels. `list` filters them exactly on

@@ -123,15 +123,23 @@ describe("sandbox provider registry", () => {
     expect(blaxel.list).toHaveBeenCalledWith({ metadata: { userId: "u1" } });
   });
 
-  // Current behaviour (fail closed): a keyed Blaxel that can't list blocks every boot's cap check.
-  it("fails the cap check when Blaxel's list fails, even with E2B healthy", async () => {
+  it("fails the cap closed on a failing Blaxel list until Blaxel is cooling, while kill and lookup skip it", async () => {
     stubKeys("e2b", "blaxel");
     const blaxel = fakeBlaxel();
     vi.mocked(blaxel.list).mockRejectedValue(new Error("blaxel down"));
     mocks.createBlaxelProvider.mockReturnValue(blaxel);
-    mocks.list.mockReturnValue({ nextItems: async () => [] });
+    mocks.list.mockReturnValue({ nextItems: async () => [{ sandboxId: "sbx_1", metadata: { userId: "u1" }, endAt: new Date(0) }] });
+    const providers = getConfiguredProviders();
+    // Fresh cooldowns, so the registry's shared one doesn't leak into later tests.
+    const cap = { ...fanoutHealth(), cooldown: createProviderCooldown(), skip: "cooling" as const };
 
-    await expect(countLive(getConfiguredProviders(), { userId: "u1" })).rejects.toThrow("blaxel down");
+    await expect(countLive(providers, { userId: "u1" }, cap)).rejects.toThrow("blaxel down");
+    expect(cap.cooldown.isCoolingDown("blaxel")).toBe(true);
+    expect(await countLive(providers, { userId: "u1" }, cap)).toBe(1);
+
+    const killOrLookup = { ...fanoutHealth(), cooldown: createProviderCooldown(), skip: "failing" as const };
+    expect((await listAll(providers, { metadata: { userId: "u1" } }, killOrLookup)).map(({ provider }) => provider)).toEqual(["e2b"]);
+    expect(killOrLookup.cooldown.isCoolingDown("blaxel")).toBe(true);
   });
 
   describe("with one provider and no fallbacks (today's production)", () => {

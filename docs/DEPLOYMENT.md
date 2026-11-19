@@ -26,16 +26,12 @@ its second boot in a row. The per-user cap, project kills and sandbox lookups sp
 every configured provider. The agent paths (check-build, build repair, swarm)
 still use E2B only.
 
-**Keys, not the list, put a provider in the fan-out.** With `BL_API_KEY` and
-`BL_WORKSPACE` set, every boot's cap check and project kill, and every preview
-lookup, calls Blaxel's list even when `blaxel` is not in the fallbacks. A Blaxel
-outage then fails every boot, E2B ones included (a hang costs about 60 s before
-a 500). Runbook:
-- Set `BL_*` on a host only when Blaxel is meant to be live there.
-- In a Blaxel outage, remove the `BL_*` keys; taking `blaxel` out of
-  `SANDBOX_PROVIDER_FALLBACKS` is not enough.
-- Removing the keys while a share preview runs on Blaxel makes that share link
-  error until its lease ends.
+**Blaxel keys (runbook).** Set `BL_*` on a host only where Blaxel is meant to be
+live: with its keys set, Blaxel is in the cap, kill and lookup fan-out even when it
+is not in the fallbacks (failures there are bounded as described below). To take
+Blaxel out entirely, remove the `BL_*` keys; removing it from
+`SANDBOX_PROVIDER_FALLBACKS` only stops creates on it. Removing the keys while a
+share preview runs on Blaxel makes that share link error until its lease ends.
 
 Intended production order: `SANDBOX_PROVIDER_FALLBACKS=blaxel,daytona`, with
 Daytona last resort only. Because a boot tries at most two providers, Daytona is
