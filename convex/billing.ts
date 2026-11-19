@@ -1,6 +1,6 @@
 import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, internalQuery, type QueryCtx } from "./_generated/server";
+import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { scheduleCustomer } from "./billingQueue";
 import { appError } from "./errors";
 import { billingModeValidator, billingPurchaseTermsValidator, billingResourceIdsValidator } from "./schema";
@@ -20,7 +20,7 @@ async function requireCustomer(ctx: QueryCtx, customerRef: Id<"billingCustomers"
   return customer;
 }
 
-async function ownerDeleted(ctx: QueryCtx, customer: Pick<Doc<"billingCustomers">, "userId" | "deletedAt">) {
+export async function ownerDeleted(ctx: QueryCtx, customer: Pick<Doc<"billingCustomers">, "userId" | "deletedAt">) {
   const user = await getUser(ctx, customer.userId);
   return !user || user.deletedAt !== undefined || customer.deletedAt !== undefined;
 }
@@ -104,24 +104,29 @@ export const reservePurchase = internalMutation({
   },
 });
 
+const bindSubscriptionArgs = v.object({ customerRef: v.id("billingCustomers"), mode: billingModeValidator, subscriptionId: v.string(), productId: v.string() });
+
+/** Shared by `bindSubscription` and fulfillment; throws CONFLICT for another customer's or product's row. */
+export async function bindSubscriptionRow(ctx: MutationCtx, args: Infer<typeof bindSubscriptionArgs>) {
+  requireText(args.subscriptionId);
+  requireText(args.productId);
+  const customer = await requireCustomer(ctx, args.customerRef);
+  requireMode(customer.mode, args.mode);
+  const late = await ownerDeleted(ctx, customer);
+  const existing = await ctx.db.query("billingSubscriptions")
+    .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", args.mode).eq("subscriptionId", args.subscriptionId)).unique();
+  if (existing) {
+    if (existing.customerRef !== args.customerRef || existing.productId !== args.productId) throw conflict();
+    if (late) await ctx.db.patch("billingSubscriptions", existing._id, { cancellationRecoveryRequired: true });
+    return existing._id;
+  }
+  return await ctx.db.insert("billingSubscriptions", { ...args, status: "pending", ...(late ? { cancellationRecoveryRequired: true } : {}) });
+}
+
 export const bindSubscription = internalMutation({
-  args: { customerRef: v.id("billingCustomers"), mode: billingModeValidator, subscriptionId: v.string(), productId: v.string() },
+  args: bindSubscriptionArgs,
   returns: v.id("billingSubscriptions"),
-  handler: async (ctx, args) => {
-    requireText(args.subscriptionId);
-    requireText(args.productId);
-    const customer = await requireCustomer(ctx, args.customerRef);
-    requireMode(customer.mode, args.mode);
-    const late = await ownerDeleted(ctx, customer);
-    const existing = await ctx.db.query("billingSubscriptions")
-      .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", args.mode).eq("subscriptionId", args.subscriptionId)).unique();
-    if (existing) {
-      if (existing.customerRef !== args.customerRef || existing.productId !== args.productId) throw conflict();
-      if (late) await ctx.db.patch("billingSubscriptions", existing._id, { cancellationRecoveryRequired: true });
-      return existing._id;
-    }
-    return await ctx.db.insert("billingSubscriptions", { ...args, status: "pending", ...(late ? { cancellationRecoveryRequired: true } : {}) });
-  },
+  handler: bindSubscriptionRow,
 });
 
 export const bindPurchase = internalMutation({
