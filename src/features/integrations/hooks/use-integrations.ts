@@ -109,7 +109,3 @@ export const useWithheldSecretCount = (
 export const useSetPublicEnvVar = () => {
   return useMutation(api.envVars.setPublicEnvVar);
 };
-
-export const useDeleteEnvVar = () => {
-  return useMutation(api.envVars.deleteEnvVar);
-};
