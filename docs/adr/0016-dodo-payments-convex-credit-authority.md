@@ -66,10 +66,10 @@ absent, so placeholders can never enable a configured consumer. Optional placeho
 are absent too. Receiver config stays available while checkout is disabled so
 refunds, disputes and cancellations can still be processed.
 
-Production requires exact `live_mode`, trusted `NEXT_PUBLIC_APP_URL=https://codena.tech`
-and `DODO_PAYMENTS_RETURN_URL=https://codena.tech/settings/billing/return`.
+Production requires exact `live_mode`, trusted `NEXT_PUBLIC_APP_URL=https://www.codenaya.tech`
+and `DODO_PAYMENTS_RETURN_URL=https://www.codenaya.tech/settings/billing/return`.
 Development, preview and staging require exact `test_mode` and an isolated trusted
-origin outside `codena.tech` and its subdomains. Nonlocal test origins require HTTPS;
+origin outside `codenaya.tech` and its subdomains. Nonlocal test origins require HTTPS;
 HTTP is permitted only on localhost or loopback. The return URL must match that
 origin and the fixed `/settings/billing/return` path exactly, without credentials,
 query or fragment. The return UI is a later stage; its URL is not proof of payment.
