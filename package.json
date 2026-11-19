@@ -16,6 +16,7 @@
 		"check:starter": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/agent-eval/register.mjs scripts/check-vite-starter.ts",
 		"check:starter-manifest": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/agent-eval/register.mjs scripts/check-starter-manifest.ts",
 		"e2b:template": "node e2b/build-template.mts",
+		"daytona:snapshot": "node daytona/build-snapshot.mts",
 		"postinstall": "patch-package",
 		"eval:agent": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/agent-eval/register.mjs scripts/agent-eval/run.ts"
 	},
