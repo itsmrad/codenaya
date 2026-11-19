@@ -276,7 +276,7 @@ export const seedSwarmConversation = async (page: Page, projectId: string) => {
   const write = (path: string, status: "done" | "running") => ({
     id: `write-${path}`, kind: "tool" as const, tool: "createFiles", targets: [path], status, startedAt: now, endedAt: status === "done" ? now : undefined,
   });
-  await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: hero, steps: [write("src/sections/hero.tsx", "done")] });
+  await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: hero, steps: [write("src/sections/hero.tsx", "done"), write("src/components/admin/dashboard/ReservationsManagerPanel.tsx", "done")] });
   await system.mutation(api.agentTasks.finishTask, { internalKey, agentTaskId: hero, status: "done", summary: "Added the hero section.", selfCheck: "scoped-ok" });
   await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: pricing, steps: [write("src/sections/pricing.tsx", "running")] });
 
