@@ -298,7 +298,13 @@ try {
     await check("2d cwd and env are applied, values with ' and $", async () => {
       const value = "a b'c $HOME $(id) \"q\"";
       const result = await sandbox.run(`pwd; printf '%s' "$SMOKE_VAR"`, { cwd: "/tmp", envs: { SMOKE_VAR: value } });
-      expect(result.stdout === `/tmp\n${value}`, JSON.stringify(result.stdout));
+      // Line endings are 2g's question.
+      expect(result.stdout.replace(/\n$/, "") === `/tmp\n${value}`, JSON.stringify(result.stdout));
+    });
+    await check("2g stdout comes back byte-exact (no added trailing newline), sync and streamed", async () => {
+      const sync = (await sandbox.run("printf x")).stdout;
+      const streamed = (await sandbox.run("printf x", { onStdout: () => {} })).stdout;
+      expect(sync === "x" && streamed === "x", `sync ${JSON.stringify(sync)}, streamed ${JSON.stringify(streamed)}`);
     });
     await check("2e run latency p50 over 10, and 3 concurrent runs", async () => {
       const times: number[] = [];
@@ -388,7 +394,12 @@ try {
     await check("7a kill; list is empty; connect throws NotFound; a second delete", async () => {
       const stale = await raw.get(sandbox.id);
       expect(await provider.kill(sandbox.id) === true, "kill did not report true");
-      expect(!(await provider.list({ metadata: { runId, slot: "a" } })).length, "still listed right after kill");
+      // list is eventually consistent: record how long it keeps a killed sandbox, and in what state.
+      const killedAt = Date.now();
+      const lagged = (await provider.list({ metadata: { runId, slot: "a" } })).length;
+      const lagState = await raw.get(sandbox.id).then((got) => got.state, (error) => statusOf(error));
+      expect(await until(async () => !(await provider.list({ metadata: { runId, slot: "a" } })).length, 30_000, 1000), "still listed 30 s on");
+      const listLag = `listed right after kill: ${lagged} (get(): ${lagState}); empty after ${Date.now() - killedAt} ms`;
       const connect = await provider.connect(sandbox.id).then(() => "connected", (error) => error);
       expect(connect instanceof SandboxNotFoundError, `connect after kill: ${statusOf(connect)}`);
       const secondDelete = await stale.delete().then(() => "resolved", (error) => statusOf(error));
@@ -401,7 +412,7 @@ try {
         if (states.at(-1) !== state) states.push(`${state}@${Math.round((Date.now() - started) / 1000)}s`);
         return !state.includes("started") && !state.includes("destroying") && state !== "stopping";
       }, 60_000, 2000);
-      return `raw second delete: ${secondDelete}; second provider.kill: ${secondKill}; get(): ${states.join(" > ")}`;
+      return `${listLag}; raw second delete: ${secondDelete}; second provider.kill: ${secondKill}; get(): ${states.join(" > ")}`;
     });
   });
 
@@ -491,10 +502,11 @@ try {
   await withSandbox("c", 60_000, async (sandbox) => {
     await check("6c a 1-minute TTL hard-deletes a started sandbox", async () => {
       const endAt = (await sandbox.info()).endAt.getTime();
-      const gone = await until(async () => !(await provider.list({ metadata: { runId, slot: "c" } })).length, 4 * 60_000, 5000);
-      expect(gone, "still listed 4 minutes on");
-      const state = await raw.get(sandbox.id).then((got) => got.state, (error) => statusOf(error));
-      return `gone ${Math.round((Date.now() - endAt) / 1000)} s after endAt; get(): ${state}`;
+      // A new sandbox takes a few seconds to appear in list, so wait for it before waiting for it to go.
+      expect(await until(async () => (await provider.list({ metadata: { runId, slot: "c" } })).length, 30_000, 1000), "never listed");
+      const gone = await until(() => raw.get(sandbox.id).then(() => false, (error) => statusOf(error).includes("404")), 4 * 60_000, 5000);
+      expect(gone, "get() still finds it 4 minutes on");
+      return `404 ${Math.round((Date.now() - endAt) / 1000)} s after endAt`;
     });
   });
 } catch (error) {
@@ -502,7 +514,7 @@ try {
 } finally {
   // Belt and braces: anything this run still lists goes too.
   const leftovers = await provider.list({ metadata: { runId } }).catch(() => []);
-  for (const sandbox of leftovers) await provider.kill(sandbox.id).catch(() => false);
+  for (const { id } of leftovers) log({ event: "sweep-kill", id, killed: await provider.kill(id).catch((error) => statusOf(error)) });
   const runUsd = round(estimateUsd(runId));
   const failed = results.filter((result) => !result.pass).map((result) => result.name);
   log({ event: "summary", sandboxes: created, leftovers: leftovers.length, failed, runUsd, totalUsd: round(estimateUsd()) });
