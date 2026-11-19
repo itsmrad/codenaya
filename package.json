@@ -16,6 +16,9 @@
 		"check:starter": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/agent-eval/register.mjs scripts/check-vite-starter.ts",
 		"check:starter-manifest": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/agent-eval/register.mjs scripts/check-starter-manifest.ts",
 		"e2b:template": "node e2b/build-template.mts",
+		"blaxel:template": "node blaxel/build-template.mts",
+		"smoke:daytona": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/agent-eval/register.mjs scripts/sandbox-smoke/daytona.mts",
+		"daytona:snapshot": "node daytona/build-snapshot.mts",
 		"postinstall": "patch-package",
 		"eval:agent": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/agent-eval/register.mjs scripts/agent-eval/run.ts"
 	},
@@ -46,6 +49,8 @@
 	"dependencies": {
 		"@ai-sdk/anthropic": "^3.0.135",
 		"@ai-sdk/openai": "^3.0.60",
+		"@aws-sdk/client-kms": "^3.1161.0",
+		"@blaxel/core": "0.3.40",
 		"@clerk/nextjs": "^7.2.7",
 		"@clerk/ui": "^1.39.0",
 		"@codemirror/autocomplete": "^6.20.1",
@@ -63,6 +68,7 @@
 		"@codemirror/state": "^6.6.0",
 		"@codemirror/theme-one-dark": "^6.1.3",
 		"@codemirror/view": "^6.41.1",
+		"@daytona/sdk": "0.232.0",
 		"@inngest/agent-kit": "0.13.2",
 		"@inngest/middleware-sentry": "^1.0.0",
 		"@lezer/highlight": "^1.2.3",

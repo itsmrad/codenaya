@@ -59,6 +59,19 @@ const fileSteps = (now: number) => [
   })),
 ];
 
+/** The transcript scroller scrolls vertically only: no horizontal scrollbar, ever. */
+export const chatScrollsHorizontally = (page: Page) =>
+  page.locator('[role="log"]').evaluate((log) => {
+    const scroller = Array.from(log.querySelectorAll("*")).find(
+      (element) => /auto|scroll/.test(getComputedStyle(element).overflowY),
+    );
+    return (
+      !scroller ||
+      getComputedStyle(scroller).overflowX !== "hidden" ||
+      scroller.scrollWidth > scroller.clientWidth + 1
+    );
+  });
+
 /**
  * Seeds a fresh conversation (it becomes the active one) with long user
  * messages, a finished run with an error step and a live run with many reads.
@@ -276,7 +289,7 @@ export const seedSwarmConversation = async (page: Page, projectId: string) => {
   const write = (path: string, status: "done" | "running") => ({
     id: `write-${path}`, kind: "tool" as const, tool: "createFiles", targets: [path], status, startedAt: now, endedAt: status === "done" ? now : undefined,
   });
-  await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: hero, steps: [write("src/sections/hero.tsx", "done")] });
+  await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: hero, steps: [write("src/sections/hero.tsx", "done"), write("src/components/admin/dashboard/ReservationsManagerPanel.tsx", "done")] });
   await system.mutation(api.agentTasks.finishTask, { internalKey, agentTaskId: hero, status: "done", summary: "Added the hero section.", selfCheck: "scoped-ok" });
   await system.mutation(api.agentTasks.upsertTaskSteps, { internalKey, agentTaskId: pricing, steps: [write("src/sections/pricing.tsx", "running")] });
 

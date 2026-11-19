@@ -168,6 +168,7 @@ export const billingPurchaseTermsValidator = v.object({
   quantity: v.number(),
   credits: v.number(),
 });
+export const billingGrantKindValidator = v.union(v.literal("current_period"), v.literal("rollover"), v.literal("top_up"));
 export const billingResourceIdsValidator = v.object({
   sessionId: v.optional(v.string()),
   paymentId: v.optional(v.string()),
@@ -828,6 +829,8 @@ export default defineSchema({
     customerId: v.optional(v.string()),
     creationState: v.union(v.literal("preparing"), v.literal("unknown"), v.literal("ready")),
     creationLeaseId: v.optional(v.string()),
+    // When checkout took `creationLeaseId`; a lease older than CUSTOMER_LEASE_STALE_MS may have created a customer.
+    creationLeasedAt: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
     hold: v.optional(v.boolean()),
     activeSubscriptionRef: v.optional(v.id("billingSubscriptions")),
@@ -867,6 +870,8 @@ export default defineSchema({
     terms: billingPurchaseTermsValidator,
     ...billingResourceIdsValidator.fields,
     expiresAt: v.optional(v.number()),
+    // Host-checked hosted checkout URL from our own create response; returned only to its owner, never logged.
+    checkoutUrl: v.optional(v.string()),
     state: v.union(v.literal("preparing"), v.literal("unknown"), v.literal("open"), v.literal("processing"), v.literal("settled"), v.literal("terminal"), v.literal("quarantined")),
     cancellationRecoveryRequired: v.optional(v.boolean()),
     principalMinor: v.optional(v.number()),
@@ -892,9 +897,49 @@ export default defineSchema({
     attempts: v.number(),
     nextAttemptAt: v.number(),
     generation: v.number(),
+    // "unsupported": a provider fact reconciliation cannot act on (unreadable, another customer's); for support.
+    quarantineReason: v.optional(v.union(v.literal("unmapped"), v.literal("digest_mismatch"), v.literal("retries_exhausted"), v.literal("unsupported"))),
+    // The payload's provider customer id, kept only on an unmapped receipt so a later binding can attach it.
+    providerCustomerId: v.optional(v.string()),
   })
     .index("by_mode_and_webhookId", ["mode", "webhookId"])
-    .index("by_state_and_nextAttemptAt", ["state", "nextAttemptAt"]),
+    .index("by_mode_and_providerCustomerId_and_state", ["mode", "providerCustomerId", "state"])
+    .index("by_mode_and_paymentId_and_state", ["mode", "paymentId", "state"])
+    .index("by_customerRef_and_state_and_eventType", ["customerRef", "state", "eventType"])
+    .index("by_state_and_nextAttemptAt", ["state", "nextAttemptAt"])
+    .index("by_customerRef_and_state_and_nextAttemptAt", ["customerRef", "state", "nextAttemptAt"]),
+
+  /**
+   * A paid credit lot (ADR 0016), unique per (mode, sourceKey). `quantity` never
+   * changes; charges raise `consumed`, a rollover raises its source's
+   * `transferred`, and debt paid at grant time is `debtOffset`
+   * (`convex/billingGrants.ts`).
+   */
+  billingGrants: defineTable({
+    mode: billingModeValidator,
+    sourceKey: v.string(),
+    customerRef: v.id("billingCustomers"),
+    // The customer's Clerk subject, which keys creditAccounts.
+    userId: v.string(),
+    purchaseRef: v.optional(v.id("billingPurchases")),
+    kind: billingGrantKindValidator,
+    quantity: v.number(),
+    consumed: v.number(),
+    revoked: v.number(),
+    expiresAt: v.number(),
+    serviceStart: v.optional(v.number()),
+    serviceEnd: v.optional(v.number()),
+    transferred: v.optional(v.number()),
+    debtOffset: v.optional(v.number()),
+    // A rollover's source period lot, for later refund attribution.
+    sourceGrantRef: v.optional(v.id("billingGrants")),
+    // Set by every write that leaves nothing unspent, so spent lots stop counting
+    // toward MAX_ACTIVE_LOTS. Revocations must set it too.
+    exhausted: v.optional(v.literal(true)),
+  })
+    .index("by_mode_and_sourceKey", ["mode", "sourceKey"])
+    .index("by_userId_and_mode_and_kind_and_expiresAt", ["userId", "mode", "kind", "expiresAt"])
+    .index("by_userId_and_mode_and_kind_and_exhausted_and_expiresAt", ["userId", "mode", "kind", "exhausted", "expiresAt"]),
 
   /**
    * A user's credit usage this month and today (ADR 0011). Created on the first
@@ -908,6 +953,17 @@ export default defineSchema({
     periodUsed: v.number(),
     dayStartsAt: v.number(),
     dayUsed: v.number(),
+    // Set only on billing-enabled accounts (ADR 0016): their charges also spend billingGrants.
+    paidCreditsVersion: v.optional(v.literal(1)),
+    // The billing mode whose lots those charges spend; set together with paidCreditsVersion.
+    paidCreditsMode: v.optional(billingModeValidator),
+    // Charged credits no paid lot covered; usage is never dropped instead.
+    creditDebt: v.optional(v.number()),
+    // A billing-enabled account's Free allocation for one UTC month, apart from
+    // the usage counters above (`features/billing/free-allocation.ts`).
+    freeMonthStartsAt: v.optional(v.number()),
+    freeUsed: v.optional(v.number()),
+    freeDebtOffset: v.optional(v.number()),
   }).index("by_userId", ["userId"]),
 
   /**
@@ -1053,6 +1109,34 @@ export default defineSchema({
   })
     .index("by_project", ["projectId"])
     .index("by_project_and_key", ["projectId", "key"]),
+
+  /**
+   * Values redacted from MCP tool results, held so the agent can store one as an
+   * env var by ref (`setEnvVarFromRef`) without seeing it. Bound to the project,
+   * owner and run that produced it. Sealed even when public; expires after an
+   * hour and is pruned by the approvals cron.
+   */
+  mcpEnvRefs: defineTable({
+    refId: v.string(),
+    projectId: v.id("projects"),
+    ownerId: v.string(),
+    messageId: v.id("messages"),
+    // Decided by the server from the redaction rule, never by the model.
+    visibility: v.union(v.literal("public"), v.literal("secret")),
+    providerId: v.string(),
+    toolName: v.string(),
+    rule: v.string(),
+    // Sealed value, anchored on `refId`.
+    kekProvider: v.string(),
+    kekKeyId: v.string(),
+    wrappedDek: v.string(),
+    ciphertext: v.string(),
+    iv: v.string(),
+    authTag: v.string(),
+    expiresAt: v.number(),
+  })
+    .index("by_refId", ["refId"])
+    .index("by_expiresAt", ["expiresAt"]),
 
   /**
    * In-flight OAuth authorization codes. Short-lived; pruned by cron.

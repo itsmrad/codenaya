@@ -92,6 +92,8 @@ async function sha256Hex(text: string) {
 
 describe("POST /billing/webhook", () => {
   beforeEach(() => {
+    // Mapped receipts schedule processing; fake timers keep those runs from firing after the test.
+    vi.useFakeTimers();
     // The receiver must work even where the runtime defines `window` (the guard is Next-only).
     vi.stubGlobal("window", {});
     for (const [name, value] of Object.entries(receiverEnv)) vi.stubEnv(name, value);
@@ -100,6 +102,7 @@ describe("POST /billing/webhook", () => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   test("stores a mapped financial event as a pending minimal receipt", async () => {
@@ -116,6 +119,7 @@ describe("POST /billing/webhook", () => {
       bodyDigest: await sha256Hex(request.body),
     });
     expect(JSON.stringify(row)).not.toMatch(/alice@example\.com|Alice"|cus_user_alice|v1,/);
+    expect(row.providerCustomerId).toBeUndefined();
     expect(await counters(t)).toEqual({ inputRevision: 1, unresolvedReceipts: 1 });
   });
 
@@ -123,7 +127,7 @@ describe("POST /billing/webhook", () => {
     const t = setup();
     expect((await t.fetch(PATH, signed(event({ type: "refund.succeeded" })))).status).toBe(200);
     const [row] = await receipts(t);
-    expect(row).toMatchObject({ state: "quarantined", eventType: "refund.succeeded", paymentId: "pay_synthetic" });
+    expect(row).toMatchObject({ state: "quarantined", eventType: "refund.succeeded", paymentId: "pay_synthetic", providerCustomerId: "cus_user_alice" });
     expect(row.customerRef).toBeUndefined();
   });
 
@@ -246,6 +250,9 @@ describe("POST /billing/webhook", () => {
     ["development with live mode", { DODO_PAYMENTS_ENVIRONMENT: "live_mode" }],
     ["absent webhook key", { DODO_PAYMENTS_WEBHOOK_KEY: undefined }],
     ["placeholder webhook key", { DODO_PAYMENTS_WEBHOOK_KEY: "PLACEHOLDER_WEBHOOK_KEY" }],
+    ["undecodable webhook key", { DODO_PAYMENTS_WEBHOOK_KEY: "whsec_not*base64!" }],
+    ["empty decoded webhook key", { DODO_PAYMENTS_WEBHOOK_KEY: "whsec_" }],
+    ["undecodable previous webhook key", { DODO_PAYMENTS_WEBHOOK_KEY_PREVIOUS: "whsec_not*base64!" }],
     ["absent business", { DODO_PAYMENTS_BUSINESS_ID: undefined }],
   ])("fails closed with 503 for %s", async (_, overrides: Record<string, string | undefined>) => {
     const t = setup();
@@ -256,5 +263,6 @@ describe("POST /billing/webhook", () => {
     const logged = log.mock.calls.flat().join(" ");
     expect(logged).toMatch(/^\[billingWebhook\] receiver not configured/);
     expect(logged).not.toContain(KEY);
+    for (const value of Object.values(overrides)) if (value?.startsWith("whsec_")) expect(logged).not.toContain(value);
   });
 });

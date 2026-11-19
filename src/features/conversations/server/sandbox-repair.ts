@@ -9,11 +9,12 @@ import {
   toolResultError,
 } from "@/features/conversations/agent-steps";
 import { decodeJsonArgs } from "@/features/conversations/inngest/lib/json-args";
-import { checkProjectBuild, isSafeProjectPath, projectFramework, redact } from "@/features/conversations/inngest/tools/check-build";
+import { checkProjectBuild, isSafeProjectPath, projectFramework } from "@/features/conversations/inngest/tools/check-build";
 import { createDeleteFilesTool } from "@/features/conversations/inngest/tools/delete-files";
 import { createEditFileTool } from "@/features/conversations/inngest/tools/edit-file";
 import { createReadFilesTool } from "@/features/conversations/inngest/tools/read-files";
 import { createWriteFilesTool } from "@/features/conversations/inngest/tools/write-files";
+import { redact } from "@/features/integrations/server/env/stream-redactor";
 import { type ProjectFile, WORK_DIR } from "@/features/sandbox-preview/server/project-sandbox";
 import { exists, remove, runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
 import type { Sandbox } from "@/features/sandbox-preview/server/provider/types";
@@ -22,6 +23,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
+import { isSecretPath } from "../../../../convex/secretFiles";
 
 /**
  * Build check and model repair for one caller-owned sandbox (SWARM workers,
@@ -76,9 +78,8 @@ const SKIPPED_DIRS = new Set([
 ]);
 /** Written by `vite build`: a repair edit would be overwritten, so repairs may not touch it. */
 const ROUTE_TREE = "src/routeTree.gen.ts";
-const isEnvFile = (path: string) => /(^|\/)\.env(\.|$)/.test(path);
 const readable = (path: string) =>
-  isSafeProjectPath(path) && !SKIPPED_DIRS.has(path.split("/")[0]) && !isEnvFile(path);
+  isSafeProjectPath(path) && !SKIPPED_DIRS.has(path.split("/")[0]) && !isSecretPath(path);
 
 export type BuildErrorKind = "static" | "install" | "type" | "build";
 export type BuildError = { file?: string; line?: number; message: string; kind: BuildErrorKind };
@@ -165,8 +166,12 @@ export type VerifyAndFixOptions = {
    * invocation: an Inngest replay starts with the signal it is given then.
    */
   signal?: AbortSignal;
-  /** Redacted from every error, event and result. */
-  secrets?: string[];
+  /**
+   * Every value any process in `sandbox` could print, redacted from every error,
+   * event, result and prompt. Null when they could not be resolved, which hides
+   * that output; `[]` only for a sandbox that was given none.
+   */
+  secrets: readonly string[] | null;
   onEvent?: (event: RepairEvent) => void | Promise<void>;
   /** Called with each of the repair agent's model responses, e.g. to meter its usage; `onFallback` names the model. */
   onResponse?: (raw: string | undefined, onFallback: boolean) => Promise<void>;
@@ -263,15 +268,15 @@ export const parseBuildErrors = (text: string): BuildError[] => {
     : [{ message: body.join("\n") || head, kind: install ? "install" : "build" }];
 };
 
-const verify = async (connect: () => Promise<Sandbox>, dir: string, secrets: string[], deadline?: number): Promise<CheckOutcome> => {
+const verify = async (connect: () => Promise<Sandbox>, dir: string, secrets: readonly string[] | null, deadline?: number): Promise<CheckOutcome> => {
   let sandbox;
   let snap;
   try {
     sandbox = await connect();
     snap = await snapshot(sandbox, dir);
   } catch (error) {
-    const reason = `Could not read the sandbox's files (${error instanceof Error ? error.message : "unknown error"})`;
-    return { status: "unverified", errors: [], paths: [], reason: redact(reason, secrets) };
+    const reason = `Could not read the sandbox's files (${redact(error instanceof Error ? error.message : "unknown error", secrets)})`;
+    return { status: "unverified", errors: [], paths: [], reason };
   }
   const text = await checkProjectBuild({ files: snap.files, paths: snap.paths, sandbox, sourceDir: dir, secrets, deadline });
   const paths = [...snap.paths];
@@ -291,12 +296,17 @@ const verify = async (connect: () => Promise<Sandbox>, dir: string, secrets: str
   };
 };
 
-/** The first few files the errors name: small ones holding none of the secrets. */
-const errorSources = (files: ProjectFile[], errors: BuildError[], secrets: string[]) => {
+/**
+ * The first few files the errors name: small ones the redactor leaves unchanged,
+ * so none holds a value in any encoding it matches. A file that does is left out
+ * rather than shown redacted: a repair that rewrote it whole from the redacted
+ * copy would replace the value with the placeholder.
+ */
+const errorSources = (files: ProjectFile[], errors: BuildError[], secrets: readonly string[] | null) => {
   const named = new Set(errors.flatMap(({ file }) => (file ? [file.replace(/^\.\//, "")] : [])));
   return files
     .filter(({ path, content }) =>
-      named.has(path) && content.length <= MAX_SOURCE_CHARS && !secrets.some((secret) => secret && content.includes(secret)))
+      named.has(path) && content.length <= MAX_SOURCE_CHARS && redact(content, secrets) === content)
     .slice(0, MAX_SOURCE_FILES);
 };
 
@@ -482,7 +492,7 @@ export const verifyAndFix = async ({
   filterErrors,
   allowedPaths,
   signal,
-  secrets = [],
+  secrets,
   onEvent,
   onResponse,
   step,
@@ -499,7 +509,7 @@ export const verifyAndFix = async ({
   const durable = <T>(id: string, fn: () => Promise<T>) =>
     step ? (step(`${prefix}:${id}`, fn) as Promise<T>) : fn();
   const failure = (what: string, error: unknown) =>
-    redact(`${what} (${error instanceof Error ? error.message : "unknown error"})`, secrets);
+    `${what} (${redact(error instanceof Error ? error.message : "unknown error", secrets)})`;
   const emit = async (event: Omit<RepairEvent, "id">) => {
     await onEvent?.({ id: `${prefix}:${event.phase}:${event.attempt}`, ...event });
   };

@@ -6,6 +6,7 @@ import { getAppError } from "@/lib/convex-error";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { isSecretPath, secretPathError } from "./paths";
 
 interface CreateFolderToolOptions {
   projectId: Id<"projects">;
@@ -41,6 +42,7 @@ export const createCreateFolderTool = ({
       }
 
       const { name, parentId } = parsed.data;
+      if (isSecretPath(name)) return secretPathError(name);
 
       try {
         return await toolStep?.run("create-folder", async () => {

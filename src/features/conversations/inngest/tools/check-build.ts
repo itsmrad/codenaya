@@ -13,7 +13,7 @@ import {
   buildPathIndex,
 } from "@/features/conversations/agent-steps";
 import { resolveProjectEnv, secretValuesFrom } from "@/features/integrations/server/env/resolve-env";
-import { createStreamRedactor } from "@/features/integrations/server/env/stream-redactor";
+import { redact } from "@/features/integrations/server/env/stream-redactor";
 import {
   MAX_LIVE_SANDBOXES,
   type ProjectFile,
@@ -21,7 +21,7 @@ import {
   offlineFirstInstall,
   projectFileEntries,
 } from "@/features/sandbox-preview/server/project-sandbox";
-import { listCommands, runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
+import { listCommands, remove, runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
 import { getDefaultProviderOrNull } from "@/features/sandbox-preview/server/provider/registry";
 import {
   type RunResult,
@@ -48,8 +48,11 @@ import {
 import { projectChecks } from "@/features/sandbox-preview/utils/project-checks";
 import { convex } from "@/lib/convex-client";
 
+import { brokenImagesWarning, brokenRemoteImages, remoteImageUrls } from "./remote-images";
+
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { isSecretPath, withoutSecretFiles } from "../../../../../convex/secretFiles";
 
 interface CheckBuildToolOptions {
   projectId: Id<"projects">;
@@ -107,22 +110,17 @@ const START_NOISE =
   /^\s*(?:vite v\d|transforming\.\.\.|rendering chunks\.\.\.|computing gzip size\.\.\.|✓ (?:\d+ modules transformed|built in)|(?:dist|\.output|\.nitro)\/\S+\s+[\d.,]+ (?:B|kB|MB)\b)/;
 const START_ERROR_START = /^\s*(?:error during build:|\[[\w:-]+\]|.*\berror TS\d+)/;
 
+/** Output lines without colour codes, the sandbox's absolute paths or trailing whitespace (`\r` included). */
+const cleanLines = (output: string, dir: string) =>
+  output.replace(ANSI_ESCAPE, "").replaceAll(`${dir}/`, "").split("\n").map((line) => line.trimEnd());
+
 /**
  * The first lines of compiler output, without colour codes, repeated lines or
  * the sandbox's absolute paths, so errors read as `src/App.tsx(3,1): ...`.
  * For Next.js and TanStack Start, progress is dropped and the errors come first.
  */
 export const trimBuildOutput = (output: string, dir = WORK_DIR, framework: Framework = "vite") => {
-  let lines = [
-    ...new Set(
-      output
-        .replace(ANSI_ESCAPE, "")
-        .replaceAll(`${dir}/`, "")
-        .split("\n")
-        .map((line) => line.trimEnd())
-        .filter(Boolean),
-    ),
-  ];
+  let lines = [...new Set(cleanLines(output, dir).filter(Boolean))];
   if (framework === "next" || framework === "tanstack-start") {
     const [noise, errorStart] = framework === "next" ? [NEXT_NOISE, NEXT_ERROR_START] : [START_NOISE, START_ERROR_START];
     lines = lines.filter((line) => !noise.test(line));
@@ -142,7 +140,8 @@ type BuildJob = {
   /** Every project file, including uploads with no text content. */
   paths: Set<string>;
   deadline: number;
-  secrets: readonly string[];
+  /** Null when unknown: output that could hold a value is then hidden. */
+  secrets: readonly string[] | null;
   /** Advisory findings appended to a passing result (#333). */
   notes: string;
   framework: Framework;
@@ -162,12 +161,6 @@ const within = (deadline: number, cap: number) => {
   return left;
 };
 
-/** The preview route's secret redaction, over a whole text rather than a stream. */
-export const redact = (text: string, secrets: readonly string[]) => {
-  const redactor = createStreamRedactor(secrets);
-  return redactor.push(text) + redactor.flush();
-};
-
 /** The result, with its exit code, is what the caller reports. */
 const run = (sandbox: Sandbox, command: string, timeoutMs: number, cwd: string) =>
   sandbox.run(command, { cwd, timeoutMs, requestTimeoutMs: timeoutMs });
@@ -175,13 +168,17 @@ const run = (sandbox: Sandbox, command: string, timeoutMs: number, cwd: string) 
 /**
  * Errors first: Vite writes progress to stdout and the failure to stderr
  * (Next.js output is reordered by `trimBuildOutput`).
- * Secrets are redacted before trimming, which could cut a multi-line one, and
- * after it, since dropping colour codes, `\r` and paths can rejoin one.
- * Known errors anywhere in the output get their cause and fix appended.
+ * Secrets are redacted once, before trimming, which could cut a multi-line one;
+ * colour codes, paths and `\r` that could split one inside a line are dropped first.
+ * Trimming then only drops or reorders whole lines, which can bring a multi-line
+ * value's lines together again, so only those values are matched once more: a
+ * second pass over every value could match inside the placeholders themselves.
+ * Known errors anywhere in the output get their cause and fix appended, unredacted.
  */
-const failureOutput = (result: RunResult, dir: string, secrets: readonly string[], framework: Framework) => {
-  const output = redact(`${result.stderr}\n${result.stdout}`, secrets);
-  return redact(withErrorHints(trimBuildOutput(output, dir, framework), output), secrets);
+const failureOutput = (result: RunResult, dir: string, secrets: readonly string[] | null, framework: Framework) => {
+  const output = redact(cleanLines(`${result.stderr}\n${result.stdout}`, dir).join("\n"), secrets);
+  const multiLine = secrets && secrets.filter((value) => value.trim().includes("\n"));
+  return withErrorHints(redact(trimBuildOutput(output, dir, framework), multiLine), output);
 };
 
 /** Where an unfinished check stopped; "step" is a failure outside any build path. */
@@ -190,7 +187,7 @@ type Where = {
   deadline?: number; sandbox?: Sandbox | null };
 
 /** A timeout or a sandbox failure, not a problem in the project's code. */
-const unfinished = (error: unknown, secrets: readonly string[] = [], { path, deadline, sandbox }: Where = { path: "step" }) => {
+const unfinished = (error: unknown, secrets: readonly string[] | null = [], { path, deadline, sandbox }: Where = { path: "step" }) => {
   const reason = redact(error instanceof Error ? error.message : "Unknown error", secrets);
   // One line per unfinished check, so a repeat can be told apart: which path, how long it ran, what was left.
   console.error(
@@ -241,6 +238,9 @@ const buildIn = async (
   const timeLeft = () => within(buildDeadline, CHECK_TIMEOUT_MS);
 
   await sandbox.writeFiles(projectFileEntries(files, dir), { requestTimeoutMs: timeLeft() });
+  // Probed alongside the install and build; never rejects.
+  const imageUrls = remoteImageUrls(files);
+  const brokenImages = imageUrls.size > 0 ? brokenRemoteImages(sandbox, imageUrls, timeLeft()) : Promise.resolve([]);
 
   const install = await run(sandbox, offlineFirstInstall("--no-audit --no-fund --loglevel=error"), timeLeft(), dir);
   if (install.exitCode !== 0) {
@@ -256,7 +256,10 @@ const buildIn = async (
     return `Error: Build failed. Fix these errors, then call checkBuild again:\n${failureOutput(build, dir, secrets, framework)}`;
   }
 
-  return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.` + notes;
+  const broken = await brokenImages;
+  // One pass over all the URLs (none holds a newline), and the warning's own text left as it is.
+  const warning = broken.length > 0 ? brokenImagesWarning(redact(broken.join("\n"), secrets).split("\n")) : "";
+  return `${BUILD_VERIFIED}\nDependencies installed, and the type check and production build passed.` + notes + warning;
 };
 
 /** How long a project's check skips its warm preview after the warm build timed out. */
@@ -463,13 +466,16 @@ type CheckOptions = {
   sandbox?: Sandbox;
   /**
    * With `sandbox`: the project's directory there, copied into the check first
-   * (without node_modules, .git, the top-level build output and .env files), so files
+   * (without node_modules, .git, the top-level build output and secret files), so files
    * `files` leaves out, such as uploads, are built too. `files` is then
    * written over the copy.
    */
   sourceDir?: string;
-  /** The project's secret values, redacted from whatever the check returns. */
-  secrets?: string[];
+  /**
+   * The values any process the check runs could print, redacted from whatever it
+   * returns; null when they could not be resolved, which hides that output.
+   */
+  secrets?: readonly string[] | null;
   /** Finish by this time (epoch ms) when it is sooner than the step's own budget, e.g. a caller's invoke timeout. */
   deadline?: number;
 };
@@ -501,14 +507,14 @@ export const checkProjectBuild = async ({
     ...linksWithoutRoutes(files, paths),
   ];
   if (problems.length > 0) {
-    return (
-      redact(`${STATIC_CHECKS_FAILED}:\n- ${problems.join("\n- ")}\n` +
-      "Fix these, then call checkBuild again.", secrets)
-    );
+    // Only the findings: the prefix must survive a short value that occurs in it.
+    return `${STATIC_CHECKS_FAILED}:\n- ${redact(problems.join("\n- "), secrets)}\nFix these, then call checkBuild again.`;
   }
 
   const advisory = projectChecks(files, paths, undefined, { references: false });
-  const notes = advisory.length ? redact(`\nAdvisory project checks:\n- ${advisory.map((f) => `[${f.checkId}] ${f.message}`).join("\n- ")}`, secrets) : "";
+  const notes = advisory.length
+    ? `\nAdvisory project checks:\n- ${redact(advisory.map((f) => `[${f.checkId}] ${f.message}`).join("\n- "), secrets)}`
+    : "";
   const framework = projectFramework(files, paths);
   if (!framework) {
     return `${BUILD_NOT_CHECKED}\nStatic checks passed. checkBuild only builds Vite and Next.js projects, so this one was not built.` + notes;
@@ -529,9 +535,13 @@ export const checkProjectBuild = async ({
           suppliedSandbox,
           `mkdir -p ${dir} && tar -C '${sourceDir}' --exclude=node_modules --exclude=.git --exclude=./dist ` +
             (GENERATED_PATHS[framework] ?? []).map((path) => `--exclude=./${path} `).join("") +
-            `--exclude=.env --exclude='.env.*' -cf - . | tar -C ${dir} -xf -`,
+            `-cf - . | tar -C ${dir} -xf -`,
           { timeoutMs, requestTimeoutMs: timeoutMs },
         );
+        // The secret-file policy, not tar globs, decides what the build may not see.
+        const opts = { cwd: dir, timeoutMs, requestTimeoutMs: timeoutMs };
+        const copied = await runOrThrow(suppliedSandbox, "find . \\( -type f -o -type l \\) -printf '%P\\n'", opts);
+        for (const path of copied.stdout.split("\n").filter(isSecretPath)) await remove(suppliedSandbox, `${dir}/${path}`, opts);
       }
       return await buildIn(suppliedSandbox, dir, job, "given");
     } catch (error) {
@@ -595,7 +605,8 @@ export const createCheckBuildTool = ({
       "Call it once before the final summary when files changed. Returns the errors to fix, or a passing result.",
     parameters: z.object({}),
     handler: async (_params, { step: toolStep }) => {
-      let secrets: string[] = [];
+      // Null until resolved, so a failure before then hides the error's text too.
+      let secrets: string[] | null = null;
       try {
         return await toolStep?.run("check-build", async () => {
           // The metadata list has no text since #412; this one carries it.
@@ -607,12 +618,15 @@ export const createCheckBuildTool = ({
               return null;
             }),
           ]);
-          // Opened only to redact them from the result; no sandbox gets them.
+          // Opened only to redact them from the result; no sandbox gets them. Unknown
+          // (unread or unopened) values stay null, which hides the output instead.
           if (envVars?.length) {
             secrets = await resolveProjectEnv(envVars).then(secretValuesFrom, (error) => {
               console.error("[check-build] could not open the project's secrets to redact", error);
-              return [];
+              return null;
             });
+          } else if (envVars) {
+            secrets = [];
           }
           const pathOf = buildPathIndex(rows);
           const files: ProjectFile[] = [];
@@ -625,7 +639,8 @@ export const createCheckBuildTool = ({
           }
 
           return await checkProjectBuild({
-            files,
+            // Names stay in `paths` for the static checks; no sandbox gets a secret file's content.
+            files: withoutSecretFiles(files),
             paths,
             provider: getDefaultProviderOrNull() ?? undefined,
             metadata: { projectId, purpose: "check-build" },

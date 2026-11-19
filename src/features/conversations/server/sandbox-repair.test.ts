@@ -63,6 +63,7 @@ import { createTool, openai } from "@inngest/agent-kit";
 import { CommandExitError, type Sandbox as E2bSandbox } from "e2b";
 import { z } from "zod";
 
+import { REDACTION_UNAVAILABLE_NOTICE } from "@/features/integrations/server/env/stream-redactor";
 import { fromE2bSandbox } from "@/features/sandbox-preview/server/provider/e2b";
 
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -714,6 +715,46 @@ describe("verifyAndFix", () => {
       typeof target === "string" ? [target] : target.map((file) => file.path),
     );
     expect(written.filter((path) => path.endsWith(".env"))).toEqual([]);
+  });
+});
+
+describe("verifyAndFix redaction wiring", () => {
+  const ENCODED = Buffer.from(SECRET).toString("base64");
+
+  it("leaves out of the prompt a named file holding a base64-encoded value", async () => {
+    const sandbox = fakeSandbox({ extra: { "src/App.tsx": `${BROKEN_APP}export const key = "${ENCODED}";\n` } });
+    const requests = modelReplies(...fixApp());
+
+    await run(sandbox, { maxAttempts: 1 });
+
+    const prompt = JSON.stringify(requests[0].messages);
+    expect(prompt).toContain("TS2322");
+    expect(prompt).not.toContain("Current content of files the errors name");
+    expect(prompt).not.toContain(ENCODED);
+  });
+
+  it("redacts an encoded value from a failure's reason, keeping its fixed text", async () => {
+    const { result, events } = await run(fakeSandbox({ find: () => new Error(`find: ${ENCODED}`) }));
+
+    expect(result.reason).toBe("Could not read the sandbox's files (find: [redacted])");
+    expect(JSON.stringify(events)).not.toContain(ENCODED);
+  });
+
+  it("hides the check's output when the values are unknown", async () => {
+    const sandbox = fakeSandbox({ build: (_broken, dir) => ({ exitCode: 2, stderr: `${dir}/src/App.tsx(2,9): ${SECRET}` }) });
+
+    const { result, events } = await run(sandbox, { secrets: null, maxAttempts: 0 });
+
+    expect(result.errors).toEqual([{ message: REDACTION_UNAVAILABLE_NOTICE, kind: "build" }]);
+    expect(JSON.stringify({ result, events })).not.toContain("src/App.tsx(2,9)");
+  });
+
+  it("still reads a static failure as static when a 3-character value occurs in its prefix", async () => {
+    const sandbox = fakeSandbox({ extra: { "src/pages/Home.tsx": 'import { Chart } from "../components/Statistics";\n' } });
+
+    const { result } = await run(sandbox, { secrets: ["tic"], maxAttempts: 0 });
+
+    expect(result.errors).toEqual([expect.objectContaining({ kind: "static", message: expect.stringContaining("Statis[redacted]s") })]);
   });
 });
 

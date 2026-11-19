@@ -151,7 +151,19 @@ describe("buildIntegrationsPromptSection", () => {
       "credential that authenticates this MCP connection is managed by the server",
     );
     expect(section).toContain("Never request it");
-    expect(section).toContain("pass it to setEnvVar");
+    expect(section).toContain("or put it in an environment variable");
+  });
+
+  it("names the variables for the user to add instead of storing values (#envvars)", () => {
+    const section = buildIntegrationsPromptSection(["Supabase: supabase__get_project"], []);
+
+    expect(section).toContain("tell the user which variable names to add");
+    expect(section).toContain("Environment Variables panel");
+    expect(section).toContain("or repeat it in a reply");
+    expect(section).toContain("[env-ref:ref_<id> public|secret]");
+    expect(section).toContain("may be the project URL");
+    expect(section).toContain("Store one with setEnvVarFromRef");
+    expect(section).not.toMatch(/\bsetEnvVar\b/);
   });
 });
 

@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   chatOverflow,
+  chatScrollsHorizontally,
   hasInternalKey,
   seedOverflowConversation,
   setChatPanelWidth,
@@ -49,7 +50,28 @@ test.describe("chat panel overflow", () => {
       for (const width of [320, 480]) {
         await setChatPanelWidth(page, width);
         expect(await chatOverflow(page)).toEqual([]);
+        expect(await chatScrollsHorizontally(page)).toBe(false);
       }
+
+      // The panel cannot be squeezed below its minimum width; dragging it far
+      // past that closes it, and the toolbar button brings it back.
+      const panel = page.getByTestId("chat-panel");
+      const sash = page.locator('[class*="sash-module_sash"]').first();
+      const dragSash = async (toX: number) => {
+        const box = (await sash.boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(toX, box.y + box.height / 2, { steps: 8 });
+        await page.mouse.up();
+      };
+      await dragSash(200);
+      expect((await panel.boundingBox())!.width).toBeGreaterThanOrEqual(300);
+      await dragSash(20);
+      await expect(panel).toBeHidden();
+      await page.getByRole("button", { name: "Show chat panel" }).click();
+      await expect(panel).toBeVisible();
+      expect((await panel.boundingBox())!.width).toBeGreaterThanOrEqual(300);
+      await setChatPanelWidth(page, 480);
 
       // The pasted log renders as a monospace block inside the bubble.
       await expect(page.locator('[role="log"] pre', { hasText: "import Home from" })).toBeVisible();
