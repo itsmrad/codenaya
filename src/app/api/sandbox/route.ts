@@ -443,6 +443,22 @@ export async function POST(request: Request) {
           }, (notice) => send({ type: "output", data: `${notice}\n` }), providerConfig);
         }
 
+        // --- Admit the secret runtime ---
+        //
+        // Registered before any value reaches the sandbox, so an env change
+        // from here on either refuses admission or marks this boot stale. Before
+        // rememberSandbox too: a sync's reinstall runs with the values.
+        if (projectId && internalKey && fenceGeneration !== null) {
+          await admitSecretRuntime({
+            internalKey,
+            projectId,
+            ownerId: userId,
+            sandbox,
+            generation: fenceGeneration,
+            replacesPreviews: !resumeSandboxId,
+          });
+        }
+
         // File syncs reuse this handle instead of reconnecting (#179).
         rememberSandbox(sandbox, userId, reinstall.schedule, async () => {
           await reinstall.idle();
@@ -491,21 +507,6 @@ export async function POST(request: Request) {
           type: "output",
           data: `Wrote ${files.length} file(s) to sandbox.\n\n`,
         });
-
-        // --- Admit the secret runtime ---
-        //
-        // Registered before any value reaches the sandbox, so an env change
-        // from here on either refuses admission or marks this boot stale.
-        if (projectId && internalKey && fenceGeneration !== null) {
-          await admitSecretRuntime({
-            internalKey,
-            projectId,
-            ownerId: userId,
-            sandbox,
-            generation: fenceGeneration,
-            replacesPreviews: !resumeSandboxId,
-          });
-        }
 
         // --- Write environment variables ---
         //

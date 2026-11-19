@@ -48,7 +48,7 @@ describe("runtime admission fence", () => {
     const manifest = await read();
     expect(manifest).toMatchObject({ generation: 0, records: [{ key: "API_KEY" }] });
     const handleId = await register(manifest!.generation);
-    expect(await admit(handleId)).toBe(true);
+    expect(await admit(handleId)).toBe("admitted");
     expect(await state(handleId)).toBe("running");
 
     // An edit while it runs outdates it.
@@ -65,7 +65,7 @@ describe("runtime admission fence", () => {
     await alice.mutation(api.envVars.deleteEnvVar, { id });
     const handleId = await register(generation);
 
-    expect(await admit(handleId)).toBe(false);
+    expect(await admit(handleId)).toBe("outdated");
     expect(await state(handleId)).toBe("stale");
   });
 
@@ -76,7 +76,7 @@ describe("runtime admission fence", () => {
 
     await alice.mutation(api.envVars.deleteEnvVar, { id });
     expect(await state(handleId)).toBe("stale");
-    expect(await admit(handleId)).toBe(false);
+    expect(await admit(handleId)).toBe("outdated");
   });
 
   test.each([
@@ -90,7 +90,7 @@ describe("runtime admission fence", () => {
     const s = await setup();
     await s.setSecret();
     const handleId = await s.register((await s.read())!.generation);
-    expect(await s.admit(handleId)).toBe(true);
+    expect(await s.admit(handleId)).toBe("admitted");
 
     await change(s);
 
@@ -105,7 +105,7 @@ describe("runtime admission fence", () => {
     await alice.mutation(api.projects.remove, { id: projectId });
 
     expect(await state(handleId)).toBe("stale");
-    expect(await admit(handleId)).toBe(false);
+    expect(await admit(handleId)).toBe("outdated");
     expect(await read()).toBeNull();
     await expect(register(1)).rejects.toThrow("Project not found");
   });
@@ -114,7 +114,7 @@ describe("runtime admission fence", () => {
     const { t, setSecret, read, register, admit, state } = await setup();
     await setSecret();
     const handleId = await register((await read())!.generation);
-    expect(await admit(handleId)).toBe(true);
+    expect(await admit(handleId)).toBe("admitted");
 
     await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
 
@@ -135,11 +135,30 @@ describe("runtime admission fence", () => {
     expect([await state(second), await state(resumed)]).toEqual(["stale", "stale"]);
   });
 
+  test("a boot replaced by a newer one while the env stayed as read is told so", async () => {
+    const { register, admit } = await setup();
+    const first = await register(0, "e2b:sbx_a");
+    expect(await admit(await register(0, "e2b:sbx_b"))).toBe("admitted");
+    expect(await admit(first)).toBe("replaced");
+  });
+
+  test("refuses a resume once the project holds MAX_LIVE_HANDLES other live handles", async () => {
+    const { t, projectId, register } = await setup();
+    await t.run(async (ctx) => {
+      for (let i = 0; i < 20; i++) {
+        await ctx.db.insert("runtimeHandles", { projectId, sandboxId: `e2b:sbx_${i}`, generation: 0, state: "running" });
+      }
+    });
+    await expect(register(0, "e2b:sbx_new", false)).rejects.toThrow("Too many previews");
+    // A fresh boot replaces them all.
+    expect(await register(0, "e2b:sbx_new")).toBeTruthy();
+  });
+
   test("admits a handle once", async () => {
     const { register, admit } = await setup();
     const handleId = await register(0);
-    expect(await admit(handleId)).toBe(true);
-    expect(await admit(handleId)).toBe(false);
+    expect(await admit(handleId)).toBe("admitted");
+    expect(await admit(handleId)).toBe("outdated");
   });
 
   test("only the project owner can register, and only with the internal key", async () => {

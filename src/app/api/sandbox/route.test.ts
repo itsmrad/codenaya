@@ -117,7 +117,7 @@ beforeEach(() => {
   mocks.auth.mockResolvedValue({ userId: "user_1" });
   // The runtime fence: register answers a handle, admit admits.
   mocks.mutation.mockImplementation(async (_ref, args: Record<string, unknown>) =>
-    "handleId" in args ? true : "handle_1",
+    "handleId" in args ? "admitted" : "handle_1",
   );
 });
 
@@ -1090,7 +1090,7 @@ describe("POST /api/sandbox runtime admission fence", () => {
     fencedBoot(order);
     mocks.mutation.mockImplementation(async (_ref, args: Record<string, unknown>) => {
       order.push("handleId" in args ? "admit" : "register");
-      return "handleId" in args ? true : "handle_1";
+      return "handleId" in args ? "admitted" : "handle_1";
     });
 
     await (await POST(request("POST", JSON.stringify({ files, projectId: "proj_1" })))).text();
@@ -1107,7 +1107,7 @@ describe("POST /api/sandbox runtime admission fence", () => {
     const order: string[] = [];
     const sandbox = fencedBoot(order);
     mocks.mutation.mockImplementation(async (_ref, args: Record<string, unknown>) =>
-      "handleId" in args ? false : "handle_1",
+      "handleId" in args ? "outdated" : "handle_1",
     );
 
     const body = await (await POST(request("POST", JSON.stringify({ files, projectId: "proj_1" })))).text();
@@ -1116,6 +1116,35 @@ describe("POST /api/sandbox runtime admission fence", () => {
     expect(body).toContain('"type":"error"');
     expect(order).toEqual([]);
     expect(sandbox.kill).toHaveBeenCalled();
+  });
+
+  it("lets no sync reinstall run with the values before admission, nor at all once it is refused", async () => {
+    const order: string[] = [];
+    const sandbox = fencedBoot(order);
+    const reinstallBeforeAdmit: boolean[] = [];
+    mocks.mutation.mockImplementation(async (_ref, args: Record<string, unknown>) => {
+      if (!("handleId" in args)) return "handle_1";
+      reinstallBeforeAdmit.push(requestReinstall("sbx_fence"));
+      return "outdated";
+    });
+
+    await (await POST(request("POST", JSON.stringify({ files, projectId: "proj_1" })))).text();
+
+    expect(reinstallBeforeAdmit).toEqual([false]);
+    expect(requestReinstall("sbx_fence")).toBe(false);
+    expect(sandbox.commands.run).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ envs: expect.objectContaining({ API_KEY: SECRET }) }));
+    expect(sandbox.kill).toHaveBeenCalled();
+  });
+
+  it("says a newer preview replaced this boot", async () => {
+    fencedBoot([]);
+    mocks.mutation.mockImplementation(async (_ref, args: Record<string, unknown>) =>
+      "handleId" in args ? "replaced" : "handle_1",
+    );
+
+    const body = await (await POST(request("POST", JSON.stringify({ files, projectId: "proj_1" })))).text();
+
+    expect(body).toContain("A newer preview of this project started");
   });
 
   it("aborts and kills the sandbox when registration fails", async () => {

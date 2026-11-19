@@ -5,13 +5,15 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 import { toPublicSandboxId } from "./provider/ids";
 import type { Sandbox } from "./provider/types";
 
-/** The project's env changed (or it was deleted) after the boot read it. */
+/** The project's env changed (or it was deleted), or a newer boot replaced this one, after it read the env. */
 export class RuntimeAdmissionError extends Error {
   name = "RuntimeAdmissionError";
-  constructor() {
+  constructor(reason: "replaced" | "outdated") {
     super(
-      "The project's environment variables changed while the preview was starting. " +
-        "Start the preview again.",
+      reason === "replaced"
+        ? "A newer preview of this project started, so this one stopped."
+        : "The project's environment variables changed while the preview was starting. " +
+            "Start the preview again.",
     );
   }
 }
@@ -36,7 +38,6 @@ export async function admitSecretRuntime(args: {
     ...rest,
     sandboxId: toPublicSandboxId(sandbox.provider, sandbox.id),
   });
-  if (!(await convex.mutation(api.runtimeHandles.admitRuntime, { internalKey, handleId }))) {
-    throw new RuntimeAdmissionError();
-  }
+  const admission = await convex.mutation(api.runtimeHandles.admitRuntime, { internalKey, handleId });
+  if (admission !== "admitted") throw new RuntimeAdmissionError(admission);
 }

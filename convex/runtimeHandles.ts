@@ -49,6 +49,7 @@ export async function bumpEnvGeneration(ctx: MutationCtx, projectId: Id<"project
   const project = await ctx.db.get("projects", projectId);
   if (!project) return;
   await ctx.db.patch("projects", projectId, { envGeneration: (project.envGeneration ?? 0) + 1 });
+  // Complete only because registerRuntime keeps live handles under MAX_LIVE_HANDLES.
   for (const handle of await liveHandles(ctx, projectId)) {
     await ctx.db.patch("runtimeHandles", handle._id, { state: "stale" });
   }
@@ -84,9 +85,9 @@ export const getBootManifest = query({
  * Records a boot that is about to receive secrets, before it receives any.
  *
  * Earlier live handles it replaces are marked stale, not dropped, so a later
- * sweep still confirms their sandbox is gone: a fresh boot (`replacesPreviews`)
- * has just killed every earlier preview of the project, and a resume replaces
- * its own sandbox's earlier boot.
+ * sweep confirms their sandbox is gone: a fresh boot (`replacesPreviews`) has
+ * tried to kill every earlier preview of the project, and a resume replaces its
+ * own sandbox's earlier boot.
  */
 export const registerRuntime = mutation({
   args: {
@@ -121,27 +122,31 @@ export const registerRuntime = mutation({
 });
 
 /**
- * Lets a registered boot start using its secrets: true only while the handle is
- * pending, the project is live and its envGeneration is still the handle's. A
- * refused handle is marked stale, so its sandbox is killed even if the boot's
- * own kill fails.
+ * Lets a registered boot start using its secrets: "admitted" only while the
+ * handle is pending, the project is live and its envGeneration is still the
+ * handle's. A refused handle is marked stale, so its sandbox is killed even if
+ * the boot's own kill fails. "replaced" when a newer boot of the project took
+ * over while the env stayed as read, so the boot can say so.
  */
 export const admitRuntime = mutation({
   args: { internalKey: v.string(), handleId: v.id("runtimeHandles") },
-  returns: v.boolean(),
+  returns: v.union(v.literal("admitted"), v.literal("replaced"), v.literal("outdated")),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     const handle = await ctx.db.get("runtimeHandles", args.handleId);
-    if (!handle) return false;
+    if (!handle) return "outdated";
 
     const project = await ctx.db.get("projects", handle.projectId);
-    const admitted =
-      handle.state === "pending" &&
+    const current =
       project !== null &&
       project.deletingAt === undefined &&
       (project.envGeneration ?? 0) === handle.generation;
 
-    await ctx.db.patch("runtimeHandles", handle._id, { state: admitted ? "running" : "stale" });
-    return admitted;
+    if (current && handle.state === "pending") {
+      await ctx.db.patch("runtimeHandles", handle._id, { state: "running" });
+      return "admitted";
+    }
+    await ctx.db.patch("runtimeHandles", handle._id, { state: "stale" });
+    return current && handle.state === "stale" ? "replaced" : "outdated";
   },
 });
