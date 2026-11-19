@@ -34,20 +34,28 @@ export const DEFAULT_BLAXEL_REGION = "us-was-1";
 /** 4096 MB also gets 2 CPUs (memory / 2048). */
 const MEMORY_MB = 4096;
 const BLAXEL_MAX_SESSION_MS = 60 * 60 * 1000;
+/** The SDK has no HTTP timeout at all; E2B's default is 30 s. Long waits pass their own. */
+const BLAXEL_REQUEST_TIMEOUT_MS = 30_000;
 const LIST_PAGE_SIZE = 200;
 /** Past this many pages `list` throws rather than undercount the per-user cap. */
 const MAX_LIST_PAGES = 5;
 
 const CONFIG_CODE = /^(AUTHENTICATION_|UNAUTHORIZED|TOKEN_REVOKED$|WORKSPACE_REQUIRED$)/;
 const RATE_LIMIT_CODES = new Set(["USAGE_LIMIT_EXCEEDED", "QUOTA_EXCEEDED", "RATE_LIMIT_EXCEEDED", "WORKSPACE_RATE_LIMIT_EXCEEDED"]);
-const GONE_CODES = new Set(["WORKLOAD_NOT_FOUND", "SANDBOX_DELETED"]);
+const GONE_CODES = new Set(["WORKLOAD_NOT_FOUND", "SANDBOX_DELETED", "SANDBOX_DELETION_IN_PROGRESS"]);
 
 /**
- * Translates Blaxel's errors into the seam's. A 404 means the sandbox is gone only
- * on a sandbox-level call; a missing file is rethrown as is. The control plane can
- * reject with a raw body rather than an Error, so that becomes an Error with it as cause.
+ * Where a call failed decides what a 400/404 means: on an existing sandbox (`sandbox`)
+ * a 404 is a gone sandbox, on `create` a 400/404 is our image, region or labels, and
+ * anywhere else (a missing file) it is rethrown as is.
  */
-export const fromBlaxelError = (error: unknown, sandboxCall = false): unknown => {
+type Scope = "sandbox" | "create";
+
+/**
+ * Translates Blaxel's errors into the seam's. The control plane can reject with a raw
+ * body rather than an Error, so that becomes an Error with it as cause.
+ */
+export const fromBlaxelError = (error: unknown, scope?: Scope): unknown => {
   const status = getBlaxelErrorStatus(error);
   const code = String(getBlaxelErrorCode(error) ?? "");
   const message = getBlaxelErrorMessage(error) ?? (error instanceof Error ? error.message : String(error));
@@ -57,7 +65,9 @@ export const fromBlaxelError = (error: unknown, sandboxCall = false): unknown =>
   }
   if (status === 402 || status === 429 || RATE_LIMIT_CODES.has(code)) return new SandboxRateLimitError(message, options);
   if (error instanceof SandboxCreationTimeoutError || isGatewayTimeout(error)) return new SandboxTimeoutError(message, options);
-  if (sandboxCall && (status === 404 || GONE_CODES.has(code))) return new SandboxNotFoundError(message, options);
+  // A bad image, region or label: fail over rather than report the sandbox gone.
+  if (scope === "create" && (status === 400 || status === 404)) return new SandboxConfigError(message, options);
+  if (scope === "sandbox" && (status === 404 || GONE_CODES.has(code))) return new SandboxNotFoundError(message, options);
   return error instanceof Error ? error : new Error(message, options);
 };
 
@@ -73,11 +83,12 @@ const withDeadline = <T>(request: Promise<T>, ms?: number): Promise<T> => {
   return Promise.race([request, deadline]).finally(() => clearTimeout(timer));
 };
 
-const call = async <T>(request: () => Promise<T>, ms?: number, sandboxCall = false): Promise<T> => {
+/** Without `requestTimeoutMs` a request gets 30 s; 0 means no deadline. */
+const call = async <T>(request: () => Promise<T>, ms = BLAXEL_REQUEST_TIMEOUT_MS, scope?: Scope): Promise<T> => {
   try {
     return await withDeadline(request(), ms);
   } catch (error) {
-    throw fromBlaxelError(error, sandboxCall);
+    throw fromBlaxelError(error, scope);
   }
 };
 
@@ -101,14 +112,14 @@ const isRunning = (sandbox: SandboxInstance) =>
   (sandbox.status === "DEPLOYING" || sandbox.status === "DEPLOYED") && endAtOf(sandbox).getTime() > Date.now();
 
 const getRunning = async (name: string, ms?: number) => {
-  const sandbox = await call(() => SandboxInstance.get(name), ms, true);
+  const sandbox = await call(() => SandboxInstance.get(name), ms, "sandbox");
   if (!isRunning(sandbox)) throw new SandboxNotFoundError("Sandbox is not running");
   return sandbox;
 };
 
 const kill = async (name: string, { requestTimeoutMs }: RequestOptions = {}) => {
   try {
-    await call(() => SandboxInstance.delete(name), requestTimeoutMs, true);
+    await call(() => SandboxInstance.delete(name), requestTimeoutMs, "sandbox");
     return true;
   } catch (error) {
     if (error instanceof SandboxNotFoundError) return false;
@@ -181,19 +192,23 @@ const wrap = (sandbox: SandboxInstance): Sandbox => {
       return url;
     },
     // Read fresh: the owner check and the warm-preview lookup need current labels and endAt.
-    info: async ({ requestTimeoutMs } = {}) => infoOf(await call(() => SandboxInstance.get(name), requestTimeoutMs, true)),
+    info: async ({ requestTimeoutMs } = {}) => infoOf(await call(() => SandboxInstance.get(name), requestTimeoutMs, "sandbox")),
     kill: async (opts) => {
       await kill(name, opts);
     },
   };
 };
 
-/** The Blaxel adapter. The SDK reads BL_WORKSPACE and BL_API_KEY itself; nothing registers it yet. */
+/**
+ * The Blaxel adapter; nothing registers it yet. The SDK reads BL_WORKSPACE and BL_API_KEY
+ * itself, and at import time also reads ./.env and ./blaxel.toml from the cwd, whose values
+ * win over process.env (and ~/.blaxel/config.yaml).
+ */
 export const createBlaxelProvider = (): SandboxProvider => ({
   id: BLAXEL_ID,
   maxSessionMs: BLAXEL_MAX_SESSION_MS,
   // localHostHeader is ignored: our :4000 proxy rewrites Host itself.
-  create: async ({ image, timeoutMs, metadata, requestTimeoutMs }) => {
+  create: async ({ image, timeoutMs, metadata, requestTimeoutMs = BLAXEL_REQUEST_TIMEOUT_MS }) => {
     const name = newSandboxName();
     let pending: Promise<SandboxInstance> | undefined;
     const sandbox = await call(
@@ -212,7 +227,7 @@ export const createBlaxelProvider = (): SandboxProvider => ({
           { timeout: requestTimeoutMs ? Math.min(MAX_CREATION_TIMEOUT_SECONDS, Math.ceil(requestTimeoutMs / 1000)) : undefined },
         )),
       requestTimeoutMs,
-      true,
+      "create",
     ).catch((error: unknown) => {
       // Our deadline left the create running: delete what it makes. (Blaxel's own
       // creation timeout already released the sandbox.) The date policy bounds it anyway.
@@ -224,17 +239,21 @@ export const createBlaxelProvider = (): SandboxProvider => ({
     const labels = sandbox.metadata.labels ?? {};
     if (Object.entries(metadata).some(([key, value]) => labels[key] !== value)) {
       void SandboxInstance.delete(name).catch(() => {});
-      throw new Error("Blaxel did not keep the sandbox's labels");
+      throw new SandboxConfigError("Blaxel did not keep the sandbox's labels");
     }
     return wrap(sandbox);
   },
   connect: async (id, { requestTimeoutMs, timeoutMs } = {}) => {
     let sandbox = await getRunning(id, requestTimeoutMs);
-    // Extend only, never shorten. Blaxel's update reads then writes, so two
-    // concurrent connects can race; the later write wins and both extend.
-    const endAt = endAtOf(sandbox).getTime();
-    if (timeoutMs && Date.now() + timeoutMs > endAt) {
-      sandbox = await call(() => SandboxInstance.updateLifecycle(id, lifecycle(Date.now() + timeoutMs)), requestTimeoutMs, true);
+    // Extend only, never shorten, and never past createdAt + 1 h: unlike E2B, Blaxel
+    // has no hard cap, and the share heartbeat extends on every beat. No createdAt, no extension.
+    // Blaxel's update reads then writes, so two concurrent connects can race; the later write wins.
+    // There is no lifecycle-only endpoint: updateLifecycle PUTs the whole sandbox to the same
+    // update the SDK uses for envs. TODO(B5): verify it keeps the running processes and files.
+    const createdAt = Date.parse(sandbox.metadata.createdAt ?? "");
+    const endAt = Math.min(Date.now() + (timeoutMs ?? 0), createdAt + BLAXEL_MAX_SESSION_MS);
+    if (timeoutMs && endAt > endAtOf(sandbox).getTime()) {
+      sandbox = await call(() => SandboxInstance.updateLifecycle(id, lifecycle(endAt)), requestTimeoutMs, "sandbox");
     }
     return wrap(sandbox);
   },

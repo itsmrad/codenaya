@@ -61,11 +61,11 @@ function readReturnUrl(env: Env, deployment: DodoDeployment): string {
   } catch {
     throw new Error("Billing URLs must be absolute trusted URLs.");
   }
-  const productionOrigin = "https://codena.tech";
+  const productionOrigin = "https://www.codenaya.tech";
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname);
   const allowedOrigin = deployment === "production"
     ? origin.origin === productionOrigin
-    : origin.hostname !== "codena.tech" && !origin.hostname.endsWith(".codena.tech") &&
+    : origin.hostname !== "codenaya.tech" && !origin.hostname.endsWith(".codenaya.tech") &&
       (local ? origin.protocol === "http:" || origin.protocol === "https:" :
         origin.protocol === "https:");
   if (
@@ -90,7 +90,7 @@ export function readDodoConfig(
 export function readDodoConfig(
   consumer: "next" | "convex-receiver", deployment: DodoDeployment, env: Env = process.env,
 ): DodoNextConfig | DodoReceiverConfig | null {
-  if (typeof window !== "undefined") throw new Error("Billing configuration is server-only.");
+  if (consumer === "next" && typeof window !== "undefined") throw new Error("Billing configuration is server-only.");
   if (consumer !== "next" && consumer !== "convex-receiver") {
     throw new Error("Unknown billing configuration consumer.");
   }

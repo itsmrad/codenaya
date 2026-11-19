@@ -26,3 +26,24 @@ export const isSecretFile = (name: string) => {
   const lower = name.toLowerCase();
   return !SHAREABLE_ENV_FILE.test(lower) && SECRET_FILE_PATTERNS.some((pattern) => pattern.test(lower));
 };
+
+/**
+ * Whether a project path names a secret file (by its last segment), however
+ * it is spelled: `\` separators, `./` or empty segments, case, and the
+ * trailing dots and spaces Windows ignores. The agent may see such a file's
+ * name, never its content.
+ */
+export const isSecretPath = (path: string) => {
+  const name = (path.split(/[\\/]/).filter((segment) => segment && segment !== ".").pop() ?? "").trim();
+  // A loop, not /[. ]+$/, which backtracks quadratically on long runs of dots and spaces.
+  let end = name.length;
+  while (end > 0 && (name[end - 1] === "." || name[end - 1] === " ")) end--;
+  return isSecretFile(name.slice(0, end));
+};
+
+/** `files` without the secret ones: all an agent build or repair sandbox gets, so no install script can read them. */
+export const withoutSecretFiles = <T extends { path: string }>(files: T[]) =>
+  files.filter(({ path }) => !isSecretPath(path));
+
+/** What the agent gets instead of a secret file's content: never the content itself. */
+export const SECRET_FILE_REFUSAL = "This file holds secrets and is managed outside the agent's tools.";
