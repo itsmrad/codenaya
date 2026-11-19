@@ -138,7 +138,7 @@ describe("sandbox provider registry", () => {
 
   it("creates through failover and its cooldown once fallbacks are set", async () => {
     vi.stubEnv("E2B_API_KEY", "key_1");
-    const config = { primary: "e2b" as const, fallbacks: ["e2b" as const], configured: { e2b: true } };
+    const config = { primary: "e2b" as const, fallbacks: ["e2b" as const], configured: { e2b: true, blaxel: false } };
     mocks.create.mockRejectedValue(new RateLimitError("slow down"));
 
     expect(isMultiProvider(config)).toBe(true);
