@@ -5,6 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { SECRET_FILE_REFUSAL, isSecretPath } from "../../../../../convex/secretFiles";
 import { getFileByAgentId } from "./get-file";
 
 /**
@@ -12,7 +13,7 @@ import { getFileByAgentId } from "./get-file";
  * project-relative `/`-separated paths, never by document id.
  */
 
-export { normalizePath };
+export { isSecretPath, normalizePath };
 
 export type ProjectFile = FunctionReturnType<typeof api.system.getProjectFiles>[number];
 
@@ -24,6 +25,9 @@ export const getProjectFiles = (internalKey: string, projectId: Id<"projects">) 
 
 export const invalidPathError = (raw: string) =>
   `Error: Invalid path "${raw}". Use a project-relative path like "src/App.tsx": no leading "/", and no "..", "." or empty segments.`;
+
+/** The refusal for a secret file (`isSecretPath`): its name only, never its content. */
+export const secretPathError = (path: string) => `Error: "${path}" is protected. ${SECRET_FILE_REFUSAL}`;
 
 export const splitPath = (path: string) => {
   const slash = path.lastIndexOf("/");
@@ -50,7 +54,8 @@ export type ProjectIndex = ReturnType<typeof indexProjectFiles>;
  * The file or folder a tool call names by `path`, or by `fileId` in calls made
  * before #292. A path names the file when a file and a folder share it, unless
  * it ends in "/". An id is looked up directly (project-scoped), so a file past
- * the `getProjectFiles` cap still resolves; the index only names it.
+ * the `getProjectFiles` cap still resolves; the index only names it. Secret
+ * files are refused either way, so no tool reads, edits or deletes one.
  */
 export const findProjectFile = async (
   internalKey: string,
@@ -61,6 +66,7 @@ export const findProjectFile = async (
   if (typeof ref.path === "string") {
     const path = normalizePath(ref.path);
     if (path === undefined) return { error: invalidPathError(ref.path) };
+    if (isSecretPath(path)) return { error: secretPathError(path) };
     const entry = index.byPath.get(path);
     const file = ref.path.trim().endsWith("/") ? entry?.folder : (entry?.file ?? entry?.folder);
     return file
@@ -75,7 +81,8 @@ export const findProjectFile = async (
         : 'Error: Provide a path, like "src/App.tsx".',
     };
   }
-  return { file, path: index.pathOf(file._id) ?? file.name };
+  const path = index.pathOf(file._id) ?? file.name;
+  return isSecretPath(path) ? { error: secretPathError(path) } : { file, path };
 };
 
 /**
