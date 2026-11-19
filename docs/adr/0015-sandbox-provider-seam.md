@@ -190,7 +190,10 @@ The boot path is wired for more than one provider:
   an outer deadline). If it fails or times out, it goes into the failover cooldown, so
   creates skip it too. Then:
   - the project kill and the preview lookup skip it and log the provider id. Killing
-    is best effort; that provider's sandboxes expire on their TTL;
+    is best effort; that provider's sandboxes expire on their TTL. The same holds when
+    it lists a sandbox but then fails: a non-primary `kill` gets 5 s and a failure is
+    logged and cools the provider (its id is not reported as killed), and a
+    non-primary `inspect` error reads as "no preview";
   - the cap skips it only while it is cooling down, and otherwise fails closed. A boot
     with a project runs the kill first, which already cools a failing provider, so
     only a project-less boot can fail on a failure not yet seen;
@@ -199,9 +202,15 @@ The boot path is wired for more than one provider:
   **Accepted risk: bounded over-cap.** While a non-primary provider's list is failing,
   a user can go over the `MAX_LIVE_SANDBOXES` cap by however many live sandboxes they
   have on that provider (at most the cap). Each of those sandboxes lives at most one
-  hour. A failing provider adds up to 5 s per fan-out, so up to 10 s per new boot (kill,
-  then cap). To drop a provider from the fan-out entirely, remove its keys; removing
-  it from `SANDBOX_PROVIDER_FALLBACKS` only stops creates on it.
+  hour. Each failure restarts the ten-minute cooldown, so the cap skip lasts as long as
+  the outage does. The excess stays bounded by the user's live sandboxes on that
+  provider (at most 3, each at most one hour), since creates skip a cooling provider.
+  The cooldown is per server instance (per warm function on Vercel): each instance
+  learns about an outage on its own, and a cold start begins with nothing cooling.
+  Cooling providers are still listed, so a hanging fallback adds about 5 s to every
+  preview lookup and up to 10 s to every new boot (kill, then cap) for the whole
+  outage. To drop a provider from the fan-out entirely, remove its keys; removing it
+  from `SANDBOX_PROVIDER_FALLBACKS` only stops creates on it.
 - **Public ids.** The client gets E2B's id unprefixed unless fallbacks are set
   (`clientSandboxId`). An unprefixed id always means E2B, even when E2B isn't first.
 - **Lookup.** The cache and the install queues key every id canonically

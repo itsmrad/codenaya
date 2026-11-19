@@ -55,6 +55,15 @@ vi.mock("e2b", () => ({
   },
 }));
 
+vi.mock("@/features/sandbox-preview/server/project-sandbox", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/sandbox-preview/server/project-sandbox")>();
+  return {
+    ...actual,
+    atLiveSandboxCap: vi.fn(actual.atLiveSandboxCap),
+    killProjectPreviews: vi.fn(actual.killProjectPreviews),
+  };
+});
+
 import { CommandExitError, TimeoutError } from "e2b";
 import { readInstallFailure } from "@/features/sandbox-preview/utils/app-error";
 import { POST } from "./route";
@@ -66,6 +75,8 @@ import {
 import {
   DEFAULT_INSTALL_COMMAND,
   MAX_LIVE_SANDBOXES,
+  atLiveSandboxCap,
+  killProjectPreviews,
 } from "@/features/sandbox-preview/server/project-sandbox";
 import {
   DEV_COMMAND_ENV,
@@ -613,6 +624,10 @@ describe("POST /api/sandbox replaces the project's earlier preview (#492)", () =
     await res.text();
     expect(mocks.sandboxKill).toHaveBeenCalledWith("sbx_orphan", { apiKey: "e2b-test" });
     expect(mocks.sandboxCreate).toHaveBeenCalled();
+    // The fan-out policy is wired: without it, a failing fallback would fail every boot.
+    const health = { primary: "e2b", cooldown: expect.objectContaining({ coolDown: expect.any(Function) }) };
+    expect(killProjectPreviews).toHaveBeenCalledWith(expect.any(Array), "user_1", "proj_1", health);
+    expect(atLiveSandboxCap).toHaveBeenCalledWith(expect.any(Array), "user_1", health);
   });
 
   it("leaves other projects' and other users' previews running", async () => {

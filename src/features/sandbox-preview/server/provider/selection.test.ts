@@ -255,6 +255,25 @@ describe("fanout with a failing non-primary provider", () => {
     }
   });
 
+  it("uses a shorter caller budget for both deadlines and never passes 0 down", async () => {
+    vi.useFakeTimers();
+    try {
+      const { providers, health } = setup();
+      vi.mocked(providers[1].list).mockReturnValue(new Promise(() => {}));
+      const policy = { ...health, skip: "failing" as const };
+      const short = listAll(providers, { requestTimeoutMs: 2_000 }, policy);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(await short).toEqual([{ ...entry, provider: "e2b" }]);
+      expect(providers[1].list).toHaveBeenLastCalledWith({ requestTimeoutMs: 2_000 });
+      const zero = listAll(providers, { requestTimeoutMs: 0 }, policy);
+      await vi.advanceTimersByTimeAsync(FALLBACK_LIST_TIMEOUT_MS);
+      expect(await zero).toEqual([{ ...entry, provider: "e2b" }]);
+      expect(providers[1].list).toHaveBeenLastCalledWith({ requestTimeoutMs: FALLBACK_LIST_TIMEOUT_MS });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(["failing", "cooling"] as const)("the primary still fails closed and is not cooled by a list (%s)", async (skip) => {
     const { providers, health } = setup();
     const error = new SandboxTimeoutError("primary down");

@@ -1,5 +1,6 @@
 import type { ProviderCooldown } from "./failover";
-import { type ProviderId, type SandboxMeta, type SandboxProvider, SandboxTimeoutError } from "./types";
+import { withDeadline } from "./helpers";
+import type { ProviderId, SandboxMeta, SandboxProvider } from "./types";
 
 type ListQuery = Parameters<SandboxProvider["list"]>[0];
 
@@ -19,14 +20,6 @@ export interface FanoutHealth {
  */
 export type FanoutPolicy = FanoutHealth & { skip: "failing" | "cooling" };
 
-const withDeadline = <T>(promise: Promise<T>, ms: number) => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new SandboxTimeoutError(`list timed out after ${ms} ms`)), ms);
-  });
-  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
-};
-
 /**
  * Lists on enabled providers, including those cooling down for creates. The primary
  * always fails closed; without a policy, so does every provider (today's behaviour).
@@ -36,9 +29,10 @@ export async function listAll(providers: readonly SandboxProvider[], query: List
     const tag = (listed: Awaited<ReturnType<SandboxProvider["list"]>>) =>
       listed.map((sandbox) => ({ ...sandbox, provider: provider.id }));
     if (!policy || provider.id === policy.primary) return tag(await provider.list(query));
-    const requestTimeoutMs = Math.min(query.requestTimeoutMs ?? FALLBACK_LIST_TIMEOUT_MS, FALLBACK_LIST_TIMEOUT_MS);
+    // A shorter caller budget wins; 0 ("no deadline" to some adapters) does not.
+    const requestTimeoutMs = Math.min(query.requestTimeoutMs || FALLBACK_LIST_TIMEOUT_MS, FALLBACK_LIST_TIMEOUT_MS);
     try {
-      return tag(await withDeadline(provider.list({ ...query, requestTimeoutMs }), FALLBACK_LIST_TIMEOUT_MS));
+      return tag(await withDeadline(provider.list({ ...query, requestTimeoutMs }), requestTimeoutMs, "list"));
     } catch (error) {
       const wasCooling = policy.cooldown.isCoolingDown(provider.id);
       policy.cooldown.coolDown(provider.id);

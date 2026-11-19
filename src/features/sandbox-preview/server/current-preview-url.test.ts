@@ -57,3 +57,12 @@ it("bounds provider lookups per verified user across projects and both page/API 
   await currentPreviewUrl("project", "other-owner");
   expect(mocks.list).toHaveBeenCalledTimes(31);
 });
+
+it("treats a fallback provider's failing inspect as no preview; the primary's still throws", async () => {
+  const error = new Error("provider down");
+  mocks.inspect.mockRejectedValue(error);
+  mocks.list.mockResolvedValue([{ id: "elsewhere", provider: "test-fallback" }]);
+  expect(await currentPreviewUrl("project", "owner")).toBeNull();
+  mocks.list.mockResolvedValue([{ id: "live", provider: "e2b" }]);
+  await expect(currentPreviewUrl("project", "owner")).rejects.toBe(error);
+});

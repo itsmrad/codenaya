@@ -139,6 +139,11 @@ describe("an E2B boot while a fallback provider's list fails", () => {
   const fakeProvider = (id: ProviderId, list: SandboxProvider["list"]) =>
     ({ id, maxSessionMs: 3_600_000, list: vi.fn(list), kill: vi.fn(async () => true), create: vi.fn(async () => sandbox) }) as unknown as SandboxProvider;
 
+  const settled = async <T>(promise: Promise<T>) => {
+    await vi.advanceTimersByTimeAsync(FALLBACK_LIST_TIMEOUT_MS);
+    return promise;
+  };
+
   afterEach(() => { vi.useRealTimers(); });
 
   it.each([
@@ -150,10 +155,6 @@ describe("an E2B boot while a fallback provider's list fails", () => {
     const failing = fakeProvider(fallback, failingList);
     const providers = [e2b, failing];
     const health = { primary: "e2b" as ProviderId, cooldown: createProviderCooldown() };
-    const settled = async <T>(promise: Promise<T>) => {
-      await vi.advanceTimersByTimeAsync(FALLBACK_LIST_TIMEOUT_MS);
-      return promise;
-    };
 
     expect(await settled(killProjectPreviews(providers, "u1", "p1", health))).toEqual(["e2b:a1"]);
     expect(e2b.kill).toHaveBeenCalledWith("a1");
@@ -163,5 +164,29 @@ describe("an E2B boot while a fallback provider's list fails", () => {
     expect(await createWithFailover({ timeoutMs: 3_600_000, metadata: {} }, { providers: candidates, cooldown: health.cooldown })).toBe(sandbox);
     expect(failing.create).not.toHaveBeenCalled();
     expect(failing.list).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["rejects", () => Promise.reject(new Error("delete failed"))],
+    ["hangs", () => new Promise<never>(() => {})],
+  ] as const)("still kills on E2B and passes the cap when a listed fallback sandbox's kill %s", async (_, failingKill) => {
+    vi.useFakeTimers();
+    const e2b = fakeProvider("e2b", async () => [listed("a1")]);
+    const failing = fakeProvider(fallback, async () => [listed("x1")]);
+    vi.mocked(failing.kill).mockImplementation(failingKill);
+    const health = { primary: "e2b" as ProviderId, cooldown: createProviderCooldown() };
+
+    expect(await settled(killProjectPreviews([e2b, failing], "u1", "p1", health))).toEqual(["e2b:a1"]);
+    expect(failing.kill).toHaveBeenCalledWith("x1", { requestTimeoutMs: FALLBACK_LIST_TIMEOUT_MS });
+    expect(health.cooldown.isCoolingDown(fallback)).toBe(true);
+    expect(await settled(atLiveSandboxCap([e2b, failing], "u1", health))).toBe(false);
+  });
+
+  it("still fails the boot when the primary's kill fails", async () => {
+    const error = new Error("e2b delete failed");
+    const e2b = fakeProvider("e2b", async () => [listed("a1")]);
+    vi.mocked(e2b.kill).mockRejectedValue(error);
+    const health = { primary: "e2b" as ProviderId, cooldown: createProviderCooldown() };
+    await expect(killProjectPreviews([e2b, fakeProvider(fallback, async () => [])], "u1", "p1", health)).rejects.toBe(error);
   });
 });
