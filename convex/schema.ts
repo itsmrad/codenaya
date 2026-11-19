@@ -829,6 +829,8 @@ export default defineSchema({
     customerId: v.optional(v.string()),
     creationState: v.union(v.literal("preparing"), v.literal("unknown"), v.literal("ready")),
     creationLeaseId: v.optional(v.string()),
+    // When checkout took `creationLeaseId`; a lease older than CUSTOMER_LEASE_STALE_MS may have created a customer.
+    creationLeasedAt: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
     hold: v.optional(v.boolean()),
     activeSubscriptionRef: v.optional(v.id("billingSubscriptions")),
@@ -868,6 +870,8 @@ export default defineSchema({
     terms: billingPurchaseTermsValidator,
     ...billingResourceIdsValidator.fields,
     expiresAt: v.optional(v.number()),
+    // Host-checked hosted checkout URL from our own create response; returned only to its owner, never logged.
+    checkoutUrl: v.optional(v.string()),
     state: v.union(v.literal("preparing"), v.literal("unknown"), v.literal("open"), v.literal("processing"), v.literal("settled"), v.literal("terminal"), v.literal("quarantined")),
     cancellationRecoveryRequired: v.optional(v.boolean()),
     principalMinor: v.optional(v.number()),
