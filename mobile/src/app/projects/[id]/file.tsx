@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "convex/react";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, useLocalSearchParams, usePreventRemove } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "expo-router/react-navigation";
 
 import type { Id } from "../../../../../convex/_generated/dataModel";
+import { confirm } from "@/components/dialogs";
 import { monoLabel } from "@/components/grid";
 import { highlight } from "@/components/highlight";
 import { Check, Pencil } from "@/components/icons";
@@ -49,30 +50,64 @@ export default function FileView() {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pending = useRef<string | undefined>(undefined);
 
-  const save = async () => {
+  const inFlight = useRef<Promise<boolean> | undefined>(undefined);
+  const leaving = useRef(false);
+  const [allowLeave, setAllowLeave] = useState(false);
+
+  const save = async (): Promise<boolean> => {
     clearTimeout(timer.current);
+    // Serialize saves so an older request cannot overwrite newer edits.
+    while (inFlight.current) {
+      if (!(await inFlight.current)) return false;
+    }
     const content = pending.current;
-    if (content === undefined) return;
+    if (content === undefined) return true;
     pending.current = undefined;
     setSaveState("saving");
+    const request = (async () => {
+      try {
+        await updateFile({ id: fileId, content });
+        // Typing during the save leaves it unsaved.
+        setSaveState(pending.current === undefined ? "saved" : "unsaved");
+        return true;
+      } catch {
+        pending.current ??= content;
+        setSaveState("error");
+        return false;
+      }
+    })();
+    inFlight.current = request;
     try {
-      await updateFile({ id: fileId, content });
-      // Typing during the save leaves it unsaved.
-      setSaveState(pending.current === undefined ? "saved" : "unsaved");
-    } catch {
-      pending.current ??= content;
-      setSaveState("error");
+      return await request;
+    } finally {
+      inFlight.current = undefined;
     }
   };
 
-  // Leaving the screen saves what is still waiting out the debounce.
-  useEffect(
-    () => () => {
+  usePreventRemove(!allowLeave && saveState !== "saved", async ({ repeat }) => {
+    if (leaving.current) return;
+    leaving.current = true;
+    try {
+      const saved = await save();
+      if (
+        (!saved || pending.current !== undefined) &&
+        !(await confirm({
+          title: `Couldn't save ${file?.name ?? "file"}`,
+          message: "Leave without saving? Your latest edits will be lost.",
+          cancelLabel: "Stay",
+          confirmLabel: "Leave",
+          destructive: true,
+        }))
+      ) return;
       clearTimeout(timer.current);
-      if (pending.current !== undefined) updateFile({ id: fileId, content: pending.current }).catch(() => undefined);
-    },
-    [fileId, updateFile],
-  );
+      setAllowLeave(true);
+      repeat();
+    } finally {
+      leaving.current = false;
+    }
+  });
+
+  useEffect(() => () => clearTimeout(timer.current), []);
 
   if (file === undefined) return <ActivityIndicator style={styles.flex} color={c.mutedForeground} />;
   // Deleted while open (by the agent or on the website): the query returns null.
@@ -99,7 +134,7 @@ export default function FileView() {
 
   const toggle = async () => {
     if (editing) {
-      await save();
+      if (!(await save()) || pending.current !== undefined) return;
       setDraft(undefined);
     } else {
       setDraft(file.content ?? "");
