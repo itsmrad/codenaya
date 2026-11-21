@@ -892,10 +892,16 @@ export default defineSchema({
     serviceStart: v.optional(v.number()),
     serviceEnd: v.optional(v.number()),
     cancelAt: v.optional(v.number()),
+    controlOperation: v.optional(v.union(v.literal("cancel"), v.literal("uncancel"))),
+    controlRevision: v.optional(v.number()),
+    controlPendingAt: v.optional(v.number()),
+    // Canonical provider state, distinct from settled access and local status.
+    controlRenewable: v.optional(v.boolean()),
     graceUntil: v.optional(v.number()),
     observedAt: v.optional(v.number()),
     cancellationRecoveryRequired: v.optional(v.boolean()),
   })
+    .index("by_customerRef_and_controlPendingAt", ["customerRef", "controlPendingAt"])
     .index("by_mode_and_subscriptionId", ["mode", "subscriptionId"])
     .index("by_customerRef_and_status", ["customerRef", "status"]),
 
