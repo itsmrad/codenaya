@@ -70,7 +70,7 @@ const listed = (extra: Record<string, unknown>) => ({ created_at: iso(NOW), cust
 const topUpPayment = (paymentId: string, extra: Record<string, unknown> = {}) => ({
   payment_id: paymentId, business_id: "bus_synthetic", status: "succeeded", customer: { customer_id: "cus_user_alice" },
   subscription_id: null, checkout_session_id: "cks_1", product_cart: [{ product_id: TOP_UP, quantity: 1 }],
-  total_amount: 1000, tax: 90, currency: "USD", created_at: iso(NOW), charge_type: null, ...extra,
+  total_amount: 1000, tax: 90, currency: "USD", created_at: iso(NOW), charge_type: null, refunds: [], disputes: [], ...extra,
 });
 const subscriptionRead = (subscriptionId: string, status: string) => ({
   subscription_id: subscriptionId, status, product_id: PRO, customer: { customer_id: "cus_user_alice" }, quantity: 1,
@@ -183,7 +183,7 @@ describe("missed webhooks", () => {
     await poll(t);
     expect((await events(t)).filter(e => e.eventType === "refund.poll")).toHaveLength(1);
     // A new top-up payment is blocked while the refund is unresolved.
-    stubProvider({ payments: [listed({ payment_id: "pay_2", status: "succeeded" })] });
+    stubProvider({ payments: [listed({ payment_id: "pay_2", status: "succeeded" })], paymentReads: { pay_1: { refunds: undefined } } });
     later(IDLE_POLL_MS);
     await poll(t);
     await processCustomer(t, alice);
