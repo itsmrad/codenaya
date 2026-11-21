@@ -45,6 +45,7 @@ import {
   withoutContent,
   writeFileContent,
 } from "./fileContents";
+import { bumpEnvGeneration } from "./runtimeHandles";
 import { resolveProjectSkills } from "./skills";
 import { countProjectBuilt } from "./stats";
 import {
@@ -1447,6 +1448,7 @@ export const setSecretEnvVar = mutation({
       .first();
 
     const now = Date.now();
+    await bumpEnvGeneration(ctx, args.projectId);
 
     const sealed = {
       visibility: "secret" as const,
@@ -1879,6 +1881,7 @@ export const setPublicEnvVarInternal = mutation({
       .first();
 
     const now = Date.now();
+    await bumpEnvGeneration(ctx, args.projectId);
 
     if (existing) {
       await ctx.db.patch("projectEnvVars", existing._id, {

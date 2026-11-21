@@ -15,6 +15,7 @@ import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { deleteProjectBatch } from "./projectCascade";
+import { bumpEnvGeneration } from "./runtimeHandles";
 import { assertCanCopy, copyProjectFiles, remixProject } from "./projectCopy";
 import { userSkillKey } from "../src/features/skills/types";
 import { MAX_PROJECT_SKILLS } from "../src/features/skills/limits";
@@ -513,6 +514,7 @@ export const remove = mutation({
     await getOwnedProject(ctx, args.id, identity.subject);
 
     await ctx.db.patch("projects", args.id, { deletingAt: Date.now() });
+    await bumpEnvGeneration(ctx, args.id);
     await ctx.scheduler.runAfter(0, internal.projects.deleteBatch, {
       id: args.id,
     });

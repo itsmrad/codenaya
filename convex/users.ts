@@ -17,6 +17,7 @@ import {
   deleteShowcaseBatch,
 } from "./projectCascade";
 import { recordSignedUp } from "./activationEvents";
+import { bumpEnvGeneration } from "./runtimeHandles";
 
 /**
  * Users mirrored from Clerk.
@@ -181,6 +182,7 @@ async function hideProjects(
   for (const project of page.page) {
     if (project.deletingAt === undefined) {
       await ctx.db.patch("projects", project._id, { deletingAt: now });
+      await bumpEnvGeneration(ctx, project._id);
     }
     for (const status of ["published", "unlisted"] as const) {
       const entry = await ctx.db
