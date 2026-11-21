@@ -50,3 +50,42 @@ those remain stage-13 gates. No provider call was made to develop this change.
 CI on the exact pushed head is the gate. Local typecheck, lint, tests, build,
 install, servers and deployment were prohibited. Added mocked adapter/routes,
 pure rule and convex-test cases cover claims, ownership and settled-money safety.
+
+## 10c deletion executor
+
+`billingCancellation` runs independently of checkout enablement. A 15-minute sweep
+selects at most five due obligations in the deployment mode. Each action makes at
+most 20 sequential external requests, including the immediate adapter's nested
+ownership GETs, PATCH and confirmation GETs. Every retry starts with a fresh read;
+unknown user controls never replay an uncancel. No deploy or provider operation
+was performed while implementing this executor.
+
+The separate optional `cancellationLeaseId`/`cancellationLeaseExpiresAt` fields do
+not change the receipt lease. Claims last ten minutes and fence commits by lease,
+generation and input revision. Crashes consume an attempt; eight failures move
+the obligation to indexed support. Backoff starts at 15 minutes, caps at one day,
+and honors a longer Retry-After. A successful chunk resets the failure count.
+
+`cancellationProgress` stores a fixed discovery window, phase, page, within-page
+offset and local cursor; it never stores an unbounded resource list. Discovery
+covers subscriptions since epoch, then every known local subscription, then
+payments through the end of subscription cancellation, then every local purchase.
+Full lists continue; the existing page cap requires support, never completion.
+Findings use the existing synthetic-receipt queue. A new receipt invalidates the
+proof and requires a fresh pass; it never creates a second grant path.
+
+Completion requires exhausted discovery and local pages, ended owned subscriptions,
+expired unpaid checkouts with fresh failure/no-payment evidence, no uncertain
+creates, no unresolved receipts or checkout lock, and no processing/unmatched
+charge. An unmatched succeeded charge remains review work; no refund occurs.
+Periods, lots, entitlements, tombstones and financial dedupe are never shortened
+or deleted here. Support may conservatively retain obligations even after a
+provider condition changes; new evidence/operator recovery must wake them.
+
+New evidence alone calls `queueDeletionRecovery`: reset attempts/outcome, mark due,
+and increment input revision. Keep the live cancellation lease and old progress;
+the next claim resets mismatched progress. Retention must additionally enforce all
+its existing resource-marker, receipt, hold, watch and pending-control blockers,
+require `cancellationRecoveryRequired === false` and outcome `complete`, and refuse
+a live cancellation lease. All new schema fields are optional; no backfill/deploy
+is included. Verification is exact-head CI only, per lane rules.

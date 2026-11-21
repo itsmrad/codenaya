@@ -76,7 +76,7 @@ export async function markPollDue(ctx: MutationCtx, customerRef: Id<"billingCust
 async function pollDelay(ctx: MutationCtx, customer: Doc<"billingCustomers">, now: number) {
   const pending = await ctx.db.query("billingSubscriptions").withIndex("by_customerRef_and_controlPendingAt", q =>
     q.eq("customerRef", customer._id).gte("controlPendingAt", 0)).first();
-  if (pending || customer.pendingPurchaseRef || customer.pollWindow) return ACTIVE_POLL_MS;
+  if (customer.cancellationRecoveryRequired || pending || customer.pendingPurchaseRef || customer.pollWindow) return ACTIVE_POLL_MS;
   const subscription = customer.activeSubscriptionRef && await ctx.db.get("billingSubscriptions", customer.activeSubscriptionRef);
   if (subscription?.status === "active") return (subscription.paidThrough ?? 0) - now < NEAR_EXPIRY_MS ? ACTIVE_POLL_MS : IDLE_POLL_MS;
   return (customer.watchUntil ?? 0) > now ? IDLE_POLL_MS : undefined;
@@ -117,7 +117,7 @@ export const selectPollTargets = internalMutation({
     if (due.length > POLL_BATCH) console.error("[billingPoll] poll backlog", { mode: config.environment });
     for (const customer of due.slice(0, POLL_BATCH)) {
       // Pushed first, so an overlapping run never selects it twice; the poll's record sets the real cadence.
-      await ctx.db.patch("billingCustomers", customer._id, { nextPollAt: customer.customerId ? now + ACTIVE_POLL_MS : undefined });
+      await ctx.db.patch("billingCustomers", customer._id, { nextPollAt: customer.customerId || customer.cancellationRecoveryRequired ? now + ACTIVE_POLL_MS : undefined });
       if (!customer.customerId) continue;
       const purchase = customer.pendingPurchaseRef && await ctx.db.get("billingPurchases", customer.pendingPurchaseRef);
       const checkout = purchase && (purchase.state === "open" || purchase.state === "terminal") && purchase.sessionId
