@@ -43,7 +43,7 @@ export const settlementDecisionValidator = v.union(
 export const subscriptionFactValidator = v.object({
   subscriptionId: v.string(), customerId: v.string(), productId: v.string(), quantity: v.optional(v.number()),
   status: v.string(), previousBillingAt: v.optional(v.number()), nextBillingAt: v.optional(v.number()),
-  cancelAtNextBillingDate: v.boolean(),
+  cancelAtNextBillingDate: v.boolean(), readStartedAt: v.optional(v.number()),
 });
 
 const paymentFactValidator = v.object({
@@ -103,7 +103,7 @@ async function planPayment(ctx: Ctx, customer: Customer, fact: PaymentFact, dele
 
 async function planSubscription(ctx: Ctx, customer: Customer, fact: SubscriptionFact): Promise<SubscriptionPlan> {
   const row = await subscriptionRow(ctx, customer.mode, fact.subscriptionId);
-  const foreign = fact.customerId !== customer.customerId || (row !== null && row.customerRef !== customer._id);
+  const foreign = fact.customerId !== customer.customerId || (row !== null && (row.customerRef !== customer._id || row.productId !== fact.productId));
   return { fact, outcome: foreign ? "quarantined" : "processed" };
 }
 
@@ -320,7 +320,10 @@ async function applySubscription(ctx: Ctx, customer: Customer, { fact, outcome }
   const ended = ENDED_STATUS.get(fact.status as "failed");
   await ctx.db.patch("billingSubscriptions", row._id, {
     observedAt: now, ...(ended ? { status: ended } : {}),
-    ...(!fact.cancelAtNextBillingDate ? { cancelAt: undefined } : fact.nextBillingAt !== undefined ? { cancelAt: fact.nextBillingAt } : {}),
+    controlRenewable: fact.status === "active",
+    ...(row.controlPendingAt !== undefined && (fact.readStartedAt ?? -Infinity) > row.controlPendingAt
+      ? { controlOperation: undefined, controlPendingAt: undefined } : {}),
+    cancelAt: fact.cancelAtNextBillingDate ? row.paidThrough : undefined,
   });
 }
 

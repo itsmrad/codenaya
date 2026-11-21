@@ -74,7 +74,9 @@ export async function markPollDue(ctx: MutationCtx, customerRef: Id<"billingCust
 
 /** Undefined: nothing left to poll for. */
 async function pollDelay(ctx: MutationCtx, customer: Doc<"billingCustomers">, now: number) {
-  if (customer.pendingPurchaseRef || customer.pollWindow) return ACTIVE_POLL_MS;
+  const pending = await ctx.db.query("billingSubscriptions").withIndex("by_customerRef_and_controlPendingAt", q =>
+    q.eq("customerRef", customer._id).gte("controlPendingAt", 0)).first();
+  if (pending || customer.pendingPurchaseRef || customer.pollWindow) return ACTIVE_POLL_MS;
   const subscription = customer.activeSubscriptionRef && await ctx.db.get("billingSubscriptions", customer.activeSubscriptionRef);
   if (subscription?.status === "active") return (subscription.paidThrough ?? 0) - now < NEAR_EXPIRY_MS ? ACTIVE_POLL_MS : IDLE_POLL_MS;
   return (customer.watchUntil ?? 0) > now ? IDLE_POLL_MS : undefined;
@@ -82,7 +84,9 @@ async function pollDelay(ctx: MutationCtx, customer: Doc<"billingCustomers">, no
 
 /** Our not-ended subscriptions and the payments of unresolved refund/dispute receipts, re-read by id each poll. */
 async function rereadIds(ctx: MutationCtx, customerRef: Id<"billingCustomers">) {
-  const subscriptionIds: string[] = [];
+  const pending = await ctx.db.query("billingSubscriptions").withIndex("by_customerRef_and_controlPendingAt", q =>
+    q.eq("customerRef", customerRef).gte("controlPendingAt", 0)).take(MAX_KNOWN_SUBSCRIPTIONS);
+  const subscriptionIds: string[] = pending.map(row => row.subscriptionId);
   for (const status of ["active", "pending"] as const) {
     const rows = await ctx.db.query("billingSubscriptions")
       .withIndex("by_customerRef_and_status", q => q.eq("customerRef", customerRef).eq("status", status)).take(MAX_KNOWN_SUBSCRIPTIONS);

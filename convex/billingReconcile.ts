@@ -33,7 +33,7 @@ export const reconcileClaim = async (ctx: ActionCtx, customerRef: Id<"billingCus
   if (customerId === null) return;
 
   const payments = new Map<string, ProviderPayment>();
-  const subscriptions = new Map<string, ProviderSubscription>();
+  const subscriptions = new Map<string, ProviderSubscription & { readStartedAt?: number }>();
   const failed = new Set<string>();
   let budget = MAX_PROVIDER_READS_PER_CLAIM;
   async function read<T>(reads: Map<string, T>, kind: "payment" | "subscription", id: string, fetchOne: () => Promise<T>): Promise<Read> {
@@ -59,7 +59,10 @@ export const reconcileClaim = async (ctx: ActionCtx, customerRef: Id<"billingCus
       if (result !== "read") return result;
     }
     for (const id of new Set([subscriptionId, paymentId && payments.get(paymentId)?.subscriptionId])) {
-      const result = id ? await read(subscriptions, "subscription", id, () => fetchSubscription(config, id)) : "read";
+      const result = id ? await read(subscriptions, "subscription", id, async () => {
+        const readStartedAt = Date.now();
+        return { ...await fetchSubscription(config, id), readStartedAt };
+      }) : "read";
       if (result !== "read") return result;
     }
     return "read";
