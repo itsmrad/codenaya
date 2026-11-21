@@ -2,7 +2,7 @@ import { v, type Infer } from "convex/values";
 
 import { allocateCredits, type GrantKind, lotUnspent, rolloverQuantity } from "../src/features/billing/grants";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { appError } from "./errors";
 import { billingGrantKindValidator, billingModeValidator } from "./schema";
 
@@ -87,7 +87,7 @@ export async function insertGrant(ctx: MutationCtx, terms: GrantTerms): Promise<
 }
 
 /** The user's unexpired, unexhausted `mode` lots of `kind`: what spending reads and checkout counts. */
-const activeLotsQuery = (ctx: MutationCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
+const activeLotsQuery = (ctx: QueryCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
   ctx.db
     .query("billingGrants")
     .withIndex("by_userId_and_mode_and_kind_and_exhausted_and_expiresAt", (q) =>
@@ -95,7 +95,7 @@ const activeLotsQuery = (ctx: MutationCtx, userId: string, mode: Mode, kind: Gra
     );
 
 /** How many active `kind` lots the user holds, read up to the kind's cap (checkout refuses at the cap). */
-export const countActiveLots = async (ctx: MutationCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
+export const countActiveLots = async (ctx: QueryCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
   (await activeLotsQuery(ctx, userId, mode, kind, now).take(MAX_ACTIVE_LOTS[kind])).length;
 
 /**
@@ -104,7 +104,7 @@ export const countActiveLots = async (ctx: MutationCtx, userId: string, mode: Mo
  * walk stops at the first capped kind: no later kind is spent while it may
  * hold unread credits.
  */
-async function readActiveLots(ctx: MutationCtx, userId: string, mode: Mode, now: number) {
+export async function readActiveLots(ctx: QueryCtx, userId: string, mode: Mode, now: number) {
   const lots: Grant[] = [];
   for (const kind of Object.keys(MAX_ACTIVE_LOTS) as GrantKind[]) {
     const cap = MAX_ACTIVE_LOTS[kind];
@@ -140,7 +140,7 @@ export async function spendPaidCredits(ctx: MutationCtx, userId: string, mode: M
  * The user's unexpired `mode` period lots, spent ones included, for
  * `isInPaidPeriod`. Period lots expire in order, so the live one is in the read.
  */
-export const readPeriodLots = (ctx: MutationCtx, userId: string, mode: Mode, now: number) =>
+export const readPeriodLots = (ctx: QueryCtx, userId: string, mode: Mode, now: number) =>
   ctx.db
     .query("billingGrants")
     .withIndex("by_userId_and_mode_and_kind_and_expiresAt", (q) =>

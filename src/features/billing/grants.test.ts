@@ -127,8 +127,14 @@ describe("paid credits gate", () => {
         .map((file) => join(dir, file))
         .filter((path) => /paidCredits(Version|Mode)/.test(readFileSync(path, "utf8"))),
     );
-    expect(mentions.sort()).toEqual(["convex/billingFulfill.ts", "convex/billingGrants.ts", "convex/credits.ts", "convex/schema.ts"]);
-    for (const reader of ["convex/billingGrants.ts", "convex/credits.ts"]) {
+    expect(mentions.sort()).toEqual([
+      "convex/billingFulfill.ts",
+      "convex/billingGrants.ts",
+      "convex/billingSummary.ts",
+      "convex/credits.ts",
+      "convex/schema.ts",
+    ]);
+    for (const reader of ["convex/billingGrants.ts", "convex/billingSummary.ts", "convex/credits.ts"]) {
       expect(readFileSync(reader, "utf8")).not.toMatch(/paidCredits(Version|Mode)\s*:/);
     }
     expect(readFileSync("convex/billingFulfill.ts", "utf8")).toMatch(/paidCreditsVersion: 1 as const, paidCreditsMode:/);
