@@ -28,8 +28,8 @@ Published source, fetched without installing: `dodopayments@2.63.0`:
   Lines 1838–1852 explicitly document `status: "cancelled"` for immediate cancel;
   this timing is reserved for 10c, never accepted by user routes. `cancelled_at`
   (690) describes an already cancelled subscription, not scheduled period expiry.
-- Subscription customer (580–582), product_id (629), status (659) and subscription_id
-  (664) bind the retrieve. Subscription has no business_id, so the adapter checks
+- Subscription customer (580–582), product_id (634), status (650) and subscription_id
+  (655) bind the retrieve. Subscription has no business_id, so the adapter checks
   [customers/customers.ts](https://unpkg.com/dodopayments@2.63.0/src/resources/customers/customers.ts)
   lines 198–203: Customer.business_id and customer_id via GET `/customers/{id}`
   both before dispatch and during fresh confirmation. Mode selects the fixed API host.

@@ -309,3 +309,8 @@ export function rateLimitedResponse(result: RateLimitResult): Response {
     },
   );
 }
+
+/** Shared by subscription controls and the separate portal route. */
+export const BILLING_MANAGEMENT_RATE_LIMIT: RateLimitConfig = {
+  scope: "billing-management", limit: 5, windowMs: 60_000,
+};
