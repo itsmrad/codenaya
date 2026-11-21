@@ -218,6 +218,19 @@ describe("refunds", () => {
     expect(renewal).toMatchObject({ state: "settled", reversedMinor: 1000, revokedCredits: 1000 });
   });
 
+  test("an early renewal's unstarted period lot is never spent, and its refund still revokes it", async () => {
+    const t = setup();
+    const { alice } = await settled(t, "pro_monthly");
+    await receive(t, alice, "payment.succeeded", "pay_2");
+    await reconcile(t, alice, [fact(period("pay_2", P2))], [sub]); // settles in P1, before P2 starts
+    expect(await spend(t, 2500)).toBe(500); // the rolled-over 2000, never P2's lot
+    await receive(t, alice, "refund.succeeded", "pay_2");
+    await reconcile(t, alice, [fact(period("pay_2", P2), refunds(refund("rfd_2", TOTAL)))], [sub]);
+    const renewal = (await all(t, "billingGrants")).find(g => g.serviceStart === P2.serviceStart);
+    expect(renewal).toMatchObject({ consumed: 0, revoked: 2000, exhausted: true, fullyReversed: true });
+    expect(await debt(t)).toBe(0);
+  });
+
   test("a refund and a lost dispute of the same money are capped at the total", async () => {
     const t = setup();
     const { alice, purchaseRef, decision } = await settled(t, "top_up");

@@ -1,8 +1,10 @@
 import { v } from "convex/values";
 
 import { internalMutation } from "./_generated/server";
-import { bindCustomerRow } from "./billing";
+import { attachReceipts, bindCustomerRow, ownerDeleted } from "./billing";
 import { CHECKOUT_PREPARE_STALE_MS } from "./billingCheckout";
+import { scheduleCustomer } from "./billingQueue";
+import { applyPurchaseReversal, queuePaymentRead } from "./billingReversals";
 import { appError } from "./errors";
 
 const auditArgs = { operator: v.string(), reason: v.string() };
@@ -57,6 +59,139 @@ export const releaseCheckoutLock = internalMutation({
     await ctx.db.patch("billingPurchases", purchase._id, { state: "terminal", resolution: { ...resolution, previousState: purchase.state } });
     await ctx.db.patch("billingCustomers", customerRef, { pendingPurchaseRef: undefined });
     console.info("[billingOperator] resolved", { action: resolution.action, customerRef, purchaseRef: purchase._id, operator });
+    return null;
+  },
+});
+
+const negative = (type: string) => /^(refund|dispute)\./.test(type);
+
+/** Repairs only quarantined receipts, using our mode-scoped payment binding as authority. */
+export const resolveReceipt = internalMutation({
+  args: { eventRef: v.id("billingEvents"), action: v.union(v.literal("attach"), v.literal("dismiss")), ...auditArgs },
+  returns: v.null(),
+  handler: async (ctx, { eventRef, action, operator, reason }) => {
+    const resolution = audit(action, operator, reason);
+    const row = await ctx.db.get("billingEvents", eventRef);
+    if (!row) throw appError("NOT_FOUND", "Receipt not found");
+    if (row.state !== "quarantined") throw appError("INVALID_ARGUMENT", "Receipt is not quarantined");
+    const purchase = row.paymentId ? await ctx.db.query("billingPurchases")
+      .withIndex("by_mode_and_paymentId", q => q.eq("mode", row.mode).eq("paymentId", row.paymentId)).unique() : null;
+    const previous = { state: row.state, customerRef: row.customerRef, quarantineReason: row.quarantineReason };
+    if (action === "attach") {
+      if (!purchase) throw appError("NOT_FOUND", "Payment has no bound purchase");
+      const owner = await ctx.db.get("billingCustomers", purchase.customerRef);
+      if (!owner || owner.mode !== row.mode) throw appError("CONFLICT", "Payment owner mode differs");
+      if (!row.customerRef) {
+        await attachReceipts(ctx, owner._id, [row], true);
+      } else {
+        if (!negative(row.eventType) || row.quarantineReason !== "unsupported" || row.customerRef === owner._id) {
+          throw appError("INVALID_ARGUMENT", "Receipt cannot be re-parented");
+        }
+        const old = await ctx.db.get("billingCustomers", row.customerRef);
+        if (!old || old.mode !== row.mode) throw appError("CONFLICT", "Receipt owner mode differs");
+        await ctx.db.patch("billingCustomers", old._id, { unresolvedReceipts: old.unresolvedReceipts - 1, inputRevision: old.inputRevision + 1 });
+        await ctx.db.patch("billingCustomers", owner._id, { unresolvedReceipts: owner.unresolvedReceipts + 1, inputRevision: owner.inputRevision + 1 });
+        await ctx.db.patch("billingEvents", eventRef, { customerRef: owner._id, state: "pending", quarantineReason: undefined, attempts: 0, nextAttemptAt: Date.now() });
+        await scheduleCustomer(ctx, old._id);
+        await scheduleCustomer(ctx, owner._id);
+      }
+    } else {
+      if (row.customerRef ? negative(row.eventType) : purchase !== null) throw appError("INVALID_ARGUMENT", "Receipt must be reconciled");
+      if (row.customerRef) {
+        const customer = await ctx.db.get("billingCustomers", row.customerRef);
+        if (!customer || customer.mode !== row.mode) throw appError("CONFLICT", "Receipt owner mode differs");
+        await ctx.db.patch("billingCustomers", customer._id, { unresolvedReceipts: customer.unresolvedReceipts - 1, inputRevision: customer.inputRevision + 1 });
+        await scheduleCustomer(ctx, customer._id);
+      }
+      await ctx.db.patch("billingEvents", eventRef, { state: "processed" });
+    }
+    await ctx.db.patch("billingEvents", eventRef, { resolution: { ...resolution, previousState: JSON.stringify(previous) } });
+    console.info("[billingOperator] resolved", { action, operator, eventRef });
+    return null;
+  },
+});
+
+export const placeSupportHold = internalMutation({
+  args: { customerRef: v.id("billingCustomers"), ...auditArgs },
+  returns: v.id("billingAdjustments"),
+  handler: async (ctx, { customerRef, operator, reason }) => {
+    const placedBy = audit("placeSupportHold", operator, reason);
+    const customer = await ctx.db.get("billingCustomers", customerRef);
+    if (!customer) throw appError("NOT_FOUND", "Customer not found");
+    const ref = await ctx.db.insert("billingAdjustments", {
+      customerRef, mode: customer.mode, kind: "support_hold", providerId: "support:" + crypto.randomUUID(),
+      paymentId: "", status: "active", countedMinor: 0, holdActive: true, observedAt: placedBy.at,
+      placedBy: { ...placedBy, previousState: "absent" },
+    });
+    await ctx.db.patch("billingCustomers", customerRef, { inputRevision: customer.inputRevision + 1 });
+    console.info("[billingOperator] hold placed", { action: placedBy.action, operator, customerRef, adjustmentRef: ref });
+    return ref;
+  },
+});
+
+export const releaseHold = internalMutation({
+  args: { adjustmentRef: v.id("billingAdjustments"), ...auditArgs },
+  returns: v.null(),
+  handler: async (ctx, { adjustmentRef, operator, reason }) => {
+    const releasedBy = audit("releaseHold", operator, reason);
+    const row = await ctx.db.get("billingAdjustments", adjustmentRef);
+    if (!row) throw appError("NOT_FOUND", "Hold not found");
+    const customer = await ctx.db.get("billingCustomers", row.customerRef);
+    if (!customer || customer.mode !== row.mode) throw appError("CONFLICT", "Hold owner mode differs");
+    if (row.kind !== "support_hold" && (row.kind !== "dispute" || !["expired", "other"].includes(row.status))) {
+      throw appError("INVALID_ARGUMENT", "Hold needs provider resolution");
+    }
+    if (!row.holdActive) return null;
+    await ctx.db.patch("billingAdjustments", adjustmentRef, {
+      holdActive: false, ...(row.kind === "dispute" ? { holdOverrideStatus: row.status } : {}),
+      releasedBy: { ...releasedBy, previousState: JSON.stringify({ holdActive: row.holdActive, status: row.status }) },
+    });
+    await ctx.db.patch("billingCustomers", customer._id, { inputRevision: customer.inputRevision + 1 });
+    console.info("[billingOperator] hold released", { action: releasedBy.action, operator, adjustmentRef });
+    return null;
+  },
+});
+
+/** amountMinor is the reviewed cumulative amount for the whole payment, or null for no reversal. */
+export const resolveUnreadableReversal = internalMutation({
+  args: {
+    customerRef: v.id("billingCustomers"), eventRef: v.id("billingEvents"),
+    generation: v.number(), inputRevision: v.number(), amountMinor: v.union(v.number(), v.null()), ...auditArgs,
+  },
+  returns: v.null(),
+  handler: async (ctx, { customerRef, eventRef, generation, inputRevision, amountMinor, operator, reason }) => {
+    const resolution = audit("resolveUnreadableReversal", operator, reason);
+    const customer = await ctx.db.get("billingCustomers", customerRef);
+    const row = await ctx.db.get("billingEvents", eventRef);
+    if (!customer || !row) throw appError("NOT_FOUND", "Customer or receipt not found");
+    if (customer.generation !== generation || customer.inputRevision !== inputRevision) throw appError("CONFLICT", "Customer fence changed");
+    if (row.customerRef !== customerRef || row.mode !== customer.mode || !negative(row.eventType) ||
+      row.state !== "quarantined" || !["retries_exhausted", "unsupported"].includes(row.quarantineReason ?? "") || !row.paymentId) {
+      throw appError("INVALID_ARGUMENT", "Receipt must be an owned dead-lettered reversal");
+    }
+    const purchase = await ctx.db.query("billingPurchases")
+      .withIndex("by_mode_and_paymentId", q => q.eq("mode", customer.mode).eq("paymentId", row.paymentId)).unique();
+    if (!purchase || purchase.customerRef !== customerRef) {
+      throw appError("INVALID_ARGUMENT", "Payment needs an owned purchase");
+    }
+    if (!Number.isSafeInteger(purchase.totalMinor) || purchase.totalMinor! <= 0) {
+      throw appError("CONFLICT", "Verified gross total unavailable; reconcile the payment before review");
+    }
+    if (amountMinor !== null && (!Number.isSafeInteger(amountMinor) || amountMinor < 0 || amountMinor > purchase.totalMinor!)) {
+      throw appError("INVALID_ARGUMENT", "Amount must be within the payment gross total");
+    }
+    if (amountMinor !== null) {
+      await applyPurchaseReversal(ctx, customer, purchase, amountMinor, purchase.totalMinor!, await ownerDeleted(ctx, customer));
+    }
+    await ctx.db.patch("billingEvents", eventRef, {
+      state: "processed", reviewedReversalMinor: amountMinor,
+      resolution: { ...resolution, previousState: JSON.stringify({ state: row.state, customerRef, quarantineReason: row.quarantineReason, reversedMinor: purchase.reversedMinor ?? 0 }) },
+    });
+    await ctx.db.patch("billingPurchases", purchase._id, { reviewedReversalRef: eventRef });
+    await ctx.db.patch("billingCustomers", customerRef, { unresolvedReceipts: customer.unresolvedReceipts - 1, inputRevision: customer.inputRevision + 1 });
+    await queuePaymentRead(ctx, customerRef, row.paymentId, resolution.at);
+    await scheduleCustomer(ctx, customerRef);
+    console.info("[billingOperator] reversal resolved", { action: resolution.action, operator, customerRef, eventRef, purchaseRef: purchase._id });
     return null;
   },
 });

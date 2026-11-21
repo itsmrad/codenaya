@@ -17,6 +17,8 @@ import { join } from "node:path";
 
 import { ImageInstance, SandboxInstance } from "@blaxel/core";
 
+import { assertExactExecStream } from "../src/features/sandbox-preview/server/provider/blaxel";
+
 // Computed, like the starter imports in e2b/starters.mts: Node runs the .mts
 // directly, and tsc doesn't reject the extension.
 const { STARTER_WARMUP_COMMANDS }: { STARTER_WARMUP_COMMANDS: string[] } = await import(
@@ -55,6 +57,10 @@ try {
     onStatusChange: (status) => console.log(`[${Math.round((Date.now() - startedAt) / 1000)}s] ${status}`),
   });
   console.log(`Built in ${Math.round((Date.now() - startedAt) / 1000)}s; image: ${sandbox.spec?.runtime?.image ?? "(not reported)"}`);
+  // sandbox-api came from :latest; the adapter's byte-exact run needs its NDJSON exec stream.
+  // The image is already published under IMAGE_NAME, so a failure here means rebuild it.
+  await assertExactExecStream(await SandboxInstance.get(IMAGE_NAME));
+  console.log("sandbox-api streams exec output exactly (NDJSON).");
 } finally {
   rmSync(contextDir, { recursive: true, force: true });
   // The build sandbox is not needed after the build; deleting it keeps the image.

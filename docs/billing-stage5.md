@@ -23,8 +23,9 @@ receipts stay pending until stage 8. Event names and order are never trusted: on
   payment writes nothing and keeps its receipts pending while everything else commits
   (`blocked`). A business outcome never throws.
 - **Exactly once.** A payment matches its purchase by payment id, then by an unbound checkout
-  session. Only a settlement binds a payment to a checkout, so a declined attempt leaves the
-  session to its retry. A Pro payment for an owned subscription with no purchase gets a
+  session. Only a verified positive binds a payment to a checkout; unreadable reversals can
+  stage that binding for support review without settling or granting. A declined
+  attempt leaves the session to its retry. A Pro payment for an owned subscription with no purchase gets a
   server-created `renewal:<payment>` purchase (also when it carries an already settled checkout's
   session); any other unmatched payment, including a second top-up for a settled checkout, is
   recorded quarantined. A settled purchase never

@@ -19,9 +19,11 @@ import {
   WORK_DIR,
   projectFileEntries,
 } from "@/features/sandbox-preview/server/project-sandbox";
-import { runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
-import { getDefaultProviderOrNull } from "@/features/sandbox-preview/server/provider/registry";
-import type { Sandbox, SandboxProvider } from "@/features/sandbox-preview/server/provider/types";
+import { FALLBACK_LIST_TIMEOUT_MS, listAll } from "@/features/sandbox-preview/server/provider/fanout";
+import { runOrThrow, withDeadline } from "@/features/sandbox-preview/server/provider/helpers";
+import { parsePublicSandboxIdOrNull, toPublicSandboxId } from "@/features/sandbox-preview/server/provider/ids";
+import { type SandboxPool, getSandboxPool } from "@/features/sandbox-preview/server/provider/registry";
+import type { Sandbox } from "@/features/sandbox-preview/server/provider/types";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
@@ -44,7 +46,7 @@ import { isSafeProjectPath, projectFramework } from "./tools/check-build";
  * `fallbackModel`, these run on the cheap model, and one more on the fallback.
  */
 export const MAX_SERVER_REPAIRS = 2;
-/** Renewed by each connect; E2B reaps it after this if every kill is lost. */
+/** Renewed by each connect; the provider reaps it after this if every kill is lost. */
 const REPAIR_SANDBOX_TIMEOUT_MS = 10 * 60_000;
 /**
  * The warm-up install's own budget. Each check installs again, from scratch,
@@ -59,21 +61,43 @@ const REPAIR_PURPOSE = "build-repair";
  * Stops every repair sandbox `runId` started: a retried provisioning step can
  * have started more than one. Also run when the run fails or is cancelled
  * (`stop-repair-sandboxes.ts`), which skips the run's own kill step.
+ *
+ * On every configured provider, as the project kill (ADR 0015 fan-out
+ * resilience): the primary fails closed as before; a non-primary one whose list
+ * or kill fails is cooled and skipped, and its sandboxes expire on their timeout.
  */
+// shortcut: the same kill loop as `killProjectPreviews`; a shared fan-out kill helper can replace both.
 export const killRepairSandboxes = async (runId: string) => {
-  const provider = getDefaultProviderOrNull();
-  if (!provider) return;
-  const running = await provider.list({ metadata: { purpose: REPAIR_PURPOSE, runId } });
-  await Promise.all(running.map(({ id }) => provider.kill(id)));
+  const pool = getSandboxPool();
+  if (!pool) return;
+  const { providers, health } = pool;
+  const byId = new Map(providers.map((provider) => [provider.id, provider]));
+  const running = await listAll(providers, { metadata: { purpose: REPAIR_PURPOSE, runId } }, health && { ...health, skip: "failing" });
+  await Promise.all(running.map(async ({ provider, id }) => {
+    const target = byId.get(provider);
+    if (!target) return;
+    if (!health || provider === health.primary) {
+      await target.kill(id);
+      return;
+    }
+    try {
+      await withDeadline(target.kill(id, { requestTimeoutMs: FALLBACK_LIST_TIMEOUT_MS }), FALLBACK_LIST_TIMEOUT_MS, "kill");
+    } catch {
+      health.cooldown.coolDown(provider);
+      console.warn(`[build-repair] Could not kill a ${provider} repair sandbox; it expires on its timeout`);
+    }
+  }));
 };
 
 /**
- * The project from Convex, in a new sandbox: returns its id, or null for a
- * project the check does not build. Uploads too, so imports of them resolve.
- * Never secret files: install scripts and builds there run agent-written code.
+ * The project from Convex, in a new sandbox on whichever provider the pool's
+ * `create` picks (failover included): returns its prefixed public id, so later steps reach
+ * that provider, or null for a project the check does not build. Uploads too, so
+ * imports of them resolve. Never secret files: install scripts and builds there
+ * run agent-written code. No `image`: each adapter uses its own default.
  */
 const provision = async (
-  provider: SandboxProvider,
+  pool: SandboxPool,
   { projectId, internalKey, runId }: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId">,
 ) => {
   const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
@@ -90,7 +114,7 @@ const provision = async (
   const uploads = withoutSecretFiles(allUploads);
   // Any other project could never verify, so a repair would only spend.
   if (!projectFramework(files, [...files, ...uploads].map(({ path }) => path))) return null;
-  const sandbox = await provider.create({
+  const sandbox = await pool.create({
     timeoutMs: REPAIR_SANDBOX_TIMEOUT_MS,
     metadata: { projectId, runId, purpose: REPAIR_PURPOSE },
   });
@@ -102,10 +126,10 @@ const provision = async (
       await sandbox.writeFiles([{ path: `${WORK_DIR}/${path}`, data: await response.arrayBuffer() }]);
     }
   } catch (error) {
-    await sandbox.kill().catch(() => {}); // Best effort: E2B reaps it anyway.
+    await sandbox.kill().catch(() => {}); // Best effort: the provider reaps it anyway.
     throw error;
   }
-  return sandbox.id;
+  return toPublicSandboxId(sandbox.provider, sandbox.id);
 };
 
 const checkError = ({ errors = [], reason }: RepairEvent) =>
@@ -169,22 +193,25 @@ export const repairBuild = async ({
   /** Upserts the rows `build` returns into the run block, in a step. */
   recordSteps: (build: () => AgentStep[]) => Promise<void>;
 }): Promise<RepairResult | null> => {
-  const provider = getDefaultProviderOrNull();
-  if (!provider) return null;
+  const pool = getSandboxPool();
+  if (!pool) return null;
 
-  const sandboxId = (await step("provision-repair-sandbox", async () => {
+  const publicId = (await step("provision-repair-sandbox", async () => {
     try {
-      return await provision(provider, options);
+      return await provision(pool, options);
     } catch (error) {
       console.error("[build-repair] could not start the repair sandbox", error);
       return null;
     }
   })) as string | null;
-  if (!sandboxId) return null;
+  // An unprefixed id (a step memoized before ids carried their provider) is E2B's.
+  const target = publicId ? parsePublicSandboxIdOrNull(publicId) : null;
+  const provider = pool.providers.find(({ id }) => id === target?.provider);
+  if (!target || !provider) return null;
 
   let connected: Promise<Sandbox> | undefined;
   const sandbox = () =>
-    (connected ??= provider.connect(sandboxId, { timeoutMs: REPAIR_SANDBOX_TIMEOUT_MS }));
+    (connected ??= provider.connect(target.nativeId, { timeoutMs: REPAIR_SANDBOX_TIMEOUT_MS }));
 
   // Fills the npm cache, so the checks' own installs fit their budget.
   await step("install-repair-sandbox", async () => {
@@ -216,8 +243,8 @@ export const repairBuild = async ({
   await step("kill-repair-sandbox", async () => {
     await killRepairSandboxes(options.runId).catch(async (error) => {
       console.error("[build-repair] could not stop the repair sandboxes", error);
-      // At least the one this run knows; best effort, E2B reaps it anyway.
-      await provider.kill(sandboxId).catch(() => {});
+      // At least the one this run knows; best effort, its provider reaps it anyway.
+      await provider.kill(target.nativeId).catch(() => {});
     });
     return null;
   });

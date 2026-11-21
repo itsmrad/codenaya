@@ -911,14 +911,19 @@ export default defineSchema({
     resolution: v.optional(billingOperatorAuditValidator),
     // Reversal bookkeeping (convex/billingReversals.ts): the gross total the ratio uses and the credits revoked so far.
     totalMinor: v.optional(v.number()),
+    reviewedReversalRef: v.optional(v.id("billingEvents")),
+    stagedGrantKey: v.optional(v.string()),
     revokedCredits: v.optional(v.number()),
   })
+    .index("by_mode_and_stagedGrantKey", ["mode", "stagedGrantKey"])
     .index("by_mode_and_intentId", ["mode", "intentId"])
     .index("by_mode_and_paymentId", ["mode", "paymentId"])
     .index("by_mode_and_sessionId", ["mode", "sessionId"])
     .index("by_customerRef_and_state", ["customerRef", "state"]),
 
   billingEvents: defineTable({
+    resolution: v.optional(billingOperatorAuditValidator),
+    reviewedReversalMinor: v.optional(v.union(v.number(), v.null())),
     // Absent for a verified receipt whose customer is not mapped yet; stored quarantined.
     customerRef: v.optional(v.id("billingCustomers")),
     mode: billingModeValidator,
@@ -994,6 +999,9 @@ export default defineSchema({
     status: v.string(),
     countedMinor: v.number(),
     currency: v.optional(v.string()),
+    placedBy: v.optional(billingOperatorAuditValidator),
+    releasedBy: v.optional(billingOperatorAuditValidator),
+    holdOverrideStatus: v.optional(v.string()),
     holdActive: v.boolean(),
     observedAt: v.number(),
   })
