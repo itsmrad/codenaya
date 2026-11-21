@@ -148,6 +148,27 @@ describe("build repair on any provider", () => {
     await expect(killRepairSandboxes("run_7")).rejects.toThrow("E2B down");
   });
 
+  it("bounds the direct kill on a fallback-created sandbox when the primary's list fails, and cools it", async () => {
+    vi.useFakeTimers();
+    try {
+      e2b.create.mockRejectedValue(new SandboxRateLimitError("quota"));
+      e2b.list.mockRejectedValue(new Error("E2B down"));
+      blaxel.kill.mockImplementation(() => new Promise<boolean>(() => {}));
+
+      let settled = false;
+      const done = repair().then((result) => { settled = true; return result; });
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(done).resolves.toMatchObject({ ok: true });
+      expect(blaxel.kill).toHaveBeenCalledWith("blaxel_new", { requestTimeoutMs: 5_000 });
+      expect(state.cooldown.isCoolingDown(BLAXEL)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops a cancelled run's sandboxes, skipping a failing fallback and cooling it", async () => {
     e2b.list.mockResolvedValue([listed("e2b_a")]);
     blaxel.list.mockRejectedValue(new Error("Blaxel down"));
