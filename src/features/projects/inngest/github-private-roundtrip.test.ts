@@ -53,14 +53,14 @@ test("push then pull preserves local private canaries and never changes their re
   const t = convexTest(schema, modules);
   mocks.query.mockImplementation(t.query);
   mocks.mutation.mockImplementation(t.mutation);
-  const local = new Map([
+  const local = Object.fromEntries([
     ...sourcePaths.map(path => [path, `source ${path}`] as const),
     ...privatePaths.map(path => [path, `LOCAL_CANARY_123 ${path}`] as const),
   ]);
   const projectId = await t.run(async ctx => {
     const id = await ctx.db.insert("projects", { name: "Round trip", ownerId: "owner", updatedAt: 0,
       githubSync: { repo: "owner/repo", branch: "main", lastSyncedSha: "old", lastSyncedAt: 0 } });
-    const { folders, filesByFolder } = planSeedTree([...local].map(([path, content]) => ({ path, content })));
+    const { folders, filesByFolder } = planSeedTree(Object.entries(local).map(([path, content]) => ({ path, content })));
     const ids = new Map<string, Id<"files">>();
     for (const path of folders) {
       const slash = path.lastIndexOf("/");
@@ -97,7 +97,7 @@ test("push then pull preserves local private canaries and never changes their re
   await (pushToGithub as unknown as (args: unknown) => Promise<unknown>)({ event, step });
   expect(head).toBe("pushed");
   for (const path of privatePaths) expect(remote.get(path)).toBe(`REMOTE_CANARY_456 ${path}`);
-  for (const path of sourcePaths) expect(remote.get(path)).toBe(local.get(path));
+  for (const path of sourcePaths) expect(remote.get(path)).toBe(local[path]);
   expect(JSON.stringify(mocks.github.createTree.mock.calls)).not.toMatch(/LOCAL_CANARY|REMOTE_CANARY/);
   expect(mocks.github.createTree.mock.calls[0][0].tree.map((entry: { path: string }) => entry.path).sort()).toEqual([...sourcePaths].sort());
   // Private paths are absent from the comparison on both sides.
@@ -111,12 +111,12 @@ test("push then pull preserves local private canaries and never changes their re
   const restored = await t.run(async ctx => {
     const files = await withContents(ctx, projectId, await ctx.db.query("files").withIndex("by_project", q => q.eq("projectId", projectId)).take(100));
     const pathOf = buildPathIndex(files);
-    return new Map(files.filter(file => file.type === "file").map(file => [pathOf(file._id), file.content]));
+    return Object.fromEntries(files.filter(file => file.type === "file").map(file => [pathOf(file._id) ?? file.name, file.content ?? null]));
   });
   for (const path of privatePaths) {
-    expect(restored.get(path)).toBe(local.get(path));
+    expect(restored[path]).toBe(local[path]);
     expect(remote.get(path)).toBe(`REMOTE_CANARY_456 ${path}`);
   }
-  for (const path of sourcePaths) expect(restored.get(path)).toBe(local.get(path));
+  for (const path of sourcePaths) expect(restored[path]).toBe(local[path]);
   expect(JSON.stringify(mocks.mutation.mock.calls)).not.toMatch(/LOCAL_CANARY|REMOTE_CANARY/);
 });
