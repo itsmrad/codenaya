@@ -8,6 +8,7 @@ import type { Id } from "./_generated/dataModel";
 import { CANCELLATION_LEASE_MS, CANCELLATION_MAX_ATTEMPTS, CANCELLATION_MAX_DELAY_MS, CANCELLATION_FETCH_LIMIT } from "./billingCancellation";
 import { queueDeletionRecovery } from "./billingDeletion";
 import schema from "./schema";
+import { sha256Hex } from "./billingWebhook";
 
 const modules = import.meta.glob("./**/*.ts");
 const NOW = Date.UTC(2026, 10, 21);
@@ -38,8 +39,10 @@ async function commit(t: T, ref: Id<"billingCustomers">, c: Awaited<ReturnType<t
       support: false, retryAt: 0, ended: [], resolved: [], findings: [] } });
 }
 function provider(opts: { full?: boolean; failure?: number; processing?: boolean; renewable?: boolean } = {}) {
+  const cancelled = new Set<string>();
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input)); const id = url.pathname.split("/")[2];
+    if (init?.method === "PATCH") cancelled.add(id);
     if (opts.failure) return new Response("{}", { status: opts.failure, headers: { "retry-after": "86400" } });
     let body: object = { items: [] };
     if (url.pathname.startsWith("/customers/")) body = { customer_id: "cus_dummy", business_id: "bus_dummy" };
@@ -48,7 +51,7 @@ function provider(opts: { full?: boolean; failure?: number; processing?: boolean
     else if (url.pathname.startsWith("/payments/")) body = { payment_id: id, business_id: "bus_dummy", customer: { customer_id: "cus_dummy" },
       created_at: new Date(NOW).toISOString(), status: "processing", total_amount: 100, currency: "USD", product_cart: [] };
     else if (url.pathname.startsWith("/subscriptions/")) body = { subscription_id: id, customer: { customer_id: "cus_dummy" }, product_id: "pdt_pro",
-      status: init?.method === "PATCH" ? "cancelled" : opts.renewable ? "paused" : "cancelled", cancel_at_next_billing_date: false };
+      status: cancelled.has(id) ? "cancelled" : opts.renewable ? "paused" : "cancelled", cancel_at_next_billing_date: false };
     else if (url.pathname === "/subscriptions" && opts.full && url.searchParams.get("page_number") === "0") body = { items: Array.from({ length: 20 }, (_, i) => ({
       subscription_id: `sub_${i}`, status: "cancelled", customer: { customer_id: "cus_dummy" }, created_at: new Date(NOW - 1000).toISOString() })) };
     return new Response(JSON.stringify(body));
@@ -138,4 +141,33 @@ test("late obligation reopens completed recovery and resets retry budget", async
   const t = setup(), ref = await customer(t, { cancellationRecoveryRequired: false, cancellationLastOutcome: "complete", cancellationAttempts: 8 });
   await t.run(ctx => queueDeletionRecovery(ctx, ref));
   expect(await row(t, ref)).toMatchObject({ cancellationRecoveryRequired: true, cancellationLastOutcome: "pending", cancellationAttempts: 0, inputRevision: 1 });
+});
+
+
+test("full discovery page advances across chunks, including old subscriptions missed by local pointers", async () => {
+  const t = setup(), ref = await customer(t); const fetchMock = provider({ full: true });
+  // Existing canonical receipts keep the discovery pass stable so this isolates its page/offset contract.
+  for (let i = 0; i < 20; i++) {
+    const key = `poll:subscription:sub_${i}:cancelled`;
+    await t.mutation(internal.billing.recordReceipt, { customerRef: ref, mode, webhookId: key, eventType: "subscription.poll",
+      subscriptionId: `sub_${i}`, bodyDigest: await sha256Hex(new TextEncoder().encode(key)), occurredAt: NOW, ignored: true });
+  }
+  for (let i = 0; i < 7; i++) {
+    fetchMock.mockClear();
+    await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(CANCELLATION_FETCH_LIMIT);
+    expect((await row(t, ref))!.cancellationRecoveryRequired).toBe(true);
+  }
+  expect((await row(t, ref))!.cancellationProgress).toMatchObject({ phase: "subscriptions", page: 1, offset: 0 });
+  await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+  expect((await row(t, ref))!.cancellationProgress!.phase).toBe("knownSubscriptions");
+});
+
+test("three renewable subscriptions use exactly twenty nested requests, cancel immediately, and never resume", async () => {
+  const t = setup(), ref = await customer(t); const fetchMock = provider({ full: true, renewable: true });
+  await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+  expect(fetchMock.mock.calls).toHaveLength(CANCELLATION_FETCH_LIMIT);
+  const writes = fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH");
+  expect(writes).toHaveLength(3);
+  for (const [, init] of writes) expect(JSON.parse(String(init!.body))).toEqual({ status: "cancelled" });
 });
