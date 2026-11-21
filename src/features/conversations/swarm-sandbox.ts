@@ -11,10 +11,15 @@ import {
   WORK_DIR,
   projectFileEntries,
 } from "@/features/sandbox-preview/server/project-sandbox";
+import { killListed, listAll } from "@/features/sandbox-preview/server/provider/fanout";
 import { runOrThrow } from "@/features/sandbox-preview/server/provider/helpers";
-import { getDefaultProvider, getDefaultProviderOrNull } from "@/features/sandbox-preview/server/provider/registry";
+import { parsePublicSandboxIdOrNull, toPublicSandboxId } from "@/features/sandbox-preview/server/provider/ids";
+import { type SandboxPool, getSandboxPool } from "@/features/sandbox-preview/server/provider/registry";
 import {
+  PROVIDER_IDS,
+  type ProviderId,
   type Sandbox,
+  SandboxConfigError,
   type SandboxMeta,
   type SandboxProvider,
   SandboxRateLimitError,
@@ -33,10 +38,13 @@ import { WORKER_TIMEOUT_MS, ownsPath } from "./swarm";
  * workers then check and repair their own files in a sandbox started from it.
  * Its result is advisory ("scoped-ok", never "verified"): the orchestrator's
  * unfiltered integration build stays the only verified signal.
+ *
+ * The foundation runs on the primary provider when it snapshots, and every
+ * worker on the provider that made the snapshot: a snapshot id works nowhere else.
  */
 
-/** Concurrent sandboxes on the E2B team; the plan is unknown, so Hobby's. */
-const E2B_TEAM_SANDBOXES = 10;
+/** Concurrent sandboxes per provider account: E2B Hobby's (the plan is unknown) and Blaxel Tier 0's. */
+const TEAM_SANDBOXES = 10;
 /** Swarm sandboxes running team-wide at most, so previews always have room. */
 const SWARM_TEAM_BUDGET = 4;
 const DEFAULT_MAX_WORKER_SANDBOXES = 2;
@@ -64,13 +72,36 @@ const hasSnapshots = (provider: SandboxProvider | null): provider is SnapshotPro
   !!(provider?.snapshot && provider.createFromSnapshot && provider.deleteSnapshot);
 
 /**
- * The kill switch (default off) and a configured provider that snapshots; read
- * inside a step, so replays keep the first answer.
+ * The kill switch (default off), the configured providers, and the primary one
+ * when it snapshots; read inside a step, so replays keep the first answer.
  */
-const swarmProvider = () => {
+const swarmProviders = (): { pool: SandboxPool; home: SnapshotProvider } | null => {
   if (process.env.SWARM_WORKER_SANDBOXES !== "true") return null;
-  const provider = getDefaultProviderOrNull();
-  return hasSnapshots(provider) ? provider : null;
+  const pool = getSandboxPool();
+  const home = pool?.providers.find(({ id }) => id === pool.health?.primary) ?? null;
+  return pool && hasSnapshots(home) ? { pool, home } : null;
+};
+
+/**
+ * The stored snapshot id names its provider, as a public sandbox id does
+ * (`blaxel:<id>`); E2B's stays bare, as it was before other providers.
+ */
+const snapshotRef = (provider: ProviderId, id: string) => (provider === "e2b" ? id : `${provider}:${id}`);
+
+const parseSnapshotRef = (ref: string): { provider: ProviderId; id: string } => {
+  const separator = ref.indexOf(":");
+  const prefix = ref.slice(0, Math.max(separator, 0));
+  return (PROVIDER_IDS as readonly string[]).includes(prefix)
+    ? { provider: prefix as ProviderId, id: ref.slice(separator + 1) }
+    : { provider: "e2b", id: ref };
+};
+
+/** The provider and native id behind a worker's public sandbox id, while that provider is configured. */
+const workerSandboxOrNull = (publicId: string) => {
+  // An unprefixed id (a step memoized before ids carried their provider) is E2B's.
+  const target = parsePublicSandboxIdOrNull(publicId);
+  const provider = target && getSandboxPool()?.providers.find(({ id }) => id === target.provider);
+  return target && provider ? { provider, nativeId: target.nativeId } : null;
 };
 
 export const maxWorkerSandboxes = () => {
@@ -79,12 +110,12 @@ export const maxWorkerSandboxes = () => {
 };
 
 /** Why a new swarm sandbox may not start now, or undefined when it may. Previews always win. */
-// ponytail: check-then-create, so parallel swarms can overshoot by a sandbox or two; E2B's own limit still holds.
+// ponytail: check-then-create, so parallel swarms can overshoot by a sandbox or two; the provider's own limit still holds.
 const overBudget = async (provider: SandboxProvider) => {
   const running = await provider.list({ limit: 100 });
   const swarm = running.filter(({ metadata }) => metadata?.purpose?.startsWith("swarm-")).length;
   if (swarm >= SWARM_TEAM_BUDGET) return "sandbox budget in use";
-  if (running.length + MAX_LIVE_SANDBOXES >= E2B_TEAM_SANDBOXES) return "previews need the sandboxes";
+  if (running.length + MAX_LIVE_SANDBOXES >= TEAM_SANDBOXES) return "previews need the sandboxes";
   return undefined;
 };
 
@@ -108,14 +139,14 @@ const createSwarmSandbox = (provider: SnapshotProvider, snapshotId: string | nul
 
 /**
  * The foundation, run as one step beside the workers: installs the current
- * tree in a fresh sandbox, snapshots it, kills it, and stores the snapshot id
- * on the swarm's task rows. Returns the snapshot id, or null when skipped or
- * failed. Never throws.
+ * tree in a fresh sandbox, snapshots it, kills it, and stores the snapshot id,
+ * with its provider, on the swarm's task rows. Returns that stored id, or null
+ * when skipped or failed. Never throws.
  */
 export const seedSwarmSnapshot = async ({
   internalKey, projectId, messageId,
 }: { internalKey: string; projectId: Id<"projects">; messageId: Id<"messages"> }) => {
-  const provider = swarmProvider();
+  const provider = swarmProviders()?.home;
   if (!provider || maxWorkerSandboxes() === 0) return null;
   let sandbox: Sandbox | undefined;
   let snapshotId: string | undefined;
@@ -135,8 +166,9 @@ export const seedSwarmSnapshot = async ({
     // A failed install is the integration build's to report.
     if (install.exitCode !== 0) return null;
     snapshotId = await provider.snapshot(sandbox, { requestTimeoutMs: CALL_TIMEOUT_MS });
-    await convex.mutation(api.agentTasks.setSeedSnapshot, { internalKey, messageId, snapshotId });
-    return snapshotId;
+    const ref = snapshotRef(provider.id, snapshotId);
+    await convex.mutation(api.agentTasks.setSeedSnapshot, { internalKey, messageId, snapshotId: ref });
+    return ref;
   } catch (error) {
     console.error("[swarm-sandbox] foundation failed", projectId, error);
     if (snapshotId) await provider.deleteSnapshot(snapshotId).catch((cleanupError) => {
@@ -148,20 +180,26 @@ export const seedSwarmSnapshot = async ({
   }
 };
 
-/** After every worker settled: kills the swarm's leftover sandboxes and deletes its snapshot. Never throws. */
+/**
+ * After every worker settled: kills the swarm's leftover sandboxes on every
+ * configured provider (the fan-out kill policy), then deletes its snapshot on
+ * the provider that made it. Never throws.
+ */
 // shortcut: a cancelled run never gets here, so its snapshot stays; sweep old snapshots if that adds up.
 export const cleanupSwarmSandboxes = async ({ messageId, snapshotId }: { messageId: string; snapshotId: string }) => {
-  const provider = getDefaultProviderOrNull();
-  if (!provider) return;
+  const pool = getSandboxPool();
+  if (!pool) return;
+  const { providers, health } = pool;
   try {
-    const running = await provider.list({ metadata: { messageId }, limit: 100 });
-    await Promise.all(running
-      .filter(({ metadata }) => metadata?.purpose?.startsWith("swarm-"))
-      .map(({ id }) => provider.kill(id).catch(() => false)));
-    await provider.deleteSnapshot?.(snapshotId);
+    const running = await listAll(providers, { metadata: { messageId }, limit: 100 }, health && { ...health, skip: "failing" });
+    await killListed(providers, running.filter(({ metadata }) => metadata?.purpose?.startsWith("swarm-")), health, "swarm sandbox");
   } catch (error) {
     console.error("[swarm-sandbox] cleanup failed", messageId, error);
   }
+  const { provider, id } = parseSnapshotRef(snapshotId);
+  await providers.find((candidate) => candidate.id === provider)?.deleteSnapshot?.(id).catch((error) => {
+    console.error("[swarm-sandbox] snapshot cleanup failed", messageId, error);
+  });
 };
 
 type StartResult = { sandboxId: string; maxAttempts: number } | { skipped: string } | { off: true };
@@ -178,34 +216,45 @@ const startWorkerSandbox = async ({
   timeoutMs: number;
   signal?: AbortSignal;
 }): Promise<StartResult> => {
-  const provider = swarmProvider();
-  if (!provider) return { off: true };
+  const providers = swarmProviders();
+  if (!providers) return { off: true };
+  const { pool, home } = providers;
   // A worker already at its cost cap leaves the slot to the others.
   if (signal?.aborted) return { skipped: "cost budget" };
   const remaining = invokedAt + timeoutMs - Date.now();
   // Each repair needs one more verify; with room for one verify only, it checks without repairing.
   const maxAttempts = Math.min(SELF_CHECK_ATTEMPTS, Math.floor((remaining - SELF_CHECK_SLACK_MS) / CHECK_ROUND_MS) - 1);
   if (maxAttempts < 0) return { skipped: "time budget" };
+  let provider = home;
   let sandbox: Sandbox | undefined;
   try {
-    const budget = await overBudget(provider);
+    const budget = await overBudget(home);
     if (budget) return { skipped: budget };
     const claim = await convex.mutation(api.agentTasks.claimSelfCheck, {
       internalKey, agentTaskId, max: maxWorkerSandboxes(),
     });
     if (claim.skipped !== undefined) return { skipped: claim.skipped };
-    // E2B expires it after the reserved check budget even if cleanup is lost.
+    // Only the provider that made the snapshot can start from it.
+    const snapshot = parseSnapshotRef(claim.seedSnapshotId);
+    const owner = pool.providers.find(({ id }) => id === snapshot.provider) ?? null;
+    if (!hasSnapshots(owner)) return { skipped: "sandbox unavailable" };
+    if (owner !== home) {
+      provider = owner;
+      const ownerBudget = await overBudget(owner);
+      if (ownerBudget) return { skipped: ownerBudget };
+    }
+    // The provider expires it after the reserved check budget even if cleanup is lost.
     sandbox = await createSwarmSandbox(
-      provider, claim.seedSnapshotId, { projectId, messageId, purpose: "swarm-worker" },
+      provider, snapshot.id, { projectId, messageId, purpose: "swarm-worker" },
       (maxAttempts + 1) * CHECK_ROUND_MS + SELF_CHECK_SLACK_MS,
     );
     // shortcut: files deleted since the snapshot stay in the sandbox; rare within one swarm.
     await sandbox.writeFiles(projectFileEntries(await projectTextFiles(internalKey, projectId)));
-    return { sandboxId: sandbox.id, maxAttempts };
+    return { sandboxId: toPublicSandboxId(sandbox.provider, sandbox.id), maxAttempts };
   } catch (error) {
     console.error("[swarm-sandbox] worker start failed", projectId, error);
     await sandbox?.kill().catch(() => {});
-    return { skipped: error instanceof SandboxRateLimitError ? "E2B rate limit" : "sandbox unavailable" };
+    return { skipped: error instanceof SandboxRateLimitError ? `${provider.id.toUpperCase()} rate limit` : "sandbox unavailable" };
   }
 };
 
@@ -268,7 +317,11 @@ export const selfCheckWorker = async ({
   const deadlineAt = invokedAt + timeoutMs - CHECK_ROUND_MS;
   const repairSignal = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
   const result = await verifyAndFix({
-    sandbox: () => getDefaultProvider().connect(started.sandboxId),
+    sandbox: async () => {
+      const target = workerSandboxOrNull(started.sandboxId);
+      if (!target) throw new SandboxConfigError("The worker sandbox's provider is not configured");
+      return target.provider.connect(target.nativeId);
+    },
     projectId,
     internalKey,
     runId: messageId,
@@ -291,7 +344,8 @@ export const selfCheckWorker = async ({
     },
   });
   await step.run("self-check-stop", async () => {
-    await getDefaultProviderOrNull()?.kill(started.sandboxId).catch(() => false);
+    const target = workerSandboxOrNull(started.sandboxId);
+    await target?.provider.kill(target.nativeId).catch(() => false);
   });
   const ownedLeft = ownedErrors(ownedPaths)(result.errors).length;
   if (result.status === "unverified" && result.reason && !repairSignal.aborted) {

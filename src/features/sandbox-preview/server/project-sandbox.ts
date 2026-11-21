@@ -2,8 +2,8 @@ import { z } from "zod";
 
 import { killTreeCommand, SHORT_CALL_MS, stopDevServers } from "./dev-server";
 import { DEFAULT_E2B_TEMPLATE } from "./provider/e2b";
-import { FALLBACK_LIST_TIMEOUT_MS, type FanoutHealth, listAll } from "./provider/fanout";
-import { listCommands, withDeadline } from "./provider/helpers";
+import { type FanoutHealth, killListed, listAll } from "./provider/fanout";
+import { listCommands } from "./provider/helpers";
 import { toPublicSandboxId } from "./provider/ids";
 import type { Sandbox as SeamSandbox, SandboxProvider } from "./provider/types";
 
@@ -78,26 +78,8 @@ export const killProjectPreviews = async (
   projectId: string,
   health?: FanoutHealth,
 ) => {
-  const byId = new Map(providers.map((provider) => [provider.id, provider]));
-  // Only sandboxes a given provider listed can be killed through it; anything else is left alone.
-  const running = (await listAll(providers, { metadata: { userId, projectId }, limit: MAX_LIVE_SANDBOXES }, health && { ...health, skip: "failing" }))
-    .filter(({ provider }) => byId.has(provider));
-  const killed = await Promise.all(running.map(async ({ provider, id }) => {
-    const target = byId.get(provider);
-    if (!target) return false;
-    if (!health || provider === health.primary) {
-      await target.kill(id);
-      return true;
-    }
-    try {
-      await withDeadline(target.kill(id, { requestTimeoutMs: FALLBACK_LIST_TIMEOUT_MS }), FALLBACK_LIST_TIMEOUT_MS, "kill");
-      return true;
-    } catch {
-      health.cooldown.coolDown(provider);
-      console.warn(`[sandbox-provider] Could not kill a ${provider} preview; it expires on its TTL`);
-      return false;
-    }
-  }));
+  const running = await listAll(providers, { metadata: { userId, projectId }, limit: MAX_LIVE_SANDBOXES }, health && { ...health, skip: "failing" });
+  const killed = await killListed(providers, running, health, "preview");
   return running.filter((_, index) => killed[index]).map(({ provider, id }) => toPublicSandboxId(provider, id));
 };
 
