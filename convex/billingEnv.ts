@@ -9,6 +9,17 @@ export const LOG_PREFIX = {
 } as const;
 
 /**
+ * The billing mode this Convex deployment's paid credits live in, from
+ * CODENAYA_DEPLOYMENT alone (production is live, everything else test, as
+ * `readDodoConfig` enforces). Null when absent or invalid: callers fail closed.
+ */
+export function deploymentBillingMode(): "test_mode" | "live_mode" | null {
+  const deployment = process.env.CODENAYA_DEPLOYMENT;
+  if (!deployment || !DEPLOYMENTS.includes(deployment)) return null;
+  return deployment === "production" ? "live_mode" : "test_mode";
+}
+
+/**
  * Billing config for this Convex deployment, whose trusted deployment comes only from the
  * Convex-only CODENAYA_DEPLOYMENT. Null (fail closed) when absent, invalid or misconfigured;
  * logs fixed text and variable names only, never values.

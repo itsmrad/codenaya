@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { readAccountEntitlement } from "./billingEntitlement";
 import { insertGrant, MAX_ACTIVE_LOTS, rollOverIntoPeriod } from "./billingGrants";
 import schema from "./schema";
 
@@ -476,6 +477,30 @@ describe("rollOverIntoPeriod", () => {
     vi.setSystemTime(P2 + MINUTE);
     expect(await rollOver(t, await period(t, customerRef, "p2", P2, P3))).toBeNull();
     expect(await rollovers(t)).toMatchObject([{ sourceKey: "rollover:p0", consumed: 250 }]);
+  });
+
+  test("an early renewal's period lot is neither spent nor shown before it starts, then is spent first", async () => {
+    vi.stubEnv("CODENAYA_DEPLOYMENT", "development");
+    vi.setSystemTime(P0 + DAY); // convex-test creation times never go back
+    const t = setup();
+    const customerRef = await seed(t);
+    await t.run((ctx) => ctx.db.insert("users", { clerkUserId: ALICE, updatedAt: 1 }));
+    await period(t, customerRef, "p0", P0, P1, 3000);
+    await grant(t, customerRef, "top", { kind: "top_up", quantity: 500, expiresAt: P2 + 60 * DAY });
+    const view = () => t.run((ctx) => readAccountEntitlement(ctx, ALICE, Date.now()));
+
+    vi.setSystemTime(P1 - DAY); // the renewal settles a day early
+    await rollOver(t, await period(t, customerRef, "p1", P1, P2));
+    await charge(t, await seedMessage(t), 21); // 3150: the rest of p0, its rollover, then the top-up
+    expect(await consumed(t)).toEqual([["p0", 1000], ["top", 150], ["p1", 0], ["rollover:p0", 2000]]);
+    expect(await rawAccount(t)).toMatchObject({ creditDebt: 0 });
+    expect(await view()).toMatchObject({ plan: "pro", paidCreditsRemaining: 350, creditsLeft: 350, nextChangeAt: P1 });
+
+    vi.setSystemTime(P1 + MINUTE);
+    expect(await view()).toMatchObject({ plan: "pro", paidCreditsRemaining: 2350, creditsLeft: 2350 });
+    await charge(t, await seedMessage(t), 0.1); // 15 from the new period first
+    expect(await lotBy(t, "p1")).toMatchObject({ consumed: 15 });
+    expect(await lotBy(t, "top")).toMatchObject({ consumed: 150 });
   });
 
   test("rejects a target that isn't a period grant", async () => {
