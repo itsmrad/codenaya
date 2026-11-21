@@ -18,7 +18,7 @@ import { insertGrant, rollOverIntoPeriod } from "./billingGrants";
  */
 
 export const MAX_UNMAPPED_CHECK = 20;
-const MAX_SUBSCRIPTIONS_PER_STATUS = 10;
+export const MAX_SUBSCRIPTIONS_PER_STATUS = 10;
 // Every status that can carry paidThrough: a cancelled subscription stays paid until its period ends.
 const PAID_STATUSES = ["active", "cancelled", "expired", "quarantined"] as const;
 const NEGATIVE_PREFIXES = ["refund.", "dispute."];

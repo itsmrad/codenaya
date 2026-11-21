@@ -85,6 +85,18 @@ export async function insertGrant(ctx: MutationCtx, terms: GrantTerms): Promise<
   return await ctx.db.insert("billingGrants", { ...lot, debtOffset, ...exhaustedIf({ ...lot, debtOffset }) });
 }
 
+/** The user's unexpired, unexhausted `mode` lots of `kind`: what spending reads and checkout counts. */
+const activeLotsQuery = (ctx: MutationCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
+  ctx.db
+    .query("billingGrants")
+    .withIndex("by_userId_and_mode_and_kind_and_exhausted_and_expiresAt", (q) =>
+      q.eq("userId", userId).eq("mode", mode).eq("kind", kind).eq("exhausted", undefined).gt("expiresAt", now),
+    );
+
+/** How many active `kind` lots the user holds, read up to the kind's cap (checkout refuses at the cap). */
+export const countActiveLots = async (ctx: MutationCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
+  (await activeLotsQuery(ctx, userId, mode, kind, now).take(MAX_ACTIVE_LOTS[kind])).length;
+
 /**
  * The user's unexpired, unexhausted `mode` lots, at most cap + 1 per kind in
  * spending order. Lots past a cap expire no earlier than those read, so the
@@ -95,12 +107,7 @@ async function readActiveLots(ctx: MutationCtx, userId: string, mode: Mode, now:
   const lots: Grant[] = [];
   for (const kind of Object.keys(MAX_ACTIVE_LOTS) as GrantKind[]) {
     const cap = MAX_ACTIVE_LOTS[kind];
-    const rows = await ctx.db
-      .query("billingGrants")
-      .withIndex("by_userId_and_mode_and_kind_and_exhausted_and_expiresAt", (q) =>
-        q.eq("userId", userId).eq("mode", mode).eq("kind", kind).eq("exhausted", undefined).gt("expiresAt", now),
-      )
-      .take(cap + 1);
+    const rows = await activeLotsQuery(ctx, userId, mode, kind, now).take(cap + 1);
     lots.push(...rows.slice(0, cap));
     if (rows.length > cap) return { lots, capped: kind };
   }
