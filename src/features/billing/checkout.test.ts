@@ -7,6 +7,8 @@ describe("checkoutErrorMessage", () => {
     expect(checkoutErrorMessage(409, "already_subscribed")).toBe("You're already on Pro.");
     expect(checkoutErrorMessage(403, "billing_on_hold")).toMatch(/on hold/);
     expect(checkoutErrorMessage(409, "top_up_cap")).toMatch(/limit/);
+    // 502 alone reads "try again shortly"; an unconfirmed checkout asks the user to wait instead.
+    expect(checkoutErrorMessage(502, "checkout_unknown")).toMatch(/wait a minute/);
   });
 
   it("falls back to the status, then to a generic message", () => {

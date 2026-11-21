@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -24,6 +25,14 @@ const useBillingSummary = (active = true) => {
 
 const formatDate = (at: number) => new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(at);
 
+type Summary = FunctionReturnType<typeof api.billingSummary.mine>;
+
+const planLabel = (summary: Summary | undefined) => {
+  if (summary === undefined) return "Loading...";
+  if (summary.plan === "pro" && summary.paidThroughMs !== null) return `Pro — paid through ${formatDate(summary.paidThroughMs)}`;
+  return "Free";
+};
+
 const Row = ({ label, value }: { label: string; value: string }) => (
   <div className="flex items-baseline justify-between gap-4 text-sm">
     <span className="text-muted-foreground">{label}</span>
@@ -31,41 +40,33 @@ const Row = ({ label, value }: { label: string; value: string }) => (
   </div>
 );
 
-/** The caller's plan and credits, live: fulfillment updates it once Dodo confirms a payment. */
-export const BillingSummary = () => {
-  const summary = useBillingSummary();
+const BillingSummaryCard = ({ summary }: { summary: Summary | undefined }) => (
+  <Card>
+    <CardHeader>
+      <CardTitle>Current plan</CardTitle>
+      <CardDescription>{planLabel(summary)}</CardDescription>
+    </CardHeader>
+    <CardContent className="space-y-3">
+      {summary === undefined ? (
+        <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+          <Spinner className="size-4" />
+          Loading credits...
+        </div>
+      ) : (
+        <>
+          <Row label="Paid credits" value={formatCredits(summary.paidCreditsRemaining)} />
+          {summary.freeRemaining !== null && (
+            <Row label="Free credits this month" value={formatCredits(summary.freeRemaining)} />
+          )}
+          {summary.debt > 0 && <Row label="Credits owed" value={formatCredits(summary.debt)} />}
+        </>
+      )}
+    </CardContent>
+  </Card>
+);
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Current plan</CardTitle>
-        <CardDescription>
-          {summary === undefined
-            ? "Loading..."
-            : summary.plan === "pro" && summary.paidThroughMs !== null
-              ? `Pro — paid through ${formatDate(summary.paidThroughMs)}`
-              : "Free"}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {summary === undefined ? (
-          <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
-            <Spinner className="size-4" />
-            Loading credits...
-          </div>
-        ) : (
-          <>
-            <Row label="Paid credits" value={formatCredits(summary.paidCreditsRemaining)} />
-            {summary.freeRemaining !== null && (
-              <Row label="Free credits this month" value={formatCredits(summary.freeRemaining)} />
-            )}
-            {summary.debt > 0 && <Row label="Credits owed" value={formatCredits(summary.debt)} />}
-          </>
-        )}
-      </CardContent>
-    </Card>
-  );
-};
+/** The caller's plan and credits, live: fulfillment updates it once Dodo confirms a payment. */
+export const BillingSummary = () => <BillingSummaryCard summary={useBillingSummary()} />;
 
 export const BillingSettings = ({ enabled, topUpsEnabled }: { enabled: boolean; topUpsEnabled: boolean }) => {
   const summary = useBillingSummary(enabled);
@@ -95,7 +96,7 @@ export const BillingSettings = ({ enabled, topUpsEnabled }: { enabled: boolean; 
 
   return (
     <div className="space-y-6">
-      <BillingSummary />
+      <BillingSummaryCard summary={summary} />
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
@@ -107,7 +108,8 @@ export const BillingSettings = ({ enabled, topUpsEnabled }: { enabled: boolean; 
             Subscribe to Pro
           </Button>
         )}
-        {topUpsEnabled && (
+        {/* Top-ups are Pro-only: checkout refuses Free with `not_pro`. */}
+        {topUpsEnabled && summary?.plan === "pro" && (
           <Button variant="outline" disabled={pending} onClick={() => void checkout("top_up")}>
             Buy {formatCredits(TOP_UP.credits)} credits
           </Button>

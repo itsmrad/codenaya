@@ -8,7 +8,8 @@ export type CheckoutSku = "pro_monthly" | "top_up";
 const CODE_MESSAGES: Record<string, string> = {
   cross_origin: "That request was blocked. Reload the page and try again.",
   billing_on_hold: "Billing is on hold for your account. Contact support.",
-  on_hold: "Billing is on hold for your account. Contact support.",
+  checkout_unknown:
+    "We couldn't confirm the checkout was created. Please wait a minute before trying again — if it keeps happening, contact support.",
   checkout_pending: "You already have a checkout open. Finish it, or try again in a few minutes.",
   already_subscribed: "You're already on Pro.",
   not_pro: "Credit top-ups are for Pro subscribers.",

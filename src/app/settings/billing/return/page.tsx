@@ -15,8 +15,8 @@ const BillingReturnPage = () => {
   return (
     <>
       <SettingsHeader
-        title="Thanks — your payment is being confirmed"
-        description="Credits appear here automatically once Dodo confirms it (usually under a minute)."
+        title="Back from checkout"
+        description="If you completed payment, it's being confirmed — credits appear here automatically (usually under a minute). If you cancelled, nothing was charged."
       />
       <BillingSummary />
       <Link href={BILLING_SETTINGS_URL} className="text-sm underline underline-offset-2 hover:text-foreground">

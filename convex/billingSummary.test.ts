@@ -19,11 +19,16 @@ type TestConvex = ReturnType<typeof setup>;
 type Mode = "test_mode" | "live_mode";
 
 /** A billing-enabled account in `mode` with `freeUsed` of October's allocation spent. */
-const seedAccount = (t: TestConvex, userId: string, fields: { freeUsed?: number; creditDebt?: number } = {}, mode: Mode = "test_mode") =>
+const seedAccount = (
+  t: TestConvex,
+  userId: string,
+  fields: { freeUsed?: number; creditDebt?: number; freeMonthStartsAt?: number } = {},
+  mode: Mode = "test_mode",
+) =>
   t.run((ctx) =>
     ctx.db.insert("creditAccounts", {
       userId, plan: "free", periodStartsAt: OCT, periodUsed: 0, dayStartsAt: Date.UTC(2026, 9, 29), dayUsed: 0,
-      paidCreditsVersion: 1, paidCreditsMode: mode, freeMonthStartsAt: OCT, freeUsed: fields.freeUsed ?? 0,
+      paidCreditsVersion: 1, paidCreditsMode: mode, freeMonthStartsAt: fields.freeMonthStartsAt ?? OCT, freeUsed: fields.freeUsed ?? 0,
       freeDebtOffset: 0, creditDebt: fields.creditDebt,
     }),
   );
@@ -89,6 +94,15 @@ describe("billingSummary.mine", () => {
 
     expect(await summary(t, ALICE)).toEqual({
       plan: "free", paidThroughMs: null, paidCreditsRemaining: 750, freeRemaining: 200, debt: 0,
+    });
+  });
+
+  test("Free in a new month: debt is shown net of the Free allocation that will pay it", async () => {
+    const t = setup();
+    // Last touched in September, so October's allocation hasn't been opened yet.
+    await seedAccount(t, ALICE, { freeMonthStartsAt: Date.UTC(2026, 8, 1), freeUsed: 300, creditDebt: 40 });
+    expect(await summary(t, ALICE)).toEqual({
+      plan: "free", paidThroughMs: null, paidCreditsRemaining: 0, freeRemaining: 260, debt: 0,
     });
   });
 
