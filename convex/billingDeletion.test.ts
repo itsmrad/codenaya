@@ -160,8 +160,8 @@ test("post-purge transcription and run usage cannot recreate user accounts/spend
   });
   await t.run(async ctx => {
     await ctx.db.insert("creditAccounts", { userId: ALICE, plan: "free", periodStartsAt: NOW, dayStartsAt: NOW, periodUsed: 0, dayUsed: 0 });
-    await ctx.db.insert("platformCatalog", { updatedAt: NOW, defaultModelId: "limited", models: [{
-      id: "limited", name: "limited", vendor: "x", provider: "openrouter", providerModelId: "limited", vision: false, tools: "reported",
+    await ctx.db.insert("platformCatalog", { updatedAt: NOW, updatedBy: "admin", defaultModelId: "limited", utilityModelId: "limited", models: [{
+      id: "limited", name: "limited", vendor: "x", provider: "openrouter", providerModelId: "limited", vision: false, tools: "reported", access: "everyone", hidden: false,
       pricing: { mode: "blended", usdPerMTok: 1 }, spendLimit: { resets: "monthly", perUserUsd: 1 },
     }] });
     await addModelSpend(ctx, ALICE, "limited", 0.1, NOW);
