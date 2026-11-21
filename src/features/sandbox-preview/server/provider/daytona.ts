@@ -177,6 +177,7 @@ const untilEndMark = (emit: (chunk: string) => void) => {
  * `endMark` prints the end marker after the command instead, and keeps its exit code.
  * `pidFile` gets the pid that `env` and `timeout` exec into: `timeout` leads its own process
  * group, so that pid is the group's id (see `killGroup`). The wrapper removes it when done.
+ * Best effort: a failed write never stops the command. Only with `endMark`, which runs the cleanup.
  */
 const shellCommand = (
   command: string,
@@ -190,7 +191,7 @@ const shellCommand = (
     `bash -c ${quote(command)}`,
   ];
   // endMark needs the shell after the command, so it can't exec; a pid file's subshell can.
-  const line = pidFile ? `(echo $BASHPID > ${pidFile} && exec ${exec.join(" ")})` : `${endMark ? "" : "exec "}${exec.join(" ")}`;
+  const line = pidFile ? `({ echo $BASHPID > ${pidFile}; } 2>/dev/null; exec ${exec.join(" ")})` : `${endMark ? "" : "exec "}${exec.join(" ")}`;
   const script = [...(cwd ? [`cd ${quote(cwd)}`] : []), ...steps, line].join(" && ");
   const cleanup = pidFile ? `rm -f ${pidFile}; ` : "";
   return `bash -c ${quote(endMark ? `${script}; s=$?; ${cleanup}${printEndMark}; ${printEndMark} >&2; exit $s` : script)}`;
@@ -204,7 +205,7 @@ const shellCommand = (
 const killGroup = (pidFile: string) =>
   `bash -c ${quote(
     `for i in $(seq 20); do [ -s ${pidFile} ] && break; sleep 0.1; done; p=$(cat ${pidFile} 2>/dev/null); rm -f ${pidFile}; ` +
-      `[ "$p" -gt 1 ] 2>/dev/null || exit 0; kill -TERM -- -$p 2>/dev/null || exit 0; sleep 2; kill -KILL -- -$p 2>/dev/null; exit 0`,
+      `[ "$p" -gt 1 ] 2>/dev/null || exit 0; kill -TERM -- "-$p" 2>/dev/null || exit 0; sleep 2; kill -KILL -- "-$p" 2>/dev/null; exit 0`,
   )}`;
 
 /** Retries `read` every `intervalMs` until it returns a value or `budgetMs` runs out. */
@@ -267,7 +268,7 @@ const wrap = (sandbox: DaytonaSandbox): Sandbox => {
       try {
         // The session wait is only HTTP, so `timeout` is what stops the command itself.
         const request = {
-          command: shellCommand(command, { cwd, envs }, { steps: [`mkdir -p ${PID_DIR}`], timeoutS: seconds(timeoutMs), endMark: true, pidFile }),
+          command: shellCommand(command, { cwd, envs }, { steps: [`{ mkdir -p ${PID_DIR} 2>/dev/null || true; }`], timeoutS: seconds(timeoutMs), endMark: true, pidFile }),
         };
         let result: RunResult;
         if (!onStdout && !onStderr) {

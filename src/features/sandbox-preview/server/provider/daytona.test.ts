@@ -420,6 +420,10 @@ describe("Daytona provider", () => {
         // No limit, so no GNU `timeout` is needed where the test runs.
         expect(await sandbox.run("printf x", { timeoutMs: 0 })).toEqual({ exitCode: 0, stdout: "x", stderr: "" });
         expect(await sandbox.run("printf 'x\\n'; printf e >&2; exit 3", { timeoutMs: 0 })).toEqual({ exitCode: 3, stdout: "x\n", stderr: "e" });
+        // The wrapper removes its pid file once the command ends.
+        for (const [sessionId] of daytona.process.executeSessionCommand.mock.calls) {
+          expect(existsSync(`/tmp/.codenaya/${sessionId}.pid`)).toBe(false);
+        }
       });
 
       it("resolves a non-zero exit with separate stdout and stderr, in its own session", async () => {
@@ -542,10 +546,10 @@ describe("Daytona provider", () => {
         const [sessionId, { command }] = daytona.process.executeSessionCommand.mock.calls[0];
         const pidFile = `/tmp/.codenaya/${sessionId}.pid`;
         // The wrapper records the pid `timeout` runs as, which leads its own process group.
-        expect(command).toContain(`(echo $BASHPID > ${pidFile} && exec env -- timeout -k 5 60s bash -c`);
+        expect(command).toContain(`({ echo $BASHPID > ${pidFile}; } 2>/dev/null; exec env -- timeout -k 5 60s bash -c`);
         const [kill, , , timeout] = daytona.process.executeCommand.mock.calls[0];
         expect(kill).toContain(pidFile);
-        expect(kill).toContain("kill -TERM -- -$p");
+        expect(kill).toContain('kill -TERM -- "-$p"');
         expect(timeout).toBe(15);
         expect(daytona.process.deleteSession).toHaveBeenCalledWith(sessionId);
 
