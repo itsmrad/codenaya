@@ -923,8 +923,10 @@ export default defineSchema({
     // Reversal bookkeeping (convex/billingReversals.ts): the gross total the ratio uses and the credits revoked so far.
     totalMinor: v.optional(v.number()),
     reviewedReversalRef: v.optional(v.id("billingEvents")),
+    stagedGrantKey: v.optional(v.string()),
     revokedCredits: v.optional(v.number()),
   })
+    .index("by_mode_and_stagedGrantKey", ["mode", "stagedGrantKey"])
     .index("by_mode_and_intentId", ["mode", "intentId"])
     .index("by_mode_and_paymentId", ["mode", "paymentId"])
     .index("by_mode_and_sessionId", ["mode", "sessionId"])
