@@ -3,7 +3,7 @@ import { mutation, query } from "./_generated/server";
 import { getSharedProject } from "./projects";
 import { validateInternalKey } from "./internalKey";
 import { withContents } from "./fileContents";
-import { MAX_CHECKPOINT_FILES, withPaths } from "./checkpoints";
+import { MAX_CHECKPOINT_FILES, withPaths, type TreeEntry } from "./checkpoints";
 import { withoutPrivateFiles } from "./projectTransfer";
 import { MAX_PUBLIC_PREVIEWS, previewDeadline, safePreviewPath } from "../src/features/share/preview-policy";
 
@@ -18,7 +18,7 @@ export const manifest = query({
     validateInternalKey(args.internalKey);
     const project = await getSharedProject(ctx, args.token);
     if (!project) return null;
-    let entries;
+    let entries: TreeEntry[];
     if (project.shareMode === "snapshot" && project.shareCheckpointId) {
       const checkpoint = await ctx.db.get("checkpoints", project.shareCheckpointId);
       if (!checkpoint || checkpoint.projectId !== project._id) throw new Error("Shared version unavailable");
