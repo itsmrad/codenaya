@@ -856,6 +856,10 @@ export default defineSchema({
     creationLeasedAt: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
     hold: v.optional(v.boolean()),
+    cancellationRecoveryRequired: v.optional(v.boolean()),
+    cancellationNextAttemptAt: v.optional(v.number()),
+    cancellationAttempts: v.optional(v.number()),
+    cancellationLastOutcome: v.optional(v.union(v.literal("pending"), v.literal("retry"), v.literal("support"), v.literal("complete"))),
     activeSubscriptionRef: v.optional(v.id("billingSubscriptions")),
     pendingPurchaseRef: v.optional(v.id("billingPurchases")),
     // One coordinator for every subscription, purchase and receipt on this customer.
@@ -875,7 +879,8 @@ export default defineSchema({
     .index("by_mode_and_ownerTokenIdentifier", ["mode", "ownerTokenIdentifier"])
     .index("by_mode_and_customerId", ["mode", "customerId"])
     .index("by_mode_and_userId", ["mode", "userId"])
-    .index("by_mode_and_nextPollAt", ["mode", "nextPollAt"]),
+    .index("by_mode_and_nextPollAt", ["mode", "nextPollAt"])
+    .index("by_mode_and_cancellationRecoveryRequired_and_cancellationNextAttemptAt", ["mode", "cancellationRecoveryRequired", "cancellationNextAttemptAt"]),
 
   billingSubscriptions: defineTable({
     customerRef: v.id("billingCustomers"),
