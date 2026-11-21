@@ -224,6 +224,15 @@ describe("pullFromGithub (#343)", () => {
     expect(JSON.stringify(calls())).not.toContain("fake-local-");
   });
 
+  it("explains that preserved local private entries count toward the pull cap", async () => {
+    mocks.files.mockReturnValue(Array.from({ length: 2001 }, (_, i) => ({ _id: `env-${i}`, name: `.env.${i}`, type: "file" })));
+    await expect(runJob()).rejects.toMatchObject({
+      name: "NonRetriableError",
+      message: expect.stringMatching(/including preserved local private entries.*project or repository/),
+    });
+    expect(written()).toEqual([]);
+  });
+
   it("refuses a remote file that would replace a local dotenv parent folder (#812)", async () => {
     mocks.files.mockReturnValue([
       { _id: "apps", name: "apps", type: "folder" },
@@ -233,7 +242,7 @@ describe("pullFromGithub (#343)", () => {
 
     await expect(runJob()).rejects.toMatchObject({
       name: "NonRetriableError",
-      message: expect.stringMatching(/local dotenv/),
+      message: expect.stringMatching(/local private/),
     });
     expect(written()).toEqual([]);
   });
@@ -283,7 +292,7 @@ describe("pullFromGithub (#343)", () => {
 
     await expect(runJob()).rejects.toMatchObject({
       name: "NonRetriableError",
-      message: expect.stringMatching(/over 2000 files/),
+      message: expect.stringMatching(/would exceed 2000 files and folders, including preserved local private entries/),
     });
     expect(written()).toEqual([]);
   });

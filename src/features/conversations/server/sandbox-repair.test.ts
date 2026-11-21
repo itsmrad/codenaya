@@ -10,7 +10,7 @@ vi.mock("e2b", async (importOriginal) => ({
 }));
 vi.mock("@/lib/convex-client", () => ({
   convex: {
-    // getProjectFilesWithUrls: root-level rows named by their whole path.
+    // getBuildFiles: root-level rows named by their whole path.
     query: vi.fn(async () =>
       [...convexFiles].map(([path, content], i) => ({ _id: `file_${i}`, name: path, type: "file", content })),
     ),

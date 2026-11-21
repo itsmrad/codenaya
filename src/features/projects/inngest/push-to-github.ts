@@ -5,6 +5,7 @@ import { Octokit, RequestError } from "octokit";
 import { NonRetriableError } from "inngest";
 
 import { convex } from "@/lib/convex-client";
+import { getAppError } from "@/lib/convex-error";
 import { inngest } from "@/inngest/client";
 import { requireJobGithubToken } from "@/features/projects/server/github-token";
 import { getFilePath } from "@/features/sandbox-preview/utils/file-tree";
@@ -13,6 +14,7 @@ import { storedScanEnv } from "@/features/security/server/scan-stored-project";
 
 import { api } from "../../../../convex/_generated/api";
 import type { Doc, Id } from "../../../../convex/_generated/dataModel";
+import { isPrivatePath } from "../../../../convex/projectTransfer";
 import { GITHUB_SYNC_BRANCH } from "../constants";
 
 interface PushToGithubEvent {
@@ -143,7 +145,7 @@ async function pushCommits(
     snapshots.length === plan.runs.length &&
     plan.runs.length > 0 &&
     !(await anySecrets(internalKey, projectId, snapshots.slice(0, -1)));
-  let commits = perRun
+  const commits = perRun
     ? snapshots
     : [{ message: summaryMessage(plan.runs, plan.more), files: current }];
 
@@ -159,25 +161,20 @@ async function pushCommits(
     tree_sha: parentCommit.tree.sha,
     recursive: "true",
   });
-  // A truncated listing would hide deletions: write one whole tree instead.
-  let base: { tree?: string; blobs: Map<string, string> } = remoteTree.truncated
-    ? { blobs: new Map() }
-    : {
-        tree: parentCommit.tree.sha,
-        blobs: new Map(
-          remoteTree.tree.flatMap((item) =>
-            item.type === "blob" && item.path && item.sha ? [[item.path, item.sha] as const] : []
-          )
-        ),
-      };
+  // Missing remote paths cannot be preserved safely from a partial listing.
   if (remoteTree.truncated) {
-    commits = [{ message: summaryMessage(plan.runs, plan.more), files: current }];
+    throw new NonRetriableError("GitHub returned an incomplete file listing for this repository. No files were pushed. Export this project to a new repository, or reduce the linked repository's file count before retrying.");
   }
+  let base = {
+    tree: parentCommit.tree.sha,
+    blobs: new Map(remoteTree.tree.flatMap(item =>
+      item.type === "blob" && item.path && item.sha ? [[item.path, item.sha] as const] : [])),
+  };
 
   const binaries = new Map<string, { bytes: Buffer; sha: string; uploaded: boolean }>();
   let committed = 0;
   for (const commit of commits) {
-    const blobs = new Map<string, string>();
+    const blobs = new Map([...base.blobs].filter(([path]) => isPrivatePath(path)));
     const changes: {
       path: string;
       mode: "100644";
@@ -187,6 +184,7 @@ async function pushCommits(
     }[] = [];
 
     for (const file of commit.files) {
+      if (isPrivatePath(file.path)) continue;
       if (file.content !== undefined) {
         const sha = gitBlobSha(Buffer.from(file.content));
         blobs.set(file.path, sha);
@@ -332,7 +330,11 @@ async function moveBranch(
 }
 
 export async function currentFiles(internalKey: string, projectId: Id<"projects">) {
-  const files = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
+  const files = await convex.query(api.files.getTransferFiles, { internalKey, projectId }).catch(error => {
+    const refusal = getAppError(error);
+    if (refusal?.code === "LIMIT_EXCEEDED") throw new NonRetriableError(refusal.message);
+    throw error;
+  });
   const byId = new Map(files.map((file) => [file._id, file]));
   return files
     .filter((file) => file.type === "file")

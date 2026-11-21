@@ -90,7 +90,7 @@ const overBudget = async (provider: SandboxProvider) => {
 
 /** The project's text files from Convex, by path, without secret files. */
 const projectTextFiles = async (internalKey: string, projectId: Id<"projects">) => {
-  const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
+  const rows = await convex.query(api.files.getBuildFiles, { internalKey, projectId });
   const pathOf = buildPathIndex(rows);
   return withoutSecretFiles(rows.flatMap((row): ProjectFile[] => {
     const path = row.type === "file" ? pathOf(row._id) : undefined;

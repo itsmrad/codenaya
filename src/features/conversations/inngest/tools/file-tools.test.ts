@@ -66,7 +66,7 @@ beforeEach(() => {
   mocks.query.mockImplementation(async (ref, args: { fileId?: string }) =>
     getFunctionName(ref) === "system:getFileById"
       ? (db.rows.find((r) => r._id === args.fileId) ?? null)
-      : db.rows.map((row) => ({ ...row, content: getFunctionName(ref) === "system:getProjectFilesWithUrls" ? row.content : undefined })),
+      : db.rows.map((row) => ({ ...row, content: getFunctionName(ref) === "files:getBuildFiles" ? row.content : undefined })),
   );
   mocks.mutation.mockImplementation(async (ref, args: Record<string, never>) => {
     switch (getFunctionName(ref)) {

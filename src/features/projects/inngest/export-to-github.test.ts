@@ -1,4 +1,5 @@
 import { getFunctionName } from "convex/server";
+import { ConvexError } from "convex/values";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -147,6 +148,21 @@ describe("exportToGithub", () => {
     expect(statuses).toEqual(["exporting", "completed"]);
   });
 
+  it("refuses an oversized project without publishing a partial tree and records the actionable message", async () => {
+    mocks.query.mockRejectedValue(new ConvexError({ code: "LIMIT_EXCEEDED", message: "Too many files and folders to export. Remove generated or unused files before retrying." }));
+    const error: Error = await runJob().then(() => { throw new Error("Expected export refusal"); }, (failure: Error) => failure);
+    expect(error).toMatchObject({ name: "NonRetriableError", message: expect.stringMatching(/Too many files and folders to export/) });
+    expect(mocks.createBlob).not.toHaveBeenCalled();
+    expect(mocks.createTree).not.toHaveBeenCalled();
+    expect(mocks.createCommit).not.toHaveBeenCalled();
+    expect(mocks.updateRef).not.toHaveBeenCalled();
+    await (exportToGithub as unknown as { config: { onFailure: (ctx: unknown) => Promise<void> } }).config.onFailure({
+      event: { data: { event: { data: { projectId: "p1" } } } }, error,
+      step: { run: (_name: string, fn: () => unknown) => fn() },
+    });
+    expect(mocks.mutation.mock.calls.at(-1)?.[1]).toMatchObject({ status: "failed", error: error.message });
+  });
+
   it("refuses a project with no files", async () => {
     projectFiles([{ _id: "src", name: "src", type: "folder" }]);
 
@@ -169,12 +185,13 @@ describe("exportToGithub onFailure", () => {
     const { onFailure } = (exportToGithub as unknown as { config: { onFailure: (ctx: unknown) => Promise<void> } }).config;
 
     await onFailure({
+      error: new Error("Generic failure"),
       event: { data: { event: { data: { projectId: "p1" } } } },
       step: { run: (_name: string, fn: () => unknown) => fn() },
     });
 
     const [[ref, args]] = mocks.mutation.mock.calls;
     expect(getFunctionName(ref)).toBe("system:updateExportStatus");
-    expect(args).toEqual({ internalKey: "test-key", projectId: "p1", status: "failed" });
+    expect(args).toEqual({ internalKey: "test-key", projectId: "p1", status: "failed", error: undefined });
   });
 });

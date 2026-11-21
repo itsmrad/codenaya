@@ -39,7 +39,7 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectById": () => ({ ownerId: "user_1" }),
   "system:getProjectMcpConnections": () => [],
   "system:getProjectFiles": () => projectFiles,
-  "system:getProjectFilesWithUrls": () => [],
+  "files:getBuildFiles": () => [],
   "system:getEnvVarsForSandbox": () => [],
   "system:getProjectSkills": () => [],
   "swarm:getSwarmSettings": () => ({ enabled: swarmEnabled, platformMaxDepth: 2 }),

@@ -207,7 +207,7 @@ describe("projects", () => {
     });
   });
 
-  test("duplicate copies files, skills and public env vars but not secrets or chat", async () => {
+  test("duplicate copies files and skills but no env vars or chat", async () => {
     vi.useFakeTimers();
     const { t, alice } = setup();
     const { projectId, storageId } = await seedProject(t, ALICE);
@@ -233,7 +233,7 @@ describe("projects", () => {
     expect(logo?.storageId).not.toBe(storageId);
 
     const envVars = await rowsOf(t, "projectEnvVars", copyId);
-    expect(envVars.map((e) => e.key)).toEqual(["PUBLIC_URL"]);
+    expect(envVars).toEqual([]);
 
     const [copiedSkill] = await rowsOf(t, "skills", copyId);
     expect(copiedSkill).toMatchObject({ name: "local-skill" });
@@ -730,7 +730,7 @@ describe("fork from checkpoint (#229)", () => {
     const index = files.find((f) => f.name === "index.ts")!;
     expect(index.content).toBe("export {};");
     expect(index.parentId).toBe(files.find((f) => f.name === "src")!._id);
-    expect((await rowsOf(t, "projectEnvVars", forkId)).map((e) => e.key)).toEqual(["PUBLIC_URL"]);
+    expect(await rowsOf(t, "projectEnvVars", forkId)).toEqual([]);
     const [skill] = await rowsOf(t, "skills", forkId);
     expect(skill.name).toBe("local-skill");
     expect((await rowsOf(t, "projectSkillSettings", forkId)).map((s) => s.skillKey).sort()).toEqual([

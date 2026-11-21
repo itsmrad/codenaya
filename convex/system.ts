@@ -45,6 +45,7 @@ import {
   withoutContent,
   writeFileContent,
 } from "./fileContents";
+import { withoutPrivateFiles } from "./projectTransfer";
 import { bumpEnvGeneration } from "./runtimeHandles";
 import { resolveProjectSkills } from "./skills";
 import { countProjectBuilt } from "./stats";
@@ -811,19 +812,25 @@ export const getCheckpointFilesWithUrls = query({
     projectId: v.id("projects"),
     checkpointId: v.id("checkpoints"),
   },
+  returns: v.array(v.object({
+    path: v.string(), type: v.union(v.literal("file"), v.literal("folder")),
+    content: v.optional(v.string()), storageId: v.optional(v.id("_storage")),
+    storageUrl: v.union(v.string(), v.null()),
+  })),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
     const checkpoint = await ctx.db.get("checkpoints", args.checkpointId);
     if (!checkpoint || checkpoint.projectId !== args.projectId) {
-      throw new Error("Checkpoint not found");
+      throw appError("NOT_FOUND", "Checkpoint not found");
     }
     const rows = await ctx.db
       .query("checkpointFiles")
       .withIndex("by_checkpoint_and_path", (q) => q.eq("checkpointId", checkpoint._id))
-      .take(MAX_CHECKPOINT_FILES);
+      .take(MAX_CHECKPOINT_FILES + 1);
+    if (rows.length > MAX_CHECKPOINT_FILES) throw appError("LIMIT_EXCEEDED", "Checkpoint too large to transfer");
     return await Promise.all(
-      rows.map(async ({ path, type, content, storageId }) => ({
+      withoutPrivateFiles(rows).map(async ({ path, type, content, storageId }) => ({
         path,
         type,
         content,
@@ -834,6 +841,7 @@ export const getCheckpointFilesWithUrls = query({
   },
 });
 
+// Raw credential-scan input only: never feed exports, copies or builds from this query.
 export const getProjectFilesWithUrls = query({
   args: {
     internalKey: v.string(),

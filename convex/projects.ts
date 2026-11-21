@@ -261,8 +261,8 @@ export const rename = mutation({
 
 /**
  * Copies a project into a new one named "<name> (copy)": files, settings,
- * instructions, theme, project skills with their enabled states, and public env vars. Secret env
- * vars, conversations and integrations stay with the original.
+ * instructions, theme and project skills with their enabled states.
+ * All env vars, secret files, conversations and integrations stay with the original.
  */
 export const duplicate = mutation({
   args: {
@@ -287,8 +287,7 @@ export const duplicate = mutation({
       props: { source: "duplicate" },
     });
 
-    // The owner's own copy: secret files stay, like their other files.
-    await copyProjectFiles(ctx, source._id, newProjectId, { keepSecretFiles: true });
+    await copyProjectFiles(ctx, source._id, newProjectId);
 
     await copyProjectConfiguration(ctx, source._id, newProjectId);
 
@@ -296,7 +295,7 @@ export const duplicate = mutation({
   },
 });
 
-/** Shared project skills, enabled states and public env vars for owner copies. */
+/** Shared project skills and enabled states; copies start with no environment variables. */
 async function copyProjectConfiguration(
   ctx: MutationCtx,
   sourceId: Id<"projects">,
@@ -332,25 +331,6 @@ async function copyProjectConfiguration(
       ownerId: setting.ownerId,
       skillKey: skillKeyMap.get(setting.skillKey) ?? setting.skillKey,
       enabled: setting.enabled,
-      updatedAt: Date.now(),
-    });
-  }
-
-  const envVars = await ctx.db
-    .query("projectEnvVars")
-    .withIndex("by_project", (q) => q.eq("projectId", sourceId))
-    .take(MAX_COPIED_ROWS);
-  for (const envVar of envVars) {
-    if (envVar.visibility !== "public") continue;
-    await ctx.db.insert("projectEnvVars", {
-      projectId: newProjectId,
-      ownerId: envVar.ownerId,
-      key: envVar.key,
-      visibility: "public",
-      plainValue: envVar.plainValue,
-      maskedPreview: envVar.maskedPreview,
-      source: envVar.source,
-      sourceConnectionId: envVar.sourceConnectionId,
       updatedAt: Date.now(),
     });
   }
@@ -496,7 +476,7 @@ export const remixShared = mutation({
     await assertCanCopy(ctx, identity.subject);
     const id = await ctx.db.insert("projects", { name: `${project.name} (imported)`, ownerId: identity.subject, updatedAt: Date.now() });
     await countProjectBuilt(ctx);
-    await copyCheckpointFiles(ctx, project.shareCheckpointId, id, false);
+    await copyCheckpointFiles(ctx, project.shareCheckpointId, id);
     return id;
   },
 });

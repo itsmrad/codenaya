@@ -3,6 +3,7 @@ import { Octokit } from "octokit";
 import { NonRetriableError } from "inngest";
 
 import { convex } from "@/lib/convex-client";
+import { getAppError } from "@/lib/convex-error";
 import { inngest } from "@/inngest/client";
 import { requireJobGithubToken } from "@/features/projects/server/github-token";
 import { buildFilePaths } from "@/features/projects/utils/github-tree";
@@ -33,7 +34,7 @@ export const exportToGithub = inngest.createFunction(
       },
     ],
     triggers: [{ event: "github/export.repo" }],
-    onFailure: async ({ event, step }) => {
+    onFailure: async ({ event, error, step }) => {
       const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
       if (!internalKey) return;
 
@@ -44,6 +45,7 @@ export const exportToGithub = inngest.createFunction(
           internalKey,
           projectId,
           status: "failed",
+          error: error.name === "NonRetriableError" ? error.message : undefined,
         });
       });
     }
@@ -105,9 +107,13 @@ export const exportToGithub = inngest.createFunction(
 
     // Fetch all project files with storage URLs
     const files = await step.run("fetch-project-files", async () => {
-      return (await convex.query(api.system.getProjectFilesWithUrls, {
+      return (await convex.query(api.files.getTransferFiles, {
         internalKey,
         projectId,
+      }).catch(error => {
+        const refusal = getAppError(error);
+        if (refusal?.code === "LIMIT_EXCEEDED") throw new NonRetriableError(refusal.message);
+        throw error;
       })) as FileWithUrl[];
     });
 

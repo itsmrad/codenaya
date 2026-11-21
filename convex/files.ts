@@ -25,7 +25,9 @@ import {
   releaseStorageIfUnreferenced,
 } from "./projectCascade";
 import { getOwnedProject } from "./projects";
-import { isSecretPath } from "./secretFiles";
+import { isSecretPath, withoutSecretFiles } from "./secretFiles";
+import schema from "./schema";
+import { transferableTree } from "./projectTransfer";
 import { recordPackageJsonReady } from "./activationEvents";
 import { Doc, Id } from "./_generated/dataModel";
 
@@ -205,29 +207,59 @@ export const getFiles = query({
   },
 });
 
+const transferFileValidator = v.object({
+  ...schema.tables.files.validator.fields,
+  _id: v.id("files"),
+  _creationTime: v.number(),
+  storageUrl: v.union(v.string(), v.null()),
+});
+
+/** Content and binary URLs for transfers, after the server file gate. */
+async function transferFiles(ctx: QueryCtx, projectId: Id<"projects">, forBuild = false, allowPartial = false) {
+  const files = await ctx.db.query("files")
+    .withIndex("by_project", q => q.eq("projectId", projectId))
+    .take(MAX_PROJECT_FILES + (allowPartial ? 0 : 1));
+  if (files.length > MAX_PROJECT_FILES) throw appError("LIMIT_EXCEEDED", `Too many files and folders to export (maximum ${MAX_PROJECT_FILES}). Remove generated or unused files, or split this project before retrying.`);
+  // Only file basenames are secret-policy inputs; empty paths leave folders intact.
+  const selected = forBuild
+    ? withoutSecretFiles(files.map(file => ({ file, path: file.type === "file" ? file.name : "" }))).map(({ file }) => file)
+    : transferableTree(files);
+  return await Promise.all((await withContents(ctx, projectId, selected)).map(async file => ({
+    ...file, storageUrl: file.storageId ? await ctx.storage.getUrl(file.storageId) : null,
+  })));
+}
+
+/** Server exports use this gate; raw project reads are for credential scanning. */
+export const getTransferFiles = query({
+  args: { internalKey: v.string(), projectId: v.id("projects") },
+  returns: v.array(transferFileValidator),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    return await transferFiles(ctx, args.projectId);
+  },
+});
+
+/** Agent builds retain source/runtime paths, dropping only secret files under the shared policy. */
+export const getBuildFiles = query({
+  args: { internalKey: v.string(), projectId: v.id("projects") },
+  returns: v.array(transferFileValidator),
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+    return await transferFiles(ctx, args.projectId, true);
+  },
+});
+
 /**
  * All files of a project with their text, and a download URL for binary
  * (storage) files. Used for: Download ZIP, preview
  */
 export const getFilesWithUrls = query({
   args: { projectId: v.id("projects") },
+  returns: v.array(transferFileValidator),
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
     await getOwnedProject(ctx, args.projectId, identity.subject);
-
-    const files = await ctx.db
-      .query("files")
-      .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
-      .take(MAX_PROJECT_FILES);
-
-    return await Promise.all(
-      (await withContents(ctx, args.projectId, files)).map(async (file) => ({
-        ...file,
-        storageUrl: file.storageId
-          ? await ctx.storage.getUrl(file.storageId)
-          : null,
-      }))
-    );
+    return await transferFiles(ctx, args.projectId, false, true);
   },
 });
 

@@ -100,7 +100,7 @@ const provision = async (
   pool: SandboxPool,
   { projectId, internalKey, runId }: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId">,
 ) => {
-  const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
+  const rows = await convex.query(api.files.getBuildFiles, { internalKey, projectId });
   const pathOf = buildPathIndex(rows);
   const all: ProjectFile[] = [];
   const allUploads: Array<{ path: string; url: string }> = [];

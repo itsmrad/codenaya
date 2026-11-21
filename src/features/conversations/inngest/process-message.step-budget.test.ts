@@ -33,7 +33,7 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectById": () => ({ ownerId: "user_1" }),
   "system:getProjectMcpConnections": () => [],
   "system:getProjectFiles": () => [],
-  "system:getProjectFilesWithUrls": () => [],
+  "files:getBuildFiles": () => [],
   "system:getProjectSkills": () => [],
   // The deleteFiles calls below must succeed: a failed write doesn't count for the build-check gate.
   "system:getFileById": () => ({ _id: "f1", name: "old.ts", type: "file" }),

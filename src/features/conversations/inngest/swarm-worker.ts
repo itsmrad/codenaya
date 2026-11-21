@@ -225,7 +225,7 @@ export const swarmWorker = inngest.createFunction(
             staticChecked = true;
             const problems = await step.run("worker-static-check", async () => {
               try {
-                const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
+                const rows = await convex.query(api.files.getBuildFiles, { internalKey, projectId });
                 const pathOf = buildPathIndex(rows);
                 const paths = new Set<string>();
                 const files: { path: string; content: string }[] = [];
