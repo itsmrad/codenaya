@@ -17,7 +17,7 @@ import {
   rateLimitedResponse,
 } from "@/lib/rate-limit";
 import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
-import { killRevokedRuntimes } from "@/features/sandbox-preview/server/runtime-fence";
+import { killOutdatedPreviews } from "@/features/sandbox-preview/server/runtime-fence";
 import { convex } from "@/lib/convex-client";
 import { parseJsonBody } from "@/lib/parse-json-body";
 
@@ -54,11 +54,6 @@ function jsonError(error: string, status: number) {
 }
 
 /** After a committed env change; never fails the change, which already happened. */
-const killOutdatedPreviews = (internalKey: string, projectId: Id<"projects">) =>
-  killRevokedRuntimes(internalKey, { projectId }).catch((error: unknown) => {
-    console.error("[env-vars] could not stop outdated previews; the sweep retries", error);
-  });
-
 export async function POST(request: Request) {
   const { userId, unauthorized } = await requireUserId();
 

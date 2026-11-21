@@ -6,6 +6,8 @@ import { canonicalSandboxIdOrNull, parsePublicSandboxIdOrNull, toPublicSandboxId
 import { getProvider } from "./provider/registry";
 import type { Sandbox } from "./provider/types";
 
+const KILL_CONCURRENCY = 5;
+
 /** The boot read an env that changed since (or a deleted project), was replaced by a newer boot, or is blocked by an unkilled runtime. */
 export class RuntimeAdmissionError extends Error {
   name = "RuntimeAdmissionError";
@@ -70,24 +72,42 @@ export async function killRevokedRuntimes(
     projectId: scope.projectId,
     sandboxId,
   });
-  const outcomes = await Promise.all(
-    handles.map(async ({ _id, sandboxId }) => {
-      const killed = await killSandbox(sandboxId).then(
-        () => true,
-        (error: unknown) => {
-          console.error("[runtime-fence] could not kill a revoked runtime", sandboxId, error);
-          return false;
-        },
-      );
-      await convex.mutation(api.runtimeHandles.recordKill, { internalKey, handleId: _id, killed });
-      return killed;
-    }),
-  );
+  const outcomes: boolean[] = [];
+  // A few at a time: a burst of kills can trip the provider's rate limit and leave handles revoke_failed.
+  for (let i = 0; i < handles.length; i += KILL_CONCURRENCY) {
+    outcomes.push(
+      ...(await Promise.all(
+        handles.slice(i, i + KILL_CONCURRENCY).map(async ({ _id, sandboxId }) => {
+          const killed = await killSandbox(sandboxId).then(
+            () => true,
+            (error: unknown) => {
+              console.error("[runtime-fence] could not kill a revoked runtime", sandboxId, error);
+              return false;
+            },
+          );
+          await convex.mutation(api.runtimeHandles.recordKill, { internalKey, handleId: _id, killed });
+          return killed;
+        }),
+      )),
+    );
+  }
   return {
     sandboxIds: handles.map((handle) => handle.sandboxId),
     failed: outcomes.filter((killed) => !killed).length,
   };
 }
+
+/**
+ * After an env change made outside a preview boot: stop the project's previews
+ * still holding the old values. Never throws; the sweep retries what this misses.
+ */
+export const killOutdatedPreviews = (internalKey: string, projectId: Id<"projects">) =>
+  killRevokedRuntimes(internalKey, { projectId }).then(
+    () => undefined,
+    (error: unknown) => {
+      console.error("[runtime-fence] could not stop outdated previews; the sweep retries", error instanceof Error ? error.name : "unknown");
+    },
+  );
 
 export const REVOKED_RUNTIME_MESSAGE =
   "This preview was stopped because the project's environment variables changed. Start the preview again.";

@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ query: vi.fn(), mutation: vi.fn(), kill: vi.fn
 vi.mock("@/lib/convex-client", () => ({ convex: { query: mocks.query, mutation: mocks.mutation } }));
 vi.mock("./provider/registry", () => ({ getProvider: () => ({ kill: mocks.kill }) }));
 
-import { killRevokedRuntimes } from "./runtime-fence";
+import { killOutdatedPreviews, killRevokedRuntimes } from "./runtime-fence";
 
 describe("killRevokedRuntimes", () => {
   beforeEach(() => {
@@ -24,6 +24,28 @@ describe("killRevokedRuntimes", () => {
     expect(await killRevokedRuntimes("internal")).toEqual({ sandboxIds: ["e2b:sbx_1"], failed: 0 });
     expect(mocks.kill).toHaveBeenLastCalledWith("sbx_1");
     expect(mocks.mutation).toHaveBeenLastCalledWith(expect.anything(), { internalKey: "internal", handleId: "h1", killed: true });
+  });
+
+  it("kills at most 5 sandboxes at a time", async () => {
+    mocks.query.mockResolvedValue(Array.from({ length: 12 }, (_, i) => ({ _id: `h${i}`, sandboxId: `e2b:sbx_${i}` })));
+    let inFlight = 0;
+    let peak = 0;
+    mocks.kill.mockImplementation(async () => {
+      peak = Math.max(peak, ++inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight--;
+      return true;
+    });
+
+    expect(await killRevokedRuntimes("internal")).toEqual(expect.objectContaining({ failed: 0 }));
+    expect(mocks.kill).toHaveBeenCalledTimes(12);
+    expect(peak).toBeLessThanOrEqual(5);
+  });
+
+  it("killOutdatedPreviews never throws; the sweep retries what it misses", async () => {
+    mocks.query.mockRejectedValue(new Error("Convex unavailable"));
+
+    await expect(killOutdatedPreviews("internal", "project_a" as never)).resolves.toBeUndefined();
   });
 
   it("counts a sandbox that is already gone as killed", async () => {
