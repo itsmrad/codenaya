@@ -211,6 +211,25 @@ describe("processMessage repair after the run", () => {
     expect(mutationArgs("projects:completeFirstBuild")).toHaveLength(1);
   });
 
+  it("makes the same E2B calls as before in the default env (E2B only, no fallbacks)", async () => {
+    mocks.verifyAndFix.mockImplementation(
+      scriptedRepair({ ok: true, status: "verified", errors: [], filesChanged: ["main.ts"], attempts: 1 }),
+    );
+
+    await drive({ modelId: "x-ai/grok-4.7" }, FAILED_RUN);
+
+    // One create on the E2B template, one connect, one list by run, one kill: nothing on another provider.
+    expect(mocks.createSandbox).toHaveBeenCalledOnce();
+    expect(mocks.createSandbox).toHaveBeenCalledWith(
+      "codenaya-node22",
+      expect.objectContaining({ timeoutMs: 10 * 60_000, metadata: { projectId: "p1", runId: "run-under-test", purpose: "build-repair" } }),
+    );
+    expect(mocks.connectSandbox).toHaveBeenCalledOnce();
+    expect(mocks.connectSandbox).toHaveBeenCalledWith("sbx_repair", expect.objectContaining({ apiKey: "e2b_key", timeoutMs: 10 * 60_000 }));
+    expect(mocks.listSandboxes).toHaveBeenCalledOnce();
+    expect(mocks.killSandbox.mock.calls).toEqual([["sbx_repair", { apiKey: "e2b_key" }]]);
+  });
+
   it("keeps the failed note and the error outcome when the repair does not fix it", async () => {
     mocks.verifyAndFix.mockImplementation(
       scriptedRepair({

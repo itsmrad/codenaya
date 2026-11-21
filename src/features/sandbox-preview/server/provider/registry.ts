@@ -3,7 +3,7 @@ import { createE2bProvider } from "./e2b";
 import { createProviderCooldown, createWithFailover } from "./failover";
 import type { FanoutHealth } from "./fanout";
 import { selectProviders } from "./select";
-import { type CreateOptions, PROVIDER_IDS, type ProviderId, SandboxConfigError, type SandboxProvider } from "./types";
+import { type CreateOptions, PROVIDER_IDS, type ProviderId, type Sandbox, SandboxConfigError, type SandboxProvider } from "./types";
 
 /**
  * The adapter for `id`. Throws SandboxConfigError when the provider has no key,
@@ -57,3 +57,28 @@ export const createSandbox = (opts: CreateOptions, onNotice?: (notice: string) =
   isMultiProvider(config)
     ? createWithFailover(opts, { providers: selectProviders(config, cooldown).map(getProvider), cooldown, onNotice })
     : getProvider(config.primary).create(opts);
+
+/**
+ * Where an agent path finds a project's sandboxes and makes new ones: every provider
+ * to list on, the fan-out health for `listAll`, and a create. Each sandbox handle
+ * carries its own provider, so its kill and cleanup go back to where it was made.
+ */
+export interface SandboxPool {
+  providers: readonly SandboxProvider[];
+  /** Absent: every list fails closed, as with a single provider. */
+  health?: FanoutHealth;
+  create(opts: CreateOptions): Promise<Sandbox>;
+}
+
+/** The configured providers with `createSandbox`'s failover, or null when none has a key. */
+export const getSandboxPool = (config = parseProviderConfig()): SandboxPool | null => {
+  const providers = getConfiguredProviders(config);
+  if (!providers.length) return null;
+  return { providers, health: fanoutHealth(config), create: (opts) => createSandbox(opts, undefined, config) };
+};
+
+/** One provider as a pool: its own list and create, no fan-out policy, no failover. */
+export const singleProviderPool = (provider: SandboxProvider): SandboxPool => ({
+  providers: [provider],
+  create: (opts) => provider.create(opts),
+});

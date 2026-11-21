@@ -17,7 +17,9 @@ billing fence: same key and terms return the original row, changed terms conflic
 `paidCreditsVersion` and `paidCreditsMode`, the new positive credit delta (and
 each dictation charge) is allocated in the same mutation to lots of that mode
 only: current period, then rollover, then the earliest-expiring top-up, equal
-expiries by grant id. Expiry uses server time. Anything the lots cannot cover is
+expiries by grant id. Expiry uses server time. A lot with a `serviceStart` (the
+next period, when a renewal settles early) spends nothing before it starts:
+`lotRemaining` holds it back, so spending and the displayed availability agree. Anything the lots cannot cover is
 added to `creditDebt`, which a calendar period reset keeps; usage counters still
 record the full charge. A replayed total adds no delta, so it allocates nothing.
 
