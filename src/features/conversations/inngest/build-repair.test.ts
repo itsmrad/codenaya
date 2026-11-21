@@ -6,8 +6,11 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AgentStep } from "@/features/conversations/agent-steps";
 import type { ProviderCooldown } from "@/features/sandbox-preview/server/provider/failover";
 import type { ProviderId, Sandbox, SandboxProvider } from "@/features/sandbox-preview/server/provider/types";
+
+import type { Id } from "../../../../convex/_generated/dataModel";
 
 const state = vi.hoisted(() => ({
   providers: [] as SandboxProvider[],
@@ -96,14 +99,15 @@ beforeEach(() => {
 
 const repair = () =>
   repairBuild({
-    projectId: "p1",
+    projectId: "p1" as Id<"projects">,
     internalKey: "ik",
     runId: "run_1",
-    messageId: "m1",
+    messageId: "m1" as Id<"messages">,
+    // verifyAndFix is mocked, so the model is never called.
     model: {} as VerifyAndFixOptions["model"],
     step: (_id, fn) => fn(),
-    recordSteps: async () => {},
-  } as Parameters<typeof repairBuild>[0]);
+    recordSteps: async (_build: () => AgentStep[]) => {},
+  });
 
 describe("build repair on any provider", () => {
   it("fails over to the second provider on create, and later reaches the sandbox there", async () => {
