@@ -248,6 +248,7 @@ describe("checkout lifecycle", () => {
     expect(await prepare(alice)).toEqual({ kind: "pending" });
     await recordCheckout(alice, purchaseRef, { kind: "not_created" });
     expectRow(await purchaseOf(t, purchaseRef), { state: "unknown" });
+    expect((await customerOf(t, "user_alice"))!.nextPollAt).toBe(Date.now() + 15 * 60_000);
     expect((await customerOf(t, "user_alice"))!.pendingPurchaseRef).toBe(purchaseRef);
     await recordCheckout(alice, purchaseRef, { kind: "created", sessionId: "cks_late", checkoutUrl: URL_OK });
     expectRow(await purchaseOf(t, purchaseRef), { state: "open", sessionId: "cks_late", paymentId: undefined });

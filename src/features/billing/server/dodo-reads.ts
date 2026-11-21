@@ -241,6 +241,8 @@ export async function fetchPayment(
     status: typeof status === "string" && PAYMENT_STATUSES.has(status) ? status as ProviderPayment["status"] : "other",
     subscriptionId: optionalId(body.subscription_id),
     sessionId: optionalId(body.checkout_session_id),
+    purchaseIdHint: isRecord(body.metadata) && typeof body.metadata.purchaseId === "string" &&
+      PROVIDER_ID.test(body.metadata.purchaseId) ? body.metadata.purchaseId : undefined,
     cart: cartLines(body.product_cart),
     totalMinor,
     taxMinor: body.tax == null ? undefined : safeInteger(body.tax),
