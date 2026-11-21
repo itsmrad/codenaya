@@ -78,12 +78,19 @@ async function findPurchase(ctx: Ctx, customer: Customer, { paymentId, sessionId
       .withIndex("by_mode_and_sessionId", q => q.eq("mode", mode).eq("sessionId", sessionId)).unique();
     if (bySession) return bySession.paymentId === undefined ? bySession : null;
   }
-  if (!purchaseIdHint || !customer.pendingPurchaseRef || (decision.kind !== "period" && decision.kind !== "top_up")) return null;
-  const pending = await ctx.db.get("billingPurchases", customer.pendingPurchaseRef);
-  return pending && pending.customerRef === customer._id && pending.mode === mode &&
-    ["unknown", "preparing"].includes(pending.state) && pending.intentId === purchaseIdHint &&
-    pending.sessionId === undefined && pending.paymentId === undefined &&
-    pending.terms.sku === (decision.kind === "period" ? "pro_monthly" : "top_up") ? pending : null;
+  if (!purchaseIdHint || (decision.kind !== "period" && decision.kind !== "top_up")) return null;
+  const pending = customer.pendingPurchaseRef && await ctx.db.get("billingPurchases", customer.pendingPurchaseRef);
+  if (pending?.intentId === purchaseIdHint) {
+    return pending.customerRef === customer._id && pending.mode === mode &&
+      ["unknown", "preparing"].includes(pending.state) && pending.sessionId === undefined &&
+      pending.paymentId === undefined && termsMatch(pending, decision) ? pending : null;
+  }
+  // A released intent may have no session id and a newer checkout may now hold the lock.
+  const released = await ctx.db.query("billingPurchases")
+    .withIndex("by_mode_and_intentId", q => q.eq("mode", mode).eq("intentId", purchaseIdHint)).unique();
+  return released && released.customerRef === customer._id && released.mode === mode &&
+    ["open", "terminal", "unknown"].includes(released.state) && released.paymentId === undefined &&
+    termsMatch(released, decision) ? released : null;
 }
 
 async function planPayment(ctx: Ctx, customer: Customer, fact: PaymentFact, deleted: boolean): Promise<PaymentPlan> {
@@ -264,6 +271,8 @@ async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positi
   const { fact } = plan;
   await ctx.db.patch("billingPurchases", purchase._id, {
     paymentId: d.paymentId, state: "settled", currency: fact.currency,
+    ...(plan.purchase && fact.purchaseIdHint === purchase.intentId && purchase.sessionId === undefined &&
+      fact.sessionId !== undefined ? { sessionId: fact.sessionId } : {}),
     ...(d.kind === "period" ? { subscriptionId: d.subscriptionId } : {}),
     ...(fact.totalMinor !== undefined && fact.taxMinor !== undefined ? { principalMinor: fact.totalMinor - fact.taxMinor } : {}),
     ...(deleted ? { cancellationRecoveryRequired: true } : {}),

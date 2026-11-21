@@ -50,7 +50,7 @@ test.each(["unmapped", "digest_mismatch"])("attaches a conflicting unmapped nega
   await resolve(ref, "attach");
   expect(await t.run(ctx => ctx.db.get(ref))).toMatchObject({
     customerRef: alice, state: reason === "unmapped" ? "pending" : "quarantined",
-    resolution: { action: "attach", ...note, at: expect.any(Number), previous: { state: "quarantined", quarantineReason: reason } },
+    resolution: { action: "attach", ...note, at: expect.any(Number), previousState: JSON.stringify({ state: "quarantined", quarantineReason: reason }) },
   });
   expect(await t.run(ctx => ctx.db.get(alice))).toMatchObject({ unresolvedReceipts: 1, inputRevision: 1 });
   expect(JSON.stringify(vi.mocked(console.info).mock.calls)).not.toContain(note.reason);
@@ -60,7 +60,7 @@ test("re-parenting invalidates Bob's stale worker and moves both counts", async 
   const { t, alice, bob, receipt, resolve } = await fixture();
   const ref = await receipt(bob);
   await resolve(ref, "attach");
-  expect(await t.run(ctx => ctx.db.get(ref))).toMatchObject({ customerRef: alice, state: "pending", attempts: 0, resolution: { previous: { customerRef: bob } } });
+  expect(await t.run(ctx => ctx.db.get(ref))).toMatchObject({ customerRef: alice, state: "pending", attempts: 0, resolution: { previousState: expect.stringContaining(bob) } });
   expect(await t.run(ctx => ctx.db.get(bob))).toMatchObject({ unresolvedReceipts: 0, inputRevision: 1 });
   expect(await t.run(ctx => ctx.db.get(alice))).toMatchObject({ unresolvedReceipts: 1, inputRevision: 1 });
   expect(await t.mutation(internal.billingFulfill.commitReconciliation, { customerRef: bob, fence: { generation: 0, inputRevision: 0 }, receiptRefs: [], payments: [], subscriptions: [] })).toBe("stale");
@@ -94,7 +94,7 @@ test("manual amount uses the normal cumulative path once, never adds the same mo
   await manual(ref, 1000);
   expect(await t.run(ctx => ctx.db.get(purchaseRef))).toMatchObject({ reversedMinor: 1000, revokedCredits: 500 });
   const before = await t.run(ctx => ctx.db.get(ref));
-  expect(before).toMatchObject({ state: "processed", reviewedReversalMinor: 1000, resolution: { ...note, previous: { state: "quarantined", reversedMinor: 0 } } });
+  expect(before).toMatchObject({ state: "processed", reviewedReversalMinor: 1000, resolution: { ...note, previousState: expect.stringContaining('"reversedMinor":0') } });
   await expect(manual(ref, 1000)).rejects.toThrow("INVALID_ARGUMENT");
   await manual(await receipt(alice), 1000);
   expect((await t.run(ctx => ctx.db.query("billingGrants").take(2)))[0].revoked).toBe(500);
@@ -136,7 +136,7 @@ test("support hold refuses checkout and release restores it without releasing an
   await expect(checkout()).rejects.toThrow("FORBIDDEN");
   await t.mutation(internal.billingOperator.releaseHold, { adjustmentRef: second, ...note });
   await checkout();
-  expect(await t.run(ctx => ctx.db.get(first))).toMatchObject({ placedBy: { ...note }, releasedBy: { ...note, previous: { holdActive: true } } });
+  expect(await t.run(ctx => ctx.db.get(first))).toMatchObject({ placedBy: { ...note }, releasedBy: { ...note, previousState: expect.stringContaining('"holdActive":true') } });
 });
 
 test.each(["expired", "other", "opened", "challenged"])("reviewed dispute release handles %s and re-holds on status change", async status => {

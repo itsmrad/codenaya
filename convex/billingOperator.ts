@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import { internalMutation } from "./_generated/server";
 import { attachReceipts, bindCustomerRow, ownerDeleted } from "./billing";
+import { CHECKOUT_PREPARE_STALE_MS } from "./billingCheckout";
 import { scheduleCustomer } from "./billingQueue";
 import { applyPurchaseReversal, queuePaymentRead } from "./billingReversals";
 import { appError } from "./errors";
@@ -31,7 +32,10 @@ export const resolveUnknownCustomer = internalMutation({
       if (customer.customerId !== undefined) throw appError("INVALID_ARGUMENT", "Customer already has a provider identifier");
       await ctx.db.patch("billingCustomers", customerRef, { creationState: "preparing" });
     }
-    await ctx.db.patch("billingCustomers", customerRef, { creationLeaseId: undefined, creationLeasedAt: undefined, resolution });
+    await ctx.db.patch("billingCustomers", customerRef, {
+      creationLeaseId: undefined, creationLeasedAt: undefined,
+      resolution: { ...resolution, previousState: customer.creationState },
+    });
     console.info("[billingOperator] resolved", { action: resolution.action, customerRef, operator });
     return null;
   },
@@ -47,11 +51,12 @@ export const releaseCheckoutLock = internalMutation({
     if (!customer) throw appError("NOT_FOUND", "Billing customer not found");
     const purchase = customer.pendingPurchaseRef && await ctx.db.get("billingPurchases", customer.pendingPurchaseRef);
     if (!purchase || purchase.customerRef !== customerRef || purchase.mode !== customer.mode ||
-      purchase.state === "settled" || purchase.state === "processing" || purchase.paymentId !== undefined) {
+      purchase.state === "settled" || purchase.state === "processing" || purchase.paymentId !== undefined ||
+      (purchase.state === "preparing" && resolution.at - purchase._creationTime < CHECKOUT_PREPARE_STALE_MS)) {
       throw appError("INVALID_ARGUMENT", "Checkout cannot be released");
     }
     // Keep the session id: a late payment must still settle through the normal fenced path.
-    await ctx.db.patch("billingPurchases", purchase._id, { state: "terminal", resolution });
+    await ctx.db.patch("billingPurchases", purchase._id, { state: "terminal", resolution: { ...resolution, previousState: purchase.state } });
     await ctx.db.patch("billingCustomers", customerRef, { pendingPurchaseRef: undefined });
     console.info("[billingOperator] resolved", { action: resolution.action, customerRef, purchaseRef: purchase._id, operator });
     return null;
@@ -100,7 +105,7 @@ export const resolveReceipt = internalMutation({
       }
       await ctx.db.patch("billingEvents", eventRef, { state: "processed" });
     }
-    await ctx.db.patch("billingEvents", eventRef, { resolution: { ...resolution, previous } });
+    await ctx.db.patch("billingEvents", eventRef, { resolution: { ...resolution, previousState: JSON.stringify(previous) } });
     console.info("[billingOperator] resolved", { eventRef });
     return null;
   },
@@ -116,7 +121,7 @@ export const placeSupportHold = internalMutation({
     const ref = await ctx.db.insert("billingAdjustments", {
       customerRef, mode: customer.mode, kind: "support_hold", providerId: "support:" + crypto.randomUUID(),
       paymentId: "", status: "active", countedMinor: 0, holdActive: true, observedAt: placedBy.at,
-      placedBy: { ...placedBy, previous: { holdActive: false } },
+      placedBy: { ...placedBy, previousState: "absent" },
     });
     await ctx.db.patch("billingCustomers", customerRef, { inputRevision: customer.inputRevision + 1 });
     console.info("[billingOperator] hold placed", { customerRef, adjustmentRef: ref });
@@ -139,7 +144,7 @@ export const releaseHold = internalMutation({
     if (!row.holdActive) return null;
     await ctx.db.patch("billingAdjustments", adjustmentRef, {
       holdActive: false, ...(row.kind === "dispute" ? { holdOverrideStatus: row.status } : {}),
-      releasedBy: { ...releasedBy, previous: { holdActive: row.holdActive, status: row.status } },
+      releasedBy: { ...releasedBy, previousState: JSON.stringify({ holdActive: row.holdActive, status: row.status }) },
     });
     await ctx.db.patch("billingCustomers", customer._id, { inputRevision: customer.inputRevision + 1 });
     console.info("[billingOperator] hold released", { adjustmentRef });
@@ -177,7 +182,7 @@ export const resolveUnreadableReversal = internalMutation({
     }
     await ctx.db.patch("billingEvents", eventRef, {
       state: "processed", reviewedReversalMinor: amountMinor ?? 0,
-      resolution: { ...resolution, previous: { state: row.state, customerRef, quarantineReason: row.quarantineReason, reversedMinor: purchase.reversedMinor ?? 0 } },
+      resolution: { ...resolution, previousState: JSON.stringify({ state: row.state, customerRef, quarantineReason: row.quarantineReason, reversedMinor: purchase.reversedMinor ?? 0 }) },
     });
     await ctx.db.patch("billingCustomers", customerRef, { unresolvedReceipts: customer.unresolvedReceipts - 1, inputRevision: customer.inputRevision + 1 });
     await queuePaymentRead(ctx, customerRef, row.paymentId, resolution.at);
