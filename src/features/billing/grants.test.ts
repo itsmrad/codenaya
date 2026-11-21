@@ -110,6 +110,10 @@ describe("isInPaidPeriod", () => {
     expect(isInPaidPeriod([{ ...period({}), kind: "top_up" }], NOW)).toBe(false);
     expect(isInPaidPeriod([], NOW)).toBe(false);
   });
+  it("ignores a fully reversed period lot, though part of it was spent rather than revoked", () => {
+    expect(isInPaidPeriod([period({ consumed: 6, revoked: 4, fullyReversed: true })], NOW)).toBe(false);
+    expect(isInPaidPeriod([period({ consumed: 6, revoked: 2 })], NOW)).toBe(true);
+  });
 });
 
 describe("paid credits gate", () => {

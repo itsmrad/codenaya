@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 
 import { classifyEnvKey, isValidEnvKey, maskSecret } from "@/features/integrations/env-keys";
 import { getSecretSealer, secretContext } from "@/features/integrations/server/crypto";
+import { killOutdatedPreviews } from "@/features/sandbox-preview/server/runtime-fence";
 import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
@@ -117,6 +118,8 @@ export const createSetEnvVarFromRefTool = ({
             });
           }
 
+          // Previews still holding the old value stop now, not at the next sweep.
+          await killOutdatedPreviews(internalKey, projectId);
           if (found.keyExists) {
             console.info("[env-refs] overwrote env var", JSON.stringify({ key: name, projectId, refId: ref }));
           }

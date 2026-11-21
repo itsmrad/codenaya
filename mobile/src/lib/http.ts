@@ -11,19 +11,26 @@ export const authHeaders = async (getToken: () => Promise<string | null>): Promi
  * cookies, so the Clerk session token goes in the Authorization header, which
  * Clerk's middleware accepts in place of the session cookie.
  */
-export const postApi = async <T>(
+const sendApi = async <T>(
+  method: "POST" | "DELETE",
   path: string,
   body: unknown,
   getToken: () => Promise<string | null>,
 ): Promise<{ ok: boolean; status: number; data: T & { error?: string; code?: string } }> => {
   const response = await fetch(`${API_URL}${path}`, {
-    method: "POST",
+    method,
     headers: await authHeaders(getToken),
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => ({}));
   return { ok: response.ok, status: response.status, data };
 };
+
+export const postApi = <T>(path: string, body: unknown, getToken: () => Promise<string | null>) =>
+  sendApi<T>("POST", path, body, getToken);
+
+export const deleteApi = <T>(path: string, body: unknown, getToken: () => Promise<string | null>) =>
+  sendApi<T>("DELETE", path, body, getToken);
 
 /** A page on the Codenaya website, e.g. a project's IDE for "Open on the website". */
 export const webUrl = (path: string) => `${API_URL}${path}`;

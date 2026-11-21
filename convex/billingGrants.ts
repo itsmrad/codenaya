@@ -42,13 +42,14 @@ const validTerms = ({ sourceKey, kind, quantity, expiresAt, serviceStart, servic
   Number.isFinite(expiresAt) &&
   (serviceStart === undefined
     ? serviceEnd === undefined && kind !== "current_period"
-    : serviceEnd !== undefined && Number.isFinite(serviceStart) && serviceStart < serviceEnd);
+    : serviceEnd !== undefined && Number.isFinite(serviceStart) && serviceStart < serviceEnd) &&
+  (kind !== "current_period" || expiresAt === serviceEnd);
 
 type Grant = Doc<"billingGrants">;
 type Mode = Grant["mode"];
 
 /** Marks a lot whose write leaves nothing unspent, so it leaves the active-lot index. */
-const exhaustedIf = (lot: Parameters<typeof lotUnspent>[0]) => (lotUnspent(lot) === 0 ? { exhausted: true as const } : {});
+export const exhaustedIf = (lot: Parameters<typeof lotUnspent>[0]) => (lotUnspent(lot) === 0 ? { exhausted: true as const } : {});
 
 /**
  * Inserts a grant once per (mode, sourceKey): a replay with the same terms
@@ -193,4 +194,20 @@ export async function rollOverIntoPeriod(ctx: MutationCtx, nextRef: Id<"billingG
   const transferred = (source.transferred ?? 0) + quantity;
   await ctx.db.patch("billingGrants", source._id, { transferred, ...exhaustedIf({ ...source, transferred }) });
   return rollover;
+}
+
+/**
+ * Records credits a refund or lost dispute took back after they were spent as
+ * debt, which later grants and the Free allocation pay off. Only on an account
+ * billing-enabled in `mode` (as `insertGrant` reads it): never creates or
+ * enables one. False when nothing was recorded; the caller logs it.
+ */
+export async function addReversalDebt(ctx: MutationCtx, userId: string, mode: Mode, credits: number): Promise<boolean> {
+  const account = await ctx.db
+    .query("creditAccounts")
+    .withIndex("by_userId", (q) => q.eq("userId", userId))
+    .unique();
+  if (!account || account.paidCreditsVersion === undefined || account.paidCreditsMode !== mode) return false;
+  await ctx.db.patch("creditAccounts", account._id, { creditDebt: (account.creditDebt ?? 0) + credits });
+  return true;
 }
