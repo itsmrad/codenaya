@@ -245,7 +245,7 @@ test.each([null, 0, 1000])("an unsettled payment retries net of reviewed amount 
   await manual(ref, amount);
   expect(await t.run(ctx => ctx.db.get(ref))).toMatchObject({ reviewedReversalMinor: amount });
   await expect(manual(ref, amount)).rejects.toThrow("INVALID_ARGUMENT");
-  const retry = (await t.run(ctx => ctx.db.query("billingEvents").withIndex("by_customerRef_and_state", q => q.eq("customerRef", alice).eq("state", "pending")).take(2)))[0];
+  const retry = (await t.run(ctx => ctx.db.query("billingEvents").withIndex("by_customerRef_and_state_and_nextAttemptAt", q => q.eq("customerRef", alice).eq("state", "pending")).take(2)))[0];
   expect(retry.eventType).toBe("payment.reconcile");
   await commit([unknown], [retry._id]);
   await commit([unknown]);
