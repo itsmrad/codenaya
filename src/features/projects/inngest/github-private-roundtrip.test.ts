@@ -73,7 +73,7 @@ test("push then pull preserves local private canaries and never changes their re
     return id;
   });
 
-  const remote = new Map([
+  const remote = new Map<string, string>([
     ...sourcePaths.map(path => [path, `old ${path}`] as const),
     ...privatePaths.map(path => [path, `REMOTE_CANARY_456 ${path}`] as const),
   ]);
