@@ -6,7 +6,7 @@ import { topUpExpiresAt } from "../src/features/billing/grants";
 import { BILLING_CATALOG_VERSION } from "../src/features/billing/settlement";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
-import { assertGrantFence, associateUnmappedReceipts, bindSubscriptionRow, ownerDeleted } from "./billing";
+import { assertGrantFence, associateUnmappedReceipts, bindPurchaseRow, bindSubscriptionRow, ownerDeleted } from "./billing";
 import { insertGrant, rollOverIntoPeriod } from "./billingGrants";
 import { markPollDue } from "./billingPoll";
 import { MAX_RECEIPTS_PER_CLAIM } from "./billingQueue";
@@ -98,7 +98,7 @@ async function planPayment(ctx: Ctx, customer: Customer, fact: PaymentFact, dele
   const found = await findPurchase(ctx, customer, fact);
   // Another customer's purchase is never written from this customer's commit.
   const foreign = found !== null && found.customerRef !== customer._id;
-  const plan = { fact, purchase: foreign ? null : found, positive: false };
+  const plan: Omit<PaymentPlan, "outcome"> = { fact, purchase: foreign ? null : found, positive: false };
   switch (d.kind) {
     case "pending": return { ...plan, outcome: "pending" };
     case "processing": case "no_grant": return { ...plan, outcome: "processed" };
@@ -113,12 +113,9 @@ async function planPayment(ctx: Ctx, customer: Customer, fact: PaymentFact, dele
     console.error("[billingFulfill] payment matches another customer's purchase", { customerRef: customer._id, paymentId: d.paymentId });
     return { ...plan, outcome: "processed" };
   }
-  // Keep verified gross even when a bound payment cannot grant yet; never derive it from principal.
-  if (plan.purchase?.paymentId === fact.paymentId && plan.purchase.totalMinor === undefined &&
-    Number.isSafeInteger(fact.totalMinor) && fact.totalMinor! > 0) {
-    await ctx.db.patch("billingPurchases", plan.purchase._id, { totalMinor: fact.totalMinor });
-  }
   if (fact.reversal.kind === "unknown") {
+    plan.purchase = await stageUnreadablePayment(ctx, customer, fact, d, plan.purchase, deleted);
+    if (!plan.purchase) return { ...plan, outcome: "quarantined" };
     const review = plan.purchase?.reviewedReversalRef && await ctx.db.get("billingEvents", plan.purchase.reviewedReversalRef);
     if (!review || review.customerRef !== customer._id || review.mode !== customer.mode ||
       review.paymentId !== fact.paymentId || review.state !== "processed" ||
@@ -242,11 +239,45 @@ async function createPurchase(ctx: Ctx, customer: Customer, d: Positive, owned: 
   return (await ctx.db.get("billingPurchases", ref))!;
 }
 
+const grantKey = (d: Positive) => d.kind === "period"
+  ? `period:${d.subscriptionId}:${d.serviceStart}:${d.serviceEnd}` : `top_up:${d.paymentId}:0`;
+
+/** Bind a verified positive for support review without granting or projecting entitlements. */
+async function stageUnreadablePayment(ctx: Ctx, customer: Customer, fact: PaymentFact, d: Positive, found: Purchase | null, deleted: boolean) {
+  if (fact.paymentId !== d.paymentId || !Number.isSafeInteger(fact.totalMinor) || fact.totalMinor! <= 0) return null;
+  const subscription = d.kind === "period" ? await subscriptionRow(ctx, customer.mode, d.subscriptionId) : null;
+  if (d.kind === "period" && (!subscription || subscription.customerRef !== customer._id || subscription.productId !== d.productId)) return null;
+  // Re-read both binding and candidate: another fact in this transaction may have taken them.
+  const bound = await ctx.db.query("billingPurchases")
+    .withIndex("by_mode_and_paymentId", q => q.eq("mode", customer.mode).eq("paymentId", fact.paymentId)).unique();
+  let purchase = bound ?? (found && await ctx.db.get("billingPurchases", found._id));
+  if (purchase && (purchase.customerRef !== customer._id || purchase.mode !== customer.mode ||
+    purchase.state === "quarantined" || !termsMatch(purchase, d) || purchase.terms.quantity !== 1 ||
+    purchase.terms.credits !== d.credits || (purchase.paymentId !== undefined && purchase.paymentId !== d.paymentId))) return null;
+  if (!purchase && d.kind !== "period") return null;
+  const sourceKey = grantKey(d);
+  // Check before creating a renewal as well as before binding an existing checkout.
+  const reserved = await ctx.db.query("billingPurchases")
+    .withIndex("by_mode_and_stagedGrantKey", q => q.eq("mode", customer.mode).eq("stagedGrantKey", sourceKey)).unique();
+  if (reserved && reserved._id !== purchase?._id) return null;
+  if (purchase?.state !== "settled" && await isDuplicate(ctx, customer, d, purchase, sourceKey)) return null;
+  if (!purchase) purchase = await createPurchase(ctx, customer, d, true, deleted, "");
+  await bindPurchaseRow(ctx, { purchaseRef: purchase._id, mode: customer.mode, paymentId: d.paymentId,
+    ...(d.kind === "period" ? { subscriptionId: d.subscriptionId } : {}) });
+  await ctx.db.patch("billingPurchases", purchase._id, {
+    totalMinor: purchase.totalMinor ?? fact.totalMinor, stagedGrantKey: sourceKey,
+  });
+  return (await ctx.db.get("billingPurchases", purchase._id))!;
+}
+
 /** A grant for this business key from another purchase, or another subscription still paid through the period. */
-async function isDuplicate(ctx: Ctx, customer: Customer, d: Positive, purchase: Purchase, sourceKey: string) {
+async function isDuplicate(ctx: Ctx, customer: Customer, d: Positive, purchase: Purchase | null, sourceKey: string) {
+  const staged = await ctx.db.query("billingPurchases")
+    .withIndex("by_mode_and_stagedGrantKey", q => q.eq("mode", customer.mode).eq("stagedGrantKey", sourceKey)).unique();
+  if (staged && staged._id !== purchase?._id) return true;
   const grant = await ctx.db.query("billingGrants")
     .withIndex("by_mode_and_sourceKey", q => q.eq("mode", customer.mode).eq("sourceKey", sourceKey)).unique();
-  if (grant && grant.purchaseRef !== purchase._id) return true;
+  if (grant && grant.purchaseRef !== purchase?._id) return true;
   if (d.kind !== "period") return false;
   for (const status of PAID_STATUSES) {
     const rows = await ctx.db.query("billingSubscriptions")
@@ -275,7 +306,7 @@ async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positi
     if (d.kind === "period" && !deleted && !rowMismatch) await projectPeriod(ctx, customer, d, now, true);
     return false;
   }
-  const sourceKey = d.kind === "period" ? `period:${d.subscriptionId}:${d.serviceStart}:${d.serviceEnd}` : `top_up:${d.paymentId}:0`;
+  const sourceKey = grantKey(d);
   const reason = rowMismatch ? "subscription_mismatch" : !termsMatch(purchase, d) ? "terms"
     : !deleted && await isDuplicate(ctx, customer, d, purchase, sourceKey) ? "duplicate" : null;
   if (reason) {
@@ -317,7 +348,7 @@ async function applyPayment(ctx: Ctx, customer: Customer, plan: PaymentPlan, del
   const { decision: d } = plan.fact;
   if (d.kind === "period" || d.kind === "top_up") return await settle(ctx, customer, plan, d, deleted, now);
   const purchase = plan.purchase && await ctx.db.get("billingPurchases", plan.purchase._id);
-  // Only a settlement binds a payment to a checkout: a failed attempt leaves the session to its retry.
+  // Only a verified positive binds a payment: a failed attempt leaves the session to its retry.
   if (purchase?.paymentId !== d.paymentId) return false;
   if (d.kind === "quarantine") {
     if (purchase.state !== "settled") await quarantinePurchase(ctx, purchase, d.paymentId, d.reason);
@@ -410,7 +441,8 @@ export const commitReconciliation = internalMutation({
     const resolvedNegatives = receipts.filter(r => NEGATIVE_EVENT.test(r.eventType) && r.paymentId && reversalOutcomes.get(r.paymentId) === "processed");
     const resolved = new Set(resolvedNegatives.map(r => r._id));
     // Decided before any write: skipped positives stay pending while everything else commits.
-    const allowed = await positivesMayCommit(ctx, customer, payments, resolved);
+    const unchanged = (await ctx.db.get("billingCustomers", customer._id))!.inputRevision === args.fence.inputRevision;
+    const allowed = unchanged && await positivesMayCommit(ctx, customer, payments, resolved);
     const paymentOutcomes = new Map(payments.map(p => [p.fact.paymentId, p.positive && !allowed ? "pending" as const : p.outcome]));
     const subscriptionOutcomes = new Map(subscriptions.map(plan => [plan.fact.subscriptionId, plan.outcome]));
     let granted = false;
