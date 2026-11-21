@@ -310,6 +310,27 @@ describe("records", () => {
     expect(await account(t)).toBeNull();
   });
 
+  test("a first held payment earns no period and cancellation never invents one", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    await checkout(t, alice);
+    await t.run(ctx => ctx.db.patch("billingCustomers", alice, { hold: true }));
+    const payment = await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
+    const cancel = await receive(t, alice, "subscription.cancelled", { subscriptionId: "sub_1" });
+    expect(await reconcile(t, alice, {
+      payments: [paid(period("pay_1"), { sessionId: "cks_1" })],
+      subscriptions: [sub({ status: "cancelled", cancelAtNextBillingDate: true })],
+    })).toBe("blocked");
+    expect(await grants(t)).toEqual([]);
+    const subscription = (await rows(t, "billingSubscriptions"))[0];
+    expect(subscription.status).toBe("cancelled");
+    expect(subscription.paidThrough).toBeUndefined();
+    expect(subscription.serviceEnd).toBeUndefined();
+    expect(subscription.cancelAt).toBeUndefined();
+    expect(await read(t, payment)).toMatchObject({ state: "pending" });
+    expect(await read(t, cancel)).toMatchObject({ state: "processed" });
+  });
+
   test("a held owner's positives are blocked while its cancellation still applies", async () => {
     const t = setup();
     const alice = await customer(t);

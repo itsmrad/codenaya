@@ -168,7 +168,10 @@ export const recordCustomerResult = mutation({
     const identity = await authorize(ctx, internalKey);
     const customer = await ownedCustomer(ctx, identity, customerRef);
     if (customer.creationLeaseId !== leaseId || customer.creationState === "ready") throw conflict();
-    const unknown = () => ctx.db.patch("billingCustomers", customerRef, { creationState: "unknown" });
+    const unknown = async () => {
+      await ctx.db.patch("billingCustomers", customerRef, { creationState: "unknown" });
+      if (customer.creationState !== "unknown" && await ownerDeleted(ctx, customer)) await queueDeletionRecovery(ctx, customer._id);
+    };
     if (result.kind === "created" && PROVIDER_ID.test(result.customerId)) {
       const bound = await ctx.db.query("billingCustomers")
         .withIndex("by_mode_and_customerId", q => q.eq("mode", customer.mode).eq("customerId", result.customerId)).unique();
@@ -190,7 +193,6 @@ export const recordCustomerResult = mutation({
       await unknown();
       console.warn("[billingCheckout] customer creation outcome unknown", { customerRef });
     }
-    if (result.kind === "unknown" && customer.creationState !== "unknown" && await ownerDeleted(ctx, customer)) await queueDeletionRecovery(ctx, customer._id);
     return null;
   },
 });
@@ -228,10 +230,10 @@ export const recordCheckoutResult = mutation({
       await ctx.db.patch("billingCustomers", customer._id, { pendingPurchaseRef: undefined });
     } else {
       await ctx.db.patch("billingPurchases", purchaseRef, { state: "unknown" });
+      if (await ownerDeleted(ctx, customer)) await queueDeletionRecovery(ctx, customer._id);
       console.warn("[billingCheckout] checkout creation outcome unknown; lock kept", { purchaseRef });
       await markPollDue(ctx, customer._id, false);
     }
-    if (result.kind === "unknown" && purchase.state !== "unknown" && await ownerDeleted(ctx, customer)) await queueDeletionRecovery(ctx, customer._id);
     return null;
   },
 });

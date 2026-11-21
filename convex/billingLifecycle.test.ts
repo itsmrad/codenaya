@@ -68,11 +68,11 @@ test.each(["confirmed", "unknown"] as const)("%s clears only after a post-claim 
   expect((await sub())?.controlPendingAt).toBe(NOW);
   await canonical(NOW - 1, true);
   expect((await sub())?.controlPendingAt).toBe(NOW);
-  await canonical(NOW + 1, true, "cancelled");
+  await canonical(NOW + 60_001, true, "cancelled");
   expect(await sub()).toMatchObject({ paidThrough: NOW + 1000, serviceEnd: NOW + 1000, cancelAt: NOW + 1000, cancellationRecoveryRequired: true });
   expect((await sub())?.controlPendingAt).toBeUndefined();
   expect(await t.run(ctx => ctx.db.get("billingGrants", refs.lotRef))).toEqual(lot);
-  await canonical(NOW + 2, false);
+  await canonical(NOW + 60_002, false);
   expect((await sub())?.cancelAt).toBeUndefined();
   expect((await sub())?.paidThrough).toBe(NOW + 1000);
 });
@@ -99,7 +99,68 @@ test("Bob cannot record Alice result; deletion while uncancel pending never repl
   })).rejects.toThrow();
   await t.run(ctx => ctx.db.patch("billingCustomers", refs.customerRef, { deletedAt: NOW }));
   await record(1, "unknown");
-  await canonical(NOW + 1, false);
+  await canonical(NOW + 60_001, false);
   expect((await sub())?.controlOperation).toBeUndefined();
   expect(await prepare("uncancel")).toEqual({ kind: "refused", code: "unavailable" });
+});
+
+test("pre-write and in-flight canonical reads cannot release the dispatch window; a fresh post-window read can", async () => {
+  const { prepare, sub, canonical, record } = await setup();
+  expect(await prepare()).toMatchObject({ revision: 1, writeUntil: NOW + 60_000 });
+  await canonical(NOW + 1, false); // Before dispatch/result.
+  expect((await sub())?.controlPendingAt).toBe(NOW);
+  expect(await prepare("uncancel")).toEqual({ kind: "refused", code: "control_pending" });
+  vi.setSystemTime(NOW + 15_000);
+  await record(1, "unknown");
+  await canonical(NOW + 15_001, false); // A result alone cannot shorten the window.
+  expect((await sub())?.controlPendingAt).toBe(NOW);
+  await canonical(NOW + 60_000, false); // Strictly after the window, not at its boundary.
+  expect((await sub())?.controlPendingAt).toBe(NOW);
+  vi.setSystemTime(NOW + 60_001);
+  expect(await prepare()).toEqual({ kind: "refused", code: "control_pending" }); // Time alone never clears.
+  await canonical(NOW + 60_001, false);
+  expect((await sub())?.controlPendingAt).toBeUndefined();
+  expect(await prepare()).toMatchObject({ revision: 2 });
+  await expect(record(1, "refused")).rejects.toThrow();
+  expect((await sub())?.controlRevision).toBe(2);
+});
+
+test("a late result moves the fresh-read threshold beyond the write window", async () => {
+  const { prepare, record, canonical, sub } = await setup();
+  await prepare();
+  vi.setSystemTime(NOW + 65_000);
+  await record(1, "confirmed");
+  await canonical(NOW + 61_000, false);
+  expect((await sub())?.controlPendingAt).toBe(NOW);
+  await canonical(NOW + 65_001, false);
+  expect((await sub())?.controlPendingAt).toBeUndefined();
+});
+
+test("a deferred adapter PATCH and interleaved reconciliation cannot admit an opposing write", async () => {
+  const { setDodoCancellation } = await import("../src/features/billing/server/dodo-subscription");
+  const { prepare, canonical, record, sub } = await setup();
+  await prepare();
+  let finishPatch!: () => void;
+  let dispatched!: () => void;
+  const entered = new Promise<void>(resolve => { dispatched = resolve; });
+  const blocked = new Promise<void>(resolve => { finishPatch = resolve; });
+  const customer = { customer_id: "cus_alice", business_id: "bus_dummy" };
+  const subscription = { subscription_id: "sub_alice", customer: { customer_id: "cus_alice" }, product_id: "pro_dummy",
+    status: "active", cancel_at_next_billing_date: true };
+  const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(customer)).mockResolvedValueOnce(Response.json(subscription))
+    .mockImplementationOnce(async () => { dispatched(); await blocked; return new Response(null); })
+    .mockResolvedValueOnce(Response.json(customer)).mockResolvedValueOnce(Response.json(subscription));
+  const pending = setDodoCancellation({ environment: "test_mode", apiKey: "dummy", businessId: "bus_dummy",
+    proProductId: "pro_dummy", customerId: "cus_alice", controlWriteUntil: NOW + 60_000 },
+  { subscriptionId: "sub_alice", timing: "period_end" }, fetchImpl);
+  await entered;
+  await canonical(NOW + 1, false);
+  expect(await prepare("uncancel")).toEqual({ kind: "refused", code: "control_pending" });
+  finishPatch();
+  expect(await pending).toMatchObject({ kind: "confirmed" });
+  await record(1, "confirmed");
+  await canonical(NOW + 2, true);
+  expect((await sub())?.controlPendingAt).toBe(NOW);
+  await canonical(NOW + 60_001, true);
+  expect((await sub())?.controlPendingAt).toBeUndefined();
 });

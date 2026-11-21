@@ -903,6 +903,8 @@ export default defineSchema({
     controlOperation: v.optional(v.union(v.literal("cancel"), v.literal("uncancel"))),
     controlRevision: v.optional(v.number()),
     controlPendingAt: v.optional(v.number()),
+    controlWriteUntil: v.optional(v.number()),
+    controlResultAt: v.optional(v.number()),
     // Canonical provider state, distinct from settled access and local status.
     controlRenewable: v.optional(v.boolean()),
     graceUntil: v.optional(v.number()),
