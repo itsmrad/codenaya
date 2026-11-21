@@ -115,7 +115,8 @@ export const countActiveLots = async (ctx: QueryCtx, userId: string, mode: Mode,
  * The user's unexpired, unexhausted `mode` lots, at most cap + 1 per kind in
  * spending order. Lots past a cap expire no earlier than those read, so the
  * walk stops at the first capped kind: no later kind is spent while it may
- * hold unread credits.
+ * hold unread credits. A next period's lot settled early is read (and counts
+ * toward the cap) but `lotRemaining` holds it back until its serviceStart.
  */
 export async function readActiveLots(ctx: QueryCtx, userId: string, mode: Mode, now: number) {
   const lots: Grant[] = [];

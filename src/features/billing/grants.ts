@@ -20,6 +20,8 @@ export interface GrantLot {
   consumed: number;
   revoked: number;
   expiresAt: number;
+  /** A period lot's first moment; nothing on it is spendable before then. */
+  serviceStart?: number;
   /** Carried into the next period's rollover lot. */
   transferred?: number;
   /** Paid toward recorded debt when the lot was granted. */
@@ -32,8 +34,14 @@ export interface GrantLot {
 export const lotUnspent = (lot: Omit<GrantLot, "_id" | "kind" | "expiresAt">) =>
   Math.max(0, lot.quantity - lot.consumed - lot.revoked - (lot.transferred ?? 0) - (lot.debtOffset ?? 0));
 
-/** Credits still spendable on `lot` at `now`; none once it has expired. */
-export const lotRemaining = (lot: GrantLot, now: number) => (lot.expiresAt > now ? lotUnspent(lot) : 0);
+/** Whether `lot` holds credits for `now`: unexpired, and its service interval (if any) has started. */
+const isLive = (lot: GrantLot, now: number) => lot.expiresAt > now && (lot.serviceStart === undefined || lot.serviceStart <= now);
+
+/**
+ * Credits still spendable on `lot` at `now`: none once it has expired, and none
+ * yet on a period lot whose service hasn't started (a renewal settled early).
+ */
+export const lotRemaining = (lot: GrantLot, now: number) => (isLive(lot, now) ? lotUnspent(lot) : 0);
 
 /** Most unused period credits carried into the next paid period. */
 export const ROLLOVER_CAP = PLANS.pro.monthlyCredits;
@@ -62,19 +70,15 @@ export function topUpExpiresAt(settledAt: number): number {
  * spending, its revoked credits stay below its quantity. Stage 11's
  * entitlement rule may replace this.
  */
-export const isInPaidPeriod = (lots: (GrantLot & { serviceStart?: number })[], now: number) =>
+export const isInPaidPeriod = (lots: GrantLot[], now: number) =>
   lots.some(
-    (lot) =>
-      lot.kind === "current_period" &&
-      lot.fullyReversed !== true &&
-      lot.expiresAt > now &&
-      lot.serviceStart !== undefined &&
-      lot.serviceStart <= now,
+    (lot) => lot.kind === "current_period" && lot.fullyReversed !== true && lot.serviceStart !== undefined && isLive(lot, now),
   );
 
 /**
- * Spends `credits` across `lots`: current period, then rollover, then the
- * earliest-expiring top-up, equal expiries tie-broken by id. What the lots
+ * Spends `credits` across the lots live at `now`: current period, then
+ * rollover, then the earliest-expiring top-up, equal expiries tie-broken by id.
+ * A next period's lot settled early waits for its serviceStart. What the lots
  * can't cover is the shortfall, which the caller records as debt.
  */
 export function allocateCredits<T extends GrantLot>(lots: T[], credits: number, now: number) {
