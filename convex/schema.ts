@@ -880,6 +880,9 @@ export default defineSchema({
     principalMinor: v.optional(v.number()),
     currency: v.optional(v.string()),
     reversedMinor: v.optional(v.number()),
+    // Reversal bookkeeping (convex/billingReversals.ts): the gross total the ratio uses and the credits revoked so far.
+    totalMinor: v.optional(v.number()),
+    revokedCredits: v.optional(v.number()),
   })
     .index("by_mode_and_intentId", ["mode", "intentId"])
     .index("by_mode_and_paymentId", ["mode", "paymentId"])
@@ -939,10 +942,35 @@ export default defineSchema({
     // Set by every write that leaves nothing unspent, so spent lots stop counting
     // toward MAX_ACTIVE_LOTS. Revocations must set it too.
     exhausted: v.optional(v.literal(true)),
+    // Every lot of a fully refunded or lost-disputed purchase: it no longer makes a paid period.
+    fullyReversed: v.optional(v.literal(true)),
   })
     .index("by_mode_and_sourceKey", ["mode", "sourceKey"])
+    .index("by_purchaseRef", ["purchaseRef"])
     .index("by_userId_and_mode_and_kind_and_expiresAt", ["userId", "mode", "kind", "expiresAt"])
     .index("by_userId_and_mode_and_kind_and_exhausted_and_expiresAt", ["userId", "mode", "kind", "exhausted", "expiresAt"]),
+
+  /**
+   * One provider refund or dispute (or, later, a support hold) per (mode, providerId), from the
+   * latest fresh payment read (`convex/billingReversals.ts`). `countedMinor` never decreases; an
+   * active hold refuses checkouts but never blocks grants.
+   */
+  billingAdjustments: defineTable({
+    mode: billingModeValidator,
+    customerRef: v.id("billingCustomers"),
+    paymentId: v.string(),
+    purchaseRef: v.optional(v.id("billingPurchases")),
+    kind: v.union(v.literal("refund"), v.literal("dispute"), v.literal("support_hold")),
+    providerId: v.string(),
+    status: v.string(),
+    countedMinor: v.number(),
+    currency: v.optional(v.string()),
+    holdActive: v.boolean(),
+    observedAt: v.number(),
+  })
+    .index("by_mode_and_providerId", ["mode", "providerId"])
+    .index("by_mode_and_paymentId", ["mode", "paymentId"])
+    .index("by_customerRef_and_holdActive", ["customerRef", "holdActive"]),
 
   /**
    * A user's credit usage this month and today (ADR 0011). Created on the first
