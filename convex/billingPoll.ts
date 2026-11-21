@@ -53,7 +53,7 @@ const findingValidator = v.object({
   kind: v.union(v.literal("payment"), v.literal("refund"), v.literal("dispute"), v.literal("subscription")),
   // createdAt is absent for a resource re-read by id.
   id: v.string(), status: v.string(), createdAt: v.optional(v.number()), paymentId: v.optional(v.string()),
-  webhookId: v.string(), bodyDigest: v.string(),
+  webhookId: v.string(), bodyDigest: v.string(), readId: v.optional(v.string()),
 });
 const checkoutValidator = v.object({ purchaseRef: v.id("billingPurchases"), sessionId: v.string() });
 const sessionValidator = v.object({ createdAt: v.number(), paymentId: v.optional(v.string()), paymentStatus: v.optional(v.string()) });
@@ -74,7 +74,9 @@ export async function markPollDue(ctx: MutationCtx, customerRef: Id<"billingCust
 
 /** Undefined: nothing left to poll for. */
 async function pollDelay(ctx: MutationCtx, customer: Doc<"billingCustomers">, now: number) {
-  if (customer.pendingPurchaseRef || customer.pollWindow) return ACTIVE_POLL_MS;
+  const pending = await ctx.db.query("billingSubscriptions").withIndex("by_customerRef_and_controlPendingAt", q =>
+    q.eq("customerRef", customer._id).gte("controlPendingAt", 0)).first();
+  if (pending || customer.pendingPurchaseRef || customer.pollWindow) return ACTIVE_POLL_MS;
   const subscription = customer.activeSubscriptionRef && await ctx.db.get("billingSubscriptions", customer.activeSubscriptionRef);
   if (subscription?.status === "active") return (subscription.paidThrough ?? 0) - now < NEAR_EXPIRY_MS ? ACTIVE_POLL_MS : IDLE_POLL_MS;
   return (customer.watchUntil ?? 0) > now ? IDLE_POLL_MS : undefined;
@@ -82,11 +84,13 @@ async function pollDelay(ctx: MutationCtx, customer: Doc<"billingCustomers">, no
 
 /** Our not-ended subscriptions and the payments of unresolved refund/dispute receipts, re-read by id each poll. */
 async function rereadIds(ctx: MutationCtx, customerRef: Id<"billingCustomers">) {
-  const subscriptionIds: string[] = [];
+  const pending = await ctx.db.query("billingSubscriptions").withIndex("by_customerRef_and_controlPendingAt", q =>
+    q.eq("customerRef", customerRef).gte("controlPendingAt", 0)).take(MAX_KNOWN_SUBSCRIPTIONS);
+  const subscriptionIds = new Set(pending.map(row => row.subscriptionId));
   for (const status of ["active", "pending"] as const) {
     const rows = await ctx.db.query("billingSubscriptions")
       .withIndex("by_customerRef_and_status", q => q.eq("customerRef", customerRef).eq("status", status)).take(MAX_KNOWN_SUBSCRIPTIONS);
-    subscriptionIds.push(...rows.map(row => row.subscriptionId));
+    for (const row of rows) subscriptionIds.add(row.subscriptionId);
   }
   const paymentIds = new Set<string>();
   for (const state of ["pending", "quarantined"] as const) {
@@ -96,7 +100,7 @@ async function rereadIds(ctx: MutationCtx, customerRef: Id<"billingCustomers">) 
       for (const row of rows) if (row.paymentId) paymentIds.add(row.paymentId);
     }
   }
-  return { subscriptionIds: subscriptionIds.slice(0, MAX_KNOWN_SUBSCRIPTIONS), paymentIds: [...paymentIds].slice(0, MAX_REVERSAL_REREADS) };
+  return { subscriptionIds: [...subscriptionIds].slice(0, MAX_KNOWN_SUBSCRIPTIONS), paymentIds: [...paymentIds].slice(0, MAX_REVERSAL_REREADS) };
 }
 
 // Cron: due customers of this deployment's mode, bounded; one action each.
@@ -159,7 +163,7 @@ export const pollCustomer = internalAction({
     // One finding per resource per observed status: a repeat is a no-op receipt, a new status records again.
     async function found(kind: Finding["kind"], item: Omit<Finding, "kind" | "webhookId" | "bodyDigest">) {
       const webhookId = `poll:${kind}:${item.id}:${item.status}`;
-      findings.push({ kind, ...item, webhookId, bodyDigest: await sha256Hex(new TextEncoder().encode(webhookId)) });
+      findings.push({ kind, ...item, ...(kind === "subscription" ? { readId: crypto.randomUUID() } : {}), webhookId, bodyDigest: await sha256Hex(new TextEncoder().encode(webhookId)) });
     }
     // Pages still to read; a failed page is read again next run, a full one moves on to the next.
     const pages: Pages = {};
@@ -206,10 +210,15 @@ async function hasUnresolvedPositive(ctx: MutationCtx, mode: Doc<"billingCustome
 /** Records only findings that would change something. */
 async function recordFindings(ctx: MutationCtx, customer: Doc<"billingCustomers">, findings: Finding[], now: number) {
   for (const finding of findings) {
+    let { webhookId, bodyDigest } = finding;
     if (finding.kind === "subscription") {
       const row = await ctx.db.query("billingSubscriptions")
         .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", customer.mode).eq("subscriptionId", finding.id)).unique();
-      if (row && !(ENDED_SUBSCRIPTION.has(finding.status) && !LOCAL_ENDED.has(row.status))) continue;
+      if (row?.customerRef === customer._id && row.controlPendingAt !== undefined) {
+        // Same provider status can resolve distinct control claims and later crash-recovery reads.
+        webhookId = `poll:control:${finding.id}:${row.controlRevision}:${finding.readId ?? now}`;
+        bodyDigest = await sha256Hex(new TextEncoder().encode(webhookId));
+      } else if (row && !(ENDED_SUBSCRIPTION.has(finding.status) && !LOCAL_ENDED.has(row.status))) continue;
     } else if (finding.kind === "payment") {
       // Only once succeeded. Settlement and quarantine both bind it, so a seen payment stops being recorded.
       if (finding.status !== "succeeded") continue;
@@ -221,8 +230,8 @@ async function recordFindings(ctx: MutationCtx, customer: Doc<"billingCustomers"
     }
     // Refunds and disputes are never suppressed by another receipt of their payment: the status-keyed id dedupes.
     await recordReceiptRow(ctx, {
-      customerRef: customer._id, mode: customer.mode, webhookId: finding.webhookId, eventType: `${finding.kind}.poll`,
-      bodyDigest: finding.bodyDigest, occurredAt: now,
+      customerRef: customer._id, mode: customer.mode, webhookId, eventType: `${finding.kind}.poll`,
+      bodyDigest, occurredAt: now,
       ...(finding.kind === "subscription" ? { subscriptionId: finding.id } : { paymentId: finding.paymentId }),
     });
   }

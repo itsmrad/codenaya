@@ -15,6 +15,8 @@ export type DodoNextConfig = DodoCommonConfig & {
   returnUrl: string;
 } & ({ topUpsEnabled: false } | { topUpsEnabled: true; topUpProductId: string });
 
+export type DodoManagementConfig = DodoCommonConfig & { apiKey: string; proProductId: string };
+
 export type DodoReceiverConfig = DodoCommonConfig & {
   webhookKey: string;
   webhookKeyPrevious?: string;
@@ -91,6 +93,9 @@ function readReturnUrl(env: Env, deployment: DodoDeployment): string {
  * so reversals and already settled money are still processed.
  */
 export function readDodoConfig(
+  consumer: "next-management", deployment: DodoDeployment, env?: Env,
+): DodoManagementConfig;
+export function readDodoConfig(
   consumer: "next", deployment: DodoDeployment, env?: Env,
 ): DodoNextConfig | null;
 export function readDodoConfig(
@@ -100,10 +105,10 @@ export function readDodoConfig(
   consumer: "convex-reconciler", deployment: DodoDeployment, env?: Env,
 ): DodoReconcilerConfig;
 export function readDodoConfig(
-  consumer: "next" | "convex-receiver" | "convex-reconciler", deployment: DodoDeployment, env: Env = process.env,
-): DodoNextConfig | DodoReceiverConfig | DodoReconcilerConfig | null {
-  if (consumer === "next" && typeof window !== "undefined") throw new Error("Billing configuration is server-only.");
-  if (consumer !== "next" && consumer !== "convex-receiver" && consumer !== "convex-reconciler") {
+  consumer: "next" | "next-management" | "convex-receiver" | "convex-reconciler", deployment: DodoDeployment, env: Env = process.env,
+): DodoNextConfig | DodoManagementConfig | DodoReceiverConfig | DodoReconcilerConfig | null {
+  if ((consumer === "next" || consumer === "next-management") && typeof window !== "undefined") throw new Error("Billing configuration is server-only.");
+  if (consumer !== "next" && consumer !== "next-management" && consumer !== "convex-receiver" && consumer !== "convex-reconciler") {
     throw new Error("Unknown billing configuration consumer.");
   }
   if (consumer === "next" && env.CODENAYA_BILLING_ENABLED !== "true") return null;
@@ -126,6 +131,9 @@ export function readDodoConfig(
       topUpProductId: configured(env, "DODO_PAYMENTS_TOP_UP_PRODUCT_ID"),
     };
   }
+  if (consumer === "next-management") return {
+    ...common, apiKey: required(env, "DODO_PAYMENTS_API_KEY"), proProductId: required(env, "DODO_PAYMENTS_PRO_PRODUCT_ID"),
+  };
   if (env.CREDIT_LIMITS_ENFORCED !== "true") {
     throw new Error("Billing requires CREDIT_LIMITS_ENFORCED=true.");
   }

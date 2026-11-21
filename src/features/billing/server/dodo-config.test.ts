@@ -258,3 +258,19 @@ describe("Dodo reconciler config", () => {
     expect(readDodoConfig("convex-reconciler", "development", reconcilerEnv)).toMatchObject({ proProductId: "test-pro" });
   });
 });
+
+describe("management configuration", () => {
+  it("remains available without checkout/enforcement flags or return URL", () => {
+    expect(readDodoConfig("next-management", "development", {
+      ...nextEnv, CODENAYA_BILLING_ENABLED: "false", CREDIT_LIMITS_ENFORCED: "false",
+      DODO_PAYMENTS_RETURN_URL: undefined, NEXT_PUBLIC_APP_URL: undefined,
+    })).toEqual({ environment: "test_mode", businessId: "test-business", apiKey: "synthetic-api-key", proProductId: "test-pro" });
+  });
+  it.each(["DODO_PAYMENTS_BUSINESS_ID", "DODO_PAYMENTS_API_KEY", "DODO_PAYMENTS_PRO_PRODUCT_ID"])("requires %s", name => {
+    expect(() => readDodoConfig("next-management", "development", { ...nextEnv, [name]: "PLACEHOLDER_dummy" })).toThrow();
+  });
+  it("preserves deployment and base URL checks", () => {
+    expect(() => readDodoConfig("next-management", "production", nextEnv)).toThrow();
+    expect(() => readDodoConfig("next-management", "development", { ...nextEnv, DODO_PAYMENTS_BASE_URL: "https://foreign.invalid" })).toThrow();
+  });
+});

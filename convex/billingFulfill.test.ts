@@ -310,19 +310,49 @@ describe("records", () => {
     expect(await account(t)).toBeNull();
   });
 
-  test("a held owner's positives are blocked while its cancellation still applies", async () => {
+  test("a first held payment earns no period and cancellation never invents one", async () => {
     const t = setup();
     const alice = await customer(t);
     await checkout(t, alice);
     await t.run(ctx => ctx.db.patch("billingCustomers", alice, { hold: true }));
+    const payment = await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
+    const cancel = await receive(t, alice, "subscription.cancelled", { subscriptionId: "sub_1" });
+    expect(await reconcile(t, alice, {
+      payments: [paid(period("pay_1"), { sessionId: "cks_1" })],
+      subscriptions: [sub({ status: "cancelled", cancelAtNextBillingDate: true })],
+    })).toBe("blocked");
+    expect(await grants(t)).toEqual([]);
+    const subscription = (await rows(t, "billingSubscriptions"))[0];
+    expect(subscription.status).toBe("cancelled");
+    expect(subscription.paidThrough).toBeUndefined();
+    expect(subscription.serviceEnd).toBeUndefined();
+    expect(subscription.cancelAt).toBeUndefined();
+    expect(await read(t, payment)).toMatchObject({ state: "pending" });
+    expect(await read(t, cancel)).toMatchObject({ state: "processed" });
+  });
+
+  test("a held owner's positives are blocked while its cancellation still applies", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    await checkout(t, alice);
     await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
+    expect(await reconcile(t, alice, {
+      payments: [paid(period("pay_1"), { sessionId: "cks_1" })], subscriptions: [sub()],
+    })).toBe("committed");
+    const settledGrants = await grants(t);
+    expect(settledGrants).toHaveLength(1);
+    await t.run(ctx => ctx.db.patch("billingCustomers", alice, { hold: true }));
+    const renewal = await receive(t, alice, "payment.succeeded", { paymentId: "pay_2" });
     const cancel = await receive(t, alice, "subscription.cancelled", { subscriptionId: "sub_1" });
     const result = await reconcile(t, alice, {
-      payments: [paid(period("pay_1"), { sessionId: "cks_1" })], subscriptions: [sub({ status: "cancelled", cancelAtNextBillingDate: true })],
+      payments: [paid(period("pay_2", P2))], subscriptions: [sub({ status: "cancelled", cancelAtNextBillingDate: true })],
     });
     expect(result).toBe("blocked");
-    expect(await grants(t)).toEqual([]);
-    expect((await rows(t, "billingSubscriptions"))[0]).toMatchObject({ status: "cancelled", cancelAt: P1.serviceEnd });
+    expect(await grants(t)).toEqual(settledGrants);
+    expect((await rows(t, "billingSubscriptions"))[0]).toMatchObject({
+      status: "cancelled", cancelAt: P1.serviceEnd, paidThrough: P1.serviceEnd, serviceEnd: P1.serviceEnd,
+    });
+    expect(await read(t, renewal)).toMatchObject({ state: "pending" });
     expect(await read(t, cancel)).toMatchObject({ state: "processed" });
   });
 

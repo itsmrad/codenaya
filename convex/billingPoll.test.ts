@@ -3,7 +3,7 @@
 import { convexTest } from "convex-test";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
   ACTIVE_POLL_MS, CHECKOUT_SESSION_TTL_MS, IDLE_POLL_MS, markPollDue, POLL_BATCH, POLL_READS_PER_CUSTOMER, PROVIDER_CLOCK_SKEW_MS,
@@ -559,5 +559,59 @@ describe("budget and cadence", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     later(ACTIVE_POLL_MS);
     expect(await poll(t)).toBe(0);
+  });
+});
+
+describe("pending control recovery", () => {
+  test.each(["route_crash", "unknown", "refused_result_lost"])("%s: poll → unique receipt → reconciliation clears claim without changing money", async outcome => {
+    const t = setup();
+    vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "dummy-internal");
+    const alice = await customer(t);
+    const subscriptionRef = await t.mutation(internal.billing.bindSubscription, {
+      customerRef: alice, mode: "test_mode", subscriptionId: "sub_1", productId: PRO,
+    });
+    await t.run(async ctx => {
+      await ctx.db.patch(subscriptionRef, { status: "active", paidThrough: NOW + 10 * DAY, serviceEnd: NOW + 10 * DAY, controlRenewable: true });
+      await ctx.db.patch(alice, { activeSubscriptionRef: subscriptionRef });
+    });
+    stubProvider({ subscriptions: [listed({ subscription_id: "sub_1", status: "active" })] });
+    // The old status-only receipt is already processed; another active read must not dedupe to it.
+    await t.mutation(internal.billing.recordReceipt, { customerRef: alice, mode: "test_mode", webhookId: "poll:subscription:sub_1:active",
+      eventType: "subscription.poll", bodyDigest: "a".repeat(64), occurredAt: NOW, subscriptionId: "sub_1" });
+    await processCustomer(t, alice);
+    const caller = t.withIdentity({ subject: "user_alice", tokenIdentifier: "https://clerk.synthetic|user_alice" });
+    for (let revision = 1; revision <= 2; revision++) {
+      expect(await caller.mutation(api.billingLifecycle.prepareControl, { internalKey: "dummy-internal", mode: "test_mode", operation: "cancel" }))
+        .toMatchObject({ kind: "call", revision });
+      if (outcome === "unknown") await caller.mutation(api.billingLifecycle.recordControlResult, {
+        internalKey: "dummy-internal", subscriptionRef, revision, outcome: "unknown",
+      });
+      later(ACTIVE_POLL_MS);
+      expect(await poll(t)).toBe(1);
+      const controlEvents = (await events(t)).filter(e => e.webhookId.startsWith("poll:control:"));
+      expect(controlEvents).toHaveLength(revision);
+      expect(controlEvents.at(-1)).toMatchObject({ state: "pending", subscriptionId: "sub_1" });
+      expect(new Set(controlEvents.map(e => e.webhookId)).size).toBe(revision);
+      await processCustomer(t, alice);
+      const row = await t.run(ctx => ctx.db.get(subscriptionRef));
+      expect(row?.controlPendingAt).toBeUndefined();
+      expect(row?.cancelAt).toBeUndefined(); // Fresh provider read observed no schedule, even for a cancel request.
+      expect(row).toMatchObject({ paidThrough: NOW + 10 * DAY, serviceEnd: NOW + 10 * DAY });
+    }
+    expect(await grants(t)).toEqual([]);
+  });
+
+  test("pending+active rereads are unique before applying the three-resource budget", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    for (const subscriptionId of ["sub_1", "sub_2", "sub_3"]) {
+      const ref = await t.mutation(internal.billing.bindSubscription, { customerRef: alice, mode: "test_mode", subscriptionId, productId: PRO });
+      await t.run(ctx => ctx.db.patch(ref, { status: "active", controlPendingAt: NOW }));
+    }
+    await t.run(ctx => ctx.db.patch(alice, { nextPollAt: NOW }));
+    await t.mutation(internal.billingPoll.selectPollTargets, {});
+    const runs = await pendingRuns(t, "pollCustomer");
+    expect(runs).toHaveLength(1);
+    expect((runs[0].args[0] as { subscriptionIds: string[] }).subscriptionIds).toEqual(["sub_1", "sub_2", "sub_3"]);
   });
 });
