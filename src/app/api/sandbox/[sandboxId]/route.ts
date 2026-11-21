@@ -10,6 +10,7 @@ import {
 } from "@/features/sandbox-preview/server/project-sandbox";
 import { canonicalSandboxIdOrNull } from "@/features/sandbox-preview/server/provider/ids";
 import { SandboxTimeoutError } from "@/features/sandbox-preview/server/provider/types";
+import { REVOKED_RUNTIME_MESSAGE, isRevokedRuntime } from "@/features/sandbox-preview/server/runtime-fence";
 import {
   forgetSandbox,
   getOwnedSandbox,
@@ -70,6 +71,9 @@ const queueKey = (sandboxId: string) => canonicalSandboxIdOrNull(sandboxId) ?? s
 
 /** The answer for a malformed, unknown or foreign id alike, so none can be told apart. */
 const notFound = () => Response.json({ error: "Sandbox not found" }, { status: 404 });
+
+/** A preview killed for holding outdated env values (runtime-fence.ts). */
+const revoked = () => Response.json({ error: REVOKED_RUNTIME_MESSAGE, code: "env_changed" }, { status: 409 });
 
 const installAfterBurst = async (publicId: string, install: Install) => {
   const sandboxId = queueKey(publicId);
@@ -166,6 +170,8 @@ export async function POST(request: Request, { params }: RouteParams) {
   try {
     const sandbox = await getOwnedSandbox(sandboxId, userId);
     if (!sandbox) return notFound();
+    // Restarting its dev server would load the outdated values again.
+    if (await isRevokedRuntime(sandboxId)) return revoked();
     // A package.json sync may be queued but not yet visible in commands.list().
     const status = installQueues.has(queueKey(sandboxId)) ? "busy" : await recoverEsbuild(sandbox);
     return Response.json({ status });
@@ -211,6 +217,11 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
     if (!sandbox) {
       return notFound();
+    }
+    // A sync can restart the dev server, which would load the outdated values again.
+    if (await isRevokedRuntime(sandboxId)) {
+      forgetSandbox(sandboxId);
+      return revoked();
     }
 
     // One request for the whole batch instead of one per file.

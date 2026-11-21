@@ -2,17 +2,23 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
-import { toPublicSandboxId } from "./provider/ids";
+import { canonicalSandboxIdOrNull, parsePublicSandboxIdOrNull, toPublicSandboxId } from "./provider/ids";
+import { getProvider } from "./provider/registry";
 import type { Sandbox } from "./provider/types";
 
-/** The project's env changed (or it was deleted), or a newer boot replaced this one, after it read the env. */
+const KILL_CONCURRENCY = 5;
+
+/** The boot read an env that changed since (or a deleted project), was replaced by a newer boot, or is blocked by an unkilled runtime. */
 export class RuntimeAdmissionError extends Error {
   name = "RuntimeAdmissionError";
-  constructor(reason: "replaced" | "outdated") {
+  constructor(reason: "replaced" | "blocked" | "outdated") {
     super(
       reason === "replaced"
         ? "A newer preview of this project started, so this one stopped."
-        : "The project's environment variables changed while the preview was starting. " +
+        : reason === "blocked"
+          ? "An earlier preview of this project with outdated environment variables could not be " +
+            "stopped yet. Try again in a minute."
+          : "The project's environment variables changed while the preview was starting. " +
             "Start the preview again.",
     );
   }
@@ -40,4 +46,76 @@ export async function admitSecretRuntime(args: {
   });
   const admission = await convex.mutation(api.runtimeHandles.admitRuntime, { internalKey, handleId });
   if (admission !== "admitted") throw new RuntimeAdmissionError(admission);
+}
+
+/** Kills one sandbox by public id. A sandbox already gone counts as killed. */
+const killSandbox = async (publicId: string) => {
+  const parsed = parsePublicSandboxIdOrNull(publicId);
+  // Registered from a live sandbox's own id, so a malformed one never booted.
+  if (parsed) await getProvider(parsed.provider).kill(parsed.nativeId);
+};
+
+/**
+ * Kills the sandboxes of revoked handles (outdated by an env change, or whose
+ * kill failed before) in one sandbox, one project, or any project, and records
+ * each outcome. A failed kill leaves the handle revoke_failed, which denies the
+ * project's secret runtime until a later sweep kills it. Returns the revoked
+ * sandboxes it found, so a caller can refuse to keep using one.
+ */
+export async function killRevokedRuntimes(
+  internalKey: string,
+  scope: { projectId?: Id<"projects">; sandboxId?: string } = {},
+) {
+  const sandboxId = scope.sandboxId && (canonicalSandboxIdOrNull(scope.sandboxId) ?? scope.sandboxId);
+  const handles = await convex.query(api.runtimeHandles.listRevokedHandles, {
+    internalKey,
+    projectId: scope.projectId,
+    sandboxId,
+  });
+  const outcomes: boolean[] = [];
+  // A few at a time: a burst of kills can trip the provider's rate limit and leave handles revoke_failed.
+  for (let i = 0; i < handles.length; i += KILL_CONCURRENCY) {
+    outcomes.push(
+      ...(await Promise.all(
+        handles.slice(i, i + KILL_CONCURRENCY).map(async ({ _id, sandboxId }) => {
+          const killed = await killSandbox(sandboxId).then(
+            () => true,
+            (error: unknown) => {
+              console.error("[runtime-fence] could not kill a revoked runtime", sandboxId, error);
+              return false;
+            },
+          );
+          await convex.mutation(api.runtimeHandles.recordKill, { internalKey, handleId: _id, killed });
+          return killed;
+        }),
+      )),
+    );
+  }
+  return {
+    sandboxIds: handles.map((handle) => handle.sandboxId),
+    failed: outcomes.filter((killed) => !killed).length,
+  };
+}
+
+/**
+ * After an env change made outside a preview boot: stop the project's previews
+ * still holding the old values. Never throws; the sweep retries what this misses.
+ */
+export const killOutdatedPreviews = (internalKey: string, projectId: Id<"projects">) =>
+  killRevokedRuntimes(internalKey, { projectId }).then(
+    () => undefined,
+    (error: unknown) => {
+      console.error("[runtime-fence] could not stop outdated previews; the sweep retries", error instanceof Error ? error.name : "unknown");
+    },
+  );
+
+export const REVOKED_RUNTIME_MESSAGE =
+  "This preview was stopped because the project's environment variables changed. Start the preview again.";
+
+/** Whether `publicId` is a revoked runtime, which this kills; a revoked sandbox takes no more syncs or repairs. */
+export async function isRevokedRuntime(publicId: string) {
+  const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
+  // Without the key no boot could register a handle.
+  if (!internalKey) return false;
+  return (await killRevokedRuntimes(internalKey, { sandboxId: publicId })).sandboxIds.length > 0;
 }
