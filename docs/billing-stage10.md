@@ -64,8 +64,46 @@ CI on the exact pushed head is the gate. Local typecheck, lint, tests, build,
 install, servers and deployment were prohibited. Added mocked adapter/routes,
 pure rule and convex-test cases cover claims, ownership and settled-money safety.
 
+## Durable deletion obligations (10b)
+
+The signed Clerk deletion path tombstones each mode's existing billing customer
+in the same transaction as the user, sets a recovery obligation, and invalidates
+in-flight reconciliation via generation/inputRevision. Resource markers are
+paged in batches of 20 using existing customer index prefixes; a customer
+obligation covers work before these pages finish. Financial rows survive
+`purgeUserData`; retention is separate (10d).
+
+Late customer/session/payment/subscription evidence is retained without granting
+benefits. New evidence reopens recovery (including support/complete), resets its
+attempt budget and advances inputRevision. Bindings compare stored IDs, payment
+application compares its stored state, and ended subscription facts do not reopen
+recovery. A renewable subscription fact still requires recovery if its marker was
+cleared; it is fresh evidence that stopping future charges is not yet proven. This invalidates 10c's pinned evidence without releasing its live
+cancellation lease, so opposing provider writes remain serialized. Duplicate
+Clerk deletion preserves the first deletedAt and support/complete unless resource
+markers reopen the obligation. Unknown creates remain pending for recovery or
+support; deletion never creates a remote customer.
+
+Credit charges can update existing usage rows after a tombstone, but cannot
+insert missing per-user credit/spend rows. Site-wide model spend still records
+incurred costs. Billing holds alone do not block charging. No deletion helper
+shrinks paid periods, credit lots or refunds money. This PR records obligations;
+10c executes provider cancellation. Billing enablement requires 10b–10d together.
 Authorization follows the existing feature-local billingCheckout convention:
 validateInternalKey first, then verifyAuth and both ownerTokenIdentifier/subject
 checks against the resource's customer. The small domain helper is intentionally
 local; broad admin/auth consolidation would change unrelated trust boundaries.
 Same-origin and JSON guards are the identical established shared request helpers.
+
+### Recovery completion contract (10b → 10c)
+
+Before clearing a resource marker, 10c MUST persist the confirmed local terminal
+purchase state or ended subscription status in that same fenced transaction.
+It MUST NOT complete while a purchase is processing/open/unknown or a subscription
+is renewable, or while a control claim can still dispatch. Discovery must retain
+all resource IDs. This lets duplicate deletion batches and canonical ended-state
+replays preserve completion instead of cycling complete → pending. Duplicate
+Clerk deliveries do not advance generation/inputRevision; new resource evidence
+advances only inputRevision and never releases a live receipt/recovery lease.
+Missing mirrored users fail closed for new per-user usage rows and emit a short
+warning without identifiers; existing usage rows remain chargeable.

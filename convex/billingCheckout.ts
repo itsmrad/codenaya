@@ -8,7 +8,8 @@ import { BILLING_CATALOG_VERSION } from "../src/features/billing/settlement";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, type MutationCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
-import { bindCustomerRow, bindPurchaseRow, ensureCustomerRow, reservePurchaseRow } from "./billing";
+import { bindCustomerRow, bindPurchaseRow, ensureCustomerRow, ownerDeleted, reservePurchaseRow } from "./billing";
+import { queueDeletionRecovery } from "./billingDeletion";
 import { readConvexBillingConfig } from "./billingEnv";
 import { MAX_SUBSCRIPTIONS_PER_STATUS } from "./billingFulfill";
 import { countActiveLots, MAX_ACTIVE_LOTS, readPeriodLots } from "./billingGrants";
@@ -167,7 +168,10 @@ export const recordCustomerResult = mutation({
     const identity = await authorize(ctx, internalKey);
     const customer = await ownedCustomer(ctx, identity, customerRef);
     if (customer.creationLeaseId !== leaseId || customer.creationState === "ready") throw conflict();
-    const unknown = () => ctx.db.patch("billingCustomers", customerRef, { creationState: "unknown" });
+    const unknown = async () => {
+      await ctx.db.patch("billingCustomers", customerRef, { creationState: "unknown" });
+      if (customer.creationState !== "unknown" && await ownerDeleted(ctx, customer)) await queueDeletionRecovery(ctx, customer._id);
+    };
     if (result.kind === "created" && PROVIDER_ID.test(result.customerId)) {
       const bound = await ctx.db.query("billingCustomers")
         .withIndex("by_mode_and_customerId", q => q.eq("mode", customer.mode).eq("customerId", result.customerId)).unique();
@@ -226,6 +230,7 @@ export const recordCheckoutResult = mutation({
       await ctx.db.patch("billingCustomers", customer._id, { pendingPurchaseRef: undefined });
     } else {
       await ctx.db.patch("billingPurchases", purchaseRef, { state: "unknown" });
+      if (await ownerDeleted(ctx, customer)) await queueDeletionRecovery(ctx, customer._id);
       console.warn("[billingCheckout] checkout creation outcome unknown; lock kept", { purchaseRef });
       await markPollDue(ctx, customer._id, false);
     }

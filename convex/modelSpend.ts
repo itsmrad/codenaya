@@ -65,6 +65,11 @@ export async function addModelSpend(ctx: MutationCtx, userId: string, modelId: s
     if (row) {
       await ctx.db.patch("modelSpend", row._id, { periodStartsAt, spentUsd });
     } else {
+      if (owner !== null) {
+        const user = await ctx.db.query("users").withIndex("by_clerkUserId", q => q.eq("clerkUserId", owner)).unique();
+        if (!user) console.warn("[modelSpend] skipped per-user insertion without a mirrored user");
+        if (!user || user.deletedAt !== undefined) continue;
+      }
       await ctx.db.insert("modelSpend", { userId: owner, modelId, periodStartsAt, spentUsd });
     }
   }

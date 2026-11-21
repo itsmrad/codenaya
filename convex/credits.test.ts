@@ -19,6 +19,8 @@ type TestConvex = ReturnType<typeof setup>;
 /** An assistant message on a project `ownerId` owns. */
 const seedMessage = (t: TestConvex, ownerId = ALICE) =>
   t.run(async (ctx) => {
+    const user = await ctx.db.query("users").withIndex("by_clerkUserId", q => q.eq("clerkUserId", ownerId)).unique();
+    if (!user) await ctx.db.insert("users", { clerkUserId: ownerId, updatedAt: 1 });
     const projectId = await ctx.db.insert("projects", { name: "App", ownerId, updatedAt: 1 });
     const conversationId = await ctx.db.insert("conversations", { projectId, title: "Chat", updatedAt: 1 });
     return await ctx.db.insert("messages", {
@@ -370,6 +372,7 @@ describe("credits.recordTranscriptionUsage", () => {
   test("charges the user, rounding a fraction of a cent up to a credit", async () => {
     const t = setup();
 
+    await t.run(ctx => ctx.db.insert("users", { clerkUserId: ALICE, updatedAt: 1 }));
     await transcribe(t, 0.0002); // 10 seconds of audio
     await transcribe(t, 0.0002);
 

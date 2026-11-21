@@ -17,6 +17,7 @@ import {
   deleteShowcaseBatch,
 } from "./projectCascade";
 import { recordSignedUp } from "./activationEvents";
+import { markBillingDeleted } from "./billingDeletion";
 import { bumpEnvGeneration } from "./runtimeHandles";
 
 /**
@@ -152,6 +153,8 @@ export const markDeleted = internalMutation({
         updatedAt: now,
       });
     }
+
+    await markBillingDeleted(ctx, clerkUserId, now);
 
     // Hide the first page of projects (and their share links) in this same
     // transaction; a larger account continues from a cursor in the purge.

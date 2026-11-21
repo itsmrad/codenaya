@@ -9,6 +9,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { assertGrantFence, associateUnmappedReceipts, bindPurchaseRow, bindSubscriptionRow, ownerDeleted } from "./billing";
 import { insertGrant, rollOverIntoPeriod } from "./billingGrants";
+import { queueDeletionRecovery } from "./billingDeletion";
 import { markPollDue } from "./billingPoll";
 import { MAX_RECEIPTS_PER_CLAIM } from "./billingQueue";
 import { applyPurchaseReversal, queuePaymentRead, recordAdjustments, reversalDecisionValidator } from "./billingReversals";
@@ -236,6 +237,7 @@ async function createPurchase(ctx: Ctx, customer: Customer, d: Positive, owned: 
     paymentId: d.paymentId, ...(d.kind === "period" ? { subscriptionId: d.subscriptionId } : {}),
     state: owned ? "open" : "quarantined", ...(deleted ? { cancellationRecoveryRequired: true } : {}),
   });
+  if (deleted) await queueDeletionRecovery(ctx, customer._id);
   if (!owned) console.error("[billingFulfill] purchase quarantined", { purchaseRef: ref, paymentId: d.paymentId, reason });
   return (await ctx.db.get("billingPurchases", ref))!;
 }
@@ -304,6 +306,10 @@ async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positi
   // A renewal that carries its checkout's session is still owned; the source key catches a same-period duplicate.
   const purchase = current && !taken ? current
     : await createPurchase(ctx, customer, d, row !== null && !rowMismatch, deleted, taken ? "duplicate_checkout" : "no_purchase");
+  if (deleted && purchase.paymentId !== d.paymentId) {
+    await ctx.db.patch("billingPurchases", purchase._id, { cancellationRecoveryRequired: true });
+    await queueDeletionRecovery(ctx, customer._id);
+  }
   if (purchase.state === "quarantined") return false;
   // A replay: one grant per payment, even if a later read reports another period.
   if (purchase.state === "settled") {
@@ -354,6 +360,10 @@ async function applyPayment(ctx: Ctx, customer: Customer, plan: PaymentPlan, del
   const purchase = plan.purchase && await ctx.db.get("billingPurchases", plan.purchase._id);
   // Only a verified positive binds a payment: a failed attempt leaves the session to its retry.
   if (purchase?.paymentId !== d.paymentId) return false;
+  if (deleted && d.kind === "processing" && ["preparing", "unknown", "open"].includes(purchase.state)) {
+    await ctx.db.patch("billingPurchases", purchase._id, { cancellationRecoveryRequired: true });
+    await queueDeletionRecovery(ctx, customer._id);
+  }
   if (d.kind === "quarantine") {
     if (purchase.state !== "settled") await quarantinePurchase(ctx, purchase, d.paymentId, d.reason);
   } else if (d.kind === "processing" && ["preparing", "unknown", "open"].includes(purchase.state)) {
@@ -384,9 +394,21 @@ const ENDED_STATUS = new Map([["cancelled", "cancelled"], ["expired", "expired"]
 
 async function applySubscription(ctx: Ctx, customer: Customer, { fact, outcome }: SubscriptionPlan, now: number) {
   // Re-read: fulfillment in this commit may have just bound the row.
-  const row = outcome === "processed" ? await subscriptionRow(ctx, customer.mode, fact.subscriptionId) : null;
+  if (outcome !== "processed") return;
+  let row = await subscriptionRow(ctx, customer.mode, fact.subscriptionId);
+  const deleted = await ownerDeleted(ctx, customer);
+  if (!row && deleted) {
+    const ref = await bindSubscriptionRow(ctx, {
+      customerRef: customer._id, mode: customer.mode, subscriptionId: fact.subscriptionId, productId: fact.productId,
+    });
+    row = await ctx.db.get("billingSubscriptions", ref);
+  }
   if (row?.customerRef !== customer._id) return;
   const ended = ENDED_STATUS.get(fact.status as "failed");
+  if (deleted && !ended) {
+    await ctx.db.patch("billingSubscriptions", row._id, { cancellationRecoveryRequired: true });
+    if (!row.cancellationRecoveryRequired) await queueDeletionRecovery(ctx, customer._id);
+  }
   await ctx.db.patch("billingSubscriptions", row._id, {
     observedAt: now, ...(ended ? { status: ended } : {}),
     controlRenewable: fact.status === "active",

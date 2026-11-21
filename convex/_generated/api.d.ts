@@ -16,6 +16,7 @@ import type * as auth from "../auth.js";
 import type * as billing from "../billing.js";
 import type * as billingLifecycle from "../billingLifecycle.js";
 import type * as billingCheckout from "../billingCheckout.js";
+import type * as billingDeletion from "../billingDeletion.js";
 import type * as billingEntitlement from "../billingEntitlement.js";
 import type * as billingEnv from "../billingEnv.js";
 import type * as billingFulfill from "../billingFulfill.js";
@@ -76,6 +77,7 @@ declare const fullApi: ApiFromModules<{
   billing: typeof billing;
   billingLifecycle: typeof billingLifecycle;
   billingCheckout: typeof billingCheckout;
+  billingDeletion: typeof billingDeletion;
   billingEntitlement: typeof billingEntitlement;
   billingEnv: typeof billingEnv;
   billingFulfill: typeof billingFulfill;
