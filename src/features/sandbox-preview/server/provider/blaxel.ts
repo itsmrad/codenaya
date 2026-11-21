@@ -136,6 +136,23 @@ const kill = async (name: string, { requestTimeoutMs }: RequestOptions = {}) => 
 /** E2B's default command timeout, so a `run` without `timeoutMs` behaves the same on both. */
 const DEFAULT_RUN_TIMEOUT_MS = 60_000;
 
+/**
+ * `run` is byte-exact only over sandbox-api's NDJSON exec stream: a hard prerequisite. An
+ * older sandbox-api answers in plain JSON, and the SDK then hands the callbacks the output
+ * split on newlines with the blank lines dropped, which the adapter cannot see or undo. The
+ * SDK bakes sandbox-api into the image at build (`ghcr.io/blaxel-ai/sandbox:latest`), so the
+ * image build runs this known-answer check through the same streamed exec `run` makes.
+ */
+export const assertExactExecStream = async (sandbox: SandboxInstance) => {
+  let streamed = "";
+  await call(() =>
+    sandbox.process.exec({ command: "printf 'a\\n\\nb'", waitForCompletion: true, onStdout: (chunk) => { streamed += chunk; } }),
+  );
+  if (streamed !== "a\n\nb") {
+    throw new SandboxConfigError(`Blaxel's sandbox-api does not stream exec output exactly (got ${JSON.stringify(streamed)}): rebuild the image`);
+  }
+};
+
 /** `streamLogs` (start's path) hands output over one line at a time with its newline stripped; E2B's chunks keep theirs. */
 const lines = (onData?: (data: string) => void) => onData && ((line: string) => onData(`${line}\n`));
 
@@ -161,7 +178,8 @@ const wrap = (sandbox: SandboxInstance): Sandbox => {
             timeout: Math.ceil(timeoutMs / 1000),
             // Always stream: a held, silent request is cut by Blaxel's edge after
             // 120s, while a streamed one gets keepalives. Its chunks are raw output,
-            // newlines kept and split anywhere, as E2B's are: pass them on unchanged.
+            // newlines kept and split anywhere, as E2B's are: pass them on unchanged
+            // (NDJSON only; see assertExactExecStream).
             onStdout: (chunk) => {
               stdout += chunk;
               onStdout?.(chunk);
