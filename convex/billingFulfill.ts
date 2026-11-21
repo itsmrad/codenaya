@@ -9,7 +9,7 @@ import { internalMutation, type MutationCtx } from "./_generated/server";
 import { assertGrantFence, associateUnmappedReceipts, bindSubscriptionRow, ownerDeleted } from "./billing";
 import { insertGrant, rollOverIntoPeriod } from "./billingGrants";
 import { MAX_RECEIPTS_PER_CLAIM } from "./billingQueue";
-import { applyPurchaseReversal, recordAdjustments, reversalDecisionValidator } from "./billingReversals";
+import { applyPurchaseReversal, queuePaymentRead, recordAdjustments, reversalDecisionValidator } from "./billingReversals";
 
 /**
  * Fenced fulfillment of reconciled Dodo facts (ADR 0016). One transaction settles each
@@ -367,7 +367,8 @@ export const commitReconciliation = internalMutation({
     for (const fact of args.subscriptions) subscriptions.push(await planSubscription(ctx, customer, fact));
     // Never depends on the positives: a negative resolves from its payment's fresh read alone.
     const reversalOutcomes = new Map(payments.map(plan => [plan.fact.paymentId, reversalOutcome(plan.fact)]));
-    const resolved = new Set(receipts.filter(r => NEGATIVE_EVENT.test(r.eventType) && r.paymentId && reversalOutcomes.get(r.paymentId) === "processed").map(r => r._id));
+    const resolvedNegatives = receipts.filter(r => NEGATIVE_EVENT.test(r.eventType) && r.paymentId && reversalOutcomes.get(r.paymentId) === "processed");
+    const resolved = new Set(resolvedNegatives.map(r => r._id));
     // Decided before any write: skipped positives stay pending while everything else commits.
     const allowed = await positivesMayCommit(ctx, customer, payments, resolved);
     const paymentOutcomes = new Map(payments.map(p => [p.fact.paymentId, p.positive && !allowed ? "pending" as const : p.outcome]));
@@ -381,6 +382,11 @@ export const commitReconciliation = internalMutation({
     for (const plan of payments) await applyReversal(ctx, customer, plan.fact, deleted, now);
     for (const plan of subscriptions) await applySubscription(ctx, customer, plan, now);
     await markReceipts(ctx, customer, receipts, receipts.map(receipt => receiptOutcome(receipt, paymentOutcomes, subscriptionOutcomes, reversalOutcomes)));
+    // A deferred payment whose negative just resolved keeps a retry of its own (the negative no longer does).
+    if (!allowed) {
+      const settledLater = new Set(resolvedNegatives.map(r => r.paymentId));
+      for (const plan of payments) if (plan.positive && settledLater.has(plan.fact.paymentId)) await queuePaymentRead(ctx, customer._id, plan.fact.paymentId, now);
+    }
     // Defence in depth: checked above, so a throw is a bug and rolls the commit back.
     if (granted) await assertGrantFence(ctx, customer._id, args.fence);
     const blocked = !allowed && payments.some(plan => plan.positive);

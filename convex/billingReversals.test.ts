@@ -333,6 +333,60 @@ describe("disputes", () => {
   });
 });
 
+describe("deferred settlement after a resolved negative", () => {
+  const failed = (paymentId: string) => fact({ kind: "no_grant", paymentId, reason: "failed" } as never);
+  const reads = async (t: T) => (await all(t, "billingEvents")).filter(e => e.eventType === "payment.reconcile");
+
+  test("a refund resolved while its payment waits on another negative queues one read that later grants the net once", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await checkout(t, alice, "top_up");
+    await receive(t, alice, "refund.succeeded", "pay_q"); // its read fails in the first claim: no fact
+    await receive(t, alice, "refund.succeeded", "pay_1"); // the only receipt naming pay_1
+    const p1 = fact(topUp("pay_1"), refunds(refund("rfd_1", 1000)), "cks_1");
+    expect(await reconcile(t, alice, [p1])).toBe("blocked");
+    expect(await all(t, "billingGrants")).toEqual([]);
+    expect((await all(t, "billingEvents")).map(e => [e.paymentId, e.eventType, e.state])).toEqual([
+      ["pay_q", "refund.succeeded", "pending"], ["pay_1", "refund.succeeded", "processed"], ["pay_1", "payment.reconcile", "pending"],
+    ]);
+    // Session-only purchase: nothing bound yet, the reversal waits in its adjustment row.
+    expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).toMatchObject({ state: "preparing" });
+    expect((await t.run(ctx => ctx.db.get("billingCustomers", alice)))?.unresolvedReceipts).toBe(2);
+
+    // Still fenced on a retry: the queued read backs off, and no second one is added.
+    vi.setSystemTime(NOW + 5 * 60_000);
+    expect(await reconcile(t, alice, [p1])).toBe("blocked");
+    expect(await reads(t)).toHaveLength(1);
+
+    vi.setSystemTime(NOW + 30 * 60_000);
+    expect(await reconcile(t, alice, [p1, failed("pay_q")])).toBe("committed");
+    expect(await lots(t)).toEqual([{ kind: "top_up", revoked: 500, consumed: 0, exhausted: undefined, fullyReversed: undefined }]);
+    expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).toMatchObject({ state: "settled", paymentId: "pay_1", revokedCredits: 500 });
+    const after = (await t.run(ctx => ctx.db.get("billingCustomers", alice)))!;
+    expect([after.unresolvedReceipts, after.pendingPurchaseRef]).toEqual([0, undefined]);
+    expect(await states(t)).toEqual(["processed", "processed", "processed"]);
+
+    // A later replay of the payment grants nothing more and queues nothing.
+    await receive(t, alice, "payment.succeeded", "pay_1");
+    vi.setSystemTime(NOW + 60 * 60_000);
+    expect(await reconcile(t, alice, [p1])).toBe("committed");
+    expect(await lots(t)).toEqual([{ kind: "top_up", revoked: 500, consumed: 0, exhausted: undefined, fullyReversed: undefined }]);
+    expect(await reads(t)).toHaveLength(1);
+  });
+
+  test("no read is queued while a positive receipt for the payment is still pending", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    await checkout(t, alice, "top_up");
+    await receive(t, alice, "refund.succeeded", "pay_q");
+    await receive(t, alice, "payment.succeeded", "pay_1");
+    await receive(t, alice, "refund.succeeded", "pay_1");
+    expect(await reconcile(t, alice, [fact(topUp("pay_1"), refunds(refund("rfd_1", 1000)), "cks_1")])).toBe("blocked");
+    expect(await states(t)).toEqual(["pending", "pending", "processed"]);
+    expect(await reads(t)).toEqual([]);
+  });
+});
+
 describe("grant fence", () => {
   test("an unresolved refund of a payment not in this commit still blocks grants", async () => {
     const t = setup();

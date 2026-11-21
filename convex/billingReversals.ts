@@ -5,6 +5,7 @@ import { cumulativeReversedMinor, MAX_ADJUSTMENTS_PER_PAYMENT, revocationTarget 
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { addReversalDebt, exhaustedIf } from "./billingGrants";
+import { MAX_RECEIPTS_PER_CLAIM } from "./billingQueue";
 
 /**
  * Commits refunds and disputes read fresh off a payment (ADR 0016, docs/billing-stage8.md).
@@ -17,6 +18,9 @@ import { addReversalDebt, exhaustedIf } from "./billingGrants";
 export const MAX_LOTS_PER_PURCHASE = 2;
 /** Refund and dispute rows of one payment: both provider lists at their cap. */
 const MAX_ROWS_PER_PAYMENT = 2 * MAX_ADJUSTMENTS_PER_PAYMENT;
+/** Internal positive receipt type: a fresh read of one payment, reconciled like `payment.*`. */
+export const PAYMENT_READ_EVENT = "payment.reconcile";
+const NEGATIVE_EVENT = /^(refund|dispute)\./;
 
 const amountValidator = v.union(v.number(), v.null());
 /** `ReversalDecision` from `src/features/billing/reversals.ts`, as the reconciler sends it. */
@@ -111,4 +115,32 @@ export async function applyPurchaseReversal(
   }
   await ctx.db.patch("billingPurchases", purchase._id, { ...fields, revokedCredits: target });
   console.warn("[billingReversals] credits revoked", { purchaseRef: purchase._id, target, debt: left, reversedMinor, totalMinor });
+}
+
+/**
+ * A refund or dispute of `paymentId` resolved while the payment's own grant waited on another fence
+ * reason: that negative may have been the only receipt naming the payment. Queues one pending positive
+ * receipt so the payment is read again and settles (net of its reversal) once the fence clears. A
+ * positive never fences grants, so it cannot deadlock. Nothing is queued for a settled payment or
+ * while another pending positive receipt names it. Call after the commit's receipts are marked.
+ */
+export async function queuePaymentRead(ctx: MutationCtx, customerRef: Id<"billingCustomers">, paymentId: string, now: number) {
+  const customer = (await ctx.db.get("billingCustomers", customerRef))!;
+  const purchase = await ctx.db.query("billingPurchases")
+    .withIndex("by_mode_and_paymentId", q => q.eq("mode", customer.mode).eq("paymentId", paymentId)).unique();
+  if (purchase?.state === "settled") return;
+  const pending = await ctx.db.query("billingEvents")
+    .withIndex("by_mode_and_paymentId_and_state", q => q.eq("mode", customer.mode).eq("paymentId", paymentId).eq("state", "pending"))
+    .take(MAX_RECEIPTS_PER_CLAIM + 1);
+  // Past the bound the rest stay pending and retry on their own.
+  if (pending.length > MAX_RECEIPTS_PER_CLAIM || pending.some(row => !NEGATIVE_EVENT.test(row.eventType))) return;
+  // One per claim at most: the generation is the claim's lease token.
+  await ctx.db.insert("billingEvents", {
+    customerRef, mode: customer.mode, webhookId: `reconcile:payment:${paymentId}:${customer.generation}`, eventType: PAYMENT_READ_EVENT,
+    paymentId, occurredAt: now, receivedAt: now, bodyDigest: "0".repeat(64), state: "pending", attempts: 0, nextAttemptAt: now,
+    generation: customer.generation,
+  });
+  // Counted like any receipt; the claim's release reschedules the customer from it.
+  await ctx.db.patch("billingCustomers", customerRef, { inputRevision: customer.inputRevision + 1, unresolvedReceipts: customer.unresolvedReceipts + 1 });
+  console.warn("[billingReversals] payment read queued", { customerRef, paymentId });
 }

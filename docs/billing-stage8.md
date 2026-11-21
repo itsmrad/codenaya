@@ -52,7 +52,11 @@ polling, resolve from a fresh read of their payment and stop blocking grants.
    commit, and the purchase is re-read by payment id, so a refund seen with its
    payment (or before it) is never spendable. A refund or dispute receipt this
    commit resolves no longer blocks the customer's grants; any other unresolved
-   one, and every quarantined one, still does.
+   one, and every quarantined one, still does. When such a negative resolves
+   while its payment's own grant waits on another fence reason, the commit
+   queues one internal `payment.reconcile` receipt for that payment (unless it
+   is settled or another positive receipt names it), so the payment is read
+   again and settles net of its reversal once the fence clears.
 9. **Unknown and foreign.** An unknown reversal writes nothing: its receipts
    stay pending (backoff, then dead letter) and that payment's grant waits. A
    refund or dispute whose payment belongs to another provider customer is
@@ -81,3 +85,6 @@ receipts come with the operator mutations (stage 8c).
   known or an operator resolves it.
 - An unknown reversal that never becomes known dead-letters its receipt, which
   keeps blocking that customer's grants until an operator resolves it.
+- A dispute hold is recorded here, but freezing platform-funded spending during
+  it is enforced at the stage 11 access gates. Billing must not launch on this
+  stage alone.
