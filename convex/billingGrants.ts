@@ -86,7 +86,7 @@ export async function insertGrant(ctx: MutationCtx, terms: GrantTerms): Promise<
 }
 
 /** The user's unexpired, unexhausted `mode` lots of `kind`: what spending reads and checkout counts. */
-const activeLotsQuery = (ctx: MutationCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
+const activeLotsQuery = (ctx: QueryCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
   ctx.db
     .query("billingGrants")
     .withIndex("by_userId_and_mode_and_kind_and_exhausted_and_expiresAt", (q) =>
@@ -94,7 +94,7 @@ const activeLotsQuery = (ctx: MutationCtx, userId: string, mode: Mode, kind: Gra
     );
 
 /** How many active `kind` lots the user holds, read up to the kind's cap (checkout refuses at the cap). */
-export const countActiveLots = async (ctx: MutationCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
+export const countActiveLots = async (ctx: QueryCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
   (await activeLotsQuery(ctx, userId, mode, kind, now).take(MAX_ACTIVE_LOTS[kind])).length;
 
 /**
