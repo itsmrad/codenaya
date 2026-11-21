@@ -4,18 +4,22 @@ import { currentUsage } from "../src/features/billing/credits";
 import { currentFreeAllocation } from "../src/features/billing/free-allocation";
 import { topUpExpiresAt } from "../src/features/billing/grants";
 import { BILLING_CATALOG_VERSION } from "../src/features/billing/settlement";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { assertGrantFence, associateUnmappedReceipts, bindSubscriptionRow, ownerDeleted } from "./billing";
 import { insertGrant, rollOverIntoPeriod } from "./billingGrants";
 import { markPollDue } from "./billingPoll";
+import { MAX_RECEIPTS_PER_CLAIM } from "./billingQueue";
+import { applyPurchaseReversal, queuePaymentRead, recordAdjustments, reversalDecisionValidator } from "./billingReversals";
 
 /**
  * Fenced fulfillment of reconciled Dodo facts (ADR 0016). One transaction settles each
  * payment and its grant together, projects subscriptions and marks receipts. A business
  * outcome never throws: that would roll back the batch's other outcomes. Positives
- * (grants for a live owner) commit only under an unchanged fence with no unresolved
- * refund or dispute for the customer; pending positives left for later claims never block.
+ * (grants for a live owner) commit only under an unchanged fence, with a known reversal
+ * for their payment and no unresolved refund or dispute for the customer outside this
+ * commit; pending positives left for later claims never block. Every payment's refunds
+ * and disputes are applied right after its settlement, in the same transaction.
  */
 
 export const MAX_UNMAPPED_CHECK = 20;
@@ -46,6 +50,7 @@ const paymentFactValidator = v.object({
   paymentId: v.string(), decision: settlementDecisionValidator, sessionId: v.optional(v.string()),
   purchaseIdHint: v.optional(v.string()),
   currency: v.optional(v.string()), totalMinor: v.optional(v.number()), taxMinor: v.optional(v.number()),
+  reversal: reversalDecisionValidator,
 });
 
 type Ctx = MutationCtx;
@@ -101,6 +106,8 @@ async function planPayment(ctx: Ctx, customer: Customer, fact: PaymentFact, dele
     console.error("[billingFulfill] payment matches another customer's purchase", { customerRef: customer._id, paymentId: d.paymentId });
     return { ...plan, outcome: "processed" };
   }
+  // Never grant while the payment's refunds or disputes are unknown.
+  if (fact.reversal.kind === "unknown") return { ...plan, outcome: "pending" };
   return { ...plan, outcome: "processed", positive: !deleted };
 }
 
@@ -110,9 +117,17 @@ async function planSubscription(ctx: Ctx, customer: Customer, fact: Subscription
   return { fact, outcome: foreign ? "quarantined" : "processed" };
 }
 
+const isMismatch = ({ decision: d }: PaymentFact) => d.kind === "quarantine" && d.reason === "customer_mismatch";
+
+/** A refund or dispute receipt is final once its payment's reversal is known; another customer's payment is for support. */
+const reversalOutcome = (fact: PaymentFact): Outcome =>
+  isMismatch(fact) ? "quarantined" : fact.reversal.kind === "known" && fact.totalMinor !== undefined ? "processed" : "pending";
+
 /** A receipt is final only when every resource it names reached a final outcome. */
-function receiptOutcome(receipt: Doc<"billingEvents">, payments: Map<string, Outcome>, subscriptions: Map<string, Outcome>): Outcome {
-  if (NEGATIVE_EVENT.test(receipt.eventType)) return "pending"; // refunds and disputes stay fenced until stage 8
+function receiptOutcome(
+  receipt: Doc<"billingEvents">, payments: Map<string, Outcome>, subscriptions: Map<string, Outcome>, reversals: Map<string, Outcome>,
+): Outcome {
+  if (NEGATIVE_EVENT.test(receipt.eventType)) return (receipt.paymentId && reversals.get(receipt.paymentId)) || "pending";
   if (!PROVIDER_EVENT.test(receipt.eventType)) return "processed"; // a redriven unsupported type
   const parts = [
     receipt.paymentId === undefined ? "processed" : payments.get(receipt.paymentId) ?? "pending",
@@ -126,7 +141,7 @@ function receiptOutcome(receipt: Doc<"billingEvents">, payments: Map<string, Out
  * A positive's payment read showed this customer, so its unmapped receipts are attached first; any
  * attachment moves the fence and adds unresolved receipts, so no positive commits in this transaction.
  */
-async function positivesMayCommit(ctx: Ctx, customer: Customer, plans: PaymentPlan[]) {
+async function positivesMayCommit(ctx: Ctx, customer: Customer, plans: PaymentPlan[], resolved: Set<Id<"billingEvents">>) {
   let attached = 0;
   for (const { fact } of plans.filter(plan => plan.positive)) {
     attached += await associateUnmappedReceipts(ctx, customer, { paymentId: fact.paymentId });
@@ -134,13 +149,15 @@ async function positivesMayCommit(ctx: Ctx, customer: Customer, plans: PaymentPl
   if (attached || customer.hold) return false;
   const account = await ctx.db.query("creditAccounts").withIndex("by_userId", q => q.eq("userId", customer.userId)).unique();
   if (account?.paidCreditsMode !== undefined && account.paidCreditsMode !== customer.mode) return false;
-  // Any refund or dispute of this customer that is unresolved (pending, processing, dead-lettered, collided) blocks.
-  // "processing" is never written for receipts today; it is read anyway so a future writer cannot bypass this.
+  // Any refund or dispute of this customer that is unresolved (pending, processing, dead-lettered, collided) blocks,
+  // unless this commit resolves it. "processing" is never written for receipts today; it is read anyway so a future
+  // writer cannot bypass this. Past the bound one may be unread: fail closed.
   for (const state of ["pending", "processing", "quarantined"] as const) {
     for (const prefix of NEGATIVE_PREFIXES) {
-      const negative = await ctx.db.query("billingEvents").withIndex("by_customerRef_and_state_and_eventType", q =>
-        q.eq("customerRef", customer._id).eq("state", state).gte("eventType", prefix).lt("eventType", `${prefix.slice(0, -1)}/`)).first();
-      if (negative) return false;
+      const negatives = await ctx.db.query("billingEvents").withIndex("by_customerRef_and_state_and_eventType", q =>
+        q.eq("customerRef", customer._id).eq("state", state).gte("eventType", prefix).lt("eventType", `${prefix.slice(0, -1)}/`))
+        .take(MAX_RECEIPTS_PER_CLAIM + 1);
+      if (negatives.length > MAX_RECEIPTS_PER_CLAIM || negatives.some(row => !resolved.has(row._id))) return false;
     }
   }
   for (const { fact } of plans.filter(plan => plan.positive)) {
@@ -289,6 +306,21 @@ async function applyPayment(ctx: Ctx, customer: Customer, plan: PaymentPlan, del
   return false;
 }
 
+/**
+ * Records a known reversal and applies it to the payment's purchase, re-read because settlement in this
+ * commit may have just bound or created it. Another customer's facts or purchase are never written.
+ */
+async function applyReversal(ctx: Ctx, customer: Customer, fact: PaymentFact, deleted: boolean, now: number) {
+  const { reversal, totalMinor, paymentId } = fact;
+  if (reversalOutcome(fact) !== "processed" || reversal.kind !== "known" || totalMinor === undefined) return;
+  const purchase = await ctx.db.query("billingPurchases")
+    .withIndex("by_mode_and_paymentId", q => q.eq("mode", customer.mode).eq("paymentId", paymentId)).unique();
+  const owned = purchase?.customerRef === customer._id ? purchase : null;
+  if (purchase && !owned) console.error("[billingFulfill] reversal for another customer's purchase", { customerRef: customer._id, paymentId });
+  const reversed = await recordAdjustments(ctx, customer, paymentId, reversal, totalMinor, owned?._id, now);
+  if (owned) await applyPurchaseReversal(ctx, customer, owned, reversed, totalMinor, deleted);
+}
+
 const ENDED_STATUS = new Map([["cancelled", "cancelled"], ["expired", "expired"], ["failed", "expired"]] as const);
 
 async function applySubscription(ctx: Ctx, customer: Customer, { fact, outcome }: SubscriptionPlan, now: number) {
@@ -346,8 +378,12 @@ export const commitReconciliation = internalMutation({
     for (const fact of args.payments) payments.push(await planPayment(ctx, customer, fact, deleted));
     const subscriptions: SubscriptionPlan[] = [];
     for (const fact of args.subscriptions) subscriptions.push(await planSubscription(ctx, customer, fact));
+    // Never depends on the positives: a negative resolves from its payment's fresh read alone.
+    const reversalOutcomes = new Map(payments.map(plan => [plan.fact.paymentId, reversalOutcome(plan.fact)]));
+    const resolvedNegatives = receipts.filter(r => NEGATIVE_EVENT.test(r.eventType) && r.paymentId && reversalOutcomes.get(r.paymentId) === "processed");
+    const resolved = new Set(resolvedNegatives.map(r => r._id));
     // Decided before any write: skipped positives stay pending while everything else commits.
-    const allowed = await positivesMayCommit(ctx, customer, payments);
+    const allowed = await positivesMayCommit(ctx, customer, payments, resolved);
     const paymentOutcomes = new Map(payments.map(p => [p.fact.paymentId, p.positive && !allowed ? "pending" as const : p.outcome]));
     const subscriptionOutcomes = new Map(subscriptions.map(plan => [plan.fact.subscriptionId, plan.outcome]));
     let granted = false;
@@ -355,8 +391,15 @@ export const commitReconciliation = internalMutation({
       if (plan.outcome !== "processed" || (plan.positive && !allowed)) continue;
       if (await applyPayment(ctx, customer, plan, deleted, now)) granted = true;
     }
+    // After every settlement, so a refund observed with its payment is never spendable.
+    for (const plan of payments) await applyReversal(ctx, customer, plan.fact, deleted, now);
     for (const plan of subscriptions) await applySubscription(ctx, customer, plan, now);
-    await markReceipts(ctx, customer, receipts, receipts.map(receipt => receiptOutcome(receipt, paymentOutcomes, subscriptionOutcomes)));
+    await markReceipts(ctx, customer, receipts, receipts.map(receipt => receiptOutcome(receipt, paymentOutcomes, subscriptionOutcomes, reversalOutcomes)));
+    // A deferred payment whose negative just resolved keeps a retry of its own (the negative no longer does).
+    if (!allowed) {
+      const settledLater = new Set(resolvedNegatives.map(r => r.paymentId));
+      for (const plan of payments) if (plan.positive && settledLater.has(plan.fact.paymentId)) await queuePaymentRead(ctx, customer._id, plan.fact.paymentId, now);
+    }
     // Defence in depth: checked above, so a throw is a bug and rolls the commit back.
     if (granted) await assertGrantFence(ctx, customer._id, args.fence);
     const blocked = !allowed && payments.some(plan => plan.positive);

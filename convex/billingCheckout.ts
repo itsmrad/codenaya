@@ -13,6 +13,7 @@ import { readConvexBillingConfig } from "./billingEnv";
 import { MAX_SUBSCRIPTIONS_PER_STATUS } from "./billingFulfill";
 import { countActiveLots, MAX_ACTIVE_LOTS, readPeriodLots } from "./billingGrants";
 import { markPollDue } from "./billingPoll";
+import { hasActiveHold } from "./billingReversals";
 import { appError } from "./errors";
 import { validateInternalKey } from "./internalKey";
 import { billingModeValidator } from "./schema";
@@ -89,7 +90,7 @@ async function heldLock(ctx: MutationCtx, purchaseRef: Id<"billingPurchases">, s
   return { kind: "pending" as const };
 }
 
-const refused = (code: "already_subscribed" | "not_pro" | "top_up_cap" | "support_required" | "unavailable") =>
+const refused = (code: "already_subscribed" | "not_pro" | "top_up_cap" | "support_required" | "unavailable" | "on_hold") =>
   ({ kind: "refused" as const, code });
 
 /** Decides the next step of a checkout request. Never calls the provider. */
@@ -100,7 +101,10 @@ export const prepareCheckout = mutation({
     v.object({ kind: v.literal("pending") }),
     v.object({
       kind: v.literal("refused"),
-      code: v.union(v.literal("already_subscribed"), v.literal("not_pro"), v.literal("top_up_cap"), v.literal("support_required"), v.literal("unavailable")),
+      code: v.union(
+        v.literal("already_subscribed"), v.literal("not_pro"), v.literal("top_up_cap"), v.literal("support_required"), v.literal("unavailable"),
+        v.literal("on_hold"),
+      ),
     }),
     v.object({ kind: v.literal("create_customer"), customerRef: v.id("billingCustomers"), leaseId: v.string() }),
     // `customerId`: the provider customer bound to the caller's own row in `mode`, for the checkout create.
@@ -116,6 +120,8 @@ export const prepareCheckout = mutation({
     const customerRef = await ensureCustomerRow(ctx, { mode, ownerTokenIdentifier: identity.tokenIdentifier, userId: identity.subject });
     const customer = (await ctx.db.get("billingCustomers", customerRef))!;
     const now = Date.now();
+    // A dispute or support hold: never hand out a new checkout or resume an open one.
+    if (await hasActiveHold(ctx, customerRef)) return refused("on_hold");
     if (customer.pendingPurchaseRef) return await heldLock(ctx, customer.pendingPurchaseRef, sku, now);
     // Refusals come before customer creation, so no email leaves us for a request we would refuse.
     if (sku === "pro_monthly") {

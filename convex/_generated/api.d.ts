@@ -22,6 +22,7 @@ import type * as billingOperator from "../billingOperator.js";
 import type * as billingPoll from "../billingPoll.js";
 import type * as billingQueue from "../billingQueue.js";
 import type * as billingReconcile from "../billingReconcile.js";
+import type * as billingReversals from "../billingReversals.js";
 import type * as billingWebhook from "../billingWebhook.js";
 import type * as chatImages from "../chatImages.js";
 import type * as checkpointComparison from "../checkpointComparison.js";
@@ -79,6 +80,7 @@ declare const fullApi: ApiFromModules<{
   billingPoll: typeof billingPoll;
   billingQueue: typeof billingQueue;
   billingReconcile: typeof billingReconcile;
+  billingReversals: typeof billingReversals;
   billingWebhook: typeof billingWebhook;
   chatImages: typeof chatImages;
   checkpointComparison: typeof checkpointComparison;

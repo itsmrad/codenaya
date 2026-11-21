@@ -157,6 +157,27 @@ describe("checkout bridge authorization", () => {
     await expect(prepare(bob)).rejects.toThrow("FORBIDDEN");
     expect(await customerOf(t, "user_bob")).toBeNull();
   });
+
+  test("an active dispute hold refuses the resume of an open session and any new checkout until released", async () => {
+    const t = setup();
+    const alice = await user(t, "user_alice");
+    const { purchaseRef } = await reserved(t, alice, "user_alice");
+    await recordCheckout(alice, purchaseRef, { kind: "created", sessionId: "cks_alice", checkoutUrl: URL_OK });
+    const customer = (await customerOf(t, "user_alice"))!;
+    const holdRef = await t.run(ctx => ctx.db.insert("billingAdjustments", {
+      mode, customerRef: customer._id, paymentId: "pay_1", kind: "dispute", providerId: "dsp_1", status: "opened",
+      countedMinor: 0, holdActive: true, observedAt: NOW,
+    }));
+    expect(await prepare(alice)).toEqual({ kind: "refused", code: "on_hold" });
+    expect(await prepare(alice, "top_up")).toEqual({ kind: "refused", code: "on_hold" });
+    await t.run(ctx => ctx.db.patch("billingCustomers", customer._id, { pendingPurchaseRef: undefined }));
+    await expect(t.mutation(internal.billing.reservePurchase, {
+      customerRef: customer._id, intentId: "intent_held",
+      terms: { sku: "top_up", catalogVersion: BILLING_CATALOG_VERSION, productId: TOP_UP, quantity: 1, credits: 1000 },
+    })).rejects.toThrow("FORBIDDEN");
+    await t.run(ctx => ctx.db.patch("billingAdjustments", holdRef, { holdActive: false, status: "won" }));
+    expect(await prepare(alice)).toMatchObject({ kind: "create_checkout" });
+  });
 });
 
 describe("checkout lifecycle", () => {
@@ -248,7 +269,6 @@ describe("checkout lifecycle", () => {
     expect(await prepare(alice)).toEqual({ kind: "pending" });
     await recordCheckout(alice, purchaseRef, { kind: "not_created" });
     expectRow(await purchaseOf(t, purchaseRef), { state: "unknown" });
-    expect((await customerOf(t, "user_alice"))!.nextPollAt).toBe(Date.now() + 15 * 60_000);
     expect((await customerOf(t, "user_alice"))!.pendingPurchaseRef).toBe(purchaseRef);
     await recordCheckout(alice, purchaseRef, { kind: "created", sessionId: "cks_late", checkoutUrl: URL_OK });
     expectRow(await purchaseOf(t, purchaseRef), { state: "open", sessionId: "cks_late", paymentId: undefined });
@@ -275,6 +295,7 @@ describe("checkout lifecycle", () => {
     vi.setSystemTime(NOW + CHECKOUT_PREPARE_STALE_MS + 1);
     expect(await prepare(alice)).toEqual({ kind: "pending" });
     expectRow(await purchaseOf(t, purchaseRef), { state: "unknown" });
+    expect((await customerOf(t, "user_alice"))!.nextPollAt).toBe(Date.now() + 15 * 60_000);
     expect((await customerOf(t, "user_alice"))!.pendingPurchaseRef).toBe(purchaseRef);
     await recordCheckout(alice, purchaseRef, { kind: "created", sessionId: "cks_late", checkoutUrl: URL_OK });
     expect(await prepare(alice)).toEqual({ kind: "resume", checkoutUrl: URL_OK });

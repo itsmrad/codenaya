@@ -24,6 +24,8 @@ export interface GrantLot {
   transferred?: number;
   /** Paid toward recorded debt when the lot was granted. */
   debtOffset?: number;
+  /** Its purchase was fully refunded or lost a dispute. */
+  fullyReversed?: true;
 }
 
 /** Credits of `lot` nobody spent, revoked, carried over or used to pay debt, ignoring expiry. */
@@ -56,11 +58,18 @@ export function topUpExpiresAt(settledAt: number): number {
 /**
  * Whether the account is in a paid period at `now`: it holds an unexpired,
  * started period lot, spent or not, so a Pro user who used up the period stays
- * off the Free allocation. Stage 11's entitlement rule may replace this.
+ * off the Free allocation. A fully reversed period lot never counts: after
+ * spending, its revoked credits stay below its quantity. Stage 11's
+ * entitlement rule may replace this.
  */
 export const isInPaidPeriod = (lots: (GrantLot & { serviceStart?: number })[], now: number) =>
   lots.some(
-    (lot) => lot.kind === "current_period" && lot.expiresAt > now && lot.serviceStart !== undefined && lot.serviceStart <= now,
+    (lot) =>
+      lot.kind === "current_period" &&
+      lot.fullyReversed !== true &&
+      lot.expiresAt > now &&
+      lot.serviceStart !== undefined &&
+      lot.serviceStart <= now,
   );
 
 /**

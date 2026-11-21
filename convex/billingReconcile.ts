@@ -1,3 +1,4 @@
+import { decideReversal } from "../src/features/billing/reversals";
 import { DodoReadError, fetchPayment, fetchSubscription } from "../src/features/billing/server/dodo-reads";
 import { decideSettlement, type ProviderPayment, type ProviderSubscription } from "../src/features/billing/settlement";
 import { internal } from "./_generated/api";
@@ -9,8 +10,8 @@ import type { Claim } from "./billingQueue";
 
 /** 20 × the 15 s read timeout stays well inside the 10-minute action limit and the 11-minute lease. */
 export const MAX_PROVIDER_READS_PER_CLAIM = 20;
-const PROVIDER_EVENT = /^(payment|subscription)\./;
-const NEGATIVE_EVENT = /^(refund|dispute)\./;
+// Refunds and disputes carry their payment's id and resolve from the same fresh read.
+const PROVIDER_EVENT = /^(payment|subscription|refund|dispute)\./;
 
 type Receipt = Claim["receipts"][number];
 type Read = "read" | "failed" | "over_budget";
@@ -64,10 +65,9 @@ export const reconcileClaim = async (ctx: ActionCtx, customerRef: Id<"billingCus
     return "read";
   };
 
-  // Sequential, in claim order; refunds and disputes stay pending (stage 8).
+  // Sequential, in claim order.
   const covered: Receipt[] = [];
   for (const receipt of claim.receipts) {
-    if (NEGATIVE_EVENT.test(receipt.eventType)) continue;
     const result = await readAll(receipt);
     if (result === "over_budget") break;
     if (result === "read") covered.push(receipt);
@@ -83,6 +83,7 @@ export const reconcileClaim = async (ctx: ActionCtx, customerRef: Id<"billingCus
     const { currency, totalMinor, taxMinor } = payment;
     paymentFacts.set(payment.paymentId, {
       paymentId: payment.paymentId, decision, sessionId: payment.sessionId ?? sessionId, purchaseIdHint: payment.purchaseIdHint, currency: currency || undefined, totalMinor, taxMinor,
+      reversal: decideReversal(payment),
     });
   }
 
