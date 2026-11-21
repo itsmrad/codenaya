@@ -15,6 +15,7 @@ import type * as aiProviders from "../aiProviders.js";
 import type * as auth from "../auth.js";
 import type * as billing from "../billing.js";
 import type * as billingCheckout from "../billingCheckout.js";
+import type * as billingEntitlement from "../billingEntitlement.js";
 import type * as billingEnv from "../billingEnv.js";
 import type * as billingFulfill from "../billingFulfill.js";
 import type * as billingGrants from "../billingGrants.js";
@@ -71,6 +72,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   billing: typeof billing;
   billingCheckout: typeof billingCheckout;
+  billingEntitlement: typeof billingEntitlement;
   billingEnv: typeof billingEnv;
   billingFulfill: typeof billingFulfill;
   billingGrants: typeof billingGrants;
