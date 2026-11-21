@@ -36,6 +36,9 @@ const mocks = vi.hoisted(() => {
     list: vi.fn(),
     delete: vi.fn(),
     updateLifecycle: vi.fn(),
+    updateMetadata: vi.fn(),
+    snapshot: { create: vi.fn(), get: vi.fn(), delete: vi.fn() },
+    forkSnapshot: vi.fn(),
   };
 });
 
@@ -49,7 +52,10 @@ vi.mock("@blaxel/core", () => ({
     list: mocks.list,
     delete: mocks.delete,
     updateLifecycle: mocks.updateLifecycle,
+    updateMetadata: mocks.updateMetadata,
   },
+  Snapshot: mocks.snapshot,
+  forkSnapshot: mocks.forkSnapshot,
 }));
 
 import { DEV_COMMAND_ENV, PROXY_TARGET_ENV } from "../dev-server";
@@ -509,6 +515,105 @@ describe("Blaxel provider", () => {
 
       expect(await sandbox.info()).toEqual({ metadata: { userId: "u1" }, endAt: new Date(NOW + 5_000) });
       await expect(sandbox.kill()).resolves.toBeUndefined();
+    });
+  });
+
+  describe("snapshots", () => {
+    const date = (endAt: number) => ({ expirationPolicies: [{ type: "date", value: iso(endAt), action: "delete" }] });
+    const fork = (snapshotId: string, timeoutMs: number, metadata: Record<string, string>) =>
+      provider.createFromSnapshot!(snapshotId, { timeoutMs, metadata });
+
+    it("snapshots the sandbox by its name and resolves once the snapshot is ready", async () => {
+      mocks.get.mockResolvedValue(instance());
+      mocks.snapshot.create.mockResolvedValue({ id: "snap-1", status: "PENDING" });
+      mocks.snapshot.get.mockResolvedValueOnce({ id: "snap-1", status: "pending" }).mockResolvedValueOnce({ id: "snap-1", status: "ready" });
+      const sandbox = await provider.connect("cn-abc");
+
+      const snapshot = provider.snapshot!(sandbox, { requestTimeoutMs: 30_000 });
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      await expect(snapshot).resolves.toBe("snap-1");
+      expect(mocks.snapshot.create).toHaveBeenCalledWith({ source: { name: "cn-abc" } });
+      expect(mocks.snapshot.get).toHaveBeenCalledTimes(2);
+      expect(mocks.snapshot.delete).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["fails", () => mocks.snapshot.get.mockResolvedValue({ id: "snap-1", status: "failed" }), Error],
+      ["stays pending past its budget", () => mocks.snapshot.get.mockResolvedValue({ id: "snap-1", status: "pending" }), SandboxTimeoutError],
+    ])("deletes a snapshot that %s", async (_, arrange, type) => {
+      mocks.get.mockResolvedValue(instance());
+      mocks.snapshot.create.mockResolvedValue({ id: "snap-1", status: "pending" });
+      mocks.snapshot.delete.mockResolvedValue(undefined);
+      arrange();
+      const sandbox = await provider.connect("cn-abc");
+
+      const snapshot = provider.snapshot!(sandbox, { requestTimeoutMs: 5_000 });
+      const expectation = expect(snapshot).rejects.toBeInstanceOf(type);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expectation;
+      expect(mocks.snapshot.delete).toHaveBeenCalledWith("snap-1");
+    });
+
+    it("never snapshots another provider's sandbox", async () => {
+      const e2bSandbox = { provider: "e2b", id: "cn-abc" } as Parameters<NonNullable<typeof provider.snapshot>>[0];
+
+      await expect(provider.snapshot!(e2bSandbox)).rejects.toThrow("Not a Blaxel sandbox");
+      expect(mocks.snapshot.create).not.toHaveBeenCalled();
+    });
+
+    it("forks with create's date policy, capped at an hour, then writes the labels", async () => {
+      const metadata = { projectId: "p1", messageId: "m1", purpose: "swarm-worker" };
+      mocks.forkSnapshot.mockResolvedValue({ data: { name: "x", type: "sandbox" } });
+      mocks.updateMetadata.mockImplementation(async (name, { labels }) =>
+        ({ ...instance({ name, labels, endAt: NOW + 60 * 60_000 }), spec: { lifecycle: date(NOW + 60 * 60_000) } }));
+
+      const sandbox = await fork("snap-1", 2 * 60 * 60_000, metadata);
+
+      const [{ path, body, throwOnError }] = mocks.forkSnapshot.mock.calls[0];
+      expect(path).toEqual({ snapshotName: "snap-1" });
+      expect(body).toEqual({ targetName: expect.stringMatching(/^cn-[a-z0-9]{20}$/), targetType: "sandbox", lifecycle: date(NOW + 60 * 60_000) });
+      expect(throwOnError).toBe(true);
+      expect(mocks.updateMetadata).toHaveBeenCalledWith(body.targetName, { labels: metadata });
+      expect(sandbox).toMatchObject({ provider: "blaxel", id: body.targetName });
+      expect(mocks.delete).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["labels", { labels: { projectId: "p2" }, lifecycle: date(NOW + 60_000) }],
+      ["lifetime", { labels: { projectId: "p1" }, lifecycle: undefined }],
+      ["lifetime", { labels: { projectId: "p1" }, lifecycle: date(NOW + 2 * 60_000) }],
+    ])("rejects and deletes a fork that lost its %s", async (what, { labels, lifecycle }) => {
+      mocks.forkSnapshot.mockResolvedValue({ data: {} });
+      mocks.updateMetadata.mockImplementation(async (name) => ({ ...instance({ name, labels }), spec: { lifecycle } }));
+      mocks.delete.mockResolvedValue({});
+
+      const rejection = fork("snap-1", 60_000, { projectId: "p1" });
+      await expect(rejection).rejects.toThrow(what);
+      await expect(rejection).rejects.toBeInstanceOf(SandboxConfigError);
+      expect(mocks.delete).toHaveBeenCalledWith(mocks.forkSnapshot.mock.calls[0][0].body.targetName);
+    });
+
+    it.each([
+      ["a missing snapshot (404)", new mocks.errors.ResponseError(404), SandboxConfigError],
+      ["a quota error", { code: "QUOTA_EXCEEDED", message: "over", status_code: 429 }, SandboxRateLimitError],
+    ])("maps %s on fork through fromBlaxelError and writes no labels", async (_, error, type) => {
+      mocks.forkSnapshot.mockRejectedValue(error);
+      mocks.delete.mockResolvedValue({});
+
+      await expect(fork("snap-1", 60_000, {})).rejects.toBeInstanceOf(type);
+      expect(mocks.updateMetadata).not.toHaveBeenCalled();
+    });
+
+    it("deletes a snapshot, false when it was already gone, and rethrows anything else", async () => {
+      mocks.snapshot.delete.mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new mocks.errors.ResponseError(404))
+        .mockRejectedValueOnce(new mocks.errors.ResponseError(500));
+
+      await expect(provider.deleteSnapshot!("snap-1")).resolves.toBe(true);
+      await expect(provider.deleteSnapshot!("snap-1")).resolves.toBe(false);
+      await expect(provider.deleteSnapshot!("snap-1")).rejects.toThrow("HTTP 500");
+      expect(mocks.snapshot.delete).toHaveBeenCalledWith("snap-1");
     });
   });
 });
