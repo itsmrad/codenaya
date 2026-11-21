@@ -79,7 +79,7 @@ describe("Dodo reads", () => {
   it("normalizes a payment with parsed dates", async () => {
     expect(await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody())))).toEqual({
       paymentId: "pay_1", businessId: "bus_1", customerId: "cus_alice", status: "succeeded",
-      subscriptionId: "sub_1", sessionId: "cks_1", cart: [],
+      subscriptionId: "sub_1", sessionId: "cks_1", purchaseIdHint: undefined, cart: [],
       totalMinor: 2000, taxMinor: 180, currency: "USD", createdAt: Date.parse("2026-11-01T00:00:05Z"),
       chargeType: "new",
       servicePeriods: [{
@@ -355,4 +355,15 @@ describe("Dodo list and checkout reads", () => {
       .toMatchObject({ paymentId: "pay_1", paymentStatus: "processing" });
     await failure(fetchCheckoutSession(config, "cks_1", fetchReturning(json({ id: "cks_2", created_at: "2026-11-02T00:00:00Z" }))));
   });
+});
+
+
+it.each([undefined, null, [], "intent_1", {}, { purchaseId: 12 }, { purchaseId: "bad id" }, { purchaseId: "a".repeat(129) }])("ignores malformed purchase metadata %j", async metadata => {
+  const payment = await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody({ metadata }))));
+  expect(payment.purchaseIdHint).toBeUndefined();
+});
+it("normalizes the purchase id without retaining other metadata", async () => {
+  const payment = await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody({ metadata: { purchaseId: "intent_1", private: "omit" } }))));
+  expect(payment.purchaseIdHint).toBe("intent_1");
+  expect(JSON.stringify(payment)).not.toContain("omit");
 });

@@ -295,6 +295,7 @@ describe("checkout lifecycle", () => {
     vi.setSystemTime(NOW + CHECKOUT_PREPARE_STALE_MS + 1);
     expect(await prepare(alice)).toEqual({ kind: "pending" });
     expectRow(await purchaseOf(t, purchaseRef), { state: "unknown" });
+    expect((await customerOf(t, "user_alice"))!.nextPollAt).toBe(Date.now() + 15 * 60_000);
     expect((await customerOf(t, "user_alice"))!.pendingPurchaseRef).toBe(purchaseRef);
     await recordCheckout(alice, purchaseRef, { kind: "created", sessionId: "cks_late", checkoutUrl: URL_OK });
     expect(await prepare(alice)).toEqual({ kind: "resume", checkoutUrl: URL_OK });

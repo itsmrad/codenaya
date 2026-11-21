@@ -1,6 +1,11 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+export const billingOperatorAuditValidator = v.object({
+  action: v.string(), operator: v.string(), reason: v.string(), at: v.number(),
+  previousState: v.optional(v.string()),
+});
+
 /**
  * One row of an agent run, recorded for display only (the chat panel's
  * "Worked for Xs" block). `targets` are human-readable paths, URLs or env keys,
@@ -846,6 +851,7 @@ export default defineSchema({
     customerId: v.optional(v.string()),
     creationState: v.union(v.literal("preparing"), v.literal("unknown"), v.literal("ready")),
     creationLeaseId: v.optional(v.string()),
+    resolution: v.optional(billingOperatorAuditValidator),
     // When checkout took `creationLeaseId`; a lease older than CUSTOMER_LEASE_STALE_MS may have created a customer.
     creationLeasedAt: v.optional(v.number()),
     deletedAt: v.optional(v.number()),
@@ -908,8 +914,10 @@ export default defineSchema({
     principalMinor: v.optional(v.number()),
     currency: v.optional(v.string()),
     reversedMinor: v.optional(v.number()),
+    resolution: v.optional(billingOperatorAuditValidator),
     // Reversal bookkeeping (convex/billingReversals.ts): the gross total the ratio uses and the credits revoked so far.
     totalMinor: v.optional(v.number()),
+    reviewedReversalRef: v.optional(v.id("billingEvents")),
     revokedCredits: v.optional(v.number()),
   })
     .index("by_mode_and_intentId", ["mode", "intentId"])
@@ -918,6 +926,8 @@ export default defineSchema({
     .index("by_customerRef_and_state", ["customerRef", "state"]),
 
   billingEvents: defineTable({
+    resolution: v.optional(billingOperatorAuditValidator),
+    reviewedReversalMinor: v.optional(v.union(v.number(), v.null())),
     // Absent for a verified receipt whose customer is not mapped yet; stored quarantined.
     customerRef: v.optional(v.id("billingCustomers")),
     mode: billingModeValidator,
@@ -993,6 +1003,9 @@ export default defineSchema({
     status: v.string(),
     countedMinor: v.number(),
     currency: v.optional(v.string()),
+    placedBy: v.optional(billingOperatorAuditValidator),
+    releasedBy: v.optional(billingOperatorAuditValidator),
+    holdOverrideStatus: v.optional(v.string()),
     holdActive: v.boolean(),
     observedAt: v.number(),
   })

@@ -48,6 +48,7 @@ export const subscriptionFactValidator = v.object({
 
 const paymentFactValidator = v.object({
   paymentId: v.string(), decision: settlementDecisionValidator, sessionId: v.optional(v.string()),
+  purchaseIdHint: v.optional(v.string()),
   currency: v.optional(v.string()), totalMinor: v.optional(v.number()), taxMinor: v.optional(v.number()),
   reversal: reversalDecisionValidator,
 });
@@ -67,18 +68,34 @@ type SubscriptionPlan = { fact: SubscriptionFact; outcome: Outcome };
 const subscriptionRow = (ctx: Ctx, mode: Customer["mode"], subscriptionId: string) => ctx.db.query("billingSubscriptions")
   .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", mode).eq("subscriptionId", subscriptionId)).unique();
 
-async function findPurchase(ctx: Ctx, mode: Customer["mode"], { paymentId, sessionId }: PaymentFact) {
+async function findPurchase(ctx: Ctx, customer: Customer, { paymentId, sessionId, purchaseIdHint, decision }: PaymentFact) {
+  const mode = customer.mode;
   const byPayment = await ctx.db.query("billingPurchases")
     .withIndex("by_mode_and_paymentId", q => q.eq("mode", mode).eq("paymentId", paymentId)).unique();
-  if (byPayment || !sessionId) return byPayment;
-  const bySession = await ctx.db.query("billingPurchases")
-    .withIndex("by_mode_and_sessionId", q => q.eq("mode", mode).eq("sessionId", sessionId)).unique();
-  return bySession?.paymentId === undefined ? bySession : null;
+  if (byPayment) return byPayment;
+  if (sessionId) {
+    const bySession = await ctx.db.query("billingPurchases")
+      .withIndex("by_mode_and_sessionId", q => q.eq("mode", mode).eq("sessionId", sessionId)).unique();
+    if (bySession) return bySession.paymentId === undefined ? bySession : null;
+  }
+  if (!purchaseIdHint || (decision.kind !== "period" && decision.kind !== "top_up")) return null;
+  const pending = customer.pendingPurchaseRef && await ctx.db.get("billingPurchases", customer.pendingPurchaseRef);
+  if (pending?.intentId === purchaseIdHint) {
+    return pending.customerRef === customer._id && pending.mode === mode &&
+      ["unknown", "preparing"].includes(pending.state) && pending.sessionId === undefined &&
+      pending.paymentId === undefined && termsMatch(pending, decision) ? pending : null;
+  }
+  // A released intent may have no session id and a newer checkout may now hold the lock.
+  const released = await ctx.db.query("billingPurchases")
+    .withIndex("by_mode_and_intentId", q => q.eq("mode", mode).eq("intentId", purchaseIdHint)).unique();
+  return released && released.customerRef === customer._id && released.mode === mode &&
+    ["open", "terminal", "unknown"].includes(released.state) && released.paymentId === undefined &&
+    termsMatch(released, decision) ? released : null;
 }
 
 async function planPayment(ctx: Ctx, customer: Customer, fact: PaymentFact, deleted: boolean): Promise<PaymentPlan> {
   const { decision: d } = fact;
-  const found = await findPurchase(ctx, customer.mode, fact);
+  const found = await findPurchase(ctx, customer, fact);
   // Another customer's purchase is never written from this customer's commit.
   const foreign = found !== null && found.customerRef !== customer._id;
   const plan = { fact, purchase: foreign ? null : found, positive: false };
@@ -96,8 +113,22 @@ async function planPayment(ctx: Ctx, customer: Customer, fact: PaymentFact, dele
     console.error("[billingFulfill] payment matches another customer's purchase", { customerRef: customer._id, paymentId: d.paymentId });
     return { ...plan, outcome: "processed" };
   }
-  // Never grant while the payment's refunds or disputes are unknown.
-  if (fact.reversal.kind === "unknown") return { ...plan, outcome: "pending" };
+  // Keep verified gross even when a bound payment cannot grant yet; never derive it from principal.
+  if (plan.purchase?.paymentId === fact.paymentId && plan.purchase.totalMinor === undefined &&
+    Number.isSafeInteger(fact.totalMinor) && fact.totalMinor! > 0) {
+    await ctx.db.patch("billingPurchases", plan.purchase._id, { totalMinor: fact.totalMinor });
+  }
+  if (fact.reversal.kind === "unknown") {
+    const review = plan.purchase?.reviewedReversalRef && await ctx.db.get("billingEvents", plan.purchase.reviewedReversalRef);
+    if (!review || review.customerRef !== customer._id || review.mode !== customer.mode ||
+      review.paymentId !== fact.paymentId || review.state !== "processed" ||
+      review.resolution?.action !== "resolveUnreadableReversal" || review.reviewedReversalMinor === undefined ||
+      fact.totalMinor === undefined || (plan.purchase?.totalMinor !== undefined && plan.purchase.totalMinor !== fact.totalMinor) ||
+      (review.reviewedReversalMinor ?? 0) > fact.totalMinor) return { ...plan, outcome: "pending" };
+    // Only the payment retry uses the reviewed cumulative amount already kept on the purchase.
+    // Receipt outcomes still use the raw facts, so a new unreadable negative remains fenced.
+    plan.fact = { ...fact, reversal: { kind: "known", refunds: [], disputes: [] } };
+  }
   return { ...plan, outcome: "processed", positive: !deleted };
 }
 
@@ -254,6 +285,9 @@ async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positi
   const { fact } = plan;
   await ctx.db.patch("billingPurchases", purchase._id, {
     paymentId: d.paymentId, state: "settled", currency: fact.currency,
+    ...(fact.totalMinor !== undefined ? { totalMinor: fact.totalMinor } : {}),
+    ...(plan.purchase && fact.purchaseIdHint === purchase.intentId && purchase.sessionId === undefined &&
+      fact.sessionId !== undefined ? { sessionId: fact.sessionId } : {}),
     ...(d.kind === "period" ? { subscriptionId: d.subscriptionId } : {}),
     ...(fact.totalMinor !== undefined && fact.taxMinor !== undefined ? { principalMinor: fact.totalMinor - fact.taxMinor } : {}),
     ...(deleted ? { cancellationRecoveryRequired: true } : {}),
@@ -372,7 +406,7 @@ export const commitReconciliation = internalMutation({
     const subscriptions: SubscriptionPlan[] = [];
     for (const fact of args.subscriptions) subscriptions.push(await planSubscription(ctx, customer, fact));
     // Never depends on the positives: a negative resolves from its payment's fresh read alone.
-    const reversalOutcomes = new Map(payments.map(plan => [plan.fact.paymentId, reversalOutcome(plan.fact)]));
+    const reversalOutcomes = new Map(args.payments.map(fact => [fact.paymentId, reversalOutcome(fact)]));
     const resolvedNegatives = receipts.filter(r => NEGATIVE_EVENT.test(r.eventType) && r.paymentId && reversalOutcomes.get(r.paymentId) === "processed");
     const resolved = new Set(resolvedNegatives.map(r => r._id));
     // Decided before any write: skipped positives stay pending while everything else commits.

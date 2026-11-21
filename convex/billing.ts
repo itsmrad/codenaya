@@ -279,13 +279,13 @@ type AssociateBy = Infer<typeof associateByValidator>;
  * Attaches unmapped quarantined receipts to the customer. An unmapped row becomes pending; a
  * digest_mismatch row stays quarantined for an operator. Both are counted for support, and an
  * attached refund or dispute fences the customer's grants. A row whose stored provider customer
- * differs from the customer's never attaches.
+ * differs from the customer's only attaches with an operator-reviewed force override.
  */
-async function attachReceipts(ctx: MutationCtx, customerRef: Id<"billingCustomers">, rows: Doc<"billingEvents">[]) {
+export async function attachReceipts(ctx: MutationCtx, customerRef: Id<"billingCustomers">, rows: Doc<"billingEvents">[], force = false) {
   // Re-read: callers such as bindCustomer may have just patched the customer.
   const customer = await requireCustomer(ctx, customerRef);
   const owned = rows.filter(row => row.customerRef === undefined && row.state === "quarantined" && row.mode === customer.mode &&
-    (row.providerCustomerId === undefined || row.providerCustomerId === customer.customerId));
+    (force || row.providerCustomerId === undefined || row.providerCustomerId === customer.customerId));
   if (!owned.length) return 0;
   const now = Date.now();
   let pending = 0;

@@ -84,6 +84,7 @@ async function heldLock(ctx: MutationCtx, purchaseRef: Id<"billingPurchases">, s
   // A route that crashed after reserving may have created a session: recovery decides, never time.
   if (purchase?.state === "preparing" && now - purchase._creationTime > CHECKOUT_PREPARE_STALE_MS) {
     await ctx.db.patch("billingPurchases", purchaseRef, { state: "unknown" });
+    await markPollDue(ctx, purchase.customerRef, false);
     console.warn("[billingCheckout] stale preparing purchase marked unknown", { purchaseRef });
   }
   return { kind: "pending" as const };

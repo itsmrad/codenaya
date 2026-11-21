@@ -85,7 +85,7 @@ export const reconcileClaim = async (ctx: ActionCtx, customerRef: Id<"billingCus
     const decision = decideSettlement({ payment, subscription, customerId, catalog: config });
     const { currency, totalMinor, taxMinor } = payment;
     paymentFacts.set(payment.paymentId, {
-      paymentId: payment.paymentId, decision, sessionId: payment.sessionId ?? sessionId, currency: currency || undefined, totalMinor, taxMinor,
+      paymentId: payment.paymentId, decision, sessionId: payment.sessionId ?? sessionId, purchaseIdHint: payment.purchaseIdHint, currency: currency || undefined, totalMinor, taxMinor,
       reversal: decideReversal(payment),
     });
   }

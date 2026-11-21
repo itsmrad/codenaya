@@ -20,6 +20,7 @@ import type * as billingEntitlement from "../billingEntitlement.js";
 import type * as billingEnv from "../billingEnv.js";
 import type * as billingFulfill from "../billingFulfill.js";
 import type * as billingGrants from "../billingGrants.js";
+import type * as billingOperator from "../billingOperator.js";
 import type * as billingPoll from "../billingPoll.js";
 import type * as billingQueue from "../billingQueue.js";
 import type * as billingReconcile from "../billingReconcile.js";
@@ -79,6 +80,7 @@ declare const fullApi: ApiFromModules<{
   billingEnv: typeof billingEnv;
   billingFulfill: typeof billingFulfill;
   billingGrants: typeof billingGrants;
+  billingOperator: typeof billingOperator;
   billingPoll: typeof billingPoll;
   billingQueue: typeof billingQueue;
   billingReconcile: typeof billingReconcile;
