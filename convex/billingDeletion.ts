@@ -66,10 +66,12 @@ export const markDeletionBatch = internalMutation({
     } else {
       const page = await ctx.db.query("billingSubscriptions")
         .withIndex("by_customerRef_and_status", q => q.eq("customerRef", customerRef)).paginate(opts);
-      // Even a locally ended subscription needs provider confirmation, not a blanket local clearance.
+      // Keep existing markers on ended rows: only provider recovery may clear them.
       for (const row of page.page) {
-        await ctx.db.patch("billingSubscriptions", row._id, { cancellationRecoveryRequired: true });
-        marked ||= !row.cancellationRecoveryRequired || customer.cancellationLastOutcome === "complete";
+        if (row.cancellationRecoveryRequired || !["cancelled", "expired"].includes(row.status)) {
+          await ctx.db.patch("billingSubscriptions", row._id, { cancellationRecoveryRequired: true });
+          marked ||= !row.cancellationRecoveryRequired || customer.cancellationLastOutcome === "complete";
+        }
       }
       if (!page.isDone) await ctx.scheduler.runAfter(0, internal.billingDeletion.markDeletionBatch,
         { customerRef, table, cursor: page.continueCursor });

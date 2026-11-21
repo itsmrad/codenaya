@@ -273,7 +273,7 @@ async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positi
     : await createPurchase(ctx, customer, d, row !== null && !rowMismatch, deleted, taken ? "duplicate_checkout" : "no_purchase");
   if (deleted) {
     await ctx.db.patch("billingPurchases", purchase._id, { cancellationRecoveryRequired: true });
-    if (!purchase.cancellationRecoveryRequired) await queueDeletionRecovery(ctx, customer._id);
+    if (!purchase.cancellationRecoveryRequired || purchase.paymentId !== d.paymentId) await queueDeletionRecovery(ctx, customer._id);
   }
   if (purchase.state === "quarantined") return false;
   // A replay: one grant per payment, even if a later read reports another period.

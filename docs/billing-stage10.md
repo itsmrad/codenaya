@@ -28,8 +28,8 @@ Published source, fetched without installing: `dodopayments@2.63.0`:
   Lines 1838–1852 explicitly document `status: "cancelled"` for immediate cancel;
   this timing is reserved for 10c, never accepted by user routes. `cancelled_at`
   (690) describes an already cancelled subscription, not scheduled period expiry.
-- Subscription customer (580–582), product_id (629), status (659) and subscription_id
-  (664) bind the retrieve. Subscription has no business_id, so the adapter checks
+- Subscription customer (580–582), product_id (634), status (650) and subscription_id
+  (655) bind the retrieve. Subscription has no business_id, so the adapter checks
   [customers/customers.ts](https://unpkg.com/dodopayments@2.63.0/src/resources/customers/customers.ts)
   lines 198–203: Customer.business_id and customer_id via GET `/customers/{id}`
   both before dispatch and during fresh confirmation. Mode selects the fixed API host.
@@ -89,3 +89,26 @@ its existing resource-marker, receipt, hold, watch and pending-control blockers,
 require `cancellationRecoveryRequired === false` and outcome `complete`, and refuse
 a live cancellation lease. All new schema fields are optional; no backfill/deploy
 is included. Verification is exact-head CI only, per lane rules.
+## Durable deletion obligations (10b)
+
+The signed Clerk deletion path tombstones each mode's existing billing customer
+in the same transaction as the user, sets a recovery obligation, and invalidates
+in-flight reconciliation via generation/inputRevision. Resource markers are
+paged in batches of 20 using existing customer index prefixes; a customer
+obligation covers work before these pages finish. Financial rows survive
+`purgeUserData`; retention is separate (10d).
+
+Late customer/session/payment/subscription evidence is retained without granting
+benefits. New evidence reopens recovery (including support/complete), resets its
+attempt budget and advances inputRevision. Unchanged replays preserve the retry
+state. This invalidates 10c's pinned evidence without releasing its live
+cancellation lease, so opposing provider writes remain serialized. Duplicate
+Clerk deletion preserves the first deletedAt and support/complete unless resource
+markers reopen the obligation. Unknown creates remain pending for recovery or
+support; deletion never creates a remote customer.
+
+Credit charges can update existing usage rows after a tombstone, but cannot
+insert missing per-user credit/spend rows. Site-wide model spend still records
+incurred costs. Billing holds alone do not block charging. No deletion helper
+shrinks paid periods, credit lots or refunds money. This PR records obligations;
+10c executes provider cancellation. Billing enablement requires 10b–10d together.
