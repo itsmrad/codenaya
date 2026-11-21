@@ -102,6 +102,37 @@ describe("sandbox registry", () => {
     },
   );
 
+  it("refuses a Blaxel id while Blaxel is not configured, without probing it", async () => {
+    vi.stubEnv("BL_API_KEY", "");
+    vi.stubEnv("BL_WORKSPACE", "workspace");
+
+    expect(await getOwnedSandbox("blaxel:cn-abc123", "user_a")).toBeNull();
+    expect(mocks.getProvider).not.toHaveBeenCalled();
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it("routes a Blaxel id to Blaxel once configured, and still checks the owner", async () => {
+    vi.stubEnv("BL_API_KEY", "bl_key");
+    vi.stubEnv("BL_WORKSPACE", "workspace");
+    mocks.connect.mockResolvedValue({ ...fakeSandbox("cn-abc123", "user_a"), provider: "blaxel" });
+
+    expect(await getOwnedSandbox("blaxel:cn-abc123", "user_b")).toBeNull();
+    expect(mocks.getProvider).toHaveBeenCalledWith("blaxel");
+    expect(mocks.connect).toHaveBeenCalledWith("cn-abc123");
+  });
+
+  it("serves a Blaxel sandbox to the user who owns it", async () => {
+    vi.stubEnv("BL_API_KEY", "bl_key");
+    vi.stubEnv("BL_WORKSPACE", "workspace");
+    const sandbox = { ...fakeSandbox("cn-abc456", "user_a"), provider: "blaxel" } as Sandbox;
+    mocks.connect.mockResolvedValue(sandbox);
+
+    expect(await getOwnedSandbox("blaxel:cn-abc456", "user_a")).toBe(sandbox);
+    expect(mocks.getProvider).toHaveBeenCalledWith("blaxel");
+    expect(mocks.connect).toHaveBeenCalledWith("cn-abc456");
+    forgetSandbox("blaxel:cn-abc456");
+  });
+
   it("reads an unprefixed id as E2B's even when another provider comes first, so open previews keep working", async () => {
     mocks.config.mockReturnValue({ primary: "other" as ProviderId, fallbacks: ["e2b"], configured: { e2b: true } });
     mocks.connect.mockResolvedValue(fakeSandbox("sbx_3", "user_a"));

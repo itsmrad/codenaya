@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import { canonicalSandboxIdOrNull, clientSandboxId, parsePublicSandboxIdOrNull, toPublicSandboxId } from "./ids";
+import { PROVIDER_IDS } from "./types";
 
 describe("public sandbox ids", () => {
-  it("round-trips a prefixed id", () => {
-    expect(parsePublicSandboxIdOrNull(toPublicSandboxId("e2b", "i3ab9xk2"))).toEqual({ provider: "e2b", nativeId: "i3ab9xk2" });
+  it.each(PROVIDER_IDS)("round-trips a prefixed %s id", (provider) => {
+    expect(parsePublicSandboxIdOrNull(toPublicSandboxId(provider, "i3ab9xk2"))).toEqual({ provider, nativeId: "i3ab9xk2" });
+  });
+
+  it("round-trips a Blaxel sandbox name, which the client always gets prefixed", () => {
+    const name = "cn-a1b2c3d4e5f6g7h8i9j0";
+    expect(parsePublicSandboxIdOrNull(`blaxel:${name}`)).toEqual({ provider: "blaxel", nativeId: name });
+    expect(canonicalSandboxIdOrNull(`blaxel:${name}`)).toBe(`blaxel:${name}`);
+    expect(clientSandboxId({ provider: "blaxel", id: name }, false)).toBe(`blaxel:${name}`);
+    expect(clientSandboxId({ provider: "blaxel", id: name }, true)).toBe(`blaxel:${name}`);
   });
 
   it("reads an unprefixed id as E2B's, so open previews keep working", () => {
@@ -15,6 +24,7 @@ describe("public sandbox ids", () => {
     "",
     "other:abc", // unknown provider
     "E2B:abc", // providers are matched exactly
+    "Blaxel:cn-abc",
     "e2b:",
     ":abc",
     "e2b:a:b",

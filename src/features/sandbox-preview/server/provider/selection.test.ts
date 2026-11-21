@@ -1,16 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import { parseProviderConfig, sandboxTimeoutMs, type SandboxProviderConfig } from "./config";
+import { PROVIDER_KEYS, parseProviderConfig, sandboxTimeoutMs, type SandboxProviderConfig } from "./config";
 import { createProviderCooldown, createWithFailover } from "./failover";
 import { countLive, FALLBACK_LIST_TIMEOUT_MS, listAll } from "./fanout";
 import { selectProviders } from "./select";
 import {
-  type CreateOptions, type ProviderId, type Sandbox, type SandboxProvider,
+  type CreateOptions, PROVIDER_IDS, type ProviderId, type Sandbox, type SandboxProvider,
   SandboxConfigError, SandboxRateLimitError, SandboxTimeoutError,
 } from "./types";
 
 // Fictional ids exercise future multi-provider behavior without adding production ids.
 const second = "test-second" as ProviderId;
 const third = "test-third" as ProviderId;
+// Every real provider unconfigured, so a new id doesn't change these fixtures.
+const none = Object.fromEntries(PROVIDER_IDS.map((id) => [id, false])) as Record<ProviderId, boolean>;
+const keysOf = (id: ProviderId, value: string) => Object.fromEntries(PROVIDER_KEYS[id].map((key) => [key, value]));
 const opts: CreateOptions = { timeoutMs: 3_600_000, metadata: { userId: "alice", projectId: "p" } };
 const sandbox = { id: "native", provider: "e2b" } as Sandbox;
 const fakeProvider = (id: ProviderId = "e2b"): SandboxProvider => ({
@@ -22,13 +25,13 @@ const fakeProvider = (id: ProviderId = "e2b"): SandboxProvider => ({
 });
 const config: SandboxProviderConfig = {
   primary: "e2b", fallbacks: [second, third],
-  configured: { e2b: true, ...Object.fromEntries([second, third].map((id) => [id, true])) },
+  configured: { ...none, e2b: true, ...Object.fromEntries([second, third].map((id) => [id, true])) },
 };
 
 describe("provider config and selection", () => {
   it("defaults to E2B, skips missing keys, and retains no credentials", () => {
     const empty = parseProviderConfig({});
-    expect(empty).toEqual({ primary: "e2b", fallbacks: [], configured: { e2b: false } });
+    expect(empty).toEqual({ primary: "e2b", fallbacks: [], configured: none });
     expect(selectProviders(empty, createProviderCooldown())).toEqual([]);
     expect(parseProviderConfig({ E2B_API_KEY: "  " }).configured.e2b).toBe(false);
     const enabled = parseProviderConfig({ E2B_API_KEY: "secret" });
@@ -39,16 +42,33 @@ describe("provider config and selection", () => {
   it("ignores unknown ids, warns once per variable, and never logs env values", () => {
     const warn = vi.fn();
     const env = { SANDBOX_PROVIDER: "secret-in-invalid-id", SANDBOX_PROVIDER_FALLBACKS: "unknown,unknown", E2B_API_KEY: "key-secret" };
-    expect(parseProviderConfig(env, warn)).toEqual({ primary: "e2b", fallbacks: [], configured: { e2b: true } });
+    expect(parseProviderConfig(env, warn)).toEqual({ primary: "e2b", fallbacks: [], configured: { ...none, e2b: true } });
     parseProviderConfig(env, warn);
     expect(warn).toHaveBeenCalledTimes(2);
     expect(warn.mock.calls.flat().join(" ")).not.toMatch(/secret|unknown,unknown/);
+  });
+
+  it.each(PROVIDER_IDS)("configures %s only when every one of its keys is set", (id) => {
+    expect(parseProviderConfig(keysOf(id, "secret")).configured).toEqual({ ...none, [id]: true });
+    expect(JSON.stringify(parseProviderConfig(keysOf(id, "secret")))).not.toContain("secret");
+    for (const key of PROVIDER_KEYS[id]) {
+      expect(parseProviderConfig({ ...keysOf(id, "secret"), [key]: " " }).configured[id]).toBe(false);
+    }
+  });
+
+  it("keeps Blaxel dark without both BL_API_KEY and BL_WORKSPACE, even when listed", () => {
+    const env = { E2B_API_KEY: "k", SANDBOX_PROVIDER_FALLBACKS: "blaxel" };
+    expect(selectProviders(parseProviderConfig({ ...env, BL_API_KEY: "k" }), createProviderCooldown())).toEqual(["e2b"]);
+    expect(selectProviders(parseProviderConfig({ ...env, BL_WORKSPACE: "w" }), createProviderCooldown())).toEqual(["e2b"]);
+    expect(selectProviders(parseProviderConfig({ ...env, BL_API_KEY: "k", BL_WORKSPACE: "w" }), createProviderCooldown()))
+      .toEqual(["e2b", "blaxel"]);
   });
 
   it("trims, removes duplicates and leaves empty fallbacks disabled", () => {
     for (const value of [undefined, "", " , ", " e2b,e2b, "]) {
       expect(parseProviderConfig({ SANDBOX_PROVIDER: " e2b ", SANDBOX_PROVIDER_FALLBACKS: value }).fallbacks).toEqual([]);
     }
+    expect(parseProviderConfig({ SANDBOX_PROVIDER_FALLBACKS: " blaxel,not-a-provider, blaxel,e2b" }, vi.fn()).fallbacks).toEqual(["blaxel"]);
   });
 
   it("orders fallbacks and prefers only an enabled healthy sticky provider", () => {

@@ -9,6 +9,17 @@ export interface SandboxProviderConfig {
 type Environment = Readonly<Record<string, string | undefined>>;
 const warned = new Set<string>();
 
+/** The env vars each provider needs. A new adapter adds one entry here. */
+export const PROVIDER_KEYS: Readonly<Record<ProviderId, readonly string[]>> = {
+  e2b: ["E2B_API_KEY"],
+  // The Blaxel SDK reads both from the environment itself.
+  blaxel: ["BL_API_KEY", "BL_WORKSPACE"],
+};
+
+/** Configured only when every one of its keys is non-empty. */
+export const isProviderConfigured = (id: ProviderId, env: Environment = process.env) =>
+  PROVIDER_KEYS[id].every((key) => Boolean(env[key]?.trim()));
+
 /** Read per request, never at import time. Warnings contain no env values. */
 export function parseProviderConfig(
   env: Environment = process.env,
@@ -30,7 +41,7 @@ export function parseProviderConfig(
   return {
     primary,
     fallbacks: [...new Set(fallbacks)],
-    configured: { e2b: Boolean(env.E2B_API_KEY?.trim()) },
+    configured: Object.fromEntries(PROVIDER_IDS.map((id) => [id, isProviderConfigured(id, env)])) as Record<ProviderId, boolean>,
   };
 }
 
