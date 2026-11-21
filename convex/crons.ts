@@ -21,6 +21,9 @@ import { internal } from "./_generated/api";
  * - **Billing receipts every 5 minutes.** Recovers lost scheduled actions and crashed
  *   customer leases (`convex/billingQueue.ts`). Payments correctness depends on it:
  *   without it a dropped wakeup leaves a paid receipt unprocessed.
+ * - **Billing provider poll every 15 minutes.** Catches missed payment, refund, dispute and
+ *   subscription webhooks and releases expired unpaid checkout locks (`convex/billingPoll.ts`).
+ *   Bounded per run; only customers with a checkout, a subscription or a reversal watch are due.
  * - **OAuth states every 15 minutes.** Their own TTL is 10 minutes, so this keeps
  *   the table near-empty without being urgent.
  *
@@ -50,6 +53,13 @@ crons.interval(
   "sweep billing receipts",
   { minutes: 5 },
   internal.billingQueue.sweepReceipts,
+  {},
+);
+
+crons.interval(
+  "poll billing provider state",
+  { minutes: 15 },
+  internal.billingPoll.selectPollTargets,
   {},
 );
 

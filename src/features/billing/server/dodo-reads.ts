@@ -175,13 +175,18 @@ function disputeAmount(value: unknown, payment: PaymentRef): number | null {
   return minor === totalMinor ? totalMinor : null;
 }
 
+/** SDK `DisputeStatus` without its `dispute_` prefix; anything else is "other". Shared by the payment and list reads. */
+function disputeStatus(value: unknown): ProviderDispute["status"] {
+  const bare = typeof value === "string" && value.startsWith("dispute_") ? value.slice("dispute_".length) : "";
+  return DISPUTE_STATUSES.has(bare) ? bare as ProviderDispute["status"] : "other";
+}
+
 function dispute(item: Json, payment: PaymentRef): ProviderDispute | undefined {
   const { dispute_id: id, dispute_status: status, amount } = item;
   if (typeof id !== "string" || !PROVIDER_ID.test(id)) return undefined;
-  const bare = typeof status === "string" && status.startsWith("dispute_") ? status.slice("dispute_".length) : "";
   return {
     disputeId: id,
-    status: DISPUTE_STATUSES.has(bare) ? bare as ProviderDispute["status"] : "other",
+    status: disputeStatus(status),
     amountMinor: disputeAmount(amount, payment),
     currency: currencyCode(item.currency),
   };
@@ -269,5 +274,68 @@ export async function fetchSubscription(
     previousBillingAt: epochMs(body.previous_billing_date),
     nextBillingAt: epochMs(body.next_billing_date),
     cancelAtNextBillingDate,
+  };
+}
+
+/** One listed resource: id, raw status (bounded, else "other"), creation time and the payment a refund or dispute names. */
+export type ListedResource = { id: string; status: string; createdAt: number; paymentId?: string };
+export type ListKind = "payments" | "refunds" | "disputes" | "subscriptions";
+const LIST_FIELDS: Record<ListKind, { id: string; status: string }> = {
+  payments: { id: "payment_id", status: "status" },
+  refunds: { id: "refund_id", status: "status" },
+  disputes: { id: "dispute_id", status: "dispute_status" },
+  subscriptions: { id: "subscription_id", status: "status" },
+};
+const LISTED_STATUS = /^[a-z_]{1,40}$/;
+
+/** A fixed creation-time window and a 0-based page (the API's default page is 0; paging is by offset). */
+export type ListWindow = { since: number; until: number; page: number };
+
+/**
+ * One page (at most 20) of a customer's resources created within the window. The window is fixed
+ * across pages, so offsets stay stable as long as the provider orders by an immutable key such as
+ * creation time (assumed; undocumented); `full` means the next page may hold more. Dispute statuses
+ * are normalized exactly as on a payment read.
+ */
+export async function listCustomerResources(
+  config: DodoReconcilerConfig, kind: ListKind, providerCustomerId: string, window: ListWindow, fetchImpl: typeof fetch = fetch,
+): Promise<{ items: ListedResource[]; full: boolean }> {
+  if (!Number.isSafeInteger(window.page) || window.page < 0) throw malformed();
+  const query = new URLSearchParams({
+    customer_id: providerId(providerCustomerId), created_at_gte: new Date(window.since).toISOString(),
+    created_at_lte: new Date(window.until).toISOString(), page_size: String(MAX_LIST_ITEMS), page_number: String(window.page),
+  });
+  const { items } = await readJson(config, `/${kind}?${query}`, fetchImpl);
+  if (!Array.isArray(items) || items.length > MAX_LIST_ITEMS) throw malformed();
+  const fields = LIST_FIELDS[kind];
+  const listed = items.map((item): ListedResource => {
+    if (!isRecord(item)) throw malformed();
+    // A listed payment or subscription of another customer means the filter was not applied: fail closed.
+    if ((kind === "payments" || kind === "subscriptions") && providerCustomerId !== customerId(item)) throw malformed();
+    const createdAt = epochMs(item.created_at);
+    if (createdAt === undefined) throw malformed();
+    const status = item[fields.status];
+    return {
+      id: providerId(item[fields.id]), createdAt,
+      status: kind === "disputes" ? disputeStatus(status) : typeof status === "string" && LISTED_STATUS.test(status) ? status : "other",
+      ...(kind === "refunds" || kind === "disputes" ? { paymentId: providerId(item.payment_id) } : {}),
+    };
+  });
+  return { items: listed, full: listed.length === MAX_LIST_ITEMS };
+}
+
+/** `GET /checkouts/{id}` (SDK `CheckoutSessionStatus`): creation time and the payment, if one was attempted. No expiry exists. */
+export async function fetchCheckoutSession(
+  config: DodoReconcilerConfig, sessionId: string, fetchImpl: typeof fetch = fetch,
+): Promise<{ createdAt: number; paymentId?: string; paymentStatus?: string }> {
+  providerId(sessionId);
+  const body = await readJson(config, `/checkouts/${sessionId}`, fetchImpl);
+  const createdAt = epochMs(body.created_at);
+  if (body.id !== sessionId || createdAt === undefined) throw malformed();
+  const status = body.payment_status;
+  return {
+    createdAt,
+    ...(body.payment_id == null ? {} : { paymentId: providerId(body.payment_id) }),
+    ...(status == null ? {} : { paymentStatus: typeof status === "string" && LISTED_STATUS.test(status) ? status : "other" }),
   };
 }
