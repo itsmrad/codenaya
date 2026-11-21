@@ -43,6 +43,10 @@ import {
 } from "@/features/sandbox-preview/server/provider/types";
 import { recordSandboxRunning } from "@/features/sandbox-preview/server/record-sandbox-running";
 import {
+  RuntimeAdmissionError,
+  admitSecretRuntime,
+} from "@/features/sandbox-preview/server/runtime-fence";
+import {
   forgetSandbox,
   getOwnedSandbox,
   rememberSandbox,
@@ -243,15 +247,23 @@ export async function POST(request: Request) {
       /** From the same resolution as `envEntries`; null hides the output. */
       let secretValues: string[] | null = [];
       const envWarnings: string[] = [];
+      /** The env generation a boot injecting secrets must be admitted at; null when it injects none. */
+      let fenceGeneration: number | null = null;
 
       if (projectId && internalKey) {
         try {
-          const records = await convex.query(api.system.getEnvVarsForSandbox, {
+          // The variables and their generation in one read, so admission
+          // checks the same env state that is injected.
+          const manifest = await convex.query(api.runtimeHandles.getBootManifest, {
             internalKey,
             projectId,
           });
 
-          const resolved = await resolveProjectEnv(records);
+          const resolved = await resolveProjectEnv(manifest?.records ?? []);
+          // Only a boot that injects secrets is fenced; the rest boot as before.
+          if (manifest && resolved.secretEntries.length > 0) {
+            fenceGeneration = manifest.generation;
+          }
 
           // E2B runs server-side, so both public and secret values are safe here.
           // This is the difference from the WebContainer path, which gets public
@@ -429,6 +441,22 @@ export async function POST(request: Request) {
             metadata: projectId ? { userId, projectId } : { userId },
             localHostHeader: true,
           }, (notice) => send({ type: "output", data: `${notice}\n` }), providerConfig);
+        }
+
+        // --- Admit the secret runtime ---
+        //
+        // Registered before any value reaches the sandbox, so an env change
+        // from here on either refuses admission or marks this boot stale. Before
+        // rememberSandbox too: a sync's reinstall runs with the values.
+        if (projectId && internalKey && fenceGeneration !== null) {
+          await admitSecretRuntime({
+            internalKey,
+            projectId,
+            ownerId: userId,
+            sandbox,
+            generation: fenceGeneration,
+            replacesPreviews: !resumeSandboxId,
+          });
         }
 
         // File syncs reuse this handle instead of reconnecting (#179).
@@ -645,7 +673,14 @@ export async function POST(request: Request) {
         });
       } catch (error) {
         // Out of time, not broken: the client boots again on this sandbox.
-        if (sandbox && !handedOff && !request.signal.aborted && budget.left() <= 0) {
+        // Never after a refused admission: that sandbox must be killed.
+        if (
+          sandbox &&
+          !handedOff &&
+          !request.signal.aborted &&
+          budget.left() <= 0 &&
+          !(error instanceof RuntimeAdmissionError)
+        ) {
           handedOff = true;
           rememberSandbox(sandbox, userId);
           send({ type: "resume", sandboxId: clientSandboxId(sandbox, isMultiProvider(providerConfig)) });

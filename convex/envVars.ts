@@ -12,6 +12,7 @@ import { mutation, query } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
 import { getOwnedProject } from "./projects";
+import { bumpEnvGeneration } from "./runtimeHandles";
 
 /** Most variables read for one project; far above real usage (#53). Defined in env-keys. */
 export { MAX_ENV_VARS };
@@ -212,6 +213,7 @@ export const setPublicEnvVar = mutation({
       .first();
 
     const now = Date.now();
+    await bumpEnvGeneration(ctx, args.projectId);
 
     if (existing) {
       await ctx.db.patch("projectEnvVars", existing._id, {
@@ -261,5 +263,6 @@ export const deleteEnvVar = mutation({
     }
 
     await ctx.db.delete("projectEnvVars", args.id);
+    await bumpEnvGeneration(ctx, row.projectId);
   },
 });
