@@ -3,6 +3,11 @@ import { v } from "convex/values";
 
 export const billingOperatorAuditValidator = v.object({
   action: v.string(), operator: v.string(), reason: v.string(), at: v.number(),
+  previous: v.optional(v.object({
+    state: v.optional(v.string()), customerRef: v.optional(v.id("billingCustomers")),
+    quarantineReason: v.optional(v.string()), holdActive: v.optional(v.boolean()),
+    status: v.optional(v.string()), reversedMinor: v.optional(v.number()),
+  })),
 });
 
 /**
@@ -918,6 +923,8 @@ export default defineSchema({
     .index("by_customerRef_and_state", ["customerRef", "state"]),
 
   billingEvents: defineTable({
+    resolution: v.optional(billingOperatorAuditValidator),
+    reviewedReversalMinor: v.optional(v.number()),
     // Absent for a verified receipt whose customer is not mapped yet; stored quarantined.
     customerRef: v.optional(v.id("billingCustomers")),
     mode: billingModeValidator,
@@ -993,6 +1000,9 @@ export default defineSchema({
     status: v.string(),
     countedMinor: v.number(),
     currency: v.optional(v.string()),
+    placedBy: v.optional(billingOperatorAuditValidator),
+    releasedBy: v.optional(billingOperatorAuditValidator),
+    holdOverrideStatus: v.optional(v.string()),
     holdActive: v.boolean(),
     observedAt: v.number(),
   })

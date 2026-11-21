@@ -71,8 +71,9 @@ export async function recordAdjustments(
       console.error("[billingReversals] counted adjustment no longer counts", { paymentId, providerId, status });
     }
     const countedMinor = Math.max(row.countedMinor, counted);
-    if (row.status === status && row.countedMinor === countedMinor && row.holdActive === hold && (row.purchaseRef || !purchaseRef)) continue;
-    await ctx.db.patch("billingAdjustments", row._id, { status, countedMinor, holdActive: hold, observedAt: now, ...(purchaseRef ? { purchaseRef } : {}) });
+    const holdActive = hold && row.holdOverrideStatus !== status;
+    if (row.status === status && row.countedMinor === countedMinor && row.holdActive === holdActive && (row.purchaseRef || !purchaseRef)) continue;
+    await ctx.db.patch("billingAdjustments", row._id, { status, countedMinor, holdActive, holdOverrideStatus: row.status === status ? row.holdOverrideStatus : undefined, observedAt: now, ...(purchaseRef ? { purchaseRef } : {}) });
   }
   const rows = await ctx.db.query("billingAdjustments")
     .withIndex("by_mode_and_paymentId", q => q.eq("mode", customer.mode).eq("paymentId", paymentId)).take(MAX_ROWS_PER_PAYMENT + 1);
