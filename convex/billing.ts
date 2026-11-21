@@ -81,7 +81,7 @@ export async function bindCustomerRow(ctx: MutationCtx, { customerRef, customerI
   const deleted = await ownerDeleted(ctx, customer);
   const live = !customer.hold && !deleted;
   await ctx.db.patch("billingCustomers", customerRef, live ? { customerId, creationState: "ready" } : { customerId });
-  if (deleted) await queueDeletionRecovery(ctx, customerRef);
+  if (deleted && customer.customerId !== customerId) await queueDeletionRecovery(ctx, customerRef);
   // Also for a deleted or held owner: its early receipts still need processing for suppression and recovery.
   await associateUnmappedReceipts(ctx, customer, { providerCustomerId: customerId });
   return null;
@@ -139,7 +139,7 @@ export async function bindSubscriptionRow(ctx: MutationCtx, args: Infer<typeof b
   const late = await ownerDeleted(ctx, customer);
   const existing = await ctx.db.query("billingSubscriptions")
     .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", args.mode).eq("subscriptionId", args.subscriptionId)).unique();
-  if (late) await queueDeletionRecovery(ctx, customer._id);
+  if (late && !existing?.cancellationRecoveryRequired) await queueDeletionRecovery(ctx, customer._id);
   if (existing) {
     if (existing.customerRef !== args.customerRef || existing.productId !== args.productId) throw conflict();
     if (late) await ctx.db.patch("billingSubscriptions", existing._id, { cancellationRecoveryRequired: true });
@@ -184,7 +184,9 @@ export async function bindPurchaseRow(ctx: MutationCtx, { purchaseRef, mode, ...
     if (!subscription || subscription.customerRef !== customer._id || subscription.productId !== purchase.terms.productId) throw conflict();
   }
   const deleted = await ownerDeleted(ctx, customer);
-  if (deleted) await queueDeletionRecovery(ctx, customer._id);
+  if (deleted && (!purchase.cancellationRecoveryRequired ||
+    ["sessionId", "paymentId", "subscriptionId"].some(field => ids[field as keyof typeof ids] !== undefined &&
+      ids[field as keyof typeof ids] !== purchase[field as keyof typeof purchase]))) await queueDeletionRecovery(ctx, customer._id);
   await ctx.db.patch("billingPurchases", purchaseRef, {
     ...ids,
     ...(deleted ? { cancellationRecoveryRequired: true } : {}),

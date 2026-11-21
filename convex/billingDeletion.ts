@@ -7,14 +7,15 @@ import { markPollDue } from "./billingPoll";
 
 export const DELETION_BATCH = 20;
 
-/** A late resource reopens completed recovery; support decisions and attempt counters survive. */
+/** Call only for new evidence: invalidate recovery reads and give the new obligation its own retry budget. */
 export async function queueDeletionRecovery(ctx: MutationCtx, customerRef: Id<"billingCustomers">) {
   const customer = await ctx.db.get("billingCustomers", customerRef);
   if (!customer) return;
   await ctx.db.patch("billingCustomers", customerRef, {
     cancellationRecoveryRequired: true,
     cancellationNextAttemptAt: Date.now(),
-    ...(customer.cancellationLastOutcome === "support" ? {} : { cancellationLastOutcome: "pending" as const }),
+    cancellationLastOutcome: "pending", cancellationAttempts: 0,
+    inputRevision: customer.inputRevision + 1,
   });
   await markPollDue(ctx, customerRef, false);
 }
@@ -57,7 +58,7 @@ export const markDeletionBatch = internalMutation({
       for (const row of page.page) {
         if (row.cancellationRecoveryRequired || !["settled", "terminal"].includes(row.state)) {
           await ctx.db.patch("billingPurchases", row._id, { cancellationRecoveryRequired: true });
-          marked = true;
+          marked ||= !row.cancellationRecoveryRequired || customer.cancellationLastOutcome === "complete";
         }
       }
       if (!page.isDone) await ctx.scheduler.runAfter(0, internal.billingDeletion.markDeletionBatch,
@@ -68,7 +69,7 @@ export const markDeletionBatch = internalMutation({
       // Even a locally ended subscription needs provider confirmation, not a blanket local clearance.
       for (const row of page.page) {
         await ctx.db.patch("billingSubscriptions", row._id, { cancellationRecoveryRequired: true });
-        marked = true;
+        marked ||= !row.cancellationRecoveryRequired || customer.cancellationLastOutcome === "complete";
       }
       if (!page.isDone) await ctx.scheduler.runAfter(0, internal.billingDeletion.markDeletionBatch,
         { customerRef, table, cursor: page.continueCursor });

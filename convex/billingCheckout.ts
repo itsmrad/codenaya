@@ -190,7 +190,7 @@ export const recordCustomerResult = mutation({
       await unknown();
       console.warn("[billingCheckout] customer creation outcome unknown", { customerRef });
     }
-    if (await ownerDeleted(ctx, customer)) await queueDeletionRecovery(ctx, customer._id);
+    if (result.kind === "unknown" && customer.creationState !== "unknown" && await ownerDeleted(ctx, customer)) await queueDeletionRecovery(ctx, customer._id);
     return null;
   },
 });
@@ -231,7 +231,7 @@ export const recordCheckoutResult = mutation({
       console.warn("[billingCheckout] checkout creation outcome unknown; lock kept", { purchaseRef });
       await markPollDue(ctx, customer._id, false);
     }
-    if (await ownerDeleted(ctx, customer)) await queueDeletionRecovery(ctx, customer._id);
+    if (result.kind === "unknown" && purchase.state !== "unknown" && await ownerDeleted(ctx, customer)) await queueDeletionRecovery(ctx, customer._id);
     return null;
   },
 });
