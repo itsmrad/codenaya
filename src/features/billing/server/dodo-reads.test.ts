@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DodoReconcilerConfig } from "./dodo-config";
 import {
-  DODO_READ_TIMEOUT_MS, DodoReadError, MAX_PROVIDER_BODY_BYTES, fetchCheckoutSession, fetchPayment, fetchSubscription,
+  DODO_READ_TIMEOUT_MS, DodoReadError, MAX_PROVIDER_BODY_BYTES, fetchCustomer, fetchCheckoutSession, fetchPayment, fetchSubscription,
   listCustomerResources,
 } from "./dodo-reads";
 
@@ -366,4 +366,22 @@ it("normalizes the purchase id without retaining other metadata", async () => {
   const payment = await fetchPayment(config, "pay_1", fetchReturning(json(paymentBody({ metadata: { purchaseId: "intent_1", private: "omit" } }))));
   expect(payment.purchaseIdHint).toBe("intent_1");
   expect(JSON.stringify(payment)).not.toContain("omit");
+});
+
+
+describe("customer ownership read", () => {
+  it("normalizes the provider IDs", async () => {
+    expect(await fetchCustomer(config, "cus_alice", fetchReturning(json({ customer_id: "cus_alice", business_id: "bus_1" })))).toEqual({ customerId: "cus_alice", businessId: "bus_1" });
+  });
+  it("rejects oversized ownership bodies and cancels the stream", async () => {
+    const cancel = vi.fn();
+    const response = new Response(new ReadableStream({ cancel }), { headers: { "content-length": String(MAX_PROVIDER_BODY_BYTES + 1) } });
+    await expect(fetchCustomer(config, "cus_alice", fetchReturning(response))).rejects.toBeInstanceOf(DodoReadError);
+    expect(cancel).toHaveBeenCalled();
+  });
+  it("discards failed ownership responses", async () => {
+    const cancel = vi.fn();
+    await expect(fetchCustomer(config, "cus_alice", fetchReturning(new Response(new ReadableStream({ cancel }), { status: 503 })))).rejects.toMatchObject({ retryable: true });
+    expect(cancel).toHaveBeenCalled();
+  });
 });

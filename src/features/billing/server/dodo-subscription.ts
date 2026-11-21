@@ -3,7 +3,7 @@ import type { DodoReconcilerConfig } from "./dodo-config";
 import { DODO_READ_TIMEOUT_MS, MAX_PROVIDER_BODY_BYTES } from "./dodo-reads";
 
 // customerId is the owned binding from prepareControl, never browser input.
-export type DodoSubscriptionConfig = DodoReconcilerConfig & { customerId: string };
+export type DodoSubscriptionConfig = DodoReconcilerConfig & { customerId: string; controlWriteUntil?: number };
 type Result = { kind: "confirmed"; cancelAtNextBillingDate: boolean; status: string } |
   { kind: "unknown" } | { kind: "refused" };
 const BASE = { test_mode: "https://test.dodopayments.com", live_mode: "https://live.dodopayments.com" };
@@ -16,8 +16,10 @@ export async function setDodoCancellation(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Result> {
   if (!ID.test(input.subscriptionId) || !ID.test(config.customerId)) return { kind: "refused" };
+  const remaining = () => config.controlWriteUntil === undefined ? DODO_READ_TIMEOUT_MS : config.controlWriteUntil - Date.now();
+  if (!(remaining() > 0)) return { kind: "refused" };
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DODO_READ_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), Math.min(DODO_READ_TIMEOUT_MS, remaining()));
   let wrote = false;
   async function request(path: string, body?: object) {
     const response = await fetchImpl(`${BASE[config.environment]}${path}`, {
@@ -47,6 +49,7 @@ export async function setDodoCancellation(
   try {
     const before = await owned();
     if (!before || (input.timing === "resume" && before.status !== "active")) return { kind: "refused" };
+    if (controller.signal.aborted || !(remaining() > 0)) return { kind: "refused" };
     wrote = true;
     const response = await request(`/subscriptions/${input.subscriptionId}`, input.timing === "immediate"
       ? { status: "cancelled" } : { cancel_at_next_billing_date: input.timing === "period_end" });

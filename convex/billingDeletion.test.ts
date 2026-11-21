@@ -212,3 +212,135 @@ test("support billing holds do not prevent normal usage-account insertion", asyn
   await t.mutation(api.credits.recordTranscriptionUsage, { internalKey: KEY, userId: ALICE, costUsd: 0.1 });
   expect(await t.run(ctx => ctx.db.query("creditAccounts").first())).toMatchObject({ userId: ALICE, periodUsed: 15 });
 });
+
+const recoverySnapshot = async (t: T, ref: Id<"billingCustomers">) => {
+  const c = (await read(t, ref))!;
+  return [c.generation, c.inputRevision, c.cancellationLastOutcome, c.cancellationAttempts, c.cancellationNextAttemptAt,
+    c.leaseId, c.leaseExpiresAt];
+};
+async function completed(t: T, ref: Id<"billingCustomers">) {
+  await t.run(ctx => ctx.db.patch("billingCustomers", ref, { cancellationRecoveryRequired: false,
+    cancellationLastOutcome: "complete", cancellationAttempts: 7, cancellationNextAttemptAt: NOW + 9000,
+    leaseId: "live-receipt-lease", leaseExpiresAt: NOW + 60000 }));
+}
+const expectWake = async (t: T, ref: Id<"billingCustomers">, before: NonNullable<Awaited<ReturnType<typeof read>>>) => {
+  expect(await read(t, ref)).toMatchObject({ generation: before.generation, inputRevision: before.inputRevision + 1,
+    cancellationLastOutcome: "pending", cancellationRecoveryRequired: true, cancellationAttempts: 0,
+    cancellationNextAttemptAt: NOW + 1000, leaseId: before.leaseId, leaseExpiresAt: before.leaseExpiresAt });
+};
+
+test("duplicate deletion preserves generation, revision, retry schedule and live receipt lease", async () => {
+  const t = setup(), ref = await customer(t);
+  await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
+  await drain(t);
+  await completed(t, ref);
+  const before = await recoverySnapshot(t, ref);
+  vi.setSystemTime(NOW + 1000);
+  await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
+  await drain(t);
+  expect(await recoverySnapshot(t, ref)).toEqual(before);
+});
+
+test.each(["customer", "checkout"] as const)("deleted %s unknown and malformed-created results wake exactly once", async target => {
+  for (const malformed of [false, true]) {
+    const t = setup(), ref = await customer(t);
+    const purchaseRef = await t.run(async ctx => {
+      const purchase = await ctx.db.insert("billingPurchases", { customerRef: ref, mode: "test_mode", intentId: "unknown",
+        terms: TERMS, state: "preparing" });
+      await ctx.db.patch("billingCustomers", ref, { creationState: "preparing", creationLeaseId: "lease", pendingPurchaseRef: purchase });
+      return purchase;
+    });
+    await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
+    await drain(t);
+    await completed(t, ref);
+    vi.setSystemTime(NOW + 1000);
+    const before = (await read(t, ref))!;
+    const record = () => target === "customer"
+      ? alice(t).mutation(api.billingCheckout.recordCustomerResult, { internalKey: KEY, customerRef: ref, leaseId: "lease",
+        result: malformed ? { kind: "created", customerId: "invalid/id" } : { kind: "unknown" } })
+      : alice(t).mutation(api.billingCheckout.recordCheckoutResult, { internalKey: KEY, purchaseRef,
+        result: malformed ? { kind: "created", sessionId: "invalid/id" } : { kind: "unknown" } });
+    await record();
+    await expectWake(t, ref, before);
+    const after = await recoverySnapshot(t, ref);
+    await record();
+    expect(await recoverySnapshot(t, ref)).toEqual(after);
+  }
+});
+
+test("late binding wakes live-lease recovery, but identical IDs after completion do not", async () => {
+  const t = setup(), ref = await customer(t);
+  const purchaseRef = await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode: "test_mode", intentId: "late",
+    terms: TERMS, state: "open" }));
+  await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
+  await drain(t);
+  await completed(t, ref);
+  vi.setSystemTime(NOW + 1000);
+  let before = (await read(t, ref))!;
+  await t.mutation(internal.billing.bindPurchase, { purchaseRef, mode: "test_mode", paymentId: "pay_late" });
+  await expectWake(t, ref, before);
+  await completed(t, ref);
+  before = (await read(t, ref))!;
+  await t.mutation(internal.billing.bindSubscription, { customerRef: ref, mode: "test_mode", subscriptionId: "sub_new", productId: TERMS.productId });
+  await expectWake(t, ref, before);
+  await t.run(async ctx => {
+    await ctx.db.patch("billingPurchases", purchaseRef, { state: "terminal", cancellationRecoveryRequired: false });
+    const row = await ctx.db.query("billingSubscriptions").first();
+    await ctx.db.patch("billingSubscriptions", row!._id, { status: "cancelled", cancellationRecoveryRequired: false });
+  });
+  await completed(t, ref);
+  const snapshot = await recoverySnapshot(t, ref);
+  await t.mutation(internal.billing.bindPurchase, { purchaseRef, mode: "test_mode", paymentId: "pay_late" });
+  await t.mutation(internal.billing.bindSubscription, { customerRef: ref, mode: "test_mode", subscriptionId: "sub_new", productId: TERMS.productId });
+  expect(await recoverySnapshot(t, ref)).toEqual(snapshot);
+});
+
+test("processing transition wakes once; known-ended subscription replay preserves completion", async () => {
+  const t = setup(), ref = await customer(t);
+  await t.run(async ctx => {
+    await ctx.db.patch("billingCustomers", ref, { customerId: "cus_late" });
+    await ctx.db.insert("billingPurchases", { customerRef: ref, mode: "test_mode", intentId: "processing",
+      terms: TERMS, paymentId: "pay_processing", state: "open" });
+    await ctx.db.insert("billingSubscriptions", { customerRef: ref, mode: "test_mode", subscriptionId: "sub_ended",
+      productId: TERMS.productId, status: "cancelled" });
+  });
+  await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
+  await drain(t);
+  await completed(t, ref);
+  vi.setSystemTime(NOW + 1000);
+  const commit = async (processing: boolean) => {
+    const c = (await read(t, ref))!;
+    return await t.mutation(internal.billingFulfill.commitReconciliation, { customerRef: ref,
+      fence: { generation: c.generation, inputRevision: c.inputRevision }, receiptRefs: [],
+      payments: processing ? [{ paymentId: "pay_processing", decision: { kind: "processing", paymentId: "pay_processing" },
+        reversal: { kind: "unknown", reason: "missing" } }] : [],
+      subscriptions: [{ subscriptionId: "sub_ended", customerId: "cus_late", productId: TERMS.productId,
+        status: "cancelled", cancelAtNextBillingDate: false }],
+    });
+  };
+  const before = (await read(t, ref))!;
+  await commit(true);
+  await expectWake(t, ref, before);
+  await completed(t, ref);
+  const after = await recoverySnapshot(t, ref);
+  await commit(true);
+  await commit(false);
+  expect(await recoverySnapshot(t, ref)).toEqual(after);
+});
+
+test("settled payment replay does not reopen a completed obligation", async () => {
+  const t = setup(), ref = await customer(t);
+  await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
+  await drain(t);
+  const purchase = await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode: "test_mode", intentId: "settled",
+    terms: { ...TERMS, sku: "top_up" }, paymentId: "pay_settled", state: "settled", cancellationRecoveryRequired: false }));
+  await completed(t, ref);
+  const before = await recoverySnapshot(t, ref), c = (await read(t, ref))!;
+  await t.mutation(internal.billingFulfill.commitReconciliation, { customerRef: ref,
+    fence: { generation: c.generation, inputRevision: c.inputRevision }, receiptRefs: [], subscriptions: [],
+    payments: [{ paymentId: "pay_settled", decision: { kind: "top_up", paymentId: "pay_settled", productId: TERMS.productId,
+      credits: 2000, settledAt: NOW }, reversal: { kind: "unknown", reason: "missing" } }],
+  });
+  expect(await recoverySnapshot(t, ref)).toEqual(before);
+  expect((await t.run(ctx => ctx.db.get("billingPurchases", purchase)))?.cancellationRecoveryRequired).toBe(false);
+});

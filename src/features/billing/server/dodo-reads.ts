@@ -117,6 +117,12 @@ async function readJson(config: DodoReconcilerConfig, path: string, fetchImpl: t
   }
 }
 
+/** Canonical ownership read with the same timeout, size bound and cleanup as other reads. */
+export async function fetchCustomer(config: DodoReconcilerConfig, id: string, fetchImpl: typeof fetch = fetch) {
+  const body = await readJson(config, `/customers/${providerId(id)}`, fetchImpl);
+  return { customerId: providerId(body.customer_id), businessId: providerId(body.business_id) };
+}
+
 /** Unknown, not empty, when missing or malformed, so settlement stays pending. */
 function servicePeriods(value: unknown): ProviderPayment["servicePeriods"] {
   if (!Array.isArray(value) || value.length > MAX_LIST_ITEMS) return undefined;

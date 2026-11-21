@@ -6,10 +6,20 @@ block uncancel, but never cancellation. The server chooses the owned active
 subscription; requests carry no IDs or timing. Management ignores checkout flags.
 
 Claims serialize opposing operations. Definite refusals release them; confirmed
-and ambiguous writes stay pending until the first canonical reconciliation read
-that started strictly after the claim. Claims have no timer expiry. Polling checks
+and ambiguous writes stay pending through a persisted 60-second dispatch window
+(`controlWriteUntil`, matching both routes' maxDuration). Canonical reconciliation
+clears only on a read started strictly after both this deadline and any recorded
+result time (`controlResultAt`). Before-result reads cannot release the write lock.
+The trusted deadline is returned by prepareControl and passed only in server config;
+the adapter refuses at entry and immediately before PATCH if expired and aborts at
+the smaller of its 15-second timeout or remaining window. Missing deadline preserves
+the deletion executor's separate adapter contract. Old claims without the optional
+window use claim time + 60 seconds. Claims have no unconditional timer release. Polling checks
 pending controls in every local status, with an indexed bounded read and active
-cadence. A route crash after claiming is covered by the same poll wakeup.
+cadence. Pending findings emit claim/read-specific receipt IDs, including repeated
+active provider status, so every fresh recovery read can reach reconciliation.
+Reread IDs are deduplicated before applying the resource limit. A route crash after
+claiming or lost result is covered by the same post-window poll wakeup.
 
 Only canonical reconciliation writes cancelAt (settled paidThrough when scheduled,
 absent otherwise). Controls never change settled periods, lots, credits or recovery
@@ -43,7 +53,10 @@ Injected fetch, bounded response reads, manual redirects and a total 15-second
 abort budget; no automatic write retry or provider URL/body/error logging. Unknown
 writes remain unknown. SDK types do not establish scoped-key PATCH permissions,
 production behavior, redirect handling or cancellation timing in a real account;
-those remain stage-13 gates. No provider call was made to develop this change.
+those remain stage-13 gates. A client abort/deadline prevents late dispatch but
+cannot prove that an already accepted provider write will not execute later. The
+window is an approved operational bound, not provider transaction fencing; late
+completion behavior needs stage-13 verification and support handling. No provider call was made to develop this change.
 
 ## Verification
 
@@ -64,7 +77,7 @@ The separate optional `cancellationLeaseId`/`cancellationLeaseExpiresAt` fields 
 not change the receipt lease. Claims last ten minutes and fence commits by lease,
 generation and input revision. Crashes consume an attempt; eight failures move
 the obligation to indexed support. Backoff starts at 15 minutes, caps at one day,
-and honors a longer Retry-After. A successful chunk resets the failure count.
+and honors Retry-After up to that cap. Successful chunks preserve the failed-pass budget; temporary blockers retry a fresh pass and eventually require support.
 
 `cancellationProgress` stores a fixed discovery window, phase, page, within-page
 offset and local cursor; it never stores an unbounded resource list. Discovery
@@ -77,10 +90,9 @@ proof and requires a fresh pass; it never creates a second grant path.
 Completion requires exhausted discovery and local pages, ended owned subscriptions,
 expired unpaid checkouts with fresh failure/no-payment evidence, no uncertain
 creates, no unresolved receipts or checkout lock, and no processing/unmatched
-charge. An unmatched succeeded charge remains review work; no refund occurs.
+charge. Any succeeded charge created at or after deletedAt minus provider clock skew requires support/refund review, even when already settled locally; no refund occurs. A verified late-bound customer ID can recover independently of the creation-state flag.
 Periods, lots, entitlements, tombstones and financial dedupe are never shortened
-or deleted here. Support may conservatively retain obligations even after a
-provider condition changes; new evidence/operator recovery must wake them.
+or deleted here. Hard support cases require new evidence or operator recovery: missing customer ID, unresolved creates without resource IDs, ownership mismatch, page caps and exhausted attempts. Open sessions, processing payments, unresolved receipts and checkout locks retry with backoff.
 
 New evidence alone calls `queueDeletionRecovery`: reset attempts/outcome, mark due,
 and increment input revision. Keep the live cancellation lease and old progress;
@@ -100,8 +112,10 @@ obligation covers work before these pages finish. Financial rows survive
 
 Late customer/session/payment/subscription evidence is retained without granting
 benefits. New evidence reopens recovery (including support/complete), resets its
-attempt budget and advances inputRevision. Unchanged replays preserve the retry
-state. This invalidates 10c's pinned evidence without releasing its live
+attempt budget and advances inputRevision. Bindings compare stored IDs, payment
+application compares its stored state, and ended subscription facts do not reopen
+recovery. A renewable subscription fact still requires recovery if its marker was
+cleared; it is fresh evidence that stopping future charges is not yet proven. This invalidates 10c's pinned evidence without releasing its live
 cancellation lease, so opposing provider writes remain serialized. Duplicate
 Clerk deletion preserves the first deletedAt and support/complete unless resource
 markers reopen the obligation. Unknown creates remain pending for recovery or
@@ -112,6 +126,55 @@ insert missing per-user credit/spend rows. Site-wide model spend still records
 incurred costs. Billing holds alone do not block charging. No deletion helper
 shrinks paid periods, credit lots or refunds money. This PR records obligations;
 10c executes provider cancellation. Billing enablement requires 10b–10d together.
+
+### 10c review fixes and remaining limits
+
+The sweep preserves the live lease-expiry wakeup when new evidence arrives.
+Completion persists provider-proven ended subscriptions and terminal purchases in
+the same fenced transaction as marker clearance. It rechecks child markers,
+nonterminal states and pending controls before completing. This final check reads
+at most 101 rows from each existing customer index; more than 100 subscriptions
+or purchases requires support, never inferred completion. Paid periods remain
+unchanged. Receipt and reconciliation leases remain owned by their existing paths.
+Support obligations alone do not keep the active poll cadence; customers without
+provider IDs stop polling. Ownership GET uses the shared bounded reader and
+MAX_PROVIDER_BODY_BYTES, including error-body cleanup.
+
+Deferred review findings:
+- P2-5: provider offset pages still assume stable ordering. A persisted page-ID
+  digest/restart contract needs a separate progress-schema change and pagination
+  regression coverage. Until then, provider reordering can skip discovery entries;
+  the bounded local-resource check does not prove remote list stability.
+- P2-9: newly recorded receipts advance inputRevision and restart discovery. This
+  preserves fencing but can require quadratic work for large histories. Progress
+  reconciliation with newly ingested evidence is deferred; attempts never imply
+  completion. The full-page test deliberately seeds dedupe receipts to isolate
+  pagination and does not establish efficient discovery with new receipts.
+
+Regression tests cover late settled charges in both payment and purchase phases,
+clock-skew boundary, live-lease sweep wakeups, capped numeric/date Retry-After,
+late-bound customer IDs, retry exhaustion, leftover markers/states/controls and
+atomic terminal state persistence. Existing billingFulfill coverage verifies no
+grant or credit account after owner deletion. Tests are authored for CI only.
+
+Authorization follows the existing feature-local billingCheckout convention:
+validateInternalKey first, then verifyAuth and both ownerTokenIdentifier/subject
+checks against the resource's customer. The small domain helper is intentionally
+local; broad admin/auth consolidation would change unrelated trust boundaries.
+Same-origin and JSON guards are the identical established shared request helpers.
+
+### Recovery completion contract (10b → 10c)
+
+Before clearing a resource marker, 10c MUST persist the confirmed local terminal
+purchase state or ended subscription status in that same fenced transaction.
+It MUST NOT complete while a purchase is processing/open/unknown or a subscription
+is renewable, or while a control claim can still dispatch. Discovery must retain
+all resource IDs. This lets duplicate deletion batches and canonical ended-state
+replays preserve completion instead of cycling complete → pending. Duplicate
+Clerk deliveries do not advance generation/inputRevision; new resource evidence
+advances only inputRevision and never releases a live receipt/recovery lease.
+Missing mirrored users fail closed for new per-user usage rows and emit a short
+warning without identifiers; existing usage rows remain chargeable.
 
 ## 10d: deleted billing record retention
 

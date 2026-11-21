@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { canUncancel } from "../src/features/billing/subscription-controls";
+import { canUncancel, CONTROL_WRITE_WINDOW_MS } from "../src/features/billing/subscription-controls";
 import { mutation, type MutationCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { ownerDeleted } from "./billing";
@@ -20,7 +20,7 @@ const refused = (code: "not_subscribed" | "on_hold" | "control_pending" | "expir
 export const prepareControl = mutation({
   args: { internalKey: v.string(), mode: billingModeValidator, operation },
   returns: v.union(v.object({ kind: v.literal("refused"), code }), v.object({
-    kind: v.literal("call"), subscriptionRef: v.id("billingSubscriptions"), subscriptionId: v.string(), customerId: v.string(), revision: v.number(),
+    kind: v.literal("call"), subscriptionRef: v.id("billingSubscriptions"), subscriptionId: v.string(), customerId: v.string(), revision: v.number(), writeUntil: v.number(),
   })),
   handler: async (ctx, args) => {
     const identity = await authorize(ctx, args.internalKey);
@@ -38,12 +38,15 @@ export const prepareControl = mutation({
         cancelAt: sub.cancelAt, paidThrough: sub.paidThrough }, Date.now())) return refused("expired");
     }
     const revision = (sub.controlRevision ?? 0) + 1;
+    const now = Date.now();
+    const writeUntil = now + CONTROL_WRITE_WINDOW_MS;
     await ctx.db.patch("billingSubscriptions", sub._id, {
-      controlOperation: args.operation, controlRevision: revision, controlPendingAt: Date.now(),
+      controlOperation: args.operation, controlRevision: revision, controlPendingAt: now,
+      controlWriteUntil: writeUntil, controlResultAt: undefined,
     });
     // Also covers a route crash before recordControlResult.
     await markPollDue(ctx, customer._id, false);
-    return { kind: "call" as const, subscriptionRef: sub._id, subscriptionId: sub.subscriptionId, customerId: customer.customerId, revision };
+    return { kind: "call" as const, subscriptionRef: sub._id, subscriptionId: sub.subscriptionId, customerId: customer.customerId, revision, writeUntil };
   },
 });
 
@@ -58,10 +61,11 @@ export const recordControlResult = mutation({
     if (!customer || customer.ownerTokenIdentifier !== identity.tokenIdentifier || customer.userId !== identity.subject) {
       throw appError("NOT_FOUND", "Billing record not found");
     }
-    if (sub!.controlRevision !== args.revision) throw appError("CONFLICT", "Control state changed");
+    if (sub!.controlRevision !== args.revision || sub!.controlPendingAt === undefined) throw appError("CONFLICT", "Control state changed");
     if (args.outcome === "refused") await ctx.db.patch("billingSubscriptions", sub!._id, {
-      controlOperation: undefined, controlPendingAt: undefined,
+      controlOperation: undefined, controlPendingAt: undefined, controlWriteUntil: undefined, controlResultAt: undefined,
     });
+    else await ctx.db.patch("billingSubscriptions", sub!._id, { controlResultAt: Date.now() });
     await markPollDue(ctx, customer._id, false);
     return null;
   },

@@ -1,3 +1,4 @@
+import { CONTROL_WRITE_WINDOW_MS } from "../src/features/billing/subscription-controls";
 import { v, type Infer } from "convex/values";
 
 import { currentUsage } from "../src/features/billing/credits";
@@ -116,7 +117,7 @@ async function planPayment(ctx: Ctx, customer: Customer, fact: PaymentFact, dele
   }
   if (fact.reversal.kind === "unknown") {
     plan.purchase = await stageUnreadablePayment(ctx, customer, fact, d, plan.purchase, deleted);
-    if (!plan.purchase) return { ...plan, outcome: "quarantined" };
+    if (!plan.purchase) return { ...plan, outcome: "pending" };
     const review = plan.purchase?.reviewedReversalRef && await ctx.db.get("billingEvents", plan.purchase.reviewedReversalRef);
     if (!review || review.customerRef !== customer._id || review.mode !== customer.mode ||
       review.paymentId !== fact.paymentId || review.state !== "processed" ||
@@ -248,24 +249,27 @@ const grantKey = (d: Positive) => d.kind === "period"
 async function stageUnreadablePayment(ctx: Ctx, customer: Customer, fact: PaymentFact, d: Positive, found: Purchase | null, deleted: boolean) {
   if (fact.paymentId !== d.paymentId || !Number.isSafeInteger(fact.totalMinor) || fact.totalMinor! <= 0) return null;
   const subscription = d.kind === "period" ? await subscriptionRow(ctx, customer.mode, d.subscriptionId) : null;
-  if (d.kind === "period" && (!subscription || subscription.customerRef !== customer._id || subscription.productId !== d.productId)) return null;
+  if (subscription && (subscription.customerRef !== customer._id || subscription.productId !== d.productId)) return null;
   // Re-read both binding and candidate: another fact in this transaction may have taken them.
   const bound = await ctx.db.query("billingPurchases")
     .withIndex("by_mode_and_paymentId", q => q.eq("mode", customer.mode).eq("paymentId", fact.paymentId)).unique();
   let purchase = bound ?? (found && await ctx.db.get("billingPurchases", found._id));
   if (purchase && (purchase.customerRef !== customer._id || purchase.mode !== customer.mode ||
     purchase.state === "quarantined" || !termsMatch(purchase, d) || purchase.terms.quantity !== 1 ||
-    purchase.terms.credits !== d.credits || (purchase.paymentId !== undefined && purchase.paymentId !== d.paymentId))) return null;
-  if (!purchase && d.kind !== "period") return null;
+    (purchase.paymentId !== undefined && purchase.paymentId !== d.paymentId))) return null;
+  if (!purchase && (d.kind !== "period" || !subscription)) return null;
+  // A settled replay never changes its original reservation, even if the read's period changed.
+  if (purchase?.state === "settled") {
+    if (purchase.totalMinor === undefined) await ctx.db.patch("billingPurchases", purchase._id, { totalMinor: fact.totalMinor });
+    return (await ctx.db.get("billingPurchases", purchase._id))!;
+  }
   const sourceKey = grantKey(d);
+  if (purchase?.stagedGrantKey !== undefined && purchase.stagedGrantKey !== sourceKey) return null;
   // Check before creating a renewal as well as before binding an existing checkout.
-  const reserved = await ctx.db.query("billingPurchases")
-    .withIndex("by_mode_and_stagedGrantKey", q => q.eq("mode", customer.mode).eq("stagedGrantKey", sourceKey)).unique();
-  if (reserved && reserved._id !== purchase?._id) return null;
-  if (purchase?.state !== "settled" && await isDuplicate(ctx, customer, d, purchase, sourceKey)) return null;
+  if (await isDuplicate(ctx, customer, d, purchase, sourceKey)) return null;
   if (!purchase) purchase = await createPurchase(ctx, customer, d, true, deleted, "");
   await bindPurchaseRow(ctx, { purchaseRef: purchase._id, mode: customer.mode, paymentId: d.paymentId,
-    ...(d.kind === "period" ? { subscriptionId: d.subscriptionId } : {}) });
+    ...(d.kind === "period" && subscription ? { subscriptionId: d.subscriptionId } : {}) });
   await ctx.db.patch("billingPurchases", purchase._id, {
     totalMinor: purchase.totalMinor ?? fact.totalMinor, stagedGrantKey: sourceKey,
   });
@@ -302,9 +306,9 @@ async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positi
   // A renewal that carries its checkout's session is still owned; the source key catches a same-period duplicate.
   const purchase = current && !taken ? current
     : await createPurchase(ctx, customer, d, row !== null && !rowMismatch, deleted, taken ? "duplicate_checkout" : "no_purchase");
-  if (deleted) {
+  if (deleted && purchase.paymentId !== d.paymentId) {
     await ctx.db.patch("billingPurchases", purchase._id, { cancellationRecoveryRequired: true });
-    if (!purchase.cancellationRecoveryRequired || purchase.paymentId !== d.paymentId) await queueDeletionRecovery(ctx, customer._id);
+    await queueDeletionRecovery(ctx, customer._id);
   }
   if (purchase.state === "quarantined") return false;
   // A replay: one grant per payment, even if a later read reports another period.
@@ -356,9 +360,9 @@ async function applyPayment(ctx: Ctx, customer: Customer, plan: PaymentPlan, del
   const purchase = plan.purchase && await ctx.db.get("billingPurchases", plan.purchase._id);
   // Only a verified positive binds a payment: a failed attempt leaves the session to its retry.
   if (purchase?.paymentId !== d.paymentId) return false;
-  if (deleted) {
+  if (deleted && d.kind === "processing" && ["preparing", "unknown", "open"].includes(purchase.state)) {
     await ctx.db.patch("billingPurchases", purchase._id, { cancellationRecoveryRequired: true });
-    if (!purchase.cancellationRecoveryRequired) await queueDeletionRecovery(ctx, customer._id);
+    await queueDeletionRecovery(ctx, customer._id);
   }
   if (d.kind === "quarantine") {
     if (purchase.state !== "settled") await quarantinePurchase(ctx, purchase, d.paymentId, d.reason);
@@ -400,16 +404,17 @@ async function applySubscription(ctx: Ctx, customer: Customer, { fact, outcome }
     row = await ctx.db.get("billingSubscriptions", ref);
   }
   if (row?.customerRef !== customer._id) return;
-  if (deleted) {
+  const ended = ENDED_STATUS.get(fact.status as "failed");
+  if (deleted && !ended) {
     await ctx.db.patch("billingSubscriptions", row._id, { cancellationRecoveryRequired: true });
     if (!row.cancellationRecoveryRequired) await queueDeletionRecovery(ctx, customer._id);
   }
-  const ended = ENDED_STATUS.get(fact.status as "failed");
   await ctx.db.patch("billingSubscriptions", row._id, {
     observedAt: now, ...(ended ? { status: ended } : {}),
     controlRenewable: fact.status === "active",
-    ...(row.controlPendingAt !== undefined && (fact.readStartedAt ?? -Infinity) > row.controlPendingAt
-      ? { controlOperation: undefined, controlPendingAt: undefined } : {}),
+    ...(row.controlPendingAt !== undefined && (fact.readStartedAt ?? -Infinity) > Math.max(
+      row.controlWriteUntil ?? row.controlPendingAt + CONTROL_WRITE_WINDOW_MS, row.controlResultAt ?? 0)
+      ? { controlOperation: undefined, controlPendingAt: undefined, controlWriteUntil: undefined, controlResultAt: undefined } : {}),
     cancelAt: fact.cancelAtNextBillingDate ? row.paidThrough : undefined,
   });
 }

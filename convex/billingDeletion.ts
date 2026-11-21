@@ -27,7 +27,8 @@ export async function markBillingDeleted(ctx: MutationCtx, clerkUserId: string, 
       .withIndex("by_mode_and_userId", q => q.eq("mode", mode).eq("userId", clerkUserId)).unique();
     if (!customer) continue;
     const first = customer.deletedAt === undefined;
-    await ctx.db.patch("billingCustomers", customer._id, {
+    const changed = first || !customer.hold || customer.cancellationLastOutcome === undefined;
+    if (changed) await ctx.db.patch("billingCustomers", customer._id, {
       deletedAt: customer.deletedAt ?? now, hold: true,
       generation: customer.generation + 1, inputRevision: customer.inputRevision + 1,
       ...(first || customer.cancellationLastOutcome === undefined ? {
