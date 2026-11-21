@@ -23,15 +23,17 @@ vi.mock("@/features/sandbox-preview/server/provider/types", async (importOrigina
   PROVIDER_IDS: ["e2b", "blaxel"],
 }));
 
-// The registry over fake providers: E2B primary, Blaxel its fallback, the real failover and cooldown.
+// The pool over fake providers: E2B primary, Blaxel its fallback, the real failover and cooldown.
 vi.mock("@/features/sandbox-preview/server/provider/registry", async (importOriginal) => {
   const { createWithFailover } = await import("@/features/sandbox-preview/server/provider/failover");
   return {
     ...(await importOriginal<typeof import("@/features/sandbox-preview/server/provider/registry")>()),
-    getConfiguredProviders: () => state.providers,
-    fanoutHealth: () => ({ primary: "e2b", cooldown: state.cooldown }),
-    createSandbox: (opts: Parameters<SandboxProvider["create"]>[0]) =>
-      createWithFailover(opts, { providers: state.providers, cooldown: state.cooldown }),
+    getSandboxPool: () => state.providers.length ? {
+      providers: state.providers,
+      health: { primary: "e2b", cooldown: state.cooldown },
+      create: (opts: Parameters<SandboxProvider["create"]>[0]) =>
+        createWithFailover(opts, { providers: state.providers, cooldown: state.cooldown }),
+    } : null,
   };
 });
 

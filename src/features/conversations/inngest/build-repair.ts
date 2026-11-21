@@ -22,11 +22,7 @@ import {
 import { FALLBACK_LIST_TIMEOUT_MS, listAll } from "@/features/sandbox-preview/server/provider/fanout";
 import { runOrThrow, withDeadline } from "@/features/sandbox-preview/server/provider/helpers";
 import { parsePublicSandboxIdOrNull, toPublicSandboxId } from "@/features/sandbox-preview/server/provider/ids";
-import {
-  createSandbox,
-  fanoutHealth,
-  getConfiguredProviders,
-} from "@/features/sandbox-preview/server/provider/registry";
+import { type SandboxPool, getSandboxPool } from "@/features/sandbox-preview/server/provider/registry";
 import type { Sandbox } from "@/features/sandbox-preview/server/provider/types";
 import { convex } from "@/lib/convex-client";
 
@@ -72,15 +68,15 @@ const REPAIR_PURPOSE = "build-repair";
  */
 // shortcut: the same kill loop as `killProjectPreviews`; a shared fan-out kill helper can replace both.
 export const killRepairSandboxes = async (runId: string) => {
-  const providers = getConfiguredProviders();
-  if (!providers.length) return;
-  const health = fanoutHealth();
+  const pool = getSandboxPool();
+  if (!pool) return;
+  const { providers, health } = pool;
   const byId = new Map(providers.map((provider) => [provider.id, provider]));
-  const running = await listAll(providers, { metadata: { purpose: REPAIR_PURPOSE, runId } }, { ...health, skip: "failing" });
+  const running = await listAll(providers, { metadata: { purpose: REPAIR_PURPOSE, runId } }, health && { ...health, skip: "failing" });
   await Promise.all(running.map(async ({ provider, id }) => {
     const target = byId.get(provider);
     if (!target) return;
-    if (provider === health.primary) {
+    if (!health || provider === health.primary) {
       await target.kill(id);
       return;
     }
@@ -94,13 +90,14 @@ export const killRepairSandboxes = async (runId: string) => {
 };
 
 /**
- * The project from Convex, in a new sandbox on whichever provider `createSandbox`
- * picks (failover included): returns its prefixed public id, so later steps reach
+ * The project from Convex, in a new sandbox on whichever provider the pool's
+ * `create` picks (failover included): returns its prefixed public id, so later steps reach
  * that provider, or null for a project the check does not build. Uploads too, so
  * imports of them resolve. Never secret files: install scripts and builds there
  * run agent-written code. No `image`: each adapter uses its own default.
  */
 const provision = async (
+  pool: SandboxPool,
   { projectId, internalKey, runId }: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId">,
 ) => {
   const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
@@ -117,7 +114,7 @@ const provision = async (
   const uploads = withoutSecretFiles(allUploads);
   // Any other project could never verify, so a repair would only spend.
   if (!projectFramework(files, [...files, ...uploads].map(({ path }) => path))) return null;
-  const sandbox = await createSandbox({
+  const sandbox = await pool.create({
     timeoutMs: REPAIR_SANDBOX_TIMEOUT_MS,
     metadata: { projectId, runId, purpose: REPAIR_PURPOSE },
   });
@@ -196,12 +193,12 @@ export const repairBuild = async ({
   /** Upserts the rows `build` returns into the run block, in a step. */
   recordSteps: (build: () => AgentStep[]) => Promise<void>;
 }): Promise<RepairResult | null> => {
-  const providers = getConfiguredProviders();
-  if (!providers.length) return null;
+  const pool = getSandboxPool();
+  if (!pool) return null;
 
   const publicId = (await step("provision-repair-sandbox", async () => {
     try {
-      return await provision(options);
+      return await provision(pool, options);
     } catch (error) {
       console.error("[build-repair] could not start the repair sandbox", error);
       return null;
@@ -209,7 +206,7 @@ export const repairBuild = async ({
   })) as string | null;
   // An unprefixed id (a step memoized before ids carried their provider) is E2B's.
   const target = publicId ? parsePublicSandboxIdOrNull(publicId) : null;
-  const provider = providers.find(({ id }) => id === target?.provider);
+  const provider = pool.providers.find(({ id }) => id === target?.provider);
   if (!target || !provider) return null;
 
   let connected: Promise<Sandbox> | undefined;
