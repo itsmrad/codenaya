@@ -525,6 +525,24 @@ describe("POST /api/sandbox after ready (#492)", () => {
     }
   });
 
+  it("keeps waiting on a provider edge 404 or 5xx and is ready on any answer from the proxy", async () => {
+    const answers = [
+      new Response("", { status: 404 }),
+      new Response("", { status: 503 }),
+      new Response("", { status: 404, headers: { "x-preview-proxy": "1" } }),
+    ];
+    const fetchMock = vi.fn(async () => answers.shift()!);
+    vi.stubGlobal("fetch", fetchMock);
+    const { client, reader } = await bootToReady("sbx_ready_edge");
+    try {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      client.abort();
+      await drain(reader);
+      forgetSandbox("sbx_ready_edge");
+    }
+  });
+
   it("installs a burst of package.json syncs once, with the dev server stopped, and starts it once after (#486)", async () => {
     const { sandbox, stats, run, finishInstall, pendingInstalls, client, reader } =
       await bootToReady("sbx_ready_burst");

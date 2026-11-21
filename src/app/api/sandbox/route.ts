@@ -792,11 +792,16 @@ async function waitForServerPort(
   return getDetectedPort();
 }
 
+/** Marks responses that came from our own port-4000 proxy, not a provider edge. */
+const PREVIEW_PROXY_HEADER = "x-preview-proxy";
+
 /**
- * Poll the public preview URL until E2B routes it (it answers 5xx before
- * that), up to `maxWaitMs`. Replaces a fixed 3s wait.
+ * Poll the public preview URL until the provider routes it, up to `maxWaitMs`.
+ * Before that the edge answers 5xx or 404; any answer from our proxy counts.
+ * It returns on the first good answer, so a fast provider (E2B) waits no longer.
+ * The default leaves room for slower edges (Blaxel's first 200 took ~3.6s, #929).
  */
-async function waitForPublicUrl(url: string, maxWaitMs = 3000): Promise<void> {
+async function waitForPublicUrl(url: string, maxWaitMs = 10_000): Promise<void> {
   const deadline = Date.now() + maxWaitMs;
 
   while (Date.now() < deadline) {
@@ -805,7 +810,12 @@ async function waitForPublicUrl(url: string, maxWaitMs = 3000): Promise<void> {
         signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
       });
       await response.body?.cancel();
-      if (response.status < 500) return;
+      if (
+        response.headers.has(PREVIEW_PROXY_HEADER) ||
+        (response.status < 500 && response.status !== 404)
+      ) {
+        return;
+      }
     } catch {
       // Not reachable yet, or the attempt ran out of time.
     }
@@ -837,6 +847,7 @@ const rewriteProxyHeaders = ${String(rewriteProxyHeaders)};
 const shouldInjectBridge = ${String(shouldInjectBridge)};
 
 const server = http.createServer((req, res) => {
+  res.setHeader(${JSON.stringify(PREVIEW_PROXY_HEADER)}, '1');
   const options = {
     hostname: 'localhost', // use localhost to support both IPv4 and IPv6 bindings
     port: TARGET_PORT,
