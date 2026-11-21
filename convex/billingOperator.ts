@@ -2,6 +2,7 @@ import { v } from "convex/values";
 
 import { internalMutation } from "./_generated/server";
 import { bindCustomerRow } from "./billing";
+import { CHECKOUT_PREPARE_STALE_MS } from "./billingCheckout";
 import { appError } from "./errors";
 
 const auditArgs = { operator: v.string(), reason: v.string() };
@@ -29,7 +30,10 @@ export const resolveUnknownCustomer = internalMutation({
       if (customer.customerId !== undefined) throw appError("INVALID_ARGUMENT", "Customer already has a provider identifier");
       await ctx.db.patch("billingCustomers", customerRef, { creationState: "preparing" });
     }
-    await ctx.db.patch("billingCustomers", customerRef, { creationLeaseId: undefined, creationLeasedAt: undefined, resolution });
+    await ctx.db.patch("billingCustomers", customerRef, {
+      creationLeaseId: undefined, creationLeasedAt: undefined,
+      resolution: { ...resolution, previousState: customer.creationState },
+    });
     console.info("[billingOperator] resolved", { action: resolution.action, customerRef, operator });
     return null;
   },
@@ -45,11 +49,12 @@ export const releaseCheckoutLock = internalMutation({
     if (!customer) throw appError("NOT_FOUND", "Billing customer not found");
     const purchase = customer.pendingPurchaseRef && await ctx.db.get("billingPurchases", customer.pendingPurchaseRef);
     if (!purchase || purchase.customerRef !== customerRef || purchase.mode !== customer.mode ||
-      purchase.state === "settled" || purchase.state === "processing" || purchase.paymentId !== undefined) {
+      purchase.state === "settled" || purchase.state === "processing" || purchase.paymentId !== undefined ||
+      (purchase.state === "preparing" && resolution.at - purchase._creationTime < CHECKOUT_PREPARE_STALE_MS)) {
       throw appError("INVALID_ARGUMENT", "Checkout cannot be released");
     }
     // Keep the session id: a late payment must still settle through the normal fenced path.
-    await ctx.db.patch("billingPurchases", purchase._id, { state: "terminal", resolution });
+    await ctx.db.patch("billingPurchases", purchase._id, { state: "terminal", resolution: { ...resolution, previousState: purchase.state } });
     await ctx.db.patch("billingCustomers", customerRef, { pendingPurchaseRef: undefined });
     console.info("[billingOperator] resolved", { action: resolution.action, customerRef, purchaseRef: purchase._id, operator });
     return null;

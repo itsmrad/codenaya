@@ -3,6 +3,7 @@ import { v } from "convex/values";
 
 export const billingOperatorAuditValidator = v.object({
   action: v.string(), operator: v.string(), reason: v.string(), at: v.number(),
+  previousState: v.optional(v.string()),
 });
 
 /**
