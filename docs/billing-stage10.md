@@ -75,8 +75,10 @@ obligation covers work before these pages finish. Financial rows survive
 
 Late customer/session/payment/subscription evidence is retained without granting
 benefits. New evidence reopens recovery (including support/complete), resets its
-attempt budget and advances inputRevision. Unchanged replays preserve the retry
-state. This invalidates 10c's pinned evidence without releasing its live
+attempt budget and advances inputRevision. Bindings compare stored IDs, payment
+application compares its stored state, and ended subscription facts do not reopen
+recovery. A renewable subscription fact still requires recovery if its marker was
+cleared; it is fresh evidence that stopping future charges is not yet proven. This invalidates 10c's pinned evidence without releasing its live
 cancellation lease, so opposing provider writes remain serialized. Duplicate
 Clerk deletion preserves the first deletedAt and support/complete unless resource
 markers reopen the obligation. Unknown creates remain pending for recovery or
@@ -92,3 +94,16 @@ validateInternalKey first, then verifyAuth and both ownerTokenIdentifier/subject
 checks against the resource's customer. The small domain helper is intentionally
 local; broad admin/auth consolidation would change unrelated trust boundaries.
 Same-origin and JSON guards are the identical established shared request helpers.
+
+### Recovery completion contract (10b → 10c)
+
+Before clearing a resource marker, 10c MUST persist the confirmed local terminal
+purchase state or ended subscription status in that same fenced transaction.
+It MUST NOT complete while a purchase is processing/open/unknown or a subscription
+is renewable, or while a control claim can still dispatch. Discovery must retain
+all resource IDs. This lets duplicate deletion batches and canonical ended-state
+replays preserve completion instead of cycling complete → pending. Duplicate
+Clerk deliveries do not advance generation/inputRevision; new resource evidence
+advances only inputRevision and never releases a live receipt/recovery lease.
+Missing mirrored users fail closed for new per-user usage rows and emit a short
+warning without identifiers; existing usage rows remain chargeable.

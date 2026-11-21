@@ -100,6 +100,7 @@ async function chargeAccount(ctx: MutationCtx, userId: string, credits: number, 
     await ctx.db.patch("creditAccounts", account._id, { ...next, ...billing });
   } else {
     const user = await ctx.db.query("users").withIndex("by_clerkUserId", q => q.eq("clerkUserId", userId)).unique();
+    if (!user) console.warn("[credits] skipped account insertion without a mirrored user");
     if (!user || user.deletedAt !== undefined) return;
     await ctx.db.insert("creditAccounts", { userId, plan: "free", ...next });
   }

@@ -306,9 +306,9 @@ async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positi
   // A renewal that carries its checkout's session is still owned; the source key catches a same-period duplicate.
   const purchase = current && !taken ? current
     : await createPurchase(ctx, customer, d, row !== null && !rowMismatch, deleted, taken ? "duplicate_checkout" : "no_purchase");
-  if (deleted) {
+  if (deleted && purchase.paymentId !== d.paymentId) {
     await ctx.db.patch("billingPurchases", purchase._id, { cancellationRecoveryRequired: true });
-    if (!purchase.cancellationRecoveryRequired || purchase.paymentId !== d.paymentId) await queueDeletionRecovery(ctx, customer._id);
+    await queueDeletionRecovery(ctx, customer._id);
   }
   if (purchase.state === "quarantined") return false;
   // A replay: one grant per payment, even if a later read reports another period.
@@ -360,9 +360,9 @@ async function applyPayment(ctx: Ctx, customer: Customer, plan: PaymentPlan, del
   const purchase = plan.purchase && await ctx.db.get("billingPurchases", plan.purchase._id);
   // Only a verified positive binds a payment: a failed attempt leaves the session to its retry.
   if (purchase?.paymentId !== d.paymentId) return false;
-  if (deleted) {
+  if (deleted && d.kind === "processing" && ["preparing", "unknown", "open"].includes(purchase.state)) {
     await ctx.db.patch("billingPurchases", purchase._id, { cancellationRecoveryRequired: true });
-    if (!purchase.cancellationRecoveryRequired) await queueDeletionRecovery(ctx, customer._id);
+    await queueDeletionRecovery(ctx, customer._id);
   }
   if (d.kind === "quarantine") {
     if (purchase.state !== "settled") await quarantinePurchase(ctx, purchase, d.paymentId, d.reason);
@@ -404,11 +404,11 @@ async function applySubscription(ctx: Ctx, customer: Customer, { fact, outcome }
     row = await ctx.db.get("billingSubscriptions", ref);
   }
   if (row?.customerRef !== customer._id) return;
-  if (deleted) {
+  const ended = ENDED_STATUS.get(fact.status as "failed");
+  if (deleted && !ended) {
     await ctx.db.patch("billingSubscriptions", row._id, { cancellationRecoveryRequired: true });
     if (!row.cancellationRecoveryRequired) await queueDeletionRecovery(ctx, customer._id);
   }
-  const ended = ENDED_STATUS.get(fact.status as "failed");
   await ctx.db.patch("billingSubscriptions", row._id, {
     observedAt: now, ...(ended ? { status: ended } : {}),
     controlRenewable: fact.status === "active",
