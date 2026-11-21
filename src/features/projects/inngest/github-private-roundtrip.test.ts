@@ -9,6 +9,7 @@ import { api } from "../../../../convex/_generated/api";
 import schema from "../../../../convex/schema";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { withContents } from "../../../../convex/fileContents";
+import { MAX_PROJECT_FILES } from "../../../../convex/files";
 import { buildPathIndex } from "@/features/conversations/agent-steps";
 import { planSeedTree } from "@/features/templates/seed-files";
 
@@ -119,4 +120,31 @@ test("push then pull preserves local private canaries and never changes their re
   }
   for (const path of sourcePaths) expect(restored[path]).toBe(local[path]);
   expect(JSON.stringify(mocks.mutation.mock.calls)).not.toMatch(/LOCAL_CANARY|REMOTE_CANARY/);
+});
+
+test("an oversized project refuses push before any remote tree or ref can change", async () => {
+  vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", internalKey);
+  const t = convexTest(schema, modules);
+  mocks.query.mockImplementation(t.query);
+  mocks.mutation.mockImplementation(t.mutation);
+  const projectId = await t.run(async ctx => {
+    const id = await ctx.db.insert("projects", { name: "Oversized", ownerId: "owner", updatedAt: 0,
+      githubSync: { repo: "owner/repo", branch: "main", lastSyncedSha: "old", lastSyncedAt: 0 } });
+    for (let i = 0; i <= MAX_PROJECT_FILES; i++) await ctx.db.insert("files", {
+      projectId: id, name: `entry-${i}`, type: i < 4800 ? "file" : "folder", updatedAt: 0,
+    });
+    return id;
+  });
+  mocks.github = {
+    getRef: vi.fn(async () => ({ data: { object: { sha: "old" } } })),
+    getTree: vi.fn(), getCommit: vi.fn(), createTree: vi.fn(), createCommit: vi.fn(), updateRef: vi.fn(),
+  };
+  await expect((pushToGithub as unknown as (args: unknown) => Promise<unknown>)({
+    event: { data: { projectId, userId: "owner" } },
+    step: { run: (_name: string, fn: () => unknown) => fn() },
+  })).rejects.toMatchObject({
+    name: "NonRetriableError", message: expect.stringMatching(/Too many files and folders to export.*Remove generated or unused files/),
+  });
+  for (const name of ["getTree", "getCommit", "createTree", "createCommit", "updateRef"]) expect(mocks.github[name]).not.toHaveBeenCalled();
+  expect(await t.run(ctx => ctx.db.get("projects", projectId))).toMatchObject({ githubSync: { lastSyncedSha: "old" } });
 });

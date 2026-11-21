@@ -5,6 +5,7 @@ import { Octokit, RequestError } from "octokit";
 import { NonRetriableError } from "inngest";
 
 import { convex } from "@/lib/convex-client";
+import { getAppError } from "@/lib/convex-error";
 import { inngest } from "@/inngest/client";
 import { requireJobGithubToken } from "@/features/projects/server/github-token";
 import { getFilePath } from "@/features/sandbox-preview/utils/file-tree";
@@ -329,7 +330,11 @@ async function moveBranch(
 }
 
 export async function currentFiles(internalKey: string, projectId: Id<"projects">) {
-  const files = await convex.query(api.files.getTransferFiles, { internalKey, projectId });
+  const files = await convex.query(api.files.getTransferFiles, { internalKey, projectId }).catch(error => {
+    const refusal = getAppError(error);
+    if (refusal?.code === "LIMIT_EXCEEDED") throw new NonRetriableError(refusal.message);
+    throw error;
+  });
   const byId = new Map(files.map((file) => [file._id, file]));
   return files
     .filter((file) => file.type === "file")

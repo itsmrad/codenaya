@@ -185,7 +185,7 @@ test.each(["node_modules/a.js", "a\\NODE_MODULES. \\cache.js", ".next/cache", ".
 });
 
 test.each([...sourcePaths, "credentials/index.ts", "src/dist/a.ts", "build", "scripts/coverage"])("keeps legitimate source path %s", path => {
-  expect(withoutPrivateFiles([{ path }])).toEqual([{ path }]);
+  expect(withoutPrivateFiles([{ path, type: "file" }])).toEqual([{ path, type: "file" }]);
 });
 
 test("owner transfer reads retain the previous 5000-row cap without rejecting an imported folder", async () => {
@@ -196,6 +196,9 @@ test("owner transfer reads retain the previous 5000-row cap without rejecting an
     return id;
   });
   expect(await t.withIdentity({ subject: "owner" }).query(api.files.getFilesWithUrls, { projectId })).toHaveLength(5000);
+  await expect(t.query(api.files.getTransferFiles, { internalKey, projectId })).rejects.toMatchObject({
+    data: { code: "LIMIT_EXCEEDED", message: expect.stringMatching(/Too many files and folders to export.*Remove generated or unused files/) },
+  });
 });
 
 test("runtime rules distinguish top-level output directories from source folders and file basenames", () => {

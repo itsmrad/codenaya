@@ -215,10 +215,12 @@ const transferFileValidator = v.object({
 });
 
 /** Content and binary URLs for transfers, after the server file gate. */
-async function transferFiles(ctx: QueryCtx, projectId: Id<"projects">, forBuild = false) {
+async function transferFiles(ctx: QueryCtx, projectId: Id<"projects">, forBuild = false, allowPartial = false) {
   const files = await ctx.db.query("files")
     .withIndex("by_project", q => q.eq("projectId", projectId))
-    .take(MAX_PROJECT_FILES);
+    .take(MAX_PROJECT_FILES + (allowPartial ? 0 : 1));
+  if (files.length > MAX_PROJECT_FILES) throw appError("LIMIT_EXCEEDED", `Too many files and folders to export (maximum ${MAX_PROJECT_FILES}). Remove generated or unused files, or split this project before retrying.`);
+  // Only file basenames are secret-policy inputs; empty paths leave folders intact.
   const selected = forBuild
     ? withoutSecretFiles(files.map(file => ({ file, path: file.type === "file" ? file.name : "" }))).map(({ file }) => file)
     : transferableTree(files);
@@ -257,7 +259,7 @@ export const getFilesWithUrls = query({
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
     await getOwnedProject(ctx, args.projectId, identity.subject);
-    return await transferFiles(ctx, args.projectId);
+    return await transferFiles(ctx, args.projectId, false, true);
   },
 });
 

@@ -124,7 +124,7 @@ export const pullFromGithub = inngest.createFunction(
       }
       if (tree.size > MAX_PULL_ENTRIES) {
         throw new NonRetriableError(
-          `Repositories over ${MAX_PULL_ENTRIES} files and folders can't be pulled`
+          `This pull would exceed ${MAX_PULL_ENTRIES} files and folders, including preserved local private entries. Remove unused files from the project or repository before retrying.`
         );
       }
 
