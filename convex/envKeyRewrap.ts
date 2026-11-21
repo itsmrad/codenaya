@@ -1,14 +1,19 @@
-import { paginationOptsValidator } from "convex/server";
+import { paginationOptsValidator, paginationResultValidator } from "convex/server";
 import { v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { validateInternalKey } from "./internalKey";
+import schema from "./schema";
 
 /**
  * Storage side of the env-var KMS key move (the runner and verify pass live in
  * `src/features/integrations/server/env/rewrap-env-keys.ts`; KMS runs on the
  * Next.js host only). `internalKey` only.
  */
+
+const sealedRow = schema.tables.projectEnvVars.validator
+  .pick("projectId", "key", "updatedAt", "secretRef", "kekProvider", "kekKeyId", "wrappedDek", "ciphertext", "iv", "authTag")
+  .extend({ _id: v.id("projectEnvVars") });
 
 /**
  * One page of secret rows with their sealed payloads, in creation order. The
@@ -17,12 +22,12 @@ import { validateInternalKey } from "./internalKey";
  */
 export const listSecretEnvVarsPage = query({
   args: { internalKey: v.string(), paginationOpts: paginationOptsValidator },
+  returns: paginationResultValidator(sealedRow),
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
     const result = await ctx.db.query("projectEnvVars").paginate(args.paginationOpts);
     return {
-      isDone: result.isDone,
-      continueCursor: result.continueCursor,
+      ...result,
       page: result.page
         .filter((row) => row.visibility === "secret")
         .map((row) => ({

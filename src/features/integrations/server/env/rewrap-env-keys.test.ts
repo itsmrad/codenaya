@@ -88,6 +88,18 @@ async function setup() {
   return { t, newProject, save, seed, rows, generations, runAll, openAll };
 }
 
+test("a merged report counts the failures it stops listing", () => {
+  const total = emptyReport();
+  const page = (n: number) => ({
+    byKey: { k: { total: n, failed: n } },
+    failures: Array.from({ length: n }, (_, i) => ({ id: `row_${i}`, kekKeyId: "k" })),
+  });
+  for (let i = 0; i < 11; i++) mergeReport(total, page(50));
+  expect(total.failures).toHaveLength(500);
+  expect(total.unlistedFailures).toBe(50);
+  expect(total.byKey.k).toEqual({ total: 550, failed: 550 });
+});
+
 describe("env-var KMS key move", () => {
   test("moves A and legacy rows to B, verifies, and rolls back by config", async () => {
     const { t, newProject, seed, rows, generations, runAll, openAll } = await setup();
@@ -133,7 +145,7 @@ describe("env-var KMS key move", () => {
     expect(after.find((row) => row._id === oldEpoch)?.recoveryEpoch).toBe(0);
     expect(await generations()).toEqual(generationsBefore);
 
-    expect(await runAll("verify")).toEqual({ byKey: { [ARN_B]: { total: 5, verified: 5 } }, failures: [] });
+    expect(await runAll("verify")).toEqual({ byKey: { [ARN_B]: { total: 5, wrapVerified: 5 } }, failures: [] });
     expect((await openAll(sealerWith(ARN_B, [ARN_A]))).sort()).toEqual(
       ["canary-API_KEY", "canary-DB_URL", "canary-DB_URL", "canary-LEGACY_TOKEN", "canary-STRIPE_KEY"],
     );
@@ -152,7 +164,7 @@ describe("env-var KMS key move", () => {
     expect(await sealerWith(ARN_B, [ARN_A]).open(saved, "ref_new", { projectId: p1, envKey: "NEW_KEY" })).toBe("canary-new");
     // And the same runner moves everything back.
     expect((await runAll("rewrap", rolledBack)).byKey).toEqual({ [ARN_B]: { total: 5, moved: 5 } });
-    expect((await runAll("verify", rolledBack)).byKey).toEqual({ [ARN_A]: { total: 5, verified: 5 } });
+    expect((await runAll("verify", rolledBack)).byKey).toEqual({ [ARN_A]: { total: 5, wrapVerified: 5 } });
   });
 
   test("a run killed midway resumes, and a KMS outage leaves rows untouched", async () => {
@@ -175,7 +187,7 @@ describe("env-var KMS key move", () => {
       [ARN_B]: { total: 2, alreadyCurrent: 2 },
       [ARN_A]: { total: 3, moved: 3 },
     });
-    expect((await runAll("verify")).byKey).toEqual({ [ARN_B]: { total: 5, verified: 5 } });
+    expect((await runAll("verify")).byKey).toEqual({ [ARN_B]: { total: 5, wrapVerified: 5 } });
   });
 
   test("a save or delete during the run wins", async () => {

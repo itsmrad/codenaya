@@ -8,12 +8,12 @@ This runbook is for the operator who owns the AWS account and the host configura
 
 - It runs on the Next.js host as the Inngest function `rewrap-env-keys`. There is no HTTP route. Send the event `env-vars/kms.rewrap` (no data) from the Inngest dashboard. Only one run happens at a time.
 - **Pass 1, rewrap.** Every secret row not yet on `ENV_VARS_KMS_KEY_ARN` is moved to it: legacy local-KEK rows, and rows on a previous ARN. The runner calls KMS Decrypt with the row's own context and Encrypt under the current key with the same context. It then writes the new wrap only if the row is exactly as it was read. A save or delete that lands first wins, and the row shows as `skipped`.
-- **Pass 2, verify.** It unwraps every row's DEK under the current key and discards it. Values are not opened.
+- **Pass 2, verify.** It checks wraps only: it unwraps every row's DEK under the current key and discards it. Values are not opened, so verify does not authenticate the value ciphertext. The move never touches that ciphertext; it stays byte-identical.
 - It never changes a value, `updatedAt`, `recoveryEpoch` or `envGeneration`. Running previews keep running. Rows from an older recovery epoch that are still waiting for the owner's Restore/Delete review are moved too, so retiring a key never strands them.
 - It is safe to re-run at any time. Rows already on the current key count as `alreadyCurrent` and cost no KMS call.
 - It refuses to start until `ENV_VARS_SECRET_RUNTIME=on`, which is the activation stage that moves secret reads to the KMS sealer. Before that, previews read secrets through the legacy sealer, which cannot open a moved row.
 
-The run's output has `rewrap` and `verify` reports. `byKey` holds counts per key id as read, using the outcomes `total`, `moved`, `alreadyCurrent`, `skipped`, `verified` and `failed`. `failures` names each failed row by its row id and key id only.
+The run's output has `rewrap` and `verify` reports. `byKey` holds counts per key id as read, using the outcomes `total`, `moved`, `alreadyCurrent`, `skipped`, `wrapVerified` and `failed`. `failures` names each failed row by its row id and key id only.
 
 ## 1. Add the new key to the set
 
@@ -26,29 +26,32 @@ The run's output has `rewrap` and `verify` reports. `byKey` holds counts per key
 Set the host configuration, then redeploy **every** live deployment, including preview and dev hosts that share the database:
 
 - `ENV_VARS_KMS_KEY_ARN` = `NEW_KEY_ARN`
-- `ENV_VARS_KMS_PREVIOUS_KEY_ARNS` = `OLD_KEY_ARN` (comma list, unwrap only)
+- `ENV_VARS_KMS_PREVIOUS_KEY_ARNS` = the existing list plus `OLD_KEY_ARN`, minus `NEW_KEY_ARN` (comma list, unwrap only). Keep every key that still has rows, or those rows stop opening.
 - `ENV_VARS_KMS_ACCESS_KEY_ID` / `ENV_VARS_KMS_SECRET_ACCESS_KEY` = the principal from step 1
+- `ENV_VARS_KMS_REGION` = the region in `NEW_KEY_ARN`, or unset it. If it differs from the current key's region, every secret save and read fails.
 
 New saves now go to the new key, and rows on either key still open.
 
 ## 3. Run and verify
 
 1. Send `env-vars/kms.rewrap`.
-2. The move is done when the `verify` report lists **only** `NEW_KEY_ARN`, with `verified` equal to `total` and no failures. Look into every failure (an unknown ARN, a key outside the set, a tampered or corrupt row). Re-run after fixing the cause. Never delete rows to make the count reach zero.
+2. The move is done when the `verify` report lists **only** `NEW_KEY_ARN`, with `wrapVerified` equal to `total` and no failures. Look into every failure (an unknown ARN, a key outside the set, a tampered or corrupt wrap). Re-run after fixing the cause. Never delete rows to make the count reach zero.
 3. Take a fresh Convex backup.
 
 ## Rollback (config only)
 
 Until step 4 removes any grants:
 
-1. Set `ENV_VARS_KMS_KEY_ARN` = `OLD_KEY_ARN` and `ENV_VARS_KMS_PREVIOUS_KEY_ARNS` = `NEW_KEY_ARN`, then redeploy. Because both keys stay in the set, rows on either key still open and new saves go to the old key.
+1. Set `ENV_VARS_KMS_KEY_ARN` = `OLD_KEY_ARN`, `ENV_VARS_KMS_PREVIOUS_KEY_ARNS` = the existing list plus `NEW_KEY_ARN`, minus `OLD_KEY_ARN`, and `ENV_VARS_KMS_REGION` = the region in `OLD_KEY_ARN` (or unset it). Keep the credentials from step 2, which hold Encrypt and Decrypt on both keys. Then redeploy. Because both keys stay in the set, rows on either key still open and new saves go to the old key.
 2. Optionally re-run `env-vars/kms.rewrap` to move rows back to the old key.
 
 ## 4. Retire the old key
 
-Keep the old key **enabled** until step 3 shows 100% verified and a fresh backup exists. Then:
+Keep the old key **enabled** until step 3 shows every wrap verified and a fresh backup exists. A key leaves `ENV_VARS_KMS_PREVIOUS_KEY_ARNS` only through these steps, after its own recount shows zero rows. Then:
 
-1. Freeze writes to it. Remove `kms:Encrypt` on the old key from every principal, and deactivate the old principal's access keys.
+1. Freeze writes to it. Remove `kms:Encrypt` on the old key from every principal.
+   - Same principal for both keys (a same-account move): do **not** deactivate its access keys. They are the credentials the host uses now.
+   - A new principal: first confirm every serving deployment uses the new principal's credentials, then deactivate the old principal's access keys.
 2. Re-run `env-vars/kms.rewrap`. The `verify` report must show zero rows on the old key.
 3. Remove `OLD_KEY_ARN` from `ENV_VARS_KMS_PREVIOUS_KEY_ARNS` and redeploy. Remove the remaining grants on the old key.
 4. **Disable** the old key (through `BREAK_GLASS_ROLE`) for a grace period, 30 days recommended, with an alarm on any attempted use.
@@ -68,6 +71,3 @@ Apply these to every env-var key, including a newly created one, in that key's o
 ## Limits
 
 - One run covers about 25,000 env-var rows, public ones included (Inngest's step cap over two passes of 50-row pages). A larger table needs the cursor carried into a follow-up run, which is not built yet.
-- An older revision of the same row replayed into the database still decrypts. That needs database write access.
-- A legacy envelope that was copied onto the wrong row before the move becomes bound to that row by the re-wrap.
-- During a cross-account move, CloudTrail in both accounts records project ids and env var names, which are not secret.

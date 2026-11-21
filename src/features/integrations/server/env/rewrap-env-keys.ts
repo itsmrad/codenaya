@@ -9,8 +9,9 @@
  * save or delete that lands first wins. Rows of any recovery epoch are moved,
  * and their epoch is left as it is.
  *
- * `verify` unwraps every row's DEK under the current key and discards it,
- * without opening the value. A row on any other key is a failure.
+ * `verify` checks wraps only: it unwraps every row's DEK under the current key
+ * and discards it, without opening the value, so it does not authenticate the
+ * value ciphertext (the move never touches it). A row on any other key fails.
  *
  * Both run a page at a time and report counts by the row's key id, plus the
  * row id and key id of each failure (nothing secret). Re-running is safe:
@@ -27,13 +28,15 @@ export const ENV_REWRAP_PAGE_SIZE = 50;
 const KMS_CONCURRENCY = 4;
 
 export type EnvKeyPassMode = "rewrap" | "verify";
-type Outcome = "moved" | "alreadyCurrent" | "skipped" | "verified" | "failed";
+type Outcome = "moved" | "alreadyCurrent" | "skipped" | "wrapVerified" | "failed";
 type Counts = Partial<Record<Outcome | "total", number>>;
 
 export interface EnvKeyPassReport {
   /** Keyed by the row's key id as read (a KMS ARN or a legacy key id). */
   byKey: Record<string, Counts>;
   failures: { id: string; kekKeyId: string }[];
+  /** Failures not listed in `failures` once it is full; still counted in `byKey`. */
+  unlistedFailures?: number;
 }
 
 export interface EnvKeyPage extends EnvKeyPassReport {
@@ -54,7 +57,10 @@ export function mergeReport(total: EnvKeyPassReport, page: EnvKeyPassReport) {
       into[outcome] = (into[outcome] ?? 0) + n;
     }
   }
-  total.failures.push(...page.failures.slice(0, MAX_REPORTED_FAILURES - total.failures.length));
+  const room = MAX_REPORTED_FAILURES - total.failures.length;
+  total.failures.push(...page.failures.slice(0, room));
+  const unlisted = Math.max(0, page.failures.length - room) + (page.unlistedFailures ?? 0);
+  if (unlisted > 0) total.unlistedFailures = (total.unlistedFailures ?? 0) + unlisted;
 }
 
 export async function runEnvKeyPage(
@@ -79,7 +85,7 @@ export async function runEnvKeyPage(
     const destination = { projectId: row.projectId, envKey: row.key };
     if (mode === "verify") {
       await sealer.checkDek(sealed, destination);
-      return "verified";
+      return "wrapVerified";
     }
     const { sealed: next, changed } = await sealer.rewrap(sealed, destination);
     if (!changed) return "alreadyCurrent";
