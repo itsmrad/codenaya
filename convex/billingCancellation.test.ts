@@ -6,6 +6,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { CANCELLATION_LEASE_MS, CANCELLATION_MAX_ATTEMPTS, CANCELLATION_MAX_DELAY_MS, CANCELLATION_FETCH_LIMIT } from "./billingCancellation";
+import { PROVIDER_CLOCK_SKEW_MS } from "./billingPoll";
 import { queueDeletionRecovery } from "./billingDeletion";
 import schema from "./schema";
 import { sha256Hex } from "./billingWebhook";
@@ -38,20 +39,22 @@ async function commit(t: T, ref: Id<"billingCustomers">, c: Awaited<ReturnType<t
     inputRevision: c.inputRevision, leaseId: c.leaseId, evidence: { progress: { ...c.progress, phase }, failed: false,
       support: false, retryAt: 0, ended: [], resolved: [], findings: [] } });
 }
-function provider(opts: { full?: boolean; failure?: number; processing?: boolean; renewable?: boolean } = {}) {
+function provider(opts: { full?: boolean; failure?: number; retryAfter?: string; processing?: boolean; renewable?: boolean; succeededAt?: number; listPayment?: boolean } = {}) {
   const cancelled = new Set<string>();
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input)); const id = url.pathname.split("/")[2];
     if (init?.method === "PATCH") cancelled.add(id);
-    if (opts.failure) return new Response("{}", { status: opts.failure, headers: { "retry-after": "86400" } });
+    if (opts.failure) return new Response("{}", { status: opts.failure, headers: { "retry-after": opts.retryAfter ?? "86400" } });
     let body: object = { items: [] };
     if (url.pathname.startsWith("/customers/")) body = { customer_id: "cus_dummy", business_id: "bus_dummy" };
     else if (url.pathname.startsWith("/checkouts/")) body = { id, created_at: new Date(NOW - 3 * 86400000).toISOString(),
       payment_id: opts.processing ? "pay_dummy" : null, payment_status: opts.processing ? "processing" : null };
     else if (url.pathname.startsWith("/payments/")) body = { payment_id: id, business_id: "bus_dummy", customer: { customer_id: "cus_dummy" },
-      created_at: new Date(NOW).toISOString(), status: "processing", total_amount: 100, currency: "USD", product_cart: [] };
+      created_at: new Date(opts.succeededAt ?? NOW).toISOString(), status: opts.succeededAt === undefined ? "processing" : "succeeded", total_amount: 100, currency: "USD", product_cart: [] };
     else if (url.pathname.startsWith("/subscriptions/")) body = { subscription_id: id, customer: { customer_id: "cus_dummy" }, product_id: "pdt_pro",
       status: cancelled.has(id) ? "cancelled" : opts.renewable ? "paused" : "cancelled", cancel_at_next_billing_date: false };
+    else if (url.pathname === "/payments" && opts.listPayment) body = { items: [{ payment_id: "pay_dummy", status: "succeeded",
+      customer: { customer_id: "cus_dummy" }, created_at: new Date(opts.succeededAt ?? NOW).toISOString() }] };
     else if (url.pathname === "/subscriptions" && opts.full && url.searchParams.get("page_number") === "0") body = { items: Array.from({ length: 20 }, (_, i) => ({
       subscription_id: `sub_${i}`, status: "cancelled", customer: { customer_id: "cus_dummy" }, created_at: new Date(NOW - 1000).toISOString() })) };
     return new Response(JSON.stringify(body));
@@ -96,7 +99,7 @@ test.each([429, 503])("provider %s respects retry-after and never completes", as
 
 test("missing customer ID and unresolved customer creation with empty lists require support", async () => {
   const t = setup(); const fetchMock = provider();
-  for (const extra of [{ customerId: undefined }, { creationState: "unknown" as const }]) {
+  for (const extra of [{ customerId: undefined, creationState: "unknown" as const }, { customerId: undefined, creationState: "preparing" as const }]) {
     const ref = await customer(t, extra); await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
     expect(await row(t, ref)).toMatchObject({ cancellationRecoveryRequired: true, cancellationLastOutcome: "support" });
   }
@@ -122,7 +125,7 @@ test("commit refuses skipping discovery, and incomplete local purchase proof can
       terms: { sku: "top_up", catalogVersion: "dummy", productId: "pdt_top", quantity: 1, credits: 1000 } });
   });
   expect(await commit(t, ref, await claim(t, ref), "done")).toBe("pending");
-  expect(await row(t, ref)).toMatchObject({ cancellationRecoveryRequired: true, cancellationLastOutcome: "support" });
+  expect(await row(t, ref)).toMatchObject({ cancellationRecoveryRequired: true, cancellationLastOutcome: "retry" });
 });
 
 test("cancelled known subscription plus expired checkout with processing payment stays incomplete and preserves periods", async () => {
@@ -189,4 +192,90 @@ test("a failed bound payment cannot prove a still-open session expired", async (
     terms: { sku: "top_up", catalogVersion: "dummy", productId: "pdt_top", quantity: 1, credits: 1000 } }));
   for (let i = 0; i < 9; i++) { vi.setSystemTime(NOW + i * (CANCELLATION_LEASE_MS + 1)); await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref }); }
   expect((await row(t, ref))!.cancellationRecoveryRequired).toBe(true);
+});
+
+async function phase(t: T, ref: Id<"billingCustomers">, value: "payments" | "purchases" | "knownSubscriptions") {
+  const c = await claim(t, ref);
+  await t.run(ctx => ctx.db.patch("billingCustomers", ref, { cancellationLeaseExpiresAt: 0,
+    cancellationProgress: { ...c.progress, phase: value } }));
+}
+const terms = { sku: "top_up" as const, catalogVersion: "dummy", productId: "pdt_top", quantity: 1, credits: 1000 };
+
+test.each(["payments", "purchases"] as const)("late succeeded charge in %s requires support even when locally settled", async value => {
+  const t = setup(), ref = await customer(t);
+  provider({ succeededAt: NOW - PROVIDER_CLOCK_SKEW_MS, listPayment: value === "payments" });
+  const purchaseRef = await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "late_charge",
+    state: "settled", paymentId: "pay_dummy", terms, cancellationRecoveryRequired: true }));
+  await phase(t, ref, value);
+  await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+  expect(await row(t, ref)).toMatchObject({ cancellationLastOutcome: "support", cancellationRecoveryRequired: true });
+  expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).toMatchObject({ state: "settled", cancellationRecoveryRequired: true });
+  expect(await t.run(ctx => ctx.db.query("billingGrants").take(1))).toEqual([]);
+});
+
+test("settled charge before the deletion skew window can finish recovery", async () => {
+  const t = setup(), ref = await customer(t); provider({ succeededAt: NOW - PROVIDER_CLOCK_SKEW_MS - 2 });
+  const purchaseRef = await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "old_charge",
+    state: "settled", paymentId: "pay_dummy", terms, cancellationRecoveryRequired: true }));
+  await phase(t, ref, "purchases");
+  await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+  expect(await row(t, ref)).toMatchObject({ cancellationLastOutcome: "complete" });
+  expect(await t.run(ctx => ctx.db.get("billingPurchases", purchaseRef))).toMatchObject({ state: "settled", cancellationRecoveryRequired: false });
+});
+
+test("verified late-bound customer can recover while its creation state stays unknown", async () => {
+  const t = setup(), ref = await customer(t, { creationState: "unknown" }); provider();
+  for (let i = 0; i < 4; i++) await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+  expect(await row(t, ref)).toMatchObject({ creationState: "unknown", cancellationLastOutcome: "complete" });
+});
+
+test("sweep preserves lease-expiry wakeup for evidence arriving during a live claim", async () => {
+  const t = setup(), ref = await customer(t); const c = await claim(t, ref);
+  await t.run(ctx => queueDeletionRecovery(ctx, ref));
+  await t.mutation(internal.billingCancellation.selectCancellationTargets, {});
+  expect((await row(t, ref))!.cancellationNextAttemptAt).toBe(NOW + CANCELLATION_LEASE_MS);
+  expect(await commit(t, ref, c)).toBe("stale");
+  vi.setSystemTime(NOW + CANCELLATION_LEASE_MS + 1);
+  await t.mutation(internal.billingCancellation.selectCancellationTargets, {});
+  expect((await claim(t, ref)).inputRevision).toBeGreaterThan(c.inputRevision);
+});
+
+test.each(["999999999999999999999", "Fri, 01 Jan 2100 00:00:00 GMT"])("Retry-After %s is capped", async retryAfter => {
+  const t = setup(), ref = await customer(t); provider({ failure: 429, retryAfter });
+  await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+  expect((await row(t, ref))!.cancellationNextAttemptAt).toBe(NOW + CANCELLATION_MAX_DELAY_MS);
+});
+
+test("temporary receipt blocker retries with backoff and exhausts to support", async () => {
+  const t = setup(), ref = await customer(t, { unresolvedReceipts: 1 }); provider();
+  for (let attempt = 1; attempt <= CANCELLATION_MAX_ATTEMPTS; attempt++) {
+    for (let i = 0; i < 4; i++) await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+    expect(await row(t, ref)).toMatchObject({ cancellationRecoveryRequired: true, cancellationAttempts: attempt,
+      cancellationLastOutcome: attempt === CANCELLATION_MAX_ATTEMPTS ? "support" : "retry" });
+    expect((await row(t, ref))!.cancellationNextAttemptAt).toBeGreaterThan(NOW);
+  }
+});
+
+test.each(["marker", "renewable", "control", "processing"])("final proof refuses leftover %s outside the current cursor", async blocker => {
+  const t = setup(), ref = await customer(t); provider();
+  if (blocker === "processing") await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "hidden",
+    state: "processing", terms }));
+  else await t.run(ctx => ctx.db.insert("billingSubscriptions", { customerRef: ref, mode, subscriptionId: "sub_hidden", productId: "pdt_pro",
+    status: blocker === "renewable" ? "active" : "cancelled", cancellationRecoveryRequired: blocker === "marker",
+    ...(blocker === "control" ? { controlPendingAt: NOW, controlOperation: "cancel" as const } : {}) }));
+  await phase(t, ref, "purchases");
+  await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+  expect(await row(t, ref)).toMatchObject({ cancellationRecoveryRequired: true, cancellationLastOutcome: "retry" });
+});
+
+test("ended subscription status is persisted atomically with marker clearance, retaining paid periods", async () => {
+  const t = setup(), ref = await customer(t); provider();
+  const subRef = await t.run(ctx => ctx.db.insert("billingSubscriptions", { customerRef: ref, mode, subscriptionId: "sub_old", productId: "pdt_pro",
+    status: "active", paidThrough: NOW + 10000, cancellationRecoveryRequired: true }));
+  const key = "poll:subscription:sub_old:cancelled";
+  await t.mutation(internal.billing.recordReceipt, { customerRef: ref, mode, webhookId: key, eventType: "subscription.poll", subscriptionId: "sub_old",
+    bodyDigest: await sha256Hex(new TextEncoder().encode(key)), occurredAt: NOW, ignored: true });
+  await phase(t, ref, "knownSubscriptions");
+  await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref });
+  expect(await t.run(ctx => ctx.db.get("billingSubscriptions", subRef))).toMatchObject({ status: "cancelled", paidThrough: NOW + 10000, cancellationRecoveryRequired: false });
 });

@@ -561,3 +561,23 @@ describe("budget and cadence", () => {
     expect(await poll(t)).toBe(0);
   });
 });
+
+
+test.each(["pending", "retry", "support"] as const)("deletion poll cadence for %s", async outcome => {
+  const t = setup(), ref = await customer(t);
+  await t.run(ctx => ctx.db.patch("billingCustomers", ref, { deletedAt: NOW, cancellationRecoveryRequired: true,
+    cancellationLastOutcome: outcome, nextPollAt: NOW }));
+  await t.mutation(internal.billingPoll.selectPollTargets, {});
+  expect((await t.run(ctx => ctx.db.get("billingCustomers", ref)))!.nextPollAt).toBe(NOW + (outcome === "support" ? IDLE_POLL_MS : ACTIVE_POLL_MS));
+  await t.mutation(internal.billingPoll.recordPollFindings, { customerRef: ref, mode: "test_mode", window: { since: NOW - DAY, until: NOW,
+    pages: {}, blocked: false }, pages: {}, failed: false, capped: false, findings: [] });
+  expect((await t.run(ctx => ctx.db.get("billingCustomers", ref)))!.nextPollAt).toBe(outcome === "support" ? undefined : NOW + ACTIVE_POLL_MS);
+});
+
+test("deleted support customer without a provider ID stops poll scheduling", async () => {
+  const t = setup(), ref = await customer(t);
+  await t.run(ctx => ctx.db.patch("billingCustomers", ref, { customerId: undefined, creationState: "unknown", deletedAt: NOW,
+    cancellationRecoveryRequired: true, cancellationLastOutcome: "support", nextPollAt: NOW }));
+  await t.mutation(internal.billingPoll.selectPollTargets, {});
+  expect((await t.run(ctx => ctx.db.get("billingCustomers", ref)))!.nextPollAt).toBeUndefined();
+});

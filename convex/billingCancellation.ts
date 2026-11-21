@@ -1,7 +1,6 @@
 import { v, type Infer } from "convex/values";
 
-import { fetchCheckoutSession, fetchPayment, fetchSubscription, listCustomerResources } from "../src/features/billing/server/dodo-reads";
-import { readBoundedBody } from "../src/features/billing/server/bounded-body";
+import { fetchCustomer, fetchCheckoutSession, fetchPayment, fetchSubscription, listCustomerResources } from "../src/features/billing/server/dodo-reads";
 import { setDodoCancellation } from "../src/features/billing/server/dodo-subscription";
 import { internal } from "./_generated/api";
 import { internalAction, internalMutation } from "./_generated/server";
@@ -17,6 +16,7 @@ export const CANCELLATION_MAX_ATTEMPTS = 8;
 export const CANCELLATION_BASE_DELAY_MS = 15 * 60_000;
 export const CANCELLATION_MAX_DELAY_MS = 24 * 60 * 60_000;
 export const CANCELLATION_LEASE_MS = 10 * 60_000;
+const LOCAL_PROOF_LIMIT = 100; // Larger histories require support rather than an unbounded completion read.
 const CHUNK = 3; // A subscription read + the adapter's five nested calls, three times, plus one list = 19.
 const ENDED = new Set(["cancelled", "expired", "failed"]);
 const DEAD_PAYMENT = new Set(["failed", "cancelled"]);
@@ -46,7 +46,8 @@ export const selectCancellationTargets = internalMutation({
       .take(CANCELLATION_BATCH);
     for (const row of rows) {
       // Support remains indexed but requires new evidence/operator work; never turn exhaustion into success.
-      await ctx.db.patch("billingCustomers", row._id, { cancellationNextAttemptAt: now + CANCELLATION_MAX_DELAY_MS });
+      await ctx.db.patch("billingCustomers", row._id, { cancellationNextAttemptAt: row.cancellationLastOutcome === "support" ? now + CANCELLATION_MAX_DELAY_MS :
+        (row.cancellationLeaseExpiresAt ?? 0) > now ? row.cancellationLeaseExpiresAt : now + CANCELLATION_LEASE_MS });
       if (row.cancellationLastOutcome !== "support")
         await ctx.scheduler.runAfter(0, internal.billingCancellation.recoverCustomer, { customerRef: row._id });
     }
@@ -59,13 +60,17 @@ export const claimCancellation = internalMutation({
   returns: v.union(v.null(), v.object({
     generation: v.number(), inputRevision: v.number(), leaseId: v.string(), customerId: v.optional(v.string()), mode: billingModeValidator,
     progress: billingCancellationProgressValidator, resources: v.array(resourceValidator), nextCursor: v.union(v.string(), v.null()), localDone: v.boolean(),
-    uncertainCreate: v.boolean(),
+    deletedAt: v.number(),
   })),
   handler: async (ctx, { customerRef }) => {
     const customer = await ctx.db.get("billingCustomers", customerRef);
     const now = Date.now();
     if (!customer || customer.deletedAt === undefined || !customer.cancellationRecoveryRequired ||
-      customer.cancellationLastOutcome === "support" || (customer.cancellationLeaseExpiresAt ?? 0) > now) return null;
+      customer.cancellationLastOutcome === "support") return null;
+    if ((customer.cancellationLeaseExpiresAt ?? 0) > now) {
+      await ctx.db.patch("billingCustomers", customerRef, { cancellationNextAttemptAt: customer.cancellationLeaseExpiresAt });
+      return null;
+    }
     if ((customer.cancellationAttempts ?? 0) >= CANCELLATION_MAX_ATTEMPTS) {
       await ctx.db.patch("billingCustomers", customerRef, { cancellationLastOutcome: "support" });
       return null;
@@ -95,7 +100,7 @@ export const claimCancellation = internalMutation({
     await ctx.db.patch("billingCustomers", customerRef, { cancellationLeaseId: leaseId, cancellationLeaseExpiresAt: now + CANCELLATION_LEASE_MS,
       cancellationAttempts: (customer.cancellationAttempts ?? 0) + 1, cancellationProgress: progress, cancellationNextAttemptAt: now + CANCELLATION_LEASE_MS });
     return { generation, inputRevision, mode, ...(customerId ? { customerId } : {}), leaseId, progress, resources, nextCursor, localDone,
-      uncertainCreate: customer.creationState !== "ready" };
+      deletedAt: customer.deletedAt };
   },
 });
 
@@ -107,7 +112,7 @@ export const recoverCustomer = internalAction({
     const claim = await ctx.runMutation(internal.billingCancellation.claimCancellation, { customerRef });
     if (!claim || config.environment !== claim.mode) return null;
     const progress: Progress = { ...claim.progress };
-    const evidence: Infer<typeof evidenceValidator> = { progress, failed: false, support: claim.uncertainCreate || !claim.customerId,
+    const evidence: Infer<typeof evidenceValidator> = { progress, failed: false, support: !claim.customerId,
       retryAt: 0, ended: [], resolved: [], findings: [] };
     let calls = 0;
     // Counts ALL nested GET/PATCH calls too. No fetch is issued after the cap or lease expiry.
@@ -120,7 +125,7 @@ export const recoverCustomer = internalAction({
         const value = response.headers.get("retry-after");
         if (value) {
           const at = /^\d+$/.test(value) ? Date.now() + Number(value) * 1000 : Date.parse(value);
-          if (Number.isFinite(at)) evidence.retryAt = Math.max(evidence.retryAt, at);
+          if (Number.isFinite(at)) evidence.retryAt = Math.max(evidence.retryAt, Math.min(at, Date.now() + CANCELLATION_MAX_DELAY_MS));
         }
       }
       return response;
@@ -140,15 +145,15 @@ export const recoverCustomer = internalAction({
       await finding("subscription", id, ended ? "cancelled" : sub.status);
       return ended;
     }
+    function lateCharge(payment: Awaited<ReturnType<typeof fetchPayment>>) {
+      const late = payment.status === "succeeded" && payment.createdAt >= claim!.deletedAt - PROVIDER_CLOCK_SKEW_MS;
+      if (payment.customerId !== claim!.customerId || late) evidence.support = true;
+      return late;
+    }
     try {
       if (!evidence.support) {
-        const host = config.environment === "test_mode" ? "https://test.dodopayments.com" : "https://live.dodopayments.com";
-        const response = await boundedFetch(`${host}/customers/${claim.customerId}`, { method: "GET", redirect: "manual",
-          headers: { Authorization: `Bearer ${config.apiKey}` }, signal: AbortSignal.timeout(15_000) });
-        const bytes = response.ok ? await readBoundedBody(response, 256 * 1024) : null;
-        if (!bytes) throw new Error("Customer ownership unavailable");
-        const owner = JSON.parse(new TextDecoder().decode(bytes)) as { customer_id?: unknown; business_id?: unknown };
-        if (owner.customer_id !== claim.customerId || owner.business_id !== config.businessId) evidence.support = true;
+        const owner = await fetchCustomer(config, claim.customerId!, boundedFetch);
+        if (owner.customerId !== claim.customerId || owner.businessId !== config.businessId) evidence.support = true;
       }
       if (!evidence.support && (progress.phase === "subscriptions" || progress.phase === "payments")) {
         const kind = progress.phase;
@@ -159,6 +164,7 @@ export const recoverCustomer = internalAction({
           else {
             const payment = await fetchPayment(config, item.id, boundedFetch);
             if (payment.customerId !== claim.customerId) { evidence.support = true; break; }
+            lateCharge(payment);
             await finding("payment", item.id, payment.status);
             // A succeeded late charge needs settlement/refund review. Never auto-refund or infer an empty remainder.
             if (!DEAD_PAYMENT.has(payment.status) && payment.status !== "succeeded") progress.blocked = true;
@@ -182,24 +188,25 @@ export const recoverCustomer = internalAction({
             if (!await endSubscription(resource.subscriptionId)) break;
             evidence.ended.push(resource.subscriptionRef);
           } else if (resource.purchaseRef) {
-            let safe = resource.state === "settled";
+            let safe = false; // A local settled state alone never proves provider charge timing.
             if (resource.sessionId) {
               const session = await fetchCheckoutSession(config, resource.sessionId, boundedFetch);
               const expired = Date.now() >= Math.max(resource.expiresAt ?? 0, session.createdAt + CHECKOUT_SESSION_TTL_MS) + PROVIDER_CLOCK_SKEW_MS;
               safe = expired && (!session.paymentId && !session.paymentStatus || DEAD_PAYMENT.has(session.paymentStatus ?? ""));
               if (session.paymentId) {
                 const payment = await fetchPayment(config, session.paymentId, boundedFetch);
-                safe = expired && payment.customerId === claim.customerId && DEAD_PAYMENT.has(payment.status);
+                safe = !lateCharge(payment) && expired && payment.customerId === claim.customerId && DEAD_PAYMENT.has(payment.status);
                 await finding("payment", session.paymentId, payment.status);
               }
             }
             if (resource.paymentId) {
               const payment = await fetchPayment(config, resource.paymentId, boundedFetch);
-              safe = payment.customerId === claim.customerId &&
+              safe = !lateCharge(payment) && payment.customerId === claim.customerId &&
                 (resource.state === "settled" && payment.status === "succeeded" ||
                   DEAD_PAYMENT.has(payment.status) && (!resource.sessionId || safe));
               await finding("payment", resource.paymentId, payment.status);
             }
+            if (["unknown", "preparing", "quarantined"].includes(resource.state ?? "") && !resource.sessionId && !resource.paymentId) evidence.support = true;
             if (["unknown", "preparing", "processing", "quarantined"].includes(resource.state ?? "")) safe = false;
             if (!safe) progress.blocked = true;
             else evidence.resolved.push(resource.purchaseRef);
@@ -261,27 +268,43 @@ export const commitCancellationEvidence = internalMutation({
     }
     // Receipt recording may itself reopen an obligation. Never overwrite its newer revision.
     const fresh = await ctx.db.get("billingCustomers", customerRef);
-    if (fresh?.inputRevision !== inputRevision) return "stale";
+    if (fresh?.inputRevision !== inputRevision) {
+      await ctx.db.patch("billingCustomers", customerRef, { cancellationNextAttemptAt: customer.cancellationLeaseExpiresAt });
+      return "stale";
+    }
     for (const ref of evidence.ended) {
       const row = await ctx.db.get("billingSubscriptions", ref);
       if (row?.customerRef !== customerRef || row.mode !== customer.mode) return "stale";
-      await ctx.db.patch("billingSubscriptions", ref, { cancellationRecoveryRequired: false });
+      if (row.controlPendingAt !== undefined) { evidence.progress.blocked = true; continue; }
+      await ctx.db.patch("billingSubscriptions", ref, { status: row.status === "expired" ? "expired" : "cancelled", cancellationRecoveryRequired: false });
     }
     for (const ref of evidence.resolved) {
       const row = await ctx.db.get("billingPurchases", ref);
       if (row?.customerRef !== customerRef || row.mode !== customer.mode) return "stale";
-      await ctx.db.patch("billingPurchases", ref, { cancellationRecoveryRequired: false });
+      await ctx.db.patch("billingPurchases", ref, { state: row.state === "settled" ? "settled" : "terminal", cancellationRecoveryRequired: false });
     }
-    const attempts = evidence.failed ? (customer.cancellationAttempts ?? 1) : 0;
+    let leftover = false;
+    if (evidence.progress.phase === "done") {
+      // Status/state cursors can move beneath us. Recheck all child markers under a hard read bound.
+      const subs = await ctx.db.query("billingSubscriptions").withIndex("by_customerRef_and_status", q => q.eq("customerRef", customerRef)).take(LOCAL_PROOF_LIMIT + 1);
+      const purchases = await ctx.db.query("billingPurchases").withIndex("by_customerRef_and_state", q => q.eq("customerRef", customerRef)).take(LOCAL_PROOF_LIMIT + 1);
+      evidence.support ||= subs.length > LOCAL_PROOF_LIMIT || purchases.length > LOCAL_PROOF_LIMIT;
+      leftover = subs.some(row => row.cancellationRecoveryRequired || row.controlPendingAt !== undefined || !["cancelled", "expired"].includes(row.status)) ||
+        purchases.some(row => row.cancellationRecoveryRequired || !["settled", "terminal"].includes(row.state));
+    }
     const complete = evidence.progress.phase === "done" && !evidence.progress.blocked && !evidence.failed && !evidence.support &&
-      customer.creationState === "ready" && !!customer.customerId && customer.unresolvedReceipts === 0 && !customer.pendingPurchaseRef;
-    const support = evidence.support || attempts >= CANCELLATION_MAX_ATTEMPTS || evidence.progress.phase === "done" && !complete;
+      !leftover && !!customer.customerId && customer.unresolvedReceipts === 0 && !customer.pendingPurchaseRef;
+    const retry = evidence.failed || evidence.progress.phase === "done" && !complete && !evidence.support;
+    const attempts = retry ? (customer.cancellationAttempts ?? 1) : 0;
+    const support = evidence.support || attempts >= CANCELLATION_MAX_ATTEMPTS;
+    // Re-read temporary blockers on a new pass; successful intermediate chunks preserve the retry budget.
+    const savedAttempts = retry || support ? attempts : Math.max(0, (customer.cancellationAttempts ?? 1) - 1);
     await ctx.db.patch("billingCustomers", customerRef, {
-      cancellationLeaseId: undefined, cancellationLeaseExpiresAt: undefined, cancellationAttempts: attempts,
-      cancellationProgress: evidence.failed ? customer.cancellationProgress : evidence.progress,
-      cancellationRecoveryRequired: !complete, cancellationLastOutcome: complete ? "complete" : support ? "support" : evidence.failed ? "retry" : "pending",
-      cancellationNextAttemptAt: complete ? undefined : Math.max(evidence.retryAt, now + (support ? CANCELLATION_MAX_DELAY_MS :
-        Math.min(CANCELLATION_MAX_DELAY_MS, CANCELLATION_BASE_DELAY_MS * 2 ** attempts))),
+      cancellationLeaseId: undefined, cancellationLeaseExpiresAt: undefined, cancellationAttempts: savedAttempts,
+      cancellationProgress: retry && evidence.progress.phase === "done" ? undefined : evidence.failed ? customer.cancellationProgress : evidence.progress,
+      cancellationRecoveryRequired: !complete, cancellationLastOutcome: complete ? "complete" : support ? "support" : retry ? "retry" : "pending",
+      cancellationNextAttemptAt: complete ? undefined : Math.max(Math.min(evidence.retryAt, now + CANCELLATION_MAX_DELAY_MS), now + (support ? CANCELLATION_MAX_DELAY_MS :
+        Math.min(CANCELLATION_MAX_DELAY_MS, CANCELLATION_BASE_DELAY_MS * 2 ** savedAttempts))),
     });
     return complete ? "complete" : "pending";
   },
