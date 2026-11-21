@@ -292,7 +292,7 @@ describe("pullFromGithub (#343)", () => {
 
     await expect(runJob()).rejects.toMatchObject({
       name: "NonRetriableError",
-      message: expect.stringMatching(/over 2000 files/),
+      message: expect.stringMatching(/would exceed 2000 files and folders, including preserved local private entries/),
     });
     expect(written()).toEqual([]);
   });
