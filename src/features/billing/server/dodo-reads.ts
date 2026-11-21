@@ -283,15 +283,21 @@ const LIST_FIELDS: Record<ListKind, { id: string; status: string }> = {
 };
 const LISTED_STATUS = /^[a-z_]{1,40}$/;
 
+/** A fixed creation-time window and a 0-based page (the API's default page is 0; paging is by offset). */
+export type ListWindow = { since: number; until: number; page: number };
+
 /**
- * First page (at most 20) of a customer's resources created since `createdAfter`. `full` means
- * the page may hide more: the caller must not treat it as complete.
+ * One page (at most 20) of a customer's resources created within the window. The window is fixed
+ * across pages, so offsets stay stable; `full` means the next page may hold more. Dispute
+ * statuses drop their `dispute_` prefix, as on a payment read.
  */
 export async function listCustomerResources(
-  config: DodoReconcilerConfig, kind: ListKind, providerCustomerId: string, createdAfter: number, fetchImpl: typeof fetch = fetch,
+  config: DodoReconcilerConfig, kind: ListKind, providerCustomerId: string, window: ListWindow, fetchImpl: typeof fetch = fetch,
 ): Promise<{ items: ListedResource[]; full: boolean }> {
+  if (!Number.isSafeInteger(window.page) || window.page < 0) throw malformed();
   const query = new URLSearchParams({
-    customer_id: providerId(providerCustomerId), created_at_gte: new Date(createdAfter).toISOString(), page_size: String(MAX_LIST_ITEMS),
+    customer_id: providerId(providerCustomerId), created_at_gte: new Date(window.since).toISOString(),
+    created_at_lte: new Date(window.until).toISOString(), page_size: String(MAX_LIST_ITEMS), page_number: String(window.page),
   });
   const { items } = await readJson(config, `/${kind}?${query}`, fetchImpl);
   if (!Array.isArray(items) || items.length > MAX_LIST_ITEMS) throw malformed();
@@ -302,7 +308,8 @@ export async function listCustomerResources(
     if ((kind === "payments" || kind === "subscriptions") && providerCustomerId !== customerId(item)) throw malformed();
     const createdAt = epochMs(item.created_at);
     if (createdAt === undefined) throw malformed();
-    const status = item[fields.status];
+    const raw = item[fields.status];
+    const status = kind === "disputes" && typeof raw === "string" && raw.startsWith("dispute_") ? raw.slice("dispute_".length) : raw;
     return {
       id: providerId(item[fields.id]), createdAt,
       status: typeof status === "string" && LISTED_STATUS.test(status) ? status : "other",

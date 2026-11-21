@@ -6,7 +6,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import {
-  ACTIVE_POLL_MS, CHECKOUT_SESSION_TTL_MS, IDLE_POLL_MS, markPollDue, POLL_BATCH, POLL_READS_PER_CUSTOMER, REVERSAL_WATCH_MS,
+  ACTIVE_POLL_MS, CHECKOUT_SESSION_TTL_MS, IDLE_POLL_MS, markPollDue, POLL_BATCH, POLL_READS_PER_CUSTOMER, PROVIDER_CLOCK_SKEW_MS,
+  REVERSAL_WATCH_MS,
 } from "./billingPoll";
 import schema from "./schema";
 
@@ -59,7 +60,11 @@ async function openCheckout(t: T, customerRef: Id<"billingCustomers">, sku: "pro
 
 type Provider = {
   payments?: readonly object[]; refunds?: readonly object[]; disputes?: readonly object[]; subscriptions?: readonly object[];
-  session?: object; failing?: string; full?: string;
+  session?: object; failing?: string;
+  // Page 0 of this list is full (20 synthetic items); page 1 holds the list's own items.
+  full?: string;
+  // Re-reads by id: a subscription's status, extra fields on a payment.
+  subscriptionReads?: Record<string, string>; paymentReads?: Record<string, Record<string, unknown>>;
 };
 const listed = (extra: Record<string, unknown>) => ({ created_at: iso(NOW), customer: { customer_id: "cus_user_alice" }, ...extra });
 const topUpPayment = (paymentId: string, extra: Record<string, unknown> = {}) => ({
@@ -67,19 +72,26 @@ const topUpPayment = (paymentId: string, extra: Record<string, unknown> = {}) =>
   subscription_id: null, checkout_session_id: "cks_1", product_cart: [{ product_id: TOP_UP, quantity: 1 }],
   total_amount: 1000, tax: 90, currency: "USD", created_at: iso(NOW), charge_type: null, ...extra,
 });
+const subscriptionRead = (subscriptionId: string, status: string) => ({
+  subscription_id: subscriptionId, status, product_id: PRO, customer: { customer_id: "cus_user_alice" }, quantity: 1,
+  previous_billing_date: iso(NOW - 20 * DAY), next_billing_date: iso(NOW + 10 * DAY), cancel_at_next_billing_date: false,
+});
 
-/** Answers Dodo list, session and payment reads from `provider`. */
+/** Answers Dodo list, session and by-id reads from `provider`. */
 function stubProvider(provider: Provider) {
   const fetchMock = vi.fn(async (url: string) => {
-    const { pathname } = new URL(url);
+    const { pathname, searchParams } = new URL(url);
     const [, kind, id] = pathname.split("/");
     if (kind === provider.failing) return new Response("{}", { status: 503 });
     let body: unknown;
     if (kind === "checkouts") body = provider.session ?? { id, created_at: iso(NOW), payment_id: null, payment_status: null };
-    else if (id) body = topUpPayment(id);
+    else if (kind === "subscriptions" && id) body = subscriptionRead(id, provider.subscriptionReads?.[id] ?? "active");
+    else if (id) body = topUpPayment(id, provider.paymentReads?.[id]);
     else {
       const items = provider[kind as "payments"] ?? [];
-      body = { items: kind === provider.full ? Array.from({ length: 20 }, (_, i) => ({ ...(items[0] ?? listed({ payment_id: "pay_x" })), [`${kind.slice(0, -1)}_id`]: `${kind}_${i}` })) : items };
+      const filler = Array.from({ length: 20 }, (_, i) => ({ ...listed({ status: "failed" }), [`${kind.slice(0, -1)}_id`]: `${kind}_${i}`, payment_id: `pay_f${i}` }));
+      const page = Number(searchParams.get("page_number"));
+      body = { items: kind === provider.full ? (page === 0 ? filler : page === 1 ? items : []) : page === 0 ? items : [] };
     }
     return new Response(JSON.stringify(body), { status: 200 });
   });
@@ -206,59 +218,207 @@ describe("missed webhooks", () => {
   });
 });
 
+describe("re-reads and reversal recording", () => {
+  test("an older known subscription is re-read by id, so its missed cancellation is recorded", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    const subRef = await t.mutation(internal.billing.bindSubscription, { customerRef: alice, mode: "test_mode", subscriptionId: "sub_old", productId: PRO });
+    await t.run(async ctx => {
+      await ctx.db.patch("billingSubscriptions", subRef, { status: "active", paidThrough: NOW + 20 * DAY });
+      await markPollDue(ctx, alice, true);
+    });
+    // Created long ago: not in any list window.
+    const fetchMock = stubProvider({ subscriptionReads: { sub_old: "cancelled" } });
+    later(ACTIVE_POLL_MS);
+    await poll(t);
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toContain("/subscriptions/sub_old");
+    expect((await events(t)).map(e => [e.webhookId, e.subscriptionId])).toEqual([["poll:subscription:sub_old:cancelled", "sub_old"]]);
+  });
+
+  test("a payment with an unresolved dispute is re-read, so a later dispute status is still recorded", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    await t.mutation(internal.billing.recordReceipt, {
+      customerRef: alice, mode: "test_mode", webhookId: "wh_dispute", eventType: "dispute.opened", bodyDigest: "a".repeat(64), occurredAt: 1, paymentId: "pay_d",
+    });
+    await t.run(ctx => markPollDue(ctx, alice, true));
+    const dispute = { dispute_id: "dsp_1", payment_id: "pay_d", business_id: "bus_synthetic", amount: "1000", currency: "USD", created_at: iso(NOW) };
+    stubProvider({ paymentReads: { pay_d: { refunds: [], disputes: [{ ...dispute, dispute_status: "dispute_lost" }] } } });
+    later(ACTIVE_POLL_MS);
+    await poll(t);
+    expect((await events(t)).map(e => [e.webhookId, e.eventType, e.state])).toEqual([
+      ["wh_dispute", "dispute.opened", "pending"], ["poll:dispute:dsp_1:lost", "dispute.poll", "pending"],
+    ]);
+    // The same status again is a no-op.
+    later(IDLE_POLL_MS);
+    await poll(t);
+    expect(await events(t)).toHaveLength(2);
+  });
+
+  test("an unresolved positive receipt of the payment never suppresses its refund", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const t = setup();
+    const alice = await customer(t);
+    const eventRef = await t.mutation(internal.billing.recordReceipt, {
+      customerRef: alice, mode: "test_mode", webhookId: "wh_pay", eventType: "payment.succeeded", bodyDigest: "a".repeat(64), occurredAt: 1, paymentId: "pay_1",
+    });
+    await t.run(async ctx => {
+      await ctx.db.patch("billingEvents", eventRef, { state: "quarantined", quarantineReason: "digest_mismatch" });
+      await markPollDue(ctx, alice, true);
+    });
+    stubProvider({
+      payments: [listed({ payment_id: "pay_1", status: "succeeded" })],
+      refunds: [listed({ refund_id: "ref_1", payment_id: "pay_1", status: "succeeded" })],
+    });
+    later(ACTIVE_POLL_MS);
+    await poll(t);
+    // The payment itself waits behind its quarantined receipt; its refund is recorded.
+    expect((await events(t)).map(e => e.webhookId).sort()).toEqual(["poll:refund:ref_1:succeeded", "wh_pay"]);
+  });
+});
+
 describe("checkout lock release", () => {
-  const expired = () => later(CHECKOUT_SESSION_TTL_MS + 1);
+  const expired = () => later(CHECKOUT_SESSION_TTL_MS + PROVIDER_CLOCK_SKEW_MS + 1);
+  const lateReceipt = (t: T, customerRef: Id<"billingCustomers">, webhookId: string, paymentId: string) => t.mutation(internal.billing.recordReceipt, {
+    customerRef, mode: "test_mode", webhookId, eventType: "payment.succeeded", bodyDigest: "a".repeat(64), occurredAt: 1, paymentId, sessionId: "cks_1",
+  });
 
   test("an expired session with no payment releases the lock; a late payment still settles once", async () => {
     const t = setup();
     const alice = await customer(t);
     const purchaseRef = await openCheckout(t, alice);
-    stubProvider({});
+    // An earlier top-up's settled payment, from before the purchase, cannot be this checkout's: it never blocks.
+    await t.run(ctx => ctx.db.insert("billingPurchases", {
+      customerRef: alice, mode: "test_mode", intentId: "intent_old", paymentId: "pay_old", state: "settled",
+      terms: { sku: "top_up", catalogVersion: "2026-11-17", productId: TOP_UP, quantity: 1, credits: 1000 },
+    }));
+    stubProvider({ payments: [listed({ payment_id: "pay_old", status: "succeeded", created_at: iso(NOW - DAY) })] });
     expired();
     await poll(t);
     expect(await read(t, purchaseRef)).toMatchObject({ state: "terminal" });
     expect((await read(t, alice))!.pendingPurchaseRef).toBeUndefined();
-    expect((await read(t, alice))!.nextPollAt).toBeUndefined();
 
     // The released purchase keeps its session, so the existing session match settles a late payment against it.
-    await t.mutation(internal.billing.recordReceipt, {
-      customerRef: alice, mode: "test_mode", webhookId: "wh_late", eventType: "payment.succeeded", bodyDigest: "a".repeat(64),
-      occurredAt: 1, paymentId: "pay_late", sessionId: "cks_1",
-    });
+    stubProvider({});
+    await lateReceipt(t, alice, "wh_late", "pay_late");
     await processCustomer(t, alice);
     expect(await read(t, purchaseRef)).toMatchObject({ state: "settled", paymentId: "pay_late" });
     expect(await grants(t)).toHaveLength(1);
     // A replayed or polled copy never grants twice.
-    await t.mutation(internal.billing.recordReceipt, {
-      customerRef: alice, mode: "test_mode", webhookId: "wh_late_again", eventType: "payment.succeeded", bodyDigest: "a".repeat(64),
-      occurredAt: 1, paymentId: "pay_late", sessionId: "cks_1",
-    });
+    await lateReceipt(t, alice, "wh_late_again", "pay_late");
     await processCustomer(t, alice);
     expect(await grants(t)).toHaveLength(1);
-    expect((await t.run(ctx => ctx.db.query("billingPurchases").take(10)))).toHaveLength(1);
+  });
+
+  test("Pro: a late period payment after release settles the released purchase once", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await openCheckout(t, alice, "pro_monthly");
+    stubProvider({});
+    expired();
+    await poll(t);
+    expect(await read(t, purchaseRef)).toMatchObject({ state: "terminal" });
+    const start = Date.now();
+    stubProvider({
+      subscriptionReads: { sub_1: "active" },
+      paymentReads: {
+        pay_pro: {
+          subscription_id: "sub_1", product_cart: null, total_amount: 2000, tax: 180, charge_type: "new",
+          service_periods: [{ subscription_id: "sub_1", starts_at: iso(start), ends_at: iso(start + 30 * DAY), proration_factor: "1" }],
+        },
+      },
+    });
+    await lateReceipt(t, alice, "wh_pro", "pay_pro");
+    await processCustomer(t, alice);
+    expect(await read(t, purchaseRef)).toMatchObject({ state: "settled", paymentId: "pay_pro", subscriptionId: "sub_1" });
+    await lateReceipt(t, alice, "wh_pro_again", "pay_pro");
+    await processCustomer(t, alice);
+    expect((await grants(t)).map(g => g.kind)).toEqual(["current_period"]);
   });
 
   test.each([
-    ["the session is not past its lifetime", {}, false],
-    ["the session payment is processing", { session: { id: "cks_1", created_at: iso(NOW), payment_id: "pay_1", payment_status: "processing" } }, true],
-    ["a read failed", { failing: "refunds" }, true],
-    ["the session read failed", { failing: "checkouts" }, true],
-    ["a list page is full", { full: "disputes" }, true],
-    ["an unbound succeeded payment was listed", { payments: [listed({ payment_id: "pay_9", status: "succeeded" })] }, true],
-  ] as const)("keeps the lock when %s", async (_name, provider, pastLifetime) => {
+    ["the session is not past its lifetime", {}, () => later(ACTIVE_POLL_MS)],
+    ["the lifetime has passed only within the clock-skew margin", {}, () => later(CHECKOUT_SESSION_TTL_MS + 1)],
+    ["the session payment is processing", { session: { id: "cks_1", created_at: iso(NOW), payment_id: "pay_1", payment_status: "processing" } }, expired],
+    ["a read failed", { failing: "refunds" }, expired],
+    ["the session read failed", { failing: "checkouts" }, expired],
+    ["a list page is full", { full: "disputes" }, expired],
+    ["a succeeded payment was listed", { payments: [listed({ payment_id: "pay_9", status: "succeeded" })] }, expired],
+    ["a processing payment was listed", { payments: [listed({ payment_id: "pay_9", status: "processing" })] }, expired],
+  ] as const)("keeps the lock when %s", async (_name, provider, advance) => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const t = setup();
     const alice = await customer(t);
     const purchaseRef = await openCheckout(t, alice);
     stubProvider(provider);
-    if (pastLifetime) expired();
-    else later(ACTIVE_POLL_MS);
+    advance();
     await poll(t);
     expect((await read(t, alice))!.pendingPurchaseRef).toBe(purchaseRef);
     expect((await read(t, purchaseRef))!.state).toBe("open");
     // Still held: polled again at the active cadence.
     expect((await read(t, alice))!.nextPollAt).toBe(Date.now() + ACTIVE_POLL_MS);
+  });
+
+  test("a bound processing payment since the purchase keeps the lock too", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await openCheckout(t, alice);
+    const other = await t.run(ctx => ctx.db.insert("billingPurchases", {
+      customerRef: alice, mode: "test_mode", intentId: "renewal:pay_b", paymentId: "pay_b", state: "processing",
+      terms: { sku: "top_up", catalogVersion: "2026-11-17", productId: TOP_UP, quantity: 1, credits: 1000 },
+    }));
+    stubProvider({ payments: [listed({ payment_id: "pay_b", status: "processing" })] });
+    expired();
+    await poll(t);
+    expect((await read(t, alice))!.pendingPurchaseRef).toBe(purchaseRef);
+    expect(other).toBeDefined();
+  });
+
+  test("a full page is paged through on the next run, then the window closes and the lock is released", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await openCheckout(t, alice);
+    const fetchMock = stubProvider({ full: "payments" });
+    expired();
+    await poll(t);
+    const paging = (await read(t, alice))!;
+    expect(paging.pendingPurchaseRef).toBe(purchaseRef);
+    expect(paging.pollWindow).toMatchObject({ pages: { payments: 1 }, blocked: false });
+    expect(paging.lastPolledAt).toBeUndefined();
+    const until = paging.pollWindow!.until;
+    later(ACTIVE_POLL_MS);
+    fetchMock.mockClear();
+    await poll(t);
+    // Only the unfinished list is read, at its next page, in the same window.
+    const lists = fetchMock.mock.calls.map(([url]) => new URL(String(url))).filter(url => url.pathname === "/payments");
+    expect(lists.map(url => [url.searchParams.get("page_number"), url.searchParams.get("created_at_lte")])).toEqual([["1", iso(until)]]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/refunds?"))).toBe(false);
+    const done = (await read(t, alice))!;
+    expect(done).toMatchObject({ lastPolledAt: until });
+    expect(done.pollWindow).toBeUndefined();
+    expect(done.pendingPurchaseRef).toBeUndefined();
+  });
+
+  test("a blocker seen on an earlier page of the window still keeps the lock when the window closes", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await openCheckout(t, alice);
+    stubProvider({ full: "disputes", payments: [listed({ payment_id: "pay_9", status: "processing" })] });
+    expired();
+    await poll(t);
+    expect((await read(t, alice))!.pollWindow).toMatchObject({ blocked: true });
+    later(ACTIVE_POLL_MS);
+    await poll(t);
+    expect((await read(t, alice))!.pollWindow).toBeUndefined();
+    expect((await read(t, alice))!.pendingPurchaseRef).toBe(purchaseRef);
+    // The next window sees the payment failed: released.
+    stubProvider({ payments: [listed({ payment_id: "pay_9", status: "failed" })] });
+    later(ACTIVE_POLL_MS);
+    await poll(t);
+    expect((await read(t, alice))!.pendingPurchaseRef).toBeUndefined();
   });
 
   test("a session whose only payment failed is released", async () => {
@@ -273,7 +433,7 @@ describe("checkout lock release", () => {
   });
 
   test.each([
-    ["pending", true], ["on_hold", true], ["cancelled", false],
+    ["pending", true], ["on_hold", true], ["past_due", true], ["Not A Status", true], ["cancelled", false],
   ] as const)("Pro: a %s subscription created since the purchase keeps the lock: %s", async (status, kept) => {
     const t = setup();
     const alice = await customer(t);
@@ -293,8 +453,8 @@ describe("checkout lock release", () => {
       await ctx.db.patch("billingPurchases", purchaseRef, { state: "settled", paymentId: "pay_1" });
     });
     await t.mutation(internal.billingPoll.recordPollFindings, {
-      customerRef: alice, mode: "test_mode", polledAt: Date.now(), complete: true, findings: [],
-      checkout: { purchaseRef, sessionId: "cks_1" }, session: { createdAt: NOW },
+      customerRef: alice, mode: "test_mode", window: { since: 0, until: Date.now(), pages: {}, blocked: false }, pages: {},
+      failed: false, findings: [], checkout: { purchaseRef, sessionId: "cks_1" }, session: { createdAt: NOW },
     });
     expect(await read(t, purchaseRef)).toMatchObject({ state: "settled" });
     expect((await read(t, alice))!.pendingPurchaseRef).toBe(purchaseRef);

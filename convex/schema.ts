@@ -168,6 +168,20 @@ export const billingPurchaseTermsValidator = v.object({
   quantity: v.number(),
   credits: v.number(),
 });
+/**
+ * A provider poll window in progress (convex/billingPoll.ts): fixed creation-time bounds, the next
+ * 0-based page per list still to read (absent once read), and whether a checkout-release blocker
+ * was seen on an earlier page.
+ */
+export const billingPollWindowValidator = v.object({
+  since: v.number(),
+  until: v.number(),
+  pages: v.object({
+    payments: v.optional(v.number()), refunds: v.optional(v.number()),
+    disputes: v.optional(v.number()), subscriptions: v.optional(v.number()),
+  }),
+  blocked: v.boolean(),
+});
 export const billingGrantKindValidator = v.union(v.literal("current_period"), v.literal("rollover"), v.literal("top_up"));
 export const billingResourceIdsValidator = v.object({
   sessionId: v.optional(v.string()),
@@ -844,10 +858,12 @@ export default defineSchema({
     unresolvedReceipts: v.number(),
     leaseId: v.optional(v.string()),
     leaseExpiresAt: v.optional(v.number()),
-    // Provider polling (convex/billingPoll.ts): when it is next due, the last complete read, and
-    // until when a settled customer stays polled for refunds and disputes.
+    // Provider polling (convex/billingPoll.ts): when it is next due, the end of the last fully read
+    // window, the window still being paged, and until when a settled customer stays polled for
+    // refunds and disputes.
     nextPollAt: v.optional(v.number()),
     lastPolledAt: v.optional(v.number()),
+    pollWindow: v.optional(billingPollWindowValidator),
     watchUntil: v.optional(v.number()),
   })
     .index("by_mode_and_ownerTokenIdentifier", ["mode", "ownerTokenIdentifier"])
