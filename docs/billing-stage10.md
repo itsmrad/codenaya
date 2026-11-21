@@ -121,11 +121,16 @@ UTC time of day. The daily 03:00 UTC retention cron pages ten customers and dele
 at most 190 financial children plus ten customers per transaction. Destructive
 child pagination drains indexed prefixes in order: grants, adjustments, receipts,
 purchases, subscriptions, customer last. A surviving customer is the resume marker;
-the next daily sweep can recover a lost continuation. Every deletion transaction
+the next daily sweep can recover a lost continuation. Customer pagination keeps a
+fixed `deletedAt > undefined` index range across continuations; retention age is
+checked separately using each transaction's clock. Every deletion transaction
 rechecks explicit recovery completion (`required === false`, outcome `complete`),
 resource markers, uncertain customer creation, unfinished recovery progress, pending
-controls, active adjustment holds, pending/review/unknown refunds, open purchases, unresolved counts and actual
-receipt states, reversal watch and receipt/cancellation leases. Deletion's permanent
+controls, active adjustment holds, pending/review/unknown refunds, open purchases,
+unresolved counts and actual receipt states (including unmapped quarantines for
+the same mode and provider customer), reversal watch and receipt/cancellation leases.
+Financial disputes in opened/challenged/expired/other states block purge using
+`disputeHolds` semantics even if an operator released the access hold. Deletion's permanent
 customer `hold` flag does not itself prevent retention expiry. Blocked customers stay
 available for support; no obligation is created or forced complete by this purge.
 
@@ -135,3 +140,7 @@ rebinding is attempted. No provider calls are made. New indexes support bounded
 blocker checks and child deletion; there are no required fields or data backfills.
 Existing rows missing explicit cancellation completion remain ineligible. Index
 backfill must complete before enabling the new cron; deployment is outside this PR.
+
+Review regressions exercise advancing-clock page-two/partial continuations,
+operator-released but unresolved disputes, and provider-customer quarantine scope.
+These use convex-test; real backend query-bound cursor validation is not yet proven.

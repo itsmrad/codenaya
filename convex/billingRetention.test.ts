@@ -151,3 +151,62 @@ test("pending checkout pointer blocks even without a remaining purchase", async 
   });
   await purge(t); expect(await read(t, ref)).not.toBeNull();
 });
+
+// convex-test exercises continuation behavior; production query-bound cursor validation still needs backend evidence.
+test("page two and its partial-child continuation keep the query stable as time advances", async () => {
+  const t = setup();
+  for (let i = 0; i < RETENTION_BATCH; i++) {
+    const ref = await seed(t, `blocked_${i}`);
+    await t.run(ctx => ctx.db.patch("billingCustomers", ref, { cancellationRecoveryRequired: true }));
+  }
+  const target = await seed(t, "target");
+  await grants(t, target, RETENTION_DELETE_BATCH + 2);
+  const firstPage = await t.run(ctx => ctx.db.query("billingCustomers")
+    .withIndex("by_deletedAt", q => q.gt("deletedAt", undefined))
+    .paginate({ cursor: null, numItems: RETENTION_BATCH }));
+  expect(firstPage.isDone).toBe(false);
+  await purge(t);
+  const jobs = await t.run(ctx => ctx.db.system.query("_scheduled_functions").take(10));
+  expect(jobs[0].args).toEqual([{ cursor: firstPage.continueCursor }]);
+  vi.setSystemTime(NOW + 1000);
+  await t.mutation(internal.billingRetention.purgeExpiredBillingCustomers, { cursor: firstPage.continueCursor });
+  expect(await read(t, target)).not.toBeNull();
+  expect(await t.run(ctx => ctx.db.query("billingGrants").take(10))).toHaveLength(2);
+  vi.setSystemTime(NOW + 2000);
+  await drain(t);
+  expect(await read(t, target)).toBeNull();
+  expect(await t.run(ctx => ctx.db.query("billingCustomers").take(20))).toHaveLength(RETENTION_BATCH);
+});
+
+test.each(["opened", "challenged", "expired", "other"])("financial dispute %s blocks even after an operator releases the access hold", async status => {
+  const t = setup(), ref = await seed(t);
+  await grants(t, ref, 1);
+  const adjustment = await t.run(ctx => ctx.db.insert("billingAdjustments", {
+    customerRef: ref, mode: "test_mode", paymentId: "pay_dummy", kind: "dispute", providerId: "dis_dummy",
+    status, countedMinor: 0, holdActive: false, holdOverrideStatus: status, observedAt: 1,
+  }));
+  await purge(t);
+  expect(await read(t, ref)).not.toBeNull();
+  expect(await t.run(ctx => ctx.db.query("billingGrants").first())).not.toBeNull();
+  await t.run(ctx => ctx.db.patch("billingAdjustments", adjustment, { status: "won" }));
+  await purge(t);
+  expect(await read(t, ref)).toBeNull();
+});
+
+test.each([
+  ["test_mode", "cus_alice", true],
+  ["live_mode", "cus_alice", false],
+  ["test_mode", "cus_other", false],
+] as const)("unmapped quarantine is scoped by mode %s and provider customer %s", async (mode, providerCustomerId, blocks) => {
+  const t = setup(), ref = await seed(t);
+  await grants(t, ref, 1);
+  const receipt = await t.run(ctx => ctx.db.insert("billingEvents", {
+    mode, providerCustomerId, webhookId: "evt_unmapped", eventType: "payment.succeeded", paymentId: "pay_dummy",
+    occurredAt: 1, receivedAt: 1, bodyDigest: "a".repeat(64), state: "quarantined", quarantineReason: "unmapped",
+    attempts: 0, nextAttemptAt: 1, generation: 0,
+  }));
+  await purge(t);
+  expect(await read(t, ref)).toEqual(blocks ? expect.objectContaining({ _id: ref }) : null);
+  expect(await t.run(ctx => ctx.db.query("billingGrants").first())).toEqual(blocks ? expect.objectContaining({ customerRef: ref }) : null);
+  expect(await t.run(ctx => ctx.db.get("billingEvents", receipt))).toMatchObject({ state: "quarantined" });
+});

@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { disputeHolds, type ProviderDispute } from "../src/features/billing/reversals";
 import { billingRetentionEndsAt } from "../src/features/billing/retention";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
@@ -24,6 +25,14 @@ async function eligible(ctx: MutationCtx, customer: Doc<"billingCustomers">, now
     if (await ctx.db.query("billingAdjustments").withIndex("by_customerRef_and_kind_and_status",
       q => q.eq("customerRef", ref).eq("kind", "refund").eq("status", status)).first()) return false;
   }
+  // An operator's access-hold override is not proof that the financial dispute ended.
+  for (const status of ["opened", "challenged", "expired", "other"] satisfies ProviderDispute["status"][]) {
+    if (disputeHolds({ status }) && await ctx.db.query("billingAdjustments")
+      .withIndex("by_customerRef_and_kind_and_status",
+        q => q.eq("customerRef", ref).eq("kind", "dispute").eq("status", status)).first()) return false;
+  }
+  if (await ctx.db.query("billingEvents").withIndex("by_mode_and_providerCustomerId_and_state",
+    q => q.eq("mode", customer.mode).eq("providerCustomerId", customer.customerId).eq("state", "quarantined")).first()) return false;
   for (const table of ["billingPurchases", "billingSubscriptions"] as const) {
     if (await ctx.db.query(table).withIndex("by_customerRef_and_cancellationRecoveryRequired",
       q => q.eq("customerRef", ref).eq("cancellationRecoveryRequired", true)).first()) return false;
@@ -51,7 +60,7 @@ export const purgeExpiredBillingCustomers = internalMutation({
   handler: async (ctx, { cursor }): Promise<null> => {
     const now = Date.now();
     const page = await ctx.db.query("billingCustomers")
-      .withIndex("by_deletedAt", q => q.gt("deletedAt", undefined).lte("deletedAt", now))
+      .withIndex("by_deletedAt", q => q.gt("deletedAt", undefined))
       .paginate({ cursor, numItems: RETENTION_BATCH });
     let remaining = RETENTION_DELETE_BATCH;
     for (const customer of page.page) {
