@@ -219,5 +219,19 @@ The boot path is wired for more than one provider:
   providers exist. The `info().metadata.userId` owner check is unchanged.
 - **`/proc` fallback.** `listCommands`' fallback keeps only tree roots and never PID 1.
 
-Not yet: the agent paths (check-build, build-repair, swarm) create and look up on the
-default provider only, and there is no sticky provider per project.
+Not yet: build-repair and swarm create and look up on the default provider only, and
+there is no sticky provider per project.
+
+## Agent paths: check-build
+
+`checkBuild` takes a `SandboxPool` (`getSandboxPool` in `registry.ts`): the configured
+providers, `fanoutHealth` and `createSandbox`.
+- **Warm.** The owner's preview is looked up with `listAll` over every configured
+  provider, with the preview lookup's policy (a failing non-primary provider is skipped
+  and cooled). The build connects through the provider that listed the preview.
+  The `endAt` rule and the `{userId, projectId}` check are unchanged.
+- **Cold.** It creates through `createSandbox`, so failover and its cooldown apply. It
+  passes no image, so each adapter uses its own default. The kill is the handle's
+  own, so it goes to the provider that made the sandbox.
+- **E2B only.** With one provider and no fallbacks, the calls are what they were: one
+  list, one connect or one create, and one kill.

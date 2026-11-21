@@ -18,6 +18,11 @@ import { getFunctionName } from "convex/server";
 
 import { BOOT_INSTALL_ENVS, DEV_COMMAND_ENV, DEV_START_COMMAND, READ_DEV_PGID_COMMAND, PROXY_TARGET_ENV, killProjectNodesCommand, killTreeCommand } from "@/features/sandbox-preview/server/dev-server";
 import { createE2bProvider, fromE2bSandbox } from "@/features/sandbox-preview/server/provider/e2b";
+import { createProviderCooldown, createWithFailover } from "@/features/sandbox-preview/server/provider/failover";
+import type { SandboxPool } from "@/features/sandbox-preview/server/provider/registry";
+import {
+  type ListedSandbox, type ProviderId, type Sandbox as SeamSandbox, type SandboxProvider, SandboxRateLimitError,
+} from "@/features/sandbox-preview/server/provider/types";
 
 import { VITE_REACT_STARTER } from "../vite-starter";
 import { REDACTION_UNAVAILABLE_NOTICE } from "@/features/integrations/server/env/stream-redactor";
@@ -1484,5 +1489,136 @@ describe("checkBuild tool (#465)", () => {
       expect.objectContaining({ query: { metadata: { userId: "user_1", projectId: "proj_1" }, state: ["running"] } }),
     );
     expect(mocks.resolveEnv).not.toHaveBeenCalled();
+  });
+  describe("with only E2B configured, as today", () => {
+    beforeEach(() => {
+      for (const name of ["SANDBOX_PROVIDER", "SANDBOX_PROVIDER_FALLBACKS", "E2B_TEMPLATE"]) vi.stubEnv(name, "");
+    });
+
+    const listQuery = { apiKey: "e2b_key", requestTimeoutMs: 10_000, limit: 3, query: { metadata: { userId: "user_1", projectId: "proj_1" }, state: ["running"] } };
+
+    it("lists once and builds in the warm preview, with no new sandbox", async () => {
+      e2b.list.mockReturnValue({ nextItems: async () => [{ sandboxId: "sbx_warm", metadata: { userId: "user_1", projectId: "proj_1" }, endAt: new Date(Date.now() + 50 * 60_000) }] });
+      const warm = sandboxWith(() => undefined);
+      e2b.connect.mockResolvedValue(warm);
+
+      const result = await runTool([]);
+
+      expect(result?.split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect(e2b.list).toHaveBeenCalledExactlyOnceWith(listQuery);
+      expect(e2b.connect).toHaveBeenCalledExactlyOnceWith("sbx_warm", { apiKey: "e2b_key", timeoutMs: 300_000, requestTimeoutMs: 10_000 });
+      expect(e2b.create).not.toHaveBeenCalled();
+      expect(warm.kill).not.toHaveBeenCalled();
+    });
+
+    it("lists once, then makes one cold sandbox from the E2B template and kills it", async () => {
+      e2b.list.mockReturnValue({ nextItems: async () => [] });
+      const sandbox = fakeSandbox();
+
+      const result = await runTool([]);
+
+      expect(result?.split("\n")[0]).toBe(BUILD_VERIFIED);
+      expect(e2b.list).toHaveBeenCalledExactlyOnceWith(listQuery);
+      expect(e2b.create).toHaveBeenCalledExactlyOnceWith("codenaya-node22", {
+        apiKey: "e2b_key",
+        timeoutMs: 300_000,
+        metadata: { projectId: "proj_1", purpose: "check-build" },
+        requestTimeoutMs: expect.any(Number),
+      });
+      expect(sandbox.kill).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+describe("checkProjectBuild on any provider", () => {
+  // Fictional id, as in selection.test.ts: no production id is added here.
+  const blaxel = "blaxel" as ProviderId;
+  const preview = { projectId: "proj_1", ownerId: "user_1" };
+  const owned = { userId: "user_1", projectId: "proj_1" };
+
+  /** A seam sandbox on `provider` whose commands all pass. */
+  const seamSandbox = (provider: ProviderId, id: string) => ({
+    provider, id,
+    run: vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" })),
+    writeFiles: vi.fn(async () => {}),
+    listCommands: vi.fn(async () => []),
+    kill: vi.fn(async () => {}),
+  }) as unknown as SeamSandbox & { run: ReturnType<typeof vi.fn>; kill: ReturnType<typeof vi.fn> };
+
+  const fakeProvider = (id: ProviderId, sandbox = seamSandbox(id, `${id}_sbx`), listed: ListedSandbox[] = []) => ({
+    id, maxSessionMs: 3_600_000,
+    create: vi.fn(async () => sandbox),
+    connect: vi.fn(async () => sandbox),
+    list: vi.fn(async () => listed),
+    kill: vi.fn(async () => true),
+  }) satisfies SandboxProvider;
+
+  const live = (id: string): ListedSandbox => ({ id, metadata: owned, endAt: new Date(Date.now() + 50 * 60_000) });
+
+  const checkOn = (sandboxes: SandboxPool) => {
+    const files = starter();
+    return checkProjectBuild({
+      files,
+      paths: new Set(files.map((file) => file.path)),
+      sandboxes,
+      metadata: { projectId: "proj_1", purpose: "check-build" },
+      preview,
+    });
+  };
+
+  it("builds warm in a preview another provider runs, through that provider", async () => {
+    const primary = fakeProvider("e2b");
+    const warm = seamSandbox(blaxel, "bx_preview");
+    const other = fakeProvider(blaxel, warm, [live("bx_preview")]);
+    const create = vi.fn();
+
+    const result = await checkOn({ providers: [primary, other], health: { primary: "e2b", cooldown: createProviderCooldown() }, create });
+
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(primary.list).toHaveBeenCalledWith(expect.objectContaining({ metadata: owned }));
+    expect(other.connect).toHaveBeenCalledExactlyOnceWith("bx_preview", { timeoutMs: 300_000, requestTimeoutMs: 10_000 });
+    expect(primary.connect).not.toHaveBeenCalled();
+    expect(warm.run).toHaveBeenCalledWith("npx tsc --noEmit -p tsconfig.app.json && npx vite build", expect.objectContaining({ cwd: expect.stringMatching(/^\/home\/user\/check-build-/) }));
+    expect(warm.kill).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("skips a non-primary provider whose list fails and still finds the primary's preview", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warm = seamSandbox("e2b", "e2b_preview");
+    const primary = fakeProvider("e2b", warm, [live("e2b_preview")]);
+    const other = fakeProvider(blaxel);
+    other.list.mockRejectedValue(new Error("blaxel down"));
+    const cooldown = createProviderCooldown();
+
+    const result = await checkOn({ providers: [primary, other], health: { primary: "e2b", cooldown }, create: vi.fn() });
+
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    expect(primary.connect).toHaveBeenCalledTimes(1);
+    expect(cooldown.isCoolingDown(blaxel)).toBe(true);
+  });
+
+  it("fails a cold check over from a rate-limited E2B, with each provider's own image, and kills it there", async () => {
+    const primary = fakeProvider("e2b");
+    primary.create.mockRejectedValue(new SandboxRateLimitError("quota"));
+    const made = seamSandbox(blaxel, "bx_cold");
+    const other = fakeProvider(blaxel, made);
+    const cooldown = createProviderCooldown();
+    const providers = [primary, other];
+
+    const result = await checkOn({ providers, health: { primary: "e2b", cooldown }, create: (opts) => createWithFailover(opts, { providers, cooldown }) });
+
+    expect(result.split("\n")[0]).toBe(BUILD_VERIFIED);
+    for (const provider of providers) {
+      expect(provider.create).toHaveBeenCalledExactlyOnceWith({
+        timeoutMs: 300_000,
+        metadata: { projectId: "proj_1", purpose: "check-build" },
+        requestTimeoutMs: expect.any(Number),
+      });
+    }
+    expect(made.run).toHaveBeenCalledWith("npx tsc --noEmit -p tsconfig.app.json && npx vite build", expect.objectContaining({ cwd: "/home/user/app" }));
+    expect(made.kill).toHaveBeenCalledTimes(1);
+    expect(primary.kill).not.toHaveBeenCalled();
+    expect(cooldown.isCoolingDown("e2b")).toBe(true);
   });
 });
