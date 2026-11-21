@@ -611,7 +611,7 @@ export const createCheckBuildTool = ({
         return await toolStep?.run("check-build", async () => {
           // The metadata list has no text since #412; this one carries it.
           const [rows, envVars] = await Promise.all([
-            convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId }),
+            convex.query(api.files.getTransferFiles, { internalKey, projectId }),
             // Null when unknown; the check then builds cold, where no variables are written.
             convex.query(api.system.getEnvVarsForSandbox, { internalKey, projectId }).catch((error) => {
               console.error("[check-build] could not read the project's variables", error);

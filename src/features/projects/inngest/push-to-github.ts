@@ -332,7 +332,7 @@ async function moveBranch(
 }
 
 export async function currentFiles(internalKey: string, projectId: Id<"projects">) {
-  const files = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
+  const files = await convex.query(api.files.getTransferFiles, { internalKey, projectId });
   const byId = new Map(files.map((file) => [file._id, file]));
   return files
     .filter((file) => file.type === "file")

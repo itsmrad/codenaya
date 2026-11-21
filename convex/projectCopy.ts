@@ -11,7 +11,7 @@ import {
 import { appError } from "./errors";
 import { insertFileContent, withContents } from "./fileContents";
 import { releaseStorageIfUnreferenced } from "./projectCascade";
-import { isSecretFile } from "./secretFiles";
+import { transferableTree } from "./projectTransfer";
 import { countProjectBuilt } from "./stats";
 import { recordProjectEvent } from "./activationEvents";
 
@@ -54,8 +54,8 @@ export const MAX_COPY_FILES = 5000;
 
 /**
  * Inserts a copy of every file and folder of `sourceId` into `targetId`,
- * keeping the tree shape. Secret files (`isSecretFile`) are skipped unless
- * `keepSecretFiles`: only the owner's own duplicate keeps them. Binary files share the source's storage blob until
+ * keeping the tree shape. Secret files and runtime artifacts are skipped.
+ * Binary files share the source's storage blob until
  * `copyBlobs` gives each copy its own. Blob deletes are reference-checked
  * (`releaseStorageIfUnreferenced`), so deleting either side meanwhile, or a
  * `copyBlobs` run that never finishes, can't remove a blob the other uses.
@@ -64,7 +64,6 @@ export async function copyProjectFiles(
   ctx: MutationCtx,
   sourceId: Id<"projects">,
   targetId: Id<"projects">,
-  { keepSecretFiles = false }: { keepSecretFiles?: boolean } = {},
 ) {
   const allFiles = await ctx.db
     .query("files")
@@ -78,9 +77,7 @@ export async function copyProjectFiles(
     );
   }
 
-  const sourceFiles = keepSecretFiles
-    ? allFiles
-    : allFiles.filter((file) => !(file.type === "file" && isSecretFile(file.name)));
+  const sourceFiles = transferableTree(allFiles);
   const now = Date.now();
   const idMap = new Map<Id<"files">, Id<"files">>();
   const binaryFileIds: Id<"files">[] = [];

@@ -91,7 +91,7 @@ export const getIconRewriter = async (
   try {
     let manifest = pending.find((file) => file.path === "package.json")?.content;
     if (manifest === undefined) {
-      const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
+      const rows = await convex.query(api.files.getTransferFiles, { internalKey, projectId });
       manifest = rows.find((row) => row.type === "file" && !row.parentId && row.name === "package.json")?.content;
     }
     const pkg = JSON.parse(manifest ?? "{}");
@@ -112,7 +112,7 @@ export const postWriteNote = async (
 ) => {
   if (!touchedIds.length) return "";
   try {
-    const rows = await convex.query(api.system.getProjectFilesWithUrls, { internalKey, projectId });
+    const rows = await convex.query(api.files.getTransferFiles, { internalKey, projectId });
     const pathOf = buildPathIndex(rows);
     const paths = new Set<string>();
     const touched = new Set<string>();

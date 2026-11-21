@@ -105,7 +105,7 @@ export const exportToGithub = inngest.createFunction(
 
     // Fetch all project files with storage URLs
     const files = await step.run("fetch-project-files", async () => {
-      return (await convex.query(api.system.getProjectFilesWithUrls, {
+      return (await convex.query(api.files.getTransferFiles, {
         internalKey,
         projectId,
       })) as FileWithUrl[];

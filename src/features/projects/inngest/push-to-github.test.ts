@@ -163,7 +163,7 @@ function project(opts: {
           content,
           storageUrl: null,
         }));
-      case "system:getProjectFilesWithUrls":
+      case "files:getTransferFiles":
         return Object.entries(opts.files).map(([name, content]) => ({
           _id: name,
           name,

@@ -6,7 +6,7 @@ import { runWrittenPaths } from "../src/features/conversations/agent-steps";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { isSecretFile } from "./secretFiles";
+import { withoutPrivateFiles } from "./projectTransfer";
 import { validateInternalKey } from "./internalKey";
 import { verifyAuth } from "./auth";
 import { appError } from "./errors";
@@ -268,12 +268,11 @@ async function restoreCheckpoint(
 /** Refuse large snapshots whole, leaving room for configuration reads and writes. */
 const MAX_FORK_BYTES = 4 * 1024 * 1024;
 
-/** Owner copies keep all saved files, just like Duplicate, including secret files. */
+/** Cross-project copies never carry secret files or runtime artifacts; local restore keeps both. */
 export async function copyCheckpointFiles(
   ctx: MutationCtx,
   checkpointId: Id<"checkpoints">,
   targetId: Id<"projects">,
-  keepSecretFiles = true,
 ) {
   const rows: Doc<"checkpointFiles">[] = [];
   let bytes = 0;
@@ -282,9 +281,9 @@ export async function copyCheckpointFiles(
     if (rows.length === MAX_CHECKPOINT_FILES || bytes > MAX_FORK_BYTES) {
       throw appError("LIMIT_EXCEEDED", "This checkpoint is too large to fork");
     }
-    if (keepSecretFiles || !row.path.split("/").some(isSecretFile)) rows.push(row);
+    rows.push(row);
   }
-  await applyTree(ctx, targetId, rows);
+  await applyTree(ctx, targetId, withoutPrivateFiles(rows));
   const files = await ctx.db.query("files")
     .withIndex("by_project", (q) => q.eq("projectId", targetId))
     .take(MAX_CHECKPOINT_FILES);

@@ -4,7 +4,7 @@ import { getSharedProject } from "./projects";
 import { validateInternalKey } from "./internalKey";
 import { withContents } from "./fileContents";
 import { MAX_CHECKPOINT_FILES, withPaths } from "./checkpoints";
-import { isSecretFile } from "./secretFiles";
+import { withoutPrivateFiles } from "./projectTransfer";
 import { MAX_PUBLIC_PREVIEWS, previewDeadline, safePreviewPath } from "../src/features/share/preview-policy";
 
 /** Only Next's server can read the build inputs; no public code or env endpoint. */
@@ -31,10 +31,10 @@ export const manifest = query({
         .map(file => ({ ...file, path: paths.get(file._id)! }));
     }
     if (entries.length > MAX_CHECKPOINT_FILES) throw new Error("Project too large to preview");
-    const files = await Promise.all(entries.filter(file => file.type === "file" && safePreviewPath(file.path) &&
-      !file.path.split("/").some(isSecretFile)).map(async file => ({ path: file.path,
+    const files = await Promise.all(withoutPrivateFiles(entries).filter(file => file.type === "file" && safePreviewPath(file.path)).map(async file => ({ path: file.path,
         content: file.storageId ? null : file.content ?? "", url: file.storageId ? await ctx.storage.getUrl(file.storageId) : null })));
     const envRows = await ctx.db.query("projectEnvVars").withIndex("by_project", q => q.eq("projectId", project._id)).take(500);
+    // Public-prefixed plain values are deliberately inlined in the shared app bundle.
     const env = Object.fromEntries(envRows.filter(row => row.visibility === "public" && /^(VITE_|NEXT_PUBLIC_)/.test(row.key))
       .map(row => [row.key, row.plainValue ?? ""]));
     return { files, env };
