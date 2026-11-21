@@ -20,7 +20,7 @@ const PRO = "pdt_pro";
 const TOP_UP = "pdt_topup";
 type Mode = "test_mode" | "live_mode";
 type Facts = { payments?: PaymentFact[]; subscriptions?: SubscriptionFact[] };
-type PaymentFact = { paymentId: string; decision: Record<string, unknown> & { kind: string; paymentId: string }; sessionId?: string; currency?: string; totalMinor?: number; taxMinor?: number; reversal?: unknown };
+type PaymentFact = { paymentId: string; decision: Record<string, unknown> & { kind: string; paymentId: string }; sessionId?: string; purchaseIdHint?: string; currency?: string; totalMinor?: number; taxMinor?: number; reversal?: unknown };
 type SubscriptionFact = Record<string, unknown> & { subscriptionId: string };
 
 function setup() {
@@ -448,6 +448,22 @@ describe("reconcileClaim", () => {
   };
   const run = (t: T, customerRef: Id<"billingCustomers">) => t.action(internal.billingQueue.processCustomer, { customerRef });
 
+  test.each(["payment.succeeded", "payment.poll"])("%s recovers an unknown Pro intent from provider metadata", async eventType => {
+    withEnv();
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await checkout(t, alice);
+    await t.run(ctx => ctx.db.patch("billingPurchases", purchaseRef, { state: "unknown", sessionId: undefined }));
+    stubFetch(path => path.startsWith("/payments/") ? paymentBody("pay_recovery", {
+      metadata: { purchaseId: "intent_1" }, refunds: [], disputes: [],
+    }) : subscriptionBody);
+    await receive(t, alice, eventType, { paymentId: "pay_recovery" });
+    await run(t, alice);
+    expect(await read(t, purchaseRef)).toMatchObject({ state: "settled", paymentId: "pay_recovery" });
+    expect(await rows(t, "billingPurchases")).toHaveLength(1);
+    expect(await grants(t)).toHaveLength(1);
+  });
+
   test("reads the provider and grants a settled Pro payment end to end", async () => {
     withEnv();
     const t = setup();
@@ -736,5 +752,115 @@ describe("review regressions", () => {
     await receive(t, alice, "payment.succeeded", { paymentId: "pay_1" });
     await reconcile(t, alice, { payments: [paid(topUp("pay_1"), { sessionId: "cks_old" })] });
     expect(await grants(t)).toEqual([["top_up", "top_up:pay_1:0", 1200, expect.any(Number)]]);
+  });
+});
+
+
+describe("intent recovery", () => {
+  test.each(["unknown", "preparing"] as const)("a %s intent settles once without a session id", async state => {
+    const t = setup();
+    const alice = await customer(t);
+    const ref = await checkout(t, alice, "top_up");
+    await t.run(ctx => ctx.db.patch("billingPurchases", ref, { state, sessionId: undefined }));
+    const facts = { payments: [paid(topUp("pay_recovery"), { purchaseIdHint: "intent_1" })] };
+    for (let n = 0; n < 2; n++) {
+      await receive(t, alice, "payment.succeeded", { paymentId: "pay_recovery" });
+      expect(await reconcile(t, alice, facts)).toBe("committed");
+    }
+    expect(await read(t, ref)).toMatchObject({ state: "settled", paymentId: "pay_recovery" });
+    expect(await rows(t, "billingPurchases")).toHaveLength(1);
+    expect(await grants(t)).toHaveLength(1);
+    expect((await read(t, alice))?.pendingPurchaseRef).toBeUndefined();
+  });
+
+  test.each(["foreign", "sku", "session", "product", "mode", "payment"])("a %s hint never grants against the intent", async variant => {
+    const t = setup();
+    const alice = await customer(t);
+    const bob = await customer(t, "user_bob");
+    const ref = await checkout(t, alice, "top_up");
+    await t.run(async ctx => {
+      await ctx.db.patch("billingPurchases", ref, { state: "unknown", sessionId: undefined });
+      if (variant === "foreign") await ctx.db.patch("billingCustomers", bob, { pendingPurchaseRef: ref });
+      if (variant === "sku") await ctx.db.patch("billingPurchases", ref, { terms: { sku: "pro_monthly", productId: PRO, catalogVersion: "2026-11-17", quantity: 1, credits: 2000 } });
+      if (variant === "session") await ctx.db.patch("billingPurchases", ref, { sessionId: "cks_existing" });
+      if (variant === "product") await ctx.db.patch("billingPurchases", ref, { terms: { sku: "top_up", productId: "other", catalogVersion: "2026-11-17", quantity: 1, credits: 1000 } });
+      if (variant === "mode") await ctx.db.patch("billingPurchases", ref, { mode: "live_mode" });
+      if (variant === "payment") await ctx.db.patch("billingPurchases", ref, { paymentId: "pay_existing" });
+    });
+    const target = variant === "foreign" ? bob : alice;
+    await receive(t, target, "payment.succeeded", { paymentId: "pay_recovery" });
+    await reconcile(t, target, { payments: [paid(topUp("pay_recovery"), { purchaseIdHint: "intent_1" })] });
+    expect(await grants(t)).toHaveLength(0);
+    expect((await read(t, ref))?.state).not.toBe("settled");
+  });
+
+  test("a late payment settles a released checkout without clearing a newer lock", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    const ref = await checkout(t, alice, "top_up");
+    await t.run(ctx => ctx.db.patch(ref, { state: "open" }));
+    await t.mutation(internal.billingOperator.releaseCheckoutLock, { customerRef: alice, operator: "support", reason: "Dashboard confirms expired and unpaid" });
+    const newer = await checkout(t, alice, "top_up", 2);
+    const facts = { payments: [paid(topUp("pay_late"), { sessionId: "cks_1", purchaseIdHint: "intent_1" })] };
+    for (let n = 0; n < 2; n++) {
+      await receive(t, alice, "payment.succeeded", { paymentId: "pay_late" });
+      await reconcile(t, alice, facts);
+    }
+    expect(await read(t, ref)).toMatchObject({ state: "settled", sessionId: "cks_1" });
+    expect(await grants(t)).toHaveLength(1);
+    expect((await read(t, alice))?.pendingPurchaseRef).toBe(newer);
+  });
+});
+
+
+describe("released intent hint recovery", () => {
+  test.each([[false, false], [true, false], [true, true]])("a late sessionless payment settles once, newer lock: %s, stored session: %s", async (newerLock, storedSession) => {
+    const t = setup();
+    const alice = await customer(t);
+    const ref = await checkout(t, alice, "top_up");
+    await t.run(ctx => ctx.db.patch(ref, { state: "unknown", sessionId: storedSession ? "cks_1" : undefined }));
+    await t.mutation(internal.billingOperator.releaseCheckoutLock, { customerRef: alice, operator: "support", reason: "Dashboard verified" });
+    const newer = newerLock ? await checkout(t, alice, "top_up", 2) : undefined;
+    for (let i = 0; i < 2; i++) {
+      await receive(t, alice, "payment.succeeded", { paymentId: "pay_late_hint" });
+      await reconcile(t, alice, { payments: [paid(topUp("pay_late_hint"), { purchaseIdHint: "intent_1" })] });
+    }
+    expect(await read(t, ref)).toMatchObject({ state: "settled", paymentId: "pay_late_hint" });
+    expect((await read(t, alice))?.pendingPurchaseRef).toBe(newer);
+    expect(await grants(t)).toHaveLength(1);
+    expect((await rows(t, "billingPurchases")).some(p => p.intentId.startsWith("unmatched:"))).toBe(false);
+  });
+
+  test.each(["foreign", "paid", "settled", "quarantined", "product", "sku", "mode"])("an indexed %s intent never binds a new payment", async variant => {
+    const t = setup();
+    const alice = await customer(t);
+    const bob = await customer(t, "user_bob");
+    const ref = await checkout(t, variant === "foreign" ? bob : alice, "top_up");
+    await t.run(async ctx => {
+      await ctx.db.patch(ref, { state: "terminal", sessionId: undefined });
+      await ctx.db.patch(variant === "foreign" ? bob : alice, { pendingPurchaseRef: undefined });
+      if (variant === "paid") await ctx.db.patch(ref, { paymentId: "pay_old" });
+      if (variant === "settled" || variant === "quarantined") await ctx.db.patch(ref, { state: variant });
+      if (variant === "mode") await ctx.db.patch(ref, { mode: "live_mode" });
+      if (variant === "product" || variant === "sku") await ctx.db.patch(ref, {
+        terms: { sku: variant === "sku" ? "pro_monthly" : "top_up", productId: "other", catalogVersion: "2026-11-17", quantity: 1, credits: 1000 },
+      });
+    });
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_new" });
+    await reconcile(t, alice, { payments: [paid(topUp("pay_new"), { purchaseIdHint: "intent_1" })] });
+    expect((await read(t, ref))?.paymentId).not.toBe("pay_new");
+    expect(await grants(t)).toHaveLength(0);
+    expect((await rows(t, "billingPurchases")).find(p => p.paymentId === "pay_new")).toMatchObject({ state: "quarantined", intentId: "unmatched:pay_new" });
+  });
+
+  test("hint recovery retains a session id supplied by the fresh payment", async () => {
+    const t = setup();
+    const alice = await customer(t);
+    const ref = await checkout(t, alice, "top_up");
+    await t.run(ctx => ctx.db.patch(ref, { state: "unknown", sessionId: undefined }));
+    await receive(t, alice, "payment.succeeded", { paymentId: "pay_hint_session" });
+    await reconcile(t, alice, { payments: [paid(topUp("pay_hint_session"), { purchaseIdHint: "intent_1", sessionId: "cks_recovered" })] });
+    expect(await read(t, ref)).toMatchObject({ state: "settled", sessionId: "cks_recovered" });
+    expect(await grants(t)).toHaveLength(1);
   });
 });

@@ -12,7 +12,7 @@ export const BILLING_CATALOG_VERSION = "2026-11-17";
 export type ProviderPayment = {
   paymentId: string; businessId: string; customerId: string;
   status: "succeeded" | "processing" | "failed" | "cancelled" | "other";
-  subscriptionId?: string; sessionId?: string;
+  subscriptionId?: string; sessionId?: string; purchaseIdHint?: string;
   /** SDK `product_cart`: the one-time products only; empty for a pure subscription charge. */
   cart: { productId: string; quantity: number }[];
   totalMinor: number; taxMinor?: number; currency: string; createdAt: number;

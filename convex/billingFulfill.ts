@@ -48,6 +48,7 @@ export const subscriptionFactValidator = v.object({
 
 const paymentFactValidator = v.object({
   paymentId: v.string(), decision: settlementDecisionValidator, sessionId: v.optional(v.string()),
+  purchaseIdHint: v.optional(v.string()),
   currency: v.optional(v.string()), totalMinor: v.optional(v.number()), taxMinor: v.optional(v.number()),
   reversal: reversalDecisionValidator,
 });
@@ -67,18 +68,34 @@ type SubscriptionPlan = { fact: SubscriptionFact; outcome: Outcome };
 const subscriptionRow = (ctx: Ctx, mode: Customer["mode"], subscriptionId: string) => ctx.db.query("billingSubscriptions")
   .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", mode).eq("subscriptionId", subscriptionId)).unique();
 
-async function findPurchase(ctx: Ctx, mode: Customer["mode"], { paymentId, sessionId }: PaymentFact) {
+async function findPurchase(ctx: Ctx, customer: Customer, { paymentId, sessionId, purchaseIdHint, decision }: PaymentFact) {
+  const mode = customer.mode;
   const byPayment = await ctx.db.query("billingPurchases")
     .withIndex("by_mode_and_paymentId", q => q.eq("mode", mode).eq("paymentId", paymentId)).unique();
-  if (byPayment || !sessionId) return byPayment;
-  const bySession = await ctx.db.query("billingPurchases")
-    .withIndex("by_mode_and_sessionId", q => q.eq("mode", mode).eq("sessionId", sessionId)).unique();
-  return bySession?.paymentId === undefined ? bySession : null;
+  if (byPayment) return byPayment;
+  if (sessionId) {
+    const bySession = await ctx.db.query("billingPurchases")
+      .withIndex("by_mode_and_sessionId", q => q.eq("mode", mode).eq("sessionId", sessionId)).unique();
+    if (bySession) return bySession.paymentId === undefined ? bySession : null;
+  }
+  if (!purchaseIdHint || (decision.kind !== "period" && decision.kind !== "top_up")) return null;
+  const pending = customer.pendingPurchaseRef && await ctx.db.get("billingPurchases", customer.pendingPurchaseRef);
+  if (pending?.intentId === purchaseIdHint) {
+    return pending.customerRef === customer._id && pending.mode === mode &&
+      ["unknown", "preparing"].includes(pending.state) && pending.sessionId === undefined &&
+      pending.paymentId === undefined && termsMatch(pending, decision) ? pending : null;
+  }
+  // A released intent may have no session id and a newer checkout may now hold the lock.
+  const released = await ctx.db.query("billingPurchases")
+    .withIndex("by_mode_and_intentId", q => q.eq("mode", mode).eq("intentId", purchaseIdHint)).unique();
+  return released && released.customerRef === customer._id && released.mode === mode &&
+    ["open", "terminal", "unknown"].includes(released.state) && released.paymentId === undefined &&
+    termsMatch(released, decision) ? released : null;
 }
 
 async function planPayment(ctx: Ctx, customer: Customer, fact: PaymentFact, deleted: boolean): Promise<PaymentPlan> {
   const { decision: d } = fact;
-  const found = await findPurchase(ctx, customer.mode, fact);
+  const found = await findPurchase(ctx, customer, fact);
   // Another customer's purchase is never written from this customer's commit.
   const foreign = found !== null && found.customerRef !== customer._id;
   const plan = { fact, purchase: foreign ? null : found, positive: false };
@@ -254,6 +271,8 @@ async function settle(ctx: Ctx, customer: Customer, plan: PaymentPlan, d: Positi
   const { fact } = plan;
   await ctx.db.patch("billingPurchases", purchase._id, {
     paymentId: d.paymentId, state: "settled", currency: fact.currency,
+    ...(plan.purchase && fact.purchaseIdHint === purchase.intentId && purchase.sessionId === undefined &&
+      fact.sessionId !== undefined ? { sessionId: fact.sessionId } : {}),
     ...(d.kind === "period" ? { subscriptionId: d.subscriptionId } : {}),
     ...(fact.totalMinor !== undefined && fact.taxMinor !== undefined ? { principalMinor: fact.totalMinor - fact.taxMinor } : {}),
     ...(deleted ? { cancellationRecoveryRequired: true } : {}),

@@ -155,4 +155,45 @@ released purchase by its session ID (top-up and Pro).
   change of a 4th subscription or a 3rd disputed payment is not seen by polling
   (lists only show resources created in the lookback); its webhook or support
   covers it.
-- An `unknown` customer or purchase needs support until the recovery stage.
+- Unknown customer creation needs support. Unknown purchases recover from a fresh
+  payment carrying our intent id; otherwise support must review them.
+
+
+## Unknown checkout recovery
+
+A fresh payment read normalizes `metadata.purchaseId` as a bounded intent hint.
+Fulfillment first matches the payment or session id. Otherwise it may locate only
+that customer's pending `unknown`/`preparing` intent, with matching sku and no
+bound session or payment. If the hint differs from the current lock, a mode/intent
+index lookup can recover an owned open/terminal/unknown intent with matching
+product terms and no payment bound, including a released sessionless checkout.
+The payment’s session id, when present, is retained on hint-based settlement.
+The hint grants nothing by itself: customer, product,
+settlement terms, deduplication and the reconciliation fence still apply. Poll
+receipts follow this same path. A stale preparing intent becoming unknown is
+also marked due for polling. Unknown customer creation needs operator review;
+email matching never binds an identity.
+
+## Audited operator recovery
+
+`billingOperator.resolveUnknownCustomer` accepts only an unknown creation. After
+checking the dashboard, support supplies the verified provider customer id, or
+omits it only when no customer was created. Binding retains provider-id uniqueness;
+resetting clears the creation lease. The customer stores the resolution audit.
+
+`billingOperator.releaseCheckoutLock` requires dashboard confirmation that the
+checkout is expired and unpaid. It refuses processing/settled purchases and any
+purchase with a payment id, or a preparing purchase younger than two minutes.
+Ownership and mode must match the locked customer.
+It marks the purchase terminal and clears the lock atomically, storing the audit
+on the purchase. The retained session id lets a late payment settle normally,
+once, without clearing a newer checkout's lock.
+
+Both are internal mutations, with operator alias (1–64 characters, no `@`), reason
+(1–500 characters), action, timestamp and previous state. `operator` identifies the
+actor and `reason` stores their note. Each resolution overwrites the prior audit
+while recording the immediately previous state; `previousState` is optional in
+the shared schema for older records. Logs contain ids/action/operator only.
+Production calls require explicit approval for each run. Manual dashboard review
+is a trust boundary: these mutations do not query Dodo or prove the review happened.
+No new environment variables, automatic create retries or billing enablement.
