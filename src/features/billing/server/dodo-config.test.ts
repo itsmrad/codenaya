@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { readDodoConfig, type DodoDeployment } from "./dodo-config";
+import { parseDeployment, readDodoConfig, type DodoDeployment } from "./dodo-config";
 
 const nextEnv = {
   CODENAYA_BILLING_ENABLED: "true",
@@ -124,6 +124,14 @@ describe("Dodo config", () => {
     expect(() => readDodoConfig("next", undefined as unknown as DodoDeployment, {
       ...nextEnv, NODE_ENV: "production",
     })).toThrow("deployment");
+  });
+  it("parses only the four known deployments, failing closed on anything else", () => {
+    for (const deployment of ["development", "preview", "staging", "production"]) {
+      expect(parseDeployment(deployment)).toBe(deployment);
+    }
+    for (const value of [undefined, "", "prod", "Production", " production", "__proto__"]) {
+      expect(parseDeployment(value)).toBeNull();
+    }
   });
   it.each(["DODO_PAYMENTS_BASE_URL", "DODO_PAYMENTS_API_BASE_URL"])("prohibits %s", (name) => {
     expect(() => readDodoConfig("next", "development", { ...nextEnv, [name]: "https://untrusted.test" })).toThrow("overrides");

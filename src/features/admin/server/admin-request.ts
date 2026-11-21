@@ -2,6 +2,7 @@ import { auth, reverificationError } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 import { type RateLimitConfig, checkRateLimit, rateLimitedResponse } from "@/lib/rate-limit";
+import { isJson, isSameOrigin } from "@/lib/request-guards";
 
 import { adminOrNull } from "./require-admin";
 
@@ -46,17 +47,6 @@ type AdminRequestResult =
   | { admin: undefined; meta: undefined; denied: Response };
 
 const deny = (denied: Response): AdminRequestResult => ({ admin: undefined, meta: undefined, denied });
-
-/**
- * A cross-site page can't make the browser send either: `Origin` names the
- * calling page, and `Sec-Fetch-Site` is set by the browser alone.
- */
-const isSameOrigin = (request: Request) =>
-  request.headers.get("origin") === new URL(request.url).origin ||
-  request.headers.get("sec-fetch-site") === "same-origin";
-
-const isJson = (request: Request) =>
-  request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() === "application/json";
 
 export const requestMeta = (request: Request): AdminRequestMeta => {
   // The first `x-forwarded-for` hop is the client, as the platform's proxy sets it.

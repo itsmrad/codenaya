@@ -37,8 +37,15 @@ function required(env: Env, name: string): string {
   return value;
 }
 
+const DEPLOYMENTS: readonly string[] = ["development", "preview", "staging", "production"] satisfies DodoDeployment[];
+
+/** The trusted deployment from `CODENAYA_DEPLOYMENT`; null when absent or invalid (fail closed). */
+export function parseDeployment(value: string | undefined): DodoDeployment | null {
+  return value !== undefined && DEPLOYMENTS.includes(value) ? value as DodoDeployment : null;
+}
+
 function readEnvironment(env: Env, deployment: DodoDeployment): DodoEnvironment {
-  if (!["development", "preview", "staging", "production"].includes(deployment)) {
+  if (!parseDeployment(deployment)) {
     throw new Error("Billing configuration requires an explicit deployment.");
   }
   const environment = required(env, "DODO_PAYMENTS_ENVIRONMENT");
