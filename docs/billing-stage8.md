@@ -1,8 +1,8 @@
-# Refund and dispute reads, reversal rules, discount guard (stage 8a)
+# Refunds, disputes and holds (stage 8)
 
-Implements the read side of ADR 0016's refund and dispute rules. Nothing commits
-a reversal yet: refund and dispute receipts stay pending, and the reconciler still
-skips them. A later stage applies these rules when it commits.
+Implements ADR 0016's refund and dispute rules: 8a reads and decides (items
+1-5), 8b commits (items 6-10). Refund and dispute receipts, from webhooks or
+polling, resolve from a fresh read of their payment and stop blocking grants.
 
 1. **Reads.** `fetchPayment` (`src/features/billing/server/dodo-reads.ts`)
    normalizes the payment's whole current `refunds` and `disputes` lists into
@@ -23,9 +23,7 @@ skips them. A later stage applies these rules when it commits.
    currency included), makes the reversal `unknown`. Dodo documents no unit for
    a dispute amount, so it is usable only when it equals the payment's gross
    total as minor units (`"2000"`) or as major units (`"20"`, `"20.00"` for USD
-   20.00): a full dispute. In this stage nothing consults the decision yet; when
-   reversals commit, an unknown reversal applies nothing and blocks that
-   payment's grant until a later read is known or an operator resolves it.
+   20.00): a full dispute. An unknown reversal applies nothing (item 9).
 4. **Dispute holds.** An opened, challenged, expired or unrecognised dispute
    holds the customer; won, cancelled, lost and accepted release it. Holds are
    per dispute.
@@ -36,6 +34,40 @@ skips them. A later stage applies these rules when it commits.
    `plans.ts`. Totals include tax, so an undiscounted USD payment is never below
    the list price. This is defence in depth: checkout (stage 9) disables
    discount codes.
+6. **Adjustment rows.** Each commit records every refund and dispute of each
+   read payment in `billingAdjustments`, one row per provider id. A row's
+   counted amount never decreases: a counted refund later shown failed, or
+   dropped from the list, stays counted (and is logged). The payment's reversed
+   amount is the capped sum over its rows, so a repeated finding never applies
+   twice.
+7. **Revocation** (`convex/billingReversals.ts`). Against the original
+   purchase's lots, never the current plan: only `target − revokedCredits` is
+   revoked, from the purchase's rollover lot first, then its own lot (expired
+   lots too: expiry alone never creates debt). Credits already spent become
+   `creditDebt`, recorded only on an account billing-enabled in the customer's
+   mode and never for a deleted owner (logged instead). A full reversal marks
+   every lot of the purchase `fullyReversed`, which ends that paid period.
+   Credits are never restored.
+8. **Same transaction.** Reversals apply right after settlement in the same
+   commit, and the purchase is re-read by payment id, so a refund seen with its
+   payment (or before it) is never spendable. A refund or dispute receipt this
+   commit resolves no longer blocks the customer's grants; any other unresolved
+   one, and every quarantined one, still does.
+9. **Unknown and foreign.** An unknown reversal writes nothing: its receipts
+   stay pending (backoff, then dead letter) and that payment's grant waits. A
+   refund or dispute whose payment belongs to another provider customer is
+   quarantined `unsupported` for support; another customer's purchase is never
+   written.
+10. **Holds.** An active dispute row is a hold on that customer row (so per
+    mode), one per dispute. It refuses new checkouts and the resume of an open
+    one (`prepareCheckout` returns `refused/on_hold`, `reservePurchaseRow`
+    throws `FORBIDDEN`). It never blocks grants: a settled renewal still grants,
+    and spending during a hold is frozen at the inference gates (stage 11).
+    `expired` keeps the hold until support releases it; won and cancelled
+    release only that dispute's hold; lost and accepted release it and reverse.
+
+Operators: support holds, releasing a reviewed dispute hold and resolving stuck
+receipts come with the operator mutations (stage 8c).
 
 ## Residual risks
 
@@ -47,3 +79,5 @@ skips them. A later stage applies these rules when it commits.
 - A counted refund the provider reports without an amount (partial) or currency
   stays unknown, which keeps that payment's grant blocked until a later read is
   known or an operator resolves it.
+- An unknown reversal that never becomes known dead-letters its receipt, which
+  keeps blocking that customer's grants until an operator resolves it.

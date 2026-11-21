@@ -20,7 +20,7 @@ const PRO = "pdt_pro";
 const TOP_UP = "pdt_topup";
 type Mode = "test_mode" | "live_mode";
 type Facts = { payments?: PaymentFact[]; subscriptions?: SubscriptionFact[] };
-type PaymentFact = { paymentId: string; decision: Record<string, unknown> & { kind: string; paymentId: string }; sessionId?: string; currency?: string; totalMinor?: number; taxMinor?: number };
+type PaymentFact = { paymentId: string; decision: Record<string, unknown> & { kind: string; paymentId: string }; sessionId?: string; currency?: string; totalMinor?: number; taxMinor?: number; reversal?: unknown };
 type SubscriptionFact = Record<string, unknown> & { subscriptionId: string };
 
 function setup() {
@@ -68,13 +68,13 @@ const period = (paymentId: string, range = P1, subscriptionId = "sub_1") =>
   ({ kind: "period", paymentId, subscriptionId, productId: PRO, ...range, credits: 2000, settledAt: range.serviceStart });
 const topUp = (paymentId: string) => ({ kind: "top_up", paymentId, productId: TOP_UP, credits: 1000, settledAt: NOW });
 const paid = (decision: PaymentFact["decision"], extra: Partial<PaymentFact> = {}): PaymentFact =>
-  ({ paymentId: decision.paymentId, decision, currency: "USD", totalMinor: 2000, taxMinor: 180, ...extra });
+  ({ paymentId: decision.paymentId, decision, currency: "USD", totalMinor: 2000, taxMinor: 180, reversal: { kind: "known", refunds: [], disputes: [] }, ...extra });
 const sub = (extra: Record<string, unknown> = {}, userId = "user_alice"): SubscriptionFact => ({
   subscriptionId: "sub_1", customerId: `cus_${userId}`, productId: PRO, quantity: 1, status: "active",
   nextBillingAt: P1.serviceEnd, cancelAtNextBillingDate: false, ...extra,
 });
 
-/** Claims the customer and commits `facts` for every claimed receipt except refunds and disputes, as the reconciler does. */
+/** Claims the customer and commits `facts` for every claimed receipt but refunds and disputes, which stay unresolved (see billingReversals.test.ts). */
 async function reconcile(t: T, customerRef: Id<"billingCustomers">, facts: Facts) {
   const claim = (await t.mutation(internal.billingQueue.claimCustomer, { customerRef }))!;
   const result = await t.mutation(internal.billingFulfill.commitReconciliation, {
@@ -426,7 +426,7 @@ describe("reconcileClaim", () => {
     payment_id: paymentId, business_id: "bus_synthetic", status: "succeeded", customer: { customer_id: "cus_user_alice" },
     subscription_id: "sub_1", product_cart: null, total_amount: 2000, tax: 180, currency: "USD", created_at: iso(NOW - DAY),
     charge_type: "new", service_periods: [{ subscription_id: "sub_1", starts_at: iso(P1.serviceStart), ends_at: iso(P1.serviceEnd), proration_factor: "1" }],
-    ...extra,
+    refunds: [], disputes: [], ...extra,
   });
   const subscriptionBody = {
     subscription_id: "sub_1", status: "active", product_id: PRO, customer: { customer_id: "cus_user_alice" }, quantity: 1,
@@ -460,6 +460,21 @@ describe("reconcileClaim", () => {
     expect(await grants(t)).toHaveLength(1);
     expect(await read(t, purchaseRef)).toMatchObject({ state: "settled", paymentId: "pay_1" });
     expect(await read(t, eventRef)).toMatchObject({ state: "processed" });
+  });
+
+  test("a refund receipt reads its payment and revokes in the same commit that grants it", async () => {
+    withEnv();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const t = setup();
+    const alice = await customer(t);
+    const purchaseRef = await checkout(t, alice);
+    const refund = { refund_id: "rfd_1", payment_id: "pay_1", business_id: "bus_synthetic", status: "succeeded", amount: 2000, currency: "USD", is_partial: false };
+    stubFetch(path => path.startsWith("/payments/") ? paymentBody("pay_1", { checkout_session_id: "cks_1", refunds: [refund] }) : subscriptionBody);
+    const eventRef = await receive(t, alice, "refund.succeeded", { paymentId: "pay_1" });
+    await run(t, alice);
+    expect(await read(t, eventRef)).toMatchObject({ state: "processed" });
+    expect(await read(t, purchaseRef)).toMatchObject({ state: "settled", reversedMinor: 2000, totalMinor: 2000, revokedCredits: 2000 });
+    expect((await rows(t, "billingGrants")).map(g => [g.quantity, g.revoked, g.exhausted, g.fullyReversed])).toEqual([[2000, 2000, true, true]]);
   });
 
   test.each([
