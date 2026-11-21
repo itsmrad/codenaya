@@ -90,12 +90,17 @@ test.each(["missing", "foreign", "product", "mode", "duplicate"])("renewal stagi
 test.each(["foreign", "mode", "terms", "duplicate", "unmatched"])("checkout staging refuses %s binding", async shape => {
   const { t, alice, bob, fact, commit, purchase, noGrant } = await setup();
   const terms = { sku: "top_up" as const, productId: shape === "terms" ? "wrong" : "pdt_topup", quantity: 1, credits: 1000, catalogVersion: "2026-11-17" };
-  if (shape !== "unmatched") await t.run(ctx => ctx.db.insert("billingPurchases", {
+  const original = shape !== "unmatched" ? await t.run(ctx => ctx.db.insert("billingPurchases", {
     customerRef: shape === "foreign" ? bob : alice, mode: shape === "mode" ? "live_mode" : mode,
     intentId: "checkout", sessionId: "cks_1", state: "open", terms, ...(shape === "duplicate" ? { paymentId: "pay_old" } : {}),
-  }));
+  })) : null;
+  const before = original && await t.run(ctx => ctx.db.get(original));
   await commit([{ ...fact, sessionId: "cks_1", decision: { kind: "top_up", paymentId: "pay_1", productId: "pdt_topup", credits: 1000, settledAt: Date.now() } }]);
-  expect(await purchase()).toBeNull();
+  if (shape === "foreign") {
+    expect(await purchase()).toMatchObject({ customerRef: alice, state: "quarantined", intentId: "unmatched:pay_1" });
+    expect((await purchase())?.stagedGrantKey).toBeUndefined();
+    expect(await t.run(ctx => ctx.db.get(original!))).toEqual(before);
+  } else expect(await purchase()).toBeNull();
   await noGrant();
 });
 
