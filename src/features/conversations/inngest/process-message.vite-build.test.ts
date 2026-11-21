@@ -26,7 +26,7 @@ const QUERIES: Record<string, (args: { fileId?: string }) => unknown> = {
   "system:getProjectMcpConnections": () => [],
   "system:getProjectSkills": () => [],
   "system:getProjectFiles": () => mocks.rows.map((row) => ({ ...row, content: undefined })),
-  "files:getTransferFiles": () => mocks.rows,
+  "files:getBuildFiles": () => mocks.rows,
   "system:getFileById": ({ fileId }) => mocks.rows.find((row) => row._id === fileId) ?? null,
 };
 

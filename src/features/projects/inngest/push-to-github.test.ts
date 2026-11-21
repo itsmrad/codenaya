@@ -373,7 +373,22 @@ describe("pushToGithub (#343)", () => {
     expect(gh.log("main")[0].files).toEqual({ "index.html": gh.sha("v2"), "logo.png": gh.sha("old bytes") });
   });
 
-  it("writes one whole tree when GitHub truncates the tree listing", async () => {
+  it("leaves remote private paths unchanged across per-run commits even if an old input contains them", async () => {
+    const gh = fakeGithub({ "index.html": "v1", ".npmrc": "REMOTE_CANARY_123", ".env.local": "REMOTE_CANARY_456" });
+    project({
+      runs: [{ prompt: "One", summary: "", checkpointId: null }, { prompt: "Two", summary: "", checkpointId: "cp2" }],
+      checkpoints: { cp2: { "index.html": "v2", ".npmrc": "LOCAL_CANARY_123" } },
+      files: { "index.html": "v3", ".env.local": "LOCAL_CANARY_456" },
+    });
+    await runJob();
+    expect(gh.log("main")).toHaveLength(2);
+    for (const commit of gh.log("main")) expect(commit.files).toMatchObject({
+      ".npmrc": gh.sha("REMOTE_CANARY_123"), ".env.local": gh.sha("REMOTE_CANARY_456"),
+    });
+    expect(JSON.stringify(vi.mocked(mocks.github.createTree).mock.calls)).not.toMatch(/LOCAL_CANARY|REMOTE_CANARY/);
+  });
+
+  it("refuses a truncated listing with an actionable message before touching remote files", async () => {
     const gh = fakeGithub({ "index.html": "v1", "gone.txt": "bye" });
     const getTree = mocks.github.getTree;
     mocks.github.getTree = ((args: never) => {
@@ -390,12 +405,19 @@ describe("pushToGithub (#343)", () => {
       files: { "index.html": "v3" },
     });
 
-    await runJob();
+    const error: Error = await runJob().then(() => { throw new Error("Expected truncated-tree refusal"); }, (failure: Error) => failure);
+    expect(error).toMatchObject({
+      name: "NonRetriableError",
+      message: expect.stringMatching(/No files were pushed.*Export this project to a new repository.*reduce.*file count/),
+    });
+    expect(gh.log("main")).toEqual([]);
+    expect(mocks.github.createTree).not.toHaveBeenCalled();
+    await (pushToGithub as unknown as { config: { onFailure: (ctx: unknown) => Promise<void> } }).config.onFailure({
+      event: { data: { event: { data: { projectId: "p1" } } } }, error,
+      step: { run: (_name: string, fn: () => unknown) => fn() },
+    });
+    expect(mocks.mutation.mock.calls.at(-1)?.[1]).toMatchObject({ status: "failed", error: error.message });
 
-    expect(gh.log("main")).toEqual([
-      { message: expect.stringMatching(/^Changes from 2 agent runs/), files: { "index.html": gh.sha("v3") } },
-    ]);
-    expect(vi.mocked(mocks.github.createTree).mock.calls[0][0]).toMatchObject({ base_tree: undefined });
   });
 
   it("downloads and uploads a binary used at two paths once", async () => {

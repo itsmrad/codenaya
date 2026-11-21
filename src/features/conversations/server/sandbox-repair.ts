@@ -449,7 +449,7 @@ const mirror = async (
   { projectId, internalKey }: { projectId: Id<"projects">; internalKey: string },
   paths: string[],
 ) => {
-  const rows = await convex.query(api.files.getTransferFiles, { internalKey, projectId });
+  const rows = await convex.query(api.files.getBuildFiles, { internalKey, projectId });
   const pathOf = buildPathIndex(rows);
   const byPath = new Map(rows.map((row) => [pathOf(row._id), row]));
   const opts = { requestTimeoutMs: SHORT_CALL_MS };

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { createCheckpoint } from "./checkpoints";
+import { buildPathIndex } from "../src/features/conversations/agent-steps";
 import { withContents } from "./fileContents";
 import schema from "./schema";
 import { withoutPrivateFiles } from "./projectTransfer";
@@ -14,6 +15,13 @@ const modules = import.meta.glob("./**/*.ts");
 const internalKey = "dummy-transfer-key";
 const token = "a".repeat(32);
 const canary = "CANARY_VALUE_123";
+const sourcePaths = ["src/app/build/page.tsx", "src/app/settings/credentials/page.tsx", "scripts/build"];
+const expectedPaths = [".env.example", "index.html", ...sourcePaths].sort();
+const sourceContent = "legitimate source";
+const pathsOf = (files: { _id: string; name: string; parentId?: string; type: "file" | "folder" }[]) => {
+  const pathOf = buildPathIndex(files);
+  return files.filter(file => file.type === "file").map(file => pathOf(file._id)).sort();
+};
 const sealedFields = ["secretRef", "kekProvider", "kekKeyId", "wrappedDek", "ciphertext", "iv", "authTag", "maskedPreview"];
 
 beforeEach(() => {
@@ -36,7 +44,24 @@ async function seed() {
     }
     const storageId = await ctx.storage.store(new Blob([canary]));
     await ctx.db.insert("files", { projectId, name: "client.p12", type: "file", storageId, updatedAt: 0 });
-    for (const name of ["node_modules", ".next", "dist", ".git", ".env.local"]) {
+    const folders = new Map<string, Id<"files">>();
+    for (const path of sourcePaths) {
+      const parts = path.split("/");
+      const name = parts.pop()!;
+      let parentId: Id<"files"> | undefined;
+      let folderPath = "";
+      for (const part of parts) {
+        folderPath = folderPath ? `${folderPath}/${part}` : part;
+        if (!folders.has(folderPath)) folders.set(folderPath, await ctx.db.insert("files", {
+          projectId, name: part, type: "folder", parentId, updatedAt: 0,
+        }));
+        parentId = folders.get(folderPath);
+      }
+      await file(name, sourceContent, parentId);
+    }
+    const nestedModules = await ctx.db.insert("files", { projectId, name: "node_modules", type: "folder", parentId: folders.get("src"), updatedAt: 0 });
+    await file("dep.js", canary, nestedModules);
+    for (const name of ["node_modules", ".next", "dist", ".git"]) {
       const parent = await ctx.db.insert("files", { projectId, name, type: "folder", updatedAt: 0 });
       await file("runtime.js", canary, parent);
     }
@@ -66,14 +91,18 @@ function expectClean(value: unknown) {
 
 test("ZIP, GitHub export/current push, and checkpoint push return only transferable files", async () => {
   const { t, owner, projectId, checkpointId } = await seed();
-  for (const files of [
-    await owner.query(api.files.getFilesWithUrls, { projectId }),
-    await t.query(api.files.getTransferFiles, { internalKey, projectId }),
-    await t.query(api.system.getCheckpointFilesWithUrls, { internalKey, projectId, checkpointId }),
-  ]) {
-    expectClean(files);
-    expect(files.map(f => "path" in f ? f.path : f.name).sort()).toEqual([".env.example", "index.html"]);
-  }
+  const zipFiles = await owner.query(api.files.getFilesWithUrls, { projectId });
+  const exportFiles = await t.query(api.files.getTransferFiles, { internalKey, projectId });
+  const checkpointFiles = await t.query(api.system.getCheckpointFilesWithUrls, { internalKey, projectId, checkpointId });
+  expectClean([zipFiles, exportFiles, checkpointFiles]);
+  expect(pathsOf(zipFiles)).toEqual(expectedPaths);
+  expect(pathsOf(exportFiles)).toEqual(expectedPaths);
+  expect(checkpointFiles.filter(f => f.type === "file").map(f => f.path).sort()).toEqual(expectedPaths);
+  const buildFiles = await t.query(api.files.getBuildFiles, { internalKey, projectId });
+  expect(pathsOf(buildFiles)).toEqual(expect.arrayContaining(sourcePaths));
+  expect(pathsOf(buildFiles)).toEqual(expect.arrayContaining(["dist/runtime.js", "src/node_modules/dep.js"]));
+  for (const path of [".env", ".npmrc", "server.pem"]) expect(pathsOf(buildFiles)).not.toContain(path);
+  await expect(t.query(api.files.getBuildFiles, { internalKey: "wrong", projectId })).rejects.toThrow();
   // The raw scan and owner editor still see source secrets, without changing undo.
   expect(JSON.stringify(await t.query(api.system.getProjectFilesWithUrls, { internalKey, projectId }))).toContain(canary);
   await expect(t.query(api.files.getTransferFiles, { internalKey: "wrong", projectId })).rejects.toThrow();
@@ -105,7 +134,7 @@ test.each(["duplicate", "fork", "remixLatest", "remixSnapshot", "showcase"])("%s
     checkpoints: await ctx.db.query("checkpoints").withIndex("by_project", q => q.eq("projectId", copyId)).take(100),
   }));
   expectClean(copied);
-  expect(copied.files.map(f => f.name).sort()).toEqual([".env.example", "index.html"]);
+  expect(pathsOf(copied.files)).toEqual(expectedPaths);
   expect(copied.env).toEqual([]);
   expect(copied.handles).toEqual([]);
   expect(copied.checkpoints).toEqual([]);
@@ -120,6 +149,7 @@ test.each(["latest", "snapshot"] as const)("%s share build exposes only public-p
   expect(manifest && { ...manifest, files: [...manifest.files].sort((a, b) => a.path.localeCompare(b.path)) }).toEqual({ files: [
     { path: "index.html", content: "safe source", url: null },
     { path: ".env.example", content: "EXAMPLE=placeholder", url: null },
+    ...sourcePaths.map(path => ({ path, content: sourceContent, url: null })),
   ].sort((a, b) => a.path.localeCompare(b.path)), env: { VITE_URL: canary, NEXT_PUBLIC_URL: "public URL" } });
   // Paths sort differently for live rows and checkpoint rows.
   expectClean(manifest?.files);
@@ -150,6 +180,34 @@ test.each(["project", "account"])("%s deletion invalidates runtimes and removes 
   expect(await t.run(ctx => ctx.db.get("runtimeHandles", handleId))).toMatchObject({ state: "stale" });
 });
 
-test.each(["node_modules/a.js", "a\\NODE_MODULES. \\cache.js", ".next/cache", ".nuxt/cache", ".output/server.js", ".cache/state", ".turbo/state", ".vercel/state", ".netlify/state", "dist/index.js", "build/server.js", "coverage/results", ".git/config", ".env.local/index.js", "a/.npmrc. "])("excludes private transfer path %s", path => {
+test.each(["node_modules/a.js", "a\\NODE_MODULES. \\cache.js", ".next/cache", ".nuxt/cache", ".output/server.js", ".cache/state", ".turbo/state", ".vercel/state", ".netlify/state", "dist/index.js", "build/server.js", "coverage/results", ".git/config", "a/.npmrc. "])("excludes private transfer path %s", path => {
   expect(withoutPrivateFiles([{ path, content: canary }])).toEqual([]);
+});
+
+test.each([...sourcePaths, "credentials/index.ts", "src/dist/a.ts", "build", "scripts/coverage"])("keeps legitimate source path %s", path => {
+  expect(withoutPrivateFiles([{ path }])).toEqual([{ path }]);
+});
+
+test("owner transfer reads retain the previous 5000-row cap without rejecting an imported folder", async () => {
+  const t = convexTest(schema, modules);
+  const projectId = await t.run(async ctx => {
+    const id = await ctx.db.insert("projects", { name: "Large", ownerId: "owner", updatedAt: 0 });
+    for (let i = 0; i < 5001; i++) await ctx.db.insert("files", { projectId: id, name: `folder-${i}`, type: "folder", updatedAt: 0 });
+    return id;
+  });
+  expect(await t.withIdentity({ subject: "owner" }).query(api.files.getFilesWithUrls, { projectId })).toHaveLength(5000);
+});
+
+test("runtime rules distinguish top-level output directories from source folders and file basenames", () => {
+  expect(withoutPrivateFiles([
+    { path: "dist", type: "folder" as const },
+    { path: "nested/node_modules", type: "folder" as const },
+    { path: "credentials", type: "folder" as const },
+    { path: "src/app/build", type: "folder" as const },
+    { path: "scripts/build", type: "file" as const },
+  ])).toEqual([
+    { path: "credentials", type: "folder" },
+    { path: "src/app/build", type: "folder" },
+    { path: "scripts/build", type: "file" },
+  ]);
 });

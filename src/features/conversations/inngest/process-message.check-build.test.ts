@@ -42,7 +42,7 @@ const QUERIES: Record<string, () => unknown> = {
   "system:getProjectById": () => ({ ownerId: "user_1" }),
   "system:getProjectMcpConnections": () => [],
   "system:getProjectFiles": () => projectFiles,
-  "files:getTransferFiles": () => projectFiles,
+  "files:getBuildFiles": () => projectFiles,
   "system:getEnvVarsForSandbox": () => [],
   "system:getProjectSkills": () => [],
 };

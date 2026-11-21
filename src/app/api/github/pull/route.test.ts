@@ -67,7 +67,7 @@ const pull = (body: object = {}) =>
     })
   );
 
-/** The project's files, as `getProjectFilesWithUrls` returns them. */
+/** The project's files, as `getTransferFiles` returns them. */
 const localFiles = (files: Record<string, string>) =>
   Object.entries(files).map(([name, content]) => ({ _id: name, name, type: "file", content }));
 
@@ -98,7 +98,7 @@ function given({
   mocks.query.mockImplementation(async (fn) => {
     const name = getFunctionName(fn);
     if (name.endsWith("isAgentRunning")) return running;
-    if (name.endsWith("getProjectFilesWithUrls")) return localFiles(files);
+    if (name === "files:getTransferFiles") return localFiles(files);
     return { _id: "p1", ownerId: "user_1", githubSync: sync };
   });
   mocks.getRef.mockResolvedValue({ data: { object: { sha: head } } });

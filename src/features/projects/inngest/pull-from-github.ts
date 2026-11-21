@@ -8,7 +8,7 @@ import { inngest } from "@/inngest/client";
 import { requireJobGithubToken } from "@/features/projects/server/github-token";
 import { readRepoArchive } from "@/features/projects/server/github-archive";
 import { buildFilePaths, planFolderCreation } from "@/features/projects/utils/github-tree";
-import { isRealEnvFile } from "@/features/projects/utils/inspect-imported-project";
+import { isPrivatePath } from "../../../../convex/projectTransfer";
 
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -99,24 +99,26 @@ export const pullFromGithub = inngest.createFunction(
     // One step: the archive can't be passed between steps. A retry writes the
     // same tree again; unchanged files are left alone.
     await step.run("apply-files", async () => {
-      const { folders, files, skipped } = await readRepoArchive(owner, repo, githubToken, sha, isRealEnvFile);
-      const unsupported = skipped.filter((path) => !isRealEnvFile(path));
+      const archive = await readRepoArchive(owner, repo, githubToken, sha, isPrivatePath);
+      const { files, skipped } = archive;
+      const folders = archive.folders.filter(path => !isPrivatePath(path, "folder"));
+      const unsupported = skipped.filter((path) => !isPrivatePath(path));
       const tree = new Map<string, TreeEntry["type"]>([
         ...folders.map((path) => [path, "folder"] as const),
         ...files.map(({ path }) => [path, "file"] as const),
       ]);
       const localFiles = await convex.query(api.system.getProjectFiles, { internalKey, projectId });
-      const localEnvPaths = Object.entries(buildFilePaths(localFiles))
-        .filter(([path, file]) => file.type === "file" && isRealEnvFile(path))
-        .map(([path]) => path);
-      // Keep local secrets and their parents even when GitHub no longer has them (#812).
+      const localPrivate = Object.entries(buildFilePaths(localFiles))
+        .filter(([path, file]) => isPrivatePath(path, file.type))
+        .map(([path, file]) => ({ path, type: file.type }));
+      // Keep every excluded local path and its parents; a push never transfers them.
       const preserved: { path: string; type: TreeEntry["type"] }[] = [
-        ...planFolderCreation([], localEnvPaths).map(({ path }) => ({ path, type: "folder" as const })),
-        ...localEnvPaths.map((path) => ({ path, type: "file" as const })),
+        ...planFolderCreation([], localPrivate.map(file => file.path)).map(({ path }) => ({ path, type: "folder" as const })),
+        ...localPrivate,
       ];
       for (const { path, type } of preserved) {
         if (tree.has(path) && tree.get(path) !== type) {
-          throw new NonRetriableError(`Pull would replace a local dotenv file or its parent: ${path}`);
+          throw new NonRetriableError(`Pull would replace a local private file or its parent: ${path}`);
         }
         tree.set(path, type);
       }
@@ -226,7 +228,7 @@ export async function differsFromCommit(
   });
   const remote = new Map(
     tree.tree.flatMap((item) =>
-      item.type === "blob" && item.path && item.sha ? [[item.path, item.sha] as const] : []
+      item.type === "blob" && item.path && item.sha && !isPrivatePath(item.path) ? [[item.path, item.sha] as const] : []
     )
   );
   // shortcut: binaries count by path only; hash them (one download each) if

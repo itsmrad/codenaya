@@ -233,7 +233,7 @@ describe("pullFromGithub (#343)", () => {
 
     await expect(runJob()).rejects.toMatchObject({
       name: "NonRetriableError",
-      message: expect.stringMatching(/local dotenv/),
+      message: expect.stringMatching(/local private/),
     });
     expect(written()).toEqual([]);
   });

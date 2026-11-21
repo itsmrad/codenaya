@@ -76,7 +76,7 @@ const provision = async (
   provider: SandboxProvider,
   { projectId, internalKey, runId }: Pick<VerifyAndFixOptions, "projectId" | "internalKey" | "runId">,
 ) => {
-  const rows = await convex.query(api.files.getTransferFiles, { internalKey, projectId });
+  const rows = await convex.query(api.files.getBuildFiles, { internalKey, projectId });
   const pathOf = buildPathIndex(rows);
   const all: ProjectFile[] = [];
   const allUploads: Array<{ path: string; url: string }> = [];

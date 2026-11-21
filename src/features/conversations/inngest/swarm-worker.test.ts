@@ -78,7 +78,7 @@ beforeEach(() => {
   vi.stubEnv("CODENAYA_CONVEX_INTERNAL_KEY", "ik");
   vi.stubEnv("OPENROUTER_API_KEY", "sk-or-platform");
   mocks.query.mockImplementation(async (ref) =>
-    ["system:getProjectFiles", "files:getTransferFiles"].includes(getFunctionName(ref)) ? [] : null);
+    ["system:getProjectFiles", "files:getBuildFiles"].includes(getFunctionName(ref)) ? [] : null);
   mocks.mutation.mockImplementation(async (ref, args) => MUTATIONS[getFunctionName(ref)]?.(args) ?? null);
 });
 
@@ -140,7 +140,7 @@ describe("swarmWorker", () => {
   });
 
   const staticSnapshot = (content: string, shared = "export const site = {};", contract = "", manifest = "") => {
-    mocks.query.mockImplementation(async (ref) => getFunctionName(ref) === "files:getTransferFiles" ? [
+    mocks.query.mockImplementation(async (ref) => getFunctionName(ref) === "files:getBuildFiles" ? [
       { _id: "manifest", name: "package.json", type: "file", content: manifest },
       { _id: "layout", name: "src/app/layout.tsx", type: "file", content: "export default () => null;" },
       { _id: "src", name: "src", type: "folder" },
@@ -291,7 +291,7 @@ describe("swarmWorker", () => {
     const outcome = await run([{ data: text("No changes needed.") }]);
     expect(outcome.finalType).toBe("function-resolved");
     expect(outcome.inferenceBodies).toHaveLength(1);
-    expect(mocks.query.mock.calls.some(([ref]) => getFunctionName(ref) === "files:getTransferFiles")).toBe(false);
+    expect(mocks.query.mock.calls.some(([ref]) => getFunctionName(ref) === "files:getBuildFiles")).toBe(false);
   });
 
   it("puts the user's original request in the system prompt, and none when absent", async () => {
