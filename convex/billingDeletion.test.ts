@@ -16,7 +16,6 @@ const NOW = Date.UTC(2026, 10, 21);
 const ALICE = "user_alice";
 const BOB = "user_bob";
 const TERMS = { sku: "pro_monthly" as const, catalogVersion: "2026-11-17", productId: "pdt_pro", quantity: 1, credits: 2000 };
-const read = (t: ReturnType<typeof setup>, ref: Id<"billingCustomers">) => t.run(ctx => ctx.db.get("billingCustomers", ref));
 const setup = () => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
@@ -72,6 +71,10 @@ test("pages all historical resources without an active pointer; financial obliga
         productId: TERMS.productId, status: i % 2 ? "active" : "pending", paidThrough: NOW + 100, serviceEnd: NOW + 100 });
     }
   });
+  const grant = await t.run(ctx => ctx.db.insert("billingGrants", { customerRef: ref, mode: "test_mode", userId: ALICE,
+    sourceKey: "paid_before_delete", kind: "current_period", quantity: 2000, consumed: 50, revoked: 0,
+    expiresAt: NOW + 100, serviceStart: NOW - 100, serviceEnd: NOW + 100 }));
+  const originalGrant = await t.run(ctx => ctx.db.get("billingGrants", grant));
   await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
   expect((await read(t, ref))?.cancellationRecoveryRequired).toBe(true);
   await drain(t);
@@ -80,6 +83,7 @@ test("pages all historical resources without an active pointer; financial obliga
     expect(rows).toHaveLength(43);
     expect(rows.every(r => r.cancellationRecoveryRequired)).toBe(true);
   }
+  expect(await t.run(ctx => ctx.db.get("billingGrants", grant))).toEqual(originalGrant);
   expect((await read(t, ref))?.activeSubscriptionRef).toBeUndefined();
   expect(await t.run(ctx => ctx.db.query("billingSubscriptions").first())).toMatchObject({ paidThrough: NOW + 100, serviceEnd: NOW + 100 });
 });
