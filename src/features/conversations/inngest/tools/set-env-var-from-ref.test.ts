@@ -3,9 +3,10 @@ import { randomBytes } from "node:crypto";
 import { getFunctionName } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ mutation: vi.fn() }));
+const mocks = vi.hoisted(() => ({ mutation: vi.fn(), killOutdatedPreviews: vi.fn() }));
 
 vi.mock("@/lib/convex-client", () => ({ convex: { mutation: mocks.mutation } }));
+vi.mock("@/features/sandbox-preview/server/runtime-fence", () => ({ killOutdatedPreviews: mocks.killOutdatedPreviews }));
 
 import {
   getSecretSealer,
@@ -182,6 +183,17 @@ describe("setEnvVarFromRef", () => {
 
     expect(result).toBe("Error: could not set the variable. You may retry on a later turn.");
     expect(everythingVisible()).not.toContain(CANARY);
+  });
+
+  it("stops previews still holding the old value right after a write, and not after a refusal", async () => {
+    const ref = await storeRef("https://abcdefghijklmnopqrst.supabase.co", "public");
+    expect(await setFromRef({ name: "VITE_SUPABASE_URL", ref })).toBe("Set VITE_SUPABASE_URL (public)");
+    expect(mocks.killOutdatedPreviews).toHaveBeenCalledWith("key", projectId);
+
+    mocks.killOutdatedPreviews.mockClear();
+    const secret = await storeRef(CANARY, "secret");
+    expect(await setFromRef({ name: "VITE_X", ref: secret })).toMatch(/^Error: not stored\./);
+    expect(mocks.killOutdatedPreviews).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid name before any step", async () => {

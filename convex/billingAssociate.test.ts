@@ -63,14 +63,14 @@ async function checkout(t: T, customerRef: Id<"billingCustomers">) {
 }
 
 const period = (paymentId: string) => ({
-  paymentId, sessionId: "cks_1", currency: "USD", totalMinor: 2000, taxMinor: 180,
+  paymentId, sessionId: "cks_1", currency: "USD", totalMinor: 2000, taxMinor: 180, reversal: { kind: "known" as const, refunds: [], disputes: [] },
   decision: { kind: "period" as const, paymentId, subscriptionId: "sub_1", productId: PRO, ...P1, credits: 2000, settledAt: P1.serviceStart },
 });
 const sub = (userId = "user_alice") => ({
   subscriptionId: "sub_1", customerId: `cus_${userId}`, productId: PRO, status: "active", nextBillingAt: P1.serviceEnd, cancelAtNextBillingDate: false,
 });
 
-/** Claims and commits a period for `paymentId` over every claimed receipt except refunds and disputes, as the reconciler does. */
+/** Claims and commits a period for `paymentId` over every claimed receipt but refunds and disputes, which stay unresolved. */
 async function reconcile(t: T, customerRef: Id<"billingCustomers">, paymentId = "pay_1", userId = "user_alice", payments: object[] = [period(paymentId)]) {
   const claim = (await t.mutation(internal.billingQueue.claimCustomer, { customerRef }))!;
   const result = await t.mutation(internal.billingFulfill.commitReconciliation, {
@@ -329,7 +329,7 @@ describe("associating unmapped receipts", () => {
     const early = await receive(t, { paymentId: "pay_2" });
     const first = await receive(t, { customerRef: alice, paymentId: "pay_1" });
     const second = await receive(t, { customerRef: alice, paymentId: "pay_2" });
-    const pay2 = { paymentId: "pay_2", currency: "USD", totalMinor: 2000, taxMinor: 180, decision: { ...period("pay_2").decision, ...P2, settledAt: P2.serviceStart } };
+    const pay2 = { paymentId: "pay_2", currency: "USD", totalMinor: 2000, taxMinor: 180, reversal: period("pay_2").reversal, decision: { ...period("pay_2").decision, ...P2, settledAt: P2.serviceStart } };
     expect(await reconcile(t, alice, "pay_1", "user_alice", [period("pay_1"), pay2])).toBe("blocked");
     expect(await grants(t)).toEqual([]);
     expect(await read(t, early)).toMatchObject({ customerRef: alice, state: "pending" });
