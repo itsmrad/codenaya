@@ -543,6 +543,23 @@ describe("POST /api/sandbox after ready (#492)", () => {
     }
   });
 
+  it("keeps waiting on the proxy's own connection-error 502 until the dev server answers", async () => {
+    const answers = [
+      new Response("E2B Proxy Error: connect ECONNREFUSED", { status: 502 }),
+      new Response("", { status: 500, headers: { "x-preview-proxy": "1" } }),
+    ];
+    const fetchMock = vi.fn(async () => answers.shift()!);
+    vi.stubGlobal("fetch", fetchMock);
+    const { client, reader } = await bootToReady("sbx_ready_proxy502");
+    try {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      client.abort();
+      await drain(reader);
+      forgetSandbox("sbx_ready_proxy502");
+    }
+  });
+
   it("installs a burst of package.json syncs once, with the dev server stopped, and starts it once after (#486)", async () => {
     const { sandbox, stats, run, finishInstall, pendingInstalls, client, reader } =
       await bootToReady("sbx_ready_burst");

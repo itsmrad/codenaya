@@ -847,7 +847,6 @@ const rewriteProxyHeaders = ${String(rewriteProxyHeaders)};
 const shouldInjectBridge = ${String(shouldInjectBridge)};
 
 const server = http.createServer((req, res) => {
-  res.setHeader(${JSON.stringify(PREVIEW_PROXY_HEADER)}, '1');
   const options = {
     hostname: 'localhost', // use localhost to support both IPv4 and IPv6 bindings
     port: TARGET_PORT,
@@ -860,6 +859,8 @@ const server = http.createServer((req, res) => {
 
   const proxyReq = http.request(options, (proxyRes) => {
     const headers = Object.assign({}, proxyRes.headers);
+    // Only the dev server's own answers are marked, not the 502 below.
+    headers[${JSON.stringify(PREVIEW_PROXY_HEADER)}] = '1';
     const isPage = shouldInjectBridge(req.method, proxyRes.statusCode, headers);
     if (!isPage) {
       res.writeHead(proxyRes.statusCode, headers);
