@@ -72,6 +72,10 @@ test("pages all historical resources without an active pointer; financial obliga
         productId: TERMS.productId, status: i % 2 ? "active" : "pending", paidThrough: NOW + 100, serviceEnd: NOW + 100 });
     }
   });
+  const grant = await t.run(ctx => ctx.db.insert("billingGrants", { customerRef: ref, mode: "test_mode", userId: ALICE,
+    sourceKey: "paid_before_delete", kind: "current_period", quantity: 2000, consumed: 50, revoked: 0,
+    expiresAt: NOW + 100, serviceStart: NOW - 100, serviceEnd: NOW + 100 }));
+  const originalGrant = await t.run(ctx => ctx.db.get("billingGrants", grant));
   await t.mutation(internal.users.markDeleted, { clerkUserId: ALICE });
   expect((await read(t, ref))?.cancellationRecoveryRequired).toBe(true);
   await drain(t);
