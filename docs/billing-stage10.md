@@ -50,3 +50,27 @@ those remain stage-13 gates. No provider call was made to develop this change.
 CI on the exact pushed head is the gate. Local typecheck, lint, tests, build,
 install, servers and deployment were prohibited. Added mocked adapter/routes,
 pure rule and convex-test cases cover claims, ownership and settled-money safety.
+
+## Durable deletion obligations (10b)
+
+The signed Clerk deletion path tombstones each mode's existing billing customer
+in the same transaction as the user, sets a recovery obligation, and invalidates
+in-flight reconciliation via generation/inputRevision. Resource markers are
+paged in batches of 20 using existing customer index prefixes; a customer
+obligation covers work before these pages finish. Financial rows survive
+`purgeUserData`; retention is separate (10d).
+
+Late customer/session/payment/subscription evidence is retained without granting
+benefits. New evidence reopens recovery (including support/complete), resets its
+attempt budget and advances inputRevision. Unchanged replays preserve the retry
+state. This invalidates 10c's pinned evidence without releasing its live
+cancellation lease, so opposing provider writes remain serialized. Duplicate
+Clerk deletion preserves the first deletedAt and support/complete unless resource
+markers reopen the obligation. Unknown creates remain pending for recovery or
+support; deletion never creates a remote customer.
+
+Credit charges can update existing usage rows after a tombstone, but cannot
+insert missing per-user credit/spend rows. Site-wide model spend still records
+incurred costs. Billing holds alone do not block charging. No deletion helper
+shrinks paid periods, credit lots or refunds money. This PR records obligations;
+10c executes provider cancellation. Billing enablement requires 10b–10d together.
