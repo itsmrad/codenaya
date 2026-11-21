@@ -171,3 +171,22 @@ test("three renewable subscriptions use exactly twenty nested requests, cancel i
   expect(writes).toHaveLength(3);
   for (const [, init] of writes) expect(JSON.parse(String(init!.body))).toEqual({ status: "cancelled" });
 });
+
+
+test("a failed bound payment cannot prove a still-open session expired", async () => {
+  const t = setup(), ref = await customer(t); const base = provider();
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input)).pathname;
+    if (path.startsWith("/checkouts/")) return new Response(JSON.stringify({ id: "cks_live", created_at: new Date(NOW).toISOString(),
+      payment_id: "pay_failed", payment_status: "failed" }));
+    if (path.startsWith("/payments/")) return new Response(JSON.stringify({ payment_id: "pay_failed", business_id: "bus_dummy",
+      customer: { customer_id: "cus_dummy" }, status: "failed", created_at: new Date(NOW).toISOString(), total_amount: 100, currency: "USD", product_cart: [] }));
+    return base(input, init);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  await t.run(ctx => ctx.db.insert("billingPurchases", { customerRef: ref, mode, intentId: "intent_live", state: "terminal",
+    sessionId: "cks_live", paymentId: "pay_failed", cancellationRecoveryRequired: true,
+    terms: { sku: "top_up", catalogVersion: "dummy", productId: "pdt_top", quantity: 1, credits: 1000 } }));
+  for (let i = 0; i < 9; i++) { vi.setSystemTime(NOW + i * (CANCELLATION_LEASE_MS + 1)); await t.action(internal.billingCancellation.recoverCustomer, { customerRef: ref }); }
+  expect((await row(t, ref))!.cancellationRecoveryRequired).toBe(true);
+});

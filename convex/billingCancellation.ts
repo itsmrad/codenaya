@@ -195,7 +195,9 @@ export const recoverCustomer = internalAction({
             }
             if (resource.paymentId) {
               const payment = await fetchPayment(config, resource.paymentId, boundedFetch);
-              safe = payment.customerId === claim.customerId && (DEAD_PAYMENT.has(payment.status) || resource.state === "settled" && payment.status === "succeeded");
+              safe = payment.customerId === claim.customerId &&
+                (resource.state === "settled" && payment.status === "succeeded" ||
+                  DEAD_PAYMENT.has(payment.status) && (!resource.sessionId || safe));
               await finding("payment", resource.paymentId, payment.status);
             }
             if (["unknown", "preparing", "processing", "quarantined"].includes(resource.state ?? "")) safe = false;
