@@ -69,7 +69,8 @@ test.each(["unknown", "open", "preparing", "terminal", "processing", "settled", 
   });
   if (state === "preparing") {
     vi.useFakeTimers();
-    vi.setSystemTime(Date.now() + CHECKOUT_PREPARE_STALE_MS);
+    const created = (await t.run(ctx => ctx.db.get(purchaseRef)))!._creationTime;
+    vi.setSystemTime(Math.ceil(created) + CHECKOUT_PREPARE_STALE_MS);
   }
   const call = () => t.mutation(internal.billingOperator.releaseCheckoutLock, { customerRef, ...note });
   if (["processing", "settled", "bound", "foreign", "mode"].includes(state)) {
@@ -100,7 +101,8 @@ test("a preparing checkout cannot be released until the stale boundary", async (
   vi.setSystemTime(created + CHECKOUT_PREPARE_STALE_MS - 1);
   await expect(t.mutation(internal.billingOperator.releaseCheckoutLock, { customerRef, ...note })).rejects.toThrow();
   expect((await t.run(ctx => ctx.db.get(customerRef)))?.pendingPurchaseRef).toBe(ref);
-  vi.setSystemTime(created + CHECKOUT_PREPARE_STALE_MS);
+  // convex-test can assign fractional creation times; the fake clock uses integer milliseconds.
+  vi.setSystemTime(Math.ceil(created) + CHECKOUT_PREPARE_STALE_MS);
   await t.mutation(internal.billingOperator.releaseCheckoutLock, { customerRef, ...note });
   expect(await t.run(ctx => ctx.db.get(ref))).toMatchObject({ state: "terminal", resolution: { previousState: "preparing" } });
 });

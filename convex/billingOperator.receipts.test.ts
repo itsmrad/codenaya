@@ -167,9 +167,22 @@ test.each([{ operator: "a@b", reason: "ok" }, { operator: "ok", reason: "" }])("
 });
 
 test.each(["unmapped", "reparent"])("repaired %s refund is claimed and reversed; the next positive grants", async shape => {
-  const { t, alice, bob, receipt, resolve, terms } = await fixture();
+  const { t, alice, bob, purchaseRef, receipt, resolve, terms } = await fixture();
   const ref = await receipt(shape === "unmapped" ? undefined : bob, "refund.succeeded", "pay_1", shape === "unmapped" ? "unmapped" : "unsupported");
   await resolve(ref, "attach");
+  if (shape === "reparent") {
+    const purchase = await t.mutation(internal.billing.reservePurchase, { customerRef: bob, intentId: "bob_next", terms });
+    await t.mutation(internal.billing.bindPurchase, { purchaseRef: purchase, mode, sessionId: "cks_bob" });
+    const positive = await t.mutation(internal.billing.recordReceipt, { customerRef: bob, mode, webhookId: "wh_bob", eventType: "payment.succeeded", paymentId: "pay_bob", bodyDigest: "c".repeat(64), occurredAt: 1 });
+    const claim = (await t.mutation(internal.billingQueue.claimCustomer, { customerRef: bob }))!;
+    expect(await t.mutation(internal.billingFulfill.commitReconciliation, { customerRef: bob,
+      fence: { generation: claim.generation, inputRevision: claim.inputRevision }, receiptRefs: [positive!], subscriptions: [],
+      payments: [{ paymentId: "pay_bob", sessionId: "cks_bob", currency: "USD", totalMinor: 2000, taxMinor: 0,
+        decision: { kind: "top_up", paymentId: "pay_bob", productId: terms.productId, credits: 1000, settledAt: 1 },
+        reversal: { kind: "known", refunds: [], disputes: [] } }],
+    })).toBe("committed");
+    expect(await t.run(ctx => ctx.db.get(purchase))).toMatchObject({ state: "settled" });
+  }
   const claim = (await t.mutation(internal.billingQueue.claimCustomer, { customerRef: alice }))!;
   expect(claim.receipts.map(r => r.eventRef)).toContain(ref);
   const fact = { paymentId: "pay_1", currency: "USD", totalMinor: 2000, taxMinor: 0,
@@ -179,7 +192,7 @@ test.each(["unmapped", "reparent"])("repaired %s refund is claimed and reversed;
     fence: { generation: claim.generation, inputRevision: claim.inputRevision }, receiptRefs: [ref], payments: [fact], subscriptions: [] });
   await t.mutation(internal.billingQueue.releaseCustomer, { customerRef: alice, generation: claim.generation });
   expect(await t.run(ctx => ctx.db.get(ref))).toMatchObject({ state: "processed" });
-  expect((await t.run(ctx => ctx.db.query("billingGrants").take(2)))[0].revoked).toBe(1000);
+  expect((await t.run(ctx => ctx.db.query("billingGrants").withIndex("by_purchaseRef", q => q.eq("purchaseRef", purchaseRef)).take(2)))[0].revoked).toBe(1000);
   const next = await t.mutation(internal.billing.reservePurchase, { customerRef: alice, intentId: "new", terms });
   await t.mutation(internal.billing.bindPurchase, { purchaseRef: next, mode, sessionId: "cks_2" });
   const positive = await t.mutation(internal.billing.recordReceipt, { customerRef: alice, mode, webhookId: "wh_positive", eventType: "payment.succeeded", paymentId: "pay_2", bodyDigest: "b".repeat(64), occurredAt: 1 });
