@@ -115,6 +115,11 @@ describe("insertGrant", () => {
       t.run((ctx) => insertGrant(ctx, { mode, sourceKey: "k", customerRef, kind: "current_period", quantity: 1, expiresAt: NOW + DAY })),
     ).rejects.toThrow(/Invalid/);
     await expect(
+      t.run((ctx) =>
+        insertGrant(ctx, { mode, sourceKey: "k", customerRef, kind: "current_period", quantity: 1, expiresAt: NOW + 2 * DAY, serviceStart: NOW, serviceEnd: NOW + DAY }),
+      ),
+    ).rejects.toThrow(/Invalid/);
+    await expect(
       t.run((ctx) => insertGrant(ctx, { mode: "live_mode", sourceKey: "k", customerRef, kind: "top_up", quantity: 1, expiresAt: NOW + DAY })),
     ).rejects.toThrow(/conflicts/);
   });

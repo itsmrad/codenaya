@@ -70,7 +70,7 @@ const listed = (extra: Record<string, unknown>) => ({ created_at: iso(NOW), cust
 const topUpPayment = (paymentId: string, extra: Record<string, unknown> = {}) => ({
   payment_id: paymentId, business_id: "bus_synthetic", status: "succeeded", customer: { customer_id: "cus_user_alice" },
   subscription_id: null, checkout_session_id: "cks_1", product_cart: [{ product_id: TOP_UP, quantity: 1 }],
-  total_amount: 1000, tax: 90, currency: "USD", created_at: iso(NOW), charge_type: null, ...extra,
+  total_amount: 1000, tax: 90, currency: "USD", created_at: iso(NOW), charge_type: null, refunds: [], disputes: [], ...extra,
 });
 const subscriptionRead = (subscriptionId: string, status: string) => ({
   subscription_id: subscriptionId, status, product_id: PRO, customer: { customer_id: "cus_user_alice" }, quantity: 1,
@@ -178,16 +178,27 @@ describe("missed webhooks", () => {
     const refund = (await events(t)).filter(e => e.eventType === "refund.poll");
     expect(refund).toMatchObject([{ webhookId: "poll:refund:ref_1:succeeded", paymentId: "pay_1", state: "pending" }]);
     expect((await read(t, alice))!.nextPollAt).toBe(Date.now() + IDLE_POLL_MS);
-    // Its reversal stays unresolved (stage 8): later buckets add nothing.
-    later(IDLE_POLL_MS);
-    await poll(t);
-    expect((await events(t)).filter(e => e.eventType === "refund.poll")).toHaveLength(1);
-    // A new top-up payment is blocked while the refund is unresolved.
-    stubProvider({ payments: [listed({ payment_id: "pay_2", status: "succeeded" })] });
+    // The webhook copy of the same refund arrives too. Reversal handling resolves both from one payment
+    // read into one adjustment row (unique per provider id): the refund is applied exactly once.
+    await t.mutation(internal.billing.recordReceipt, {
+      customerRef: alice, mode: "test_mode", webhookId: "wh_refund", eventType: "refund.succeeded", bodyDigest: "a".repeat(64), occurredAt: 1, paymentId: "pay_1",
+    });
+    const refunded = { refunds: [{ refund_id: "ref_1", payment_id: "pay_1", business_id: "bus_synthetic", status: "succeeded", amount: 1000, currency: "USD", is_partial: false, created_at: iso(NOW) }] };
+    stubProvider({ paymentReads: { pay_1: refunded } });
+    await processCustomer(t, alice);
+    const adjustments = () => t.run(ctx => ctx.db.query("billingAdjustments").take(10));
+    expect((await adjustments()).map(a => [a.kind, a.providerId, a.status])).toEqual([["refund", "ref_1", "succeeded"]]);
+    expect((await events(t)).filter(e => e.paymentId === "pay_1" && /^refund\./.test(e.eventType)).map(e => e.state)).toEqual(["processed", "processed"]);
+    const revoked = (await t.run(ctx => ctx.db.query("billingPurchases").take(10))).find(p => p.paymentId === "pay_1")!.revokedCredits;
+    expect(revoked).toBe(1000);
+    // Later buckets record nothing new for the same status, and a further read applies nothing twice.
+    stubProvider({ refunds: [listed({ refund_id: "ref_1", payment_id: "pay_1", status: "succeeded" })], paymentReads: { pay_1: refunded } });
     later(IDLE_POLL_MS);
     await poll(t);
     await processCustomer(t, alice);
-    expect(await grants(t)).toHaveLength(1);
+    expect((await events(t)).filter(e => e.eventType === "refund.poll")).toHaveLength(1);
+    expect(await adjustments()).toHaveLength(1);
+    expect((await t.run(ctx => ctx.db.query("billingPurchases").take(10))).find(p => p.paymentId === "pay_1")!.revokedCredits).toBe(1000);
 
     // After the watch, with no lock or subscription, the customer is no longer polled.
     stubProvider({});

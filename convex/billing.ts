@@ -3,6 +3,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { scheduleCustomer } from "./billingQueue";
+import { hasActiveHold } from "./billingReversals";
 import { appError } from "./errors";
 import { billingModeValidator, billingPurchaseTermsValidator, billingResourceIdsValidator } from "./schema";
 
@@ -101,6 +102,8 @@ export async function reservePurchaseRow(ctx: MutationCtx, args: Infer<typeof re
   }
   const customer = await requireCustomer(ctx, args.customerRef);
   await requireActiveOwner(ctx, customer);
+  // A dispute or support hold refuses new checkouts; it never blocks grants of settled money.
+  if (await hasActiveHold(ctx, customer._id)) throw appError("FORBIDDEN", "Billing is on hold");
   if (customer.creationState !== "ready" || !customer.customerId) throw conflict();
   const existing = await ctx.db.query("billingPurchases")
     .withIndex("by_mode_and_intentId", q => q.eq("mode", customer.mode).eq("intentId", args.intentId)).unique();
