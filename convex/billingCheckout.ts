@@ -8,7 +8,8 @@ import { BILLING_CATALOG_VERSION } from "../src/features/billing/settlement";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, type MutationCtx } from "./_generated/server";
 import { verifyAuth } from "./auth";
-import { bindCustomerRow, bindPurchaseRow, ensureCustomerRow, reservePurchaseRow } from "./billing";
+import { bindCustomerRow, bindPurchaseRow, ensureCustomerRow, ownerDeleted, reservePurchaseRow } from "./billing";
+import { queueDeletionRecovery } from "./billingDeletion";
 import { readConvexBillingConfig } from "./billingEnv";
 import { MAX_SUBSCRIPTIONS_PER_STATUS } from "./billingFulfill";
 import { countActiveLots, MAX_ACTIVE_LOTS, readPeriodLots } from "./billingGrants";
@@ -189,6 +190,7 @@ export const recordCustomerResult = mutation({
       await unknown();
       console.warn("[billingCheckout] customer creation outcome unknown", { customerRef });
     }
+    if (await ownerDeleted(ctx, customer)) await queueDeletionRecovery(ctx, customer._id);
     return null;
   },
 });
@@ -229,6 +231,7 @@ export const recordCheckoutResult = mutation({
       console.warn("[billingCheckout] checkout creation outcome unknown; lock kept", { purchaseRef });
       await markPollDue(ctx, customer._id, false);
     }
+    if (await ownerDeleted(ctx, customer)) await queueDeletionRecovery(ctx, customer._id);
     return null;
   },
 });

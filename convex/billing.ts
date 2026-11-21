@@ -2,6 +2,7 @@ import { v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { queueDeletionRecovery } from "./billingDeletion";
 import { scheduleCustomer } from "./billingQueue";
 import { hasActiveHold } from "./billingReversals";
 import { appError } from "./errors";
@@ -77,8 +78,10 @@ export async function bindCustomerRow(ctx: MutationCtx, { customerRef, customerI
     .withIndex("by_mode_and_customerId", q => q.eq("mode", customer.mode).eq("customerId", customerId)).unique();
   if ((existing && existing._id !== customerRef) || (customer.customerId && customer.customerId !== customerId)) throw conflict();
   // A late ID for a deleted or held owner is kept for recovery but never reopens the customer.
-  const live = !customer.hold && !(await ownerDeleted(ctx, customer));
+  const deleted = await ownerDeleted(ctx, customer);
+  const live = !customer.hold && !deleted;
   await ctx.db.patch("billingCustomers", customerRef, live ? { customerId, creationState: "ready" } : { customerId });
+  if (deleted) await queueDeletionRecovery(ctx, customerRef);
   // Also for a deleted or held owner: its early receipts still need processing for suppression and recovery.
   await associateUnmappedReceipts(ctx, customer, { providerCustomerId: customerId });
   return null;
@@ -136,6 +139,7 @@ export async function bindSubscriptionRow(ctx: MutationCtx, args: Infer<typeof b
   const late = await ownerDeleted(ctx, customer);
   const existing = await ctx.db.query("billingSubscriptions")
     .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", args.mode).eq("subscriptionId", args.subscriptionId)).unique();
+  if (late) await queueDeletionRecovery(ctx, customer._id);
   if (existing) {
     if (existing.customerRef !== args.customerRef || existing.productId !== args.productId) throw conflict();
     if (late) await ctx.db.patch("billingSubscriptions", existing._id, { cancellationRecoveryRequired: true });
@@ -179,9 +183,11 @@ export async function bindPurchaseRow(ctx: MutationCtx, { purchaseRef, mode, ...
       .withIndex("by_mode_and_subscriptionId", q => q.eq("mode", purchase.mode).eq("subscriptionId", ids.subscriptionId!)).unique();
     if (!subscription || subscription.customerRef !== customer._id || subscription.productId !== purchase.terms.productId) throw conflict();
   }
+  const deleted = await ownerDeleted(ctx, customer);
+  if (deleted) await queueDeletionRecovery(ctx, customer._id);
   await ctx.db.patch("billingPurchases", purchaseRef, {
     ...ids,
-    ...(await ownerDeleted(ctx, customer) ? { cancellationRecoveryRequired: true } : {}),
+    ...(deleted ? { cancellationRecoveryRequired: true } : {}),
   });
   if (ids.paymentId !== undefined) await associateUnmappedReceipts(ctx, customer, { paymentId: ids.paymentId });
   return null;
