@@ -11,7 +11,7 @@
  * (the cap is per log file). The dev check is a proxy: a dev Convex URL means an `infisical --env dev`
  * shell, so the Daytona key is the dev org's; the API host is logged at start.
  */
-import { Daytona } from "@daytona/sdk";
+import { Daytona, Process } from "@daytona/sdk";
 import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -481,6 +481,27 @@ try {
       const runShape = `bash -c 'env -- timeout -k 5 60s bash -c "sleep 302"; s=$?; printf %s%s a b; exit $s'`;
       const marked = await deleteKills("smoke-del-run", runShape, "302");
       return `session shell ${shell}; deleteSession kills its command: ${plain}; in run's shape: ${marked}`;
+    });
+    await check("4f a failed run wait stops its command, with and without timeoutMs", async () => {
+      const follow = Process.prototype.getSessionCommandLogs;
+      const seen: string[] = [];
+      for (const [arg, timeoutMs] of [["303", 60_000], ["304", 0]] as const) {
+        const running = async () => (await listProcesses(sandbox)).some((process) => /sleep$/.test(process.cmd) && process.args[0] === arg);
+        // The log follow rejects once the command runs, as a dropped connection does. Other calls pass through.
+        Process.prototype.getSessionCommandLogs = async function (this: Process, ...args: unknown[]) {
+          if (!args[2]) return (follow as (...rest: unknown[]) => Promise<unknown>).apply(this, args);
+          expect(await until(running, 10_000), `sleep ${arg} never started`);
+          throw new Error("smoke: follow dropped");
+        } as typeof follow;
+        const error = await sandbox.run(`sleep ${arg}`, { timeoutMs, onStdout: () => {} })
+          .then(() => undefined, (caught: unknown) => caught)
+          .finally(() => { Process.prototype.getSessionCommandLogs = follow; });
+        expect(error instanceof Error && error.message === "smoke: follow dropped", `run gave ${error ? statusOf(error) : "no error"}`);
+        const failedAt = Date.now();
+        expect(await until(async () => !(await running()), 15_000), `sleep ${arg} (timeoutMs ${timeoutMs}) still running 15 s after the failed wait`);
+        seen.push(`timeoutMs ${timeoutMs}: gone ${Date.now() - failedAt} ms after the failed wait`);
+      }
+      return seen.join("; ");
     });
     await check("4e VERCEL=1 child: serverless upload, read and log stream", async () => {
       // Async, so a signal isn't held up; the child's stderr is dropped, never logged.
