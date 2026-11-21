@@ -17,7 +17,9 @@ import {
   rateLimitedResponse,
 } from "@/lib/rate-limit";
 import { requireOwnedProject } from "@/features/projects/server/require-owned-project";
+import { killOutdatedPreviews } from "@/features/sandbox-preview/server/runtime-fence";
 import { convex } from "@/lib/convex-client";
+import { parseJsonBody } from "@/lib/parse-json-body";
 
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -32,6 +34,11 @@ import { Id } from "../../../../convex/_generated/dataModel";
  * KEK that deliberately does not exist in Convex's environment, so this route
  * seals it and hands only ciphertext to Convex. The agent never sets values: it
  * tells the user which names to add here.
+ *
+ * DELETE /api/env-vars removes a variable of either kind.
+ *
+ * Both kill the project's previews that still hold the old value after the
+ * write (convex/runtimeHandles.ts); the sweep cron retries a kill that fails.
  */
 
 const requestSchema = z.object({
@@ -40,10 +47,13 @@ const requestSchema = z.object({
   value: z.string().min(1, "Value is required"),
 });
 
+const deleteSchema = z.object({ projectId: z.string().min(1), key: z.string().min(1) });
+
 function jsonError(error: string, status: number) {
   return Response.json({ ok: false, error }, { status });
 }
 
+/** After a committed env change; never fails the change, which already happened. */
 export async function POST(request: Request) {
   const { userId, unauthorized } = await requireUserId();
 
@@ -122,9 +132,40 @@ export async function POST(request: Request) {
       source: "manual",
       ...sealed,
     });
-    return Response.json({ ok: true });
   } catch (error) {
     console.error("[env-vars] failed to persist secret", error);
     return jsonError("Could not save the secret", 500);
   }
+  await killOutdatedPreviews(internalKey, projectId);
+  return Response.json({ ok: true });
+}
+
+export async function DELETE(request: Request) {
+  const { userId, unauthorized } = await requireUserId();
+  if (unauthorized) return unauthorized;
+
+  const rateLimit = checkRateLimit(userId, ENV_VAR_RATE_LIMIT);
+  if (!rateLimit.allowed) return rateLimitedResponse(rateLimit);
+
+  const { data, invalid } = await parseJsonBody(request, deleteSchema);
+  if (invalid) return invalid;
+
+  const internalKey = process.env.CODENAYA_CONVEX_INTERNAL_KEY;
+  if (!internalKey) {
+    console.error("[env-vars] CODENAYA_CONVEX_INTERNAL_KEY is not set");
+    return jsonError("Server is not configured for secrets", 500);
+  }
+
+  const projectId = data.projectId as Id<"projects">;
+  const { notFound } = await requireOwnedProject({ internalKey, userId, projectId });
+  if (notFound) return notFound;
+
+  try {
+    await convex.mutation(api.envVars.deleteEnvVar, { internalKey, projectId, ownerId: userId, key: data.key });
+  } catch (error) {
+    console.error("[env-vars] failed to delete variable", error);
+    return jsonError("Could not delete the variable", 500);
+  }
+  await killOutdatedPreviews(internalKey, projectId);
+  return Response.json({ ok: true });
 }

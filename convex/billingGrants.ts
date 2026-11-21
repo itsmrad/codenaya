@@ -2,7 +2,7 @@ import { v, type Infer } from "convex/values";
 
 import { allocateCredits, type GrantKind, lotUnspent, rolloverQuantity } from "../src/features/billing/grants";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { appError } from "./errors";
 import { billingGrantKindValidator, billingModeValidator } from "./schema";
 
@@ -42,13 +42,27 @@ const validTerms = ({ sourceKey, kind, quantity, expiresAt, serviceStart, servic
   Number.isFinite(expiresAt) &&
   (serviceStart === undefined
     ? serviceEnd === undefined && kind !== "current_period"
-    : serviceEnd !== undefined && Number.isFinite(serviceStart) && serviceStart < serviceEnd);
+    : serviceEnd !== undefined && Number.isFinite(serviceStart) && serviceStart < serviceEnd) &&
+  (kind !== "current_period" || expiresAt === serviceEnd);
 
 type Grant = Doc<"billingGrants">;
 type Mode = Grant["mode"];
 
+/**
+ * An account's paid markers as entitlement reads them: enabled only when both
+ * are set. A half-set pair reports its mode (or null) so the caller can flag it.
+ */
+export const paidCreditsState = (account: Doc<"creditAccounts"> | null): { enabled: boolean; mode: Mode | null } => ({
+  enabled: account?.paidCreditsVersion === 1 && account.paidCreditsMode !== undefined,
+  mode: account?.paidCreditsMode ?? null,
+});
+
+/** Whether `account` carries exactly one of the two paid markers. */
+export const halfPaidMarker = (account: Doc<"creditAccounts"> | null) =>
+  (account?.paidCreditsVersion === undefined) !== (account?.paidCreditsMode === undefined);
+
 /** Marks a lot whose write leaves nothing unspent, so it leaves the active-lot index. */
-const exhaustedIf = (lot: Parameters<typeof lotUnspent>[0]) => (lotUnspent(lot) === 0 ? { exhausted: true as const } : {});
+export const exhaustedIf = (lot: Parameters<typeof lotUnspent>[0]) => (lotUnspent(lot) === 0 ? { exhausted: true as const } : {});
 
 /**
  * Inserts a grant once per (mode, sourceKey): a replay with the same terms
@@ -86,7 +100,7 @@ export async function insertGrant(ctx: MutationCtx, terms: GrantTerms): Promise<
 }
 
 /** The user's unexpired, unexhausted `mode` lots of `kind`: what spending reads and checkout counts. */
-const activeLotsQuery = (ctx: MutationCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
+const activeLotsQuery = (ctx: QueryCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
   ctx.db
     .query("billingGrants")
     .withIndex("by_userId_and_mode_and_kind_and_exhausted_and_expiresAt", (q) =>
@@ -94,16 +108,17 @@ const activeLotsQuery = (ctx: MutationCtx, userId: string, mode: Mode, kind: Gra
     );
 
 /** How many active `kind` lots the user holds, read up to the kind's cap (checkout refuses at the cap). */
-export const countActiveLots = async (ctx: MutationCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
+export const countActiveLots = async (ctx: QueryCtx, userId: string, mode: Mode, kind: GrantKind, now: number) =>
   (await activeLotsQuery(ctx, userId, mode, kind, now).take(MAX_ACTIVE_LOTS[kind])).length;
 
 /**
  * The user's unexpired, unexhausted `mode` lots, at most cap + 1 per kind in
  * spending order. Lots past a cap expire no earlier than those read, so the
  * walk stops at the first capped kind: no later kind is spent while it may
- * hold unread credits.
+ * hold unread credits. A next period's lot settled early is read (and counts
+ * toward the cap) but `lotRemaining` holds it back until its serviceStart.
  */
-async function readActiveLots(ctx: MutationCtx, userId: string, mode: Mode, now: number) {
+export async function readActiveLots(ctx: QueryCtx, userId: string, mode: Mode, now: number) {
   const lots: Grant[] = [];
   for (const kind of Object.keys(MAX_ACTIVE_LOTS) as GrantKind[]) {
     const cap = MAX_ACTIVE_LOTS[kind];
@@ -139,7 +154,7 @@ export async function spendPaidCredits(ctx: MutationCtx, userId: string, mode: M
  * The user's unexpired `mode` period lots, spent ones included, for
  * `isInPaidPeriod`. Period lots expire in order, so the live one is in the read.
  */
-export const readPeriodLots = (ctx: MutationCtx, userId: string, mode: Mode, now: number) =>
+export const readPeriodLots = (ctx: QueryCtx, userId: string, mode: Mode, now: number) =>
   ctx.db
     .query("billingGrants")
     .withIndex("by_userId_and_mode_and_kind_and_expiresAt", (q) =>
@@ -193,4 +208,20 @@ export async function rollOverIntoPeriod(ctx: MutationCtx, nextRef: Id<"billingG
   const transferred = (source.transferred ?? 0) + quantity;
   await ctx.db.patch("billingGrants", source._id, { transferred, ...exhaustedIf({ ...source, transferred }) });
   return rollover;
+}
+
+/**
+ * Records credits a refund or lost dispute took back after they were spent as
+ * debt, which later grants and the Free allocation pay off. Only on an account
+ * billing-enabled in `mode` (as `insertGrant` reads it): never creates or
+ * enables one. False when nothing was recorded; the caller logs it.
+ */
+export async function addReversalDebt(ctx: MutationCtx, userId: string, mode: Mode, credits: number): Promise<boolean> {
+  const account = await ctx.db
+    .query("creditAccounts")
+    .withIndex("by_userId", (q) => q.eq("userId", userId))
+    .unique();
+  if (!account || account.paidCreditsVersion === undefined || account.paidCreditsMode !== mode) return false;
+  await ctx.db.patch("creditAccounts", account._id, { creditDebt: (account.creditDebt ?? 0) + credits });
+  return true;
 }

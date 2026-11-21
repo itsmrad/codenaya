@@ -26,7 +26,7 @@ import { ChevronRight, ExternalLink, Eye, EyeOff, Link2, Plus, Trash2, Unlink } 
 import { Sheet, SheetRow } from "@/components/sheet";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/format";
-import { postApi, webUrl } from "@/lib/http";
+import { deleteApi, postApi, webUrl } from "@/lib/http";
 import { classifyEnvKey, getProvider, isValidEnvKey } from "@/lib/shared";
 import { font, useColors } from "@/lib/theme";
 
@@ -50,7 +50,6 @@ export default function ProjectIntegrations() {
   const updateLink = useMutation(api.integrations.updateProjectConnection);
   const unlink = useMutation(api.integrations.unlinkProjectConnection);
   const setPublicEnvVar = useMutation(api.envVars.setPublicEnvVar);
-  const deleteEnvVar = useMutation(api.envVars.deleteEnvVar);
 
   const [sheet, setSheet] = useState<"link" | "add">();
   // The linked connection whose settings sheet is open.
@@ -257,7 +256,12 @@ export default function ProjectIntegrations() {
                         confirmLabel: "Delete",
                         destructive: true,
                       });
-                      if (confirmed) deleteEnvVar({ id: envVar._id }).catch(() => toast.error(`Unable to delete ${envVar.key}`));
+                      // Through the web API, which also stops previews still holding the value.
+                      if (!confirmed) return;
+                      const failed = () => toast.error(`Unable to delete ${envVar.key}`);
+                      deleteApi("/api/env-vars", { projectId, key: envVar.key }, getToken)
+                        .then(({ ok }) => (ok ? undefined : failed()))
+                        .catch(failed);
                     }}
                     hitSlop={8}
                     accessibilityLabel={`Delete ${envVar.key}`}

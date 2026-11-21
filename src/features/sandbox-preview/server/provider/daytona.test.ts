@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -79,6 +79,9 @@ const fakeDaytonaSandbox = (overrides: Record<string, unknown> = {}) => ({
       async (_sessionId, _cmdId, onStdout) => (onStdout ? undefined : { output: "", stdout: "", stderr: "" }),
     ),
     deleteSession: vi.fn<(sessionId: string) => Promise<void>>(async () => {}),
+    executeCommand: vi.fn<(command: string, cwd?: string, env?: Record<string, string>, timeout?: number) => Promise<{ exitCode: number; result: string }>>(
+      async () => ({ exitCode: 0, result: "" }),
+    ),
   },
   fs: {
     uploadFiles: vi.fn<(files: { source: Buffer; destination: string }[], timeout?: number) => Promise<void>>(async () => {}),
@@ -417,6 +420,10 @@ describe("Daytona provider", () => {
         // No limit, so no GNU `timeout` is needed where the test runs.
         expect(await sandbox.run("printf x", { timeoutMs: 0 })).toEqual({ exitCode: 0, stdout: "x", stderr: "" });
         expect(await sandbox.run("printf 'x\\n'; printf e >&2; exit 3", { timeoutMs: 0 })).toEqual({ exitCode: 3, stdout: "x\n", stderr: "e" });
+        // The wrapper removes its pid file once the command ends.
+        for (const [sessionId] of daytona.process.executeSessionCommand.mock.calls) {
+          expect(existsSync(`/tmp/.codenaya/${sessionId}.pid`)).toBe(false);
+        }
       });
 
       it("resolves a non-zero exit with separate stdout and stderr, in its own session", async () => {
@@ -529,6 +536,60 @@ describe("Daytona provider", () => {
 
         expect(await sandbox.run("npm run build", { onStdout: () => {} })).toEqual({ exitCode: 0, stdout: "partial", stderr: "" });
         expect(daytona.process.getSessionCommand).toHaveBeenCalledTimes(2);
+      });
+
+      it("kills the command's process group after a failed wait, and not after a finished one", async () => {
+        const { daytona, sandbox } = await connect();
+        daytona.process.executeSessionCommand.mockRejectedValueOnce(new Error("socket hang up"));
+
+        await expect(sandbox.run("sleep 99")).rejects.toThrow("socket hang up");
+        const [sessionId, { command }] = daytona.process.executeSessionCommand.mock.calls[0];
+        const pidFile = `/tmp/.codenaya/${sessionId}.pid`;
+        // The wrapper records the pid `timeout` runs as, which leads its own process group.
+        expect(command).toContain(`({ echo $BASHPID > ${pidFile}; } 2>/dev/null; exec env -- timeout -k 5 60s bash -c`);
+        const [kill, , , timeout] = daytona.process.executeCommand.mock.calls[0];
+        expect(kill).toContain(pidFile);
+        expect(kill).toContain('kill -TERM -- "-$p"');
+        expect(timeout).toBe(15);
+        expect(daytona.process.deleteSession).toHaveBeenCalledWith(sessionId);
+
+        await sandbox.run("true");
+        expect(daytona.process.executeCommand).toHaveBeenCalledTimes(1);
+      });
+
+      it("never blocks on or fails from the group kill", async () => {
+        const { daytona, sandbox } = await connect();
+        daytona.process.getSessionCommandLogs.mockRejectedValue(new Error("stream dropped"));
+        daytona.process.executeCommand.mockReturnValueOnce(new Promise(() => {}));
+
+        await expect(sandbox.run("sleep 99", { onStdout: () => {} })).rejects.toThrow("stream dropped");
+        daytona.process.executeCommand.mockRejectedValueOnce(new Error("sandbox gone"));
+        await expect(sandbox.run("sleep 99", { onStdout: () => {} })).rejects.toThrow("stream dropped");
+        expect(daytona.process.executeCommand).toHaveBeenCalledTimes(2);
+      });
+
+      it("kills the group TERM then KILL, and never pid 1 or a missing pid", async () => {
+        const { daytona, sandbox } = await connect();
+        daytona.process.executeSessionCommand.mockRejectedValue(new Error("socket hang up"));
+        await sandbox.run("sleep 99").catch(() => {});
+        const [sessionId] = daytona.process.executeSessionCommand.mock.calls[0];
+        const pidFile = `/tmp/.codenaya/${sessionId}.pid`;
+        const [kill] = daytona.process.executeCommand.mock.calls[0];
+        // The kill script as bash runs it, with kill and sleep stubbed to print.
+        const runKill = (pid?: string) => {
+          mkdirSync("/tmp/.codenaya", { recursive: true });
+          if (pid !== undefined) writeFileSync(pidFile, `${pid}\n`);
+          const stub = `kill() { echo "kill $*"; }; sleep() { echo "sleep $*"; }; export -f kill sleep; ${kill}`;
+          const out = spawnSync("bash", ["-c", stub], { encoding: "utf8" }).stdout.split("\n").filter((line) => !line.startsWith("sleep 0.1"));
+          expect(existsSync(pidFile)).toBe(false);
+          return out.filter(Boolean);
+        };
+
+        expect(runKill("4242")).toEqual(["kill -TERM -- -4242", "sleep 2", "kill -KILL -- -4242"]);
+        expect(runKill("1")).toEqual([]);
+        expect(runKill("-1")).toEqual([]);
+        expect(runKill("")).toEqual([]);
+        expect(runKill()).toEqual([]);
       });
 
       it("times a streamed command out after its wait", async () => {

@@ -52,7 +52,9 @@ vi.mock("@blaxel/core", () => ({
   },
 }));
 
+import { DEV_COMMAND_ENV, PROXY_TARGET_ENV } from "../dev-server";
 import { createBlaxelProvider, fromBlaxelError, newSandboxName } from "./blaxel";
+import { listCommands } from "./helpers";
 import { SandboxConfigError, SandboxNotFoundError, SandboxRateLimitError, SandboxTimeoutError } from "./types";
 
 const NOW = Date.parse("2026-11-19T12:00:00Z");
@@ -262,9 +264,12 @@ describe("Blaxel provider", () => {
   });
 
   it("kills by name and answers false when the sandbox was already gone", async () => {
-    mocks.delete.mockResolvedValueOnce({}).mockRejectedValueOnce(new mocks.errors.ResponseError(404))
+    // Live: a delete while DELETING succeeds with DELETING, as the first did, so it is true too (documented window).
+    mocks.delete.mockResolvedValueOnce({ status: "DELETING" }).mockResolvedValueOnce({ status: "DELETING" })
+      .mockRejectedValueOnce(new mocks.errors.ResponseError(404))
       .mockRejectedValueOnce({ code: "SANDBOX_DELETION_IN_PROGRESS", message: "deleting", status_code: 409 });
 
+    expect(await provider.kill("cn-abc")).toBe(true);
     expect(await provider.kill("cn-abc")).toBe(true);
     expect(await provider.kill("cn-abc")).toBe(false);
     expect(await provider.kill("cn-abc")).toBe(false);
@@ -336,18 +341,53 @@ describe("Blaxel provider", () => {
       });
     });
 
-    it("builds the output from the streamed lines, which reach the callbacks with their newlines", async () => {
+    it("builds the output byte-exact from the streamed raw chunks, which reach the callbacks unchanged", async () => {
       const { blaxel, sandbox } = await connect();
+      // The ndjson stream splits anywhere, mid-line included, and keeps the newlines.
       blaxel.process.exec.mockImplementation(async ({ onStdout, onStderr }) => {
-        onStdout("a");
-        onStdout("b");
+        onStdout("a\n\nb");
+        onStdout("c\n2999");
+        onStdout("0\n");
         onStderr("warn");
-        return done({ stdout: "b", stderr: "" });
+        return done({ stdout: "0\n", stderr: "" });
       });
       const onStdout = vi.fn();
+      const onStderr = vi.fn();
 
-      expect(await sandbox.run("ls", { onStdout })).toEqual({ exitCode: 0, stdout: "a\nb\n", stderr: "warn\n" });
-      expect(onStdout.mock.calls).toEqual([["a\n"], ["b\n"]]);
+      expect(await sandbox.run("ls", { onStdout, onStderr })).toEqual({ exitCode: 0, stdout: "a\n\nbc\n29990\n", stderr: "warn" });
+      expect(onStdout.mock.calls).toEqual([["a\n\nb"], ["c\n2999"], ["0\n"]]);
+      expect(onStderr.mock.calls).toEqual([["warn"]]);
+
+      // `printf x`: no newline is added.
+      blaxel.process.exec.mockImplementation(async ({ onStdout }) => (onStdout("x"), done({ stdout: "x" })));
+      expect((await sandbox.run("printf x")).stdout).toBe("x");
+    });
+
+    it("lists the dev server and proxy from a /proc listing streamed in chunks split mid-line", async () => {
+      const { blaxel, sandbox } = await connect();
+      const b64 = (...parts: string[]) => Buffer.from(parts.map((part) => `${part}\0`).join("")).toString("base64");
+      const pad = Array.from({ length: 50 }, (_, i) => `BL_VAR_${i}=${"v".repeat(40)}`);
+      const line = (pid: number, ppid: number, envs: string[], ...argv: string[]) =>
+        `${pid}\t${ppid}\t/home/user\t${b64(...argv)}\t${b64(...pad, ...envs)}\n`;
+      // sandbox-api is PID 1 and parents every command; markers sit after Blaxel's own envs.
+      const listing =
+        line(1, 0, [], "/usr/local/bin/sandbox-api") +
+        line(28, 1, [`${DEV_COMMAND_ENV}=npm run dev`], "setsid", "--wait", "sh", "-c", "exec bash") +
+        line(29, 28, [`${DEV_COMMAND_ENV}=npm run dev`], "node", "vite") +
+        line(36, 1, [`${PROXY_TARGET_ENV}=5173`], "node", "/home/user/e2b-proxy.js");
+      blaxel.process.exec.mockImplementation(async ({ onStdout }) => {
+        // Raw chunks (live: about 4 KB), so boundaries fall inside lines and their base64.
+        for (let at = 0; at < listing.length; at += 1000) onStdout(listing.slice(at, at + 1000));
+        return done({ stdout: listing.slice(-100) });
+      });
+
+      const roots = await listCommands(sandbox);
+      expect(roots.map(({ pid, cmd, cwd }) => ({ pid, cmd, cwd }))).toEqual([
+        { pid: 28, cmd: "setsid", cwd: "/home/user" }, { pid: 36, cmd: "node", cwd: "/home/user" },
+      ]);
+      expect(roots[0].envs[DEV_COMMAND_ENV]).toBe("npm run dev");
+      expect(roots[1].envs[PROXY_TARGET_ENV]).toBe("5173");
+      expect(roots[1].args).toEqual(["/home/user/e2b-proxy.js"]);
     });
 
     it("bounds the request by the command's limit plus 30 s, and not at all without a limit", async () => {
