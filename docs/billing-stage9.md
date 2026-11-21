@@ -97,9 +97,10 @@ through the queue and the fenced commit:
 
 - a succeeded payment no purchase has bound (`payment.poll`), unless a pending
   or quarantined positive receipt for it already exists;
-- a succeeded refund or any dispute status (`refund.poll`, `dispute.poll`;
-  they stay fenced like their webhooks until reversal handling lands); another
-  receipt of the payment never suppresses them;
+- a succeeded refund or any dispute status (`refund.poll`, `dispute.poll`);
+  reversal handling resolves them like their webhooks, from a fresh payment
+  read into adjustment rows unique per provider id, so a poll copy and a
+  webhook copy apply once; another receipt of the payment never suppresses them;
 - a subscription with no local row, or that the provider shows ended while the
   local row is not (`subscription.poll`).
 
