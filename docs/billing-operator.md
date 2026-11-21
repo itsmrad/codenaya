@@ -29,9 +29,14 @@ Rows keep the latest operator audit with fresh `previousState`, rather than an a
   `billingQueue:redriveReceipt` for a mapped dead-letter) records verified gross.
   A verified positive with unreadable reversals can stage its payment binding and
   gross through an owned terms-matched checkout session/intent, or create a renewal
-  purchase from an independently owned subscription/product. Staging uses unique
+  purchase from an independently owned subscription/product. A first Pro checkout
+  can stage without a subscription row; an existing foreign/product-mismatched row
+  refuses staging. Immutable checkout credits apply even if catalog credits changed.
+  Staging uses unique
   payment and grant keys and does not settle, grant, enable an account or advance
-  paid-through. Unmatched, foreign, mode/terms mismatches and duplicates are refused.
+  paid-through. Staging refusals keep unreadable-reversal receipts pending for retry;
+  existing foreign-payment support quarantine behavior remains unchanged. Reserved
+  grant keys are kept conservatively, including on settled replay or quarantine.
   Operators never choose the purchase. A reviewed receipt
   authorizes a queued payment retry to settle net of that cumulative reversal even
   when the amount remains unreadable. New unresolved negatives still fence grants.
