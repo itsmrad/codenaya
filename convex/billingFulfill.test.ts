@@ -798,6 +798,7 @@ describe("intent recovery", () => {
     const t = setup();
     const alice = await customer(t);
     const ref = await checkout(t, alice, "top_up");
+    await t.run(ctx => ctx.db.patch(ref, { state: "open" }));
     await t.mutation(internal.billingOperator.releaseCheckoutLock, { customerRef: alice, operator: "support", reason: "Dashboard confirms expired and unpaid" });
     const newer = await checkout(t, alice, "top_up", 2);
     const facts = { payments: [paid(topUp("pay_late"), { sessionId: "cks_1", purchaseIdHint: "intent_1" })] };
